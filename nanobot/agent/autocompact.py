@@ -120,6 +120,10 @@ class AutoCompact:
         finally:
             self._archiving.discard(key)
 
+    def discard_summary(self, key: str) -> None:
+        """A replaced history must reload its retained summary from the owner."""
+        self._summaries.pop(key, None)
+
     async def prepare_session(
         self,
         session: Session,

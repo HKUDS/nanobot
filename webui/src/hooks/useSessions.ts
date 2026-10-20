@@ -206,7 +206,7 @@ export function useSessions(): {
   };
 }
 
-/** Read-only history view backed by the conversation owner. */
+/** Read-only history view backed by the conversation owner, including its generation fence. */
 export function useSessionHistory(key: string | null) {
   const { messages, history, refreshHistory, loadOlder } = useNanobotStream(
     null, undefined, false, undefined, undefined, undefined, { key },

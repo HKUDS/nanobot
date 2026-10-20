@@ -48,6 +48,7 @@ _FORK_VOLATILE_METADATA_KEYS = {
     "pending_user_turn",
     "pending_user_followups",
     "runtime_checkpoint",
+    "history_edit_receipt",
     "session_handle",
     "webui_recovery",
     "thread_goal",
@@ -378,24 +379,25 @@ class SessionInfo(TypedDict):
     path: str
 
 
-def fork_session(source: Session, target_key: str, before_user_index: int) -> Session | None:
-    """Build a portable fork ending before the requested visible user message."""
+def history_prefix_boundary(source: Session, before_user_index: int) -> int | None:
+    """Locate a global visible-user boundary, shared by new forks and replacement."""
     if before_user_index < 0:
         return None
-    copied: list[dict[str, Any]] = []
     user_index = 0
-    found_target = False
-    for message in source.messages:
+    for position, message in enumerate(source.messages):
         if message.get("role") == "user" and not is_hidden_history_message(message):
             if user_index == before_user_index:
-                found_target = True
-                break
+                return position
             user_index += 1
-        copied.append(public_history_message(message))
-    if user_index == before_user_index:
-        found_target = True
-    if not found_target:
+    return len(source.messages) if user_index == before_user_index else None
+
+
+def fork_session(source: Session, target_key: str, before_user_index: int) -> Session | None:
+    """Build a portable fork ending before the requested visible user message."""
+    boundary = history_prefix_boundary(source, before_user_index)
+    if boundary is None:
         return None
+    copied = [public_history_message(message) for message in source.messages[:boundary]]
 
     metadata = deepcopy(source.metadata)
     for key in _FORK_VOLATILE_METADATA_KEYS:

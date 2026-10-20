@@ -363,6 +363,17 @@ class SqliteSessionStore:
         session.revision += 1
         session.persisted = True
 
+    def replace_generation(self, session: Session, *, previous_generation: str) -> None:
+        """Rotate the lifecycle without recreating identity or deleting the row."""
+        with self.transaction() as db:
+            changed = db.execute(
+                "UPDATE sessions SET generation=? WHERE key=? AND generation=? AND revision=?",
+                (session.generation, session.key, previous_generation, session.revision),
+            ).rowcount
+            if changed != 1:
+                raise SessionConflictError("session history changed")
+            self.save(session)
+
     def save_runtime_checkpoint(self, session: Session) -> None:
         with self.transaction() as db:
             row = db.execute("SELECT generation FROM sessions WHERE key=?", (session.key,)).fetchone()

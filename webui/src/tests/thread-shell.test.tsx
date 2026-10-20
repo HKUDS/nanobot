@@ -863,6 +863,47 @@ describe("ThreadShell", () => {
     expect(screen.queryByText("old answer")).not.toBeInTheDocument();
   });
 
+  it("does not hydrate a replacement history with a late trace from the retired generation", async () => {
+    const client = makeClient();
+    let retired = false;
+    const isRetired = vi.fn((_chatId: string, snapshot: { history_generation?: string }) => retired && snapshot.history_generation === "before");
+    Object.assign(client, { isRetiredHistorySnapshot: isRetired, adoptHistorySnapshot: vi.fn(() => false) });
+    let resolveOld!: (value: Response) => void;
+    let resolveNew!: (value: Response) => void;
+    const oldDetail = new Promise<Response>((resolve) => { resolveOld = resolve; });
+    const newDetail = new Promise<Response>((resolve) => { resolveNew = resolve; });
+    const oldThread = { ...traceDetailThread(true, "old answer"), history_generation: "before" };
+    const newThread = { ...traceDetailThread(true, "replacement answer"), history_generation: "after" };
+    let detailCalls = 0;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      if (String(input).includes("/trace-detail?")) return ++detailCalls === 1 ? oldDetail : newDetail;
+      if (String(input).includes("/webui-thread")) return Promise.resolve(httpJson(retired ? newThread : oldThread));
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    }));
+    render(wrap(client, <ThreadShell session={session("trace-replaced")} title="Trace replacement" onToggleSidebar={() => {}} />));
+    fireEvent.click(within(await openMessageActions("old answer")).getByRole("button", { name: /Worked/ }));
+    await waitFor(() => expect(detailCalls).toBe(1));
+    await act(async () => {
+      retired = true;
+      client._emitChat("trace-replaced", { event: "history_replaced", chat_id: "trace-replaced", thread: newThread });
+    });
+    await screen.findByText("replacement answer");
+    await act(async () => resolveOld(httpJson({ message_id: "history-aaaaaaaaaaaaaaaaaaaa", events: [
+      { event: "message", chat_id: "trace-replaced", projection_id: "trace-shared", kind: "progress", text: 'exec({"command":"echo obsolete suffix"})' },
+    ] }) as Response));
+    expect(isRetired).toHaveBeenCalledWith("trace-replaced", { history_generation: "before" });
+    expect(document.body).not.toHaveTextContent("obsolete suffix");
+    if (!screen.queryByRole("button", { name: /Collapse activity details/ })) {
+      fireEvent.click(within(await openMessageActions("replacement answer")).getByRole("button", { name: /Worked/ }));
+    }
+    await waitFor(() => expect(detailCalls).toBe(2));
+    await act(async () => resolveNew(httpJson({ message_id: "history-aaaaaaaaaaaaaaaaaaaa", events: [
+      { event: "message", chat_id: "trace-replaced", projection_id: "trace-shared", kind: "progress", text: 'exec({"command":"echo current details"})' },
+    ] }) as Response));
+    await waitFor(() => expect(document.body).toHaveTextContent("current details"));
+    expect(document.body).not.toHaveTextContent("obsolete suffix");
+  });
+
   it("ignores a deferred trace-detail failure after switching sessions", async () => {
     const client = makeClient();
     const detailUrls: string[] = [];

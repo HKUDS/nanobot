@@ -1,0 +1,148 @@
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import { useClient } from "@/providers/ClientProvider";
+import { parseQuotedUserMessage } from "@/lib/user-message-quote";
+import type { UIMessage } from "@/lib/types";
+
+interface EditAnchor {
+  generation: string;
+  revision: number;
+  user_index: number;
+  message_digest: string;
+  transcript_revision: string;
+  transcript_user_index: number;
+  display_message_id: string;
+  display_turn_id?: string;
+}
+
+interface EditDraft {
+  message: UIMessage;
+  userIndex: number;
+  text: string;
+  turnId: string;
+  anchor: EditAnchor | null;
+  preparing: boolean;
+  submitting: boolean;
+  error: string | null;
+}
+
+interface EditingContext {
+  draft: EditDraft | null;
+  reason: (message: UIMessage) => string | null;
+  begin: (message: UIMessage, userIndex: number) => void;
+  change: (text: string) => void;
+  cancel: () => void;
+  confirm: () => void;
+  busy: boolean;
+}
+
+const Context = createContext<EditingContext | null>(null);
+export const useMessageEditing = () => useContext(Context);
+
+function textRestriction(text: string): string | null {
+  if (text.trimStart().startsWith("/") || text.trimStart().startsWith("!")) return "edit_commands_unsupported";
+  if (/(^|\s)@[\p{L}\p{N}_-]+/u.test(text)) return "edit_mentions_unsupported";
+  if (parseQuotedUserMessage(text).quotedContext) return "edit_context_unsupported";
+  return null;
+}
+
+/** Deliberately separate from Composer drafts, attachments and waiting input. */
+export function MessageEditingProvider({ chatId, busy, enabled, onBegin, children }: {
+  chatId: string | null;
+  busy: boolean;
+  enabled: boolean;
+  onBegin?: (messageId: string) => void;
+  children: ReactNode;
+}) {
+  const { client } = useClient();
+  const { t } = useTranslation();
+  const [draft, setDraft] = useState<EditDraft | null>(null);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const submitting = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    setDraft(null);
+    submitting.current = null;
+  }, [chatId]);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const errorLabel = (error: unknown) => {
+    const code = error instanceof Error ? error.message : "";
+    return t(`message.editErrors.${code}`, { defaultValue: t("message.editFailed") });
+  };
+  const reason = (message: UIMessage): string | null => {
+    if (!enabled || !chatId) return t("message.editErrors.edit_unavailable");
+    if (busy) return t("message.editErrors.edit_session_busy");
+    if (draft && draft.message.id !== message.id) return t("message.editFinishCurrent");
+    if (message.deliveryStatus === "sending" || message.deliveryStatus === "failed") return t("message.editErrors.edit_plain_text_only");
+    if (message.source || message.sessionMessage) return t("message.editErrors.edit_special_message");
+    if (message.media?.length || message.images?.length) return t("message.editErrors.edit_attachments_unsupported");
+    if (message.cliApps?.length || message.mcpPresets?.length || message.sessionMentions?.length) return t("message.editErrors.edit_mentions_unsupported");
+    const restriction = textRestriction(message.content);
+    return restriction ? t(`message.editErrors.${restriction}`) : null;
+  };
+  const begin = (message: UIMessage, userIndex: number) => {
+    if (!chatId || reason(message) || submitting.current) return;
+    const turnId = crypto.randomUUID();
+    onBegin?.(message.id);
+    setDraft({ message, userIndex, text: message.content, turnId, anchor: null, preparing: true, submitting: false, error: null });
+    void client.requestMutation<{ anchor: EditAnchor }>("chat.edit.prepare", {
+      chat_id: chatId, user_index: userIndex, message_id: message.id,
+      text: message.content, turn_id: message.turnId,
+    }).then(({ anchor }) => {
+      if (mounted.current) setDraft((current) => current?.turnId === turnId ? { ...current, anchor, preparing: false } : current);
+    }, (error: unknown) => {
+      if (mounted.current) setDraft((current) => current?.turnId === turnId ? { ...current, preparing: false, error: errorLabel(error) } : current);
+    });
+  };
+  const confirm = () => {
+    const current = draftRef.current;
+    if (!chatId || !current?.anchor || current.preparing || busy || submitting.current || !current.text.trim()) return;
+    const restriction = textRestriction(current.text);
+    if (restriction) {
+      setDraft({ ...current, error: t(`message.editErrors.${restriction}`) });
+      return;
+    }
+    submitting.current = current.turnId;
+    setDraft({ ...current, submitting: true, error: null });
+    void client.requestMutation<{ accepted: boolean }>("chat.fork", {
+      mode: "replace", chat_id: chatId, anchor: current.anchor,
+      text: current.text, turn_id: current.turnId,
+    }).then(() => {
+      if (mounted.current) setDraft((value) => value?.turnId === current.turnId ? null : value);
+    }, (error: unknown) => {
+      if (mounted.current) setDraft((value) => value?.turnId === current.turnId ? { ...value, submitting: false, error: errorLabel(error) } : value);
+    }).finally(() => { if (submitting.current === current.turnId) submitting.current = null; });
+  };
+  return <Context.Provider value={{ draft, reason, begin, confirm, busy,
+    change: (text) => setDraft((current) => current && !submitting.current ? { ...current, text } : current),
+    cancel: () => { if (!submitting.current) setDraft(null); },
+  }}>{children}</Context.Provider>;
+}
+
+export function InlineMessageEditor({ sourceMissing = false }: { sourceMissing?: boolean }) {
+  const editing = useMessageEditing();
+  const { t } = useTranslation();
+  const input = useRef<HTMLTextAreaElement>(null);
+  const id = editing?.draft?.message.id;
+  useLayoutEffect(() => { input.current?.focus({ preventScroll: true }); }, [id]);
+  if (!editing?.draft) return null;
+  const { draft, busy, change, cancel, confirm } = editing;
+  const error = sourceMissing ? t("message.editErrors.edit_source_changed")
+    : busy ? t("message.editErrors.edit_session_busy") : draft.error;
+  return <form data-message-editor className="ms-auto w-full max-w-full rounded-lg border border-border bg-background p-3"
+    onSubmit={(event) => { event.preventDefault(); confirm(); }}>
+    <textarea ref={input} aria-label={t("message.editMessage")} value={draft.text}
+      disabled={draft.submitting} rows={Math.min(14, Math.max(3, draft.text.split("\n").length))}
+      onChange={(event) => change(event.target.value)}
+      onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); cancel(); } }}
+      className="w-full resize-y bg-transparent text-sm leading-6 outline-none" />
+    <p className="mt-1 text-xs text-muted-foreground">{t("message.editReplacesSuffix")}</p>
+    {error ? <p role="alert" className="mt-2 text-xs text-destructive">{error}</p> : null}
+    <div className="mt-3 flex flex-wrap justify-end gap-2">
+      <button type="button" disabled={draft.submitting} onClick={cancel} className="rounded-control px-3 py-2 text-sm hover:bg-muted disabled:opacity-50">{t("common.cancel")}</button>
+      <button type="submit" disabled={sourceMissing || busy || draft.preparing || draft.submitting || !draft.anchor || !draft.text.trim()}
+        className="rounded-control bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50">{t("message.confirmEditResend")}</button>
+    </div>
+  </form>;
+}

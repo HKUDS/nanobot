@@ -87,6 +87,12 @@ from nanobot.security.workspace_access import (
 from nanobot.session import turn_continuation
 from nanobot.session.automation_turns import automation_history_overrides
 from nanobot.session.goal_state import goal_state_runtime_lines, sustained_goal_active
+from nanobot.session.history_edit import (
+    HistoryEditAccepted,
+    HistoryEditAnchor,
+    HistoryEditError,
+    HistoryEditProjection,
+)
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
 from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, Session, SessionManager, SessionPolicy
@@ -754,7 +760,10 @@ class AgentLoop:
             )
             if runtime_context_meta is not None:
                 extra[RUNTIME_CONTEXT_HISTORY_META] = runtime_context_meta
-            session.add_message("user", text, **extra)
+            if msg.input_persisted:
+                session.messages[-1] = {**session.messages[-1], **extra, "content": text}
+            else:
+                session.add_message("user", text, **extra)
             self._mark_pending_user_turn(session)
             followup_id = msg.metadata.get(PENDING_FOLLOWUP_ID_KEY)
             if isinstance(followup_id, str) and followup_id:
@@ -1116,6 +1125,13 @@ class AgentLoop:
                 except asyncio.QueueEmpty:
                     break
 
+            if session is not None:
+                # Independent dispatch already fences generation. Apply the same
+                # ownership check before injecting a late result into a live turn.
+                pending_messages = [message for message in pending_messages
+                                    if message.session_generation is None
+                                    or message.session_generation == session.generation]
+
             async def _to_user_message(pending_msg: InboundMessage) -> dict[str, Any]:
                 content = pending_msg.content
                 image_paths = pending_msg.media if pending_msg.media else None
@@ -1223,7 +1239,9 @@ class AgentLoop:
                 items
                 or pending_queue is None
                 or session is None
-                or self.subagents.get_running_count_by_session(session.key) == 0
+                or self.subagents.get_running_count_by_session(
+                    session.key, session_generation=session.generation,
+                ) == 0
             ):
                 return items
 
@@ -1560,6 +1578,47 @@ class AgentLoop:
             },
         )
         return pending_msg
+
+    async def replace_user_input(
+        self, msg: InboundMessage, anchor: HistoryEditAnchor, projection: HistoryEditProjection,
+        accepted: HistoryEditAccepted,
+    ) -> Session:
+        """Reserve an idle execution lane before committing an in-place history edit."""
+        key = self._effective_session_key(msg)
+        lock = self._get_session_lock(key)
+        if key != msg.session_key or key in self._pending_queues or lock.locked():
+            raise HistoryEditError("edit_session_busy")
+        async def admit() -> Session:
+            # shield_and_drain schedules this admission at its own boundary;
+            # another input may have reserved the lane since the caller checked.
+            if key in self._pending_queues or lock.locked():
+                raise HistoryEditError("edit_session_busy")
+            async with lock:
+                pending: asyncio.Queue[InboundMessage] = asyncio.Queue()
+                self._pending_queues[key] = pending
+                try:
+                    session = await self.sessions.state.replace_user_input(key, anchor, msg, projection)
+                    self.auto_compact.discard_summary(key)
+                    msg.session_generation = session.generation
+                    msg.require_existing_session = True
+                    msg.input_persisted = True
+                    pending.put_nowait(msg)
+                    try:
+                        await accepted(session)
+                    except Exception:
+                        logger.exception("Unable to announce accepted history replacement for {}", key)
+                finally:
+                    if pending.empty():
+                        self._pending_queues.pop(key, None)
+                    else:
+                        task = asyncio.create_task(self._run_session_queue(key, pending))
+                        self._track_active_task(key, task)
+            return session
+
+        # A disconnected/cancelled observer cannot strand a committed new input
+        # between persistence and execution admission.
+        from nanobot.utils.cancellation import shield_and_drain
+        return await shield_and_drain(admit())
 
     async def _enqueue_session_message(self, msg: InboundMessage) -> None:
         """Admit session work without waiting for its execution or result."""
@@ -2102,6 +2161,7 @@ class AgentLoop:
                 ctx.session = await self.sessions.state.get(ctx.session_key)
         session = ctx.session
         await ctx.delivery.bind_session_generation(session.generation)
+        ctx.input_persisted_early = msg.input_persisted
         ctx.ephemeral = ctx.ephemeral or not session.policy.persist
         tools = ctx.tools if ctx.tools is not None else self.tools
         if session.policy.disabled_tools:
@@ -2134,7 +2194,8 @@ class AgentLoop:
         if restore_runtime_checkpoint(session) and ctx.commit_session:
             await self.sessions.state.restore_interruption(session)
         if (
-            RECOVERY_INBOUND_METADATA_KEY not in msg.metadata
+            not msg.input_persisted
+            and RECOVERY_INBOUND_METADATA_KEY not in msg.metadata
             and restore_pending_interruption(session)
             and ctx.commit_session
         ):
@@ -2227,6 +2288,14 @@ class AgentLoop:
         ctx.history = await self.runner.prepare_prompt(
             session.get_history, extend_to_user=is_subagent,
         )
+        if ctx.msg.input_persisted:
+            # The admission owner wrote this user tail atomically with a history
+            # replacement. It is fresh input, not a second history occurrence.
+            expected_id = ctx.msg.metadata.get(INBOUND_META_TURN_ID)
+            if not session.messages or session.messages[-1].get(INBOUND_META_TURN_ID) != expected_id:
+                raise SessionConflictError("prepared input is no longer the session tail")
+            if ctx.history and ctx.history[-1].get("role") == "user":
+                ctx.history = ctx.history[:-1]
         stored_state = session.provider_state
         subagent_followup_persisted = False
         if is_subagent:
