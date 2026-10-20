@@ -1,3 +1,4 @@
+import { pastedFilePath } from "../../../packages/client-events/attachments"
 import {
   BoxRenderable,
   CliRenderEvents,
@@ -221,6 +222,7 @@ export class NanobotTui {
   private apiRefreshPromise: Promise<GatewayApiConnection> | null = null
   private skillLoadId = 0
   private clipboardImagePending = false
+  private pathInspectionPending = false
   private clipboardPasteGeneration = 0
   private composerValue = ""
   private composerCursor = 0
@@ -508,6 +510,10 @@ export class NanobotTui {
   private submit(): void {
     if (this.quitting || this.composer.isDestroyed) return
     const visibleContent = this.composer.plainText.trim()
+    if (this.pathInspectionPending) {
+      this.status.content = "Checking local attachment…"
+      return
+    }
     if (this.sessionLoading) {
       this.status.content = "Loading sessions…"
       return
@@ -564,7 +570,7 @@ export class NanobotTui {
     }
     const command = this.commandMenu.resolve(visibleContent)
     if ((command || visibleContent.startsWith("!")) && this.draft.media(visibleContent).length) {
-      this.status.content = "Remove the image before running a command."
+      this.status.content = "Remove attachments before running a command."
       return
     }
     if (command?.source === "tui") {
@@ -607,7 +613,7 @@ export class NanobotTui {
       this.attachmentSendPending = true
       const originalText = this.composer.plainText
       const chatId = this.client.activeChatId
-      this.status.content = "Uploading attachments…"
+      this.status.content = "Sending attachments…"
       void this.client.sendAttachments(prompt.content, prompt.options).then((turnId) => {
         if (this.client.activeChatId !== chatId || this.composer.plainText !== originalText) return
         this.sendPrompt(prompt, steering, turnId)
@@ -1246,10 +1252,7 @@ export class NanobotTui {
       this.status.content = "Duplicate image placeholder. Rename or remove it before sending."
       return false
     }
-    if (!this.hasPrompt(prompt)) return false
-    if ((prompt.options.media?.length || 0) <= MAX_DRAFT_IMAGES) return true
-    this.status.content = `Remove images until ${MAX_DRAFT_IMAGES} or fewer remain`
-    return false
+    return this.hasPrompt(prompt)
   }
 
   private restoreQueuedPrompts(): void {
@@ -1264,7 +1267,7 @@ export class NanobotTui {
     if (!this.activeTurn || !this.ready) return
     const visibleContent = this.composer.plainText.trim()
     if (this.draft.media(visibleContent).length) {
-      this.status.content = "Images cannot be queued. Press Enter to send now."
+      this.status.content = "Attachments cannot be queued. Press Enter to send now."
       return
     }
     if (this.commandMenu.resolve(visibleContent)?.source === "tui") {
@@ -1945,10 +1948,6 @@ export class NanobotTui {
 
   private async pasteClipboardImage(): Promise<void> {
     if (this.clipboardImagePending) return
-    if (this.draft.imageCount >= MAX_DRAFT_IMAGES) {
-      this.status.content = `A message can include up to ${MAX_DRAFT_IMAGES} images`
-      return
-    }
     const generation = this.clipboardPasteGeneration
     this.clipboardImagePending = true
     this.status.content = "Reading clipboard image…"
@@ -1957,7 +1956,7 @@ export class NanobotTui {
       if (this.quitting || generation !== this.clipboardPasteGeneration) return
       const insertion = this.draft.image(image, this.composer.plainText)
       if (!insertion) {
-        this.status.content = `A message can include up to ${MAX_DRAFT_IMAGES} images`
+        this.status.content = `A message can include up to ${MAX_DRAFT_IMAGES} images or files`
         return
       }
       this.composer.insertText(insertion.text)
@@ -1981,6 +1980,30 @@ export class NanobotTui {
   private handlePaste(event: PasteEvent): void {
     event.preventDefault()
     const value = stripAnsiSequences(decodePasteBytes(event.bytes))
+    const path = pastedFilePath(value)
+    if (path && !this.pathInspectionPending) {
+      this.composer.insertText(value)
+      const pasted = this.composer.plainText
+      const cursor = this.composerStringCursor()
+      const generation = this.clipboardPasteGeneration
+      const chatId = this.client.activeChatId
+      this.pathInspectionPending = true
+      this.status.content = "Checking local attachment…"
+      void this.client.inspectAttachment(path).then((file) => {
+        if (this.quitting || this.composer.isDestroyed || generation !== this.clipboardPasteGeneration
+          || chatId !== this.client.activeChatId || this.composer.plainText !== pasted) return
+        const insertion = this.draft.localFile(file, pasted)
+        if (!insertion) throw new Error("Too many attachments; remove one and paste the path again")
+        const start = cursor - value.length
+        this.composer.setText(pasted.slice(0, start) + insertion.text + pasted.slice(start + value.length))
+        this.composer.cursorOffset = this.composerOffsetForStringIndex(this.composer.plainText, start + insertion.text.length)
+        this.status.content = `Attached ${file.name}. Review before sending.`
+      }).catch((error: unknown) => {
+        if (generation !== this.clipboardPasteGeneration || this.quitting) return
+        this.status.content = error instanceof Error ? error.message : "Attachment unavailable; path retained"
+      }).finally(() => { this.pathInspectionPending = false })
+      return
+    }
     const insertion = this.draft.paste(value)
     if (!insertion.text) return
     this.composer.insertText(insertion.text)

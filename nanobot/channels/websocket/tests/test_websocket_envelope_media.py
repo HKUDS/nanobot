@@ -19,7 +19,9 @@ from nanobot.session.session_handles import SessionHandleResolver
 from nanobot.webui.gateway_services import build_gateway_services
 
 
-def _make_channel(session_manager: SessionManager | None = None) -> WebSocketChannel:
+def _make_channel(
+    session_manager: SessionManager | None = None, *, workspace: Path | None = None, restricted: bool = False,
+) -> WebSocketChannel:
     bus = MagicMock()
     bus.publish_inbound = AsyncMock()
     cfg = {"enabled": True, "allowFrom": ["*"], "websocketRequiresToken": False}
@@ -29,8 +31,8 @@ def _make_channel(session_manager: SessionManager | None = None) -> WebSocketCha
         bus=bus,
         session_manager=session_manager,
         static_dist_path=None,
-        workspace_path=Path.cwd(),
-        default_restrict_to_workspace=False,
+        workspace_path=workspace or Path.cwd(),
+        default_restrict_to_workspace=restricted,
         runtime_model_name=None,
         runtime_surface="browser",
         runtime_capabilities_overrides=None,
@@ -311,3 +313,96 @@ async def test_reference_attachments_are_projected_to_other_clients(tmp_path, mo
     assert payload["media_urls"][0]["name"] == "shot.png"
     assert payload["media_urls"][0]["url"].startswith("/api/media/")
     assert reference not in str(payload)
+
+
+@pytest.mark.asyncio
+async def test_local_reference_inspection_send_recheck_and_no_staging(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path / "data")
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    source = workspace / "clip #100%.mp4"
+    source.write_bytes(b"\0video")
+    channel = _make_channel(workspace=workspace, restricted=True)
+    conn = AsyncMock()
+    channel._webui_connections.add(conn)
+
+    async def inspect(path):
+        conn.send.reset_mock()
+        await channel._dispatch_envelope(conn, "client", {
+            "type": "webui_request", "request_id": "inspect", "action": "attachment.inspect",
+            "payload": {"chat_id": "local-chat", "path": path},
+        })
+        return json.loads(conn.send.await_args.args[0])
+
+    result = await inspect(source.name)
+    assert result["ok"] is True
+    local = result["result"]
+    assert local["path"] == str(source)
+    assert local["size"] == 6
+    assert local["kind"] == "video"
+    assert channel.gateway.uploads.store._entries == {}
+    assert not list(channel.gateway.uploads.store.media_dir.glob("*"))
+    assert channel._webui_request_operations == {}
+
+    for invalid in ("missing.mp4", str(workspace), str(tmp_path / "outside.mp4")):
+        failure = await inspect(invalid)
+        assert failure["ok"] is False
+
+    message = {
+        "type": "message", "chat_id": "local-chat", "content": "keep my text",
+        "webui": True, "turn_id": "local-turn", "media": [{"path": local["path"]}],
+    }
+    source.unlink()
+    await channel._dispatch_envelope(conn, "client", message)
+    assert json.loads(conn.send.await_args.args[0])["detail"] == "attachment_rejected"
+    channel._handle_message.assert_not_awaited()
+    source.write_bytes(b"latest video")
+    await channel._dispatch_envelope(conn, "client", message)
+    channel._handle_message.assert_awaited_once()
+    assert channel._handle_message.await_args.kwargs["media"] == [str(source)]
+    assert source.read_bytes() == b"latest video"
+    assert not list(channel.gateway.uploads.store.media_dir.glob("*"))
+
+
+@pytest.mark.asyncio
+async def test_mixed_local_and_uploaded_video_limit_keeps_upload_for_retry(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path / "data")
+    source = tmp_path / "local.webm"
+    source.write_bytes(b"video")
+    channel = _make_channel(workspace=tmp_path, restricted=True)
+    conn = AsyncMock()
+    owner = channel.gateway.uploads.issue(conn)["token"]
+
+    async def body():
+        yield b"upload"
+
+    ref = await channel.gateway.uploads.store.upload(body(), owner=owner, mime="video/mp4", size=6)
+    await channel._dispatch_envelope(conn, "client", {
+        "type": "message", "chat_id": "mixed-local", "content": "retained",
+        "media": [{"path": str(source)}, {"reference": ref}],
+    })
+    assert json.loads(conn.send.await_args.args[0])["detail"] == "attachment_rejected"
+    assert channel.gateway.uploads.store.resolve([ref], owner=owner)
+    assert source.exists()
+    channel._handle_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_temporary_chat_disposal_never_deletes_borrowed_source(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path / "data")
+    source = tmp_path / "original.txt"
+    source.write_text("borrowed", encoding="utf-8")
+    manager = SessionManager(tmp_path)
+    channel = _make_channel(manager, workspace=tmp_path, restricted=True)
+    conn = AsyncMock()
+    channel._webui_connections.add(conn)
+    chat_id = await channel.gateway.temporary_chats.create(conn, trusted_webui=True)
+    await channel._dispatch_envelope(conn, "client", {
+        "type": "message", "chat_id": chat_id, "content": "", "webui": True,
+        "media": [{"path": str(source)}],
+    })
+    channel._handle_message.assert_awaited_once()
+    channel.gateway.uploads.store.discard_owner(channel.gateway.uploads.owner(conn))
+    channel.gateway.uploads.store.prune()
+    await channel.gateway.temporary_chats.discard(conn, chat_id)
+    assert source.read_text(encoding="utf-8") == "borrowed"

@@ -2085,6 +2085,7 @@
         "unsupported_type": "不支援的檔案類型",
         "empty_file": "無法附加空白檔案",
         "too_many_attachments": "每則訊息最多 {{max}} 個附件",
+        "too_many_videos": "每則訊息最多 1 部影片",
         "too_many_images": "每則訊息最多 {{max}} 張圖片",
         "magic_mismatch": "檔案內容似乎不是有效的圖片",
         "decode_failed": "無法解碼這張圖片",

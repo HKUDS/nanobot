@@ -1,3 +1,4 @@
+import { pastedFilePath, isLocalAttachment, type LocalAttachment } from "../../../../packages/client-events/attachments";
 import {
   NewChatIcon,
   CompactIcon,
@@ -57,6 +58,7 @@ import {
   ChevronUp,
   CornerDownRight,
   FileText,
+  Video,
   ImageIcon,
   Loader2,
   Quote,
@@ -97,10 +99,11 @@ import {
   MAX_ATTACHMENTS_PER_MESSAGE,
   MAX_ATTACHMENT_BYTES,
   MAX_TOTAL_ATTACHMENT_BYTES,
+  MAX_VIDEO_BYTES,
+  MAX_VIDEOS_PER_MESSAGE,
   useAttachedImages,
   type AttachedImage,
   type AttachmentError,
-  type AttachmentKind,
   type RestoredReadyImage,
 } from "@/hooks/useAttachedImages";
 import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
@@ -244,6 +247,7 @@ interface ThreadComposerProps {
   onStop?: () => void;
   surfaceRef?: Ref<HTMLDivElement>;
   onTranscribeAudio?: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
+  onInspectAttachment?: (path: string) => Promise<LocalAttachment>;
   /** Sustained objective for this chat (WebSocket ``goal_state``). */
   goalState?: GoalStateWsPayload;
   workspaceScope?: WorkspaceScopePayload | null;
@@ -387,16 +391,14 @@ function mergeQueuedPrompt(first: QueuedPrompt, next: QueuedPrompt): QueuedPromp
 }
 
 function queuedAttachmentBytes(image: QueuedPromptImage): number {
-  const base64 = image.dataUrl.slice(image.dataUrl.indexOf(",") + 1);
+  if (image.local) return image.local.size;
+  const dataUrl = image.dataUrl ?? "";
+  const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
   const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
   return Math.floor(base64.length * 3 / 4) - padding;
 }
 
-interface QueuedPromptImage {
-  dataUrl: string;
-  name?: string;
-  kind?: AttachmentKind;
-}
+type QueuedPromptImage = RestoredReadyImage;
 
 interface CliAppMentionQuery {
   query: string;
@@ -543,13 +545,16 @@ function normalizeQueuedPrompt(item: unknown, index: number): QueuedPrompt | nul
   if (typeof record.text !== "string") return null;
   const text = record.text.trim();
   const images = Array.isArray(record.images)
-    ? record.images.flatMap((image) => {
+    ? record.images.flatMap((image): QueuedPromptImage[] => {
         if (!image || typeof image !== "object") return [];
         const candidate = image as Partial<QueuedPromptImage>;
+        if (isLocalAttachment(candidate.local)) {
+          return [{ local: candidate.local, kind: candidate.local.kind, name: candidate.local.name }];
+        }
         if (typeof candidate.dataUrl !== "string" || !candidate.dataUrl.startsWith("data:")) {
           return [];
         }
-        const kind = candidate.kind === "file" || candidate.kind === "image"
+        const kind = candidate.kind === "file" || candidate.kind === "image" || candidate.kind === "video"
           ? candidate.kind
           : candidate.dataUrl.startsWith("data:image/")
             ? "image"
@@ -694,10 +699,11 @@ function queuedPromptStoreFor(storageKey: string | null): QueuedPromptStore {
 }
 
 function readyImagesToQueuedImages(
-  images: Array<AttachedImage & { dataUrl: string }>,
+  images: AttachedImage[],
 ): QueuedPromptImage[] {
   return images.map((img) => ({
     dataUrl: img.dataUrl,
+    local: img.local,
     kind: img.kind,
     name: img.file.name,
   }));
@@ -705,17 +711,20 @@ function readyImagesToQueuedImages(
 
 function queuedImagesToSendImages(images?: QueuedPromptImage[]): SendAttachment[] | undefined {
   if (!images?.length) return undefined;
-  return images.map((img) => ({
-    media: {
-      data_url: img.dataUrl,
-      ...(img.name ? { name: img.name } : {}),
-    },
-    preview: {
-      kind: img.kind ?? (img.dataUrl.startsWith("data:image/") ? "image" : "file"),
-      url: img.dataUrl,
-      ...(img.name ? { name: img.name } : {}),
-    },
-  }));
+  return images.flatMap((img): SendAttachment[] => {
+    if (img.local) return [{
+      media: { path: img.local.path, name: img.local.name },
+      preview: { kind: img.local.kind, url: img.local.url, name: img.local.name },
+    }];
+    if (!img.dataUrl) return [];
+    return [{
+      media: { data_url: img.dataUrl, ...(img.name ? { name: img.name } : {}) },
+      preview: {
+        kind: img.kind ?? (img.dataUrl.startsWith("data:image/") ? "image" : img.dataUrl.startsWith("data:video/") ? "video" : "file"),
+        url: img.dataUrl, ...(img.name ? { name: img.name } : {}),
+      },
+    }];
+  });
 }
 
 function queuedPromptLabel(prompt: QueuedPrompt): string {
@@ -1069,6 +1078,7 @@ export function ThreadComposer({
   onStop,
   surfaceRef,
   onTranscribeAudio,
+  onInspectAttachment,
   goalState,
   workspaceScope = null,
   workspaceControlsHidden = false,
@@ -1107,6 +1117,12 @@ export function ThreadComposer({
   } | null>(null);
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [sendPending, setSendPending] = useState(false);
+  const [checkingPath, setCheckingPath] = useState(false);
+  const pathCheckGeneration = useRef(0);
+  const pathCheckScope = useRef("");
+  const scopeIdentity = `${workspaceScope?.project_path ?? ""}:${workspaceScope?.access_mode ?? ""}`;
+  pathCheckScope.current = scopeIdentity;
+  useEffect(() => () => { pathCheckGeneration.current += 1; }, []);
   const [modelSetupAttentionRequest, setModelSetupAttentionRequest] = useState(0);
   const queuedPromptStorageKey = queuedPromptsStorageKey(pendingQueueKey);
   const queuedPromptStore = useMemo(() => queuedPromptStoreFor(queuedPromptStorageKey), [queuedPromptStorageKey]);
@@ -1197,21 +1213,25 @@ export function ThreadComposer({
   const maxAttachments = ingressLimits?.attachments.max_count
     ?? MAX_ATTACHMENTS_PER_MESSAGE;
   const maxTextBytes = ingressLimits?.message.max_text_bytes ?? 64 * 1024;
-  const { images, enqueue, remove, clear, restoreReadyImages, encoding, full } =
+  const { images, enqueue, addLocal, remove, clear, restoreReadyImages, encoding: encodingFiles, full } =
     useAttachedImages({ ingressLimits });
+  const encoding = encodingFiles || checkingPath;
   const restoredDraftAttachments = useRef(false);
   const [draftAttachmentsReady, setDraftAttachmentsReady] = useState(!initialDraft?.files.length);
   useLayoutEffect(() => {
     if (restoredDraftAttachments.current) return;
     restoredDraftAttachments.current = true;
     if (initialDraft?.files.length) enqueue(initialDraft.files, { restoringDraft: true });
+    for (const local of initialDraft?.localAttachments ?? []) addLocal(local, { restoringDraft: true });
     setDraftAttachmentsReady(true);
-  }, [enqueue, initialDraft]);
+  }, [enqueue, addLocal, initialDraft]);
 
   const formatRejection = useCallback(
     (reason: AttachmentError): string => {
       const key = `thread.composer.imageRejected.${reason}`;
-      const fallback = reason === "too_many_attachments"
+      const fallback = reason === "too_many_videos"
+        ? "Max 1 video per message"
+        : reason === "too_many_attachments"
         ? `Max ${maxAttachments} attachments per message`
         : reason === "empty_file"
           ? "Empty files cannot be attached"
@@ -1249,12 +1269,44 @@ export function ThreadComposer({
 
   const {
     isDragging,
-    onPaste,
+    onPaste: onAttachmentPaste,
     onDragEnter,
     onDragOver,
     onDragLeave,
     onDrop,
   } = useClipboardAndDrop(addFiles);
+
+  const onPaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    onAttachmentPaste(event);
+    if (event.defaultPrevented || interactionDisabled || !onInspectAttachment) return;
+    const raw = event.clipboardData.getData("text/plain");
+    const path = pastedFilePath(raw);
+    if (!path) return;
+    event.preventDefault();
+    const input = event.currentTarget;
+    const before = value.slice(0, input.selectionStart);
+    const after = value.slice(input.selectionEnd);
+    const pasted = before + raw + after;
+    // Keep the original paste in the draft until the gateway confirms it.
+    setValue(pasted);
+    const generation = ++pathCheckGeneration.current;
+    setCheckingPath(true);
+    void onInspectAttachment(path).then((local) => {
+      if (generation !== pathCheckGeneration.current || pathCheckScope.current !== scopeIdentity
+        || textareaRef.current?.value !== pasted) return;
+      const rejection = addLocal(local);
+      if (rejection) { setInlineError(formatRejection(rejection)); return; }
+      setValue(before + after);
+      setCursorPosition(before.length);
+      setInlineError(null);
+    }).catch((error: unknown) => {
+      if (generation === pathCheckGeneration.current) {
+        setInlineError(error instanceof Error ? error.message : t("message.attachmentUnavailable"));
+      }
+    }).finally(() => {
+      if (generation === pathCheckGeneration.current) setCheckingPath(false);
+    });
+  }, [addLocal, formatRejection, interactionDisabled, onAttachmentPaste, onInspectAttachment, scopeIdentity, t, value]);
 
   useEffect(() => {
     if (compactWhenIdle || interactionDisabled || hasTouchPrimaryPointer || (workspaceError && showProjectPicker)) {
@@ -1279,8 +1331,8 @@ export function ThreadComposer({
   const normalizedQuotedContext = quotedContext?.trim() || null;
 
   const readyImages = useMemo(
-    () => images.filter((img): img is AttachedImage & { dataUrl: string } =>
-      img.status === "ready" && typeof img.dataUrl === "string",
+    () => images.filter((img) =>
+      img.status === "ready" && (typeof img.dataUrl === "string" || !!img.local),
     ),
     [images],
   );
@@ -1544,7 +1596,8 @@ export function ThreadComposer({
     }
     draftStore.set(draftKey, {
       text: draftText,
-      files: images.map((image) => image.file),
+      files: images.flatMap((image) => image.file instanceof File ? [image.file] : []),
+      localAttachments: images.flatMap((image) => image.local ? [image.local] : []),
       sessionMentions: activeSessionMentions,
       quotedContext,
     }, persistDraft);
@@ -1990,12 +2043,14 @@ export function ThreadComposer({
       return textTooLargeMessage();
     }
     const attachments = prompt.images ?? [];
-    if (attachments.length > maxAttachments) return formatRejection("too_many_attachments");
-    const sizes = attachments.map(queuedAttachmentBytes);
-    if (sizes.some((size) => size > (ingressLimits?.attachments.max_file_bytes ?? MAX_ATTACHMENT_BYTES))) {
+    const videos = attachments.filter((item) => item.kind === "video").length;
+    if (videos > MAX_VIDEOS_PER_MESSAGE) return formatRejection("too_many_videos");
+    if (attachments.length - videos > maxAttachments) return formatRejection("too_many_attachments");
+    if (attachments.some((item) => queuedAttachmentBytes(item) > (item.kind === "video" ? MAX_VIDEO_BYTES : ingressLimits?.attachments.max_file_bytes ?? MAX_ATTACHMENT_BYTES))) {
       return formatRejection("too_large");
     }
-    if (sizes.reduce((sum, size) => sum + size, 0) > (ingressLimits?.attachments.max_total_bytes ?? MAX_TOTAL_ATTACHMENT_BYTES)) {
+    const total = attachments.reduce((sum, item) => sum + (item.kind === "video" ? 0 : queuedAttachmentBytes(item)), 0);
+    if (total > (ingressLimits?.attachments.max_total_bytes ?? MAX_TOTAL_ATTACHMENT_BYTES)) {
       return formatRejection("total_too_large");
     }
     if ((prompt.sessionMentions?.length ?? 0) > SESSION_MENTIONS_LIMIT) {
@@ -2118,16 +2173,7 @@ export function ThreadComposer({
     }
     // Keep self-contained local previews across drafts and optimistic bubbles.
     // The client decodes these to HTTP binary; WS messages contain only refs.
-    const payload: SendAttachment[] | undefined =
-      readyImages.length > 0
-        ? readyImages.map((img) => ({
-            media: {
-              data_url: img.dataUrl,
-              name: img.file.name,
-            },
-            preview: { kind: img.kind, url: img.dataUrl, name: img.file.name },
-          }))
-        : undefined;
+    const payload = queuedImagesToSendImages(readyImagesToQueuedImages(readyImages));
     const attachedCliApps = activeCliMentionApps.map(cliAppMentionPayload);
     const attachedMcpPresets = activeMcpPresetMentions.map(mcpPresetMentionPayload);
     const options: SendOptions | undefined =
@@ -3365,6 +3411,8 @@ function AttachmentChip({
           <div className="flex h-full w-full items-center justify-center">
             {image.kind === "image" ? (
               <ImageIcon className="h-4 w-4 text-muted-foreground" aria-hidden />
+            ) : image.kind === "video" ? (
+              <Video className="h-4 w-4 text-muted-foreground" aria-hidden />
             ) : (
               <FileText className="h-4 w-4 text-muted-foreground" aria-hidden />
             )}

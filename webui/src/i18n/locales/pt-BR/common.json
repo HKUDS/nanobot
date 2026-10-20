@@ -2114,6 +2114,7 @@
         "unsupported_type": "Tipo de arquivo não compatível",
         "empty_file": "Arquivos vazios não podem ser anexados",
         "too_many_attachments": "Máx. de {{max}} anexos por mensagem",
+        "too_many_videos": "Máx. de 1 vídeo por mensagem",
         "too_many_images": "Máx. de {{max}} imagens por mensagem",
         "magic_mismatch": "O arquivo não parece uma imagem real",
         "decode_failed": "Não foi possível decodificar esta imagem",

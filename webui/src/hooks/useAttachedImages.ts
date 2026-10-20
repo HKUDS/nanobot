@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { LocalAttachment } from "../../../packages/client-events/attachments";
 
 import { encodeImage, type EncodeFailure } from "@/lib/imageEncode";
 import type { WebUIIngressLimits } from "@/lib/types";
@@ -10,12 +11,13 @@ import type { WebUIIngressLimits } from "@/lib/types";
  * - ``error``     — validation / decode failure; chip shows inline error
  */
 type AttachmentStatus = "encoding" | "ready" | "error";
-export type AttachmentKind = "image" | "file";
+export type AttachmentKind = "image" | "video" | "file";
 
 interface AttachedAttachment {
   id: string;
   kind: AttachmentKind;
-  file: File;
+  file: Pick<File, "name" | "size" | "type">;
+  local?: LocalAttachment;
   /** Optimistic ``blob:`` preview URL; revoked on ``remove`` / ``clear`` /
    * unmount. */
   previewUrl?: string;
@@ -32,8 +34,9 @@ interface AttachedAttachment {
 
 export type AttachedImage = AttachedAttachment;
 
-interface RestoredReadyAttachment {
-  dataUrl: string;
+export interface RestoredReadyAttachment {
+  dataUrl?: string;
+  local?: LocalAttachment;
   name?: string;
   kind?: AttachmentKind;
 }
@@ -46,7 +49,8 @@ export type RestoredReadyImage = RestoredReadyAttachment;
 export type AttachmentError =
   | "unsupported_type"   // server whitelist excludes this MIME
   | "empty_file"         // attachments must contain bytes
-  | "too_many_attachments" // per-message cap (4) reached before enqueue
+  | "too_many_attachments" // non-video per-message cap reached before enqueue
+  | "too_many_videos"      // video slot is already occupied
   | "total_too_large"    // decoded attachments exceed the business-policy total
   | "magic_mismatch"     // extension lies about the real content
   | "decode_failed"      // Worker couldn't decode / re-encode
@@ -56,6 +60,11 @@ export type AttachmentError =
 export const MAX_ATTACHMENTS_PER_MESSAGE = 4;
 export const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024;
 export const MAX_TOTAL_ATTACHMENT_BYTES = 24 * 1024 * 1024;
+export const MAX_VIDEO_BYTES = 20 * 1024 * 1024;
+export const MAX_VIDEOS_PER_MESSAGE = 1;
+const VIDEO_MIME_BY_EXTENSION = new Map([
+  [".mp4", "video/mp4"], [".webm", "video/webm"], [".mov", "video/quicktime"],
+]);
 
 /** MIME whitelist — mirrors the server's and the ``<input accept>`` attr. */
 const ACCEPTED_IMAGE_MIMES: ReadonlySet<string> = new Set([
@@ -91,6 +100,8 @@ export const ACCEPT_ATTR = [
   ...ACCEPTED_IMAGE_MIMES,
   ...ACCEPTED_DOCUMENT_MIMES,
   ...DOCUMENT_MIME_BY_EXTENSION.keys(),
+  ...VIDEO_MIME_BY_EXTENSION.values(),
+  ...VIDEO_MIME_BY_EXTENSION.keys(),
 ].join(",");
 
 function extensionOf(name: string): string {
@@ -99,7 +110,8 @@ function extensionOf(name: string): string {
 }
 
 function mimeForFile(file: File): string {
-  const byName = DOCUMENT_MIME_BY_EXTENSION.get(extensionOf(file.name));
+  const byName = DOCUMENT_MIME_BY_EXTENSION.get(extensionOf(file.name))
+    ?? VIDEO_MIME_BY_EXTENSION.get(extensionOf(file.name));
   if (byName) return byName;
   if (!file.type || file.type === "application/octet-stream") {
     return "application/octet-stream";
@@ -114,6 +126,8 @@ function positiveLimit(value: number | null | undefined, fallback: number): numb
 }
 
 export function acceptedAttachmentKind(file: File): AttachmentKind | null {
+  if (VIDEO_MIME_BY_EXTENSION.has(extensionOf(file.name))
+    || [...VIDEO_MIME_BY_EXTENSION.values()].includes(file.type)) return "video";
   if (DOCUMENT_MIME_BY_EXTENSION.has(extensionOf(file.name))) return "file";
   if (ACCEPTED_IMAGE_MIMES.has(file.type)) return "image";
   const mime = mimeForFile(file);
@@ -127,7 +141,8 @@ function dataUrlMime(dataUrl: string): string {
 }
 
 function kindFromDataUrl(dataUrl: string): AttachmentKind {
-  return dataUrlMime(dataUrl).startsWith("image/") ? "image" : "file";
+  const mime = dataUrlMime(dataUrl);
+  return mime.startsWith("image/") ? "image" : mime.startsWith("video/") ? "video" : "file";
 }
 
 function dataUrlToFile(dataUrl: string, name?: string): File {
@@ -212,6 +227,7 @@ export interface UseAttachedImagesApi {
   enqueue: (files: Iterable<File>, options?: { restoringDraft: boolean }) => {
     rejected: Array<{ file: File; reason: AttachmentError }>;
   };
+  addLocal: (attachment: LocalAttachment, options?: { restoringDraft: boolean }) => AttachmentError | null;
   remove: (id: string) => { nextFocusId: string | null };
   /** Revoke every staged blob URL and drop all attachments. Called after a
    * successful submit — the optimistic bubble holds onto an independent
@@ -272,13 +288,14 @@ export function useAttachedImages({
   const enqueue = useCallback(
     (files: Iterable<File>, { restoringDraft = false } = {}) => {
       const rejected: Array<{ file: File; reason: AttachmentError }> = [];
-      const toAdd: AttachedAttachment[] = [];
-      let slot = maxAttachments - imagesRef.current.length;
+      const toAdd: Array<AttachedAttachment & { file: File }> = [];
+      let slot = maxAttachments - imagesRef.current.filter((item) => item.kind !== "video").length;
+      let videoSlot = MAX_VIDEOS_PER_MESSAGE - imagesRef.current.filter((item) => item.kind === "video").length;
       let projectedDecodedBytes = imagesRef.current.reduce(
-        (total, image) => total + (
+        (total, image) => total + (image.kind === "video" ? 0 : (
           image.encodedBytes
           ?? (image.kind === "image" ? Math.min(image.file.size, maxFileBytes) : image.file.size)
-        ),
+        )),
         0,
       );
 
@@ -292,20 +309,21 @@ export function useAttachedImages({
           rejected.push({ file, reason: "empty_file" });
           continue;
         }
-        if (!restoringDraft && kind === "file" && file.size > maxFileBytes) {
+        if (!restoringDraft && kind !== "image" && file.size > (kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes)) {
           rejected.push({ file, reason: "too_large" });
           continue;
         }
-        if (!restoringDraft && slot <= 0) {
-          rejected.push({ file, reason: "too_many_attachments" });
+        if (!restoringDraft && (kind === "video" ? videoSlot : slot) <= 0) {
+          rejected.push({ file, reason: kind === "video" ? "too_many_videos" : "too_many_attachments" });
           continue;
         }
-        const nextDecodedBytes = kind === "image" ? Math.min(file.size, maxFileBytes) : file.size;
+        const nextDecodedBytes = kind === "video" ? 0 : kind === "image" ? Math.min(file.size, maxFileBytes) : file.size;
         if (!restoringDraft && projectedDecodedBytes + nextDecodedBytes > maxTotalBytes) {
           rejected.push({ file, reason: "total_too_large" });
           continue;
         }
-        slot -= 1;
+        if (kind === "video") videoSlot -= 1;
+        else slot -= 1;
         projectedDecodedBytes += nextDecodedBytes;
         toAdd.push({
           id: uuid(),
@@ -325,7 +343,7 @@ export function useAttachedImages({
           queueMicrotask(() => {
             const work = entry.kind === "image"
               ? encodeImage(entry.file)
-              : encodeFile(entry.file, maxFileBytes);
+              : encodeFile(entry.file, entry.kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes);
             work.then(
               (result) => {
                 if (result.ok) {
@@ -358,6 +376,25 @@ export function useAttachedImages({
     },
     [maxAttachments, maxFileBytes, maxTotalBytes, setEntry],
   );
+
+  const addLocal = useCallback((local: LocalAttachment, { restoringDraft = false } = {}): AttachmentError | null => {
+    const current = imagesRef.current;
+    const videos = current.filter((item) => item.kind === "video").length;
+    if (!restoringDraft && (local.kind === "video" ? videos >= MAX_VIDEOS_PER_MESSAGE : current.length - videos >= maxAttachments)) {
+      return local.kind === "video" ? "too_many_videos" : "too_many_attachments";
+    }
+    if (!restoringDraft && local.size > (local.kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes)) return "too_large";
+    const bytes = current.reduce((sum, item) => sum + (item.kind === "video" ? 0 : item.encodedBytes ?? item.file.size), 0);
+    if (!restoringDraft && bytes + (local.kind === "video" ? 0 : local.size) > maxTotalBytes) return "total_too_large";
+    const next: AttachedAttachment[] = [...current, {
+      id: uuid(), kind: local.kind, local, status: "ready", encodedBytes: local.size,
+      file: { name: local.name, size: local.size, type: local.mime },
+      ...(local.kind === "image" ? { previewUrl: local.url } : {}),
+    }];
+    imagesRef.current = next;
+    setImages(next);
+    return null;
+  }, [maxAttachments, maxFileBytes, maxTotalBytes]);
 
   const remove = useCallback((id: string) => {
     let nextFocusId: string | null = null;
@@ -399,21 +436,24 @@ export function useAttachedImages({
   }, []);
 
   const restoreReadyImages = useCallback((restored: RestoredReadyAttachment[]) => {
-    const toRestore = restored
-      .filter((img) => acceptedAttachmentKind(dataUrlToFile(img.dataUrl, img.name)))
-      .map((img): AttachedAttachment => {
-        const file = dataUrlToFile(img.dataUrl, img.name);
-        const kind = img.kind ?? kindFromDataUrl(img.dataUrl);
-        return {
-          id: uuid(),
-          kind,
-          file,
-          ...(kind === "image" ? { previewUrl: img.dataUrl } : {}),
-          status: "ready",
-          dataUrl: img.dataUrl,
-          encodedBytes: file.size,
-        };
-      });
+    const toRestore = restored.flatMap((img): AttachedAttachment[] => {
+      if (img.local) {
+        const local = img.local;
+        return [{
+          id: uuid(), kind: local.kind, local, status: "ready", encodedBytes: local.size,
+          file: { name: local.name, size: local.size, type: local.mime },
+          ...(local.kind === "image" ? { previewUrl: local.url } : {}),
+        }];
+      }
+      if (!img.dataUrl) return [];
+      const file = dataUrlToFile(img.dataUrl, img.name);
+      if (!acceptedAttachmentKind(file)) return [];
+      const kind = img.kind ?? kindFromDataUrl(img.dataUrl);
+      return [{
+        id: uuid(), kind, file, status: "ready", dataUrl: img.dataUrl, encodedBytes: file.size,
+        ...(kind === "image" ? { previewUrl: img.dataUrl } : {}),
+      }];
+    });
     setImages((prev) => {
       for (const img of prev) {
         if (img.previewUrl) {
@@ -447,7 +487,8 @@ export function useAttachedImages({
   }, []);
 
   const encoding = images.some((img) => img.status === "encoding");
-  const full = images.length >= maxAttachments;
+  const videos = images.filter((image) => image.kind === "video").length;
+  const full = images.length - videos >= maxAttachments && videos >= MAX_VIDEOS_PER_MESSAGE;
 
-  return { images, enqueue, remove, clear, restoreReadyImages, encoding, full };
+  return { images, enqueue, addLocal, remove, clear, restoreReadyImages, encoding, full };
 }

@@ -6,6 +6,7 @@ import base64
 import binascii
 import hashlib
 import hmac
+import json
 import mimetypes
 import os
 import re
@@ -13,13 +14,15 @@ import shutil
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
 from nanobot.config.paths import get_media_dir
+from nanobot.security.workspace_access import WorkspaceScope
 from nanobot.utils.helpers import safe_filename
+from nanobot.webui.file_preview import WebUIFilePreviewError, resolve_file_path
 from nanobot.webui.http_utils import (
     case_insensitive_header as _case_insensitive_header,
 )
@@ -115,6 +118,13 @@ def sign_media_path(
     return f"/api/media/{b64url_encode(mac)}/{payload}"
 
 
+def sign_local_attachment(path: str, *, session_key: str, secret: bytes) -> str:
+    """Bind a borrowed path to its session; serving rechecks the current scope."""
+    payload = b64url_encode(b"\0" + json.dumps([session_key, path], ensure_ascii=False).encode("utf-8"))
+    mac = hmac.new(secret, payload.encode("ascii"), hashlib.sha256).digest()[:16]
+    return f"/api/media/{b64url_encode(mac)}/{payload}"
+
+
 def sign_or_stage_media_path(
     path: Path,
     *,
@@ -196,6 +206,7 @@ def serve_signed_media(
     secret: bytes,
     request: WsRequest | None = None,
     media_dir: MediaDirProvider = _default_media_dir,
+    scope_for_session: Callable[[str], WorkspaceScope] | None = None,
 ) -> Response:
     """Serve a signed media URL, including browser-friendly byte ranges."""
     try:
@@ -210,21 +221,44 @@ def serve_signed_media(
         rel_str = rel_bytes.decode("utf-8")
     except (ValueError, binascii.Error, UnicodeDecodeError):
         return _http_error(400, "invalid payload")
-    try:
-        media_root = media_dir(None).resolve()
-        candidate = (media_root / rel_str).resolve()
-        candidate.relative_to(media_root)
-    except (OSError, ValueError):
-        return _http_error(404, "not found")
-    if not candidate.is_file():
-        return _http_error(404, "not found")
+    # NUL cannot start a legacy filesystem-relative path.
+    borrowed = rel_str.startswith("\0")
+    if borrowed:
+        try:
+            raw_reference: object = json.loads(rel_str[1:])
+            if not isinstance(raw_reference, list) or scope_for_session is None:
+                return _http_error(400, "invalid local attachment")
+            reference = cast(list[object], raw_reference)
+            if len(reference) != 2:
+                return _http_error(400, "invalid local attachment")
+            session_key, path = reference
+            if not isinstance(session_key, str) or not isinstance(path, str):
+                return _http_error(400, "invalid local attachment")
+            candidate = resolve_file_path(
+                path, scope=scope_for_session(session_key), literal=True,
+            )
+        except (ValueError, WebUIFilePreviewError) as exc:
+            return _http_error(getattr(exc, "status", 404), "attachment unavailable")
+    else:
+        try:
+            media_root = media_dir(None).resolve()
+            candidate = (media_root / rel_str).resolve()
+            candidate.relative_to(media_root)
+        except (OSError, ValueError):
+            return _http_error(404, "not found")
+        if not candidate.is_file():
+            return _http_error(404, "not found")
 
+    return _serve_media_file(candidate, request=request, borrowed=borrowed)
+
+
+def _serve_media_file(candidate: Path, *, request: WsRequest | None, borrowed: bool) -> Response:
     mime, _ = mimetypes.guess_type(candidate.name)
     if mime not in _MEDIA_ALLOWED_MIMES:
         mime = "application/octet-stream"
     common_headers = [
         ("Accept-Ranges", "bytes"),
-        ("Cache-Control", "private, max-age=31536000, immutable"),
+        ("Cache-Control", "no-store" if borrowed else "private, max-age=31536000, immutable"),
         ("X-Content-Type-Options", "nosniff"),
     ]
     if mime == "image/svg+xml":

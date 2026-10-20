@@ -1,4 +1,4 @@
-"""File, MIME and batch policy for WebSocket channel binary uploads."""
+"""Shared MIME and batch limits for WebSocket attachment ingress."""
 
 from dataclasses import dataclass
 
@@ -39,3 +39,20 @@ DOCUMENT_MIME_ALLOWED: frozenset[str] = frozenset({
     "text/csv", "text/html", "text/markdown", "text/plain", "text/xml", "text/yaml",
 })
 UPLOAD_MIME_ALLOWED = IMAGE_MIME_ALLOWED | VIDEO_MIME_ALLOWED | DOCUMENT_MIME_ALLOWED
+
+
+def validate_attachment_batch(
+    items: list[tuple[str, int]], *, limits: AttachmentIngressLimits,
+) -> None:
+    """Apply the same per-message limits to uploads and borrowed local files."""
+    videos = sum(mime in VIDEO_MIME_ALLOWED for mime, _ in items)
+    if videos > MAX_VIDEOS_PER_MESSAGE or len(items) - videos > limits.max_count:
+        raise ValueError("Too many attachments")
+    for mime, size in items:
+        if mime not in UPLOAD_MIME_ALLOWED:
+            raise ValueError("Unsupported attachment MIME")
+        limit = MAX_VIDEO_BYTES if mime in VIDEO_MIME_ALLOWED else limits.max_file_bytes
+        if not 0 < size <= limit:
+            raise ValueError("Invalid attachment size")
+    if sum(size for mime, size in items if mime not in VIDEO_MIME_ALLOWED) > limits.max_total_bytes:
+        raise ValueError("Attachment total exceeds limit")

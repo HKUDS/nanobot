@@ -2306,6 +2306,7 @@
         "unsupported_type": "Unsupported file type",
         "empty_file": "Empty files cannot be attached",
         "too_many_attachments": "Max {{max}} attachments per message",
+        "too_many_videos": "Max 1 video per message",
         "too_many_images": "Max {{max}} images per message",
         "magic_mismatch": "File doesn't look like a real image",
         "decode_failed": "Couldn't decode this image",

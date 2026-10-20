@@ -1676,10 +1676,7 @@ export type ThreadProjectionEvent = Extract<
  * surface. ``name`` is advisory and is surfaced as the placeholder label when
  * the session is replayed.
  */
-export interface OutboundMedia {
-  data_url: string;
-  name?: string;
-}
+export type OutboundMedia = import("../../../packages/client-events/attachments").DraftAttachment;
 
 export interface OutboundCliAppMention {
   name: string;

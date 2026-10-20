@@ -2899,6 +2899,27 @@ describe("useNanobotStream", () => {
     );
   });
 
+  it("replaces a local reference's optimistic preview with the gateway's session URL", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("local-video", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    act(() => {
+      result.current.send("watch", [{
+        media: { path: "/project/video.mp4", name: "video.mp4" },
+        preview: { kind: "video", url: "", name: "video.mp4" },
+      }]);
+    });
+    const optimistic = result.current.messages[0];
+    const media = [{ kind: "video" as const, url: "/api/media/sig/local-video", name: "video.mp4" }];
+    act(() => fake.emit("local-video", {
+      event: "user_message", chat_id: "local-video", text: "watch",
+      turn_id: optimistic.turnId!, starts_turn: true, media_urls: media,
+    }));
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0]).toMatchObject({ id: optimistic.id, media, deliveryStatus: "accepted" });
+  });
+
   it("inlines quoted context into the optimistic and outbound user message", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-quote", EMPTY_MESSAGES), {

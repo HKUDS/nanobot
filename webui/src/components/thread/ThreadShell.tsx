@@ -15,7 +15,7 @@ import { ModelFallbackNotice } from "@/components/thread/ModelFallbackNotice";
 import { RecoveryNotice } from "@/components/thread/RecoveryNotice";
 import { SubagentTasksProvider } from "@/components/thread/SubagentTasks";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
-import type { ComposerDraftStore } from "@/lib/composer-draft";
+import type { ComposerDraft, ComposerDraftStore } from "@/lib/composer-draft";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import type {
   ComposerContextUsage,
@@ -54,6 +54,7 @@ import {
   isMcpPresetsPayload,
 } from "@/lib/mcp-preset-events";
 import type { StreamError } from "@/lib/nanobot-client";
+import { isLocalAttachment } from "../../../../packages/client-events/attachments";
 import type {
   ChatSummary,
   FilePreviewPayload,
@@ -560,7 +561,8 @@ export function ThreadShell({
   const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
   const filePreviewCloseTimerRef = useRef<number | null>(null);
   const filePreviewResizeCleanupRef = useRef<(() => void) | null>(null);
-  const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
+  const pendingFirstRef = useRef<(PendingFirstMessage & { draft?: ComposerDraft; draftKey: string }) | null>(null);
+  const [restoredFirstDraft, setRestoredFirstDraft] = useState<{ chatId: string; revision: number; error: string } | null>(null);
   const [pendingFirstTargetChatId, setPendingFirstTargetChatId] = useState<string | null>(null);
   const consumedPendingFirstMessageIdRef = useRef<string | null>(null);
   const viewportRef = useRef<ThreadViewportHandle | null>(null);
@@ -971,10 +973,27 @@ export function ThreadShell({
       setSubmittedViewportTurnId(submitted.turnId);
     }
     if (submitted?.delivery) {
-      void submitted.delivery.then(() => pending.finish?.(true), () => pending.finish?.(false));
+      void submitted.delivery.then(() => pending.finish?.(true), (error: unknown) => {
+        // Topic creation already unmounted the landing composer. A rejected
+        // local reference must hand its draft to that topic, not strand it on /new.
+        if (pending.draft && pending.images?.some((image) => image.media.path !== undefined)) {
+          const targetKey = `websocket:${chatId}`;
+          const current = draftStore?.get(targetKey, !temporary);
+          if (!current?.text && !current?.files.length && !current?.localAttachments?.length
+            && !current?.sessionMentions.length && !current?.quotedContext) {
+            draftStore?.set(targetKey, pending.draft, !temporary);
+            if (draftStore?.get(pending.draftKey) === pending.draft) draftStore.delete(pending.draftKey);
+            setRestoredFirstDraft((previous) => ({
+              chatId, revision: (previous?.revision ?? 0) + 1,
+              error: error instanceof Error ? error.message : String(error),
+            }));
+          }
+        }
+        pending.finish?.(false);
+      });
     } else pending.finish?.(submitted !== null);
     setBooting(false);
-  }, [chatId, pendingFirstTargetChatId, send]);
+  }, [chatId, draftStore, pendingFirstTargetChatId, send, temporary]);
 
   useEffect(() => {
     if (
@@ -1022,7 +1041,10 @@ export function ThreadShell({
       setBooting(true);
       let finish!: (accepted: boolean) => void;
       const delivery = new Promise<boolean>((resolve) => { finish = resolve; });
-      pendingFirstRef.current = { content, images, options: withWorkspaceScope(options), finish };
+      pendingFirstRef.current = {
+        content, images, options: withWorkspaceScope(options), finish,
+        draftKey, draft: draftStore?.get(draftKey, persistDraft),
+      };
       setPendingFirstTargetChatId(null);
       const newId = await onCreateChat?.(workspaceScope, content, localModelPreset);
       if (!newId) {
@@ -1037,11 +1059,20 @@ export function ThreadShell({
       setPendingFirstTargetChatId(newId);
       return delivery;
     },
-    [booting, client, localModelPreset, onCreateChat, withWorkspaceScope, workspaceScope],
+    [booting, client, draftKey, draftStore, localModelPreset, onCreateChat, persistDraft, withWorkspaceScope, workspaceScope],
   );
+
+  const inspectAttachment = useCallback(async (path: string) => {
+    const result = await client.requestMutation("attachment.inspect", {
+      chat_id: chatId, path, ...(workspaceScope ? { workspace_scope: workspaceScope } : {}),
+    });
+    if (!isLocalAttachment(result)) throw new Error("Invalid attachment metadata");
+    return result;
+  }, [chatId, client, workspaceScope]);
 
   const handleThreadSend = useCallback(
     (content: string, images?: SendAttachment[], options?: SendOptions) => {
+      setRestoredFirstDraft((current) => current?.chatId === chatId ? { ...current, error: "" } : current);
       const submitted = send(content, images, withWorkspaceScope(options));
       if (
         chatId
@@ -1253,9 +1284,12 @@ export function ThreadShell({
           onOpenSettings={onOpenModelSettings}
         />
       ) : null}
+      {restoredFirstDraft?.chatId === chatId && restoredFirstDraft.error ? (
+        <p role="alert" className="px-3 text-sm text-destructive">{restoredFirstDraft.error}</p>
+      ) : null}
       {session ? (
         <ThreadComposer
-          key={draftKey}
+          key={`${draftKey}:${restoredFirstDraft?.chatId === chatId ? restoredFirstDraft.revision : 0}`}
           draftKey={draftKey}
           draftStore={draftStore}
           persistDraft={persistDraft}
@@ -1291,6 +1325,7 @@ export function ThreadShell({
           sessions={mentionSessions}
           skills={skills}
           onStop={stop}
+          onInspectAttachment={inspectAttachment}
           onTranscribeAudio={transcribeAudio}
           goalState={currentGoalState}
           onFavoriteWorkspaceProject={favoriteWorkspaceProject}
@@ -1347,6 +1382,7 @@ export function ThreadShell({
           sessions={mentionSessions}
           skills={skills}
           surfaceRef={composerSurfaceRef}
+          onInspectAttachment={inspectAttachment}
           onTranscribeAudio={transcribeAudio}
           goalState={currentGoalState}
           onFavoriteWorkspaceProject={favoriteWorkspaceProject}

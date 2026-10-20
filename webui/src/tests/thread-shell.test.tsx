@@ -665,6 +665,33 @@ describe("ThreadShell", () => {
     expect(client.sendMessage).not.toHaveBeenCalled();
   });
 
+  it("restores the landing attachment draft in its created topic after a gateway rejection", async () => {
+    const client = { ...makeClient(), sendAttachments: vi.fn().mockRejectedValue(new Error("file not found")) };
+    const store = new ComposerDraftStore();
+    store.set("new:chat", {
+      text: "keep the first draft", files: [], sessionMentions: [], quotedContext: null,
+      localAttachments: [{ path: "/project/video.mp4", name: "video.mp4", size: 8, mime: "video/mp4", kind: "video", url: "" }],
+    });
+    const onCreateChat = vi.fn().mockResolvedValue("created");
+    const shell = (id: string | null) => wrap(client, <ThreadShell session={id ? session(id) : null}
+      title="First attachment" draftStore={store} onToggleSidebar={() => {}} onCreateChat={onCreateChat} />);
+    const view = render(shell(null));
+    await screen.findByTestId("composer-chip");
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(onCreateChat).toHaveBeenCalledTimes(1));
+    view.rerender(shell("created"));
+    await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue("keep the first draft"));
+    expect(await screen.findByTestId("composer-chip")).toHaveTextContent("video.mp4");
+    expect(screen.getByRole("alert")).toHaveTextContent("file not found");
+    expect(store.get("websocket:created")?.localAttachments).toHaveLength(1);
+    expect(store.has("new:chat")).toBe(false);
+    client.sendAttachments.mockResolvedValue(undefined);
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(screen.queryByTestId("composer-chip")).not.toBeInTheDocument());
+    expect(screen.getByRole("textbox")).toHaveValue("");
+    expect(client.sendAttachments).toHaveBeenCalledTimes(2);
+  });
+
   it("clears the welcome draft after a delayed new-chat send and an unchanged round-trip", async () => {
     const client = makeClient();
     const store = new ComposerDraftStore();

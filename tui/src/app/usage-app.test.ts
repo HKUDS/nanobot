@@ -47,6 +47,7 @@ describe("TUI /usage", () => {
       activeChatId: "chat", connect() {}, close() {},
       send(content: string) { sent.push(content); return "turn" },
       async sendAttachments(content: string) { return this.send(content) },
+      async inspectAttachment(): Promise<never> { throw new Error("file not found") },
       attach(chatId: string) { this.activeChatId = chatId },
       newChat() { this.activeChatId = "new-chat" },
       setWorkspaceScope() {},

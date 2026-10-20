@@ -16,6 +16,7 @@ from loguru import logger
 from websockets.asyncio.server import ServerConnection
 
 from nanobot.bus.events import INBOUND_META_USER_SHELL
+from nanobot.channels.websocket.attachment_policy import validate_attachment_batch
 from nanobot.channels.websocket.attachment_store import AttachmentUploadError
 from nanobot.command.builtin import USER_SHELL_COMMAND, builtin_command_starts_agent_turn
 from nanobot.runtime_context import (
@@ -39,6 +40,7 @@ from nanobot.session.webui_turns import (
 )
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.prompt_templates import render_template
+from nanobot.webui.attachments import inspect_local_attachment
 from nanobot.webui.cli_apps_api import normalize_cli_app_mentions
 from nanobot.webui.file_preview import (
     WebUIFilePreviewError,
@@ -252,7 +254,7 @@ class WebUICommandRouter:
         }
         if turn_id is not None:
             body["turn_id"] = turn_id
-        media = self._media.augment_transcript_user_media(media_paths)
+        media = self._media.augment_transcript_user_media(media_paths, session_key=webui_session_key(chat_id))
         for attachment, name in zip(media, media_names, strict=False):
             if name:
                 attachment["name"] = name
@@ -584,6 +586,8 @@ class WebUICommandRouter:
         media_paths: list[str] = []
         media_names: list[str | None] = []
         references: list[str] = []
+        local_paths: list[str] = []
+        attachment_order: list[tuple[bool, int]] = []
         upload_owner = self._uploads.owner(connection) if raw_media else ""
         try:
             if not isinstance(raw_media, list):
@@ -596,13 +600,23 @@ class WebUICommandRouter:
                     raise AttachmentUploadError("malformed")
                 attachment = cast(dict[str, Any], item)
                 reference = attachment.get("reference")
-                if not isinstance(reference, str) or len(reference) > 64 or "data_url" in attachment:
-                    raise AttachmentUploadError("Expected an HTTP attachment reference")
-                references.append(reference)
+                path = attachment.get("path")
+                if "data_url" in attachment or (reference is None) == (path is None):
+                    raise AttachmentUploadError("Expected an upload reference or local path")
+                if path is not None:
+                    if not isinstance(path, str) or not path or len(path) > 4096:
+                        raise AttachmentUploadError("Invalid local attachment path")
+                    attachment_order.append((True, len(local_paths)))
+                    local_paths.append(path)
+                else:
+                    if not isinstance(reference, str) or len(reference) > 64:
+                        raise AttachmentUploadError("Invalid upload reference")
+                    attachment_order.append((False, len(references)))
+                    references.append(reference)
                 name = attachment.get("name")
                 media_names.append((safe_filename(name) or None) if isinstance(name, str) else None)
             if references:
-                media_paths = self._uploads.store.resolve(references, owner=upload_owner)
+                self._uploads.store.resolve(references, owner=upload_owner)
         except AttachmentUploadError as exc:
             await self._transport.webui_send_event(
                 connection, "error", detail="attachment_rejected", reason=str(exc),
@@ -610,7 +624,7 @@ class WebUICommandRouter:
             )
             return
 
-        if not content.strip() and not media_paths:
+        if not content.strip() and not attachment_order:
             await self._transport.webui_send_event(
                 connection,
                 "error",
@@ -661,7 +675,7 @@ class WebUICommandRouter:
             and turn_id is not None
             and turn_id.startswith(WEBUI_SYSTEM_COMMAND_TURN_PREFIX)
             and content.strip().lower() == "/restart"
-            and not media_paths
+            and not attachment_order
         )
         if restart_control:
             metadata[WEBUI_RESTART_CONTROL_METADATA_KEY] = True
@@ -697,16 +711,34 @@ class WebUICommandRouter:
         # persisting paths, with no intervening await, so expiry cannot remove
         # files referenced by the canonical transcript.
         try:
+            local = [
+                await asyncio.to_thread(
+                    inspect_local_attachment, path, scope=scope, limits=self._uploads.store.limits,
+                )
+                for path in local_paths
+            ]
+            uploaded = self._uploads.store.inspect(references, owner=upload_owner)
+            validate_attachment_batch(
+                [(item["mime"], item["size"]) for item in local]
+                + [(item.mime, item.size) for item in uploaded],
+                limits=self._uploads.store.limits,
+            )
+            media_paths = [
+                local[index]["path"] if is_local else str(uploaded[index].path)
+                for is_local, index in attachment_order
+            ]
+            if len(set(media_paths)) != len(media_paths):
+                raise AttachmentUploadError("Duplicate attachment reference")
             if references:
-                media_paths = self._uploads.store.commit(references, owner=upload_owner)
-        except AttachmentUploadError as exc:
+                self._uploads.store.commit(references, owner=upload_owner)
+        except (ValueError, WebUIFilePreviewError) as exc:
             await self._transport.webui_send_event(
                 connection, "error", detail="attachment_rejected", reason=str(exc),
                 **rejection_fields,
             )
             return
         if temporary_policy is not None:
-            self._temporary_chats.register_media(connection, chat_id, media_paths)
+            self._temporary_chats.register_media(connection, chat_id, [str(item.path) for item in uploaded])
         is_webui = metadata.get("webui") is True
         queued_owner = None
         if is_webui and not is_user_shell and builtin_command_starts_agent_turn(content):
@@ -906,6 +938,46 @@ class WebUICommandRouter:
             )
             return
 
+        payload = cast(dict[str, Any], payload)
+        if action == "attachment.inspect":
+            # Read-only and connection-scoped: never retain filesystem results in
+            # the mutation replay cache. Send admission always checks again.
+            chat_id, path = payload.get("chat_id"), payload.get("path")
+            if (chat_id is not None and not is_valid_webui_chat_id(chat_id)) or not isinstance(path, str):
+                await self.send_webui_response(
+                    connection, request_id, status=400, message="invalid attachment request",
+                )
+                return
+            try:
+                if chat_id is None:
+                    scope = await self._workspaces.scope_for_new_chat(
+                        payload, can_change_project=self.workspace_project_selection_available(connection),
+                    )
+                else:
+                    policy = self._temporary_chats.message_policy(connection, chat_id, "")
+                    scope = policy.workspace_scope if policy is not None else (
+                        await self._workspaces.scope_for_message(
+                            payload, chat_id=chat_id,
+                            chat_running=websocket_turn_wall_started_at(chat_id) is not None,
+                            can_change_project=self.workspace_project_selection_available(connection),
+                        )
+                    )
+                result = await asyncio.to_thread(
+                    inspect_local_attachment, path, scope=scope, limits=self._uploads.store.limits,
+                )
+            except (TemporaryChatError, WorkspaceScopeError, WebUIFilePreviewError) as exc:
+                await self.send_webui_response(
+                    connection, request_id, status=getattr(exc, "status", 404), message=str(exc),
+                )
+            else:
+                await self.send_webui_response(
+                    connection, request_id,
+                    result={**result, "url": self._media.local_attachment_url(
+                        result["path"], session_key=webui_session_key(chat_id),
+                    ) if chat_id is not None else ""},
+                )
+            return
+
         if action == "temporary_chat.file_preview":
             # Connection-owned, read-only, and deliberately outside the mutation
             # replay cache: private paths/content must not outlive this request.
@@ -972,7 +1044,7 @@ class WebUICommandRouter:
                 self.execute_webui_request(
                     connection,
                     action,
-                    cast(dict[str, Any], payload),
+                    payload,
                 )
             )
             new_operation = WebUIRequestOperation(

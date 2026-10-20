@@ -36,7 +36,7 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
     );
   }
 
-  if (attachment.kind === "video" && hasUrl) {
+  if (attachment.kind === "video" && hasUrl && !failed) {
     return (
       <AttachmentFrame
         attachment={attachment}
@@ -48,6 +48,7 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
           src={attachment.url}
           controls
           preload="metadata"
+          onError={() => setFailedUrl(attachment.url)}
           className={cn(
             "block w-full bg-black",
             variant === "compact" ? "max-h-40" : "max-h-[26rem]",
@@ -100,7 +101,7 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
       aria-label={label}
     >
       {body}
-      <span className="sr-only">
+      <span className="text-xs text-muted-foreground">
         {t("message.attachmentUnavailable", { defaultValue: "Attachment unavailable" })}
       </span>
     </div>

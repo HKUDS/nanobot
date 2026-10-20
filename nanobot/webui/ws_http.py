@@ -949,7 +949,7 @@ class GatewayHTTPHandler:
             active=status.state in {"queued", "running", "stopping"},
             latency_ms=(int(max(0.0, status.finished_at - status.started_at) * 1000)
                         if status.finished_at is not None else None),
-            augment_user_media=self.media.augment_transcript_media,
+            augment_user_media=lambda paths: self.media.augment_transcript_user_media(paths, session_key=session_key),
             augment_assistant_media=self.media.augment_transcript_media,
             augment_assistant_text=lambda text: self.media.rewrite_local_markdown_images(
                 text, workspace_path=scope.project_path,
@@ -1262,7 +1262,7 @@ class GatewayHTTPHandler:
         replay_stats = diagnostics.transcript if diagnostics is not None else TranscriptReplayStats()
         data = build_webui_thread_response(
             decoded_key, history=history,
-            augment_user_media=self.media.augment_transcript_media,
+            augment_user_media=lambda paths: self.media.augment_transcript_user_media(paths, session_key=decoded_key),
             augment_assistant_media=self.media.augment_transcript_media,
             augment_assistant_text=lambda text: self.media.rewrite_local_markdown_images(
                 text,
@@ -1682,6 +1682,7 @@ class GatewayHTTPHandler:
             sig,
             payload,
             request=request,
+            scope_for_session=self.workspaces.scope_for_session_key,
         )
 
     # -- Misc routes --------------------------------------------------------

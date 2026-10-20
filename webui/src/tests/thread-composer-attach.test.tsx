@@ -425,3 +425,49 @@ describe("ThreadComposer — attachments", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 });
+
+
+describe("local attachment paths and video ingress", () => {
+  const local = { path: "C:\\project\\my clip.mp4", name: "my clip.mp4", size: 12,
+    mime: "video/mp4", kind: "video" as const, url: "/api/media/sig/local" };
+
+  it("confirms an independently pasted path and sends only the borrowed reference", async () => {
+    const inspect = vi.fn().mockResolvedValue(local);
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} onInspectAttachment={inspect} />);
+    const input = screen.getByLabelText(/message input/i);
+    fireEvent.change(input, { target: { value: "keep this " } });
+    (input as HTMLTextAreaElement).setSelectionRange(10, 10);
+    fireEvent.paste(input, { clipboardData: { items: [], getData: () => '"C:\\project\\my clip.mp4"' } });
+    await waitFor(() => expect(screen.getByTestId("composer-chip")).toHaveTextContent("my clip.mp4"));
+    expect(input).toHaveValue("keep this ");
+    expect(inspect).toHaveBeenCalledWith(local.path);
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSend.mock.calls[0][1][0].media).toEqual({ path: local.path, name: local.name });
+  });
+
+  it("keeps failed path text and attachment draft, and does not consume prose or URLs", async () => {
+    const inspect = vi.fn().mockRejectedValue(new Error("file not found"));
+    render(<ThreadComposer onSend={vi.fn()} onInspectAttachment={inspect} />);
+    const input = screen.getByLabelText(/message input/i);
+    fireEvent.paste(input, { clipboardData: { items: [], getData: () => "./missing.mp4" } });
+    await waitFor(() => expect(screen.getByText("file not found")).toBeInTheDocument());
+    expect(input).toHaveValue("./missing.mp4");
+    for (const text of ["look at ./missing.mp4 please", "https://host/clip.mp4", "const path = './clip.mp4'", "line one\n./clip.mp4"]) {
+      fireEvent.paste(input, { clipboardData: { items: [], getData: () => text } });
+    }
+    expect(inspect).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("composer-chip")).not.toBeInTheDocument();
+  });
+
+  it("uploads picked video bytes with the existing independent video size/count allowance", async () => {
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} ingressLimits={ingressLimits({ maxFileBytes: 3 })} />);
+    const input = screen.getByLabelText(/message input/i);
+    const picker = input.closest("form")!.querySelector('input[type="file"]')!;
+    fireEvent.change(picker, { target: { files: [new File(["movie"], "clip.mov", { type: "" })] } });
+    await waitFor(() => expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled());
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSend.mock.calls[0][1][0].media).toEqual({ data_url: `data:video/quicktime;base64,${btoa("movie")}`, name: "clip.mov" });
+  });
+});
