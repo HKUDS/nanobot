@@ -390,11 +390,11 @@ function IncomingSessionMessage({
       data-session-message
       className="group relative mr-auto w-fit min-w-0 max-w-[min(85%,36rem)] text-reading"
     >
-      {contextMenu}
-      <div className="min-w-0 rounded-floating bg-secondary/70 px-4 py-2">
-        <div className="mb-1.5 flex items-center text-[12px] text-muted-foreground">
-          <SessionHandleLabel id={handle.id}>{handleName}</SessionHandleLabel>
-        </div>
+      <div className="mb-1.5 flex items-center px-4 text-[12px] text-muted-foreground">
+        <SessionHandleLabel id={handle.id}>{handleName}</SessionHandleLabel>
+      </div>
+      <div className="relative min-w-0 rounded-floating bg-secondary/70 px-4 py-2">
+        {contextMenu}
         <div data-assistant-selectable="true" className="min-w-0">
           <MarkdownText
             preserveStreamingLayout

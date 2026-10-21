@@ -235,7 +235,7 @@ describe("MessageBubble", () => {
       .toBe(screen.getByText("reply").parentElement);
   });
 
-  it("renders cross-session input with its public handle inside a left-aligned bubble", () => {
+  it("renders cross-session input with its public handle above a left-aligned bubble", () => {
     const message: UIMessage = {
       id: "session-message:message-1",
       role: "user",
@@ -255,11 +255,12 @@ describe("MessageBubble", () => {
 
     const row = container.querySelector("[data-session-message]")!;
     const handle = screen.getByText("@mira-0123456789");
-    const bubble = handle.parentElement!.parentElement!;
+    const bubble = row.querySelector("[data-assistant-selectable]")!.parentElement!;
     expect(row).toHaveClass("mr-auto", "w-fit", "max-w-[min(85%,36rem)]");
-    expect(bubble).toHaveClass("rounded-floating", "bg-secondary/70", "px-4", "py-2");
+    expect(handle.parentElement!.parentElement).toBe(row);
+    expect(bubble).toHaveClass("relative", "rounded-floating", "bg-secondary/70", "px-4", "py-2");
     expect(bubble).toContainElement(screen.getByText("Please review this."));
-    expect(screen.getByRole("button", { name: "Message actions" }).parentElement).toBe(row);
+    expect(screen.getByRole("button", { name: "Message actions" }).parentElement).toBe(bubble);
   });
 
   it("outlines temporary-chat user messages with a short dashed border", () => {

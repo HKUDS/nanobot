@@ -37,10 +37,11 @@ for (const theme of ["light", "dark"] as const) {
             const bubble = row.querySelector<HTMLElement>("[data-assistant-selectable]")!.parentElement!;
             const style = getComputedStyle(bubble);
             const rect = bubble.getBoundingClientRect();
-            const handle = bubble.firstElementChild!.getBoundingClientRect();
+            const handle = row.firstElementChild!.firstElementChild!.getBoundingClientRect();
             const body = bubble.querySelector("[data-assistant-selectable]")!.getBoundingClientRect();
-            return { left: rect.left, width: rect.width, background: style.backgroundColor,
-              radius: style.borderRadius, padding: style.padding, handleBottom: handle.bottom, bodyTop: body.top };
+            return { left: rect.left, top: rect.top, width: rect.width, background: style.backgroundColor,
+              radius: style.borderRadius, padding: style.padding, handleBottom: handle.bottom,
+              handleLeft: handle.left, bodyLeft: body.left };
           }),
         };
       });
@@ -53,7 +54,8 @@ for (const theme of ["light", "dark"] as const) {
         expect(bubble.background).toBe(layout.ownBackground);
         expect(bubble.radius).toBe(layout.ownRadius);
         expect(bubble.padding).toBe(layout.ownPadding);
-        expect(bubble.handleBottom).toBeLessThan(bubble.bodyTop);
+        expect(bubble.handleBottom).toBeLessThan(bubble.top);
+        expect(Math.abs(bubble.handleLeft - bubble.bodyLeft)).toBeLessThan(1);
       }
 
       const row = page.locator("[data-thread-display-unit]").filter({ has: page.getByText("@mira", { exact: true }) });
