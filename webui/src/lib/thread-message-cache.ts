@@ -1,8 +1,8 @@
-import type { ThreadCheckpoint } from "./thread-checkpoint";
+import type { ThreadTranscriptSnapshot } from "./thread-transcript";
 import { MemoryLruCache } from "./memory-lru-cache";
 
 /** Bounded replay cache; temporary chats remain pinned because they have no disk history. */
-export class ThreadMessageCache<T extends ThreadCheckpoint = ThreadCheckpoint> extends MemoryLruCache<T> {
+export class ThreadMessageCache extends MemoryLruCache<ThreadTranscriptSnapshot> {
 
   constructor(
     isPinned: (key: string) => boolean,

@@ -28,6 +28,7 @@ import { ChatFailureFixture } from "./chat-failure-fixture";
 import { ThreadLoadingFixture } from "./thread-loading-fixture";
 import { AnswerOrderFixture } from "./answer-order-fixture";
 import { SidebarActivityFixture } from "./sidebar-activity-fixture";
+import { HistoryHydrationFixture } from "./history-hydration-fixture";
 
 const history: UIMessage[] = [
   { id: "question", role: "user", content: "Earlier question", createdAt: 1_700_000_000_000 },
@@ -176,6 +177,8 @@ createRoot(document.getElementById("root")!).render(<TooltipProvider>
     ? <ChatFailureFixture parameters={parameters} />
     : parameters.get("case") === "typography"
     ? <ClientProvider client={railClient} token="fixture"><TypographyFixture /></ClientProvider>
+    : parameters.get("case") === "history-hydration"
+    ? <HistoryHydrationFixture />
     : parameters.get("case") === "history-boundary"
     ? <ClientProvider client={railClient} token="fixture" webuiCapabilities={["webui.prompt-navigation.v1"]}><HistoryBoundaryFixture local={parameters.has("local")} navigate={parameters.has("navigate")} tasks={parameters.has("tasks")} /></ClientProvider>
     : parameters.get("case") === "diagrams"

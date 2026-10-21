@@ -316,7 +316,17 @@ function parseThreadProjectionEvent(value: unknown): ThreadProjectionEvent {
   if (!isRecord(value) || typeof value.event !== "string" || typeof value.chat_id !== "string") {
     throw new Error("Invalid WebUI thread event");
   }
-  if (!hasValidProjectionMetadata(value)) {
+  if (!hasValidProjectionMetadata(value)
+    || (value.stream_id !== undefined && typeof value.stream_id !== "string")
+    || (value.projection_receipts !== undefined && (
+      !Array.isArray(value.projection_receipts)
+      || !value.projection_receipts.every((receipt: unknown) => isRecord(receipt)
+        && typeof receipt.turn_id === "string" && receipt.turn_id.length > 0
+        && Array.isArray(receipt.ranges)
+        && receipt.ranges.every((range: unknown) => Array.isArray(range)
+          && range.length === 2 && Number.isSafeInteger(range[0]) && range[0] >= 0
+          && Number.isSafeInteger(range[1]) && range[1] >= range[0]))
+    ))) {
     throw new Error("Invalid WebUI thread event metadata");
   }
   switch (value.event) {

@@ -191,6 +191,40 @@ describe("webui API helpers", () => {
   });
 
   it.each([
+    {},
+    { stream_id: "answer-1" },
+    { projection_receipts: [] },
+    { stream_id: "answer-1", projection_receipts: [{ turn_id: "turn-1", ranges: [[1, 3], [5, 5]] }] },
+  ])("accepts optional stream identity and projection receipts: %j", async (metadata) => {
+    const event = { event: "stream_end", chat_id: "chat-1", text: "Reply", turn_id: "turn-1", turn_seq: 6, ...metadata };
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      schemaVersion: 3, projection: "events", events: [event],
+    })));
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).resolves.toMatchObject({ events: [event] });
+  });
+
+  it.each([
+    { stream_id: 123 },
+    { projection_receipts: null },
+    { projection_receipts: [{ turn_id: "", ranges: [[1, 2]] }] },
+    { projection_receipts: [{ turn_id: "turn-1", ranges: [[2, 1]] }] },
+    { projection_receipts: [{ turn_id: "turn-1", ranges: [[1]] }] },
+    { projection_receipts: [{ turn_id: "turn-1", ranges: [[-1, 2]] }] },
+    { projection_receipts: [{ turn_id: "turn-1", ranges: [[1, 2.5]] }] },
+  ])("rejects malformed stream identity or projection receipts at the HTTP boundary: %j", async (metadata) => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      schemaVersion: 3,
+      projection: "events",
+      events: [{ event: "stream_end", chat_id: "chat-1", text: "Reply", ...metadata }],
+    })));
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).rejects.toThrow(
+      "Invalid WebUI thread event metadata",
+    );
+  });
+
+  it.each([
     null,
     "backup",
     [null],

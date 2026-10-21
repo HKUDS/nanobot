@@ -11,12 +11,14 @@ import { CLI_APPS_CHANGED_EVENT } from "@/lib/cli-app-events";
 import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
-import { createThreadCheckpoint } from "@/lib/thread-checkpoint";
+import { ThreadTranscript } from "@/lib/thread-transcript";
+import { persistedCanonicalRunState } from "@/lib/canonical-run-snapshot";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type {
   CliAppsPayload,
   ConnectionStatus,
   SettingsPayload,
+  ThreadProjectionEvent,
   UIMessage,
   WebuiThreadPersistedPayload,
 } from "@/lib/types";
@@ -79,11 +81,14 @@ function makeClient() {
       || (
         snapshot?.completionIdsProvided !== true
         && snapshot?.hasPendingToolCalls === false
+        && snapshot?.activeTurnId !== turnId
         && observedTurnIds.has(turnId)
       )
     );
     const currentGeneration = runGenerationByChatId.get(chatId) ?? 0;
     const latestTurnId = latestRunTurnIdByChatId.get(chatId);
+    if (latestTurnId && !closedRunTurnIdsByChatId.get(chatId)?.has(latestTurnId)
+      && !isRepresented(latestTurnId)) return false;
     return (
       currentGeneration === expectedRunGeneration
       || (typeof latestTurnId === "string" && isRepresented(latestTurnId))
@@ -106,7 +111,8 @@ function makeClient() {
     const fences = completedTurnIdsByChatId.get(chatId) ?? new Set<string>();
     for (const turnId of completedTurnIds) fences.add(turnId);
     completedTurnIdsByChatId.set(chatId, fences);
-    runStartedAtByChatId.delete(chatId);
+    const hadClock = runStartedAtByChatId.delete(chatId);
+    if (hadClock) for (const h of runStatusHandlers) h(chatId, null);
     return true;
   });
   return {
@@ -187,6 +193,13 @@ function makeClient() {
       };
     },
     _emitError(err: StreamError) {
+      if (err.kind !== "model_request_failed" && err.chatId && err.turnId) {
+        if (latestRunTurnIdByChatId.get(err.chatId) === err.turnId) {
+          latestRunTurnIdByChatId.delete(err.chatId);
+          const hadClock = runStartedAtByChatId.delete(err.chatId);
+          if (hadClock) for (const h of runStatusHandlers) h(err.chatId, null);
+        }
+      }
       for (const h of errorHandlers) h(err);
     },
     _emitStatus(nextStatus: ConnectionStatus) {
@@ -285,18 +298,92 @@ function session(chatId: string, modelPreset?: string | null) {
 }
 
 function transcriptFromSimpleMessages(
-  rows: Array<{ role: "user" | "assistant"; content: string; turnId?: string }>,
+  rows: Array<{ id?: string; role: "user" | "assistant"; content: string; turnId?: string }>,
 ): WebuiThreadPersistedPayload {
   return canonicalThreadPayload({
     schemaVersion: 3,
     messages: rows.map((m, i) => ({
-      id: `m-${i}`,
+      id: m.id ?? `m-${i}`,
       role: m.role,
       content: m.content,
       ...(m.turnId ? { turnId: m.turnId } : {}),
       createdAt: 1000 + i,
     })),
   })!;
+}
+
+type StreamedFixtureRow =
+  | ({
+      role: "user";
+      content: string;
+      startsTurn?: boolean;
+      activeTurnId?: string;
+    } & (
+      | { turnId: string; sessionMessage?: never }
+      | { turnId?: never; sessionMessage: NonNullable<UIMessage["sessionMessage"]> }
+    ))
+  | {
+      role: "assistant";
+      content: string;
+      turnId: string;
+      streamId: string;
+      textSeq?: number;
+      endSeq?: number;
+      mergeNext?: boolean;
+    };
+
+// Stream replacement requires the actual input and wire sources, not display IDs.
+function streamedThreadPayload(
+  chatId: string,
+  rows: StreamedFixtureRow[],
+  completedTurnIds: string[] = [],
+): WebuiThreadPersistedPayload {
+  const events: ThreadProjectionEvent[] = [];
+  rows.forEach((row, index) => {
+    if (row.role === "user") {
+      events.push({
+        event: "user_message", chat_id: chatId,
+        projection_id: `input:${row.turnId ?? row.sessionMessage.message_id}`,
+        text: row.content, starts_turn: row.startsTurn ?? true,
+        ...(row.turnId ? { turn_id: row.turnId, turn_seq: 1 } : {}),
+        ...(row.activeTurnId ? { active_turn_id: row.activeTurnId } : {}),
+        ...(row.sessionMessage ? { provenance: { session_message: row.sessionMessage } } : {}),
+      });
+    } else {
+      const textSeq = row.textSeq ?? 2;
+      const endSeq = row.endSeq ?? 3;
+      events.push({
+        event: "stream_end", chat_id: chatId,
+        projection_id: `answer:${row.turnId}:${row.streamId}:${endSeq}`,
+        turn_id: row.turnId, turn_phase: "answer", turn_seq: endSeq,
+        stream_id: row.streamId, text: row.content,
+        projection_receipts: [{ turn_id: row.turnId, ranges: [[textSeq, endSeq]] }],
+        ...(row.mergeNext ? { resuming: true, merge_next: true } : {}),
+      });
+    }
+    if (row.turnId && completedTurnIds.includes(row.turnId)
+      && !rows.slice(index + 1).some((later) => later.turnId === row.turnId)) {
+      events.push({
+        event: "turn_end", chat_id: chatId, turn_id: row.turnId,
+        projection_id: `complete:${row.turnId}`,
+        turn_seq: row.role === "assistant" ? (row.endSeq ?? 3) + 1 : 2,
+      });
+    }
+  });
+  return { schemaVersion: 3, projection: "events", events, completed_turn_ids: completedTurnIds };
+}
+
+function publishReconnectCompletion(
+  client: ReturnType<typeof makeClient>,
+  chatId: string,
+  body: WebuiThreadPersistedPayload,
+) {
+  const generation = client.getRunGeneration(chatId);
+  const { completedTurnIds, snapshot } = persistedCanonicalRunState(body);
+  expect(client.canReconcileCanonicalCompletion(chatId, generation, completedTurnIds, snapshot)).toBe(true);
+  // useReconnectRuns publishes synchronously before settling/fencing the ledger.
+  webuiThreadCache.set(`websocket:${chatId}`, body);
+  expect(client.reconcileCanonicalCompletion(chatId, generation, completedTurnIds, snapshot)).toBe(true);
 }
 
 function httpJson(body: unknown) {
@@ -2609,7 +2696,7 @@ describe("ThreadShell", () => {
     await act(async () => {
       client._emitChat("chat-a", {
         event: "goal_status",
-        chat_id: "chat-a",
+        chat_id: "chat-a", turn_id: "running-chat-a-turn",
         status: "running",
         started_at: Date.now() / 1000,
       });
@@ -2630,6 +2717,7 @@ describe("ThreadShell", () => {
   it("keeps live fork replies when a canonical refresh is missing an earlier assistant answer", async () => {
     const client = makeClient();
     let historyCalls = 0;
+    let secondTurnId = "";
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -2637,12 +2725,12 @@ describe("ThreadShell", () => {
         if (url.includes("websocket%3Achat-fork/webui-thread")) {
           historyCalls += 1;
           return httpJson(
-            transcriptFromSimpleMessages(
+            streamedThreadPayload("chat-fork",
               historyCalls === 1
-                ? [{ role: "user", content: "first fork question" }]
+                ? [{ role: "user", content: "first fork question", turnId: "first-fork-turn" }]
                 : [
-                    { role: "user", content: "first fork question" },
-                    { role: "user", content: "second fork question" },
+                    { role: "user", content: "first fork question", turnId: "first-fork-turn" },
+                    { role: "user", content: "second fork question", turnId: secondTurnId },
                   ],
             ),
           );
@@ -2672,7 +2760,7 @@ describe("ThreadShell", () => {
       client._emitChat("chat-fork", {
         event: "message",
         chat_id: "chat-fork",
-        text: "first fork answer",
+        text: "first fork answer", turn_id: "first-fork-turn", turn_seq: 2,
       });
     });
     expect(screen.getByText("first fork answer")).toBeInTheDocument();
@@ -2684,6 +2772,8 @@ describe("ThreadShell", () => {
     await waitFor(() =>
       expectSendMessageWithTurn(client, "chat-fork", "second fork question"),
     );
+    secondTurnId = client.sendMessage.mock.calls[0]?.[3]?.turnId ?? "";
+    expect(secondTurnId).not.toBe("");
     expect(screen.getByText("second fork question")).toBeInTheDocument();
 
     await act(async () => {
@@ -2691,13 +2781,17 @@ describe("ThreadShell", () => {
     });
 
     await waitFor(() => expect(historyCalls).toBe(2));
-    expect(screen.getByText("first fork question")).toBeInTheDocument();
-    expect(screen.getByText("first fork answer")).toBeInTheDocument();
-    expect(screen.getByText("second fork question")).toBeInTheDocument();
+    const firstQuestion = screen.getByText("first fork question");
+    const firstAnswer = screen.getByText("first fork answer");
+    const secondQuestion = screen.getByText("second fork question");
+    expect(firstQuestion.compareDocumentPosition(firstAnswer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(firstAnswer.compareDocumentPosition(secondQuestion) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("recovers a truncated streamed answer after reconnecting", async () => {
     const client = makeClient();
+    const turnId = "resume-turn";
+    const streamId = "resume-answer";
     let historyCalls = 0;
     vi.stubGlobal(
       "fetch",
@@ -2705,16 +2799,18 @@ describe("ThreadShell", () => {
         const url = String(input);
         if (url.includes("websocket%3Aresume-chat/webui-thread")) {
           historyCalls += 1;
-          return httpJson(
-            transcriptFromSimpleMessages(
+          return httpJson({
+            ...streamedThreadPayload("resume-chat",
               historyCalls === 1
-                ? [{ role: "user", content: "question" }]
+                ? [{ role: "user", content: "question", turnId }]
                 : [
-                    { role: "user", content: "question" },
-                    { role: "assistant", content: "partial answer completed while away" },
+                    { role: "user", content: "question", turnId },
+                    { role: "assistant", content: "partial answer completed while away", turnId, streamId },
                   ],
+              historyCalls === 1 ? [] : [turnId],
             ),
-          );
+            has_pending_tool_calls: historyCalls === 1,
+          });
         }
         return {
           ok: false,
@@ -2740,13 +2836,13 @@ describe("ThreadShell", () => {
     act(() => {
       client._emitChat("resume-chat", {
         event: "goal_status",
-        chat_id: "resume-chat",
+        chat_id: "resume-chat", turn_id: turnId,
         status: "running",
         started_at: 1_700,
       });
       client._emitChat("resume-chat", {
         event: "delta",
-        chat_id: "resume-chat",
+        chat_id: "resume-chat", turn_id: turnId, turn_seq: 2, stream_id: streamId,
         text: "partial answer",
       });
     });
@@ -2778,7 +2874,7 @@ describe("ThreadShell", () => {
       historyCalls += 1;
       if (historyCalls > 1) return { ok: false, status: 304 };
       return httpJson({
-        ...transcriptFromSimpleMessages([{ role: "user", content: "question", turnId }]),
+        ...streamedThreadPayload(chatId, [{ role: "user", content: "question", turnId }]),
         has_pending_tool_calls: true,
       });
     }));
@@ -2793,23 +2889,23 @@ describe("ThreadShell", () => {
         status: "running", started_at: 1_700,
       });
       client._emitChat(chatId, {
-        event: "delta", chat_id: chatId, turn_id: turnId, text: "cached prefix",
+        event: "delta", chat_id: chatId, turn_id: turnId, turn_seq: 2,
+        stream_id: "cached-answer", text: "cached prefix",
       });
     });
     await screen.findByText("cached prefix");
     act(() => client._emitStatus("reconnecting"));
     // The reconnect coordinator can cache this response before the mounted
     // thread's conditional request returns the same body through HTTP 304.
-    act(() => webuiThreadCache.set(`websocket:${chatId}`, canonicalThreadPayload({
-      schemaVersion: 3,
+    act(() => publishReconnectCompletion(client, chatId, {
+      ...streamedThreadPayload(chatId, [
+        { role: "user", content: "question", turnId },
+        { role: "assistant", content: "full cached answer", turnId, streamId: "cached-answer" },
+      ], [turnId]),
       revision: "completed-revision",
       has_pending_tool_calls: false,
-      completed_turn_ids: [turnId],
-      messages: [
-        { id: "canonical-user", role: "user", content: "question", turnId, createdAt: 1_000 },
-        { id: "canonical-answer", role: "assistant", content: "full cached answer", turnId, createdAt: 2_000 },
-      ],
-    })!));
+    }));
+    expect(client.reconcileCanonicalCompletion).toHaveBeenCalledTimes(1);
     act(() => client._emitStatus("open"));
     await screen.findByText("full cached answer");
     expect(historyCalls).toBe(2);
@@ -2829,7 +2925,7 @@ describe("ThreadShell", () => {
       }
       historyCalls += 1;
       if (historyCalls === 1) return Promise.resolve(httpJson({
-        ...transcriptFromSimpleMessages([{ role: "user", content: "question", turnId }]),
+        ...streamedThreadPayload(chatId, [{ role: "user", content: "question", turnId }]),
         has_pending_tool_calls: true,
       }));
       return new Promise<ReturnType<typeof httpJson>>((resolve) => { finishOlderRead = resolve; });
@@ -2845,27 +2941,28 @@ describe("ThreadShell", () => {
         status: "running", started_at: 1_700,
       });
       client._emitChat(chatId, {
-        event: "delta", chat_id: chatId, turn_id: turnId, text: "old active prefix",
+        event: "delta", chat_id: chatId, turn_id: turnId, turn_seq: 2,
+        stream_id: "published-answer", text: "old active prefix",
       });
     });
     await screen.findByText("old active prefix");
     act(() => client._emitStatus("reconnecting"));
     act(() => client._emitStatus("open"));
     await waitFor(() => expect(historyCalls).toBe(2));
-    const completed = canonicalThreadPayload({
-      ...transcriptFromSimpleMessages([
+    const completed = {
+      ...streamedThreadPayload(chatId, [
         { role: "user", content: "question", turnId },
-        { role: "assistant", content: "externally published final answer", turnId },
-      ]),
+        { role: "assistant", content: "externally published final answer", turnId, streamId: "published-answer" },
+      ], [turnId]),
       revision: "completed-revision",
       has_pending_tool_calls: false,
-      completed_turn_ids: [turnId],
-    })!;
-    act(() => webuiThreadCache.set(`websocket:${chatId}`, completed));
+    };
+    act(() => publishReconnectCompletion(client, chatId, completed));
+    expect(client.reconcileCanonicalCompletion).toHaveBeenCalledTimes(1);
     await screen.findByText("externally published final answer");
     expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
     await act(async () => finishOlderRead(httpJson({
-      ...transcriptFromSimpleMessages([{ role: "user", content: "question", turnId }]),
+      ...streamedThreadPayload(chatId, [{ role: "user", content: "question", turnId }]),
       revision: "older-active-revision",
       has_pending_tool_calls: true,
       active_turn_id: turnId,
@@ -2875,6 +2972,7 @@ describe("ThreadShell", () => {
     expect(screen.queryByText("old active prefix")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
     expect(webuiThreadCache.get(`websocket:${chatId}`)).toBe(completed);
+    expect(client.reconcileCanonicalCompletion).toHaveBeenCalledTimes(1);
   });
 
   it("refreshes after opening when mounted while the socket is reconnecting", async () => {
@@ -2940,7 +3038,7 @@ describe("ThreadShell", () => {
               historyCalls === 1
                 ? [
                     {
-                      role: "assistant",
+                      id: "expired-window-replay", role: "assistant",
                       content: "row from the expired latest window",
                       turnId: "turn-old-window",
                     },
@@ -2952,7 +3050,7 @@ describe("ThreadShell", () => {
                       turnId: canonicalTurnId,
                     },
                     {
-                      role: "assistant",
+                      id: "new-window-replay", role: "assistant",
                       content: "answer in the new latest window",
                       turnId: canonicalTurnId,
                     },
@@ -3016,8 +3114,8 @@ describe("ThreadShell", () => {
           return httpJson({
             ...transcriptFromSimpleMessages(
               chatACalls === 1
-                ? [{ role: "assistant", content: "committed old lineage" }]
-                : [{ role: "assistant", content: "disjoint new lineage" }],
+                ? [{ id: "old-lineage-replay", role: "assistant", content: "committed old lineage" }]
+                : [{ id: "new-lineage-replay", role: "assistant", content: "disjoint new lineage" }],
             ),
             has_pending_tool_calls: false,
           });
@@ -3080,7 +3178,7 @@ describe("ThreadShell", () => {
         historyCalls += 1;
         if (historyCalls === 1) {
           return Promise.resolve(httpJson(transcriptFromSimpleMessages([
-            { role: "assistant", content: "old canonical row" },
+            { id: "old-canonical-replay", role: "assistant", content: "old canonical row" },
           ])));
         }
         return new Promise((resolve) => {
@@ -3109,7 +3207,7 @@ describe("ThreadShell", () => {
       client._emitChat("reset-tail-race", {
         event: "message",
         chat_id: "reset-tail-race",
-        text: "local durable row after request",
+        text: "local durable row after request", turn_id: "durable-post-request-turn", turn_seq: 2,
       });
     });
     await waitFor(() =>
@@ -3119,7 +3217,7 @@ describe("ThreadShell", () => {
     await act(async () => {
       resolveRefresh?.(httpJson({
         ...transcriptFromSimpleMessages([
-          { role: "assistant", content: "disjoint canonical reset row" },
+          { id: "disjoint-canonical-replay", role: "assistant", content: "disjoint canonical reset row" },
         ]),
         has_pending_tool_calls: false,
       }));
@@ -3139,6 +3237,9 @@ describe("ThreadShell", () => {
       vi.fn(async (input: RequestInfo | URL) => {
         if (String(input).includes("websocket%3Aempty-reset-chat/webui-thread")) {
           historyCalls += 1;
+          if (historyCalls > 1) return httpJson({
+            schemaVersion: 3, projection: "events", events: [], has_pending_tool_calls: false,
+          });
         }
         return {
           ok: false,
@@ -3165,6 +3266,12 @@ describe("ThreadShell", () => {
     fireEvent.change(input, { target: { value: "rejected local turn" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(screen.getByText("rejected local turn")).toBeInTheDocument());
+    const rejectedTurnId = client.sendMessage.mock.calls[0]?.[3]?.turnId;
+    expect(rejectedTurnId).toBeTruthy();
+    act(() => client._emitError({
+      kind: "turn_rejected", chatId: "empty-reset-chat", turnId: rejectedTurnId!,
+      detail: "message_rejected",
+    }));
 
     act(() => client._emitSessionUpdate("empty-reset-chat", "thread"));
 
@@ -3194,13 +3301,14 @@ describe("ThreadShell", () => {
       vi.fn(async (input: RequestInfo | URL) => {
         if (String(input).includes("websocket%3Astrict-canonical/webui-thread")) {
           return httpJson({
-            ...transcriptFromSimpleMessages(
+            ...streamedThreadPayload("strict-canonical",
               canonicalComplete
                 ? [
                     { role: "user", content: "strict question", turnId },
-                    { role: "assistant", content: "strict canonical answer", turnId },
+                    { role: "assistant", content: "strict canonical answer", turnId, streamId: "strict-answer" },
                   ]
                 : [{ role: "user", content: "strict question", turnId }],
+              canonicalComplete ? [turnId] : [],
             ),
             has_pending_tool_calls: !canonicalComplete,
           });
@@ -3240,7 +3348,7 @@ describe("ThreadShell", () => {
         event: "delta",
         chat_id: "strict-canonical",
         text: "strict partial",
-        turn_id: turnId,
+        turn_id: turnId, turn_seq: 2, stream_id: "strict-answer",
       });
     });
     await waitFor(() => expect(screen.getByText("strict partial")).toBeInTheDocument());
@@ -3254,88 +3362,86 @@ describe("ThreadShell", () => {
     expect(client.canReconcileCanonicalCompletion).toHaveBeenCalled();
   });
 
-  it("keeps completed content while deferring a rejected final lifecycle reconciliation", async () => {
+  it("keeps completed content while a newer run blocks lifecycle reconciliation", async () => {
     const client = makeClient();
+    const chatId = "layout-recheck";
     const turnId = "turn-layout-recheck";
+    const newerTurnId = "newer-layout-turn";
     let historyCalls = 0;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input).includes("websocket%3Alayout-recheck/webui-thread")) {
-          historyCalls += 1;
-          return httpJson({
-            ...transcriptFromSimpleMessages(
-              historyCalls === 1
-                ? [{ role: "user", content: "layout question", turnId }]
-                : [
-                    { role: "user", content: "layout question", turnId },
-                    { role: "assistant", content: "layout canonical answer", turnId },
-                  ],
-            ),
-            has_pending_tool_calls: historyCalls === 1,
-          });
-        }
-        return {
-          ok: false,
-          status: 404,
-          json: async () => ({}),
-        };
-      }),
-    );
-
-    render(
-      wrap(
-        client,
-        <ThreadShell
-          session={session("layout-recheck")}
-          title="Layout recheck"
-          onToggleSidebar={() => {}}
-          onNewChat={() => {}}
-        />,
-      ),
-    );
-
-    await waitFor(() => expect(screen.getByText("layout question")).toBeInTheDocument());
+    let finishRefresh!: (response: Response) => void;
+    const completedBody = (includeNewer: boolean) => {
+      const rows: StreamedFixtureRow[] = [
+        { role: "user", content: "layout question", turnId },
+        { role: "assistant", content: "layout canonical answer", turnId, streamId: "layout-answer" },
+      ];
+      if (includeNewer) rows.push(
+        { role: "user", content: "newer layout question", turnId: newerTurnId },
+        { role: "assistant", content: "newer layout complete", turnId: newerTurnId, streamId: "newer-layout-answer" },
+      );
+      return {
+        ...streamedThreadPayload(chatId, rows, includeNewer ? [turnId, newerTurnId] : [turnId]),
+        has_pending_tool_calls: false,
+      };
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      if (!String(input).includes(`websocket%3A${chatId}/webui-thread`)) {
+        return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+      }
+      historyCalls += 1;
+      if (historyCalls === 1) return Promise.resolve(httpJson({
+        ...streamedThreadPayload(chatId, [{ role: "user", content: "layout question", turnId }]),
+        has_pending_tool_calls: true,
+      }));
+      if (historyCalls === 2) return new Promise<Response>((resolve) => { finishRefresh = resolve; });
+      return Promise.resolve(httpJson(completedBody(true)));
+    }));
+    render(wrap(client, <ThreadShell session={session(chatId)} title="Layout recheck"
+      onToggleSidebar={() => {}} onNewChat={() => {}} />));
+    await screen.findByText("layout question");
     act(() => {
-      client._emitChat("layout-recheck", {
-        event: "goal_status",
-        chat_id: "layout-recheck",
-        status: "running",
-        started_at: 2_200,
-        turn_id: turnId,
+      client._emitChat(chatId, {
+        event: "goal_status", chat_id: chatId, status: "running", started_at: 2_200, turn_id: turnId,
       });
-      client._emitChat("layout-recheck", {
-        event: "delta",
-        chat_id: "layout-recheck",
-        text: "layout partial",
-        turn_id: turnId,
+      client._emitChat(chatId, {
+        event: "delta", chat_id: chatId, text: "layout partial", turn_id: turnId,
+        turn_seq: 2, stream_id: "layout-answer",
       });
     });
-    await waitFor(() => expect(screen.getByText("layout partial")).toBeInTheDocument());
+    await screen.findByText("layout partial");
+    act(() => client._emitSessionUpdate(chatId, "thread"));
+    await waitFor(() => expect(historyCalls).toBe(2));
 
-    const reconcileAfterReject = client.reconcileCanonicalCompletion.getMockImplementation();
-    client.reconcileCanonicalCompletion
-      .mockImplementationOnce(() => false)
-      .mockImplementation((...args) => reconcileAfterReject?.(...args) ?? false);
-
-    act(() => client._emitSessionUpdate("layout-recheck", "thread"));
-
-    await waitFor(() => {
-      expect(historyCalls).toBe(2);
-      expect(client.reconcileCanonicalCompletion).toHaveBeenCalledTimes(1);
-      expect(screen.queryByText("layout partial")).not.toBeInTheDocument();
-      expect(screen.getByText("layout canonical answer")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
+    // Another tab starts a newer turn while this read is pending. Its running
+    // status invalidates settlement before the pure preflight runs.
+    act(() => {
+      for (const event of streamedThreadPayload(chatId, [
+        { role: "user", content: "newer layout question", turnId: newerTurnId },
+      ]).events) client._emitChat(chatId, event);
+      client._emitChat(chatId, {
+        event: "goal_status", chat_id: chatId, status: "running", started_at: 2_300, turn_id: newerTurnId,
+      });
+      client._emitChat(chatId, {
+        event: "delta", chat_id: chatId, text: "newer layout partial", turn_id: newerTurnId,
+        turn_seq: 2, stream_id: "newer-layout-answer",
+      });
     });
+    await screen.findByText("newer layout partial");
+    await act(async () => finishRefresh(httpJson(completedBody(false))));
+    await screen.findByText("layout canonical answer");
+    expect(screen.queryByText("layout partial")).not.toBeInTheDocument();
+    expect(screen.getByText("newer layout partial")).toBeInTheDocument();
+    expect(client.reconcileCanonicalCompletion).not.toHaveBeenCalled();
+    expect(client.isRunCompleted(chatId, turnId)).toBe(true);
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
 
-    act(() => client._emitSessionUpdate("layout-recheck", "thread"));
-
-    await waitFor(() => {
-      expect(historyCalls).toBe(3);
-      expect(screen.getByText("layout canonical answer")).toBeInTheDocument();
-      expect(screen.queryByText("layout partial")).not.toBeInTheDocument();
-      expect(client.reconcileCanonicalCompletion).toHaveBeenCalledTimes(2);
-    });
+    act(() => client._emitSessionUpdate(chatId, "thread"));
+    await screen.findByText("newer layout complete");
+    expect(historyCalls).toBe(3);
+    expect(screen.getByText("layout canonical answer")).toBeInTheDocument();
+    expect(screen.queryByText("layout partial")).not.toBeInTheDocument();
+    expect(screen.queryByText("newer layout partial")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
+    expect(client.reconcileCanonicalCompletion).toHaveBeenCalledTimes(1);
   });
 
   it("adopts a completed equal-length history when returning after an inactive outage", async () => {
@@ -3349,23 +3455,16 @@ describe("ThreadShell", () => {
         const url = String(input);
         if (url.includes("websocket%3Achat-version-a/webui-thread")) {
           chatACalls += 1;
-          const rows = chatACalls <= 2
-            ? [
-                { role: "user" as const, content: "old question", turnId: oldTurnId },
-                { role: "assistant" as const, content: "old answer", turnId: oldTurnId },
-              ]
-            : [
-                { role: "user" as const, content: "old question", turnId: oldTurnId },
-                { role: "assistant" as const, content: "old answer", turnId: oldTurnId },
-                { role: "user" as const, content: "new question", turnId: newTurnId },
-                {
-                  role: "assistant" as const,
-                  content: "partial answer completed",
-                  turnId: newTurnId,
-                },
-              ];
+          const rows: StreamedFixtureRow[] = [
+            { role: "user", content: "old question", turnId: oldTurnId },
+            { role: "assistant", content: "old answer", turnId: oldTurnId, streamId: "old-answer" },
+          ];
+          if (chatACalls > 2) rows.push(
+            { role: "user", content: "new question", turnId: newTurnId },
+            { role: "assistant", content: "partial answer completed", turnId: newTurnId, streamId: "new-answer" },
+          );
           return httpJson({
-            ...transcriptFromSimpleMessages(rows),
+            ...streamedThreadPayload("chat-version-a", rows, chatACalls <= 2 ? [oldTurnId] : [oldTurnId, newTurnId]),
             has_pending_tool_calls: false,
           });
         }
@@ -3417,7 +3516,7 @@ describe("ThreadShell", () => {
         event: "delta",
         chat_id: "chat-version-a",
         text: "partial answer",
-        turn_id: newTurnId,
+        turn_id: newTurnId, turn_seq: 2, stream_id: "new-answer",
       });
     });
     await waitFor(() => expect(screen.getByText("partial answer")).toBeInTheDocument());
@@ -3512,12 +3611,16 @@ describe("ThreadShell", () => {
     expect(client.sendMessage).not.toHaveBeenCalled();
   });
 
-  it.each(["both", "current", "canonical"] as const)("keeps repeated guidance order and newer live output with %s turn ids", async (guidanceTurnIds) => {
+  it.each(["raw-turn", "session-message"] as const)("keeps repeated guidance order and newer live output with stable %s sources", async (guidanceIdentity) => {
     const client = makeClient();
     const chatId = "completed-guidance-new-tail";
     const turnId = "completed-guided-turn";
-    const guidanceTurnId = "guidance-input";
-    const repeatedGuidanceTurnId = "repeated-guidance-input";
+    const guidanceRows = ["guidance-input", "repeated-guidance-input"].map((id): StreamedFixtureRow => ({
+      role: "user", content: "supplemental guidance", startsTurn: false, activeTurnId: turnId,
+      ...(guidanceIdentity === "raw-turn"
+        ? { turnId: id }
+        : { sessionMessage: { message_id: id, session: { id: "guidance-session", name: "Guidance" } } }),
+    }));
     let historyCalls = 0;
     let resolveRefresh!: (response: ReturnType<typeof httpJson>) => void;
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -3526,7 +3629,7 @@ describe("ThreadShell", () => {
       }
       historyCalls += 1;
       if (historyCalls === 1) return Promise.resolve(httpJson({
-        ...transcriptFromSimpleMessages([{ role: "user", content: "guided question", turnId }]),
+        ...streamedThreadPayload(chatId, [{ role: "user", content: "guided question", turnId }]),
         has_pending_tool_calls: true,
       }));
       return new Promise<ReturnType<typeof httpJson>>((resolve) => { resolveRefresh = resolve; });
@@ -3543,32 +3646,26 @@ describe("ThreadShell", () => {
       });
       client._emitChat(chatId, {
         event: "delta", chat_id: chatId, text: "first partial segment", turn_id: turnId,
+        turn_seq: 2, stream_id: "guided-first-answer",
       });
     });
     await screen.findByText("first partial segment");
     act(() => {
       client._emitChat(chatId, {
         event: "stream_end", chat_id: chatId, turn_id: turnId, resuming: true,
+        turn_seq: 3, stream_id: "guided-first-answer", text: "first partial segment",
       });
-      client._emitChat(chatId, {
-        event: "user_message", chat_id: chatId,
-        turn_id: guidanceTurnIds === "canonical" ? undefined : guidanceTurnId,
-        text: "supplemental guidance", starts_turn: false, active_turn_id: turnId,
-      });
-      client._emitChat(chatId, {
-        event: "user_message", chat_id: chatId,
-        turn_id: guidanceTurnIds === "canonical" ? undefined : repeatedGuidanceTurnId,
-        text: "supplemental guidance", starts_turn: false, active_turn_id: turnId,
-      });
+      for (const event of streamedThreadPayload(chatId, guidanceRows).events) client._emitChat(chatId, event);
       client._emitChat(chatId, {
         event: "delta", chat_id: chatId, turn_id: turnId, text: "last partial segment",
+        turn_seq: 4, stream_id: "guided-last-answer",
       });
     });
     await screen.findByText("last partial segment");
     act(() => client._emitSessionUpdate(chatId, "thread"));
     await waitFor(() => expect(historyCalls).toBe(2));
     act(() => client._emitChat(chatId, {
-      event: "turn_end", chat_id: chatId, turn_id: turnId,
+      event: "turn_end", chat_id: chatId, turn_id: turnId, turn_seq: 6,
     }));
     fireEvent.change(screen.getByRole("textbox", { name: "Message input" }), {
       target: { value: "new local question" },
@@ -3583,21 +3680,18 @@ describe("ThreadShell", () => {
       });
       client._emitChat(chatId, {
         event: "delta", chat_id: chatId, turn_id: newerTurnId, text: "newer live reply",
+        turn_seq: 2, stream_id: "newer-guidance-answer",
       });
     });
     await screen.findByText("newer live reply");
     await act(async () => resolveRefresh(httpJson({
-      ...transcriptFromSimpleMessages([
+      ...streamedThreadPayload(chatId, [
         { role: "user", content: "guided question", turnId },
-        { role: "assistant", content: "canonical first segment", turnId },
-        { role: "user", content: "supplemental guidance",
-          turnId: guidanceTurnIds === "current" ? undefined : guidanceTurnId },
-        { role: "user", content: "supplemental guidance",
-          turnId: guidanceTurnIds === "current" ? undefined : repeatedGuidanceTurnId },
-        { role: "assistant", content: "canonical final segment", turnId },
-      ]),
+        { role: "assistant", content: "canonical first segment", turnId, streamId: "guided-first-answer" },
+        ...guidanceRows,
+        { role: "assistant", content: "canonical final segment", turnId, streamId: "guided-last-answer", textSeq: 4, endSeq: 5 },
+      ], [turnId]),
       has_pending_tool_calls: false,
-      completed_turn_ids: [turnId],
     })));
     const first = await screen.findByText("canonical first segment");
     const guidance = screen.getAllByText("supplemental guidance");
@@ -3614,9 +3708,11 @@ describe("ThreadShell", () => {
     act(() => {
       client._emitChat(chatId, {
         event: "delta", chat_id: chatId, turn_id: turnId, text: "obsolete delayed delta",
+        turn_seq: 7, stream_id: "guided-last-answer",
       });
       client._emitChat(chatId, {
         event: "delta", chat_id: chatId, turn_id: newerTurnId, text: " continued",
+        turn_seq: 3, stream_id: "newer-guidance-answer",
       });
     });
     await screen.findByText("newer live reply continued");
@@ -3631,13 +3727,23 @@ describe("ThreadShell", () => {
     const unseenTurnId = "other-tab-completed-turn";
     const newerTurnId = "new-local-turn";
     const messageCache = new ThreadMessageCache(() => false);
-    messageCache.set(chatId, createThreadCheckpoint([
+    const owner = new ThreadTranscript([
       { id: "older-page", role: "assistant", content: "older paginated answer", createdAt: 1 },
-      { id: "cached-user", role: "user", content: "completed question", turnId: completedTurnId, createdAt: 2 },
-      { id: "cached-prefix", role: "assistant", content: "outdated prefix", turnId: completedTurnId, createdAt: 3 },
-      { id: "new-user", role: "user", content: "new local question", turnId: newerTurnId, createdAt: 7 },
-      { id: "new-answer", role: "assistant", content: "new local stream", turnId: newerTurnId, isStreaming: true, createdAt: 8 },
-    ]));
+    ]);
+    const cachedEvents = [
+      { event: "user_message", chat_id: chatId, turn_id: completedTurnId, turn_seq: 1,
+        text: "completed question", starts_turn: true },
+      { event: "delta", chat_id: chatId, turn_id: completedTurnId, turn_seq: 2,
+        stream_id: "completed-cached-answer", text: "outdated prefix" },
+      { event: "user_message", chat_id: chatId, turn_id: newerTurnId, turn_seq: 1,
+        text: "new local question", starts_turn: true },
+      { event: "delta", chat_id: chatId, turn_id: newerTurnId, turn_seq: 2,
+        stream_id: "new-local-answer", text: "new local stream" },
+    ] satisfies ThreadProjectionEvent[];
+    cachedEvents.forEach((event, index) => owner.project(event, {
+      createId: () => `cached-${index}`, now: index + 2,
+    }));
+    messageCache.set(chatId, owner.save());
     client._emitChat(chatId, {
       event: "goal_status", chat_id: chatId, turn_id: newerTurnId, status: "running", started_at: 2_000,
     });
@@ -3646,12 +3752,12 @@ describe("ThreadShell", () => {
         return { ok: false, status: 404, json: async () => ({}) };
       }
       return httpJson({
-        ...transcriptFromSimpleMessages([
+        ...streamedThreadPayload(chatId, [
           { role: "user", content: "completed question", turnId: completedTurnId },
-          { role: "assistant", content: "completed reply", turnId: completedTurnId },
+          { role: "assistant", content: "completed reply", turnId: completedTurnId, streamId: "completed-cached-answer" },
           { role: "user", content: "other tab question", turnId: unseenTurnId },
-          { role: "assistant", content: "other tab completed reply", turnId: unseenTurnId },
-        ]),
+          { role: "assistant", content: "other tab completed reply", turnId: unseenTurnId, streamId: "other-tab-answer" },
+        ], [completedTurnId, unseenTurnId]),
         has_pending_tool_calls: false,
         completed_turn_ids: [completedTurnId, unseenTurnId],
         page: { before_cursor: "older-page", has_more_before: true, user_message_offset: 25 },
@@ -3672,21 +3778,37 @@ describe("ThreadShell", () => {
     expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
   });
 
-  it.each(["identified", "anonymous"] as const)("keeps completed guidance after a paginated prefix with %s live identity", async (guidanceIdentity) => {
+  it.each(["raw-turn", "session-message"] as const)("keeps completed guidance after a paginated prefix with stable %s sources", async (guidanceIdentity) => {
     const client = makeClient();
     const chatId = "completed-guidance-paged-prefix";
+    const guidanceRow: StreamedFixtureRow = {
+      role: "user", content: "continue", startsTurn: false, activeTurnId: "main",
+      ...(guidanceIdentity === "raw-turn"
+        ? { turnId: "guidance" }
+        : { sessionMessage: { message_id: "cached-guidance", session: { id: "guidance-session", name: "Guidance" } } }),
+    };
     const messageCache = new ThreadMessageCache(() => false);
-    messageCache.set(chatId, createThreadCheckpoint([
+    const owner = new ThreadTranscript([
       { id: "old-user", role: "user", content: "continue", createdAt: 1 },
       { id: "old-answer", role: "assistant", content: "older answer", createdAt: 2 },
-      { id: "question", role: "user", content: "current question", turnId: "main", createdAt: 3 },
-      { id: "first", role: "assistant", content: "first partial", turnId: "main", createdAt: 4 },
-      { id: "guidance", role: "user", content: "continue",
-        ...(guidanceIdentity === "identified" ? { turnId: "guidance" } : {}), createdAt: 5 },
-      { id: "last", role: "assistant", content: "last partial", turnId: "main", createdAt: 6 },
-      { id: "new-user", role: "user", content: "new question", turnId: "new", createdAt: 7 },
-      { id: "new-answer", role: "assistant", content: "new live answer", turnId: "new", isStreaming: true, createdAt: 8 },
-    ]));
+    ]);
+    const cachedEvents = [
+      { event: "user_message", chat_id: chatId, turn_id: "main", turn_seq: 1,
+        text: "current question", starts_turn: true },
+      { event: "delta", chat_id: chatId, turn_id: "main", turn_seq: 2,
+        stream_id: "main-first-answer", text: "first partial" },
+      ...streamedThreadPayload(chatId, [guidanceRow]).events,
+      { event: "delta", chat_id: chatId, turn_id: "main", turn_seq: 4,
+        stream_id: "main-last-answer", text: "last partial" },
+      { event: "user_message", chat_id: chatId, turn_id: "new", turn_seq: 1,
+        text: "new question", starts_turn: true },
+      { event: "delta", chat_id: chatId, turn_id: "new", turn_seq: 2,
+        stream_id: "new-live-answer", text: "new live answer" },
+    ] satisfies ThreadProjectionEvent[];
+    cachedEvents.forEach((event, index) => owner.project(event, {
+      createId: () => `cached-${index}`, now: index + 3,
+    }));
+    messageCache.set(chatId, owner.save());
     client._emitChat(chatId, {
       event: "goal_status", chat_id: chatId, turn_id: "new", status: "running", started_at: 2_000,
     });
@@ -3695,12 +3817,12 @@ describe("ThreadShell", () => {
         return { ok: false, status: 404, json: async () => ({}) };
       }
       return httpJson({
-        ...transcriptFromSimpleMessages([
+        ...streamedThreadPayload(chatId, [
           { role: "user", content: "current question", turnId: "main" },
-          { role: "assistant", content: "completed first", turnId: "main" },
-          { role: "user", content: "continue", turnId: "guidance" },
-          { role: "assistant", content: "completed last", turnId: "main" },
-        ]),
+          { role: "assistant", content: "completed first", turnId: "main", streamId: "main-first-answer" },
+          guidanceRow,
+          { role: "assistant", content: "completed last", turnId: "main", streamId: "main-last-answer", textSeq: 4, endSeq: 5 },
+        ], ["main"]),
         has_pending_tool_calls: false,
         completed_turn_ids: ["main"],
         page: { before_cursor: "older-page", has_more_before: true, user_message_offset: 25 },
@@ -3726,6 +3848,7 @@ describe("ThreadShell", () => {
     expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
     act(() => client._emitChat(chatId, {
       event: "delta", chat_id: chatId, turn_id: "new", text: " continued",
+      turn_seq: 3, stream_id: "new-live-answer",
     }));
     await screen.findByText("new live answer continued");
   });
@@ -3775,13 +3898,14 @@ describe("ThreadShell", () => {
         if (url.includes("websocket%3Alate-frame-chat/webui-thread")) {
           historyCalls += 1;
           return httpJson({
-            ...transcriptFromSimpleMessages(
+            ...streamedThreadPayload("late-frame-chat",
               historyCalls === 1
                 ? [{ role: "user", content: "question", turnId }]
                 : [
                     { role: "user", content: "question", turnId },
-                    { role: "assistant", content: "canonical complete answer", turnId },
+                    { role: "assistant", content: "canonical complete answer", turnId, streamId: "http-won-answer" },
                   ],
+              historyCalls === 1 ? [] : [turnId],
             ),
             has_pending_tool_calls: false,
           });
@@ -3819,7 +3943,7 @@ describe("ThreadShell", () => {
         event: "delta",
         chat_id: "late-frame-chat",
         text: "partial",
-        turn_id: turnId,
+        turn_id: turnId, turn_seq: 2, stream_id: "http-won-answer",
       });
     });
     await waitFor(() => expect(screen.getByText("partial")).toBeInTheDocument());
@@ -3834,18 +3958,19 @@ describe("ThreadShell", () => {
         event: "delta",
         chat_id: "late-frame-chat",
         text: " delayed duplicate",
-        turn_id: turnId,
+        turn_id: turnId, turn_seq: 2, stream_id: "http-won-answer",
       });
       client._emitChat("late-frame-chat", {
         event: "turn_end",
         chat_id: "late-frame-chat",
-        turn_id: turnId,
+        turn_id: turnId, turn_seq: 4,
       });
       client._emitSessionUpdate("late-frame-chat");
     });
 
     await waitFor(() => expect(historyCalls).toBe(3));
     expect(screen.getAllByText("canonical complete answer")).toHaveLength(1);
+    expect(screen.queryByText("partial")).not.toBeInTheDocument();
     expect(screen.queryByText(" delayed duplicate")).not.toBeInTheDocument();
     expect(screen.queryByText("canonical complete answer delayed duplicate")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
@@ -3995,12 +4120,12 @@ describe("ThreadShell", () => {
       vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
         if (String(input).includes(`websocket%3A${chatId}/webui-thread`)) {
           return httpJson({
-            ...transcriptFromSimpleMessages([
+            ...streamedThreadPayload(chatId, [
               { role: "user", content: "previous question", turnId: "finished-turn" },
-              { role: "assistant", content: "previous answer", turnId: "finished-turn" },
+              { role: "assistant", content: "previous answer", turnId: "finished-turn", streamId: "finished-answer" },
               { role: "user", content: "current question", turnId: "persisted-turn" },
-              { role: "assistant", content: "saved answer prefix", turnId: "persisted-turn" },
-            ]),
+              { role: "assistant", content: "saved answer prefix", turnId: "persisted-turn", streamId: "saved-answer" },
+            ], ["finished-turn"]),
             completed_turn_ids: ["finished-turn"],
             has_pending_tool_calls: true,
             active_turn_id: turnId,
@@ -4028,10 +4153,12 @@ describe("ThreadShell", () => {
 
       act(() => client._emitChat(chatId, {
         event: "delta", chat_id: chatId, turn_id: turnId, text: "continued",
+        turn_seq: 4, stream_id: "continued-answer",
       }));
       await screen.findByText("continued");
       act(() => client._emitChat(chatId, {
         event: "delta", chat_id: chatId, turn_id: turnId, text: " answer",
+        turn_seq: 5, stream_id: "continued-answer",
       }));
       await screen.findByText("continued answer");
       expect(screen.getByText("saved answer prefix")).toBeInTheDocument();
@@ -4052,7 +4179,7 @@ describe("ThreadShell", () => {
     ], expectVisible: false },
     { name: "an empty successful page", rows: [], expectVisible: false },
     { name: "a failed page", rows: [], expectVisible: false, error: true },
-  ])("releases older-page loading after ThreadShell handles $name", async ({ rows, expectVisible, error = false }) => {
+  ])("atomically publishes older-page rows and loading completion for $name", async ({ rows, expectVisible, error = false }) => {
     const client = makeClient();
     const chatId = `older-projection-${expectVisible ? "visible" : "hidden"}`;
     let resolveOlder!: (response: Response) => void;
@@ -4099,6 +4226,7 @@ describe("ThreadShell", () => {
     if (expectVisible) {
       act(() => client._emitChat(chatId, {
         event: "delta", chat_id: chatId, turn_id: "current-turn", text: "live during pagination",
+        turn_seq: 2, stream_id: "pagination-answer",
       }));
       await screen.findByText("live during pagination");
     }
@@ -4113,7 +4241,12 @@ describe("ThreadShell", () => {
     });
     if (expectVisible) await screen.findByText("older answer");
     await waitFor(() => expect(container.querySelector('.thread-history-status[data-state="loading"]')).toBeNull());
-    expect(commits.some((commit) => commit.loading && !commit.olderVisible)).toBe(expectVisible);
+    expect(commits.length).toBeGreaterThan(0);
+    expect(commits.at(-1)?.loading).toBe(false);
+    if (expectVisible) {
+      expect(commits.some((commit) => !commit.loading && !commit.olderVisible)).toBe(false);
+      expect(commits.at(-1)?.olderVisible).toBe(true);
+    }
     if (error) {
       expect(container.querySelector('.thread-history-status[data-state="error"]')).toBeInTheDocument();
       expect(container.querySelector(".thread-history-slot")).toBeInTheDocument();
@@ -4190,23 +4323,24 @@ describe("ThreadShell", () => {
         const url = String(input);
         if (url.includes("websocket%3Abefore-delta-chat/webui-thread")) {
           historyCalls += 1;
-          const transcript = transcriptFromSimpleMessages(
+          const transcript = streamedThreadPayload("before-delta-chat",
             historyCalls === 1
               ? [{ role: "user", content: "question", turnId }]
               : [
                   { role: "user", content: "question", turnId },
                   {
-                    role: "assistant",
-                    content: historyCalls === 2
-                      ? "missed prefix"
-                      : "missed prefix resumed suffix",
-                    turnId,
+                    role: "assistant", turnId, streamId: "before-delta-answer",
+                    content: historyCalls === 2 ? "missed prefix" : "missed prefix resumed suffix",
+                    endSeq: historyCalls === 2 ? 3 : 5,
+                    mergeNext: historyCalls === 2,
                   },
                 ],
+            historyCalls < 3 ? [] : [turnId],
           );
           return httpJson({
             ...transcript,
-            has_pending_tool_calls: historyCalls === 2,
+            has_pending_tool_calls: historyCalls < 3,
+            active_turn_id: historyCalls < 3 ? turnId : null,
           });
         }
         return {
@@ -4248,7 +4382,7 @@ describe("ThreadShell", () => {
     act(() => client._emitStatus("reconnecting"));
     act(() => client._emitStatus("open"));
     await waitFor(() => expect(historyCalls).toBe(2));
-    expect(screen.queryByText("missed prefix")).not.toBeInTheDocument();
+    await screen.findByText("missed prefix");
     expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
     expect(client.sendMessage).not.toHaveBeenCalled();
 
@@ -4256,11 +4390,14 @@ describe("ThreadShell", () => {
       client._emitChat("before-delta-chat", {
         event: "delta",
         chat_id: "before-delta-chat",
-        text: "resumed suffix",
-        turn_id: turnId,
+        text: " resumed suffix",
+        turn_id: turnId, turn_seq: 4, stream_id: "before-delta-answer",
       });
     });
-    await waitFor(() => expect(screen.getByText("resumed suffix")).toBeInTheDocument());
+    await screen.findByText("missed prefix resumed suffix");
+    expect(screen.queryByText("missed prefix")).not.toBeInTheDocument();
+    expect(screen.queryByText("resumed suffix")).not.toBeInTheDocument();
+    expect(client.sendMessage).not.toHaveBeenCalled();
 
     act(() => client._emitStatus("reconnecting"));
     act(() => client._emitStatus("open"));
@@ -4286,25 +4423,25 @@ describe("ThreadShell", () => {
         const url = String(input);
         if (url.includes("websocket%3Aactive-resume-chat/webui-thread")) {
           historyCalls += 1;
-          const transcript = transcriptFromSimpleMessages(
+          const transcript = streamedThreadPayload("active-resume-chat",
             historyCalls === 1
               ? [{ role: "user", content: "question", turnId }]
               : [
                   { role: "user", content: "question", turnId },
                   {
-                    role: "assistant",
-                    content: historyCalls === 2
-                      ? "partial answer missed"
-                      : "partial answer missed resumed",
-                    turnId,
+                    role: "assistant", turnId, streamId: "active-resume-answer",
+                    content: historyCalls === 2 ? "partial answer missed" : "partial answer missed resumed",
+                    endSeq: historyCalls === 2 ? 4 : 6,
+                    mergeNext: historyCalls === 2,
                   },
                 ],
+            historyCalls < 3 ? [] : [turnId],
           );
-          return httpJson(
-            historyCalls === 1
-              ? transcript
-              : { ...transcript, has_pending_tool_calls: historyCalls === 2 },
-          );
+          return httpJson({
+            ...transcript,
+            has_pending_tool_calls: historyCalls < 3,
+            active_turn_id: historyCalls < 3 ? turnId : null,
+          });
         }
         return {
           ok: false,
@@ -4339,7 +4476,7 @@ describe("ThreadShell", () => {
         event: "delta",
         chat_id: "active-resume-chat",
         text: "partial answer",
-        turn_id: turnId,
+        turn_id: turnId, turn_seq: 2, stream_id: "active-resume-answer",
       });
     });
     await waitFor(() => expect(screen.getByText("partial answer")).toBeInTheDocument());
@@ -4360,7 +4497,7 @@ describe("ThreadShell", () => {
         event: "delta",
         chat_id: "active-resume-chat",
         text: " resumed",
-        turn_id: turnId,
+        turn_id: turnId, turn_seq: 5, stream_id: "active-resume-answer",
       });
     });
 

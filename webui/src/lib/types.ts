@@ -1661,6 +1661,9 @@ export type ThreadProjectionEvent = Extract<
 > & {
   projection_id?: string;
   created_at_ms?: number;
+  turn_seq?: number;
+  /** Actual facts represented by a compacted HTTP projection event. */
+  projection_receipts?: Array<{ turn_id: string; ranges: Array<[number, number]> }>;
 };
 
 /** Local draft/preview data, converted to HTTP binary before sending a message.
@@ -1703,6 +1706,7 @@ interface WebuiThreadPagePayload {
   has_more_after?: boolean;
   user_message_offset?: number;
   loaded_event_count?: number;
+  truncated_oversized_turn?: boolean;
 }
 
 export interface PromptSummary {

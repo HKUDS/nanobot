@@ -925,6 +925,44 @@ describe("useSessions", () => {
     expect(result.current.hasPendingToolCalls).toBe(false);
   });
 
+  it("clears the body and paging metadata when no session is selected", async () => {
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue(canonicalThreadPayload({
+      schemaVersion: 3,
+      has_pending_tool_calls: true,
+      active_turn_id: "selected-turn",
+      messages: [{ id: "selected-user", role: "user", content: "selected question", turnId: "selected-turn", createdAt: 1 }],
+      fork_boundary_message_count: 1,
+      page: {
+        before_cursor: "selected-cursor", has_more_before: true,
+        loaded_event_count: 1, user_message_offset: 4,
+      },
+    }));
+    const { result, rerender } = renderHook(({ sessionKey }) => useSessionHistory(sessionKey), {
+      initialProps: { sessionKey: "websocket:selected" as string | null },
+      wrapper: wrap(fakeClient()),
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.messages[0]?.id).toBe("selected-user");
+    expect(result.current.hasMoreBefore).toBe(true);
+    expect(result.current.userMessageOffset).toBe(4);
+    expect(result.current.hasPendingToolCalls).toBe(true);
+    expect(result.current.activeTurnId).toBe("selected-turn");
+    expect(result.current.forkBoundaryMessageCount).toBe(1);
+
+    rerender({ sessionKey: null });
+
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.loading).toBe(false);
+    expect(result.current.hasMoreBefore).toBe(false);
+    expect(result.current.userMessageOffset).toBe(0);
+    expect(result.current.hasPendingToolCalls).toBe(false);
+    expect(result.current.activeTurnId).toBeNull();
+    expect(result.current.forkBoundaryMessageCount).toBeNull();
+    act(() => result.current.refresh());
+    await act(async () => { await result.current.loadOlder(); });
+    expect(api.fetchWebuiThread).toHaveBeenCalledTimes(1);
+  });
+
   it("does not reload history when only the auth token rotates", async () => {
     const tokenSource = { current: "tok-old" };
     vi.mocked(api.fetchWebuiThread).mockResolvedValue(canonicalThreadPayload({
@@ -959,6 +997,45 @@ describe("useSessions", () => {
       "websocket:token-rotation",
       expect.any(Object),
     );
+  });
+
+  it("ignores an old client's pending response after the provider switches clients", async () => {
+    let oldSignal: AbortSignal | undefined;
+    let finishOld!: (body: Awaited<ReturnType<typeof api.fetchWebuiThread>>) => void;
+    const currentBody = canonicalThreadPayload({
+      schemaVersion: 3,
+      messages: [{ id: "current-host-answer", role: "assistant", content: "current host", createdAt: 2 }],
+    });
+    vi.mocked(api.fetchWebuiThread)
+      .mockImplementationOnce((_token, _key, optionsOrBase) => new Promise((resolve) => {
+        if (typeof optionsOrBase !== "string") oldSignal = optionsOrBase?.signal;
+        finishOld = resolve;
+      }))
+      .mockResolvedValueOnce(currentBody);
+    let client = fakeClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <ClientProvider client={client as unknown as import("@/lib/nanobot-client").NanobotClient} token="tok">
+        {children}
+      </ClientProvider>
+    );
+    const { result, rerender } = renderHook(() => useSessionHistory("websocket:host-switch"), { wrapper });
+    await waitFor(() => expect(oldSignal).toBeDefined());
+
+    client = fakeClient();
+    rerender();
+
+    expect(oldSignal?.aborted).toBe(true);
+    await waitFor(() => expect(result.current.messages[0]?.id).toBe("current-host-answer"));
+    await act(async () => {
+      finishOld(canonicalThreadPayload({
+        schemaVersion: 3,
+        messages: [{ id: "old-host-answer", role: "assistant", content: "old host", createdAt: 1 }],
+      }));
+    });
+    expect(api.fetchWebuiThread).toHaveBeenCalledTimes(2);
+    expect(result.current.messages.map((message) => message.id)).toEqual(["current-host-answer"]);
+    expect(result.current.error).toBeNull();
+    expect(webuiThreadCache.get("websocket:host-switch")).toBe(currentBody);
   });
 
   it("aborts a superseded latest-history request without surfacing an error", async () => {
@@ -1039,7 +1116,6 @@ describe("useSessions", () => {
     expect(result.current.userMessageOffset).toBe(1);
     const latestVersion = result.current.version;
     const latestLineage = result.current.lineage;
-    expect(result.current.continuity).toBe("initial");
 
     await act(async () => {
       await result.current.loadOlder();
@@ -1064,7 +1140,6 @@ describe("useSessions", () => {
     expect(result.current.userMessageOffset).toBe(0);
     expect(result.current.version).toBe(latestVersion);
     expect(result.current.lineage).toBe(latestLineage);
-    expect(result.current.continuity).toBe("initial");
   });
 
   it("keeps older-history failures separate and retries them explicitly", async () => {
@@ -1144,9 +1219,50 @@ describe("useSessions", () => {
     expect(result.current.error).toBeNull();
 
     rerender({ sessionKey: "websocket:other-history" });
+    expect(result.current.messages).toEqual([]);
     expect(result.current.olderError).toBeNull();
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.messages).toEqual([]);
+  });
+
+  it("releases a superseded older read when the replacement latest read fails", async () => {
+    const latest = canonicalThreadPayload({
+      schemaVersion: 3,
+      messages: [{ id: "current", role: "assistant", content: "current answer", createdAt: 2 }],
+      page: { before_cursor: "previous-page", has_more_before: true, user_message_offset: 1 },
+    });
+    const older = canonicalThreadPayload({
+      schemaVersion: 3,
+      messages: [{ id: "previous", role: "assistant", content: "previous answer", createdAt: 1 }],
+      page: { before_cursor: null, has_more_before: false, user_message_offset: 0 },
+    });
+    let olderSignal: AbortSignal | undefined;
+    vi.mocked(api.fetchWebuiThread)
+      .mockResolvedValueOnce(latest)
+      .mockImplementationOnce((_token, _key, options) => new Promise((_resolve, reject) => {
+        if (typeof options !== "string") olderSignal = options?.signal;
+        olderSignal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+      }))
+      .mockRejectedValueOnce(new Error("latest unavailable"))
+      .mockResolvedValueOnce(older);
+    const { result } = renderHook(() => useSessionHistory("websocket:superseded-older"), {
+      wrapper: wrap(fakeClient()),
+    });
+    await waitFor(() => expect(result.current.messages[0]?.content).toBe("current answer"));
+    let pending!: Promise<void>;
+    act(() => { pending = result.current.loadOlder(); });
+    expect(result.current.loadingOlder).toBe(true);
+    act(() => result.current.refresh());
+    await waitFor(() => expect(result.current.error).toBe("latest unavailable"));
+    await act(async () => { await pending; });
+    expect(olderSignal?.aborted).toBe(true);
+    expect(result.current.loadingOlder).toBe(false);
+    expect(result.current.hasMoreBefore).toBe(true);
+    expect(result.current.messages.map((row) => row.content)).toEqual(["current answer"]);
+    await act(async () => { await result.current.loadOlder(); });
+    expect(api.fetchWebuiThread).toHaveBeenLastCalledWith("tok", "websocket:superseded-older",
+      expect.objectContaining({ before: "previous-page" }));
+    expect(result.current.messages.map((row) => row.content)).toEqual(["previous answer", "current answer"]);
   });
 
   it("aborts an older-history request when the consumer unmounts", async () => {
@@ -1195,8 +1311,8 @@ describe("useSessions", () => {
         schemaVersion: 3,
         has_pending_tool_calls: true,
         messages: [
-          { id: "u2", role: "user", content: "middle question", createdAt: 2 },
-          { id: "a2", role: "assistant", content: "middle answer", createdAt: 3 },
+          { id: "u2", role: "user", content: "middle question", turnId: "turn-2", turnSeq: 1, createdAt: 2 },
+          { id: "a2", role: "assistant", content: "middle answer", turnId: "turn-2", turnSeq: 2, createdAt: 3 },
         ],
         page: {
           before_cursor: "cursor-middle",
@@ -1223,7 +1339,7 @@ describe("useSessions", () => {
         has_pending_tool_calls: false,
         completed_turn_ids: ["turn-3"],
         messages: [
-          { id: "a2-replayed", role: "assistant", content: "middle answer", createdAt: 3 },
+          { id: "a2-replayed", role: "assistant", content: "middle answer", turnId: "turn-2", turnSeq: 2, createdAt: 3 },
           {
             id: "u3",
             role: "user",
@@ -1273,23 +1389,24 @@ describe("useSessions", () => {
     expect(result.current.userMessageOffset).toBe(0);
     expect(result.current.hasPendingToolCalls).toBe(false);
     expect(result.current.completedTurnIds).toEqual(["turn-3"]);
-    expect(result.current.continuity).toBe("overlap");
     expect(result.current.lineage).toBe(loadedLineage);
   });
 
-  it("starts a new lineage when more than 160 new rows remove all latest-page overlap", async () => {
+  it("starts a new lineage for a disjoint latest window even when row text repeats", async () => {
     const oldWindow = Array.from({ length: 160 }, (_, index) => ({
       id: `old-${index}`,
       role: index % 2 === 0 ? "user" as const : "assistant" as const,
-      content: `old window row ${index}`,
+      content: `window row ${index}`,
       turnId: `old-turn-${Math.floor(index / 2)}`,
+      turnSeq: index % 2 + 1,
       createdAt: index,
     }));
     const newWindow = Array.from({ length: 160 }, (_, index) => ({
       id: `new-${index}`,
       role: index % 2 === 0 ? "user" as const : "assistant" as const,
-      content: `new window row ${index}`,
+      content: `window row ${index}`,
       turnId: `new-turn-${Math.floor(index / 2)}`,
+      turnSeq: index % 2 + 1,
       createdAt: 1_000 + index,
     }));
     vi.mocked(api.fetchWebuiThread)
@@ -1323,23 +1440,22 @@ describe("useSessions", () => {
 
     expect(result.current.messages).toHaveLength(160);
     expect(result.current.messages.at(-1)?.id).toBe("new-159");
-    expect(result.current.continuity).toBe("reset");
     expect(result.current.lineage).toBeGreaterThan(initialLineage);
     expect(result.current.hasMoreBefore).toBe(true);
   });
 
-  it("uses the longest consecutive semantic overlap for legacy unstable replay metadata", async () => {
+  it("preserves repeated prompts by stable turn sources when replay IDs change", async () => {
     vi.mocked(api.fetchWebuiThread)
       .mockResolvedValueOnce(canonicalThreadPayload({
         schemaVersion: 3,
         messages: [
-          { id: "repeat-1-old", role: "user", content: "repeat", createdAt: 10 },
-          { id: "answer-1-old", role: "assistant", content: "first answer", createdAt: 11 },
-          { id: "repeat-2-old", role: "user", content: "repeat", createdAt: 12 },
-          { id: "answer-2-old", role: "assistant", content: "second answer", createdAt: 13 },
+          { id: "repeat-1-old", role: "user", content: "repeat", turnId: "repeat-turn-1", turnSeq: 1, createdAt: 10 },
+          { id: "answer-1-old", role: "assistant", content: "first answer", turnId: "repeat-turn-1", turnSeq: 2, createdAt: 11 },
+          { id: "repeat-2-old", role: "user", content: "repeat", turnId: "repeat-turn-2", turnSeq: 1, createdAt: 12 },
+          { id: "answer-2-old", role: "assistant", content: "second answer", turnId: "repeat-turn-2", turnSeq: 2, createdAt: 13 },
         ],
         page: {
-          before_cursor: "legacy-cursor",
+          before_cursor: "source-cursor",
           has_more_before: true,
         },
       }))
@@ -1356,17 +1472,17 @@ describe("useSessions", () => {
       .mockResolvedValueOnce(canonicalThreadPayload({
         schemaVersion: 3,
         messages: [
-          { id: "repeat-2-new", role: "user", content: "repeat", createdAt: 9_012 },
-          { id: "answer-2-new", role: "assistant", content: "second answer", createdAt: 9_013 },
+          { id: "repeat-2-new", role: "user", content: "repeat", turnId: "repeat-turn-2", turnSeq: 1, createdAt: 9_012 },
+          { id: "answer-2-new", role: "assistant", content: "second answer", turnId: "repeat-turn-2", turnSeq: 2, createdAt: 9_013 },
           { id: "new-tail", role: "assistant", content: "new tail", createdAt: 9_014 },
         ],
         page: {
-          before_cursor: "shifted-legacy-cursor",
+          before_cursor: "shifted-source-cursor",
           has_more_before: true,
         },
       }));
 
-    const { result } = renderHook(() => useSessionHistory("websocket:legacy-overlap"), {
+    const { result } = renderHook(() => useSessionHistory("websocket:source-overlap"), {
       wrapper: wrap(fakeClient()),
     });
 
@@ -1387,7 +1503,6 @@ describe("useSessions", () => {
       "answer-2-new",
       "new-tail",
     ]);
-    expect(result.current.continuity).toBe("overlap");
     expect(result.current.lineage).toBe(lineage);
   });
 
@@ -1434,7 +1549,6 @@ describe("useSessions", () => {
 
     act(() => result.current.refresh());
     await waitFor(() => expect(result.current.messages[0]?.id).toBe("new-latest"));
-    expect(result.current.continuity).toBe("reset");
     expect(result.current.lineage).toBeGreaterThan(oldLineage);
 
     await act(async () => {

@@ -53,6 +53,7 @@ _MAX_TRANSCRIPT_PAGE_BYTES = 20 * 1024 * 1024
 _MAX_INLINE_TRACE_DETAIL_BYTES = 32 * 1024
 _WEBUI_TURN_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 _WEBUI_REPLAY_IDENTITY_KEY = "_webui_replay_identity"
+_WEBUI_PROJECTION_RECEIPTS_KEY = "_webui_projection_receipts"
 _WEBUI_TRACE_DETAIL_UNSAFE_KEY = "_webui_trace_detail_unsafe"
 _WEBUI_TRACE_DETAIL_REF_RE = re.compile(
     r"^(?P<turn>\d{1,12})\.(?P<message>history-[0-9a-f]{20})$"
@@ -199,6 +200,11 @@ class _SessionBackfillTurn(NamedTuple):
     assistant_records: tuple[dict[str, Any], ...]
 
 
+class _ProjectionReceipt(TypedDict):
+    turn_id: str
+    ranges: list[list[int]]
+
+
 class _DeferredTraceGroup(NamedTuple):
     start: int
     stop: int
@@ -243,8 +249,32 @@ def _stream_key(record: dict[str, Any], stream: str) -> tuple[str, str, str]:
     return turn_id, phase, stream_id
 
 
+def _projection_receipts(records: Sequence[Mapping[str, Any]]) -> list[_ProjectionReceipt]:
+    """Compress actual represented facts by turn, without covering missing sequences."""
+    members: dict[str, set[int]] = {}
+    for record in records:
+        turn_id, sequence = record.get("turn_id"), record.get("turn_seq")
+        if (
+            isinstance(turn_id, str) and turn_id
+            and isinstance(sequence, int) and not isinstance(sequence, bool) and sequence >= 0
+        ):
+            members.setdefault(turn_id, set()).add(sequence)
+    receipts: list[_ProjectionReceipt] = []
+    for turn_id, sequences in members.items():
+        ranges: list[list[int]] = []
+        for sequence in sorted(sequences):
+            if ranges and ranges[-1][1] + 1 == sequence:
+                ranges[-1][1] = sequence
+            else:
+                ranges.append([sequence, sequence])
+        receipts.append({"turn_id": turn_id, "ranges": ranges})
+    return receipts
+
+
 def _compact_completed_stream_deltas(
     turn: list[dict[str, Any]],
+    *,
+    include_projection_receipts: bool = False,
 ) -> tuple[list[dict[str, Any]], int]:
     """Fold transport deltas into canonical end records for a completed turn."""
     if not turn or turn[-1].get("event") != "turn_end":
@@ -271,6 +301,10 @@ def _compact_completed_stream_deltas(
             completed["text"] = "".join(
                 str(chunk.get("text") or "") for _, chunk in chunks
             )
+        if include_projection_receipts:
+            receipts = _projection_receipts([*(chunk for _, chunk in chunks), record])
+            if receipts:
+                completed[_WEBUI_PROJECTION_RECEIPTS_KEY] = receipts
         replacements[index] = completed
         dropped_indexes.update(chunk_index for chunk_index, _ in chunks)
 
@@ -388,7 +422,7 @@ def _select_transcript_page(
         )
         stats.parsed_records += len(turn)
         stats.source_bytes += ref.byte_count if safe else _records_bytes(turn)
-        turn, dropped = _compact_completed_stream_deltas(turn)
+        turn, dropped = _compact_completed_stream_deltas(turn, include_projection_receipts=True)
         stats.compacted_delta_records += dropped
         if not safe:
             stats.truncated_oversized_turn = True
@@ -1254,7 +1288,7 @@ def build_webui_trace_detail_response(
     turn = _transcript_turn_at_ordinal(session_key, ordinal, history=history)
     if turn is None:
         return None
-    turn, _ = _compact_completed_stream_deltas(turn)
+    turn, _ = _compact_completed_stream_deltas(turn, include_projection_receipts=True)
     lines = _records_with_replay_identity(turn, turn_ordinal=ordinal)
     for group in _client_projection_deferred_trace_groups(lines).values():
         first = lines[group.start]
@@ -1309,6 +1343,9 @@ def _client_projection_common_fields(record: dict[str, Any]) -> dict[str, Any]:
     created_at_ms = _valid_created_at_ms(record.get("created_at_ms"))
     if created_at_ms is not None:
         fields["created_at_ms"] = created_at_ms
+    receipts = record.get(_WEBUI_PROJECTION_RECEIPTS_KEY)
+    if receipts:
+        fields["projection_receipts"] = receipts
     return fields
 
 
@@ -1598,6 +1635,9 @@ def _client_projection_events(
             )
             event["text"] = _trace_summary(last_text)
             event.pop("tool_events", None)
+            receipts = _projection_receipts(lines[group.start:group.stop])
+            if receipts:
+                event["projection_receipts"] = receipts
             if detail_ref is not None:
                 event["trace_detail"] = {
                     "ref": detail_ref,

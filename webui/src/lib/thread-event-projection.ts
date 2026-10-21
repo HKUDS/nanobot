@@ -34,6 +34,13 @@ export interface ThreadProjectionState {
   turnAliases: Map<string, string>;
 }
 
+export interface ThreadProjectionEffects {
+  /** Content targets, including cleaned trace rows removed by this event. */
+  bodyWrites: Set<string>;
+  /** Absorbed/replaced rows; an absorbed ID can also remain a body target. */
+  consumed: Set<string>;
+}
+
 export interface ThreadProjectionOptions {
   createId: () => string;
   now: number;
@@ -41,6 +48,7 @@ export interface ThreadProjectionOptions {
   sideChannel?: boolean;
   /** First sequence of a coalesced batch; event.turn_seq is its last contribution. */
   startSeq?: number;
+  effects?: ThreadProjectionEffects;
 }
 
 export function turnFieldsFromEvent(
@@ -278,6 +286,7 @@ function stripCoveredFileEditToolHintsFromMessages(
   messages: UIMessage[],
   edits: UIFileEdit[],
   turn: UIMessageTurnFields,
+  effects?: ThreadProjectionEffects,
 ): UIMessage[] {
   if (edits.length === 0) return messages;
   let next = messages;
@@ -288,8 +297,10 @@ function stripCoveredFileEditToolHintsFromMessages(
     if (!matchesTurn(candidate, turn)) continue;
     const cleaned = stripCoveredFileEditToolHints(candidate, edits);
     if (cleaned === candidate) continue;
+    effects?.bodyWrites.add(candidate.id);
     if (next === messages) next = [...messages];
     if (traceMessageIsEmpty(cleaned)) {
+      effects?.consumed.add(candidate.id);
       next.splice(i, 1);
     } else {
       next[i] = cleaned;
@@ -575,6 +586,7 @@ function appendAnswerText(
   state.activeAssistantId = merged.id;
   state.mergeReasoning = false;
   state.messages = replaceMessageAt(state.messages, targetIndex, merged);
+  options.effects?.bodyWrites.add(merged.id);
 }
 
 function attachProjectedReasoning(
@@ -598,6 +610,7 @@ function attachProjectedReasoning(
       reasoningStreaming: event.event === "reasoning_delta" || target.reasoningStreaming,
       ...(!target.content ? positionedTurnFields(target, turn, options) : {}),
     });
+    options.effects?.bodyWrites.add(target.id);
     return;
   }
   const activeAssistantBeforeContinuation = state.activeAssistantId;
@@ -613,6 +626,7 @@ function attachProjectedReasoning(
       reasoningStreaming: true,
       ...(event.stream_id ? { reasoningStreamId: event.stream_id } : {}),
     });
+    options.effects?.bodyWrites.add(target.id);
     return;
   }
 
@@ -640,16 +654,18 @@ function attachProjectedReasoning(
         ...positionedTurnFields(candidate, turn, options),
         ...(event.stream_id ? { reasoningStreamId: event.stream_id } : {}),
       });
+      options.effects?.bodyWrites.add(candidate.id);
       return;
     }
     break;
   }
 
   const activitySegmentId = ensureProjectionActivitySegment(state);
+  const id = projectionMessageId(event, options);
   state.messages = [
     ...state.messages,
     {
-      id: projectionMessageId(event, options),
+      id,
       role: "assistant",
       content: "",
       isStreaming: true,
@@ -661,6 +677,7 @@ function attachProjectedReasoning(
       createdAt: projectionCreatedAt(event, options),
     },
   ];
+  options.effects?.bodyWrites.add(id);
 }
 
 function absorbProjectedAssistantMessage(
@@ -681,17 +698,21 @@ function absorbProjectedAssistantMessage(
         reasoningStreaming: false,
       },
     ];
+    options.effects?.consumed.add(last.id);
+    options.effects?.bodyWrites.add(last.id);
     return;
   }
+  const id = projectionMessageId(event, options);
   state.messages = [
     ...state.messages,
     {
-      id: projectionMessageId(event, options),
+      id,
       role: "assistant",
       createdAt: projectionCreatedAt(event, options),
       ...message,
     },
   ];
+  options.effects?.bodyWrites.add(id);
 }
 
 function projectToolActivity(
@@ -753,12 +774,14 @@ function projectToolActivity(
         ...positionedTurnFields(last, turn, options),
       },
     ];
+    options.effects?.bodyWrites.add(last.id);
     return;
   }
+  const id = projectionMessageId(event, options);
   state.messages = [
     ...state.messages,
     {
-      id: projectionMessageId(event, options),
+      id,
       role: "tool",
       kind: "trace",
       content: lines[lines.length - 1],
@@ -770,6 +793,7 @@ function projectToolActivity(
       createdAt: projectionCreatedAt(event, options),
     },
   ];
+  options.effects?.bodyWrites.add(id);
 }
 
 function projectFileEdits(
@@ -789,7 +813,7 @@ function projectFileEdits(
     segmentId = detachedProjectionActivitySegment(state);
     state.fileEditSegmentId = segmentId;
   }
-  const base = stripCoveredFileEditToolHintsFromMessages(state.messages, normalized, turn);
+  const base = stripCoveredFileEditToolHintsFromMessages(state.messages, normalized, turn, options.effects);
   const targetIndex = findFileEditTraceIndex(base, segmentId, normalized);
   if (targetIndex !== null) {
     const target = base[targetIndex];
@@ -801,14 +825,16 @@ function projectFileEdits(
       activitySegmentId: segmentId,
       ...positionedTurnFields(target, turn, options),
     });
+    options.effects?.bodyWrites.add(target.id);
     return;
   }
   segmentId = segmentId ?? detachedProjectionActivitySegment(state);
   if (opensPhase) state.fileEditSegmentId = segmentId;
+  const id = projectionMessageId(event, options);
   state.messages = [
     ...base,
     {
-      id: projectionMessageId(event, options),
+      id,
       role: "tool",
       kind: "trace",
       content: "",
@@ -819,6 +845,7 @@ function projectFileEdits(
       createdAt: projectionCreatedAt(event, options),
     },
   ];
+  options.effects?.bodyWrites.add(id);
 }
 
 /** Canonical UI-message reducer shared by WebSocket delivery and transcript replay. */
@@ -875,6 +902,7 @@ export function projectThreadEvent(
       row.images = media.map(({ url, name }) => ({ url, name }));
     }
     state.messages = [...state.messages, row];
+    options.effects?.bodyWrites.add(row.id);
     return state;
   }
 
@@ -926,6 +954,7 @@ export function projectThreadEvent(
         ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
         createdAt: projectionCreatedAt(event, options),
       }];
+      options.effects?.bodyWrites.add(id);
       targetIndex = state.messages.length - 1;
     } else if (targetIndex !== null && (typeof text === "string" || event.source || event.response_sources !== undefined)) {
       const target = state.messages[targetIndex];
@@ -937,6 +966,7 @@ export function projectThreadEvent(
         ...(event.source ? { source: event.source } : {}),
         ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
       });
+      if (typeof text === "string") options.effects?.bodyWrites.add(target.id);
     }
     if (wasClosed || wireClosed) return state;
     if (targetIndex !== null) state.activeAssistantId = state.messages[targetIndex].id;
@@ -986,6 +1016,7 @@ export function projectThreadEvent(
       ...message,
       createdAt: state.messages[existing].createdAt,
     });
+    options.effects?.bodyWrites.add(id);
     state.activitySegmentId = null;
     state.fileEditSegmentId = null;
     return state;
@@ -1037,7 +1068,13 @@ export function projectThreadEvent(
     }
     const activeId = state.activeAssistantId;
     Object.assign(state, closeThreadProjectionAnswer(state));
-    if (activeId) state.messages = state.messages.filter((message) => message.id !== activeId);
+    if (activeId) {
+      state.messages = state.messages.filter((message) => {
+        if (message.id !== activeId) return true;
+        options.effects?.consumed.add(message.id);
+        return false;
+      });
+    }
     absorbProjectedAssistantMessage(state, event, projected, options);
     state.activitySegmentId = null;
     state.fileEditSegmentId = null;
