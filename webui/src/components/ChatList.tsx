@@ -1884,6 +1884,12 @@ function ChatsFoldFooter({
   );
 }
 
+function synchronizeRunningRing(element: SVGCircleElement | null) {
+  if (!element) return;
+  // Align pending animations before their first frame, not only after animationstart.
+  for (const animation of element.getAnimations()) animation.startTime = 0;
+}
+
 function SessionActivityIndicator({
   state,
 }: {
@@ -1925,10 +1931,8 @@ function SessionActivityIndicator({
             <circle
               cx="12" cy="12" r="10" strokeDasharray="16 46.8" strokeLinecap="round"
               className="sidebar-running-ring"
-              onAnimationStart={(event) => {
-                // Share the document clock, including late mounts and reduced-motion changes.
-                for (const animation of event.currentTarget.getAnimations()) animation.startTime = 0;
-              }}
+              ref={synchronizeRunningRing}
+              onAnimationStart={(event) => synchronizeRunningRing(event.currentTarget)}
             />
           </svg>
         </span>
