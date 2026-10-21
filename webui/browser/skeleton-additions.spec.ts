@@ -19,10 +19,10 @@ async function boxes(locator: Locator) {
   }));
 }
 
-function sameBoxes(actual: Awaited<ReturnType<typeof boxes>>, expected: typeof actual) {
+function sameBoxes(actual: Awaited<ReturnType<typeof boxes>>, expected: typeof actual, surface = "") {
   expect(actual).toHaveLength(expected.length);
   for (let index = 0; index < actual.length; index++) for (const key of ["x", "y", "width", "height"] as const) {
-    expect(Math.abs(actual[index][key] - expected[index][key]), `row ${index} ${key}`).toBeLessThan(0.5);
+    expect(Math.abs(actual[index][key] - expected[index][key]), `${surface} row ${index} ${key}: ${JSON.stringify({ actual: actual[index], expected: expected[index] })}`).toBeLessThan(0.5);
   }
 }
 
@@ -81,7 +81,7 @@ for (const width of [390, 1440]) for (const locale of ["en", "zh-CN"]) {
         await settle(page);
         const skeletonSelector = section === "overview" ? "[data-overview-skeleton-row]" : section === "models" ? "[data-model-preset-skeleton], .settings-footer" : section === "about" ? ".settings-list-row" : "[data-settings-skeleton-row]";
         const skeleton = await boxes(target.locator(skeletonSelector + notificationDetails));
-        sameBoxes(skeleton, loaded);
+        sameBoxes(skeleton, loaded, section);
         if (readingControl) sameBoxes(await boxes(target.locator("[data-skeleton-reading-size]")), readingControl);
         if (loadedControls) {
           const skeletonControls = await boxes(target.locator("[data-skeleton-switch]"));
