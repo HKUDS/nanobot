@@ -201,7 +201,8 @@ def test_atomic_write_ignores_unsupported_directory_fsync(
     dir_fd = 987654
 
     def fake_open(path: str, flags: int) -> int:
-        assert Path(path) == store_path.parent
+        # Windows I/O uses an extended path to this same directory.
+        assert Path(path).samefile(store_path.parent)
         return dir_fd
 
     def fake_fsync(fd: int) -> None:
