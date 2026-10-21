@@ -541,6 +541,19 @@ jobs:
             --version "$version" --commit "$(git rev-parse HEAD)" --gateway \
             --report "$RUNNER_TEMP/native-install-report.json"
 
+      - name: Exercise updates with the default Windows path policy
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Only this disposable runner changes. Do not require users to enable
+          # machine-wide long paths for an ordinary update's atomic temp files.
+          $key = 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem'
+          Set-ItemProperty -Path $key -Name LongPathsEnabled -Value 0
+          if ((Get-ItemPropertyValue -Path $key -Name LongPathsEnabled) -ne 0) {
+            throw 'Native update acceptance requires LongPathsEnabled=0'
+          }
+          Write-Output 'Packaged update/recovery acceptance: LongPathsEnabled=0'
+
       - name: Verify packaged upgrades and automatic service recovery
         shell: bash
         run: |
