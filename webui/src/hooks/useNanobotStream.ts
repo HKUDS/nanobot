@@ -371,15 +371,7 @@ export function useNanobotStream(
     [chatId],
   );
 
-  const flushPendingStreamEvents = useCallback((options?: {
-    closeAnswerSegment?: boolean;
-    mergeReasoning?: boolean;
-    finalAnswerText?: string;
-    turn?: UIMessageTurnFields;
-    streamId?: string;
-    source?: UIMessage["source"];
-    responseSources?: UIMessage["responseSources"];
-  }) => {
+  const flushPendingStreamEvents = useCallback((end?: Extract<ThreadProjectionEvent, { event: "stream_end" }>) => {
     lastStreamFlushRef.current = 0;
     if (streamFrameRef.current !== null) {
       window.cancelAnimationFrame(streamFrameRef.current);
@@ -390,37 +382,13 @@ export function useNanobotStream(
       streamTimerRef.current = null;
     }
     const events = pendingStreamEventsRef.current;
-    const finalAnswerText = options?.finalAnswerText;
-    const turn = options?.turn ?? {};
-    const source = options?.source;
-    const responseSources = options?.responseSources;
-    if (events.length === 0 && finalAnswerText === undefined && source === undefined && responseSources === undefined
-      && !options?.mergeReasoning && !options?.closeAnswerSegment) {
-      return;
-    }
+    if (events.length === 0 && !end) return;
     pendingStreamEventsRef.current = [];
     setMessages((prev) => {
       const nextMessages = events.length > 0 ? applyPendingStreamEvents(prev, events) : prev;
       let projection = { ...projectionRef.current, messages: nextMessages };
-      if (
-        finalAnswerText !== undefined
-        || source !== undefined
-        || responseSources !== undefined
-        || options?.mergeReasoning
-        || options?.closeAnswerSegment
-      ) {
-        projection = projectThreadEvent(projection, {
-          event: "stream_end",
-          chat_id: chatId ?? "",
-          stream_id: options?.streamId,
-          ...(finalAnswerText !== undefined ? { text: finalAnswerText } : {}),
-          ...(source ? { source } : {}),
-          ...(responseSources !== undefined ? { response_sources: responseSources } : {}),
-          ...(options?.mergeReasoning ? { resuming: true, merge_next: true } : {}),
-          turn_id: turn.turnId,
-          turn_phase: turn.turnPhase,
-          turn_seq: turn.turnSeq,
-        }, {
+      if (end) {
+        projection = projectThreadEvent(projection, end, {
           createId: () => crypto.randomUUID(),
           now: Date.now(),
         });
@@ -428,7 +396,7 @@ export function useNanobotStream(
       projectionRef.current = projection;
       return projection.messages;
     });
-  }, [applyPendingStreamEvents, chatId, setMessages]);
+  }, [applyPendingStreamEvents, setMessages]);
 
   const getCheckpoint = useCallback(() => {
     flushPendingStreamEvents();
@@ -608,7 +576,8 @@ export function useNanobotStream(
       if (ev.event === "message_accepted") return;
       if (ev.event === "user_message") {
         if (ev.provenance?.session_message) {
-          flushPendingStreamEvents({ closeAnswerSegment: true });
+          flushPendingStreamEvents();
+          closeActiveAssistantStream();
           clearActivitySegment();
           setIsStreaming(true);
           setMessages((prev) => appendProjectedSessionInput(prev, ev));
@@ -649,7 +618,8 @@ export function useNanobotStream(
       }
       const sideChannelEvent = isSideChannelEvent(ev);
       if (ev.event === "context_compaction") {
-        flushPendingStreamEvents({ closeAnswerSegment: true });
+        flushPendingStreamEvents();
+        closeActiveAssistantStream();
         clearActivitySegment();
         const compaction = {
           id: ev.compaction_id,
@@ -718,17 +688,7 @@ export function useNanobotStream(
       }
 
       if (ev.event === "stream_end") {
-        const turn = turnFieldsFromEvent(ev, "answer");
-        const mergeNext = ev.resuming === true && ev.merge_next === true;
-        flushPendingStreamEvents({
-          closeAnswerSegment: !mergeNext,
-          mergeReasoning: mergeNext,
-          ...(typeof ev.text === "string" ? { finalAnswerText: ev.text } : {}),
-          streamId: ev.stream_id,
-          turn,
-          source: ev.source,
-          responseSources: ev.response_sources,
-        });
+        flushPendingStreamEvents(ev);
         if (projectionRef.current.suppressUntilTurnEnd) return;
         if (ev.resuming) {
           setIsStreaming(true);

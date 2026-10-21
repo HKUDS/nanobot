@@ -89,15 +89,16 @@ for (const width of [1440, 390]) {
     });
   }
 
-  test(`keeps hosted-tool answer slices in one wire stream after a cached return at ${width}px`, async ({ page }) => {
+  test(`keeps hosted-tool answer segments after a cached return at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 });
     const { emit, errors } = await openThread(page);
     emit(
       { event: "goal_status", ...base, status: "running", started_at: 100 },
       { event: "delta", ...base, stream_id: "hosted", turn_seq: 1, text: "First " },
-      { event: "message", ...base, turn_seq: 2, kind: "tool_hint", text: "web_search(query)" },
-      { event: "delta", ...base, stream_id: "hosted", turn_seq: 3, text: "second" },
-      { event: "stream_end", ...base, stream_id: "hosted", turn_seq: 4, text: "First second", resuming: true, merge_next: true },
+      { event: "stream_end", ...base, stream_id: "hosted", turn_seq: 2, resuming: true },
+      { event: "message", ...base, turn_seq: 3, kind: "tool_hint", text: "web_search(query)" },
+      { event: "delta", ...base, stream_id: "after-tool", turn_seq: 4, text: "second" },
+      { event: "stream_end", ...base, stream_id: "after-tool", turn_seq: 5, text: "second", resuming: true, merge_next: true },
     );
     await expect(page.getByText("First", { exact: true })).toHaveCount(1);
     await expect(page.getByText("second", { exact: true })).toHaveCount(1);
@@ -106,13 +107,61 @@ for (const width of [1440, 390]) {
     await page.getByRole("button", { name: "Switch topic" }).click();
     await expect(page.getByText("second", { exact: true })).toHaveCount(1);
     emit(
-      { event: "delta", ...base, stream_id: "hosted", turn_seq: 5, text: " last" },
-      { event: "stream_end", ...base, stream_id: "hosted", turn_seq: 6, text: "First second last", response_sources: [source] },
+      { event: "delta", ...base, stream_id: "after-tool", turn_seq: 6, text: " last" },
+      { event: "stream_end", ...base, stream_id: "after-tool", turn_seq: 7, text: "second last", response_sources: [source] },
     );
     await expect(page.getByText("First", { exact: true })).toHaveCount(1);
     await expect(page.getByText("second last", { exact: true })).toHaveCount(1);
     const texts = await page.locator("[data-thread-display-unit]").allTextContents();
     expect(texts.findIndex((text) => text.includes("First"))).toBeLessThan(texts.findIndex((text) => text.includes("second last")));
+    expect(errors).toEqual([]);
+  });
+
+  test(`replays legacy cumulative answers on both sides of a hosted tool at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    const { errors } = await openThread(page, [
+      { event: "stream_end", ...base, stream_id: "legacy", turn_seq: 2, text: "First ", resuming: true, merge_next: true },
+      { event: "message", ...base, turn_seq: 3, kind: "tool_hint", text: "web_search(query)" },
+      { event: "stream_end", ...base, stream_id: "legacy", turn_seq: 5, text: "First last" },
+      { event: "turn_end", ...base, turn_seq: 6 },
+    ]);
+    await expect(page.getByText("First", { exact: true })).toHaveCount(1);
+    await expect(page.getByText("last", { exact: true })).toHaveCount(1);
+    const texts = await page.locator("[data-thread-display-unit]").allTextContents();
+    expect(texts.findIndex((text) => text.includes("First"))).toBeLessThan(texts.findIndex((text) => text.includes("Searching the web")));
+    expect(texts.findIndex((text) => text.includes("Searching the web"))).toBeLessThan(texts.findIndex((text) => text.includes("last")));
+    expect(errors).toEqual([]);
+  });
+
+  test(`keeps a rewritten image intact before a hosted tool at ${width}px`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 1000 });
+    const { emit, errors } = await openThread(page);
+    await page.route("**/api/media/**", (route) => route.fulfill({ contentType: "image/png", body: Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j5hUAAAAASUVORK5CYII=", "base64",
+    ) }));
+    emit(
+      { event: "delta", ...base, stream_id: "image", turn_seq: 1, text: "![plot](plot.png)" },
+      { event: "stream_end", ...base, stream_id: "image", turn_seq: 2, text: "![plot](/api/media/signature/plot.png)", resuming: true },
+      { event: "message", ...base, turn_seq: 3, kind: "tool_hint", text: "web_search(query)" },
+      { event: "delta", ...base, stream_id: "after-tool", turn_seq: 4, text: "After tool." },
+      { event: "stream_end", ...base, stream_id: "after-tool", turn_seq: 5 },
+    );
+    const image = page.getByRole("img", { name: "plot", exact: true });
+    await expect(image).toHaveCount(1);
+    await expect(image).toHaveAttribute("src", /\/api\/media\/signature\/plot.png/);
+    await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBe(1);
+    await expect(page.getByText("After tool.", { exact: true })).toHaveCount(1);
+    const units = page.locator("[data-thread-display-unit]");
+    const imageIndex = await units.evaluateAll((elements) => elements.findIndex((element) => element.querySelector('img[alt="plot"]')));
+    const texts = await units.allTextContents();
+    const toolIndex = texts.findIndex((text) => text.includes("Searching the web"));
+    expect(imageIndex).toBeLessThan(toolIndex);
+    expect(toolIndex).toBeLessThan(texts.findIndex((text) => text.includes("After tool.")));
+    await page.screenshot({ path: info.outputPath("hosted-tool-image.png") });
+    emit({ event: "turn_end", ...base, turn_seq: 6 });
+    await expect(page.getByRole("button", { name: "Stop response" })).toHaveCount(0);
+    await expect(image).toHaveCount(1);
+    await expect(page.getByText("After tool.", { exact: true })).toHaveCount(1);
     expect(errors).toEqual([]);
   });
 

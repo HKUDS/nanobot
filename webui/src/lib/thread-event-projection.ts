@@ -23,7 +23,7 @@ export interface ThreadProjectionState {
   messages: UIMessage[];
   activeAssistantId: string | null;
   closedAssistantIds: Set<string>;
-  /** Wire streams can span several UI slices around provider-hosted tools. */
+  /** Completed wire identities also fence late deltas for textless ends. */
   closedAnswerStreamIds: Set<string>;
   mergeReasoning: boolean;
   activitySegmentId: string | null;
@@ -895,14 +895,30 @@ export function projectThreadEvent(
     const wireClosed = streamKey !== undefined && state.closedAnswerStreamIds.has(streamKey);
     if (streamKey && !mergeNext) state.closedAnswerStreamIds.add(streamKey);
     let targetIndex = answerStreamIndex(state, turn, event.stream_id);
-    if (targetIndex === null && typeof event.text !== "string") return state;
+    let text = event.text;
+    // Older completed records can span a hosted tool. Their snapshots already
+    // use rewritten text; live streams now end before the tool starts.
+    if (options.persisted && event.stream_id && typeof text === "string") {
+      let offset = 0;
+      for (let index = 0; index < (targetIndex ?? state.messages.length); index++) {
+        const row = state.messages[index];
+        if (row.streamId === event.stream_id && matchesTurn(row, turn)) offset += row.content.length;
+      }
+      if (targetIndex !== null && state.closedAssistantIds.has(state.messages[targetIndex].id)
+        && !wireClosed && text.length > offset + state.messages[targetIndex].content.length) {
+        offset += state.messages[targetIndex].content.length;
+        targetIndex = null;
+      }
+      text = text.slice(offset);
+    }
+    if (targetIndex === null && typeof text !== "string") return state;
     const wasClosed = targetIndex !== null && state.closedAssistantIds.has(state.messages[targetIndex].id);
-    if (targetIndex === null && typeof event.text === "string") {
+    if (targetIndex === null && typeof text === "string") {
       const id = projectionMessageId(event, options);
       state.messages = [...state.messages, {
         id,
         role: "assistant",
-        content: event.text,
+        content: text,
         isStreaming: true,
         ...positionedTurnFields(undefined, turn, options),
         ...(event.stream_id ? { streamId: event.stream_id } : {}),
@@ -911,24 +927,15 @@ export function projectThreadEvent(
         createdAt: projectionCreatedAt(event, options),
       }];
       targetIndex = state.messages.length - 1;
-    } else if (typeof event.text === "string" || event.source || event.response_sources !== undefined) {
-      let offset = 0;
-      state.messages = state.messages.map((target, index) => {
-        const ownsStream = index === targetIndex
-          || (event.stream_id && target.streamId === event.stream_id && matchesTurn(target, turn));
-        if (!ownsStream) return target;
-        // A cumulative snapshot spans every UI slice separated by hosted tools.
-        const end = index === targetIndex ? undefined : offset + target.content.length;
-        const content = typeof event.text === "string" ? event.text.slice(offset, end) : target.content;
-        offset += target.content.length;
-        return {
-          ...target,
-          content,
-          ...positionedTurnFields(target, turn, options),
-          ...(event.stream_id ? { streamId: event.stream_id } : {}),
-          ...(event.source ? { source: event.source } : {}),
-          ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
-        };
+    } else if (targetIndex !== null && (typeof text === "string" || event.source || event.response_sources !== undefined)) {
+      const target = state.messages[targetIndex];
+      state.messages = replaceMessageAt(state.messages, targetIndex, {
+        ...target,
+        ...(typeof text === "string" ? { content: text } : {}),
+        ...positionedTurnFields(target, turn, options),
+        ...(event.stream_id ? { streamId: event.stream_id } : {}),
+        ...(event.source ? { source: event.source } : {}),
+        ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
       });
     }
     if (wasClosed || wireClosed) return state;

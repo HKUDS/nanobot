@@ -234,24 +234,24 @@ describe("useNanobotStream", () => {
     expect(checkpoint?.projection.messages[0].reasoning).toBe("Queued ");
   });
 
-  it.each([true, false])("keeps both answer slices when a provider tool interrupts one wire stream (snapshot: %s)", (snapshot) => {
+  it.each([true, false])("keeps answer segments across a provider-tool boundary (snapshot: %s)", (snapshot) => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("hosted-tool", EMPTY_MESSAGES), { wrapper: wrap(fake.client) });
     act(() => {
       fake.emit("hosted-tool", { event: "delta", chat_id: "hosted-tool", turn_id: "turn", stream_id: "answer", turn_seq: 1, text: "First " });
-      // Provider-hosted progress does not advance AgentTurnDelivery's stream ID.
-      fake.emit("hosted-tool", { event: "message", chat_id: "hosted-tool", turn_id: "turn", turn_seq: 2, kind: "tool_hint", text: "web_search(query)" });
-      fake.emit("hosted-tool", { event: "delta", chat_id: "hosted-tool", turn_id: "turn", stream_id: "answer", turn_seq: 3, text: "second" });
-      fake.emit("hosted-tool", { event: "stream_end", chat_id: "hosted-tool", turn_id: "turn", stream_id: "answer", turn_seq: 4, ...(snapshot ? { text: "First second" } : {}), resuming: true, merge_next: true });
+      fake.emit("hosted-tool", { event: "stream_end", chat_id: "hosted-tool", turn_id: "turn", stream_id: "answer", turn_seq: 2, ...(snapshot ? { text: "First " } : {}), resuming: true });
+      fake.emit("hosted-tool", { event: "message", chat_id: "hosted-tool", turn_id: "turn", turn_seq: 3, kind: "tool_hint", text: "web_search(query)" });
+      fake.emit("hosted-tool", { event: "delta", chat_id: "hosted-tool", turn_id: "turn", stream_id: "after-tool", turn_seq: 4, text: "second" });
+      fake.emit("hosted-tool", { event: "stream_end", chat_id: "hosted-tool", turn_id: "turn", stream_id: "after-tool", turn_seq: 5, ...(snapshot ? { text: "second" } : {}), resuming: true, merge_next: true });
     });
     expect(result.current.messages.map((message) => message.content)).toEqual(["First ", "web_search(query)", "second"]);
     act(() => {
-      fake.emit("hosted-tool", { event: "delta", chat_id: "hosted-tool", turn_id: "turn", stream_id: "answer", turn_seq: 5, text: " last" });
-      fake.emit("hosted-tool", { event: "stream_end", chat_id: "hosted-tool", turn_id: "turn", stream_id: "answer", turn_seq: 6, ...(snapshot ? { text: "First second last" } : {}), response_sources: [] });
+      fake.emit("hosted-tool", { event: "delta", chat_id: "hosted-tool", turn_id: "turn", stream_id: "after-tool", turn_seq: 6, text: " last" });
+      fake.emit("hosted-tool", { event: "stream_end", chat_id: "hosted-tool", turn_id: "turn", stream_id: "after-tool", turn_seq: 7, ...(snapshot ? { text: "second last" } : {}), response_sources: [] });
     });
     expect(result.current.messages.map((message) => message.content)).toEqual(["First ", "web_search(query)", "second last"]);
     expect(result.current.messages[0].projectionStartSeq).toBe(1);
-    expect(result.current.messages[2].projectionStartSeq).toBe(3);
+    expect(result.current.messages[2].projectionStartSeq).toBe(4);
   });
 
   it("captures the first sequence of coalesced chunks before a paint", () => {

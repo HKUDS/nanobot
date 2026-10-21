@@ -141,6 +141,22 @@ describe("canonical thread event projection", () => {
     });
   });
 
+  it.each(["First ", "![plot](/api/media/signature/immutable-plot.png)\n\n"])(
+    "keeps legacy cumulative replay contributions around tools: %s", (prefix) => {
+      const messages = projectThreadEvents([
+        { event: "stream_end", chat_id: "chat", turn_id: "turn", stream_id: "answer", turn_seq: 2, text: prefix, resuming: true, merge_next: true },
+        { event: "message", chat_id: "chat", turn_id: "turn", turn_seq: 3, kind: "tool_hint", text: "web_search(query)" },
+        { event: "stream_end", chat_id: "chat", turn_id: "turn", stream_id: "answer", turn_seq: 5, text: prefix + "After tool." },
+        { event: "turn_end", chat_id: "chat", turn_id: "turn", turn_seq: 6 },
+      ]);
+      expect(normalizeActivityTimeline(messages).map((unit) => unit.type === "message"
+        ? unit.message.content : unit.messages.map((message) => message.content).join("")))
+        .toEqual([prefix.trim(), "web_search(query)", "After tool."]);
+      expect(messages[0]).toMatchObject({ content: prefix, projectionStartSeq: 2 });
+      expect(messages[2]).toMatchObject({ content: "After tool.", projectionStartSeq: 5 });
+    },
+  );
+
   it("preserves the stream's position when a complete message replaces its active row", () => {
     const messages = projectThreadEvents([
       { event: "delta", chat_id: "chat", turn_id: "turn", stream_id: "answer", turn_seq: 1, text: "Partial" },
