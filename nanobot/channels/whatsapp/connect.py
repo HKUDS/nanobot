@@ -331,14 +331,15 @@ class WhatsAppConnectStore:
         from nanobot.bus.queue import MessageBus
         from nanobot.channels.whatsapp.runtime import WhatsAppChannel
 
-        section = getattr(load_config().channels, "whatsapp", None)
+        root_config = load_config()
+        section = getattr(root_config.channels, "whatsapp", None)
         if section is not None and hasattr(section, "model_dump"):
             config = section.model_dump(mode="json", by_alias=True)
         elif isinstance(section, dict):
             config = dict(cast(dict[str, Any], section))
         else:
             config = {}
-        channel = WhatsAppChannel(config, MessageBus())
+        channel = WhatsAppChannel(config, MessageBus(), network=root_config.network)
         return channel, channel.connect_database_path()
 
     @staticmethod

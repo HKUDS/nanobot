@@ -5,6 +5,7 @@ export interface RuntimeConfigField {
   options?: string[];
   when?: { path: string; value: string | boolean | string[] };
   manual?: boolean;
+  secret?: boolean;
   min?: number;
   max?: number;
 }
@@ -21,6 +22,7 @@ export const RUNTIME_CONFIG_GROUPS: { id: string; page: RuntimeConfigPage; enabl
   { id: "web", page: "browser" },
   { id: "shell", page: "advanced", enabledBy: "tools.exec.enable" },
   { id: "network", page: "network" },
+  { id: "proxy", page: "advanced" },
   { id: "safety", page: "advanced" },
   { id: "cli", page: "advanced", enabledBy: "tools.cli_apps.enable" },
   { id: "gateway", page: "advanced" },
@@ -54,7 +56,8 @@ export const RUNTIME_CONFIG_FIELDS: RuntimeConfigField[] = [
   { group: "shell", path: "tools.exec.allowed_env_keys", kind: "list" },
   { group: "shell", path: "tools.exec.allow_patterns", kind: "list" },
   { group: "shell", path: "tools.exec.deny_patterns", kind: "list" },
-  { group: "network", path: "tools.web.proxy", kind: "nullable" },
+  { group: "proxy", path: "network.proxy", kind: "nullable", secret: true },
+  { group: "network", path: "tools.web.use_proxy", kind: "boolean" },
   { group: "network", path: "tools.web.user_agent", kind: "nullable" },
   { group: "safety", path: "tools.restrict_to_workspace", kind: "boolean" },
   { group: "safety", path: "tools.webui_allow_remote_package_install", kind: "boolean" },

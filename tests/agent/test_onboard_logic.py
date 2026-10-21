@@ -1090,7 +1090,8 @@ class TestMainMenuInteraction:
 
         config = Config()
         config.providers.openai.api_key = "${UNRELATED_MISSING_KEY}"
-        config.providers.openai_codex.proxy = "${CODEX_PROXY}"
+        config.network.proxy = "${CODEX_PROXY}"
+        config.providers.openai_codex.use_proxy = True
         token = SimpleNamespace(access="existing-token", account_id="account-123")
         token_proxies: list[str | None] = []
         login_calls: list[object] = []
@@ -1113,7 +1114,8 @@ class TestMainMenuInteraction:
         assert token_proxies == ["http://127.0.0.1:8080"]
         assert login_calls == []
         assert config.providers.openai.api_key == "${UNRELATED_MISSING_KEY}"
-        assert config.providers.openai_codex.proxy == "${CODEX_PROXY}"
+        assert config.network.proxy == "${CODEX_PROXY}"
+        assert config.providers.openai_codex.use_proxy is True
 
     def test_quick_start_openai_codex_reports_incomplete_installation(self, monkeypatch):
         import oauth_cli_kit
@@ -1139,7 +1141,8 @@ class TestMainMenuInteraction:
         import oauth_cli_kit
 
         config = Config()
-        config.providers.openai_codex.proxy = "http://127.0.0.1:8080"
+        config.network.proxy = "http://127.0.0.1:8080"
+        config.providers.openai_codex.use_proxy = True
         prompts: list[str] = []
         printed: list[tuple[tuple[object, ...], dict[str, object]]] = []
 

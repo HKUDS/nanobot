@@ -38,6 +38,7 @@ from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventContext, SubagentTaskChanged
+from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import AgentDefaults, ToolsConfig
 from nanobot.events import AgentEvent, EventSink
 from nanobot.llm_usage.context import LLMUsageSource, current_llm_usage_source
@@ -220,6 +221,7 @@ class SubagentManager:
         max_concurrent_subagents: int | None = None,
         *,
         consolidator: Consolidator,
+        network_config: NetworkConfig | None = None,
         session_manager: SessionManager | None = None,
     ):
         if cast(object, consolidator) is None:
@@ -252,6 +254,7 @@ class SubagentManager:
         self.workspace = workspace
         self.bus = bus
         self.tools_config = tools_config or ToolsConfig()
+        self.network_config = network_config or NetworkConfig()
         self.max_tool_result_chars = max_tool_result_chars
         self.restrict_to_workspace = restrict_to_workspace
         self.disabled_skills = set(disabled_skills or [])
@@ -526,6 +529,7 @@ class SubagentManager:
         cfg = tools_config if tools_config is not None else self._subagent_tools_config()
         ctx = ToolContext(
             config=cfg,
+            network=self.network_config,
             workspace=str(root.resolve()),
             exec_session_manager=exec_manager or self._exec_session_manager,
             file_state_store=FileStates(),

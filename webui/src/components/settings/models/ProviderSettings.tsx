@@ -107,7 +107,7 @@ const CUSTOM_PROVIDER_ADVANCED_FIELDS: ProviderAdvancedField[] = [
   "extra_headers",
   "extra_body",
   "extra_query",
-  "proxy",
+  "use_proxy",
   "thinking_style",
 ];
 
@@ -466,22 +466,18 @@ function ProviderAdvancedOptions({
                 </DropdownMenu>
               </label>
             ) : null}
-            {enabled.has("proxy") ? (
-              <label className="block space-y-1.5 md:col-span-2">
-                <span className="block px-3 text-[12px] font-medium text-muted-foreground">
-                  {tx("settings.providers.proxy", "Network proxy")}
-                </span>
-                <Input
-                  value={form.proxy}
-                  onChange={(event) => onChange({ proxy: event.target.value })}
-                  placeholder="http://127.0.0.1:7890"
-                  autoCapitalize="none"
-                  autoComplete="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  className="h-9 rounded-full font-mono text-[12px]"
+            {enabled.has("use_proxy") ? (
+              <div className="flex items-center justify-between gap-4 px-3 py-2 md:col-span-2">
+                <div className="min-w-0">
+                  <p className="text-[13px] font-medium text-foreground">{t("settings.network.useProxy")}</p>
+                  <p className="mt-1 text-[12px] text-muted-foreground">{t("settings.network.useProxyHelp")}</p>
+                </div>
+                <ToggleButton
+                  checked={form.useProxy}
+                  onChange={(useProxy) => onChange({ useProxy })}
+                  label={t("settings.network.useProxy")}
                 />
-              </label>
+              </div>
             ) : null}
             {enabled.has("region") ? (
               <label className="block space-y-1.5">
@@ -671,7 +667,7 @@ export function ProvidersSettings({
     const apiBase = form.apiBase.trim();
     const advancedFields = provider.advanced_fields ?? [];
     const oauthSettingsDirty = isOauthProvider && (
-      form.proxy.trim() !== (provider.proxy ?? "").trim()
+      form.useProxy !== (provider.use_proxy ?? false)
       || form.extraBody.trim() !== providerJsonValue(provider.extra_body).trim()
     );
     const oauthSettingsSaving = saving && providerOperation?.action === "save";
@@ -680,7 +676,7 @@ export function ProvidersSettings({
     const hasOptionalProviderSetting = Boolean(
       apiKey
       || apiBase
-      || form.proxy.trim()
+      || form.useProxy
       || form.extraHeaders.trim()
       || form.extraBody.trim()
       || form.extraQuery.trim()

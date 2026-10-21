@@ -159,10 +159,11 @@ class TestResolveConfig:
         proxy = "http://127.0.0.1:23458"
         config = Config.model_validate(
             {
+                "network": {"proxy": proxy},
                 "providers": {
                     "openaiCodex": {
                         "apiKey": "codex-secret",
-                        "proxy": proxy,
+                        "useProxy": True,
                         "extraBody": {"service_tier": "priority"},
                     },
                     "groq": {"apiKey": "groq-secret"},
@@ -175,12 +176,13 @@ class TestResolveConfig:
         saved = json.loads(config_path.read_text(encoding="utf-8"))
         assert saved["providers"]["openaiCodex"] == {
             "extraBody": {"service_tier": "priority"},
-            "proxy": proxy,
+            "useProxy": True,
         }
         assert saved["providers"]["groq"]["apiKey"] == "groq-secret"
 
         reloaded = load_config(config_path)
-        assert reloaded.providers.openai_codex.proxy == proxy
+        assert reloaded.network.proxy == proxy
+        assert reloaded.providers.openai_codex.use_proxy is True
         assert reloaded.providers.openai_codex.extra_body == {"service_tier": "priority"}
         assert reloaded.providers.openai_codex.api_key is None
 
@@ -189,10 +191,11 @@ class TestResolveConfig:
         proxy = "http://127.0.0.1:23458"
         config = Config.model_validate(
             {
+                "network": {"proxy": proxy},
                 "providers": {
                     "xaiGrok": {
                         "apiKey": "must-not-be-saved",
-                        "proxy": proxy,
+                        "useProxy": True,
                         "extraBody": {"parallel_tool_calls": False},
                     }
                 }
@@ -204,12 +207,13 @@ class TestResolveConfig:
         saved = json.loads(config_path.read_text(encoding="utf-8"))
         assert saved["providers"]["xaiGrok"] == {
             "extraBody": {"parallel_tool_calls": False},
-            "proxy": proxy,
+            "useProxy": True,
         }
         assert "must-not-be-saved" not in config_path.read_text(encoding="utf-8")
 
         reloaded = load_config(config_path)
-        assert reloaded.providers.xai_grok.proxy == proxy
+        assert reloaded.network.proxy == proxy
+        assert reloaded.providers.xai_grok.use_proxy is True
         assert reloaded.providers.xai_grok.extra_body == {"parallel_tool_calls": False}
         assert reloaded.providers.xai_grok.api_key is None
 
@@ -217,6 +221,7 @@ class TestResolveConfig:
         config_path = tmp_path / "config.json"
         config = Config.model_validate(
             {
+                "network": {"proxy": "http://127.0.0.1:7890"},
                 "providers": {
                     "openaiCodex": {
                         "apiKey": "codex-secret",
@@ -224,7 +229,7 @@ class TestResolveConfig:
                     },
                     "xaiGrok": {
                         "apiKey": "xai-secret",
-                        "proxy": "http://127.0.0.1:7890",
+                        "useProxy": True,
                         "extraBody": {"parallel_tool_calls": False},
                     },
                 }
@@ -239,7 +244,7 @@ class TestResolveConfig:
         }
         assert saved["providers"]["xaiGrok"] == {
             "extraBody": {"parallel_tool_calls": False},
-            "proxy": "http://127.0.0.1:7890",
+            "useProxy": True,
         }
         assert "codex-secret" not in config_path.read_text(encoding="utf-8")
         assert "xai-secret" not in config_path.read_text(encoding="utf-8")

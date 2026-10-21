@@ -841,7 +841,7 @@ describe("webui API helpers", () => {
   it("serializes OAuth provider advanced settings", async () => {
     await updateProviderSettings(mutationTransport, {
       provider: "xai_grok",
-      proxy: "http://127.0.0.1:7890",
+      use_proxy: true,
       extraBody: '{"tools":[]}',
     });
 
@@ -849,7 +849,7 @@ describe("webui API helpers", () => {
       "settings.provider.update",
       {
         provider: "xai_grok",
-        proxy: "http://127.0.0.1:7890",
+        use_proxy: true,
         extraBody: '{"tools":[]}',
       },
       20_000,
@@ -864,7 +864,7 @@ describe("webui API helpers", () => {
       extraHeaders: '{"X-Tenant":"engineering"}',
       extraBody: '{"service_tier":"priority"}',
       extraQuery: '{"api-version":"2026-01-01"}',
-      proxy: "http://127.0.0.1:7890",
+      use_proxy: true,
       thinkingStyle: "enable_thinking",
     };
     await createProviderSettings(mutationTransport, update);
@@ -1180,6 +1180,18 @@ describe("webui API helpers", () => {
       { flow_id: "flow-123" },
       20_000,
     );
+  });
+
+  it.each(["true", "false"])("preserves explicit MCP proxy flag %s across setup and edits", async (use_proxy) => {
+    await runMcpPresetAction(mutationTransport, "enable", "notion", { use_proxy });
+    expect(requestMutation).toHaveBeenLastCalledWith("settings.mcp.enable", { name: "notion", use_proxy }, 20_000);
+    await startMcpOAuth(mutationTransport, "notion", false, { use_proxy });
+    expect(requestMutation).toHaveBeenLastCalledWith("settings.mcp.oauth_start", { name: "notion", use_proxy }, 30_000);
+    await runMcpPresetAction(mutationTransport, "proxy", "notion", { use_proxy });
+    expect(requestMutation).toHaveBeenLastCalledWith("settings.mcp.proxy", { name: "notion", use_proxy }, 20_000);
+    const custom = { name: "docs", transport: "sse", url: "https://example.com/sse", use_proxy };
+    await saveCustomMcpServer(mutationTransport, custom);
+    expect(requestMutation).toHaveBeenLastCalledWith("settings.mcp.custom", custom, 20_000);
   });
 
   it("serializes custom MCP, mcp.json import, and tool allowlist actions", async () => {

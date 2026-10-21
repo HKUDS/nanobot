@@ -251,7 +251,7 @@ export function RuntimeConfigSettings({
                                 }))}
                                 onChange={(next) => state.change(field, next === "__none__" ? "" : next)} />
                             ) : (
-                              <Input {...common} type={field.kind === "number" ? "number" : "text"}
+                              <Input {...common} type={field.secret ? "password" : field.kind === "number" ? "number" : "text"}
                                 min={field.min} max={field.max} step={field.path === "api.timeout" ? "any" : 1}
                                 value={String(current)} className="h-9 rounded-full text-[13px]" autoComplete="off"
                                 onChange={(event) => state.change(field, event.target.value)} />

@@ -2,6 +2,8 @@
 
 Open **Apps → MCP** to find a service, configure its connection, and select **Connect**. Presets save MCP server configuration; the gateway discovers and runs the tools. Each service still requires its own account access and permissions. The tables below list all built-in presets.
 
+For a remote HTTP/SSE service that needs a proxy, first set the shared address in **Settings → Advanced → Shared proxy**, then turn on **Use proxy** in its connection dialog before selecting **Connect**. The gateway uses that route for MCP requests and authorization. The browser's sign-in page still uses your browser's own network settings. Local stdio servers keep their own networking configuration.
+
 ## Hosted services
 
 Browser sign-in uses the service's MCP OAuth flow. API-key presets ask for the credential listed below and add it to the required HTTP header or URL parameter. Paste the token itself into the credential field.

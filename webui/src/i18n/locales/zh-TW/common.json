@@ -491,6 +491,10 @@
       "description": "變更已儲存，重新啟動後生效。",
       "later": "稍後重新啟動"
     },
+    "network": {
+      "useProxy": "使用代理",
+      "useProxyHelp": "使用進階設定中的共用代理。"
+    },
     "runtimeConfig": {
       "apiSaved": "已儲存，重新啟動 API 服務後生效。",
       "commandRuntime": {
@@ -528,7 +532,8 @@
         "tools_exec_allowed_env_keys": {"label": "環境變數", "help": "額外傳給命令的變數名，每行一個\n\n除必需變數外，還要從主機傳遞給命令的環境變數名稱，每行一個。"},
         "tools_exec_allow_patterns": {"label": "允許命令", "help": "只允許完整匹配規則的命令\n\n每行一個正規表示式。填寫後，只允許每段命令都完整匹配規則的命令執行，且優先於內建和自定義拒絕規則；工作區和網路限制仍生效。"},
         "tools_exec_deny_patterns": {"label": "禁止命令", "help": "阻止匹配規則的命令\n\n每行一個正規表示式，與內建拒絕規則一同檢查。完整匹配允許規則的命令會跳過這些檢查。"},
-        "tools_web_proxy": {"label": "網頁代理", "help": "用於智慧體搜尋和讀取網頁。留空使用預設網路設定，包括環境變數中的代理。\n\n127.0.0.1 指執行 nanobot 的機器，不是開啟網頁的手機。本設定不影響模型、MCP 或瀏覽器的連線。"},
+        "network_proxy": {"label": "共用代理", "help": "啟用「使用代理」的功能共用此位址。127.0.0.1 指執行 nanobot 的裝置。"},
+        "tools_web_use_proxy": {"label": "使用代理", "help": "網頁搜尋與讀取使用共用代理。"},
         "tools_web_user_agent": {"label": "User-Agent", "help": "網頁請求標識，留空使用預設值\n\n網頁請求使用的 User-Agent 標識，留空使用預設值。"},
         "tools_restrict_to_workspace": {"label": "目錄限制", "help": "全域性目錄限制，WebUI 許可權另設\n\n設定全域性工作區訪問限制；WebUI 中每個對話的許可權單獨設定。"},
         "tools_ssrf_whitelist": {"label": "允許 IP", "help": "允許訪問的 IP 或 CIDR，每行一項\n\n允許網頁等出站請求訪問這些受限地址。每行填寫一個 IP 地址或 CIDR 網段。"},
@@ -552,7 +557,8 @@
         "sessions": {"title": "對話", "help": "設定跨平臺對話共享"},
         "tools": {"title": "內建工具", "help": "選擇智慧體可以使用的工具"},
         "shell": {"title": "Shell 與沙箱", "help": "設定命令超時、環境和訪問規則"},
-        "network": {"title": "網頁連線", "help": "設定代理和 User-Agent\n\n設定網頁訪問代理和 User-Agent 標識。"},
+        "proxy": {"title": "共用代理", "help": "為使用代理的功能設定共用位址。"},
+        "network": {"title": "網頁連線", "help": "設定網頁請求的代理開關與 User-Agent。"},
         "safety": {"title": "全域性許可權", "help": "設定目錄限制、網路例外和遠端安裝\n\n設定工作區訪問限制、網路訪問例外和遠端安裝許可權。"},
         "cli": {"title": "CLI 限制", "help": "設定安裝、執行超時和列表快取\n\n設定安裝和執行超時，以及應用列表的快取時長。"},
         "gateway": {"title": "閘道器", "help": "設定部署和重啟方式"},
@@ -949,7 +955,6 @@
       "defaultAPIDescription": "預設選擇「自動」時使用此協定。個別預設可改用支援清單中的其他協定。",
       "declareAPIs": "設定支援的協定",
       "openaiDefaultAPIDescription": "設為「自動」的預設使用此預設協定。此處選擇「自動」會遵循已知模型規則；個別預設可以覆寫此預設值。",
-      "proxy": "網路代理",
       "thinkingStyle": "推理格式",
       "region": "區域",
       "profile": "AWS 設定檔名稱",
@@ -1588,9 +1593,6 @@
       "signInBeforeSaving": "請先登入此供應商，再儲存模型預設。",
       "signedIn": "已登入",
       "notSignedIn": "未登入",
-      "proxyLabel": "網路代理",
-      "proxySaveBeforeSignIn": "請先儲存代理變更再登入。",
-      "saveProxy": "儲存代理",
       "localCodeHelp": "請在瀏覽器中完成登入。nanobot 通常會自動完成；若未自動完成，請將授權碼貼到下方。",
       "remoteCodeHelp": "請點選 [登入]，在電腦上開啟 xAI。完成登入後，請將 xAI 顯示的授權碼貼到下方。",
       "localCallbackHelp": "請在瀏覽器中完成登入。nanobot 通常會自動完成；若未自動完成，請複製網址列中的完整 localhost 回呼 URL 並貼到下方。",

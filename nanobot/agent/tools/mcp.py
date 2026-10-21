@@ -19,6 +19,7 @@ from loguru import logger
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.config.network import NetworkConfig
 from nanobot.security.network import (
     PinnedDNSAsyncTransport,
     env_proxy_applies_to_url,
@@ -60,7 +61,7 @@ _HTTP_READ_TIMEOUT = 300.0
 # Replace anything outside [a-zA-Z0-9_-] with underscore and collapse runs.
 _SANITIZE_RE = re.compile(r"_+")
 _ReconnectCallback = Callable[[str, str, Tool], Awaitable[Tool | None]]
-MCPServerLoader = Callable[[], Mapping[str, "MCPServerConfig"]]
+MCPServerLoader = Callable[[], tuple[Mapping[str, "MCPServerConfig"], NetworkConfig]]
 MCPRuntimeStatus = Literal["connecting", "connected", "failed"]
 
 
@@ -242,7 +243,7 @@ def _is_session_terminated(exc: BaseException) -> bool:
     )
 
 
-async def _probe_http_url(url: str, timeout: float = 3.0) -> bool:
+async def _probe_http_url(url: str, timeout: float = 3.0, *, proxy: str | None = None) -> bool:
     """Quick TCP probe to check if an HTTP MCP server is reachable.
 
     Avoids entering ``streamable_http_client`` / ``sse_client`` when the port is
@@ -258,7 +259,7 @@ async def _probe_http_url(url: str, timeout: float = 3.0) -> bool:
     ok, _, resolved_ips = resolve_url_target(url)
     if not ok:
         return False
-    if env_proxy_applies_to_url(url):
+    if proxy or env_proxy_applies_to_url(url):
         return True
     for target_host in resolved_ips or (host,):
         try:
@@ -294,7 +295,9 @@ def _redact_url(url: str) -> str:
         return "<redacted-url>"
 
 
-def _pinned_transport_kwargs() -> dict[str, Any]:
+def _pinned_transport_kwargs(proxy: str | None = None) -> dict[str, Any]:
+    if proxy:
+        return {"transport": httpx.AsyncHTTPTransport(proxy=proxy), "trust_env": False}
     kwargs: dict[str, Any] = {"transport": PinnedDNSAsyncTransport()}
     mounts = httpx_env_proxy_mounts()
     if mounts:
@@ -1008,6 +1011,7 @@ async def connect_mcp_servers(
     registry: ToolRegistry,
     *,
     oauth_handlers: Mapping[str, MCPOAuthHandlers] | None = None,
+    network: NetworkConfig | None = None,
 ) -> dict[str, MCPConnection]:
     """Connect to configured MCP servers and register their tools, resources, prompts.
 
@@ -1047,6 +1051,9 @@ async def connect_mcp_servers(
                     )
                     return False
 
+            if cfg.use_proxy and transport_type == "stdio":
+                raise ValueError("The shared proxy is available for HTTP and SSE MCP connections")
+            proxy = (network or NetworkConfig()).resolve_proxy(cfg.use_proxy)
             oauth_auth: httpx.Auth | None = None
             if cfg.auth == "oauth":
                 if transport_type not in {"sse", "streamableHttp"}:
@@ -1084,7 +1091,7 @@ async def connect_mcp_servers(
                 )
                 read, write = await server_stack.enter_async_context(stdio_client(params))
             elif transport_type == "sse":
-                if not await _probe_http_url(cfg.url):
+                if not await _probe_http_url(cfg.url, proxy=proxy):
                     logger.warning("MCP server '{}': {} unreachable, skipping", name, _redact_url(cfg.url))
                     return False
 
@@ -1104,7 +1111,7 @@ async def connect_mcp_servers(
                         follow_redirects=True,
                         timeout=timeout,
                         auth=auth,
-                        **_pinned_transport_kwargs(),
+                        **_pinned_transport_kwargs(proxy),
                     )
 
                 sse_kwargs: dict[str, Any] = {
@@ -1116,7 +1123,7 @@ async def connect_mcp_servers(
                     sse_client(cfg.url, **sse_kwargs)
                 )
             elif transport_type == "streamableHttp":
-                if not await _probe_http_url(cfg.url):
+                if not await _probe_http_url(cfg.url, proxy=proxy):
                     logger.warning("MCP server '{}': {} unreachable, skipping", name, _redact_url(cfg.url))
                     return False
 
@@ -1131,7 +1138,7 @@ async def connect_mcp_servers(
                         connect=10.0,
                         read=max(_HTTP_READ_TIMEOUT, cfg.tool_timeout),
                     ),
-                    **_pinned_transport_kwargs(),
+                    **_pinned_transport_kwargs(proxy),
                 }
                 if oauth_auth is not None:
                     http_client_kwargs["auth"] = oauth_auth
@@ -1384,10 +1391,11 @@ def _configured_servers(config: Config) -> dict[str, MCPServerConfig]:
     )
 
 
-def _load_current_servers() -> dict[str, MCPServerConfig]:
+def _load_current_servers() -> tuple[dict[str, MCPServerConfig], NetworkConfig]:
     from nanobot.config.loader import load_config, resolve_config_env_vars
 
-    return _configured_servers(resolve_config_env_vars(load_config()))
+    config = resolve_config_env_vars(load_config())
+    return _configured_servers(config), config.network
 
 
 class MCPProvider:
@@ -1399,8 +1407,10 @@ class MCPProvider:
         registry: ToolRegistry,
         *,
         server_loader: MCPServerLoader | None = None,
+        network: NetworkConfig | None = None,
     ) -> None:
         self._servers = dict(servers)
+        self._network = (network or NetworkConfig()).model_copy(deep=True)
         self._registry = registry
         self._server_loader = server_loader or _load_current_servers
         self._connections: dict[str, MCPConnection] = {}
@@ -1420,6 +1430,7 @@ class MCPProvider:
             _configured_servers(config),
             registry,
             server_loader=server_loader,
+            network=config.network,
         )
 
     @property
@@ -1491,7 +1502,7 @@ class MCPProvider:
                 return
             self._set_runtime_status(missing_servers, "connecting")
             try:
-                connected = await connect_mcp_servers(missing_servers, self._registry)
+                connected = await connect_mcp_servers(missing_servers, self._registry, network=self._network)
                 if self._closing:
                     await _close_mcp_connections(connected)
                     return
@@ -1526,7 +1537,8 @@ class MCPProvider:
             if self._closing:
                 return self._closing_result()
             try:
-                next_servers = dict(self._server_loader())
+                loaded_servers, next_network = self._server_loader()
+                next_servers = dict(loaded_servers)
             except Exception as exc:
                 logger.warning("MCP hot reload could not read config: {}", exc)
                 return {
@@ -1553,6 +1565,7 @@ class MCPProvider:
                 for name in current_names & next_names
                 if _server_signature(current_servers[name])
                 != _server_signature(next_servers[name])
+                or (next_servers[name].use_proxy and self._network.proxy != next_network.proxy)
             )
 
             tools_removed = 0
@@ -1564,6 +1577,7 @@ class MCPProvider:
                 self._runtime_statuses.pop(name, None)
 
             self._servers = next_servers
+            self._network = next_network.model_copy(deep=True)
             retry_missing = sorted(
                 name
                 for name in next_names
@@ -1580,7 +1594,7 @@ class MCPProvider:
             if to_connect:
                 self._set_runtime_status(to_connect, "connecting")
                 try:
-                    connected = await connect_mcp_servers(to_connect, self._registry)
+                    connected = await connect_mcp_servers(to_connect, self._registry, network=self._network)
                 except BaseException:
                     self._set_runtime_status(to_connect, "failed")
                     raise
@@ -1695,6 +1709,7 @@ class MCPProvider:
             connected = await connect_mcp_servers(
                 {server_name: cfg},
                 self._registry,
+                network=self._network,
             )
             if self._closing:
                 await _close_mcp_connections(connected)

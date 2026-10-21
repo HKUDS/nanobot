@@ -912,11 +912,13 @@ def test_discover_enabled_warns_for_enabled_package_import_errors():
 # Manager _init_channels with dict config
 # ---------------------------------------------------------------------------
 
-def test_manager_loads_plugin_from_dict_config(monkeypatch):
-    """ChannelManager should instantiate a channel package from a raw dict config."""
+@pytest.mark.parametrize("proxy", ["", "http://127.0.0.1:7890"])
+def test_manager_loads_plugin_from_dict_config(monkeypatch, proxy):
+    """Existing two-argument plugins work with or without a shared proxy configured."""
     from nanobot.channels.manager import ChannelManager
 
     fake_config = Config.model_validate({
+        "network": {"proxy": proxy},
         "channels": {
             "fakeplugin": {"enabled": True, "allowFrom": ["*"]},
         }

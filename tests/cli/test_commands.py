@@ -911,7 +911,7 @@ def test_provider_login_openai_codex_passes_configured_proxy(monkeypatch):
     proxy = "http://127.0.0.1:23458"
     monkeypatch.setattr(
         "nanobot.config.loader.load_config",
-        lambda: Config.model_validate({"providers": {"openaiCodex": {"proxy": proxy}}}),
+        lambda: Config.model_validate({"network": {"proxy": proxy}, "providers": {"openaiCodex": {"useProxy": True}}}),
     )
 
     import oauth_cli_kit
@@ -954,7 +954,7 @@ def test_provider_login_openai_codex_uses_explicit_config_proxy(tmp_path, monkey
         path = config_path or active_path.get("path")
         if path is None:
             return Config.model_validate(
-                {"providers": {"openaiCodex": {"proxy": "http://default-proxy:8080"}}}
+                {"network": {"proxy": "http://default-proxy:8080"}, "providers": {"openaiCodex": {"useProxy": True}}}
             )
         return real_load_config(path)
 
@@ -987,7 +987,7 @@ def test_provider_login_openai_codex_resolves_proxy_env_ref(monkeypatch):
     monkeypatch.setattr(
         "nanobot.config.loader.load_config",
         lambda: Config.model_validate(
-            {"providers": {"openaiCodex": {"proxy": "${CODEX_PROXY_FOR_TEST}"}}}
+            {"network": {"proxy": "${CODEX_PROXY_FOR_TEST}"}, "providers": {"openaiCodex": {"useProxy": True}}}
         ),
     )
 
@@ -1011,7 +1011,7 @@ def test_provider_login_xai_grok_runs_browser_flow_with_configured_proxy(monkeyp
     proxy = "http://127.0.0.1:23458"
     monkeypatch.setattr(
         "nanobot.config.loader.load_config",
-        lambda: Config.model_validate({"providers": {"xaiGrok": {"proxy": proxy}}}),
+        lambda: Config.model_validate({"network": {"proxy": proxy}, "providers": {"xaiGrok": {"useProxy": True}}}),
     )
     monkeypatch.setattr(
         "nanobot.providers.xai_oauth.get_xai_oauth_token",
@@ -1326,7 +1326,8 @@ def test_openai_codex_proxy_config_affects_provider_and_signature():
                         "model": "openai-codex/gpt-5.5",
                     }
                 },
-                "providers": {"openaiCodex": {"proxy": proxy}},
+                "network": {"proxy": proxy},
+                "providers": {"openaiCodex": {"useProxy": True}},
             }
         )
 
@@ -1355,13 +1356,13 @@ def test_provider_proxy_rejects_unsupported_backend():
                 "azureOpenai": {
                     "apiKey": "sk-test",
                     "apiBase": "https://azure.example/openai/v1",
-                    "proxy": "http://127.0.0.1:23458",
+                    "useProxy": True,
                 }
             },
         }
     )
 
-    with pytest.raises(ValueError, match=r"providers\.azure_openai\.proxy"):
+    with pytest.raises(ValueError, match=r"providers\.azure_openai\.use_proxy"):
         make_provider(config)
 
 

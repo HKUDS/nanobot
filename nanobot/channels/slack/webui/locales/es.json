@@ -84,9 +84,8 @@
       "dm_allowFrom": {
         "label": "Usuarios de DM permitidos"
       },
-      "proxy": {
-        "label": "Proxy de red",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "Usar proxy"
       }
     }
   }

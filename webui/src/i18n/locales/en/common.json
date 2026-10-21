@@ -491,6 +491,10 @@
       "description": "Your changes are saved. Restart to apply them.",
       "later": "Restart later"
     },
+    "network": {
+      "useProxy": "Use proxy",
+      "useProxyHelp": "Uses the shared proxy in Advanced."
+    },
     "runtimeConfig": {
       "apiSaved": "Saved. Restart the API service to apply changes.",
       "commandRuntime": {
@@ -609,9 +613,13 @@
           "label": "Blocked commands",
           "help": "Block commands that match these rules.\n\nOne regular expression per line, checked alongside built-in deny rules. Commands that fully match allow rules skip these checks."
         },
-        "tools_web_proxy": {
-          "label": "Web proxy",
-          "help": "Used for the agent's web search and page reading. Leave blank to use the default network settings, including proxy environment variables.\n\n127.0.0.1 refers to the machine that runs nanobot. This setting does not change model, MCP, or browser connections."
+        "network_proxy": {
+          "label": "Shared proxy",
+          "help": "Address used by features with Use proxy enabled. 127.0.0.1 is the machine running nanobot."
+        },
+        "tools_web_use_proxy": {
+          "label": "Use proxy",
+          "help": "Use the shared proxy for web search and page reading."
         },
         "tools_web_user_agent": {
           "label": "User agent",
@@ -699,9 +707,13 @@
           "title": "Shell and sandbox",
           "help": "Set command timeouts, environment, and access rules."
         },
+        "proxy": {
+          "title": "Shared proxy",
+          "help": "Set one address for features that use a proxy."
+        },
         "network": {
           "title": "Web connections",
-          "help": "Set the proxy and User-Agent.\n\nSet the proxy and User-Agent header for web requests."
+          "help": "Set the proxy preference and User-Agent for web requests."
         },
         "safety": {
           "title": "Global permissions",
@@ -1379,7 +1391,6 @@
       "defaultAPIDescription": "Presets set to Auto use this API. A preset can choose another API from the supported list.",
       "declareAPIs": "Set supported APIs",
       "openaiDefaultAPIDescription": "Sets the default API for presets using Auto. Auto here follows known model rules. Individual presets can override this choice.",
-      "proxy": "Network proxy",
       "thinkingStyle": "Reasoning format",
       "region": "Region",
       "profile": "AWS profile",
@@ -1788,9 +1799,6 @@
       "signInBeforeSaving": "Sign in before saving this provider in the preset.",
       "signedIn": "Signed in",
       "notSignedIn": "Not signed in",
-      "proxyLabel": "Network proxy",
-      "proxySaveBeforeSignIn": "Save proxy changes before signing in.",
-      "saveProxy": "Save proxy",
       "localCodeHelp": "Complete sign-in in your browser. If nanobot does not connect automatically, paste the authorization code below.",
       "remoteCodeHelp": "Select Sign in to open xAI on your computer. After signing in, paste the authorization code shown by xAI below.",
       "localCallbackHelp": "Complete sign-in in your browser. If nanobot does not connect automatically, copy the full localhost callback URL from the address bar and paste it below.",

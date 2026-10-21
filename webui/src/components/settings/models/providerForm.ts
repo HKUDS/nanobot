@@ -8,7 +8,7 @@ export type ProviderForm = {
   apiKey: string;
   apiBase: string;
   api: ModelAPIConfig | null;
-  proxy: string;
+  useProxy: boolean;
   extraHeaders: string;
   extraBody: string;
   extraQuery: string;
@@ -43,7 +43,7 @@ export function providerFormFromRow(
     apiKey: "",
     apiBase: provider.api_base ?? provider.default_api_base ?? "",
     api: provider.api ?? null,
-    proxy: provider.proxy ?? "",
+    useProxy: provider.use_proxy ?? false,
     extraHeaders: providerJsonValue(provider.extra_headers),
     extraBody: providerJsonValue(provider.extra_body),
     extraQuery: providerJsonValue(provider.extra_query),
@@ -60,7 +60,7 @@ export function emptyCustomProviderDraft(): CustomProviderDraft {
     apiKey: "",
     apiBase: "",
     api: { supported_apis: ["chat_completions"], preferred_api: "chat_completions" },
-    proxy: "",
+    useProxy: false,
     extraHeaders: "",
     extraBody: "",
     extraQuery: "",

@@ -135,7 +135,6 @@ def _provider_config_updates(query: QueryParams) -> dict[str, Any]:
     string_fields = (
         ("api_key", "apiKey"),
         ("api_base", "apiBase"),
-        ("proxy", "proxy"),
         ("thinking_style", "thinkingStyle"),
         ("region", "region"),
         ("profile", "profile"),
@@ -145,6 +144,9 @@ def _provider_config_updates(query: QueryParams) -> dict[str, Any]:
         if query_has_alias(query, snake, camel):
             value = (query_first_alias(query, snake, camel) or "").strip()
             updates[snake] = value or None
+
+    if query_has_alias(query, "use_proxy", "useProxy"):
+        updates["use_proxy"] = parse_bool(query_first_alias(query, "use_proxy", "useProxy") or "", "use_proxy")
 
     for snake, camel in (
         ("extra_headers", "extraHeaders"),
@@ -348,9 +350,9 @@ def _provider_advanced_field_names(name: str, spec: Any) -> list[str]:
     if spec.backend in {"openai_compat", "anthropic", "bedrock", "openai_codex", "xai_grok"}:
         fields.append("extra_body")
     if spec.backend in {"openai_compat", "anthropic"}:
-        fields.extend(("extra_query", "proxy"))
-    if spec.name in _OAUTH_PROXY_PROVIDERS and "proxy" not in fields:
-        fields.append("proxy")
+        fields.extend(("extra_query", "use_proxy"))
+    if spec.name in _OAUTH_PROXY_PROVIDERS and "use_proxy" not in fields:
+        fields.append("use_proxy")
     if spec.backend == "bedrock":
         fields.extend(("region", "profile"))
     if find_by_name(name) is None:
@@ -398,7 +400,7 @@ def _provider_settings_row(
         "thinking_style": provider_config.thinking_style,
         "region": getattr(provider_config, "region", None),
         "profile": getattr(provider_config, "profile", None),
-        "proxy": provider_config.proxy,
+        "use_proxy": provider_config.use_proxy,
     }
     if oauth_status is not None:
         row["oauth_account"] = oauth_status["account"]
@@ -695,7 +697,7 @@ def provider_models_payload(
             "model_count": len(rows),
         }
     if catalog_kind == "hybrid":
-        proxy = _resolve_env_placeholders(provider_config.proxy)
+        proxy = config.network.resolve_proxy(provider_config.use_proxy)
         catalog = get_oauth_model_catalog(
             spec.name, proxy=proxy, refresh=query_first(query, "refresh") == "1",
         )
@@ -758,11 +760,13 @@ def provider_models_payload(
         models_url = f"{api_base.rstrip('/')}/v1/models"
 
     try:
+        proxy = config.network.resolve_proxy(provider_config.use_proxy)
         response = http_get(
             models_url,
             headers=headers,
             timeout=10.0,
             follow_redirects=False,
+            **({"proxy": proxy, "trust_env": False} if proxy else {}),
         )
         response.raise_for_status()
         rows = _extract_model_rows(response.json(), spec=spec)
@@ -1602,10 +1606,15 @@ def create_provider_settings(config: Config, query: QueryParams) -> str:
     if len(display_name) > 80:
         raise WebUISettingsError("provider name must be 80 characters or fewer")
     updates = _provider_config_updates(query)
+    if updates.get("use_proxy"):
+        try:
+            config.network.resolve_proxy(True)
+        except ValueError as exc:
+            raise WebUISettingsError(str(exc)) from None
     allowed = {
         "api_key",
         "api_base",
-        "proxy",
+        "use_proxy",
         "extra_headers",
         "extra_body",
         "extra_query",
@@ -1643,6 +1652,11 @@ def update_provider_settings(
         raise WebUISettingsError("unknown provider")
     spec, provider_key, provider_config = resolved_provider
     updates = _provider_config_updates(query)
+    if updates.get("use_proxy"):
+        try:
+            config.network.resolve_proxy(True)
+        except ValueError as exc:
+            raise WebUISettingsError(str(exc)) from None
     if not spec.is_oauth and spec.name != "openai":
         updates.pop("api_type", None)
     try:
@@ -1652,10 +1666,10 @@ def update_provider_settings(
     if spec.is_oauth:
         if spec.name not in _OAUTH_PROXY_PROVIDERS:
             raise WebUISettingsError("unknown provider")
-        unsupported = set(updates) - {"proxy", "extra_body"}
+        unsupported = set(updates) - {"use_proxy", "extra_body"}
         if unsupported:
             raise WebUISettingsError(
-                "OAuth provider only supports proxy and extra_body settings"
+                "OAuth provider only supports use_proxy and extra_body settings"
             )
     else:
         allowed = {
@@ -1730,10 +1744,8 @@ def login_oauth_provider(
             raise WebUISettingsError(OAUTH_CLI_KIT_MISSING_MESSAGE, status=500) from None
 
         try:
-            proxy = resolve_config_env_vars(
-                config,
-                config_path=config_path,
-            ).providers.openai_codex.proxy or None
+            resolved_config = resolve_config_env_vars(config, config_path=config_path)
+            proxy = resolved_config.network.resolve_proxy(resolved_config.providers.openai_codex.use_proxy)
         except ValueError as exc:
             raise WebUISettingsError(str(exc), status=400) from exc
         remote_browser_value = query_first(query, "remote_browser")
@@ -1799,10 +1811,8 @@ def login_oauth_provider(
         from nanobot.providers.xai_oauth import create_xai_oauth_login
 
         try:
-            proxy = resolve_config_env_vars(
-                config,
-                config_path=config_path,
-            ).providers.xai_grok.proxy or None
+            resolved_config = resolve_config_env_vars(config, config_path=config_path)
+            proxy = resolved_config.network.resolve_proxy(resolved_config.providers.xai_grok.use_proxy)
         except ValueError as exc:
             raise WebUISettingsError(str(exc), status=400) from exc
         try:

@@ -906,7 +906,8 @@ def test_create_provider_settings_persists_custom_advanced_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = tmp_path / "config.json"
-    save_config(Config(), config_path)
+    config = Config.model_validate({"network": {"proxy": "http://127.0.0.1:7890"}})
+    save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
     payload = create_provider_settings(
@@ -914,7 +915,7 @@ def test_create_provider_settings_persists_custom_advanced_options(
             "name": ["Company Gateway"],
             "apiBase": ["https://gateway.example/v1"],
             "apiKey": ["sk-company"],
-            "proxy": ["http://127.0.0.1:7890"],
+            "use_proxy": ["true"],
             "extraHeaders": [json.dumps({"X-Tenant": "engineering"})],
             "extraBody": [json.dumps({"service_tier": "priority"})],
             "extraQuery": [json.dumps({"api-version": "2026-01-01"})],
@@ -930,7 +931,7 @@ def test_create_provider_settings_persists_custom_advanced_options(
         "extra_headers",
         "extra_body",
         "extra_query",
-        "proxy",
+        "use_proxy",
         "thinking_style",
     ]
     assert row["extra_headers"] == {"X-Tenant": "engineering"}
@@ -941,7 +942,8 @@ def test_create_provider_settings_persists_custom_advanced_options(
     assert saved.display_name == "Company Gateway"
     assert saved.api_key == "sk-company"
     assert saved.api_base == "https://gateway.example/v1"
-    assert saved.proxy == "http://127.0.0.1:7890"
+    assert saved.use_proxy is True
+    assert load_config(config_path).network.proxy == "http://127.0.0.1:7890"
     assert saved.extra_headers == {"X-Tenant": "engineering"}
     assert saved.extra_body == {"service_tier": "priority"}
     assert saved.extra_query == {"api-version": "2026-01-01"}
@@ -1023,6 +1025,7 @@ def test_update_provider_settings_persists_provider_specific_advanced_options(
     config_path = tmp_path / "config.json"
     config = Config()
     config.providers.openai.api_key = "sk-openai"
+    config.network.proxy = "http://127.0.0.1:7890"
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
@@ -1030,7 +1033,7 @@ def test_update_provider_settings_persists_provider_specific_advanced_options(
         {
             "provider": ["openai"],
             "apiType": ["responses"],
-            "proxy": ["http://127.0.0.1:7890"],
+            "use_proxy": ["true"],
             "extraHeaders": [json.dumps({"X-Trace": "enabled"})],
             "extraBody": [json.dumps({"service_tier": "priority"})],
             "extraQuery": [json.dumps({"trace": "true"})],
@@ -1047,7 +1050,8 @@ def test_update_provider_settings_persists_provider_specific_advanced_options(
 
     saved = load_config(config_path)
     assert saved.providers.openai.api.to_capabilities().preferred_api == "responses"
-    assert saved.providers.openai.proxy == "http://127.0.0.1:7890"
+    assert saved.providers.openai.use_proxy is True
+    assert saved.network.proxy == "http://127.0.0.1:7890"
     assert saved.providers.openai.extra_headers == {"X-Trace": "enabled"}
     assert saved.providers.openai.extra_body == {"service_tier": "priority"}
     assert saved.providers.openai.extra_query == {"trace": "true"}
@@ -1071,7 +1075,7 @@ def test_update_provider_settings_updates_and_clears_oauth_proxy(
 ) -> None:
     config_path = tmp_path / "config.json"
     config = Config()
-    getattr(config.providers, config_attr).proxy = "http://127.0.0.1:7000"
+    config.network.proxy = "http://127.0.0.1:7890"
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     monkeypatch.setattr(
@@ -1087,24 +1091,24 @@ def test_update_provider_settings_updates_and_clears_oauth_proxy(
     payload = update_provider_settings(
         {
             "provider": [provider_name],
-            "proxy": [" http://127.0.0.1:7890 "],
+            "use_proxy": ["true"],
             "extraBody": [json.dumps({"tools": []})],
         }
     )
 
     providers = {row["name"]: row for row in payload["providers"]}
-    assert providers[provider_name]["proxy"] == "http://127.0.0.1:7890"
-    assert getattr(load_config(config_path).providers, config_attr).proxy == (
-        "http://127.0.0.1:7890"
-    )
+    assert providers[provider_name]["use_proxy"] is True
+    assert getattr(load_config(config_path).providers, config_attr).use_proxy is True
+    assert load_config(config_path).network.proxy == "http://127.0.0.1:7890"
     assert providers[provider_name]["extra_body"] == {"tools": []}
     assert getattr(load_config(config_path).providers, config_attr).extra_body == {"tools": []}
 
-    cleared = update_provider_settings({"provider": [provider_name], "proxy": ["  "]})
+    cleared = update_provider_settings({"provider": [provider_name], "use_proxy": ["false"]})
 
     providers = {row["name"]: row for row in cleared["providers"]}
-    assert providers[provider_name]["proxy"] is None
-    assert getattr(load_config(config_path).providers, config_attr).proxy is None
+    assert providers[provider_name]["use_proxy"] is False
+    assert getattr(load_config(config_path).providers, config_attr).use_proxy is False
+    assert load_config(config_path).network.proxy == "http://127.0.0.1:7890"
 
 
 def test_update_provider_settings_keeps_oauth_credentials_read_only(
@@ -1115,7 +1119,7 @@ def test_update_provider_settings_keeps_oauth_credentials_read_only(
     save_config(Config(), config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
-    with pytest.raises(WebUISettingsError, match="only supports proxy and extra_body settings"):
+    with pytest.raises(WebUISettingsError, match="only supports use_proxy and extra_body settings"):
         update_provider_settings({"provider": ["openai_codex"], "apiKey": ["not-allowed"]})
 
 
@@ -1930,7 +1934,7 @@ def test_openai_codex_oauth_login_passes_configured_proxy(
     proxy = "http://127.0.0.1:23458"
     config_path = tmp_path / "config.json"
     save_config(
-        Config.model_validate({"providers": {"openaiCodex": {"proxy": "${CODEX_PROXY_TEST}"}}}),
+        Config.model_validate({"network": {"proxy": "${CODEX_PROXY_TEST}"}, "providers": {"openaiCodex": {"useProxy": True}}}),
         config_path,
     )
     monkeypatch.setenv("CODEX_PROXY_TEST", proxy)
@@ -2112,7 +2116,7 @@ def test_xai_grok_login_starts_fresh_browser_flow_with_proxy(
 ) -> None:
     proxy = "http://127.0.0.1:23458"
     config_path = tmp_path / "config.json"
-    save_config(Config.model_validate({"providers": {"xaiGrok": {"proxy": proxy}}}), config_path)
+    save_config(Config.model_validate({"network": {"proxy": proxy}, "providers": {"xaiGrok": {"useProxy": True}}}), config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     captured: dict[str, object] = {}
 

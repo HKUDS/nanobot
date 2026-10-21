@@ -69,13 +69,14 @@ def _make_provider_core(
     p = setup.provider_config
     spec = setup.spec
     backend = setup.backend
+    proxy = config.network.resolve_proxy(p.use_proxy) if p else None
 
     if backend == "openai_codex":
         from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 
         provider = OpenAICodexProvider(
             default_model=model,
-            proxy=getattr(p, "proxy", None) if p else None,
+            proxy=proxy,
             extra_body=p.extra_body if p else None,
             provider_name=provider_name,
         )
@@ -84,7 +85,7 @@ def _make_provider_core(
 
         provider = XAIGrokProvider(
             default_model=model,
-            proxy=getattr(p, "proxy", None) if p else None,
+            proxy=proxy,
             extra_body=p.extra_body if p else None,
             provider_name=provider_name,
         )
@@ -120,7 +121,7 @@ def _make_provider_core(
             extra_headers=_provider_extra_headers(spec, p),
             extra_body=p.extra_body if p else None,
             extra_query=p.extra_query if p else None,
-            proxy=p.proxy if p else None,
+            proxy=proxy,
             spec=custom_spec,
             provider_name=provider_name,
         )
@@ -148,7 +149,7 @@ def _make_provider_core(
             extra_body=p.extra_body if p else None,
             model_api=setup.model_api,
             extra_query=p.extra_query if p else None,
-            proxy=p.proxy if p else None,
+            proxy=proxy,
             provider_name=provider_name,
         )
 
@@ -261,7 +262,7 @@ def _preset_provider_signature(
         preset.reasoning_effort,
         preset.context_window_tokens,
         preset.api.model_dump_json() if preset.api is not None else None,
-        getattr(provider_config, "proxy", None) if provider_config else None,
+        config.network.resolve_proxy(provider_config.use_proxy) if provider_config else None,
         provider_config.thinking_style if provider_config else None,
     )
 

@@ -8,9 +8,7 @@ from nanobot.channels.plugin import ChannelPlugin
 SETUP_SPEC = ChannelSetupSpec(
     fields={
         "token": field("secret"),
-        "proxy": field(),
-        "proxyUsername": field(),
-        "proxyPassword": field("secret"),
+        "useProxy": field("bool", default=False),
         "allowFrom": field("list", snapshot=False),
         "allowChannels": field("list"),
         "groupPolicy": field("enum", choices=DIRECT_GROUP_POLICIES, default="mention"),

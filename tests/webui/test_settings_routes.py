@@ -457,9 +457,10 @@ async def test_mcp_oauth_start_uses_gateway_callback_and_requires_api_auth(monke
         auth="oauth",
         url="https://app.xmind.com/api/mcp",
     )
+    network = SimpleNamespace(proxy="http://shared.example:8080")
     monkeypatch.setattr(
         "nanobot.webui.settings_routes.ensure_mcp_oauth_server",
-        lambda _query, *, config_path=None: ("xmind", config),
+        lambda _query, *, config_path=None: ("xmind", config, network),
     )
     router = _router()
     start = AsyncMock(return_value={
@@ -484,6 +485,7 @@ async def test_mcp_oauth_start_uses_gateway_callback_and_requires_api_auth(monke
         config,
         "https://gateway.example/auth/mcp/callback",
         reload_mcp=ANY,
+        network=network,
         reset_credentials=False,
     )
 
@@ -1040,3 +1042,38 @@ async def test_image_switch_round_trip_clears_restart(tmp_path, enabled):
     reverted = await router.dispatch(None, _mutation_request(path, {"enabled": enabled}), path)
     assert json.loads(reverted.body)["requires_restart"] is False
     assert json.loads(reverted.body)["restart_required_sections"] == []
+
+
+@pytest.mark.asyncio
+async def test_first_mcp_oauth_request_saves_proxy_flag_before_starting_flow(tmp_path) -> None:
+    from nanobot.config.loader import load_config
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({
+        "network": {"proxy": "http://shared.example:8080"},
+        "agents": {"defaults": {"workspace": str(tmp_path / "workspace")}},
+    }), encoding="utf-8")
+    router = _router(config_path=config_path)
+    captured = {}
+
+    async def start(name, cfg, redirect_uri, *, reload_mcp, network, reset_credentials):
+        saved = load_config(config_path)
+        assert name == "xmind"
+        assert cfg.auth == "oauth"
+        assert cfg.use_proxy is True
+        assert saved.tools.mcp_servers[name].use_proxy is True
+        assert network == saved.network
+        captured["network"] = network.proxy
+        return {"status": "authorization_required", "name": name, "flow_id": "first-flow"}
+
+    router._mcp_oauth = SimpleNamespace(start=start)
+    request = _mutation_request(
+        "/api/settings/mcp-oauth/start",
+        {"name": "xmind", "use_proxy": True},
+    )
+    response = await router.dispatch(None, request, "/api/settings/mcp-oauth/start")
+
+    assert response is not None
+    assert response.status_code == 200
+    assert json.loads(response.body)["flow_id"] == "first-flow"
+    assert captured == {"network": "http://shared.example:8080"}

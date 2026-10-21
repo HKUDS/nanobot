@@ -18,6 +18,7 @@ const xmindMcpPreset = {
   docs_url: "https://xmind.com/user-guide/xmind-mcp",
   transport: "streamableHttp",
   auth: "oauth" as const,
+  use_proxy: false,
   requires: "Xmind account",
   note: "Connects securely in your browser with Xmind OAuth.",
   install_supported: true,
@@ -32,6 +33,12 @@ const xmindMcpPreset = {
   enabled_tools: ["*"],
   source: "preset",
 };
+
+async function connectXmind() {
+  fireEvent.click(await screen.findByRole("button", { name: "Connect Xmind" }));
+  const dialog = await screen.findByRole("dialog", { name: "Xmind" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Connect" }));
+}
 
 describe("SettingsView Apps catalog", () => {
   installSettingsViewTestHooks();
@@ -85,14 +92,14 @@ describe("SettingsView Apps catalog", () => {
 
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.mcp.oauth_start",
-      { name: "metabase", mcp_url: "https://analytics.example.com/api/metabase-mcp" },
+      { name: "metabase", mcp_url: "https://analytics.example.com/api/metabase-mcp", use_proxy: "false" },
       expect.any(Number),
     ));
   });
 
 
 
-  it("connects an OAuth MCP from the Apps catalog without manual callback input", async () => {
+  it("sets the proxy flag before the first OAuth request, even with no credential fields", async () => {
     let connected = false;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -110,6 +117,7 @@ describe("SettingsView Apps catalog", () => {
               available: true,
               status: "configured",
               connection_summary: "https://app.xmind.com/api/mcp",
+              use_proxy: true,
             }
             : xmindMcpPreset],
           installed_count: connected ? 1 : 0,
@@ -164,6 +172,17 @@ describe("SettingsView Apps catalog", () => {
     const connectButton = await screen.findByRole("button", { name: "Connect Xmind" });
     expect(connectButton).toHaveTextContent("Connect");
     fireEvent.click(connectButton);
+    const dialog = await screen.findByRole("dialog", { name: "Xmind" });
+    expect(open).not.toHaveBeenCalled();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    const useProxy = within(dialog).getByRole("switch", { name: "Use proxy" });
+    expect(useProxy).not.toBeChecked();
+    expect(within(dialog).queryByRole("textbox", { name: /proxy/i })).not.toBeInTheDocument();
+    fireEvent.click(useProxy);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Connect" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.mcp.oauth_start", { name: "xmind", use_proxy: "true" }, 30_000,
+    ));
 
     expect(open).toHaveBeenCalledWith(
       "about:blank",
@@ -185,6 +204,9 @@ describe("SettingsView Apps catalog", () => {
     expect(await screen.findByRole("button", { name: "Manage Xmind" }, { timeout: 2500 }))
       .toHaveTextContent("Manage");
     expect(popup.close).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Manage Xmind" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Connection" }));
+    expect(screen.getByRole("switch", { name: "Use proxy" })).toBeChecked();
     expect(replace).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/settings/mcp-oauth/status?flow_id=flow-123",
@@ -250,7 +272,7 @@ describe("SettingsView Apps catalog", () => {
 
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.mcp.oauth_start",
-      { name: "xmind", reset: true },
+      { name: "xmind", reset: true, use_proxy: "false" },
       30_000,
     ));
     await act(() => i18n.changeLanguage("en"));
@@ -405,6 +427,7 @@ describe("SettingsView Apps catalog", () => {
       display_name: "team-mcp",
       source: "custom",
       installed: true,
+      use_proxy: true,
       status: "authorization_required",
       connection_summary: "https://mcp.example.com/mcp",
     };
@@ -464,6 +487,7 @@ describe("SettingsView Apps catalog", () => {
       screen.getByText("Save the server, then select Connect to sign in."),
     ).toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole("switch", { name: "Use proxy" }));
     fireEvent.click(screen.getByRole("button", { name: "Save MCP server" }));
 
     await waitFor(() => {
@@ -477,12 +501,15 @@ describe("SettingsView Apps catalog", () => {
         transport: "streamableHttp",
         url: "https://mcp.example.com/mcp",
         auth: "oauth",
+        use_proxy: "true",
       });
       expect(values).not.toHaveProperty("headers");
       expect(saveCall?.[2]).toBe(20_000);
     });
-    expect(await screen.findByRole("button", { name: "Connect team-mcp" }))
-      .toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Connect team-mcp" }));
+    const connection = await screen.findByRole("dialog", { name: "team-mcp" });
+    expect(within(connection).getByRole("switch", { name: "Use proxy" })).toBeChecked();
+    expect(requestMutationMock).not.toHaveBeenCalledWith("settings.mcp.oauth_start", expect.anything(), expect.anything());
   });
 
   it("offers a pasted callback flow when the remote WebUI uses HTTP", async () => {
@@ -561,7 +588,7 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "apps" });
     fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Connect Xmind" }));
+    await connectXmind();
 
     const callbackInput = await screen.findByRole("textbox", { name: "Callback URL" });
     expect(screen.getByText(/localhost page will not load/i)).toBeInTheDocument();
@@ -628,7 +655,7 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "apps" });
     fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Connect Xmind" }));
+    await connectXmind();
 
     const cancelButton = await screen.findByRole("button", { name: "Cancel" });
     expect(screen.getByRole("button", { name: "Connecting Xmind" })).toBeInTheDocument();
@@ -734,7 +761,7 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "apps" });
     fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Connect Xmind" }));
+    await connectXmind();
 
     const continueButton = await screen.findByRole("button", { name: "Continue sign-in" });
     expect(screen.getByRole("status")).toHaveTextContent("Open the sign-in page to continue.");
@@ -804,7 +831,7 @@ describe("SettingsView Apps catalog", () => {
 
     renderSettingsView({ initialSection: "apps" });
     fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Connect Xmind" }));
+    await connectXmind();
 
     await waitFor(() => expect(statusCalls).toBe(1), { timeout: 2000 });
     expect(screen.getByRole("status")).toHaveTextContent(

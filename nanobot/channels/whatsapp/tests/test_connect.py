@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from nanobot.channels.whatsapp.connect import WhatsAppConnectStore
+from nanobot.config.schema import Config
 
 
 class _FakeClient:
@@ -359,3 +360,18 @@ async def test_cancel_during_finalize_does_not_promote_login_database(
     assert target.read_bytes() == b"working-session"
     assert not Path(channel.config.database_path).exists()
     assert store.has_pending_work is False
+
+
+def test_connect_builds_channel_with_shared_network_settings(monkeypatch, tmp_path) -> None:
+    database = tmp_path / "neonize.db"
+    config = Config.model_validate({
+        "network": {"proxy": "http://127.0.0.1:7890"},
+        "channels": {"whatsapp": {"useProxy": True, "databasePath": str(database)}},
+    })
+    monkeypatch.setattr("nanobot.channels.whatsapp.connect.load_config", lambda: config)
+
+    channel, target = WhatsAppConnectStore._build_channel()
+
+    assert channel.network is config.network
+    assert channel.config.use_proxy is True
+    assert target == database

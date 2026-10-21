@@ -2,7 +2,6 @@
 
 import re
 from typing import Any, cast
-from urllib.parse import urlparse
 
 import httpx
 
@@ -12,25 +11,13 @@ from nanobot.channels.validation import (
     message_from_response,
     payload,
     required_checks,
+    resolve_proxy,
     status_from_checks,
     string_value,
 )
 from nanobot.config.loader import resolve_env_refs
 
 _TIMEOUT_SECONDS = 4.0
-_SUPPORTED_PROXY_SCHEMES = {"http", "https", "socks5", "socks5h"}
-
-
-def _proxy_url_is_valid(proxy: str) -> bool:
-    if "://" not in proxy:
-        proxy = f"http://{proxy}"
-    try:
-        parsed = urlparse(proxy)
-        hostname = parsed.hostname
-        parsed.port
-    except ValueError:
-        return False
-    return parsed.scheme.lower() in _SUPPORTED_PROXY_SCHEMES and bool(hostname)
 
 
 def _get_me(token: str, proxy: str | None) -> dict[str, Any]:
@@ -46,12 +33,15 @@ def _get_me(token: str, proxy: str | None) -> dict[str, Any]:
     return cast(dict[str, Any], data) if isinstance(data, dict) else {}
 
 
-def validate(values: dict[str, Any], _context: ChannelValidationContext) -> dict[str, Any]:
+def validate(values: dict[str, Any], context: ChannelValidationContext) -> dict[str, Any]:
     checks, missing = required_checks("telegram", values)
+    try:
+        proxy = resolve_proxy(values, context)
+    except ValueError as exc:
+        checks.append(check("network_proxy", "Network proxy", "fail", str(exc)))
+        return status_from_checks("telegram", checks, missing)
     raw_token = string_value(values.get("token"))
-    raw_proxy = string_value(values.get("proxy"))
     token = string_value(resolve_env_refs(raw_token))
-    proxy = string_value(resolve_env_refs(raw_proxy))
     if raw_token and not token:
         checks.append(
             check(
@@ -61,26 +51,7 @@ def validate(values: dict[str, Any], _context: ChannelValidationContext) -> dict
                 "Set every environment variable referenced by the bot token.",
             )
         )
-    if raw_proxy and not proxy:
-        checks.append(
-            check(
-                "proxy_env",
-                "Proxy environment variable",
-                "fail",
-                "Set every environment variable referenced by the network proxy.",
-            )
-        )
-    if (raw_token and not token) or (raw_proxy and not proxy):
-        return status_from_checks("telegram", checks, missing)
-    if proxy and not _proxy_url_is_valid(proxy):
-        checks.append(
-            check(
-                "proxy_format",
-                "Network proxy",
-                "fail",
-                "Enter a valid HTTP or SOCKS proxy.",
-            )
-        )
+    if raw_token and not token:
         return status_from_checks("telegram", checks, missing)
     if token:
         if not re.match(r"^\d+:[A-Za-z0-9_-]{20,}$", token):

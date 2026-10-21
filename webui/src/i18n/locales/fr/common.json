@@ -491,6 +491,10 @@
       "description": "Vos modifications sont enregistrées. Redémarrez pour les appliquer.",
       "later": "Redémarrer plus tard"
     },
+    "network": {
+      "useProxy": "Utiliser le proxy",
+      "useProxyHelp": "Utilise le proxy partagé des réglages avancés."
+    },
     "runtimeConfig": {
       "apiSaved": "Enregistré. Redémarrez le service API pour appliquer les modifications.",
       "commandRuntime": {
@@ -528,7 +532,8 @@
         "tools_exec_allowed_env_keys": {"label": "Variables d’environnement", "help": "Variables supplémentaires transmises aux commandes, un nom par ligne.\n\nVariables supplémentaires à transmettre aux commandes, une par ligne. Les variables nécessaires au fonctionnement restent disponibles."},
         "tools_exec_allow_patterns": {"label": "Commandes autorisées", "help": "Exécutez seulement les commandes correspondant entièrement aux règles d’autorisation.\n\nUne expression régulière par ligne. Si cette liste est renseignée, chaque segment de commande doit correspondre entièrement à une règle. Les commandes autorisées échappent aux règles de blocage intégrées et personnalisées, mais restent soumises aux restrictions réseau et d’espace de travail."},
         "tools_exec_deny_patterns": {"label": "Commandes bloquées", "help": "Bloquez les commandes correspondant à ces règles.\n\nExpressions régulières de blocage supplémentaires, une par ligne. Les règles d’autorisation explicites ont priorité sur ces règles et sur les protections intégrées."},
-        "tools_web_proxy": {"label": "Proxy web", "help": "Utilisé pour la recherche web et la lecture de pages par l’agent. Laissez vide pour utiliser le réseau par défaut, y compris les variables d’environnement du proxy.\n\n127.0.0.1 désigne la machine qui exécute nanobot. Ce réglage ne change pas les connexions des modèles, de MCP ou du navigateur."},
+        "network_proxy": {"label": "Proxy partagé", "help": "Adresse utilisée par les fonctions dont le proxy est activé. 127.0.0.1 désigne la machine qui exécute nanobot."},
+        "tools_web_use_proxy": {"label": "Utiliser le proxy", "help": "Utiliser le proxy partagé pour la recherche web et la lecture de pages."},
         "tools_web_user_agent": {"label": "En-tête User-Agent", "help": "User-Agent des requêtes web ; laissez vide pour la valeur par défaut.\n\nEn-tête User-Agent personnalisé. Laissez vide pour utiliser la valeur par défaut."},
         "tools_restrict_to_workspace": {"label": "Restriction de l’espace", "help": "Limites globales de l’espace ; les permissions WebUI sont réglées séparément.\n\nRègle globale des outils. Les autorisations de chaque conversation WebUI sont distinctes."},
         "tools_ssrf_whitelist": {"label": "IP autorisées", "help": "IP ou plages CIDR autorisées, une par ligne.\n\nAdresses IP ou plages CIDR exemptées de la protection des requêtes sortantes, une par ligne."},
@@ -552,7 +557,8 @@
         "sessions": {"title": "Conversations", "help": "Configurez les discussions partagées entre plateformes."},
         "tools": {"title": "Outils intégrés", "help": "Choisissez les outils accessibles à l’agent."},
         "shell": {"title": "Shell et bac à sable", "help": "Réglez les délais, l’environnement et les règles d’accès des commandes."},
-        "network": {"title": "Connexions web", "help": "Réglez le proxy et le User-Agent.\n\nProxy et identification des requêtes web."},
+        "proxy": {"title": "Proxy partagé", "help": "Définissez une adresse pour les fonctions utilisant un proxy."},
+        "network": {"title": "Connexions web", "help": "Réglez l’utilisation du proxy et le User-Agent des requêtes web."},
         "safety": {"title": "Permissions globales", "help": "Réglez les limites de l’espace, les exceptions réseau et les installations distantes.\n\nRestrictions de l’espace de travail, réseaux privés et installations à distance."},
         "cli": {"title": "Limites CLI", "help": "Réglez les délais d’installation et d’exécution, et la durée du cache.\n\nDélais d’installation, d’exécution et de cache du catalogue."},
         "gateway": {"title": "Passerelle", "help": "Réglez le déploiement et le redémarrage."},
@@ -949,7 +955,6 @@
       "defaultAPIDescription": "Les préréglages définis sur Auto utilisent cette API. Chaque préréglage peut choisir une autre API de la liste des API prises en charge.",
       "declareAPIs": "Définir les API prises en charge",
       "openaiDefaultAPIDescription": "Définit l’API par défaut des préréglages utilisant Auto. Ici, Auto suit les règles connues du modèle. Chaque préréglage peut modifier ce choix.",
-      "proxy": "Proxy réseau",
       "thinkingStyle": "Format du raisonnement",
       "region": "Région",
       "profile": "Profil AWS",
@@ -1588,9 +1593,6 @@
       "signInBeforeSaving": "Connectez-vous à ce fournisseur avant d’enregistrer le préréglage.",
       "signedIn": "Connecté",
       "notSignedIn": "Non connecté",
-      "proxyLabel": "Proxy réseau",
-      "proxySaveBeforeSignIn": "Enregistrez les modifications du proxy avant de vous connecter.",
-      "saveProxy": "Enregistrer le proxy",
       "localCodeHelp": "Terminez la connexion dans votre navigateur. nanobot termine généralement automatiquement ; sinon, collez le code d’autorisation ci-dessous.",
       "remoteCodeHelp": "Sélectionnez Se connecter pour ouvrir xAI sur votre ordinateur. Après la connexion, collez ci-dessous le code d’autorisation affiché par xAI.",
       "localCallbackHelp": "Terminez la connexion dans votre navigateur. nanobot termine généralement automatiquement ; sinon, copiez l’URL complète de rappel localhost depuis la barre d’adresse et collez-la ci-dessous.",

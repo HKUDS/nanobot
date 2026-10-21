@@ -491,6 +491,10 @@
       "description": "更改已保存，重启后生效。",
       "later": "稍后重启"
     },
+    "network": {
+      "useProxy": "使用代理",
+      "useProxyHelp": "使用高级设置中的共享代理。"
+    },
     "runtimeConfig": {
       "apiSaved": "已保存，重启 API 服务后生效。",
       "commandRuntime": {
@@ -609,9 +613,13 @@
           "label": "禁止命令",
           "help": "阻止匹配规则的命令\n\n每行一个正则表达式，与内置拒绝规则一同检查。完整匹配允许规则的命令会跳过这些检查。"
         },
-        "tools_web_proxy": {
-          "label": "网页代理",
-          "help": "用于智能体搜索和读取网页。留空使用默认网络设置，包括环境变量中的代理。\n\n127.0.0.1 指运行 nanobot 的机器，不是打开网页的手机。本设置不影响模型、MCP 或浏览器的连接。"
+        "network_proxy": {
+          "label": "共享代理",
+          "help": "启用“使用代理”的功能共用此地址。127.0.0.1 指运行 nanobot 的设备。"
+        },
+        "tools_web_use_proxy": {
+          "label": "使用代理",
+          "help": "网页搜索和读取使用共享代理。"
         },
         "tools_web_user_agent": {
           "label": "User-Agent",
@@ -699,9 +707,13 @@
           "title": "Shell 与沙箱",
           "help": "设置命令超时、环境和访问规则"
         },
+        "proxy": {
+          "title": "共享代理",
+          "help": "为使用代理的功能设置共享地址。"
+        },
         "network": {
           "title": "网页连接",
-          "help": "设置代理和 User-Agent\n\n设置网页访问代理和 User-Agent 标识。"
+          "help": "设置网页请求的代理开关和 User-Agent。"
         },
         "safety": {
           "title": "全局权限",
@@ -1379,7 +1391,6 @@
       "defaultAPIDescription": "预设选择「自动」时使用此协议。单个预设可改用支持列表中的其他协议。",
       "declareAPIs": "设置支持的协议",
       "openaiDefaultAPIDescription": "设为「自动」的预设使用此默认协议。此处选择「自动」会遵循已知模型规则；单个预设可以覆盖此默认值。",
-      "proxy": "网络代理",
       "thinkingStyle": "推理格式",
       "region": "区域",
       "profile": "AWS 配置名称",
@@ -1788,9 +1799,6 @@
       "signInBeforeSaving": "请先登录此提供商，再保存模型预设。",
       "signedIn": "已登录",
       "notSignedIn": "未登录",
-      "proxyLabel": "网络代理",
-      "proxySaveBeforeSignIn": "请先保存代理更改再登录。",
-      "saveProxy": "保存代理",
       "localCodeHelp": "请在浏览器中完成登录。若 nanobot 未自动完成连接，请将授权码粘贴到下方。",
       "remoteCodeHelp": "点击“登录”在你的电脑上打开 xAI。完成登录后，请将 xAI 显示的授权码粘贴到下方。",
       "localCallbackHelp": "请在浏览器中完成登录。若 nanobot 未自动完成连接，请复制地址栏中完整的 localhost 回调地址，粘贴到下方。",

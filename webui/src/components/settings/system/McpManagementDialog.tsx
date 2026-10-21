@@ -15,12 +15,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input, SearchInput } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import type { McpPresetInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export type McpManagementTab = "overview" | "tools" | "connection";
 
-type McpAction = "enable" | "disable" | "remove" | "test" | "reconnect";
+type McpAction = "enable" | "disable" | "remove" | "test" | "reconnect" | "proxy";
 
 interface McpManagementDialogProps {
   preset: McpPresetInfo;
@@ -68,9 +69,14 @@ export function McpManagementDialog({
   const enableBusy = actionKey === `enable:${preset.name}`;
   const toolsBusy = actionKey === `tools:${preset.name}`;
   const oauthBusy = actionKey === `oauth:${preset.name}`;
-  const busy = testBusy || reconnectBusy || removeBusy || enableBusy || toolsBusy || oauthBusy;
+  const proxyBusy = actionKey === `proxy:${preset.name}`;
+  const busy = testBusy || reconnectBusy || removeBusy || enableBusy || toolsBusy || oauthBusy || proxyBusy;
   const configuredInstalled = preset.installed && preset.configured;
   const isOAuth = preset.auth === "oauth";
+  const remote = preset.transport !== "stdio";
+  const useProxy = values.use_proxy ?? String(preset.use_proxy ?? false);
+  const proxyDirty = remote && useProxy !== String(preset.use_proxy ?? false);
+  const connectionValues = remote ? { ...values, use_proxy: useProxy } : values;
   const inspectionRequestedRef = useRef(false);
   const allowAllTools = draftEnabledTools.includes("*");
   const selectedTools = new Set(allowAllTools ? toolNames : draftEnabledTools);
@@ -115,10 +121,14 @@ export function McpManagementDialog({
   const connect = () => {
     onOpenChange(false);
     if (isOAuth) {
-      onOAuthConnect(preset.name, configuredInstalled, values);
+      onOAuthConnect(preset.name, configuredInstalled, connectionValues);
       return;
     }
-    onAction(configuredInstalled ? "reconnect" : "enable", preset.name, values);
+    if (configuredInstalled && proxyDirty) {
+      onAction("proxy", preset.name, { use_proxy: useProxy });
+      return;
+    }
+    onAction(configuredInstalled ? "reconnect" : "enable", preset.name, configuredInstalled ? values : connectionValues);
   };
 
   const inspectTools = () => {
@@ -220,7 +230,7 @@ export function McpManagementDialog({
           ) : (
             <ConnectionPanel
               preset={preset}
-              values={values}
+              values={connectionValues}
               busy={busy}
               connectBusy={reconnectBusy || enableBusy || oauthBusy}
               removeBusy={removeBusy}
@@ -234,6 +244,23 @@ export function McpManagementDialog({
             />
           )}
         </div>
+
+        {tab === "connection" && preset.installed && proxyDirty ? (
+          <div className="flex shrink-0 items-center justify-end border-t border-border/45 bg-background/95 px-5 py-3 sm:px-6">
+            <Button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                onOpenChange(false);
+                onAction("proxy", preset.name, { use_proxy: useProxy });
+              }}
+              className="h-9 rounded-full px-4 text-[13px] font-semibold"
+            >
+              {proxyBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : null}
+              {tx("settings.mcp.applyChanges", "Apply changes")}
+            </Button>
+          </div>
+        ) : null}
 
         {tab === "tools" && toolsDirty ? (
           <div className="flex shrink-0 items-center justify-end border-t border-border/45 bg-background/95 px-5 py-3 sm:px-6">
@@ -596,6 +623,21 @@ function ConnectionPanel({
       {preset.error ? (
         <div role="alert" className="rounded-control bg-destructive/10 px-3.5 py-3 text-[12.5px] leading-5 text-destructive">
           {preset.error}
+        </div>
+      ) : null}
+
+      {preset.transport !== "stdio" ? (
+        <div className="flex items-center justify-between gap-4 rounded-control bg-muted/40 px-4 py-3.5">
+          <div className="min-w-0">
+            <p className="text-[13px] font-medium text-foreground">{t("settings.network.useProxy")}</p>
+            <p className="mt-1 text-[12px] text-muted-foreground">{t("settings.network.useProxyHelp")}</p>
+          </div>
+          <ToggleButton
+            checked={values.use_proxy === "true"}
+            disabled={busy}
+            onChange={(checked) => onFieldChange(preset.name, "use_proxy", String(checked))}
+            label={t("settings.network.useProxy")}
+          />
         </div>
       ) : null}
 

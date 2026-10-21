@@ -416,7 +416,7 @@ class WebSearchTool(Tool):
             config_loader = _load_search_config
         return cls(
             config=ctx.config.web.search,
-            proxy=ctx.config.web.proxy,
+            proxy=ctx.network.resolve_proxy(ctx.config.web.use_proxy),
             user_agent=ctx.config.web.user_agent,
             config_loader=config_loader,
         )
@@ -1296,7 +1296,7 @@ class WebFetchTool(Tool):
     def create(cls, ctx: ToolContext) -> Tool:
         return cls(
             config=ctx.config.web.fetch,
-            proxy=ctx.config.web.proxy,
+            proxy=ctx.network.resolve_proxy(ctx.config.web.use_proxy),
             user_agent=ctx.config.web.user_agent,
         )
 

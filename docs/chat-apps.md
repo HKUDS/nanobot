@@ -127,7 +127,7 @@ See the [native Linear agent guide](./guides/linear-agent.md) for the complete s
 
 1. Create a bot with `@BotFather` and copy its token.
 2. Run `nanobot webui`, then open **Channels → Telegram**.
-3. Paste the token. If the gateway cannot reach Telegram directly, expand **Advanced** and add an HTTP or SOCKS proxy.
+3. Paste the token. If the gateway cannot reach Telegram directly, set the address in **Settings → Advanced → Shared proxy**, then enable **Use proxy** in Telegram's advanced options.
 4. Save and enable Telegram, then send the bot a direct message.
 
 The configuration badge means nanobot found a saved token. The live connection check is separate, so a temporary Telegram or proxy outage does not make an existing configuration disappear. Saved tokens and proxy URLs remain masked.
@@ -161,13 +161,14 @@ nanobot plugins enable telegram
 }
 ```
 
-If the gateway cannot reach Telegram directly, add a proxy to the same section:
+If the gateway cannot reach Telegram directly, set the shared address and enable it for Telegram:
 
 ```json
 {
+  "network": { "proxy": "http://127.0.0.1:7890" },
   "channels": {
     "telegram": {
-      "proxy": "http://127.0.0.1:7890"
+      "useProxy": true
     }
   }
 }

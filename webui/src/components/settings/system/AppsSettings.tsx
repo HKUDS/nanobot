@@ -53,6 +53,7 @@ import {
 import { Input, SearchInput } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Textarea } from "@/components/ui/textarea";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import { SettingsTextEditor } from "@/components/settings/shared/SettingsTextEditor";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { isGenericRepositoryLogoUrl, logoFallbackUrls } from "@/lib/provider-brand";
@@ -84,6 +85,7 @@ export interface CustomMcpForm {
   env: string;
   headers: string;
   toolTimeout: string;
+  useProxy: boolean;
 }
 
 export const DEFAULT_CUSTOM_MCP_FORM: CustomMcpForm = {
@@ -96,6 +98,7 @@ export const DEFAULT_CUSTOM_MCP_FORM: CustomMcpForm = {
   env: "",
   headers: "",
   toolTimeout: "30",
+  useProxy: false,
 };
 
 export function AppsCatalogSettings({
@@ -172,7 +175,7 @@ export function AppsCatalogSettings({
   onQueryChange: (value: string) => void;
   onFilterChange: (value: AppsKindFilter) => void;
   onCliAction: (action: "install" | "update" | "uninstall" | "test", name: string) => void;
-  onMcpAction: (action: "enable" | "disable" | "remove" | "test" | "reconnect", name: string, values?: Record<string, string>) => void;
+  onMcpAction: (action: "enable" | "disable" | "remove" | "test" | "reconnect" | "proxy", name: string, values?: Record<string, string>) => void;
   onMcpOAuthConnect: (name: string, reset?: boolean, values?: Record<string, string>) => void;
   onMcpOAuthCancel: () => void;
   onMcpOAuthOpen: () => void;
@@ -526,7 +529,7 @@ function McpAppsCatalogRow({
   showBrandLogos: boolean;
   showTypeBadge: boolean;
   onFieldChange: (presetName: string, fieldName: string, value: string) => void;
-  onAction: (action: "enable" | "disable" | "remove" | "test" | "reconnect", name: string, values?: Record<string, string>) => void;
+  onAction: (action: "enable" | "disable" | "remove" | "test" | "reconnect" | "proxy", name: string, values?: Record<string, string>) => void;
   onOAuthConnect: (name: string, reset?: boolean, values?: Record<string, string>) => void;
   onOAuthCancel: () => void;
   onOAuthOpen: () => void;
@@ -552,7 +555,8 @@ function McpAppsCatalogRow({
   const toolsBusy = actionKey === `tools:${preset.name}`;
   const oauthBusy = actionKey === `oauth:${preset.name}`;
   const anotherOAuthBusy = Boolean(actionKey?.startsWith("oauth:")) && !oauthBusy;
-  const busy = enableBusy || disableBusy || removeBusy || testBusy || reconnectBusy || toolsBusy || oauthBusy;
+  const proxyBusy = actionKey === `proxy:${preset.name}`;
+  const busy = enableBusy || disableBusy || removeBusy || testBusy || reconnectBusy || toolsBusy || oauthBusy || proxyBusy;
   const agentPlugin = preset.source === "agent-plugin";
   const toggleable = preset.enabled !== undefined;
   const isOAuth = preset.auth === "oauth";
@@ -583,7 +587,7 @@ function McpAppsCatalogRow({
   const callbackErrorId = `${callbackInputId}-error`;
 
   const enableOrOpenSetup = () => {
-    if (needsSetupInput || (preset.installed && !preset.configured && hasFields)) {
+    if (preset.transport !== "stdio" || needsSetupInput || (preset.installed && !preset.configured && hasFields)) {
       setManagementTab("connection");
       setManagementOpen(true);
       return;
@@ -709,7 +713,7 @@ function McpAppsCatalogRow({
                   defaultValue: "Manage {{name}}",
                 })}
                 visibleLabel={tx("settings.mcp.manage", "Manage")}
-                busy={testBusy || toolsBusy || removeBusy || reconnectBusy}
+                busy={testBusy || toolsBusy || removeBusy || reconnectBusy || proxyBusy}
                 disabled={busy}
                 tone={runtimeConnected ? "installed" : "default"}
                 onClick={() => openManagement("overview")}
@@ -741,7 +745,7 @@ function McpAppsCatalogRow({
               visibleLabel={hasFields ? tx("settings.mcp.configure", "Connect") : tx("settings.mcp.enable", "Enable")}
               busy={enableBusy}
               onClick={() => {
-                if (hasFields) openManagement("connection");
+                if (hasFields || preset.transport !== "stdio") openManagement("connection");
                 else onAction("enable", preset.name, values);
               }}
             />
@@ -1157,6 +1161,21 @@ function McpCustomServerPanel({
                   )}
                 </p>
               ) : null}
+            </div>
+          ) : null}
+
+          {remote ? (
+            <div className="mt-3 flex items-center justify-between gap-4 rounded-control bg-background/55 px-3 py-3">
+              <div className="min-w-0">
+                <p className="text-[13px] font-medium text-foreground">{t("settings.network.useProxy")}</p>
+                <p className="mt-1 text-[12px] text-muted-foreground">{t("settings.network.useProxyHelp")}</p>
+              </div>
+              <ToggleButton
+                checked={form.useProxy}
+                disabled={customBusy}
+                onChange={(useProxy) => update("useProxy", useProxy)}
+                label={t("settings.network.useProxy")}
+              />
             </div>
           ) : null}
 

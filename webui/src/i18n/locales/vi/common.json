@@ -491,6 +491,10 @@
       "description": "Thay đổi đã được lưu. Khởi động lại để áp dụng.",
       "later": "Khởi động lại sau"
     },
+    "network": {
+      "useProxy": "Dùng proxy",
+      "useProxyHelp": "Dùng proxy chung trong phần Nâng cao."
+    },
     "runtimeConfig": {
       "apiSaved": "Đã lưu. Khởi động lại dịch vụ API để áp dụng thay đổi.",
       "commandRuntime": {
@@ -528,7 +532,8 @@
         "tools_exec_allowed_env_keys": {"label": "Biến môi trường", "help": "Thêm biến truyền cho lệnh, mỗi dòng một tên.\n\nCác biến môi trường bổ sung được truyền cho lệnh, mỗi dòng một tên. Các biến cơ bản cần cho hoạt động vẫn được truyền."},
         "tools_exec_allow_patterns": {"label": "Lệnh được phép", "help": "Chỉ chạy lệnh khớp hoàn toàn với quy tắc cho phép.\n\nMỗi dòng một biểu thức chính quy. Khi có quy tắc, từng phần của lệnh phải khớp hoàn toàn với ít nhất một quy tắc. Lệnh được phép sẽ bỏ qua quy tắc chặn tích hợp và bổ sung, nhưng vẫn chịu giới hạn mạng và không gian làm việc."},
         "tools_exec_deny_patterns": {"label": "Lệnh bị chặn", "help": "Chặn lệnh khớp với các quy tắc này.\n\nQuy tắc chặn bổ sung dưới dạng biểu thức chính quy, mỗi dòng một quy tắc. Quy tắc cho phép được ưu tiên hơn cả quy tắc chặn tích hợp và bổ sung."},
-        "tools_web_proxy": {"label": "Proxy web", "help": "Dùng cho tìm kiếm web và đọc trang của tác nhân. Để trống để dùng mạng mặc định, bao gồm các biến môi trường proxy.\n\n127.0.0.1 là máy chạy nanobot. Cài đặt này không thay đổi kết nối mô hình, MCP hoặc trình duyệt."},
+        "network_proxy": {"label": "Proxy chung", "help": "Địa chỉ dùng cho các tính năng đã bật proxy. 127.0.0.1 là máy chạy nanobot."},
+        "tools_web_use_proxy": {"label": "Dùng proxy", "help": "Dùng proxy chung để tìm kiếm web và đọc trang."},
         "tools_web_user_agent": {"label": "Header User-Agent", "help": "User-Agent cho yêu cầu web; để trống để dùng mặc định.\n\nHeader User-Agent tùy chỉnh cho yêu cầu web. Để trống để dùng giá trị mặc định."},
         "tools_restrict_to_workspace": {"label": "Giới hạn vùng làm việc", "help": "Giới hạn vùng làm việc chung; quyền trò chuyện WebUI được đặt riêng.\n\nChính sách công cụ toàn cục. Quyền của từng cuộc trò chuyện WebUI được đặt riêng."},
         "tools_ssrf_whitelist": {"label": "IP được phép", "help": "IP hoặc dải CIDR được phép, mỗi dòng một mục.\n\nIP hoặc dải CIDR được miễn bảo vệ yêu cầu ra ngoài, mỗi dòng một mục."},
@@ -552,7 +557,8 @@
         "sessions": {"title": "Cuộc trò chuyện", "help": "Đặt chia sẻ trò chuyện giữa các nền tảng."},
         "tools": {"title": "Công cụ tích hợp", "help": "Chọn công cụ agent được phép dùng."},
         "shell": {"title": "Shell và sandbox", "help": "Đặt thời hạn lệnh, môi trường và quy tắc truy cập."},
-        "network": {"title": "Kết nối web", "help": "Đặt proxy và User-Agent.\n\nProxy và thông tin nhận dạng yêu cầu web."},
+        "proxy": {"title": "Proxy chung", "help": "Đặt một địa chỉ cho các tính năng dùng proxy."},
+        "network": {"title": "Kết nối web", "help": "Đặt tùy chọn proxy và User-Agent cho yêu cầu web."},
         "safety": {"title": "Quyền chung", "help": "Đặt giới hạn vùng làm việc, ngoại lệ mạng và cài đặt từ xa.\n\nGiới hạn không gian làm việc, mạng riêng và cài đặt từ xa."},
         "cli": {"title": "Giới hạn CLI", "help": "Đặt thời hạn cài đặt, chạy và thời gian cache danh sách.\n\nGiới hạn thời gian cài đặt, thực thi và lưu đệm danh mục."},
         "gateway": {"title": "Gateway", "help": "Đặt cách triển khai và khởi động lại."},
@@ -949,7 +955,6 @@
       "defaultAPIDescription": "Cấu hình sẵn đặt ở Tự động sẽ dùng API này. Mỗi cấu hình sẵn có thể chọn API khác trong danh sách được hỗ trợ.",
       "declareAPIs": "Đặt API được hỗ trợ",
       "openaiDefaultAPIDescription": "Đặt API mặc định cho cấu hình sẵn dùng Tự động. Chọn Tự động tại đây sẽ áp dụng quy tắc đã biết của mô hình. Mỗi cấu hình sẵn có thể thay đổi lựa chọn này.",
-      "proxy": "Proxy mạng",
       "thinkingStyle": "Định dạng suy luận",
       "region": "Khu vực",
       "profile": "Hồ sơ AWS",
@@ -1588,9 +1593,6 @@
       "signInBeforeSaving": "Hãy đăng nhập nhà cung cấp này trước khi lưu cấu hình đặt trước.",
       "signedIn": "Đã đăng nhập",
       "notSignedIn": "Chưa đăng nhập",
-      "proxyLabel": "Proxy mạng",
-      "proxySaveBeforeSignIn": "Hãy lưu thay đổi proxy trước khi đăng nhập.",
-      "saveProxy": "Lưu proxy",
       "localCodeHelp": "Hoàn tất đăng nhập trong trình duyệt. nanobot thường tự động hoàn tất; nếu không, hãy dán mã ủy quyền bên dưới.",
       "remoteCodeHelp": "Chọn Đăng nhập để mở xAI trên máy tính của bạn. Sau khi đăng nhập, hãy dán mã ủy quyền do xAI hiển thị bên dưới.",
       "localCallbackHelp": "Hoàn tất đăng nhập trong trình duyệt. nanobot thường tự động hoàn tất; nếu không, hãy sao chép URL callback localhost đầy đủ từ thanh địa chỉ và dán vào bên dưới.",

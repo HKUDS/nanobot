@@ -84,9 +84,8 @@
       "dm_allowFrom": {
         "label": "Người dùng DM được phép"
       },
-      "proxy": {
-        "label": "Proxy mạng",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "Dùng proxy"
       }
     }
   }

@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 
+from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import MCPServerConfig
 from nanobot.runtime_admission import RuntimeAdmission, RuntimeBusyError, RuntimeMaintenanceError
 from nanobot.webui.mcp_oauth_api import (
@@ -50,14 +51,19 @@ async def test_browser_flow_retries_current_server_and_ignores_unrelated_reload_
     connection = _Connection()
     received: dict[str, object] = {}
     reload_calls = 0
+    cfg = _config()
+    cfg.use_proxy = True
+    network_config = NetworkConfig(proxy="http://proxy-a.example:8080")
 
     monkeypatch.setattr(
         "nanobot.webui.mcp_oauth_api.validate_url_target",
         lambda _url: (True, ""),
     )
 
-    async def connect(servers, _registry, *, oauth_handlers):
+    async def connect(servers, _registry, *, oauth_handlers, network):
         assert set(servers) == {"xmind"}
+        received["cfg"] = servers["xmind"]
+        received["network"] = network
         handlers = oauth_handlers["xmind"]
         await handlers.redirect_handler(
             "https://accounts.example.com/authorize?client_id=test&state=state-123"
@@ -86,13 +92,20 @@ async def test_browser_flow_retries_current_server_and_ignores_unrelated_reload_
 
     started = await manager.start(
         "xmind",
-        _config(),
+        cfg,
         "https://agent.example.com/auth/mcp/callback",
         reload_mcp=reload_mcp,
+        network=network_config,
     )
 
     assert started["status"] == "authorization_required"
     assert started["authorization_url"].startswith("https://accounts.example.com/authorize?")
+    cfg.use_proxy = False
+    network_config.proxy = "http://proxy-b.example:8080"
+    assert received["cfg"] is not cfg
+    assert received["cfg"].use_proxy is True
+    assert received["network"] is not network_config
+    assert received["network"].proxy == "http://proxy-a.example:8080"
     manager.submit_callback(state="state-123", code="oauth-code", error=None)
     with pytest.raises(McpOAuthError, match="expired"):
         manager.submit_callback(state="state-123", code="replayed-code", error=None)
@@ -135,7 +148,7 @@ async def test_browser_flow_activates_tools_before_probe_cleanup_completes(
         lambda _url: (True, ""),
     )
 
-    async def connect(_servers, _registry, *, oauth_handlers):
+    async def connect(_servers, _registry, *, oauth_handlers, network):
         handlers = oauth_handlers["linear"]
         await handlers.redirect_handler(
             "https://accounts.example.com/authorize?client_id=test&state=blocked-close"
@@ -256,7 +269,7 @@ async def test_remote_http_flow_accepts_a_pasted_loopback_callback(
         lambda _url: (True, ""),
     )
 
-    async def connect(_servers, _registry, *, oauth_handlers):
+    async def connect(_servers, _registry, *, oauth_handlers, network):
         handlers = oauth_handlers["linear"]
         received["redirect_uri"] = handlers.redirect_uri
         await handlers.redirect_handler(
@@ -329,7 +342,7 @@ async def test_browser_flow_surfaces_provider_denial_without_callback_descriptio
         lambda _url: (True, ""),
     )
 
-    async def connect(_servers, _registry, *, oauth_handlers):
+    async def connect(_servers, _registry, *, oauth_handlers, network):
         handlers = oauth_handlers["notion"]
         await handlers.redirect_handler("https://accounts.example.com/auth?state=deny-state")
         await handlers.callback_handler()
@@ -375,7 +388,7 @@ async def test_browser_flow_blocks_unsafe_authorization_url(
         lambda _url: (url_is_safe, "private address"),
     )
 
-    async def connect(_servers, _registry, *, oauth_handlers):
+    async def connect(_servers, _registry, *, oauth_handlers, network):
         await oauth_handlers["linear"].redirect_handler(authorization_url)
         return {}
 

@@ -93,7 +93,8 @@ def test_agent_loop_assembles_my_tool_with_runtime_control(tmp_path: Path) -> No
 def test_runtime_snapshot_has_exact_allowlist_and_redacts_secrets(tmp_path: Path) -> None:
     loop = _make_loop(tmp_path)
     loop.web_config.search.api_key = "search-secret"
-    loop.web_config.proxy = "http://proxy-user:proxy-secret@proxy.example"
+    loop.network_config.proxy = "http://proxy-user:proxy-secret@proxy.example"
+    loop.web_config.use_proxy = True
     loop.unlisted_secret = "loop-secret"
 
     snapshot = _my_tool(loop)._runtime_control.snapshot()
@@ -132,7 +133,7 @@ def test_runtime_snapshot_has_exact_allowlist_and_redacts_secrets(tmp_path: Path
     assert "search-secret" not in rendered
     assert "proxy-secret" not in rendered
     assert "loop-secret" not in rendered
-    assert snapshot.web_config["proxy"] == "<configured>"
+    assert snapshot.web_config["use_proxy"] is True
 
 
 def test_runtime_snapshot_is_detached_from_mutable_config(tmp_path: Path) -> None:

@@ -560,7 +560,7 @@ export function createSystemSettingsActions({
   };
 
   const handleMcpPresetAction = async (
-    action: "enable" | "disable" | "remove" | "test" | "reconnect",
+    action: "enable" | "disable" | "remove" | "test" | "reconnect" | "proxy",
     name: string,
     values: Record<string, string> = {},
   ) => {
@@ -615,6 +615,7 @@ export function createSystemSettingsActions({
             ? customMcpForm.headers
             : "",
         tool_timeout: customMcpForm.toolTimeout,
+        ...(customMcpForm.transport !== "stdio" ? { use_proxy: String(customMcpForm.useProxy) } : {}),
       });
       setMcpPresets(payload);
       applyMcpActionFeedback(

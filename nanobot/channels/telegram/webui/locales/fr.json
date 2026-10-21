@@ -7,9 +7,8 @@
         "label": "Jeton du bot",
         "placeholder": "123456:ABC..."
       },
-      "proxy": {
-        "label": "Proxy réseau",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "Utiliser le proxy"
       },
       "allowFrom": {
         "label": "Utilisateurs autorisés",

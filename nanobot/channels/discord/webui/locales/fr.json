@@ -23,14 +23,8 @@
         "label": "Utilisateurs autorisés",
         "placeholder": "ID utilisateur séparés par des virgules"
       },
-      "proxy": {
-        "label": "Mandataire réseau"
-      },
-      "proxyUsername": {
-        "label": "Utilisateur du proxy"
-      },
-      "proxyPassword": {
-        "label": "Mot de passe proxy"
+      "useProxy": {
+        "label": "Utiliser le proxy"
       },
       "intents": {
         "label": "Intentions de passerelle"

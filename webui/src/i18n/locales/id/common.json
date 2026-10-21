@@ -491,6 +491,10 @@
       "description": "Perubahan sudah disimpan. Mulai ulang untuk menerapkannya.",
       "later": "Mulai ulang nanti"
     },
+    "network": {
+      "useProxy": "Gunakan proxy",
+      "useProxyHelp": "Menggunakan proxy bersama di pengaturan Lanjutan."
+    },
     "runtimeConfig": {
       "apiSaved": "Tersimpan. Mulai ulang layanan API untuk menerapkan perubahan.",
       "commandRuntime": {
@@ -528,7 +532,8 @@
         "tools_exec_allowed_env_keys": {"label": "Variabel lingkungan", "help": "Variabel tambahan untuk perintah, satu nama per baris.\n\nVariabel tambahan yang diteruskan ke perintah, satu per baris. Variabel dasar yang diperlukan tetap tersedia."},
         "tools_exec_allow_patterns": {"label": "Perintah diizinkan", "help": "Hanya jalankan perintah yang cocok sepenuhnya dengan aturan izin.\n\nSatu ekspresi reguler per baris. Jika diisi, setiap bagian perintah harus cocok sepenuhnya dengan salah satu aturan. Perintah yang diizinkan melewati aturan pemblokiran bawaan dan tambahan, tetapi tetap mengikuti batasan jaringan dan ruang kerja."},
         "tools_exec_deny_patterns": {"label": "Perintah diblokir", "help": "Blokir perintah yang cocok dengan aturan ini.\n\nAturan pemblokiran tambahan berupa ekspresi reguler, satu per baris. Aturan izin eksplisit mengesampingkan aturan pemblokiran bawaan dan tambahan."},
-        "tools_web_proxy": {"label": "Proxy web", "help": "Digunakan untuk pencarian web dan pembacaan halaman oleh agen. Kosongkan untuk memakai pengaturan jaringan default, termasuk variabel lingkungan proxy.\n\n127.0.0.1 adalah mesin yang menjalankan nanobot. Pengaturan ini tidak mengubah koneksi model, MCP, atau browser."},
+        "network_proxy": {"label": "Proxy bersama", "help": "Alamat untuk fitur yang mengaktifkan proxy. 127.0.0.1 adalah perangkat yang menjalankan nanobot."},
+        "tools_web_use_proxy": {"label": "Gunakan proxy", "help": "Gunakan proxy bersama untuk pencarian web dan pembacaan halaman."},
         "tools_web_user_agent": {"label": "Header User-Agent", "help": "User-Agent untuk permintaan web; kosongkan untuk nilai default.\n\nHeader User-Agent kustom. Kosongkan untuk memakai nilai default."},
         "tools_restrict_to_workspace": {"label": "Batas ruang kerja", "help": "Batas ruang kerja global; izin chat WebUI diatur terpisah.\n\nKebijakan alat global. Izin setiap percakapan WebUI diatur secara terpisah."},
         "tools_ssrf_whitelist": {"label": "IP diizinkan", "help": "IP atau rentang CIDR diizinkan, satu per baris.\n\nIP atau rentang CIDR yang dikecualikan dari perlindungan permintaan keluar, satu per baris."},
@@ -552,7 +557,8 @@
         "sessions": {"title": "Percakapan", "help": "Atur chat bersama di berbagai platform."},
         "tools": {"title": "Alat bawaan", "help": "Pilih alat yang boleh digunakan agen."},
         "shell": {"title": "Shell dan sandbox", "help": "Atur batas waktu perintah, lingkungan, dan aturan akses."},
-        "network": {"title": "Koneksi web", "help": "Atur proxy dan User-Agent.\n\nProxy dan identitas permintaan web."},
+        "proxy": {"title": "Proxy bersama", "help": "Tetapkan satu alamat untuk fitur yang menggunakan proxy."},
+        "network": {"title": "Koneksi web", "help": "Atur penggunaan proxy dan User-Agent untuk permintaan web."},
         "safety": {"title": "Izin global", "help": "Atur batas ruang kerja, pengecualian jaringan, dan pemasangan jarak jauh.\n\nPembatasan ruang kerja, jaringan privat, dan instalasi jarak jauh."},
         "cli": {"title": "Batas CLI", "help": "Atur batas waktu pemasangan dan eksekusi, serta durasi cache daftar.\n\nBatas waktu instalasi, eksekusi, dan cache katalog."},
         "gateway": {"title": "Gateway", "help": "Atur opsi penerapan dan mulai ulang."},
@@ -949,7 +955,6 @@
       "defaultAPIDescription": "Preset yang diatur ke Otomatis memakai API ini. Setiap preset dapat memilih API lain dari daftar yang didukung.",
       "declareAPIs": "Atur API yang didukung",
       "openaiDefaultAPIDescription": "Menetapkan API default untuk preset yang memakai Otomatis. Otomatis di sini mengikuti aturan model yang sudah diketahui. Setiap preset dapat mengubah pilihan ini.",
-      "proxy": "Proksi jaringan",
       "thinkingStyle": "Format penalaran",
       "region": "Wilayah",
       "profile": "Profil AWS",
@@ -1588,9 +1593,6 @@
       "signInBeforeSaving": "Masuk ke penyedia ini sebelum menyimpan prasetel.",
       "signedIn": "Sudah masuk",
       "notSignedIn": "Belum masuk",
-      "proxyLabel": "Proksi jaringan",
-      "proxySaveBeforeSignIn": "Simpan perubahan proksi sebelum login.",
-      "saveProxy": "Simpan proksi",
       "localCodeHelp": "Selesaikan proses masuk di browser. nanobot biasanya menyelesaikannya secara otomatis; jika tidak, tempel kode otorisasi di bawah.",
       "remoteCodeHelp": "Pilih Masuk untuk membuka xAI di komputer Anda. Setelah masuk, tempel kode otorisasi yang ditampilkan xAI di bawah.",
       "localCallbackHelp": "Selesaikan proses masuk di browser. nanobot biasanya menyelesaikannya secara otomatis; jika tidak, salin URL callback localhost lengkap dari bilah alamat dan tempel di bawah.",

@@ -83,6 +83,40 @@ describe("McpManagementDialog", () => {
     expect(onAction).toHaveBeenCalledWith("reconnect", "docs", {});
   });
 
+  it.each(["streamableHttp", "sse"])("edits an existing %s proxy flag without restarting OAuth", (transport) => {
+    const onAction = vi.fn();
+    const { updateDialog } = renderDialog({
+      initialTab: "connection", onAction,
+      preset: { ...connectedPreset, transport, use_proxy: true },
+    });
+    const useProxy = screen.getByRole("switch", { name: "Use proxy" });
+    expect(useProxy).toBeChecked();
+    expect(screen.queryByRole("textbox", { name: /proxy/i })).not.toBeInTheDocument();
+    fireEvent.click(useProxy);
+    expect(onAction).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(onAction).toHaveBeenCalledWith("proxy", "docs", { use_proxy: "false" });
+    updateDialog({ ...connectedPreset, transport, use_proxy: false });
+    expect(useProxy).not.toBeChecked();
+    expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+  });
+
+  it("preserves the configured proxy flag when reconnecting OAuth", () => {
+    const onOAuthConnect = vi.fn();
+    renderDialog({
+      initialTab: "connection", onOAuthConnect,
+      preset: { ...connectedPreset, auth: "oauth", use_proxy: true },
+    });
+    expect(screen.getByRole("switch", { name: "Use proxy" })).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+    expect(onOAuthConnect).toHaveBeenCalledWith("docs", true, { use_proxy: "true" });
+  });
+
+  it("does not offer a proxy switch for stdio servers", () => {
+    renderDialog({ initialTab: "connection", preset: { ...connectedPreset, transport: "stdio" } });
+    expect(screen.queryByRole("switch", { name: "Use proxy" })).not.toBeInTheDocument();
+  });
+
   it("loads tools on entry and replaces passive inspection copy with recovery", async () => {
     const onAction = vi.fn();
     renderDialog({
@@ -154,21 +188,24 @@ function renderDialog({
   initialTab,
   onAction = vi.fn(),
   onToolsChange = vi.fn(),
+  onOAuthConnect = vi.fn(),
   preset = connectedPreset,
   actionKey = null,
 }: {
   initialTab: McpManagementTab;
   onAction?: ReturnType<typeof vi.fn>;
   onToolsChange?: ReturnType<typeof vi.fn>;
+  onOAuthConnect?: ReturnType<typeof vi.fn>;
   preset?: McpPresetInfo;
   actionKey?: string | null;
 }) {
   function Harness({ preset, actionKey }: { preset: McpPresetInfo; actionKey: string | null }) {
     const [tab, setTab] = useState(initialTab);
+    const [values, setValues] = useState<Record<string, string>>({});
     return (
       <McpManagementDialog
         preset={preset}
-        values={{}}
+        values={values}
         actionKey={actionKey}
         statusLabel="Connected"
         statusTone="success"
@@ -176,9 +213,9 @@ function renderDialog({
         icon={<span aria-hidden>DM</span>}
         onTabChange={setTab}
         onOpenChange={vi.fn()}
-        onFieldChange={vi.fn()}
+        onFieldChange={(_name, field, value) => setValues((prev) => ({ ...prev, [field]: value }))}
         onAction={onAction}
-        onOAuthConnect={vi.fn()}
+        onOAuthConnect={onOAuthConnect}
         onToolsChange={onToolsChange}
       />
     );
