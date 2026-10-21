@@ -681,7 +681,6 @@ class WebuiTurnCoordinator:
             await append_session_message_input(
                 session_key,
                 sessions=self.sessions,
-                expected_generation=event.context.session_generation,
                 content=event.content,
                 created_at_ms=envelope["created_at_ms"],
                 session_message=public_metadata,

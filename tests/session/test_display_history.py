@@ -65,6 +65,19 @@ async def test_display_facts_survive_reopen_without_entering_model_history(tmp_p
     assert next(event for event in payload["events"] if event["event"] == "stream_end")["response_sources"] == facts[3].content["response_sources"]
 
 
+async def test_unbound_display_append_targets_current_session(tmp_path):
+    sessions = _manager(tmp_path)
+    key = "websocket:current"
+    await sessions.state.get(key)
+    await sessions.state.reset(key)
+    fact = HistoryFact(HistoryKind.INPUT, {"text": "new message"})
+
+    await sessions.state.append_history(key, [fact], expected_generation=None)
+
+    assert await sessions.state.project_history(key, lambda history: list(history.all_facts())) == [fact]
+    await sessions.state.aclose()
+
+
 async def test_delete_reset_reject_old_display_generation(tmp_path):
     sessions = _manager(tmp_path)
     key = "websocket:generation"

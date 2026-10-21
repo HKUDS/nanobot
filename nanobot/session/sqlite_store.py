@@ -456,12 +456,12 @@ class SqliteSessionStore:
             return project(HistoryReader(db, key, self.path))
 
     def append_history(
-        self, key: str, facts: list[HistoryFact], *, expected_generation: str,
+        self, key: str, facts: list[HistoryFact], *, expected_generation: str | None,
     ) -> None:
         encoded = [(fact, fact.encode()) for fact in facts]
         with self.transaction() as db:
             row = db.execute("SELECT generation FROM sessions WHERE key=?", (key,)).fetchone()
-            if row is None or row[0] != expected_generation:
+            if row is None or (expected_generation is not None and row[0] != expected_generation):
                 raise SessionConflictError("history belongs to a deleted or replaced session")
             db.execute("INSERT OR IGNORE INTO history_heads (session_key) VALUES (?)", (key,))
             tail = db.execute(

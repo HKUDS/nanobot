@@ -715,8 +715,9 @@ class SessionState:
         )
 
     async def append_history(
-        self, key: str, facts: Sequence[HistoryFact], *, expected_generation: str,
+        self, key: str, facts: Sequence[HistoryFact], *, expected_generation: str | None,
     ) -> None:
+        """Append to an existing session; None selects its current generation."""
         records = list(facts)
         await self._execute(
             key,

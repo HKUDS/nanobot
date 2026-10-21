@@ -291,9 +291,11 @@ async def test_turn_retry_cause_survives_only_actual_exhaustion(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("write_succeeds", [True, False])
 async def test_session_input_is_projected_by_the_webui_coordinator(
     tmp_path,
     monkeypatch,
+    write_succeeds,
 ) -> None:
     bus = MessageBus()
     bus.publish_outbound = AsyncMock()
@@ -310,7 +312,7 @@ async def test_session_input_is_projected_by_the_webui_coordinator(
         "source_session_key": "websocket:source",
         "target_session_key": "websocket:target",
     }
-    append_input = AsyncMock()
+    append_input = AsyncMock(side_effect=None if write_succeeds else OSError("write failed"))
     monkeypatch.setattr(wth, "append_session_message_input", append_input)
     coordinator = wth.WebuiTurnCoordinator(
         bus=bus,
@@ -324,14 +326,15 @@ async def test_session_input_is_projected_by_the_webui_coordinator(
             channel="system",
             chat_id="websocket:target",
             session_key="websocket:target",
-            session_generation=target_session.generation,
             metadata={SESSION_MESSAGE_METADATA_KEY: envelope},
         ),
         content="Review this",
     ))
 
     append_input.assert_awaited_once()
-    assert append_input.await_args.kwargs["expected_generation"] == target_session.generation
+    if not write_succeeds:
+        bus.publish_outbound.assert_not_awaited()
+        return
     outbound = bus.publish_outbound.await_args.args[0]
     assert outbound.channel == "websocket"
     assert outbound.chat_id == "target"

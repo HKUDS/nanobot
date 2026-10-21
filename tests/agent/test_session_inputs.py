@@ -195,7 +195,6 @@ async def test_cross_session_input_preserves_source_in_live_events_and_history(
             asyncio.gather(*loop._active_tasks[target_key]), 5,
         )
         assert len(accepted) == message_count
-        assert all(event.context.session_generation is None for event in accepted)
         events = [
             call.args[0].event for call in loop.bus.publish_outbound.await_args_list
             if isinstance(call.args[0].event, UserInputEvent)
