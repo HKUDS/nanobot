@@ -3425,6 +3425,7 @@ async def test_context_compaction_started_is_live_only(history, notify, show_not
         "chat_id": "chat-compaction-started",
         "compaction_id": "compact-started",
         "phase": "started",
+        "history_generation": history.sessions.read_session_version("websocket:chat-compaction-started")[0],
     }]
     assert history.read("websocket:chat-compaction-started") == []
 
@@ -3463,7 +3464,10 @@ async def test_context_compaction_is_structured_persisted_and_summary_free(histo
         "phase": phase,
         "reason": "manual",
     }
-    assert _sent_ws_payloads(mock_ws) == [expected]
+    assert _sent_ws_payloads(mock_ws) == [{
+        **expected,
+        "history_generation": history.sessions.read_session_version("websocket:chat-compaction")[0],
+    }]
     [persisted] = history.read("websocket:chat-compaction")
     assert {key: persisted[key] for key in expected} == expected
 

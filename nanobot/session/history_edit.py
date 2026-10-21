@@ -6,7 +6,6 @@ import hashlib
 import json
 import re
 from collections.abc import Awaitable, Callable
-from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -16,6 +15,7 @@ from nanobot.runtime_context import (
     WEBUI_QUOTE_SOURCE,
     public_history_message,
 )
+from nanobot.session.display_history import HistoryFact, HistoryReader
 from nanobot.session.manager import Session, history_prefix_boundary
 
 
@@ -80,9 +80,16 @@ class HistoryEditAnchor:
         return boundary
 
 
-# The adapter prepares a rollback-capable display projection under the same
-# owner transaction. Core never imports a channel's storage or wire format.
-HistoryEditProjection = Callable[[Session], AbstractContextManager[None]]
+@dataclass(frozen=True)
+class HistoryEditDisplay:
+    turn_ordinal: int
+    position: int
+    input: HistoryFact
+
+
+# The adapter resolves wire identity inside the owner's transaction; the owner
+# mutates only neutral facts, together with the canonical history.
+HistoryEditProjection = Callable[[Session, HistoryReader], HistoryEditDisplay]
 
 HistoryEditAccepted = Callable[[Session], Awaitable[None]]
 HistoryEditSubmit = Callable[

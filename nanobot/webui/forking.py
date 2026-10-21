@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from loguru import logger
 
+from nanobot.session.display_history import HistoryReader
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.webui_turns import clean_generated_title
 from nanobot.webui.session_identity import is_valid_webui_chat_id, webui_session_key
@@ -129,7 +129,6 @@ async def prepare_webui_chat_edit(
     from nanobot.session.history_visibility import is_hidden_history_message
     from nanobot.session.manager import history_prefix_boundary
     from nanobot.session.webui_turns import websocket_turn_wall_started_at
-    from nanobot.webui.history_replacement import transcript_access
     from nanobot.webui.transcript import transcript_edit_target, webui_transcript_revision
 
     chat_id, user_index = payload.get("chat_id"), payload.get("user_index")
@@ -151,22 +150,21 @@ async def prepare_webui_chat_edit(
     if any(source.metadata.get(name) for name in ("pending_user_turn", "pending_user_followups", "runtime_checkpoint")):
         raise HistoryEditError("edit_session_busy")
 
-    def check_display() -> tuple[dict[str, Any], int, str]:
-        with transcript_access(key):
-            target = transcript_edit_target(key, message_id, turn_id)
-            if target is None or target[0].get("text") != text:
-                raise HistoryEditError("edit_source_changed")
-            row, display_index = target
-            if row.get("session_message") or row.get("source"):
-                raise HistoryEditError("edit_special_message")
-            if reason := ordinary_text_error({**row, "role": "user", "content": text}):
-                raise HistoryEditError(reason)
-            revision = webui_transcript_revision(key)
-            if revision is None:
-                raise HistoryEditError("edit_source_changed")
-            return row, display_index, revision
+    def check_display(history: HistoryReader) -> tuple[dict[str, Any], int, str]:
+        target = transcript_edit_target(key, message_id, turn_id, history=history)
+        if target is None or target[0].get("text") != text:
+            raise HistoryEditError("edit_source_changed")
+        row, display_index, _, _ = target
+        if row.get("session_message") or row.get("source"):
+            raise HistoryEditError("edit_special_message")
+        if reason := ordinary_text_error({**row, "role": "user", "content": text}):
+            raise HistoryEditError(reason)
+        revision = webui_transcript_revision(key, history=history)
+        if revision is None:
+            raise HistoryEditError("edit_source_changed")
+        return row, display_index, revision
 
-    row, display_index, display_revision = await asyncio.to_thread(check_display)
+    row, display_index, display_revision = await gateway.session_manager.state.project_history(key, check_display)
     persisted_turn_id = row.get("turn_id")
     if persisted_turn_id:
         users = [item for item in source.messages if item.get("role") == "user" and not is_hidden_history_message(item)]
@@ -197,23 +195,18 @@ async def replace_webui_chat_input(
     channel: WebUIForkHost, payload: Mapping[str, Any],
 ) -> dict[str, Any]:
     """The replace branch of fork_chat: accept and execute in the same session."""
-    from collections.abc import Generator
-    from contextlib import contextmanager
-
     from nanobot.bus.events import InboundMessage
-    from nanobot.session.history_edit import HistoryEditAnchor, HistoryEditError
+    from nanobot.session.history_edit import HistoryEditAnchor, HistoryEditDisplay, HistoryEditError
     from nanobot.session.webui_turns import (
         clear_websocket_turn_if_current,
         register_queued_websocket_turn_if_idle,
     )
-    from nanobot.webui.history_replacement import replace_transcript, transcript_access
+    from nanobot.webui.history import fact_from_record
     from nanobot.webui.metadata import WEBSOCKET_TURN_OWNER_METADATA_KEY
     from nanobot.webui.transcript import (
         build_user_transcript_event,
         build_webui_thread_response,
-        read_transcript_lines,
         transcript_edit_target,
-        transcript_prefix_before_user_index,
         webui_transcript_revision,
     )
 
@@ -271,44 +264,35 @@ async def replace_webui_chat_input(
     retired_turn_ids: list[str] = []
     committed = False
 
-    @contextmanager
-    def projection(session: Session) -> Generator[None]:
-        with transcript_access(key):
-            if webui_transcript_revision(key) != anchor_fields.get("transcript_revision"):
-                raise HistoryEditError("edit_source_changed")
-            target = transcript_edit_target(key, display_message_id, display_turn_id)
-            if target is None or target[1] != transcript_user_index or source is None:
-                raise HistoryEditError("edit_source_changed")
-            from nanobot.runtime_context import public_history_message
-            from nanobot.session.manager import history_prefix_boundary
-            boundary = history_prefix_boundary(source, anchor.user_index)
-            if boundary is None or boundary == len(source.messages):
-                raise HistoryEditError("edit_source_changed")
-            original = source.messages[boundary]
-            if (target[0].get("text") != public_history_message(original).get("content")
-                    or target[0].get("turn_id") != original.get("webui_turn_id")):
-                raise HistoryEditError("edit_source_changed")
-            lines = read_transcript_lines(key)
-            prefix = transcript_prefix_before_user_index(lines, transcript_user_index)
-            if prefix is None:
-                raise HistoryEditError("edit_source_changed")
-            retired_turn_ids.extend(list(dict.fromkeys(
-                row["turn_id"] for row in lines if isinstance(row.get("turn_id"), str)
-            ))[-256:])
-            event = build_user_transcript_event(chat_id, text)
-            assert event is not None
-            gateway.transcripts.prepare_event(chat_id, event, metadata=message.metadata, phase="user")
-            event["created_at_ms"] = int(message.timestamp.timestamp() * 1000)
-            with replace_transcript(
-                key, [*prefix, event], database=manager.sessions_dir / "sessions.sqlite3",
-                generation=session.generation, previous_generation=anchor.generation,
-            ):
-                yield
+    def projection(session: Session, history: HistoryReader) -> HistoryEditDisplay:
+        if webui_transcript_revision(key, history=history) != anchor_fields.get("transcript_revision"):
+            raise HistoryEditError("edit_source_changed")
+        target = transcript_edit_target(key, display_message_id, display_turn_id, history=history)
+        if target is None or target[1] != transcript_user_index:
+            raise HistoryEditError("edit_source_changed")
+        from nanobot.runtime_context import public_history_message
+        original = session.messages[anchor.locate(session)]
+        if (target[0].get("text") != public_history_message(original).get("content")
+                or target[0].get("turn_id") != original.get("webui_turn_id")):
+            raise HistoryEditError("edit_source_changed")
+        retired_turn_ids.extend(list(dict.fromkeys(
+            fact.turn_id for ordinal, position, fact in history.navigation()
+            if (ordinal, position) >= (target[2], target[3]) and fact.turn_id is not None
+        ))[-256:])
+        event = build_user_transcript_event(chat_id, text)
+        assert event is not None
+        gateway.transcripts.prepare_event(chat_id, event, metadata=message.metadata, phase="user")
+        event["created_at_ms"] = int(message.timestamp.timestamp() * 1000)
+        return HistoryEditDisplay(target[2], target[3], fact_from_record(event))
 
     async def accepted(session: Session) -> None:
         nonlocal committed
         committed = True
-        body = await asyncio.to_thread(build_webui_thread_response, key)
+        body = await manager.state.project_history(key, lambda history: build_webui_thread_response(
+            key, history=history,
+            session_messages_loader=lambda: session.messages,
+            session_version_loader=lambda: manager.read_session_version(key),
+        ))
         assert body is not None
         body["history_generation"] = session.generation
         body["active_turn_id"] = turn_id

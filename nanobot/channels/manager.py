@@ -9,7 +9,6 @@ import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from contextlib import suppress
-from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -1061,8 +1060,6 @@ class ChannelManager:
     @staticmethod
     async def _send_once(channel: BaseChannel, msg: OutboundMessage) -> None:
         """Send one outbound message without retry policy."""
-        if msg.channel == "websocket" and msg.delivery is not None and msg.delivery.session_generation:
-            msg = replace(msg, metadata={**msg.metadata, "_webui_history_generation": msg.delivery.session_generation})
         event = msg.event
         if isinstance(event, ProgressEvent) and event.reasoning_end:
             await ChannelManager._send_reasoning_end(channel, msg, event)

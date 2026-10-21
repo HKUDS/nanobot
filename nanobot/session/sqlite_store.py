@@ -509,6 +509,53 @@ class SqliteSessionStore:
             if encoded:
                 db.execute("UPDATE history_heads SET revision=revision+1 WHERE session_key=?", (key,))
 
+    def replace_history_input(
+        self, key: str, ordinal: int, position: int, fact: HistoryFact, *, expected_generation: str,
+    ) -> None:
+        """Replace an anchored display suffix and rebuild its paging/sidebar summaries."""
+        with self.transaction() as db:
+            db.execute(
+                """DELETE FROM history_entries WHERE session_key=?
+                   AND (turn_ordinal>? OR (turn_ordinal=? AND position>=?))""",
+                (key, ordinal, ordinal, position),
+            )
+            db.execute("DELETE FROM history_turns WHERE session_key=? AND ordinal>?", (key, ordinal))
+            counts = db.execute(
+                """SELECT count(*), coalesce(sum(length(CAST(record AS BLOB))), 0),
+                          coalesce(sum(kind=?), 0)
+                   FROM history_entries WHERE session_key=? AND turn_ordinal=?""",
+                (HistoryKind.INPUT, key, ordinal),
+            ).fetchone()
+            if counts[0]:
+                db.execute(
+                    """UPDATE history_turns SET record_count=?, byte_count=?, user_count=?, completed=0
+                       WHERE session_key=? AND ordinal=?""", (*counts, key, ordinal),
+                )
+            else:
+                db.execute("DELETE FROM history_turns WHERE session_key=? AND ordinal=?", (key, ordinal))
+            preview = user_preview = ""
+            for row in db.execute(
+                """SELECT kind, json_extract(record, '$.content.text') FROM history_entries
+                   WHERE session_key=? AND kind IN (?, ?, ?) ORDER BY turn_ordinal, position""",
+                (key, HistoryKind.INPUT, HistoryKind.ANSWER, HistoryKind.ANSWER_SEGMENT),
+            ):
+                text = message_preview_text({"content": row[1] or ""})
+                if row[0] == HistoryKind.INPUT:
+                    user_preview = user_preview or text
+                else:
+                    preview = preview or text
+                if preview and user_preview:
+                    break
+            updated_at_ms = db.execute(
+                "SELECT coalesce(max(json_extract(record, '$.created_at_ms')), 0) FROM history_entries WHERE session_key=?",
+                (key,),
+            ).fetchone()[0]
+            db.execute(
+                "UPDATE history_heads SET preview=?, user_preview=?, updated_at_ms=? WHERE session_key=?",
+                (preview, user_preview, updated_at_ms, key),
+            )
+            self.append_history(key, [fact], expected_generation=expected_generation)
+
     def copy_history_prefix(self, source_key: str, target: Session, before_input: int) -> bool:
         """Copy a display prefix alongside its canonical fork, in the caller's transaction."""
         def select(reader: HistoryReader) -> list[HistoryFact] | None:

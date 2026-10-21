@@ -7,7 +7,6 @@ import sqlite3
 import threading
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import ExitStack
 from contextvars import copy_context
 from copy import deepcopy
 from dataclasses import fields, replace
@@ -1021,40 +1020,43 @@ class SessionState:
             raise HistoryEditError(reason)
 
         def commit() -> Session:
-            with ExitStack() as projections:
-                def write() -> Session:
-                    current = self._load(key)
-                    if current is None or not current.policy.persist:
-                        raise HistoryEditError("edit_source_changed")
-                    boundary = anchor.locate(current)
-                    if any(current.metadata.get(name) for name in _RESERVED_KEYS):
-                        raise HistoryEditError("edit_session_busy")
-                    previous_generation = current.generation
-                    current.messages = current.messages[:boundary]
-                    if current.last_archived >= boundary:
-                        current.last_archived = 0
-                        current.metadata.pop("_last_summary", None)
-                    current.provider_state = None
-                    for name in ("webui_recovery", "_last_usage", "request_origin", "goal_state", "thread_goal"):
-                        current.metadata.pop(name, None)
-                    current.generation = uuid4().hex
-                    current.add_message(
-                        "user", message.content, timestamp=message.timestamp.isoformat(),
-                        webui_turn_id=message.metadata["webui_turn_id"],
-                    )
-                    current.metadata[_PENDING_KEY] = True
-                    current.metadata["history_edit_receipt"] = {
-                        "turn_id": message.metadata["webui_turn_id"],
-                        "source_generation": anchor.generation,
-                        "source_revision": anchor.revision,
-                        "text": message.content,
-                    }
-                    projections.enter_context(projection(current))
-                    self._store.replace_generation(current, previous_generation=previous_generation)
-                    return current
+            def write() -> Session:
+                current = self._load(key)
+                if current is None or not current.policy.persist:
+                    raise HistoryEditError("edit_source_changed")
+                boundary = anchor.locate(current)
+                if any(current.metadata.get(name) for name in _RESERVED_KEYS):
+                    raise HistoryEditError("edit_session_busy")
+                display = self._store.project_history(key, lambda history: projection(current, history))
+                previous_generation = current.generation
+                current.messages = current.messages[:boundary]
+                if current.last_archived >= boundary:
+                    current.last_archived = 0
+                    current.metadata.pop("_last_summary", None)
+                current.provider_state = None
+                for name in ("webui_recovery", "_last_usage", "request_origin", "goal_state", "thread_goal"):
+                    current.metadata.pop(name, None)
+                current.generation = uuid4().hex
+                current.add_message(
+                    "user", message.content, timestamp=message.timestamp.isoformat(),
+                    webui_turn_id=message.metadata["webui_turn_id"],
+                )
+                current.metadata[_PENDING_KEY] = True
+                current.metadata["history_edit_receipt"] = {
+                    "turn_id": message.metadata["webui_turn_id"],
+                    "source_generation": anchor.generation,
+                    "source_revision": anchor.revision,
+                    "text": message.content,
+                }
+                self._store.replace_generation(current, previous_generation=previous_generation)
+                self._store.replace_history_input(
+                    key, display.turn_ordinal, display.position, display.input,
+                    expected_generation=current.generation,
+                )
+                return current
 
-                current = self._store.run_write(write)
-                self._publish(current)
+            current = self._store.run_write(write)
+            self._publish(current)
             return self._draft(current)
 
         return await self._execute(key, commit, operation_name="replace_user_input")

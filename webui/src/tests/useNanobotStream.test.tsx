@@ -158,6 +158,37 @@ async function flushStreamFrame() {
 }
 
 describe("useNanobotStream", () => {
+  it("replaces the complete transcript owner before accepting and caching new live output", async () => {
+    const fake = fakeClient();
+    const cache = new ThreadMessageCache(() => false);
+    const first = renderHook(() => useNanobotStream("edited", EMPTY_MESSAGES, false,
+      undefined, undefined, [], { key: null, cache }), { wrapper: wrap(fake.client) });
+    act(() => {
+      fake.emit("edited", { event: "user_message", chat_id: "edited", turn_id: "old", starts_turn: true, text: "Original" });
+      fake.emit("edited", { event: "delta", chat_id: "edited", turn_id: "old", stream_id: "old-answer", turn_seq: 2, text: "Discarded pending output" });
+      fake.emit("edited", { event: "history_replaced", chat_id: "edited", thread: {
+        schemaVersion: 3, projection: "events", history_generation: "new-generation",
+        events: [{ event: "user_message", chat_id: "edited", projection_id: "edited-input", turn_id: "new", starts_turn: true, turn_seq: 1, text: "Edited" }],
+        has_pending_tool_calls: true, active_turn_id: "new",
+        page: { before_cursor: "new-cursor", has_more_before: true, user_message_offset: 4 },
+      } });
+      fake.emit("edited", { event: "delta", chat_id: "edited", turn_id: "new", stream_id: "new-answer", turn_seq: 2, text: "New reply" });
+    });
+    await flushStreamFrame();
+    expect(first.result.current.messages.map((row) => row.content)).toEqual(["Edited", "New reply"]);
+    expect(first.result.current.history).toMatchObject({
+      historyGeneration: "new-generation", beforeCursor: "new-cursor", userMessageOffset: 4,
+    });
+    first.unmount();
+    const restored = renderHook(() => useNanobotStream("edited", EMPTY_MESSAGES, false,
+      undefined, undefined, [], { key: null, cache }), { wrapper: wrap(fake.client) });
+    expect(restored.result.current.messages.map((row) => row.content)).toEqual(["Edited", "New reply"]);
+    act(() => fake.emit("edited", { event: "delta", chat_id: "edited", turn_id: "new", stream_id: "new-answer", turn_seq: 3, text: " continues" }));
+    await flushStreamFrame();
+    expect(restored.result.current.messages.map((row) => row.content)).toEqual(["Edited", "New reply continues"]);
+    restored.unmount();
+  });
+
   it("resumes a merge_next cached snapshot including reasoning queued before detach", () => {
     const fake = fakeClient();
     const cache = new ThreadMessageCache(() => false);

@@ -28,7 +28,6 @@ from nanobot.session.automation_turns import is_automation_kind
 from nanobot.session.display_history import (
     HISTORY_GENERATION_METADATA_KEY,
     HistoryFact,
-    HistoryKind,
     HistoryReader,
 )
 from nanobot.session.history_visibility import is_hidden_history_message
@@ -459,6 +458,25 @@ def read_transcript_lines(session_key: str, *, history: HistoryReader) -> list[d
     return [record_from_fact(fact, session_key) for fact in history.all_facts()]
 
 
+def transcript_edit_target(
+    session_key: str, message_id: str, turn_id: str | None, *, history: HistoryReader,
+) -> tuple[dict[str, Any], int, int, int] | None:
+    """Resolve persisted input identity independently of the loaded page window."""
+    from nanobot.session.display_history import HistoryKind
+
+    count = 0
+    matches: list[tuple[dict[str, Any], int, int, int]] = []
+    for ordinal, position, fact in history.navigation():
+        if fact.kind is not HistoryKind.INPUT:
+            continue
+        row = {**record_from_fact(fact, session_key),
+               _WEBUI_REPLAY_IDENTITY_KEY: f"turn:{ordinal}:record:{position}"}
+        if _client_projection_event_id(row) == message_id or (turn_id and fact.turn_id == turn_id):
+            matches.append((row, count, ordinal, position))
+        count += 1
+    return matches[0] if len(matches) == 1 else None
+
+
 def _now_ms() -> int:
     return int(time.time() * 1000)
 
@@ -633,44 +651,6 @@ def _chat_id_from_session_key(session_key: str) -> str | None:
     if chat_id is None:
         return None
     return chat_id.strip() or None
-
-
-def _is_user_transcript_row(row: dict[str, Any]) -> bool:
-    return row.get("event") == "user" or row.get("role") == "user"
-
-
-def transcript_prefix_before_user_index(
-    lines: list[dict[str, Any]], before_user_index: int,
-) -> list[dict[str, Any]] | None:
-    """Build a display prefix independently of new/replace target ownership."""
-    if before_user_index < 0:
-        return None
-    copied: list[dict[str, Any]] = []
-    user_index = 0
-    for row in lines:
-        if _is_user_transcript_row(row):
-            if user_index == before_user_index:
-                return copied
-            user_index += 1
-        copied.append(dict(row))
-    return copied if user_index == before_user_index else None
-
-
-def transcript_edit_target(
-    session_key: str, message_id: str, turn_id: str | None, *, history: HistoryReader,
-) -> tuple[dict[str, Any], int] | None:
-    """Resolve a verifiable display identity and return its true global boundary."""
-    count = 0
-    matches: list[tuple[dict[str, Any], int]] = []
-    for ordinal, position, fact in history.navigation():
-        if fact.kind is not HistoryKind.INPUT:
-            continue
-        row = record_from_fact(fact, session_key)
-        row[_WEBUI_REPLAY_IDENTITY_KEY] = f"turn:{ordinal}:record:{position}"
-        if _client_projection_event_id(row) == message_id or (turn_id and row.get("turn_id") == turn_id):
-            matches.append((row, count))
-        count += 1
-    return matches[0] if len(matches) == 1 else None
 
 
 def normalize_session_mentions_metadata(raw: object) -> list[dict[str, str]]:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from contextlib import nullcontext
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -12,7 +11,13 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMResponse
 from nanobot.runtime_context import public_history_message
-from nanobot.session.history_edit import HistoryEditAnchor, HistoryEditError, message_digest
+from nanobot.session.display_history import HistoryFact, HistoryKind
+from nanobot.session.history_edit import (
+    HistoryEditAnchor,
+    HistoryEditDisplay,
+    HistoryEditError,
+    message_digest,
+)
 from nanobot.session.manager import SessionManager
 
 
@@ -30,6 +35,12 @@ async def edited_loop(tmp_path):
         value.add_message("user", f"question-{index}", webui_turn_id=f"old-{index}")
         value.add_message("assistant", f"answer-{index}")
     await loop.sessions.state.prepare_input(value)
+    facts = [fact for index in range(3) for fact in (
+        HistoryFact(HistoryKind.INPUT, {"text": f"question-{index}"}, turn_id=f"old-{index}"),
+        HistoryFact(HistoryKind.ANSWER, {"text": f"answer-{index}"}, turn_id=f"old-{index}"),
+        HistoryFact(HistoryKind.COMPLETION, turn_id=f"old-{index}"),
+    )]
+    await manager.state.append_history(value.key, facts, expected_generation=value.generation)
     yield loop
     tasks = [task for group in loop._active_tasks.values() for task in group]
     if tasks:
@@ -45,6 +56,10 @@ async def edit(loop, index=1):
     return msg, anchor
 
 
+def display_replacement(_session, _history):
+    return HistoryEditDisplay(1, 0, HistoryFact(HistoryKind.INPUT, {"text": "modified question"}, turn_id="edit-turn"))
+
+
 async def drain(loop):
     tasks = [task for group in loop._active_tasks.values() for task in group]
     if tasks:
@@ -55,7 +70,7 @@ async def test_replacement_runs_once_with_only_the_retained_model_context(edited
     loop = edited_loop
     msg, anchor = await edit(loop)
     accepted = AsyncMock()
-    await loop.replace_user_input(msg, anchor, lambda _: nullcontext(), accepted)
+    await loop.replace_user_input(msg, anchor, display_replacement, accepted)
     await drain(loop)
     assert accepted.await_count == 1
     assert loop.provider.chat_stream_with_retry.await_count == 1
@@ -76,7 +91,7 @@ async def test_execution_lane_busy_is_checked_at_admission(edited_loop):
     msg, anchor = await edit(loop)
     async with loop._get_session_lock(msg.session_key):
         with pytest.raises(HistoryEditError, match="edit_session_busy"):
-            await loop.replace_user_input(msg, anchor, lambda _: nullcontext(), AsyncMock())
+            await loop.replace_user_input(msg, anchor, display_replacement, AsyncMock())
     assert (await loop.sessions.state.read(msg.session_key)).generation == anchor.generation
     assert not loop.provider.chat_stream_with_retry.called
 
@@ -93,7 +108,7 @@ async def test_cancelling_admission_observer_still_executes_an_accepted_input(ed
         return original(*args, **kwargs)
 
     monkeypatch.setattr(loop.sessions._store, "replace_generation", blocked)
-    task = asyncio.create_task(loop.replace_user_input(msg, anchor, lambda _: nullcontext(), AsyncMock()))
+    task = asyncio.create_task(loop.replace_user_input(msg, anchor, display_replacement, AsyncMock()))
     assert await asyncio.to_thread(started.wait, 5)
     task.cancel()
     release.set()
@@ -108,7 +123,7 @@ async def test_simultaneous_confirmations_only_admit_one_replacement(edited_loop
     loop = edited_loop
     msg, anchor = await edit(loop)
     results = await asyncio.gather(*(
-        loop.replace_user_input(msg, anchor, lambda _: nullcontext(), AsyncMock())
+        loop.replace_user_input(msg, anchor, display_replacement, AsyncMock())
         for _ in range(2)
     ), return_exceptions=True)
     assert sum(isinstance(value, HistoryEditError) for value in results) == 1
@@ -152,7 +167,7 @@ async def test_discarded_turn_child_result_cannot_enter_the_replacement_prompt(e
             await SubagentTool(loop.subagents).execute(action="create", task="task from discarded turn")
         await asyncio.wait_for(child_started.wait(), 5)
         msg, anchor = await edit(loop)
-        await loop.replace_user_input(msg, anchor, lambda _: nullcontext(), AsyncMock())
+        await loop.replace_user_input(msg, anchor, display_replacement, AsyncMock())
         await asyncio.wait_for(main_started.wait(), 5)
         if arrival == "after_reply":
             # The replacement must not join children owned by the discarded turn.
