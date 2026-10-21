@@ -12,7 +12,7 @@ def results(*domains):
             for domain in ("python", "webui", "tui", "docker", "native")
         }},
         **{job: {"result": "skipped"} for job in (
-            "test", "windows_process", "webui_checks", "webui_browser", "webui", "tui", "docker", "native",
+            "test", "windows_process", "windows_installers", "webui_checks", "webui_browser", "webui", "tui", "docker", "native",
         )},
     }
 
@@ -51,3 +51,15 @@ def test_unexpected_failure_is_not_ignored():
     needs = results()
     needs["native"]["result"] = "cancelled"
     assert check_results(needs, "push")
+
+
+def test_selected_windows_installers_are_required_independently_of_process_tests():
+    needs = results("python", "native")
+    for job in ("test", "windows_process", "native"):
+        needs[job]["result"] = "success"
+    assert check_results(needs, "pull_request") == ["windows_installers: required, got skipped"]
+    needs["windows_installers"]["result"] = "success"
+    assert check_results(needs, "pull_request") == []
+    needs["windows_installers"]["result"] = "skipped"
+    needs["native"]["result"] = "skipped"
+    assert check_results(needs, "push") == []

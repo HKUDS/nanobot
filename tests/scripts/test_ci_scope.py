@@ -89,9 +89,9 @@ def test_union_preserves_each_reason():
 
 @pytest.fixture
 def repo(tmp_path):
-    def git(*args):
+    def git(*args, input=None):
         return subprocess.run(
-            ["git", *args], cwd=tmp_path, check=True, capture_output=True, text=True,
+            ["git", *args], cwd=tmp_path, check=True, capture_output=True, text=True, input=input,
         ).stdout.strip()
 
     git("init", "-b", "main")
@@ -130,11 +130,11 @@ def test_pr_uses_merge_base_not_base_tip(repo):
     assert selected(select_scope("push", base, head, cwd=cwd)) == {"webui", "docker", "tui"}
 
 
-def test_rename_and_delete_keep_old_domain_and_handle_newlines(repo):
+def test_rename_and_delete_keep_old_domain(repo):
     cwd, git, commit = repo
     commit("nanobot/providers/old.py", "production")
     base = commit("tui/src/removed.ts", "native package")
-    target = cwd / "docs" / "renamed\npython_required=false.md"
+    target = cwd / "docs" / "renamed file.md"
     target.parent.mkdir()
     (cwd / "nanobot/providers/old.py").rename(target)
     (cwd / "tui/src/removed.ts").unlink()
@@ -143,7 +143,7 @@ def test_rename_and_delete_keep_old_domain_and_handle_newlines(repo):
     result = select_scope("push", base, git("rev-parse", "HEAD"), cwd=cwd)
     assert selected(result) == {"python", "docker", "tui"}
     assert {item["path"] for item in result["paths"]} == {
-        "nanobot/providers/old.py", "tui/src/removed.ts", "docs/renamed\npython_required=false.md",
+        "nanobot/providers/old.py", "tui/src/removed.ts", "docs/renamed file.md",
     }
 
 
@@ -168,7 +168,12 @@ def test_non_repository_and_dispatch_are_full(tmp_path):
 def test_cli_emits_only_fixed_boolean_outputs_and_escaped_summary(repo):
     cwd, git, commit = repo
     base = commit("docs/guide.md", "initial")
-    head = commit("webui/```\npython_required=false<script>.ts", "untrusted filename")
+    # A PR authored on Unix can contain names Windows cannot check out or add
+    # to its index. Build the actual Git tree directly, without materializing it.
+    blob = git("rev-parse", "HEAD:docs/guide.md")
+    subtree = git("mktree", "-z", input=f"100644 blob {blob}\t```\npython_required=false<script>.ts\0")
+    tree = git("mktree", "-z", input=f"040000 tree {subtree}\twebui\0")
+    head = git("commit-tree", tree, "-p", base, "-m", "untrusted filename")
     output, summary = cwd / "output", cwd / "summary"
     proc = subprocess.run(
         [sys.executable, str(ROOT / "scripts/ci_scope.py"), "--event", "push", "--base", base, "--head", head],

@@ -230,19 +230,44 @@ jobs:
           --junitxml=test-results/process.xml --timing-report=test-results/process.json
           --durations=25 --durations-min=1.0
 
+      - name: Upload Windows process test timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-timings-windows-process
+          path: test-results/
+          retention-days: 7
+
+  windows_installers:
+    name: Python (Windows installer compatibility)
+    needs: changes
+    if: github.event_name != 'push' && needs.changes.outputs.python_required == 'true' && needs.changes.outputs.native_required == 'true'
+    runs-on: windows-latest
+    # The real installer matrix took 18m06s alone; process checks and teardown
+    # previously pushed the combined job beyond its 20-minute bound.
+    timeout-minutes: 25
+    env:
+      PYTEST_ADDOPTS: "-o tmp_path_retention_policy=failed -p scripts.pytest_timing"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
       - name: Install pipx for offline installer checks
-        if: github.event_name != 'push' && needs.changes.outputs.native_required == 'true'
         shell: bash
         run: |
           uv tool install pipx==1.17.12
           uv tool dir --bin >> "$GITHUB_PATH"
 
-      # Installer subprocesses run here, parallel to the broad Windows suite.
-      # Each case owns an isolated manager/config root, so individual cases can
-      # run concurrently without sharing a console or package installation.
-      # Keep four workers: three exceed this job's budget on native Windows.
+      # Each case owns an isolated manager/config root. Keep the existing
+      # four-worker budget, independent of process-identity compatibility checks.
       - name: Run Windows installer checks
-        if: github.event_name != 'push' && needs.changes.outputs.native_required == 'true'
         run: >-
           uv run --no-sync python -m pytest tests/test_install_scripts.py
           -n 4 --dist load -x -vv --durations=10
@@ -252,7 +277,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: python-timings-windows-process
+          name: python-timings-windows-installers
           path: test-results/
           retention-days: 7
 
@@ -496,7 +521,7 @@ jobs:
 
   required:
     name: CI required
-    needs: [changes, test, windows_process, webui_checks, webui_browser, webui, tui, docker, native]
+    needs: [changes, test, windows_process, windows_installers, webui_checks, webui_browser, webui, tui, docker, native]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2

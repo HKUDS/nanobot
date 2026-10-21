@@ -20,7 +20,8 @@ def check_results(needs: dict, event: str) -> list[str]:
     jobs = {"test": selected["python"], "windows_process": selected["python"],
             "webui_checks": selected["webui"], "webui_browser": selected["webui"],
             "webui": selected["webui"], "tui": selected["tui"], "docker": selected["docker"],
-            "native": selected["native"] and event != "push"}
+            "native": selected["native"] and event != "push",
+            "windows_installers": selected["python"] and selected["native"] and event != "push"}
     errors = []
     for job, required in jobs.items():
         result = needs[job]["result"]

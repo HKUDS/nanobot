@@ -40,3 +40,16 @@ def test_accepted_handoff_uses_the_producer_id_and_requires_native_success():
     assert download["with"]["artifact-ids"] == "${{ needs.candidate.outputs.prepared_artifact_id }}"
     assert download["with"]["merge-multiple"] == "true"
     assert "name" not in download["with"]
+
+
+def test_windows_installer_matrix_has_an_independent_required_job():
+    jobs = workflow("ci.yml")["jobs"]
+    installer = jobs["windows_installers"]
+    assert installer["runs-on"] == "windows-latest"
+    assert "native_required" in installer["if"] and "python_required" in installer["if"]
+    assert "github.event_name != 'push'" in installer["if"]
+    commands = [step.get("run", "") for step in installer["steps"]]
+    assert any("tests/test_install_scripts.py" in command and "-n 4" in command for command in commands)
+    assert not any("tests/test_install_scripts.py" in step.get("run", "")
+                   for step in jobs["windows_process"]["steps"])
+    assert "windows_installers" in jobs["required"]["needs"]
