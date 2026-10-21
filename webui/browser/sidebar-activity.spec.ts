@@ -45,7 +45,7 @@ test("sidebar activity stays in phase across staggered starts, selection and rem
 });
 
 for (const width of [1280, 390]) {
-  test(`sidebar Trace follows the neutral theme at ${width}px and respects live motion preferences`, async ({ page }) => {
+  test(`sidebar Ring follows the neutral theme at ${width}px and respects live motion preferences`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
     await page.goto("/browser/fixture.html?case=sidebar-activity&all");
     const indicators = page.getByRole("img", { name: "Agent running", exact: true });

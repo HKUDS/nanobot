@@ -1092,15 +1092,16 @@
   }
 }
 
-/* loading.dev Trace, Copyright (c) 2026 Jakub Krehel (MIT); THIRD_PARTY_NOTICES.md. */
-.sidebar-running-trace {
-  animation: sidebar-running-trace 1200ms linear infinite;
+/* loading.dev Ring, Copyright (c) 2026 Jakub Krehel (MIT); THIRD_PARTY_NOTICES.md. */
+.sidebar-running-ring {
+  transform-origin: center;
+  animation: sidebar-running-ring 800ms linear infinite;
 }
-@keyframes sidebar-running-trace {
-  to { stroke-dashoffset: -100; }
+@keyframes sidebar-running-ring {
+  to { transform: rotate(360deg); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .sidebar-running-trace {
+  .sidebar-running-ring {
     animation: none;
   }
 }
