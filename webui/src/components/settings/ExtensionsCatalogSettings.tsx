@@ -133,7 +133,7 @@ export function ExtensionsCatalogSettings({
                         name: extension.name,
                         defaultValue: "Toggle {{name}}",
                       })}
-                      label={enabled ? t("settings.values.on", { defaultValue: "On" }) : t("settings.values.off", { defaultValue: "Off" })}
+                      label={enabled ? t("settings.values.enabled", { defaultValue: "Enabled" }) : t("settings.values.disabled", { defaultValue: "Disabled" })}
                       onChange={(next) => {
                         void onToggleExtension(extension.id, next);
                       }}
