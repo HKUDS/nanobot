@@ -75,6 +75,7 @@ import type {
 import { projectThreadEvents } from "@/lib/thread-event-projection";
 import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
+import { copyThreadCheckpoint, createThreadCheckpoint, type ThreadCheckpoint } from "@/lib/thread-checkpoint";
 import { canonicalRunSnapshot, completedAssistantTurnIds } from "@/lib/canonical-run-snapshot";
 import { providerDisplayLabel } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
@@ -883,10 +884,6 @@ export function ThreadShell({
   ));
   const messageCacheRef = useRef(messageCache ?? localMessageCacheRef.current);
   messageCacheRef.current = messageCache ?? localMessageCacheRef.current;
-  /** Last chatId we associated with the in-memory thread (for cache-on-switch). */
-  const prevChatIdForCacheRef = useRef<string | null>(null);
-  /** Skip one message-cache write right after chatId changes (messages may not match yet). */
-  const skipLayoutCacheRef = useRef(false);
   const pendingCanonicalHydrateRef = useRef<Map<string, PendingCanonicalHydrate>>(new Map());
   const pendingCanonicalCommitRef = useRef<Map<string, PendingCanonicalCommit>>(new Map());
   const pendingHistoryLineageCommitRef = useRef<Map<string, PendingHistoryLineageCommit>>(
@@ -905,19 +902,18 @@ export function ThreadShell({
     !hideHeader && !session && !loading && !!onTemporaryChatEnabledChange;
 
   const initial = useMemo(() => {
-    if (!chatId) return historical;
-    const cached = messageCacheRef.current.get(chatId);
+    const cached = chatId ? messageCacheRef.current.get(chatId) : undefined;
     return cached
-      ? replaceCanonicalCompletedTurns(cached, historical, completedTurnIds)
-      : historical;
+      ? copyThreadCheckpoint(cached, replaceCanonicalCompletedTurns(cached.projection.messages, historical, completedTurnIds))
+      : createThreadCheckpoint(historical);
   }, [chatId, completedTurnIds, historical]);
   const handleTurnEnd = useCallback(() => {
     if (chatId) activeViewportTurnByChatIdRef.current.delete(chatId);
     setSubmittedViewportTurnId(null);
     onTurnEnd?.();
   }, [chatId, onTurnEnd]);
-  const handleStreamDetach = useCallback((snapshot: UIMessage[]) => {
-    if (chatId) messageCacheRef.current.set(chatId, projectWebuiThreadMessages(snapshot));
+  const handleStreamDetach = useCallback((checkpoint: ThreadCheckpoint) => {
+    if (chatId) messageCacheRef.current.set(chatId, checkpoint);
   }, [chatId]);
   const {
     messages,
@@ -934,10 +930,11 @@ export function ThreadShell({
     stop,
     reconcileTurnComplete,
     setMessages,
+    getCheckpoint,
     streamError,
     dismissStreamError,
   } = useNanobotStream(
-    chatId, initial, hasPendingToolCalls, handleTurnEnd, handleStreamDetach, completedTurnIds,
+    chatId, initial.projection.messages, hasPendingToolCalls, handleTurnEnd, handleStreamDetach, completedTurnIds, initial,
   );
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
   const normalizedHistory = useMemo(() => projectWebuiThreadMessages(historical), [historical]);
@@ -1292,7 +1289,7 @@ export function ThreadShell({
       historyLineage,
       historyVersion,
       runGeneration: client.getRunGeneration(chatId),
-      uiBaseline: durableMessageShapes(initial),
+      uiBaseline: durableMessageShapes(initial.projection.messages),
       uiLineage: committedHistoryLineageRef.current.get(chatId) ?? null,
       uiRevision: uiRevisionRef.current,
     });
@@ -1476,11 +1473,11 @@ export function ThreadShell({
     ) {
       pendingCanonicalCommitRef.current.delete(chatId);
       const fallback = replaceCanonicalCompletedTurns(
-        messageCacheRef.current.get(chatId) ?? commit.previousMessages,
+        messageCacheRef.current.get(chatId)?.projection.messages ?? commit.previousMessages,
         commit.messages,
         commit.completedTurnIds,
       );
-      messageCacheRef.current.set(chatId, fallback);
+      messageCacheRef.current.set(chatId, copyThreadCheckpoint(getCheckpoint(), fallback));
       setMessages((current) => current === commit.messages ? fallback : current);
       return;
     }
@@ -1488,7 +1485,7 @@ export function ThreadShell({
     pendingCanonicalCommitRef.current.delete(chatId);
     committedHistoryLineageRef.current.set(chatId, historyLineage);
     completedCanonicalHydrateVersionRef.current.set(chatId, historyVersion);
-  }, [chatId, client, historyKey, historyLineage, historyVersion, messages, setMessages]);
+  }, [chatId, client, getCheckpoint, historyKey, historyLineage, historyVersion, messages, setMessages]);
 
   useEffect(() => {
     if (!historyKey || !chatId || hasPendingToolCalls) return;
@@ -1573,42 +1570,10 @@ export function ThreadShell({
     setMessages(projectWebuiThreadMessages(historical));
   }, [chatId, historical, setMessages]);
 
-  useLayoutEffect(() => {
-    if (chatId) {
-      const prev = prevChatIdForCacheRef.current;
-      if (prev && prev !== chatId) {
-        messageCacheRef.current.set(prev, displayMessages);
-        skipLayoutCacheRef.current = true;
-      }
-      prevChatIdForCacheRef.current = chatId;
-    } else {
-      if (prevChatIdForCacheRef.current) {
-        messageCacheRef.current.set(
-          prevChatIdForCacheRef.current,
-          displayMessages,
-        );
-        skipLayoutCacheRef.current = true;
-      }
-      prevChatIdForCacheRef.current = null;
-    }
-  }, [chatId, displayMessages]);
-
-  // Persist thread to in-memory cache after paint so ``useNanobotStream``'s chat switch
-  // ``useEffect`` reset has flushed; ``skipLayoutCacheRef`` drops the first run that still
-  // sees the *previous* chat's ``messages`` (avoids stale rows leaking across sessions).
   useEffect(() => {
-    if (!chatId) {
-      return;
-    }
-    if (skipLayoutCacheRef.current) {
-      skipLayoutCacheRef.current = false;
-      return;
-    }
-    if (loading) {
-      return;
-    }
-    messageCacheRef.current.set(chatId, displayMessages);
-  }, [chatId, displayMessages, loading]);
+    if (!chatId || !messagesReady || loading) return;
+    messageCacheRef.current.set(chatId, getCheckpoint());
+  }, [chatId, getCheckpoint, loading, messages, messagesReady]);
 
   // The landing composer queues the first message while `new_chat` is in flight.
   // Only the chat created for that send may consume it; selecting another chat

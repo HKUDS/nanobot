@@ -172,6 +172,11 @@ export interface UIMessage {
   turnId?: string;
   turnPhase?: UITurnPhase;
   turnSeq?: number;
+  /** First contributing sequence; later content/source updates do not move this row. */
+  projectionStartSeq?: number;
+  /** Phase-qualified stream ownership survives memory-cache restoration. */
+  streamId?: string;
+  reasoningStreamId?: string;
   /** Ephemeral delivery lifecycle for optimistic user messages. */
   deliveryStatus?: MessageDeliveryStatus;
   /** Structured rejection reason shown with a failed optimistic message. */

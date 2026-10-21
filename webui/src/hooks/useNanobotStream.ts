@@ -1,6 +1,6 @@
 import { acceptsCompactionPhase } from "../../../packages/client-events/notifications";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { copyThreadCheckpoint, createThreadCheckpoint, type ThreadCheckpoint } from "@/lib/thread-checkpoint";
 import { useThreadVisibility } from "@/hooks/useThreadVisibility";
 
 import { useClient } from "@/providers/ClientProvider";
@@ -9,7 +9,6 @@ import type { StreamError } from "@/lib/nanobot-client";
 import {
   clearThreadProjectionActivity,
   closeThreadProjectionAnswer,
-  createThreadProjectionState,
   finalizeStreamedTurn,
   projectThreadEvent,
   resetThreadProjectionCursor,
@@ -38,8 +37,8 @@ import type {
 } from "@/lib/types";
 
 type PendingStreamEvent =
-  | { kind: "delta"; text: string; turn: UIMessageTurnFields; source?: UIMessage["source"]; responseSources?: UIMessage["responseSources"] }
-  | { kind: "reasoning"; text: string; turn: UIMessageTurnFields };
+  | { kind: "delta"; text: string; turn: UIMessageTurnFields; streamId?: string; source?: UIMessage["source"]; responseSources?: UIMessage["responseSources"] }
+  | { kind: "reasoning"; text: string; turn: UIMessageTurnFields; streamId?: string };
 
 const BACKGROUND_STREAM_FLUSH_INTERVAL_MS = 1_000;
 // Markdown and layout work must leave room for input between visible updates.
@@ -137,8 +136,9 @@ export function useNanobotStream(
   initialMessages: UIMessage[] = EMPTY_INITIAL_MESSAGES,
   hasPendingToolCalls = false,
   onTurnEnd?: () => void,
-  onStreamDetach?: (messages: UIMessage[]) => void,
+  onStreamDetach?: (checkpoint: ThreadCheckpoint) => void,
   completedTurnIds: readonly string[] = EMPTY_COMPLETED_TURN_IDS,
+  initialCheckpoint?: ThreadCheckpoint,
 ): {
   messages: UIMessage[];
   /** Whether ``messages`` belongs to the current ``chatId`` after a session switch. */
@@ -163,6 +163,8 @@ export function useNanobotStream(
   /** Mark an accepted canonical snapshot as the definitive end of the active turn. */
   reconcileTurnComplete: () => void;
   setMessages: React.Dispatch<React.SetStateAction<UIMessage[]>>;
+  /** Flush received chunks and capture a resumable copy, independently of paint. */
+  getCheckpoint: () => ThreadCheckpoint;
   /** Latest transport-level fault raised since the last ``dismissStreamError``.
    * ``null`` when there is nothing to show. */
   streamError: StreamError | null;
@@ -174,7 +176,11 @@ export function useNanobotStream(
   const threadVisible = useThreadVisibility();
   const threadVisibleRef = useRef(threadVisible);
   threadVisibleRef.current = threadVisible;
-  const { t } = useTranslation();
+  const [initialState] = useState(() => initialCheckpoint
+    ? copyThreadCheckpoint(initialCheckpoint, initialMessages)
+    : createThreadCheckpoint(initialMessages));
+  const projectionRef = useRef<ThreadProjectionState>(initialState.projection);
+  const sideChannelTurnIdsRef = useRef(initialState.sideChannelTurnIds);
   const initialRunStartedAt = chatId ? client.getRunStartedAt(chatId) : null;
   const [messages, setRenderedMessages] = useState<UIMessage[]>(initialMessages);
   const messagesRef = useRef(messages);
@@ -183,6 +189,7 @@ export function useNanobotStream(
   const setMessages = useCallback<React.Dispatch<React.SetStateAction<UIMessage[]>>>((update) => {
     const next = typeof update === "function" ? update(messagesRef.current) : update;
     messagesRef.current = next;
+    projectionRef.current = { ...projectionRef.current, messages: next };
     setRenderedMessages(next);
   }, []);
   const [messageOwnerChatId, setMessageOwnerChatId] = useState(chatId);
@@ -203,14 +210,10 @@ export function useNanobotStream(
   const [goalState, setGoalState] = useState<GoalStateWsPayload | undefined>(undefined);
   const [recoveryState, setRecoveryState] = useState<RecoveryState | null>(null);
   const [streamError, setStreamError] = useState<StreamError | null>(null);
-  const projectionRef = useRef<ThreadProjectionState>(
-    createThreadProjectionState(initialMessages),
-  );
   const pendingStreamEventsRef = useRef<PendingStreamEvent[]>([]);
   const streamFrameRef = useRef<number | null>(null);
   const streamTimerRef = useRef<number | null>(null);
   const lastStreamFlushRef = useRef(0);
-  const sideChannelTurnIdsRef = useRef<Set<string>>(new Set());
 
   const dismissStreamError = useCallback(() => setStreamError(null), []);
 
@@ -324,6 +327,7 @@ export function useNanobotStream(
         while (index + 1 < events.length) {
           const nextEvent = events[index + 1];
           if (nextEvent.kind !== event.kind
+            || nextEvent.streamId !== event.streamId
             || nextEvent.turn.turnId !== event.turn.turnId
             || nextEvent.turn.turnPhase !== event.turn.turnPhase
             || (nextEvent.kind === "delta" && event.kind === "delta"
@@ -338,6 +342,7 @@ export function useNanobotStream(
           ? {
               event: "delta",
               chat_id: chatId ?? "",
+              stream_id: event.streamId,
               text,
               turn_id: turn.turnId,
               turn_phase: turn.turnPhase,
@@ -348,6 +353,7 @@ export function useNanobotStream(
           : {
               event: "reasoning_delta",
               chat_id: chatId ?? "",
+              stream_id: event.streamId,
               text,
               turn_id: turn.turnId,
               turn_phase: turn.turnPhase,
@@ -356,6 +362,7 @@ export function useNanobotStream(
         projection = projectThreadEvent(projection, projectedEvent, {
           createId: () => crypto.randomUUID(),
           now: Date.now(),
+          startSeq: event.turn.turnSeq,
         });
       }
       projectionRef.current = projection;
@@ -369,6 +376,7 @@ export function useNanobotStream(
     mergeReasoning?: boolean;
     finalAnswerText?: string;
     turn?: UIMessageTurnFields;
+    streamId?: string;
     source?: UIMessage["source"];
     responseSources?: UIMessage["responseSources"];
   }) => {
@@ -387,8 +395,7 @@ export function useNanobotStream(
     const source = options?.source;
     const responseSources = options?.responseSources;
     if (events.length === 0 && finalAnswerText === undefined && source === undefined && responseSources === undefined
-      && !options?.mergeReasoning) {
-      if (options?.closeAnswerSegment) closeActiveAssistantStream();
+      && !options?.mergeReasoning && !options?.closeAnswerSegment) {
       return;
     }
     pendingStreamEventsRef.current = [];
@@ -405,6 +412,7 @@ export function useNanobotStream(
         projection = projectThreadEvent(projection, {
           event: "stream_end",
           chat_id: chatId ?? "",
+          stream_id: options?.streamId,
           ...(finalAnswerText !== undefined ? { text: finalAnswerText } : {}),
           ...(source ? { source } : {}),
           ...(responseSources !== undefined ? { response_sources: responseSources } : {}),
@@ -420,7 +428,15 @@ export function useNanobotStream(
       projectionRef.current = projection;
       return projection.messages;
     });
-  }, [applyPendingStreamEvents, chatId, closeActiveAssistantStream, setMessages]);
+  }, [applyPendingStreamEvents, chatId, setMessages]);
+
+  const getCheckpoint = useCallback(() => {
+    flushPendingStreamEvents();
+    return copyThreadCheckpoint({
+      projection: projectionRef.current,
+      sideChannelTurnIds: sideChannelTurnIdsRef.current,
+    });
+  }, [flushPendingStreamEvents]);
 
   const schedulePendingStreamFlush = useCallback(function schedule() {
     if (streamFrameRef.current !== null || streamTimerRef.current !== null) return;
@@ -524,9 +540,12 @@ export function useNanobotStream(
     setRetryStatus(null);
     setGoalState(chatId ? client.getGoalState(chatId) : undefined);
     setRecoveryState(null);
-    projectionRef.current = createThreadProjectionState(initialMessages);
+    const restored = initialCheckpoint
+      ? copyThreadCheckpoint(initialCheckpoint, initialMessages)
+      : createThreadCheckpoint(initialMessages);
+    projectionRef.current = restored.projection;
+    sideChannelTurnIdsRef.current = restored.sideChannelTurnIds;
     clearPendingStreamWork();
-    sideChannelTurnIdsRef.current.clear();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatId, client, clearActivitySegment, clearPendingStreamWork, setMessages]);
 
@@ -675,6 +694,7 @@ export function useNanobotStream(
           kind: "delta",
           text: chunk,
           turn: turnFieldsFromEvent(ev, "answer"),
+          streamId: ev.stream_id,
           source: ev.source,
           responseSources: ev.response_sources,
         });
@@ -691,6 +711,7 @@ export function useNanobotStream(
           kind: "reasoning",
           text: chunk,
           turn: turnFieldsFromEvent(ev, "reasoning"),
+          streamId: ev.stream_id,
         });
         schedulePendingStreamFlush();
         return;
@@ -703,6 +724,7 @@ export function useNanobotStream(
           closeAnswerSegment: !mergeNext,
           mergeReasoning: mergeNext,
           ...(typeof ev.text === "string" ? { finalAnswerText: ev.text } : {}),
+          streamId: ev.stream_id,
           turn,
           source: ev.source,
           responseSources: ev.response_sources,
@@ -891,20 +913,13 @@ export function useNanobotStream(
     const unsub = client.onTranscript(chatId, handle);
     return () => {
       unsub();
-      // Navigation may happen before the throttled paint. Snapshot the pending
-      // deltas synchronously while they still belong to this subscription.
-      const pending = pendingStreamEventsRef.current;
-      const snapshot = pending.length > 0
-        ? applyPendingStreamEvents(messagesRef.current, pending)
-        : messagesRef.current;
-      onStreamDetach?.(snapshot);
-      if (pending.length > 0) setMessages(snapshot);
-      projectionRef.current = resetThreadProjectionCursor(projectionRef.current);
+      // Capture received state, including deltas waiting for a throttled paint.
+      const checkpoint = getCheckpoint();
+      onStreamDetach?.(checkpoint);
       clearPendingStreamWork();
     };
   }, [
     applyProjectionEvent,
-    applyPendingStreamEvents,
     applyStreamError,
     chatId,
     closeActiveAssistantStream,
@@ -917,7 +932,7 @@ export function useNanobotStream(
     onStreamDetach,
     schedulePendingStreamFlush,
     setMessages,
-    t,
+    getCheckpoint,
   ]);
 
   const send = useCallback(
@@ -1061,6 +1076,7 @@ export function useNanobotStream(
     stop,
     reconcileTurnComplete,
     setMessages,
+    getCheckpoint,
     streamError,
     dismissStreamError,
   };

@@ -1378,6 +1378,9 @@ def _client_projection_event(
 
     if event in {"delta", "stream_end", "reasoning_delta", "reasoning_end"}:
         projected = {"event": event, **common}
+        stream_id = record.get("stream_id")
+        if isinstance(stream_id, str) and stream_id:
+            projected["stream_id"] = stream_id
         text = record.get("text")
         if isinstance(text, str):
             if event == "stream_end" and augment_assistant_text is not None:

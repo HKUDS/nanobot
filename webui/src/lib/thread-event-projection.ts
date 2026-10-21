@@ -23,6 +23,8 @@ export interface ThreadProjectionState {
   messages: UIMessage[];
   activeAssistantId: string | null;
   closedAssistantIds: Set<string>;
+  /** Wire streams can span several UI slices around provider-hosted tools. */
+  closedAnswerStreamIds: Set<string>;
   mergeReasoning: boolean;
   activitySegmentId: string | null;
   fileEditSegmentId: string | null;
@@ -37,6 +39,8 @@ export interface ThreadProjectionOptions {
   now: number;
   persisted?: boolean;
   sideChannel?: boolean;
+  /** First sequence of a coalesced batch; event.turn_seq is its last contribution. */
+  startSeq?: number;
 }
 
 export function turnFieldsFromEvent(
@@ -59,6 +63,15 @@ function matchesTurn(message: UIMessage, turn: UIMessageTurnFields): boolean {
   return !turn.turnId || !message.turnId || message.turnId === turn.turnId;
 }
 
+function positionedTurnFields(
+  target: UIMessage | undefined,
+  turn: UIMessageTurnFields,
+  options: ThreadProjectionOptions,
+): UIMessageTurnFields & Pick<UIMessage, "projectionStartSeq"> {
+  const start = target?.projectionStartSeq ?? target?.turnSeq ?? options.startSeq ?? turn.turnSeq;
+  return { ...turn, ...(start !== undefined ? { projectionStartSeq: start } : {}) };
+}
+
 /** Find a still-open streamed assistant turn. Closed stream segments stay visible
  * as streaming until ``turn_end`` for visual continuity, but they must not
  * receive later delta segments. */
@@ -66,6 +79,7 @@ function findStreamingAssistantIndex(
   prev: UIMessage[],
   closedStreamIds: ReadonlySet<string>,
   turn: UIMessageTurnFields = {},
+  streamId?: string,
 ): number | null {
   for (let i = prev.length - 1; i >= 0; i -= 1) {
     const m = prev[i];
@@ -74,6 +88,7 @@ function findStreamingAssistantIndex(
       m.role === "assistant"
       && m.isStreaming
       && !closedStreamIds.has(m.id)
+      && (!streamId || !m.streamId || m.streamId === streamId)
       && matchesTurn(m, turn)
     ) return i;
     if (m.role === "user") break;
@@ -110,10 +125,15 @@ function replaceMessageAt(
 
 /** Close the active reasoning stream segment. ``now`` is supplied by the caller
  * so the projection remains deterministic for replay and fixture tests. */
-function closeReasoningStream(prev: UIMessage[], now?: number): UIMessage[] {
+function closeReasoningStream(prev: UIMessage[], now?: number, turn: UIMessageTurnFields = {}, streamId?: string): UIMessage[] {
+  const identifiedIndex = streamId ? prev.findIndex((message) => (
+    message.reasoningStreamId === streamId && matchesTurn(message, turn)
+  )) : -1;
   for (let i = prev.length - 1; i >= 0; i -= 1) {
+    if (identifiedIndex >= 0 && i !== identifiedIndex) continue;
     const candidate = prev[i];
-    if (!candidate.reasoningStreaming) continue;
+    if (!candidate.reasoningStreaming || !matchesTurn(candidate, turn)
+      || (streamId && candidate.reasoningStreamId && streamId !== candidate.reasoningStreamId)) continue;
     const latencyMs =
       now !== undefined
       && candidate.latencyMs === undefined
@@ -374,6 +394,7 @@ export function createThreadProjectionState(
     messages,
     activeAssistantId: null,
     closedAssistantIds: new Set(),
+    closedAnswerStreamIds: new Set(),
     mergeReasoning: false,
     activitySegmentId: null,
     fileEditSegmentId: null,
@@ -489,18 +510,44 @@ function activeAssistantIndex(
   return index;
 }
 
+function answerStreamKey(turn: UIMessageTurnFields, streamId?: string): string | undefined {
+  return streamId ? JSON.stringify([turn.turnId ?? "", streamId]) : undefined;
+}
+
+function answerStreamIndex(
+  state: ThreadProjectionState,
+  turn: UIMessageTurnFields,
+  streamId?: string,
+): number | null {
+  if (streamId) {
+    for (let index = state.messages.length - 1; index >= 0; index--) {
+      const message = state.messages[index];
+      if (message.role === "assistant" && message.streamId === streamId && matchesTurn(message, turn)) return index;
+    }
+  }
+  const active = activeAssistantIndex(state, turn);
+  if (active !== null && (!streamId || !state.messages[active].streamId || state.messages[active].streamId === streamId)) {
+    return active;
+  }
+  const placeholder = findActiveAssistantPlaceholderIndex(state.messages, turn);
+  if (placeholder !== null && (!streamId || !state.messages[placeholder].streamId || state.messages[placeholder].streamId === streamId)) {
+    return placeholder;
+  }
+  return findStreamingAssistantIndex(state.messages, state.closedAssistantIds, turn, streamId);
+}
+
 function appendAnswerText(
   state: ThreadProjectionState,
   event: Extract<ThreadProjectionEvent, { event: "delta" }>,
   options: ThreadProjectionOptions,
 ): void {
   const turn = turnFieldsForProjection(state, event, "answer");
-  let targetIndex = activeAssistantIndex(state, turn);
-  if (targetIndex === null) targetIndex = findActiveAssistantPlaceholderIndex(state.messages, turn);
+  const streamKey = answerStreamKey(turn, event.stream_id);
+  if (streamKey && state.closedAnswerStreamIds.has(streamKey)) return;
+  let targetIndex = answerStreamIndex(state, turn, event.stream_id);
+  if (targetIndex !== null && state.closedAssistantIds.has(state.messages[targetIndex].id)) targetIndex = null;
   if (targetIndex === null) {
-    targetIndex = findStreamingAssistantIndex(state.messages, state.closedAssistantIds, turn);
-  }
-  if (targetIndex === null) {
+    Object.assign(state, closeThreadProjectionAnswer(state));
     const id = projectionMessageId(event, options);
     state.messages = [
       ...state.messages,
@@ -519,7 +566,8 @@ function appendAnswerText(
     ...target,
     content: target.content + event.text,
     isStreaming: true,
-    ...turn,
+    ...positionedTurnFields(target, turn, options),
+    ...(event.stream_id ? { streamId: event.stream_id } : {}),
     ...(event.source ? { source: event.source } : {}),
     ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
   };
@@ -536,6 +584,22 @@ function attachProjectedReasoning(
   options: ThreadProjectionOptions,
 ): void {
   const turn = turnFieldsForProjection(state, event, "reasoning");
+  const streamIndex = event.stream_id ? state.messages.findIndex((message) => (
+    message.reasoningStreamId === event.stream_id && matchesTurn(message, turn)
+  )) : -1;
+  if (streamIndex >= 0) {
+    const target = state.messages[streamIndex];
+    const continues = state.mergeReasoning && state.activeAssistantId === target.id;
+    if (event.event === "reasoning_delta" && !target.reasoningStreaming && !continues) return;
+    const separator = target.reasoning && !target.reasoningStreaming ? "\n\n" : "";
+    state.messages = replaceMessageAt(state.messages, streamIndex, {
+      ...target,
+      reasoning: event.event === "reasoning_end" ? text : (target.reasoning ?? "") + separator + text,
+      reasoningStreaming: event.event === "reasoning_delta" || target.reasoningStreaming,
+      ...(!target.content ? positionedTurnFields(target, turn, options) : {}),
+    });
+    return;
+  }
   const activeAssistantBeforeContinuation = state.activeAssistantId;
   const continuationIndex = state.mergeReasoning
     ? activeAssistantIndex(state, turn)
@@ -547,6 +611,7 @@ function attachProjectedReasoning(
       ...target,
       reasoning: (target.reasoning ?? "") + separator + text,
       reasoningStreaming: true,
+      ...(event.stream_id ? { reasoningStreamId: event.stream_id } : {}),
     });
     return;
   }
@@ -562,7 +627,8 @@ function attachProjectedReasoning(
     const candidate = state.messages[index];
     if (candidate.role === "user" || candidate.kind === "trace") break;
     if (candidate.role !== "assistant") continue;
-    if (!matchesTurn(candidate, turn) || candidate.content.length > 0) break;
+    if (!matchesTurn(candidate, turn) || candidate.content.length > 0
+      || (event.stream_id && candidate.reasoningStreamId && event.stream_id !== candidate.reasoningStreamId)) break;
     if (candidate.reasoningStreaming || (candidate.isStreaming && candidate.reasoning === undefined)) {
       const activitySegmentId = candidate.activitySegmentId
         ?? ensureProjectionActivitySegment(state);
@@ -571,7 +637,8 @@ function attachProjectedReasoning(
         reasoning: (candidate.reasoning ?? "") + text,
         reasoningStreaming: true,
         activitySegmentId,
-        ...turn,
+        ...positionedTurnFields(candidate, turn, options),
+        ...(event.stream_id ? { reasoningStreamId: event.stream_id } : {}),
       });
       return;
     }
@@ -589,7 +656,8 @@ function attachProjectedReasoning(
       reasoning: text,
       reasoningStreaming: true,
       activitySegmentId,
-      ...turn,
+      ...positionedTurnFields(undefined, turn, options),
+      ...(event.stream_id ? { reasoningStreamId: event.stream_id } : {}),
       createdAt: projectionCreatedAt(event, options),
     },
   ];
@@ -608,6 +676,7 @@ function absorbProjectedAssistantMessage(
       {
         ...last,
         ...message,
+        projectionStartSeq: last.projectionStartSeq ?? last.turnSeq ?? message.projectionStartSeq,
         isStreaming: false,
         reasoningStreaming: false,
       },
@@ -681,7 +750,7 @@ function projectToolActivity(
           : lines[lines.length - 1],
         toolEvents: mergedEvents,
         activitySegmentId: last.activitySegmentId ?? segmentId,
-        ...turn,
+        ...positionedTurnFields(last, turn, options),
       },
     ];
     return;
@@ -697,7 +766,7 @@ function projectToolActivity(
       ...(visibleEvents.length ? { toolEvents: visibleEvents } : {}),
       ...(deferredDetail ? { traceDetail: deferredDetail } : {}),
       activitySegmentId: segmentId,
-      ...turn,
+      ...positionedTurnFields(undefined, turn, options),
       createdAt: projectionCreatedAt(event, options),
     },
   ];
@@ -730,7 +799,7 @@ function projectFileEdits(
       ...target,
       fileEdits: mergeFileEdits(target.fileEdits, normalized),
       activitySegmentId: segmentId,
-      ...turn,
+      ...positionedTurnFields(target, turn, options),
     });
     return;
   }
@@ -746,7 +815,7 @@ function projectFileEdits(
       traces: [],
       fileEdits: normalized,
       activitySegmentId: segmentId,
-      ...turn,
+      ...positionedTurnFields(undefined, turn, options),
       createdAt: projectionCreatedAt(event, options),
     },
   ];
@@ -761,6 +830,7 @@ export function projectThreadEvent(
   const state: ThreadProjectionState = {
     ...previous,
     closedAssistantIds: new Set(previous.closedAssistantIds),
+    closedAnswerStreamIds: new Set(previous.closedAnswerStreamIds),
     closedTurnIds: new Set(previous.closedTurnIds),
     turnAliases: new Map(previous.turnAliases),
   };
@@ -821,46 +891,47 @@ export function projectThreadEvent(
     if (state.suppressUntilTurnEnd) return state;
     const turn = turnFieldsForProjection(state, event, "answer");
     const mergeNext = event.resuming === true && event.merge_next === true;
-    let targetIndex = activeAssistantIndex(state, turn);
-    if (targetIndex === null) {
-      targetIndex = findStreamingAssistantIndex(state.messages, state.closedAssistantIds, turn);
-    }
-    if (typeof event.text === "string") {
-      if (targetIndex === null) {
-        const id = projectionMessageId(event, options);
-        state.messages = [
-          ...state.messages,
-          {
-            id,
-            role: "assistant",
-            content: event.text,
-            isStreaming: true,
-            ...turn,
-            ...(event.source ? { source: event.source } : {}),
-            ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
-            createdAt: projectionCreatedAt(event, options),
-          },
-        ];
-        targetIndex = state.messages.length - 1;
-      } else {
-        const target = state.messages[targetIndex];
-        state.messages = replaceMessageAt(state.messages, targetIndex, {
-          ...target,
-          content: event.text,
-          isStreaming: true,
-          ...turn,
-          ...(event.source ? { source: event.source } : {}),
-          ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
-        });
-      }
-    } else if ((event.source || event.response_sources !== undefined) && targetIndex !== null) {
-      state.messages = replaceMessageAt(state.messages, targetIndex, {
-        ...state.messages[targetIndex],
-        ...turn,
+    const streamKey = answerStreamKey(turn, event.stream_id);
+    const wireClosed = streamKey !== undefined && state.closedAnswerStreamIds.has(streamKey);
+    if (streamKey && !mergeNext) state.closedAnswerStreamIds.add(streamKey);
+    let targetIndex = answerStreamIndex(state, turn, event.stream_id);
+    if (targetIndex === null && typeof event.text !== "string") return state;
+    const wasClosed = targetIndex !== null && state.closedAssistantIds.has(state.messages[targetIndex].id);
+    if (targetIndex === null && typeof event.text === "string") {
+      const id = projectionMessageId(event, options);
+      state.messages = [...state.messages, {
+        id,
+        role: "assistant",
+        content: event.text,
+        isStreaming: true,
+        ...positionedTurnFields(undefined, turn, options),
+        ...(event.stream_id ? { streamId: event.stream_id } : {}),
         ...(event.source ? { source: event.source } : {}),
         ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
+        createdAt: projectionCreatedAt(event, options),
+      }];
+      targetIndex = state.messages.length - 1;
+    } else if (typeof event.text === "string" || event.source || event.response_sources !== undefined) {
+      let offset = 0;
+      state.messages = state.messages.map((target, index) => {
+        const ownsStream = index === targetIndex
+          || (event.stream_id && target.streamId === event.stream_id && matchesTurn(target, turn));
+        if (!ownsStream) return target;
+        // A cumulative snapshot spans every UI slice separated by hosted tools.
+        const end = index === targetIndex ? undefined : offset + target.content.length;
+        const content = typeof event.text === "string" ? event.text.slice(offset, end) : target.content;
+        offset += target.content.length;
+        return {
+          ...target,
+          content,
+          ...positionedTurnFields(target, turn, options),
+          ...(event.stream_id ? { streamId: event.stream_id } : {}),
+          ...(event.source ? { source: event.source } : {}),
+          ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
+        };
       });
     }
+    if (wasClosed || wireClosed) return state;
     if (targetIndex !== null) state.activeAssistantId = state.messages[targetIndex].id;
     state.mergeReasoning = mergeNext && state.activeAssistantId !== null;
     if (!mergeNext) Object.assign(state, closeThreadProjectionAnswer(state));
@@ -880,6 +951,8 @@ export function projectThreadEvent(
     state.messages = closeReasoningStream(
       state.messages,
       options.persisted ? undefined : options.now,
+      turnFieldsForProjection(state, event, "reasoning"),
+      event.stream_id,
     );
     return state;
   }
@@ -899,7 +972,7 @@ export function projectThreadEvent(
         phase: event.phase,
         ...(!options.persisted ? { announce: true } : {}),
       },
-      ...turnFieldsForProjection(state, event, "activity"),
+      ...positionedTurnFields(state.messages[existing], turnFieldsForProjection(state, event, "activity"), options),
     };
     if (existing < 0) state.messages = [...state.messages, message];
     else state.messages = replaceMessageAt(state.messages, existing, {
@@ -945,7 +1018,11 @@ export function projectThreadEvent(
       ...(latencyMs !== undefined ? { latencyMs } : {}),
       ...(event.source ? { source: event.source } : {}),
       ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
-      ...turnFieldsForProjection(state, event, "answer"),
+      ...positionedTurnFields(
+        options.sideChannel ? undefined : state.messages.find((message) => message.id === state.activeAssistantId),
+        turnFieldsForProjection(state, event, "answer"),
+        options,
+      ),
     };
     if (options.sideChannel) {
       absorbProjectedAssistantMessage(state, event, projected, options);
@@ -989,6 +1066,7 @@ export function projectThreadEvent(
   );
   state.activeAssistantId = null;
   state.closedAssistantIds.clear();
+  state.closedAnswerStreamIds.clear();
   state.mergeReasoning = false;
   if (event.turn_id) {
     if (state.turnAliases.has(event.turn_id)) state.turnAliases.delete(event.turn_id);

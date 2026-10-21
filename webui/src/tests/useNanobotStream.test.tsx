@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { useNanobotStream } from "@/hooks/useNanobotStream";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
 import { normalizeActivityTimeline } from "@/lib/activity-timeline";
+import type { ThreadCheckpoint } from "@/lib/thread-checkpoint";
 import type { StreamError } from "@/lib/nanobot-client";
 import type {
   ConnectionStatus,
@@ -204,6 +205,101 @@ async function flushStreamFrame() {
 }
 
 describe("useNanobotStream", () => {
+  it("resumes a merge_next checkpoint including reasoning queued before detach", () => {
+    const fake = fakeClient();
+    let checkpoint: ThreadCheckpoint | undefined;
+    const first = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES, false, undefined,
+      (value) => { checkpoint = value; }), { wrapper: wrap(fake.client) });
+    act(() => {
+      fake.emit("checkpoint", { event: "delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 1, text: "First " });
+      fake.emit("checkpoint", { event: "stream_end", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 2, text: "First ", resuming: true, merge_next: true });
+      fake.emit("checkpoint", { event: "reasoning_delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 3, text: "Queued " });
+    });
+    first.unmount();
+    expect(checkpoint?.projection.messages[0].reasoning).toBe("Queued ");
+    const restored = renderHook(() => useNanobotStream("checkpoint", checkpoint!.projection.messages, false,
+      undefined, undefined, [], checkpoint), { wrapper: wrap(fake.client) });
+    act(() => {
+      fake.emit("checkpoint", { event: "reasoning_delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 4, text: "Continue reasoning" });
+      fake.emit("checkpoint", { event: "reasoning_end", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 5 });
+      fake.emit("checkpoint", { event: "delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 6, text: "last" });
+      fake.emit("checkpoint", { event: "stream_end", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 7, text: "First last" });
+    });
+    expect(restored.result.current.messages).toHaveLength(1);
+    expect(restored.result.current.messages[0]).toMatchObject({
+      content: "First last", reasoning: "Queued Continue reasoning", streamId: "answer", reasoningStreamId: "answer",
+      projectionStartSeq: 1, turnSeq: 7,
+    });
+    expect(checkpoint?.projection.messages[0].content).toBe("First ");
+    expect(checkpoint?.projection.messages[0].reasoning).toBe("Queued ");
+  });
+
+  it.each([true, false])("keeps both answer slices when a provider tool interrupts one wire stream (snapshot: %s)", (snapshot) => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("hosted-tool", EMPTY_MESSAGES), { wrapper: wrap(fake.client) });
+    act(() => {
+      fake.emit("hosted-tool", { event: "delta", chat_id: "hosted-tool", turn_id: "turn", stream_id: "answer", turn_seq: 1, text: "First " });
+      // Provider-hosted progress does not advance AgentTurnDelivery's stream ID.
+      fake.emit("hosted-tool", { event: "message", chat_id: "hosted-tool", turn_id: "turn", turn_seq: 2, kind: "tool_hint", text: "web_search(query)" });
+      fake.emit("hosted-tool", { event: "delta", chat_id: "hosted-tool", turn_id: "turn", stream_id: "answer", turn_seq: 3, text: "second" });
+      fake.emit("hosted-tool", { event: "stream_end", chat_id: "hosted-tool", turn_id: "turn", stream_id: "answer", turn_seq: 4, ...(snapshot ? { text: "First second" } : {}), resuming: true, merge_next: true });
+    });
+    expect(result.current.messages.map((message) => message.content)).toEqual(["First ", "web_search(query)", "second"]);
+    act(() => {
+      fake.emit("hosted-tool", { event: "delta", chat_id: "hosted-tool", turn_id: "turn", stream_id: "answer", turn_seq: 5, text: " last" });
+      fake.emit("hosted-tool", { event: "stream_end", chat_id: "hosted-tool", turn_id: "turn", stream_id: "answer", turn_seq: 6, ...(snapshot ? { text: "First second last" } : {}), response_sources: [] });
+    });
+    expect(result.current.messages.map((message) => message.content)).toEqual(["First ", "web_search(query)", "second last"]);
+    expect(result.current.messages[0].projectionStartSeq).toBe(1);
+    expect(result.current.messages[2].projectionStartSeq).toBe(3);
+  });
+
+  it("captures the first sequence of coalesced chunks before a paint", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES), { wrapper: wrap(fake.client) });
+    act(() => {
+      fake.emit("checkpoint", { event: "delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 1, text: "First " });
+      fake.emit("checkpoint", { event: "delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 2, text: "last" });
+    });
+    let checkpoint!: ThreadCheckpoint;
+    act(() => { checkpoint = result.current.getCheckpoint(); });
+    expect(checkpoint.projection.messages).toHaveLength(1);
+    expect(checkpoint.projection.messages[0]).toMatchObject({
+      content: "First last", streamId: "answer", projectionStartSeq: 1, turnSeq: 2,
+    });
+    act(() => {
+      fake.emit("checkpoint", { event: "stream_end", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 3, response_sources: [] });
+    });
+    expect(result.current.messages[0]).toMatchObject({ projectionStartSeq: 1, turnSeq: 3 });
+    expect(checkpoint.projection.closedAssistantIds.size).toBe(0);
+    expect(checkpoint.projection.closedAnswerStreamIds.size).toBe(0);
+    const closed = result.current.getCheckpoint().projection;
+    expect(closed.closedAssistantIds.size).toBe(1);
+    expect(closed.closedAnswerStreamIds.size).toBe(1);
+  });
+
+  it("retains side-channel ownership when restoring an active answer checkpoint", async () => {
+    const fake = fakeClient();
+    const first = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES), { wrapper: wrap(fake.client) });
+    act(() => {
+      fake.emit("checkpoint", { event: "delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", text: "Active answer" });
+    });
+    await flushStreamFrame();
+    act(() => { first.result.current.send("/model", undefined, { sideChannel: true }); });
+    const commandTurn = fake.client.sendMessage.mock.calls.at(-1)![3]?.turnId;
+    const checkpoint = first.result.current.getCheckpoint();
+    first.unmount();
+    const restored = renderHook(() => useNanobotStream("checkpoint", checkpoint.projection.messages, false,
+      undefined, undefined, [], checkpoint), { wrapper: wrap(fake.client) });
+    act(() => {
+      fake.emit("checkpoint", { event: "message", chat_id: "checkpoint", turn_id: commandTurn, text: "Current model" });
+      fake.emit("checkpoint", { event: "delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", text: " continued" });
+      fake.emit("checkpoint", { event: "stream_end", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer" });
+    });
+    expect(restored.result.current.messages.filter((message) => message.role === "assistant").map((message) => message.content))
+      .toEqual(["Active answer continued", "Current model"]);
+  });
+
   it("keeps invocation snapshots across streaming, recovery segments, completion and reload", async () => {
     const fake = fakeClient();
     const a = { provider: "openai_codex", model: "gpt", preset: "writer", fallback: false };
