@@ -313,7 +313,7 @@ def test_atomic_write_lines_suppresses_directory_permission_error(
     atomic_write_lines(target, ["ok"])
 
     assert target.read_text(encoding="utf-8") == "ok\n"
-    assert opened == [(str(tmp_path), os.O_RDONLY)]
+    assert opened == [(str(atomic_file.io_path(tmp_path)), os.O_RDONLY)]
 
 
 @pytest.mark.parametrize("error_number", [errno.EINVAL, errno.EIO], ids=["unsupported", "io-error"])
@@ -372,5 +372,5 @@ def test_atomic_writes_directory_fsync_errors(
 
     assert target.read_text(encoding="utf-8") == expected_content
     assert fsync_calls == 2
-    assert opened == [(str(tmp_path), directory_fd)]
+    assert opened == [(str(atomic_file.io_path(tmp_path)), directory_fd)]
     assert closed == [directory_fd]

@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import BinaryIO
 
+from nanobot.utils.atomic_file import io_path
+
 
 class InstallationBusyError(RuntimeError):
     """Another runtime or updater holds an incompatible installation lease."""
@@ -93,6 +95,7 @@ def _lock_windows(handle: BinaryIO, *, exclusive: bool) -> None:
 @contextmanager
 def file_access(path: Path, *, exclusive: bool) -> Generator[FileLease]:
     """Hold a nonblocking OS lease; never replace or delete its file."""
+    path = io_path(path)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     descriptor = os.open(path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
     with os.fdopen(descriptor, "a+b") as handle:
@@ -124,7 +127,7 @@ def installation_access(*, updating: bool = False, allow_incomplete: bool = Fals
     try:
         with file_access(installation_state_dir(environment) / "runtime.lock", exclusive=updating) as lease:
             acquired = True
-            if not updating and not allow_incomplete and pending_update_path(environment).exists():
+            if not updating and not allow_incomplete and io_path(pending_update_path(environment)).exists():
                 raise InstallationBusyError(
                     "A previous update did not finish. Check its saved update state at "
                     f"{installation_state_dir(environment)} before repairing this installation. "

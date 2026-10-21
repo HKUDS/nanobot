@@ -26,6 +26,7 @@ from nanobot.runtime_admission import RuntimeBusyError, RuntimeMaintenanceError
 from nanobot.update_plan import UpdatePlan
 from nanobot.update_profiles import ProfileReceipt, require_stopped_profiles, validate_profiles
 from nanobot.update_worker import JobStatus, Phase, WorkerSpec, read_record, write_record
+from nanobot.utils.atomic_file import io_path, read_atomic_bytes
 
 _POLL_SECONDS = 0.1
 
@@ -62,7 +63,7 @@ def _read_request(environment: str) -> _Request | None:
 def _job(environment: str, identifier: str) -> tuple[Path, UpdatePlan]:
     directory = installation_state_dir(environment) / "jobs" / identifier
     spec = WorkerSpec.read(directory)
-    plan = UpdatePlan.model_validate_json((directory / "plan.json").read_bytes())
+    plan = UpdatePlan.model_validate_json(read_atomic_bytes(directory / "plan.json"))
     status = JobStatus.read(directory)
     if (spec.baseline.environment != environment or plan.installation.environment != environment
             or spec.plan_id != plan.id or tuple(plan.restart_profiles) != spec.restart_profiles
@@ -75,7 +76,7 @@ def _job(environment: str, identifier: str) -> tuple[Path, UpdatePlan]:
 def _reply(directory: Path, request: _Request, profile: ProfileReceipt,
            state: Literal["ready", "busy", "released", "stopping", "refused"]) -> None:
     path = directory / "stop-replies" / f"{profile.id}.json"
-    path.parent.mkdir(exist_ok=True, mode=0o700)
+    io_path(path.parent).mkdir(exist_ok=True, mode=0o700)
     write_record(path, _Reply(attempt=request.attempt, run_id=profile.run_id, state=state).model_dump())
 
 

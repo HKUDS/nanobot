@@ -53,7 +53,7 @@ from nanobot.update_jobs import (
     start_job,
 )
 from nanobot.update_plan import InstallationSnapshot, UpdatePlan, UpdatePlans
-from nanobot.update_process import PreparationProcess
+from nanobot.update_process import PreparationProcess, inspect_python_environment
 from nanobot.update_profiles import inspect_profiles, record_gateway_profile
 from nanobot.update_service import UpdateJobService
 from nanobot.update_worker import (
@@ -178,6 +178,16 @@ def wheel(directory, name, version, *, requires=(), platform="any", broken=False
         for filename, data in files.items():
             archive.writestr(filename, data)
     return path
+
+
+def test_planning_probe_bootstraps_before_target_site(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    result = inspect_python_environment(
+        sys.executable, str(Path(sys.prefix).resolve()), "print('protected inspection')",
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "protected inspection"
 
 
 @pytest.fixture
