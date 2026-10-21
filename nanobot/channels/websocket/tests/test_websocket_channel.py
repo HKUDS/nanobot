@@ -40,6 +40,7 @@ from nanobot.bus.outbound_events import (
     UserInputEvent,
 )
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.websocket import runtime as websocket_runtime
 from nanobot.channels.websocket.runtime import (
     WebSocketChannel,
     WebSocketConfig,
@@ -210,6 +211,44 @@ async def start_listener():
                 if not task.done():
                     task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_shutdown_closes_undecided_connections_before_waiting_for_server(
+    bus, start_listener, monkeypatch,
+) -> None:
+    bridges = []
+    bridge_type = websocket_runtime.BinaryHTTPBridge
+
+    def create_bridge(handler):
+        bridge = bridge_type(handler)
+        bridges.append(bridge)
+        return bridge
+
+    monkeypatch.setattr(websocket_runtime, "BinaryHTTPBridge", create_bridge)
+    channel = _ch(bus)
+    port, start_task = await start_listener(channel)
+    async with websockets.connect(f"ws://127.0.0.1:{port}/ws") as client:
+        assert json.loads(await client.recv())["event"] == "ready"
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        try:
+            writer.write(b"P")
+            await writer.drain()
+            async with asyncio.timeout(2):
+                while not any(
+                    connection._prefix == b"P" for connection in bridges[0].pending_connections
+                ):
+                    await asyncio.sleep(0)
+            async with asyncio.timeout(2):
+                await channel.stop()
+                await start_task
+                assert await reader.read() == b""
+                await client.wait_closed()
+            assert not bridges[0].pending_connections
+            assert channel._server is None
+        finally:
+            writer.close()
+            await writer.wait_closed()
 
 
 async def _wait_for_connection_cleanup(

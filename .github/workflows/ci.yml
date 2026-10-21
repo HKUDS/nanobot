@@ -145,7 +145,7 @@ jobs:
     # suite; that suite was still progressing at the former 20-minute job cap.
     timeout-minutes: ${{ matrix.os == 'windows-latest' && 30 || 20 }}
     env:
-      PYTEST_ADDOPTS: "-o tmp_path_retention_policy=failed"
+      PYTEST_ADDOPTS: "-o tmp_path_retention_policy=failed -p scripts.pytest_timing"
     strategy:
       fail-fast: false
       matrix:
@@ -168,8 +168,8 @@ jobs:
             coverage: false
             # Process identities run serially; isolated update jobs use case-level
             # scheduling below so one file cannot serialize all real venv work.
-            # PowerShell/process-tree tests also keep their separate console job.
-            pytest_args: "-n 2 --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/cli/test_cli_input.py --ignore=tests/cli/test_desktop_target.py --ignore=tests/cli/test_desktop_target_entrypoints.py --ignore=tests/tools/test_exec_platform.py --ignore=tests/cli/test_wsl_browser.py --ignore=tests/test_install_scripts.py --ignore=tests/test_update_jobs.py --ignore=tests/test_update_profiles.py"
+            # Retain main's three-worker budget and the separate native-process job.
+            pytest_args: "-n 3 --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/cli/test_cli_input.py --ignore=tests/cli/test_desktop_target.py --ignore=tests/cli/test_desktop_target_entrypoints.py --ignore=tests/tools/test_exec_platform.py --ignore=tests/cli/test_wsl_browser.py --ignore=tests/test_install_scripts.py --ignore=tests/test_update_jobs.py --ignore=tests/test_update_profiles.py"
 
     steps:
       - uses: actions/checkout@v4
@@ -213,7 +213,7 @@ jobs:
       # later uv run sync pruning the packages installed by the previous step.
       - name: Lint with ruff
         if: matrix.coverage
-        run: uv run --no-sync ruff check nanobot tests conftest.py scripts/check_import_boundaries.py
+        run: uv run --no-sync ruff check nanobot tests conftest.py scripts/check_import_boundaries.py scripts/pytest_timing.py
 
       - name: Type check with BasedPyright (strict)
         if: matrix.coverage
@@ -228,7 +228,7 @@ jobs:
           tests/utils/test_helpers.py::test_atomic_record_reader_does_not_block_concurrent_replacement
           tests/gateway/test_runtime.py::test_runtime_state_publish_keeps_existing_snapshot_readable
           tests/gateway/test_runtime.py::test_runtime_state_reader_does_not_block_publish_while_decoding
-          -q
+          -q --junitxml=test-results/coordination.xml --timing-report=test-results/coordination.json
 
       # Each update job owns its venv, HOME, profile and lock directory. Preserve
       # the real installation/restore checks, but avoid a loadfile straggler and
@@ -237,7 +237,8 @@ jobs:
         if: runner.os == 'Windows'
         run: >-
           uv run --no-sync python -m pytest tests/test_update_jobs.py
-          -n 4 --dist load -vv --durations=25 --durations-min=1.0
+          -n 3 --dist load -vv --durations=25 --durations-min=1.0
+          --junitxml=test-results/update-jobs.xml --timing-report=test-results/update-jobs.json
 
       - name: Run tests with coverage
         if: matrix.coverage
@@ -245,7 +246,8 @@ jobs:
           uv run --no-sync python -m pytest
           ${{ matrix.pytest_args }}
           --cov=nanobot --cov-report=term-missing:skip-covered
-          -vv -o faulthandler_timeout=60
+          -o faulthandler_timeout=60
+          --junitxml=test-results/main.xml --timing-report=test-results/main.json
           --durations=25 --durations-min=1.0
 
       - name: Run serial CLI input and command tests with coverage
@@ -255,6 +257,7 @@ jobs:
           tests/cli/test_cli_input.py tests/cli/test_desktop_target.py
           tests/cli/test_desktop_target_entrypoints.py tests/cli/test_commands.py
           --cov=nanobot --cov-append --cov-report=term-missing:skip-covered
+          --junitxml=test-results/cli.xml --timing-report=test-results/cli.json
           --durations=25 --durations-min=1.0
 
       - name: Run compatibility tests
@@ -262,6 +265,7 @@ jobs:
         run: >-
           uv run --no-sync python -m pytest
           ${{ matrix.pytest_args }}
+          --junitxml=test-results/main.xml --timing-report=test-results/main.json
           --durations=25 --durations-min=1.0
 
       - name: Run serial CLI input and command compatibility tests
@@ -270,16 +274,25 @@ jobs:
           uv run --no-sync python -m pytest
           tests/cli/test_cli_input.py tests/cli/test_desktop_target.py
           tests/cli/test_desktop_target_entrypoints.py tests/cli/test_commands.py
+          --junitxml=test-results/cli.xml --timing-report=test-results/cli.json
           --durations=25 --durations-min=1.0
+
+      - name: Upload Python test timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-timings-${{ matrix.os }}-${{ matrix.python-version }}
+          path: test-results/
+          retention-days: 7
 
   windows_process:
     name: Python (Windows process compatibility)
+    env:
+      PYTEST_ADDOPTS: "-o tmp_path_retention_policy=failed -p scripts.pytest_timing"
     needs: changes
     if: needs.changes.outputs.python_required == 'true'
     runs-on: windows-latest
     timeout-minutes: 20
-    env:
-      PYTEST_ADDOPTS: "-o tmp_path_retention_policy=failed"
 
     steps:
       - uses: actions/checkout@v4
@@ -309,6 +322,7 @@ jobs:
           uv run --no-sync python -m pytest
           tests/tools/test_exec_platform.py
           tests/cli/test_wsl_browser.py
+          --junitxml=test-results/process.xml --timing-report=test-results/process.json
           --durations=25 --durations-min=1.0
 
       - name: Install pipx for offline installer checks
@@ -321,7 +335,18 @@ jobs:
       # Each case owns an isolated manager/config root, so individual cases can
       # run concurrently without sharing a console or package installation.
       - name: Run Windows installer checks
-        run: uv run --no-sync python -m pytest tests/test_install_scripts.py -n 4 --dist load -x -vv --durations=10
+        run: >-
+          uv run --no-sync python -m pytest tests/test_install_scripts.py
+          -n 3 --dist load -x -vv --durations=10
+          --junitxml=test-results/installers.xml --timing-report=test-results/installers.json
+
+      - name: Upload Windows process test timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-timings-windows-process
+          path: test-results/
+          retention-days: 7
 
   webui_checks:
     name: WebUI checks and build

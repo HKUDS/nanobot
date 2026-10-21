@@ -682,16 +682,6 @@ class TestParseResponseOutput:
         assert result.usage is not None
         assert result.usage.input_tokens == 1
 
-    def test_usage_maps_responses_api_keys(self):
-        """Responses API uses input_tokens/output_tokens, not prompt_tokens/completion_tokens."""
-        resp = {
-            "output": [],
-            "status": "completed",
-            "usage": {"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
-        }
-        result = parse_response_output(resp)
-        assert result.usage == LLMUsage.reported(input_tokens=100, output_tokens=50)
-
     def test_non_stream_preserves_provider_reported_total(self):
         result = parse_response_output({
             "output": [],

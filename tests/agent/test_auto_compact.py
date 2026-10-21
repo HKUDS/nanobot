@@ -467,11 +467,13 @@ class TestAutoCompact:
         await loop.aclose()
 
     @pytest.mark.asyncio
-    async def test_auto_compact_stores_summary(self, tmp_path):
-        """_archive should store the summary in _summaries."""
+    async def test_auto_compact_stores_summary_in_cache_and_metadata(self, tmp_path):
+        """_archive caches and persists the summary without exposing archived history."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         _add_turns(session, 6, prefix="hello")
+        last_active = datetime.now() - timedelta(minutes=20)
+        session.updated_at = last_active
         loop.sessions.save(session)
 
         loop.consolidator.compact_idle_session = _make_fake_compact(
@@ -483,7 +485,12 @@ class TestAutoCompact:
         entry = loop.auto_compact._summaries.get("cli:test")
         assert entry is not None
         assert entry["text"] == "User said hello."
+        loop.sessions.invalidate("cli:test")
         session_after = loop.sessions.get_or_create("cli:test")
+        meta = session_after.metadata.get("_last_summary")
+        assert meta is not None
+        assert meta["text"] == "User said hello."
+        assert meta["last_active"] == last_active.isoformat()
         assert len(session_after.messages) == 13
         assert session_after.get_history(max_messages=12) == []
         await loop.aclose()
@@ -1237,29 +1244,6 @@ class TestProactiveAutoCompact:
 
 class TestSummaryPersistence:
     """Test that summary survives restart via session metadata."""
-
-    @pytest.mark.asyncio
-    async def test_summary_persisted_in_session_metadata(self, tmp_path):
-        """After archive, _last_summary should be in session metadata."""
-        loop = _make_loop(tmp_path, session_ttl_minutes=15)
-        session = loop.sessions.get_or_create("cli:test")
-        _add_turns(session, 6, prefix="hello")
-        session.updated_at = datetime.now() - timedelta(minutes=20)
-        loop.sessions.save(session)
-
-        loop.consolidator.compact_idle_session = _make_fake_compact(
-            loop, summary="User said hello.",
-        )
-
-        await loop.auto_compact._archive("cli:test", runtime=loop.llm_runtime())
-
-        # Summary should be persisted in session metadata
-        session_after = loop.sessions.get_or_create("cli:test")
-        meta = session_after.metadata.get("_last_summary")
-        assert meta is not None
-        assert meta["text"] == "User said hello."
-        assert "last_active" in meta
-        await loop.aclose()
 
     @pytest.mark.asyncio
     async def test_summary_recovered_after_restart(self, tmp_path):

@@ -23,6 +23,12 @@ def _isolate_tokenizer_warmup(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_tool_entry_points(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only load external tool plugins explicitly provided by the test."""
+    monkeypatch.setattr("nanobot.agent.tools.loader.entry_points", lambda **_kwargs: ())
+
+
+@pytest.fixture(autouse=True)
 def _isolate_nanobot_log_activation() -> Iterator[None]:
     """Keep CLI log settings from leaking into later tests in the same process."""
     logger.enable("nanobot")
@@ -33,33 +39,32 @@ def _isolate_nanobot_log_activation() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_sessions_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Redirect session storage away from the real active config data directory.
+def _isolate_runtime_stores(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[None]:
+    """Isolate writable stores without making a directory for pure tests."""
+    import nanobot.llm_usage.service as llm_usage
+    import nanobot.pairing.store as pairing_store
+    import nanobot.session.location as session_location
+    from nanobot.webui import star_prompt
 
-    Session storage lives under the active runtime data root (outside the workspace,
-    per ADR-0001), so without redirection tests would write into the real home.
-    """
-    data_root = tmp_path.parent / "session-data" / uuid4().hex
-    runtime_root = data_root / "runtime"
+    # A sibling of tmp_path stays outside any test's agent workspace. mkdir is
+    # deferred until a store is used and remains safe for concurrent callers.
+    data_root = tmp_path_factory.getbasetemp() / "runtime-data" / uuid4().hex
+
+    def data_dir() -> Path:
+        data_root.mkdir(parents=True, exist_ok=True)
+        return data_root
 
     def runtime_subdir(name: str) -> Path:
-        path = runtime_root / name
+        path = data_root / name
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    monkeypatch.setattr(
-        "nanobot.session.location.get_runtime_subdir",
-        runtime_subdir,
-    )
-    yield
-
-
-@pytest.fixture(autouse=True)
-def _isolate_llm_usage_stores(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> Iterator[None]:
-    import nanobot.llm_usage.service as llm_usage
-
+    monkeypatch.setattr(session_location, "get_runtime_subdir", runtime_subdir)
+    monkeypatch.setattr(star_prompt, "get_webui_dir", lambda: runtime_subdir("webui"))
+    monkeypatch.setattr(pairing_store, "_store_path", lambda: data_dir() / "pairing.json")
+    monkeypatch.setattr(llm_usage, "get_data_dir", data_dir)
     stores: dict[Path, llm_usage.LLMUsageStore] = {}
     monkeypatch.setattr(llm_usage, "_STORES", stores)
     try:
@@ -67,30 +72,6 @@ def _isolate_llm_usage_stores(
     finally:
         for store in stores.values():
             store.close()
-
-
-@pytest.fixture(autouse=True)
-def _isolate_star_prompt_store(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Keep WebUI completion events out of the user's invitation state and lock."""
-    webui_dir = tmp_path.parent / "star-prompt-webui" / uuid4().hex
-
-    def get_webui_dir() -> Path:
-        webui_dir.mkdir(parents=True, exist_ok=True)
-        return webui_dir
-
-    monkeypatch.setattr("nanobot.webui.star_prompt.get_webui_dir", get_webui_dir)
-
-
-@pytest.fixture(autouse=True)
-def _isolate_pairing_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep channel pairing tests out of the user's active pairing store."""
-    pairing_path = tmp_path / "pairing.json"
-    monkeypatch.setattr(
-        "nanobot.pairing.store._store_path",
-        lambda: pairing_path,
-    )
 
 
 @pytest.fixture(scope="session", autouse=True)

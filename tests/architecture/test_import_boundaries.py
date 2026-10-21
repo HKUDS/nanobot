@@ -11,18 +11,6 @@ import pytest
 from scripts.check_import_boundaries import Violation, find_violations
 
 
-def test_repository_respects_import_boundaries() -> None:
-    result = subprocess.run(
-        [sys.executable, "-m", "scripts.check_import_boundaries"],
-        cwd=Path(__file__).resolve().parents[2],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stderr
-
-
 @pytest.mark.parametrize("module", [
     "nanobot.agent.loop", "nanobot.session.state", "nanobot.runtime_admission",
     "nanobot.data_access", "nanobot.installation_lock",

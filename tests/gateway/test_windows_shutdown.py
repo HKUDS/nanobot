@@ -229,7 +229,9 @@ root = Path(sys.argv[1])
 runtime = GatewayRuntime(paths=GatewayInstance.resolve(config_path=root / 'config.json').paths)
 with runtime.foreground_instance(GatewayStartOptions(port=0)):
     child = subprocess.Popen([sys._base_executable, '-c', 'import time; time.sleep(60)'])
-    (root / 'ready.json').write_text(json.dumps({'child': child.pid}), encoding='utf-8')
+    ready = root / 'ready.tmp'
+    ready.write_text(json.dumps({'child': child.pid}), encoding='utf-8')
+    ready.replace(root / 'ready.json')
     time.sleep(60)  # Models a blocked event loop that cannot service the kernel event.
 """
 

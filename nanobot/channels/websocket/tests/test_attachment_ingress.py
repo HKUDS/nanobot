@@ -307,3 +307,30 @@ async def test_stalled_upload_reports_timeout_and_keeps_connection_retryable(gat
         assert not [p for p in channel.gateway.uploads.store.media_dir.rglob("*") if p.is_file()]
         async with http.post(http_url + capability["path"], data=b"xy", headers=headers) as response:
             assert response.status == 201
+
+
+async def test_stopping_listener_cancels_active_upload_before_clearing_store(gateway):
+    channel, _, http_url, ws_url = gateway
+    port = int(http_url.rsplit(":", 1)[1])
+    async with connect(ws_url) as ws:
+        capability = (await event(ws, "ready"))["upload"]
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        try:
+            writer.write((
+                f"POST {capability['path']} HTTP/1.1\r\nHost: localhost\r\n"
+                f"Authorization: Bearer {capability['token']}\r\n"
+                "Content-Type: image/png\r\nContent-Length: 1024\r\n"
+                "Expect: 100-continue\r\n\r\n"
+            ).encode("ascii"))
+            await writer.drain()
+            assert b"100 Continue" in await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 2)
+            writer.write(b"partial")
+            await writer.drain()
+            async with asyncio.timeout(3):
+                await channel.stop()
+                await reader.read()
+                await ws.wait_closed()
+            assert not [p for p in channel.gateway.uploads.store.media_dir.rglob("*") if p.is_file()]
+        finally:
+            writer.close()
+            await writer.wait_closed()

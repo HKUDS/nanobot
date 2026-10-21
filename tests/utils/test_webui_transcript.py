@@ -359,25 +359,25 @@ def test_many_short_trace_rows_are_bounded_and_resolved(tmp_path, monkeypatch) -
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:deferred-many-traces"
     trace_count = 2_000
-    append_transcript_object(
-        key,
+    rows = [
         {"event": "user", "chat_id": "deferred-many-traces", "text": "run many tools"},
-    )
-    for index in range(trace_count):
-        append_transcript_object(
-            key,
+        *(
             {
                 "event": "message",
                 "chat_id": "deferred-many-traces",
                 "kind": "progress",
                 "text": f"tool_{index}(value)",
-            },
-        )
-    append_transcript_object(
-        key,
+            }
+            for index in range(trace_count)
+        ),
         {"event": "message", "chat_id": "deferred-many-traces", "text": "done"},
+        {"event": "turn_end", "chat_id": "deferred-many-traces"},
+    ]
+    # Replay needs the full stored input, not one durable append per trace row.
+    transcript_module._write_records_to_path(
+        transcript_module.webui_transcript_path(key),
+        [{**row, "created_at_ms": 1_700_000_000_000} for row in rows],
     )
-    append_transcript_object(key, {"event": "turn_end", "chat_id": "deferred-many-traces"})
 
     payload = build_webui_thread_response(key, limit=40, direction="latest")
 

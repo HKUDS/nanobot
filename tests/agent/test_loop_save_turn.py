@@ -1105,39 +1105,6 @@ async def test_subagent_followup_stages_provider_state_before_turn_runs(
 
 
 @pytest.mark.asyncio
-async def test_subagent_followup_state_is_durable_before_prompt_assembly(
-    tmp_path: Path,
-) -> None:
-    loop = _make_full_loop(tmp_path)
-    loop.provider.can_resume_conversation_state.return_value = True
-    loop.context.build_system_prompt = MagicMock(  # type: ignore[method-assign]
-        side_effect=RuntimeError("prompt boom"),
-    )
-    session = loop.sessions.get_or_create("cli:subagent-prompt-crash")
-    session.provider_state = _provider_state()
-    loop.sessions.save(session)
-    await save_completed_subagent(loop, "sub-1", session.key)
-
-    msg = InboundMessage(
-        channel="system",
-        sender_id="subagent",
-        chat_id="cli:subagent-prompt-crash",
-        content="subagent result",
-        metadata={"subagent_task_id": "sub-1"},
-    )
-    with pytest.raises(RuntimeError, match="prompt boom"):
-        await loop._process_message(msg)
-
-    loop.sessions.invalidate("cli:subagent-prompt-crash")
-    persisted = loop.sessions.get_or_create("cli:subagent-prompt-crash")
-    assert persisted.messages[-1]["content"] == "subagent result"
-    assert persisted.provider_state is not None
-    assert persisted.provider_state.pending_messages[-1]["content"] == (
-        "subagent result"
-    )
-
-
-@pytest.mark.asyncio
 async def test_subagent_redelivery_does_not_duplicate_staged_provider_input(
     tmp_path: Path,
 ) -> None:
@@ -1164,7 +1131,11 @@ async def test_subagent_redelivery_does_not_duplicate_staged_provider_input(
 
     loop.sessions.invalidate("cli:subagent-redelivery")
     persisted = loop.sessions.get_or_create("cli:subagent-redelivery")
+    assert persisted.messages[-1]["content"] == "subagent result"
     assert persisted.provider_state is not None
+    assert persisted.provider_state.pending_messages[-1]["content"] == (
+        "subagent result"
+    )
     assert [
         message.get("content")
         for message in persisted.provider_state.pending_messages

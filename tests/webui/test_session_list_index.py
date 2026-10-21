@@ -102,10 +102,11 @@ def test_webui_session_list_scans_empty_display_directory_once_per_request(tmp_p
         scans.append(Path(path))
         return original_scandir(path)
 
-    monkeypatch.setattr(Path, "stat", stored_files_only)
-    monkeypatch.setattr(session_list_index.os, "scandir", scan)
-    for _ in range(2):
-        assert {row["key"] for row in list_webui_sessions(manager)} == keys
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "stat", stored_files_only)
+        patch.setattr(session_list_index.os, "scandir", scan)
+        for _ in range(2):
+            assert {row["key"] for row in list_webui_sessions(manager)} == keys
     assert scans == [webui_dir, webui_dir]
 
 

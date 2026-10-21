@@ -439,16 +439,17 @@ def test_exec_session_can_terminate_session(tmp_path):
 
         initial = await exec_tool.execute(command=command, yield_time_ms=100)
         sid = _session_id(initial)
-        waited = await stdin_tool.execute(
-            session_id=sid,
-            wait_for="ready",
-            timeout_ms=10000,
-        )
+        if "ready" not in initial:
+            initial += await stdin_tool.execute(
+                session_id=sid,
+                wait_for="ready",
+                timeout_ms=10000,
+            )
         result = await stdin_tool.execute(
             session_id=sid,
             terminate=True,
         )
-        return initial + waited, result
+        return initial, result
 
     initial, result = asyncio.run(run())
     assert "ready" in initial

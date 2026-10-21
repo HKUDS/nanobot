@@ -211,11 +211,12 @@ def test_atomic_write_ignores_unsupported_directory_fsync(
     def fake_close(fd: int) -> None:
         assert fd == dir_fd
 
-    monkeypatch.setattr("os.open", fake_open)
-    monkeypatch.setattr("os.fsync", fake_fsync)
-    monkeypatch.setattr("os.close", fake_close)
+    with monkeypatch.context() as patch:
+        patch.setattr("os.open", fake_open)
+        patch.setattr("os.fsync", fake_fsync)
+        patch.setattr("os.close", fake_close)
 
-    CronService._atomic_write(store_path, '{"version": 1, "jobs": []}')
+        CronService._atomic_write(store_path, '{"version": 1, "jobs": []}')
 
     assert store_path.read_text(encoding="utf-8") == '{"version": 1, "jobs": []}'
     assert list(store_path.parent.glob("*.tmp")) == []
