@@ -23,7 +23,7 @@ from nanobot.installation_lock import (
     installation_access,
     installation_state_dir,
 )
-from nanobot.utils.atomic_file import atomic_write_lines
+from nanobot.utils.atomic_file import atomic_write_lines, io_path
 
 # This stack belongs only to the single-use frozen child. Do not close it on a
 # function return/SystemExit: pip/site atexit cleanup must still hold the leases.
@@ -49,6 +49,9 @@ import json, sys, types
 from contextlib import ExitStack
 from pathlib import Path
 request = json.load(sys.stdin)
+atomic = types.ModuleType('_nanobot_inspection_atomic')
+sys.modules[atomic.__name__] = atomic
+exec(compile(request['atomic'], '<inspection atomic I/O>', 'exec'), atomic.__dict__)
 locking = types.ModuleType('_nanobot_inspection_lock')
 sys.modules[locking.__name__] = locking
 exec(compile(request['locking'], '<inspection leases>', 'exec'), locking.__dict__)
@@ -79,8 +82,14 @@ def inspect_python_environment(python: str, environment: str, probe: str, *,
     import inspect
 
     with installation_access(environment=environment, allow_incomplete=allow_incomplete):
+        # Lease acquisition needs the same frozen I/O helper as the worker. The
+        # child must not import either helper from the target before its lease.
+        atomic_module = io_path.__module__
+        locking = inspect.getsource(sys.modules[installation_access.__module__]).replace(
+            f"from {atomic_module} import io_path", "from _nanobot_inspection_atomic import io_path",
+        )
         request = json.dumps(dict(
-            locking=inspect.getsource(sys.modules[installation_access.__module__]),
+            atomic=inspect.getsource(sys.modules[atomic_module]), locking=locking,
             startup=inspect.getsource(initialize_runtime), python=python, environment=environment,
             probe=probe, arguments=arguments, allow_incomplete=allow_incomplete,
         ))

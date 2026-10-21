@@ -11,6 +11,21 @@ from pathlib import Path
 from typing import BinaryIO
 
 
+def io_path(path: Path) -> Path:
+    """Use Windows' extended namespace for I/O, without changing stored identities."""
+    if os.name != "nt":
+        return path
+    name = str(path)
+    if name.startswith(("\\\\?\\", "\\\\.\\")):
+        return path
+    # Extended paths bypass Win32 normalization and must be absolute. Normalize
+    # ordinary relative paths, separators and dot segments before adding a prefix.
+    name = os.path.abspath(name)
+    if name.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + name[2:])
+    return Path("\\\\?\\" + name)
+
+
 def _open_snapshot(path: Path) -> BinaryIO:
     """Read one inode without preventing its atomic replacement on Windows."""
     if os.name != "nt":
@@ -30,7 +45,7 @@ def _open_snapshot(path: Path) -> BinaryIO:
     # GENERIC_READ; FILE_SHARE_READ | WRITE | DELETE; OPEN_EXISTING.
     # Python's normal open omits SHARE_DELETE. Pair this handle with the POSIX
     # rename below so a short status poll cannot block journal commits.
-    handle = create(str(path), 0x80000000, 1 | 2 | 4, None, 3, 0x80, None)
+    handle = create(str(io_path(path)), 0x80000000, 1 | 2 | 4, None, 3, 0x80, None)
     if handle == wintypes.HANDLE(-1).value:
         raise ctypes.WinError(ctypes.get_last_error())
     try:
@@ -47,6 +62,7 @@ def replace_atomic(source: Path, destination: Path) -> None:
     if os.name != "nt":
         os.replace(source, destination)
         return
+    source, destination = io_path(source), io_path(destination)
     import ctypes
     from ctypes import wintypes
 
@@ -75,7 +91,7 @@ def replace_atomic(source: Path, destination: Path) -> None:
         raise ctypes.WinError(ctypes.get_last_error())
     unsupported = False
     try:
-        name = str(destination.absolute()).encode("utf-16-le")
+        name = str(destination).encode("utf-16-le")
         buffer = ctypes.create_string_buffer(ctypes.sizeof(RenameInfo) + len(name))
         info = RenameInfo.from_buffer(buffer)
         info.Flags = 1 | 2  # REPLACE_IF_EXISTS | POSIX_SEMANTICS (not IGNORE_READONLY).
@@ -117,6 +133,7 @@ def _fsync_directory_after_replace(directory: Path) -> None:
 
 def atomic_write_text(path: Path, content: str) -> None:
     """Create parent directories and durably replace exact UTF-8 text."""
+    path = io_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
@@ -137,6 +154,7 @@ def atomic_write_lines(path: Path, lines: Iterable[str], *, fsync: bool = True) 
     Directory fsync tolerates Windows permission errors and unsupported filesystems,
     but propagates other I/O failures. Existing callers retain their durability choice.
     """
+    path = io_path(path)
     tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         # Stable bytes across platforms: callers hash records and bound their
