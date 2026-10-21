@@ -28,8 +28,6 @@ from nanobot.webui.transcript import WebUITranscriptRecorder
 async def test_committed_model_failure_continues_with_tool_results_without_resending(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("nanobot.webui.transcript.get_webui_dir", lambda: tmp_path / "webui")
-    monkeypatch.setattr("nanobot.webui.session_list_index.get_webui_dir", lambda: tmp_path / "webui")
     bus = MessageBus()
     sessions = SessionManager(tmp_path)
     session = sessions.get_or_create("websocket:chat")
