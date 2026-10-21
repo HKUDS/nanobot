@@ -21,6 +21,21 @@ def test_append_and_read_roundtrip(history, tmp_path, monkeypatch) -> None:
     assert lines[0]["text"] == "hello"
 
 
+@pytest.mark.parametrize("event", ["stream_end", "reasoning_end"])
+def test_history_preserves_phase_qualified_stream_identity(history, event) -> None:
+    key = "websocket:stream-identity"
+    history.append(key, {"event": "user", "chat_id": "stream-identity", "text": "question"})
+    history.append(key, {
+        "event": event, "chat_id": "stream-identity", "text": "completed segment",
+        "stream_id": "stream-one", "turn_id": "turn-one", "turn_seq": 2,
+    })
+    response = history.build(key)
+    assert response is not None
+    segment = next(record for record in response["events"] if record["event"] == event)
+    assert segment["stream_id"] == "stream-one"
+    assert segment["turn_seq"] == 2
+
+
 def test_append_stamps_created_at_ms(history, tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     monkeypatch.setattr("nanobot.webui.transcript.time.time", lambda: 1_700_000_000.0)

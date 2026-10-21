@@ -11,6 +11,7 @@ import { CLI_APPS_CHANGED_EVENT } from "@/lib/cli-app-events";
 import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
+import { createThreadCheckpoint } from "@/lib/thread-checkpoint";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type {
   CliAppsPayload,
@@ -506,6 +507,42 @@ describe("ThreadShell", () => {
         json: async () => ({}),
       }),
     );
+  });
+
+  it.each(["callback", "cached return"] as const)("keeps closed answer segments in order after %s", async (path) => {
+    const client = makeClient();
+    const messageCache = new ThreadMessageCache(() => false);
+    const chatId = "answer-order";
+    const turnId = "answer-order-turn";
+    const source = { provider: "fixture", model: "fixture", preset: "fixture" };
+    const shell = (id: string, onTurnEnd = () => {}) => wrap(client, <ThreadShell
+      session={session(id)} title="Answer order" messageCache={messageCache}
+      onToggleSidebar={() => {}} onTurnEnd={onTurnEnd} />);
+    const view = render(shell(chatId));
+    act(() => {
+      client._emitChat(chatId, { event: "goal_status", chat_id: chatId, turn_id: turnId, status: "running", started_at: 100 });
+      client._emitChat(chatId, { event: "delta", chat_id: chatId, turn_id: turnId, stream_id: "first", turn_seq: 1, text: "Earlier answer" });
+      client._emitChat(chatId, { event: "stream_end", chat_id: chatId, turn_id: turnId, stream_id: "first", turn_seq: 2, resuming: true, response_sources: [source] });
+      client._emitChat(chatId, { event: "message", chat_id: chatId, turn_id: turnId, turn_seq: 3, kind: "tool_hint", text: "read_file(earlier)" });
+      client._emitChat(chatId, { event: "delta", chat_id: chatId, turn_id: turnId, stream_id: "second", turn_seq: 4, text: "Later answer" });
+      client._emitChat(chatId, { event: "stream_end", chat_id: chatId, turn_id: turnId, stream_id: "second", turn_seq: 5, resuming: true, response_sources: [source] });
+      client._emitChat(chatId, { event: "message", chat_id: chatId, turn_id: turnId, turn_seq: 6, kind: "tool_hint", text: "read_file(later)" });
+    });
+    await screen.findByText("Later answer");
+    if (path === "cached return") {
+      view.rerender(shell("other-chat"));
+      expect(screen.queryByText("Earlier answer")).not.toBeInTheDocument();
+    }
+    view.rerender(shell(chatId));
+    await screen.findByText("Earlier answer");
+    act(() => {
+      client._emitChat(chatId, { event: "stream_end", chat_id: chatId, turn_id: turnId, stream_id: "empty-one", turn_seq: 7, resuming: true, response_sources: [source] });
+      client._emitChat(chatId, { event: "stream_end", chat_id: chatId, turn_id: turnId, stream_id: "empty-two", turn_seq: 8, resuming: true, response_sources: [source] });
+    });
+    const earlier = screen.getByText("Earlier answer");
+    const later = screen.getByText("Later answer");
+    expect(earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
   });
 
   it("renders one persisted task entry at the initiating prompt through the full shell", async () => {
@@ -3594,13 +3631,13 @@ describe("ThreadShell", () => {
     const unseenTurnId = "other-tab-completed-turn";
     const newerTurnId = "new-local-turn";
     const messageCache = new ThreadMessageCache(() => false);
-    messageCache.set(chatId, [
+    messageCache.set(chatId, createThreadCheckpoint([
       { id: "older-page", role: "assistant", content: "older paginated answer", createdAt: 1 },
       { id: "cached-user", role: "user", content: "completed question", turnId: completedTurnId, createdAt: 2 },
       { id: "cached-prefix", role: "assistant", content: "outdated prefix", turnId: completedTurnId, createdAt: 3 },
       { id: "new-user", role: "user", content: "new local question", turnId: newerTurnId, createdAt: 7 },
       { id: "new-answer", role: "assistant", content: "new local stream", turnId: newerTurnId, isStreaming: true, createdAt: 8 },
-    ]);
+    ]));
     client._emitChat(chatId, {
       event: "goal_status", chat_id: chatId, turn_id: newerTurnId, status: "running", started_at: 2_000,
     });
@@ -3639,7 +3676,7 @@ describe("ThreadShell", () => {
     const client = makeClient();
     const chatId = "completed-guidance-paged-prefix";
     const messageCache = new ThreadMessageCache(() => false);
-    messageCache.set(chatId, [
+    messageCache.set(chatId, createThreadCheckpoint([
       { id: "old-user", role: "user", content: "continue", createdAt: 1 },
       { id: "old-answer", role: "assistant", content: "older answer", createdAt: 2 },
       { id: "question", role: "user", content: "current question", turnId: "main", createdAt: 3 },
@@ -3649,7 +3686,7 @@ describe("ThreadShell", () => {
       { id: "last", role: "assistant", content: "last partial", turnId: "main", createdAt: 6 },
       { id: "new-user", role: "user", content: "new question", turnId: "new", createdAt: 7 },
       { id: "new-answer", role: "assistant", content: "new live answer", turnId: "new", isStreaming: true, createdAt: 8 },
-    ]);
+    ]));
     client._emitChat(chatId, {
       event: "goal_status", chat_id: chatId, turn_id: "new", status: "running", started_at: 2_000,
     });

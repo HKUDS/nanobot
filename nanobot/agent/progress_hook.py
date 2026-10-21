@@ -117,7 +117,7 @@ class AgentProgressHook(AgentHook):
             "embeds": [],
         }
         if phase == "start":
-            await self.emit_reasoning_end()
+            await self.on_stream_end(context, resuming=True)
             tool_call = ToolCallRequest(id=str(call_id), name=name, arguments=arguments)
             tool_hint = self._strip_think(self._tool_hint([tool_call])) or name
             await self._publish(ProgressEvent(

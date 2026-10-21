@@ -50,8 +50,8 @@ export function hasPendingAgentActivity(messages: UIMessage[]): boolean {
 
 /** Project gateway rows without changing their causal order.
  *
- * Messages use ``turnSeq`` when every row in the turn provides it and fall
- * back to stable arrival order otherwise. Only contiguous rows of the same
+ * Messages use their first contributing sequence (legacy rows use ``turnSeq``)
+ * when every row provides one, and stable arrival order otherwise. Only contiguous rows of the same
  * display class are combined: activity rows share a collapsible surface, and
  * adjacent answer slices share an answer bubble. A visible answer is always a
  * hard boundary between activity surfaces; completed empty transport frames
@@ -267,12 +267,14 @@ function isAssistantAnswer(message: UIMessage): boolean {
 }
 
 function orderMessagesByTurnSeq(messages: UIMessage[]): UIMessage[] {
-  if (messages.length < 2 || !messages.every((message) => Number.isFinite(message.turnSeq))) {
+  if (messages.length < 2 || !messages.every((message) => Number.isFinite(message.projectionStartSeq ?? message.turnSeq))) {
     return messages;
   }
   return messages
     .map((message, index) => ({ message, index }))
-    .sort((left, right) => (left.message.turnSeq! - right.message.turnSeq!) || (left.index - right.index))
+    .sort((left, right) => (
+      (left.message.projectionStartSeq ?? left.message.turnSeq!) - (right.message.projectionStartSeq ?? right.message.turnSeq!)
+    ) || (left.index - right.index))
     .map(({ message }) => message);
 }
 
@@ -310,6 +312,7 @@ function reasoningOnlyMessageFromAnswer(message: UIMessage): UIMessage {
     turnId: message.turnId,
     turnPhase: "reasoning",
     turnSeq: message.turnSeq,
+    projectionStartSeq: message.projectionStartSeq,
   };
 }
 
