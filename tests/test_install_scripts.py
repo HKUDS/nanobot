@@ -17,6 +17,7 @@ import ssl
 import subprocess
 import sys
 import sysconfig
+import tempfile
 import threading
 import tomllib
 import urllib.request
@@ -91,9 +92,25 @@ def _python(environment):
     return environment / ("Scripts/python.exe" if WINDOWS else "bin/python")
 
 
-def _run(command, sandbox, *, check=True):
-    result = subprocess.run(command, cwd=sandbox["cwd"], env=sandbox["env"],
-                            capture_output=True, text=True, encoding="utf-8", timeout=90)
+def _run(command, sandbox, *, check=True, timeout=90):
+    # Installer subprocesses may inherit output handles. Bound the command's
+    # lifetime, not pipe EOF, and retain partial output when the command times out.
+    with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+        try:
+            process = subprocess.run(command, cwd=sandbox["cwd"], env=sandbox["env"],
+                                     stdout=stdout, stderr=stderr, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            stdout.seek(0)
+            stderr.seek(0)
+            output = stdout.read().decode("utf-8", errors="replace")
+            error = stderr.read().decode("utf-8", errors="replace")
+            pytest.fail(f"Installer command exceeded {timeout}s: {command!r}\n"
+                        f"stdout:\n{output}\nstderr:\n{error}", pytrace=False)
+        stdout.seek(0)
+        stderr.seek(0)
+        result = subprocess.CompletedProcess(command, process.returncode,
+                                             stdout.read().decode("utf-8", errors="replace"),
+                                             stderr.read().decode("utf-8", errors="replace"))
     if check:
         assert result.returncode == 0, result.stdout + result.stderr
     return result
@@ -832,3 +849,11 @@ def test_generated_bootstrap_command_downloads_and_upgrades_original_owner(sandb
     assert Path(identity["prefix"]).resolve() == prefix
     assert requests[0] == installer_url and len(requests) == 3
     assert not list(sandbox["root"].glob("*/install.sh"))
+
+
+def test_installer_command_timeout_preserves_partial_diagnostics(sandbox):
+    command = [BASE_PYTHON, "-I", "-c",
+               "import sys, time; print('installer-stage', flush=True); "
+               "print('manager-stage', file=sys.stderr, flush=True); time.sleep(10)"]
+    with pytest.raises(pytest.fail.Exception, match="(?s)installer-stage.*manager-stage"):
+        _run(command, sandbox, timeout=1)
