@@ -347,6 +347,7 @@ describe("useNanobotStream", () => {
       fake.emit("chat-compaction", {
         event: "context_compaction",
         chat_id: "chat-compaction",
+        turn_id: "turn-compaction",
         compaction_id: "compact-1",
         phase: "started",
       });
@@ -368,6 +369,7 @@ describe("useNanobotStream", () => {
       fake.emit("chat-compaction", {
         event: "context_compaction",
         chat_id: "chat-compaction",
+        turn_id: "turn-compaction",
         compaction_id: "compact-1",
         phase,
       });
@@ -382,6 +384,23 @@ describe("useNanobotStream", () => {
         announce: true,
       },
     });
+  });
+
+  it("does not add a transcript divider for background idle compaction", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(
+      () => useNanobotStream("chat-idle-compaction", EMPTY_MESSAGES),
+      { wrapper: wrap(fake.client) },
+    );
+
+    act(() => fake.emit("chat-idle-compaction", {
+      event: "context_compaction",
+      chat_id: "chat-idle-compaction",
+      compaction_id: "idle-compact-1",
+      phase: "succeeded",
+    }));
+
+    expect(result.current.messages).toEqual([]);
   });
 
   it("keeps a hydrated terminal compaction when a queued start arrives", () => {

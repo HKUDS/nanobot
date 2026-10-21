@@ -618,6 +618,9 @@ export function useNanobotStream(
       }
       const sideChannelEvent = isSideChannelEvent(ev);
       if (ev.event === "context_compaction") {
+        // Idle maintenance compactions are persisted as session events without a
+        // turn_id. Keep them out of the user's conversation transcript.
+        if (!ev.turn_id) return;
         flushPendingStreamEvents();
         closeActiveAssistantStream();
         clearActivitySegment();

@@ -75,6 +75,26 @@ function normalizeProjection(messages: UIMessage[]): Array<Record<string, unknow
 }
 
 describe("canonical thread event projection", () => {
+  it("omits background compaction records without a turn id", () => {
+    const messages = projectThreadEvents([
+      {
+        event: "context_compaction",
+        chat_id: "chat",
+        compaction_id: "idle",
+        phase: "succeeded",
+      },
+      {
+        event: "context_compaction",
+        chat_id: "chat",
+        turn_id: "turn",
+        compaction_id: "turn",
+        phase: "succeeded",
+      },
+    ]);
+
+    expect(messages.map((message) => message.id)).toEqual(["compaction-turn"]);
+  });
+
   it("routes late snapshots by stream without moving same-text answers or stealing the active cursor", () => {
     let state = createThreadProjectionState();
     const emit = (event: ThreadProjectionEvent) => {

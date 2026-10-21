@@ -965,6 +965,9 @@ export function projectThreadEvent(
   }
 
   if (event.event === "context_compaction") {
+    // Turn compactions are part of the conversation transcript. Idle maintenance
+    // compactions have no turn_id and should not appear as user-facing dividers.
+    if (!event.turn_id) return state;
     Object.assign(state, closeThreadProjectionAnswer(state));
     const id = `compaction-${event.compaction_id}`;
     const existing = state.messages.findIndex((message) => message.id === id);

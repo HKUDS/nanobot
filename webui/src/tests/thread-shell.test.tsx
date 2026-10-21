@@ -952,12 +952,14 @@ describe("ThreadShell", () => {
     expect(screen.getByTestId("composer-context-meter")).toBeInTheDocument();
     for (const phase of ["started", "failed"] as const) {
       act(() => client._emitChat("usage-chart", {
-        event: "context_compaction", chat_id: "usage-chart", compaction_id: "failed", phase,
+        event: "context_compaction", chat_id: "usage-chart", turn_id: "turn-usage",
+        compaction_id: "failed", phase,
       }));
       expect(screen.getByTestId("composer-context-meter")).toBeInTheDocument();
     }
     act(() => client._emitChat("usage-chart", {
       event: "context_compaction", chat_id: "usage-chart",
+      turn_id: "turn-usage",
       compaction_id: "success", phase: "succeeded",
     }));
     expect(trigger).toHaveAccessibleName("Open context usage");
@@ -974,6 +976,7 @@ describe("ThreadShell", () => {
       },
       {
         id: "compact", role: "assistant", kind: "compaction", content: "", createdAt: 2_000,
+        turnId: "turn-compact",
         compaction: { id: "compact", phase: "succeeded" },
       },
     ];
