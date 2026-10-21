@@ -25,6 +25,12 @@ jobs:
   candidate:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    outputs:
+      candidate_commit: ${{ steps.identity.outputs.candidate_commit }}
+      manifest_sha256: ${{ steps.identity.outputs.manifest_sha256 }}
+      linux_artifact_id: ${{ steps.linux_input.outputs.artifact-id }}
+      windows_artifact_id: ${{ steps.windows_input.outputs.artifact-id }}
+      prepared_artifact_id: ${{ steps.prepared.outputs.artifact-id }}
     env:
       SOURCE_COMMIT: ${{ github.sha }}
       NEXT_STABLE: ${{ inputs.next_stable }}
@@ -122,20 +128,45 @@ jobs:
           python -m twine check "$RUNNER_TEMP/release-artifacts/"*.whl \
             "$RUNNER_TEMP/release-artifacts/"*.tar.gz
 
-      - name: Install and probe the Linux wheel without frontend build tools
-        working-directory: ${{ env.CANDIDATE_DIR }}
+      - name: Record exact acceptance identity
+        id: identity
+        env:
+          MANIFEST: ${{ runner.temp }}/release-artifacts/release-manifest.json
         run: |
-          version="${NEXT_STABLE}.dev${PREVIEW_SEQUENCE}"
-          uv_bin="$(command -v uv)"
-          uv venv --python 3.11 "$RUNNER_TEMP/installed-candidate"
-          mkdir "$RUNNER_TEMP/empty-install-path"
-          env PATH="$RUNNER_TEMP/empty-install-path" "$uv_bin" pip install \
-            --python "$RUNNER_TEMP/installed-candidate/bin/python" --only-binary :all: \
-            "$RUNNER_TEMP/release-artifacts/nanobot_ai-${version}-py3-none-manylinux_2_17_x86_64.whl"
-          uv pip check --python "$RUNNER_TEMP/installed-candidate/bin/python"
-          "$RUNNER_TEMP/installed-candidate/bin/python" -I scripts/verify_installed_release.py \
-            --version "$version" --commit "$(git rev-parse HEAD)" --gateway \
-            --report "$RUNNER_TEMP/installed-candidate-report.json"
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          payload = Path(os.environ['MANIFEST']).read_bytes()
+          manifest = json.loads(payload)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f"candidate_commit={manifest['candidate_commit']}\n")
+              output.write(f"manifest_sha256={hashlib.sha256(payload).hexdigest()}\n")
+          PY
+
+      # Temporary same-run inputs, not approved release handoffs. Do not rebuild on consumers.
+      - name: Transfer exact Linux acceptance input
+        id: linux_input
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-native-linux-x64-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/release-artifacts/*-manylinux_2_17_x86_64.whl
+            ${{ runner.temp }}/release-artifacts/release-manifest.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+      - name: Transfer exact Windows acceptance input
+        id: windows_input
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-native-win32-x64-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/release-artifacts/*-win_amd64.whl
+            ${{ runner.temp }}/release-artifacts/release-manifest.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
 
       - name: Generate the exact candidate installation handoff
         working-directory: ${{ env.CANDIDATE_DIR }}
@@ -144,25 +175,14 @@ jobs:
             --artifacts "$RUNNER_TEMP/release-artifacts" \
             --output "$RUNNER_TEMP/install-candidate.md"
 
-      - name: Verify packaged Linux upgrades and service recovery
-        working-directory: ${{ env.CANDIDATE_DIR }}
-        run: |
-          version="${NEXT_STABLE}.dev${PREVIEW_SEQUENCE}"
-          python -I scripts/verify_packaged_update.py \
-            --wheel "$RUNNER_TEMP/release-artifacts/nanobot_ai-${version}-py3-none-manylinux_2_17_x86_64.whl" \
-            --commit "$(git rev-parse HEAD)" --output "$RUNNER_TEMP/packaged-update"
-
-      # Keep the default preflight cheap: no ~400 MB archive upload per manual run.
-      # These reports are not installable releases or publication approvals.
-      - name: Retain identity, structural and native Linux probe reports
+      # These reports are neither native acceptance nor publication approval.
+      - name: Retain candidate identity and structural reports
         uses: actions/upload-artifact@v4
         with:
           name: candidate-report-${{ github.run_number }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/candidate.json
             ${{ runner.temp }}/release-artifacts/release-manifest.json
-            ${{ runner.temp }}/installed-candidate-report.json
-            ${{ runner.temp }}/packaged-update/packaged-update-report.json
             ${{ runner.temp }}/install-candidate.md
           if-no-files-found: error
           retention-days: 3
@@ -177,8 +197,51 @@ jobs:
             --artifacts "$RUNNER_TEMP/release-artifacts" \
             --output "$RUNNER_TEMP/retained-candidate"
 
-      - name: Retain installable candidate for approved release handoff
+      - name: Transfer prepared candidate pending native acceptance
+        id: prepared
         if: ${{ inputs.retain_installable }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: prepared-candidate-${{ github.run_number }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/retained-candidate
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  native:
+    name: Candidate native acceptance
+    needs: candidate
+    uses: ./.github/workflows/native-acceptance.yml
+    with:
+      candidate: true
+      candidate_commit: ${{ needs.candidate.outputs.candidate_commit }}
+      manifest_sha256: ${{ needs.candidate.outputs.manifest_sha256 }}
+      linux_artifact_id: ${{ needs.candidate.outputs.linux_artifact_id }}
+      windows_artifact_id: ${{ needs.candidate.outputs.windows_artifact_id }}
+
+  verified:
+    name: Candidate required
+    needs: [candidate, native]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require build and both native acceptance jobs
+        env:
+          BUILD_RESULT: ${{ needs.candidate.result }}
+          NATIVE_RESULT: ${{ needs.native.result }}
+        run: test "$BUILD_RESULT" = success && test "$NATIVE_RESULT" = success
+
+      - name: Restore the exact retained candidate after acceptance
+        if: inputs.retain_installable
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.candidate.outputs.prepared_artifact_id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/retained-candidate
+
+      - name: Retain accepted installable candidate for separate approval
+        if: inputs.retain_installable
         uses: actions/upload-artifact@v4
         with:
           name: installable-candidate-${{ github.run_number }}-${{ github.run_attempt }}
@@ -186,3 +249,11 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 1
+
+      - name: Record accepted identity
+        env:
+          CANDIDATE_COMMIT: ${{ needs.candidate.outputs.candidate_commit }}
+          MANIFEST_SHA256: ${{ needs.candidate.outputs.manifest_sha256 }}
+        run: |
+          printf 'Candidate: `%s`\n\nManifest SHA-256: `%s`\n\nLinux and Windows native acceptance passed. Publication requires separate approval.\n' \
+            "$CANDIDATE_COMMIT" "$MANIFEST_SHA256" >> "$GITHUB_STEP_SUMMARY"

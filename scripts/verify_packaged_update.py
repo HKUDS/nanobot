@@ -26,7 +26,7 @@ import sqlite3
 import subprocess
 import sys
 import time
-from contextlib import closing
+from contextlib import closing, contextmanager
 from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import quote
@@ -47,6 +47,35 @@ def read(path: Path):
 
 def write(path: Path, value) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+class Timings:
+    """Separate, incrementally persisted evidence; never include commands or logs."""
+
+    def __init__(self, output: Path):
+        self.output = output
+        self.records: list[dict] = []
+
+    @contextmanager
+    def measure(self, phase: str, *, scenario: str | None = None, journey: int | None = None):
+        started = time.perf_counter()
+        succeeded = False
+        try:
+            yield
+            succeeded = True
+        finally:
+            record = {"phase": phase, "scenario": scenario, "journey": journey,
+                      "seconds": time.perf_counter() - started,
+                      "status": "succeeded" if succeeded else "failed"}
+            self.records.append(record)
+            # The controller owns this exclusive root before starting any timer.
+            # Replace the checkpoint atomically so a later failed phase cannot
+            # leave a partially written report. This is not a durability/fsync test.
+            temporary = self.output.with_suffix(".tmp")
+            write(temporary, {"schema_version": 1, "clock": "perf_counter", "timings": self.records})
+            temporary.replace(self.output)
+            label = "/".join(str(value) for value in (scenario, journey, phase) if value is not None)
+            print(f"TIMING {label}: {record['seconds']:.3f}s ({record['status']})", flush=True)
 
 
 def replace_once(source: bytes, old: bytes, new: bytes) -> bytes:
@@ -612,6 +641,7 @@ def run(args) -> dict:
     original_hash = digest(target)
     root = args.output.resolve()
     root.mkdir(mode=0o700)  # Exclusive evidence root. Never use a user's installation.
+    timings = Timings(root / "packaged-update-timings.json")
     environment = root / "managed"
     python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     base = Version(version).release
@@ -635,103 +665,117 @@ def run(args) -> dict:
         system["PATH"] = str(Path(system["SYSTEMROOT"]) / "System32")
     # Install once, without inherited user pip settings; every case resets only
     # nanobot in this private environment. Dependencies stay pinned by its snapshot.
-    subprocess.run([sys.executable, "-I", "-m", "venv", str(environment)], check=True, env=system, timeout=90)
-    subprocess.run([str(python), "-I", "-m", "pip", "install", "--only-binary=:all:", str(target)],
-                   check=True, env=system, timeout=600, stdout=subprocess.DEVNULL)
+    with timings.measure("venv"):
+        subprocess.run([sys.executable, "-I", "-m", "venv", str(environment)], check=True, env=system, timeout=90)
+    with timings.measure("initial_dependency_install"):
+        subprocess.run([str(python), "-I", "-m", "pip", "install", "--only-binary=:all:", str(target)],
+                       check=True, env=system, timeout=600, stdout=subprocess.DEVNULL)
     write(environment / "nanobot-install.json", {"schema_version": 1, "owner": "nanobot-installer",
                                                "environment": str(environment), "extras": []})
     for scenario in args.scenario or SCENARIOS:
-        case_root = root / scenario
-        case_root.mkdir()
-        account = case_root / "account"
-        account.mkdir()
-        env = dict(system, HOME=str(account), USERPROFILE=str(account), APPDATA=str(account / "config"),
-                   LOCALAPPDATA=str(account / "data"), XDG_CONFIG_HOME=str(account / "config"),
-                   XDG_CACHE_HOME=str(root / "cache"), XDG_DATA_HOME=str(account / "data"),
-                   TMPDIR=str(case_root), TMP=str(case_root), TEMP=str(case_root))
-        selected = target
-        feed = case_root / "feed.json"
-        if scenario in {"upgrade-again", "import-failure", "restart-failure", "restore-interruption"}:
-            intermediate = Version(version).base_version + ".dev0"
-            if not Version(baseline_version) < Version(intermediate) < Version(version):
-                raise ValueError("Consecutive updates require baseline < target.dev0 < target")
-            # Faults and the instrumented intermediate get a distinct version:
-            # never overwrite a previously observed version with healthy bytes.
-            selected = fixture_wheel(target, case_root / "intermediate", intermediate,
-                                     feed=feed if scenario == "upgrade-again" else None, scenario=scenario)
-        write(feed, feed_records(selected, args.commit))
-        earlier = baseline_version
-        if scenario == "skipped-preview" and not args.baseline_wheel:
-            earlier = Version(version).base_version + ".dev0"
-            if Version(earlier) >= Version(version):
-                raise ValueError("Skipped Preview requires a target newer than dev0")
-        baseline = fixture_wheel(baseline_source, case_root / "baseline", earlier, feed=feed, scenario=scenario)
-        case = {"scenario": scenario, "baseline_version": earlier, "dock": args.dock,
-                "target_version": str(parse_wheel_filename(selected.name)[1]),
-                "baseline_kind": "instrumented historical wheel" if args.baseline_wheel else "instrumented version fixture",
-                "baseline_source_sha256": digest(baseline_source), "baseline_fixture_sha256": digest(baseline),
-                "target_wheel": str(selected), "target_sha256": digest(selected), "commit": args.commit,
-                "target_unmodified": selected == target}
-        write(case_root / "case.json", case)
-        subprocess.run([str(python), "-I", "-m", "pip", "install", "--no-deps", "--force-reinstall", str(baseline)],
-                       check=True, env=env, timeout=120, stdout=subprocess.DEVNULL)
-        child = [str(python), "-I", str(Path(__file__).resolve())]
-        with (case_root / "acceptance.log").open("w", encoding="utf-8") as log:
-            def journey():
-                subprocess.run([*child, "--phase", "prepare", "--output", str(case_root)],
-                               check=True, env=env, cwd=case_root, stdout=log, stderr=log, timeout=180)
-                launch = read(case_root / "launch.json")
-                subprocess.run(launch["command"], check=True, env=env, cwd=launch["directory"],
-                               stdout=log, stderr=log, timeout=420)
-                subprocess.run([*child, "--phase", "verify", "--output", str(case_root)],
-                               check=True, env=env, cwd=case_root, stdout=log, stderr=log, timeout=180)
-                return read(case_root / "result.json")
+        with timings.measure("scenario_total", scenario=scenario):
+            with timings.measure("fixture", scenario=scenario, journey=1):
+                case_root = root / scenario
+                case_root.mkdir()
+                account = case_root / "account"
+                account.mkdir()
+                env = dict(system, HOME=str(account), USERPROFILE=str(account), APPDATA=str(account / "config"),
+                           LOCALAPPDATA=str(account / "data"), XDG_CONFIG_HOME=str(account / "config"),
+                           XDG_CACHE_HOME=str(root / "cache"), XDG_DATA_HOME=str(account / "data"),
+                           TMPDIR=str(case_root), TMP=str(case_root), TEMP=str(case_root))
+                selected = target
+                feed = case_root / "feed.json"
+                if scenario in {"upgrade-again", "import-failure", "restart-failure", "restore-interruption"}:
+                    intermediate = Version(version).base_version + ".dev0"
+                    if not Version(baseline_version) < Version(intermediate) < Version(version):
+                        raise ValueError("Consecutive updates require baseline < target.dev0 < target")
+                    # Faults and the instrumented intermediate get a distinct version:
+                    # never overwrite a previously observed version with healthy bytes.
+                    selected = fixture_wheel(target, case_root / "intermediate", intermediate,
+                                             feed=feed if scenario == "upgrade-again" else None, scenario=scenario)
+                write(feed, feed_records(selected, args.commit))
+                earlier = baseline_version
+                if scenario == "skipped-preview" and not args.baseline_wheel:
+                    earlier = Version(version).base_version + ".dev0"
+                    if Version(earlier) >= Version(version):
+                        raise ValueError("Skipped Preview requires a target newer than dev0")
+                baseline = fixture_wheel(baseline_source, case_root / "baseline", earlier, feed=feed, scenario=scenario)
+                case = {"scenario": scenario, "baseline_version": earlier, "dock": args.dock,
+                        "target_version": str(parse_wheel_filename(selected.name)[1]),
+                        "baseline_kind": "instrumented historical wheel" if args.baseline_wheel else "instrumented version fixture",
+                        "baseline_source_sha256": digest(baseline_source), "baseline_fixture_sha256": digest(baseline),
+                        "target_wheel": str(selected), "target_sha256": digest(selected), "commit": args.commit,
+                        "target_unmodified": selected == target}
+                write(case_root / "case.json", case)
+            with timings.measure("baseline_install", scenario=scenario, journey=1):
+                subprocess.run([str(python), "-I", "-m", "pip", "install", "--no-deps", "--force-reinstall", str(baseline)],
+                               check=True, env=env, timeout=120, stdout=subprocess.DEVNULL)
+            child = [str(python), "-I", str(Path(__file__).resolve())]
+            # Raw logs stay private to this local evidence root, including on success.
+            with (case_root / "acceptance.log").open("w", encoding="utf-8") as log:
+                def journey(number):
+                    with timings.measure("prepare", scenario=scenario, journey=number):
+                        subprocess.run([*child, "--phase", "prepare", "--output", str(case_root)],
+                                       check=True, env=env, cwd=case_root, stdout=log, stderr=log, timeout=180)
+                        launch = read(case_root / "launch.json")
+                    with timings.measure("worker", scenario=scenario, journey=number):
+                        subprocess.run(launch["command"], check=True, env=env, cwd=launch["directory"],
+                                       stdout=log, stderr=log, timeout=420)
+                    with timings.measure("verify", scenario=scenario, journey=number):
+                        subprocess.run([*child, "--phase", "verify", "--output", str(case_root)],
+                                       check=True, env=env, cwd=case_root, stdout=log, stderr=log, timeout=180)
+                        return read(case_root / "result.json")
 
-            try:
-                result = journey()
-                if result["phase"] == "restored" or scenario == "upgrade-again":
-                    previous_job = read(case_root / "launch.json")["directory"]
-                    write(feed, feed_records(target, args.commit, generation=2))
-                    write(case_root / "case.json", {
-                        **case, "scenario": "upgrade", "baseline_version": result["running_version"],
-                        "baseline_kind": "previous journey's running installation",
-                        "baseline_source_sha256": (case["baseline_source_sha256"] if result["phase"] == "restored"
-                                                   else case["target_sha256"]),
-                        "baseline_fixture_sha256": (case["baseline_fixture_sha256"] if result["phase"] == "restored"
-                                                    else case["target_sha256"]),
-                        "target_version": version, "target_wheel": str(target),
-                        "target_sha256": original_hash, "target_unmodified": True,
-                    })
-                    result["subsequent_update"] = journey()
-                    assert read(case_root / "launch.json")["directory"] != previous_job
-                    assert result["subsequent_update"]["phase"] == "succeeded"
-                    write(case_root / "result.json", result)
-                results.append(result)
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-                log.flush()
-                tail = (case_root / "acceptance.log").read_text(encoding="utf-8", errors="replace")[-8192:]
-                config_file = account / ".nanobot/config.json"
-                if config_file.exists():
-                    token = read(config_file)["channels"]["websocket"]["tokenIssueSecret"]
-                    tail = tail.replace(token, "[redacted]")
-                print(tail, file=sys.stderr)
-                raise
-            finally:
-                subprocess.run([str(python), "-I", "-m", "nanobot", "gateway", "stop", "--config",
-                                str(account / ".nanobot/config.json")], env=env, cwd=case_root,
-                               stdout=log, stderr=log, timeout=60, check=True)
-                config_file = account / ".nanobot/config.json"
-                if config_file.exists():
-                    config = read(config_file)
-                    _wait_for_closed_listeners((config["gateway"]["port"], config["channels"]["websocket"]["port"]))
-        results[-1]["gateway_process_stopped"] = True
-        dock_address = results[-1].get("dock_socket")
-        if not dock_address:
-            dock_address = results[-1].get("subsequent_update", {}).get("dock_socket")
-        if dock_address:
-            _wait_dock(Path(dock_address), present=False)
-            results[-1]["dock_stopped"] = True
-        print(f"PASS {scenario}: {results[-1]['phase']}", flush=True)
+                try:
+                    result = journey(1)
+                    if result["phase"] == "restored" or scenario == "upgrade-again":
+                        with timings.measure("fixture", scenario=scenario, journey=2):
+                            previous_job = read(case_root / "launch.json")["directory"]
+                            write(feed, feed_records(target, args.commit, generation=2))
+                            write(case_root / "case.json", {
+                                **case, "scenario": "upgrade", "baseline_version": result["running_version"],
+                                "baseline_kind": "previous journey's running installation",
+                                "baseline_source_sha256": (case["baseline_source_sha256"] if result["phase"] == "restored"
+                                                           else case["target_sha256"]),
+                                "baseline_fixture_sha256": (case["baseline_fixture_sha256"] if result["phase"] == "restored"
+                                                            else case["target_sha256"]),
+                                "target_version": version, "target_wheel": str(target),
+                                "target_sha256": original_hash, "target_unmodified": True,
+                            })
+                        result["subsequent_update"] = journey(2)
+                        assert read(case_root / "launch.json")["directory"] != previous_job
+                        assert result["subsequent_update"]["phase"] == "succeeded"
+                        write(case_root / "result.json", result)
+                    results.append(result)
+                except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                    log.flush()
+                    tail = (case_root / "acceptance.log").read_text(encoding="utf-8", errors="replace")[-8192:]
+                    config_file = account / ".nanobot/config.json"
+                    if config_file.exists():
+                        token = read(config_file)["channels"]["websocket"]["tokenIssueSecret"]
+                        tail = tail.replace(token, "[redacted]")
+                    print(tail, file=sys.stderr)
+                    raise
+                finally:
+                    with timings.measure("cleanup", scenario=scenario):
+                        subprocess.run([str(python), "-I", "-m", "nanobot", "gateway", "stop", "--config",
+                                        str(account / ".nanobot/config.json")], env=env, cwd=case_root,
+                                       stdout=log, stderr=log, timeout=60, check=True)
+                        config_file = account / ".nanobot/config.json"
+                        if config_file.exists():
+                            config = read(config_file)
+                            _wait_for_closed_listeners((config["gateway"]["port"], config["channels"]["websocket"]["port"]))
+                        # No journey result exists on failure; successful journeys
+                        # also retain the existing native Dock shutdown assertion.
+                        if results and results[-1]["scenario"] == scenario:
+                            results[-1]["gateway_process_stopped"] = True
+                            dock_address = results[-1].get("dock_socket")
+                            if not dock_address:
+                                dock_address = results[-1].get("subsequent_update", {}).get("dock_socket")
+                            if dock_address:
+                                _wait_dock(Path(dock_address), present=False)
+                                results[-1]["dock_stopped"] = True
+            print(f"PASS {scenario}: {results[-1]['phase']}", flush=True)
     assert digest(target) == original_hash
     return {"platform": platform.system(), "machine": platform.machine(), "python": platform.python_version(),
             "target_sha256": original_hash, "candidate_commit": args.commit, "version": version,

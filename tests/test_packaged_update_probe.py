@@ -15,6 +15,7 @@ import pytest
 
 from nanobot.release_feed import ReleaseFeed
 from scripts.verify_packaged_update import (
+    Timings,
     assert_canonical_preserved,
     assert_history_preserved,
     canonical_records,
@@ -187,3 +188,68 @@ def test_unisolated_probe_refuses_before_creating_output(tmp_path):
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 2 and "python -I" in result.stderr
     assert not output.exists()
+
+
+def test_timings_checkpoint_real_fixture_and_keep_result_schema_separate(tmp_path, capsys):
+    output = tmp_path / "packaged-update-timings.json"
+    timings = Timings(output)
+    source = wheel(tmp_path, "0.3.6")
+    with timings.measure("scenario_total", scenario="upgrade"):
+        with timings.measure("fixture", scenario="upgrade", journey=1):
+            baseline = fixture_wheel(source, tmp_path / "baseline", "0.3.5", feed=tmp_path / "feed.json")
+        # Evidence is available before the outer context exits.
+        checkpoint = json.loads(output.read_text())
+        assert checkpoint["clock"] == "perf_counter"
+        assert checkpoint["schema_version"] == 1
+        assert len(checkpoint["timings"]) == 1
+        assert checkpoint["timings"][0]["phase"] == "fixture"
+        assert baseline.exists()
+        for number in (1, 2):
+            with timings.measure("verify", scenario="upgrade", journey=number):
+                assert digest(source) != digest(baseline)
+    records = json.loads(output.read_text())["timings"]
+    assert [(row["phase"], row["journey"]) for row in records] == [
+        ("fixture", 1), ("verify", 1), ("verify", 2), ("scenario_total", None)]
+    assert all(row["status"] == "succeeded" and row["seconds"] >= 0 for row in records)
+    assert records[-1]["seconds"] >= sum(row["seconds"] for row in records[:-1])
+    assert not (tmp_path / "result.json").exists()
+    assert not (tmp_path / "packaged-update-report.json").exists()
+    stdout = capsys.readouterr().out
+    assert "TIMING upgrade/1/fixture:" in stdout
+    assert "TIMING upgrade/2/verify:" in stdout
+    assert "TIMING upgrade/scenario_total:" in stdout
+
+
+@pytest.mark.parametrize("failure", ["exit", "timeout", "assertion"])
+def test_timings_persist_failure_and_finally_cleanup_without_exporting_secrets(tmp_path, capsys, failure):
+    output = tmp_path / "packaged-update-timings.json"
+    timings = Timings(output)
+    secret = "sensitive-token-must-stay-local"
+    error = {"exit": subprocess.CalledProcessError, "timeout": subprocess.TimeoutExpired,
+             "assertion": AssertionError}[failure]
+    with pytest.raises(error):
+        with timings.measure("scenario_total", scenario="restart-failure"):
+            try:
+                with timings.measure("worker", scenario="restart-failure", journey=2):
+                    if failure == "assertion":
+                        raise AssertionError(secret)
+                    command = ("raise SystemExit(91)" if failure == "exit" else "import time; time.sleep(30)")
+                    subprocess.run([sys.executable, "-I", "-c", command, secret], check=True,
+                                   capture_output=True, timeout=0.1 if failure == "timeout" else 10)
+            finally:
+                with timings.measure("cleanup", scenario="restart-failure"):
+                    # Read the failed phase from disk before cleanup completes.
+                    assert json.loads(output.read_text())["timings"][0]["status"] == "failed"
+                    (tmp_path / "cleaned").touch()
+    assert (tmp_path / "cleaned").exists()
+    document = output.read_text()
+    records = json.loads(document)["timings"]
+    assert [(row["phase"], row["status"]) for row in records] == [
+        ("worker", "failed"), ("cleanup", "succeeded"), ("scenario_total", "failed")]
+    assert all(row["seconds"] >= 0 for row in records)
+    assert records[-1]["seconds"] >= sum(row["seconds"] for row in records[:-1])
+    assert secret not in document
+    captured = capsys.readouterr()
+    assert secret not in captured.out + captured.err
+    assert "TIMING restart-failure/2/worker:" in captured.out
+    assert "TIMING restart-failure/scenario_total:" in captured.out
