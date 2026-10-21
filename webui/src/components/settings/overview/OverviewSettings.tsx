@@ -160,8 +160,8 @@ export function AboutSettings({ settings, onRequestUpdate: requestUpdate }: { se
 }
 
 function VersionCheckRow({ currentVersion, currentCommit, onRequestUpdate, hasPendingUpdate }: VersionInfoProps) {
-  const { checking, result, check, dismiss, dismissedVersion, releaseStatus, canChangeChannel,
-    changingChannel, channelError, channelSaved, changeChannel, installationMethod } = useVersionCheck();
+  const { checking, result, check, releaseStatus, canChangeChannel,
+    changingChannel, channelError, changeChannel, installationMethod } = useVersionCheck();
   const [manualFeedback, setManualFeedback] = useState(false);
   const pending = checking || manualFeedback;
   const checkManually = async () => {
@@ -178,8 +178,7 @@ function VersionCheckRow({ currentVersion, currentCommit, onRequestUpdate, hasPe
     onRequestUpdate={onRequestUpdate} hasPendingUpdate={hasPendingUpdate}
     installationMethod={installationMethod}
     releaseStatus={releaseStatus} canChangeChannel={canChangeChannel} changingChannel={changingChannel}
-    channelError={channelError} channelSaved={channelSaved} onChangeChannel={changeChannel}
-    onDismiss={dismiss} dismissedVersion={dismissedVersion} />;
+    channelError={channelError} onChangeChannel={changeChannel} />;
 }
 
 export function AppearanceSettings({ theme, onToggleTheme, localPrefs, onChangeLocalPrefs }: {

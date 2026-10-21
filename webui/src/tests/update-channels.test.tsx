@@ -29,7 +29,7 @@ function view(client: NanobotClient, token = "channel-a", native = false) {
 }
 
 describe("Installation-owned release channels", () => {
-  it("selects a channel with visible feedback but no installation or restart consent", async () => {
+  it("shows saving progress, then quietly selects a channel without installation or restart consent", async () => {
     const client = new NanobotClient({ url: "ws://localhost:8765" });
     let resolve!: (value: unknown) => void;
     const mutation = vi.spyOn(client, "requestMutation").mockImplementation(() => new Promise(done => { resolve = done; }));
@@ -39,11 +39,12 @@ describe("Installation-owned release channels", () => {
     render(view(client));
     const selector = await screen.findByRole("switch", { name: "Receive preview updates" });
     expect(selector).toBeVisible();
-    expect(selector).toHaveAccessibleDescription(/previews may have bugs/);
+    expect(selector).toHaveAccessibleDescription("Try new features early.");
     expect(selector).toHaveAttribute("aria-checked", "false");
     fireEvent.change(screen.getByLabelText("Draft"), { target: { value: "Keep writing" } });
     fireEvent.click(selector);
     expect(selector).toBeDisabled();
+    expect(screen.getByText("Saving…")).toBeVisible();
     expect(screen.getByRole("button", { name: "Check for updates" })).toBeDisabled();
     fireEvent.click(screen.getByText("Subscribe stable"));
     expect(mutation).toHaveBeenCalledOnce();
@@ -52,12 +53,38 @@ describe("Installation-owned release channels", () => {
     await waitFor(() => expect(selector).toBeEnabled());
     expect(selector).toHaveAttribute("aria-checked", "true");
     expect(selector).toBeVisible();
-    expect(screen.getByText(/Update preference saved/)).toBeVisible();
+    expect(screen.queryByText("Saving…")).toBeNull();
+    expect(screen.queryByText("Update preference saved")).toBeNull();
     expect(screen.getByText(/Could not verify/)).toBeVisible();
     expect(screen.queryByText("You're up to date")).toBeNull();
     expect(screen.getByLabelText("Draft")).toHaveValue("Keep writing");
     expect(fetcher).toHaveBeenCalledWith("/api/settings/version-check?channel_status=1", expect.any(Object));
     expect(mutation).toHaveBeenCalledOnce();
+  });
+
+  it("reloads a quietly saved channel and uses its latest revision for the next save", async () => {
+    const client = new NanobotClient({ url: "ws://localhost:8765" });
+    let selection = { channel: "stable", revision: 0 };
+    const mutation = vi.spyOn(client, "requestMutation").mockImplementation(async (_action, payload) => {
+      selection = { channel: String(payload?.channel), revision: selection.revision + 1 };
+      return selection;
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(state(selection.channel, selection.revision))));
+    const first = render(view(client));
+    fireEvent.click(await screen.findByRole("switch", { name: "Receive preview updates" }));
+    await waitFor(() => expect(screen.getByRole("switch")).toBeEnabled());
+    expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true");
+    first.unmount();
+
+    render(view(client));
+    const selector = await screen.findByRole("switch", { name: "Receive preview updates" });
+    expect(selector).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(selector);
+    await waitFor(() => expect(selector).toBeEnabled());
+    expect(selector).toHaveAttribute("aria-checked", "false");
+    expect(mutation).toHaveBeenNthCalledWith(1, "settings.nanobot.update.channel", { channel: "preview", revision: 0 }, expect.any(Number));
+    expect(mutation).toHaveBeenNthCalledWith(2, "settings.nanobot.update.channel", { channel: "stable", revision: 1 }, expect.any(Number));
+    expect(screen.queryByText("Update preference saved")).toBeNull();
   });
 
   it("resynchronizes a stale tab or lost response and waits for stable without downgrading", async () => {

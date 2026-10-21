@@ -1,11 +1,10 @@
-import { useId, useRef } from "react";
-import { ArrowUpCircle, Check, ExternalLink, Loader2, X } from "lucide-react";
+import { useId } from "react";
+import { ArrowUpCircle, Check, ExternalLink, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { SettingsGroup, SettingsRow } from "@/components/settings/shared/SettingsControls";
 import { ToggleButton } from "@/components/ui/toggle-button";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ReleaseStatus, UpdateChannel, UpdateMethod } from "@/lib/api";
 import type { VersionResult } from "@/providers/VersionCheckProvider";
 
@@ -20,25 +19,21 @@ export type VersionCheckState = VersionResult;
 
 export function VersionCheckRowView({
   currentVersion, currentCommit, checking, result, onCheck,
-  onRequestUpdate, hasPendingUpdate, onDismiss, dismissedVersion, installationMethod,
-  releaseStatus, canChangeChannel, changingChannel, channelError, channelSaved, onChangeChannel,
+  onRequestUpdate, hasPendingUpdate, installationMethod,
+  releaseStatus, canChangeChannel, changingChannel, channelError, onChangeChannel,
 }: VersionInfoProps & {
   checking: boolean;
   result: VersionCheckState;
   onCheck: () => void;
-  onDismiss?: () => void;
-  dismissedVersion?: string | null;
   releaseStatus?: ReleaseStatus | null;
   canChangeChannel?: boolean;
   changingChannel?: boolean;
   channelError?: string;
-  channelSaved?: boolean;
   onChangeChannel?: (channel: UpdateChannel) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const previewHelp = useId();
   const previewToggle = useId();
-  const checkButton = useRef<HTMLButtonElement>(null);
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   return (
     <SettingsGroup>
@@ -62,7 +57,6 @@ export function VersionCheckRowView({
         </div>
       </>}>
         <Button
-          ref={checkButton}
           size="sm"
           variant="outline"
           onClick={onCheck}
@@ -96,45 +90,30 @@ export function VersionCheckRowView({
             {t("settings.about.viewUpdateDetails")}
           </Button>
           </div>
-        ) : result?.type === "update" && dismissedVersion !== result.latestVersion ? (
-          <div className="settings-list-inset border-t border-border/50 py-4 text-start">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0" role="status">
-                <div className="text-[14px] font-medium leading-5">
+        ) : result?.type === "update" ? (
+          <div className="settings-list-inset border-t border-border/50 py-3 text-start">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1" role="status">
+                <span className="text-[14px] font-medium leading-5">
                   {t("settings.about.updateNotice")}
-                </div>
-                <p className="mt-1 break-all text-[13px] leading-5 tabular-nums text-muted-foreground">v{result.latestVersion}</p>
+                </span>
+                <span className="break-all text-[13px] leading-5 tabular-nums text-muted-foreground">v{result.latestVersion}</span>
               </div>
-              {onDismiss && <TooltipProvider><Tooltip>
-                <TooltipTrigger asChild>
-                  <Button size="icon" variant="ghost" onClick={() => {
-                    onDismiss();
-                    checkButton.current?.focus();
-                  }}
-                    className="-me-2 -mt-2 shrink-0 text-muted-foreground"
-                    aria-label={t("settings.about.dismissUpdate")}>
-                    <X className="h-4 w-4" aria-hidden />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{t("settings.about.dismissUpdate")}</TooltipContent>
-              </Tooltip></TooltipProvider>}
-            </div>
-            {!onRequestUpdate && <p className="mt-2 text-[13px] leading-5 text-muted-foreground">{t("settings.about.updateInstructions")}</p>}
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-              {onRequestUpdate ? <Button size="sm" variant="accent" className="h-auto min-h-9 whitespace-normal text-start" onClick={onRequestUpdate}>
+              {onRequestUpdate ? <Button size="sm" variant="outline" className="h-auto min-h-9 max-w-full whitespace-normal break-words text-start" onClick={onRequestUpdate}>
                 {installationMethod && installationMethod !== "managed"
                   ? t("updates.guide.entry", { method: t(`updates.guide.methods.${installationMethod}`) })
                   : t("settings.about.updateNow")}</Button> :
-                <Button size="sm" variant="outline" asChild><a href="https://github.com/HKUDS/nanobot#-install"
-                  target="_blank" rel="noopener noreferrer">{t("settings.about.installationGuide")}<ExternalLink className="ms-1.5 h-3 w-3" aria-hidden /></a></Button>}
+                <Button size="sm" variant="outline" className="h-auto min-h-9 max-w-full whitespace-normal text-start" asChild><a href="https://github.com/HKUDS/nanobot#-install"
+                  target="_blank" rel="noopener noreferrer">{t("settings.about.installationGuide")}<ExternalLink className="ms-1.5 h-3 w-3 shrink-0" aria-hidden /></a></Button>}
               {result.releaseUrl || result.pypiUrl ? (
                 <a href={result.releaseUrl || result.pypiUrl} target="_blank" rel="noopener noreferrer"
-                  className="inline-flex min-h-9 shrink-0 items-center gap-1 whitespace-nowrap rounded-control text-[13px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  className="inline-flex min-h-9 items-center gap-1 rounded-control text-[13px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   {result.releaseUrl ? t("updates.channel.releaseNotes") : "PyPI"}
                   <ExternalLink className="h-3 w-3 shrink-0" aria-hidden />
                 </a>
               ) : null}
             </div>
+            {!onRequestUpdate && <p className="mt-2 text-[13px] leading-5 text-muted-foreground">{t("settings.about.updateInstructions")}</p>}
           </div>
         ) : null}
       {releaseStatus && onChangeChannel && <div className="border-t border-border/50">
@@ -151,8 +130,8 @@ export function VersionCheckRowView({
             label={t("updates.channel.receivePreview")} aria-describedby={previewHelp} />
         </SettingsRow>
         <p role="status" className={`settings-list-inset text-[13px] leading-5 ${channelError ? "text-destructive" : "text-muted-foreground"}`}>
-          <span className={changingChannel || channelError || channelSaved ? "block pb-3" : undefined}>
-          {changingChannel ? t("updates.channel.saving") : channelError || (channelSaved ? t("updates.channel.saved") : "")}
+          <span className={changingChannel || channelError ? "block pb-3" : undefined}>
+          {changingChannel ? t("updates.channel.saving") : channelError}
           </span>
         </p>
       </div>}

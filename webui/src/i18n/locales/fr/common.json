@@ -48,7 +48,7 @@
       "receivePreview": "Recevoir les préversions",
       "previewWarning": "Cette préversion peut contenir des erreurs.",
       "preview": "Préversion",
-      "hint": "Essayez les nouveautés en avance ; les préversions peuvent contenir des erreurs. Chaque mise à jour reste à confirmer. Désactiver cette option ne réinstalle pas une ancienne version.",
+      "hint": "Essayez les nouveautés en avance.",
       "saving": "Enregistrement…",
       "saved": "Préférence de mise à jour enregistrée",
       "ahead": "Cette version est plus récente que celle du canal choisi. Aucune version antérieure ne sera installée.",

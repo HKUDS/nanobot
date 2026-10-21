@@ -77,7 +77,7 @@ it("keeps the visible assistant identity when translating existing interaction f
   expect(preview.getByText("Support assistant：已关闭")).toBeVisible();
 });
 
-it("keeps Preview update controls and translates feedback without executing an update", async () => {
+it("quietly keeps Preview selection and translates update feedback without executing an update", async () => {
   const source = "webui/src/components/settings/overview/VersionCheckRowView.tsx";
   window.history.replaceState({}, "", `/gallery.html#${new URLSearchParams({ component: source })}`);
   const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => inventory });
@@ -89,7 +89,7 @@ it("keeps Preview update controls and translates feedback without executing an u
   const toggle = preview.getByRole("switch", { name: "Receive preview updates" });
   await userEvent.click(toggle);
   expect(toggle).toBeChecked();
-  expect(preview.getByText("Sample preference saved; nothing will be installed or restarted.")).toBeVisible();
+  expect(preview.queryByText("Sample preference saved; nothing will be installed or restarted.")).toBeNull();
   await userEvent.click(preview.getByRole("button", { name: "Update" }));
   expect(preview.getByText("Update review selected; this preview does not install or restart anything.")).toBeVisible();
 
