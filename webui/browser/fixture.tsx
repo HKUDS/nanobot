@@ -27,6 +27,7 @@ import { HistoryBoundaryFixture } from "./history-boundary-fixture";
 import { ChatFailureFixture } from "./chat-failure-fixture";
 import { ThreadLoadingFixture } from "./thread-loading-fixture";
 import { AnswerOrderFixture } from "./answer-order-fixture";
+import { SidebarActivityFixture } from "./sidebar-activity-fixture";
 
 const history: UIMessage[] = [
   { id: "question", role: "user", content: "Earlier question", createdAt: 1_700_000_000_000 },
@@ -169,6 +170,8 @@ await initializeI18n();
 createRoot(document.getElementById("root")!).render(<TooltipProvider>
   {parameters.get("case") === "answer-order"
     ? <AnswerOrderFixture />
+    : parameters.get("case") === "sidebar-activity"
+    ? <SidebarActivityFixture />
     : parameters.get("case") === "chat-failure"
     ? <ChatFailureFixture parameters={parameters} />
     : parameters.get("case") === "typography"

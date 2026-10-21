@@ -1917,7 +1917,21 @@ function SessionActivityIndicator({
           aria-label={label}
           className="grid h-4 w-4 shrink-0 place-items-center"
         >
-          <span className="h-3 w-3 animate-spin rounded-full border border-blue-500/25 border-t-blue-500 [animation-duration:1.4s] motion-reduce:animate-none dark:border-blue-400/25 dark:border-t-blue-400" />
+          <svg
+            className="h-3 w-3 text-sidebar-muted-foreground"
+            viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true"
+          >
+            <rect x="1.25" y="1.25" width="17.5" height="17.5" rx="4" opacity="0.2" />
+            <rect
+              x="1.25" y="1.25" width="17.5" height="17.5" rx="4"
+              pathLength="100" strokeDasharray="25 75" strokeLinecap="round"
+              className="sidebar-running-trace"
+              onAnimationStart={(event) => {
+                // Share the document clock, including late mounts and reduced-motion changes.
+                for (const animation of event.currentTarget.getAnimations()) animation.startTime = 0;
+              }}
+            />
+          </svg>
         </span>
       </HoverHint>
     );
