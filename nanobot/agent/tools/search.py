@@ -24,6 +24,7 @@ from nanobot.utils.document import (
     DocumentLineSource,
     LocatedDocumentLine,
     PdfPageRangeError,
+    _decode_bom_text,
     open_document_line_source,
 )
 
@@ -635,10 +636,12 @@ class GrepTool(_SearchTool):
             return open_document_line_source(path, pages=pages)
         with path.open("rb") as file:
             raw = file.read(max_bytes + 1)
-        if _is_binary(raw):
-            return None
         try:
-            content = raw.decode("utf-8")
+            content = _decode_bom_text(raw)
+            if content is None:
+                if _is_binary(raw):
+                    return None
+                content = raw.decode("utf-8")
         except UnicodeDecodeError:
             return None
         return DocumentLineSource(
