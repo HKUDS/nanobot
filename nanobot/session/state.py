@@ -426,6 +426,14 @@ class SessionState:
             return self._draft(session)
         return await self._execute(key, read, write=False)
 
+    async def read_identity(self, key: str) -> SessionIdentity | None:
+        """Read an existing identity without loading history or creating a session."""
+        def read() -> SessionIdentity | None:
+            session = self._load(key, history=False)
+            return SessionIdentity(session.generation, session.policy) if session is not None else None
+
+        return await self._execute(key, read, write=False)
+
     async def get(self, key: str) -> Session:
         """Read an existing conversation; create missing state on the writer."""
         return await self._get(key, history=True)

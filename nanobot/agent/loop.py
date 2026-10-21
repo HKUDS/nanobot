@@ -1458,7 +1458,21 @@ class AgentLoop:
         if msg.metadata.get(INBOUND_META_RUNTIME_CONTROL) == RUNTIME_CONTROL_SESSION_DISCARD:
             await self.discard_session(msg.session_key)
             return
-        if (
+        if msg.channel == "system" and msg.is_user_input:
+            identity = await self.sessions.state.read_identity(effective_key)
+            if msg.session_generation is not None and (
+                identity is None or msg.session_generation != identity.generation
+            ):
+                raise SessionConflictError("session input belongs to a deleted or replaced session")
+            if identity is None:
+                return
+            # Internal user inputs target an existing conversation. Bind its
+            # identity before projections observe acceptance, and keep that
+            # identity through queued execution instead of resolving it again.
+            msg = dataclasses.replace(
+                msg, session_generation=identity.generation, require_existing_session=True,
+            )
+        elif (
             msg.require_existing_session
             and await self.sessions.state.read_metadata(effective_key) is None
         ):
