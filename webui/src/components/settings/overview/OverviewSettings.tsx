@@ -4,7 +4,7 @@ import {
   ImageGenerationIcon,
   VoiceIcon,
 } from "@/components/icons/product-icons";
-import { useContext, useState, type Dispatch, type SetStateAction } from "react";
+import { useContext, useEffect, type Dispatch, type SetStateAction } from "react";
 import {
   ChevronRight,
   type LucideIcon,
@@ -162,19 +162,10 @@ export function AboutSettings({ settings, onRequestUpdate: requestUpdate }: { se
 function VersionCheckRow({ currentVersion, currentCommit, onRequestUpdate, hasPendingUpdate }: VersionInfoProps) {
   const { checking, result, check, releaseStatus, canChangeChannel,
     changingChannel, channelError, changeChannel, installationMethod } = useVersionCheck();
-  const [manualFeedback, setManualFeedback] = useState(false);
-  const pending = checking || manualFeedback;
-  const checkManually = async () => {
-    if (pending) return;
-    setManualFeedback(true);
-    // A cached response can finish before the first paint. Keep this button's
-    // acknowledgement readable without delaying the shared check or its result.
-    await Promise.all([check({ revealNotice: true }), new Promise(resolve => setTimeout(resolve, 600))]);
-    setManualFeedback(false);
-  };
+  useEffect(() => { void check(); }, [check]);
 
   return <VersionCheckRowView currentVersion={currentVersion} currentCommit={currentCommit}
-    checking={pending} result={result} onCheck={() => void checkManually()}
+    checking={checking} result={result} onCheck={() => void check()}
     onRequestUpdate={onRequestUpdate} hasPendingUpdate={hasPendingUpdate}
     installationMethod={installationMethod}
     releaseStatus={releaseStatus} canChangeChannel={canChangeChannel} changingChannel={changingChannel}

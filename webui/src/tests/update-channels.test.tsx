@@ -45,7 +45,6 @@ describe("Installation-owned release channels", () => {
     fireEvent.click(selector);
     expect(selector).toBeDisabled();
     expect(screen.getByText("Saving…")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Check for updates" })).toBeDisabled();
     fireEvent.click(screen.getByText("Subscribe stable"));
     expect(mutation).toHaveBeenCalledOnce();
     expect(mutation).toHaveBeenCalledWith("settings.nanobot.update.channel", { channel: "preview", revision: 0 }, expect.any(Number));
@@ -85,6 +84,36 @@ describe("Installation-owned release channels", () => {
     expect(mutation).toHaveBeenNthCalledWith(1, "settings.nanobot.update.channel", { channel: "preview", revision: 0 }, expect.any(Number));
     expect(mutation).toHaveBeenNthCalledWith(2, "settings.nanobot.update.channel", { channel: "stable", revision: 1 }, expect.any(Number));
     expect(screen.queryByText("Update preference saved")).toBeNull();
+  });
+
+  it("shares the post-save check when About is reentered during a channel mutation and retries its failure", async () => {
+    const client = new NanobotClient({ url: "ws://localhost:8765" });
+    let resolveSave!: (value: unknown) => void;
+    const mutation = vi.spyOn(client, "requestMutation").mockImplementation(() => new Promise(done => { resolveSave = done; }));
+    const fetcher = vi.fn().mockResolvedValueOnce(jsonResponse(state()))
+      .mockRejectedValueOnce(new Error("Channel check unavailable"))
+      .mockResolvedValueOnce(jsonResponse(state("preview", 1)));
+    vi.stubGlobal("fetch", fetcher);
+    const surface = (about: boolean) => <ClientProvider client={client} token="save-reentry"
+      webuiCapabilities={["webui.update-channels.v1"]}>
+      {about && <AboutSettings settings={settingsPayload()} />}
+    </ClientProvider>;
+    const mounted = render(surface(true));
+    fireEvent.click(await screen.findByRole("switch", { name: "Receive preview updates" }));
+    mounted.rerender(surface(false));
+    mounted.rerender(surface(true));
+    expect(screen.getByText("Saving…")).toBeVisible();
+    expect(fetcher).toHaveBeenCalledOnce();
+    await act(async () => resolveSave({ channel: "preview", revision: 1 }));
+    expect(await screen.findByText("Channel check unavailable")).toBeVisible();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.getByRole("switch")).toBeEnabled());
+    expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText("You're up to date")).toBeVisible();
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(mutation).toHaveBeenCalledOnce();
+    expect(mutation).toHaveBeenCalledWith("settings.nanobot.update.channel", { channel: "preview", revision: 0 }, expect.any(Number));
   });
 
   it("resynchronizes a stale tab or lost response and waits for stable without downgrading", async () => {

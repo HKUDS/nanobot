@@ -14,7 +14,7 @@ interface VersionCheckState {
   result: VersionResult;
   checking: boolean;
   dismissedVersion: string | null;
-  check: (options?: { revealNotice?: boolean }) => Promise<void>;
+  check: () => Promise<void>;
   dismiss: () => void;
   releaseStatus: ReleaseStatus | null;
   canChangeChannel: boolean;
@@ -33,13 +33,13 @@ function createVersionCheck(token: string, channels: boolean, client?: WebUIMuta
     releaseStatus: null, canChangeChannel: false, changingChannel: false, channelError: "",
   };
   let pending: Promise<void> | null = null;
+  let pendingChannel: Promise<void> | null = null;
   const listeners = new Set<() => void>();
   const update = (patch: Partial<typeof snapshot>) => {
     snapshot = { ...snapshot, ...patch };
     listeners.forEach((listener) => listener());
   };
-  const check = ({ revealNotice = false }: { revealNotice?: boolean } = {}) => {
-    if (revealNotice) update({ dismissedVersion: null });
+  const check = () => {
     if (pending) return pending;
     update({ checking: true });
     pending = (async () => {
@@ -64,21 +64,26 @@ function createVersionCheck(token: string, channels: boolean, client?: WebUIMuta
     return pending;
   };
   return {
-    check,
-    changeChannel: async (channel: UpdateChannel) => {
-      if (!channels || !client || !snapshot.releaseStatus || !snapshot.canChangeChannel || snapshot.changingChannel || pending) return;
+    // Entering About during a save shares its post-mutation check, not an old-channel read.
+    check: () => pendingChannel ?? check(),
+    changeChannel: (channel: UpdateChannel) => {
+      if (!channels || !client || !snapshot.releaseStatus || !snapshot.canChangeChannel || snapshot.changingChannel || pending) return Promise.resolve();
       const revision = snapshot.releaseStatus.revision;
       update({ changingChannel: true, channelError: "" });
-      try {
-        const selection = await changeUpdateChannel(client, channel, revision);
-        update({ releaseStatus: { ...snapshot.releaseStatus!, ...selection }, result: null, dismissedVersion: null });
-      } catch (error) {
-        update({ channelError: (error as Error).message });
-      } finally {
-        // Also resolve a lost mutation response / another tab's newer revision.
-        await check();
-        update({ changingChannel: false });
-      }
+      pendingChannel = (async () => {
+        try {
+          const selection = await changeUpdateChannel(client, channel, revision);
+          update({ releaseStatus: { ...snapshot.releaseStatus!, ...selection }, result: null, dismissedVersion: null });
+        } catch (error) {
+          update({ channelError: (error as Error).message });
+        } finally {
+          // Also resolve a lost mutation response / another tab's newer revision.
+          await check();
+          pendingChannel = null;
+          update({ changingChannel: false });
+        }
+      })();
+      return pendingChannel;
     },
     getSnapshot: () => snapshot,
     subscribe: (listener: () => void) => {

@@ -16,7 +16,7 @@ describe("Settings overview and appearance", () => {
   installSettingsViewTestHooks();
 
   it.each([{ capabilities: [] }, { capabilities: ["webui.core.v1", "webui.self-update.v1"] }])(
-    "keeps manual version checks without calling the legacy updater (%j)",
+    "checks on About entry without calling the legacy updater (%j)",
     async ({ capabilities }) => {
       const fetcher = vi.fn(async () => jsonResponse({
         updateAvailable: { currentVersion: "0.2.2", latestVersion: "0.3.6" },
@@ -28,8 +28,6 @@ describe("Settings overview and appearance", () => {
           <AboutSettings settings={settingsPayload()} />
         </ClientProvider>,
       );
-      expect(fetcher).not.toHaveBeenCalled();
-      fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
       expect(await screen.findByRole("link", { name: "Installation guide" })).toBeVisible();
       expect(fetcher).toHaveBeenCalledTimes(1);
       expect(fetcher).toHaveBeenCalledWith("/api/settings/version-check", expect.any(Object));
@@ -39,12 +37,13 @@ describe("Settings overview and appearance", () => {
 
   it("displays a caller-owned version result and delegates checking without a client provider", () => {
     const check = vi.fn();
-    render(<VersionCheckRowView currentVersion="0.3.5" checking={false}
+    const { rerender } = render(<VersionCheckRowView currentVersion="0.3.5" checking={false}
       result={{ type: "update", latestVersion: "0.3.6", pypiUrl: "https://pypi.org/project/nanobot-ai/" }} onCheck={check} />);
-    expect(screen.getByText("Update available")).toBeVisible();
     expect(screen.getByText("v0.3.6")).toBeVisible();
     expect(screen.getByRole("link", { name: "PyPI" })).toHaveAttribute("href", "https://pypi.org/project/nanobot-ai/");
-    fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+    rerender(<VersionCheckRowView currentVersion="0.3.5" checking={false} result={{ type: "up-to-date" }} onCheck={check} />);
+    expect(screen.getByText("You're up to date")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
     expect(check).toHaveBeenCalledTimes(1);
   });
 
@@ -133,7 +132,7 @@ describe("Settings overview and appearance", () => {
       initialSettings: { ...settingsPayload(), version: { current: "0.3.5", commit } },
     });
     expect(screen.getByText("v0.3.5")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Check for updates" })).toBeEnabled();
+    expect(screen.getByText("Checking...")).toBeVisible();
     expect(document.querySelector('a[href*="/commit/"]')).toBeNull();
     const reportUrl = new URL(screen.getByRole("link", { name: "Report an issue" }).getAttribute("href")!);
     expect(reportUrl.searchParams.get("version")).toBe("0.3.5");
