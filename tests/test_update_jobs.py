@@ -1541,7 +1541,17 @@ async def test_stale_first_supervisor_cannot_take_new_confirmation(managed_insta
     assert not (directory / "approval.json").exists()
     assert not (installation_state_dir(spec.baseline.environment) / "stop.json").exists()
     # B retains its first supervision budget and completes the explicit retry.
-    completed = await asyncio.to_thread(subprocess.run, [*command, current.id], capture_output=True, timeout=40)
+    try:
+        completed = await asyncio.to_thread(subprocess.run, [*command, current.id], capture_output=True, timeout=40)
+    except subprocess.TimeoutExpired:
+        # Identify the blocked phase without exposing the confirmation nonce or
+        # making a slow snapshot indistinguishable from a handoff deadlock.
+        status = JobStatus.read(directory)
+        progress = {"phase": status.phase.value, "attempt": status.attempt,
+                    "mutation_started": status.mutation_started, "message": status.message,
+                    "snapshot_complete": (directory / "program-backup.json").exists(),
+                    "activation_complete": (directory / "activation.json").exists()}
+        pytest.fail(f"Confirmed supervisor exceeded 40s: {progress}", pytrace=False)
     assert completed.returncode == 0, completed.stderr.decode()
     assert read_record(directory / "supervision.json")["confirmation_id"] == current.id
     assert JobStatus.read(directory).phase == Phase.SUCCEEDED

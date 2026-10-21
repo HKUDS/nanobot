@@ -16,12 +16,37 @@ import pytest
 from nanobot.release_feed import ReleaseFeed
 from scripts.verify_packaged_update import (
     assert_canonical_preserved,
+    assert_history_preserved,
     canonical_records,
     digest,
     feed_records,
     fixture_wheel,
     replace_once,
 )
+
+
+def test_historical_projection_defaults_do_not_mask_history_loss():
+    # Real retained packages omit unknown timestamps and an inactive goal from
+    # their public projection, although the latter is already in their JSONL.
+    events = [{"event": "user_message", "projection_id": "input", "text": "Keep this"},
+              {"event": "turn_end", "projection_id": "complete"}]
+    before = {"events": events, "completed_turn_ids": ["turn"]}
+    projected = [{**events[0], "created_at_ms": 0},
+                 {**events[1], "created_at_ms": 0, "goal_state": {"active": False}}]
+    after = {**before, "events": projected}
+    assert_history_preserved(before, after)
+    assert_history_preserved(after, after)
+    for change in ({"text": "Changed"}, {"projection_id": "changed"}, {"created_at_ms": 123}):
+        with pytest.raises(AssertionError):
+            assert_history_preserved(before, {**after, "events": [{**projected[0], **change}, projected[1]]})
+    with pytest.raises(AssertionError):
+        assert_history_preserved(before, {**after, "events": [projected[0], {**projected[1], "goal_state": {"active": True}}]})
+    with pytest.raises(AssertionError):
+        assert_history_preserved(before, {**after, "events": projected[:1]})
+    with pytest.raises(AssertionError):
+        assert_history_preserved(before, {**after, "completed_turn_ids": []})
+    with pytest.raises(AssertionError):
+        assert_history_preserved(after, before)
 
 
 def test_display_migration_allows_an_empty_owner_without_masking_context_loss(tmp_path):
@@ -41,10 +66,17 @@ def test_display_migration_allows_an_empty_owner_without_masking_context_loss(tm
     after = canonical_records(store.path)
     assert_canonical_preserved(before, after)
     assert_canonical_preserved(after, after)
+    # The real /api/sessions read allocates the newly imported owner's handle.
+    store.update_metadata("websocket:display-only", {"session_handle": "jeno"})
+    after = canonical_records(store.path)
+    assert_canonical_preserved(before, after)
     with pytest.raises(AssertionError):
         assert_canonical_preserved(before, {**after, "messages": []})
     with pytest.raises(AssertionError):
         assert_canonical_preserved(before, {**after, "sessions": after["sessions"][1:]})
+    store.update_metadata("websocket:display-only", {"unexpected": "context"})
+    with pytest.raises(AssertionError):
+        assert_canonical_preserved(before, canonical_records(store.path))
 
 
 def wheel(tmp_path, version, *, worker=b"# worker\n", fallback=b"# fallback\n"):

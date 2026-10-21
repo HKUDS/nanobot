@@ -19,6 +19,7 @@ import io
 import json
 import os
 import platform
+import re
 import secrets
 import socket
 import sqlite3
@@ -260,6 +261,23 @@ def history(root: Path, key: str):
     return {name: response[name] for name in ("events", "completed_turn_ids")}
 
 
+def assert_history_preserved(before: dict, after: dict) -> None:
+    """Allow only known additive defaults in the older transcript projection."""
+    assert after["completed_turn_ids"] == before["completed_turn_ids"]
+    assert len(after["events"]) == len(before["events"])
+    for previous, current in zip(before["events"], after["events"], strict=True):
+        current = dict(current)
+        # SQLite represents an unknown legacy timestamp as zero. New projection
+        # also exposes the already-persisted inactive goal on a completed turn.
+        # Do not ignore these fields when the old API supplied an actual value.
+        if "created_at_ms" not in previous and current.get("created_at_ms") == 0:
+            del current["created_at_ms"]
+        if (previous["event"] == "turn_end" and "goal_state" not in previous
+                and current.get("goal_state") == {"active": False}):
+            del current["goal_state"]
+        assert current == previous, (current, previous)
+
+
 def canonical_records(path: Path, tables: tuple[str, ...] = ("sessions", "messages", "checkpoints", "pending_inputs")) -> dict:
     """Compare logical records, not SQLite's transient WAL/checkpoint layout."""
     with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db:
@@ -275,8 +293,15 @@ def assert_canonical_preserved(before: dict, after: dict) -> None:
     added = [row for row in after["sessions"] if row[0] == key and key not in existing]
     for row in added:
         # A newly imported display transcript owns an empty Session. Only its
-        # identity/timestamps are new; it must not manufacture agent context.
-        assert row[3:7] == ["{}", None, 0, 1] and row[8:] == ["", "", None], row
+        # identity/timestamps and the public handle allocated by /api/sessions
+        # are new; it must not manufacture agent context or other metadata.
+        metadata = json.loads(row[3])
+        if metadata:
+            assert set(metadata) == {"session_handle"}, row
+            handle = metadata["session_handle"]
+            assert isinstance(handle, str) and re.fullmatch("[a-z]{4,16}", handle), row
+        revision = 2 if metadata else 1
+        assert row[4:7] == [None, 0, revision] and row[8:] == ["", "", None], row
     comparable = {**after, "sessions": [row for row in after["sessions"] if row not in added]}
     assert comparable == before, (comparable, before)
 
@@ -523,9 +548,9 @@ def verify_data(root: Path, expected: str) -> bool:
         _wait_dock(_dock_socket(root), present=True)
     assert {name: digest(Path(name)) for name in before["files"]} == before["files"]
     key = "websocket:" + before["chat_id"]
-    assert history(root, key) == before["history"]
-    assert history(root, "websocket:legacy-acceptance") == before["legacy"]
-    assert history(root, "websocket:display-only") == before["display_only"]
+    assert_history_preserved(before["history"], history(root, key))
+    assert_history_preserved(before["legacy"], history(root, "websocket:legacy-acceptance"))
+    assert_history_preserved(before["display_only"], history(root, "websocket:display-only"))
     assert canonical_context(root) == before["canonical_only"], (canonical_context(root), before["canonical_only"])
     database = Path(before["database"])
     sqlite_expected = importlib.util.find_spec("nanobot.session.location") is not None
@@ -555,8 +580,8 @@ def verify_data(root: Path, expected: str) -> bool:
     if _dock_supported(root):
         _wait_dock(_dock_socket(root), present=True)
     assert history(root, key) == continued
-    assert history(root, "websocket:legacy-acceptance") == before["legacy"]
-    assert history(root, "websocket:display-only") == before["display_only"]
+    assert_history_preserved(before["legacy"], history(root, "websocket:legacy-acceptance"))
+    assert_history_preserved(before["display_only"], history(root, "websocket:display-only"))
     assert canonical_context(root) == before["canonical_only"]
     if sqlite_expected:
         assert canonical_records(database) == canonical
