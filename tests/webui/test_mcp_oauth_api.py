@@ -215,7 +215,7 @@ async def test_browser_flow_remains_busy_through_cancelled_or_expired_cleanup(
     if expire:
         monkeypatch.setattr("nanobot.webui.mcp_oauth_api._FLOW_TTL_S", 0)
 
-    async def connect(_servers, _registry, *, oauth_handlers):
+    async def connect(_servers, _registry, *, oauth_handlers, network):
         handlers = oauth_handlers["linear"]
         await handlers.redirect_handler("https://accounts.example.com/auth?state=pending")
         try:

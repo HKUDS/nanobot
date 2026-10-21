@@ -14,6 +14,7 @@ from websockets.datastructures import Headers
 
 from nanobot.bus.queue import MessageBus
 from nanobot.config.loader import get_config_path
+from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import MCPServerConfig
 from nanobot.runtime_admission import RuntimeBusyError
 from nanobot.webui.http_utils import http_json_response
@@ -413,12 +414,12 @@ async def test_settings_shutdown_joins_browser_authorization_and_releases_admiss
     config = MCPServerConfig(type="streamableHttp", auth="oauth", url="https://mcp.example/mcp")
     monkeypatch.setattr(
         "nanobot.webui.settings_routes.ensure_mcp_oauth_server",
-        lambda _query, *, config_path=None: ("linear", config),
+        lambda _query, *, config_path=None: ("linear", config, NetworkConfig()),
     )
     monkeypatch.setattr("nanobot.webui.mcp_oauth_api.validate_url_target", lambda _: (True, ""))
     cleanup_started, allow_cleanup = asyncio.Event(), asyncio.Event()
 
-    async def connect(_servers, _registry, *, oauth_handlers):
+    async def connect(_servers, _registry, *, oauth_handlers, network):
         handlers = oauth_handlers["linear"]
         await handlers.redirect_handler("https://accounts.example/authorize?state=settings")
         try:

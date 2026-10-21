@@ -17,6 +17,7 @@ from nanobot.agent.tools.mcp_oauth import MCPOAuthStorage
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import MCPServerConfig
+from nanobot.runtime_admission import RuntimeAdmission
 from nanobot.security import network as security_network
 from nanobot.webui.mcp_oauth_api import McpOAuthManager
 
@@ -192,7 +193,7 @@ async def test_oauth_discovery_tokens_reconnect_and_tool_calls_share_real_proxy(
     network = NetworkConfig(proxy=fixture.proxy)
     registry = ToolRegistry()
     provider = MCPProvider({"local": cfg}, registry, network=network)
-    manager = McpOAuthManager()
+    manager = McpOAuthManager(RuntimeAdmission())
 
     async def reload_mcp():
         await provider.connect()
