@@ -452,8 +452,9 @@ def append_transcript_object(
 
 async def append_session_message_input(
     session_key: str, *, sessions: SessionManager, content: str, created_at_ms: int,
-    session_message: Mapping[str, Any], expected_generation: str,
+    session_message: Mapping[str, Any], expected_generation: str | None,
 ) -> None:
+    """Bind a display write to an existing destination, preserving any prior fence."""
     chat_id = _chat_id_from_session_key(session_key)
     if chat_id is None:
         return
@@ -461,6 +462,11 @@ async def append_session_message_input(
     if event is None:
         return
     event.update(created_at_ms=created_at_ms, session_message=dict(session_message))
+    if expected_generation is None:
+        revision = await sessions.state.project_history(session_key, lambda history: history.revision)
+        if revision is None:
+            raise SessionConflictError("display destination is no longer active")
+        expected_generation = revision[0]
     await sessions.state.append_history(session_key, [fact_from_record(event)],
                                          expected_generation=expected_generation)
 
