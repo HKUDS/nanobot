@@ -54,7 +54,7 @@
       "ahead": "Cette version est plus récente que celle du canal choisi. Aucune version antérieure ne sera installée.",
       "waiting_stable": "Les préversions sont désactivées. Conservez cette version en attendant une version stable plus récente.",
       "withdrawn": "Cette préversion a été retirée. Installez une version plus récente dès sa disponibilité ; ne rétrogradez pas avec vos données actuelles.",
-      "unavailable": "Impossible de vérifier ce canal. Il n’est peut-être pas encore disponible. Vérifiez votre connexion et réessayez.",
+      "unavailable": "Impossible de vérifier les mises à jour de ce canal.",
       "publishing": "La publication est en cours. Réessayez plus tard.",
       "unsupported": "Aucune mise à jour compatible avec cette version de Python et cette plateforme.",
       "releaseNotes": "Notes de version"

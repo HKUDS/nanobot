@@ -54,7 +54,7 @@ describe("Installation-owned release channels", () => {
     expect(selector).toBeVisible();
     expect(screen.queryByText("Saving…")).toBeNull();
     expect(screen.queryByText("Update preference saved")).toBeNull();
-    expect(screen.getByText(/Could not verify/)).toBeVisible();
+    expect(screen.getByText("Could not check this update channel.")).toBeVisible();
     expect(screen.queryByText("You're up to date")).toBeNull();
     expect(screen.getByLabelText("Draft")).toHaveValue("Keep writing");
     expect(fetcher).toHaveBeenCalledWith("/api/settings/version-check?channel_status=1", expect.any(Object));

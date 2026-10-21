@@ -54,7 +54,7 @@
       "ahead": "Versi ini lebih baru dari saluran yang dipilih. Versi lama tidak akan diinstal.",
       "waiting_stable": "Pembaruan pratinjau dinonaktifkan. Gunakan versi ini sampai versi stabil yang lebih baru tersedia.",
       "withdrawn": "Pratinjau ini ditarik. Perbarui saat versi baru tersedia; jangan turunkan versi dengan data saat ini.",
-      "unavailable": "Saluran ini belum dapat diverifikasi dan mungkin belum tersedia. Periksa koneksi lalu coba lagi.",
+      "unavailable": "Pembaruan di saluran ini tidak dapat diperiksa.",
       "publishing": "Versi masih diterbitkan. Periksa lagi nanti.",
       "unsupported": "Tidak ada pembaruan yang cocok untuk versi Python dan platform ini.",
       "releaseNotes": "Catatan rilis"

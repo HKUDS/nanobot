@@ -54,7 +54,7 @@
       "ahead": "This version is ahead of the selected channel. No downgrade will be installed.",
       "waiting_stable": "Preview updates are off. Keep using this version until a newer stable release is available.",
       "withdrawn": "This preview was withdrawn. Update to a newer release when available; do not downgrade over your current data.",
-      "unavailable": "Could not verify this channel. It may not be available yet. Check your connection and try again.",
+      "unavailable": "Could not check this update channel.",
       "publishing": "The release is still being published. Check again later.",
       "unsupported": "No compatible update is available for this Python version and platform.",
       "releaseNotes": "Release notes"
