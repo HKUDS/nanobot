@@ -764,7 +764,11 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         ),
         # MiniMax-M3.1-Flash rejects reasoning_split=false (HTTP 400, error 2013),
         # so map the "off" presets to the lowest effort instead of disabling thinking.
-        reasoning_effort_remap=(("none", "low"), ("minimal", "low")),
+        # Identity entries keep the low/medium/high menu for models without metadata.
+        reasoning_effort_remap=(
+            ("none", "low"), ("minimal", "low"),
+            ("low", "low"), ("medium", "medium"), ("high", "high"),
+        ),
     ),
     # MiniMax Anthropic-compatible endpoint: supports thinking mode
     ProviderSpec(

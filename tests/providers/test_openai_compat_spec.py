@@ -1464,6 +1464,13 @@ def test_minimax_off_presets_map_to_low_effort(model, effort) -> None:
     assert kw["extra_body"] == {"reasoning_split": True}
 
 
+@pytest.mark.parametrize("model", ["MiniMax-M2.7", "MiniMax-M3"])
+def test_minimax_effort_menu_unchanged_for_models_without_metadata(model) -> None:
+    from nanobot.webui.settings_models import reasoning_effort_values_for
+
+    assert reasoning_effort_values_for("minimax", model) == ["", "low", "medium", "high"]
+
+
 def test_minimax_m31_flash_builtin_metadata() -> None:
     from nanobot.providers.registry import find_by_name
 
