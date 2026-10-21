@@ -454,7 +454,6 @@ async def append_session_message_input(
     session_key: str, *, sessions: SessionManager, content: str, created_at_ms: int,
     session_message: Mapping[str, Any],
 ) -> None:
-    """Append an incoming message to the current display destination."""
     chat_id = _chat_id_from_session_key(session_key)
     if chat_id is None:
         return
