@@ -3,7 +3,7 @@
 import os
 import re
 from typing import Any, cast
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit
 
 from pydantic import Field, field_validator
 from pydantic_core import PydanticCustomError
@@ -45,11 +45,18 @@ class NetworkConfig(Base):
 
     def resolve_environment(self) -> str | None:
         value = self.proxy or ""
+        userinfo_start = value.find("://") + 3
         userinfo_end = value.rfind("@")
 
         def replace(match: re.Match[str]) -> str:
             resolved = os.environ[match[1]]
-            return quote(resolved, safe="") if match.start() < userinfo_end else resolved
+            if userinfo_start <= match.start() < userinfo_end:
+                if match.start() == userinfo_start and match.end() == userinfo_end:
+                    # Whole userinfo supplies its own delimiter and URL escapes.
+                    username, separator, password = resolved.partition(":")
+                    return f"{quote(username, safe='%')}{separator}{quote(password, safe='%')}"
+                return quote(resolved, safe="")
+            return resolved
 
         try:
             return self.normalize_proxy(_ENV_REF_PATTERN.sub(replace, value))
@@ -98,10 +105,10 @@ def migrate_legacy_proxy_config(value: Any) -> Any:
                 if isinstance(username, str) and username and isinstance(password, str) and password:
                     if _ENV_REF_PATTERN.fullmatch(proxy):
                         raise PydanticCustomError("proxy_credential_migration", "Combine the Discord proxy URL and credentials into one full URL environment variable, or set network.proxy before upgrading.")
-                    parsed = urlsplit(proxy)
-                    host = parsed.netloc.rsplit("@", 1)[-1]
+                    scheme, host = proxy.split("://", 1)
+                    host = host.rsplit("@", 1)[-1]
                     credentials = f"{quote(username, safe='${}')}:{quote(password, safe='${}')}"
-                    proxy = urlunsplit(parsed._replace(netloc=f"{credentials}@{host}"))
+                    proxy = f"{scheme}://{credentials}@{host}"
                 addresses.add(proxy)
             migrated.append(section)
 

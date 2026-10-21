@@ -5,7 +5,6 @@ export interface RuntimeConfigField {
   options?: string[];
   when?: { path: string; value: string | boolean | string[] };
   manual?: boolean;
-  secret?: boolean;
   min?: number;
   max?: number;
 }
@@ -56,7 +55,7 @@ export const RUNTIME_CONFIG_FIELDS: RuntimeConfigField[] = [
   { group: "shell", path: "tools.exec.allowed_env_keys", kind: "list" },
   { group: "shell", path: "tools.exec.allow_patterns", kind: "list" },
   { group: "shell", path: "tools.exec.deny_patterns", kind: "list" },
-  { group: "proxy", path: "network.proxy", kind: "nullable", secret: true },
+  { group: "proxy", path: "network.proxy", kind: "nullable" },
   { group: "network", path: "tools.web.use_proxy", kind: "boolean" },
   { group: "network", path: "tools.web.user_agent", kind: "nullable" },
   { group: "safety", path: "tools.restrict_to_workspace", kind: "boolean" },

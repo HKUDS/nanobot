@@ -347,8 +347,8 @@ describe("Settings capabilities", () => {
     fireEvent.click(within(screen.getByRole("dialog", { name: "Web access" })).getByRole("button", { name: "Close" }));
     expect(screen.getByRole("switch", { name: "Web access" })).not.toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
-    const proxy = screen.getByLabelText("Shared proxy", { selector: "input" });
-    expect(proxy).toHaveAttribute("type", "password");
+    const proxy = screen.getByRole("textbox", { name: "Shared proxy" });
+    expect(proxy).toHaveAttribute("type", "text");
     expect(proxy).toHaveValue("http://old-proxy.example:8080");
     expect(screen.queryByRole("switch", { name: "Use proxy" })).not.toBeInTheDocument();
     const address = "http://user:secret@new-proxy.example:7890";

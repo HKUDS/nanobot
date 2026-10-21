@@ -308,7 +308,8 @@ describe("Runtime configuration settings", () => {
       return payload;
     });
     renderSettingsView({ initialSection: "advanced", initialSettings: payload });
-    const proxy = screen.getByLabelText("Shared proxy", { selector: "input" });
+    const proxy = screen.getByRole("textbox", { name: "Shared proxy" });
+    expect(proxy).toHaveAttribute("type", "text");
     expect(proxy).toHaveValue("http://localhost:8080");
     fireEvent.change(proxy, { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "System" }));

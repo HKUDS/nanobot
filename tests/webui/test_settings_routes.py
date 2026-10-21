@@ -1077,3 +1077,68 @@ async def test_first_mcp_oauth_request_saves_proxy_flag_before_starting_flow(tmp
     assert response.status_code == 200
     assert json.loads(response.body)["flow_id"] == "first-flow"
     assert captured == {"network": "http://shared.example:8080"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("use_proxy", [True, False])
+async def test_mcp_proxy_mutation_persists_reloads_and_keeps_oauth_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, use_proxy: bool,
+) -> None:
+    from mcp.shared.auth import OAuthToken
+    from websockets.http11 import Request
+
+    from nanobot.agent.tools.mcp_oauth import MCPOAuthStorage
+    from nanobot.bus.queue import MessageBus
+    from nanobot.channels.websocket.runtime import WebSocketConfig
+    from nanobot.config.loader import load_config, save_config
+    from nanobot.config.schema import Config
+    from nanobot.webui.gateway_services import build_gateway_services
+
+    monkeypatch.setattr("nanobot.agent.tools.mcp_oauth.get_data_dir", lambda: tmp_path)
+    config_path = tmp_path / "config.json"
+    config = Config.model_validate({
+        "network": {"proxy": "http://proxy.example:8080"},
+        "tools": {"mcpServers": {"team-docs": {
+            "type": "streamableHttp", "auth": "oauth",
+            "url": "https://mcp.example.com/mcp", "useProxy": not use_proxy,
+            "headers": {"X-Organization": "team"}, "enabledTools": ["read"],
+        }}},
+    })
+    save_config(config, config_path)
+    original = config.tools.mcp_servers["team-docs"].model_copy(deep=True)
+    storage = MCPOAuthStorage("team-docs", original.url)
+    await storage.set_tokens(OAuthToken(access_token="synthetic-access", token_type="Bearer"))
+
+    async def reload_mcp() -> dict[str, object]:
+        assert load_config(config_path).tools.mcp_servers["team-docs"].use_proxy is use_proxy
+        return {"ok": True, "connected": ["team-docs"], "requires_restart": False}
+
+    reload = AsyncMock(side_effect=reload_mcp)
+    gateway = build_gateway_services(
+        config=WebSocketConfig(), bus=MessageBus(), session_manager=None,
+        static_dist_path=None, workspace_path=tmp_path, config_path=config_path,
+        default_restrict_to_workspace=True, runtime_model_name=None,
+        runtime_surface="browser", runtime_capabilities_overrides=None, mcp_reload=reload,
+    )
+    connection = SimpleNamespace(
+        remote_address=("127.0.0.1", 12345),
+        request=Request("/", Headers({"Host": "127.0.0.1:8765"})),
+    )
+    path = "/api/settings/mcp-presets/proxy"
+    try:
+        http_response = await gateway.http.dispatch(connection, Request(path, Headers()))
+        assert http_response.status_code == 405
+        response = await gateway.http.dispatch_webui_mutation(
+            connection, "settings.mcp.proxy", {"name": "team-docs", "use_proxy": str(use_proxy).lower()},
+        )
+        assert response.status_code == 200
+        payload = json.loads(response.body)
+        assert payload["hot_reload"]["ok"] is True
+        assert payload["requires_restart"] is False
+        row = next(row for row in payload["presets"] if row["name"] == "team-docs")
+        assert row["use_proxy"] is use_proxy
+        assert load_config(config_path).tools.mcp_servers["team-docs"] == original.model_copy(update={"use_proxy": use_proxy})
+        assert storage.has_credentials() is True
+        reload.assert_awaited_once()
+    finally:
+        await gateway.http.settings_routes.close()

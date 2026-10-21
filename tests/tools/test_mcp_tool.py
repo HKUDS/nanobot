@@ -7,12 +7,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
+from urllib.parse import unquote
 from urllib.request import getproxies_environment
 
 import httpx
 import pytest
 
 import nanobot.agent.tools.mcp as mcp_mod
+from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.mcp import (
     MCPPromptWrapper,
     MCPProvider,
@@ -1118,6 +1120,160 @@ def test_unexpected_connection_failure_keeps_error_trace() -> None:
     error = next(record for record in records if record["level"].name == "ERROR")
     assert error["exception"] is not None
     assert not any(record["level"].name == "WARNING" for record in records)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport", ["sse", "streamableHttp"])
+@pytest.mark.parametrize("log_content", [True, False])
+async def test_proxy_constructor_failure_diagnostics_never_render_live_locals(
+    monkeypatch: pytest.MonkeyPatch, transport: str, log_content: bool,
+) -> None:
+    proxy = "http://diagnostic-user:diagnostic-secret@\u2603.example:8080"
+    network = NetworkConfig(proxy=proxy)
+    with pytest.raises(httpx.InvalidURL):
+        httpx.AsyncHTTPTransport(proxy=network.proxy)
+
+    @asynccontextmanager
+    async def sse_client(_url, *, httpx_client_factory):
+        async with httpx_client_factory():
+            yield object(), object()
+
+    monkeypatch.setattr(sys.modules["mcp.client.sse"], "sse_client", sse_client)
+    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
+    monkeypatch.setattr(mcp_mod, "_probe_http_url", AsyncMock(return_value=True))
+    messages: list[str] = []
+    sink = mcp_mod.logger.add(
+        lambda message: messages.append(str(message)), level="DEBUG",
+        format="{level} {message}", diagnose=True, backtrace=True,
+    )
+    registry = ToolRegistry()
+    try:
+        with request_context(RequestContext(channel="test", chat_id="proxy", log_content=log_content)):
+            connections = await connect_mcp_servers(
+                {"remote": MCPServerConfig(
+                    type=transport, url="https://mcp.example.invalid/mcp", use_proxy=True,
+                )}, registry, network=network,
+            )
+    finally:
+        mcp_mod.logger.remove(sink)
+
+    assert connections == {}
+    assert registry.tool_names == []
+    output = "\n".join(messages)
+    assert "diagnostic-secret" not in output
+    assert "diagnostic-user" not in output
+    assert "failed to connect" in output
+    if log_content:
+        assert "InvalidURL" in output
+        assert "Invalid IDNA hostname" in output
+        assert "Traceback (most recent call last)" in output
+        assert "in _pinned_transport_kwargs" in output
+    else:
+        assert "InvalidURL" not in output
+        assert "Traceback" not in output
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_stage", ["open", "cleanup"])
+@pytest.mark.parametrize("userinfo", ["diagnostic-user:diagnostic%3Asecret", "e:p", "e"])
+async def test_connection_failure_redacts_resolved_proxy_in_exception_chain_and_group(
+    fake_mcp_runtime, monkeypatch: pytest.MonkeyPatch, failure_stage: str, userinfo: str,
+) -> None:
+    proxy = f"http://{userinfo}@proxy.example.invalid:8080"
+    authority = proxy.removeprefix("http://")
+    monkeypatch.setenv("MCP_DIAGNOSTIC_PROXY", proxy)
+    network = NetworkConfig(proxy="${MCP_DIAGNOSTIC_PROXY}")
+    session = _make_fake_session(["demo"])
+    session.initialize = AsyncMock(side_effect=RuntimeError("initialize failed"))
+    fake_mcp_runtime["session"] = session
+
+    @asynccontextmanager
+    async def failing_sse(_url, *, httpx_client_factory):
+        if failure_stage == "cleanup":
+            yield object(), object()
+        try:
+            raise ValueError(f"proxy handshake rejected {proxy}")
+        except ValueError as cause:
+            raise ExceptionGroup("MCP transport setup failed", [
+                httpx.ProxyError(
+                    f"authentication rejected {authority} / {unquote(authority)} / {unquote(proxy)}"
+                ),
+            ]) from cause
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(sys.modules["mcp.client.sse"], "sse_client", failing_sse)
+    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
+    monkeypatch.setattr(mcp_mod, "_probe_http_url", AsyncMock(return_value=True))
+    messages: list[str] = []
+    sink = mcp_mod.logger.add(
+        lambda message: messages.append(str(message)), level="DEBUG",
+        format="{level} {message}", diagnose=True, backtrace=True,
+    )
+    try:
+        assert await connect_mcp_servers(
+            {"remote": MCPServerConfig(type="sse", url="https://mcp.example.invalid/sse", use_proxy=True)},
+            ToolRegistry(), network=network,
+        ) == {}
+    finally:
+        mcp_mod.logger.remove(sink)
+
+    output = "\n".join(messages)
+    for credential_context in (proxy, unquote(proxy), f"{userinfo}@", f"{unquote(userinfo)}@"):
+        assert credential_context not in output
+    assert "Traceback (most recent call last)" in output
+    assert "httpx.ProxyError: authentication rejected" in output
+    assert "ValueError: proxy handshake rejected" in output
+    assert "ExceptionGroup: MCP transport setup failed" in output
+    assert "http://proxy.example.invalid:8080" in output
+    assert "[redacted]@proxy.example.invalid:8080" in output
+    assert "direct cause" in output
+    assert "in failing_sse" in output
+    if failure_stage == "cleanup":
+        assert "initialize failed" in output
+
+
+@pytest.mark.parametrize("transient", [False, True])
+def test_connection_failure_retains_useful_trace_without_local_values(transient: bool) -> None:
+    messages: list[str] = []
+    records: list[dict] = []
+
+    def capture(message):
+        messages.append(str(message))
+        records.append(message.record)
+
+    sink = mcp_mod.logger.add(
+        capture, level="DEBUG", format="{level} {message}", diagnose=True, backtrace=True,
+    )
+
+    def fail_transport():
+        local_credential = "unrelated-local-credential"
+        error = httpx.ConnectError if transient else RuntimeError
+        raise error(f"handshake failed (credential length {len(local_credential)})")
+
+    try:
+        try:
+            fail_transport()
+        except Exception as exc:
+            mcp_mod._log_mcp_connection_failure("remote", exc, " check server configuration")
+    finally:
+        mcp_mod.logger.remove(sink)
+
+    output = "\n".join(messages)
+    assert "unrelated-local-credential" not in output
+    assert "handshake failed (credential length 26)" in output
+    assert "in fail_transport" in output
+    assert "Traceback (most recent call last)" in output
+    detail = next(record for record in records if record["exception"] is not None)
+    assert detail["exception"].traceback is None
+    assert detail["exception"].value.__traceback__ is None
+    assert detail["exception"].value.__context__ is None
+    assert detail["level"].name == ("DEBUG" if transient else "ERROR")
+    if transient:
+        assert "ConnectError" in output
+        assert "transient connection failure" in output
+    else:
+        assert "RuntimeError" in output
+        assert "check server configuration" in output
 
 
 @pytest.mark.asyncio

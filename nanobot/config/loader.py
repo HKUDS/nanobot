@@ -159,7 +159,7 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
             by_alias=True,
             include={"use_proxy", "extra_body"},
             exclude_none=True,
-            exclude_defaults=True,
+            exclude_unset=True,
         )
         if settings:
             data.setdefault("providers", {})[alias] = settings

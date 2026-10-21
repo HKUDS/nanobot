@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import traceback
 import urllib.parse
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
 from contextlib import AsyncExitStack, suppress
@@ -217,8 +218,26 @@ def _is_transient_connection_failure(exc: BaseException) -> bool:
     return isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)) or _is_transient(exc)
 
 
-def _log_mcp_connection_failure(name: str, exc: BaseException, hint: str = "") -> None:
-    exception = exc if tool_log_content_allowed() else False
+def _log_mcp_connection_failure(
+    name: str, exc: BaseException, hint: str = "", *, proxy: str | None = None,
+) -> None:
+    exception: Exception | bool = False
+    if tool_log_content_allowed():
+        details = "".join(traceback.TracebackException.from_exception(
+            exc, capture_locals=False,
+        ).format())
+        if proxy:
+            for value in (proxy, urllib.parse.unquote(proxy)):
+                details = details.replace(value, _redact_url(proxy))
+            # Match userinfo only with its URL delimiter, never isolated short
+            # credentials that could rewrite exception types or stack text.
+            userinfo = urllib.parse.urlsplit(proxy).netloc.rpartition("@")[0]
+            if userinfo:
+                for value in (userinfo, urllib.parse.unquote(userinfo)):
+                    details = details.replace(f"{value}@", "[redacted]@")
+        # Keep exception-aware sinks, but never give Loguru live frames or a raw
+        # exception chain: diagnose=True would render credential-bearing locals.
+        exception = Exception("\n" + details.rstrip())
     if _is_transient_connection_failure(exc):
         logger.warning("MCP server '{}': transient connection failure", name)
         logger.opt(exception=exception).debug(
@@ -1024,6 +1043,10 @@ async def connect_mcp_servers(
     from mcp.client.stdio import stdio_client
     from mcp.client.streamable_http import streamable_http_client
 
+    # Stack-exit failures are logged outside open_single_server; retain the exact
+    # selected value there too, including credentials resolved from environment refs.
+    selected_proxies: dict[str, str | None] = {}
+
     async def open_single_server(
         name: str, cfg: MCPServerConfig, server_stack: AsyncExitStack
     ) -> bool:
@@ -1054,6 +1077,7 @@ async def connect_mcp_servers(
             if cfg.use_proxy and transport_type == "stdio":
                 raise ValueError("The shared proxy is available for HTTP and SSE MCP connections")
             proxy = (network or NetworkConfig()).resolve_proxy(cfg.use_proxy)
+            selected_proxies[name] = proxy
             oauth_auth: httpx.Auth | None = None
             if cfg.auth == "oauth":
                 if transport_type not in {"sse", "streamableHttp"}:
@@ -1307,7 +1331,7 @@ async def connect_mcp_servers(
                     " Hint: this looks like stdio protocol pollution. Make sure the MCP server writes "
                     "only JSON-RPC to stdout and sends logs/debug output to stderr instead."
                 )
-            _log_mcp_connection_failure(name, e, hint)
+            _log_mcp_connection_failure(name, e, hint, proxy=selected_proxies.get(name))
             return False
 
     async def connect_single_server(
@@ -1357,7 +1381,7 @@ async def connect_mcp_servers(
             try:
                 result = await connect_single_server(name, cfg)
             except Exception as e:
-                _log_mcp_connection_failure(name, e)
+                _log_mcp_connection_failure(name, e, proxy=selected_proxies.get(name))
                 continue
             if result[1] is not None:
                 server_stacks[result[0]] = result[1]
