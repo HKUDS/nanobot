@@ -532,17 +532,18 @@ class WebuiTurnRoutePolicy:
 
         return routed
 
-    async def admit(self, route: TurnRoute, session_key: str, generation: str) -> TurnRoute:
-        """Pin independently routed replies to the destination's current lifetime."""
+    async def admit(self, route: TurnRoute, session_key: str, generation: str | None) -> TurnRoute:
+        """Bind replies to the display destination's admitted lifetime."""
         if route.channel != "websocket":
             return route
         target_key = webui_session_key(route.chat_id)
-        if target_key == session_key:
-            return route
+        metadata = dict(route.metadata)
+        if target_key == session_key and generation is not None:
+            metadata.setdefault(HISTORY_GENERATION_METADATA_KEY, generation)
+            return replace(route, metadata=metadata)
         revision = await self.sessions.state.project_history(target_key, lambda history: history.revision)
         if revision is None:
             raise SessionConflictError("display destination is no longer active")
-        metadata = dict(route.metadata)
         admitted = metadata.get(HISTORY_GENERATION_METADATA_KEY)
         # A distinct alias admitted by the WebSocket edge must still be current.
         if admitted not in (None, generation, revision[0]):
