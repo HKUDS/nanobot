@@ -260,7 +260,7 @@ export function Sidebar(props: SidebarProps) {
             onClick={props.onOpenExtensions}
             active={props.activeUtility === "extensions"}
             selectionRef={activeActionRef}
-            icon={<Blocks className="h-4 w-4" />}
+            icon={<AppsIcon className="h-4 w-4" />}
           />
         ) : null}
         {props.archivedCount ? (

@@ -420,22 +420,22 @@ export function SettingsPage({
           <ChannelsSettings
             onConfigureMcp={(name) => {
               setMcpSetupName(name);
-              setAppsKindFilter("mcp");
-              setAppsQuery(name);
+              systemState.setAppsKindFilter("mcp");
+              systemState.setAppsQuery(name);
               selectSection("apps");
             }}
             token={token}
-            nanobotFeatures={nanobotFeatures}
-            loading={nanobotFeaturesLoading}
-            actionKey={nanobotFeatureAction}
+            nanobotFeatures={systemState.nanobotFeatures}
+            loading={systemState.nanobotFeaturesLoading}
+            actionKey={systemState.nanobotFeatureAction}
             chatAppsDocsUrl={settings.docs?.chat_apps_url}
             showBrandLogos={localPrefs.brandLogos}
-            error={nanobotFeaturesError}
+            error={systemState.nanobotFeaturesError}
             requiresRestartPending={pendingRestartSections.runtime}
-            onAction={handleNanobotFeatureAction}
-            onFeaturesUpdate={setNanobotFeatures}
+            onAction={systemActions.handleNanobotFeatureAction}
+            onFeaturesUpdate={systemState.setNanobotFeatures}
             onDismissStatus={() => {
-              setNanobotFeaturesError(null);
+              systemState.setNanobotFeaturesError(null);
             }}
             onRestart={restartViaSettingsSurface}
             isRestarting={restartInProgress}
@@ -447,50 +447,50 @@ export function SettingsPage({
             <AppsCatalogSettings
               setupName={mcpSetupName}
               onSetupOpened={() => setMcpSetupName(null)}
-              cliApps={cliApps}
-              mcpPresets={mcpPresets}
-              cliAppsLoading={cliAppsLoading}
-              mcpPresetsLoading={mcpPresetsLoading}
-              query={appsQuery}
-              filter={appsKindFilter}
-              cliActionKey={cliAppsAction}
-              mcpActionKey={mcpPresetAction}
-              mcpOAuthFlow={mcpOAuthFlow}
-              mcpOAuthPopupBlocked={mcpOAuthPopupBlocked}
-              mcpOAuthCallbackUrl={mcpOAuthCallbackUrl}
-              mcpOAuthCompleting={mcpOAuthCompleting}
-              mcpOAuthCallbackError={mcpOAuthCallbackError}
-              cliMessage={cliAppsMessage}
-              cliError={cliAppsError}
-              cliFocusName={cliAppsFocusName}
-              mcpMessage={mcpMessage}
-              mcpError={mcpError}
-              mcpFieldValues={mcpFieldValues}
-              customMcpForm={customMcpForm}
-              mcpConfigImport={mcpConfigImport}
+              cliApps={systemState.cliApps}
+              mcpPresets={systemState.mcpPresets}
+              cliAppsLoading={systemState.cliAppsLoading}
+              mcpPresetsLoading={systemState.mcpPresetsLoading}
+              query={systemState.appsQuery}
+              filter={systemState.appsKindFilter}
+              cliActionKey={systemState.cliAppsAction}
+              mcpActionKey={systemState.mcpPresetAction}
+              mcpOAuthFlow={systemState.mcpOAuthFlow}
+              mcpOAuthPopupBlocked={systemState.mcpOAuthPopupBlocked}
+              mcpOAuthCallbackUrl={systemState.mcpOAuthCallbackUrl}
+              mcpOAuthCompleting={systemState.mcpOAuthCompleting}
+              mcpOAuthCallbackError={systemState.mcpOAuthCallbackError}
+              cliMessage={systemState.cliAppsMessage}
+              cliError={systemState.cliAppsError}
+              cliFocusName={systemState.cliAppsFocusName}
+              mcpMessage={systemState.mcpMessage}
+              mcpError={systemState.mcpError}
+              mcpFieldValues={systemState.mcpFieldValues}
+              customMcpForm={systemState.customMcpForm}
+              mcpConfigImport={systemState.mcpConfigImport}
               showBrandLogos={localPrefs.brandLogos}
               requiresRestartPending={pendingRestartSections.runtime}
-              onQueryChange={setAppsQuery}
-              onFilterChange={setAppsKindFilter}
-              onCliAction={handleCliAppAction}
-              onMcpAction={handleMcpPresetAction}
-              onMcpOAuthConnect={handleMcpOAuthConnect}
-              onMcpOAuthCancel={() => void handleMcpOAuthCancel()}
-              onMcpOAuthOpen={handleMcpOAuthOpen}
+              onQueryChange={systemState.setAppsQuery}
+              onFilterChange={systemState.setAppsKindFilter}
+              onCliAction={systemActions.handleCliAppAction}
+              onMcpAction={systemActions.handleMcpPresetAction}
+              onMcpOAuthConnect={systemActions.handleMcpOAuthConnect}
+              onMcpOAuthCancel={() => void systemActions.handleMcpOAuthCancel()}
+              onMcpOAuthOpen={systemActions.handleMcpOAuthOpen}
               onMcpOAuthCallbackUrlChange={(value) => {
-                setMcpOAuthCallbackUrl(value);
-                setMcpOAuthCallbackError(null);
+                systemState.setMcpOAuthCallbackUrl(value);
+                systemState.setMcpOAuthCallbackError(null);
               }}
-              onMcpOAuthComplete={() => void handleMcpOAuthComplete()}
+              onMcpOAuthComplete={() => void systemActions.handleMcpOAuthComplete()}
               onDismissStatus={() => {
-                setCliAppsMessage(null);
-                setCliAppsError(null);
-                setMcpMessage(null);
-                setMcpError(null);
+                systemState.setCliAppsMessage(null);
+                systemState.setCliAppsError(null);
+                systemState.setMcpMessage(null);
+                systemState.setMcpError(null);
               }}
               onBackToChat={onBackToChat}
               onMcpFieldChange={(presetName, fieldName, value) => {
-                setMcpFieldValues((prev) => ({
+                systemState.setMcpFieldValues((prev) => ({
                   ...prev,
                   [presetName]: {
                     ...(prev[presetName] ?? {}),
@@ -498,11 +498,11 @@ export function SettingsPage({
                   },
                 }));
               }}
-              onCustomMcpFormChange={setCustomMcpForm}
-              onMcpConfigImportChange={setMcpConfigImport}
-              onSaveCustomMcp={handleSaveCustomMcp}
-              onImportMcpConfig={handleImportMcpConfig}
-              onMcpToolsChange={handleMcpToolsChange}
+              onCustomMcpFormChange={systemState.setCustomMcpForm}
+              onMcpConfigImportChange={systemState.setMcpConfigImport}
+              onSaveCustomMcp={systemActions.handleSaveCustomMcp}
+              onImportMcpConfig={systemActions.handleImportMcpConfig}
+              onMcpToolsChange={systemActions.handleMcpToolsChange}
               onRestart={restartViaSettingsSurface}
               isRestarting={restartInProgress}
             />
@@ -513,21 +513,23 @@ export function SettingsPage({
           <div className="settings-stack">
             <AutomationsSettings
               token={token}
-              payload={automations}
+              payload={systemState.automations}
               titleOverrides={titleOverrides}
+              sessions={sessions}
               settingsSnapshot={controller.settings}
               onStartChat={onStartAutomationChat}
-              loading={automationsLoading}
-              filter={automationsFilter}
-              actionKey={automationAction}
-              error={automationsError}
-              onFilterChange={setAutomationsFilter}
-              onAction={handleAutomationAction}
+              loading={systemState.automationsLoading}
+              filter={systemState.automationsFilter}
+              actionKey={systemState.automationAction}
+              error={systemState.automationsError}
+              onFilterChange={systemState.setAutomationsFilter}
+              onAction={systemActions.handleAutomationAction}
               onRequestEdit={(job) => {
                 setAutomationDetailReturn(null);
-                setAutomationPendingEdit(job);
+                systemState.setAutomationPendingEdit(job);
               }}
-              onRequestDelete={setAutomationPendingDelete}
+              onRequestDelete={systemState.setAutomationPendingDelete}
+              onChangeChat={systemActions.handleAutomationChat}
               onManageModels={() => selectSection("models")}
               returnToDetailJob={automationDetailReturn}
               onReturnToDetailHandled={() => setAutomationDetailReturn(null)}
@@ -535,7 +537,7 @@ export function SettingsPage({
           </div>
         );
       case "skills":
-        return <SkillsCatalogSettings skills={skills} />;
+        return <SkillsCatalogSettings skills={skills} loading={skillsLoading} error={skillsError} />;
       case "extensions":
         return (
           <ExtensionsCatalogSettings
