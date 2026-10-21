@@ -334,10 +334,11 @@ jobs:
       # Installer subprocesses run here, parallel to the broad Windows suite.
       # Each case owns an isolated manager/config root, so individual cases can
       # run concurrently without sharing a console or package installation.
+      # Keep four workers: three exceed this job's budget on native Windows.
       - name: Run Windows installer checks
         run: >-
           uv run --no-sync python -m pytest tests/test_install_scripts.py
-          -n 3 --dist load -x -vv --durations=10
+          -n 4 --dist load -x -vv --durations=10
           --junitxml=test-results/installers.xml --timing-report=test-results/installers.json
 
       - name: Upload Windows process test timings
