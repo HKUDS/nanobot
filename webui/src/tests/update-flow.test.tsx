@@ -56,6 +56,19 @@ beforeEach(() => {
 afterEach(() => { cleanup(); sessionStorage.clear(); vi.useRealTimers(); });
 
 describe("Real update consent and recovery", () => {
+  it("opens the original confirmation from an automatically checked About update without consenting to installation", async () => {
+    vi.mocked(api.checkVersion).mockResolvedValue({ installation_method: "managed",
+      updateAvailable: { currentVersion: "0.3.5", latestVersion: "0.3.6" } });
+    render(<ClientProvider client={client} token="about-confirmation" webuiCapabilities={["webui.update-flow.v1"]}>
+      <AboutSettings settings={settingsPayload()} />
+    </ClientProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: /^Update$/ }));
+    expect(await screen.findByRole("button", { name: "Update & restart" })).toBeEnabled();
+    expect(api.checkVersion).toHaveBeenCalledOnce();
+    expect(api.createUpdateReview).toHaveBeenCalledOnce();
+    expect(api.prepareUpdate).not.toHaveBeenCalled();
+    expect(api.executeUpdate).not.toHaveBeenCalled();
+  });
   it("offers installation-bound instructions and copy feedback, without installation consent", async () => {
     vi.mocked(api.createUpdateReview).mockResolvedValue(externalReview);
     vi.mocked(copyTextToClipboard).mockResolvedValueOnce(false).mockResolvedValueOnce(true);

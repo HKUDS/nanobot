@@ -22,7 +22,6 @@ it.each([
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ ...available(), installation_method: method })));
   const request = vi.fn();
   render(<ClientProvider token="test" client={client}><AboutSettings settings={settingsPayload()} onRequestUpdate={request} /></ClientProvider>);
-  fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
   const entry = await screen.findByRole("button", { name: label });
   fireEvent.click(entry);
   expect(request).toHaveBeenCalledOnce();
@@ -54,45 +53,40 @@ describe("Sidebar update entry", () => {
       <Surface />
       <AboutSettings settings={settingsPayload()} onRequestUpdate={vi.fn()} />
     </ClientProvider>);
-    expect(screen.getByRole("button", { name: /^Update$/ })).toBeVisible();
+    expect(await screen.findByRole("button", { name: /^Update$/ })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Update available v0.3.6" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Dismiss update notice" })).toBeNull();
-    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
-  it("acknowledges every manual check, including fast cached results, failure and slow retry", async () => {
-    vi.useFakeTimers();
-    const fetcher = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({ updateAvailable: null })));
-    vi.stubGlobal("fetch", fetcher);
-    render(<ClientProvider client={client} token="manual-feedback" checkUpdatesOnConnect>
-      <AboutSettings settings={settingsPayload()} />
-    </ClientProvider>);
-    await act(async () => {});
-    expect(screen.getByRole("status")).toHaveTextContent("You're up to date");
-    fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
-    await act(async () => { await vi.advanceTimersByTimeAsync(599); });
-    expect(screen.getByRole("button", { name: "Checking..." })).toBeDisabled();
-    expect(screen.getByRole("status")).toHaveTextContent("Checking...");
-    expect(screen.queryByText("You're up to date")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Checking..." }));
-    expect(fetcher).toHaveBeenCalledTimes(2); // One automatic + one manual check.
-    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
-    expect(screen.getByRole("status")).toHaveTextContent("You're up to date");
-    expect(screen.getByRole("button", { name: "Check for updates" })).toBeEnabled();
-
-    fetcher.mockRejectedValueOnce(new Error("Connection unavailable"));
-    fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
-    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
-    expect(screen.getByRole("status")).toHaveTextContent("Connection unavailable");
+  it("automatically checks each About entry, shares an in-flight check and retries failures without a loading delay", async () => {
     let resolve!: (response: Response) => void;
-    fetcher.mockImplementationOnce(() => new Promise<Response>(done => { resolve = done; }));
-    fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
-    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
-    expect(screen.getByRole("button", { name: "Checking..." })).toBeDisabled();
-    expect(screen.queryByText("Connection unavailable")).toBeNull();
+    const fetcher = vi.fn().mockImplementation(() => new Promise<Response>(done => { resolve = done; }));
+    vi.stubGlobal("fetch", fetcher);
+    const surface = (about: boolean) => <ClientProvider client={client} token="about-entry" checkUpdatesOnConnect>
+      {about && <AboutSettings settings={settingsPayload()} />}
+    </ClientProvider>;
+    const mounted = render(surface(false));
+    expect(fetcher).toHaveBeenCalledOnce();
+    mounted.rerender(surface(true));
+    expect(screen.getByRole("status")).toHaveTextContent("Checking...");
+    expect(fetcher).toHaveBeenCalledOnce();
     await act(async () => resolve(jsonResponse({ updateAvailable: null })));
-    expect(screen.getByRole("status")).toHaveTextContent("You're up to date");
+    expect(screen.getByText("You're up to date")).toBeVisible();
+
+    mounted.rerender(surface(false));
+    mounted.rerender(surface(true));
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("status")).toHaveTextContent("Checking...");
+    await act(async () => resolve(jsonResponse({ updateAvailable: null })));
+    fetcher.mockRejectedValueOnce(new Error("Connection unavailable"));
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    expect(await screen.findByText("Connection unavailable")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Checking...");
     expect(fetcher).toHaveBeenCalledTimes(4);
+    await act(async () => resolve(jsonResponse(available())));
+    expect(screen.getByRole("link", { name: "Installation guide" })).toBeVisible();
   });
   it("opens the provided update confirmation directly without navigating through details", () => {
     const openDetails = vi.fn();
@@ -125,16 +119,15 @@ describe("Sidebar update entry", () => {
     fireEvent.change(screen.getByLabelText("Draft"), { target: { value: "Keep writing" } });
     fireEvent.click(await screen.findByRole("button", { name: "Update available v0.3.6" }));
     expect(screen.getByRole("dialog", { name: "Update available v0.3.6" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Check for updates" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Installation guide" })).toBeNull();
     expect(screen.getByLabelText("Draft")).toHaveValue("Keep writing");
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(screen.getByRole("button", { name: "Update available v0.3.6" })).toHaveFocus();
     fireEvent.click(screen.getByRole("button", { name: "Update available v0.3.6" }));
     fireEvent.click(screen.getByRole("button", { name: "View details" }));
-    expect(await screen.findByRole("button", { name: "Check for updates" })).toBeVisible();
-    expect(screen.getByRole("link", { name: "Installation guide" })).toHaveAttribute("href", "https://github.com/HKUDS/nanobot#-install");
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("link", { name: "Installation guide" })).toHaveAttribute("href", "https://github.com/HKUDS/nanobot#-install");
+    expect(fetcher).toHaveBeenCalledTimes(2);
     expect(fetcher).toHaveBeenCalledWith("/api/settings/version-check", expect.any(Object));
   });
 
