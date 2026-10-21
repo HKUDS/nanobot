@@ -1,5 +1,8 @@
 """Tests for multi-provider web search."""
 
+import asyncio
+from contextlib import asynccontextmanager
+
 import httpx
 import pytest
 
@@ -97,7 +100,9 @@ async def test_brave_search_retries_rate_limit_once(monkeypatch):
     async def mock_get(self, url, **kw):
         calls["n"] += 1
         if calls["n"] == 1:
-            return _response(status=429, json={"error": "rate limit"})
+            response = _response(status=429, json={"error": "rate limit"})
+            response.headers["Retry-After"] = "3600"
+            return response
         return _response(json={
             "web": {"results": [{"title": "Recovered", "url": "https://example.com", "description": "ok"}]}
         })
@@ -683,7 +688,9 @@ async def test_deepseek_search_retries_transient_errors_then_succeeds(
     async def mock_post(self, url, **kw):
         calls["n"] += 1
         if calls["n"] == 1:
-            return _response(status=status, json={"error": {"message": "transient"}})
+            response = _response(status=status, json={"error": {"message": "transient"}})
+            response.headers["Retry-After"] = "3600"
+            return response
         return _response(json={
             "results": [{"title": "Recovered", "url": "https://example.com/ok", "snippet": "ok"}]
         })
@@ -1396,3 +1403,71 @@ async def test_olostep_package_missing_returns_install_hint(monkeypatch):
     assert result == (
         "Error: Olostep support is not installed. Run `nanobot plugins enable olostep`."
     )
+
+
+@pytest.mark.parametrize("provider,outcome", [
+    ("brave", 500),
+    ("brave", httpx.ReadTimeout("slow")),
+    ("deepseek", httpx.ConnectError("offline")),
+])
+async def test_search_does_not_retry_unclassified_failures(monkeypatch, provider, outcome):
+    calls = []
+
+    async def request(*args, **kwargs):
+        calls.append(args)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return _response(status=outcome)
+
+    method = "get" if provider == "brave" else "post"
+    monkeypatch.setattr(httpx.AsyncClient, method, request)
+    result = await _tool(provider=provider, api_key="test-key").execute(query="failure")
+    assert is_tool_error_result(result)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("provider", ["brave", "deepseek"])
+@pytest.mark.parametrize("phase", ["request", "backoff"])
+async def test_search_task_cancellation_closes_client_without_replay(monkeypatch, provider, phase):
+    entered, closed = asyncio.Event(), asyncio.Event()
+    calls = []
+    real_client = httpx.AsyncClient
+
+    async def block():
+        entered.set()
+        await asyncio.Event().wait()
+
+    async def handle(request):
+        calls.append(request)
+        if phase == "request":
+            await block()
+        return httpx.Response(429, json={})
+
+    @asynccontextmanager
+    async def client(**kwargs):
+        instance = real_client(transport=httpx.MockTransport(handle), **kwargs)
+        try:
+            async with instance:
+                yield instance
+        finally:
+            assert instance.is_closed
+            closed.set()
+
+    async def sleep(delay):
+        assert delay == 1.0
+        await block()
+
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", client)
+    monkeypatch.setattr("nanobot.agent.tools.web.asyncio.sleep", sleep)
+    task = asyncio.create_task(_tool(provider=provider, api_key="test-key").execute(query="cancel"))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    assert len(calls) == 1
+    assert closed.is_set()

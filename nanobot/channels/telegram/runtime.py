@@ -1136,6 +1136,11 @@ class TelegramChannel(BaseChannel):
         buf.message_id = sent.message_id
         buf.draft_id = None
 
+    def should_retry_send_error(self, error: Exception) -> bool:
+        # Per-part API retries belong to this adapter. Whole-message replay is safe
+        # only before submission; otherwise it may duplicate a successful prefix.
+        return isinstance(error, ChannelNotReadyError)
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
         if isinstance(msg.event, ContextCompactionEvent) and not (

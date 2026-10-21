@@ -667,6 +667,7 @@ def test_manager_retry_resumes_after_acknowledged_parts(
     monkeypatch.setattr("nanobot.channels.manager._SEND_RETRY_DELAYS", (0,))
     manager = object.__new__(ChannelManager)
     manager.config = Config()
+    manager._outbound_sends = asyncio.Semaphore(32)
     message = OutboundMessage(channel=channel.name, chat_id="creator", content="A" * 4096 + "B")
     asyncio.run(manager._send_with_retry(channel, message))
     assert delivered == ["A" * 4096, "B"]
@@ -764,6 +765,7 @@ def test_media_failure_never_replays_accepted_text_or_attachments(
     monkeypatch.setattr("nanobot.channels.manager._SEND_RETRY_DELAYS", (0,))
     manager = object.__new__(ChannelManager)
     manager.config = Config()
+    manager._outbound_sends = asyncio.Semaphore(32)
     message = OutboundMessage(
         channel=channel.name, chat_id="creator", content="Files",
         media=[str(attachment), str(attachment)],
