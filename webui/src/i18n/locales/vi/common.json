@@ -2361,7 +2361,6 @@
     "copy": "Sao chép mã nguồn",
     "enlarge": "Phóng to sơ đồ",
     "title": "Sơ đồ Mermaid",
-    "preparing": "Đang chuẩn bị sơ đồ…",
     "errors": {
       "syntax": "Hãy kiểm tra cú pháp sơ đồ trong mã nguồn.",
       "unsupported": "Chưa hỗ trợ loại sơ đồ này. Hãy xem mã nguồn.",

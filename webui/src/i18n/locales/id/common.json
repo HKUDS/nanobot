@@ -2361,7 +2361,6 @@
     "copy": "Salin sumber",
     "enlarge": "Perbesar diagram",
     "title": "Diagram Mermaid",
-    "preparing": "Menyiapkan diagram…",
     "errors": {
       "syntax": "Periksa sintaks diagram pada sumber.",
       "unsupported": "Jenis diagram ini belum didukung. Lihat sumber.",

@@ -2361,7 +2361,6 @@
     "copy": "ソースをコピー",
     "enlarge": "図を拡大",
     "title": "Mermaid 図",
-    "preparing": "図を準備中…",
     "errors": {
       "syntax": "ソースの図の構文を確認してください。",
       "unsupported": "この図の種類には対応していません。ソースを確認してください。",

@@ -2561,7 +2561,6 @@
     "copy": "复制源码",
     "enlarge": "放大查看",
     "title": "Mermaid 图表",
-    "preparing": "正在准备图表…",
     "errors": {
       "syntax": "图表语法有误，请检查源码。",
       "unsupported": "暂不支持此类图表，可查看源码。",

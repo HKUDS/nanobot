@@ -2361,7 +2361,6 @@
     "copy": "소스 복사",
     "enlarge": "다이어그램 확대",
     "title": "Mermaid 다이어그램",
-    "preparing": "다이어그램 준비 중…",
     "errors": {
       "syntax": "소스의 다이어그램 문법을 확인하세요.",
       "unsupported": "지원하지 않는 다이어그램 유형입니다. 소스를 확인하세요.",

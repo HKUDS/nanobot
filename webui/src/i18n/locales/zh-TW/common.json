@@ -2361,7 +2361,6 @@
     "copy": "複製原始碼",
     "enlarge": "放大檢視",
     "title": "Mermaid 圖表",
-    "preparing": "正在準備圖表…",
     "errors": {
       "syntax": "圖表語法有誤，請檢查原始碼。",
       "unsupported": "尚不支援此類圖表，可檢視原始碼。",

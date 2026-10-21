@@ -2561,7 +2561,6 @@
     "copy": "Copy source",
     "enlarge": "Enlarge diagram",
     "title": "Mermaid diagram",
-    "preparing": "Preparing diagram…",
     "errors": {
       "syntax": "Check the diagram syntax in the source.",
       "unsupported": "This diagram type is not supported. View the source.",

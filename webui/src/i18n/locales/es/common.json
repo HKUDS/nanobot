@@ -2362,7 +2362,6 @@
     "copy": "Copiar código fuente",
     "enlarge": "Ampliar diagrama",
     "title": "Diagrama Mermaid",
-    "preparing": "Preparando diagrama…",
     "errors": {
       "syntax": "Comprueba la sintaxis del diagrama en el código fuente.",
       "unsupported": "Este tipo de diagrama no es compatible. Consulta el código fuente.",
