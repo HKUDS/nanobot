@@ -83,6 +83,44 @@ def test_interrupt_during_handshake_closes_connection_and_stops_new_helper(monke
     process.terminate.assert_called_once()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Darwin/Unix helper startup contract")
+def test_cold_helper_startup_keeps_the_connection_until_ready(monkeypatch, tmp_path):
+    # Native AppKit startup was measured at 1.928s after an update, already at
+    # the old 2s socket deadline. Exercise a cold start without requiring a GUI.
+    helper = tmp_path / "slow-helper.py"
+    helper.write_text("""import socket, sys, time
+listener = socket.socket(fileno=int(sys.argv[1]))
+time.sleep(2.5)
+connection, _ = listener.accept()
+with connection:
+    assert connection.recv(8192).endswith(b'\\n')
+    connection.sendall(b'1')
+    assert connection.recv(1) == b''
+listener.close()
+""")
+    spawned = []
+    popen = dock.subprocess.Popen
+
+    def launch(*args, **kwargs):
+        process = popen(*args, **kwargs)
+        spawned.append(process)
+        return process
+
+    monkeypatch.setattr(dock, "_WORKER", helper)
+    monkeypatch.setattr(dock, "_bundle", lambda _: Path(sys.executable))
+    monkeypatch.setattr(dock.subprocess, "Popen", launch)
+    with tempfile.TemporaryDirectory(prefix="nb-dock-") as name:
+        try:
+            connection = dock._attach(Path(name), "http://127.0.0.1:8765/")
+            connection.close()
+            assert spawned[0].wait(timeout=3) == 0
+        finally:
+            for process in spawned:
+                if process.poll() is None:
+                    process.terminate()
+                process.wait(timeout=3)
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="macOS private-directory contract")
 def test_private_cache_rejects_symlink_and_shared_directory(tmp_path):
     shared = tmp_path / "shared"

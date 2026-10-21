@@ -28,6 +28,7 @@ from loguru import logger
 
 _WORKER = Path(__file__).with_name("_macos_dock.py")
 _ICON = Path(__file__).with_name("assets") / "dock-icon.png"
+_STARTUP_TIMEOUT = 10
 
 
 def _desktop_available() -> bool:
@@ -106,7 +107,7 @@ def _attach(directory: Path, url: str) -> socket.socket:
     address = directory / "s"
     process: subprocess.Popen[bytes] | None = None
     connection: socket.socket | None = None
-    with FileLock(str(directory / "start.lock"), timeout=2):
+    with FileLock(str(directory / "start.lock"), timeout=_STARTUP_TIMEOUT):
         try:
             connection = _connect(address)
             if connection is None:
@@ -130,6 +131,11 @@ def _attach(directory: Path, url: str) -> socket.socket:
                     connection = _connect(address)
             if connection is None:
                 raise OSError("Dock helper did not start")
+            # Connecting to the inherited listener is immediate, but the helper
+            # loads AppKit before acknowledging readiness. A cold post-update
+            # launch can exceed the short socket-connect deadline. Keep this
+            # bounded off the gateway event loop, including concurrent joiners.
+            connection.settimeout(_STARTUP_TIMEOUT)
             # Credentials stay in the private local socket, never argv or a file.
             connection.sendall(url.encode("utf-8") + b"\n")
             if connection.recv(1) != b"1":
@@ -155,8 +161,9 @@ def dock_icon(url: str, *, instance: Path, enabled: bool = True) -> Generator[No
         try:
             if is_local_browser_url(url):
                 connection = _attach(_directory(instance, url), url)
-        except (OSError, ValueError, TimeoutError):
+        except (OSError, ValueError, TimeoutError) as exc:
             # Do not include exception text: URL/installation details are private.
+            logger.debug("Dock startup failure category: {}", type(exc).__name__)
             logger.warning("Dock icon unavailable; WebUI can still be used in your browser.")
     try:
         yield
