@@ -581,8 +581,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     if (!el || !hasMessages || pendingConversationScrollRef.current) return;
     if (!threadMotionRef.current?.isBrowsingHistory()) return;
     if (el.scrollTop > historyPrefetchDistance(el)) return;
-    // Commit network-loading anchors only after native scrolling reaches the actual top.
-    if (hiddenMessageCount <= 0 && (historyInputRef.current === "touch" || el.scrollTop > 0)) return;
+    if (hiddenMessageCount <= 0 && (historyInputRef.current === "touch" || el.scrollTop > 1)) return;
     if (hiddenMessageCount <= 0 && (!hasMoreBefore || olderError)) return;
     loadEarlierMessages();
   }, [hasMessages, hasMoreBefore, hiddenMessageCount, loadEarlierMessages, olderError]);
@@ -921,7 +920,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
 
     onScroll(false);
     const handleScroll = () => onScroll(true);
-    const atHistoryBoundary = () => el.scrollTop <= 0 && messages.length > 0 && conversationReady
+    const atHistoryBoundary = () => el.scrollTop <= 1 && messages.length > 0 && conversationReady
       && !pendingConversationScrollRef.current;
     const canLoadAtTop = () => atHistoryBoundary() && !loadingOlder && !navigation?.loading
       && (hiddenMessageCount > 0 || hasMoreBefore);
