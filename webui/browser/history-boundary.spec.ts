@@ -39,6 +39,8 @@ async function installHistory(page: Page, initialStart = 40, initialCount = 12) 
   };
 }
 
+type HistoryFixture = Awaited<ReturnType<typeof installHistory>>;
+
 async function installShortHistory(page: Page) {
   let reads = 0;
   await page.route("**/api/sessions/**", async (route) => {
@@ -98,6 +100,49 @@ async function anchorTop(body: Locator, text: string) {
     node.closest("[data-thread-display-unit]")!.getBoundingClientRect().top);
 }
 
+async function openSettledHistory(page: Page, query = "") {
+  await page.goto(`/browser/fixture.html?case=history-boundary${query}`);
+  const body = page.getByTestId("thread-message-region");
+  await expect(body).toBeVisible();
+  await stableLayout(body);
+  return { body, header: page.locator(".thread-history-status"), slot: body.locator(".thread-history-slot") };
+}
+
+async function requestOlderWithWheel(body: Locator, history: HistoryFixture, readCount: number) {
+  await body.hover();
+  await body.page().mouse.wheel(0, -120);
+  await expect.poll(() => history.reads.length).toBe(readCount);
+}
+
+async function positionReadingAnchor(body: Locator, text: string) {
+  await body.getByText(text, { exact: true }).evaluate((node) => {
+    const unit = node.closest("[data-thread-display-unit]")!;
+    const scroller = unit.closest<HTMLElement>(".thread-message-viewport")!;
+    scroller.scrollTop += unit.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 280;
+  });
+  await stableLayout(body);
+  return anchorTop(body, text);
+}
+
+async function completePrepend(history: HistoryFixture, body: Locator, firstText: string, anchorText: string, expectedTop: number) {
+  history.complete();
+  await expect(body.getByText(firstText, { exact: true })).toBeAttached();
+  await expect(body.page().locator(".thread-history-status")).toHaveCount(0);
+  await stableLayout(body);
+  await expectAnchorCoordinate(body, anchorText, expectedTop);
+}
+
+async function themeColor(locator: Locator, token: "--muted-foreground" | "--destructive") {
+  return locator.evaluate((node, variable) => {
+    const probe = document.createElement("span");
+    probe.style.color = `hsl(var(${variable}))`;
+    node.append(probe);
+    const color = getComputedStyle(probe).color;
+    probe.remove();
+    return color;
+  }, token);
+}
+
 // Use the fixed viewport, never the transformed scroller, as the coordinate frame.
 async function historyGeometry(body: Locator, text: string) {
   return body.getByText(text, { exact: true }).evaluate((node) => {
@@ -111,7 +156,7 @@ async function historyGeometry(body: Locator, text: string) {
       visibleHeight: header ? Math.max(0, Math.min(header.bottom, frame.bottom) - Math.max(header.top, frame.top)) : 0,
       anchorTop: unit.top, frameTop: frame.top, scrollTop: scroller.scrollTop,
       transformY: new DOMMatrix(getComputedStyle(scroller).transform).m42,
-      slotHeight: slot?.getBoundingClientRect().height ?? 0,
+      slotHeight: slot ? Number.parseFloat(getComputedStyle(slot).height) : 0,
       slotBeforeKey: slot?.parentElement?.nextElementSibling?.getAttribute("data-thread-display-unit") ?? null,
       firstKey: scroller.querySelector("[data-thread-display-unit]")?.getAttribute("data-thread-display-unit"),
     };
@@ -175,11 +220,7 @@ async function expectNoVisibleHistoryText(header: Locator) {
 
 test("wheel loading hands off to a retained 48px slot; prepend and delayed layout keep absolute reading coordinates", async ({ page }) => {
   const history = await installHistory(page);
-  await page.goto("/browser/fixture.html?case=history-boundary");
-  const body = page.getByTestId("thread-message-region");
-  const header = page.locator(".thread-history-status");
-  await expect(body).toBeVisible();
-  await stableLayout(body);
+  const { body, header } = await openSettledHistory(page);
   const nativeTop = await body.evaluate((node) => node.scrollTop);
   await body.hover();
   await page.mouse.wheel(0, -100);
@@ -215,19 +256,9 @@ test("wheel loading hands off to a retained 48px slot; prepend and delayed layou
   await body.evaluate((node) => { node.scrollTop = 0; });
   await stableLayout(body);
   await expectCoordinates(body, "Question 40", held);
-  await body.getByText("Question 40", { exact: true }).evaluate((node) => {
-    const unit = node.closest("[data-thread-display-unit]")!;
-    const scroller = unit.closest<HTMLElement>(".thread-message-viewport")!;
-    scroller.scrollTop += unit.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 280;
-  });
-  await stableLayout(body);
-  const preCompletionAnchorTop = await anchorTop(body, "Question 40");
+  const preCompletionAnchorTop = await positionReadingAnchor(body, "Question 40");
 
-  history.complete();
-  await expect(body.getByText("Question 28", { exact: true })).toBeAttached();
-  await expect(header).toHaveCount(0);
-  await stableLayout(body);
-  await expectAnchorCoordinate(body, "Question 40", preCompletionAnchorTop);
+  await completePrepend(history, body, "Question 28", "Question 40", preCompletionAnchorTop);
   const completedSpacing = await historyBoundarySpacing(body, "Question 40", "Question 41");
   const completedAnchorTop = await anchorTop(body, "Question 40");
   console.log("history-completion-spacing", JSON.stringify({ ...completedSpacing, readingDeltaPx: completedAnchorTop - preCompletionAnchorTop }));
@@ -283,13 +314,7 @@ test("unlinked task prelude stays with the retained boundary when earlier messag
   await expect(page.locator(".thread-history-status")).toHaveAttribute("data-state", "loading");
   const held = await expectHeld(body, "Question 40");
   expect(held.anchorTop - originalTop).toBeCloseTo(48, 0);
-  await body.getByText("Question 40", { exact: true }).evaluate((node) => {
-    const unit = node.closest("[data-thread-display-unit]")!;
-    const scroller = unit.closest<HTMLElement>(".thread-message-viewport")!;
-    scroller.scrollTop += unit.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 280;
-  });
-  await stableLayout(body);
-  const preCompletionAnchorTop = await anchorTop(body, "Question 40");
+  const preCompletionAnchorTop = await positionReadingAnchor(body, "Question 40");
   history.complete();
   await expect(body.getByText("Question 28", { exact: true })).toBeAttached();
   await expect(page.locator(".thread-history-slot")).toHaveCount(0);
@@ -305,11 +330,7 @@ test("touch reveals a static partial ready header, arms only on release, and ret
   const page = await context.newPage();
   const history = await installHistory(page);
   try {
-    await page.goto("/browser/fixture.html?case=history-boundary");
-    const body = page.getByTestId("thread-message-region");
-    const header = page.locator(".thread-history-status");
-    await expect(body).toBeVisible();
-    await stableLayout(body);
+    const { body, header } = await openSettledHistory(page);
     await positionAtTop(body);
     await expect(header).not.toBeInViewport();
     const cdp = await context.newCDPSession(page);
@@ -394,21 +415,12 @@ test("reduced-motion failure keeps its functional 48px slot and retry until natu
   await expect(body).toBeVisible();
   await stableLayout(body);
   const originalTop = await positionAtTop(body);
-  await body.hover();
-  await page.mouse.wheel(0, -120);
-  await expect.poll(() => history.reads.length).toBe(1);
+  await requestOlderWithWheel(body, history, 1);
   const held = await expectHeld(body, "Question 40");
   expect(held.anchorTop - originalTop).toBeCloseTo(48, 0);
   const block = header.locator(".thread-history-blocks > span").first();
   const normalColor = await header.locator(".thread-history-blocks").evaluate((node) => getComputedStyle(node).color);
-  const mutedColor = await header.evaluate((node) => {
-    const probe = document.createElement("span");
-    probe.style.color = "hsl(var(--muted-foreground))";
-    node.append(probe);
-    const color = getComputedStyle(probe).color;
-    probe.remove();
-    return color;
-  });
+  const mutedColor = await themeColor(header, "--muted-foreground");
   expect(normalColor).toBe(mutedColor);
   console.log(`history-colors dark loading=${normalColor}`);
   await expect(block).toHaveCSS("animation-name", "none");
@@ -457,9 +469,7 @@ test("reduced-motion failure keeps its functional 48px slot and retry until natu
 
   for (const [index, start] of [16, 4, 0].entries()) {
     await positionAtTop(body);
-    await body.hover();
-    await page.mouse.wheel(0, -120);
-    await expect.poll(() => history.reads.length).toBe(index + 3);
+    await requestOlderWithWheel(body, history, index + 3);
     history.complete();
     await expect(body.getByText(`Question ${start}`, { exact: true })).toBeAttached();
   }
@@ -474,26 +484,24 @@ test("reduced-motion failure keeps its functional 48px slot and retry until natu
   await expect(exhausted).toHaveCount(0);
 });
 
-test("fast responses reclaim completed slots and keep the next boundary loading", async ({ page }) => {
+for (const elapsedMs of [0, 80]) test(`fast responses reclaim completed slots and keep the next boundary loading${elapsedMs ? " during spring travel" : ""}`, async ({ page }) => {
   const history = await installHistory(page);
   history.useFastResponse(true);
-  await page.clock.install();
-  await page.goto("/browser/fixture.html?case=history-boundary");
-  const body = page.getByTestId("thread-message-region");
-  const header = page.locator(".thread-history-status");
-  await expect(body).toBeVisible();
-  await stableLayout(body);
+  await page.clock.install({ time: new Date("2026-01-01T00:00:00Z") });
+  const { body, header } = await openSettledHistory(page);
   await positionAtTop(body);
   await expect(header).toHaveAttribute("data-state", "ready");
   await expect(header).not.toBeInViewport();
   await body.hover();
-  await page.clock.pauseAt(Date.now());
+  await page.clock.pauseAt(new Date("2026-01-01T01:00:00Z"));
   await page.mouse.wheel(0, -120);
   await expect.poll(() => history.reads.length).toBe(1);
   await expect(header).toHaveAttribute("data-state", "loading");
+  if (elapsedMs > 0) await page.clock.runFor(elapsedMs);
   const beforeFastRead = await historyGeometry(body, "Question 40");
   expect(beforeFastRead.slotHeight).toBe(48);
   expect(Math.abs(beforeFastRead.transformY)).toBeGreaterThan(0);
+  if (elapsedMs > 0) expect(beforeFastRead.transformY).toBeGreaterThan(-48);
   history.releaseFastResponse();
   await expect(body.getByText("Question 28", { exact: true })).toBeAttached();
   expect(history.reads).toHaveLength(1);
@@ -521,18 +529,12 @@ test("fast responses reclaim completed slots and keep the next boundary loading"
   expect(atNewHead.slotHeight).toBe(0);
   await expect(header).toBeHidden();
   expect(history.reads).toHaveLength(1);
-  await body.hover();
-  await page.mouse.wheel(0, -120);
-  await expect.poll(() => history.reads.length).toBe(2);
+  await requestOlderWithWheel(body, history, 2);
   await expect(header).toHaveAttribute("data-state", "loading");
   const nextHeld = await expectHeld(body, "Question 28");
   expect(nextHeld.slotBeforeKey).toBe("u28");
   expect(nextHeld.anchorTop - atNewHead.anchorTop).toBeCloseTo(48, 0);
-  history.complete();
-  await expect(body.getByText("Question 16", { exact: true })).toBeAttached();
-  await expect(header).toHaveCount(0);
-  await stableLayout(body);
-  await expectAnchorCoordinate(body, "Question 28", nextHeld.anchorTop);
+  await completePrepend(history, body, "Question 16", "Question 28", nextHeld.anchorTop);
   await expect(body.locator(".thread-history-slot")).toHaveCount(0);
   expect(history.reads).toEqual(["?limit=120&before=40", "?limit=120&before=28"]);
 });
@@ -569,16 +571,11 @@ test("ordinary middle reading never reveals an exhausted overlay, even when the 
 
 test("a successful exhausted result reclaims its slot and stays at the real history boundary", async ({ page }) => {
   const history = await installHistory(page, 4);
-  await page.goto("/browser/fixture.html?case=history-boundary");
-  const body = page.getByTestId("thread-message-region");
+  const { body } = await openSettledHistory(page);
   const exhausted = page.locator('.thread-history-status[data-state="exhausted"]');
-  await expect(body).toBeVisible();
-  await stableLayout(body);
   await expect(exhausted).toHaveCount(0);
   await positionAtTop(body);
-  await body.hover();
-  await page.mouse.wheel(0, -120);
-  await expect.poll(() => history.reads.length).toBe(1);
+  await requestOlderWithWheel(body, history, 1);
   const held = await expectHeld(body, "Question 4");
   history.complete();
   await expect(body.getByText("Question 0", { exact: true })).toBeAttached();
@@ -719,9 +716,7 @@ test("navigation-window loading and errors remain visible and retry uses the nav
   await expect(body.getByText("Question 51", { exact: true })).toBeAttached();
   await stableLayout(body);
   await positionAtTop(body);
-  await body.hover();
-  await page.mouse.wheel(0, -120);
-  await expect.poll(() => history.reads.length).toBe(3);
+  await requestOlderWithWheel(body, history, 3);
   await expect(page.locator('.thread-history-status[data-state="loading"]')).toBeInViewport();
   const held = await expectHeld(body, "Question 38");
   await page.mouse.wheel(0, -80);
@@ -760,16 +755,9 @@ async function jumpViaRail(page: Page, index: number) {
 
 test("failed Blocks animate without visible error text; pulling retries once and pending input cannot duplicate the request", async ({ page }) => {
   const history = await installHistory(page);
-  await page.goto("/browser/fixture.html?case=history-boundary");
-  const body = page.getByTestId("thread-message-region");
-  const header = page.locator(".thread-history-status");
-  const slot = body.locator(".thread-history-slot");
-  await expect(body).toBeVisible();
-  await stableLayout(body);
+  const { body, header, slot } = await openSettledHistory(page);
   await positionAtTop(body);
-  await body.hover();
-  await page.mouse.wheel(0, -120);
-  await expect.poll(() => history.reads.length).toBe(1);
+  await requestOlderWithWheel(body, history, 1);
   const held = await expectHeld(body, "Question 40");
   expect(held.slotBeforeKey).toBe("u40");
   history.complete("error");
@@ -787,9 +775,7 @@ test("failed Blocks animate without visible error text; pulling retries once and
   expect(history.reads).toHaveLength(1);
 
   // This is a fresh pull at the failed boundary, not a ready-button-only path.
-  await body.hover();
-  await page.mouse.wheel(0, -120);
-  await expect.poll(() => history.reads.length).toBe(2);
+  await requestOlderWithWheel(body, history, 2);
   await expect(header).toHaveAttribute("data-state", "loading");
   await page.mouse.wheel(0, -120);
   await page.mouse.wheel(0, -80);
@@ -816,15 +802,9 @@ test("failed Blocks animate without visible error text; pulling retries once and
 test("cross-path unloaded rail jump has visible navigation feedback outside a scrolled-away older slot", async ({ page }) => {
   const history = await installHistory(page);
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/browser/fixture.html?case=history-boundary&navigate=1");
-  const body = page.getByTestId("thread-message-region");
-  const slot = body.locator(".thread-history-slot");
-  await expect(body).toBeVisible();
-  await stableLayout(body);
+  const { body, slot } = await openSettledHistory(page, "&navigate=1");
   await positionAtTop(body);
-  await body.hover();
-  await page.mouse.wheel(0, -120);
-  await expect.poll(() => history.reads.length).toBe(1);
+  await requestOlderWithWheel(body, history, 1);
   history.complete();
   await expect(body.getByText("Question 28", { exact: true })).toBeAttached();
   await expect(slot).toHaveCount(0);
@@ -856,11 +836,7 @@ test("cross-path unloaded rail jump has visible navigation feedback outside a sc
 test("cross-path newer has visible navigation feedback and forward input retries newer after its older slot scrolls away", async ({ page }) => {
   const history = await installHistory(page);
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/browser/fixture.html?case=history-boundary&navigate=1");
-  const body = page.getByTestId("thread-message-region");
-  const slot = body.locator(".thread-history-slot");
-  await expect(body).toBeVisible();
-  await stableLayout(body);
+  const { body, slot } = await openSettledHistory(page, "&navigate=1");
   await positionAtTop(body);
   await stableLayout(body);
   await jumpViaRail(page, 10);
@@ -869,9 +845,7 @@ test("cross-path newer has visible navigation feedback and forward input retries
   await expect(body.getByText("Question 10", { exact: true })).toBeInViewport();
   await stableLayout(body);
   await positionAtTop(body);
-  await body.hover();
-  await page.mouse.wheel(0, -120);
-  await expect.poll(() => history.reads.length).toBe(2);
+  await requestOlderWithWheel(body, history, 2);
   history.complete();
   await expect(body.getByText("Question 0", { exact: true })).toBeAttached();
   await expect(slot).toHaveCount(0);
@@ -908,13 +882,9 @@ test("cross-path older errors never float after latest or a loaded rail jump, bu
   for (const destination of ["latest", "loaded prompt"] as const) {
     await test.step(destination, async () => {
       const initialReads = history.reads.length;
-      await page.goto("/browser/fixture.html?case=history-boundary&navigate=1");
-      await expect(body).toBeVisible();
-      await stableLayout(body);
+      await openSettledHistory(page, "&navigate=1");
       await positionAtTop(body);
-      await body.hover();
-      await page.mouse.wheel(0, -120);
-      await expect.poll(() => history.reads.length).toBe(initialReads + 1);
+      await requestOlderWithWheel(body, history, initialReads + 1);
       history.complete("error");
       await expect(retry).toBeInViewport();
       await expectHeld(body, "Question 40");
@@ -985,18 +955,12 @@ test("bounded navigation retains three pages and reclaims each completed wheel o
   await expect(body.getByText("Question 49", { exact: true })).toBeAttached();
   await stableLayout(body);
   await positionAtTop(body);
-  await body.hover();
-  await page.mouse.wheel(0, -120);
-  await expect.poll(() => history.reads.length).toBe(2);
+  await requestOlderWithWheel(body, history, 2);
   await expect(header).toHaveAttribute("data-state", "loading");
   const held = await expectHeld(body, "Question 38");
   expect(held.slotBeforeKey).toBe("u38");
 
-  history.complete();
-  await expect(body.getByText("Question 26", { exact: true })).toBeAttached();
-  await expect(header).toHaveCount(0);
-  await stableLayout(body);
-  await expectAnchorCoordinate(body, "Question 38", held.anchorTop);
+  await completePrepend(history, body, "Question 26", "Question 38", held.anchorTop);
   expect((await historyGeometry(body, "Question 38")).slotBeforeKey).toBeNull();
   await expect(body.locator('[data-thread-display-unit^="u"]')).toHaveCount(24);
 
@@ -1011,11 +975,7 @@ test("bounded navigation retains three pages and reclaims each completed wheel o
   const secondHeld = await expectHeld(body, "Question 26");
   expect(secondHeld.slotBeforeKey).toBe("u26");
   expect(secondHeld.anchorTop - atSecondHead.anchorTop - atSecondHead.scrollTop).toBeCloseTo(48, 0);
-  history.complete();
-  await expect(body.getByText("Question 14", { exact: true })).toBeAttached();
-  await expect(header).toHaveCount(0);
-  await stableLayout(body);
-  await expectAnchorCoordinate(body, "Question 26", secondHeld.anchorTop);
+  await completePrepend(history, body, "Question 14", "Question 26", secondHeld.anchorTop);
   expect((await historyGeometry(body, "Question 26")).slotBeforeKey).toBeNull();
   await expect(body.locator('[data-thread-display-unit^="u"]')).toHaveCount(36);
 
@@ -1038,11 +998,7 @@ test("bounded navigation retains three pages and reclaims each completed wheel o
   const newHeld = await expectHeld(body, "Question 14");
   expect(newHeld.slotBeforeKey).toBe("u14");
   expect(newHeld.anchorTop - atNewHead.anchorTop - atNewHead.scrollTop).toBeCloseTo(48, 0);
-  history.complete();
-  await expect(body.getByText("Question 2", { exact: true })).toBeAttached();
-  await expect(header).toHaveCount(0);
-  await stableLayout(body);
-  await expectAnchorCoordinate(body, "Question 14", newHeld.anchorTop);
+  await completePrepend(history, body, "Question 2", "Question 14", newHeld.anchorTop);
   await expect(slot).toHaveCount(0);
   const completed = await historyGeometry(body, "Question 14");
   expect(completed.slotBeforeKey).toBeNull();
@@ -1123,32 +1079,16 @@ test("history Blocks use muted loading and destructive error colors in light and
     await expect(body).toBeVisible();
     await stableLayout(body);
     await positionAtTop(body);
-    await body.hover();
-    await page.mouse.wheel(0, -120);
-    await expect.poll(() => history.reads.length).toBe(1);
+    await requestOlderWithWheel(body, history, 1);
     const loadingBlocks = page.locator('.thread-history-status[data-state="loading"] .thread-history-blocks');
     const loadingColor = await loadingBlocks.evaluate((node) => getComputedStyle(node).color);
-    const mutedColor = await loadingBlocks.evaluate((node) => {
-      const probe = document.createElement("span");
-      probe.style.color = "hsl(var(--muted-foreground))";
-      node.append(probe);
-      const color = getComputedStyle(probe).color;
-      probe.remove();
-      return color;
-    });
+    const mutedColor = await themeColor(loadingBlocks, "--muted-foreground");
     expect(loadingColor).toBe(mutedColor);
     history.complete("error");
     const retry = page.getByRole("button", { name: "Loading failed. Retry", exact: true });
     const errorBlocks = retry.locator(".thread-history-blocks");
     const errorColor = await errorBlocks.evaluate((node) => getComputedStyle(node).color);
-    const destructiveColor = await errorBlocks.evaluate((node) => {
-      const probe = document.createElement("span");
-      probe.style.color = "hsl(var(--destructive))";
-      node.append(probe);
-      const color = getComputedStyle(probe).color;
-      probe.remove();
-      return color;
-    });
+    const destructiveColor = await themeColor(errorBlocks, "--destructive");
     expect(errorColor).toBe(destructiveColor);
     expect(errorColor).not.toBe(loadingColor);
     console.log(`history-colors ${colorScheme} loading=${loadingColor} error=${errorColor}`);

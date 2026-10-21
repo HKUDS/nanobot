@@ -248,11 +248,6 @@ function setHistoryPresentation(
   status?.style.setProperty("--history-pull", `${distance}px`);
 }
 
-function historySlotBefore(slot: HTMLDivElement | null, element: HTMLElement): number {
-  return slot && (slot.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING)
-    ? HISTORY_HOLD_PX : 0;
-}
-
 export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportProps>(function ThreadViewport({
   messages: latestMessages,
   navigation,
@@ -312,7 +307,6 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const restoreScrollAfterPrependRef =
     useRef<{ height: number; top: number } | null>(null);
   const historyScrollAnchorRef = useRef<HistoryScrollAnchor | null>(null);
-  const historyCompletionAnchorRef = useRef<HistoryScrollAnchor | null>(null);
   const previousLoadingOlderRef = useRef(loadingOlder);
   const composerDockHeightRef = useRef(0);
   const [atBottom, setAtBottom] = useState(true);
@@ -320,6 +314,8 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const [historyPhase, setHistoryPhase] = useState<HistoryRevealPhase>("hidden");
   const historyPhaseRef = useRef(historyPhase);
   const [historySlotKey, setHistorySlotKey] = useState<string | null>(null);
+  const historySlotCompleted = previousLoadingOlderRef.current && !loadingOlder && !olderError && historySlotKey !== null;
+  const retainedHistorySlotKey = historySlotCompleted ? null : historySlotKey;
   const [showHistoryExhausted, setShowHistoryExhausted] = useState(false);
   const historySlotRef = useRef<HTMLDivElement | null>(null);
   const historyInputRef = useRef<"touch" | "other">("other");
@@ -462,8 +458,9 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     }
     historyScrollAnchorRef.current = {
       key,
+      // Normalize out the reveal lease, even when reading above its inline slot.
       offsetTop: element.getBoundingClientRect().top - viewport.top
-        - historySlotBefore(historySlotRef.current, element),
+        - (historySlotRef.current ? HISTORY_HOLD_PX : 0),
     };
     return true;
   }, []);
@@ -484,7 +481,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     const nextOffset =
       element.getBoundingClientRect().top
       - scroller.getBoundingClientRect().top
-      - historySlotBefore(historySlotRef.current, element);
+      - (historySlotRef.current ? HISTORY_HOLD_PX : 0);
     const delta = nextOffset - anchor.offsetTop;
     if (Math.abs(delta) < 0.5) return true;
     const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
@@ -510,8 +507,8 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
 
   useLayoutEffect(() => {
     // Replaced history windows cannot retain a slot for an unmounted boundary.
-    if (historySlotKey && !historySlotRef.current) resetHistoryHeader();
-  }, [historySlotKey, resetHistoryHeader, visibleMessages]);
+    if (retainedHistorySlotKey && !historySlotRef.current) resetHistoryHeader();
+  }, [retainedHistorySlotKey, resetHistoryHeader, visibleMessages]);
 
   const scrollToBottomNow = useCallback((smooth = false) => {
     historyScrollAnchorRef.current = null;
@@ -765,6 +762,18 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   }, [activeTurnId, activeTurnStartedHere, conversationReady, messages]);
 
   useLayoutEffect(() => {
+    const wasLoading = previousLoadingOlderRef.current;
+    previousLoadingOlderRef.current = loadingOlder;
+    if (!wasLoading || loadingOlder || olderError || !historySlotKey) return;
+    // The completed render already removed the slot. Rebase the saved anchor
+    // by its live presentation travel before the single final-geometry read.
+    const anchor = historyScrollAnchorRef.current;
+    if (anchor) anchor.offsetTop += historyDistanceRef.current;
+    setShowHistoryExhausted(historyExhausted);
+    resetHistoryHeader();
+  }, [loadingOlder, olderError, historySlotKey, historyExhausted, resetHistoryHeader]);
+
+  useLayoutEffect(() => {
     const pending = restoreScrollAfterPrependRef.current;
     const el = scrollRef.current;
     restoreScrollAfterPrependRef.current = null;
@@ -777,7 +786,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       Math.max(0, pending.top + delta),
     );
     threadMotionRef.current?.jumpTo(nextTop);
-  }, [reconcileHistoryScrollAnchor, visibleMessages.length, messages]);
+  }, [reconcileHistoryScrollAnchor, visibleMessages.length, messages, loadingOlder]);
 
   useLayoutEffect(() => {
     const promptId = pendingPromptJumpRef.current;
@@ -816,65 +825,6 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       holdHistoryHeader();
     }
   }, [conversationReady, loadingOlder, holdHistoryHeader]);
-
-  useLayoutEffect(() => {
-    const wasLoading = previousLoadingOlderRef.current;
-    previousLoadingOlderRef.current = loadingOlder;
-    if (!wasLoading || loadingOlder || olderError || !historySlotKey) return;
-    const scroller = scrollRef.current;
-    const content = messageContentRef.current;
-    const viewport = viewportFrameRef.current?.getBoundingClientRect();
-    if (!scroller || !content || !viewport) return;
-    if (pendingPromptJumpRef.current) {
-      historyCompletionAnchorRef.current = null;
-      setShowHistoryExhausted(historyExhausted);
-      resetHistoryHeader();
-      return;
-    }
-    const priorKey = historyScrollAnchorRef.current?.key;
-    const anchor = priorKey
-      ? Array.from(content.querySelectorAll<HTMLElement>(THREAD_DISPLAY_UNIT_SELECTOR))
-          .find((candidate) => candidate.dataset.threadDisplayUnit === priorKey) ?? null
-      : visibleHistoryUnit(content, viewport);
-    const key = anchor?.dataset.threadDisplayUnit;
-    if (anchor && key) {
-      historyCompletionAnchorRef.current = {
-        key,
-        offsetTop: anchor.getBoundingClientRect().top - viewport.top,
-      };
-    } else {
-      historyCompletionAnchorRef.current = null;
-    }
-    setShowHistoryExhausted(historyExhausted);
-    resetHistoryHeader();
-  }, [loadingOlder, olderError, historySlotKey, resetHistoryHeader]);
-
-  useLayoutEffect(() => {
-    if (historySlotKey !== null) return;
-    const anchor = historyCompletionAnchorRef.current;
-    if (!anchor) return;
-    historyCompletionAnchorRef.current = null;
-    const scroller = scrollRef.current;
-    const content = messageContentRef.current;
-    const viewport = viewportFrameRef.current?.getBoundingClientRect();
-    if (!scroller || !content || !viewport || pendingPromptJumpRef.current) return;
-    const element = Array.from(
-      content.querySelectorAll<HTMLElement>(THREAD_DISPLAY_UNIT_SELECTOR),
-    ).find((candidate) => candidate.dataset.threadDisplayUnit === anchor.key);
-    if (!element) return;
-    const offset = element.getBoundingClientRect().top - viewport.top;
-    const delta = offset - anchor.offsetTop;
-    if (Math.abs(delta) >= 0.5) {
-      const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-      const nextTop = Math.min(maxScrollTop, Math.max(0, scroller.scrollTop + delta));
-      threadMotionRef.current?.jumpTo(nextTop);
-    }
-    const scrollport = scroller.getBoundingClientRect();
-    historyScrollAnchorRef.current = {
-      key: anchor.key,
-      offsetTop: element.getBoundingClientRect().top - scrollport.top - historySlotBefore(historySlotRef.current, element),
-    };
-  }, [historySlotKey]);
 
   useLayoutEffect(() => {
     if (!conversationReady || !conversationHandoffPendingRef.current) return;
@@ -1145,7 +1095,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   ]);
 
   const navigationStatus = navigation?.operation !== "older" && Boolean(navigation?.loading || navigation?.error);
-  const showHistoryStatus = !navigationStatus && messages.length > 0 && conversationReady
+  const showHistoryStatus = !historySlotCompleted && !navigationStatus && messages.length > 0 && conversationReady
     && (atHistoryTop && (!historyExhausted || showHistoryExhausted) || historyPhase !== "hidden" || loadingOlder);
   const historyStatus = showHistoryStatus ? (
     <ThreadHistoryStatus
@@ -1155,7 +1105,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       exhausted={historyExhausted}
       preview={historyPhase === "feedback"}
       onRetry={loadEarlierMessages}
-      className={!historySlotKey && !(historyExhausted && showHistoryExhausted) ? cn("thread-history-reveal", historyPhase === "feedback" && "thread-history-feedback") : undefined}
+      className={!retainedHistorySlotKey && !(historyExhausted && showHistoryExhausted) ? cn("thread-history-reveal", historyPhase === "feedback" && "thread-history-feedback") : undefined}
     />
   ) : null;
 
@@ -1204,7 +1154,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                 <SubagentThreadMessages
                   messages={visibleMessages}
                   topInset={PROMPT_TOP_INSET_PX}
-                  beforeUnit={historySlotKey ? { key: historySlotKey, content: (
+                  beforeUnit={retainedHistorySlotKey ? { key: retainedHistorySlotKey, content: (
                     <div ref={setHistorySlot} className="thread-history-slot relative" style={{ height: HISTORY_HOLD_PX }}>
                       {historyStatus}
                     </div>
@@ -1284,7 +1234,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
             />
           ) : null}
         </div>
-        {!historySlotKey ? historyStatus : null}
+        {!retainedHistorySlotKey ? historyStatus : null}
         {navigationStatus && navigation ? <ThreadHistoryStatus loading={navigation.loading}
           error={navigation.error} onRetry={navigation.retry} /> : null}
         {!hasMessages ? <div ref={bottomRef} aria-hidden className="h-px" /> : null}
