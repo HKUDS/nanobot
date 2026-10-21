@@ -73,60 +73,60 @@ def select(channel):
     return UpdateJobService().change_channel(UpdateChannelRequest(channel=channel, revision=current.revision))
 
 
-def test_stable_preview_exit_wait_and_final_release(releases, monkeypatch):
-    assert version_check.check_for_update()["releaseStatus"]["state"] == "current"
+async def test_stable_preview_exit_wait_and_final_release(releases, monkeypatch):
+    assert (await version_check.check_for_update())["releaseStatus"]["state"] == "current"
     assert CATALOGUE_URL not in releases.requests
     select("preview")
-    result = version_check.check_for_update()
+    result = await version_check.check_for_update()
     assert result["updateAvailable"]["latestVersion"] == "0.3.7.dev42"
     monkeypatch.setattr(nanobot, "__version__", "0.3.7.dev42")
     releases.preview, releases.generation = "0.3.7.dev43", 2
-    assert version_check.check_for_update()["updateAvailable"]["latestVersion"] == "0.3.7.dev43"
+    assert (await version_check.check_for_update())["updateAvailable"]["latestVersion"] == "0.3.7.dev43"
     select("stable")
-    result = version_check.check_for_update()
+    result = await version_check.check_for_update()
     assert result["releaseStatus"]["state"] == "waiting_stable"
     assert result["updateAvailable"] is None
     releases.stable, releases.generation = "0.3.7", 3
-    assert version_check.check_for_update()["updateAvailable"]["latestVersion"] == "0.3.7"
+    assert (await version_check.check_for_update())["updateAvailable"]["latestVersion"] == "0.3.7"
     assert read_update_channel().channel == "stable"
 
 
-def test_preview_subscription_survives_final_release_and_next_cycle(releases, monkeypatch):
+async def test_preview_subscription_survives_final_release_and_next_cycle(releases, monkeypatch):
     select("preview")
     releases.stable = "0.3.7"
     monkeypatch.setattr(nanobot, "__version__", "0.3.7.dev42")
-    assert version_check.check_for_update()["updateAvailable"]["latestVersion"] == "0.3.7"
+    assert (await version_check.check_for_update())["updateAvailable"]["latestVersion"] == "0.3.7"
     monkeypatch.setattr(nanobot, "__version__", "0.3.7")
-    assert version_check.check_for_update()["releaseStatus"]["state"] == "current"
+    assert (await version_check.check_for_update())["releaseStatus"]["state"] == "current"
     assert read_update_channel().channel == "preview"
     releases.preview, releases.generation = "0.3.8.dev1", 2
-    assert version_check.check_for_update()["updateAvailable"]["latestVersion"] == "0.3.8.dev1"
+    assert (await version_check.check_for_update())["updateAvailable"]["latestVersion"] == "0.3.8.dev1"
 
 
-def test_leaving_preview_can_find_a_newer_stable_when_catalogue_is_unavailable(releases, monkeypatch):
+async def test_leaving_preview_can_find_a_newer_stable_when_catalogue_is_unavailable(releases, monkeypatch):
     select("preview")
     monkeypatch.setattr(nanobot, "__version__", "0.3.7.dev42")
     select("stable")
     releases.missing = True
     releases.stable = "0.3.7"
-    result = version_check.check_for_update()
+    result = await version_check.check_for_update()
     assert result["updateAvailable"]["latestVersion"] == "0.3.7"
     assert result["releaseStatus"]["state"] == "available"
     assert read_update_channel().channel == "stable"
     # A broken Preview index cannot authorize a partial release or a downgrade,
     # or turn unverified withdrawal status into a green 'up to date'.
     releases.partial = True
-    assert version_check.check_for_update()["updateAvailable"] is None
+    assert (await version_check.check_for_update())["updateAvailable"] is None
     releases.partial = False
     releases.stable = "0.3.6"
-    result = version_check.check_for_update()
+    result = await version_check.check_for_update()
     assert result["updateAvailable"] is None
     assert result["releaseStatus"]["state"] == "unavailable"
 
 
 @pytest.mark.parametrize("replacement", ["older", "newer", "incompatible"])
 @pytest.mark.parametrize("channel", ["stable", "preview"])
-def test_withdrawn_running_preview_is_not_reported_up_to_date(releases, monkeypatch, replacement, channel):
+async def test_withdrawn_running_preview_is_not_reported_up_to_date(releases, monkeypatch, replacement, channel):
     select(channel)
     monkeypatch.setattr(nanobot, "__version__", "0.3.7.dev42")
     releases.withdrawn = {"0.3.7.dev42": "Startup regression"}
@@ -134,30 +134,30 @@ def test_withdrawn_running_preview_is_not_reported_up_to_date(releases, monkeypa
         releases.preview = "0.3.7.dev43"
         releases.stable = "0.3.7"
     releases.incompatible = replacement == "incompatible"
-    result = version_check.check_for_update()
+    result = await version_check.check_for_update()
     assert result["releaseStatus"]["state"] == "withdrawn"
     assert (result["updateAvailable"] is not None) == (replacement == "newer")
 
 
 @pytest.mark.parametrize("problem,state", [("partial", "publishing"), ("offline", "unavailable"),
                                            ("incompatible", "unsupported"), ("missing", "unavailable")])
-def test_unavailable_checks_have_feedback_and_can_recover(releases, problem, state):
+async def test_unavailable_checks_have_feedback_and_can_recover(releases, problem, state):
     if problem == "missing":
         select("preview")
     setattr(releases, problem, True)
-    result = version_check.check_for_update()
+    result = await version_check.check_for_update()
     assert result["updateAvailable"] is None
     assert result["releaseStatus"]["state"] == state
     assert "credential" not in str(result)
     setattr(releases, problem, False)
-    assert version_check.check_for_update()["releaseStatus"]["state"] in {"current", "available"}
+    assert (await version_check.check_for_update())["releaseStatus"]["state"] in {"current", "available"}
 
 
-def test_current_dev_does_not_implicitly_opt_in_and_older_target_is_not_offered(releases, monkeypatch):
+async def test_current_dev_does_not_implicitly_opt_in_and_older_target_is_not_offered(releases, monkeypatch):
     monkeypatch.setattr(nanobot, "__version__", "0.3.8.dev1")
     assert read_update_channel().channel == "stable"
-    assert version_check.check_for_update()["releaseStatus"]["state"] == "waiting_stable"
+    assert (await version_check.check_for_update())["releaseStatus"]["state"] == "waiting_stable"
     select("preview")
-    result = version_check.check_for_update()
+    result = await version_check.check_for_update()
     assert result["updateAvailable"] is None
     assert result["releaseStatus"]["state"] == "ahead"

@@ -782,7 +782,7 @@ async def test_version_check_route_returns_stable_payload(
 ) -> None:
     monkeypatch.setattr(
         "nanobot.webui.settings_routes.check_for_update",
-        lambda: {"updateAvailable": update_info, "releaseStatus": {"state": "available" if update_info else "current"}},
+        AsyncMock(return_value={"updateAvailable": update_info, "releaseStatus": {"state": "available" if update_info else "current"}}),
     )
     request = SimpleNamespace(path="/api/settings/version-check", headers=Headers())
 
@@ -793,11 +793,82 @@ async def test_version_check_route_returns_stable_payload(
     assert json.loads(response.body) == expected
 
 
+async def test_version_check_and_mcp_requests_share_the_gateway_loop(monkeypatch, tmp_path):
+    import httpx
+    from packaging.tags import Tag
+
+    import nanobot
+    from nanobot.release_feed import PYPI_URL, ReleaseFeed
+    from nanobot.releases import release_filenames
+    from nanobot.security import network
+    from nanobot.update_channel import UpdateChannel
+    from nanobot.webui import version_check
+
+    gateway_loop = asyncio.get_running_loop()
+    entered = asyncio.Event()
+    finish = asyncio.Event()
+    requests = []
+
+    def resolve(url, **_kwargs):
+        if url == f"{PYPI_URL}/json":
+            # Settle the gateway requests on the next tick of the checking loop,
+            # after discovery has tried to acquire the already-contended lock.
+            asyncio.get_running_loop().call_soon(gateway_loop.call_soon_threadsafe, finish.set)
+        return True, "", ("93.184.216.34",)
+
+    async def respond(request):
+        requests.append(str(request.url))
+        if request.url.host == "mcp.example":
+            entered.set()
+            await finish.wait()
+            return httpx.Response(200, json={})
+        assert str(request.url) == f"{PYPI_URL}/json"
+        return httpx.Response(200, json={
+            "info": {"name": "nanobot-ai", "version": "0.3.5", "requires_python": ">=3.11"},
+            "urls": [{"filename": name, "size": 123, "yanked": False,
+                      "digests": {"sha256": "c" * 64},
+                      "url": f"https://files.pythonhosted.org/packages/{name}"}
+                     for name in sorted(release_filenames("0.3.5"))
+                     if name.endswith((".whl", ".tar.gz"))],
+        })
+
+    def transport():
+        return network.PinnedDNSAsyncTransport(inner=httpx.MockTransport(respond))
+
+    monkeypatch.setattr(network.PinnedDNSAsyncTransport, "_resolver_lock", asyncio.Lock())
+    monkeypatch.setattr(network, "resolve_url_target", resolve)
+    monkeypatch.setattr(nanobot, "__version__", "0.3.5")
+    monkeypatch.setattr(version_check, "read_update_channel", UpdateChannel)
+    monkeypatch.setattr(version_check, "installation_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(version_check, "ReleaseFeed", lambda directory: ReleaseFeed(
+        directory, transport=transport(), supported_tags=[Tag("py3", "none", "win_amd64")],
+    ))
+    request = SimpleNamespace(path="/api/settings/version-check", headers=Headers())
+
+    async with httpx.AsyncClient(transport=transport(), trust_env=False) as client:
+        first = asyncio.create_task(client.get("https://mcp.example/first"))
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        second = asyncio.create_task(client.get("https://mcp.example/second"))
+        await asyncio.sleep(0)  # Let the second gateway request wait on the shared lock.
+        try:
+            response = await asyncio.wait_for(_router().dispatch(None, request, request.path), timeout=5)
+        finally:
+            finish.set()
+            await asyncio.gather(first, second)
+        subsequent = await client.get("https://mcp.example/subsequent")
+
+    assert response.status_code == 200
+    assert json.loads(response.body) == {"updateAvailable": None}
+    assert subsequent.status_code == 200
+    assert requests == ["https://mcp.example/first", "https://mcp.example/second",
+                        f"{PYPI_URL}/json", "https://mcp.example/subsequent"]
+
+
 @pytest.mark.asyncio
 async def test_version_check_route_enforces_auth_and_bounds_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    check = MagicMock(side_effect=RuntimeError("upstream secret body"))
+    check = AsyncMock(side_effect=RuntimeError("upstream secret body"))
     monkeypatch.setattr("nanobot.webui.settings_routes.check_for_update", check)
     request = SimpleNamespace(path="/api/settings/version-check", headers=Headers())
 
@@ -811,6 +882,7 @@ async def test_version_check_route_enforces_auth_and_bounds_failures(
     assert failed.status_code == 500
     assert json.loads(failed.body) == {"error": "version check failed"}
     assert "upstream secret body" not in failed.body.decode()
+    check.assert_awaited_once_with()
 
 
 @pytest.mark.parametrize("state", ["waiting_stable", "withdrawn", "unavailable", "publishing", "unsupported"])
@@ -818,7 +890,7 @@ async def test_channel_status_is_explicit_and_old_clients_never_report_false_suc
     result = {"updateAvailable": None, "releaseStatus": {
         "channel": "stable", "revision": 2, "currentVersion": "0.3.7.dev42", "state": state,
     }}
-    monkeypatch.setattr("nanobot.webui.settings_routes.check_for_update", lambda: result)
+    monkeypatch.setattr("nanobot.webui.settings_routes.check_for_update", AsyncMock(return_value=result))
     request = SimpleNamespace(path="/api/settings/version-check", headers=Headers())
     router = _router()
     response = await router.dispatch(None, request, request.path)
@@ -834,7 +906,7 @@ async def test_version_check_owner_is_additive_read_only_and_failure_is_not_a_re
     from nanobot.webui import settings_system
 
     result = {"updateAvailable": None, "releaseStatus": {"state": "current"}}
-    monkeypatch.setattr("nanobot.webui.settings_routes.check_for_update", lambda: result)
+    monkeypatch.setattr("nanobot.webui.settings_routes.check_for_update", AsyncMock(return_value=result))
     inspect_owner = MagicMock(return_value=SimpleNamespace(owner="pipx", records={}))
     monkeypatch.setattr(settings_system, "inspect_update_installation", inspect_owner)
     request = SimpleNamespace(path="/api/settings/version-check", headers=Headers())

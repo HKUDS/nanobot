@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 import httpx
@@ -14,7 +13,12 @@ from nanobot.release_feed import ReleaseFeed, ReleaseFeedError
 from nanobot.update_channel import read_update_channel
 
 
-async def _check() -> dict[str, Any]:
+async def check_for_update() -> dict[str, Any]:
+    """Check fresh release data on the caller's event loop without installing.
+
+    The feed shares the gateway's pinned-DNS transport lock. Keep discovery on
+    that loop rather than creating a temporary event loop in a worker thread.
+    """
     selection = read_update_channel()
     current = nanobot.__version__
     status: dict[str, Any] = {
@@ -46,12 +50,3 @@ async def _check() -> dict[str, Any]:
     if read_update_channel() != selection:
         raise ValueError("Update channel changed while checking; check again")
     return result
-
-
-def check_for_update() -> dict[str, Any]:
-    """Blocking settings adapter. Every check is fresh and never installs.
-
-    The feed's ETag cache guards generations, not availability. Older clients
-    still read updateAvailable; channel status is additive.
-    """
-    return asyncio.run(_check())

@@ -9,7 +9,7 @@ import platform
 import re
 import subprocess
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, cast
@@ -86,7 +86,7 @@ class SystemSettingsOperations:
     mcp_presets_action: SettingsOperation
     reload_mcp: SettingsOperation
     mcp_runtime_status: Callable[[], Mapping[str, str]] | None
-    check_for_update: SettingsOperation
+    check_for_update: Callable[[], Awaitable[dict[str, Any]]]
     channel_feature_action: SettingsOperation | None = None
     channel_runtime_status: Callable[[], dict[str, Any]] | None = None
 
@@ -1225,7 +1225,7 @@ class SystemSettingsHandler:
         operations: SystemSettingsOperations,
     ) -> SettingsRouteResult:
         try:
-            update_info = await asyncio.to_thread(operations.check_for_update)
+            update_info = await operations.check_for_update()
         except Exception as exc:
             self.logger.warning("version check failed ({})", type(exc).__name__)
             return SettingsRouteResult.failure(500, "version check failed")
