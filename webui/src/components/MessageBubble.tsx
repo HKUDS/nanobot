@@ -28,7 +28,6 @@ import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatMessageEndTime } from "@/lib/format-time";
 import { toMediaAttachment } from "@/lib/media";
 import { matchingSlashCommand } from "@/lib/slash-command";
-import { sessionHandleColor } from "@/lib/session-handle";
 import { parseQuotedUserMessage } from "@/lib/user-message-quote";
 import type {
   CliAppInfo,
@@ -384,22 +383,18 @@ function IncomingSessionMessage({
   onOpenFilePreview?: (path: string) => void;
 }) {
   const handle = message.sessionMessage!.session;
-  const color = sessionHandleColor(handle.id);
   const handleName = `@${handle.name}`;
 
   return (
     <div
       data-session-message
-      className="group relative w-full text-reading"
+      className="group relative mr-auto w-fit min-w-0 max-w-[min(85%,36rem)] text-reading"
     >
-      {contextMenu}
-      <div
-        className="min-w-0 rounded-es-[16px] border-s-2 bg-background pb-1 ps-2.5"
-        style={{ borderInlineStartColor: color }}
-      >
-        <div className="mb-1.5 flex items-center text-[12px] text-muted-foreground">
-          <SessionHandleLabel id={handle.id}>{handleName}</SessionHandleLabel>
-        </div>
+      <div className="mb-1.5 flex items-center px-4 text-[12px] text-muted-foreground">
+        <SessionHandleLabel id={handle.id}>{handleName}</SessionHandleLabel>
+      </div>
+      <div className="relative min-w-0 rounded-floating bg-secondary/70 px-4 py-2">
+        {contextMenu}
         <div data-assistant-selectable="true" className="min-w-0">
           <MarkdownText
             preserveStreamingLayout

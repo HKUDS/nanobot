@@ -64,6 +64,25 @@ function TallDialogFixture({ placement }: { placement: "center" | "bottom" }) {
   </main>;
 }
 
+function SessionMessagesFixture() {
+  const messages: UIMessage[] = [
+    { id: "own-input", role: "user", content: "Please review the update.", createdAt: 1 },
+    {
+      id: "session-message:short", role: "user", content: "Looks good.", createdAt: 2,
+      sessionMessage: { message_id: "short", session: { id: "handle_0123456789abcdef0123456789abcdef", name: "mira" } },
+    },
+    {
+      id: "session-message:long", role: "user", createdAt: 3,
+      content: "**Review notes**\n\n- Keep the layout left-aligned.\n- Preserve Markdown and links.\n\n```ts\nconst message = \"" + "long-path/".repeat(30) + "\";\n```\n\n[Release notes](https://example.com/release-notes)",
+      sessionMessage: { message_id: "long", session: { id: "handle_fedcba9876543210fedcba9876543210", name: "nori" } },
+    },
+    { id: "reply", role: "assistant", content: "Thanks, I will keep those details.", createdAt: 4 },
+  ];
+  return <main className="mx-auto max-w-3xl px-6 py-8" aria-label="Session messages">
+    <ThreadMessages messages={messages} isStreaming={false} />
+  </main>;
+}
+
 const parameters = new URLSearchParams(location.search);
 const railClient = new NanobotClient({ url: "ws://127.0.0.1:8765", reconnect: false });
 const railHistory: UIMessage[] = Array.from({ length: 5 }, (_, index) => [
@@ -169,6 +188,8 @@ createRoot(document.getElementById("root")!).render(<TooltipProvider>
     ? <ClientProvider client={railClient} token="fixture" webuiCapabilities={["webui.prompt-navigation.v1"]}><RailFixture /></ClientProvider>
     : parameters.get("case") === "settings-icon"
     ? <Button variant="icon" size="icon" aria-label="Settings"><SettingsIcon className="h-4 w-4" /></Button>
+    : parameters.get("case") === "session-messages"
+    ? <SessionMessagesFixture />
     : parameters.get("case") === "history"
     ? <HistoryFixture />
     : <TallDialogFixture placement={parameters.get("placement") === "bottom" ? "bottom" : "center"} />}
