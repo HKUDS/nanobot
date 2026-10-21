@@ -1327,7 +1327,7 @@ async def test_idle_compaction_does_not_reactivate_a_completed_agent_session(tmp
     ))
     activity_count = len(client.activities)
 
-    idle_events = factory.session_events(inbound.session_key, session_metadata)
+    idle_events = factory.session_events(inbound.session_key, session_metadata, generation="generation")
     for phase in ("started", "succeeded"):
         await idle_events.emit(ContextCompactionEvent(compaction_id="idle-1", phase=phase))
         await channel.send(await channel.bus.consume_outbound())

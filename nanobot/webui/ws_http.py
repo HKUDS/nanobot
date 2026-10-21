@@ -18,7 +18,7 @@ import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 from loguru import logger
@@ -34,6 +34,7 @@ from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
 from nanobot.runtime_admission import RuntimeMaintenanceError
 from nanobot.security.workspace_access import WorkspaceScope, WorkspaceScopeError
+from nanobot.session.display_history import HistoryReader
 from nanobot.session.manager import SessionManager
 from nanobot.session.session_handles import (
     SessionHandle,
@@ -129,7 +130,6 @@ from nanobot.webui.skills_marketplace import (
     trending_marketplace_skills,
 )
 from nanobot.webui.star_prompt import update_star_prompt
-from nanobot.webui.thread_disk import delete_webui_thread
 from nanobot.webui.transcript import (
     TranscriptReplayStats,
     build_session_thread_response,
@@ -350,6 +350,10 @@ def _resolve_bootstrap_model_name(
 # ---------------------------------------------------------------------------
 # GatewayHTTPHandler
 # ---------------------------------------------------------------------------
+
+
+class _HistoryProjection(Protocol):
+    def __call__(self, request: WsRequest, key: str, *, history: HistoryReader) -> Response: ...
 
 
 class GatewayHTTPHandler:
@@ -826,15 +830,11 @@ class GatewayHTTPHandler:
     async def _dispatch_session_routes(self, request: WsRequest, got: str) -> Response | None:
         m = re.fullmatch(r"/api/sessions/([^/]+)/webui-thread/prompts", got)
         if m:
-            return await asyncio.to_thread(self._handle_prompt_index_get, request, m.group(1))
+            return await self._project_session_history(request, m.group(1), self._handle_prompt_index_get)
 
         m = re.match(r"^/api/sessions/([^/]+)/webui-thread/trace-detail$", got)
         if m:
-            return await asyncio.to_thread(
-                self._handle_webui_trace_detail_get,
-                request,
-                m.group(1),
-            )
+            return await self._project_session_history(request, m.group(1), self._handle_webui_trace_detail_get)
 
         m = re.match(r"^/api/sessions/([^/]+)/webui-thread$", got)
         if m:
@@ -1073,7 +1073,23 @@ class GatewayHTTPHandler:
     def _read_session_version(self, key: str) -> tuple[str, int] | None:
         return self.session_manager.read_session_version(key) if self.session_manager is not None else None
 
-    def _handle_prompt_index_get(self, request: WsRequest, key: str) -> Response:
+    async def _project_session_history(
+        self, request: WsRequest, key: str, project: _HistoryProjection,
+    ) -> Response:
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        decoded = _decode_api_key(key)
+        if decoded is None:
+            return _http_error(400, "invalid session key")
+        if not _is_websocket_channel_session_key(decoded):
+            return _http_error(404, "session not found")
+        if self.session_manager is None:
+            return _http_error(503, "session manager unavailable")
+        return await self.session_manager.state.project_history(
+            decoded, lambda history: project(request, key, history=history),
+        )
+
+    def _handle_prompt_index_get(self, request: WsRequest, key: str, *, history: HistoryReader) -> Response:
         from nanobot.webui.transcript import prompt_index_response, prompt_index_revision
 
         if not self.check_api_token(request):
@@ -1083,13 +1099,13 @@ class GatewayHTTPHandler:
             return _http_error(400, "invalid session key")
         if not _is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
-        revision = prompt_index_revision(decoded_key, self._read_session_version(decoded_key))
+        revision = prompt_index_revision(decoded_key, self._read_session_version(decoded_key), history=history)
         etag = _quoted_etag(revision) if revision else None
         if etag and _etag_matches(_case_insensitive_header(request.headers, "If-None-Match"), etag):
             return _http_response(b"", status=304, extra_headers=[*_NO_STORE_HEADERS, ("ETag", etag)])
         query = _parse_query(request.path)
         data = prompt_index_response(
-            decoded_key, _query_first(query, "since"),
+            decoded_key, _query_first(query, "since"), history=history,
             session_messages_loader=lambda: self._read_session_messages(decoded_key),
             session_version_loader=lambda: self._read_session_version(decoded_key),
         )
@@ -1121,13 +1137,11 @@ class GatewayHTTPHandler:
 
         timer = loop.call_later(0.05, sample_event_loop_lag)
         started = time.perf_counter()
+        def project(request: WsRequest, key: str, *, history: HistoryReader) -> Response:
+            return self._handle_webui_thread_get(request, key, history=history, diagnostics=diagnostics)
+
         try:
-            response = await asyncio.to_thread(
-                self._handle_webui_thread_get,
-                request,
-                key,
-                diagnostics=diagnostics,
-            )
+            response = await self._project_session_history(request, key, project)
         finally:
             active = False
             timer.cancel()
@@ -1144,7 +1158,6 @@ class GatewayHTTPHandler:
         stats = diagnostics.transcript
         if not (
             diagnostics.total_ms >= _SLOW_WEBUI_HTTP_LOG_MS
-            or stats.manifest_rebuilt
             or stats.capped_by_bytes
             or stats.capped_by_records
         ):
@@ -1152,7 +1165,7 @@ class GatewayHTTPHandler:
         self._log.warning(
             "webui thread replay session_hash={} status={} limit={} source_bytes={} "
             "parsed_records={} selected_bytes={} selected_records={} compacted_deltas={} "
-            "manifest_rebuilt={} manifest_rebuild_ms={} capped_bytes={} capped_records={} "
+            "capped_bytes={} capped_records={} "
             "truncated_turn={} replay_ms={} build_ms={} json_ms={} gzip_ms={} gzip={} "
             "response_bytes={} event_loop_lag_ms={} total_ms={}",
             diagnostics.session_hash or "unknown",
@@ -1163,8 +1176,6 @@ class GatewayHTTPHandler:
             stats.selected_bytes,
             stats.selected_records,
             stats.compacted_delta_records,
-            stats.manifest_rebuilt,
-            stats.manifest_rebuild_ms,
             stats.capped_by_bytes,
             stats.capped_by_records,
             stats.truncated_oversized_turn,
@@ -1183,6 +1194,7 @@ class GatewayHTTPHandler:
         request: WsRequest,
         key: str,
         *,
+        history: HistoryReader,
         diagnostics: _WebUIThreadDiagnostics | None = None,
     ) -> Response:
         if not self.check_api_token(request):
@@ -1240,7 +1252,7 @@ class GatewayHTTPHandler:
             "session_version": self._read_session_version(decoded_key),
             "workspace_scope": scope.payload(),
         }
-        initial_revision = webui_transcript_revision(decoded_key, variant=revision_variant)
+        initial_revision = webui_transcript_revision(decoded_key, history=history, variant=revision_variant)
         if initial_revision is not None:
             etag = _quoted_etag(initial_revision)
             if _etag_matches(_case_insensitive_header(request.headers, "If-None-Match"), etag):
@@ -1248,7 +1260,7 @@ class GatewayHTTPHandler:
         build_started = time.perf_counter()
         replay_stats = diagnostics.transcript if diagnostics is not None else TranscriptReplayStats()
         data = build_webui_thread_response(
-            decoded_key,
+            decoded_key, history=history,
             augment_user_media=self.media.augment_transcript_media,
             augment_assistant_media=self.media.augment_transcript_media,
             augment_assistant_text=lambda text: self.media.rewrite_local_markdown_images(
@@ -1274,7 +1286,7 @@ class GatewayHTTPHandler:
             return _http_error(404, "webui thread not found")
         data["workspace_scope"] = scope.payload()
         revision_variant["session_version"] = self._read_session_version(decoded_key)
-        final_revision = webui_transcript_revision(decoded_key, variant=revision_variant)
+        final_revision = webui_transcript_revision(decoded_key, history=history, variant=revision_variant)
         response_headers = list(_NO_STORE_HEADERS)
         if final_revision is not None and final_revision == initial_revision:
             response_headers.append(("ETag", _quoted_etag(final_revision)))
@@ -1286,7 +1298,7 @@ class GatewayHTTPHandler:
             metrics=diagnostics.response if diagnostics is not None else None,
         )
 
-    def _handle_webui_trace_detail_get(self, request: WsRequest, key: str) -> Response:
+    def _handle_webui_trace_detail_get(self, request: WsRequest, key: str, *, history: HistoryReader) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         decoded_key = _decode_api_key(key)
@@ -1297,7 +1309,7 @@ class GatewayHTTPHandler:
         detail_ref = _query_first(_parse_query(request.path), "ref")
         if not detail_ref:
             return _http_error(400, "missing trace detail ref")
-        data = build_webui_trace_detail_response(decoded_key, detail_ref)
+        data = build_webui_trace_detail_response(decoded_key, detail_ref, history=history)
         if data is None:
             return _http_error(404, "trace detail not found")
         return _http_json_response(
@@ -1389,10 +1401,7 @@ class GatewayHTTPHandler:
         elif self.subagent_manager is not None:
             await self.subagent_manager.cancel_by_session(decoded_key)
         session_deleted = await self.session_manager.state.delete(decoded_key)
-        transcript_deleted = await asyncio.to_thread(delete_webui_thread, decoded_key)
-        return _http_json_response(
-            {"deleted": bool(draft_deleted or session_deleted or transcript_deleted)}
-        )
+        return _http_json_response({"deleted": bool(draft_deleted or session_deleted)})
 
     # -- Automation routes --------------------------------------------------
 

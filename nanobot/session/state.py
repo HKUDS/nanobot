@@ -14,8 +14,15 @@ from datetime import datetime
 from typing import Any, TypeVar, cast
 
 from nanobot.bus.events import InboundMessage
+from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind, HistoryReader
 from nanobot.session.keys import is_dream_session
-from nanobot.session.manager import Session, SessionIdentity, SessionPolicy, fork_session
+from nanobot.session.manager import (
+    Session,
+    SessionIdentity,
+    SessionInfo,
+    SessionPolicy,
+    fork_session,
+)
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.session.sqlite_store import SessionConflictError, SqliteSessionStore
 from nanobot.session.types import PARENT_SESSION_KEY, SessionTypes
@@ -692,6 +699,31 @@ class SessionState:
             metadata = {**baseline.metadata, _CHECKPOINT_KEY: committed.metadata[_CHECKPOINT_KEY]}
             draft._baseline = replace(baseline, metadata=metadata, provider_state=committed.provider_state)  # pyright: ignore[reportPrivateUsage]
 
+    async def migrate_history(
+        self, name: str, collect: Callable[[list[SessionInfo]], list[HistoryImport]],
+    ) -> None:
+        await self._execute(
+            None, lambda: self._store.migrate_history(name, collect), operation_name="migrate_history",
+        )
+
+    async def project_history(
+        self, key: str, project: Callable[[HistoryReader], _T],
+    ) -> _T:
+        return await self._execute(
+            key, lambda: self._store.project_history(key, project),
+            operation_name="project_history", write=False,
+        )
+
+    async def append_history(
+        self, key: str, facts: Sequence[HistoryFact], *, expected_generation: str,
+    ) -> None:
+        records = list(facts)
+        await self._execute(
+            key,
+            lambda: self._store.append_history(key, deepcopy(records), expected_generation=expected_generation),
+            operation_name="append_history",
+        )
+
     async def record_delivery(
         self,
         key: str,
@@ -933,6 +965,7 @@ class SessionState:
     async def fork(
         self, source_key: str, target_key: str, before_user_index: int,
         *, title: str | None = None,
+        history_projection: Callable[[Session], list[HistoryFact]] | None = None,
     ) -> Session | None:
         def commit() -> Session | None:
             def write() -> Session | None:
@@ -945,6 +978,11 @@ class SessionState:
                 if title:
                     target.metadata["title"] = title
                 self._commit(target)
+                copied = self._store.copy_history_prefix(source_key, target, before_user_index)
+                if not copied and history_projection is not None:
+                    facts = history_projection(target)
+                    facts.append(HistoryFact(HistoryKind.FORK_BOUNDARY, created_at_ms=int(target.created_at.timestamp() * 1000)))
+                    self._store.append_history(target.key, facts, expected_generation=target.generation)
                 return target
 
             target = self._store.run_write(write)

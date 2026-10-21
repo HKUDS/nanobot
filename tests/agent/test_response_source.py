@@ -23,12 +23,7 @@ from nanobot.providers.base import LLMProvider, LLMResponse, ProviderCallContext
 from nanobot.providers.factory import make_provider, provider_signature
 from nanobot.providers.fallback_provider import FallbackProvider
 from nanobot.utils.llm_runtime import LLMRuntime
-from nanobot.webui.transcript import (
-    WebUITranscriptRecorder,
-    append_transcript_object,
-    build_webui_thread_response,
-    webui_transcript_path,
-)
+from nanobot.webui.transcript import WebUITranscriptRecorder
 
 
 class AnswerProvider(LLMProvider):
@@ -65,7 +60,7 @@ def delivery(chat="chat", *, streaming=True):
 
 @pytest.mark.parametrize("streaming", [False, True])
 @pytest.mark.parametrize("failures", [0, 1, 2, 3])
-async def test_actual_candidate_is_delivered_and_replayed(
+async def test_actual_candidate_is_delivered_and_replayed(history,
     streaming,
     failures,
     tmp_path,
@@ -98,7 +93,7 @@ async def test_actual_candidate_is_delivered_and_replayed(
             channel="websocket", chat_id="chat", content=result.content or "",
         ), publish_completion=False)
     records = []
-    recorder = WebUITranscriptRecorder()
+    recorder = WebUITranscriptRecorder(None)
     while not bus.outbound.empty():
         msg = bus.outbound.get_nowait()
         if msg.event is not None and not isinstance(msg.event, StreamDeltaEvent | StreamEndEvent):
@@ -112,8 +107,8 @@ async def test_actual_candidate_is_delivered_and_replayed(
         records.append(record)
     # Completed segment is the durable record; token-sized deltas aren't needed on replay.
     for record in (r for r in records if r["event"] != "delta"):
-        append_transcript_object("websocket:chat", record)
-    replay = build_webui_thread_response("websocket:chat")
+        history.append("websocket:chat", record)
+    replay = history.build("websocket:chat")
     if failures == 3:
         assert all(not r.get("response_sources") for r in records)
         if replay is None:
@@ -300,7 +295,7 @@ def test_factory_captures_names_even_when_models_and_settings_are_identical():
     assert make_provider(config)._fallback_preset_names == ("renamed",)
 
 
-def test_old_history_and_malformed_identity_are_not_guessed(tmp_path, monkeypatch):
+def test_old_history_and_malformed_identity_are_not_guessed(history, tmp_path, monkeypatch):
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     records = [
         {"event": "message", "text": "legacy"},
@@ -313,8 +308,8 @@ def test_old_history_and_malformed_identity_are_not_guessed(tmp_path, monkeypatc
         ]},
     ]
     for record in records:
-        append_transcript_object("websocket:source-history", record)
-    replay = build_webui_thread_response("websocket:source-history")
+        history.append("websocket:source-history", record)
+    replay = history.build("websocket:source-history")
     assert replay is not None
     events = replay["events"]
     assert "response_sources" not in events[0]
@@ -355,27 +350,28 @@ async def test_runner_records_each_provider_when_streaming_times_out_and_recover
 
 
 @pytest.mark.parametrize("temporary", [False, True])
-async def test_websocket_wire_and_disk_replay_preserve_sources(tmp_path, monkeypatch, temporary):
+async def test_websocket_wire_and_disk_replay_preserve_sources(history, tmp_path, monkeypatch, temporary):
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     channel = WebSocketChannel({"allowFrom": ["*"]}, MessageBus(), gateway=MagicMock())
     channel._media.rewrite_local_markdown_images.side_effect = lambda text: text
-    channel._transcripts = WebUITranscriptRecorder()
+    channel._transcripts = WebUITranscriptRecorder(history.sessions)
+    generation, _ = await history.sessions.state.open_with_metadata("websocket:source-chat", {})
     channel._temporary_chats.should_persist_transcript = lambda _: not temporary
     channel._safe_send_to = AsyncMock()
     channel._subs["source-chat"] = {MagicMock()}
     sources = [{"provider": "xai", "model": "grok", "preset": "snapshot name", "fallback": True}]
-    metadata = {"webui_turn_id": "source-turn", "response_sources": sources}
+    metadata = {"webui_turn_id": "source-turn", "response_sources": sources, "_history_generation": generation}
     await channel.send_delta("source-chat", "Hello", metadata, stream_id="s")
     await channel.send_delta("source-chat", "", metadata, stream_id="s", stream_end=True)
     frames = [json.loads(call.args[1]) for call in channel._safe_send_to.call_args_list]
     assert [frame["event"] for frame in frames] == ["delta", "stream_end"]
     assert all(frame["response_sources"] == sources for frame in frames)
     if temporary:
-        assert not webui_transcript_path("websocket:source-chat").exists()
+        assert history.read("websocket:source-chat") == []
     else:
         # A fresh reader after an unrelated preset rename/delete sees the saved snapshot.
         sources[0]["preset"] = "renamed later"
-        replay = build_webui_thread_response("websocket:source-chat")
+        replay = history.build("websocket:source-chat")
         assert replay is not None
         end = next(e for e in replay["events"] if e["event"] == "stream_end")
         assert end["response_sources"][0]["preset"] == "snapshot name"

@@ -1009,7 +1009,7 @@ class AgentLoop:
         if session is None:
             return NO_EVENTS
         return self.turn_delivery_factory.session_events(
-            session_key, session.metadata,
+            session_key, session.metadata, generation=session.generation,
         )
 
     def _remember_session_route(
@@ -2093,7 +2093,7 @@ class AgentLoop:
             else:
                 ctx.session = await self.sessions.state.get(ctx.session_key)
         session = ctx.session
-        ctx.delivery.bind_session_generation(session.generation)
+        await ctx.delivery.bind_session_generation(session.generation)
         ctx.ephemeral = ctx.ephemeral or not session.policy.persist
         tools = ctx.tools if ctx.tools is not None else self.tools
         if session.policy.disabled_tools:
@@ -2173,6 +2173,9 @@ class AgentLoop:
         ctx.turn_scopes.append(GoalInputScope(ctx.msg))
         if result is not None:
             ctx.outbound = result
+            if cmd_ctx.raw.lower() == "/new":
+                current = await self.sessions.state.get_header(ctx.session_key)
+                await ctx.delivery.bind_session_generation(current.generation)
             # Shortcut commands skip BUILD and SAVE, so we must persist the
             # turn here so WebUI history hydration after turn_end sees the
             # message.  Mark messages with _command so get_history can filter

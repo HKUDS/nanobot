@@ -268,6 +268,19 @@ def canonical_records(path: Path, tables: tuple[str, ...] = ("sessions", "messag
                 for table in tables}
 
 
+def assert_canonical_preserved(before: dict, after: dict) -> None:
+    """Schema v2 may add a display-only owner, never model context or lost rows."""
+    key = "websocket:display-only"
+    existing = {row[0] for row in before["sessions"]}
+    added = [row for row in after["sessions"] if row[0] == key and key not in existing]
+    for row in added:
+        # A newly imported display transcript owns an empty Session. Only its
+        # identity/timestamps are new; it must not manufacture agent context.
+        assert row[3:7] == ["{}", None, 0, 1] and row[8:] == ["", "", None], row
+    comparable = {**after, "sessions": [row for row in after["sessions"] if row not in added]}
+    assert comparable == before, (comparable, before)
+
+
 def canonical_context(root: Path) -> dict:
     context = request(root, "/api/sessions/websocket%3Acanonical-only/context")
     # Tokenizer availability can alter estimates; stored message content is
@@ -518,14 +531,14 @@ def verify_data(root: Path, expected: str) -> bool:
     sqlite_expected = importlib.util.find_spec("nanobot.session.location") is not None
     canonical = canonical_records(database) if sqlite_expected else None
     if before["canonical"] is not None:
-        assert canonical == before["canonical"]
+        assert_canonical_preserved(before["canonical"], canonical)
     delivery = root / "account/.nanobot/delivery/outbox.sqlite3"
     if before.get("delivery") is not None:
         assert canonical_records(delivery, ("deliveries",)) == before["delivery"]
     if canonical is not None:
-        assert "websocket:display-only" not in {row[0] for row in canonical["sessions"]}
         # Display transcripts are not canonical agent context. Check the actual
         # imported message bodies too when the baseline predates SQLite.
+        assert not any(row[0] == "websocket:display-only" for row in canonical["messages"])
         for session_key in ("websocket:legacy-acceptance", "websocket:canonical-only"):
             messages = [json.loads(row[2]) for row in canonical["messages"] if row[0] == session_key]
             assert [(message["role"], message["content"]) for message in messages] == [

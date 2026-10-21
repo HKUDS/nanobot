@@ -310,7 +310,7 @@ async def test_session_input_is_projected_by_the_webui_coordinator(
         "source_session_key": "websocket:source",
         "target_session_key": "websocket:target",
     }
-    append_input = MagicMock()
+    append_input = AsyncMock()
     monkeypatch.setattr(wth, "append_session_message_input", append_input)
     coordinator = wth.WebuiTurnCoordinator(
         bus=bus,
@@ -324,12 +324,14 @@ async def test_session_input_is_projected_by_the_webui_coordinator(
             channel="system",
             chat_id="websocket:target",
             session_key="websocket:target",
+            session_generation=target_session.generation,
             metadata={SESSION_MESSAGE_METADATA_KEY: envelope},
         ),
         content="Review this",
     ))
 
-    append_input.assert_called_once()
+    append_input.assert_awaited_once()
+    assert append_input.await_args.kwargs["expected_generation"] == target_session.generation
     outbound = bus.publish_outbound.await_args.args[0]
     assert outbound.channel == "websocket"
     assert outbound.chat_id == "target"

@@ -14,7 +14,37 @@ import httpx
 import pytest
 
 from nanobot.release_feed import ReleaseFeed
-from scripts.verify_packaged_update import digest, feed_records, fixture_wheel, replace_once
+from scripts.verify_packaged_update import (
+    assert_canonical_preserved,
+    canonical_records,
+    digest,
+    feed_records,
+    fixture_wheel,
+    replace_once,
+)
+
+
+def test_display_migration_allows_an_empty_owner_without_masking_context_loss(tmp_path):
+    from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind
+    from nanobot.session.manager import Session
+    from nanobot.session.sqlite_store import SqliteSessionStore
+
+    store = SqliteSessionStore(tmp_path)
+    store.initialize(tmp_path)
+    session = Session(key="websocket:canonical-only")
+    session.add_message("user", "Keep this original context")
+    store.save(session)
+    before = canonical_records(store.path)
+    store.migrate_history("acceptance-import", lambda _: [HistoryImport(
+        key="websocket:display-only", facts=[HistoryFact(HistoryKind.ANSWER, {"text": "Display only"})],
+    )])
+    after = canonical_records(store.path)
+    assert_canonical_preserved(before, after)
+    assert_canonical_preserved(after, after)
+    with pytest.raises(AssertionError):
+        assert_canonical_preserved(before, {**after, "messages": []})
+    with pytest.raises(AssertionError):
+        assert_canonical_preserved(before, {**after, "sessions": after["sessions"][1:]})
 
 
 def wheel(tmp_path, version, *, worker=b"# worker\n", fallback=b"# fallback\n"):

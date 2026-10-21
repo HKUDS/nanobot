@@ -848,6 +848,7 @@ class TestToolEventProgress:
         assert request_ctx.metadata == {
             "injected_event": "subagent_result",
             "subagent_task_id": "sub-1",
+            "_history_generation": request_ctx.session_generation,
         }
         statuses = [
             message.event.status
@@ -905,6 +906,7 @@ class TestToolEventProgress:
                 "_wants_stream",
                 WEBSOCKET_TURN_OWNER_METADATA_KEY,
                 WEBUI_TURN_METADATA_KEY,
+                "_history_generation",
                 "latency_ms",
             }
             for message in visible_events

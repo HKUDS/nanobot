@@ -86,7 +86,7 @@ def test_ordered_upgrades_preserve_records_and_do_not_repeat_import(tmp_path, mo
     source.write_text("stale malformed source must not be imported again", encoding="utf-8")
     upgraded = SqliteSessionStore(tmp_path)
     upgraded.initialize(workspace)
-    assert _database_snapshot(store.path)[0] == 3
+    assert _database_snapshot(store.path)[0] == len(sqlite_store._SCHEMA_MIGRATIONS)
     loaded = upgraded.load(original.key)
     assert loaded is not None
     assert loaded.messages == original.messages
@@ -138,7 +138,7 @@ def test_failed_upgrade_rolls_back_schema_version_and_records_then_can_retry(tmp
         *migrations, add_archived, complete_upgrade,
     ))
     store.initialize(workspace)
-    assert _database_snapshot(store.path)[0] == 3
+    assert _database_snapshot(store.path)[0] == len(sqlite_store._SCHEMA_MIGRATIONS)
     loaded = store.load(original.key)
     assert loaded is not None
     assert loaded.messages == original.messages

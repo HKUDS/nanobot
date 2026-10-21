@@ -28,8 +28,6 @@ from nanobot.webui.transcript import WebUITranscriptRecorder
 async def test_committed_model_failure_continues_with_tool_results_without_resending(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("nanobot.webui.transcript.get_webui_dir", lambda: tmp_path / "webui")
-    monkeypatch.setattr("nanobot.webui.session_list_index.get_webui_dir", lambda: tmp_path / "webui")
     bus = MessageBus()
     sessions = SessionManager(tmp_path)
     session = sessions.get_or_create("websocket:chat")
@@ -146,8 +144,7 @@ async def test_recovery_continuation_runs_without_a_sustained_goal(
 async def test_recovery_preserves_turn_origin_until_the_next_user_turn(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, late_result: bool,
 ) -> None:
-    monkeypatch.setattr("nanobot.webui.transcript.get_webui_dir", lambda: tmp_path / "webui")
-    monkeypatch.setattr("nanobot.webui.session_list_index.get_webui_dir", lambda: tmp_path / "webui")
+    monkeypatch.setattr("nanobot.webui.history.get_webui_dir", lambda: tmp_path / "webui")
     bus = MessageBus()
     provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
@@ -208,12 +205,12 @@ async def test_recovery_preserves_turn_origin_until_the_next_user_turn(
             "message_id": None if late_result else "user-message",
             "turn_id": delivery.route.turn_id,
         }
-        recorder = WebUITranscriptRecorder()
+        recorder = WebUITranscriptRecorder(loop.sessions)
 
         async def record_progress(content, **kwargs):
-            recorder.prepare_and_append(
+            await recorder.prepare_and_append(
                 "chat", {"event": "message", "chat_id": "chat", "text": content, "kind": "progress"},
-                metadata=delivery.route.metadata, phase="activity",
+                metadata=delivery.delivery_message.metadata, phase="activity",
             )
 
         task = asyncio.create_task(loop._process_message(

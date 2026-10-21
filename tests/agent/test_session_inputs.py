@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agent.session_helpers import stop_loop
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -89,15 +88,14 @@ async def test_session_message_text_is_not_dispatched_as_a_slash_command(
     loop: AgentLoop,
 ) -> None:
     loop.sessions.save(loop.sessions.get_or_create("telegram:target"))
-    task = asyncio.create_task(loop.run())
-    try:
-        await loop.bus.publish_inbound(_message("/stop"))
-        response = await asyncio.wait_for(loop.bus.consume_outbound(), timeout=2)
+    await loop._dispatch_inbound(_message("/stop"))
+    await asyncio.wait_for(
+        asyncio.gather(*loop._active_tasks["telegram:target"]), timeout=2,
+    )
+    response = await asyncio.wait_for(loop.bus.consume_outbound(), timeout=2)
 
-        assert response.content == "Reviewed"
-        loop.provider.chat_stream_with_retry.assert_awaited_once()
-    finally:
-        await stop_loop(loop, task, timeout=2)
+    assert response.content == "Reviewed"
+    loop.provider.chat_stream_with_retry.assert_awaited_once()
 
 
 async def test_path_followup_reaches_running_turn(loop: AgentLoop) -> None:

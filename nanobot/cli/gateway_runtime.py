@@ -89,14 +89,26 @@ async def _deliver_to_channel(
         if session_generation is not None
         else raw_generation if isinstance(raw_generation, str) else None
     )
+    key = session_key or (raw_key if isinstance(raw_key, str) else None)
+    if key is None:
+        key = session_key_for_channel(
+            msg.channel, msg.chat_id, unified_session=unified_session,
+        )
+    if msg.channel == "websocket":
+        from nanobot.agent.turn_delivery import TurnRoute
+        from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
+        from nanobot.session.webui_turns import WebuiTurnRoutePolicy
+        from nanobot.webui.session_identity import webui_session_key
+
+        route = await WebuiTurnRoutePolicy(session_manager).admit(
+            TurnRoute(msg.channel, msg.chat_id, metadata), key, expected_generation,
+        )
+        metadata = route.metadata
+        if key == webui_session_key(msg.chat_id):
+            expected_generation = cast(str, metadata[HISTORY_GENERATION_METADATA_KEY])
     if metadata != (msg.metadata or {}):
         msg = replace(msg, metadata=metadata)
     if record and msg.channel != "cli" and msg.content.strip():
-        key = session_key or (raw_key if isinstance(raw_key, str) else None)
-        if key is None:
-            key = session_key_for_channel(
-                msg.channel, msg.chat_id, unified_session=unified_session,
-            )
         if expected_generation is None:
             # Cross-target sends admit their target before recording; subsequent
             # deletion or reset must still revoke this delivery's generation.
@@ -577,9 +589,11 @@ def _run_claimed_gateway(
     cron = CronService(cron_store_path, admission=bus.admission)
     trigger_store = LocalTriggerStore(config.workspace_path)
 
+    webui_route_policy = WebuiTurnRoutePolicy(session_manager)
     turn_delivery_factory = TurnDeliveryFactory(
         bus,
-        route_policy=WebuiTurnRoutePolicy(session_manager),
+        route_policy=webui_route_policy,
+        route_admission=webui_route_policy.admit,
     )
 
     tools = ToolRegistry()
