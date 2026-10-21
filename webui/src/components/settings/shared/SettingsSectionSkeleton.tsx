@@ -99,7 +99,7 @@ export function SettingsSectionSkeleton({ section, showRestart = false }: { sect
         <SettingsGroup><SettingsRow title={<>
           <div className="flex h-5 items-center"><div className={cn(block, "h-3.5 w-20")} /></div>
           <div className="mt-1 flex h-5 items-center"><div className={cn(block, "h-3 w-24")} /></div>
-        </>}><div className={cn(block, "h-9 w-36 rounded-control")} /></SettingsRow></SettingsGroup>
+        </>}><div className={cn(block, "settings-version-actions h-9 w-36 rounded-control")} /></SettingsRow></SettingsGroup>
       } links={
         <SettingsGroup>{[0, 1, 2].map((index) => <div key={index} className="settings-list-row flex items-center gap-3"><div className={cn(block, "h-4 w-4")} /><div className={cn(block, "h-3.5 w-28")} /></div>)}</SettingsGroup>
       } />;

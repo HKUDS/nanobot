@@ -63,7 +63,7 @@ export function VersionCheckRowView({
         {available && !checking && !onRequestUpdate &&
           <p className="mt-1 text-[13px] font-normal leading-5 text-muted-foreground">{t("settings.about.updateInstructions")}</p>}
       </>}>
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        <div className="settings-version-actions flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
           {(checking || (result && !available)) && <span role="status" aria-atomic="true" className={`min-w-0 text-[13px] leading-5 [overflow-wrap:anywhere] ${result?.type === "error" && !checking ? "text-destructive" : "text-muted-foreground"}`}>
             {checking ? <span className="inline-flex items-center gap-1.5">
               <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />
