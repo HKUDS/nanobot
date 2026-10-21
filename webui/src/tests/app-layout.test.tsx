@@ -3122,7 +3122,10 @@ describe("App layout", () => {
   });
 
   it("opens the settings view from the sidebar footer", async () => {
-    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/settings/version-check": { updateAvailable: null },
+    });
     render(<App />);
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     fireEvent.click(within(screen.getByRole("navigation", { name: "Sidebar navigation" }))
@@ -3138,7 +3141,8 @@ describe("App layout", () => {
     fireEvent.click(within(nav).getByRole("button", { name: "Capabilities" }));
     expect(screen.getByRole("switch", { name: "Image generation" })).toBeInTheDocument();
     fireEvent.click(within(nav).getByRole("button", { name: "About" }));
-    expect(await screen.findByRole("button", { name: "Check for updates" })).toBeInTheDocument();
+    expect(await screen.findByText("You're up to date")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check again" })).toBeInTheDocument();
   });
 
   it("restores the settings section from the URL hash after a page reload", async () => {
