@@ -50,9 +50,8 @@ describe("Settings overview and appearance", () => {
 
   it("delegates update actions and keeps saved-job details available in the shared view", () => {
     const requestUpdate = vi.fn();
-    const dismiss = vi.fn();
     const props = { currentVersion: "0.3.5", checking: false, onCheck: vi.fn(),
-      onRequestUpdate: requestUpdate, onDismiss: dismiss };
+      onRequestUpdate: requestUpdate };
     const { rerender } = render(<VersionCheckRowView {...props}
       result={{ type: "update", latestVersion: "0.3.7.dev2026101501",
         releaseUrl: "https://github.com/HKUDS/nanobot/releases/tag/v0.3.7.dev2026101501" }} />);
@@ -63,8 +62,6 @@ describe("Settings overview and appearance", () => {
     expect(screen.queryByRole("link", { name: "Installation guide" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /^Update$/ }));
     expect(requestUpdate).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss update notice" }));
-    expect(dismiss).toHaveBeenCalledTimes(1);
 
     rerender(<VersionCheckRowView {...props} currentVersion="0.3.6"
       result={{ type: "up-to-date" }} hasPendingUpdate />);
@@ -80,7 +77,7 @@ describe("Settings overview and appearance", () => {
       releaseStatus={{ channel: "stable", revision: 1, currentVersion: "0.3.6", state: "current" }}
       canChangeChannel onChangeChannel={changeChannel} onRequestUpdate={requestUpdate} />);
     const toggle = screen.getByRole("switch", { name: "Receive preview updates" });
-    expect(toggle).toHaveAccessibleDescription(/Updates still need confirmation/);
+    expect(toggle).toHaveAccessibleDescription("Try new features early.");
     fireEvent.click(document.querySelector(`label[for="${toggle.id}"]`)!);
     expect(changeChannel).toHaveBeenCalledTimes(1);
     expect(changeChannel).toHaveBeenCalledWith("preview");

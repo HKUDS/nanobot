@@ -48,7 +48,7 @@
       "receivePreview": "Recibir versiones preliminares",
       "previewWarning": "Esta versión preliminar puede tener errores.",
       "preview": "Preliminar",
-      "hint": "Prueba las novedades antes; pueden tener errores. Cada actualización requiere confirmación. Desactivar esta opción no instala una versión anterior.",
+      "hint": "Prueba las novedades antes.",
       "saving": "Guardando…",
       "saved": "Preferencia de actualización guardada",
       "ahead": "Esta versión es más reciente que la del canal seleccionado. No se instalará una versión anterior.",

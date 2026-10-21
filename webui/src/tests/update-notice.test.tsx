@@ -44,28 +44,20 @@ function Surface() {
 const view = (token = "host-a") => <ClientProvider client={client} token={token} checkUpdatesOnConnect><Surface /></ClientProvider>;
 
 describe("Sidebar update entry", () => {
-  it("closes the About notice, restores focus, and reveals it on an explicit check", async () => {
-    vi.useFakeTimers();
+  it("keeps About update actions available after dismissing the sidebar notice", async () => {
     const fetcher = vi.fn(async () => jsonResponse(available()));
     vi.stubGlobal("fetch", fetcher);
-    render(<ClientProvider client={client} token="dismiss-about" checkUpdatesOnConnect>
+    const { rerender } = render(view("dismiss-sidebar"));
+    fireEvent.click(await screen.findByRole("button", { name: "Update available v0.3.6" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss update notice" }));
+    rerender(<ClientProvider client={client} token="dismiss-sidebar" checkUpdatesOnConnect>
+      <Surface />
       <AboutSettings settings={settingsPayload()} onRequestUpdate={vi.fn()} />
     </ClientProvider>);
-    await act(async () => {});
-    const dismiss = screen.getByRole("button", { name: "Dismiss update notice" });
-    act(() => dismiss.focus());
-    fireEvent.click(dismiss);
-    expect(screen.queryByText("Update available")).toBeNull();
-    expect(screen.queryByRole("button", { name: /^Update$/ })).toBeNull();
-    const check = screen.getByRole("button", { name: "Check for updates" });
-    expect(check).toHaveFocus();
-    fireEvent.click(check);
-    expect(screen.getByRole("button", { name: "Checking..." })).toBeDisabled();
-    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
-    expect(screen.getByText("Update available")).toBeVisible();
     expect(screen.getByRole("button", { name: /^Update$/ })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Dismiss update notice" })).toBeVisible();
-    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("button", { name: "Update available v0.3.6" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Dismiss update notice" })).toBeNull();
+    expect(fetcher).toHaveBeenCalledOnce();
   });
 
   it("acknowledges every manual check, including fast cached results, failure and slow retry", async () => {

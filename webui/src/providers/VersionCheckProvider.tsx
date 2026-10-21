@@ -20,7 +20,6 @@ interface VersionCheckState {
   canChangeChannel: boolean;
   changingChannel: boolean;
   channelError: string;
-  channelSaved: boolean;
   changeChannel: (channel: UpdateChannel) => Promise<void>;
 }
 
@@ -31,7 +30,7 @@ const VersionCheckContext = createContext<VersionCheckState | null>(null);
 function createVersionCheck(token: string, channels: boolean, client?: WebUIMutationTransport) {
   let snapshot: Omit<VersionCheckState, "check" | "dismiss" | "changeChannel"> = {
     result: null, checking: false, dismissedVersion: null, installationMethod: null,
-    releaseStatus: null, canChangeChannel: false, changingChannel: false, channelError: "", channelSaved: false,
+    releaseStatus: null, canChangeChannel: false, changingChannel: false, channelError: "",
   };
   let pending: Promise<void> | null = null;
   const listeners = new Set<() => void>();
@@ -69,10 +68,10 @@ function createVersionCheck(token: string, channels: boolean, client?: WebUIMuta
     changeChannel: async (channel: UpdateChannel) => {
       if (!channels || !client || !snapshot.releaseStatus || !snapshot.canChangeChannel || snapshot.changingChannel || pending) return;
       const revision = snapshot.releaseStatus.revision;
-      update({ changingChannel: true, channelError: "", channelSaved: false });
+      update({ changingChannel: true, channelError: "" });
       try {
         const selection = await changeUpdateChannel(client, channel, revision);
-        update({ releaseStatus: { ...snapshot.releaseStatus!, ...selection }, result: null, dismissedVersion: null, channelSaved: true });
+        update({ releaseStatus: { ...snapshot.releaseStatus!, ...selection }, result: null, dismissedVersion: null });
       } catch (error) {
         update({ channelError: (error as Error).message });
       } finally {

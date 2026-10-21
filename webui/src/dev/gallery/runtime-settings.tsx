@@ -70,7 +70,7 @@ function ChatBindingPreview() {
 function AboutPreview() {
   const { t } = useGalleryTranslation();
   const [mode, setMode] = useState<"ready" | "checking" | "up-to-date" | "update" | "preview" | "error">("ready");
-  const [notice, setNotice] = useState<"preferenceSaved" | "updateRequested" | "dismissed" | "selectedLink" | null>(null);
+  const [notice, setNotice] = useState<"updateRequested" | "selectedLink" | null>(null);
   const [channel, setChannel] = useState<UpdateChannel>("stable");
   const result: VersionCheckState = mode === "up-to-date" ? { type: mode }
     : mode === "update" ? { type: mode, latestVersion: "0.3.6", pypiUrl: "https://pypi.org/project/nanobot-ai/" }
@@ -84,10 +84,8 @@ function AboutPreview() {
         releaseStatus={{ channel, revision: 0, currentVersion: "0.3.5", state: "current" }}
         canChangeChannel onChangeChannel={async (value) => {
           setChannel(value);
-          setNotice("preferenceSaved");
         }}
-        onRequestUpdate={mode === "preview" ? () => setNotice("updateRequested") : undefined}
-        onDismiss={() => { setMode("ready"); setNotice("dismissed"); }} />}
+        onRequestUpdate={mode === "preview" ? () => setNotice("updateRequested") : undefined} />}
       starLink={<StarLinkView onActivate={() => setNotice("selectedLink")} />} />
     {notice ? <p role="status" className="mt-4 text-xs text-muted-foreground">{t(`controls.about.${notice}`)}</p> : null}</>;
 }

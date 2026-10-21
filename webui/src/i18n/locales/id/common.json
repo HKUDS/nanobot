@@ -48,7 +48,7 @@
       "receivePreview": "Terima pembaruan pratinjau",
       "previewWarning": "Ini adalah versi pratinjau dan mungkin memiliki bug.",
       "preview": "Pratinjau",
-      "hint": "Coba fitur baru lebih awal; pratinjau mungkin memiliki bug. Pembaruan tetap perlu dikonfirmasi. Menonaktifkan opsi ini tidak menurunkan versi nanobot.",
+      "hint": "Coba fitur baru lebih awal.",
       "saving": "Menyimpan…",
       "saved": "Preferensi pembaruan disimpan",
       "ahead": "Versi ini lebih baru dari saluran yang dipilih. Versi lama tidak akan diinstal.",

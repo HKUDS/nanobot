@@ -48,7 +48,7 @@
       "receivePreview": "Receive preview updates",
       "previewWarning": "This is a preview release and may have bugs.",
       "preview": "Preview",
-      "hint": "Try new features early; previews may have bugs. Updates still need confirmation. Turning this off does not downgrade nanobot.",
+      "hint": "Try new features early.",
       "saving": "Saving…",
       "saved": "Update preference saved",
       "ahead": "This version is ahead of the selected channel. No downgrade will be installed.",
