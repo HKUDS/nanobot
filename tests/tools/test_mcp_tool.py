@@ -626,7 +626,7 @@ async def test_execute_contains_malformed_success_result() -> None:
 
 
 @pytest.mark.asyncio
-async def test_registry_adds_retry_hint_to_malformed_mcp_result() -> None:
+async def test_registry_adds_error_hint_to_malformed_mcp_result() -> None:
     async def call_tool(_name: str, arguments: dict) -> object:
         return SimpleNamespace(content=None)
 
@@ -638,7 +638,10 @@ async def test_registry_adds_retry_hint_to_malformed_mcp_result() -> None:
 
     assert is_tool_error_result(result)
     assert "MCP tool returned malformed content" in result
-    assert "Analyze the error above and try a different approach" in result
+    assert (
+        "[Consider this result in the context of the user's goal "
+        "and decide whether and how to proceed.]"
+    ) in result
 
 
 @pytest.mark.asyncio
@@ -779,8 +782,8 @@ def _make_tool_def(name: str) -> SimpleNamespace:
 
 
 def _make_fake_session(tool_names: list[str]) -> SimpleNamespace:
-    async def initialize() -> None:
-        return None
+    async def initialize() -> SimpleNamespace:
+        return SimpleNamespace(capabilities=SimpleNamespace(tools=SimpleNamespace()))
 
     async def list_tools() -> SimpleNamespace:
         return SimpleNamespace(tools=[_make_tool_def(name) for name in tool_names], nextCursor=None)
@@ -1914,8 +1917,8 @@ def _make_fake_session_with_capabilities(
     resource_names: list[str] | None = None,
     prompt_names: list[str] | None = None,
 ) -> SimpleNamespace:
-    async def initialize() -> None:
-        return None
+    async def initialize() -> SimpleNamespace:
+        return SimpleNamespace(capabilities=SimpleNamespace(tools=SimpleNamespace()))
 
     async def list_tools() -> SimpleNamespace:
         return SimpleNamespace(tools=[_make_tool_def(name) for name in tool_names], nextCursor=None)
@@ -1930,7 +1933,7 @@ def _make_fake_session_with_capabilities(
                     description=f"{rname} resource",
                 )
             )
-        return SimpleNamespace(resources=resources)
+        return SimpleNamespace(resources=resources, nextCursor=None)
 
     async def list_prompts() -> SimpleNamespace:
         prompts = []
@@ -1942,7 +1945,7 @@ def _make_fake_session_with_capabilities(
                     arguments=None,
                 )
             )
-        return SimpleNamespace(prompts=prompts)
+        return SimpleNamespace(prompts=prompts, nextCursor=None)
 
     return SimpleNamespace(
         initialize=initialize,
@@ -1950,6 +1953,80 @@ def _make_fake_session_with_capabilities(
         list_resources=list_resources,
         list_prompts=list_prompts,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("catalog", ["resources", "prompts"])
+async def test_connect_registers_all_resource_and_prompt_pages(
+    fake_mcp_runtime: dict[str, object | None], catalog: str,
+) -> None:
+    session = _make_fake_session_with_capabilities(["tool_a"], ["res_b"], ["prompt_c"])
+    definition = (
+        SimpleNamespace(name="second", uri="file:///second", description="second resource")
+        if catalog == "resources"
+        else SimpleNamespace(name="second", description="second prompt", arguments=None)
+    )
+    pages = {
+        None: SimpleNamespace(**{catalog: []}, nextCursor=""),
+        "": SimpleNamespace(**{catalog: []}, nextCursor="opaque:+/="),
+        "opaque:+/=": SimpleNamespace(**{catalog: [definition]}, nextCursor=None),
+    }
+    cursors: list[str | None] = []
+
+    async def list_pages(*, params: SimpleNamespace | None = None) -> SimpleNamespace:
+        cursor = params.cursor if params is not None else None
+        cursors.append(cursor)
+        return pages[cursor]
+
+    setattr(session, f"list_{catalog}", list_pages)
+    fake_mcp_runtime["session"] = session
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers({"test": MCPServerConfig(command="fake")}, registry)
+    try:
+        assert set(stacks) == {"test"}
+        assert cursors == [None, "", "opaque:+/="]
+        kind = "resource" if catalog == "resources" else "prompt"
+        other = "mcp_test_prompt_prompt_c" if catalog == "resources" else "mcp_test_resource_res_b"
+        assert set(registry.tool_names) == {"mcp_test_tool_a", other, f"mcp_test_{kind}_second"}
+    finally:
+        for stack in stacks.values():
+            await stack.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("catalog", ["resources", "prompts"])
+@pytest.mark.parametrize("failure", ["request-error", "repeated-cursor"])
+async def test_connect_failed_catalog_pagination_preserves_other_capabilities(
+    fake_mcp_runtime: dict[str, object | None], catalog: str, failure: str,
+) -> None:
+    session = _make_fake_session_with_capabilities(["tool_a"], ["res_b"], ["prompt_c"])
+    first_page = await getattr(session, f"list_{catalog}")()
+    first_page.nextCursor = "next"
+    cursors: list[str | None] = []
+
+    async def list_pages(*, params: SimpleNamespace | None = None) -> SimpleNamespace:
+        cursor = params.cursor if params is not None else None
+        cursors.append(cursor)
+        if cursor is None:
+            return first_page
+        if failure == "request-error":
+            raise RuntimeError("second page failed")
+        if len(cursors) > 2:
+            raise AssertionError("A repeated cursor must not be requested again")
+        return SimpleNamespace(**{catalog: []}, nextCursor="next")
+
+    setattr(session, f"list_{catalog}", list_pages)
+    fake_mcp_runtime["session"] = session
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers({"test": MCPServerConfig(command="fake")}, registry)
+    try:
+        assert set(stacks) == {"test"}
+        assert cursors == [None, "next"]
+        other = "mcp_test_prompt_prompt_c" if catalog == "resources" else "mcp_test_resource_res_b"
+        assert set(registry.tool_names) == {"mcp_test_tool_a", other}
+    finally:
+        for stack in stacks.values():
+            await stack.aclose()
 
 
 @pytest.mark.asyncio
@@ -1972,6 +2049,85 @@ async def test_connect_registers_resources_and_prompts(
     assert "mcp_test_tool_a" in registry.tool_names
     assert "mcp_test_resource_res_b" in registry.tool_names
     assert "mcp_test_prompt_prompt_c" in registry.tool_names
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("catalog", ["resources", "prompts"])
+@pytest.mark.parametrize("failure", ["http", "rpc"])
+async def test_discovery_failure_logs_do_not_expose_credentials(
+    fake_mcp_runtime: dict[str, object | None],
+    monkeypatch: pytest.MonkeyPatch,
+    catalog: str,
+    failure: str,
+) -> None:
+    from mcp.shared.exceptions import McpError
+
+    secrets = ("userinfo-secret", "path-secret", "signature-secret", "message-secret")
+    url = (
+        f"https://user:{secrets[0]}@mcp.example.com/{secrets[1]}"
+        f"?signature={secrets[2]}"
+    )
+    if failure == "http":
+        response = httpx.Response(403, request=httpx.Request("POST", url))
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            error = exc
+    else:
+        error = McpError(code=-32603, message=f"Discovery failed for {url}: {secrets[3]}")
+
+    session = _make_fake_session_with_capabilities(["tool_a"], ["res_b"], ["prompt_c"])
+    setattr(session, f"list_{catalog}", AsyncMock(side_effect=error))
+    fake_mcp_runtime["session"] = session
+    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
+    monkeypatch.setattr(mcp_mod, "_probe_http_url", AsyncMock(return_value=True))
+    messages: list[str] = []
+    sink = mcp_mod.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+    registry = ToolRegistry()
+    stacks = {}
+    try:
+        stacks = await connect_mcp_servers(
+            {"test": MCPServerConfig(type="streamableHttp", url=url)}, registry
+        )
+        assert set(stacks) == {"test"}
+        other = "mcp_test_prompt_prompt_c" if catalog == "resources" else "mcp_test_resource_res_b"
+        assert set(registry.tool_names) == {"mcp_test_tool_a", other}
+        logs = "\n".join(messages)
+        assert not any(secret in logs for secret in secrets)
+        assert f"MCP server 'test': {catalog} not supported or failed: {type(error).__name__}" in logs
+    finally:
+        for stack in stacks.values():
+            await stack.aclose()
+        mcp_mod.logger.remove(sink)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("catalog", ["resources", "prompts"])
+async def test_connect_accepts_servers_without_tools_capability(
+    fake_mcp_runtime: dict[str, object | None], catalog: str,
+) -> None:
+    from mcp.shared.exceptions import McpError
+
+    session = _make_fake_session_with_capabilities(
+        tool_names=[],
+        resource_names=["document"] if catalog == "resources" else [],
+        prompt_names=["review"] if catalog == "prompts" else [],
+    )
+    session.initialize = AsyncMock(
+        return_value=SimpleNamespace(capabilities=SimpleNamespace(tools=None)),
+    )
+    session.list_tools = AsyncMock(side_effect=McpError(code=-32601, message="Method not found"))
+    fake_mcp_runtime["session"] = session
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers({"test": MCPServerConfig(command="fake")}, registry)
+    try:
+        assert set(stacks) == {"test"}
+        expected = "mcp_test_resource_document" if catalog == "resources" else "mcp_test_prompt_review"
+        assert registry.tool_names == [expected]
+        session.list_tools.assert_not_awaited()
+    finally:
+        for stack in stacks.values():
+            await stack.aclose()
 
 
 # ---------------------------------------------------------------------------

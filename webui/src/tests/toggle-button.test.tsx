@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { ToggleButton } from "@/components/settings/ToggleButton";
+import { ToggleButton } from "@/components/ui/toggle-button";
 
 describe("ToggleButton", () => {
   it("uses shared theme colors and compact dimensions in both states", () => {

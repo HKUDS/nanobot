@@ -1147,19 +1147,21 @@ async def connect_mcp_servers(
 
             read = _filter_malformed_mcp_progress_notifications(read, name)
             session = await server_stack.enter_async_context(ClientSession(read, write))
-            await session.initialize()
+            initialization = await session.initialize()
 
             # Finish discovery before registering tools so a failed page leaves no partial set.
-            page = await session.list_tools()
-            tool_defs = list(page.tools)
-            seen_cursors: set[str] = set()
-            while page.nextCursor is not None:
-                cursor = page.nextCursor
-                if cursor in seen_cursors:
-                    raise ValueError("MCP tools/list returned a repeated pagination cursor")
-                seen_cursors.add(cursor)
-                page = await session.list_tools(params=types.PaginatedRequestParams(cursor=cursor))
+            tool_defs: list[MCPToolDefinition] = []
+            if initialization.capabilities.tools is not None:
+                page = await session.list_tools()
                 tool_defs.extend(page.tools)
+                seen_cursors: set[str] = set()
+                while page.nextCursor is not None:
+                    cursor = page.nextCursor
+                    if cursor in seen_cursors:
+                        raise ValueError("MCP tools/list returned a repeated pagination cursor")
+                    seen_cursors.add(cursor)
+                    page = await session.list_tools(params=types.PaginatedRequestParams(cursor=cursor))
+                    tool_defs.extend(page.tools)
 
             enabled_tools = set(cfg.enabled_tools)
             allow_all_tools = "*" in enabled_tools
@@ -1214,7 +1216,18 @@ async def connect_mcp_servers(
             if register_extras:
                 try:
                     resources_result = await session.list_resources()
-                    for resource in resources_result.resources:
+                    resources = list(resources_result.resources)
+                    resource_cursors: set[str] = set()
+                    while resources_result.nextCursor is not None:
+                        cursor = resources_result.nextCursor
+                        if cursor in resource_cursors:
+                            raise ValueError("MCP resources/list returned a repeated pagination cursor")
+                        resource_cursors.add(cursor)
+                        resources_result = await session.list_resources(
+                            params=types.PaginatedRequestParams(cursor=cursor)
+                        )
+                        resources.extend(resources_result.resources)
+                    for resource in resources:
                         wrapper = MCPResourceWrapper(
                             session, name, resource, resource_timeout=cfg.tool_timeout
                         )
@@ -1227,12 +1240,23 @@ async def connect_mcp_servers(
                         )
                 except Exception as e:
                     logger.debug(
-                        "MCP server '{}': resources not supported or failed: {}", name, e
+                        "MCP server '{}': resources not supported or failed: {}", name, type(e).__name__
                     )
 
                 try:
                     prompts_result = await session.list_prompts()
-                    for prompt in prompts_result.prompts:
+                    prompts = list(prompts_result.prompts)
+                    prompt_cursors: set[str] = set()
+                    while prompts_result.nextCursor is not None:
+                        cursor = prompts_result.nextCursor
+                        if cursor in prompt_cursors:
+                            raise ValueError("MCP prompts/list returned a repeated pagination cursor")
+                        prompt_cursors.add(cursor)
+                        prompts_result = await session.list_prompts(
+                            params=types.PaginatedRequestParams(cursor=cursor)
+                        )
+                        prompts.extend(prompts_result.prompts)
+                    for prompt in prompts:
                         wrapper = MCPPromptWrapper(
                             session, name, prompt, prompt_timeout=cfg.tool_timeout
                         )
@@ -1245,7 +1269,7 @@ async def connect_mcp_servers(
                         )
                 except Exception as e:
                     logger.debug(
-                        "MCP server '{}': prompts not supported or failed: {}", name, e
+                        "MCP server '{}': prompts not supported or failed: {}", name, type(e).__name__
                     )
             else:
                 logger.info(

@@ -4,13 +4,13 @@ import { useTranslation } from "react-i18next";
 import {
   CapabilityMentionToken,
   splitCapabilityMentionSegments,
-  type CapabilityMentionSegment,
 } from "@/components/CliAppMentionText";
 import {
   INLINE_TOKEN_HIGHLIGHT_COLOR,
   InlineTokenHighlight,
 } from "@/components/InlineTokenHighlight";
 import type { CliAppInfo, McpPresetInfo, SessionMention } from "@/lib/types";
+import type { CapabilityMentionSegment } from "@/lib/composer-mention-text";
 
 type SkillReferenceSegment =
   | { kind: "text"; text: string }

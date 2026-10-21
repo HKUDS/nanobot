@@ -9,6 +9,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
+from nanobot.bus.delivery import DeliveryRequest
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.notification_delivery import notification_is_deliverable
 from nanobot.bus.outbound_events import (
@@ -19,7 +20,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventPublisher
-from nanobot.channels.notification_routes import notification_metadata
+from nanobot.channels.notification_routes import notification_metadata, system_reply_metadata
 from nanobot.events import (
     AgentEvent,
     ContextCompactionEvent,
@@ -180,13 +181,7 @@ class TurnDeliveryFactory:
         channel, chat_id = (
             msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
         )
-        metadata: dict[str, Any] = {}
-        if (
-            channel == "slack"
-            and session_key.startswith("slack:")
-            and session_key.count(":") >= 2
-        ):
-            metadata["slack"] = {"thread_ts": session_key.split(":", 2)[2]}
+        metadata = system_reply_metadata(channel, session_key)
         if origin_message_id := msg.metadata.get("origin_message_id"):
             metadata["origin_message_id"] = origin_message_id
         return TurnRoute(channel=channel, chat_id=chat_id, metadata=metadata)
@@ -236,6 +231,11 @@ class TurnDelivery:
     @property
     def streaming(self) -> bool:
         return self._stream_base_id is not None
+
+    def bind_session_generation(self, generation: str) -> None:
+        """Attach the admitted session identity to all later lifecycle events."""
+        self.delivery_message.session_generation = generation
+        self.lifecycle_message.session_generation = generation
 
     def remember_session_route(self, session_metadata: dict[str, Any]) -> None:
         """Keep only routing fields needed to deliver a later idle notification."""
@@ -342,6 +342,12 @@ class TurnDelivery:
                     "response_sources": [dataclasses.asdict(self._response_source)],
                 })
             if response.channel != "websocket" or stop_reason != "error":
+                delivery = DeliveryRequest.from_context(
+                    self.input_message.metadata, self.session_key,
+                    self.delivery_message.session_generation,
+                )
+                if delivery is not None:
+                    response = dataclasses.replace(response, delivery=delivery)
                 await self.bus.publish_outbound(response)
         elif self.lifecycle_message.channel == "cli":
             await self.bus.publish_outbound(

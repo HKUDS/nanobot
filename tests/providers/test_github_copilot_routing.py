@@ -21,7 +21,6 @@ def _make_copilot_provider() -> OpenAICompatProvider:
     p.default_model = "github_copilot/gpt-5.4-mini"
     p._spec = find_by_name("github_copilot")
     p._effective_base = "https://api.githubcopilot.com"
-    p._api_type = "auto"
     p._responses_failures = {}
     p._responses_tripped_at = {}
     return p
@@ -31,6 +30,7 @@ def test_should_use_responses_api_allows_github_copilot_non_openai_base():
     """github_copilot bypasses the direct-OpenAI base check and still opts in for GPT-5."""
     provider = _make_copilot_provider()
     assert provider._should_use_responses_api("github_copilot/gpt-5.4-mini", None) is True
+    assert provider._should_use_responses_api("github_copilot/gpt-6-astra", None) is True
     assert provider._should_use_responses_api("github_copilot/o3", None) is True
 
 
@@ -48,6 +48,7 @@ def test_build_responses_body_strips_github_copilot_prefix():
         provider_context=ProviderCallContext(context_window_tokens=128_000),
     )
     assert body["model"] == "gpt-5.4-mini"
+    assert body["include"] == ["reasoning.encrypted_content"]
     assert "context_management" not in body
 
 

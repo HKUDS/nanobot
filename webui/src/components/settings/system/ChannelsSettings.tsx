@@ -2,7 +2,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { SETTINGS_SEARCH_INPUT_CLASS } from "@/components/settings/shared/SettingsControls";
 import { CatalogSkeleton } from "@/components/settings/shared/CatalogSkeleton";
@@ -102,7 +102,7 @@ export function ChannelsSettings({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute start-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-          <Input type="search" value={query} onChange={(event) => setQuery(event.target.value)}
+          <SearchInput type="search" value={query} onChange={(event) => setQuery(event.target.value)}
             aria-label={t("settings.channels.search")}
             placeholder={t("settings.channels.search")}
             className={`h-12 ps-11 text-[15px] ${SETTINGS_SEARCH_INPUT_CLASS}`} />

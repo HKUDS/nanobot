@@ -1,5 +1,6 @@
 import errno
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,7 @@ from nanobot.utils import helpers, token_encoding
 from nanobot.utils.helpers import (
     _write_text_atomic,
     atomic_write_lines,
+    atomic_write_text,
     content_with_media_breadcrumbs,
     split_message,
     truncate_text_to_tokens,
@@ -159,11 +161,12 @@ def test_write_text_atomic_fsyncs_file_and_parent_directory(
     def fake_fsync(fd: int) -> None:
         fsync_calls.append(fd)
 
-    monkeypatch.setattr(helpers.os, "fsync", fake_fsync)
-    monkeypatch.setattr(helpers.os, "open", lambda path, flags: 12345)
-    monkeypatch.setattr(helpers.os, "close", lambda fd: closed_fds.append(fd))
+    with monkeypatch.context() as patch:
+        patch.setattr(helpers.os, "fsync", fake_fsync)
+        patch.setattr(helpers.os, "open", lambda path, flags: 12345)
+        patch.setattr(helpers.os, "close", lambda fd: closed_fds.append(fd))
 
-    _write_text_atomic(target, '{"approved": {}}')
+        _write_text_atomic(target, '{"approved": {}}')
 
     assert target.read_text(encoding="utf-8") == '{"approved": {}}'
     assert len(fsync_calls) == 2
@@ -181,13 +184,27 @@ def test_write_text_atomic_keeps_file_when_directory_fsync_is_unsupported(
     def fake_open(path, flags):
         raise OSError("directory fsync unsupported")
 
-    monkeypatch.setattr(helpers.os, "fsync", lambda fd: fsync_calls.append(fd))
-    monkeypatch.setattr(helpers.os, "open", fake_open)
+    with monkeypatch.context() as patch:
+        patch.setattr(helpers.os, "fsync", lambda fd: fsync_calls.append(fd))
+        patch.setattr(helpers.os, "open", fake_open)
 
-    _write_text_atomic(target, '{"pending": {}}')
+        _write_text_atomic(target, '{"pending": {}}')
 
     assert target.read_text(encoding="utf-8") == '{"pending": {}}'
     assert len(fsync_calls) == 1
+
+
+def test_atomic_write_text_creates_parent_and_replaces_exact_content(tmp_path: Path) -> None:
+    target = tmp_path / "runs" / "record.json"
+    atomic_write_text(target, "old")
+    assert target.read_text(encoding="utf-8") == "old"
+
+    content = '{"message": "café"}'
+    atomic_write_text(target, content)
+    assert target.read_text(encoding="utf-8") == content
+
+    atomic_write_text(target, "")
+    assert target.read_text(encoding="utf-8") == ""
 
 
 def test_atomic_write_lines_round_trip_replaces_target(tmp_path: Path) -> None:
@@ -212,8 +229,14 @@ def test_atomic_write_lines_empty_input_replaces_file_with_empty(tmp_path: Path)
 
 
 @pytest.mark.parametrize("error_type", [RuntimeError, KeyboardInterrupt])
-def test_atomic_write_lines_cleans_temp_when_replace_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error_type: type[BaseException]
+@pytest.mark.parametrize(
+    "write",
+    [atomic_write_text, lambda path, text: atomic_write_lines(path, [text])],
+    ids=["text", "lines"],
+)
+def test_atomic_writes_clean_temp_when_replace_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error_type: type[BaseException],
+    write: Callable[[Path, str], None],
 ) -> None:
     """A failed replace must not leave a temp file or change the target."""
     target = tmp_path / "history.jsonl"
@@ -225,7 +248,7 @@ def test_atomic_write_lines_cleans_temp_when_replace_fails(
     monkeypatch.setattr(helpers.os, "replace", fail_replace)
 
     with pytest.raises(error_type, match="replace failed"):
-        atomic_write_lines(target, ["new"])
+        write(target, "new")
 
     assert target.read_text(encoding="utf-8") == "kept\n"
     assert list(tmp_path.glob("*.tmp")) == []
@@ -279,8 +302,14 @@ def test_atomic_write_lines_suppresses_directory_permission_error(
 
 
 @pytest.mark.parametrize("error_number", [errno.EINVAL, errno.EIO], ids=["unsupported", "io-error"])
-def test_atomic_write_lines_directory_fsync_errors(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error_number: int
+@pytest.mark.parametrize(
+    ("write", "expected_content"),
+    [(atomic_write_text, "ok"), (lambda path, text: atomic_write_lines(path, [text]), "ok\n")],
+    ids=["text", "lines"],
+)
+def test_atomic_writes_directory_fsync_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error_number: int,
+    write: Callable[[Path, str], None], expected_content: str,
 ) -> None:
     """Only unsupported directory fsync errors are ignored; descriptors always close.
 
@@ -320,13 +349,13 @@ def test_atomic_write_lines_directory_fsync_errors(
     monkeypatch.setattr(helpers.os, "fsync", fsync_then_error)
 
     if error_number == errno.EINVAL:
-        atomic_write_lines(target, ["ok"])
+        write(target, "ok")
     else:
         with pytest.raises(OSError) as exc_info:
-            atomic_write_lines(target, ["ok"])
+            write(target, "ok")
         assert exc_info.value.errno == error_number
 
-    assert target.read_text(encoding="utf-8") == "ok\n"
+    assert target.read_text(encoding="utf-8") == expected_content
     assert fsync_calls == 2
     assert opened == [(str(tmp_path), directory_fd)]
     assert closed == [directory_fd]

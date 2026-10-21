@@ -5,7 +5,7 @@ import { MessageBlockMenuActions, MessageBubble } from "@/components/MessageBubb
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { setAppLanguage } from "@/i18n";
 import * as clipboard from "@/lib/clipboard";
-import { formatMessageEndTime } from "@/lib/format";
+import { formatMessageEndTime } from "@/lib/format-time";
 import type {
   CliAppInfo,
   McpPresetInfo,
@@ -209,12 +209,12 @@ describe("MessageBubble", () => {
     const pill = screen.getByText("hello");
 
     expect(row).toHaveClass("ml-auto", "flex");
-    expect(row).toHaveAttribute("data-user-text-bubble", "true");
+    expect(pill.parentElement).toHaveAttribute("data-user-text-bubble", "true");
     expect(pill).toHaveClass("ml-auto", "w-fit", "rounded-floating");
     expect(pill).toHaveTextContent("hello");
   });
 
-  it("aligns the context trigger to the first text line only when text leads the user block", () => {
+  it("anchors the context trigger to the text even below an image or quote", () => {
     const message: UIMessage = {
       id: "u-alignment", role: "user", content: "first line\nsecond line", createdAt: 0,
     };
@@ -222,15 +222,17 @@ describe("MessageBubble", () => {
     const { container, rerender } = render(
       <MessageBubble message={message} contextMenu={contextMenu} />,
     );
-    const row = container.firstElementChild!;
-    expect(row).toHaveAttribute("data-user-text-bubble", "true");
-    expect(screen.getByRole("button", { name: "Message actions" }).parentElement).toBe(row);
+    const anchor = container.querySelector("[data-user-text-bubble]")!;
+    expect(anchor).toHaveClass("relative");
+    expect(screen.getByRole("button", { name: "Message actions" }).parentElement).toBe(anchor);
 
     rerender(<MessageBubble message={{ ...message, images: [{ name: "image.png" }] }} contextMenu={contextMenu} />);
-    expect(row).not.toHaveAttribute("data-user-text-bubble");
+    expect(screen.getByRole("button", { name: "Message actions" }).parentElement)
+      .toBe(container.querySelector("[data-user-text-bubble]"));
 
     rerender(<MessageBubble message={{ ...message, content: "> [!QUOTE]\n> excerpt\n\nreply" }} contextMenu={contextMenu} />);
-    expect(row).not.toHaveAttribute("data-user-text-bubble");
+    expect(screen.getByRole("button", { name: "Message actions" }).parentElement)
+      .toBe(screen.getByText("reply").parentElement);
   });
 
   it("renders cross-session input with its public handle", () => {
@@ -274,31 +276,37 @@ describe("MessageBubble", () => {
     expect(bubble).toHaveClass("bg-secondary/70");
   });
 
-  it("does not replay an entrance animation when persisted messages mount", () => {
+  it("renders completed message branches with static wrapper classes", async () => {
     const messages: UIMessage[] = [
       {
         id: "u-persisted",
         role: "user",
         content: "Earlier question",
-        createdAt: Date.now(),
+        createdAt: 1_700_000_000_000,
       },
       {
         id: "a-persisted",
         role: "assistant",
         content: "Earlier answer",
-        createdAt: Date.now(),
+        createdAt: 1_700_000_001_000,
       },
       {
         id: "t-persisted",
         role: "tool",
         kind: "trace",
         content: "Earlier tool call",
-        createdAt: Date.now(),
+        createdAt: 1_700_000_002_000,
       },
     ];
 
     for (const message of messages) {
       const { container, unmount } = render(<MessageBubble message={message} />);
+      if (message.kind === "trace") {
+        const disclosure = screen.getByRole("button", { expanded: false });
+        fireEvent.click(disclosure);
+        expect(disclosure).toHaveAttribute("aria-expanded", "true");
+      }
+      expect(await screen.findByText(message.content)).toBeVisible();
       for (const className of ["animate-in", "fade-in-0", "slide-in-from-bottom-1"]) {
         expect(container.firstElementChild).not.toHaveClass(className);
       }
@@ -540,7 +548,7 @@ describe("MessageBubble", () => {
     );
 
     menuActions(container);
-    fireEvent.click(screen.getByRole("button", { name: "Fork" }));
+    fireEvent.click(screen.getByRole("button", { name: "New chat from here" }));
     expect(onForkFromHere).toHaveBeenCalledTimes(1);
   });
 
@@ -575,7 +583,7 @@ describe("MessageBubble", () => {
     />);
     const actions = menuActions(container);
     const copy = screen.getByRole("button", { name: "Copy" });
-    const fork = screen.getByRole("button", { name: "Fork" });
+    const fork = screen.getByRole("button", { name: "New chat from here" });
     const metadata = actions.querySelector("[data-message-block-metadata]")!;
     expect(actions.querySelector("[data-message-block-toolbar]")).toContainElement(copy);
     expect(actions.querySelector("[data-message-block-toolbar]")).toContainElement(fork);
@@ -647,6 +655,31 @@ describe("MessageBubble", () => {
     );
   });
 
+  it("preserves punctuation-separated session links and capability mentions in sent messages", () => {
+    const message: UIMessage = {
+      id: "u-punctuation-mentions",
+      role: "user",
+      content: "@bime、@luma，@luma；@zoom：@browserbase。",
+      sessionMentions: [
+        { id: "handle_00000000000000000000000000000001", name: "bime", session_key: "websocket:pricing", title: "Pricing" },
+        { id: "handle_00000000000000000000000000000002", name: "luma", session_key: "websocket:notes", title: "Notes" },
+      ],
+      createdAt: Date.now(),
+    };
+
+    render(<MessageBubble message={message} cliApps={CLI_APPS} mcpPresets={MCP_PRESETS} />);
+
+    expect(screen.getByTestId("message-session-mention-bime").closest("a"))
+      .toHaveAttribute("href", "#/chat/websocket%3Apricing");
+    const repeated = screen.getAllByTestId("message-session-mention-luma");
+    expect(repeated).toHaveLength(2);
+    for (const token of repeated) {
+      expect(token.closest("a")).toHaveAttribute("href", "#/chat/websocket%3Anotes");
+    }
+    expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@Zoom");
+    expect(screen.getByTestId("message-mcp-mention-browserbase")).toHaveTextContent("@Browserbase");
+  });
+
   it("renders installed CLI app mentions inside sent user messages", () => {
     const message: UIMessage = {
       id: "u-cli",
@@ -663,8 +696,8 @@ describe("MessageBubble", () => {
     expect(token).toHaveClass("font-[550]");
     expect(token.className).not.toContain("rounded");
     expect(token.className).not.toContain("px-");
-    expect(token.getAttribute("style")).toContain("color: #0B5CFF");
-    expect(token.getAttribute("style")).not.toContain("text-shadow");
+    expect(token).toHaveClass("text-foreground");
+    expect(token.style.textShadow).toBe("");
     const logo = screen.getByTestId("message-cli-mention-logo-zoom");
     expect(logo).toHaveClass("h-[1.1em]", "w-[1.1em]", "rounded-[0.25em]", "top-1/2", "-translate-y-1/2");
     expect(logo.parentElement).toHaveClass("mr-1", "w-[1.1em]");
@@ -716,7 +749,7 @@ describe("MessageBubble", () => {
     expect(token).toHaveTextContent("@Draw.io");
     expect(token.className).not.toContain("rounded");
     expect(token.className).not.toContain("px-");
-    expect(token.getAttribute("style")).toContain("color: #F08705");
+    expect(token).toHaveClass("text-foreground");
     expect(screen.getByTestId("message-cli-mention-logo-drawio")).toBeInTheDocument();
   });
 
@@ -733,7 +766,7 @@ describe("MessageBubble", () => {
     const token = screen.getByTestId("message-mcp-mention-browserbase");
     expect(token).toHaveTextContent("@Browserbase");
     expect(token).toHaveAttribute("title", "MCP server: Browserbase (@browserbase)");
-    expect(token.getAttribute("style")).toContain("color: #111827");
+    expect(token).toHaveClass("text-foreground");
     const logo = screen.getByTestId("message-mcp-mention-logo-browserbase");
     expect(logo).toHaveClass("h-[1.1em]", "w-[1.1em]", "rounded-[0.25em]", "top-1/2", "-translate-y-1/2");
     expect(logo.parentElement).toHaveClass("mr-1", "w-[1.1em]");
@@ -756,6 +789,7 @@ describe("MessageBubble", () => {
         id: "saved-app-name",
         role: "user",
         content: `Use @${name} please`,
+        createdAt: 1,
         ...(kind === "cli" ? {
           cliApps: [{ name, display_name: displayName, category: "test", entry_point: name }],
         } : {
@@ -777,12 +811,12 @@ describe("MessageBubble", () => {
     const copy = vi.spyOn(clipboard, "copyTextToClipboard").mockResolvedValue(true);
     try {
       render(<ThreadMessages messages={[{
-        id: "copy-display-name", role: "user", content: "Please use @drawio",
+        id: "copy-display-name", role: "user", content: "Please use @drawio", createdAt: 1,
         cliApps: [{ name: "drawio", display_name: "Draw.io", category: "diagram", entry_point: "drawio" }],
       }]} />);
       expect(screen.getByTestId("message-cli-mention-drawio")).toHaveTextContent("@Draw.io");
       fireEvent.click(screen.getByRole("button", { name: "Message actions" }));
-      fireEvent.click(screen.getByRole("button", { name: "Copy", exact: true }));
+      fireEvent.click(screen.getByRole("button", { name: "Copy" }));
       await waitFor(() => expect(copy).toHaveBeenCalledWith("Please use @drawio"));
     } finally {
       copy.mockRestore();

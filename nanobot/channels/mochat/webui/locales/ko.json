@@ -24,7 +24,7 @@
         "placeholder": "패널 ID, 쉼표로 구분"
       },
       "allowFrom": {
-        "label": "허용된 사용자",
+        "label": "허용 사용자",
         "placeholder": "사용자 ID, 쉼표로 구분"
       },
       "socketUrl": {
@@ -44,7 +44,7 @@
         "label": "재연결 지연"
       },
       "socketMaxReconnectDelayMs": {
-        "label": "최대 재연결 지연"
+        "label": "재연결 지연 상한(ms)"
       },
       "socketConnectTimeoutMs": {
         "label": "연결 시간 초과"
@@ -56,16 +56,16 @@
         "label": "시청 시간 초과"
       },
       "watchLimit": {
-        "label": "시계 배치 크기"
+        "label": "가져올 항목 수"
       },
       "retryDelayMs": {
         "label": "재시도 지연"
       },
       "maxRetryAttempts": {
-        "label": "최대 재시도"
+        "label": "재시도 상한"
       },
       "mention_requireInGroups": {
-        "label": "그룹에서 멘션 필요",
+        "label": "그룹 멘션 필요",
         "choices": {
           "true": "켜기",
           "false": "끄기"
@@ -75,7 +75,7 @@
         "label": "그룹 규칙(JSON)"
       },
       "replyDelayMode": {
-        "label": "응답 지연 모드"
+        "label": "답변 지연 방식"
       },
       "replyDelayMs": {
         "label": "답변 지연"

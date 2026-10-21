@@ -23,24 +23,33 @@
         }
       },
       "ackMessage": {
-        "label": "Mensagem de confirmação"
+        "label": "Mensagem de recebimento"
       },
       "mediaDir": {
         "label": "Diretório de mídia"
       },
       "downloadChunkSize": {
-        "label": "Baixar tamanho do pedaço"
+        "label": "Tamanho do bloco (bytes)"
       },
       "downloadMaxBytes": {
-        "label": "Tamanho máximo de download"
+        "label": "Limite de download (bytes)"
       },
       "showCompactionNotices": {
-        "label": "Avisos de compactação de contexto",
+        "label": "Avisos de compactação",
         "choices": {
           "true": "Ativado",
           "false": "Desativado"
         }
       }
     }
+  },
+  "custom": {
+    "scanTitle": "Escaneie com o QQ móvel",
+    "waiting": "Aguardando leitura do QQ…",
+    "connected": "QQ está conectado.",
+    "stopped": "O login do QQ foi interrompido.",
+    "connecting": "Conectando…",
+    "qrAlt": "QR code de login do QQ",
+    "scanAgainWarning": "Escanear novamente substitui o App Secret atual. O App Secret anterior deixa de funcionar quando a nova leitura termina."
   }
 }

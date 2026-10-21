@@ -1,10 +1,9 @@
 import { acceptsCompactionPhase } from "../../../packages/client-events/notifications";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useThreadVisibility } from "@/hooks/useThreadVisibility";
 
 import { useClient } from "@/providers/ClientProvider";
-import { resolveModelRequestFailureCopy } from "@/lib/model-request-failure";
 import { hasPendingAgentActivity } from "@/lib/activity-timeline";
 import type { StreamError } from "@/lib/nanobot-client";
 import {
@@ -22,7 +21,6 @@ import type {
   UIMessageTurnFields,
 } from "@/lib/thread-event-projection";
 import { formatQuotedUserMessage } from "@/lib/user-message-quote";
-import { readLocalPreferences } from "@/lib/local-preferences";
 import { playTurnCompleteSound } from "@/lib/notification-sound";
 import type {
   InboundEvent,
@@ -46,6 +44,8 @@ type PendingStreamEvent =
 const BACKGROUND_STREAM_FLUSH_INTERVAL_MS = 1_000;
 // Markdown and layout work must leave room for input between visible updates.
 const VISIBLE_STREAM_FLUSH_INTERVAL_MS = 50;
+const EMPTY_INITIAL_MESSAGES: UIMessage[] = [];
+const EMPTY_COMPLETED_TURN_IDS: readonly string[] = [];
 
 /**
  * Subscribe to a chat by ID. Returns the in-memory message list for the chat,
@@ -134,10 +134,11 @@ function appendProjectedSessionInput(
 
 export function useNanobotStream(
   chatId: string | null,
-  initialMessages: UIMessage[] = [],
+  initialMessages: UIMessage[] = EMPTY_INITIAL_MESSAGES,
   hasPendingToolCalls = false,
   onTurnEnd?: () => void,
   onStreamDetach?: (messages: UIMessage[]) => void,
+  completedTurnIds: readonly string[] = EMPTY_COMPLETED_TURN_IDS,
 ): {
   messages: UIMessage[];
   /** Whether ``messages`` belongs to the current ``chatId`` after a session switch. */
@@ -186,7 +187,13 @@ export function useNanobotStream(
   }, []);
   const [messageOwnerChatId, setMessageOwnerChatId] = useState(chatId);
   /** If history ends in unfinished agent activity, keep the loading spinner alive. */
-  const initialStreaming = hasPendingAgentActivity(initialMessages);
+  const initialStreaming = useMemo(() => {
+    if (completedTurnIds.length === 0) return hasPendingAgentActivity(initialMessages);
+    const completedInitialTurns = new Set(completedTurnIds);
+    return hasPendingAgentActivity(initialMessages.filter((message) => (
+      !message.turnId || !completedInitialTurns.has(message.turnId)
+    )));
+  }, [completedTurnIds, initialMessages]);
   const [isStreaming, setIsStreaming] = useState(
     initialStreaming || hasPendingToolCalls || initialRunStartedAt !== null,
   );
@@ -206,16 +213,6 @@ export function useNanobotStream(
   const sideChannelTurnIdsRef = useRef<Set<string>>(new Set());
 
   const dismissStreamError = useCallback(() => setStreamError(null), []);
-
-  const notifyInBackground = useCallback((body: string) => {
-    if (
-      typeof Notification === "undefined"
-      || Notification.permission !== "granted"
-      || document.visibilityState === "visible"
-      || !readLocalPreferences().browserNotifications
-    ) return;
-    new Notification("nanobot", { body });
-  }, []);
 
   const clearPendingStreamWork = useCallback(() => {
     if (streamFrameRef.current !== null) {
@@ -518,7 +515,7 @@ export function useNanobotStream(
     setMessages(initialMessages);
     setMessageOwnerChatId(chatId);
     setIsStreaming(
-      hasPendingAgentActivity(initialMessages)
+      initialStreaming
       || hasPendingToolCalls
       || restoredRunStartedAt !== null,
     );
@@ -807,13 +804,6 @@ export function useNanobotStream(
           : null;
         if (modelFailure) setStreamError(modelFailure);
         applyProjectionEvent(ev);
-        notifyInBackground(
-          modelFailure
-            ? resolveModelRequestFailureCopy(modelFailure, t).body
-            : ev.outcome === "failed"
-              ? ev.failure_message || "This turn failed and has ended."
-            : t("recovery.completed", { defaultValue: "Task completed" }),
-        );
         playTurnCompleteSound();
         onTurnEnd?.();
         return;
@@ -828,8 +818,14 @@ export function useNanobotStream(
           ...(typeof ev.can_continue === "boolean"
             ? { can_continue: ev.can_continue }
             : {}),
+          ...(typeof ev.failure_error_kind === "string"
+            ? { failure_error_kind: ev.failure_error_kind }
+            : {}),
         };
         setRecoveryState(next);
+        if (ev.reason === "model_request_failed" || ev.status === "resuming") {
+          setStreamError(null);
+        }
         if (ev.status === "resuming") {
           setRunStartedAt((current) => current ?? Date.now() / 1000);
           setIsStreaming(true);
@@ -850,19 +846,18 @@ export function useNanobotStream(
           clearPendingStreamWork();
           closeActiveAssistantStream();
           clearActivitySegment();
-          if (ev.status !== "recovered") {
-            notifyInBackground(
-              ev.status === "failed"
-                ? t("recovery.failed", { defaultValue: "Task recovery failed" })
-                : t("recovery.interrupted", { defaultValue: "Task interrupted" }),
-            );
-          }
         }
         return;
       }
 
       if (ev.event === "attached") {
         setRecoveryState(ev.recovery_state ?? null);
+        if (
+          ev.recovery_state?.reason === "model_request_failed"
+          || ev.recovery_state?.status === "resuming"
+        ) {
+          setStreamError(null);
+        }
         if (ev.recovery_state?.status === "resuming") {
           setRunStartedAt((current) => current ?? Date.now() / 1000);
           setIsStreaming(true);
@@ -893,7 +888,7 @@ export function useNanobotStream(
       }
     };
 
-    const unsub = client.onChat(chatId, handle);
+    const unsub = client.onTranscript(chatId, handle);
     return () => {
       unsub();
       // Navigation may happen before the throttled paint. Snapshot the pending
@@ -918,7 +913,6 @@ export function useNanobotStream(
     clearPendingStreamWork,
     flushPendingStreamEvents,
     isSideChannelEvent,
-    notifyInBackground,
     onTurnEnd,
     onStreamDetach,
     schedulePendingStreamFlush,
@@ -1023,7 +1017,7 @@ export function useNanobotStream(
 
   const reconcileTurnComplete = useCallback(() => {
     clearPendingStreamWork();
-    projectionRef.current = resetThreadProjectionCursor(projectionRef.current);
+    projectionRef.current = resetThreadProjectionCursor(projectionRef.current, messagesRef.current);
     setRunStartedAt(null);
     setRetryStatus(null);
     setIsStreaming(false);

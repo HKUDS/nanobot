@@ -16,15 +16,15 @@
         "placeholder": "8080"
       },
       "dm_allowFrom": {
-        "label": "DM を許可する送信者",
+        "label": "許可する DM ユーザー",
         "placeholder": "電話番号または UUID"
       },
       "group_allowFrom": {
-        "label": "許可するグループ",
+        "label": "許可グループ",
         "placeholder": "グループ ID"
       },
       "groupMessageBufferSize": {
-        "label": "グループコンテキストメッセージ"
+        "label": "コンテキストの件数"
       },
       "attachmentsDir": {
         "label": "添付ファイルディレクトリ"
@@ -58,7 +58,7 @@
         }
       },
       "group_requireMention": {
-        "label": "グループ内での言及が必要",
+        "label": "グループのメンション必須",
         "choices": {
           "true": "オン",
           "false": "オフ"

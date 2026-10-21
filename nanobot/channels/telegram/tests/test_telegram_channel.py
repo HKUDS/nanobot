@@ -12,6 +12,7 @@ try:
 except ImportError:
     pytest.skip("Telegram dependencies not installed (python-telegram-bot)", allow_module_level=True)
 
+from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
@@ -206,26 +207,28 @@ def _assert_code_blocks_render_balanced(chunks: list[str]) -> None:
         assert html.count("<pre><code>") == html.count("</code></pre>")
 
 
-def test_split_telegram_markdown_inside_code_block_moves_before_fence() -> None:
-    content = "Intro paragraph.\n```python\nprint('a')\nprint('b')\n```\nDone"
+@pytest.mark.parametrize("prefix", ["Intro paragraph.\n", "Intro paragraph. "])
+def test_split_telegram_markdown_inside_code_block_moves_before_fence(prefix) -> None:
+    content = prefix + "```python\nprint('a')\nprint('b')\n```\nDone"
 
     chunks = _split_telegram_markdown(content, max_len=35)
 
-    assert chunks[0] == "Intro paragraph.\n"
+    assert chunks[0] == prefix
     assert chunks[1].startswith("```python\nprint('a')")
     _assert_code_blocks_render_balanced(chunks)
 
 
-def test_split_telegram_markdown_long_code_block_closes_and_reopens() -> None:
-    content = "```python\n" + ("print('line one')\n" * 6) + "```\nDone"
+@pytest.mark.parametrize("fence", ["```", "~~~", "````"])
+def test_split_telegram_markdown_long_code_block_closes_and_reopens(fence) -> None:
+    content = f"{fence}python\n" + ("print('line one')\n" * 6) + f"{fence}\nDone"
 
     chunks = _split_telegram_markdown(content, max_len=60)
 
     assert len(chunks) > 1
     assert all(len(chunk) <= 60 for chunk in chunks)
-    assert chunks[0].startswith("```python\n")
-    assert chunks[0].endswith("\n```")
-    assert chunks[1].startswith("```python\n")
+    assert chunks[0].startswith(f"{fence}python\n")
+    assert chunks[0].endswith(f"\n{fence}")
+    assert chunks[1].startswith(f"{fence}python\n")
     _assert_code_blocks_render_balanced(chunks)
 
 
@@ -250,6 +253,20 @@ def test_split_telegram_markdown_multiple_code_blocks() -> None:
     _assert_code_blocks_render_balanced(chunks)
 
 
+def test_split_telegram_markdown_keeps_nested_shorter_fence() -> None:
+    content = "````markdown\n```python\n" + "# raw example\n" * 40 + "```\n````"
+
+    chunks = _split_telegram_markdown(content, max_len=80)
+
+    assert len(chunks) > 1
+    assert all(len(chunk) <= 80 for chunk in chunks)
+    assert all(chunk.startswith("````markdown\n") and chunk.endswith("\n````") for chunk in chunks)
+    html = "".join(_markdown_to_telegram_html(chunk) for chunk in chunks)
+    assert html.count("# raw example") == 40
+    assert html.count("```") == 2
+    assert "<b>" not in html
+
+
 def test_split_telegram_markdown_leading_whitespace_before_fence() -> None:
     content = "\n```python\n" + ("print('line one')\n" * 6) + "```\nDone"
 
@@ -261,25 +278,26 @@ def test_split_telegram_markdown_leading_whitespace_before_fence() -> None:
     _assert_code_blocks_render_balanced(chunks)
 
 
-def test_split_telegram_markdown_long_single_line_code_body() -> None:
+@pytest.mark.parametrize("fence", ["```", "~~~", "````"])
+def test_split_telegram_markdown_long_single_line_code_body(fence) -> None:
     """Long fence bodies with no interior newlines must still advance."""
     body = "a" * 4500
-    content = f"```\n{body}\n```"
+    content = f"{fence}\n{body}\n{fence}"
 
     chunks = _split_telegram_markdown(content, TELEGRAM_MAX_MESSAGE_LEN)
 
     assert len(chunks) > 1
     assert all(len(chunk) <= TELEGRAM_MAX_MESSAGE_LEN for chunk in chunks)
-    assert chunks[0].startswith("```\n")
-    assert chunks[0].endswith("\n```")
-    assert chunks[1].startswith("```\n")
+    assert chunks[0].startswith(f"{fence}\n")
+    assert chunks[0].endswith(f"\n{fence}")
+    assert chunks[1].startswith(f"{fence}\n")
     reassembled = []
     for chunk in chunks:
         part = chunk.split("\n", 1)[1]
-        if part.endswith("\n```"):
-            part = part[:-4]
-        elif part.endswith("```"):
-            part = part[:-3]
+        if part.endswith(f"\n{fence}"):
+            part = part[:-(len(fence) + 1)]
+        elif part.endswith(fence):
+            part = part[:-len(fence)]
         reassembled.append(part)
     assert "".join(reassembled) == body
     _assert_code_blocks_render_balanced(chunks)
@@ -621,14 +639,15 @@ async def test_send_during_rebuild_fails_instead_of_dropping(monkeypatch) -> Non
     channel._app = None
 
     msg = OutboundMessage(channel="telegram", chat_id="123", content="hello")
-    with pytest.raises(RuntimeError, match="restarting"):
+    with pytest.raises(ChannelNotReadyError, match="restarting"):
         await channel.send(msg)
     with pytest.raises(RuntimeError, match="restarting"):
         await channel.send_delta("123", "hello", stream_id="s1")
 
-    # Stopped: nothing to deliver, so stay quiet.
+    # A stopped channel must not report a final message as delivered.
     channel._running = False
-    await channel.send(msg)
+    with pytest.raises(ChannelNotReadyError, match="not running"):
+        await channel.send(msg)
     await channel.send_delta("123", "hello", stream_id="s1")
 
 
@@ -771,9 +790,12 @@ async def test_running_message_handler_reorders_same_session_updates() -> None:
         MessageBus(),
     )
     seen: list[int] = []
+    processed = asyncio.Event()
 
     async def fake_process(update, context) -> None:
         seen.append(update.message.message_id)
+        if len(seen) == 2:
+            processed.set()
 
     channel._process_message_update = fake_process
     channel._running = True
@@ -785,12 +807,20 @@ async def test_running_message_handler_reorders_same_session_updates() -> None:
     second.update_id = 101
     second.message.message_id = 2
 
-    await channel._on_message(second, None)
-    await channel._on_message(first, None)
-    await asyncio.sleep(0.3)
-    channel._running = False
+    workers: set[asyncio.Task[None]] = set()
+    try:
+        await channel._on_message(second, None)
+        workers.update(channel._inbound_workers.values())
+        await channel._on_message(first, None)
+        await asyncio.wait_for(processed.wait(), timeout=5)
+        assert seen == [1, 2]
+    finally:
+        workers.update(channel._inbound_workers.values())
+        await channel.stop()
+        await asyncio.wait_for(asyncio.gather(*workers, return_exceptions=True), timeout=5)
 
-    assert seen == [1, 2]
+    assert workers
+    assert all(task.done() for task in workers)
 
 
 @pytest.mark.asyncio
@@ -1603,7 +1633,8 @@ async def test_send_delta_stream_end_html_expansion_does_not_overflow() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_delta_stream_end_splits_long_code_block_before_html_rendering() -> None:
+@pytest.mark.parametrize("fence", ["```", "~~~", "````"])
+async def test_send_delta_stream_end_splits_long_code_block_before_html_rendering(fence) -> None:
     """Final streamed replies must not split Telegram HTML inside <pre><code>."""
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
@@ -1613,7 +1644,7 @@ async def test_send_delta_stream_end_splits_long_code_block_before_html_renderin
     channel._app.bot.edit_message_text = AsyncMock()
     channel._app.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=99))
 
-    raw_text = "```python\n" + ("print(\"line\")\n" * 450) + "```\nDone"
+    raw_text = f"{fence}python\n" + ("print(\"line\")\n" * 450) + f"{fence}\nDone"
     channel._stream_bufs["123"] = _StreamBuf(text=raw_text, message_id=7, last_edit=0.0)
 
     await channel.send_delta("123", "", stream_end=True)
@@ -1629,6 +1660,9 @@ async def test_send_delta_stream_end_splits_long_code_block_before_html_renderin
     for html in html_chunks:
         assert len(html) <= 4096
         assert html.count("<pre><code>") == html.count("</code></pre>")
+        if 'print("line")' in html:
+            assert html.startswith("<pre><code>")
+    assert "".join(html_chunks).count('print("line")') == 450
     assert "123" not in channel._stream_bufs
 
 
@@ -1894,7 +1928,12 @@ async def test_send_reply_infers_topic_from_message_id_cache() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_remote_media_url_after_security_validation(monkeypatch) -> None:
+@pytest.mark.parametrize("media_url", [
+    "https://example.com/cat.jpg",
+    "https://example.com/cat.jpg?width=672",
+    "https://example.com/cat.jpg#preview",
+])
+async def test_send_remote_media_url_after_security_validation(monkeypatch, media_url) -> None:
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
         MessageBus(),
@@ -1907,7 +1946,7 @@ async def test_send_remote_media_url_after_security_validation(monkeypatch) -> N
             channel="telegram",
             chat_id="123",
             content="",
-            media=["https://example.com/cat.jpg"],
+            media=[media_url],
         )
     )
 
@@ -1915,7 +1954,7 @@ async def test_send_remote_media_url_after_security_validation(monkeypatch) -> N
         {
             "kind": "photo",
             "chat_id": 123,
-            "photo": "https://example.com/cat.jpg",
+            "photo": media_url,
             "reply_parameters": None,
         }
     ]
@@ -2947,6 +2986,52 @@ def test_markdown_to_html_headers_become_bold() -> None:
     assert _markdown_to_telegram_html("### Deep") == "<b>Deep</b>"
 
 
+def test_markdown_to_html_tilde_fence_is_code() -> None:
+    from nanobot.channels.telegram.runtime import _markdown_to_telegram_html
+
+    text = "Run:\n~~~python\n# setup\ndef __init__(self): pass\n~~~\nDone"
+    assert _markdown_to_telegram_html(text) == (
+        "Run:\n<pre><code># setup\ndef __init__(self): pass\n</code></pre>\nDone"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fence", ["~~~", "````"])
+async def test_send_preserves_fenced_code_and_escapes_html(fence) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    _install_ready_app(channel)
+    await channel.send(OutboundMessage(
+        channel="telegram", chat_id="123",
+        content=f"{fence}python\n# setup\na < b && __raw__\n{fence}",
+    ))
+    assert len(channel._app.bot.sent_messages) == 1
+    sent = channel._app.bot.sent_messages[0]
+    assert sent["parse_mode"] == "HTML"
+    assert sent["text"] == "<pre><code># setup\na &lt; b &amp;&amp; __raw__\n</code></pre>"
+
+
+def test_markdown_to_html_longer_fence_keeps_nested_example() -> None:
+    from nanobot.channels.telegram.runtime import _markdown_to_telegram_html
+
+    text = "Example:\n````markdown\n```python\nx = a * b\n```\n**raw**\n````\nAfter **bold**"
+    assert _markdown_to_telegram_html(text) == (
+        "Example:\n<pre><code>```python\nx = a * b\n```\n**raw**\n</code></pre>\n"
+        "After <b>bold</b>"
+    )
+
+
+def test_markdown_to_html_single_line_and_backtick_fences_unchanged() -> None:
+    from nanobot.channels.telegram.runtime import _markdown_to_telegram_html
+
+    assert _markdown_to_telegram_html("```py\n# c\nx = __y__\n```") == (
+        "<pre><code># c\nx = __y__\n</code></pre>"
+    )
+    assert _markdown_to_telegram_html("Use ```ls -la``` now") == "Use <pre><code>ls -la</code></pre> now"
+
+
 def test_markdown_to_html_numbered_lists_preserved() -> None:
     from nanobot.channels.telegram.runtime import _markdown_to_telegram_html
 
@@ -3047,6 +3132,12 @@ def test_strip_md_block_converts_bullets_and_numbers() -> None:
     assert "\u2022 item a" in result
     assert "1. item b" in result
     assert "2. item c" in result
+
+
+def test_strip_md_block_strips_tilde_fences() -> None:
+    from nanobot.channels.telegram.runtime import _strip_md_block
+
+    assert _strip_md_block("~~~bash\nls\n~~~\nDone") == "ls\n\nDone"
 
 
 def test_strip_md_block_strips_links() -> None:

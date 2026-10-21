@@ -28,7 +28,7 @@ from nanobot.bus.events import (
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.websocket.binary_http import BinaryHTTPBridge
-from nanobot.config.schema import Base
+from nanobot.config_base import Base
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     mark_websocket_turn_transcript_persistence_failed,
@@ -47,6 +47,7 @@ from nanobot.webui.http_utils import (
 from nanobot.webui.inbound_commands import WebUICommandRouter
 from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
+    WEBUI_RESTART_CONTROL_METADATA_KEY,
     WEBUI_TURN_METADATA_KEY,
 )
 from nanobot.webui.outbound_projection import WebUIOutboundProjector
@@ -458,6 +459,7 @@ class WebSocketChannel(BaseChannel):
         is_dm: bool,
         session_key: str | None,
         require_existing_session: bool,
+        session_generation: str | None,
     ) -> None:
         await self._handle_message(
             sender_id=sender_id,
@@ -468,6 +470,7 @@ class WebSocketChannel(BaseChannel):
             is_dm=is_dm,
             session_key=session_key,
             require_existing_session=require_existing_session,
+            session_generation=session_generation,
         )
 
     def _attach(self, connection: ServerConnection, chat_id: str) -> None:
@@ -643,9 +646,12 @@ class WebSocketChannel(BaseChannel):
                         "WebSocket listener is no longer accepting connections"
                     )
 
-    async def _close_server(self, server: Server, socket_path: str) -> None:
+    async def _close_server(
+        self, server: Server, socket_path: str, bridge: BinaryHTTPBridge,
+    ) -> None:
         server.close()
         try:
+            await bridge.shutdown()
             await server.wait_closed()
         except OSError as exc:
             self.logger.warning("WebSocket server close failed: {}", exc)
@@ -698,8 +704,6 @@ class WebSocketChannel(BaseChannel):
         async def handler(connection: ServerConnection) -> None:
             await self._connection_loop(connection)
 
-        bridge = BinaryHTTPBridge(self._uploads.handle)
-
         async def prune_uploads() -> None:
             while not stop_event.is_set():
                 self._uploads.store.prune()
@@ -715,6 +719,7 @@ class WebSocketChannel(BaseChannel):
             failures = 0
             while not stop_event.is_set():
                 server: Server | None = None
+                bridge = BinaryHTTPBridge(self._uploads.handle)
                 was_serving = False
                 started_at = 0.0
                 try:
@@ -794,7 +799,9 @@ class WebSocketChannel(BaseChannel):
                 finally:
                     self._running = False
                     if server is not None:
-                        await self._close_server(server, socket_path)
+                        await self._close_server(server, socket_path, bridge)
+                    else:
+                        await bridge.shutdown()
                     if self._server is server:
                         self._server = None
 
@@ -805,7 +812,6 @@ class WebSocketChannel(BaseChannel):
         finally:
             prune_task.cancel()
             await asyncio.gather(prune_task, return_exceptions=True)
-            await bridge.shutdown()
             self._uploads.store.clear()
             self._running = False
             if self._server_task is task:
@@ -1124,7 +1130,10 @@ class WebSocketChannel(BaseChannel):
         transcript_overrides: dict[str, Any] | None = None,
     ) -> bool:
         """Persist one canonical turn event and retain unsafe owners on failure."""
-        if not self._temporary_chats.should_persist_transcript(chat_id):
+        if (
+            (metadata or {}).get(WEBUI_RESTART_CONTROL_METADATA_KEY) is True
+            or not self._temporary_chats.should_persist_transcript(chat_id)
+        ):
             self._transcripts.prepare_event(
                 chat_id, event, metadata=metadata, phase=phase, include_source=include_source,
             )

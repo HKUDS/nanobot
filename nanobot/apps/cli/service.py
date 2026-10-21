@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -20,7 +21,7 @@ from urllib.parse import urlparse
 import httpx
 from loguru import logger
 
-from nanobot.agent.skills import parse_skill_metadata, valid_skill_metadata
+from nanobot.agent.skill_metadata import parse_skill_metadata, valid_skill_metadata
 from nanobot.apps.protocol import app_manifest, compact_dict
 from nanobot.config.paths import get_runtime_subdir
 from nanobot.security.workspace_policy import is_path_within
@@ -506,7 +507,7 @@ class CliAppManager:
         *,
         force_refresh: bool = False,
     ) -> dict[str, Any]:
-        data, cached_at = self._cached_registry(cache_path)
+        data, cached_at = await asyncio.to_thread(self._cached_registry, cache_path)
         if (
             not force_refresh
             and data is not None
@@ -526,7 +527,7 @@ class CliAppManager:
                 return data
             raise
 
-        _write_json(cache_path, {"_cached_at": _now(), "data": fetched})
+        await asyncio.to_thread(_write_json, cache_path, {"_cached_at": _now(), "data": fetched})
         return fetched
 
     async def refresh_catalog_cache(self, *, force_refresh: bool = False) -> None:

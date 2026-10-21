@@ -118,6 +118,7 @@ def agent(
             return
 
     from nanobot.agent.hooks import create_file_edit_activity_hook
+    from nanobot.agent.tools.image_generation import register_image_generation_tool
     from nanobot.agent.tools.mcp import MCPProvider
     from nanobot.agent.tools.registry import ToolRegistry
     from nanobot.bus.outbound_events import (
@@ -130,7 +131,6 @@ def agent(
     from nanobot.cli.stream import ThinkingSpinner
     from nanobot.cron.service import CronService
     from nanobot.providers.factory import make_provider
-    from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.utils.helpers import sanitize_surrogates as _sanitize_surrogates
     from nanobot.utils.restart import (
         format_restart_completed_message,
@@ -163,6 +163,7 @@ def agent(
     cron_store_path = runtime_config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
     tools = ToolRegistry()
+    register_image_generation_tool(runtime_config, tools, workspace=runtime_config.workspace_path)
     mcp_provider = MCPProvider.from_config(runtime_config, tools)
 
     _set_nanobot_logs(logs)
@@ -173,7 +174,6 @@ def agent(
             bus,
             provider=provider,
             cron_service=cron,
-            image_generation_provider_configs=image_gen_provider_configs(runtime_config),
             hook_factories=[create_file_edit_activity_hook],
             tool_registry=tools,
         )

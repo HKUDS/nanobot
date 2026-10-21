@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from collections.abc import Callable
-from contextlib import closing
+from contextlib import closing, suppress
 from pathlib import Path
 from typing import Any, cast
 
@@ -20,10 +21,9 @@ _INDEX_VERSION = 1
 class SessionSearchIndex:
     """Select candidates; the reader owns visibility, ordering and excerpts.
 
-    A separate cache lock serializes SQLite access and corruption recovery.
-    Canonical files are locked only for snapshots and individual content reads,
-    allowing session saves while SQLite builds the index. Files changed during
-    indexing are returned as candidates for the reader to check directly.
+    The cache uses committed session identities for invalidation, so indexing
+    never blocks session writes. Sessions changed during indexing are returned
+    as candidates for the reader to check directly.
     """
 
     def __init__(self, sessions: SessionManager) -> None:
@@ -41,15 +41,12 @@ class SessionSearchIndex:
         if len(needle) < 3 or "\x00" in needle:
             return None
         try:
-            paths = self._paths(rows)
-            if paths is None:
-                return None
             with self._lock:
                 if self._path.is_symlink():
                     return None
                 for attempt in range(2):
                     try:
-                        return self._query(needle, paths, load_content)
+                        return self._query(needle, rows, load_content)
                     except sqlite3.DatabaseError as exc:
                         code = getattr(exc, "sqlite_errorcode", 0) & 0xFF
                         if attempt or code not in {sqlite3.SQLITE_CORRUPT, sqlite3.SQLITE_NOTADB}:
@@ -61,49 +58,43 @@ class SessionSearchIndex:
             logger.debug("Session search cache unavailable; using canonical scan: {}", exc)
         return None
 
-    def _paths(self, rows: list[dict[str, Any]]) -> dict[str, Path] | None:
-        paths: dict[str, Path] = {}
+    def _signatures(self, rows: list[dict[str, Any]]) -> dict[str, str] | None:
+        versions = self._sessions.list_session_versions()
+        signatures: dict[str, str] = {}
         for row in rows:
             key = row.get("key")
             if not isinstance(key, str):
                 return None
-            path = self._sessions.canonical_session_path(key)
-            if path is None:
-                return None
-            paths[key] = path
-        return paths
+            version = versions.get(key)
+            if version is None:
+                continue
+            signatures[key] = f"{version[0]}:{version[1]}"
+        return signatures
 
-    @staticmethod
-    def _signature(path: Path) -> str | None:
-        try:
-            info = path.stat()
-        except FileNotFoundError:
-            return None
-        return f"{info.st_dev}:{info.st_ino}:{info.st_size}:{info.st_mtime_ns}:{info.st_ctime_ns}"
-
-    def _signatures(self, paths: dict[str, Path]) -> dict[str, str]:
-        with self._sessions.locked_session_files():
-            return {
-                key: signature
-                for key, path in paths.items()
-                if (signature := self._signature(path)) is not None
-            }
+    def _session_signature(self, key: str) -> str | None:
+        version = self._sessions.read_session_version(key)
+        return None if version is None else f"{version[0]}:{version[1]}"
 
     def _query(
         self,
         needle: str,
-        paths: dict[str, Path],
+        rows: list[dict[str, Any]],
         load_content: Callable[[str], str],
-    ) -> set[str]:
-        signatures = self._signatures(paths)
+    ) -> set[str] | None:
+        signatures = self._signatures(rows)
+        if signatures is None:
+            return None
         with closing(sqlite3.connect(self._path, timeout=1)) as connection:
             connection.execute("PRAGMA journal_mode = WAL")
             with connection:
                 self._schema(connection)
-                indexed = self._reconcile(connection, signatures, paths, load_content)
+                with suppress(OSError):
+                    os.chmod(self._path, 0o600)
+                indexed = self._reconcile(connection, signatures, load_content)
                 hits = self._matches(connection, needle)
-        current = self._signatures(paths)
-        hits.update(key for key in current if current[key] != indexed.get(key))
+        current = self._signatures(rows)
+        if current is not None:
+            hits.update(key for key in current if current[key] != indexed.get(key))
         return hits
 
     @staticmethod
@@ -138,7 +129,6 @@ class SessionSearchIndex:
         self,
         connection: sqlite3.Connection,
         signatures: dict[str, str],
-        paths: dict[str, Path],
         load_content: Callable[[str], str],
     ) -> dict[str, str]:
         stored = {
@@ -158,13 +148,10 @@ class SessionSearchIndex:
             previous = stored.get(key)
             if previous is not None and previous[1] == signature:
                 continue
-            with self._sessions.locked_session_files():
-                content = load_content(key).casefold()
-                signature = self._signature(paths[key])
-            if signature is None:
-                if previous is not None:
-                    self._remove(connection, previous[0])
-                    indexed.pop(key)
+            content = load_content(key).replace("\x00", "")
+            if self._session_signature(key) != signature:
+                # A write raced this read; leave the old entry for the final
+                # signature check to route through direct verification.
                 continue
             if previous is None:
                 cursor = connection.execute(
@@ -181,7 +168,7 @@ class SessionSearchIndex:
                 )
             connection.execute(
                 "INSERT INTO session_search (rowid, content) VALUES (?, ?)",
-                (row_id, content),
+                (row_id, content.casefold()),
             )
             indexed[key] = signature
         return indexed

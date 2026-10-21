@@ -4,6 +4,12 @@ x-common-config: &common-config
     dockerfile: Dockerfile
     args:
       NANOBOT_CHANNELS: ${NANOBOT_CHANNELS:-whatsapp}
+  environment:
+    # Bootstrap a working config.json on first boot (binds that work across
+    # the container boundary; secrets generated if not provided).
+    NANOBOT_DOCKER_BOOTSTRAP: "1"
+    NANOBOT_WEB_TOKEN: ${NANOBOT_WEB_TOKEN:-}
+    NANOBOT_API_KEY: ${NANOBOT_API_KEY:-}
   volumes:
     - ~/.nanobot:/home/nanobot/.nanobot
   cap_drop:

@@ -11,7 +11,6 @@ import shutil
 import urllib.parse
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Mapping, cast
@@ -31,6 +30,7 @@ from nanobot.config.loader import load_config, resolve_config_env_vars, save_con
 from nanobot.config.paths import get_runtime_subdir
 from nanobot.config.schema import MCPServerConfig
 from nanobot.utils.helpers import ensure_dir
+from nanobot.webui.mcp_presets import MCP_PRESETS, McpPreset, McpPresetField
 
 QueryParams = dict[str, list[str]]
 
@@ -74,399 +74,10 @@ class McpPresetError(Exception):
         self.status = status
 
 
-@dataclass(frozen=True)
-class McpPresetField:
-    name: str
-    label: str
-    target: tuple[Literal["env", "url_param", "arg", "header"], str]
-    secret: bool = True
-    required: bool = True
-    env_var: str | None = None
-    placeholder: str = ""
-
-
-@dataclass(frozen=True)
-class McpPreset:
-    name: str
-    display_name: str
-    category: str
-    description: str
-    docs_url: str
-    transport: Literal["stdio", "streamableHttp", "sse", "oauth"]
-    install_supported: bool
-    brand_domain: str
-    brand_color: str
-    server: MCPServerConfig | None = None
-    fields: tuple[McpPresetField, ...] = ()
-    requires: str = ""
-    note: str = ""
-
-
 def _favicon_url(domain: str) -> str:
     return f"https://www.google.com/s2/favicons?domain={domain}&sz=64"
 
 
-MCP_PRESETS: tuple[McpPreset, ...] = (
-    McpPreset(
-        name="browserbase",
-        display_name="Browserbase",
-        category="browser",
-        description="Cloud browser automation through Browserbase's hosted MCP server.",
-        docs_url="https://docs.browserbase.com/integrations/mcp/setup",
-        transport="streamableHttp",
-        install_supported=True,
-        brand_domain="browserbase.com",
-        brand_color="#111827",
-        requires="Browserbase API key",
-        server=MCPServerConfig(
-            type="streamableHttp",
-            url="https://mcp.browserbase.com/mcp",
-            tool_timeout=60,
-        ),
-        fields=(
-            McpPresetField(
-                name="browserbase_api_key",
-                label="Browserbase API key",
-                target=("url_param", "browserbaseApiKey"),
-                env_var="BROWSERBASE_API_KEY",
-                placeholder="bb_live_...",
-            ),
-        ),
-    ),
-    McpPreset(
-        name="playwright",
-        display_name="Playwright",
-        category="browser",
-        description="Local browser inspection and automation with Playwright's MCP server.",
-        docs_url="https://playwright.dev/docs/getting-started-mcp",
-        transport="stdio",
-        install_supported=True,
-        brand_domain="playwright.dev",
-        brand_color="#2EAD33",
-        requires="Node.js and npx",
-        server=MCPServerConfig(
-            type="stdio",
-            command="npx",
-            args=["-y", "@playwright/mcp@latest"],
-            tool_timeout=60,
-        ),
-    ),
-    McpPreset(
-        name="context7",
-        display_name="Context7",
-        category="docs",
-        description="Fetch current library docs and code examples while the agent works.",
-        docs_url="https://context7.com/docs/resources/all-clients",
-        transport="stdio",
-        install_supported=True,
-        brand_domain="context7.com",
-        brand_color="#111827",
-        requires="Node.js and npx; API key optional",
-        server=MCPServerConfig(
-            type="stdio",
-            command="npx",
-            args=["-y", "@upstash/context7-mcp@latest"],
-            tool_timeout=45,
-        ),
-        fields=(
-            McpPresetField(
-                name="context7_api_key",
-                label="Context7 API key",
-                target=("arg", "--api-key"),
-                env_var="CONTEXT7_API_KEY",
-                placeholder="ctx7_...",
-                required=False,
-            ),
-        ),
-        note="Works without a key for basic public docs; add a key for higher limits or private docs.",
-    ),
-    McpPreset(
-        name="firecrawl",
-        display_name="Firecrawl",
-        category="web",
-        description="Scrape, crawl, search, and extract web pages through Firecrawl's MCP server.",
-        docs_url="https://docs.firecrawl.dev/use-cases/developers-mcp",
-        transport="streamableHttp",
-        install_supported=True,
-        brand_domain="firecrawl.dev",
-        brand_color="#EB5E28",
-        requires="Network access",
-        server=MCPServerConfig(
-            type="streamableHttp",
-            url="https://mcp.firecrawl.dev/v2/mcp",
-            tool_timeout=60,
-        ),
-        note=(
-            "Uses Firecrawl Keyless through the hosted MCP endpoint. No API key is required for "
-            "the built-in preset; use a custom MCP server URL if you want account-specific limits."
-        ),
-    ),
-    McpPreset(
-        name="parallel-search",
-        display_name="Parallel Search",
-        category="web",
-        description="Search the web and fetch relevant page content through Parallel's hosted MCP server.",
-        docs_url="https://docs.parallel.ai/integrations/mcp/search-mcp",
-        transport="streamableHttp",
-        install_supported=True,
-        brand_domain="parallel.ai",
-        brand_color="#111827",
-        requires="Network access",
-        server=MCPServerConfig(
-            type="streamableHttp",
-            url="https://search.parallel.ai/mcp",
-            tool_timeout=60,
-            enabled_tools=["web_search", "web_fetch"],
-        ),
-        note="Free anonymous access for light use; no API key is required.",
-    ),
-    McpPreset(
-        name="exa",
-        display_name="Exa",
-        category="web",
-        description="Search the web and fetch clean page content through Exa's hosted MCP server.",
-        docs_url="https://exa.ai/mcp",
-        transport="streamableHttp",
-        install_supported=True,
-        brand_domain="exa.ai",
-        brand_color="#101010",
-        requires="Network access",
-        server=MCPServerConfig(
-            type="streamableHttp",
-            url="https://mcp.exa.ai/mcp",
-            tool_timeout=45,
-        ),
-        note="Hosted Exa MCP endpoint currently does not require an API key.",
-    ),
-    McpPreset(
-        name="microsoft-learn",
-        display_name="Microsoft Learn",
-        category="docs",
-        description="Search and fetch Microsoft Learn documentation through Microsoft's hosted MCP server.",
-        docs_url="https://learn.microsoft.com/en-us/training/support/mcp",
-        transport="streamableHttp",
-        install_supported=True,
-        brand_domain="learn.microsoft.com",
-        brand_color="#0078D4",
-        requires="Network access",
-        server=MCPServerConfig(
-            type="streamableHttp",
-            url="https://learn.microsoft.com/api/mcp",
-            tool_timeout=45,
-        ),
-        note="Public documentation only; no authentication required.",
-    ),
-    McpPreset(
-        name="aws-docs",
-        display_name="AWS Documentation",
-        category="docs",
-        description="Search AWS documentation and service guidance through AWS Labs' documentation MCP server.",
-        docs_url="https://awslabs.github.io/mcp/servers/aws-documentation-mcp-server/",
-        transport="stdio",
-        install_supported=True,
-        brand_domain="aws.amazon.com",
-        brand_color="#FF9900",
-        requires="uvx",
-        server=MCPServerConfig(
-            type="stdio",
-            command="uvx",
-            args=["awslabs.aws-documentation-mcp-server@latest"],
-            env={"FASTMCP_LOG_LEVEL": "ERROR", "AWS_DOCUMENTATION_PARTITION": "aws"},
-            tool_timeout=60,
-        ),
-    ),
-    McpPreset(
-        name="brave-search",
-        display_name="Brave Search",
-        category="web",
-        description="Run web, news, image, video, and local search through Brave Search.",
-        docs_url="https://www.npmjs.com/package/@brave/brave-search-mcp-server",
-        transport="stdio",
-        install_supported=True,
-        brand_domain="brave.com",
-        brand_color="#FB542B",
-        requires="Node.js, npx, and Brave Search API key",
-        server=MCPServerConfig(
-            type="stdio",
-            command="npx",
-            args=["-y", "@brave/brave-search-mcp-server@latest", "--transport", "stdio"],
-            tool_timeout=45,
-        ),
-        fields=(
-            McpPresetField(
-                name="brave_api_key",
-                label="Brave Search API key",
-                target=("env", "BRAVE_API_KEY"),
-                env_var="BRAVE_API_KEY",
-                placeholder="BSA...",
-            ),
-        ),
-    ),
-    McpPreset(
-        name="postman",
-        display_name="Postman",
-        category="api",
-        description="Inspect and manage Postman APIs, collections, and workspaces through the local MCP server.",
-        docs_url="https://learning.postman.com/docs/developer/postman-api/postman-mcp-server/postman-mcp-local-server",
-        transport="stdio",
-        install_supported=True,
-        brand_domain="postman.com",
-        brand_color="#FF6C37",
-        requires="Node.js, npx, and Postman API key",
-        server=MCPServerConfig(
-            type="stdio",
-            command="npx",
-            args=["-y", "@postman/postman-mcp-server@latest", "--full"],
-            tool_timeout=60,
-        ),
-        fields=(
-            McpPresetField(
-                name="postman_api_key",
-                label="Postman API key",
-                target=("env", "POSTMAN_API_KEY"),
-                env_var="POSTMAN_API_KEY",
-                placeholder="PMAK-...",
-            ),
-        ),
-    ),
-    McpPreset(
-        name="figma",
-        display_name="Figma",
-        category="design",
-        description="Read design context from Figma using the local Dev Mode MCP server.",
-        docs_url="https://help.figma.com/hc/en-us/articles/32132100833559-Guide-to-the-Figma-MCP-server",
-        transport="streamableHttp",
-        install_supported=True,
-        brand_domain="figma.com",
-        brand_color="#F24E1E",
-        requires="Figma desktop app with MCP enabled",
-        server=MCPServerConfig(
-            type="streamableHttp",
-            url="http://127.0.0.1:3845/mcp",
-            tool_timeout=45,
-        ),
-        note="Requires Figma Desktop Dev Mode MCP to be running locally.",
-    ),
-    McpPreset(
-        name="xmind",
-        display_name="Xmind",
-        category="productivity",
-        description="Create, read, and edit cloud mind maps through Xmind.",
-        docs_url="https://xmind.com/user-guide/xmind-mcp",
-        transport="streamableHttp",
-        install_supported=True,
-        brand_domain="xmind.com",
-        brand_color="#F4B41A",
-        requires="Xmind account",
-        server=MCPServerConfig(
-            type="streamableHttp",
-            auth="oauth",
-            url="https://app.xmind.com/api/mcp",
-            tool_timeout=60,
-        ),
-        note="Connects securely in your browser with Xmind OAuth.",
-    ),
-    McpPreset(
-        name="notion",
-        display_name="Notion",
-        category="productivity",
-        description="Read and update your Notion workspace through Notion MCP.",
-        docs_url="https://developers.notion.com/guides/mcp/get-started-with-mcp",
-        transport="streamableHttp",
-        install_supported=True,
-        brand_domain="notion.so",
-        brand_color="#111111",
-        requires="Notion account",
-        server=MCPServerConfig(
-            type="streamableHttp",
-            auth="oauth",
-            url="https://mcp.notion.com/mcp",
-            tool_timeout=60,
-        ),
-        note="Connects securely in your browser with Notion OAuth.",
-    ),
-    McpPreset(
-        name="linear",
-        display_name="Linear",
-        category="productivity",
-        description="Find and manage Linear issues, projects, and comments.",
-        docs_url="https://linear.app/docs/mcp",
-        transport="streamableHttp",
-        install_supported=True,
-        brand_domain="linear.app",
-        brand_color="#5E6AD2",
-        requires="Linear account",
-        server=MCPServerConfig(
-            type="streamableHttp",
-            auth="oauth",
-            url="https://mcp.linear.app/mcp",
-            tool_timeout=60,
-        ),
-        note="Connects securely in your browser with Linear OAuth.",
-    ),
-    McpPreset(
-        name="github",
-        display_name="GitHub",
-        category="code",
-        description="Repository, issue, and pull request workflows via GitHub's MCP server.",
-        docs_url="https://github.com/github/github-mcp-server",
-        transport="stdio",
-        install_supported=True,
-        brand_domain="github.com",
-        brand_color="#24292F",
-        requires="Docker and GitHub token",
-        server=MCPServerConfig(
-            type="stdio",
-            command="docker",
-            args=[
-                "run",
-                "-i",
-                "--rm",
-                "-e",
-                "GITHUB_PERSONAL_ACCESS_TOKEN",
-                "ghcr.io/github/github-mcp-server",
-            ],
-            tool_timeout=60,
-        ),
-        fields=(
-            McpPresetField(
-                name="github_token",
-                label="GitHub token",
-                target=("env", "GITHUB_PERSONAL_ACCESS_TOKEN"),
-                env_var="GITHUB_PERSONAL_ACCESS_TOKEN",
-                placeholder="ghp_...",
-            ),
-        ),
-    ),
-    McpPreset(
-        name="supabase",
-        display_name="Supabase",
-        category="database",
-        description="Inspect and manage Supabase projects through the Supabase MCP server.",
-        docs_url="https://supabase.com/docs/guides/ai-tools/mcp",
-        transport="stdio",
-        install_supported=True,
-        brand_domain="supabase.com",
-        brand_color="#3ECF8E",
-        requires="Node.js, npx, and Supabase access token",
-        server=MCPServerConfig(
-            type="stdio",
-            command="npx",
-            args=["-y", "@supabase/mcp-server-supabase@latest", "--read-only"],
-            tool_timeout=60,
-        ),
-        fields=(
-            McpPresetField(
-                name="supabase_access_token",
-                label="Supabase access token",
-                target=("env", "SUPABASE_ACCESS_TOKEN"),
-                env_var="SUPABASE_ACCESS_TOKEN",
-                placeholder="sbp_...",
-            ),
-        ),
-        note="MVP config starts read-only by default.",
-    ),
-)
 
 
 def _query_first(query: QueryParams, key: str) -> str | None:
@@ -631,7 +242,9 @@ def _field_value_from_config(field: McpPresetField, cfg: MCPServerConfig | None)
         return value if value else None
     if target_kind == "header":
         value = cfg.headers.get(target_name)
-        return value if value else None
+        return value.removeprefix(field.value_prefix) if value else None
+    if target_kind == "url":
+        return cfg.url or None
     if target_kind == "arg":
         return _arg_value(list(cfg.args), target_name)
     if target_kind == "url_param" and cfg.url:
@@ -685,7 +298,7 @@ def _materialize_server(
     if preset.server is None or not preset.install_supported:
         raise McpPresetError(f"{preset.display_name} is not supported yet", status=409)
 
-    cfg = _clone_server(preset.server)
+    cfg = _clone_server(existing or preset.server)
     for field_spec in preset.fields:
         value = _resolve_field_value(field_spec, query, existing)
         if field_spec.required and not value:
@@ -696,11 +309,13 @@ def _materialize_server(
         if target_kind == "env":
             cfg.env[target_name] = value
         elif target_kind == "header":
-            cfg.headers[target_name] = value
+            cfg.headers[target_name] = field_spec.value_prefix + value
         elif target_kind == "arg":
             cfg.args = _with_arg_value(list(cfg.args), target_name, value)
         elif target_kind == "url_param":
             cfg.url = _url_with_param(cfg.url, target_name, value)
+        elif target_kind == "url":
+            cfg.url = value
     return _with_managed_stdio_cwd(preset.name, cfg)
 
 
@@ -1528,11 +1143,16 @@ def ensure_mcp_oauth_server(
     name = _validated_server_name((_query_first(query, "name") or "").strip())
     config = load_config(config_path) if config_path is not None else load_config()
     cfg = config.tools.mcp_servers.get(name)
-    if cfg is None:
-        preset = _preset_by_name(name)
+    preset = _preset_by_name_optional(name)
+    fields_provided = preset is not None and any(
+        _query_value(query, field.name) for field in preset.fields
+    )
+    if cfg is None or fields_provided:
+        if preset is None:
+            raise McpPresetError("unknown MCP preset", status=404)
         if preset.server is None or preset.server.auth != "oauth":
             raise McpPresetError("MCP server does not support browser authorization", status=409)
-        cfg = _materialize_server(preset, query, None)
+        cfg = _materialize_server(preset, query, cfg)
         config.tools.mcp_servers[name] = cfg
         save_config(config, config_path)
     if cfg.auth != "oauth" or cfg.type not in {"sse", "streamableHttp"} or not cfg.url:

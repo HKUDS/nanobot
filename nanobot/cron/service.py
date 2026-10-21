@@ -1,14 +1,12 @@
 """Cron service for scheduling agent tasks."""
 
 import asyncio
-import errno
 import json
-import os
 import time
 import uuid
 from contextlib import suppress
 from copy import deepcopy
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime
 from pathlib import Path
 from types import EllipsisType
@@ -29,6 +27,7 @@ from nanobot.cron.types import (
     CronStore,
 )
 from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META
+from nanobot.utils.helpers import atomic_write_text
 from nanobot.utils.run_records import (
     write_run_record as write_automation_run_record,
 )
@@ -69,6 +68,26 @@ def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
             return None
 
     return None
+
+
+def _resume_next_run(schedule: CronSchedule, persisted_ms: int | None, now_ms: int) -> int | None:
+    """Return the next run for a reloaded job, keeping a pending interval run.
+
+    ``every`` schedules are relative to the previous run, so recomputing them
+    from ``now`` on every startup postpones the job by a full interval each
+    time the gateway restarts. A persisted next run is kept while it is still
+    in the future and no more than one interval away; anything else falls back
+    to :func:`_compute_next_run`.
+    """
+    if (
+        schedule.kind == "every"
+        and schedule.every_ms
+        and schedule.every_ms > 0
+        and persisted_ms is not None
+        and now_ms < persisted_ms <= now_ms + schedule.every_ms
+    ):
+        return persisted_ms
+    return _compute_next_run(schedule, now_ms)
 
 
 def _validate_schedule_for_add(schedule: CronSchedule) -> None:
@@ -447,40 +466,8 @@ class CronService:
 
     @staticmethod
     def _atomic_write(path: Path, content: str) -> None:
-        """Write *content* to *path* atomically with fsync.
-
-        Uses a temp-file + ``os.replace`` + ``fsync`` pattern so a crash or
-        SIGKILL mid-write cannot leave the destination truncated or invalid.
-        Mirrors ``nanobot.session.manager.SessionManager.save`` (see
-        commit 512bf59, ``fix(session): fsync sessions on graceful shutdown
-        to prevent data loss``).  Without this, ``jobs.json`` could be
-        corrupted on container shutdown and silently re-created empty on
-        next start, wiping every scheduled job.
-        """
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = path.with_suffix(path.suffix + ".tmp")
-        try:
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                f.write(content)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_path, path)
-            # fsync the parent directory so the rename itself is durable.
-            # Skip on Windows where opening a directory raises PermissionError;
-            # some shared filesystems reject directory fsync with EINVAL.
-            with suppress(PermissionError):
-                fd = os.open(str(path.parent), os.O_RDONLY)
-                try:
-                    try:
-                        os.fsync(fd)
-                    except OSError as exc:
-                        if exc.errno != errno.EINVAL:
-                            raise
-                finally:
-                    os.close(fd)
-        except BaseException:
-            tmp_path.unlink(missing_ok=True)
-            raise
+        """Durably replace the job store without exposing a partial write."""
+        atomic_write_text(path, content)
 
     def write_run_record(self, run_id: str, record: dict[str, Any]) -> None:
         """Write an internal audit record for one cron execution."""
@@ -522,7 +509,9 @@ class CronService:
             if self._enforce_agent_binding(job):
                 continue
             if job.enabled:
-                job.state.next_run_at_ms = _compute_next_run(job.schedule, now)
+                job.state.next_run_at_ms = _resume_next_run(
+                    job.schedule, job.state.next_run_at_ms, now
+                )
 
     def _get_next_wake_ms(self) -> int | None:
         """Get the earliest next run time across all jobs."""
@@ -615,6 +604,7 @@ class CronService:
 
     async def _execute_job(self, job: CronJob) -> None:
         """Execute a single job."""
+        schedule = job.schedule
         start_ms = _now_ms()
         logger.info("Cron: executing job '{}' ({})", job.name, job.id)
         result: str | CronRunResult | None = None
@@ -656,6 +646,10 @@ class CronService:
             session_key=job.payload.session_key,
         ))
         job.state.run_history = job.state.run_history[-self._MAX_RUN_HISTORY:]
+
+        # Completion belongs to the schedule that started this run.
+        if job.schedule is not schedule:
+            return
 
         # Handle one-shot jobs
         if job.schedule.kind == "at":
@@ -805,7 +799,13 @@ class CronService:
         """Register an internal system job (idempotent on restart)."""
         store = self._require_store()
         now = _now_ms()
-        job.state = CronJobState(next_run_at_ms=_compute_next_run(job.schedule, now))
+        existing = next((j for j in store.jobs if j.id == job.id), None)
+        persisted_ms = (
+            existing.state.next_run_at_ms
+            if existing is not None and existing.enabled and existing.schedule == job.schedule
+            else None
+        )
+        job.state = CronJobState(next_run_at_ms=_resume_next_run(job.schedule, persisted_ms, now))
         job.created_at_ms = now
         job.updated_at_ms = now
         store.jobs = [j for j in store.jobs if j.id != job.id]
@@ -900,7 +900,8 @@ class CronService:
         schedule_changed = schedule is not None and schedule != job.schedule
         if schedule is not None:
             _validate_schedule_for_add(schedule)
-            job.schedule = schedule
+            if schedule_changed:
+                job.schedule = replace(schedule)
         if name is not None:
             job.name = name
         if message is not None:

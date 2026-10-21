@@ -14,12 +14,13 @@ from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.web.async_client import AsyncWebClient
 from slackify_markdown import slackify_markdown  # pyright: ignore[reportMissingTypeStubs]
 
+from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
-from nanobot.config.schema import Base
+from nanobot.config_base import Base
 from nanobot.events import ContextCompactionEvent
 from nanobot.pairing import is_approved
 from nanobot.security.network import (
@@ -208,8 +209,7 @@ class SlackChannel(BaseChannel):
         ):
             return
         if not self._web_client:
-            self.logger.warning("client not running")
-            return
+            raise ChannelNotReadyError("Slack client not running")
         try:
             web_api = self._require_web_api()
             target_chat_id = await self._resolve_target_chat_id(msg.chat_id)

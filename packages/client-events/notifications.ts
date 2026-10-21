@@ -7,6 +7,7 @@ export interface RecoveryState {
   reason?: string
   attempts?: number
   can_continue?: boolean
+  failure_error_kind?: string
 }
 
 export interface ContextCompaction {
@@ -53,6 +54,7 @@ export function isRecoveryState(value: unknown): value is RecoveryState {
     && optional(value.reason, "string")
     && optional(value.attempts, "number")
     && optional(value.can_continue, "boolean")
+    && optional(value.failure_error_kind, "string")
 }
 
 /** Undefined means another protocol family; null means a malformed notification. */

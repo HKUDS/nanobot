@@ -18,6 +18,7 @@ _ROOT_OPTIONS = frozenset(
         "--version",
         "--install-completion",
         "--show-completion",
+        "--home",
     }
 )
 

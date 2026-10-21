@@ -390,20 +390,18 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
         # not an individual process, and can interrupt the caller when a
         # detached/no-window child has no addressable console group.  Keep
         # termination scoped to the recorded PID tree instead.
-        self._subprocess_run(
-            ["taskkill", "/PID", str(pid), "/T"],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        if self._wait_for_exit(pid, timeout_s):
-            return True
-        self._subprocess_run(
-            ["taskkill", "/PID", str(pid), "/T", "/F"],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        # Cooperative shutdown belongs to the application owner. Non-forced
+        # taskkill cannot close these windowless trees and only wastes its grace period.
+        try:
+            self._subprocess_run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=2,
+            )
+        except subprocess.TimeoutExpired:
+            return False
         return self._wait_for_exit(pid, 2)
 
     def _wait_for_exit(self, pid: int, timeout_s: int | float) -> bool:

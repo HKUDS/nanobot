@@ -8,6 +8,7 @@ import time
 import uuid
 from typing import Any, Protocol
 
+from nanobot.bus.delivery import DELIVERY_RUN_META
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.cron.session_delivery import origin_delivery_context
 from nanobot.cron.session_turns import CRON_DEFER_UNTIL_IDLE_META, CRON_TRIGGER_META
@@ -52,6 +53,10 @@ def _bound_session_delivery_context(
                 source_label=source_label,
             )
         )
+    else:
+        # External scheduled results need one recoverable final message, not a
+        # transient stream whose completion marker cannot be replayed safely.
+        metadata.pop("_wants_stream", None)
 
     return channel, chat_id, metadata
 
@@ -89,6 +94,7 @@ async def run_bound_cron_job(
         ),
     }
     metadata[CRON_DEFER_UNTIL_IDLE_META] = True
+    metadata[DELIVERY_RUN_META] = run_id
     run_record_base: dict[str, Any] = {
         "job_id": job.id,
         "job_name": job.name,

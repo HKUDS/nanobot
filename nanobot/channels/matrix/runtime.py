@@ -58,12 +58,13 @@ except ImportError as e:
         "Matrix dependencies not installed. Run: nanobot plugins enable matrix"
     ) from e
 
+from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_data_dir, get_media_dir
-from nanobot.config.schema import Base
+from nanobot.config_base import Base
 from nanobot.events import ContextCompactionEvent
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.logging_bridge import redirect_lib_logging
@@ -621,7 +622,7 @@ class MatrixChannel(BaseChannel):
         ):
             return
         if not self.client:
-            raise RuntimeError("Matrix client not initialized")
+            raise ChannelNotReadyError("Matrix client not initialized")
         text = msg.content or ""
         candidates = self._collect_outbound_media_candidates(msg.media)
         relates_to = self._build_outbound_relates_to(msg.metadata)

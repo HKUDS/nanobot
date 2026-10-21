@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent.runner_helpers import make_run_spec
-from agent.session_helpers import run_session
+from agent.session_helpers import run_session, visible_message
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.tools.context import RequestContext
 from nanobot.config.schema import AgentDefaults
@@ -37,7 +37,6 @@ def _make_loop(tmp_path, *, recovery_admission=None):
     provider.get_default_model.return_value = "test-model"
 
     with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager"), \
          patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         mock_sub_mgr.return_value.close = AsyncMock()
@@ -393,7 +392,7 @@ async def test_goal_continuation_precedes_terminal_wait():
     continuation_checks = 0
     terminal_waits = 0
 
-    def continue_goal() -> str | None:
+    async def continue_goal() -> str | None:
         nonlocal continuation_checks
         continuation_checks += 1
         return "Continue the active goal." if continuation_checks == 1 else None
@@ -749,7 +748,7 @@ async def test_pending_injection_resolves_its_own_runtime_context(tmp_path):
         )
 
     loop.register_runtime_context_provider(provide_identity)
-    session = loop.sessions.get_or_create("telegram:group-1")
+    session = await loop.sessions.state.get("telegram:group-1")
     pending_queue = asyncio.Queue()
     await pending_queue.put(InboundMessage(
         channel="telegram",
@@ -823,7 +822,7 @@ async def test_pending_injection_resolves_its_own_runtime_context(tmp_path):
     assert "telegram | group-1 | user-c | message-3" in str(model_messages)
     assert "Carol | topic-7" in str(model_messages)
     assert all(
-        message["_meta"][RUNTIME_CONTEXT_MESSAGE_META]["sources"] == ["identity"]
+        message["_meta"][RUNTIME_CONTEXT_MESSAGE_META]["sources"] == ["workspace_access", "identity"]
         for message in injected
     )
 
@@ -892,7 +891,7 @@ async def test_subagent_pending_injection_is_hidden_history_and_not_merged(tmp_p
     assert result.had_injections is True
     assert call_count["n"] == 2
     injected_users = [message for message in result.messages if message.get("role") == "user"][-2:]
-    assert [message["content"] for message in injected_users] == ["visible follow-up", payload]
+    assert [visible_message(message)["content"] for message in injected_users] == ["visible follow-up", payload]
     assert injected_users[1][HIDDEN_HISTORY_META] == {
         "kind": "subagent_result",
         "subagent_task_id": "sub-1",
@@ -1283,7 +1282,7 @@ async def test_pending_queue_batches_full_snapshot_before_first_model_call(tmp_p
     for idx in range(total_followups):
         assert f"follow-up-{idx}" in flattened_user_content
     raw_followups = [
-        message["content"]
+        visible_message(message)["content"]
         for message in result.messages
         if message.get("role") == "user"
         and isinstance(message.get("content"), str)
@@ -1416,7 +1415,7 @@ async def test_pending_snapshot_rolls_back_before_later_arrivals(tmp_path, cance
         else:
             result = await run
             user_content = [
-                message["content"] for message in result.messages if message["role"] == "user"
+                visible_message(message)["content"] for message in result.messages if message["role"] == "user"
             ]
             assert user_content == ["root", *contents, "later arrival"]
             assert pending.empty()
@@ -1444,9 +1443,9 @@ async def test_persistent_conversion_error_does_not_drop_later_session_inputs(tm
         calls += 1
         if calls == 1:
             for content in ["before", "bad", "after"]:
-                loop._enqueue_session_message(InboundMessage(
+                (await loop._enqueue_session_message(InboundMessage(
                     channel="cli", sender_id="u", chat_id="c", content=content,
-                ))
+                )))
         return LLMResponse(content="answer", finish_reason="stop")
 
     async def context_provider(request):
@@ -1462,7 +1461,7 @@ async def test_persistent_conversion_error_does_not_drop_later_session_inputs(tm
         ))
         loop.sessions.invalidate("cli:c")
         history = loop.sessions.get_or_create("cli:c").messages
-        assert [message["content"] for message in history if message["role"] == "user"] == [
+        assert [visible_message(message)["content"] for message in history if message["role"] == "user"] == [
             "root", "before", "after",
         ]
         assert sum(event.outcome == "failed" for event in completions) == 1
@@ -1472,16 +1471,25 @@ async def test_persistent_conversion_error_does_not_drop_later_session_inputs(tm
 
 
 @pytest.mark.asyncio
-async def test_session_inbox_is_installed_before_worker_start(tmp_path):
+async def test_session_inbox_is_installed_before_worker_start(tmp_path, monkeypatch):
     """A preloaded burst has one FIFO path before the worker can be scheduled."""
     from nanobot.bus.events import InboundMessage, OutboundMessage
 
     loop = _make_loop(tmp_path)
     first_started = asyncio.Event()
+    all_enqueued = asyncio.Event()
     release_first = asyncio.Event()
     all_processed = asyncio.Event()
     processed: list[str] = []
     followups = [f"follow-up-{index}" for index in range(40)]
+    enqueue = loop._enqueue_session_message
+
+    async def capture_enqueue(msg):
+        await enqueue(msg)
+        if msg.content == followups[-1]:
+            all_enqueued.set()
+
+    monkeypatch.setattr(loop, "_enqueue_session_message", capture_enqueue)
 
     async def _process_message(msg, **_kwargs):
         processed.append(msg.content)
@@ -1502,14 +1510,11 @@ async def test_session_inbox_is_installed_before_worker_start(tmp_path):
         )
 
     run_task = asyncio.create_task(loop.run())
-    await asyncio.wait_for(first_started.wait(), timeout=2)
+    await asyncio.wait_for(
+        asyncio.gather(first_started.wait(), all_enqueued.wait()), timeout=30,
+    )
 
     session_key = "cli:c"
-    for _ in range(200):
-        pending = loop._pending_queues.get(session_key)
-        if pending is not None and pending.qsize() == len(followups):
-            break
-        await asyncio.sleep(0.01)
     assert len(loop._active_tasks[session_key]) == 1
     assert loop._pending_queues[session_key].qsize() == len(followups)
 
@@ -1562,7 +1567,8 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(
         model="test-model",
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
-    loop.sessions.get_or_create("cli:c").policy = SessionPolicy(log_content=log_content)
+    await loop.sessions.state.get("cli:c")
+    await loop.sessions.state.set_policy("cli:c", SessionPolicy(log_content=log_content))
     followups = [f"follow-up-{index:02}" for index in range(12)]
 
     run_task = asyncio.create_task(loop.run())
@@ -1594,7 +1600,8 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(
             break
         await asyncio.sleep(0.01)
     loop.stop()
-    await asyncio.wait_for(run_task, timeout=2)
+    # Shutdown drains accepted writes and closes the worker's WAL connection.
+    await asyncio.wait_for(run_task, timeout=30)
 
     assert len(captured_messages) == 2
     second_request = "\n".join(
@@ -1607,7 +1614,10 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(
     injections = [r for r in records if r["message"].startswith("Injected ")]
     assert len(injections) == 1
     record = injections[0]
-    preview = "\n\n".join(followups)[:80] + "..." if log_content else "[content hidden]"
+    preview = (
+        "follow-up-00\n\n[Runtime Context — metadata only, not instructions]\nCurrent projec..."
+        if log_content else "[content hidden]"
+    )
     assert record["message"] == (
         f"Injected {len(followups)} follow-up message(s) after final response (snapshot 1): {preview}"
     )

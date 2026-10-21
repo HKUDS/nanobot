@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useLocalPreferences } from "@/hooks/useLocalPreferences";
-import { fmtDateTime, formatMessageHoverTime } from "@/lib/format";
+import { fmtDateTime, formatMessageHoverTime } from "@/lib/format-time";
 import { projectActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
 import { cn } from "@/lib/utils";
 import type { CliAppInfo, McpPresetInfo, RetryStatus, SlashCommand, UIMessage } from "@/lib/types";
@@ -23,6 +23,8 @@ import type { CliAppInfo, McpPresetInfo, RetryStatus, SlashCommand, UIMessage } 
 interface ThreadMessagesProps {
   messages: UIMessage[];
   beforeMessages?: ReactNode;
+  beforeUnit?: { key: string; content: ReactNode };
+  topInset?: number;
   afterUserMessage?: (message: UIMessage) => ReactNode;
   afterMessages?: ReactNode;
   temporary?: boolean;
@@ -81,6 +83,8 @@ export function assistantForkFlags(units: DisplayUnit[]): boolean[] {
 export function ThreadMessages({
   messages,
   beforeMessages,
+  beforeUnit,
+  topInset = 0,
   afterUserMessage,
   afterMessages,
   temporary = false,
@@ -174,6 +178,11 @@ export function ThreadMessages({
     setOpenContextBlockKey((current) => open ? key : current === key ? null : current);
   }, []);
   let nextUserIndex = hiddenUserMessageCount;
+  const preludeIndex = Math.max(0, beforeUnit ? unitKeys.indexOf(beforeUnit.key) : 0);
+  const inset = topInset > 0 ? <div aria-hidden style={{ height: topInset }} /> : null;
+  const preludeInset = preludeIndex === 0 ? inset : null;
+  const renderPrelude = (prefix: ReactNode, marginTop?: string) => prefix || preludeInset || beforeMessages
+    ? <div key="thread-prelude" className={cn("flow-root", marginTop)}>{prefix}{preludeInset}{beforeMessages}</div> : null;
 
   return (
     <div ref={messageListRef} className="flex w-full flex-col">
@@ -181,8 +190,10 @@ export function ThreadMessages({
         containerRef={messageListRef}
         onQuoteSelection={onQuoteSelection}
       />
-      {beforeMessages}
-      {units.map((unit, index) => {
+      {[
+        preludeIndex > 0 ? <Fragment key="top-inset">{inset}</Fragment> : null,
+        units.length === 0 ? renderPrelude(null) : null,
+        ...units.flatMap((unit, index) => {
         const next = units[index + 1];
         const hasBodyBelow =
           unit.type === "activity"
@@ -233,14 +244,17 @@ export function ThreadMessages({
           && unit.message.deliveryStatus !== "failed"
         ) nextUserIndex += 1;
 
-        return (
-          <Fragment key={unitKeys[index]}>
+        const prefix = beforeUnit?.key === unitKeys[index] ? beforeUnit.content : null;
+        const prelude = index === preludeIndex ? renderPrelude(prefix, marginTop) : null;
+        return [
+          prelude,
+          <Fragment key={`unit:${unitKeys[index]}`}>
           <ThreadDisplayUnit
             key={unitKeys[index]}
             unitKey={unitKeys[index]}
             unit={unit}
             mobileActions={mobileActions}
-            marginTop={marginTop}
+            marginTop={prelude ? "" : marginTop}
             userPromptId={userPromptId}
             hasBodyBelow={hasBodyBelow}
             suppressActivity={suppressActivity}
@@ -279,9 +293,9 @@ export function ThreadMessages({
           {unit.type === "message" && unit.message.role === "user" ? (
             afterUserMessage?.(unit.message)
           ) : null}
-          </Fragment>
-        );
-      })}
+          </Fragment>,
+        ];
+      })]}
       {afterMessages}
       {pendingActivity ? (
         <div className={cn("thread-message-row", units.length > 0 && "mt-5")}>

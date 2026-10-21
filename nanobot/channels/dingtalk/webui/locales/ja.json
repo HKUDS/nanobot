@@ -12,21 +12,21 @@
         "placeholder": "••••••"
       },
       "allowFrom": {
-        "label": "許可するユーザー",
+        "label": "許可ユーザー",
         "placeholder": "ユーザー ID（カンマ区切り）"
       },
       "allowRemoteMediaRedirects": {
-        "label": "メディアのリダイレクトを許可する",
+        "label": "メディア転送",
         "choices": {
           "true": "オン",
           "false": "オフ"
         }
       },
       "remoteMediaRedirectAllowedHosts": {
-        "label": "メディアリダイレクトホスト"
+        "label": "転送先ホスト"
       },
       "groupUserIsolation": {
-        "label": "個別のグループセッション",
+        "label": "メンバー別セッション",
         "choices": {
           "true": "オン",
           "false": "オフ"

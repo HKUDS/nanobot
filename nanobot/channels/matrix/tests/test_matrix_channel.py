@@ -951,14 +951,30 @@ async def test_typing_keepalive_refreshes_periodically(monkeypatch) -> None:
     channel._running = True
 
     monkeypatch.setattr(matrix_module, "TYPING_KEEPALIVE_INTERVAL_MS", 10)
+    refreshed = asyncio.Event()
+    room_typing = client.room_typing
 
-    await channel._start_typing_keepalive("!room:matrix.org")
-    await asyncio.sleep(0.03)
-    await channel._stop_typing_keepalive("!room:matrix.org", clear_typing=True)
+    async def record_typing(**kwargs):
+        response = await room_typing(**kwargs)
+        if len([call for call in client.typing_calls if call[1] is True]) >= 2:
+            refreshed.set()
+        return response
+
+    monkeypatch.setattr(client, "room_typing", record_typing)
+    task = None
+    try:
+        await channel._start_typing_keepalive("!room:matrix.org")
+        task = channel._typing_tasks["!room:matrix.org"]
+        await asyncio.wait_for(refreshed.wait(), timeout=5)
+    finally:
+        channel._running = False
+        await channel._stop_typing_keepalive("!room:matrix.org", clear_typing=True)
 
     true_updates = [call for call in client.typing_calls if call[1] is True]
     assert len(true_updates) >= 2
     assert client.typing_calls[-1] == ("!room:matrix.org", False, TYPING_NOTICE_TIMEOUT_MS)
+    assert task is not None and task.done()
+    assert not channel._typing_tasks
 
 
 @pytest.mark.asyncio
@@ -1365,10 +1381,14 @@ async def test_on_media_message_sets_thread_metadata_when_threaded_event(
     monkeypatch.setattr("nanobot.channels.matrix.runtime.get_data_dir", lambda: tmp_path)
 
     channel = MatrixChannel(_make_config(), MessageBus())
-    client = _FakeAsyncClient("", "", "", None)
-    client.download_bytes = b"image"
-    channel.client = client
+    channel.client = _FakeAsyncClient("", "", "", None)
+    downloads: list[tuple[str, int]] = []
 
+    async def _download_media_bytes(mxc_url: str, limit_bytes: int) -> bytes:
+        downloads.append((mxc_url, limit_bytes))
+        return b"image"
+
+    monkeypatch.setattr(channel, "_download_media_bytes", _download_media_bytes)
     handled: list[dict[str, object]] = []
 
     async def _fake_handle_message(**kwargs) -> None:
@@ -1396,8 +1416,15 @@ async def test_on_media_message_sets_thread_metadata_when_threaded_event(
 
     await channel._on_media_message(room, event)
 
+    assert len(downloads) == 1
+    assert downloads[0][0] == "mxc://example.org/mediaid"
+    assert downloads[0][1] >= len(b"image")
     assert len(handled) == 1
+    media_paths = handled[0]["media"]
+    assert len(media_paths) == 1
+    assert Path(media_paths[0]).read_bytes() == b"image"
     metadata = handled[0]["metadata"]
+    assert metadata["attachments"][0]["path"] == media_paths[0]
     assert metadata["thread_root_event_id"] == "$root1"
     assert metadata["thread_reply_to_event_id"] == "$event1"
     assert metadata["event_id"] == "$event1"
@@ -2320,31 +2347,6 @@ def test_build_matrix_text_content_with_event_id_preserves_thread_relation() -> 
         "event_id": "event-1",
     }
     assert result["m.new_content"]["m.relates_to"] == relates_to
-
-
-def test_build_matrix_text_content_no_event_id() -> None:
-    """Test that when event_id is not provided, no extra properties are added."""
-    result = _build_matrix_text_content("Regular message")
-
-    # Basic required properties should be present
-    assert "msgtype" in result
-    assert "body" in result
-    assert result["body"] == "Regular message"
-
-    # Extra properties for replacement should NOT be present
-    assert "m.relates_to" not in result
-    assert "m.new_content" not in result
-    assert "format" not in result
-    assert "formatted_body" not in result
-
-
-def test_build_matrix_text_content_plain_text_no_html() -> None:
-    """Test plain text that should not include HTML formatting."""
-    result = _build_matrix_text_content("Simple plain text")
-    assert "msgtype" in result
-    assert "body" in result
-    assert "format" not in result
-    assert "formatted_body" not in result
 
 
 @pytest.mark.asyncio

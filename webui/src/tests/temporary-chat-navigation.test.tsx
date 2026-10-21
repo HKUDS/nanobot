@@ -115,7 +115,8 @@ describe("temporary chat navigation", () => {
           updated_at: "2026-09-01T00:00:00Z",
         })) });
       }
-      if (path === "/api/webui/sidebar-state" && groupedTopics) {
+      if (path === "/api/webui/sidebar-state") {
+        if (!groupedTopics) return Response.json({});
         return Response.json({ workbench: { version: 1, tabs: {
           "tab:websocket:regular": {
             explicit: true, title: "Regular topic",
@@ -171,7 +172,7 @@ describe("temporary chat navigation", () => {
     await screen.findByRole("button", { name: "Temporary chat" });
     act(() => TestSocket.current.open());
     await selectTopic("Regular topic");
-    fireEvent.click(screen.getByRole("button", { name: "Settings", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     await screen.findByRole("button", { name: "Back to chat" });
     expect(window.location.hash).toBe("#/settings");
     first.unmount();
@@ -190,7 +191,7 @@ describe("temporary chat navigation", () => {
     await screen.findByRole("button", { name: "Temporary chat" });
     act(() => TestSocket.current.open());
     const chatId = await startTemporaryChat("Temporary navigation check");
-    fireEvent.click(screen.getByRole("button", { name: "Settings", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     await screen.findByRole("button", { name: "Back to chat" });
     expect(window.location.hash).toBe("#/settings");
     act(() => TestSocket.current.receive({ event: "message", chat_id: chatId, text: "Reply while in settings" }));
@@ -404,7 +405,9 @@ describe("temporary chat navigation", () => {
     }));
     fireEvent.click(await screen.findByRole("button", { name: "notes.txt" }));
     await screen.findByText("Preview of notes.txt");
-    const store = update.mock.contexts.find((value) => value.get(`websocket:${chatId}`).tabs.length)!;
+    const store = update.mock.contexts.find((value): value is FilePreviewStore =>
+      value instanceof FilePreviewStore && value.get(`websocket:${chatId}`).tabs.length > 0,
+    )!;
     expect(store.get(`websocket:${chatId}`).activeId).toBe("file:notes.txt");
     await selectTopic("Close temporary chat: Show example files");
     expect(store.get(`websocket:${chatId}`).tabs).toEqual([]);

@@ -105,8 +105,11 @@ def test_guess_send_file_type_file() -> None:
 
 
 def test_guess_send_file_type_by_mime() -> None:
-    # A filename with no known extension but whose mime type is image/*
-    assert _guess_send_file_type("photo.xyz_image_test") == QQ_FILE_TYPE_FILE
+    filename = "photo.xyz_image_test"
+    assert not _is_image_name(filename)
+    with patch.object(qq.mimetypes, "guess_type", return_value=("image/png", None)) as guess_type:
+        assert _guess_send_file_type(filename) == QQ_FILE_TYPE_IMAGE
+    guess_type.assert_called_once_with(filename)
 
 
 # ── send() exception handling ───────────────────────────────────────

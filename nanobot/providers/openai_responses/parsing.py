@@ -71,7 +71,7 @@ def _response_object(value: object) -> dict[str, Any] | None:
         return object_value
     dump = getattr(value, "model_dump", None)
     if callable(dump):
-        dumped = _as_json_object(dump())
+        dumped = _as_json_object(dump(by_alias=True))
         if dumped is not None:
             return dumped
     try:
@@ -309,6 +309,7 @@ def _extract_refusal_text_from_output(output: object) -> tuple[bool, str]:
 async def iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], None]:
     """Yield parsed JSON events from a Responses API SSE stream."""
     buffer: list[str] = []
+    first_line = True
 
     def _flush() -> dict[str, Any] | None:
         data_lines = [line[5:].strip() for line in buffer if line.startswith("data:")]
@@ -325,6 +326,10 @@ async def iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], N
             return None
 
     async for line in response.aiter_lines():
+        if first_line:
+            # SSE permits one UTF-8 BOM at the beginning of the stream.
+            line = line.removeprefix("\ufeff")
+            first_line = False
         if line == "":
             if buffer:
                 event = _flush()
@@ -362,7 +367,7 @@ async def consume_sse_with_reasoning(
     on_response_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     capture: ResponsesStreamCapture | None = None,
 ) -> tuple[str, list[ToolCallRequest], str, LLMUsage | None, str | None]:
-    """Consume a Responses API SSE stream, including visible reasoning summaries."""
+    """Consume a Responses API SSE stream, including reasoning text and summaries."""
     return await consume_responses_events(
         iter_sse(response),
         on_content_delta=on_content_delta,

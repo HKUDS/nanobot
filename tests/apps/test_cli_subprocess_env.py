@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 
 import pytest
@@ -51,59 +50,6 @@ def test_subprocess_env_excludes_api_keys_on_windows(monkeypatch, tmp_path) -> N
     assert env["SYSTEMROOT"]
     assert "XDG_RUNTIME_DIR" not in env
     assert all(isinstance(value, str) for value in env.values())
-
-
-def test_run_passes_filtered_env(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-should-not-leak")
-    manager = CliAppManager(workspace=tmp_path, data_dir=tmp_path / "cli-apps")
-    captured: dict[str, object] = {}
-
-    def fake_run(*args, **kwargs):
-        captured.update(kwargs)
-
-        class Result:
-            returncode = 0
-            stdout = "ok"
-            stderr = ""
-
-        return Result()
-
-    monkeypatch.setattr("nanobot.apps.cli.service.subprocess.run", fake_run)
-    monkeypatch.setattr(manager, "get_app", lambda name: {"name": name, "entry_point": "echo"})
-    monkeypatch.setattr(
-        manager,
-        "_load_installed",
-        lambda: {"echo": {"entry_point": "echo"}},
-    )
-    monkeypatch.setattr("nanobot.apps.cli.service.shutil.which", lambda entry: "/bin/echo")
-    monkeypatch.setattr(manager, "_resolve_cwd", lambda *a, **k: tmp_path)
-    monkeypatch.setattr(manager, "_artifact_snapshot", lambda cwd: {})
-    monkeypatch.setattr(manager, "_changed_artifacts", lambda cwd, snap: [])
-
-    manager.run("echo", ["hi"])
-
-    env = captured.get("env")
-    assert isinstance(env, dict)
-    assert "OPENAI_API_KEY" not in env
-
-
-def test_management_subprocesses_use_filtered_env(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-should-not-leak")
-    captured: dict[str, object] = {}
-
-    def fake_run(*args, **kwargs):
-        captured.update(kwargs)
-        return subprocess.CompletedProcess(args[0], 0, stdout="ok", stderr="")
-
-    monkeypatch.setattr("nanobot.apps.cli.service.subprocess.run", fake_run)
-    manager = CliAppManager(workspace=tmp_path, data_dir=tmp_path / "cli-apps")
-
-    manager._run_argv(["example-cli", "--help"], timeout=5)
-
-    env = captured.get("env")
-    assert isinstance(env, dict)
-    assert "OPENAI_API_KEY" not in env
-    assert env["PYTHONUNBUFFERED"] == "1"
 
 
 @pytest.mark.parametrize("operation", ["run", "management"])

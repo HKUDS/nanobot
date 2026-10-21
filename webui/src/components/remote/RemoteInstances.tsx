@@ -1,39 +1,17 @@
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Loader2, PlugZap } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import { groupRemoteProfiles, isCompatibilityError, needsRemoteSetup, type RemoteDirectory } from "@/lib/remote-instances";
+import { groupRemoteProfiles, isCompatibilityError, needsRemoteSetup } from "@/lib/remote-instances";
 import { HostCompatibilityDialog } from "./HostCompatibilityDialog";
 import { RemoteConnectionsPage } from "./RemoteConnectionsPage";
-import type { HostAnchor } from "./host-bridge";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { useHostSessions } from "./useHostSessions";
 import { HostNavigationContext, HostSwitcher, RemoteHostMenu, type HostPicker } from "./HostSwitcher";
 import { useSidebarHostBridge } from "./useSidebarHostBridge";
 import { readPairReturn, subscribePairReturn } from "@/lib/remote-pair-return";
-import type { HostConnectionState } from "./HostConnectionStatus";
-
-const RemoteContext = createContext<{
-  available: boolean;
-  localActive: boolean;
-  activeHostId: string | null;
-  hostStates: Record<string, HostConnectionState>;
-  managing: boolean;
-  embeddedManagement?: boolean;
-  reportManagementSurface?: (rect: HostAnchor, theme: "light" | "dark") => void;
-  closeManagement: () => void;
-  selectLocal: () => void;
-  openHostIds: string[];
-  directory: RemoteDirectory | null;
-  directoryError: boolean;
-  refresh: () => Promise<RemoteDirectory>;
-  rename: (id: string, name: string) => Promise<void>;
-  connect: (id: string, stillWanted?: () => boolean) => Promise<void>;
-  disconnect: (id: string) => Promise<void>;
-  remove: (id: string) => Promise<void>;
-  cancel: () => void;
-} | null>(null);
-export function useRemoteConnections() { return useContext(RemoteContext); }
+import { RemoteContext, type HostConnectionState } from "./remote-context";
+import { NOTIFICATION_OPEN_EVENT } from "@/lib/browser-notifications";
 
 /** Keep host views alive; navigation belongs in each view's sidebar, not a second header. */
 export function RemoteInstances({ children }: { children: ReactNode }) {
@@ -57,7 +35,16 @@ export function RemoteInstances({ children }: { children: ReactNode }) {
     if (lastLocalFocus.current?.isConnected) lastLocalFocus.current.focus({ preventScroll: true });
   };
   const message = error ? t(`remote.errors.${error}`, { defaultValue: t("remote.errors.unknown") }) : "";
-  const bridge = useSidebarHostBridge(frames, selected?.id, frameNodes, restoreLocalFocus, { pendingName: pending?.name, error: message }, managing, () => changeManagement(false));
+  const bridge = useSidebarHostBridge(frames, selected?.id, frameNodes, restoreLocalFocus, { pendingName: pending?.name, error: message }, managing, () => changeManagement(false), (id) => {
+    if (hosts.reveal(id)) changeManagement(false);
+  });
+  useEffect(() => {
+    const revealLocal = () => {
+      if (window.parent === window) { returnLocal(); setManaging(false); }
+    };
+    window.addEventListener(NOTIFICATION_OPEN_EVENT, revealLocal);
+    return () => window.removeEventListener(NOTIFICATION_OPEN_EVENT, revealLocal);
+  }, [returnLocal]);
   useEffect(() => {
     if (!managing || !selected || !bridge.surface?.theme) return;
     // Management is drawn by the local shell, beside this host's sidebar.

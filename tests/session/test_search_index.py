@@ -5,12 +5,11 @@ from __future__ import annotations
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
 from nanobot.session.history import SessionHistoryReader
-from nanobot.session.manager import Session, SessionManager, SessionStore
+from nanobot.session.manager import Session, SessionManager
 from nanobot.session.search_index import _INDEX_FILENAME
 
 
@@ -70,7 +69,7 @@ def test_warm_index_reads_only_matching_session_bodies(tmp_path: Path, monkeypat
     assert calls == []
 
 
-def test_rewrite_without_timestamp_or_size_change_refreshes_index(tmp_path: Path) -> None:
+def test_rewrite_without_timestamp_change_refreshes_index(tmp_path: Path) -> None:
     manager = SessionManager(tmp_path)
     session = _save(manager, "sdk:target", "old needle")
     reader = SessionHistoryReader(manager)
@@ -121,11 +120,11 @@ def test_corrupt_cache_is_rebuilt_without_changing_history(tmp_path: Path) -> No
     _save(manager, "sdk:target", "canonical needle")
     reader = SessionHistoryReader(manager)
     assert reader.search("needle", 5)
-    canonical = {path: path.read_bytes() for path in manager.sessions_dir.glob("*.jsonl")}
     (manager.sessions_dir / _INDEX_FILENAME).write_bytes(b"broken SQLite cache")
 
-    assert [match["session_key"] for match in reader.search("needle", 5)] == ["sdk:target"]
-    assert all(path.read_bytes() == content for path, content in canonical.items())
+    matches = reader.search("needle", 5)
+    assert [match["session_key"] for match in matches] == ["sdk:target"]
+    assert matches[0]["messages"][0]["content"] == "canonical needle"
     with sqlite3.connect(manager.sessions_dir / _INDEX_FILENAME) as connection:
         assert connection.execute("PRAGMA quick_check").fetchone() == ("ok",)
 
@@ -146,23 +145,6 @@ def test_save_during_sqlite_query_is_checked_without_blocking_writer(tmp_path: P
         matches = reader.search("new needle", 5)
     assert [match["session_key"] for match in matches] == ["sdk:target"]
     assert matches[0]["messages"][0]["content"] == "new needle"
-
-
-def test_custom_store_keeps_its_own_search_data(tmp_path: Path) -> None:
-    store = MagicMock(spec=SessionStore)
-    store.list_sessions.return_value = [{"key": "sdk:custom", "title": "Notes"}]
-    payload = {
-        "metadata": {"title": "Notes"}, "updated_at": None,
-        "messages": [{"role": "user", "content": "custom needle"}],
-    }
-    store.read_metadata.return_value = payload
-    store.read.return_value = payload
-    manager = SessionManager(tmp_path, store=store)
-
-    matches = SessionHistoryReader(manager).search("needle", 5)
-    assert [match["session_key"] for match in matches] == ["sdk:custom"]
-    assert matches[0]["messages"][0]["content"] == "custom needle"
-    assert not (manager.sessions_dir / _INDEX_FILENAME).exists()
 
 
 def test_index_remains_workspace_scoped(tmp_path: Path) -> None:

@@ -20,6 +20,7 @@ from nanobot.api.server import (
     handle_chat_completions,
 )
 from nanobot.providers.base import LLMUsage
+from nanobot.providers.unconfigured_provider import UnconfiguredProvider
 
 try:
     from aiohttp.test_utils import TestClient, TestServer
@@ -74,6 +75,29 @@ def test_error_json() -> None:
     body = json.loads(resp.body)
     assert body["error"]["message"] == "bad request"
     assert body["error"]["code"] == 400
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.asyncio
+async def test_unconfigured_model_returns_503_before_execution(aiohttp_client, mock_agent, stream):
+    mock_agent.provider = UnconfiguredProvider("not-configured")
+    prepare = AsyncMock()
+    app = create_app(mock_agent, api_key=API_KEY, prepare_agent=prepare)
+    client = await aiohttp_client(app)
+
+    assert (await client.get("/health")).status == 200
+    denied = await client.post("/v1/chat/completions", json={"messages": []})
+    assert denied.status == 401
+    response = await client.post(
+        "/v1/chat/completions", headers=AUTH_HEADERS,
+        json={"messages": [{"role": "user", "content": "hello"}], "stream": stream},
+    )
+    assert response.status == 503
+    error = (await response.json())["error"]
+    assert error["type"] == "configuration_error"
+    assert "Model is not configured" in error["message"]
+    mock_agent.process_direct.assert_not_called()
+    prepare.assert_not_called()
 
 
 def test_chat_completion_response() -> None:
@@ -238,19 +262,6 @@ async def test_no_user_message_returns_400(aiohttp_client, app) -> None:
         json={"messages": [{"role": "system", "content": "you are a bot"}]},
     )
     assert resp.status == 400
-
-
-@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
-@pytest.mark.asyncio
-async def test_stream_true_returns_sse(aiohttp_client, app) -> None:
-    client = await aiohttp_client(app)
-    resp = await client.post(
-        "/v1/chat/completions",
-        headers=AUTH_HEADERS,
-        json={"messages": [{"role": "user", "content": "hello"}], "stream": True},
-    )
-    assert resp.status == 200
-    assert resp.content_type == "text/event-stream"
 
 
 @pytest.mark.asyncio

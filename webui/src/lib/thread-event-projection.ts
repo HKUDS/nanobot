@@ -421,9 +421,9 @@ export function closeThreadProjectionAnswer(
 }
 
 function projectionCreatedAt(event: ThreadProjectionEvent, options: ThreadProjectionOptions): number {
-  return typeof event.created_at_ms === "number" && Number.isFinite(event.created_at_ms)
+  return typeof event.created_at_ms === "number" && Number.isFinite(event.created_at_ms) && event.created_at_ms >= 0
     ? event.created_at_ms
-    : options.now;
+    : options.persisted ? 0 : options.now;
 }
 
 function projectionMessageId(
@@ -785,7 +785,7 @@ export function projectThreadEvent(
     );
     Object.assign(state, resetThreadProjectionCursor(state, state.messages));
     const media = event.media_urls?.map((item) => toMediaAttachment(item));
-    const turn = turnFieldsForProjection(state, event, "user");
+    const turn = turnFieldsFromEvent(event, "user");
     const row: UIMessage = {
       id: projectionMessageId(event, options),
       role: "user",
@@ -999,13 +999,10 @@ export function projectThreadEvent(
 
 export function projectThreadEvents(events: ThreadProjectionEvent[]): UIMessage[] {
   let state = createThreadProjectionState();
-  const fallbackNow = Date.now();
   events.forEach((event, index) => {
     state = projectThreadEvent(state, event, {
       createId: () => `history-${index}`,
-      now: typeof event.created_at_ms === "number"
-        ? event.created_at_ms
-        : fallbackNow + index,
+      now: 0,
       persisted: true,
     });
   });

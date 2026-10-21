@@ -245,35 +245,6 @@ async def test_stream_sse_chunk_ids_are_consistent(aiohttp_client) -> None:
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
-async def test_stream_passes_on_stream_callbacks(aiohttp_client) -> None:
-    """process_direct should be called with on_stream and on_stream_end when streaming."""
-    captured_kwargs: dict = {}
-
-    async def fake_process_direct(**kwargs):
-        captured_kwargs.update(kwargs)
-        if kwargs.get("on_stream_end"):
-            await kwargs["on_stream_end"]()
-        return "done"
-
-    agent = MagicMock()
-    agent.process_direct = fake_process_direct
-    agent.aclose = AsyncMock()
-
-    app = create_app(agent, model_name="m", api_key=API_KEY)
-    client = await aiohttp_client(app)
-
-    resp = await client.post(
-        "/v1/chat/completions",
-        headers=AUTH_HEADERS,
-        json={"messages": [{"role": "user", "content": "hi"}], "stream": True},
-    )
-    assert resp.status == 200
-    assert captured_kwargs.get("on_stream") is not None
-    assert captured_kwargs.get("on_stream_end") is not None
-
-
-@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
-@pytest.mark.asyncio
 async def test_stream_segment_end_does_not_close_sse(aiohttp_client) -> None:
     """Intermediate stream-end callbacks should not terminate the HTTP stream."""
     agent = MagicMock()

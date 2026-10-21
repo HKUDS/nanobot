@@ -25,6 +25,7 @@ def _router(
     config_path: Path | None = None,
     mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
     mcp_reload: Callable[[], Awaitable[dict[str, object]]] | None = None,
+    image_generation_reload: Callable[[], Awaitable[dict[str, object]]] | None = None,
     rename_model_preset: Callable[[str, str], int] | None = None,
     refresh_runtime_config: Callable[[], None] | None = None,
 ) -> WebUISettingsRouter:
@@ -47,6 +48,7 @@ def _router(
         runtime_capabilities={},
         mcp_runtime_status=mcp_runtime_status,
         mcp_reload=mcp_reload,
+        image_generation_reload=image_generation_reload,
         mcp_oauth_redirect_uri=lambda _request: "https://gateway.example/auth/mcp/callback",
     )
 
@@ -154,6 +156,43 @@ async def test_full_settings_query_runs_off_the_event_loop(monkeypatch) -> None:
     assert response is not None
     assert response.status_code == 200
     assert worker_threads and worker_threads[0] != calling_thread
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("provider", "model", "effort", "expected"), [
+    ("openai", "gpt-4o", "", "chat_completions"),
+    ("openai", "gpt-4o", "high", "responses"),
+    ("tenant", "gpt-6-luna", "high", "chat_completions"),
+    ("openai_codex", "gpt-6-astra", "", "responses"),
+])
+async def test_automatic_model_api_read_resolves_drafts_without_saving_or_probing(
+    tmp_path, monkeypatch, provider, model, effort, expected,
+) -> None:
+    from nanobot.config.loader import save_config
+    from nanobot.config.schema import Config
+
+    config_path = tmp_path / "config.json"
+    save_config(Config.model_validate({"providers": {
+        "openai": {"apiKey": "fixture"},
+        "tenant": {"apiBase": "https://tenant.test/v1"},
+    }}), config_path)
+    before = config_path.read_bytes()
+
+    def unexpected_client(*_args, **_kwargs):
+        pytest.fail("API resolution must not construct an HTTP client")
+
+    monkeypatch.setattr("httpx.Client", unexpected_client)
+    monkeypatch.setattr("httpx.AsyncClient", unexpected_client)
+    path = f"/api/settings/model-api?provider={provider}&model={model}&reasoning_effort={effort}"
+    request = SimpleNamespace(path=path, headers=Headers())
+    route = "/api/settings/model-api"
+    denied = await _router(authorized=False, config_path=config_path).dispatch(None, request, route)
+    assert denied is not None and denied.status_code == 401
+    response = await _router(config_path=config_path).dispatch(None, request, route)
+    assert response is not None and response.status_code == 200
+    assert json.loads(response.body) == {"provider": provider, "api": expected}
+    assert config_path.read_bytes() == before
+    assert WebUISettingsRouter.is_mutation_path(route) is False
 
 
 @pytest.mark.asyncio
@@ -610,17 +649,39 @@ async def test_reverting_runtime_switch_clears_restart_but_preserves_other_chang
 
 async def test_reverting_web_reader_preserves_unrelated_restart_reason(tmp_path):
     router = _router(config_path=tmp_path / "config.json")
-    original = router.settings.config.load().tools.web.fetch.use_jina_reader
+    config = router.settings.config.load()
+    original_reader = config.tools.web.fetch.use_jina_reader
+    original_timeout = config.api.timeout
     path = "/api/settings/web-search/update"
-    first = await router.dispatch(None, _mutation_request(path, {"provider": "duckduckgo", "use_jina_reader": not original}), path)
+    first = await router.dispatch(None, _mutation_request(path, {
+        "provider": "duckduckgo", "use_jina_reader": not original_reader,
+    }), path)
+    assert first.status_code == 200
     assert json.loads(first.body)["restart_required_sections"] == ["browser"]
-    router._restart_sections.add("runtime")
-    restored = await router.dispatch(None, _mutation_request(path, {"provider": "duckduckgo", "use_jina_reader": original}), path)
+
+    runtime_path = "/api/settings/runtime-config/update"
+    changed = await router.dispatch(None, _mutation_request(runtime_path, {
+        "values": {"api.timeout": original_timeout + 1},
+    }), runtime_path)
+    assert changed.status_code == 200
+    assert set(json.loads(changed.body)["restart_required_sections"]) == {"browser", "runtime"}
+
+    restored = await router.dispatch(None, _mutation_request(path, {
+        "provider": "duckduckgo", "use_jina_reader": original_reader,
+    }), path)
+    assert restored.status_code == 200
     assert json.loads(restored.body)["restart_required_sections"] == ["runtime"]
+    refreshed = await router.dispatch(None, SimpleNamespace(path="/api/settings", headers=Headers()), "/api/settings")
+    assert json.loads(refreshed.body)["restart_required_sections"] == ["runtime"]
+    reverted = await router.dispatch(None, _mutation_request(runtime_path, {
+        "values": {"api.timeout": original_timeout},
+    }), runtime_path)
+    assert reverted.status_code == 200
+    assert json.loads(reverted.body)["restart_required_sections"] == []
 
 
 @pytest.mark.parametrize("enabled", [False, True])
-async def test_image_switch_round_trip_clears_restart(tmp_path, monkeypatch, enabled):
+async def test_image_switch_round_trip_clears_restart(tmp_path, enabled):
     from nanobot.config.loader import save_config
     from nanobot.config.schema import Config
 
@@ -629,11 +690,10 @@ async def test_image_switch_round_trip_clears_restart(tmp_path, monkeypatch, ena
     config.tools.image_generation.enabled = enabled
     config_path = tmp_path / "config.json"
     save_config(config, config_path)
-    monkeypatch.setattr(
-        "nanobot.webui.settings_routes.request_image_generation_reload",
-        AsyncMock(return_value={"ok": False, "requires_restart": True}),
+    router = _router(
+        config_path=config_path,
+        image_generation_reload=AsyncMock(return_value={"ok": False, "requires_restart": True}),
     )
-    router = _router(config_path=config_path)
     router.logger.warning = MagicMock()
     path = "/api/settings/image-generation/update"
     changed = await router.dispatch(None, _mutation_request(path, {"enabled": not enabled}), path)

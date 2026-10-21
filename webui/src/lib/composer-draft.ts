@@ -33,7 +33,7 @@ function readDraft(raw: string): ComposerDraft | undefined {
       ...(typeof item.id === "string" && /^handle_[a-f0-9]{32}$/i.test(item.id)
         ? { id: item.id } : {}),
     }];
-  }).slice(0, 8);
+  });
   return { text: value.text, quotedContext: value.quotedContext, sessionMentions, files: [] };
 }
 

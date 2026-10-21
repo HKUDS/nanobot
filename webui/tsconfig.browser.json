@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.build.json",
+  "include": ["browser", "playwright.config.ts"],
+  "exclude": []
+}

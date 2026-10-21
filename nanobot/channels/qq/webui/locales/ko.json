@@ -12,7 +12,7 @@
         "placeholder": "••••••"
       },
       "allowFrom": {
-        "label": "허용된 사용자",
+        "label": "허용 사용자",
         "placeholder": "Open ID, 쉼표로 구분"
       },
       "msgFormat": {
@@ -23,24 +23,33 @@
         }
       },
       "ackMessage": {
-        "label": "확인 메시지"
+        "label": "수신 확인 메시지"
       },
       "mediaDir": {
         "label": "미디어 디렉토리"
       },
       "downloadChunkSize": {
-        "label": "청크 크기 다운로드"
+        "label": "청크 크기(바이트)"
       },
       "downloadMaxBytes": {
-        "label": "최대 다운로드 크기"
+        "label": "다운로드 상한(바이트)"
       },
       "showCompactionNotices": {
-        "label": "컨텍스트 압축 알림",
+        "label": "압축 알림",
         "choices": {
           "true": "켜기",
           "false": "끄기"
         }
       }
     }
+  },
+  "custom": {
+    "scanTitle": "모바일 QQ로 스캔",
+    "waiting": "QQ 스캔을 기다리는 중…",
+    "connected": "QQ가 연결되었습니다.",
+    "stopped": "QQ 로그인이 중지되었습니다.",
+    "connecting": "연결 중…",
+    "qrAlt": "QQ 로그인 QR 코드",
+    "scanAgainWarning": "다시 스캔하면 현재 App Secret이 교체됩니다. 새 스캔이 완료되면 이전 App Secret은 더 이상 작동하지 않습니다."
   }
 }

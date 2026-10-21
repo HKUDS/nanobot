@@ -281,16 +281,13 @@ class TestBuildUserContent:
 
 
 class TestBuildSystemPrompt:
-    def test_returns_nonempty_string(self, tmp_path):
-        builder = _builder(tmp_path)
-        result = builder.build_system_prompt()
-        assert isinstance(result, str)
-        assert len(result) > 0
-
     def test_includes_identity_section(self, tmp_path):
         builder = _builder(tmp_path)
         result = builder.build_system_prompt()
-        assert "workspace" in result.lower() or "python" in result.lower()
+
+        assert "## Runtime\n" in result
+        assert "Agent profile: SOUL.md and USER.md" in result
+        assert "History log: memory/history.jsonl" in result
 
     def test_default_identity_uses_relative_agent_paths(self, tmp_path):
         result = ContextBuilder(tmp_path)._get_identity()

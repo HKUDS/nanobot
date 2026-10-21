@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useRef } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { preloadMarkdownText } from "@/components/MarkdownText";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { WebLink, WebPreviewContext } from "@/components/WebLink";
 import { useMessageWebLinks } from "@/components/MessageLinksMenu";
@@ -30,6 +31,8 @@ async function openLinks() {
 }
 
 describe("message link actions", () => {
+  beforeAll(preloadMarkdownText);
+
   function mobileViewport() {
     const listeners = new Set<() => void>();
     let narrow = true;
@@ -111,8 +114,8 @@ describe("message link actions", () => {
     expect(container.querySelectorAll("[data-message-mobile-actions]")).toHaveLength(2);
     fireEvent.click(screen.getAllByRole("button", { name: "Message actions" })[1]);
     const menu = screen.getByRole("dialog");
-    expect(within(menu).getByRole("button", { name: "Fork" })).toHaveTextContent("Fork");
-    fireEvent.click(within(menu).getByRole("button", { name: "Fork" }));
+    expect(within(menu).getByRole("button", { name: "New chat from here" })).toHaveTextContent("New chat from here");
+    fireEvent.click(within(menu).getByRole("button", { name: "New chat from here" }));
     expect(fork).toHaveBeenCalledWith(1);
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });

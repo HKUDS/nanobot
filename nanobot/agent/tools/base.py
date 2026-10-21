@@ -27,6 +27,32 @@ _JSON_TYPE_MAP: dict[str, type | tuple[type, ...]] = {
 }
 
 
+def _is_json_integer(value: object) -> bool:
+    return not isinstance(value, bool) and (
+        isinstance(value, int) or (isinstance(value, float) and value.is_integer())
+    )
+
+
+def _json_values_equal(left: Any, right: Any) -> bool:
+    """Compare JSON values without treating booleans as numbers."""
+    if isinstance(left, bool) or isinstance(right, bool):
+        return left is right
+    if isinstance(left, list) and isinstance(right, list):
+        left_items = cast(list[Any], left)
+        right_items = cast(list[Any], right)
+        return len(left_items) == len(right_items) and all(
+            _json_values_equal(a, b) for a, b in zip(left_items, right_items)
+        )
+    if isinstance(left, dict) and isinstance(right, dict):
+        left_object = cast(dict[str, Any], left)
+        right_object = cast(dict[str, Any], right)
+        return left_object.keys() == right_object.keys() and all(
+            _json_values_equal(value, right_object[key])
+            for key, value in left_object.items()
+        )
+    return left == right
+
+
 class Schema(ABC):
     """Abstract base for JSON Schema fragments describing tool parameters.
 
@@ -51,6 +77,8 @@ class Schema(ABC):
                 continue
             if t in ("integer", "number") and isinstance(val, bool):
                 continue
+            if t == "integer" and _is_json_integer(val):
+                return t
             if isinstance(val, _JSON_TYPE_MAP[t]):
                 return t
         return None
@@ -87,7 +115,7 @@ class Schema(ABC):
                 t = Schema.match_json_schema_type(val, types)
                 if t is None:
                     return [f"{label} should match one of the types {types}"]
-        if t == "integer" and (not isinstance(val, int) or isinstance(val, bool)):
+        if t == "integer" and not _is_json_integer(val):
             return [f"{label} should be integer"]
         if t == "number" and (
             not isinstance(val, _JSON_TYPE_MAP["number"]) or isinstance(val, bool)
@@ -99,7 +127,7 @@ class Schema(ABC):
             return [f"{label} must be finite"]
 
         errors: list[str] = []
-        if "enum" in schema and val not in schema["enum"]:
+        if "enum" in schema and not any(_json_values_equal(val, item) for item in schema["enum"]):
             errors.append(f"{label} must be one of {schema['enum']}")
         if t in ("integer", "number"):
             if "minimum" in schema and val < schema["minimum"]:
@@ -297,8 +325,8 @@ class Tool(ABC):
 
         if t == "boolean" and isinstance(val, bool):
             return val
-        if t == "integer" and isinstance(val, int) and not isinstance(val, bool):
-            return val
+        if t == "integer" and _is_json_integer(val):
+            return int(val) if isinstance(val, float) else val
         if t in self._TYPE_MAP and t not in ("boolean", "integer", "array", "object"):
             expected = self._TYPE_MAP[t]
             if isinstance(val, expected):

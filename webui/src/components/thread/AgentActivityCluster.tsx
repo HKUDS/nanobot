@@ -593,8 +593,7 @@ function ActivityModelMessage({
     <div
       data-testid="activity-model-message"
       data-assistant-selectable={active && message.isStreaming ? undefined : "true"}
-      className="w-full min-w-0 py-1 text-[15px]"
-      style={{ lineHeight: "var(--cjk-line-height)" }}
+      className="w-full min-w-0 py-1 text-reading"
     >
       <MarkdownText
         streaming={active && !!message.isStreaming}
@@ -830,7 +829,7 @@ function ActivityTraceRow({
       tone={status === "error" ? "error" : status === "done" ? "success" : "active"}
       label={trace.kind === "search" ? trace.label : formatActivityTarget(t, trace.label, trace.detail)}
       detail={trace.kind === "search" ? trace.detail : trace.aside}
-      detailClassName={trace.kind === "search" ? "whitespace-pre-line" : undefined}
+      labelClassName={trace.kind === "search" && trace.detail ? "max-w-[50%]" : undefined}
     />
   );
 }

@@ -5,13 +5,20 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import io
 import json
+import random
+import subprocess
+import sys
 from dataclasses import dataclass, field, replace
+from textwrap import dedent
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from aiohttp import web
+from loguru import logger
+from PIL import Image
 from pypdf import PdfWriter
 
 from nanobot.agent.loop import AgentLoop
@@ -31,7 +38,7 @@ class _Peer:
     closed: asyncio.Event = field(default_factory=asyncio.Event)
 
 
-def _events(response_id: str, output: list[dict[str, Any]] | None = None):
+def _events(response_id: str, output: list[dict[str, Any]] | None = None, *, usage=None):
     if output is None:
         output = [{
             "type": "message", "id": f"msg_{response_id}", "role": "assistant",
@@ -45,13 +52,13 @@ def _events(response_id: str, output: list[dict[str, Any]] | None = None):
         events.append({"type": "response.output_item.done", "output_index": index, "item": item})
     events.append({"type": "response.completed", "response": {
         "id": response_id, "status": "completed", "output": output,
-        "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+        "usage": usage if usage is not None else {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
     }})
     return events
 
 
-async def _complete(peer: _Peer, response_id: str, output=None):
-    for event in _events(response_id, output):
+async def _complete(peer: _Peer, response_id: str, output=None, *, usage=None):
+    for event in _events(response_id, output, usage=usage):
         await peer.socket.send_json(event)
 
 
@@ -64,16 +71,17 @@ class _ResponsesServer:
         self.reject_upgrade = False
         self.upgrade_status = 426
         self.upgrade_headers = []
+        self.usage = None
         self.respond = self._respond
 
     async def _respond(self, peer, _body):
-        await _complete(peer, f"resp_{len(self.requests)}")
+        await _complete(peer, f"resp_{len(self.requests)}", usage=self.usage)
 
     async def handle(self, request):
         if request.method == "POST":
             body = await request.json()
             self.http_requests.append(body)
-            data = "".join(f"data: {json.dumps(event)}\n\n" for event in _events("resp_http"))
+            data = "".join(f"data: {json.dumps(event)}\n\n" for event in _events("resp_http", usage=self.usage))
             return web.Response(text=data, content_type="text/event-stream")
         self.upgrade_attempts += 1
         if self.reject_upgrade:
@@ -136,6 +144,100 @@ def _context(result: LLMResponse | None = None, pending=None, session="session-a
     return ProviderCallContext(session_id=session, conversation_state=state, **kwargs)
 
 
+@pytest.mark.parametrize("reject_upgrade", [False, True], ids=["websocket", "sse-fallback"])
+async def test_codex_exports_langfuse_usage(codex_peer, reject_upgrade):
+    pytest.importorskip("langfuse")
+    from importlib.metadata import version
+
+    from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+
+    import nanobot.providers.openai_codex_provider as codex
+
+    _, server, _ = codex_peer
+    server.reject_upgrade = reject_upgrade
+    server.usage = {
+        "input_tokens": 100, "output_tokens": 20, "total_tokens": 120,
+        "input_tokens_details": {"cached_tokens": 80},
+    }
+    spans = []
+    sdk_versions = []
+
+    async def collect(request):
+        sdk_versions.append(request.headers.get("x-langfuse-sdk-version"))
+        exported = ExportTraceServiceRequest.FromString(await request.read())
+        for resource in exported.resource_spans:
+            for scope in resource.scope_spans:
+                spans.extend(scope.spans)
+        return web.Response(body=b"", content_type="application/x-protobuf")
+
+    app = web.Application()
+    app.router.add_post("/api/public/otel/v1/traces", collect)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    try:
+        await web.TCPSite(runner, "127.0.0.1", 0).start()
+        langfuse_url = f"http://127.0.0.1:{runner.addresses[0][1]}"
+        # Isolate the SDK's global client and export threads from the test process.
+        script = dedent('''
+            import asyncio
+            import os
+            import sys
+            from types import SimpleNamespace
+
+            from langfuse import Langfuse
+            import nanobot.providers.openai_codex_provider as codex
+            from nanobot.providers.base import ProviderCallContext
+
+            os.environ.pop("OTEL_EXPORTER_OTLP_HEADERS", None)
+            os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_HEADERS", None)
+            client = Langfuse(
+                public_key="pk-local", secret_key="sk-local", base_url=sys.argv[2],
+                tracing_enabled=True,
+            )
+            os.environ["LANGFUSE_SECRET_KEY"] = "sk-local"
+            codex.DEFAULT_CODEX_URL = sys.argv[1]
+            codex.get_codex_token = lambda **_: SimpleNamespace(account_id="acct", access="token")
+
+            async def run():
+                provider = codex.OpenAICodexProvider(default_model="gpt-5.4")
+                try:
+                    result = await provider.chat(
+                        [{"role": "user", "content": "hello"}],
+                        provider_context=ProviderCallContext(session_id="langfuse-test"),
+                    )
+                    assert result.content == "answer"
+                finally:
+                    await provider.aclose()
+
+            try:
+                asyncio.run(run())
+            finally:
+                client.shutdown()
+        ''')
+        completed = await asyncio.to_thread(
+            subprocess.run, [sys.executable, "-c", script, codex.DEFAULT_CODEX_URL, langfuse_url],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+    finally:
+        await runner.cleanup()
+
+    assert len(server.requests) == int(not reject_upgrade)
+    assert len(server.http_requests) == int(reject_upgrade)
+    assert sdk_versions == [version("langfuse")]
+    assert len(spans) == 1
+    span = spans[0]
+    attributes = {item.key: item.value.string_value for item in span.attributes}
+    assert span.name == "codex_request"
+    assert span.end_time_unix_nano >= span.start_time_unix_nano > 0
+    assert attributes["langfuse.observation.type"] == "generation"
+    assert attributes["langfuse.observation.model.name"] == "gpt-5.4"
+    assert attributes["langfuse.observation.output"] == "answer"
+    assert json.loads(attributes["langfuse.observation.usage_details"]) == {
+        "input": 20, "output": 20, "total": 120, "input_cached_tokens": 80,
+    }
+
+
 async def test_gateway_continues_image_then_pdf_attachment_turn(codex_peer, tmp_path):
     provider, server, _ = codex_peer
     image = tmp_path / "image.png"
@@ -171,6 +273,105 @@ async def test_gateway_continues_image_then_pdf_attachment_turn(codex_peer, tmp_
     finally:
         await agent.aclose()
     await asyncio.wait_for(server.peers[0].closed.wait(), 2)
+
+
+async def test_gateway_prepares_image_batch_and_preserves_originals(codex_peer, tmp_path):
+    provider, server, _ = codex_peer
+    random_bytes = random.Random(234).randbytes(900 * 1800)
+    image = Image.frombytes("L", (900, 1800), random_bytes).point(lambda x: 240 + x // 16)
+    paths = [tmp_path / f"screenshot-{number}.jpg" for number in range(3)]
+    for path in paths:
+        image.save(path, "JPEG", quality=95)
+    originals = [path.read_bytes() for path in paths]
+    # Each image fits by itself; the combined base64 payload requires preparation.
+    original_sizes = [4 * ((len(raw) + 2) // 3) for raw in originals]
+    assert max(original_sizes) < 1_000_000 < sum(original_sizes)
+    small = tmp_path / "thumbnail.jpg"
+    Image.new("RGB", (32, 32), "white").save(small, "JPEG", quality=95)
+    small_bytes = small.read_bytes()
+    agent = AgentLoop(
+        bus=MessageBus(), provider=provider, workspace=tmp_path,
+        model=provider.get_default_model(), context_window_tokens=128_000,
+    )
+    try:
+        result = await agent.process_direct(
+            "Read these screenshots.", session_key="websocket:large-images",
+            channel="websocket", chat_id="large-images", media=[str(path) for path in [*paths, small]],
+        )
+        assert result.content == "answer"
+        initial = server.requests[0][1]
+        urls = [block["image_url"] for item in initial["input"] for block in item.get("content", []) if block["type"] == "input_image"]
+        assert len(urls) == 4
+        assert sum(map(len, urls)) <= 1_000_000
+        for url in urls[:3]:
+            with Image.open(io.BytesIO(base64.b64decode(url.split(",", 1)[1]))) as sent:
+                assert sent.size == (900, 1800)
+        assert base64.b64decode(urls[3].split(",", 1)[1]) == small_bytes
+        assert [path.read_bytes() for path in paths] == originals
+
+        next_result = await agent.process_direct(
+            "Continue.", session_key="websocket:large-images",
+            channel="websocket", chat_id="large-images",
+        )
+        assert next_result.content == "answer"
+        continued = server.requests[1][1]
+        assert continued["previous_response_id"] == "resp_1"
+        assert "input_image" not in json.dumps(continued["input"])
+    finally:
+        await agent.aclose()
+
+
+async def test_codex_prepares_tool_images_and_preserves_png_transparency(codex_peer):
+    provider, server, _ = codex_peer
+    random_bytes = random.Random(234).randbytes(1080 * 2376)
+    image = Image.frombytes("L", (1080, 2376), random_bytes).point(lambda x: 240 + x // 16)
+    image_data = io.BytesIO()
+    image.save(image_data, "JPEG", quality=98)
+    transparent = Image.new("RGBA", (700, 700), (20, 60, 100, 80))
+    png_data = io.BytesIO()
+    transparent.save(png_data, "PNG", compress_level=0)
+    images = [
+        {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{base64.b64encode(raw).decode()}"}}
+        for mime, raw in [("image/jpeg", image_data.getvalue()), ("image/png", png_data.getvalue())]
+    ]
+    message = {"role": "tool", "tool_call_id": "call_1", "content": images}
+    original_message = json.dumps(message)
+    assistant = {"role": "assistant", "content": "", "tool_calls": [{
+        "id": "call_1", "type": "function",
+        "function": {"name": "read_file", "arguments": '{"path":"image.jpg"}'},
+    }]}
+    result = await provider.chat(
+        [*_messages("Read the image."), assistant, message], provider_context=_context(),
+    )
+    assert result.content == "answer"
+    output = server.requests[0][1]["input"][-1]["output"]
+    urls = [block["image_url"] for block in output]
+    assert sum(map(len, urls)) <= 1_000_000
+    assert len(base64.b64decode(urls[0].split(",", 1)[1])) < len(image_data.getvalue())
+    with Image.open(io.BytesIO(base64.b64decode(urls[1].split(",", 1)[1]))) as sent_png:
+        assert sent_png.mode == "RGBA"
+        assert sent_png.size == transparent.size
+        assert sent_png.tobytes() == transparent.tobytes()
+    assert json.dumps(message) == original_message
+
+
+async def test_codex_image_budget_limits_downscaling(codex_peer):
+    provider, server, _ = codex_peer
+    image = Image.frombytes("RGB", (1600, 1600), random.Random(234).randbytes(1600 * 1600 * 3))
+    original = io.BytesIO()
+    image.save(original, "JPEG", quality=98)
+    url = "data:image/jpeg;base64," + base64.b64encode(original.getvalue()).decode()
+    assert len(url) > 1_000_000
+    result = await provider.chat(
+        _messages([{"type": "image_url", "image_url": {"url": url}}]),
+        provider_context=_context(),
+    )
+    assert result.content == "answer"
+    sent_url = server.requests[0][1]["input"][0]["content"][0]["image_url"]
+    assert len(sent_url) <= 1_000_000
+    with Image.open(io.BytesIO(base64.b64decode(sent_url.split(",", 1)[1]))) as sent:
+        assert 1200 <= sent.width < 1600
+        assert 1200 <= sent.height < 1600
 
 
 async def test_codex_continues_attachment_and_tool_turns_without_replaying_history(codex_peer):
@@ -423,13 +624,18 @@ async def test_codex_interrupted_stream_does_not_replay_accepted_request(codex_p
 
     async def respond(peer, _body):
         await peer.socket.send_json({"type": "response.output_text.delta", "delta": "partial"})
-        await peer.socket.close(code=1011, message=b"PRIVATE INPUT")
+        await peer.socket.close(code=1011, message=b"PRIVATE INPUT test-token")
 
     async def on_delta(delta):
         deltas.append(delta)
 
     server.respond = respond
-    result = await provider.chat_stream(_messages(), provider_context=_context(), on_content_delta=on_delta)
+    logs = []
+    sink_id = logger.add(lambda message: logs.append(str(message)))
+    try:
+        result = await provider.chat_stream(_messages(), provider_context=_context(), on_content_delta=on_delta)
+    finally:
+        logger.remove(sink_id)
     assert result.finish_reason == "error"
     assert result.error_kind == "connection"
     assert result.error_should_retry is True
@@ -438,6 +644,81 @@ async def test_codex_interrupted_stream_does_not_replay_accepted_request(codex_p
     assert len(server.requests) == 1
     assert not server.http_requests
     assert "PRIVATE INPUT" not in result.content
+    log = "\n".join(logs)
+    assert "received_code=1011" in log
+    assert "received_reason=redacted" in log
+    assert "direction=received" in log
+    assert "PRIVATE INPUT" not in log
+    assert "test-token" not in log
+
+
+async def test_codex_transport_retry_budget_switches_session_to_http(codex_peer, monkeypatch):
+    provider, server, _ = codex_peer
+    monkeypatch.setattr(provider, "_CHAT_RETRY_DELAYS", (0, 0, 0))
+
+    async def respond(peer, _body):
+        await peer.socket.close(code=1011, message=b"keepalive ping timeout")
+
+    server.respond = respond
+    first = await provider.chat_with_retry(_messages(), provider_context=_context())
+    assert first.content == "answer"
+    assert len(server.requests) == 3
+    assert len(server.http_requests) == 1
+
+    second = await provider.chat(_messages("next"), provider_context=_context(first))
+    assert second.content == "answer"
+    assert len(server.requests) == 3
+    assert len(server.http_requests[1]["input"]) == 3
+    assert "previous_response_id" not in server.http_requests[1]
+
+    server.respond = server._respond
+    other = await provider.chat(_messages(), provider_context=_context(session="session-b"))
+    assert other.content == "answer"
+    assert len(server.requests) == 4
+    assert len(server.http_requests) == 2
+
+
+async def test_codex_transport_fallback_does_not_repeat_partial_output(codex_peer, monkeypatch):
+    provider, server, _ = codex_peer
+    monkeypatch.setattr(provider, "_CHAT_RETRY_DELAYS", (0, 0, 0))
+    deltas = []
+
+    async def respond(peer, _body):
+        if len(server.requests) == 3:
+            await peer.socket.send_json({"type": "response.output_text.delta", "delta": "partial"})
+        await peer.socket.close(code=1011, message=b"keepalive ping timeout")
+
+    async def on_delta(delta):
+        deltas.append(delta)
+
+    server.respond = respond
+    result = await provider.chat_stream_with_retry(
+        _messages(), provider_context=_context(), on_content_delta=on_delta,
+    )
+    assert result.finish_reason == "error"
+    assert deltas == ["partial"]
+    assert len(server.requests) == 3
+    assert not server.http_requests
+
+    next_result = await provider.chat(_messages("next"), provider_context=_context())
+    assert next_result.content == "answer"
+    assert len(server.requests) == 3
+    assert len(server.http_requests) == 1
+
+
+async def test_codex_idle_timeout_budget_switches_session_to_http(codex_peer, monkeypatch):
+    provider, server, _ = codex_peer
+    monkeypatch.setattr(provider, "_CHAT_RETRY_DELAYS", (0, 0, 0))
+    monkeypatch.setenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", "0.05")
+
+    async def respond(_peer, _body):
+        pass
+
+    server.respond = respond
+    result = await provider.chat_with_retry(_messages(), provider_context=_context())
+    assert result.content == "answer"
+    assert len(server.requests) == 3
+    assert len(server.http_requests) == 1
 
 
 @pytest.mark.parametrize("event", [

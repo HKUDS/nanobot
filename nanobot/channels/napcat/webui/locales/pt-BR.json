@@ -12,7 +12,7 @@
         "placeholder": "Token opcional"
       },
       "groupPolicy": {
-        "label": "Comportamento em grupos",
+        "label": "Regras de grupo",
         "choices": {
           "mention": "Somente menções",
           "open": "Todas as mensagens",
@@ -24,17 +24,17 @@
         "placeholder": "IDs do QQ separados por vírgulas"
       },
       "groupPolicyOverrides": {
-        "label": "Substituições de comportamento de grupo (JSON)"
+        "label": "Exceções de grupo (JSON)"
       },
       "welcomeNewMembers": {
-        "label": "Bem vindos novos membros",
+        "label": "Receber novos membros",
         "choices": {
           "true": "Ligado",
           "false": "Desligado"
         }
       },
       "maxImageBytes": {
-        "label": "Tamanho máximo da imagem"
+        "label": "Limite de imagem (bytes)"
       }
     }
   }

@@ -292,6 +292,7 @@ def test_channels_config_keeps_shared_delivery_defaults():
         "matrix",
         "weixin",
         "whatsapp",
+        "whatsapp_agent",
     ],
 )
 def test_special_setup_validation_is_owned_by_channel_package(name: str):
@@ -303,7 +304,7 @@ def test_special_setup_validation_is_owned_by_channel_package(name: str):
     assert plugin.setup.validator.__module__ == f"nanobot.channels.{name}.validation"
 
 
-@pytest.mark.parametrize("name", ["feishu", "linear", "weixin", "whatsapp"])
+@pytest.mark.parametrize("name", ["feishu", "linear", "qq", "weixin", "whatsapp"])
 def test_interactive_connector_is_owned_by_channel_package(name: str):
     plugin = load_channel_package(name)
 
@@ -2637,7 +2638,7 @@ def test_optional_dependency_metadata_for_enable():
     required = data["project"]["dependencies"]
 
     assert "boto3>=1.43.0" not in data["project"]["dependencies"]
-    assert deps["bedrock"] == ["boto3>=1.43.0"]
+    assert deps["bedrock"] == ["boto3>=1.43.0", "botocore>=1.43.0,<2.0.0"]
     # The built-in remote WebUI proxy now needs aiohttp even without channels.
     # Keep the historical API extra installable for existing deployment commands.
     assert "aiohttp>=3.14.3,<4.0.0" in required
@@ -2670,7 +2671,7 @@ def test_optional_dependency_metadata_for_enable():
         "python-pptx>=1.0.0,<2.0.0",
     ]
     assert deps["pdf"] == ["pypdf>=5.0.0,<6.0.0"]
-    assert deps["langfuse"] == ["langfuse>=3.0.0,<4.0.0"]
+    assert deps["langfuse"] == ["langfuse>=4.7.0,<5.0.0"]
     assert deps["olostep"] == ["olostep>=0.1.0; python_version < '3.14'"]
     expected_olostep_args = [] if sys.version_info >= (3, 14) else ["olostep>=0.1.0"]
     assert optional_features.install_args_for_extra("olostep", deps["olostep"]) == (
@@ -2729,6 +2730,8 @@ def test_optional_dependency_metadata_for_enable():
         "weixin": ("qrcode[pil]>=8.0", "pycryptodome>=3.20.0"),
         "whatsapp": (
             "neonize>=0.4.3.post0,<0.5.0",
+            "python-magic>=0.4.27; sys_platform != 'win32'",
+            "python-magic-bin>=0.4.14; sys_platform == 'win32'",
             "segno>=1.6.1,<2.0.0",
         ),
     }

@@ -91,8 +91,7 @@ class SessionHistoryReader:
         *,
         exclude_session_key: str | None = None,
     ) -> list[SessionMatch]:
-        with self._sessions.locked_session_files():
-            ranked, remaining, public_rows = self._candidates(query, exclude_session_key)
+        ranked, remaining, public_rows = self._candidates(query, exclude_session_key)
         ranked.sort(key=lambda item: item[0])
         if len(ranked) < limit and remaining:
             keys = self._search_index.matching_session_keys(query, public_rows, self._index_content)
@@ -116,14 +115,11 @@ class SessionHistoryReader:
         ranked: list[tuple[int, SessionMatch]] = []
         remaining: list[dict[str, Any]] = []
         public_rows: list[dict[str, Any]] = []
-        for row in self._sessions.list_sessions():
+        for row in self._sessions.list_metadata():
             key = row.get("key")
             if not isinstance(key, str):
                 continue
-            payload = self._sessions.read_session_metadata(key)
-            if payload is None:
-                continue
-            raw_metadata = cast(object, payload.get("metadata"))
+            raw_metadata = row.get("metadata")
             metadata = cast(dict[str, Any], raw_metadata) if isinstance(raw_metadata, dict) else {}
             if not self._sessions.types.public_history(metadata):
                 continue

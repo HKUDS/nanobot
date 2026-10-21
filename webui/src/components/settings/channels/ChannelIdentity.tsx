@@ -15,7 +15,7 @@ import type {
   ChannelConfigField,
   ChannelFieldPresentation,
   ChannelSetupPresentation,
-} from "@/components/settings/channels/catalog";
+} from "@/channel-plugins/catalog";
 import { channelValidationMessage } from "@/components/settings/channels/validationMessages";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { normalizeLocale } from "@/i18n/config";
@@ -50,6 +50,7 @@ export function channelSetup(
   });
   const presentation: ChannelSetupPresentation = {
     ...definition,
+    privacyNotice: setupMessages?.privacyNotice,
     primaryActionLabel: setupMessages?.primaryAction,
     docsLabel: setupMessages?.docsLabel,
     officialLabel: setupMessages?.officialLabel,

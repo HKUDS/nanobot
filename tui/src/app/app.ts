@@ -90,6 +90,7 @@ import {
 } from "../views/footer-hints"
 import { copyWithSystemClipboard } from "../platform/clipboard"
 import { configureOpenTuiEnvironment, createTuiHost, type TuiHost } from "../platform/host"
+import { applySelectionColors } from "../platform/selection"
 import { LOCAL_COMMANDS } from "./commands"
 import { CooperativeEventQueue } from "./event-queue"
 import {
@@ -375,7 +376,7 @@ export class NanobotTui {
       },
       {
         onPrimaryMouseDown: () => {
-          const restoreComposerFocus = !this.diffViewer.visible
+          const restoreComposerFocus = !this.diffViewer.visible && !this.transcript.diagrams.viewer.visible
           if (restoreComposerFocus) this.composer.focus()
           // Runtime pickers are transient popovers. A primary click anywhere
           // outside their trigger or body dismisses them; hide() restores the
@@ -404,6 +405,20 @@ export class NanobotTui {
     this.status = layout.status
     this.meta = layout.meta
     this.renderer.root.add(this.shell)
+    this.renderer.root.add(this.transcript.diagrams.viewer.root)
+    this.transcript.diagrams.onOpen = () => {
+      this.composer.blur()
+    }
+    this.transcript.diagrams.viewer.onClose = () => {
+      this.composer.focus()
+      if (this.activeTurn) this.renderActiveStatus()
+      else this.status.content = this.readyStatus()
+      this.updateMeta()
+    }
+    this.shell.renderBefore = () => {
+      const selection = this.renderer.getSelection()
+      if (selection) applySelectionColors(selection, this.palette.selection)
+    }
 
     this.renderer.keyInput.on("keypress", this.handleKey)
     this.renderer.on(CliRenderEvents.THEME_MODE, this.handleTheme)
@@ -557,6 +572,7 @@ export class NanobotTui {
       else if (command.command.action === "context") void this.openContext()
       else if (command.command.action === "usage") this.openUsage()
       else if (command.command.action === "diff") this.openDiff()
+      else if (command.command.action === "diagrams") { this.clearComposer(); this.transcript.diagrams.open() }
       else if (command.command.action === "branch") void this.openBranch()
       else if (command.command.action === "detach") this.quit(true)
       else if (command.command.action === "exit") this.quit()
@@ -1308,6 +1324,17 @@ export class NanobotTui {
         return
       }
     }
+    if (this.transcript.diagrams.viewer.visible) {
+      this.transcript.diagrams.viewer.handleKey(key)
+      key.preventDefault()
+      return
+    }
+    if (key.ctrl && key.name === "g") {
+      this.commandMenu.hide()
+      this.transcript.diagrams.open()
+      key.preventDefault()
+      return
+    }
     if (this.diffViewer.visible) {
       if (key.ctrl && key.name === "c") {
         const selected = this.renderer.getSelection()?.getSelectedText()
@@ -1729,6 +1756,8 @@ export class NanobotTui {
     this.composerFrame.borderColor = this.palette.accent
     this.composer.backgroundColor = surface
     this.composer.focusedBackgroundColor = surface
+    this.composer.selectionBg = this.palette.selection.background
+    this.composer.selectionFg = this.palette.selection.foreground
     this.composer.placeholderColor = this.palette.muted
   }
 

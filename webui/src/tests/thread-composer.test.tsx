@@ -8,6 +8,28 @@ import { encodeImage } from "@/lib/imageEncode";
 import { SESSION_DRAG_TYPE } from "@/lib/session-drag";
 import type { ChatSummary, CliAppInfo, McpPresetInfo, SlashCommand, WorkspaceScopePayload } from "@/lib/types";
 
+function workspacePickerProps(scope: WorkspaceScopePayload) {
+  const resolvePath = (path: string) => path.startsWith("~/") ? `/Users/test/${path.slice(2)}` : path;
+  return {
+    onLoadWorkspaceProjects: async () => ({
+      schema_version: 1,
+      default_access_mode: "default" as const,
+      default_scope: scope,
+      recent_projects: [],
+      favorite_projects: [],
+      controls: { can_change_project: true },
+    }),
+    onBrowseWorkspaceDirectories: async (path: string) => ({
+      path: resolvePath(path), parent: null, entries: [], partial: false,
+      truncated: false, host: "test-host", platform: "Linux",
+    }),
+    onResolveWorkspaceProject: async (path: string) => ({
+      path: resolvePath(path), name: path.replace(/\\/g, "/").split("/").filter(Boolean).pop() || path,
+    }),
+    onFavoriteWorkspaceProject: async () => [],
+  };
+}
+
 vi.mock("@/lib/imageEncode", () => ({
   encodeImage: vi.fn(async (file: File) => ({
     ok: true,
@@ -129,7 +151,7 @@ const MCP_PRESETS: McpPresetInfo[] = [
   },
 ];
 
-function session(chatId: string, title: string, preview = ""): ChatSummary {
+function session(chatId: string, title: string, preview = "", handleName = title): ChatSummary {
   const key = `websocket:${chatId}`;
   const handleId = Array.from(chatId)
     .map((character) => character.codePointAt(0)?.toString(16).padStart(4, "0") ?? "0000")
@@ -146,7 +168,7 @@ function session(chatId: string, title: string, preview = ""): ChatSummary {
     preview,
     handle: {
       id: `handle_${handleId}`,
-      name: title,
+      name: handleName,
     },
   };
 }
@@ -539,7 +561,7 @@ describe("ThreadComposer", () => {
 
     const input = screen.getByLabelText("Message input");
     fireEvent.change(input, { target: { value: "keep this draft" } });
-    fireEvent.click(screen.getByRole("button", { name: "Remove quoted context" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove quote" }));
 
     expect(onQuotedContextChange).toHaveBeenCalledWith(null);
     expect(input).toHaveValue("keep this draft");
@@ -557,17 +579,17 @@ describe("ThreadComposer", () => {
 
     expect(screen.getByText("claude-opus-4-5")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Search" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Reason" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Thinking" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Deep research" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Voice input" })).not.toBeInTheDocument();
     const input = screen.getByPlaceholderText("Ask anything...");
     expect(input).toBeInTheDocument();
     expect(input.className).toContain("min-h-[78px]");
-    expect(input.className).toContain("text-[16px]");
+    expect(input.className).toContain("text-composer");
     expect(input.className).toContain("pt-[27px]");
     fireEvent.change(input, { target: { value: "1" } });
     expect(input.className).toContain("pt-[27px]");
-    expect(input.parentElement?.parentElement?.className).toContain("max-w-[58rem]");
+    expect(input.parentElement?.parentElement?.className).toContain("max-w-[var(--composer-content-width,58rem)]");
   });
 
   it("defers textarea autosizing until IME composition commits", () => {
@@ -607,7 +629,6 @@ describe("ThreadComposer", () => {
         modelPresets={[
           {
             name: "gpt-5-6-sol",
-            label: "gpt-5.6-sol",
             model: "openai-codex/gpt-5.6-sol",
             provider: "openai_codex",
           },
@@ -794,11 +815,13 @@ describe("ThreadComposer", () => {
     expect(modelPill).not.toHaveClass("font-semibold");
     const providerLogo = screen.getByTestId("composer-model-logo-openai");
     expect(providerLogo).toBeInTheDocument();
-    expect(providerLogo).not.toHaveClass("border", "bg-background");
+    for (const className of ["border", "bg-background"]) {
+      expect(providerLogo).not.toHaveClass(className);
+    }
     const input = screen.getByPlaceholderText("Type your message...");
     expect(input.className).toContain("min-h-[50px]");
-    expect(input.className).toContain("text-[16px]");
-    expect(input.parentElement?.parentElement?.className).toContain("max-w-[49.5rem]");
+    expect(input.className).toContain("text-composer");
+    expect(input.parentElement?.parentElement?.className).toContain("max-w-[var(--composer-content-width,49.5rem)]");
     expect(input.parentElement?.parentElement?.className).toContain("rounded-panel");
     expect(input.parentElement?.parentElement?.className).not.toContain("shadow-");
     expect(screen.getByRole("button", { name: "Send message" }).className).toContain("bg-foreground");
@@ -810,7 +833,7 @@ describe("ThreadComposer", () => {
     expect(badge).toHaveClass("h-9");
     expect(badge).toHaveClass("w-fit");
     fireEvent.click(badge);
-    const picker = screen.getByRole("dialog", { name: "Switch model for this chat" });
+    const picker = screen.getByRole("dialog", { name: "Switch model" });
     expect(picker).toHaveClass("w-[min(18rem,calc(100vw-2rem))]");
     expect(badge).toHaveClass("w-fit");
     expect(badge.querySelector(".composer-model-pill")).not.toHaveClass("w-full");
@@ -834,8 +857,8 @@ describe("ThreadComposer", () => {
     const { badge } = renderPresetComposer("thread", onManageModels);
 
     fireEvent.click(badge);
-    const picker = screen.getByRole("dialog", { name: "Switch model for this chat" });
-    fireEvent.click(within(picker).getByRole("button", { name: "Manage models" }));
+    const picker = screen.getByRole("dialog", { name: "Switch model" });
+    fireEvent.click(within(picker).getByRole("button", { name: "Manage presets" }));
 
     expect(onManageModels).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
@@ -864,6 +887,34 @@ describe("ThreadComposer", () => {
     fireEvent.click(badge);
     fireEvent.click(screen.getByRole("option", { name: "dflash" }));
     expect(onPresetChange).toHaveBeenCalledWith("dflash");
+  });
+
+  it("switches the same primary button between voice and send as the draft changes", () => {
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} onTranscribeAudio={vi.fn(async () => "voice")} />);
+    const input = screen.getByRole("textbox");
+    const action = screen.getByRole("button", { name: "Voice input" });
+    expect(screen.queryByRole("button", { name: "Send message" })).not.toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "   " } });
+    expect(screen.getByRole("button", { name: "Voice input" })).toBe(action);
+    fireEvent.change(input, { target: { value: "send this" } });
+    expect(screen.getByRole("button", { name: "Send message" })).toBe(action);
+    expect(screen.queryByRole("button", { name: "Voice input" })).not.toBeInTheDocument();
+    fireEvent.click(action);
+    expect(onSend).toHaveBeenCalledWith("send this", undefined, undefined);
+    expect(screen.getByRole("button", { name: "Voice input" })).toBe(action);
+  });
+
+  it("uses send for an attachment-only draft and restores voice after removal", async () => {
+    mockBlobUrls();
+    const { container } = render(<ThreadComposer onSend={vi.fn()} onTranscribeAudio={vi.fn(async () => "voice")} />);
+    fireEvent.change(container.querySelector('input[type="file"]')!, {
+      target: { files: [new File(["image"], "photo.png", { type: "image/png" })] },
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled());
+    expect(screen.queryByRole("button", { name: "Voice input" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove attachment" }));
+    expect(screen.getByRole("button", { name: "Voice input" })).toBeInTheDocument();
   });
 
   it("transcribes voice input into the composer without sending", async () => {
@@ -941,7 +992,9 @@ describe("ThreadComposer", () => {
       "running",
       [new Float32Array([0, 0.5, -0.5])],
     );
-    const onTranscribeAudio = vi.fn(async () => "mimo voice");
+    const onTranscribeAudio = vi.fn<NonNullable<React.ComponentProps<typeof ThreadComposer>["onTranscribeAudio"]>>(
+      async () => "mimo voice",
+    );
     render(
       <ThreadComposer
         onSend={vi.fn()}
@@ -977,9 +1030,9 @@ describe("ThreadComposer", () => {
 
   it("does not start duplicate voice recordings while microphone access is pending", async () => {
     const { getUserMedia, stopTrack } = mockVoiceRecorder();
-    let resolveStream: ((stream: MediaStream) => void) | undefined;
+    let resolveStream: ((stream: Awaited<ReturnType<typeof getUserMedia>>) => void) | undefined;
     getUserMedia.mockImplementation(() => new Promise((resolve) => {
-      resolveStream = resolve as (stream: MediaStream) => void;
+      resolveStream = resolve;
     }));
     const onTranscribeAudio = vi.fn(async () => "one recording");
     render(
@@ -997,7 +1050,7 @@ describe("ThreadComposer", () => {
     expect(getUserMedia).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      resolveStream?.({ getTracks: () => [{ stop: stopTrack }] } as unknown as MediaStream);
+      resolveStream?.({ getTracks: () => [{ stop: stopTrack }] });
     });
     expect(await screen.findByLabelText("Recording 0:00")).toBeInTheDocument();
     await waitForVoiceCapture();
@@ -1106,10 +1159,11 @@ describe("ThreadComposer", () => {
 
   it("ignores the delayed click emitted after a long-press voice recording", async () => {
     const { getUserMedia } = mockVoiceRecorder();
+    const onSend = vi.fn();
     const onTranscribeAudio = vi.fn(async () => "held once");
     render(
       <ThreadComposer
-        onSend={vi.fn()}
+        onSend={onSend}
         onTranscribeAudio={onTranscribeAudio}
         placeholder="Type your message..."
       />,
@@ -1131,8 +1185,9 @@ describe("ThreadComposer", () => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
-    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
+    expect(onSend).not.toHaveBeenCalled();
     expect(getUserMedia).toHaveBeenCalledTimes(1);
     expect(onTranscribeAudio).toHaveBeenCalledTimes(1);
   });
@@ -1153,7 +1208,8 @@ describe("ThreadComposer", () => {
 
     const input = screen.getByLabelText("Message input");
     fireEvent.change(input, { target: { value: "draft" } });
-    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
+    fireEvent.keyDown(window, { key: "D", code: "KeyD", ctrlKey: true, shiftKey: true });
+    expect(await screen.findByLabelText("Recording 0:00")).toBeInTheDocument();
     await waitForVoiceCapture();
     fireEvent.click(await screen.findByRole("button", { name: "Stop recording" }));
 
@@ -1342,6 +1398,19 @@ describe("ThreadComposer", () => {
     expect(screen.getByRole("progressbar", { name: "Context 50%" })).toBeVisible();
   });
 
+  it.each([
+    ["restricted", "Default Permission", "Read files, edit files, and run commands only inside the working directory."],
+    ["full", "Full Access", "Allow file access and commands outside the working directory."],
+  ] as const)("explains %s workspace access on hover", async (mode, label, explanation) => {
+    const user = userEvent.setup();
+    render(<ThreadComposer onSend={vi.fn()} workspaceScope={{ project_path: "/tmp/project", project_name: "project", access_mode: mode, restrict_to_workspace: mode === "restricted" }} onWorkspaceScopeChange={vi.fn()} />);
+    const access = screen.getByRole("button", { name: `Workspace access mode: ${label}` });
+    expect(access).not.toHaveAttribute("title");
+    await user.hover(access);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(explanation);
+    expect(access).toHaveAttribute("aria-describedby");
+  });
+
   it("toggles workspace access directly by click and keyboard", async () => {
     const user = userEvent.setup();
     const onWorkspaceScopeChange = vi.fn();
@@ -1349,10 +1418,10 @@ describe("ThreadComposer", () => {
       project_path: "/tmp/project", project_name: "project",
       access_mode: "restricted", restrict_to_workspace: true,
     };
-    const composer = (workspaceScope: WorkspaceScopePayload, canUseFullAccess = true) => (
+    const composer = (workspaceScope: WorkspaceScopePayload) => (
       <ThreadComposer onSend={vi.fn()} placeholder="Type your message..."
         workspaceScope={workspaceScope}
-        workspaceControls={{ can_change_project: true, can_use_full_access: canUseFullAccess }}
+        workspaceControls={{ can_change_project: true }}
         onWorkspaceScopeChange={onWorkspaceScopeChange} />
     );
     const { rerender } = render(composer(restricted));
@@ -1368,11 +1437,10 @@ describe("ThreadComposer", () => {
     expect(access).toHaveFocus();
     await user.keyboard("{Enter}");
     expect(onWorkspaceScopeChange).toHaveBeenLastCalledWith(restricted);
-    rerender(composer(restricted, false));
-    expect(access).toBeDisabled();
-    onWorkspaceScopeChange.mockClear();
+    rerender(composer(restricted));
+    expect(access).toBeEnabled();
     await user.click(access);
-    expect(onWorkspaceScopeChange).not.toHaveBeenCalled();
+    expect(onWorkspaceScopeChange).toHaveBeenLastCalledWith(full);
   });
 
   it("exposes full and compact workspace labels for container-driven compression", () => {
@@ -1387,7 +1455,7 @@ describe("ThreadComposer", () => {
           access_mode: "full",
           restrict_to_workspace: false,
         }}
-        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        workspaceControls={{ can_change_project: true }}
         onWorkspaceScopeChange={vi.fn()}
       />,
     );
@@ -1403,7 +1471,7 @@ describe("ThreadComposer", () => {
     expect(shortLabel).toHaveClass("hidden");
   });
 
-  it("keeps project selection as a compact composer dropdown", async () => {
+  it("opens project selection in a searchable dialog", async () => {
     const user = userEvent.setup();
     const onWorkspaceScopeChange = vi.fn();
     const defaultScope = {
@@ -1423,27 +1491,26 @@ describe("ThreadComposer", () => {
           restrict_to_workspace: false,
         }}
         workspaceDefaultScope={defaultScope}
-        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        {...workspacePickerProps(defaultScope)}
+        workspaceControls={{ can_change_project: true, can_browse_directories: true, can_resolve_project: true }}
         onWorkspaceScopeChange={onWorkspaceScopeChange}
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Choose project" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
 
-    expect(await screen.findByRole("button", { name: /Default workspace/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "/Users/test/.nanobot/workspace" })).toBeInTheDocument();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
 
-    const input = screen.getByLabelText("Paste path");
+    await user.click(screen.getByRole("button", { name: /^Edit path:/ }));
+    const input = screen.getByRole("combobox");
     fireEvent.change(input, { target: { value: "relative/project" } });
-    fireEvent.click(screen.getByRole("button", { name: "Use Path" }));
-
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "Enter an absolute folder path on this machine.",
-    );
+    expect(screen.queryByRole("option", { name: "relative/project" })).not.toBeInTheDocument();
     expect(onWorkspaceScopeChange).not.toHaveBeenCalled();
 
     fireEvent.change(input, { target: { value: "/Users/test/project-alpha" } });
-    fireEvent.click(screen.getByRole("button", { name: "Use Path" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
 
     expect(onWorkspaceScopeChange).toHaveBeenCalledWith(expect.objectContaining({
       project_path: "/Users/test/project-alpha",
@@ -1452,13 +1519,15 @@ describe("ThreadComposer", () => {
       restrict_to_workspace: false,
     }));
 
-    await user.click(screen.getByRole("button", { name: "Choose project" }));
-    const reopenedInput = await screen.findByLabelText("Paste path");
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
+    await user.click(screen.getByRole("button", { name: /^Edit path:/ }));
+    const reopenedInput = await screen.findByRole("combobox");
     fireEvent.change(reopenedInput, { target: { value: "~/Pictures/Photos" } });
-    fireEvent.click(screen.getByRole("button", { name: "Use Path" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
 
     expect(onWorkspaceScopeChange).toHaveBeenLastCalledWith(expect.objectContaining({
-      project_path: "~/Pictures/Photos",
+      project_path: "/Users/test/Pictures/Photos",
       project_name: "Photos",
       access_mode: "full",
       restrict_to_workspace: false,
@@ -1467,10 +1536,12 @@ describe("ThreadComposer", () => {
 
   it.each([
     ["Windows", "D:\\Users\\test\\.nanobot\\workspace", "D:\\path\\to\\project"],
+    ["Windows UNC", "\\\\server\\share\\workspace", "\\\\server\\share\\project"],
     ["macOS", "/Users/test/.nanobot/workspace", "/Users/name/project"],
     ["Linux", "/home/test/.nanobot/workspace", "/home/name/project"],
-  ])("uses a %s path example for the project picker", async (_, projectPath, placeholder) => {
+  ])("accepts a %s project path", async (_, projectPath, selectedPath) => {
     const user = userEvent.setup();
+    const onWorkspaceScopeChange = vi.fn();
     const defaultScope = {
       project_path: projectPath,
       project_name: "workspace",
@@ -1485,17 +1556,21 @@ describe("ThreadComposer", () => {
         variant="hero"
         workspaceScope={defaultScope}
         workspaceDefaultScope={defaultScope}
-        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
-        onWorkspaceScopeChange={vi.fn()}
+        {...workspacePickerProps(defaultScope)}
+        workspaceControls={{ can_change_project: true }}
+        onWorkspaceScopeChange={onWorkspaceScopeChange}
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Choose project" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
 
-    expect(await screen.findByLabelText("Paste path")).toHaveAttribute("placeholder", placeholder);
+    fireEvent.change(await screen.findByRole("combobox"), { target: { value: selectedPath } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled());
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+    await waitFor(() => expect(onWorkspaceScopeChange).toHaveBeenCalledWith(expect.objectContaining({ project_path: selectedPath })));
   });
 
-  it("slides project controls closed without offering a compact replacement", () => {
+  it("groups the directory and access beside attachments and hides them with workspace controls", () => {
     const defaultScope = {
       project_path: "/Users/test/.nanobot/workspace",
       project_name: "workspace",
@@ -1510,58 +1585,71 @@ describe("ThreadComposer", () => {
         workspaceControlsHidden={workspaceControlsHidden}
         workspaceScope={defaultScope}
         workspaceDefaultScope={defaultScope}
-        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        {...workspacePickerProps(defaultScope)}
+        workspaceControls={{ can_change_project: true }}
         onWorkspaceScopeChange={vi.fn()}
       />
     );
     const { container, rerender } = render(composer(false));
-    const drawer = container.querySelector("[data-composer-workspace-drawer]");
-
-    expect(drawer).toHaveClass("inline-disclosure");
-    expect(drawer?.firstElementChild).toHaveClass("inline-disclosure-clip");
-    expect(drawer?.firstElementChild?.firstElementChild).toHaveClass("inline-disclosure-content");
-    expect(drawer).toHaveAttribute("data-state", "open");
-    expect(drawer).not.toHaveAttribute("aria-hidden");
-    expect(container.querySelector("[data-composer-workspace-compact]")).not.toBeInTheDocument();
-
+    const trigger = screen.getByRole("button", { name: "Switch directory" });
+    expect(trigger).toHaveTextContent("workspace");
+    expect(trigger.closest(".thread-composer-footer-primary")).not.toBeNull();
+    expect(trigger.closest(".thread-composer-workspace-group")).toContainElement(screen.getByRole("button", { name: "Workspace access mode: Full Access" }));
+    expect(container.querySelector("[data-composer-workspace-drawer]")).not.toBeInTheDocument();
     rerender(composer(true));
-
-    expect(container.querySelector("[data-composer-workspace-drawer]")).toBe(drawer);
-    expect(drawer).toHaveAttribute("data-state", "closed");
-    expect(drawer).toHaveAttribute("aria-hidden", "true");
-    expect(within(drawer as HTMLElement).getByRole("button", {
-      hidden: true,
-      name: "Choose project",
-    })).toBeDisabled();
-    expect(screen.queryByRole("button", { name: "Choose project" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", {
-      name: "Workspace access mode: Full Access",
-    })).not.toBeInTheDocument();
-
+    expect(screen.queryByRole("button", { name: "Switch directory" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Workspace access mode: Full Access" })).not.toBeInTheDocument();
     rerender(composer(false));
-
-    expect(container.querySelector("[data-composer-workspace-drawer]")).toBe(drawer);
-    expect(drawer).toHaveAttribute("data-state", "open");
-    expect(within(drawer as HTMLElement).getByRole("button", {
-      name: "Choose project",
-    })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Switch directory" })).toBeEnabled();
   });
 
-  it("uses the native folder picker for project selection on native host", async () => {
+  it("places the directory left and access right on narrow composers, moving them into the toolbar on desktop", () => {
+    let width = 390;
+    vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockImplementation(() => rect({ width, height: 160 }));
+    const defaultScope = { project_path: "/srv/workspace", project_name: "workspace", access_mode: "full" as const };
+    const { container } = render(<ThreadComposer variant="hero" onSend={vi.fn()} workspaceScope={defaultScope}
+      workspaceDefaultScope={defaultScope}
+        {...workspacePickerProps(defaultScope)} workspaceControls={{ can_change_project: true }} onWorkspaceScopeChange={vi.fn()} />);
+    const input = screen.getByRole("textbox");
+    const row = container.querySelector(".thread-composer-workspace-row")!;
+    const trigger = screen.getByRole("button", { name: "Switch directory" });
+    expect(row).toContainElement(trigger);
+    expect(trigger.closest(".ml-auto")).toBeNull();
+    const access = screen.getByRole("button", { name: "Workspace access mode: Full Access" });
+    expect(row).toContainElement(access);
+    expect(access.closest(".ml-auto")).not.toBeNull();
+    width = 800;
+    fireEvent(window, new Event("resize"));
+    expect(screen.getByRole("button", { name: "Switch directory" }).closest(".thread-composer-footer-primary")).not.toBeNull();
+    expect(container.querySelector("[data-composer-workspace-drawer]")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toBe(input);
+    expect(screen.getAllByRole("button", { name: "Switch directory" })).toHaveLength(1);
+  });
+
+  it("browses and selects the connected host's project in one dialog on a native client", async () => {
+    const user = userEvent.setup();
     const onWorkspaceScopeChange = vi.fn();
-    const pickFolder = vi.fn().mockResolvedValue("/Users/test/native-project");
     const defaultScope = {
       project_path: "/Users/test/.nanobot/workspace",
       project_name: "workspace",
       access_mode: "full" as const,
       restrict_to_workspace: false,
     };
+    const project = { path: `${defaultScope.project_path}/project`, name: "project" };
+    const onBrowseWorkspaceDirectories = vi.fn((rawPath: string) => {
+      const path = rawPath.replace(/\/$/, "");
+      return Promise.resolve({
+        path, parent: path === defaultScope.project_path ? "/Users/test/.nanobot" : defaultScope.project_path,
+        entries: path === defaultScope.project_path ? [project] : [],
+        truncated: false, host: "dev-mac", platform: "Darwin",
+      });
+    });
+    const onResolveWorkspaceProject = vi.fn().mockResolvedValue(project);
     Object.defineProperty(window, "nanobotHost", {
       configurable: true,
       value: {
         getRuntimeInfo: vi.fn(),
         restartEngine: vi.fn(),
-        pickFolder,
         openLogs: vi.fn(),
         exportDiagnostics: vi.fn(),
       },
@@ -1574,43 +1662,43 @@ describe("ThreadComposer", () => {
         variant="hero"
         workspaceScope={defaultScope}
         workspaceDefaultScope={defaultScope}
+        {...workspacePickerProps(defaultScope)}
         workspaceControls={{
           can_change_project: true,
-          can_use_full_access: true,
-          can_pick_folder: true,
+          can_browse_directories: true,
+          can_resolve_project: true,
         }}
+        onBrowseWorkspaceDirectories={onBrowseWorkspaceDirectories}
+        onResolveWorkspaceProject={onResolveWorkspaceProject}
         onWorkspaceScopeChange={onWorkspaceScopeChange}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Choose project" }));
-
-    await waitFor(() => expect(pickFolder).toHaveBeenCalled());
-    expect(screen.queryByRole("button", { name: /Default workspace/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
+    expect(screen.getByRole("dialog", { name: "Choose directory" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("option", { name: project.path }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled());
+    expect(onWorkspaceScopeChange).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Choose directory" })).not.toBeInTheDocument());
+    expect(onResolveWorkspaceProject).toHaveBeenCalledWith(project.path);
     expect(onWorkspaceScopeChange).toHaveBeenCalledWith(expect.objectContaining({
-      project_path: "/Users/test/native-project",
-      project_name: "native-project",
+      project_path: project.path,
+      project_name: project.name,
       access_mode: "full",
       restrict_to_workspace: false,
     }));
   });
 
-  it("does not use a native host picker when the gateway disallows folder picking", async () => {
+  it("preserves Full Access when selecting an entered host path", async () => {
     const user = userEvent.setup();
     const onWorkspaceScopeChange = vi.fn();
-    const pickFolder = vi.fn().mockResolvedValue("/Users/test/native-project");
-    const onPickWorkspaceFolder = vi.fn().mockResolvedValue("/srv/nas-project");
     const defaultScope = {
       project_path: "/srv/nanobot/workspace",
       project_name: "workspace",
       access_mode: "full" as const,
       restrict_to_workspace: false,
     };
-    Object.defineProperty(window, "nanobotHost", {
-      configurable: true,
-      value: { pickFolder },
-    });
-
     render(
       <ThreadComposer
         onSend={vi.fn()}
@@ -1618,99 +1706,31 @@ describe("ThreadComposer", () => {
         variant="hero"
         workspaceScope={defaultScope}
         workspaceDefaultScope={defaultScope}
+        {...workspacePickerProps(defaultScope)}
         workspaceControls={{
           can_change_project: true,
-          can_use_full_access: false,
-          can_pick_folder: false,
         }}
-        onPickWorkspaceFolder={onPickWorkspaceFolder}
         onWorkspaceScopeChange={onWorkspaceScopeChange}
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Choose project" }));
+    await user.click(screen.getByRole("button", { name: "Switch directory" }));
 
-    expect(await screen.findByLabelText("Paste path")).toBeInTheDocument();
-    expect(pickFolder).not.toHaveBeenCalled();
-    expect(onPickWorkspaceFolder).not.toHaveBeenCalled();
+    expect(await screen.findByRole("combobox")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Paste path"), {
+    fireEvent.change(screen.getByRole("combobox"), {
       target: { value: "/srv/nas-project" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Use Path" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
 
     expect(onWorkspaceScopeChange).toHaveBeenCalledWith(expect.objectContaining({
       project_path: "/srv/nas-project",
-      access_mode: "restricted",
-      restrict_to_workspace: true,
-    }));
-  });
-
-  it("uses the gateway folder picker for a locally hosted WebUI", async () => {
-    const onWorkspaceScopeChange = vi.fn();
-    const pickFolder = vi.fn().mockResolvedValue("/Users/test/gateway-project");
-    const defaultScope = {
-      project_path: "/Users/test/.nanobot/workspace",
-      project_name: "workspace",
-      access_mode: "full" as const,
-      restrict_to_workspace: false,
-    };
-
-    render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        placeholder="Ask anything..."
-        variant="hero"
-        workspaceScope={defaultScope}
-        workspaceDefaultScope={defaultScope}
-        workspaceControls={{
-          can_change_project: true,
-          can_use_full_access: true,
-          can_pick_folder: true,
-        }}
-        onPickWorkspaceFolder={pickFolder}
-        onWorkspaceScopeChange={onWorkspaceScopeChange}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Choose project" }));
-
-    await waitFor(() => expect(pickFolder).toHaveBeenCalled());
-    expect(screen.queryByLabelText("Paste path")).not.toBeInTheDocument();
-    expect(onWorkspaceScopeChange).toHaveBeenCalledWith(expect.objectContaining({
-      project_path: "/Users/test/gateway-project",
-      project_name: "gateway-project",
       access_mode: "full",
       restrict_to_workspace: false,
     }));
   });
 
-  it("uses the web path menu when no native host picker is available", async () => {
-    const user = userEvent.setup();
-    const defaultScope = {
-      project_path: "/Users/test/.nanobot/workspace",
-      project_name: "workspace",
-      access_mode: "full" as const,
-      restrict_to_workspace: false,
-    };
-
-    render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        placeholder="Ask anything..."
-        variant="hero"
-        workspaceScope={defaultScope}
-        workspaceDefaultScope={defaultScope}
-        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
-        onWorkspaceScopeChange={vi.fn()}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Choose project" }));
-
-    expect(await screen.findByRole("button", { name: /Default workspace/ })).toBeInTheDocument();
-    expect(screen.getByLabelText("Paste path")).toBeInTheDocument();
-  });
 
   it("closes the sustained goal through its existing drawer", () => {
     const { container, rerender } = render(
@@ -1869,7 +1889,7 @@ describe("ThreadComposer", () => {
     const input = screen.getByLabelText("Message input");
     fireEvent.change(input, { target: { value: "/" } });
 
-    expect(screen.getByRole("option", { name: /Stop current task/i })).toHaveAttribute(
+    expect(screen.getByRole("option", { name: /Stop task/i })).toHaveAttribute(
       "aria-selected",
       "true",
     );
@@ -2096,7 +2116,147 @@ describe("ThreadComposer", () => {
     });
   });
 
-  it("attaches persisted sessions only through the shared mention palette", () => {
+  it.each(["typed", "pasted"])("attaches %s session handles without selecting a candidate", async (entry) => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    const targets = [session("pricing", "Pricing", "", "bime"), session("notes", "Notes", "", "bari")];
+    render(<ThreadComposer onSend={onSend} sessions={targets} />);
+    const input = screen.getByLabelText("Message input");
+    const text = "参考 @bime @bime @BARI";
+
+    if (entry === "typed") await user.type(input, text);
+    else {
+      await user.click(input);
+      await user.paste(text);
+    }
+
+    expect(screen.getAllByTestId("composer-session-mention-bime")).toHaveLength(2);
+    expect(screen.getByTestId("composer-session-mention-bari")).toHaveTextContent("@BARI");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).toHaveBeenCalledWith(text, undefined, {
+      sessionMentions: targets.map((target) => ({
+        id: target.handle?.id,
+        name: target.handle?.name,
+        session_key: target.key,
+        title: target.title,
+      })),
+    });
+  });
+
+  it.each(["typed", "pasted"])("recognizes %s session handles separated by punctuation without spaces", async (entry) => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    const targets = [session("pricing", "Pricing", "", "bime"), session("notes", "Notes", "", "luma")];
+    render(<ThreadComposer onSend={onSend} sessions={targets} />);
+    const input = screen.getByLabelText("Message input");
+    const text = "@bime、@luma，@luma";
+
+    if (entry === "typed") await user.type(input, text);
+    else {
+      await user.click(input);
+      await user.paste(text);
+    }
+
+    expect(screen.getByTestId("composer-session-mention-bime")).toHaveTextContent("@bime");
+    expect(screen.getAllByTestId("composer-session-mention-luma")).toHaveLength(2);
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).toHaveBeenCalledWith(text, undefined, {
+      sessionMentions: targets.map((target) => ({
+        id: target.handle?.id, name: target.handle?.name, session_key: target.key, title: target.title,
+      })),
+    });
+  });
+
+  it.each(["、", ",", "："])("completes a session handle after %s without inserting a leading space", (separator) => {
+    const onSend = vi.fn();
+    const targets = [session("pricing", "Pricing", "", "bime"), session("notes", "Notes", "", "luma")];
+    render(<ThreadComposer onSend={onSend} sessions={targets} />);
+    const input = screen.getByLabelText("Message input");
+    const text = `@bime${separator}@lu`;
+    fireEvent.change(input, { target: { value: text, selectionStart: text.length } });
+
+    expect(screen.getByRole("option", { name: /@luma/i })).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Tab" });
+    expect(input).toHaveValue(`@bime${separator}@luma `);
+    expect(screen.getByTestId("composer-session-mention-luma")).toHaveTextContent("@luma");
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).toHaveBeenCalledWith(`@bime${separator}@luma`, undefined, {
+      sessionMentions: targets.map((target) => ({
+        id: target.handle?.id, name: target.handle?.name, session_key: target.key, title: target.title,
+      })),
+    });
+  });
+
+  it("previews and drops a session after punctuation without changing the surrounding text", () => {
+    const onSend = vi.fn();
+    const targets = [session("pricing", "Pricing", "", "bime"), session("notes", "Notes", "", "luma")];
+    render(<ThreadComposer onSend={onSend} sessions={targets} />);
+    const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "@bime、", selectionStart: 6 } });
+    const dataTransfer = { types: [SESSION_DRAG_TYPE], files: [], getData: () => targets[1].key };
+
+    fireEvent.dragOver(input, { dataTransfer });
+    expect(screen.getByTestId("composer-session-drag-preview")).toHaveTextContent("@luma");
+    expect(input).toHaveValue("@bime、");
+    fireEvent.drop(input, { dataTransfer });
+    expect(input).toHaveValue("@bime、@luma ");
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).toHaveBeenCalledWith("@bime、@luma", undefined, {
+      sessionMentions: targets.map((target) => ({
+        id: target.handle?.id, name: target.handle?.name, session_key: target.key, title: target.title,
+      })),
+    });
+  });
+
+  it("leaves unknown handles, partial names, titles and embedded email or path handles as plain text", () => {
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} sessions={[session("pricing", "Pricing", "", "bime")]} />);
+    const text = "@missing @bi @bimex @Pricing mail@bime word@bime /tmp/@bime";
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: text, selectionStart: text.length } });
+
+    expect(screen.queryByTestId("composer-session-mention-bime")).not.toBeInTheDocument();
+    expect(screen.queryByRole("listbox", { name: "Mentions" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).toHaveBeenCalledWith(text, undefined, undefined);
+  });
+
+  it("updates session references when a typed handle is changed or removed", () => {
+    const onSend = vi.fn();
+    const target = session("notes", "Notes", "", "bari");
+    render(<ThreadComposer onSend={onSend} sessions={[session("pricing", "Pricing", "", "bime"), target]} />);
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "@bime @bari" } });
+    expect(screen.getByTestId("composer-session-mention-bime")).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "@bim @bari" } });
+
+    expect(screen.queryByTestId("composer-session-mention-bime")).not.toBeInTheDocument();
+    expect(screen.getByTestId("composer-session-mention-bari")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).toHaveBeenCalledWith("@bim @bari", undefined, {
+      sessionMentions: [{ id: target.handle?.id, name: "bari", session_key: target.key, title: "Notes" }],
+    });
+  });
+
+  it("gives typed session handles the same priority over App and MCP names as the palette", () => {
+    const onSend = vi.fn();
+    const targets = [session("image-notes", "Image notes", "", "gimp"), session("browser-notes", "Browser notes", "", "bari")];
+    render(<ThreadComposer onSend={onSend} sessions={targets} cliApps={CLI_APPS}
+      mcpPresets={[{ ...MCP_PRESETS[0], name: "bari" }]} />);
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "@gimp @bari" } });
+
+    expect(screen.getByTestId("composer-session-mention-gimp")).toBeInTheDocument();
+    expect(screen.getByTestId("composer-session-mention-bari")).toBeInTheDocument();
+    expect(screen.queryByTestId("composer-cli-mention-gimp")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("composer-mcp-mention-bari")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).toHaveBeenCalledWith("@gimp @bari", undefined, {
+      sessionMentions: targets.map((target) => ({
+        id: target.handle?.id, name: target.handle?.name, session_key: target.key, title: target.title,
+      })),
+    });
+  });
+
+  it("attaches persisted sessions through the shared mention palette", () => {
     const onSend = vi.fn();
     render(
       <ThreadComposer
@@ -2107,13 +2267,6 @@ describe("ThreadComposer", () => {
     );
 
     const input = screen.getByLabelText("Message input");
-    fireEvent.change(input, {
-      target: { value: "普通文字 @收费设计", selectionStart: 10 },
-    });
-    expect(screen.queryByTestId("composer-session-mention-收费设计")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-    expect(onSend).toHaveBeenLastCalledWith("普通文字 @收费设计", undefined, undefined);
-
     fireEvent.change(input, {
       target: { value: "参考 @收费", selectionStart: 6 },
     });
@@ -2217,40 +2370,59 @@ describe("ThreadComposer", () => {
     expect(screen.queryByTestId("composer-session-drag-preview")).not.toBeInTheDocument();
   });
 
-  it("releases the eight-session limit when a mention is removed", () => {
+  it.each([" ", "、"])("rejects more than eight typed session references separated by %j without silently dropping them", (separator) => {
     const onSend = vi.fn();
-    render(
-      <ThreadComposer
-        onSend={onSend}
-        placeholder="Type your message..."
-        sessions={Array.from(
-          { length: 9 },
-          (_, index) => session(`topic-${index}`, `Topic${index}`),
-        )}
-      />,
-    );
+    const targets = Array.from({ length: 9 }, (_, index) => session(`topic-${index}`, `Topic${index}`));
+    render(<ThreadComposer onSend={onSend} sessions={targets} />);
+    const input = screen.getByLabelText("Message input");
+    const handles = targets.map((target) => `@${target.handle?.name}`);
+    fireEvent.change(input, { target: { value: handles.join(separator) } });
 
-    const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
-    for (let index = 0; index < 8; index += 1) {
-      const value = `${input.value}${input.value ? " " : ""}@Topic${index}`;
-      fireEvent.change(input, { target: { value, selectionStart: value.length } });
-      fireEvent.keyDown(input, { key: "Tab" });
+    for (const target of targets) {
+      expect(screen.getByTestId(`composer-session-mention-${target.handle?.name}`)).toBeInTheDocument();
     }
-    const replacement = `${input.value.replace("@Topic0 ", "")} @Topic8`;
-    fireEvent.change(input, {
-      target: { value: replacement, selectionStart: replacement.length },
-    });
-    fireEvent.keyDown(input, { key: "Tab" });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("A message can mention up to 8 chats");
 
-    const options = onSend.mock.calls[0]?.[2];
-    expect(options.sessionMentions).toHaveLength(8);
-    expect(options.sessionMentions.map((mention: { session_key: string }) => (
-      mention.session_key
-    ))).toEqual(expect.arrayContaining(["websocket:topic-8"]));
+    fireEvent.change(input, { target: { value: handles.slice(1).join(separator) } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend.mock.calls[0]?.[2].sessionMentions.map((mention: { session_key: string }) => mention.session_key))
+      .toEqual(targets.slice(1).map((target) => target.key));
   });
 
-  it("keeps a selected session stable across refreshes and queued guidance", () => {
+  it.each(["palette", "drop"])("releases the eight-session limit for %s insertion when a mention is removed", (entry) => {
+    const onSend = vi.fn();
+    const targets = Array.from({ length: 9 }, (_, index) => session(`topic-${index}`, `Topic${index}`, "", `ref${index}x`));
+    render(<ThreadComposer onSend={onSend} sessions={targets} />);
+    const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
+    const text = `${targets.slice(0, 8).map((target) => `@${target.handle?.name}`).join(" ")} @ref8`;
+    fireEvent.change(input, { target: { value: text, selectionStart: text.length } });
+    expect(screen.queryByRole("option", { name: /@ref8x/i })).not.toBeInTheDocument();
+    const dataTransfer = { types: [SESSION_DRAG_TYPE], files: [], getData: () => targets[8].key };
+    if (entry === "drop") {
+      fireEvent.dragOver(input, { dataTransfer });
+      expect(screen.queryByTestId("composer-session-drag-preview")).not.toBeInTheDocument();
+      fireEvent.drop(input, { dataTransfer });
+      expect(input).toHaveValue(text);
+    }
+
+    const replacement = input.value.replace("@ref0x ", "");
+    fireEvent.change(input, { target: { value: replacement, selectionStart: replacement.length } });
+    expect(screen.getByRole("option", { name: /@ref8x/i })).toBeInTheDocument();
+    if (entry === "palette") fireEvent.keyDown(input, { key: "Tab" });
+    else {
+      input.setSelectionRange(replacement.lastIndexOf("@"), replacement.length);
+      fireEvent.dragOver(input, { dataTransfer });
+      expect(screen.getByTestId("composer-session-drag-preview")).toHaveTextContent("@ref8x");
+      fireEvent.drop(input, { dataTransfer });
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend.mock.calls[0]?.[2].sessionMentions.map((mention: { session_key: string }) => mention.session_key))
+      .toEqual(targets.slice(1).map((target) => target.key));
+  });
+
+  it.each(["typed", "selected"])("keeps a %s session stable across refreshes and queued guidance", (entry) => {
     const onSend = vi.fn();
     const target = session("z-target", "Plan", "Original plan");
     const { rerender } = render(
@@ -2264,19 +2436,21 @@ describe("ThreadComposer", () => {
     );
 
     const input = screen.getByLabelText("Message input");
-    fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
-    fireEvent.keyDown(input, { key: "Tab" });
+    if (entry === "typed") fireEvent.change(input, { target: { value: "@Plan " } });
+    else {
+      fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
+      fireEvent.keyDown(input, { key: "Tab" });
+    }
 
+    // The referenced chat was deleted and its handle reused by a new chat.
+    const replacement = session("a-new", "New plan", "", "Plan");
     rerender(
       <ThreadComposer
         onSend={onSend}
         onStop={vi.fn()}
         isStreaming
         placeholder="Type your message..."
-        sessions={[
-          { ...target, title: "Renamed plan" },
-          session("a-new", "Plan", target.preview),
-        ]}
+        sessions={[replacement]}
       />,
     );
 
@@ -2293,6 +2467,46 @@ describe("ThreadComposer", () => {
       }],
       continueActiveTurn: true,
     });
+  });
+
+  it.each(["palette", "drop"])("prevents %s insertion from retargeting a draft when a handle is reused", (entry) => {
+    const onSend = vi.fn();
+    const original = session("original", "Original plan", "", "bime");
+    const replacement = session("replacement", "New plan", "", "bime");
+    const composer = (target: ChatSummary) => <ThreadComposer onSend={onSend} sessions={[target]} />;
+    const { rerender } = render(composer(original));
+    const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "@bime " } });
+    rerender(composer(replacement));
+    const dataTransfer = { types: [SESSION_DRAG_TYPE], files: [], getData: () => replacement.key };
+
+    if (entry === "palette") {
+      fireEvent.change(input, { target: { value: "@bime @bi", selectionStart: 9 } });
+      expect(screen.queryByRole("option", { name: /@bime/i })).not.toBeInTheDocument();
+    } else {
+      fireEvent.dragOver(input, { dataTransfer });
+      expect(screen.queryByTestId("composer-session-drag-preview")).not.toBeInTheDocument();
+      fireEvent.drop(input, { dataTransfer });
+      expect(input).toHaveValue("@bime ");
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend.mock.calls[0]?.[2].sessionMentions).toEqual([{
+      id: original.handle?.id, name: "bime", session_key: original.key, title: original.title,
+    }]);
+
+    if (entry === "palette") {
+      fireEvent.change(input, { target: { value: "@bi", selectionStart: 3 } });
+      expect(screen.getByRole("option", { name: /@bime/i })).toBeInTheDocument();
+      fireEvent.keyDown(input, { key: "Tab" });
+    } else {
+      fireEvent.dragOver(input, { dataTransfer });
+      expect(screen.getByTestId("composer-session-drag-preview")).toHaveTextContent("@bime");
+      fireEvent.drop(input, { dataTransfer });
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend.mock.calls[1]?.[2].sessionMentions).toEqual([{
+      id: replacement.handle?.id, name: "bime", session_key: replacement.key, title: replacement.title,
+    }]);
   });
 
   it("opens skills only from a $ reference and prioritizes the skill name", () => {
@@ -2467,6 +2681,21 @@ describe("ThreadComposer", () => {
     expect(input).toHaveValue("use @Blender tonight");
   });
 
+  it("keeps literal mixed-script spacing in both composer input layers", () => {
+    render(<ThreadComposer onSend={vi.fn()} cliApps={CLI_APPS} />);
+    const input = screen.getByLabelText("Message input");
+    const value = "定位原因, 提 @gimp issue, i并提";
+    fireEvent.change(input, { target: { value, selectionStart: value.length } });
+
+    const display = "定位原因, 提 @\u00a0GIMP issue, i并提";
+    const overlay = input.previousElementSibling;
+    expect(input).toHaveValue(display);
+    expect(overlay).toHaveAttribute("aria-hidden", "true");
+    expect(overlay?.textContent).toBe(display);
+    expect(input).toHaveClass("[text-autospace:no-autospace]");
+    expect(overlay).toHaveClass("[text-autospace:no-autospace]");
+  });
+
   it("renders a CLI app mention logo inline without moving the text cursor slot", () => {
     render(
       <ThreadComposer
@@ -2489,8 +2718,8 @@ describe("ThreadComposer", () => {
     expect(token.className).not.toContain("zoom-in");
     expect(token.className).not.toContain("px-");
     expect(token.className).not.toContain("mx-");
-    expect(token.getAttribute("style")).toContain("color: #5C5543");
-    expect(token.getAttribute("style")).not.toContain("text-shadow");
+    expect(token).toHaveClass("text-foreground");
+    expect(token.style.textShadow).toBe("");
     expect(screen.queryByTestId("composer-cli-app-tray")).not.toBeInTheDocument();
     const logo = screen.getByTestId("composer-cli-mention-logo-gimp");
     expect(logo.className).toContain("top-1/2");
@@ -2526,7 +2755,7 @@ describe("ThreadComposer", () => {
     expect(name).toHaveClass("[-webkit-text-stroke:0.4px_currentColor]");
   });
 
-  it("uses the shared accent when an installed CLI app has no brand metadata", () => {
+  it("uses the theme foreground when an installed CLI app has no brand metadata", () => {
     const mention = "@obsidian-agent-cli";
     const app: CliAppInfo = {
       name: "obsidian-agent-cli",
@@ -2558,8 +2787,7 @@ describe("ThreadComposer", () => {
     });
 
     const token = screen.getByTestId("composer-cli-mention-obsidian-agent-cli");
-    expect(token.getAttribute("style")).toContain("var(--inline-token-highlight)");
-    expect(token.getAttribute("style")).not.toContain("var(--primary)");
+    expect(token).toHaveClass("text-foreground");
   });
 
   it.each([
@@ -2784,7 +3012,7 @@ describe("ThreadComposer", () => {
     vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockImplementation(
       () => rect({ top: landscape ? 44 : 274, width: landscape ? 744 : 388, height: 112 }),
     );
-    vi.spyOn(HTMLDivElement.prototype, "getBoundingClientRect").mockImplementation(function () {
+    vi.spyOn(HTMLDivElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLDivElement) {
       return this.id === "root"
         ? rect({ top: 0, width: landscape ? 776 : 420, height: landscape ? 128 : 396 })
         : rect({ top: landscape ? 44 : 0, width: landscape ? 776 : 420, height: landscape ? 84 : 396 });
@@ -2866,7 +3094,7 @@ describe("ThreadComposer", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "Toggle image generation mode" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Image mode" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Image aspect ratio" })).not.toBeInTheDocument();
 
     const input = screen.getByLabelText("Message input");
@@ -2907,6 +3135,19 @@ describe("ThreadComposer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(onSend).toHaveBeenCalledWith("/status", undefined, undefined);
+  });
+
+  it("sends a possible stop command without waiting when command metadata is unavailable", () => {
+    const onSend = vi.fn();
+    const onStop = vi.fn();
+    render(<ThreadComposer onSend={onSend} onStop={onStop} isStreaming />);
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/stop" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onSend).toHaveBeenCalledWith("/stop", undefined, { continueActiveTurn: true });
+    expect(onStop).not.toHaveBeenCalled();
+    expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
   });
 
   it("marks new chat commands as side-channel sends that finalize the active turn", () => {
@@ -3117,7 +3358,7 @@ describe("ThreadComposer", () => {
     });
   });
 
-  it("preserves waiting guidance when the send button submits a newer draft", () => {
+  it("includes waiting guidance when the send button submits a newer draft", () => {
     const onSend = vi.fn();
     render(<ThreadComposer onSend={onSend} onStop={vi.fn()} isStreaming />);
     const input = screen.getByLabelText("Message input");
@@ -3126,10 +3367,9 @@ describe("ThreadComposer", () => {
     fireEvent.change(input, { target: { value: "send this now" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(onSend).toHaveBeenCalledWith("send this now", undefined, { continueActiveTurn: true });
-    expect(screen.getByText("waiting guidance")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
-    expect(onSend).toHaveBeenLastCalledWith("waiting guidance", undefined, { continueActiveTurn: true });
+    expect(onSend).toHaveBeenCalledWith("waiting guidance\nsend this now", undefined, { continueActiveTurn: true });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
   });
 
   it("does not mark side-channel commands as guidance during an active turn", () => {
@@ -3186,6 +3426,43 @@ describe("ThreadComposer", () => {
     );
     expect(screen.queryByText("keep the UI minimal")).not.toBeInTheDocument();
   });
+
+  it.each(["/tmp", "/home/user/project", "/stop/config.json", "/neaw"])(
+    "queues ordinary slash-prefixed text %s until the response finishes",
+    (content) => {
+      const onSend = vi.fn();
+      const composer = (isStreaming: boolean) => (
+        <ThreadComposer onSend={onSend} isStreaming={isStreaming} slashCommands={COMMANDS} />
+      );
+      const { rerender } = render(composer(true));
+      const input = screen.getByLabelText("Message input");
+      fireEvent.change(input, { target: { value: content } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(onSend).not.toHaveBeenCalled();
+      expect(screen.getByRole("group", { name: "Waiting to send" })).toHaveTextContent(content);
+
+      rerender(composer(false));
+
+      expect(onSend).toHaveBeenCalledTimes(1);
+      expect(onSend).toHaveBeenCalledWith(content);
+      expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
+    },
+  );
+
+  it.each(["/history 5", "/stop now", "/STOP@nanobot now"])(
+    "sends registered command %s to the gateway without queuing it",
+    (content) => {
+      const onSend = vi.fn();
+      render(<ThreadComposer onSend={onSend} isStreaming slashCommands={COMMANDS} />);
+      fireEvent.change(screen.getByLabelText("Message input"), { target: { value: content } });
+      fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
+
+      expect(onSend).toHaveBeenCalledTimes(1);
+      expect(onSend.mock.calls[0][0]).toBe(content);
+      expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
+    },
+  );
 
   it("guides queued guidance when Enter is pressed again", () => {
     const onSend = vi.fn();
@@ -3319,7 +3596,7 @@ describe("ThreadComposer", () => {
     expect(screen.getByText("leave this queued")).toBeInTheDocument();
   });
 
-  it("guides the newly queued prompt when older guidance is still waiting", () => {
+  it("merges consecutive queued inputs and interjects the whole message on a second Enter", () => {
     const onSend = vi.fn();
     render(
       <ThreadComposer
@@ -3338,16 +3615,15 @@ describe("ThreadComposer", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(onSend).toHaveBeenCalledWith(
-      "guide this one now",
+      "older guidance\nguide this one now",
       undefined,
       { continueActiveTurn: true },
     );
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("older guidance")).toBeInTheDocument();
-    expect(screen.queryByText("guide this one now")).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
   });
 
-  it("keeps queued guidance attached to the composer and sends it one item at a time", async () => {
+  it("shows one pending message and sends all consecutive inputs once after completion", async () => {
     const onSend = vi.fn();
     const { rerender } = render(
       <ThreadComposer
@@ -3368,10 +3644,9 @@ describe("ThreadComposer", () => {
     expect(queue).toHaveClass("composer-status-strip");
     expect(queue).toHaveClass("mx-3");
     expect(queue.parentElement?.className).toContain("group/composer");
-    expect(within(queue).getByText("first follow-up")).toBeInTheDocument();
-    expect(within(queue).getByText("second follow-up")).toBeInTheDocument();
-    expect(within(queue).getAllByRole("button", { name: "Edit guidance" })).toHaveLength(2);
-    expect(within(queue).getAllByRole("button", { name: "Send now" })).toHaveLength(2);
+    expect(within(queue).getByText("first follow-up second follow-up")).toHaveTextContent("first follow-up second follow-up");
+    expect(within(queue).getAllByRole("button", { name: "Edit message" })).toHaveLength(1);
+    expect(within(queue).getAllByRole("button", { name: "Send now" })).toHaveLength(1);
 
     rerender(
       <ThreadComposer
@@ -3383,11 +3658,10 @@ describe("ThreadComposer", () => {
     );
 
     await waitFor(() => {
-      expect(onSend).toHaveBeenCalledWith("first follow-up");
+      expect(onSend).toHaveBeenCalledWith("first follow-up\nsecond follow-up");
     });
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText("first follow-up")).not.toBeInTheDocument();
-    expect(screen.getByText("second follow-up")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
 
     rerender(
       <ThreadComposer
@@ -3406,10 +3680,7 @@ describe("ThreadComposer", () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(onSend).toHaveBeenLastCalledWith("second follow-up");
-    });
-    expect(onSend).toHaveBeenCalledTimes(2);
+    expect(onSend).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
   });
 
@@ -3428,7 +3699,7 @@ describe("ThreadComposer", () => {
     fireEvent.change(input, { target: { value: "rough follow-up" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    const editButton = screen.getByRole("button", { name: "Edit guidance" });
+    const editButton = screen.getByRole("button", { name: "Edit message" });
     const textarea = input as HTMLTextAreaElement;
     const setSelection = textarea.setSelectionRange.bind(textarea);
     const focusedSelections: boolean[] = [];
@@ -3461,65 +3732,23 @@ describe("ThreadComposer", () => {
     });
   });
 
-  it("requeues edited guidance at the end of the pending list", async () => {
+  it("edits the complete pending message without overwriting a newer draft", () => {
     const onSend = vi.fn();
-    const { rerender } = render(
-      <ThreadComposer
-        onSend={onSend}
-        onStop={vi.fn()}
-        isStreaming
-        placeholder="Type your message..."
-      />,
-    );
-
+    const { rerender } = render(<ThreadComposer onSend={onSend} isStreaming />);
     const input = screen.getByLabelText("Message input");
-    fireEvent.change(input, { target: { value: "first follow-up" } });
+    for (const text of ["first follow-up", "second follow-up"]) {
+      fireEvent.change(input, { target: { value: text } });
+      fireEvent.keyDown(input, { key: "Enter" });
+    }
+    fireEvent.change(input, { target: { value: "third follow-up" } });
+    fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+    expect(input).toHaveValue("first follow-up\nsecond follow-up\nthird follow-up");
+    expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "edited complete message" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.change(input, { target: { value: "second follow-up" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-
-    fireEvent.click(screen.getAllByRole("button", { name: "Edit guidance" })[0]);
-    await waitFor(() => {
-      expect(input).toHaveValue("first follow-up");
-    });
-    fireEvent.change(input, { target: { value: "first follow-up edited" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-
-    rerender(
-      <ThreadComposer
-        onSend={onSend}
-        onStop={vi.fn()}
-        isStreaming={false}
-        placeholder="Type your message..."
-      />,
-    );
-
-    await waitFor(() => {
-      expect(onSend).toHaveBeenCalledWith("second follow-up");
-    });
+    rerender(<ThreadComposer onSend={onSend} />);
     expect(onSend).toHaveBeenCalledTimes(1);
-
-    rerender(
-      <ThreadComposer
-        onSend={onSend}
-        onStop={vi.fn()}
-        isStreaming
-        placeholder="Type your message..."
-      />,
-    );
-    rerender(
-      <ThreadComposer
-        onSend={onSend}
-        onStop={vi.fn()}
-        isStreaming={false}
-        placeholder="Type your message..."
-      />,
-    );
-
-    await waitFor(() => {
-      expect(onSend).toHaveBeenLastCalledWith("first follow-up edited");
-    });
-    expect(onSend).toHaveBeenCalledTimes(2);
+    expect(onSend).toHaveBeenCalledWith("edited complete message");
   });
 
   it("queues image guidance while running and restores it for editing", async () => {
@@ -3549,7 +3778,7 @@ describe("ThreadComposer", () => {
     expect(screen.getByText("look at this")).toBeInTheDocument();
     expect(screen.queryByTestId("composer-chip")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit guidance" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
     expect(input).toHaveValue("look at this");
     expect(screen.getByTestId("composer-chip")).toHaveTextContent("draft.png");
     expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
@@ -3577,98 +3806,19 @@ describe("ThreadComposer", () => {
     });
   });
 
-  it("reorders queued guidance while dragging over another row", async () => {
+  it("deletes the complete pending message across remounts", () => {
     const onSend = vi.fn();
-    const { rerender } = render(
-      <ThreadComposer
-        onSend={onSend}
-        onStop={vi.fn()}
-        isStreaming
-        placeholder="Type your message..."
-      />,
-    );
-
+    const first = render(<ThreadComposer onSend={onSend} isStreaming pendingQueueKey="chat-a" />);
     const input = screen.getByLabelText("Message input");
-    fireEvent.change(input, { target: { value: "first follow-up" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.change(input, { target: { value: "second follow-up" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-
-    const handles = screen.getAllByLabelText("Drag to reorder");
-    const secondRow = screen
-      .getByText("second follow-up")
-      .closest("[data-queued-prompt-row='true']");
-    expect(secondRow).toBeTruthy();
-
-    const dataTransfer = {
-      effectAllowed: "",
-      dropEffect: "",
-      setData: vi.fn(),
-      getData: vi.fn(),
-    };
-    fireEvent.dragStart(handles[0], { dataTransfer });
-    fireEvent.dragEnter(secondRow!, { dataTransfer });
-    fireEvent.dragEnd(handles[0], { dataTransfer });
-
-    rerender(
-      <ThreadComposer
-        onSend={onSend}
-        onStop={vi.fn()}
-        isStreaming={false}
-        placeholder="Type your message..."
-      />,
-    );
-
-    await waitFor(() => {
-      expect(onSend).toHaveBeenCalledWith("second follow-up");
-    });
-  });
-
-  it("moves later queued guidance before an earlier item while dragging", async () => {
-    const onSend = vi.fn();
-    const { rerender } = render(
-      <ThreadComposer
-        onSend={onSend}
-        onStop={vi.fn()}
-        isStreaming
-        placeholder="Type your message..."
-      />,
-    );
-
-    const input = screen.getByLabelText("Message input");
-    fireEvent.change(input, { target: { value: "first follow-up" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.change(input, { target: { value: "second follow-up" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-
-    const handles = screen.getAllByLabelText("Drag to reorder");
-    const firstRow = screen
-      .getByText("first follow-up")
-      .closest("[data-queued-prompt-row='true']");
-    expect(firstRow).toBeTruthy();
-
-    const dataTransfer = {
-      effectAllowed: "",
-      dropEffect: "",
-      setData: vi.fn(),
-      getData: vi.fn(),
-    };
-    fireEvent.dragStart(handles[1], { dataTransfer });
-    fireEvent.dragEnter(firstRow!, { dataTransfer });
-    fireEvent.dragEnd(handles[1], { dataTransfer });
-
-    rerender(
-      <ThreadComposer
-        onSend={onSend}
-        onStop={vi.fn()}
-        isStreaming={false}
-        placeholder="Type your message..."
-      />,
-    );
-
-    await waitFor(() => {
-      expect(onSend).toHaveBeenCalledWith("second follow-up");
-    });
+    for (const text of ["1", "2"]) {
+      fireEvent.change(input, { target: { value: text } });
+      fireEvent.keyDown(input, { key: "Enter" });
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Delete message" }));
+    first.unmount();
+    render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" />);
+    expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
+    expect(onSend).not.toHaveBeenCalled();
   });
 
   it("keeps queued guidance in its session when switching from running to idle", () => {
@@ -3719,7 +3869,7 @@ describe("ThreadComposer", () => {
     const input = screen.getByLabelText("Message input");
     fireEvent.change(input, { target: { value: "remember this follow-up" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.click(screen.getByRole("button", { name: "Edit guidance" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
     fireEvent.change(input, { target: { value: "remember this edited follow-up" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(screen.getByText("remember this edited follow-up")).toBeInTheDocument();
@@ -3786,6 +3936,147 @@ describe("ThreadComposer", () => {
     });
   });
 
+  it("resumes a restored queue only after its waiting turn is confirmed complete", async () => {
+    let acceptDelivery!: (accepted: boolean) => void;
+    const delivery = new Promise<boolean>((resolve) => { acceptDelivery = resolve; });
+    const onSend = vi.fn().mockReturnValueOnce(delivery);
+    const first = render(
+      <ThreadComposer onSend={onSend} isStreaming activeTurnId="turn-a" pendingQueueKey="chat-a" />,
+    );
+    const input = screen.getByLabelText("Message input");
+    for (const text of ["first follow-up", "second follow-up"]) {
+      fireEvent.change(input, { target: { value: text } });
+      fireEvent.keyDown(input, { key: "Enter" });
+    }
+    first.unmount();
+    const otherSend = vi.fn();
+    const other = render(
+      <ThreadComposer onSend={otherSend} pendingQueueKey="chat-b" completedTurnIds={["turn-a"]} />,
+    );
+    expect(otherSend).not.toHaveBeenCalled();
+    expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
+    other.unmount();
+
+    const returned = render(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={[]} />,
+    );
+    expect(screen.getByText("first follow-up second follow-up")).toBeInTheDocument();
+    expect(onSend).not.toHaveBeenCalled();
+    returned.rerender(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-other"]} />,
+    );
+    expect(onSend).not.toHaveBeenCalled();
+    returned.rerender(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
+    );
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("first follow-up\nsecond follow-up"));
+    for (let update = 0; update < 3; update += 1) {
+      returned.rerender(
+        <ThreadComposer onSend={(...args) => onSend(...args)} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
+      );
+    }
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Send now" })).toBeDisabled();
+    await act(async () => { acceptDelivery(true); await delivery; });
+    expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
+    returned.rerender(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" isStreaming activeTurnId="turn-next" completedTurnIds={["turn-a"]} />,
+    );
+    returned.rerender(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
+    );
+    expect(onSend).toHaveBeenCalledTimes(1);
+    returned.unmount();
+    render(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a", "turn-next"]} />,
+    );
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
+  });
+
+  it.each(["button", "palette"])("keeps queued messages manual after stopping through %s and remounting", (entrypoint) => {
+    const onSend = vi.fn();
+    const onStop = vi.fn();
+    const view = render(
+      <ThreadComposer onSend={onSend} onStop={onStop} isStreaming activeTurnId="turn-a" pendingQueueKey="chat-a" slashCommands={COMMANDS} />,
+    );
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "keep for later" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    if (entrypoint === "button") fireEvent.click(screen.getByRole("button", { name: "Stop response" }));
+    else {
+      fireEvent.change(input, { target: { value: "/sto" } });
+      fireEvent.mouseDown(screen.getByRole("option", { name: /\/stop/i }));
+    }
+    expect(onStop).toHaveBeenCalledTimes(1);
+    view.unmount();
+    const returned = render(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
+    );
+    expect(screen.getByText("keep for later")).toBeInTheDocument();
+    expect(onSend).not.toHaveBeenCalled();
+    // A run started in another pane must not re-arm a queue the user stopped.
+    returned.rerender(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" isStreaming activeTurnId="turn-other-pane" completedTurnIds={["turn-a"]} />,
+    );
+    returned.rerender(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a", "turn-other-pane"]} />,
+    );
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend).toHaveBeenCalledWith("keep for later");
+  });
+
+  it("retains a rejected queued attachment for manual retry after remounting", async () => {
+    mockBlobUrls();
+    let rejectDelivery!: (error: Error) => void;
+    const delivery = new Promise<boolean>((_resolve, reject) => { rejectDelivery = reject; });
+    const onSend = vi.fn().mockReturnValue(delivery);
+    const first = render(
+      <ThreadComposer onSend={onSend} isStreaming activeTurnId="turn-a" pendingQueueKey="chat-a" />,
+    );
+    fireEvent.change(first.container.querySelector<HTMLInputElement>('input[type="file"]')!, {
+      target: { files: [new File(["image"], "queued.png", { type: "image/png" })] },
+    });
+    await screen.findByText("queued.png");
+    for (const text of ["queued attachment", "more guidance"]) {
+      fireEvent.change(screen.getByLabelText("Message input"), { target: { value: text } });
+      fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
+    }
+    first.unmount();
+    const returned = render(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
+    );
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    await act(async () => { rejectDelivery(new Error("Attachment upload interrupted")); });
+    expect(screen.getByText("queued attachment more guidance")).toBeInTheDocument();
+    expect(onSend).toHaveBeenCalledTimes(1);
+    returned.unmount();
+    render(
+      <ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />,
+    );
+    expect(screen.getByText("queued attachment more guidance")).toBeInTheDocument();
+    expect(onSend).toHaveBeenCalledTimes(1);
+    onSend.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(onSend).toHaveBeenCalledTimes(2);
+    expect(onSend.mock.calls[1][0]).toBe("queued attachment\nmore guidance");
+    expect(onSend.mock.calls[1][1]).toEqual([expect.objectContaining({ media: expect.objectContaining({ name: "queued.png" }) })]);
+  });
+
+  it("retains legacy queued drafts for manual sending when mounted idle", () => {
+    window.localStorage.setItem("nanobot.webui.composerQueuedGuidance.v1:chat-a", JSON.stringify([
+      { id: "legacy-draft", text: "legacy follow-up" },
+    ]));
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["old-turn"]} />);
+    expect(screen.getByText("legacy follow-up")).toBeInTheDocument();
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(onSend).toHaveBeenCalledWith("legacy follow-up");
+  });
+
   it("keeps temporary chat guidance in memory only", async () => {
     const onSend = vi.fn();
     const view = render(
@@ -3834,6 +4125,30 @@ describe("ThreadComposer", () => {
 
 
 describe("session composer drafts", () => {
+  it("resolves typed draft handles when the catalog arrives and persists their identity", () => {
+    const draftStore = new ComposerDraftStore();
+    const onSend = vi.fn();
+    const target = session("pricing", "Pricing", "", "bime");
+    const composer = (sessions: ChatSummary[], store = draftStore) => (
+      <ThreadComposer draftKey="typed-handle" draftStore={store} persistDraft onSend={onSend} sessions={sessions} />
+    );
+    const view = render(composer([]));
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "参考 @bime" } });
+    expect(screen.queryByTestId("composer-session-mention-bime")).not.toBeInTheDocument();
+
+    view.rerender(composer([target]));
+    expect(screen.getByTestId("composer-session-mention-bime")).toBeInTheDocument();
+    view.unmount();
+    render(composer([], new ComposerDraftStore()));
+
+    expect(screen.getByLabelText("Message input")).toHaveValue("参考 @bime");
+    expect(screen.getByTestId("composer-session-mention-bime")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).toHaveBeenCalledWith("参考 @bime", undefined, {
+      sessionMentions: [{ id: target.handle?.id, name: "bime", session_key: target.key, title: "Pricing" }],
+    });
+  });
+
   it("restores independent drafts across session switches and remounts", () => {
     const draftStore = new ComposerDraftStore();
     const composer = (key: string) => (

@@ -19,22 +19,13 @@ vi.mock("@/lib/api", async (importOriginal) => {
   };
 });
 
-const fetchThreadMock = vi.mocked(api.fetchWebuiThread);
-const rawMockResolvedValue = fetchThreadMock.mockResolvedValue.bind(fetchThreadMock);
-const rawMockResolvedValueOnce = fetchThreadMock.mockResolvedValueOnce.bind(fetchThreadMock);
-fetchThreadMock.mockResolvedValue = ((value) => rawMockResolvedValue(
-  canonicalThreadPayload(value as never),
-)) as typeof fetchThreadMock.mockResolvedValue;
-fetchThreadMock.mockResolvedValueOnce = ((value) => rawMockResolvedValueOnce(
-  canonicalThreadPayload(value as never),
-)) as typeof fetchThreadMock.mockResolvedValueOnce;
-
 function fakeClient() {
   const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>();
   return {
     status: "open" as const,
     defaultChatId: null as string | null,
     onStatus: () => () => {},
+    onRunCompletion: () => () => {},
     onError: () => () => {},
     onChat: () => () => {},
     getRunStartedAt: () => null,
@@ -73,6 +64,20 @@ function wrap(
 }
 
 describe("useSessions", () => {
+  it("distinguishes initial loading from revalidating a successfully loaded empty list", async () => {
+    let finish!: (rows: Awaited<ReturnType<typeof api.listSessions>>) => void;
+    vi.mocked(api.listSessions).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const { result } = renderHook(() => useSessions(), { wrapper: wrap(fakeClient()) });
+    expect(result.current.initialLoading).toBe(true);
+    await act(async () => finish([]));
+    expect(result.current.initialLoading).toBe(false);
+    let refresh!: Promise<void>;
+    act(() => { refresh = result.current.refresh(); });
+    expect(result.current.loading).toBe(true);
+    expect(result.current.initialLoading).toBe(false);
+    await act(async () => { finish([]); await refresh; });
+  });
+
   it("shows tab-cached sessions while revalidating and removes server-deleted rows", async () => {
     activateReloadCache("ws://localhost:8765/");
     writeReloadCache("sessions", [{
@@ -85,6 +90,7 @@ describe("useSessions", () => {
     try {
       expect(result.current.sessions[0]?.key).toBe("websocket:cached");
       expect(result.current.loading).toBe(true);
+      expect(result.current.initialLoading).toBe(false);
       await act(async () => finish([]));
       expect(result.current.sessions).toEqual([]);
       expect(result.current.loading).toBe(false);
@@ -450,7 +456,7 @@ describe("useSessions", () => {
   });
 
   it("passes through WebUI transcript user media as images and media", async () => {
-    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue(canonicalThreadPayload({
       schemaVersion: 3,
       messages: [
         {
@@ -470,7 +476,7 @@ describe("useSessions", () => {
         { id: "a1", role: "assistant", content: "it's a cat", createdAt: 2 },
         { id: "u2", role: "user", content: "follow-up without images", createdAt: 3 },
       ],
-    });
+    }));
 
     const { result } = renderHook(() => useSessionHistory("websocket:chat-media"), {
       wrapper: wrap(fakeClient()),
@@ -494,7 +500,7 @@ describe("useSessions", () => {
   });
 
   it("passes through assistant video media from transcript replay", async () => {
-    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue(canonicalThreadPayload({
       schemaVersion: 3,
       messages: [
         {
@@ -505,7 +511,7 @@ describe("useSessions", () => {
           media: [{ kind: "video", url: "/api/media/sig-v/payload-v", name: "clip.mp4" }],
         },
       ],
-    });
+    }));
 
     const { result } = renderHook(() => useSessionHistory("websocket:chat-video"), {
       wrapper: wrap(fakeClient()),
@@ -521,7 +527,7 @@ describe("useSessions", () => {
   });
 
   it("passes through assistant reasoning from transcript replay", async () => {
-    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue(canonicalThreadPayload({
       schemaVersion: 3,
       messages: [
         {
@@ -532,7 +538,7 @@ describe("useSessions", () => {
           reasoning: "hidden but persisted reasoning",
         },
       ],
-    });
+    }));
 
     const { result } = renderHook(() => useSessionHistory("websocket:chat-reasoning"), {
       wrapper: wrap(fakeClient()),
@@ -547,7 +553,7 @@ describe("useSessions", () => {
   });
 
   it("accepts transcript rows produced by the server replay reducer", async () => {
-    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue(canonicalThreadPayload({
       schemaVersion: 3,
       messages: [
         { id: "u1", role: "user", content: "research this", createdAt: 1 },
@@ -561,7 +567,7 @@ describe("useSessions", () => {
         },
         { id: "a1", role: "assistant", content: "summary", createdAt: 3 },
       ],
-    });
+    }));
 
     const { result } = renderHook(() => useSessionHistory("websocket:chat-tools"), {
       wrapper: wrap(fakeClient()),
@@ -580,7 +586,7 @@ describe("useSessions", () => {
   });
 
   it("projects canonical transcript events with the live event reducer", async () => {
-    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue(api.parseWebuiThreadPayload({
       schemaVersion: 3,
       projection: "events",
       events: [
@@ -630,7 +636,7 @@ describe("useSessions", () => {
           turn_seq: 5,
         },
       ],
-    });
+    }));
 
     const { result } = renderHook(() => useSessionHistory("websocket:chat-event-history"), {
       wrapper: wrap(fakeClient()),
@@ -649,13 +655,13 @@ describe("useSessions", () => {
   });
 
   it("shows a cached transcript immediately while revalidating it", async () => {
-    const cached = {
+    const cached = canonicalThreadPayload({
       schemaVersion: 3,
       revision: "rev-cached",
       messages: [
-        { id: "a1", role: "assistant" as const, content: "cached answer", createdAt: 1 },
+        { id: "a1", role: "assistant", content: "cached answer", createdAt: 1 },
       ],
-    };
+    });
     vi.mocked(api.fetchWebuiThread).mockResolvedValueOnce(cached);
 
     const first = renderHook(() => useSessionHistory("websocket:cached"), {
@@ -684,14 +690,87 @@ describe("useSessions", () => {
     second.unmount();
   });
 
+  it("reconciles a cached 304 response as a new successful latest-page observation", async () => {
+    const cached = canonicalThreadPayload({
+      schemaVersion: 3,
+      revision: "rev-not-modified",
+      has_pending_tool_calls: false,
+      completed_turn_ids: ["completed-turn"],
+      messages: [{
+        id: "completed-answer", role: "assistant", content: "complete answer",
+        createdAt: 1, turnId: "completed-turn",
+      }],
+    })!;
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue(cached);
+    const { result, unmount } = renderHook(() => useSessionHistory("websocket:unchanged"), {
+      wrapper: wrap(fakeClient()),
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const previousVersion = result.current.version;
+    const lineage = result.current.lineage;
+    act(() => result.current.refresh());
+    await waitFor(() => expect(result.current.version).toBeGreaterThan(previousVersion));
+    expect(result.current.lineage).toBe(lineage);
+    expect(result.current.completedTurnIds).toEqual(["completed-turn"]);
+    expect(result.current.messages[0]?.content).toBe("complete answer");
+    unmount();
+  });
+
+  it("publishes canonical reconnect history to both mounted readers and ignores their older responses", async () => {
+    const requests: Array<{
+      resolve: (body: Awaited<ReturnType<typeof api.fetchWebuiThread>>) => void;
+      signal: AbortSignal | undefined;
+    }> = [];
+    vi.mocked(api.fetchWebuiThread).mockImplementation((_token, _key, optionsOrBase) => new Promise((resolve) => {
+      const options = typeof optionsOrBase === "string" ? undefined : optionsOrBase;
+      requests.push({ resolve, signal: options?.signal });
+    }));
+    const first = renderHook(() => useSessionHistory("websocket:shared-reconnect"), {
+      wrapper: wrap(fakeClient()),
+    });
+    const second = renderHook(() => useSessionHistory("websocket:shared-reconnect"), {
+      wrapper: wrap(fakeClient()),
+    });
+    const completed = canonicalThreadPayload({
+      schemaVersion: 3, revision: "completed-response", has_pending_tool_calls: false,
+      completed_turn_ids: ["completed-turn"],
+      messages: [{
+        id: "answer", role: "assistant", content: "published complete answer",
+        turnId: "completed-turn", createdAt: 1,
+      }],
+    })!;
+    act(() => webuiThreadCache.set("websocket:shared-reconnect", completed));
+    expect(first.result.current.messages[0]?.content).toBe("published complete answer");
+    expect(second.result.current.messages[0]?.content).toBe("published complete answer");
+    expect(requests.every((request) => request.signal?.aborted)).toBe(true);
+    const active = canonicalThreadPayload({
+      schemaVersion: 3, revision: "older-active-response", has_pending_tool_calls: true,
+      completed_turn_ids: [], active_turn_id: "completed-turn",
+      messages: [{
+        id: "answer", role: "assistant", content: "older prefix", turnId: "completed-turn", createdAt: 1,
+      }],
+    })!;
+    await act(async () => {
+      for (const request of requests) request.resolve(active);
+      await Promise.resolve();
+    });
+    expect(first.result.current.messages[0]?.content).toBe("published complete answer");
+    expect(second.result.current.messages[0]?.content).toBe("published complete answer");
+    expect(first.result.current.hasPendingToolCalls).toBe(false);
+    expect(second.result.current.hasPendingToolCalls).toBe(false);
+    expect(webuiThreadCache.get("websocket:shared-reconnect")).toBe(completed);
+    first.unmount();
+    second.unmount();
+  });
+
   it("keeps rendered history visible when its LRU entry was evicted before refresh", async () => {
-    const loaded = {
+    const loaded = canonicalThreadPayload({
       schemaVersion: 3,
       revision: "rev-loaded",
       messages: [
-        { id: "a1", role: "assistant" as const, content: "still visible", createdAt: 1 },
+        { id: "a1", role: "assistant", content: "still visible", createdAt: 1 },
       ],
-    };
+    });
     vi.mocked(api.fetchWebuiThread)
       .mockResolvedValueOnce(loaded)
       .mockImplementationOnce(() => new Promise(() => {}));
@@ -713,7 +792,7 @@ describe("useSessions", () => {
   });
 
   it("flags transcript ending with a trace row as pending", async () => {
-    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue(canonicalThreadPayload({
       schemaVersion: 3,
       messages: [
         {
@@ -725,7 +804,7 @@ describe("useSessions", () => {
           createdAt: 1,
         },
       ],
-    });
+    }));
 
     const { result } = renderHook(() => useSessionHistory("websocket:chat-pending"), {
       wrapper: wrap(fakeClient()),
@@ -737,7 +816,7 @@ describe("useSessions", () => {
   });
 
   it("uses the server pending flag for completed tails that still end with trace rows", async () => {
-    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue(canonicalThreadPayload({
       schemaVersion: 3,
       has_pending_tool_calls: false,
       messages: [
@@ -758,7 +837,7 @@ describe("useSessions", () => {
           createdAt: 2,
         },
       ],
-    });
+    }));
 
     const { result } = renderHook(() => useSessionHistory("websocket:chat-cron-done"), {
       wrapper: wrap(fakeClient()),
@@ -770,21 +849,18 @@ describe("useSessions", () => {
     expect(result.current.hasPendingToolCalls).toBe(false);
   });
 
-  it("exposes turn ids backed by persisted completion events", async () => {
-    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+  it("exposes valid completion ids from parsed persisted history", async () => {
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue(api.parseWebuiThreadPayload({
       schemaVersion: 3,
+      projection: "events",
       has_pending_tool_calls: false,
-      completed_turn_ids: ["turn-empty", "", "turn-empty"],
-      messages: [
+      completed_turn_ids: ["turn-empty", "", null, "turn-empty"],
+      events: [
         {
-          id: "u1",
-          role: "user",
-          content: "stop",
-          turnId: "turn-empty",
-          createdAt: 1,
+          event: "user_message", chat_id: "chat-empty", text: "stop", turn_id: "turn-empty", starts_turn: true,
         },
       ],
-    });
+    }));
 
     const { result } = renderHook(() => useSessionHistory("websocket:chat-empty"), {
       wrapper: wrap(fakeClient()),
@@ -792,17 +868,40 @@ describe("useSessions", () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
+    expect(result.current.error).toBeNull();
+    expect(result.current.messages[0]?.content).toBe("stop");
     expect(result.current.completedTurnIds).toEqual(["turn-empty"]);
     expect(result.current.hasPendingToolCalls).toBe(false);
   });
 
-  it("does not flag transcript as pending when last row is not a trace", async () => {
+  it("respects an explicit empty completion list for an incomplete persisted transcript", async () => {
     vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+      schemaVersion: 3,
+      projection: "events",
+      has_pending_tool_calls: true,
+      active_turn_id: "incomplete-turn",
+      completed_turn_ids: [],
+      events: [
+        { event: "user_message", chat_id: "incomplete", text: "question", turn_id: "incomplete-turn", starts_turn: true },
+        { event: "turn_end", chat_id: "incomplete", turn_id: "incomplete-turn" },
+      ],
+    });
+    const { result } = renderHook(() => useSessionHistory("websocket:incomplete"), {
+      wrapper: wrap(fakeClient()),
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.completedTurnIds).toEqual([]);
+    expect(result.current.completionIdsProvided).toBe(true);
+    expect(result.current.hasPendingToolCalls).toBe(true);
+  });
+
+  it("does not flag transcript as pending when last row is not a trace", async () => {
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue(canonicalThreadPayload({
       schemaVersion: 3,
       messages: [
         { id: "a1", role: "assistant", content: "All done", createdAt: 1 },
       ],
-    });
+    }));
 
     const { result } = renderHook(() => useSessionHistory("websocket:chat-done"), {
       wrapper: wrap(fakeClient()),
@@ -828,12 +927,12 @@ describe("useSessions", () => {
 
   it("does not reload history when only the auth token rotates", async () => {
     const tokenSource = { current: "tok-old" };
-    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue(canonicalThreadPayload({
       schemaVersion: 3,
       messages: [
         { id: "a1", role: "assistant", content: "stable", createdAt: 1 },
       ],
-    });
+    }));
 
     const { result, rerender } = renderHook(
       () => useSessionHistory("websocket:token-rotation"),
@@ -871,12 +970,12 @@ describe("useSessions", () => {
           reject(new DOMException("Aborted", "AbortError"));
         });
       }))
-      .mockResolvedValueOnce({
+      .mockResolvedValueOnce(canonicalThreadPayload({
         schemaVersion: 3,
         messages: [
           { id: "a2", role: "assistant", content: "latest", createdAt: 2 },
         ],
-      });
+      }));
 
     const { result } = renderHook(
       () => useSessionHistory("websocket:superseded"),
@@ -895,7 +994,7 @@ describe("useSessions", () => {
 
   it("loads older transcript pages before the current history", async () => {
     vi.mocked(api.fetchWebuiThread)
-      .mockResolvedValueOnce({
+      .mockResolvedValueOnce(canonicalThreadPayload({
         schemaVersion: 3,
         messages: [
           { id: "u2", role: "user", content: "new question", createdAt: 2 },
@@ -904,11 +1003,11 @@ describe("useSessions", () => {
         page: {
           before_cursor: "cursor-2",
           has_more_before: true,
-          loaded_message_count: 2,
+          loaded_event_count: 2,
           user_message_offset: 1,
         },
-      })
-      .mockResolvedValueOnce({
+      }))
+      .mockResolvedValueOnce(canonicalThreadPayload({
         schemaVersion: 3,
         messages: [
           { id: "u1", role: "user", content: "old question", createdAt: 0 },
@@ -917,10 +1016,10 @@ describe("useSessions", () => {
         page: {
           before_cursor: null,
           has_more_before: false,
-          loaded_message_count: 2,
+          loaded_event_count: 2,
           user_message_offset: 0,
         },
-      });
+      }));
 
     const { result } = renderHook(() => useSessionHistory("websocket:paged"), {
       wrapper: wrap(fakeClient()),
@@ -970,7 +1069,7 @@ describe("useSessions", () => {
 
   it("keeps older-history failures separate and retries them explicitly", async () => {
     vi.mocked(api.fetchWebuiThread)
-      .mockResolvedValueOnce({
+      .mockResolvedValueOnce(canonicalThreadPayload({
         schemaVersion: 3,
         messages: [
           { id: "u2", role: "user", content: "latest question", createdAt: 2 },
@@ -978,12 +1077,12 @@ describe("useSessions", () => {
         page: {
           before_cursor: "cursor-2",
           has_more_before: true,
-          loaded_message_count: 1,
+          loaded_event_count: 1,
           user_message_offset: 1,
         },
-      })
+      }))
       .mockRejectedValueOnce(new Error("offline"))
-      .mockResolvedValueOnce({
+      .mockResolvedValueOnce(canonicalThreadPayload({
         schemaVersion: 3,
         messages: [
           { id: "u1", role: "user", content: "earliest question", createdAt: 1 },
@@ -991,10 +1090,10 @@ describe("useSessions", () => {
         page: {
           before_cursor: null,
           has_more_before: false,
-          loaded_message_count: 1,
+          loaded_event_count: 1,
           user_message_offset: 0,
         },
-      });
+      }));
 
     const { result } = renderHook(() => useSessionHistory("websocket:retry-older"), {
       wrapper: wrap(fakeClient()),
@@ -1017,19 +1116,19 @@ describe("useSessions", () => {
   });
 
   it("preserves a failed history cursor on refresh but clears it for another session", async () => {
-    const latest = {
-      schemaVersion: 3 as const,
-      messages: [{ id: "u2", role: "user" as const, content: "question", createdAt: 2 }],
+    const latest = canonicalThreadPayload({
+      schemaVersion: 3,
+      messages: [{ id: "u2", role: "user", content: "question", createdAt: 2 }],
       page: {
         before_cursor: "cursor-2", has_more_before: true,
-        loaded_message_count: 1, user_message_offset: 1,
+        loaded_event_count: 1, user_message_offset: 1,
       },
-    };
+    });
     vi.mocked(api.fetchWebuiThread)
       .mockResolvedValueOnce(latest)
       .mockRejectedValueOnce(new Error("offline"))
       .mockResolvedValueOnce({ ...latest })
-      .mockResolvedValueOnce({ schemaVersion: 3, messages: [] });
+      .mockResolvedValueOnce(canonicalThreadPayload({ schemaVersion: 3, messages: [] }));
     const { result, rerender } = renderHook(({ sessionKey }) => useSessionHistory(sessionKey), {
       initialProps: { sessionKey: "websocket:failed-prefix" },
       wrapper: wrap(fakeClient()),
@@ -1053,7 +1152,7 @@ describe("useSessions", () => {
   it("aborts an older-history request when the consumer unmounts", async () => {
     let olderSignal: AbortSignal | undefined;
     vi.mocked(api.fetchWebuiThread)
-      .mockResolvedValueOnce({
+      .mockResolvedValueOnce(canonicalThreadPayload({
         schemaVersion: 3,
         messages: [
           { id: "u2", role: "user", content: "latest question", createdAt: 2 },
@@ -1061,10 +1160,10 @@ describe("useSessions", () => {
         page: {
           before_cursor: "cursor-2",
           has_more_before: true,
-          loaded_message_count: 1,
+          loaded_event_count: 1,
           user_message_offset: 1,
         },
-      })
+      }))
       .mockImplementationOnce((_token, _key, optionsOrBase) => new Promise((_resolve, reject) => {
         if (typeof optionsOrBase !== "string") olderSignal = optionsOrBase?.signal;
         olderSignal?.addEventListener("abort", () => {
@@ -1092,7 +1191,7 @@ describe("useSessions", () => {
 
   it("preserves a loaded prefix when a canonical latest window overlaps its tail", async () => {
     vi.mocked(api.fetchWebuiThread)
-      .mockResolvedValueOnce({
+      .mockResolvedValueOnce(canonicalThreadPayload({
         schemaVersion: 3,
         has_pending_tool_calls: true,
         messages: [
@@ -1102,11 +1201,11 @@ describe("useSessions", () => {
         page: {
           before_cursor: "cursor-middle",
           has_more_before: true,
-          loaded_message_count: 2,
+          loaded_event_count: 2,
           user_message_offset: 1,
         },
-      })
-      .mockResolvedValueOnce({
+      }))
+      .mockResolvedValueOnce(canonicalThreadPayload({
         schemaVersion: 3,
         messages: [
           { id: "u1", role: "user", content: "old question", createdAt: 0 },
@@ -1115,11 +1214,11 @@ describe("useSessions", () => {
         page: {
           before_cursor: null,
           has_more_before: false,
-          loaded_message_count: 2,
+          loaded_event_count: 2,
           user_message_offset: 0,
         },
-      })
-      .mockResolvedValueOnce({
+      }))
+      .mockResolvedValueOnce(canonicalThreadPayload({
         schemaVersion: 3,
         has_pending_tool_calls: false,
         completed_turn_ids: ["turn-3"],
@@ -1143,10 +1242,10 @@ describe("useSessions", () => {
         page: {
           before_cursor: "cursor-shifted",
           has_more_before: true,
-          loaded_message_count: 3,
+          loaded_event_count: 3,
           user_message_offset: 1,
         },
-      });
+      }));
 
     const { result } = renderHook(() => useSessionHistory("websocket:paged-refresh"), {
       wrapper: wrap(fakeClient()),
@@ -1194,22 +1293,22 @@ describe("useSessions", () => {
       createdAt: 1_000 + index,
     }));
     vi.mocked(api.fetchWebuiThread)
-      .mockResolvedValueOnce({
+      .mockResolvedValueOnce(canonicalThreadPayload({
         schemaVersion: 3,
         messages: oldWindow,
         page: {
           before_cursor: "old-window-cursor",
           has_more_before: true,
         },
-      })
-      .mockResolvedValueOnce({
+      }))
+      .mockResolvedValueOnce(canonicalThreadPayload({
         schemaVersion: 3,
         messages: newWindow,
         page: {
           before_cursor: "new-window-cursor",
           has_more_before: true,
         },
-      });
+      }));
 
     const { result } = renderHook(() => useSessionHistory("websocket:window-reset"), {
       wrapper: wrap(fakeClient()),
@@ -1231,7 +1330,7 @@ describe("useSessions", () => {
 
   it("uses the longest consecutive semantic overlap for legacy unstable replay metadata", async () => {
     vi.mocked(api.fetchWebuiThread)
-      .mockResolvedValueOnce({
+      .mockResolvedValueOnce(canonicalThreadPayload({
         schemaVersion: 3,
         messages: [
           { id: "repeat-1-old", role: "user", content: "repeat", createdAt: 10 },
@@ -1243,8 +1342,8 @@ describe("useSessions", () => {
           before_cursor: "legacy-cursor",
           has_more_before: true,
         },
-      })
-      .mockResolvedValueOnce({
+      }))
+      .mockResolvedValueOnce(canonicalThreadPayload({
         schemaVersion: 3,
         messages: [
           { id: "old-prefix", role: "user", content: "old prefix", createdAt: 1 },
@@ -1253,8 +1352,8 @@ describe("useSessions", () => {
           before_cursor: null,
           has_more_before: false,
         },
-      })
-      .mockResolvedValueOnce({
+      }))
+      .mockResolvedValueOnce(canonicalThreadPayload({
         schemaVersion: 3,
         messages: [
           { id: "repeat-2-new", role: "user", content: "repeat", createdAt: 9_012 },
@@ -1265,7 +1364,7 @@ describe("useSessions", () => {
           before_cursor: "shifted-legacy-cursor",
           has_more_before: true,
         },
-      });
+      }));
 
     const { result } = renderHook(() => useSessionHistory("websocket:legacy-overlap"), {
       wrapper: wrap(fakeClient()),
@@ -1297,7 +1396,7 @@ describe("useSessions", () => {
       | ((value: Awaited<ReturnType<typeof api.fetchWebuiThread>>) => void)
       | null = null;
     vi.mocked(api.fetchWebuiThread)
-      .mockResolvedValueOnce({
+      .mockResolvedValueOnce(canonicalThreadPayload({
         schemaVersion: 3,
         messages: [
           { id: "old-latest", role: "assistant", content: "old latest", createdAt: 10 },
@@ -1306,11 +1405,11 @@ describe("useSessions", () => {
           before_cursor: "cursor-old-lineage",
           has_more_before: true,
         },
-      })
+      }))
       .mockImplementationOnce(() => new Promise((resolve) => {
         resolveOlder = resolve;
       }))
-      .mockResolvedValueOnce({
+      .mockResolvedValueOnce(canonicalThreadPayload({
         schemaVersion: 3,
         messages: [
           { id: "new-latest", role: "assistant", content: "new latest", createdAt: 20 },
@@ -1319,7 +1418,7 @@ describe("useSessions", () => {
           before_cursor: "cursor-new-lineage",
           has_more_before: true,
         },
-      });
+      }));
 
     const { result } = renderHook(() => useSessionHistory("websocket:paged-race"), {
       wrapper: wrap(fakeClient()),
@@ -1358,7 +1457,7 @@ describe("useSessions", () => {
 
   it("preserves authoritative active state while prepending older history", async () => {
     vi.mocked(api.fetchWebuiThread)
-      .mockResolvedValueOnce({
+      .mockResolvedValueOnce(canonicalThreadPayload({
         schemaVersion: 3,
         has_pending_tool_calls: true,
         messages: [
@@ -1368,11 +1467,11 @@ describe("useSessions", () => {
         page: {
           before_cursor: "cursor-active",
           has_more_before: true,
-          loaded_message_count: 2,
+          loaded_event_count: 2,
           user_message_offset: 1,
         },
-      })
-      .mockResolvedValueOnce({
+      }))
+      .mockResolvedValueOnce(canonicalThreadPayload({
         schemaVersion: 3,
         has_pending_tool_calls: false,
         messages: [
@@ -1382,10 +1481,10 @@ describe("useSessions", () => {
         page: {
           before_cursor: null,
           has_more_before: false,
-          loaded_message_count: 2,
+          loaded_event_count: 2,
           user_message_offset: 0,
         },
-      });
+      }));
 
     const { result } = renderHook(() => useSessionHistory("websocket:paged-active"), {
       wrapper: wrap(fakeClient()),
@@ -1405,7 +1504,7 @@ describe("useSessions", () => {
 
   it("preserves authoritative completed state while prepending trace history", async () => {
     vi.mocked(api.fetchWebuiThread)
-      .mockResolvedValueOnce({
+      .mockResolvedValueOnce(canonicalThreadPayload({
         schemaVersion: 3,
         has_pending_tool_calls: false,
         messages: [
@@ -1421,11 +1520,11 @@ describe("useSessions", () => {
         page: {
           before_cursor: "cursor-complete",
           has_more_before: true,
-          loaded_message_count: 1,
+          loaded_event_count: 1,
           user_message_offset: 1,
         },
-      })
-      .mockResolvedValueOnce({
+      }))
+      .mockResolvedValueOnce(canonicalThreadPayload({
         schemaVersion: 3,
         messages: [
           { id: "u1", role: "user", content: "old question", createdAt: 0 },
@@ -1434,10 +1533,10 @@ describe("useSessions", () => {
         page: {
           before_cursor: null,
           has_more_before: false,
-          loaded_message_count: 2,
+          loaded_event_count: 2,
           user_message_offset: 0,
         },
-      });
+      }));
 
     const { result } = renderHook(() => useSessionHistory("websocket:paged-complete"), {
       wrapper: wrap(fakeClient()),

@@ -36,6 +36,62 @@ const xmindMcpPreset = {
 describe("SettingsView Apps catalog", () => {
   installSettingsViewTestHooks();
 
+  it("collects an instance MCP URL before starting browser authorization", async () => {
+    const metabasePreset = {
+      ...xmindMcpPreset,
+      name: "metabase",
+      display_name: "Metabase",
+      description: "Query analytics in your Metabase instance.",
+      required_fields: [{
+        name: "mcp_url",
+        label: "MCP server URL",
+        secret: false,
+        required: true,
+        configured: false,
+        placeholder: "https://analytics.example.com/api/metabase-mcp",
+        env_var: null,
+      }],
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [metabasePreset], installed_count: 0 });
+      }
+      return { ok: false, status: 404, text: async () => "Not found" } as Response;
+    }));
+    vi.stubGlobal("open", vi.fn(() => null));
+    requestMutationMock.mockResolvedValue({
+      flow_id: "flow-metabase",
+      name: "metabase",
+      status: "failed",
+      error: "Stopped after the authorization request.",
+      expires_in: 300,
+    });
+
+    renderSettingsView({ initialSection: "apps" });
+    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Metabase" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Metabase" });
+    const connect = within(dialog).getByRole("button", { name: "Connect" });
+    expect(connect).toBeDisabled();
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "MCP server URL" }), {
+      target: { value: "https://analytics.example.com/api/metabase-mcp" },
+    });
+    expect(connect).toBeEnabled();
+    await act(async () => fireEvent.click(connect));
+
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.mcp.oauth_start",
+      { name: "metabase", mcp_url: "https://analytics.example.com/api/metabase-mcp" },
+      expect.any(Number),
+    ));
+  });
+
+
+
   it("connects an OAuth MCP from the Apps catalog without manual callback input", async () => {
     let connected = false;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -186,7 +242,7 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(manage);
     const dialog = screen.getByRole("dialog", { name: "Xmind" });
     expect(within(dialog).getByRole("tab", { name: "连接" })).toHaveAttribute("aria-selected", "true");
-    expect(within(dialog).getByText("创建、读取和编辑 Xmind 云端思维导图。")).toHaveClass("sr-only");
+    expect(within(dialog).getByText("创建、读取和编辑云端思维导图")).toHaveClass("sr-only");
     expect(within(dialog).getByText("连接失败", { exact: true })).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "移除连接" })).toBeInTheDocument();
     const reconnect = within(dialog).getByRole("button", { name: "重新连接" });
@@ -400,7 +456,7 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.change(screen.getByLabelText("Headers (JSON)"), {
       target: { value: '{"Authorization":"Bearer stale"}' },
     });
-    expect(screen.getByText("Add the request headers used by this server.")).toBeInTheDocument();
+    expect(screen.getByText("Enter the headers required by the service.")).toBeInTheDocument();
 
     fireEvent.click(oauth);
     expect(oauth).toHaveAttribute("aria-pressed", "true");
@@ -507,7 +563,7 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
     fireEvent.click(await screen.findByRole("button", { name: "Connect Xmind" }));
 
-    const callbackInput = await screen.findByRole("textbox", { name: "Full callback URL" });
+    const callbackInput = await screen.findByRole("textbox", { name: "Callback URL" });
     expect(screen.getByText(/localhost page will not load/i)).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(
       "Finish signing in, then paste the callback URL into nanobot.",

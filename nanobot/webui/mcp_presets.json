@@ -1,0 +1,3226 @@
+[
+  {
+    "name": "browserbase",
+    "display_name": "Browserbase",
+    "category": "browser",
+    "description": "Cloud browser automation through Browserbase's hosted MCP server.",
+    "docs_url": "https://docs.browserbase.com/integrations/mcp/setup",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "browserbase.com",
+    "brand_color": "#111827",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://mcp.browserbase.com/mcp",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "browserbase_api_key",
+        "label": "Browserbase API key",
+        "target": [
+          "url_param",
+          "browserbaseApiKey"
+        ],
+        "env_var": "BROWSERBASE_API_KEY",
+        "placeholder": "bb_live_..."
+      }
+    ],
+    "requires": "Browserbase API key"
+  },
+  {
+    "name": "playwright",
+    "display_name": "Playwright",
+    "category": "browser",
+    "description": "Local browser inspection and automation with Playwright's MCP server.",
+    "docs_url": "https://playwright.dev/docs/getting-started-mcp",
+    "transport": "stdio",
+    "install_supported": true,
+    "brand_domain": "playwright.dev",
+    "brand_color": "#2EAD33",
+    "server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@latest"
+      ],
+      "tool_timeout": 60
+    },
+    "requires": "Node.js and npx"
+  },
+  {
+    "name": "context7",
+    "display_name": "Context7",
+    "category": "docs",
+    "description": "Fetch current library docs and code examples while the agent works.",
+    "docs_url": "https://context7.com/docs/resources/all-clients",
+    "transport": "stdio",
+    "install_supported": true,
+    "brand_domain": "context7.com",
+    "brand_color": "#111827",
+    "server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp@latest"
+      ],
+      "tool_timeout": 45
+    },
+    "fields": [
+      {
+        "name": "context7_api_key",
+        "label": "Context7 API key",
+        "target": [
+          "arg",
+          "--api-key"
+        ],
+        "required": false,
+        "env_var": "CONTEXT7_API_KEY",
+        "placeholder": "ctx7_..."
+      }
+    ],
+    "requires": "Node.js and npx; API key optional",
+    "note": "Works without a key for basic public docs; add a key for higher limits or private docs."
+  },
+  {
+    "name": "firecrawl",
+    "display_name": "Firecrawl",
+    "category": "web",
+    "description": "Scrape, crawl, search, and extract web pages through Firecrawl's MCP server.",
+    "docs_url": "https://docs.firecrawl.dev/use-cases/developers-mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "firecrawl.dev",
+    "brand_color": "#EB5E28",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://mcp.firecrawl.dev/v2/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Network access",
+    "note": "Uses Firecrawl Keyless through the hosted MCP endpoint. No API key is required for the built-in preset; use a custom MCP server URL if you want account-specific limits."
+  },
+  {
+    "name": "parallel-search",
+    "display_name": "Parallel Search",
+    "category": "web",
+    "description": "Search the web and fetch relevant page content through Parallel's hosted MCP server.",
+    "docs_url": "https://docs.parallel.ai/integrations/mcp/search-mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "parallel.ai",
+    "brand_color": "#111827",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://search.parallel.ai/mcp",
+      "tool_timeout": 60,
+      "enabled_tools": [
+        "web_search",
+        "web_fetch"
+      ]
+    },
+    "requires": "Network access",
+    "note": "Free anonymous access for light use; no API key is required."
+  },
+  {
+    "name": "exa",
+    "display_name": "Exa",
+    "category": "web",
+    "description": "Search the web and fetch clean page content through Exa's hosted MCP server.",
+    "docs_url": "https://exa.ai/mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "exa.ai",
+    "brand_color": "#101010",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://mcp.exa.ai/mcp",
+      "tool_timeout": 45
+    },
+    "requires": "Network access",
+    "note": "Hosted Exa MCP endpoint currently does not require an API key."
+  },
+  {
+    "name": "microsoft-learn",
+    "display_name": "Microsoft Learn",
+    "category": "docs",
+    "description": "Search and fetch Microsoft Learn documentation through Microsoft's hosted MCP server.",
+    "docs_url": "https://learn.microsoft.com/en-us/training/support/mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "learn.microsoft.com",
+    "brand_color": "#0078D4",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://learn.microsoft.com/api/mcp",
+      "tool_timeout": 45
+    },
+    "requires": "Network access",
+    "note": "Public documentation only; no authentication required."
+  },
+  {
+    "name": "aws-docs",
+    "display_name": "AWS Documentation",
+    "category": "docs",
+    "description": "Search AWS documentation and service guidance through AWS Labs' documentation MCP server.",
+    "docs_url": "https://awslabs.github.io/mcp/servers/aws-documentation-mcp-server/",
+    "transport": "stdio",
+    "install_supported": true,
+    "brand_domain": "aws.amazon.com",
+    "brand_color": "#FF9900",
+    "server": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "awslabs.aws-documentation-mcp-server@latest"
+      ],
+      "env": {
+        "FASTMCP_LOG_LEVEL": "ERROR",
+        "AWS_DOCUMENTATION_PARTITION": "aws"
+      },
+      "tool_timeout": 60
+    },
+    "requires": "uvx"
+  },
+  {
+    "name": "brave-search",
+    "display_name": "Brave Search",
+    "category": "web",
+    "description": "Run web, news, image, video, and local search through Brave Search.",
+    "docs_url": "https://www.npmjs.com/package/@brave/brave-search-mcp-server",
+    "transport": "stdio",
+    "install_supported": true,
+    "brand_domain": "brave.com",
+    "brand_color": "#FB542B",
+    "server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@brave/brave-search-mcp-server@latest",
+        "--transport",
+        "stdio"
+      ],
+      "tool_timeout": 45
+    },
+    "fields": [
+      {
+        "name": "brave_api_key",
+        "label": "Brave Search API key",
+        "target": [
+          "env",
+          "BRAVE_API_KEY"
+        ],
+        "env_var": "BRAVE_API_KEY",
+        "placeholder": "BSA..."
+      }
+    ],
+    "requires": "Node.js, npx, and Brave Search API key"
+  },
+  {
+    "name": "postman",
+    "display_name": "Postman",
+    "category": "api",
+    "description": "Inspect and manage Postman APIs, collections, and workspaces through the local MCP server.",
+    "docs_url": "https://learning.postman.com/docs/developer/postman-api/postman-mcp-server/postman-mcp-local-server",
+    "transport": "stdio",
+    "install_supported": true,
+    "brand_domain": "postman.com",
+    "brand_color": "#FF6C37",
+    "server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@postman/postman-mcp-server@latest",
+        "--full"
+      ],
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "postman_api_key",
+        "label": "Postman API key",
+        "target": [
+          "env",
+          "POSTMAN_API_KEY"
+        ],
+        "env_var": "POSTMAN_API_KEY",
+        "placeholder": "PMAK-..."
+      }
+    ],
+    "requires": "Node.js, npx, and Postman API key"
+  },
+  {
+    "name": "figma",
+    "display_name": "Figma",
+    "category": "design",
+    "description": "Read design context from Figma using the local Dev Mode MCP server.",
+    "docs_url": "https://help.figma.com/hc/en-us/articles/32132100833559-Guide-to-the-Figma-MCP-server",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "figma.com",
+    "brand_color": "#F24E1E",
+    "server": {
+      "type": "streamableHttp",
+      "url": "http://127.0.0.1:3845/mcp",
+      "tool_timeout": 45
+    },
+    "requires": "Figma desktop app with MCP enabled",
+    "note": "Requires Figma Desktop Dev Mode MCP to be running locally."
+  },
+  {
+    "name": "xmind",
+    "display_name": "Xmind",
+    "category": "productivity",
+    "description": "Create, read, and edit cloud mind maps through Xmind.",
+    "docs_url": "https://xmind.com/user-guide/xmind-mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "xmind.com",
+    "brand_color": "#F4B41A",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://app.xmind.com/api/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Xmind account",
+    "note": "Connects securely in your browser with Xmind OAuth."
+  },
+  {
+    "name": "notion",
+    "display_name": "Notion",
+    "category": "productivity",
+    "description": "Read and update your Notion workspace through Notion MCP.",
+    "docs_url": "https://developers.notion.com/guides/mcp/get-started-with-mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "notion.so",
+    "brand_color": "#111111",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.notion.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Notion account",
+    "note": "Connects securely in your browser with Notion OAuth."
+  },
+  {
+    "name": "linear",
+    "display_name": "Linear",
+    "category": "productivity",
+    "description": "Find and manage Linear issues, projects, and comments.",
+    "docs_url": "https://linear.app/docs/mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "linear.app",
+    "brand_color": "#5E6AD2",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.linear.app/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Linear account",
+    "note": "Connects securely in your browser with Linear OAuth."
+  },
+  {
+    "name": "github",
+    "display_name": "GitHub",
+    "category": "code",
+    "description": "Repository, issue, and pull request workflows via GitHub's MCP server.",
+    "docs_url": "https://github.com/github/github-mcp-server",
+    "transport": "stdio",
+    "install_supported": true,
+    "brand_domain": "github.com",
+    "brand_color": "#24292F",
+    "server": {
+      "type": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "ghcr.io/github/github-mcp-server"
+      ],
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "github_token",
+        "label": "GitHub token",
+        "target": [
+          "env",
+          "GITHUB_PERSONAL_ACCESS_TOKEN"
+        ],
+        "env_var": "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "placeholder": "ghp_..."
+      }
+    ],
+    "requires": "Docker and GitHub token"
+  },
+  {
+    "name": "supabase",
+    "display_name": "Supabase",
+    "category": "database",
+    "description": "Inspect and manage Supabase projects through the Supabase MCP server.",
+    "docs_url": "https://supabase.com/docs/guides/ai-tools/mcp",
+    "transport": "stdio",
+    "install_supported": true,
+    "brand_domain": "supabase.com",
+    "brand_color": "#3ECF8E",
+    "server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@supabase/mcp-server-supabase@latest",
+        "--read-only"
+      ],
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "supabase_access_token",
+        "label": "Supabase access token",
+        "target": [
+          "env",
+          "SUPABASE_ACCESS_TOKEN"
+        ],
+        "env_var": "SUPABASE_ACCESS_TOKEN",
+        "placeholder": "sbp_..."
+      }
+    ],
+    "requires": "Node.js, npx, and Supabase access token",
+    "note": "MVP config starts read-only by default."
+  },
+  {
+    "name": "stripe",
+    "display_name": "Stripe",
+    "category": "finance",
+    "description": "Manage payments, customers, subscriptions, and Stripe reports.",
+    "docs_url": "https://docs.stripe.com/mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "stripe.com",
+    "brand_color": "#635BFF",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.stripe.com",
+      "tool_timeout": 60
+    },
+    "requires": "Stripe account",
+    "note": "Account access and available tools follow your Stripe permissions."
+  },
+  {
+    "name": "monday",
+    "display_name": "monday.com",
+    "category": "productivity",
+    "description": "Manage boards, items, updates, and workspaces.",
+    "docs_url": "https://developer.monday.com/api-reference/docs/mcp-dynamic-client-registration",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "monday.com",
+    "brand_color": "#FFCB00",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.monday.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "monday.com account"
+  },
+  {
+    "name": "clickup",
+    "display_name": "ClickUp",
+    "category": "productivity",
+    "description": "Manage tasks, docs, time tracking, and workspace activity.",
+    "docs_url": "https://developer.clickup.com/docs/connect-an-ai-assistant-to-clickups-mcp-server",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "clickup.com",
+    "brand_color": "#7B68EE",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.clickup.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "ClickUp account"
+  },
+  {
+    "name": "todoist",
+    "display_name": "Todoist",
+    "category": "productivity",
+    "description": "Manage tasks, projects, reminders, and comments.",
+    "docs_url": "https://developer.todoist.com/api/v1/",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "todoist.com",
+    "brand_color": "#E44332",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://ai.todoist.net/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Todoist account"
+  },
+  {
+    "name": "airtable",
+    "display_name": "Airtable",
+    "category": "productivity",
+    "description": "Search and update records, bases, and tables.",
+    "docs_url": "https://support.airtable.com/articles/9897799762-using-the-airtable-mcp-server",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "airtable.com",
+    "brand_color": "#F82B60",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.airtable.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Airtable account"
+  },
+  {
+    "name": "miro",
+    "display_name": "Miro",
+    "category": "design",
+    "description": "Read and edit boards, diagrams, sticky notes, and documents.",
+    "docs_url": "https://developers.miro.com/docs/connecting-to-miro-mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "miro.com",
+    "brand_color": "#FFD02F",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.miro.com/",
+      "tool_timeout": 60
+    },
+    "requires": "Miro account"
+  },
+  {
+    "name": "whimsical",
+    "display_name": "Whimsical",
+    "category": "design",
+    "description": "Create and edit diagrams, wireframes, mind maps, and docs.",
+    "docs_url": "https://whimsical.com/learn/integrations/mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "whimsical.com",
+    "brand_color": "#7B31F4",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.whimsical.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Whimsical account"
+  },
+  {
+    "name": "figma-remote",
+    "display_name": "Figma (remote)",
+    "category": "design",
+    "description": "Read design context and work with Figma files through the hosted server.",
+    "docs_url": "https://developers.figma.com/docs/figma-mcp-server/",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "figma.com",
+    "brand_color": "#F24E1E",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.figma.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Figma account"
+  },
+  {
+    "name": "supabase-remote",
+    "display_name": "Supabase (remote)",
+    "category": "database",
+    "description": "Inspect databases and manage Supabase projects through browser sign-in.",
+    "docs_url": "https://supabase.com/docs/guides/ai-tools/mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "supabase.com",
+    "brand_color": "#3ECF8E",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.supabase.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Supabase account"
+  },
+  {
+    "name": "neon",
+    "display_name": "Neon",
+    "category": "database",
+    "description": "Manage Postgres projects, branches, schemas, and queries.",
+    "docs_url": "https://neon.com/docs/ai/neon-mcp-server",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "neon.com",
+    "brand_color": "#00E599",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.neon.tech/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Neon account"
+  },
+  {
+    "name": "vercel",
+    "display_name": "Vercel",
+    "category": "cloud",
+    "description": "Manage projects, inspect deployments, and query web analytics.",
+    "docs_url": "https://vercel.com/docs/agent-resources/vercel-mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "vercel.com",
+    "brand_color": "#111111",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.vercel.com",
+      "tool_timeout": 60
+    },
+    "requires": "Vercel account"
+  },
+  {
+    "name": "render",
+    "display_name": "Render",
+    "category": "cloud",
+    "description": "Manage services, deployments, databases, metrics, and logs.",
+    "docs_url": "https://render.com/docs/mcp-server",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "render.com",
+    "brand_color": "#46E3B7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://mcp.render.com/mcp",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "render_api_key",
+        "label": "Render API key",
+        "target": [
+          "header",
+          "Authorization"
+        ],
+        "env_var": "RENDER_API_KEY",
+        "placeholder": "rnd_...",
+        "value_prefix": "Bearer "
+      }
+    ],
+    "requires": "Render API key"
+  },
+  {
+    "name": "railway",
+    "display_name": "Railway",
+    "category": "cloud",
+    "description": "Manage projects, services, environments, and deployments.",
+    "docs_url": "https://docs.railway.com/ai/mcp-server",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "railway.com",
+    "brand_color": "#A855F7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.railway.com",
+      "tool_timeout": 60
+    },
+    "requires": "Railway account"
+  },
+  {
+    "name": "wordpress-com",
+    "display_name": "WordPress.com",
+    "category": "publishing",
+    "description": "Read and update sites, posts, pages, and media.",
+    "docs_url": "https://developer.wordpress.com/docs/mcp/connect-custom-mcp-client/",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "wordpress.com",
+    "brand_color": "#21759B",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://public-api.wordpress.com/wpcom/v2/mcp/v1",
+      "tool_timeout": 60
+    },
+    "requires": "WordPress.com account"
+  },
+  {
+    "name": "webflow",
+    "display_name": "Webflow",
+    "category": "publishing",
+    "description": "Manage sites, CMS content, designs, and site analytics.",
+    "docs_url": "https://developers.webflow.com/mcp/reference/getting-started",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "webflow.com",
+    "brand_color": "#146EF5",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.webflow.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Webflow account"
+  },
+  {
+    "name": "wix",
+    "display_name": "Wix",
+    "category": "publishing",
+    "description": "Build and manage Wix sites, apps, and business data.",
+    "docs_url": "https://dev.wix.com/docs/overview/ai-the-wix-platform/the-wix-mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "wix.com",
+    "brand_color": "#111111",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.wix.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Wix account"
+  },
+  {
+    "name": "granola",
+    "display_name": "Granola",
+    "category": "meetings",
+    "description": "Search meeting notes, decisions, and action items.",
+    "docs_url": "https://help.granola.ai/article/granola-mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "granola.ai",
+    "brand_color": "#7CBE82",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.granola.ai/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Granola account"
+  },
+  {
+    "name": "fireflies",
+    "display_name": "Fireflies",
+    "category": "meetings",
+    "description": "Search meeting transcripts, summaries, and action items.",
+    "docs_url": "https://guide.fireflies.ai/articles/8272956938-learn-about-the-fireflies-mcp-server-model-context-protocol",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "fireflies.ai",
+    "brand_color": "#7A5AF8",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://api.fireflies.ai/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Fireflies account"
+  },
+  {
+    "name": "otter",
+    "display_name": "Otter.ai",
+    "category": "meetings",
+    "description": "Search and analyze meeting transcripts and conversations.",
+    "docs_url": "https://help.otter.ai/hc/en-us/articles/35287607569687-Otter-MCP-Server",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "otter.ai",
+    "brand_color": "#0066FF",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.otter.ai/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Otter.ai account"
+  },
+  {
+    "name": "plaud",
+    "display_name": "Plaud",
+    "category": "meetings",
+    "description": "Search recordings, transcripts, summaries, and notes.",
+    "docs_url": "https://support.plaud.ai/hc/en-us/articles/57751078986265-Plaud-MCP",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "plaud.ai",
+    "brand_color": "#212121",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.plaud.ai/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Plaud account"
+  },
+  {
+    "name": "read-ai",
+    "display_name": "Read AI",
+    "category": "meetings",
+    "description": "Search meeting summaries, transcripts, and action items.",
+    "docs_url": "https://support.read.ai/hc/en-us/articles/49381158409491-MCP-Server",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "read.ai",
+    "brand_color": "#FF5B35",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://api.read.ai/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Read AI account",
+    "note": "For EU accounts, use the EU endpoint from the official setup guide."
+  },
+  {
+    "name": "superhuman-mail",
+    "display_name": "Superhuman Mail",
+    "category": "email",
+    "description": "Search email, draft replies, and manage calendar events.",
+    "docs_url": "https://help.superhuman.com/hc/en-us/articles/46005696690317-Superhuman-Mail-MCP-Server",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "superhuman.com",
+    "brand_color": "#6758D9",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.mail.superhuman.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Superhuman Mail account"
+  },
+  {
+    "name": "calendly",
+    "display_name": "Calendly",
+    "category": "productivity",
+    "description": "Manage scheduling, event types, availability, and bookings.",
+    "docs_url": "https://developer.calendly.com/docs/mcp/calendly-mcp-server",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "calendly.com",
+    "brand_color": "#006BFF",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.calendly.com",
+      "tool_timeout": 60
+    },
+    "requires": "Calendly account"
+  },
+  {
+    "name": "attio",
+    "display_name": "Attio",
+    "category": "crm",
+    "description": "Search and update CRM records, notes, lists, and tasks.",
+    "docs_url": "https://attio.com/help/reference/how-to-guides/attio-mcp-prompts-and-best-practices",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "attio.com",
+    "brand_color": "#4640DE",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.attio.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Attio account"
+  },
+  {
+    "name": "close",
+    "display_name": "Close",
+    "category": "crm",
+    "description": "Manage CRM records, deals, calls, email, and outreach.",
+    "docs_url": "https://developer.close.com/mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "close.com",
+    "brand_color": "#2A67FF",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.close.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Close account"
+  },
+  {
+    "name": "apollo",
+    "display_name": "Apollo.io",
+    "category": "crm",
+    "description": "Find contacts, enrich records, and manage sales workflows.",
+    "docs_url": "https://docs.apollo.io/docs/apollo-mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "apollo.io",
+    "brand_color": "#F8D24B",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.apollo.io/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Apollo.io account"
+  },
+  {
+    "name": "ashby",
+    "display_name": "Ashby",
+    "category": "hr",
+    "description": "Search recruiting pipelines, candidates, interviews, and jobs.",
+    "docs_url": "https://docs.ashbyhq.com/ashby-mcp-server-beta",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "ashbyhq.com",
+    "brand_color": "#7E58C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.ashbyhq.com/mcp/v1",
+      "tool_timeout": 60
+    },
+    "requires": "Ashby account",
+    "note": "An organization admin must enable MCP access first."
+  },
+  {
+    "name": "gusto",
+    "display_name": "Gusto",
+    "category": "hr",
+    "description": "Work with payroll, employees, time tracking, and onboarding.",
+    "docs_url": "https://gusto.com/product/integrations/gusto_mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "gusto.com",
+    "brand_color": "#F45D48",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.api.gusto.com",
+      "tool_timeout": 60
+    },
+    "requires": "Gusto account"
+  },
+  {
+    "name": "ramp",
+    "display_name": "Ramp",
+    "category": "finance",
+    "description": "Manage expenses, transactions, approvals, and spending reports.",
+    "docs_url": "https://support.ramp.com/ramp-mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "ramp.com",
+    "brand_color": "#D3F36B",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.ramp.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Ramp account"
+  },
+  {
+    "name": "mercury",
+    "display_name": "Mercury",
+    "category": "finance",
+    "description": "Work with accounts, transactions, cards, and payment requests.",
+    "docs_url": "https://docs.mercury.com/docs/connecting-mercury-mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "mercury.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.mercury.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Mercury account"
+  },
+  {
+    "name": "higgsfield",
+    "display_name": "Higgsfield",
+    "category": "media",
+    "description": "Generate images, videos, characters, and audio.",
+    "docs_url": "https://higgsfield.ai/creator-hub/help-center/integrations/what-is-higgsfield-mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "higgsfield.ai",
+    "brand_color": "#C4FF00",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.higgsfield.ai/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Higgsfield account",
+    "note": "Generations use your account credits."
+  },
+  {
+    "name": "openart",
+    "display_name": "OpenArt",
+    "category": "media",
+    "description": "Generate and edit images and videos in your OpenArt account.",
+    "docs_url": "https://openart.ai/mcp/",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "openart.ai",
+    "brand_color": "#835AFF",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.openart.ai/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "OpenArt account",
+    "note": "Generations use your account credits."
+  },
+  {
+    "name": "runway",
+    "display_name": "Runway",
+    "category": "media",
+    "description": "Generate and edit images and videos using your Runway account.",
+    "docs_url": "https://help.runwayml.com/hc/en-us/articles/51931843164691-Connecting-to-Runway-MCP",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "runwayml.com",
+    "brand_color": "#111111",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.runwayml.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Runway account",
+    "note": "Generations use your Runway workspace credits."
+  },
+  {
+    "name": "posthog",
+    "display_name": "PostHog",
+    "category": "analytics",
+    "description": "Query analytics and manage feature flags, errors, and experiments.",
+    "docs_url": "https://posthog.com/docs/model-context-protocol/codex",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "posthog.com",
+    "brand_color": "#F54E00",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.posthog.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "PostHog account"
+  },
+  {
+    "name": "amplitude",
+    "display_name": "Amplitude",
+    "category": "analytics",
+    "description": "Explore analytics, charts, dashboards, cohorts, and tracking plans.",
+    "docs_url": "https://amplitude.com/docs/amplitude-ai/amplitude-mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "amplitude.com",
+    "brand_color": "#005AF2",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.amplitude.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Amplitude account",
+    "note": "For EU data residency, use the EU endpoint from the official setup guide."
+  },
+  {
+    "name": "statsig",
+    "display_name": "Statsig",
+    "category": "analytics",
+    "description": "Manage experiments, feature gates, and dynamic configurations.",
+    "docs_url": "https://docs.statsig.com/integrations/mcp/manual-setup",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "statsig.com",
+    "brand_color": "#4256FF",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://api.statsig.com/v3/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Statsig account",
+    "note": "Your organization must allow personal Console API keys for MCP OAuth."
+  },
+  {
+    "name": "hex",
+    "display_name": "Hex",
+    "category": "analytics",
+    "description": "Analyze data and work with Hex projects and notebooks.",
+    "docs_url": "https://learn.hex.tech/docs/api-integrations/mcp-server",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "hex.tech",
+    "brand_color": "#F0C5AB",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://app.hex.tech/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Hex account",
+    "note": "Requires a Team or Enterprise plan and an Explorer role or higher."
+  },
+  {
+    "name": "motherduck",
+    "display_name": "MotherDuck",
+    "category": "database",
+    "description": "Query DuckDB data, inspect schemas, and create visualizations.",
+    "docs_url": "https://motherduck.com/docs/key-tasks/ai-and-motherduck/mcp-setup/",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "motherduck.com",
+    "brand_color": "#FFE94A",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://api.motherduck.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "MotherDuck account"
+  },
+  {
+    "name": "consensus",
+    "display_name": "Consensus",
+    "category": "research",
+    "description": "Search and synthesize peer-reviewed research papers.",
+    "docs_url": "https://docs.consensus.app/consensus-mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "consensus.app",
+    "brand_color": "#48A5A2",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.consensus.app/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Consensus account"
+  },
+  {
+    "name": "scite",
+    "display_name": "Scite",
+    "category": "research",
+    "description": "Search scientific papers and assess supporting and contrasting citations.",
+    "docs_url": "https://scite.ai/mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "scite.ai",
+    "brand_color": "#DB6C20",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://api.scite.ai/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Scite account",
+    "note": "Requires a paid plan or an active trial."
+  },
+  {
+    "name": "tavily",
+    "display_name": "Tavily",
+    "category": "web",
+    "description": "Search, extract, and crawl web content.",
+    "docs_url": "https://docs.tavily.com/documentation/mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "tavily.com",
+    "brand_color": "#4A83F6",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.tavily.com/mcp/",
+      "tool_timeout": 60
+    },
+    "requires": "Tavily account"
+  },
+  {
+    "name": "atlassian",
+    "display_name": "Atlassian",
+    "category": "productivity",
+    "description": "Search and manage Jira issues and Confluence content.",
+    "docs_url": "https://support.atlassian.com/atlassian-ai-gateway/docs/get-started-with-the-atlassian-remote-mcp-server/",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "atlassian.com",
+    "brand_color": "#0052CC",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.atlassian.com/v2/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Atlassian account",
+    "note": "Your organization may need to allow your WebUI callback domain."
+  },
+  {
+    "name": "trello",
+    "display_name": "Trello",
+    "category": "productivity",
+    "description": "Manage boards, lists, cards, and workspace activity.",
+    "docs_url": "https://support.atlassian.com/trello/docs/connect-trello-to-ai-assistants-with-trello-mcp/",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "trello.com",
+    "brand_color": "#0079BF",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.trello.com/v1",
+      "tool_timeout": 60
+    },
+    "requires": "Trello account",
+    "note": "Your organization may need to allow your WebUI callback domain."
+  },
+  {
+    "name": "readwise",
+    "display_name": "Readwise",
+    "category": "productivity",
+    "description": "Search highlights and Reader documents.",
+    "docs_url": "https://readwise.io/mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "readwise.io",
+    "brand_color": "#E6A44D",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp2.readwise.io/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Readwise account"
+  },
+  {
+    "name": "github-remote",
+    "display_name": "GitHub (remote)",
+    "category": "code",
+    "description": "Manage repositories, issues, pull requests, and GitHub workflows.",
+    "docs_url": "https://github.com/github/github-mcp-server/blob/main/docs/remote-server.md",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "github.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "github_token",
+        "label": "GitHub personal access token",
+        "target": [
+          "header",
+          "Authorization"
+        ],
+        "env_var": "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "placeholder": "Paste your token",
+        "value_prefix": "Bearer "
+      }
+    ],
+    "requires": "GitHub personal access token"
+  },
+  {
+    "name": "coda",
+    "display_name": "Coda",
+    "category": "productivity",
+    "description": "Read and edit docs, pages, tables, and project data.",
+    "docs_url": "https://help.coda.io/hc/en-us/articles/44722661982989-Connect-to-the-Coda-MCP",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "coda.io",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://coda.io/apis/mcp",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "coda_token",
+        "label": "Coda MCP token",
+        "target": [
+          "header",
+          "Authorization"
+        ],
+        "env_var": "CODA_MCP_TOKEN",
+        "placeholder": "Paste your token",
+        "value_prefix": "Bearer "
+      }
+    ],
+    "requires": "Coda MCP token"
+  },
+  {
+    "name": "deepnote",
+    "display_name": "Deepnote",
+    "category": "analytics",
+    "description": "Read, create, edit, and run notebooks in your workspace.",
+    "docs_url": "https://deepnote.com/docs/deepnote-mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "deepnote.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://deepnote.com/mcp",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "deepnote_api_key",
+        "label": "Deepnote workspace API key",
+        "target": [
+          "header",
+          "Authorization"
+        ],
+        "env_var": "DEEPNOTE_API_KEY",
+        "placeholder": "Paste your token",
+        "value_prefix": "Bearer "
+      }
+    ],
+    "requires": "Deepnote workspace API key"
+  },
+  {
+    "name": "hunter",
+    "display_name": "Hunter",
+    "category": "crm",
+    "description": "Find companies, discover contacts, and verify email addresses.",
+    "docs_url": "https://hunter.io/api-documentation",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "hunter.io",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://mcp.hunter.io/mcp",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "hunter_api_key",
+        "label": "Hunter API key",
+        "target": [
+          "header",
+          "Authorization"
+        ],
+        "env_var": "HUNTER_API_KEY",
+        "placeholder": "Paste your token",
+        "value_prefix": "Bearer "
+      }
+    ],
+    "requires": "Hunter API key"
+  },
+  {
+    "name": "ahrefs",
+    "display_name": "Ahrefs",
+    "category": "analytics",
+    "description": "Research search traffic, keywords, links, and competitors.",
+    "docs_url": "https://docs.ahrefs.com/en/mcp/docs/copilot-studio",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "ahrefs.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://api.ahrefs.com/mcp/mcp",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "ahrefs_mcp_key",
+        "label": "Ahrefs MCP key",
+        "target": [
+          "header",
+          "Authorization"
+        ],
+        "env_var": "AHREFS_MCP_KEY",
+        "placeholder": "Paste your token",
+        "value_prefix": "Bearer "
+      }
+    ],
+    "requires": "Ahrefs Lite plan or higher and MCP key"
+  },
+  {
+    "name": "agentmail",
+    "display_name": "AgentMail",
+    "category": "email",
+    "description": "Manage inboxes, messages, threads, drafts, and attachments.",
+    "docs_url": "https://docs.agentmail.to/integrations/mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "agentmail.to",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://mcp.agentmail.to/mcp",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "agentmail_api_key",
+        "label": "AgentMail API key",
+        "target": [
+          "header",
+          "x-api-key"
+        ],
+        "env_var": "AGENTMAIL_API_KEY",
+        "placeholder": "Paste your token"
+      }
+    ],
+    "requires": "AgentMail API key"
+  },
+  {
+    "name": "similarweb",
+    "display_name": "Similarweb",
+    "category": "analytics",
+    "description": "Research website traffic, audiences, keywords, and competitors.",
+    "docs_url": "https://developers.similarweb.com/docs/copilot-mcp-integration",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "similarweb.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://mcp.similarweb.com",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "similarweb_api_key",
+        "label": "Similarweb API key",
+        "target": [
+          "header",
+          "api-key"
+        ],
+        "env_var": "SIMILARWEB_API_KEY",
+        "placeholder": "Paste your token"
+      }
+    ],
+    "requires": "Similarweb API key"
+  },
+  {
+    "name": "instacart",
+    "display_name": "Instacart",
+    "category": "shopping",
+    "description": "Create recipe pages and shopping lists on Instacart.",
+    "docs_url": "https://docs.instacart.com/developer_platform_api/guide/tutorials/mcp/",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "instacart.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://mcp.instacart.com/mcp",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "instacart_api_key",
+        "label": "Instacart Developer Platform API key",
+        "target": [
+          "header",
+          "Authorization"
+        ],
+        "env_var": "INSTACART_API_KEY",
+        "placeholder": "Paste your token",
+        "value_prefix": "Bearer "
+      }
+    ],
+    "requires": "Approved production Developer Platform API key",
+    "note": "This server creates recipes and shopping lists; it does not manage your shopping account."
+  },
+  {
+    "name": "datadog",
+    "display_name": "Datadog",
+    "category": "analytics",
+    "description": "Investigate logs, metrics, traces, monitors, and dashboards.",
+    "docs_url": "https://docs.datadoghq.com/mcp_server/setup/",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "datadoghq.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "mcp_url",
+        "label": "MCP server URL",
+        "target": [
+          "url",
+          "url"
+        ],
+        "secret": false,
+        "placeholder": "Copy the MCP endpoint for your Datadog site"
+      },
+      {
+        "name": "datadog_access_token",
+        "label": "Datadog personal or service access token",
+        "target": [
+          "header",
+          "Authorization"
+        ],
+        "env_var": "DATADOG_ACCESS_TOKEN",
+        "placeholder": "Paste your token",
+        "value_prefix": "Bearer "
+      }
+    ],
+    "requires": "Datadog site MCP URL and personal or service access token"
+  },
+  {
+    "name": "digitalocean",
+    "display_name": "DigitalOcean",
+    "category": "cloud",
+    "description": "Manage cloud resources through the remote server for your service.",
+    "docs_url": "https://docs.digitalocean.com/reference/mcp/configure-mcp/",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "digitalocean.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "mcp_url",
+        "label": "MCP server URL",
+        "target": [
+          "url",
+          "url"
+        ],
+        "secret": false,
+        "placeholder": "https://apps.mcp.digitalocean.com/mcp"
+      },
+      {
+        "name": "digitalocean_token",
+        "label": "DigitalOcean API token",
+        "target": [
+          "header",
+          "Authorization"
+        ],
+        "env_var": "DIGITALOCEAN_API_TOKEN",
+        "placeholder": "Paste your token",
+        "value_prefix": "Bearer "
+      }
+    ],
+    "requires": "Service MCP URL and DigitalOcean API token",
+    "note": "Choose the endpoint for App Platform, databases, or another service from the setup guide."
+  },
+  {
+    "name": "metabase",
+    "display_name": "Metabase",
+    "category": "analytics",
+    "description": "Query your instance and work with saved analytics content.",
+    "docs_url": "https://www.metabase.com/docs/latest/ai/mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "metabase.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "mcp_url",
+        "label": "MCP server URL",
+        "target": [
+          "url",
+          "url"
+        ],
+        "secret": false,
+        "placeholder": "https://your-metabase.example.com/api/metabase-mcp"
+      }
+    ],
+    "requires": "Instance MCP URL with MCP enabled"
+  },
+  {
+    "name": "sigma",
+    "display_name": "Sigma",
+    "category": "analytics",
+    "description": "Explore data and build workbooks in your Sigma organization.",
+    "docs_url": "https://help.sigmacomputing.com/docs/use-sigma-mcp-server",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "sigmacomputing.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "mcp_url",
+        "label": "MCP server URL",
+        "target": [
+          "url",
+          "url"
+        ],
+        "secret": false,
+        "placeholder": "Copy the Sigma MCP URL from Profile → Integrations"
+      }
+    ],
+    "requires": "Organization MCP URL and permission to use Sigma MCP"
+  },
+  {
+    "name": "descript",
+    "display_name": "Descript",
+    "category": "media",
+    "description": "Import, transcribe, edit, and publish audio and video projects.",
+    "docs_url": "https://help.descript.com/api-and-mcp/mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "descript.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "mcp_url",
+        "label": "MCP server URL",
+        "target": [
+          "url",
+          "url"
+        ],
+        "secret": false,
+        "placeholder": "Copy the URL from Settings → Descript MCP"
+      }
+    ],
+    "requires": "Descript MCP URL and account",
+    "note": "Each connection is limited to the Drive selected during sign-in."
+  },
+  {
+    "name": "hugging-face",
+    "display_name": "Hugging Face",
+    "category": "research",
+    "description": "Search models, datasets, papers, and community AI tools.",
+    "docs_url": "https://huggingface.co/docs/hub/agents-mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "huggingface.co",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://huggingface.co/mcp",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "hugging_face_token",
+        "label": "Hugging Face token (optional)",
+        "target": [
+          "header",
+          "Authorization"
+        ],
+        "required": false,
+        "env_var": "HF_TOKEN",
+        "placeholder": "hf_...",
+        "value_prefix": "Bearer "
+      }
+    ],
+    "requires": "Network access; token optional"
+  },
+  {
+    "name": "wolfram",
+    "display_name": "Wolfram",
+    "category": "research",
+    "description": "Compute answers with Wolfram|Alpha and Wolfram Language.",
+    "docs_url": "https://support.wolfram.com/75237",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "wolfram.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://agenttools.wolfram.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Network access"
+  },
+  {
+    "name": "openai-docs",
+    "display_name": "OpenAI Developers",
+    "category": "docs",
+    "description": "Search and read OpenAI API, ChatGPT, Codex, and plugin documentation.",
+    "docs_url": "https://developers.openai.com/learn/docs-mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "openai.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://developers.openai.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Network access",
+    "note": "Documentation only; this server does not call the OpenAI API."
+  },
+  {
+    "name": "redis-docs",
+    "display_name": "Redis Docs",
+    "category": "docs",
+    "description": "Search Redis documentation and development guidance.",
+    "docs_url": "https://redis.io/docs/latest/develop/setup/build-with-an-agent/",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "redis.io",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://redis.io/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Network access",
+    "note": "Documentation only; use the Redis preset to connect to your database."
+  },
+  {
+    "name": "firebase",
+    "display_name": "Firebase",
+    "category": "cloud",
+    "description": "Manage Firebase projects, services, apps, and deployments.",
+    "docs_url": "https://firebase.google.com/docs/ai-assistance/mcp-server",
+    "transport": "stdio",
+    "install_supported": true,
+    "brand_domain": "firebase.google.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "firebase-tools@latest",
+        "mcp"
+      ],
+      "tool_timeout": 60
+    },
+    "requires": "Node.js, npx, and Firebase CLI sign-in",
+    "note": "Uses the account authenticated with firebase login."
+  },
+  {
+    "name": "mongodb",
+    "display_name": "MongoDB",
+    "category": "database",
+    "description": "Read database collections, inspect schemas, and run queries.",
+    "docs_url": "https://www.mongodb.com/docs/mcp-server/local-mcp/security-best-practices/",
+    "transport": "stdio",
+    "install_supported": true,
+    "brand_domain": "mongodb.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mongodb-mcp-server@latest",
+        "--readOnly"
+      ],
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "mongodb_connection_string",
+        "label": "MongoDB connection string",
+        "target": [
+          "env",
+          "MDB_MCP_CONNECTION_STRING"
+        ],
+        "env_var": "MDB_MCP_CONNECTION_STRING",
+        "placeholder": "mongodb+srv://user:password@cluster.mongodb.net/database"
+      }
+    ],
+    "requires": "Node.js, npx, and MongoDB connection string",
+    "note": "Starts in read-only mode."
+  },
+  {
+    "name": "clickhouse",
+    "display_name": "ClickHouse",
+    "category": "database",
+    "description": "Inspect ClickHouse schemas and run read-only SQL queries.",
+    "docs_url": "https://github.com/ClickHouse/mcp-clickhouse",
+    "transport": "stdio",
+    "install_supported": true,
+    "brand_domain": "clickhouse.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-clickhouse"
+      ],
+      "env": {
+        "CLICKHOUSE_PORT": "8443",
+        "CLICKHOUSE_SECURE": "true",
+        "CLICKHOUSE_VERIFY": "true",
+        "CLICKHOUSE_ALLOW_WRITE_ACCESS": "false"
+      },
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "clickhouse_host",
+        "label": "ClickHouse host",
+        "target": [
+          "env",
+          "CLICKHOUSE_HOST"
+        ],
+        "secret": false,
+        "env_var": "CLICKHOUSE_HOST",
+        "placeholder": "your-service.clickhouse.cloud"
+      },
+      {
+        "name": "clickhouse_port",
+        "label": "ClickHouse HTTP port",
+        "target": [
+          "env",
+          "CLICKHOUSE_PORT"
+        ],
+        "secret": false,
+        "required": false,
+        "env_var": "CLICKHOUSE_PORT",
+        "placeholder": "8443"
+      },
+      {
+        "name": "clickhouse_user",
+        "label": "ClickHouse user",
+        "target": [
+          "env",
+          "CLICKHOUSE_USER"
+        ],
+        "secret": false,
+        "env_var": "CLICKHOUSE_USER",
+        "placeholder": "default"
+      },
+      {
+        "name": "clickhouse_password",
+        "label": "ClickHouse password",
+        "target": [
+          "env",
+          "CLICKHOUSE_PASSWORD"
+        ],
+        "env_var": "CLICKHOUSE_PASSWORD",
+        "placeholder": "Paste your password"
+      }
+    ],
+    "requires": "uvx and ClickHouse connection credentials",
+    "note": "Uses HTTPS and read-only queries by default."
+  },
+  {
+    "name": "redis",
+    "display_name": "Redis",
+    "category": "database",
+    "description": "Read and manage Redis data, indexes, and server information.",
+    "docs_url": "https://github.com/redis/mcp-redis",
+    "transport": "stdio",
+    "install_supported": true,
+    "brand_domain": "redis.io",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "redis-mcp-server@latest",
+        "redis-mcp-server"
+      ],
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "redis_url",
+        "label": "Redis connection URL",
+        "target": [
+          "arg",
+          "--url"
+        ],
+        "env_var": "REDIS_URL",
+        "placeholder": "rediss://default:password@your-redis-host:6379/0"
+      }
+    ],
+    "requires": "uvx and Redis connection URL",
+    "note": "Use rediss:// for TLS. The connection URL selects the Redis host, port, database, and credentials."
+  },
+  {
+    "name": "dbt",
+    "display_name": "dbt",
+    "category": "analytics",
+    "description": "Work with your dbt platform account, models, jobs, and semantic layer.",
+    "docs_url": "https://docs.getdbt.com/docs/dbt-ai/setup-local-mcp",
+    "transport": "stdio",
+    "install_supported": true,
+    "brand_domain": "getdbt.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "dbt-mcp"
+      ],
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "dbt_host",
+        "label": "dbt account hostname",
+        "target": [
+          "env",
+          "DBT_HOST"
+        ],
+        "secret": false,
+        "env_var": "DBT_HOST",
+        "placeholder": "your-account.us1.dbt.com"
+      }
+    ],
+    "requires": "uvx and dbt account with a static subdomain",
+    "note": "The local MCP server opens your browser for dbt sign-in."
+  },
+  {
+    "name": "google-workspace",
+    "display_name": "Google Workspace",
+    "category": "productivity",
+    "description": "Work with Gmail, Drive, Calendar, Docs, Sheets, Slides, and Contacts.",
+    "docs_url": "https://github.com/taylorwilsdon/google_workspace_mcp",
+    "transport": "stdio",
+    "install_supported": true,
+    "brand_domain": "workspace.google.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "workspace-mcp",
+        "--transport",
+        "stdio",
+        "--tool-tier",
+        "core"
+      ],
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "google_client_id",
+        "label": "Google OAuth client ID",
+        "target": [
+          "env",
+          "GOOGLE_OAUTH_CLIENT_ID"
+        ],
+        "secret": false,
+        "env_var": "GOOGLE_OAUTH_CLIENT_ID",
+        "placeholder": "your-client.apps.googleusercontent.com"
+      },
+      {
+        "name": "google_client_secret",
+        "label": "Google OAuth client secret",
+        "target": [
+          "env",
+          "GOOGLE_OAUTH_CLIENT_SECRET"
+        ],
+        "env_var": "GOOGLE_OAUTH_CLIENT_SECRET",
+        "placeholder": "Paste your client secret"
+      }
+    ],
+    "requires": "uvx and Google Cloud OAuth app with the required APIs enabled",
+    "note": "Community server by Taylor Wilsdon. Follow its setup guide and complete Google sign-in when requested."
+  },
+  {
+    "name": "microsoft-365",
+    "display_name": "Microsoft 365",
+    "category": "productivity",
+    "description": "Work with Outlook, Calendar, OneDrive, SharePoint, and Teams.",
+    "docs_url": "https://github.com/Softeria/ms-365-mcp-server",
+    "transport": "stdio",
+    "install_supported": true,
+    "brand_domain": "microsoft.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@softeria/ms-365-mcp-server@latest",
+        "--org-mode"
+      ],
+      "tool_timeout": 60
+    },
+    "requires": "Node.js, npx, and Microsoft work or school account",
+    "note": "Community server by Softeria. Ask it to sign in and follow the device-code instructions; your organization may require admin consent."
+  },
+  {
+    "name": "adobe-express-docs",
+    "display_name": "Adobe Express Developer",
+    "category": "docs",
+    "description": "Read Express add-on documentation and TypeScript definitions.",
+    "docs_url": "https://developer.adobe.com/express/add-ons/docs/guides/getting-started/local-development/mcp-server",
+    "transport": "stdio",
+    "install_supported": true,
+    "brand_domain": "adobe.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@adobe/express-developer-mcp@latest"
+      ],
+      "tool_timeout": 60
+    },
+    "requires": "Node.js and npx",
+    "note": "Developer documentation only; this server does not edit your Adobe designs."
+  },
+  {
+    "name": "klaviyo",
+    "display_name": "Klaviyo",
+    "category": "marketing",
+    "description": "Manage email campaigns, profiles, audiences, and marketing reports.",
+    "docs_url": "https://developers.klaviyo.com/en/docs/connect_to_the_klaviyo_mcp_server",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "klaviyo.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.klaviyo.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Klaviyo account"
+  },
+  {
+    "name": "windsor",
+    "display_name": "Windsor.ai",
+    "category": "analytics",
+    "description": "Query connected advertising, analytics, commerce, and CRM data sources.",
+    "docs_url": "https://windsor.ai/mcp/",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "windsor.ai",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.windsor.ai/",
+      "tool_timeout": 60
+    },
+    "requires": "Windsor.ai account"
+  },
+  {
+    "name": "gong",
+    "display_name": "Gong",
+    "category": "crm",
+    "description": "Search sales conversations and inspect account and deal insights.",
+    "docs_url": "https://help.gong.io/docs/create-an-integration-to-connect-to-the-mcp-server",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "gong.io",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.gong.io/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Paid Gong seat and administrator-enabled MCP integration",
+    "note": "Your Tech admin must create an Automatic integration and register nanobot's callback URL before sign-in."
+  },
+  {
+    "name": "magicpath",
+    "display_name": "MagicPath",
+    "category": "design",
+    "description": "Create and edit UI designs, diagrams, and shared canvases.",
+    "docs_url": "https://github.com/MagicPathAI/magicpath-agent-plugin",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "magicpath.ai",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://api.magicpath.ai/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "MagicPath account"
+  },
+  {
+    "name": "wisdom",
+    "display_name": "WisdomAI",
+    "category": "analytics",
+    "description": "Ask questions across governed business data and domains.",
+    "docs_url": "https://docs.wisdom.ai/integrations/mcp-server/MCP-Server",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "wisdom.ai",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.wisdom.ai/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "WisdomAI account"
+  },
+  {
+    "name": "mixpanel",
+    "display_name": "Mixpanel",
+    "category": "analytics",
+    "description": "Analyze product events, funnels, cohorts, reports, and dashboards.",
+    "docs_url": "https://docs.mixpanel.com/docs/mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "mixpanel.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.mixpanel.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Mixpanel account",
+    "note": "Uses the US endpoint. EU and India endpoints are listed in the setup guide."
+  },
+  {
+    "name": "heygen",
+    "display_name": "HeyGen",
+    "category": "creative",
+    "description": "Create and manage avatar videos and video projects.",
+    "docs_url": "https://www.heygen.com/model-context-protocol",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "heygen.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.heygen.com/mcp/v1/",
+      "tool_timeout": 60
+    },
+    "requires": "HeyGen account"
+  },
+  {
+    "name": "tinyfish",
+    "display_name": "TinyFish",
+    "category": "browser",
+    "description": "Search and browse websites with the TinyFish web agent.",
+    "docs_url": "https://docs.tinyfish.ai/mcp-integration/index",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "tinyfish.ai",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://agent.tinyfish.ai/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "TinyFish account"
+  },
+  {
+    "name": "vanta",
+    "display_name": "Vanta",
+    "category": "security",
+    "description": "Inspect compliance controls, tests, evidence, and security workflows.",
+    "docs_url": "https://developer.vanta.com/docs/vanta-mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "vanta.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.vanta.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Vanta Admin account",
+    "note": "Uses the US endpoint. EU and Australia endpoints are listed in the setup guide."
+  },
+  {
+    "name": "omni",
+    "display_name": "Omni",
+    "category": "analytics",
+    "description": "Query business data through your Omni semantic models.",
+    "docs_url": "https://docs.omni.co/ai/mcp/authentication",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "omni.co",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://callbacks.omniapp.co/callback/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Omni account and administrator-enabled MCP",
+    "note": "Your organization must enable AI, MCP, and personal access tokens."
+  },
+  {
+    "name": "metricool",
+    "display_name": "Metricool",
+    "category": "marketing",
+    "description": "Read social analytics and create or update scheduled posts.",
+    "docs_url": "https://help.metricool.com/how-to-connect-metricools-mcp-eqp9h",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "metricool.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://ai.metricool.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Metricool account"
+  },
+  {
+    "name": "supermetrics",
+    "display_name": "Supermetrics",
+    "category": "marketing",
+    "description": "Query connected marketing data and manage supported campaigns.",
+    "docs_url": "https://docs.supermetrics.com/docs/supermetrics-mcp-server",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "supermetrics.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.supermetrics.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Supermetrics subscription with API access"
+  },
+  {
+    "name": "resend",
+    "display_name": "Resend",
+    "category": "productivity",
+    "description": "Send email and manage domains, contacts, and email workflows.",
+    "docs_url": "https://github.com/resend/resend-mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "resend.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.resend.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Resend account"
+  },
+  {
+    "name": "smartsheet",
+    "display_name": "Smartsheet",
+    "category": "productivity",
+    "description": "Read and manage sheets, rows, reports, and projects.",
+    "docs_url": "https://developers.smartsheet.com/ai-mcp/smartsheet/install-the-smartsheet-mcp-server",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "smartsheet.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://mcp.smartsheet.com",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "smartsheet_token",
+        "label": "Smartsheet API token",
+        "target": [
+          "header",
+          "Authorization"
+        ],
+        "env_var": "SMARTSHEET_API_TOKEN",
+        "placeholder": "Paste your token",
+        "value_prefix": "Bearer "
+      }
+    ],
+    "requires": "Smartsheet API token",
+    "note": "Uses the US endpoint. EU and Australia endpoints are listed in the setup guide."
+  },
+  {
+    "name": "lusha",
+    "display_name": "Lusha",
+    "category": "crm",
+    "description": "Search prospects and enrich contact and company data.",
+    "docs_url": "https://docs.lusha.com/mcp/overview",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "lusha.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://mcp.lusha.com",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "lusha_api_key",
+        "label": "Lusha API key",
+        "target": [
+          "header",
+          "x-api-key"
+        ],
+        "env_var": "LUSHA_API_KEY",
+        "placeholder": "Paste your token"
+      }
+    ],
+    "requires": "Lusha API key"
+  },
+  {
+    "name": "semrush",
+    "display_name": "Semrush",
+    "category": "marketing",
+    "description": "Query SEO, traffic, competitor, and project reports.",
+    "docs_url": "https://developer.semrush.com/api/v3/introduction/semrush-mcp/",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "semrush.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://mcp.semrush.com/v2/mcp",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "semrush_api_key",
+        "label": "Semrush API key",
+        "target": [
+          "header",
+          "Authorization"
+        ],
+        "env_var": "SEMRUSH_API_KEY",
+        "placeholder": "Paste your token",
+        "value_prefix": "Apikey "
+      }
+    ],
+    "requires": "Semrush API key and eligible subscription",
+    "note": "API-key authentication avoids OAuth client approval. Queries consume your Semrush API units."
+  },
+  {
+    "name": "blockscout",
+    "display_name": "Blockscout",
+    "category": "search",
+    "description": "Read blockchain addresses, transactions, tokens, and smart contracts.",
+    "docs_url": "https://github.com/blockscout/mcp-server",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "blockscout.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://mcp.blockscout.com/mcp",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "blockscout_api_key",
+        "label": "Blockscout PRO API key",
+        "target": [
+          "header",
+          "Blockscout-MCP-Pro-Api-Key"
+        ],
+        "env_var": "BLOCKSCOUT_PRO_API_KEY",
+        "placeholder": "Paste your token"
+      }
+    ],
+    "requires": "Blockscout PRO API key"
+  },
+  {
+    "name": "snowflake",
+    "display_name": "Snowflake",
+    "category": "database",
+    "description": "Query tools exposed by your managed Snowflake MCP server.",
+    "docs_url": "https://www.snowflake.com/en/developers/guides/getting-started-with-snowflake-mcp-server/",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "snowflake.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "",
+      "headers": {
+        "X-Snowflake-Authorization-Token-Type": "PROGRAMMATIC_ACCESS_TOKEN"
+      },
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "snowflake_mcp_url",
+        "label": "MCP server URL",
+        "target": [
+          "url",
+          "url"
+        ],
+        "secret": false,
+        "placeholder": "https://org-account.snowflakecomputing.com/api/v2/databases/db/schemas/schema/mcp-servers/server"
+      },
+      {
+        "name": "snowflake_token",
+        "label": "Snowflake programmatic access token",
+        "target": [
+          "header",
+          "Authorization"
+        ],
+        "env_var": "SNOWFLAKE_PAT",
+        "placeholder": "Paste your token",
+        "value_prefix": "Bearer "
+      }
+    ],
+    "requires": "Managed MCP server URL and Snowflake programmatic access token",
+    "note": "Create the managed MCP server and grant access to its tools before connecting."
+  },
+  {
+    "name": "parallel-task",
+    "display_name": "Parallel Task",
+    "category": "search",
+    "description": "Run web research and enrichment tasks across structured datasets.",
+    "docs_url": "https://docs.parallel.ai/integrations/mcp/task-mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "parallel.ai",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://task-mcp.parallel.ai/mcp",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "parallel_api_key",
+        "label": "Parallel API key",
+        "target": [
+          "header",
+          "Authorization"
+        ],
+        "env_var": "PARALLEL_API_KEY",
+        "placeholder": "Paste your token",
+        "value_prefix": "Bearer "
+      }
+    ],
+    "requires": "Parallel API key"
+  },
+  {
+    "name": "zoho-crm",
+    "display_name": "Zoho CRM",
+    "category": "crm",
+    "description": "Connect a Zoho CRM server for data, customization, or automation.",
+    "docs_url": "https://www.zoho.com/crm/developer/docs/mcp/setup/claude.html",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "zoho.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "zoho_mcp_url",
+        "label": "MCP server URL",
+        "target": [
+          "url",
+          "url"
+        ],
+        "secret": false,
+        "placeholder": "https://your-server.zohomcp.in/mcp/server-id/message"
+      }
+    ],
+    "requires": "Zoho CRM account and chosen server URL",
+    "note": "Copy the Data Insights, Data Operations, Module Customization, or Automation URL from Zoho's setup guide."
+  },
+  {
+    "name": "azure",
+    "display_name": "Azure",
+    "category": "cloud",
+    "description": "Inspect and manage Azure resources, databases, and services.",
+    "docs_url": "https://github.com/microsoft/mcp/tree/main/servers/Azure.Mcp.Server",
+    "transport": "stdio",
+    "install_supported": true,
+    "brand_domain": "azure.microsoft.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@azure/mcp@latest",
+        "server",
+        "start"
+      ],
+      "tool_timeout": 60
+    },
+    "requires": "Node.js, npx, Azure CLI, and Azure sign-in",
+    "note": "Run az login on the gateway computer before connecting."
+  },
+  {
+    "name": "tableau",
+    "display_name": "Tableau",
+    "category": "analytics",
+    "description": "Query Tableau data sources, workbooks, views, and metrics.",
+    "docs_url": "https://github.com/tableau/tableau-mcp",
+    "transport": "stdio",
+    "install_supported": true,
+    "brand_domain": "tableau.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@tableau/mcp-server@latest"
+      ],
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "tableau_server",
+        "label": "Tableau server URL",
+        "target": [
+          "env",
+          "SERVER"
+        ],
+        "secret": false,
+        "env_var": "SERVER",
+        "placeholder": "https://your-site.online.tableau.com"
+      },
+      {
+        "name": "tableau_site",
+        "label": "Tableau site name",
+        "target": [
+          "env",
+          "SITE_NAME"
+        ],
+        "secret": false,
+        "required": false,
+        "env_var": "SITE_NAME",
+        "placeholder": "your-site"
+      },
+      {
+        "name": "tableau_pat_name",
+        "label": "Personal access token name",
+        "target": [
+          "env",
+          "PAT_NAME"
+        ],
+        "secret": false,
+        "env_var": "PAT_NAME",
+        "placeholder": "nanobot"
+      },
+      {
+        "name": "tableau_pat_value",
+        "label": "Personal access token",
+        "target": [
+          "env",
+          "PAT_VALUE"
+        ],
+        "env_var": "PAT_VALUE"
+      }
+    ],
+    "requires": "Node.js 22.7.5 or later, npx, and Tableau personal access token",
+    "note": "Cloud sites require a site name; leave it blank for Tableau Server's default site."
+  },
+  {
+    "name": "bigquery",
+    "display_name": "BigQuery",
+    "category": "database",
+    "description": "Inspect BigQuery datasets and run SQL and analytics queries.",
+    "docs_url": "https://docs.cloud.google.com/bigquery/docs/pre-built-tools-with-mcp-toolbox",
+    "transport": "stdio",
+    "install_supported": true,
+    "brand_domain": "cloud.google.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@toolbox-sdk/server@latest",
+        "--prebuilt",
+        "bigquery",
+        "--stdio"
+      ],
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "bigquery_project",
+        "label": "Google Cloud project ID",
+        "target": [
+          "env",
+          "BIGQUERY_PROJECT"
+        ],
+        "secret": false,
+        "env_var": "BIGQUERY_PROJECT",
+        "placeholder": "your-project"
+      }
+    ],
+    "requires": "Node.js, npx, Google Application Default Credentials, and BigQuery access",
+    "note": "Run gcloud auth application-default login on the gateway computer; queries use your Google Cloud permissions."
+  },
+  {
+    "name": "salesforce",
+    "display_name": "Salesforce DX",
+    "category": "crm",
+    "description": "Query org data and work with Salesforce orgs and metadata.",
+    "docs_url": "https://developer.salesforce.com/docs/platform/sfdx-dev/guide/sfdx-dev-mcp-server.html",
+    "transport": "stdio",
+    "install_supported": true,
+    "brand_domain": "salesforce.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@salesforce/mcp@latest",
+        "--orgs",
+        "DEFAULT_TARGET_ORG",
+        "--toolsets",
+        "data,orgs,metadata"
+      ],
+      "tool_timeout": 60
+    },
+    "requires": "Node.js, npx, Salesforce CLI, and an authorized default target org",
+    "note": "Authorize your org with sf org login web and set it as the default target org."
+  },
+  {
+    "name": "shopify-dev",
+    "display_name": "Shopify Developer",
+    "category": "docs",
+    "description": "Search Shopify developer resources and validate API schemas and code.",
+    "docs_url": "https://shopify.dev/docs/apps/build/ai-toolkit",
+    "transport": "stdio",
+    "install_supported": true,
+    "brand_domain": "shopify.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@shopify/dev-mcp@latest"
+      ],
+      "tool_timeout": 60
+    },
+    "requires": "Node.js 18 or later and npx",
+    "note": "Developer resources only; store administration requires separately authenticated Shopify tools."
+  },
+  {
+    "name": "aws",
+    "display_name": "AWS",
+    "category": "cloud",
+    "description": "Search AWS guidance and call AWS APIs using your IAM credentials.",
+    "docs_url": "https://docs.aws.amazon.com/agent-toolkit/latest/userguide/getting-started-aws-mcp-server.html",
+    "transport": "stdio",
+    "install_supported": true,
+    "brand_domain": "aws.amazon.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-proxy-for-aws-cli@latest",
+        "https://aws-mcp.us-east-1.api.aws/mcp"
+      ],
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "aws_profile",
+        "label": "AWS profile (optional)",
+        "target": [
+          "env",
+          "AWS_PROFILE"
+        ],
+        "secret": false,
+        "required": false,
+        "env_var": "AWS_PROFILE",
+        "placeholder": "default"
+      }
+    ],
+    "requires": "uvx, AWS CLI, configured IAM credentials, and AWS MCP permissions",
+    "note": "Uses AWS's official SigV4 proxy and the us-east-1 endpoint. IAM permissions control available operations."
+  },
+  {
+    "name": "alation",
+    "display_name": "Alation",
+    "category": "analytics",
+    "description": "Search catalog metadata and use your Alation Agent Studio tools.",
+    "docs_url": "https://github.com/Alation/alation-ai-agent-sdk/tree/main/python/dist-mcp",
+    "transport": "stdio",
+    "install_supported": true,
+    "brand_domain": "alation.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "alation-ai-agent-mcp",
+        "start-alation-mcp-server"
+      ],
+      "env": {
+        "ALATION_AUTH_METHOD": "service_account"
+      },
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "alation_url",
+        "label": "Alation instance URL",
+        "target": [
+          "env",
+          "ALATION_BASE_URL"
+        ],
+        "secret": false,
+        "env_var": "ALATION_BASE_URL",
+        "placeholder": "https://your-instance.alationcloud.com"
+      },
+      {
+        "name": "alation_client_id",
+        "label": "Alation service-account client ID",
+        "target": [
+          "env",
+          "ALATION_CLIENT_ID"
+        ],
+        "secret": false,
+        "env_var": "ALATION_CLIENT_ID"
+      },
+      {
+        "name": "alation_client_secret",
+        "label": "Alation service-account client secret",
+        "target": [
+          "env",
+          "ALATION_CLIENT_SECRET"
+        ],
+        "env_var": "ALATION_CLIENT_SECRET"
+      }
+    ],
+    "requires": "uvx and Alation service-account integration",
+    "note": "Create an Alation service-account integration and grant the catalog permissions you need."
+  },
+  {
+    "name": "wispr-flow",
+    "display_name": "Wispr Flow",
+    "category": "productivity",
+    "description": "Read dictation history and maintain vocabulary and snippets.",
+    "docs_url": "https://github.com/Wispr-AI/wispr-flow-plugin",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "wisprflow.ai",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://api.wisprflow.ai/connect/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Wispr Flow account"
+  },
+  {
+    "name": "gitbook",
+    "display_name": "GitBook",
+    "category": "productivity",
+    "description": "Read and edit documentation spaces and their content.",
+    "docs_url": "https://gitbook.com/docs/documentation/docs-as-code/gitbook-mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "gitbook.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.gitbook.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "GitBook account"
+  },
+  {
+    "name": "floot",
+    "display_name": "Floot",
+    "category": "creative",
+    "description": "Create, edit, and publish applications through Floot.",
+    "docs_url": "https://floot.com/docs/integrations/other-mcp-clients",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "floot.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.floot.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Floot account"
+  },
+  {
+    "name": "clay",
+    "display_name": "Clay",
+    "category": "crm",
+    "description": "Find and enrich prospect and company information.",
+    "docs_url": "https://university.clay.com/docs/connect-to-clay-mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "clay.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://api.clay.com/v3/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Clay account",
+    "note": "Workspace admins must enable MCP and allow Unknown clients for dynamically registered clients."
+  },
+  {
+    "name": "wpwriter",
+    "display_name": "WPWriter",
+    "category": "productivity",
+    "description": "Create and manage content on connected WordPress sites.",
+    "docs_url": "https://www.wpwriter.com/html/abg_wp12.html",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "wpwriter.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.wpwriter.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "WPWriter account"
+  },
+  {
+    "name": "wpvibe",
+    "display_name": "WPVibe",
+    "category": "productivity",
+    "description": "Read and manage connected WordPress websites.",
+    "docs_url": "https://wpvibe.ai/connect/",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "wpvibe.ai",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.wpvibe.ai/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "WPVibe account"
+  },
+  {
+    "name": "vidiq",
+    "display_name": "vidIQ",
+    "category": "marketing",
+    "description": "Analyze video performance and plan content for social channels.",
+    "docs_url": "https://support.vidiq.com/en/articles/15082430-vidiq-mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "vidiq.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.vidiq.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "vidIQ account"
+  },
+  {
+    "name": "caliber",
+    "display_name": "Caliber",
+    "category": "health",
+    "description": "Read workouts and manage your strength-training routines.",
+    "docs_url": "https://caliberstrong.freshdesk.com/support/solutions/articles/48001282391-mcp-server-instructions",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "caliberstrong.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://api.caliberstrong.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Caliber account"
+  },
+  {
+    "name": "coros",
+    "display_name": "COROS",
+    "category": "health",
+    "description": "Read authorized sports, activity, and training data.",
+    "docs_url": "https://github.com/coroslab/COROS-MCP",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "coros.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.coros.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "COROS account"
+  },
+  {
+    "name": "namecheap",
+    "display_name": "Namecheap",
+    "category": "cloud",
+    "description": "Search domains and manage supported domain workflows.",
+    "docs_url": "https://www.namecheap.com/support/knowledgebase/article.aspx/10824/34/namecheap-mcp/",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "namecheap.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.namecheap.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Namecheap account"
+  },
+  {
+    "name": "godaddy",
+    "display_name": "GoDaddy",
+    "category": "search",
+    "description": "Search public domain availability and registration information.",
+    "docs_url": "https://developer.godaddy.com/en/docs/api-users/mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "godaddy.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://api.godaddy.com/v1/domains/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Network access",
+    "note": "Public domain data only; account-specific administration requires GoDaddy's other tools."
+  },
+  {
+    "name": "thoughtspot-docs",
+    "display_name": "ThoughtSpot Developer",
+    "category": "docs",
+    "description": "Look up ThoughtSpot embedding and API documentation.",
+    "docs_url": "https://developers.thoughtspot.com/docs/SpotterCode",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "thoughtspot.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://spottercode.thoughtspot.app/mcp/docs",
+      "tool_timeout": 60
+    },
+    "requires": "Network access",
+    "note": "Documentation only; authenticated ThoughtSpot administration requires a custom connection."
+  },
+  {
+    "name": "hostinger-mail",
+    "display_name": "Hostinger Mail",
+    "category": "productivity",
+    "description": "Read and manage email, mailboxes, and contacts.",
+    "docs_url": "https://api.mail.hostinger.com/",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "hostinger.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://mcp.mail.hostinger.com/mcp",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "hostinger_token",
+        "label": "Hostinger API token",
+        "target": [
+          "header",
+          "Authorization"
+        ],
+        "env_var": "HOSTINGER_API_TOKEN",
+        "placeholder": "Paste your token",
+        "value_prefix": "Bearer "
+      }
+    ],
+    "requires": "Hostinger API token"
+  },
+  {
+    "name": "gsc-wizard",
+    "display_name": "GSC Wizard",
+    "category": "marketing",
+    "description": "Query Search Console performance and inspect SEO reports.",
+    "docs_url": "https://mcp.gscwizard.com/docs",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "gscwizard.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://mcp.gscwizard.com/mcp",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "gsc_api_key",
+        "label": "GSC Wizard API key",
+        "target": [
+          "header",
+          "Authorization"
+        ],
+        "env_var": "GSC_WIZARD_API_KEY",
+        "placeholder": "gscw_live_...",
+        "value_prefix": "Bearer "
+      }
+    ],
+    "requires": "GSC Wizard API key"
+  },
+  {
+    "name": "pocket",
+    "display_name": "Pocket AI",
+    "category": "productivity",
+    "description": "Search meeting transcripts, notes, and recordings.",
+    "docs_url": "https://docs.heypocketai.com/docs/mcp",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "heypocketai.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://public.heypocketai.com/mcp",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "pocket_api_key",
+        "label": "Pocket API key",
+        "target": [
+          "header",
+          "Authorization"
+        ],
+        "env_var": "POCKET_API_KEY",
+        "placeholder": "pk_...",
+        "value_prefix": "Bearer "
+      }
+    ],
+    "requires": "Pocket API key"
+  },
+  {
+    "name": "expedia",
+    "display_name": "Expedia Travel Recommendations",
+    "category": "travel",
+    "description": "Find hotel recommendations through Expedia's travel API.",
+    "docs_url": "https://github.com/ExpediaGroup/expedia-travel-recommendations-mcp",
+    "transport": "stdio",
+    "install_supported": true,
+    "brand_domain": "expediagroup.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "expedia_travel_recommendations_mcp",
+        "--protocol",
+        "stdio"
+      ],
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "expedia_api_key",
+        "label": "Expedia API key",
+        "target": [
+          "env",
+          "EXPEDIA_API_KEY"
+        ],
+        "env_var": "EXPEDIA_API_KEY",
+        "placeholder": "Paste your API key"
+      }
+    ],
+    "requires": "uvx and Expedia Travel Recommendations API key",
+    "note": "Recommendation API only; this does not connect your personal Expedia bookings."
+  },
+  {
+    "name": "legal-data-hunter",
+    "display_name": "Legal Data Hunter",
+    "category": "search",
+    "description": "Search legal records and retrieve source documents.",
+    "docs_url": "https://legaldatahunter.com/llms.txt",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "legaldatahunter.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://legaldatahunter.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Legal Data Hunter account"
+  },
+  {
+    "name": "ringcentral",
+    "display_name": "RingCentral Phone",
+    "category": "productivity",
+    "description": "Read phone activity, messages, contacts, and call insights.",
+    "docs_url": "https://developers.ringcentral.com/mcp/servers/ringex-phone-setup/",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "ringcentral.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.labs.ringcentral.com/ringex/phone",
+      "tool_timeout": 60
+    },
+    "requires": "RingCentral Phone account"
+  },
+  {
+    "name": "ubersuggest",
+    "display_name": "Ubersuggest",
+    "category": "marketing",
+    "description": "Research keywords, competitors, SEO, and content opportunities.",
+    "docs_url": "https://ubersuggest-mcp.neilpatelapi.com/docs",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "neilpatel.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://ubersuggest-mcp.neilpatelapi.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Ubersuggest account"
+  },
+  {
+    "name": "talarion",
+    "display_name": "Talarion Acumen",
+    "category": "search",
+    "description": "Search recent facts with dates and source references.",
+    "docs_url": "https://docs.talarion.com/installation",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "talarion.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://mcp.talarion.com/mcp",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "talarion_api_key",
+        "label": "Talarion workspace API key",
+        "target": [
+          "header",
+          "Authorization"
+        ],
+        "env_var": "TALARION_API_KEY",
+        "placeholder": "tlrn_...",
+        "value_prefix": "Bearer "
+      }
+    ],
+    "requires": "Talarion workspace API key"
+  },
+  {
+    "name": "databricks",
+    "display_name": "Databricks Genie",
+    "category": "analytics",
+    "description": "Query a Databricks-provided or registered MCP service.",
+    "docs_url": "https://docs.databricks.com/aws/en/agents/mcp-tools/authentication-networking",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "databricks.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "url": "",
+      "tool_timeout": 60
+    },
+    "fields": [
+      {
+        "name": "databricks_mcp_url",
+        "label": "MCP service URL",
+        "target": [
+          "url",
+          "url"
+        ],
+        "secret": false,
+        "placeholder": "https://your-workspace/ai-gateway/mcp-services/system.ai.genie_one_mcp"
+      },
+      {
+        "name": "databricks_token",
+        "label": "Databricks access token",
+        "target": [
+          "header",
+          "Authorization"
+        ],
+        "env_var": "DATABRICKS_TOKEN",
+        "placeholder": "Paste your token",
+        "value_prefix": "Bearer "
+      }
+    ],
+    "requires": "Databricks MCP service URL and access token",
+    "note": "PAT access is intended for local testing. Databricks Apps require a separately configured OAuth connection."
+  },
+  {
+    "name": "ticktick",
+    "display_name": "TickTick",
+    "category": "productivity",
+    "description": "Read and manage tasks, projects, and calendars.",
+    "docs_url": "https://mcp.ticktick.com/.well-known/oauth-protected-resource",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "ticktick.com",
+    "brand_color": "#5269C7",
+    "server": {
+      "type": "streamableHttp",
+      "auth": "oauth",
+      "url": "https://mcp.ticktick.com",
+      "tool_timeout": 60
+    },
+    "requires": "TickTick account"
+  }
+]

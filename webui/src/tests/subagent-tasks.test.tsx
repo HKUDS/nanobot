@@ -30,8 +30,8 @@ function emitTask(snapshot: SubagentTaskSnapshot, chatId = "a") {
   act(() => { chatHandlers.get(chatId)?.forEach((handler) => handler({ event: "subagent_task", chat_id: chatId, task: snapshot })); });
 }
 const messages: UIMessage[] = [
-  { id: "prompt-a", role: "user", content: "Inspect config", turnId: "turn-a" },
-  { id: "answer-a", role: "assistant", content: "Main answer", turnId: "turn-a" },
+  { id: "prompt-a", role: "user", content: "Inspect config", turnId: "turn-a", createdAt: 100_000 },
+  { id: "answer-a", role: "assistant", content: "Main answer", turnId: "turn-a", createdAt: 101_000 },
 ];
 
 function task(overrides: Partial<SubagentTaskSnapshot> = {}): SubagentTaskSnapshot {
@@ -84,7 +84,7 @@ describe("session-owned task UI", () => {
       : response([task({ state: "done", completed_at: 102 })])));
     const user = userEvent.setup();
     const view = render(layout({ historyEnabled: true }));
-    const work = await screen.findByRole("button", { name: /Delegated work/ });
+    const work = await screen.findByRole("button", { name: /Subtasks/ });
     expect(work).toHaveAttribute("aria-expanded", "false");
 
     act(() => { writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, activityMode: "expanded" }); });
@@ -134,7 +134,7 @@ describe("session-owned task UI", () => {
     fetcher.mockImplementation(async (url) => url.endsWith("/webui-thread") ? childThread("## Findings\n\nVerified the full session", false)
       : response([task({ revision: 2, state: "done", completed_at: 102 })]));
     render(layout({ historyEnabled: true }));
-    await user.click(await screen.findByRole("button", { name: /Delegated work/ }));
+    await user.click(await screen.findByRole("button", { name: /Subtasks/ }));
     await user.click(screen.getByRole("button", { name: /Config check Completed/ }));
     expect(await within(screen.getByRole("dialog")).findByRole("heading", { name: "Findings" })).toBeVisible();
   });
@@ -174,28 +174,41 @@ describe("session-owned task UI", () => {
     expect(await within(screen.getByRole("dialog")).findByText("Latest child response")).toBeVisible();
   });
 
-  it("retries a failed history read through the shared history controls", async () => {
-    let offline = true;
+  it("shares history loading, actual failure details and keyboard retry with the main thread", async () => {
+    let rejectRead!: (reason: Error) => void;
+    let resolveRead!: (value: Response) => void;
+    let reads = 0;
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       if (!url.endsWith("/webui-thread")) return response([task()]);
-      if (offline) throw new Error("offline");
-      return childThread("Recovered child response");
+      reads += 1;
+      return new Promise<Response>((resolve, reject) => { resolveRead = resolve; rejectRead = reject; });
     }));
     const user = userEvent.setup();
     render(layout({ historyEnabled: true }));
     await user.click(await screen.findByRole("button", { name: /Config check Running/ }));
     const detail = screen.getByRole("dialog");
-    expect(await within(detail).findByRole("alert")).toHaveTextContent("Loading failed.");
-    offline = false;
-    await user.click(within(detail).getByRole("button", { name: "Retry" }));
+    const loading = within(detail).getByRole("status");
+    expect(loading.querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
+    expect(loading.closest(".thread-history-status")).toHaveAttribute("data-state", "loading");
+    await act(async () => { rejectRead(new Error("offline")); });
+    const retry = await within(detail).findByRole("button", { name: "Loading failed. Retry" });
+    expect(retry.closest(".thread-history-status")).toHaveAttribute("data-state", "error");
+    expect(retry.querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
+    act(() => { retry.focus(); });
+    expect(screen.getByRole("tooltip")).toHaveTextContent("offline");
+    await user.keyboard("{Enter}");
+    expect(reads).toBe(2);
+    expect(within(detail).getByRole("status").closest(".thread-history-status")).toHaveAttribute("data-state", "loading");
+    await act(async () => { resolveRead(childThread("Recovered child response")); });
     expect(await within(detail).findByText("Recovered child response")).toBeVisible();
+    expect(within(detail).queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("keeps the same work block under its prompt, folds completed work and restores it after refresh", async () => {
     const view = render(layout());
     const runningRow = await screen.findByRole("button", { name: /Config check Running/ });
     const work = runningRow.closest("section");
-    const header = within(work!).getByRole("button", { name: /Delegated work/ });
+    const header = within(work!).getByRole("button", { name: /Subtasks/ });
     expect(screen.getByTestId("messages")).toContainElement(runningRow);
     expect(header).toHaveAttribute("aria-expanded", "true");
     vi.mocked(fetch).mockImplementation(async () => response([task({ revision: 2, state: "done", result: "Verified", completed_at: 102 })]));
@@ -206,10 +219,10 @@ describe("session-owned task UI", () => {
     expect(row).toBe(runningRow);
     expect(row.closest("section")).toBe(work);
     expect(within(screen.getByTestId("composer")).queryByText("Config check")).not.toBeInTheDocument();
-    expect(work).toHaveAccessibleName("Delegated work");
+    expect(work).toHaveAccessibleName("Subtasks");
     view.unmount();
     render(layout());
-    fireEvent.click(await screen.findByRole("button", { name: /Delegated work Finished: 1/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Subtasks Finished: 1/ }));
     expect(screen.getByRole("button", { name: /Config check Completed/ })).toBeVisible();
     expect(requestMutation).not.toHaveBeenCalled();
   });
@@ -221,7 +234,7 @@ describe("session-owned task UI", () => {
     })]));
     const user = userEvent.setup();
     render(layout());
-    await user.click(await screen.findByRole("button", { name: /Delegated work/ }));
+    await user.click(await screen.findByRole("button", { name: /Subtasks/ }));
     const row = await screen.findByRole("button", { name: /Config check Interrupted/ });
     await user.click(row);
     const detail = screen.getByRole("dialog", { name: "Config check" });
@@ -229,7 +242,7 @@ describe("session-owned task UI", () => {
     expect(detail).toHaveFocus();
     expect(within(detail).getByText("Interrupted")).toBeVisible();
     expect(within(detail).getByText("Found a conflicting setting")).toBeVisible();
-    await user.click(within(detail).getByText("Message delivery"));
+    await user.click(within(detail).getByText("Message status"));
     expect(within(detail).getByText("Delivered: 1")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Stop Config check" })).not.toBeInTheDocument();
     await user.keyboard("{Escape}");
@@ -249,7 +262,7 @@ describe("session-owned task UI", () => {
     fireEvent(window, new Event("focus"));
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
     await act(async () => { resolveStop(task({ revision: 3, state: "cancelled", completed_at: 102 })); });
-    await user.click(screen.getByRole("button", { name: /Delegated work Finished: 1/ }));
+    await user.click(screen.getByRole("button", { name: /Subtasks Finished: 1/ }));
     await screen.findByRole("button", { name: /Config check Cancelled/ });
     await act(async () => { resolveRefresh(response([task()])); });
     expect(screen.queryByRole("button", { name: "Stop Config check" })).not.toBeInTheDocument();
@@ -272,7 +285,7 @@ describe("session-owned task UI", () => {
     expect(statusHandlers.size).toBe(0);
   });
 
-  it("keeps load failures visible and keeps stop failures across a successful refresh", async () => {
+  it("preserves loaded tasks and stop errors across background snapshot failures", async () => {
     const user = userEvent.setup();
     requestMutation.mockRejectedValue(new Error("Cannot stop task"));
     render(layout());
@@ -282,23 +295,26 @@ describe("session-owned task UI", () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
     expect(screen.getByText("Cannot stop task")).toBeVisible();
     vi.mocked(fetch).mockRejectedValue(new Error("offline"));
-    fireEvent(window, new Event("focus"));
-    await screen.findByText("Could not load subtasks.");
+    await act(async () => { fireEvent(window, new Event("focus")); });
     expect(screen.getByRole("button", { name: /Config check Running/ })).toBeVisible();
+    expect(screen.getByText("Cannot stop task")).toBeVisible();
   });
 
-  it("shows a read error for malformed or duplicate task records", async () => {
+  it("retains the last valid snapshot after malformed reads and recovers on refresh", async () => {
+    render(layout());
+    await screen.findByRole("button", { name: /Config check Running/ });
     vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({
       tasks: [{ ...task(), label: { unexpected: true } }],
     }), { headers: { "content-type": "application/json" } }));
-    render(layout());
-    await screen.findByText("Could not load subtasks.");
-    expect(screen.queryByText("Config check")).not.toBeInTheDocument();
+    await act(async () => { fireEvent(window, new Event("focus")); });
+    expect(screen.getByRole("button", { name: /Config check Running/ })).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     vi.mocked(fetch).mockImplementation(async () => response([task(), task()]));
-    fireEvent(window, new Event("focus"));
-    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
-    expect(screen.getByText("Could not load subtasks.")).toBeVisible();
-    expect(screen.queryByText("Config check")).not.toBeInTheDocument();
+    await act(async () => { fireEvent(window, new Event("focus")); });
+    expect(screen.getByRole("button", { name: /Config check Running/ })).toBeVisible();
+    vi.mocked(fetch).mockResolvedValue(response([task({ revision: 2, state: "done", completed_at: 102 })]));
+    await act(async () => { fireEvent(window, new Event("focus")); });
+    expect(screen.getByRole("button", { name: /Subtasks Finished: 1/ })).toBeVisible();
   });
 
   it("discards reads from the previous session after switching", async () => {
@@ -329,12 +345,12 @@ describe("session-owned task UI", () => {
     expect(within(detail).getByRole("link", { name: /Evidence/ })).toHaveAttribute("href", "https://example.com/review");
     expect(detail).toBeVisible();
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(screen.getByRole("button", { name: /Delegated work/ })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole("button", { name: /Subtasks/ })).toHaveFocus());
     expect(requestMutation).not.toHaveBeenCalled();
   });
 
   it("anchors replay once when multiple prompts share a turn and preserves row order", async () => {
-    const replay = [...messages, { id: "followup", role: "user", content: "Focus on errors", turnId: "turn-a" } satisfies UIMessage];
+    const replay = [...messages, { id: "followup", role: "user", content: "Focus on errors", turnId: "turn-a", createdAt: 102_000 } satisfies UIMessage];
     const keys = unitKeysForDisplay(buildDisplayUnits(replay));
     expect(new Set(keys).size).toBe(keys.length);
     vi.mocked(fetch).mockImplementation(async () => response([
@@ -343,7 +359,7 @@ describe("session-owned task UI", () => {
     ]));
     render(layout({ threadMessages: replay }));
     await screen.findByRole("button", { name: /Config check Running/ });
-    expect(screen.getAllByRole("region", { name: "Delegated work" })).toHaveLength(1);
+    expect(screen.getAllByRole("region", { name: "Subtasks" })).toHaveLength(1);
     const rows = screen.getAllByRole("button", { name: /check Running/ });
     expect(rows.map((row) => row.dataset.subagentId)).toEqual(["task-1", "second"]);
     vi.mocked(fetch).mockImplementation(async () => response([
@@ -359,13 +375,13 @@ describe("session-owned task UI", () => {
 
   it("prefers the exact initiating follow-up over a turn fallback", async () => {
     vi.mocked(fetch).mockImplementation(async () => response([task({ origin_message_id: "followup" })]));
-    render(layout({ threadMessages: [...messages, { id: "followup", role: "user", content: "Check more", turnId: "turn-a" }] }));
+    render(layout({ threadMessages: [...messages, { id: "followup", role: "user", content: "Check more", turnId: "turn-a", createdAt: 102_000 }] }));
     await screen.findByRole("button", { name: /Config check Running/ });
-    const group = screen.getByRole("region", { name: "Delegated work" });
+    const group = screen.getByRole("region", { name: "Subtasks" });
     expect(screen.getByText("Check more").compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("keeps legacy work with an unknown origin separate from the latest request after refresh", async () => {
+  it("keeps legacy work separate after refresh and preserves its disclosure through local history prepends", async () => {
     vi.mocked(fetch).mockImplementation(async () => response([
       task({ task_id: "legacy", revision: 0, label: "Nanjing weather", state: "done", completed_at: 102,
         origin_turn_id: "websocket:a:1791046873588004336", result: "## Nanjing\n\n- **Rain**" }),
@@ -374,11 +390,11 @@ describe("session-owned task UI", () => {
     const user = userEvent.setup();
     const view = render(layout());
     await screen.findByRole("button", { name: /Config check Running/ });
-    const otherWork = screen.getByRole("region", { name: "Other delegated work" });
-    const header = within(otherWork).getByRole("button", { name: /Other delegated work/ });
+    const otherWork = screen.getByRole("region", { name: "Other tasks" });
+    const header = within(otherWork).getByRole("button", { name: /Other tasks/ });
     expect(header).toHaveAttribute("aria-expanded", "false");
     expect(otherWork.compareDocumentPosition(screen.getByText("Inspect config")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(within(screen.getByRole("region", { name: "Delegated work" })).queryByText("Nanjing weather")).not.toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Subtasks" })).queryByText("Nanjing weather")).not.toBeInTheDocument();
     await user.click(header);
     expect(within(otherWork).getByText("These tasks have no matching request in the displayed messages.")).toBeVisible();
     await user.click(within(otherWork).getByRole("button", { name: /Nanjing weather Completed/ }));
@@ -386,10 +402,17 @@ describe("session-owned task UI", () => {
     expect(within(detail).getByRole("heading", { name: "Nanjing" })).toBeVisible();
     expect(within(detail).getByRole("list")).toHaveTextContent("Rain");
     await user.keyboard("{Escape}");
+    view.rerender(layout({ threadMessages: [
+      { id: "cached-prompt", role: "user", content: "Earlier cached prompt", createdAt: 99_000 },
+      ...messages,
+    ] }));
+    const expanded = screen.getByRole("region", { name: "Other tasks" });
+    expect(within(expanded).getByRole("button", { name: /Other tasks/ })).toHaveAttribute("aria-expanded", "true");
+    expect(within(expanded).getByRole("button", { name: /Nanjing weather Completed/ })).toBeVisible();
     view.unmount();
     render(layout());
-    const restored = await screen.findByRole("region", { name: "Other delegated work" });
-    expect(within(restored).getByRole("button", { name: /Other delegated work/ })).toHaveAttribute("aria-expanded", "false");
+    const restored = await screen.findByRole("region", { name: "Other tasks" });
+    expect(within(restored).getByRole("button", { name: /Other tasks/ })).toHaveAttribute("aria-expanded", "false");
     expect(restored.compareDocumentPosition(screen.getByText("Inspect config")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(requestMutation).not.toHaveBeenCalled();
   });
@@ -401,16 +424,16 @@ describe("session-owned task UI", () => {
     ]));
     const user = userEvent.setup();
     const view = render(layout());
-    const otherWork = await screen.findByRole("region", { name: "Other delegated work" });
+    const otherWork = await screen.findByRole("region", { name: "Other tasks" });
     await user.click(within(otherWork).getByRole("button", { name: /Earlier check Running/ }));
     const detail = screen.getByRole("dialog", { name: "Earlier check" });
     view.rerender(layout({ threadMessages: [
-      { id: "older-prompt", role: "user", content: "Inspect earlier work", turnId: "older-turn" },
+      { id: "older-prompt", role: "user", content: "Inspect earlier work", turnId: "older-turn", createdAt: 99_000 },
       ...messages,
     ] }));
     expect(detail).toBeVisible();
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("region", { name: "Other delegated work" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Other tasks" })).not.toBeInTheDocument();
     const row = screen.getByRole("button", { name: /Earlier check Running/ });
     expect(screen.getAllByRole("button", { name: /Earlier check Running/ })).toHaveLength(1);
     expect(screen.getByText("Inspect earlier work").compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -427,7 +450,7 @@ describe("session-owned task UI", () => {
     await screen.findByRole("button", { name: /Sibling check Running/ });
     await act(async () => { resolveRead(response([task()])); });
     expect(screen.getByRole("button", { name: /Config check Completed/ })).toBeVisible();
-    expect(screen.getAllByRole("region", { name: "Delegated work" })).toHaveLength(1);
+    expect(screen.getAllByRole("region", { name: "Subtasks" })).toHaveLength(1);
     vi.useFakeTimers();
     await act(async () => { vi.advanceTimersByTime(10_000); });
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -464,18 +487,22 @@ describe("session-owned task UI", () => {
     expect(screen.getByRole("button", { name: /Config check Cancelled/ })).toBeVisible();
     expect(fetch).toHaveBeenCalledTimes(3);
     emitTask({ ...task(), revision: -1 });
-    expect(screen.getByText("Could not load subtasks.")).toBeVisible();
+    expect(screen.getByRole("button", { name: /Config check Cancelled/ })).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("keeps protocol 1 task controls usable on a host without event support", async () => {
+  it("reads snapshots without polling on a host without task events", async () => {
     vi.mocked(fetch).mockImplementation(async () => response([task({ revision: undefined })]));
     vi.useFakeTimers();
     const view = render(layout({ liveEvents: false }));
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByRole("button", { name: /Config check Running/ })).toBeVisible();
     vi.mocked(fetch).mockImplementation(async () => response([task({ revision: undefined, state: "done", completed_at: 102 })]));
-    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
-    expect(screen.getByRole("button", { name: /Delegated work Finished: 1/ })).toBeVisible();
+    await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: /Config check Running/ })).toBeVisible();
+    await act(async () => { fireEvent(window, new Event("focus")); });
+    expect(screen.getByRole("button", { name: /Subtasks Finished: 1/ })).toBeVisible();
     expect(client.onChat).not.toHaveBeenCalled();
     view.rerender(layout({ liveEvents: false, visible: false }));
     const reads = vi.mocked(fetch).mock.calls.length;

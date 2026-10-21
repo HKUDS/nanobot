@@ -12,6 +12,7 @@ from nanobot.agent import model_presets as preset_helpers
 from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot, build_provider_snapshot
+from nanobot.providers.request_overrides import isolate_request_overrides
 from nanobot.utils.llm_runtime import LLMRuntime, runtime_from_provider_snapshot
 
 
@@ -254,4 +255,8 @@ class ModelRuntimeResolver:
 
         base = config.resolve_preset(self.model_preset)
         preset = base.model_copy(update={"model": model, "provider": "auto"})
+        preset = isolate_request_overrides(
+            preset, previous_provider=config.get_provider_name(preset=base),
+            provider=config.get_provider_name(preset=preset),
+        )
         return self.resolve_snapshot(build_provider_snapshot(config, preset=preset))

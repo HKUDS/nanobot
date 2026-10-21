@@ -2,9 +2,11 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { expect, it, vi } from "vitest";
 import { HostNavigationContext } from "@/components/remote/HostSwitcher";
 import { AboutSettings } from "@/components/settings/overview/OverviewSettings";
+import { VersionCheckRowView } from "@/components/settings/overview/VersionCheckRowView";
 import { NanobotClient } from "@/lib/nanobot-client";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type { SettingsPayload } from "@/lib/types";
+import { DEFAULT_LOCAL_PREFS, LOCAL_PREFS_STORAGE_KEY, readLocalPreferences, writeLocalPreferences } from "@/lib/local-preferences";
 import { jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
 
   const thirdPartyBrandNotice =
@@ -13,6 +15,42 @@ import { jsonResponse, settingsPayload, renderSettingsView, installSettingsViewT
 describe("Settings overview and appearance", () => {
   installSettingsViewTestHooks();
 
+  it("displays a caller-owned version result and delegates checking without a client provider", () => {
+    const check = vi.fn();
+    render(<VersionCheckRowView currentVersion="0.3.5" checking={false}
+      result={{ type: "update", latestVersion: "0.3.6", pypiUrl: "https://pypi.org/project/nanobot-ai/" }} onCheck={check} />);
+    expect(screen.getByText("Update available v0.3.6")).toBeVisible();
+    expect(screen.getByRole("link", { name: "PyPI" })).toHaveAttribute("href", "https://pypi.org/project/nanobot-ai/");
+    fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+    expect(check).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the notifications section and preserves independent browser-local channel preferences", () => {
+    writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, notificationSound: true });
+    renderSettingsView({ initialSection: "appearance", initialSettings: settingsPayload(), showSidebar: true });
+    fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
+    expect(screen.getByRole("switch", { name: "Browser notifications" })).toHaveAttribute("aria-checked", "false");
+    const sound = screen.getByRole("switch", { name: "Completion sound" });
+    expect(sound).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(sound);
+    expect(readLocalPreferences()).toMatchObject({ browserNotifications: false, notificationSound: false });
+  });
+
+
+  it.each(["local", "other tab"])("preserves a %s notification opt-out when another preference changes", (source) => {
+    writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, browserNotifications: true, notificationSound: true });
+    renderSettingsView({ initialSection: "appearance", initialSettings: settingsPayload(), showSidebar: true });
+    act(() => {
+      const next = { ...readLocalPreferences(), browserNotifications: false };
+      if (source === "local") writeLocalPreferences(next);
+      else {
+        localStorage.setItem(LOCAL_PREFS_STORAGE_KEY, JSON.stringify(next));
+        window.dispatchEvent(new StorageEvent("storage", { key: LOCAL_PREFS_STORAGE_KEY }));
+      }
+    });
+    fireEvent.click(screen.getByRole("switch", { name: "Code wrapping" }));
+    expect(readLocalPreferences()).toMatchObject({ browserNotifications: false, notificationSound: true, codeWrap: false });
+  });
 
   it("links the host's short commit beside its version", () => {
     const commit = "abcdef12".repeat(5);
@@ -74,6 +112,18 @@ describe("Settings overview and appearance", () => {
     expect(url.href).not.toContain("private-host");
   });
 
+  it("saves the reading size immediately while preserving the other local preferences", async () => {
+    const previous = { ...DEFAULT_LOCAL_PREFS, codeWrap: false, brandLogos: false, notificationSound: true };
+    writeLocalPreferences(previous);
+    renderSettingsView({ initialSection: "appearance", initialSettings: settingsPayload() });
+
+    expect(screen.getByRole("radio", { name: "Standard reading text" })).toBeChecked();
+    fireEvent.click(screen.getByRole("radio", { name: "Large reading text" }));
+
+    await waitFor(() => expect(readLocalPreferences()).toEqual({ ...previous, readingTextSize: "large" }));
+    expect(screen.getByRole("radio", { name: "Large reading text" })).toBeChecked();
+  });
+
   it("persists the file edit display local preference", async () => {
     renderSettingsView({
       initialSection: "appearance",
@@ -81,7 +131,7 @@ describe("Settings overview and appearance", () => {
       showSidebar: true,
     });
 
-    expect(screen.getByText("File edit display")).toBeInTheDocument();
+    expect(screen.getByText("Edit preview")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Diff" }));
 
     await waitFor(() => {
@@ -150,7 +200,7 @@ describe("Settings overview and appearance", () => {
 
     expect(await screen.findByText("No apps available.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Browse MCP tools" }));
-    expect(await screen.findByText("Add MCP server")).toBeInTheDocument();
+    expect(await screen.findByText("Add MCP")).toBeInTheDocument();
   });
 
   it("shows token activity on the overview", async () => {

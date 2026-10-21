@@ -24,6 +24,7 @@ import {
   fetchMarketplaceSkillTrends,
   fetchNanobotFeatures,
   fetchProviderModels,
+  fetchPromptIndex,
   fetchSessionAutomations,
   fetchSettingsUsage,
   fetchSidebarState,
@@ -122,6 +123,26 @@ describe("webui API helpers", () => {
         credentials: "same-origin",
       }),
     );
+  });
+
+  it("revalidates prompt summaries and replaces only the changed suffix", async () => {
+    const prompt = { id: "u1", preview: "question", answerPreview: "", cursor: "cursor", turnId: "t1", createdAt: 1 };
+    const cached = { revision: "first", prompts: [prompt] };
+    const signal = new AbortController().signal;
+    vi.mocked(fetch).mockResolvedValueOnce({ status: 304 } as Response);
+    await expect(fetchPromptIndex("tok", "websocket:chat-1", signal, cached)).resolves.toBe(cached);
+    expect(fetch).toHaveBeenLastCalledWith("/api/sessions/websocket%3Achat-1/webui-thread/prompts?since=first",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok", "If-None-Match": '"first"' }, cache: "no-store" }));
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({
+      revision: "second", replaceFrom: 1, prompts: [{ ...prompt, id: "u2" }],
+    }) } as Response);
+    const appended = await fetchPromptIndex("tok", "websocket:chat-1", signal, cached);
+    expect(appended.prompts.map((item) => item.id)).toEqual(["u1", "u2"]);
+    expect(appended.prompts[0]).toBe(prompt);
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ revision: "third", replaceFrom: 1, prompts: [] }) } as Response);
+    expect((await fetchPromptIndex("tok", "websocket:chat-1", signal, appended)).prompts).toEqual([prompt]);
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ replaceFrom: 2, prompts: [] }) } as Response);
+    await expect(fetchPromptIndex("tok", "websocket:chat-1", signal, cached)).rejects.toThrow("Invalid prompt index revision");
   });
 
   it("revalidates a cached WebUI thread and reuses it on 304", async () => {
@@ -292,22 +313,22 @@ describe("webui API helpers", () => {
   });
 
   it("aborts a WebUI thread request when its caller signal is aborted", async () => {
-    let requestSignal: AbortSignal | null = null;
+    const request: { signal?: AbortSignal | null } = {};
     vi.mocked(fetch).mockImplementation((_input, init) => new Promise((_resolve, reject) => {
-      requestSignal = init?.signal ?? null;
-      requestSignal?.addEventListener("abort", () => {
+      request.signal = init?.signal;
+      request.signal?.addEventListener("abort", () => {
         reject(new DOMException("Aborted", "AbortError"));
       });
     }));
     const controller = new AbortController();
 
-    const request = fetchWebuiThread("tok", "websocket:chat-1", {
+    const pending = fetchWebuiThread("tok", "websocket:chat-1", {
       signal: controller.signal,
     });
     controller.abort();
 
-    await expect(request).rejects.toMatchObject({ name: "AbortError" });
-    expect(requestSignal?.aborted).toBe(true);
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(request.signal?.aborted).toBe(true);
   });
 
   it("percent-encodes websocket keys and paths when fetching file previews", async () => {
@@ -1185,8 +1206,6 @@ describe("webui API helpers", () => {
       collapsed_groups: {},
       view: {
         density: "compact" as const,
-        show_previews: false,
-        show_timestamps: false,
         show_archived: true,
         sort: "updated_desc" as const,
       },
@@ -1218,7 +1237,6 @@ describe("webui API helpers", () => {
       },
       controls: {
         can_change_project: true,
-        can_use_full_access: true,
       },
     };
     vi.mocked(fetch).mockResolvedValueOnce({

@@ -57,6 +57,55 @@ class TestGenerateCode:
         assert store.approve_code(code2) is None
 
 
+class TestDelivery:
+    def test_failed_reply_can_retry_without_replacing_code_or_approving(self):
+        code = store.generate_code("feishu", "alice")
+        assert "delivery_status" not in store.list_pending()[0]
+        store.record_delivery(code, "sending")
+        assert store.list_pending()[0]["delivery_status"] == "sending"
+        store.record_delivery(code, "failed")
+        assert store.list_pending()[0]["delivery_status"] == "failed"
+        assert store.generate_code("feishu", "alice") == code
+        store.record_delivery(code, "sent")
+        store.record_delivery(code, "failed")
+        assert store.list_pending()[0]["delivery_status"] == "sent"
+        assert not store.is_approved("feishu", "alice")
+
+    @pytest.mark.parametrize("action", [store.approve_code, store.deny_code])
+    def test_late_delivery_does_not_revive_removed_request(self, action):
+        code = store.generate_code("feishu", "alice")
+        action(code)
+        store.record_delivery(code, "sent")
+        assert store.list_pending() == []
+
+    def test_expired_reply_is_not_revived(self, monkeypatch):
+        monkeypatch.setattr(store.time, "time", lambda: 1000)
+        code = store.generate_code("feishu", "alice", ttl=10)
+        monkeypatch.setattr(store.time, "time", lambda: 1011)
+        store.record_delivery(code, "sent")
+        assert store.list_pending() == []
+        assert store.approve_code(code) is None
+
+    def test_old_records_remain_usable(self):
+        code = store.generate_code("feishu", "alice")
+        data = store._load()
+        data["pending"][code].pop("delivery_status", None)
+        store._save(data)
+        assert "delivery_status" not in store.list_pending()[0]
+        store.record_delivery(code, "sent")
+        assert store.approve_code(code) == ("feishu", "alice")
+
+    def test_bookkeeping_failure_preserves_store(self, monkeypatch):
+        code = store.generate_code("feishu", "alice")
+        before = store._store_path().read_bytes()
+        with monkeypatch.context() as m:
+            def fail(_data):
+                raise OSError("disk unavailable")
+            m.setattr(store, "_save", fail)
+            store.record_delivery(code, "sent")
+        assert store._store_path().read_bytes() == before
+
+
 class TestFormatPairingReply:
     def test_points_owner_to_webui_with_command_fallback(self) -> None:
         reply = store.format_pairing_reply("ABCD-EFGH")

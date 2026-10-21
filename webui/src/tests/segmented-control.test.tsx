@@ -20,7 +20,7 @@ function Example({
   mode = "buttons",
   animateIndicator = true,
 }: {
-  mode?: "buttons" | "tabs";
+  mode?: "buttons" | "tabs" | "radio";
   animateIndicator?: boolean;
 }) {
   const [value, setValue] = useState("summary");
@@ -99,6 +99,24 @@ describe("SegmentedControl", () => {
 
     expect(onChange).toHaveBeenCalledWith("diff");
     expect(diff).toHaveFocus();
+  });
+
+  it("exposes one checked radio and moves selection and focus with the keyboard", () => {
+    render(<Example mode="radio" />);
+    const summary = screen.getByRole("radio", { name: "Summary" });
+    const diff = screen.getByRole("radio", { name: "Diff" });
+    expect(summary).toBeChecked();
+    expect(summary).toHaveAttribute("tabindex", "0");
+    expect(diff).toHaveAttribute("tabindex", "-1");
+
+    summary.focus();
+    fireEvent.keyDown(summary, { key: "ArrowRight" });
+    expect(diff).toBeChecked();
+    expect(diff).toHaveFocus();
+    expect(summary).not.toBeChecked();
+    fireEvent.keyDown(diff, { key: "Home" });
+    expect(summary).toBeChecked();
+    expect(summary).toHaveFocus();
   });
 
   it("can disable motion when the set of segments is dynamic", () => {

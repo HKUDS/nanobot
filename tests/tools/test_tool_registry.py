@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import AsyncMock
 
+import pytest
+
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.filesystem import ReadFileTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -269,7 +271,8 @@ async def test_registry_preserves_successful_exec_output_that_starts_with_error(
     assert result == output
 
 
-async def test_registry_uses_structured_tool_result_for_errors() -> None:
+@pytest.mark.parametrize("already_hinted", [False, True])
+async def test_registry_uses_structured_tool_result_for_errors(already_hinted: bool) -> None:
     registry = ToolRegistry()
     output = "Error: plain tool output, not a structured failure"
     raw_tool = _FakeTool("raw_output")
@@ -280,16 +283,20 @@ async def test_registry_uses_structured_tool_result_for_errors() -> None:
 
     assert raw_result == output
 
+    error_hint = (
+        "\n\n[Consider this result in the context of the user's goal "
+        "and decide whether and how to proceed.]"
+    )
+    error_content = "Error: real failure" + (error_hint if already_hinted else "")
     failing_tool = _FakeTool("failing_tool")
-    failing_tool.execute = AsyncMock(return_value=ToolResult.error("Error: real failure"))
+    failing_tool.execute = AsyncMock(return_value=ToolResult.error(error_content))
     registry.register(failing_tool)
 
     error_result = await registry.execute("failing_tool", {})
 
     assert isinstance(error_result, ToolResult)
     assert error_result.is_error
-    assert error_result.startswith("Error: real failure")
-    assert "[Analyze the error above" in error_result
+    assert error_result == "Error: real failure" + error_hint
 
 
 def test_get_definitions_returns_cached_result() -> None:

@@ -60,6 +60,9 @@ RUNTIME_CONFIG_PATHS = (
 
 
 def _parent(config: Config, path: str) -> tuple[BaseModel, str]:
+    # Keep the existing WebUI editor on the canonical hard-runtime field.
+    if path == "tools.exec.timeout":
+        path = "tools.exec.max_runtime"
     parent: BaseModel = config
     *parts, leaf = path.split(".")
     for part in parts:
@@ -128,6 +131,12 @@ def update_runtime_config(
         raise WebUISettingsError("gateway.port: must be at most 65535")
     if "api.timeout" in values and validated.api.timeout > 3600:
         raise WebUISettingsError("api.timeout: must be at most 3600 seconds")
+    if "tools.exec.timeout" in values:
+        limit = validated.tools.exec.max_runtime_limit
+        if validated.tools.exec.max_runtime > limit:
+            raise WebUISettingsError(
+                f"tools.exec.timeout: enter 1–{limit} seconds, or 0 for no time limit"
+            )
     for path in ("gateway.host", "api.host", "tools.image_generation.save_dir"):
         if path in values:
             parent, leaf = _parent(validated, path)

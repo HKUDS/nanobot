@@ -16,17 +16,17 @@
         "placeholder": "ID de usuario separados por comas"
       },
       "allowRemoteMediaRedirects": {
-        "label": "Permitir redirecciones de medios",
+        "label": "Redirecciones multimedia",
         "choices": {
           "true": "encendido",
           "false": "Apagado"
         }
       },
       "remoteMediaRedirectAllowedHosts": {
-        "label": "Hosts de redireccionamiento de medios"
+        "label": "Hosts de redirección"
       },
       "groupUserIsolation": {
-        "label": "Sesiones grupales separadas",
+        "label": "Sesiones por miembro",
         "choices": {
           "true": "encendido",
           "false": "Apagado"

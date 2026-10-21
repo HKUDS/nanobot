@@ -4,6 +4,7 @@ export interface PreviewTab {
   id: string;
   kind: "file" | "web";
   value: string;
+  canonicalPath?: string;
 }
 
 export interface FilePreviewState {
@@ -44,6 +45,21 @@ export class FilePreviewStore {
     this.update(key, { tabs, activeId: id });
   }
 
+  /** Reconcile aliases only after the gateway has resolved and authorized the file. */
+  resolveFile(key: string, path: string, canonicalPath: string) {
+    const previous = this.get(key);
+    const id = `file:${path}`;
+    const current = previous.tabs.find(tab => tab.id === id);
+    if (!current || current.canonicalPath === canonicalPath) return;
+    const existing = previous.tabs.find(tab => tab.id !== id && tab.kind === "file"
+      && tab.canonicalPath === canonicalPath);
+    const tabs = existing
+      ? previous.tabs.filter(tab => tab.id !== id)
+      : previous.tabs.map(tab => tab.id === id ? { ...tab, canonicalPath } : tab);
+    this.update(key, { tabs,
+      activeId: existing && previous.activeId === id ? existing.id : previous.activeId });
+  }
+
   select(key: string, id: string) {
     if (this.get(key).tabs.some((tab) => tab.id === id)) this.update(key, { activeId: id });
   }
@@ -80,6 +96,9 @@ export function useFilePreviewState(key: string | null, sharedStore?: FilePrevie
   const openFile = useCallback((path: string) => {
     if (key) store.open(key, "file", path);
   }, [key, store]);
+  const resolveFile = useCallback((path: string, canonicalPath: string) => {
+    if (key) store.resolveFile(key, path, canonicalPath);
+  }, [key, store]);
   const setWidth = useCallback((width: number) => {
     if (key) store.update(key, { width });
   }, [key, store]);
@@ -95,5 +114,5 @@ export function useFilePreviewState(key: string | null, sharedStore?: FilePrevie
   const close = useCallback(() => {
     if (key) store.close(key);
   }, [key, store]);
-  return { state, openFile, openWeb, selectTab, closeTab, close, setWidth };
+  return { state, openFile, resolveFile, openWeb, selectTab, closeTab, close, setWidth };
 }

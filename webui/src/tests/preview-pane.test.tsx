@@ -4,6 +4,27 @@ import { PreviewPane } from "@/components/PreviewPane";
 import { FilePreviewStore, useFilePreviewState } from "@/hooks/useFilePreviewState";
 
 describe("preview tabs", () => {
+  it("reuses a gateway-resolved file without merging same-named files or sessions", () => {
+    const store = new FilePreviewStore();
+    store.open("a", "file", "reports/REPORT.md");
+    store.resolveFile("a", "reports/REPORT.md", "/workspace/reports/REPORT.md");
+    store.open("a", "file", "/workspace/reports/./details.md");
+    store.resolveFile("a", "/workspace/reports/./details.md", "/workspace/reports/details.md");
+    store.update("a", { width: 620 });
+    store.open("a", "file", "/workspace/reports/./REPORT.md");
+    store.resolveFile("a", "/workspace/reports/./REPORT.md", "/workspace/reports/REPORT.md");
+    expect(store.get("a").tabs.map(tab => tab.value)).toEqual([
+      "reports/REPORT.md", "/workspace/reports/./details.md",
+    ]);
+    expect(store.get("a")).toMatchObject({ activeId: "file:reports/REPORT.md", width: 620 });
+    store.open("a", "file", "archive/REPORT.md");
+    store.resolveFile("a", "archive/REPORT.md", "/workspace/archive/REPORT.md");
+    store.open("b", "file", "reports/REPORT.md");
+    store.resolveFile("b", "reports/REPORT.md", "/workspace/reports/REPORT.md");
+    expect(store.get("a").tabs).toHaveLength(3);
+    expect(store.get("b").tabs).toHaveLength(1);
+  });
+
   it("deduplicates targets, keeps selection and width per session, and closes neighboring tabs", () => {
     const store = new FilePreviewStore();
     const storage = vi.spyOn(Storage.prototype, "setItem");

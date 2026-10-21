@@ -101,7 +101,7 @@ def test_sanitize_filename_empty_or_dots_fallback() -> None:
 
 
 @pytest.mark.asyncio
-async def test_download_and_save_success() -> None:
+async def test_download_and_save_success(tmp_path: Path) -> None:
     """Successful download writes file and returns sanitized path."""
     channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["*"]), MessageBus())
     client = _FakeWeComClient()
@@ -110,14 +110,12 @@ async def test_download_and_save_success() -> None:
     fake_data = b"\x89PNG\r\nfake image"
     client.download_file.return_value = (fake_data, "raw_photo.png")
 
-    with patch("nanobot.channels.wecom.runtime.get_media_dir", return_value=Path(tempfile.gettempdir())):
+    with patch("nanobot.channels.wecom.runtime.get_media_dir", return_value=tmp_path):
         path = await channel._download_and_save_media("https://example.com/img.png", "aes_key", "image", "photo.png")
 
     assert path is not None
-    assert os.path.isfile(path)
-    assert os.path.basename(path) == "photo.png"
-    # Cleanup
-    os.unlink(path)
+    assert Path(path) == tmp_path / "photo.png"
+    assert Path(path).read_bytes() == fake_data
 
 
 @pytest.mark.asyncio

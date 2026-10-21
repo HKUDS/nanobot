@@ -28,8 +28,8 @@ function assistantActionCounts(root: ParentNode = document) {
     const row = body.closest<HTMLElement>("[data-thread-display-unit]")!;
     if (!row.querySelector("[data-message-block-menu-trigger]")) continue;
     const { menu } = openMessageBlockMenu(row);
-    counts.copy += within(menu).queryAllByRole("button", { name: "Copy", exact: true }).length;
-    counts.fork += within(menu).queryAllByRole("button", { name: "Fork", exact: true }).length;
+    counts.copy += within(menu).queryAllByRole("button", { name: "Copy" }).length;
+    counts.fork += within(menu).queryAllByRole("button", { name: "New chat from here" }).length;
     fireEvent.keyDown(menu, { key: "Escape" });
   }
   return counts;
@@ -86,7 +86,7 @@ describe("ThreadMessages", () => {
         const assertIndependentDiff = () => {
           const diff = screen.getByTestId("file-edit-diff");
           expect(diff).toBeVisible();
-          expect(screen.getByText("Edited")).toBeInTheDocument();
+          expect(screen.getByRole("img", { name: "Edited" })).toBeInTheDocument();
           expect(diff.closest('[aria-hidden="true"], [inert], [data-testid="agent-activity-content"]'))
             .toBeNull();
           expect(screen.getByText("File updated")).toBeVisible();
@@ -94,7 +94,7 @@ describe("ThreadMessages", () => {
         };
         assertIndependentDiff();
         openAssistantBlockMenu(container);
-        const disclosure = screen.getByRole("button", { name: "Worked for 5s", exact: true });
+        const disclosure = screen.getByRole("button", { name: "Worked for 5s" });
         expect(disclosure).toHaveAttribute("aria-expanded", "false");
         const detailsId = disclosure.getAttribute("aria-controls")!;
         expect(container.querySelectorAll(`[id="${detailsId}"]`)).toHaveLength(1);
@@ -260,7 +260,7 @@ describe("ThreadMessages", () => {
         content: "question",
         createdAt: 1,
         turnId,
-        turnPhase: "prompt",
+        turnPhase: "user",
       },
       {
         id: "live-answer",
@@ -313,7 +313,7 @@ describe("ThreadMessages", () => {
             content: "next question",
             createdAt: 3,
             turnId: "turn-2",
-            turnPhase: "prompt",
+            turnPhase: "user",
           },
         ]}
         isStreaming
@@ -334,7 +334,7 @@ describe("ThreadMessages", () => {
       content: "research this",
       createdAt: 1,
       turnId,
-      turnPhase: "prompt",
+      turnPhase: "user",
       turnSeq: 0,
     };
     const commentary: UIMessage = {
@@ -681,7 +681,7 @@ describe("ThreadMessages", () => {
     } as unknown as Selection);
 
     document.dispatchEvent(new Event("selectionchange"));
-    const action = await screen.findByRole("button", { name: "Ask about this" });
+    const action = await screen.findByRole("button", { name: "Ask about selection" });
     fireEvent.click(action);
 
     await waitFor(() => expect(onQuoteSelection).toHaveBeenCalledWith("selected answer"));
@@ -731,7 +731,9 @@ describe("ThreadMessages", () => {
     const rows = Array.from(container.firstElementChild?.children ?? []);
 
     expect(rows).toHaveLength(2);
-    expect(rows[0]).not.toHaveClass("mt-2", "mt-4", "mt-5");
+    for (const className of ["mt-2", "mt-4", "mt-5"]) {
+      expect(rows[0]).not.toHaveClass(className);
+    }
     expect(rows[1]).not.toHaveClass("mt-4");
     const answerRow = screen.getByText("final answer")
       .closest<HTMLElement>("[data-thread-display-unit]")!;
@@ -765,14 +767,16 @@ describe("ThreadMessages", () => {
     const timestamp = menu.querySelector<HTMLElement>("[data-message-timestamp]")!;
     expect(timestamp).toBeInTheDocument();
     expect(timestamp).toHaveClass("min-h-[var(--message-block-control-size)]");
-    expect(timestamp.parentElement).toHaveClass("border-t", "text-muted-foreground/45");
+    expect(timestamp.parentElement).toHaveClass("border-t", "text-muted-foreground");
     expect(toolbar).not.toContainElement(timestamp);
     expect(timestamp).not.toHaveAttribute("tabindex");
     expect(timestamp.querySelector("svg")).not.toBeInTheDocument();
     expect(disclosure.compareDocumentPosition(timestamp) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
     expect(menu).toHaveClass("w-max", "max-w-64", "bg-popover", "rounded-floating", "overflow-y-auto");
-    expect(menu).not.toHaveClass("min-w-[8.5rem]", "bg-popover/95", "rounded-xl");
+    for (const className of ["min-w-[8.5rem]", "bg-popover/95", "rounded-xl"]) {
+      expect(menu).not.toHaveClass(className);
+    }
     const menuButtons = Array.from(menu.querySelectorAll("button"));
     expect(menuButtons.length).toBeGreaterThan(1);
     for (const button of menuButtons) {

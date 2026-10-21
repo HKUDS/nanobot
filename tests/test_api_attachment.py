@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 from io import BytesIO
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -235,29 +236,35 @@ async def test_multipart_upload_saves_file(aiohttp_client, mock_agent, tmp_path)
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
-async def test_multipart_multiple_files(aiohttp_client, mock_agent, tmp_path) -> None:
+async def test_multipart_multiple_files(aiohttp_client, mock_agent, tmp_path, monkeypatch) -> None:
     """Multipart upload with multiple files saves all and passes paths."""
-    import os
-    original_cwd = os.getcwd()
-    os.chdir(tmp_path)
+    import aiohttp
 
-    try:
-        app = create_app(mock_agent, model_name="m", api_key=API_KEY)
-        client = await aiohttp_client(app)
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    monkeypatch.setattr("nanobot.api.server.get_media_dir", lambda _channel=None: media_dir)
+    app = create_app(mock_agent, model_name="m", api_key=API_KEY)
+    client = await aiohttp_client(app)
 
-        # Note: aiohttp test client has limited multipart support
-        # This test verifies the basic flow
-        file_data = b"test content"
-        data = BytesIO(file_data)
+    files = [("first.txt", b"first file content"), ("second.bin", b"\x00second file\xff")]
+    data = aiohttp.FormData()
+    data.add_field("message", "analyze both files")
+    for filename, payload in files:
+        data.add_field("files", payload, filename=filename, content_type="application/octet-stream")
 
-        resp = await client.post(
-            "/v1/chat/completions",
-            headers=AUTH_HEADERS,
-            data={"message": "analyze", "files": data},
-        )
-        assert resp.status == 200
-    finally:
-        os.chdir(original_cwd)
+    resp = await client.post("/v1/chat/completions", headers=AUTH_HEADERS, data=data)
+
+    assert resp.status == 200
+    mock_agent.process_direct.assert_called_once()
+    mock_agent.process_direct.assert_awaited_once()
+    call_kwargs = mock_agent.process_direct.call_args.kwargs
+    assert call_kwargs["content"] == "analyze both files"
+    saved_paths = [Path(path) for path in call_kwargs["media"]]
+    assert len(saved_paths) == 2
+    assert saved_paths[0] != saved_paths[1]
+    for path, (_, payload) in zip(saved_paths, files, strict=True):
+        assert path.parent == media_dir
+        assert path.read_bytes() == payload
 
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")

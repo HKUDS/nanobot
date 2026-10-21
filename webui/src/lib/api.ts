@@ -3,6 +3,7 @@ import type {
   AutomationChatsPayload,
   AutomationChatUpdate,
   AutomationsPayload,
+  AutomaticModelAPIPayload,
   AutomationUpdatePayload,
   ChannelConfigurePayload,
   ChannelConnectPayload,
@@ -20,6 +21,7 @@ import type {
   ModelConfigurationUpdate,
   NetworkSafetySettingsUpdate,
   PairingPayload,
+  PromptIndex,
   ProviderCreationUpdate,
   ProviderModelsPayload,
   ProviderOAuthCompletionResult,
@@ -46,6 +48,7 @@ import type {
   ThreadProjectionEvent,
   WebSearchSettingsUpdate,
   WorkspacesPayload,
+  WorkspaceDirectoriesPayload,
   WebuiThreadPersistedPayload,
   WebuiThreadTraceDetailPayload,
   WorkspaceScopePayload,
@@ -233,6 +236,7 @@ export interface FetchWebuiThreadOptions {
   limit?: number;
   direction?: "latest";
   before?: string | null;
+  after?: string | null;
   signal?: AbortSignal;
   revision?: string;
   cached?: WebuiThreadPersistedPayload;
@@ -416,6 +420,7 @@ export async function fetchWebuiThread(
   if (options?.limit !== undefined) params.set("limit", String(options.limit));
   if (options?.direction) params.set("direction", options.direction);
   if (options?.before) params.set("before", options.before);
+  if (options?.after) params.set("after", options.after);
   const query = params.toString();
   const suffix = query ? `?${query}` : "";
   const url = `${resolvedBase}/api/sessions/${encodeURIComponent(key)}/webui-thread${suffix}`;
@@ -431,6 +436,34 @@ export async function fetchWebuiThread(
   if (res.status === 404) return null;
   if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
   return parseWebuiThreadPayload(await res.json());
+}
+
+export async function fetchPromptIndex(token: string, key: string, signal: AbortSignal, cached?: PromptIndex): Promise<PromptIndex> {
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+  const query = cached?.revision ? `?since=${encodeURIComponent(cached.revision)}` : "";
+  if (cached?.revision) headers["If-None-Match"] = `"${cached.revision}"`;
+  const res = await fetchWithTimeout(`/api/sessions/${encodeURIComponent(key)}/webui-thread/prompts${query}`, {
+    headers, credentials: "same-origin", cache: "no-store", signal,
+  });
+  if (res.status === 304 && cached) return cached;
+  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+  const body: unknown = await res.json();
+  if (!isRecord(body) || !Array.isArray(body.prompts)) throw new Error("Invalid prompt index");
+  const replaceFrom = body.replaceFrom ?? 0;
+  if (typeof replaceFrom !== "number" || !Number.isSafeInteger(replaceFrom)
+    || replaceFrom < 0 || replaceFrom > (cached?.prompts.length ?? 0)
+    || (body.revision != null && typeof body.revision !== "string")) throw new Error("Invalid prompt index revision");
+  const prompts = body.prompts.map((item: unknown) => {
+    if (!isRecord(item) || typeof item.id !== "string" || typeof item.preview !== "string"
+      || typeof item.answerPreview !== "string" || typeof item.cursor !== "string" || typeof item.turnId !== "string"
+      || typeof item.createdAt !== "number" || !Number.isFinite(item.createdAt)) {
+      throw new Error("Invalid prompt summary");
+    }
+    return { id: item.id, preview: item.preview, answerPreview: item.answerPreview,
+      cursor: item.cursor, createdAt: item.createdAt, turnId: item.turnId };
+  });
+  return { prompts: [...(cached?.prompts.slice(0, replaceFrom) ?? []), ...prompts],
+    revision: typeof body.revision === "string" ? body.revision : undefined };
 }
 
 export async function fetchWebuiThreadTraceDetail(
@@ -762,6 +795,22 @@ export async function fetchWorkspaces(
   );
 }
 
+export async function fetchWorkspaceDirectories(
+  token: string,
+  path: string,
+  query: string,
+  showHidden: boolean,
+  allowPartial = false,
+): Promise<WorkspaceDirectoriesPayload> {
+  const params = new URLSearchParams({ path, q: query, hidden: showHidden ? "1" : "0", partial: allowPartial ? "1" : "0" });
+  return request<WorkspaceDirectoriesPayload>(
+    `/api/workspaces/directories?${params}`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
+  );
+}
+
 export async function fetchCliApps(
   token: string,
   base: string = "",
@@ -982,11 +1031,12 @@ export async function startMcpOAuth(
   transport: WebUIMutationTransport,
   name: string,
   reset: boolean = false,
+  values: Record<string, string> = {},
 ): Promise<McpOAuthFlowPayload> {
   return mutation<McpOAuthFlowPayload>(
     transport,
     "settings.mcp.oauth_start",
-    { name, ...(reset ? { reset: true } : {}) },
+    { ...values, name, ...(reset ? { reset: true } : {}) },
     30_000,
   );
 }
@@ -1028,13 +1078,36 @@ export async function cancelMcpOAuth(
   );
 }
 
+export async function fetchAutomaticModelAPI(
+  token: string,
+  provider: string,
+  model: string,
+  reasoningEffort: string,
+  base: string = "",
+): Promise<AutomaticModelAPIPayload> {
+  const query = new URLSearchParams({ provider, model, reasoning_effort: reasoningEffort });
+  const payload = await request<unknown>(
+    `${base}/api/settings/model-api?${query}`, token, undefined, API_READ_TIMEOUT_MS,
+  );
+  if (typeof payload !== "object" || payload === null) throw new Error("Invalid model API resolution");
+  const result = payload as Record<string, unknown>;
+  const api = result.api;
+  if (typeof result.provider !== "string" || (
+    api !== "chat_completions" && api !== "responses" && api !== "anthropic_messages"
+    && api !== "bedrock_converse" && api !== "transcription"
+  )) throw new Error("Invalid model API resolution");
+  return { provider: result.provider, api };
+}
+
 export async function fetchProviderModels(
   token: string,
   provider: string,
   base: string = "",
+  options?: { refresh?: boolean },
 ): Promise<ProviderModelsPayload> {
   const query = new URLSearchParams();
   query.set("provider", provider);
+  if (options?.refresh) query.set("refresh", "1");
   return request<ProviderModelsPayload>(
     `${base}/api/settings/provider-models?${query}`,
     token,
@@ -1135,7 +1208,7 @@ export async function fetchSidebarState(
 function modelGenerationSettingsPayload(
   configuration: Pick<
     ModelConfigurationCreate,
-    "maxTokens" | "contextWindowTokens" | "temperature" | "reasoningEffort"
+    "maxTokens" | "contextWindowTokens" | "temperature" | "reasoningEffort" | "api" | "extraHeaders" | "extraQuery" | "extraBody"
   >,
 ): Record<string, unknown> {
   const payload: Record<string, unknown> = {};
@@ -1150,6 +1223,14 @@ function modelGenerationSettingsPayload(
   }
   if (configuration.reasoningEffort !== undefined) {
     payload.reasoning_effort = configuration.reasoningEffort ?? "";
+  }
+  if (configuration.api !== undefined) {
+    payload.api = configuration.api;
+  }
+  for (const [key, field] of [
+    ["extraHeaders", "extra_headers"], ["extraQuery", "extra_query"], ["extraBody", "extra_body"],
+  ] as const) {
+    if (configuration[key] !== undefined) payload[field] = configuration[key];
   }
   return payload;
 }
@@ -1319,6 +1400,8 @@ export async function updateImageGenerationSettings(
       default_aspect_ratio: update.defaultAspectRatio,
       default_image_size: update.defaultImageSize,
       max_images_per_turn: update.maxImagesPerTurn,
+      ...(update.extraHeaders !== undefined ? { extra_headers: update.extraHeaders } : {}),
+      ...(update.extraBody !== undefined ? { extra_body: update.extraBody } : {}),
     },
   );
 }

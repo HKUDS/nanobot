@@ -8,13 +8,18 @@ import { ViewportCodeRows } from "@/components/ViewportCodeRows";
 
 SyntaxHighlighter.registerLanguage("markup", markup);
 
-let notify: IntersectionObserverCallback;
+let notify: (entries: IntersectionObserverEntry[]) => void;
 const disconnect = vi.fn();
 const observe = vi.fn();
 function showChunks(indices: number[]) {
   const entries = [...document.querySelectorAll<HTMLElement>("[data-code-chunk]")]
-    .map(target => ({ target, isIntersecting: indices.includes(Number(target.dataset.codeChunk)) }));
-  act(() => notify(entries as IntersectionObserverEntry[], {} as IntersectionObserver));
+    .map((target): IntersectionObserverEntry => {
+      const isIntersecting = indices.includes(Number(target.dataset.codeChunk));
+      const rect = target.getBoundingClientRect();
+      return { target, isIntersecting, time: 0, boundingClientRect: rect,
+        intersectionRect: rect, intersectionRatio: isIntersecting ? 1 : 0, rootBounds: null };
+    });
+  act(() => notify(entries));
 }
 function sourceText() {
   return [...document.querySelectorAll("[data-highlighted]")].map(node => node.textContent).join("");
@@ -26,10 +31,15 @@ function preview(code: string) {
 
 describe("viewport code highlighting", () => {
   beforeEach(() => {
-    vi.stubGlobal("IntersectionObserver", class {
-      constructor(callback: IntersectionObserverCallback) { notify = callback; }
+    vi.stubGlobal("IntersectionObserver", class implements IntersectionObserver {
+      readonly root = null;
+      readonly rootMargin = "0px";
+      readonly thresholds = [0];
+      constructor(callback: IntersectionObserverCallback) { notify = entries => callback(entries, this); }
       observe = observe;
       disconnect = disconnect;
+      unobserve = vi.fn();
+      takeRecords = () => [];
     });
     observe.mockClear();
     disconnect.mockClear();

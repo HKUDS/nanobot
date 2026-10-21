@@ -4,7 +4,7 @@ import type { ChannelUiContribution } from "@/channel-plugins/types";
 import {
   type ChannelProviderPresetDefinition,
   chatAppGuideUrl,
-} from "@/components/settings/channels/catalog";
+} from "@/channel-plugins/catalog";
 
 const EMAIL_PROVIDER_PRESETS: ChannelProviderPresetDefinition[] = [
   {

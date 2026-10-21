@@ -13,7 +13,7 @@ import { groupRemoteProfiles, isCompatibilityError, remoteAction, type RemoteIns
 import { cn } from "@/lib/utils";
 import { parseSSHAddress } from "@/lib/ssh-address";
 import { clearPairReturn, readPairReturn, subscribePairReturn } from "@/lib/remote-pair-return";
-import { useRemoteConnections } from "./RemoteInstances";
+import { useRemoteConnections } from "./remote-context";
 import { SSHHostPicker } from "./SSHHostPicker";
 import { QuickPairSetup } from "./QuickPairSetup";
 import { PairRouteSettings } from "./PairRouteSettings";

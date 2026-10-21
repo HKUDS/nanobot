@@ -321,7 +321,7 @@ def test_factory_injects_configured_identity_into_primary_and_fallback_leaves() 
 
 
 def test_inline_fallback_reasoning_effort_does_not_inherit_primary() -> None:
-    from nanobot.config.schema import Config
+    from nanobot.config.schema import Config, InlineFallbackConfig
     from nanobot.providers.factory import provider_signature
 
     config = Config.model_validate({
@@ -349,7 +349,13 @@ def test_inline_fallback_reasoning_effort_does_not_inherit_primary() -> None:
     signature = provider_signature(config)
     fallback_signatures = signature[-1]
 
-    assert fallback_signatures[0][13] is None
+    config.model_presets["fast"].reasoning_effort = "low"
+    assert provider_signature(config)[-1] == fallback_signatures
+
+    config.agents.defaults.fallback_models = [
+        InlineFallbackConfig(provider="openai", model="gpt-4.1", reasoning_effort="low")
+    ]
+    assert provider_signature(config)[-1] != fallback_signatures
 
 
 # -- FallbackProvider tests --
@@ -1276,6 +1282,34 @@ class TestRetryBeforeFailover:
         assert retry_statuses[-1].state == "exhausted"
 
     @pytest.mark.asyncio
+    async def test_fallback_auth_error_preserves_primary_diagnosis_and_exhaustion(self) -> None:
+        primary = _FakeProvider("primary", _make_response(
+            "private network detail", finish_reason="error", error_kind="connection",
+        ))
+        fallback = _FakeProvider("fallback", _make_response(
+            "private auth detail", finish_reason="error", error_status_code=401,
+        ))
+        provider = FallbackProvider(primary, [_fallback("backup")], MagicMock(return_value=fallback))
+        statuses: list[RetryStatusEvent] = []
+
+        async def record(status: RetryStatusEvent) -> None:
+            statuses.append(status)
+
+        with patch("nanobot.providers.base.asyncio.sleep", new_callable=AsyncMock):
+            result = await provider.chat_with_retry(
+                [{"role": "user", "content": "hello"}], on_retry_status=record,
+            )
+
+        assert len(primary.chat_calls) == 4
+        assert len(fallback.chat_calls) == 1
+        assert LLMProvider.public_error_kind(result) == "connection"
+        assert result.preserve_provider_state_on_error is True
+        assert not LLMProvider.is_transient_response(result)  # Retry policy is still terminal.
+        assert statuses[-1] == RetryStatusEvent(
+            state="exhausted", attempt=4, max_attempts=4, error_kind="connection",
+        )
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize("factory_fails", [False, True])
     async def test_persistent_mode_repeats_the_whole_chain(
         self,
@@ -1611,7 +1645,7 @@ class TestFailoverOnAuthenticationError:
         factory.assert_called_once_with(fallback_preset)
 
 
-class TestNoFallbackOnNonRetryableError:
+class TestFallbackErrorClassification:
     @pytest.mark.asyncio
     async def test_bad_request(self) -> None:
         primary = _FakeProvider(
@@ -1660,7 +1694,7 @@ class TestNoFallbackOnNonRetryableError:
         factory.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_timeout(self) -> None:
+    async def test_timeout_triggers_fallback(self) -> None:
         primary = _FakeProvider(
             "primary",
             _make_response("timed out", finish_reason="error", error_kind="timeout"),

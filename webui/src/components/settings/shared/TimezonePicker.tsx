@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { ComboboxOption, useComboboxNavigation } from "@/components/ui/combobox";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 export function TimezonePicker({ value, onChange, ...triggerProps }: {
@@ -48,7 +48,7 @@ export function TimezonePicker({ value, onChange, ...triggerProps }: {
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80 max-w-[calc(100vw-2rem)] p-1.5">
-        <Input {...navigation.inputProps} value={query} onChange={(event) => setQuery(event.target.value)}
+        <SearchInput {...navigation.inputProps} value={query} onChange={(event) => setQuery(event.target.value)}
           aria-label={t("sidebar.searchAria")} placeholder={t("sidebar.searchPlaceholder")}
           className="mb-1.5 h-9 rounded-full" />
         <div {...navigation.listProps} aria-label={triggerProps["aria-label"]} className="max-h-64 overflow-y-auto">

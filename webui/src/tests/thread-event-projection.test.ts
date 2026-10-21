@@ -131,3 +131,16 @@ describe("canonical thread event projection", () => {
     expect(messages[0].activitySegmentId).toBe(messages[1].activitySegmentId);
   });
 });
+
+
+it("uses deterministic unknown replay time and preserves distinct same-text inputs", () => {
+  const events: ThreadProjectionEvent[] = [
+    { event: "user_message", chat_id: "chat", text: "same", starts_turn: true, turn_id: "input-one", projection_id: "u1" },
+    { event: "turn_end", chat_id: "chat", turn_id: "input-one" },
+    { event: "user_message", chat_id: "chat", text: "same", starts_turn: true, turn_id: "input-two", projection_id: "u2" },
+  ];
+  const messages = projectThreadEvents(events);
+  expect(messages.map((message) => message.id)).toEqual(["u1", "u2"]);
+  expect(messages.map((message) => message.createdAt)).toEqual([0, 0]);
+  expect(projectThreadEvents(events)).toEqual(messages);
+});

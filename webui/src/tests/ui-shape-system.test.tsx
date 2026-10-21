@@ -24,7 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
 describe("UI shape system", () => {
-  it.each(["center", "bottom"] as const)("keeps an oversized %s dialog scrollable from its start", (placement) => {
+  it.each(["center", "bottom"] as const)("declares a scroll owner inside the %s modal boundary", (placement) => {
     render(<Dialog open><DialogContent placement={placement}>
       <DialogTitle>Long dialog</DialogTitle>
       <DialogDescription>Content that can outgrow a keyboard-fitted frame.</DialogDescription>
@@ -32,7 +32,7 @@ describe("UI shape system", () => {
     const dialog = screen.getByRole("dialog");
     expect(dialog.parentElement).toHaveClass("items-start", "overflow-y-auto");
     // The scroll owner stays inside Radix's overlay/scroll-lock boundary.
-    expect(dialog.parentElement?.parentElement).toHaveClass("backdrop-blur-[8px]", "duration-200");
+    expect(dialog.parentElement?.parentElement).toHaveAttribute("data-state", "open");
     expect(dialog).toHaveClass(placement === "bottom" ? "mt-auto" : "my-auto");
   });
 

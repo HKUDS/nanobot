@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from contextvars import copy_context
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
 from uuid import uuid4
 
 from loguru import logger
@@ -70,6 +71,8 @@ BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
 PLACEHOLDER_TEXTS = frozenset({
     "[Previous assistant message omitted.]",
 })
+_PreparationArgs = ParamSpec("_PreparationArgs")
+_PreparationResult = TypeVar("_PreparationResult")
 
 
 class ContextWindowExceededError(RuntimeError):
@@ -91,6 +94,16 @@ class ContextWindowExceededError(RuntimeError):
             "Model input exceeds the local context budget "
             f"for {session_key or 'default'}: {estimated_tokens}/{input_budget} via {source}"
         )
+
+
+def _request_extends_measured(
+    measured: list[dict[str, Any]],
+    current: list[dict[str, Any]],
+) -> bool:
+    """Return whether measured messages are an unchanged prefix of the request."""
+    return len(current) >= len(measured) and all(
+        current[index] == measured[index] for index in range(len(measured))
+    )
 
 
 def _tool_call_name_is_valid(tool_call: Any) -> bool:
@@ -230,17 +243,6 @@ class ContextCompactionState:
     ) -> list[dict[str, Any]]:
         return deepcopy(request_messages[len(self.accepted_messages):])
 
-    def accept_request(
-        self,
-        model_messages: list[dict[str, Any]],
-        *,
-        raw_boundary: int,
-    ) -> None:
-        """Advance H after the provider has received one request."""
-        self.accepted_messages = deepcopy(model_messages)
-        self.raw_accepted_boundary = raw_boundary
-
-
 @dataclass(slots=True)
 class ModelRequestState:
     """Context state shared by every provider request in one runner turn."""
@@ -258,6 +260,47 @@ class ModelRequestState:
 
 class ContextGovernor:
     """Own model-request context while preserving persisted history."""
+
+    def __init__(self) -> None:
+        self._preparation_slots = asyncio.Semaphore(1)
+        self._preparation_jobs: set[Awaitable[object]] = set()
+
+    async def prepare_in_background(
+        self, operation: Callable[_PreparationArgs, _PreparationResult],
+        *args: _PreparationArgs.args, **kwargs: _PreparationArgs.kwargs,
+    ) -> _PreparationResult:
+        """Run read-only prompt preparation with one physical job at a time."""
+        await self._preparation_slots.acquire()
+        context = copy_context()
+
+        def prepare() -> _PreparationResult:
+            return context.run(operation, *args, **kwargs)
+
+        try:
+            future = asyncio.get_running_loop().run_in_executor(None, prepare)
+        except BaseException:
+            self._preparation_slots.release()
+            raise
+        self._preparation_jobs.add(future)
+
+        def finished(done: asyncio.Future[_PreparationResult]) -> None:
+            self._preparation_jobs.discard(done)
+            self._preparation_slots.release()
+            if not done.cancelled():
+                done.exception()
+
+        future.add_done_callback(finished)
+        # The caller can stop immediately; its worker holds the slot until it exits.
+        return await asyncio.shield(future)
+
+    async def accept_request(
+        self, state: ModelRequestState, model_messages: list[dict[str, Any]],
+        *, raw_boundary: int,
+    ) -> None:
+        """Advance accepted history on the loop after copying its payload."""
+        accepted = await self.prepare_in_background(deepcopy, model_messages)
+        state.compaction.accepted_messages = accepted
+        state.compaction.raw_accepted_boundary = raw_boundary
 
     @staticmethod
     def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
@@ -418,6 +461,7 @@ class ContextGovernor:
         usage: LLMUsage | None,
         *,
         usage_matches_messages: bool,
+        usage_prefixes_messages: bool,
         tool_definitions: list[dict[str, Any]] | None,
         request_context_tokens: int | None = None,
     ) -> tuple[int, str] | None:
@@ -442,6 +486,15 @@ class ContextGovernor:
                 messages,
                 tool_definitions,
             )
+            if (
+                usage_prefixes_messages
+                and usage is not None
+                and usage.reported_tokens > 0
+                and usage.context_tokens is not None
+                and usage.context_tokens > measured
+            ):
+                measured = usage.context_tokens
+                source = "prior provider usage plus pending messages"
         if budget > 0 and measured < budget:
             return None
         return measured, source
@@ -507,7 +560,7 @@ class ContextGovernor:
         try:
             summary = await compaction.consolidate_provider_compaction(
                 response.provider_compaction_state,
-                deepcopy(accepted_messages),
+                await self.prepare_in_background(deepcopy, accepted_messages),
                 compaction.active_summary,
             )
         except (Exception, asyncio.CancelledError) as exc:
@@ -551,13 +604,15 @@ class ContextGovernor:
             ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
         )
         try:
-            delta_messages = compaction.delta_after_accepted(messages)
-            consolidation_prefix = self.prepare_messages_for_model(
-                state.config,
+            delta_messages = await self.prepare_in_background(
+                compaction.delta_after_accepted, messages,
+            )
+            consolidation_prefix = await self.prepare_in_background(
+                self.prepare_messages_for_model, state.config,
                 compaction.accepted_messages,
             )
             summary = await compaction.consolidate_history(
-                deepcopy(consolidation_prefix),
+                await self.prepare_in_background(deepcopy, consolidation_prefix),
                 compaction.active_summary,
             )
             if not summary:
@@ -576,10 +631,13 @@ class ContextGovernor:
                 if any(message.get("role") == "user" for message in delta_messages)
                 else [{"role": "user", "content": SUMMARY_CONTINUATION_TEXT}]
             )
-            prepared = self.prepare_messages_for_model(
-                state.config,
+            summary_transcript = await self.prepare_in_background(
+                self._summary_transcript, compaction, summary,
+            )
+            prepared = await self.prepare_in_background(
+                self.prepare_messages_for_model, state.config,
                 [
-                    *self._summary_transcript(compaction, summary),
+                    *summary_transcript,
                     *continuation,
                     *delta_messages,
                 ],
@@ -589,8 +647,8 @@ class ContextGovernor:
             # establish a new provider-owned state at the rewritten boundary.
             state.conversation.replace_transcript(compaction.raw_messages)
             state.usage = None
-            prepared = self.ensure_request_fits(
-                state.config,
+            prepared = await self.prepare_in_background(
+                self.ensure_request_fits, state.config,
                 prepared,
                 tool_definitions=tool_definitions,
             )
@@ -623,7 +681,9 @@ class ContextGovernor:
         transcript: list[dict[str, Any]] | None = None,
     ) -> tuple[list[dict[str, Any]], ProviderCallContext | None]:
         """Prepare or compact and record the exact provider payload."""
-        prepared = self.prepare_messages_for_model(state.config, messages)
+        prepared = await self.prepare_in_background(
+            self.prepare_messages_for_model, state.config, messages,
+        )
         model_messages: list[dict[str, Any]] | None = prepared
         supplemental_messages: list[dict[str, Any]] | None = None
         request_context_tokens = None
@@ -631,8 +691,8 @@ class ContextGovernor:
             if tool_definitions is None:
                 model_messages = None
                 supplemental_messages = [prepared[-1]]
-            request_context_tokens = state.conversation.estimate_request_context_tokens(
-                transcript,
+            request_context_tokens = await self.prepare_in_background(
+                state.conversation.estimate_request_context_tokens, transcript,
                 model_messages=model_messages,
                 supplemental_messages=supplemental_messages,
                 tool_definitions=tool_definitions,
@@ -642,11 +702,17 @@ class ContextGovernor:
             and prepared == state.messages
             and tool_definitions == state.tool_definitions
         )
-        pressure = self.request_pressure(
-            state.config,
+        usage_prefixes_messages = (
+            state.messages is not None
+            and tool_definitions == state.tool_definitions
+            and _request_extends_measured(state.messages, prepared)
+        )
+        pressure = await self.prepare_in_background(
+            self.request_pressure, state.config,
             prepared,
             state.usage,
             usage_matches_messages=usage_matches_messages,
+            usage_prefixes_messages=usage_prefixes_messages,
             tool_definitions=tool_definitions,
             request_context_tokens=request_context_tokens,
         )
@@ -692,9 +758,17 @@ class ContextGovernor:
             provider_context = replace(
                 provider_context or ProviderCallContext(), events=state.events,
             )
-        state.messages = deepcopy(prepared)
-        state.tool_definitions = deepcopy(tool_definitions)
+        state.messages, state.tool_definitions = await self.prepare_in_background(
+            self._request_snapshot, prepared, tool_definitions,
+        )
         return prepared, provider_context
+
+    @staticmethod
+    def _request_snapshot(
+        messages: list[dict[str, Any]],
+        tool_definitions: list[dict[str, Any]] | None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None]:
+        return deepcopy(messages), deepcopy(tool_definitions)
 
     @staticmethod
     def input_budget(config: ContextGovernanceConfig) -> int:

@@ -3,7 +3,6 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./globals.css";
 import { initializeI18n } from "./i18n";
-import { initializeLoopbackRuntimeHost } from "./lib/runtime";
 import { initializePairReturn } from "./lib/remote-pair-return";
 
 // `crypto.randomUUID` is only defined in secure contexts (HTTPS or localhost).
@@ -27,10 +26,19 @@ if (!root) throw new Error("root element missing");
 
 initializePairReturn();
 window.addEventListener("hashchange", initializePairReturn);
-initializeLoopbackRuntimeHost();
 
 async function renderWebui(container: HTMLElement) {
-  await initializeI18n();
+  // The critical skeleton paints immediately; React must wait for the full stylesheet.
+  const styles = [...document.querySelectorAll<HTMLLinkElement>("link[data-app-stylesheet]")]
+    .map((link) => new Promise<void>((resolve, reject) => {
+      const ready = () => { link.media = "all"; resolve(); };
+      link.addEventListener("load", ready, { once: true });
+      link.addEventListener("error", () => reject(new Error("Failed to load the WebUI stylesheet")), { once: true });
+      link.media = "print";
+      link.rel = "stylesheet";
+      if (link.sheet) ready();
+    }));
+  await Promise.all([initializeI18n(), ...styles]);
   /* StrictMode disabled: dev double-invokes state updaters; delta accumulation must stay pure — see useNanobotStream. */
   ReactDOM.createRoot(container).render(<App />);
 }

@@ -87,7 +87,7 @@ jobs:
                   tui_required=true
                   docker_required=true
                   ;;
-                webui/*|nanobot/channels/*/webui/*)
+                webui/*|nanobot/channels/*/webui/*|nanobot/channels/*/tests/webui/*)
                   webui_required=true
                   # The Docker image builds and bundles both WebUI trees.
                   docker_required=true
@@ -103,6 +103,10 @@ jobs:
                 pyproject.toml|hatch_build.py|scripts/install_channel_dependencies.py)
                   python_required=true
                   docker_required=true
+                  ;;
+                scripts/check_client_import_boundaries.*)
+                  webui_required=true
+                  tui_required=true
                   ;;
                 tests/*|conftest.py|uv.lock|scripts/*)
                   python_required=true
@@ -139,7 +143,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     env:
-      PYTEST_ADDOPTS: "-o tmp_path_retention_policy=failed"
+      PYTEST_ADDOPTS: "-o tmp_path_retention_policy=failed -p scripts.pytest_timing"
     strategy:
       fail-fast: false
       matrix:
@@ -160,9 +164,10 @@ jobs:
             os: windows-latest
             python-version: "3.14"
             coverage: false
-            # Real PowerShell/process-tree tests run serially in a separate
-            # job. Keep them out of xdist so workers never share a console.
-            pytest_args: "-n auto --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/tools/test_exec_platform.py"
+            # Real PowerShell, browser-handoff, and process-tree tests run
+            # serially so xdist workers do not compete for native processes.
+            # Keep threaded storage work bounded without adding another runner.
+            pytest_args: "-n 3 --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/tools/test_exec_platform.py --ignore=tests/cli/test_wsl_browser.py"
 
     steps:
       - uses: actions/checkout@v4
@@ -171,6 +176,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+
+      - name: Check Python import boundaries
+        if: matrix.coverage
+        run: python -m scripts.check_import_boundaries
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -195,7 +204,7 @@ jobs:
       # later uv run sync pruning the packages installed by the previous step.
       - name: Lint with ruff
         if: matrix.coverage
-        run: uv run --no-sync ruff check nanobot tests conftest.py
+        run: uv run --no-sync ruff check nanobot tests conftest.py scripts/check_import_boundaries.py scripts/pytest_timing.py
 
       - name: Type check with BasedPyright (strict)
         if: matrix.coverage
@@ -207,7 +216,8 @@ jobs:
           uv run --no-sync python -m pytest
           ${{ matrix.pytest_args }}
           --cov=nanobot --cov-report=term-missing:skip-covered
-          -vv -o faulthandler_timeout=60
+          -o faulthandler_timeout=60
+          --junitxml=test-results/main.xml --timing-report=test-results/main.json
           --durations=25 --durations-min=1.0
 
       - name: Run serial CLI command tests with coverage
@@ -216,6 +226,7 @@ jobs:
           uv run --no-sync python -m pytest
           tests/cli/test_commands.py
           --cov=nanobot --cov-append --cov-report=term-missing:skip-covered
+          --junitxml=test-results/cli.xml --timing-report=test-results/cli.json
           --durations=25 --durations-min=1.0
 
       - name: Run compatibility tests
@@ -223,6 +234,7 @@ jobs:
         run: >-
           uv run --no-sync python -m pytest
           ${{ matrix.pytest_args }}
+          --junitxml=test-results/main.xml --timing-report=test-results/main.json
           --durations=25 --durations-min=1.0
 
       - name: Run serial CLI command compatibility tests
@@ -230,10 +242,21 @@ jobs:
         run: >-
           uv run --no-sync python -m pytest
           tests/cli/test_commands.py
+          --junitxml=test-results/cli.xml --timing-report=test-results/cli.json
           --durations=25 --durations-min=1.0
+
+      - name: Upload Python test timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-timings-${{ matrix.os }}-${{ matrix.python-version }}
+          path: test-results/
+          retention-days: 7
 
   windows_process:
     name: Python (Windows process compatibility)
+    env:
+      PYTEST_ADDOPTS: "-o tmp_path_retention_policy=failed -p scripts.pytest_timing"
     needs: changes
     if: needs.changes.outputs.python_required == 'true'
     runs-on: windows-latest
@@ -266,9 +289,20 @@ jobs:
         run: >-
           uv run --no-sync python -m pytest
           tests/tools/test_exec_platform.py
+          tests/cli/test_wsl_browser.py
+          --junitxml=test-results/process.xml --timing-report=test-results/process.json
           --durations=25 --durations-min=1.0
 
-  webui:
+      - name: Upload Windows process test timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-timings-windows-process
+          path: test-results/
+          retention-days: 7
+
+  webui_checks:
+    name: WebUI checks and build
     needs: changes
     if: needs.changes.outputs.webui_required == 'true'
     runs-on: ubuntu-latest
@@ -290,9 +324,21 @@ jobs:
         working-directory: webui
         run: bun install --frozen-lockfile
 
+      - name: Check WebUI import boundaries
+        working-directory: webui
+        run: bun run check:imports
+
+      - name: Test client import checker with WebUI dependencies
+        working-directory: webui
+        run: bun run test:imports
+
       - name: Lint WebUI
         working-directory: webui
         run: bun run lint
+
+      - name: Type check WebUI and unit tests
+        working-directory: webui
+        run: bun run typecheck
 
       - name: Test WebUI
         working-directory: webui
@@ -301,6 +347,47 @@ jobs:
       - name: Build WebUI
         working-directory: webui
         run: bun run build
+
+  webui_browser:
+    name: WebUI browser
+    needs: changes
+    if: needs.changes.outputs.webui_required == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.6
+
+      - name: Install WebUI dependencies
+        working-directory: webui
+        run: bun install --frozen-lockfile
+
+      - name: Install browser for layout regressions
+        working-directory: webui
+        run: bun x playwright install --with-deps chromium
+
+      - name: Test browser layout and history motion
+        working-directory: webui
+        run: bun run test:browser
+
+  webui:
+    needs: [changes, webui_checks, webui_browser]
+    if: always() && needs.changes.outputs.webui_required == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+
+    steps:
+      # Keep the existing check name dependent on every WebUI acceptance check.
+      - name: Require both WebUI jobs to pass
+        env:
+          CHECKS_RESULT: ${{ needs.webui_checks.result }}
+          BROWSER_RESULT: ${{ needs.webui_browser.result }}
+        run: test "$CHECKS_RESULT" = success && test "$BROWSER_RESULT" = success
 
   tui:
     needs: changes
@@ -330,6 +417,14 @@ jobs:
       - name: Install TUI dependencies
         working-directory: tui
         run: bun install --frozen-lockfile
+
+      - name: Check TUI import boundaries
+        working-directory: tui
+        run: bun run check:imports
+
+      - name: Test client import checker with TUI dependencies
+        working-directory: tui
+        run: bun run test:imports
 
       - name: Check TUI
         working-directory: tui
@@ -388,6 +483,9 @@ jobs:
 
       - name: Build image with default channel dependencies
         run: docker build -t nanobot:test .
+
+      - name: Verify first-boot WebUI and API
+        run: python scripts/docker_compose_smoke.py --image nanobot:test
 
       - name: Verify Docker Compose startup and privilege boundary
         env:

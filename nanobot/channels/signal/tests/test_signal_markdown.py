@@ -90,10 +90,12 @@ def test_markdown_style_mapping(markdown, expected_plain, styled_text, style):
 
 def test_code_block():
     plain, styles = _markdown_to_signal("```\nprint('hi')\n```")
-    assert "print('hi')" in plain
-    assert styles_for(plain, styles).get("print('hi')\n") == ["MONOSPACE"] or "MONOSPACE" in str(
-        styles_for(plain, styles)
-    )
+    assert plain.rstrip("\n") == "print('hi')"
+    assert {
+        span.rstrip("\n"): span_styles
+        for span, span_styles in utf16_styles_for(plain, styles).items()
+    } == {"print('hi')": ["MONOSPACE"]}
+    assert_within_utf16_bounds(plain, styles)
 
 
 def test_code_block_with_lang():
@@ -167,9 +169,10 @@ def test_header_with_inline_code():
     """Header becomes BOLD; code inside becomes MONOSPACE (not double-BOLD)."""
     plain, styles = _markdown_to_signal("# Use `grep`")
     assert plain == "Use grep"
-    sd = styles_for(plain, styles)
-    assert "BOLD" in sd.get("Use ", []) or "BOLD" in str(styles)
-    assert "MONOSPACE" in sd.get("grep", [])
+    assert utf16_styles_for(plain, styles) == {
+        "Use ": ["BOLD"], "grep": ["MONOSPACE"],
+    }
+    assert_within_utf16_bounds(plain, styles)
 
 
 def test_multiline_mixed():
@@ -435,20 +438,16 @@ def test_inline_code_inside_blockquote():
     assert sd.get("grep") == ["MONOSPACE"]
 
 
-def test_header_with_inner_bold_produces_contiguous_bold_ranges():
-    """`# **wrap** me` — header forces BOLD over the whole line; the inner `**`
-    splits the run, yielding two contiguous BOLD ranges that together cover
-    "wrap me". This is intentional — Signal renders adjacent same-style ranges
-    as a single visual span.
-    """
+def test_header_with_inner_bold_covers_whole_header():
+    """Header text is bold regardless of equivalent adjacent range fragmentation."""
     plain, styles = _markdown_to_signal("# **wrap** me")
     assert plain == "wrap me"
-    # Both ranges are BOLD; collectively they cover the whole "wrap me".
+    assert_within_utf16_bounds(plain, styles)
+    assert all(s.endswith(":BOLD") for s in styles)
     bold_ranges = [s for s in styles if s.endswith(":BOLD")]
-    assert len(bold_ranges) == 2
     covered = set()
     for entry in bold_ranges:
         start, length, _ = entry.split(":", 2)
         for i in range(int(start), int(start) + int(length)):
             covered.add(i)
-    assert covered == set(range(len(plain)))
+    assert covered == set(range(_utf16_len(plain)))

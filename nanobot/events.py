@@ -65,6 +65,7 @@ class RecoveryStateEvent(AgentEvent):
     reason: str | None = None
     attempts: int = 0
     can_continue: bool | None = None
+    failure_error_kind: str | None = None
 
 
 @dataclass(frozen=True)

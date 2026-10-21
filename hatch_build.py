@@ -1,10 +1,11 @@
-"""Hatch build hook that bundles the webui (Vite) into nanobot/web/dist.
+"""Hatch build hook that bundles the WebUI and nanobot skill documentation.
 
 Triggered automatically by `python -m build` (and any other hatch-driven build)
 so published wheels and sdists ship a fresh webui without requiring developers
-to remember `cd webui && bun run build` beforehand.
+to remember `cd webui && bun run build` beforehand. Documentation from docs/ is
+copied into the nanobot-document skill on every build, including editable installs.
 
-Behavior:
+WebUI behavior:
 
 - Skips for editable installs (`pip install -e .`). Editable mode is for Python
   development; webui contributors use `cd webui && bun run dev` (Vite HMR) and
@@ -21,6 +22,7 @@ Behavior:
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -43,6 +45,27 @@ class WebUIBuildHook(BuildHookInterface):
 
     def initialize(self, version: str, build_data: dict) -> None:  # noqa: D401
         root = Path(self.root)
+        docs_dir = root / "docs"
+        references_dir = root / "nanobot" / "skills" / "nanobot-document" / "references"
+        if not (docs_dir / "README.md").is_file():
+            raise RuntimeError("[nanobot-document] docs/README.md is required to bundle documentation")
+        # Refresh generated files without removing directories that Windows
+        # editors or file watchers may hold open during editable installs.
+        current_docs: set[Path] = set()
+        for source in docs_dir.rglob("*.md"):
+            relative = source.relative_to(docs_dir)
+            if relative.parts[0] in {"plans", "superpowers"}:
+                continue
+            current_docs.add(relative)
+            destination = references_dir / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+        for generated in references_dir.rglob("*.md"):
+            if generated.relative_to(references_dir) not in current_docs:
+                generated.unlink()
+        build_data.setdefault("artifacts", []).append(
+            "nanobot/skills/nanobot-document/references/**/*.md"
+        )
         webui_dir = root / "webui"
         package_json = webui_dir / "package.json"
         dist_dir = root / "nanobot" / "web" / "dist"

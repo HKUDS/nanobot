@@ -5,11 +5,12 @@ import { resolveModelRequestFailureCopy } from "@/lib/model-request-failure";
 
 describe("model request failure copy", () => {
   it("maps every sanitized provider error category to a specific cause", () => {
-    const titles = ["billing", "connection", "timeout", "rate_limit", "server", "unknown"].map(
+    const titles = ["authentication", "billing", "connection", "timeout", "rate_limit", "server", "unknown"].map(
       (errorKind) => resolveModelRequestFailureCopy({ errorKind }, i18n.t).title,
     );
 
     expect(titles).toEqual([
+      "Model provider authorization failed",
       "Model provider quota is unavailable",
       "Could not connect to the model provider",
       "Model provider request timed out",
@@ -24,8 +25,7 @@ describe("model request failure copy", () => {
       { errorKind: "connection", attempts: 4 },
       i18n.t,
     ).body).toBe(
-      "The request still failed on attempt 4, so retries stopped. "
-      + "Check the provider configuration or service status, then try again.",
+      "Stopped after 4 attempts. Try again later or choose another model.",
     );
   });
 
@@ -42,7 +42,7 @@ describe("model request failure copy", () => {
     const body = resolveModelRequestFailureCopy({ errorKind: "unknown" }, i18n.t).body;
 
     expect(body).toBe(
-      "Check the provider configuration or service status, then try again.",
+      "Try again later or choose another model.",
     );
   });
 });

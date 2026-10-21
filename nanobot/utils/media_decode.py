@@ -92,5 +92,8 @@ def media_destination(media_dir: Path, mime_type: str, *, filename: str | None =
     ext = _MIME_EXTENSION_OVERRIDES.get(mime_type) or mimetypes.guess_extension(mime_type) or ".bin"
     base = safe_filename(filename or "")
     stem = Path(base).stem[:80] if base else ""
+    # Leave room for the 12-character ID, separator, and extension.
+    max_stem_bytes = 255 - 13 - len(ext.encode("utf-8"))
+    stem = stem.encode("utf-8")[:max_stem_bytes].decode("utf-8", errors="ignore")
     saved_name = f"{uuid.uuid4().hex[:12]}_{stem}{ext}" if stem else f"{uuid.uuid4().hex[:12]}{ext}"
     return media_dir / safe_filename(saved_name)

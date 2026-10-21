@@ -171,6 +171,14 @@ def responses_state_context_tokens(state: ProviderConversationState) -> int:
     return max(0, value)
 
 
+def responses_compaction_items(result: LLMResponse) -> list[dict[str, Any]]:
+    """Return replay items ending at a valid trigger-compaction boundary."""
+    items = responses_state_items(result.provider_state) if result.provider_state is not None else None
+    if not items or items[-1].get("type") not in _COMPACTION_ITEM_TYPES:
+        raise RuntimeError("Responses compaction returned no compaction item")
+    return items
+
+
 def resolve_compact_threshold(
     context_window_tokens: int | None,
     max_output_tokens: int,

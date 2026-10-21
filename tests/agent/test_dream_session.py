@@ -25,91 +25,39 @@ class TestDreamSessionKey:
 
 
 class TestPruneDreamSessions:
-    def test_keeps_n_most_recent(self, tmp_path):
-        import os
-        import time
+    async def test_keeps_n_most_recent(self, tmp_path):
+        manager = SessionManager(tmp_path / "workspace", sessions_root=tmp_path / "runtime")
+        keys = [f"dream:20260528-{100000 + i:06d}" for i in range(15)]
+        for i, key in enumerate(keys):
+            session = manager.get_or_create(key)
+            session.updated_at = datetime(2026, 5, 28, 10, 0, i)
+            manager.save(session)
+        manager.save(manager.get_or_create("telegram:normal"))
 
-        manager = SessionManager(
-            tmp_path / "workspace",
-            sessions_root=tmp_path / "runtime",
-        )
-        sessions_dir = manager.sessions_dir
+        assert await manager.state.prune_dream_sessions(keep=10) == 5
+        await manager.state.aclose()
 
-        base_time = time.time() - 100
-        dream_paths = []
+        assert [manager.read_session_snapshot(key) is not None for key in keys] == [False] * 5 + [True] * 10
+        assert manager.read_session_snapshot("telegram:normal") is not None
 
-        for i in range(15):
-            key = f"dream:20260528-{100000 + i:06d}"
-            path = sessions_dir / f"{SessionManager._storage_key(key)}.jsonl"
-            path.write_text(
-                f'{{"_type": "metadata", "key": "{key}", '
-                f'"created_at": "2026-05-28T10:00:{i:02d}", '
-                f'"updated_at": "2026-05-28T10:00:{i:02d}"}}\n',
-                encoding="utf-8",
-            )
-            os.utime(path, (base_time + i, base_time + i))
-            dream_paths.append(path)
+    async def test_leaves_legacy_backup_untouched(self, tmp_path):
+        manager = SessionManager(tmp_path / "workspace", sessions_root=tmp_path / "runtime")
+        path = manager.sessions_dir / "dream_20260713-095959.jsonl"
+        path.write_text('legacy backup', encoding="utf-8")
+        await manager.state.prune_dream_sessions(keep=0)
+        await manager.state.aclose()
+        assert path.read_text(encoding="utf-8") == 'legacy backup'
 
-        normal_path = sessions_dir / "telegram_123.jsonl"
-        normal_path.write_text('{"_type": "metadata"}\n', encoding="utf-8")
-
-        MemoryStore.prune_dream_sessions(manager, keep=10)
-
-        assert [path.exists() for path in dream_paths] == [False] * 5 + [True] * 10
-        assert normal_path.exists()
-
-    def test_ignores_legacy_dream_filenames(self, tmp_path):
-        import os
-        import time
-
-        manager = SessionManager(
-            tmp_path / "workspace",
-            sessions_root=tmp_path / "runtime",
-        )
-        sessions_dir = manager.sessions_dir
-        base_time = time.time() - 100
-        current_paths = []
-
-        for i in range(2):
-            key = f"dream:20260713-{100000 + i:06d}"
-            path = sessions_dir / f"{SessionManager._storage_key(key)}.jsonl"
-            path.write_text(
-                f'{{"_type": "metadata", "key": "{key}"}}\n',
-                encoding="utf-8",
-            )
-            os.utime(path, (base_time + i, base_time + i))
-            current_paths.append(path)
-
-        legacy_path = sessions_dir / "dream_20260713-095959.jsonl"
-        legacy_path.write_text(
-            '{"_type": "metadata", "key": "dream:20260713-095959"}\n',
-            encoding="utf-8",
-        )
-        os.utime(legacy_path, (base_time - 1, base_time - 1))
-
-        MemoryStore.prune_dream_sessions(manager, keep=1)
-
-        assert [path.exists() for path in current_paths] == [False, True]
-        assert legacy_path.exists()
-
-    def test_noop_when_under_limit(self, tmp_path):
-        manager = SessionManager(
-            tmp_path / "workspace",
-            sessions_root=tmp_path / "runtime",
-        )
-        sessions_dir = manager.sessions_dir
+    async def test_noop_when_under_limit(self, tmp_path):
+        manager = SessionManager(tmp_path / "workspace", sessions_root=tmp_path / "runtime")
         for i in range(3):
-            key = f"dream:20260528-{100000 + i:06d}"
-            path = sessions_dir / f"{SessionManager._storage_key(key)}.jsonl"
-            path.write_text("{}", encoding="utf-8")
+            manager.save(manager.get_or_create(f"dream:20260528-{100000 + i:06d}"))
+        assert await manager.state.prune_dream_sessions(keep=10) == 0
+        await manager.state.aclose()
+        assert len(manager.list_sessions()) == 3
 
-        MemoryStore.prune_dream_sessions(manager, keep=10)
-        assert len(list(sessions_dir.glob("*.jsonl"))) == 3
-
-    def test_empty_dir_noop(self, tmp_path):
-        manager = SessionManager(
-            tmp_path / "workspace",
-            sessions_root=tmp_path / "runtime",
-        )
-        MemoryStore.prune_dream_sessions(manager, keep=10)
-        assert list(manager.sessions_dir.glob("*.jsonl")) == []
+    async def test_empty_store_noop(self, tmp_path):
+        manager = SessionManager(tmp_path / "workspace", sessions_root=tmp_path / "runtime")
+        assert await manager.state.prune_dream_sessions(keep=10) == 0
+        await manager.state.aclose()
+        assert manager.list_sessions() == []

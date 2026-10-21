@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 import typer
+from click import unstyle
 from rich.console import Console
 from typer.testing import CliRunner
 
@@ -52,6 +53,8 @@ class FakeRuntime:
         self.stop_timeout: int | None = None
         self.follow_tail: int | None = None
         self.validated_configs: list[Config] = []
+        self.runtime_selectors: list[tuple[str | None, str | None]] = []
+        self.config_selectors: list[tuple[str | None, str | None]] = []
 
     def start_background(self, options: GatewayStartOptions) -> RuntimeResult:
         self.started_options = options
@@ -124,8 +127,13 @@ def _test_app(
     ] = []
     prepare_calls: list[tuple[Config, str]] = []
 
-    def load_runtime_config(_config_path: str | None, _workspace: str | None) -> Config:
+    def load_runtime_config(config_path: str | None, workspace: str | None) -> Config:
+        fake_runtime.config_selectors.append((config_path, workspace))
         return config or Config()
+
+    def runtime_factory(*, config: str | None, workspace: str | None) -> FakeRuntime:
+        fake_runtime.runtime_selectors.append((config, workspace))
+        return fake_runtime
 
     def run_gateway(
         config: Config,
@@ -157,7 +165,7 @@ def _test_app(
             validate_startup_config=(
                 validate_startup_config if startup_error is not None else None
             ),
-            runtime_factory=lambda **_kwargs: fake_runtime,
+            runtime_factory=runtime_factory,
             service_factory=lambda: fake_service,
             prepare_webui_bundle=prepare_webui_bundle,
         ),
@@ -338,6 +346,74 @@ def test_gateway_rejects_conflicting_modes(tmp_path):
 
     assert result.exit_code == 1
     assert "--foreground and --background cannot be used together" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["status"],
+        ["logs", "--no-follow"],
+        ["stop"],
+        ["restart"],
+        ["install-service", "--dry-run", "--manager", "systemd"],
+    ],
+    ids=["status", "logs", "stop", "restart", "install-service"],
+)
+def test_gateway_management_uses_instance_selectors(
+    tmp_path: Path,
+    command: list[str],
+) -> None:
+    app, runtime, service, _calls, _prepare_calls = _test_app(tmp_path)
+    config_path = str(tmp_path / "custom" / "config.json")
+    workspace = str(tmp_path / "workspace")
+    selectors = ["--config", config_path, "--workspace", workspace]
+
+    result = runner.invoke(app, ["gateway", *command, *selectors])
+
+    assert result.exit_code == 0, result.output
+    if command[0] == "install-service":
+        assert service.installed_options is not None
+        start = service.installed_options.start
+    else:
+        assert runtime.runtime_selectors == [(config_path, workspace)]
+        start = runtime.restarted_options
+    if command[0] in {"restart", "install-service"}:
+        assert runtime.config_selectors == [(config_path, workspace)]
+        assert start == GatewayInstance.resolve(
+            config_path=config_path, workspace=workspace,
+        ).start_options(port=18790)
+
+
+@pytest.mark.parametrize(
+    ("command", "options"),
+    [
+        (["status"], ["--config"]),
+        (["logs", "--no-follow"], ["--workspace"]),
+        (["stop"], ["--config", "--workspace"]),
+        (["restart"], ["-c"]),
+        (["install-service", "--dry-run", "--manager", "systemd"], ["-w"]),
+    ],
+    ids=["status", "logs", "stop", "restart", "install-service"],
+)
+def test_gateway_management_rejects_misplaced_selectors_before_side_effects(
+    tmp_path: Path,
+    command: list[str],
+    options: list[str],
+) -> None:
+    app, runtime, service, calls, prepare_calls = _test_app(tmp_path)
+    selectors = [argument for option in options for argument in (option, str(tmp_path / "custom instance"))]
+
+    result = runner.invoke(app, ["gateway", *selectors, *command])
+
+    assert result.exit_code == 2, result.output
+    output = " ".join(unstyle(result.output).split())
+    assert "--config and --workspace must follow a management subcommand" in output
+    assert f"nanobot gateway {command[0]} --help" in output
+    assert runtime.runtime_selectors == []
+    assert runtime.config_selectors == []
+    assert service.installed_options is None
+    assert calls == []
+    assert prepare_calls == []
 
 
 def test_gateway_status_uses_runtime(tmp_path):

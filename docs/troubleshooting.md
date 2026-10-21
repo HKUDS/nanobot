@@ -1,35 +1,23 @@
 # Troubleshooting
 
-Use this page to isolate where a failure lives. Start with the smallest surface that proves the most: local CLI first, then gateway, then WebUI or chat apps.
+Use the first check that matches what you see, then follow its next step. This avoids investigating the browser or a chat app before confirming nanobot can start and contact its model.
 
 ## Fast Diagnosis Order
 
-Run these in order:
+- **The `nanobot` command is not found, or nanobot will not start:** check [Installation Problems](#installation-problems). Run `nanobot --version` to confirm the command is available.
+- **nanobot starts, but does not answer:** run `nanobot status`. Check that it points to the config and workspace you expect and that the active model is ready. This command does not contact the model; if setup is incomplete, follow its WebUI **Settings → Models** or CLI wizard instructions.
+- **Status looks ready, but a test question fails:** run `nanobot agent -m "Hello!"`. If it fails, troubleshoot [Provider and Model Problems](#provider-and-model-problems) before testing the gateway or a chat app.
+- **The test question works, but the browser or chat app does not:** start `nanobot gateway` and follow [Gateway Problems](#gateway-problems), [WebUI Problems](#webui-problems), or [Chat App Problems](#chat-app-problems), depending on what is failing.
 
-```bash
-nanobot --version
-nanobot status
-nanobot agent -m "Hello!"
-```
+`nanobot status` checks local configuration and provider readiness without making a model request. A successful `nanobot agent -m "Hello!"` confirms the local agent can get a reply; it does not prove that a gateway, browser, or chat app is working.
 
-Then, only if the CLI works:
+## Empty topics after a WebUI restart
 
-```bash
-nanobot gateway
-```
+The Restart button in WebUI settings does not create a conversation or add messages to an existing conversation. Reopening WebUI or reconnecting to the gateway also does not save a topic until a message or another session action creates it.
 
-This separates failures into layers:
+Older gateway versions could save an empty topic when the Restart button had no current chat. Update the gateway to stop creating these topics. Existing topics are not deleted by the update; check their contents before removing them. A typed `/restart` command remains part of that chat's display history.
 
-| Layer | What it proves |
-|---|---|
-| `nanobot --version` | Install and shell command discovery |
-| `nanobot status` | Config path, workspace, environment references, and active provider/model configuration |
-| `nanobot agent -m "Hello!"` | Config loading, provider/model access, workspace writes, and agent loop |
-| `nanobot gateway` | Channel startup, cron system jobs, heartbeat, WebUI/WebSocket, and health endpoint |
-
-If `nanobot agent -m "Hello!"` fails, fix that before debugging WebUI, Telegram, Discord, Docker, systemd, or any chat app.
-
-`nanobot status` does not call the model. If provider/model setup is incomplete, it points to WebUI **Settings → Models** or the CLI setup wizard, then prints the command to check again.
+If settings stay disabled after a restart while another tab has reconnected, reload the affected page. Updated WebUI clients track restart completion per tab, so one tab cannot leave another tab waiting by clearing the shared restart marker.
 
 ## Session storage overlaps the workspace
 
@@ -86,7 +74,7 @@ Use the same Python command for install checks and module fallback. On macOS/Lin
 | `curl: command not found` | The macOS/Linux one-command installer could not download the script. Install curl, or use a manual isolated install such as `uv tool install nanobot-ai` or `pipx install nanobot-ai`. |
 | `irm` is not recognized | PowerShell could not run the download helper. Use manual install: `uv tool install nanobot-ai`, `pipx install nanobot-ai`, or `py -m pip install nanobot-ai` inside an environment you control. |
 | Could not download `raw.githubusercontent.com` | Your network, proxy, or firewall blocked the installer script download. Use manual install from PyPI, or configure your proxy and rerun the command. |
-| `nanobot: command not found` | Use the module form, for example `python -m nanobot ...`, `python3 -m nanobot ...`, or `py -m nanobot ...`. Reinstall with the same Python command, or add that Python's scripts directory to `PATH`. |
+| `nanobot: command not found` | With the recommended installer, reuse its printed full command; with uv/pipx, use `uv tool run --from nanobot-ai nanobot ...` / `pipx run --spec nanobot-ai nanobot ...`. For a pip install, use `<installing-python> -m nanobot ...` from that same environment. A system `python` or `py` may not contain the isolated installation. |
 | `No module named nanobot` | You are running a different Python than the one used for installation. Run `python -m pip show nanobot-ai`, `python3 -m pip show nanobot-ai`, or `py -m pip show nanobot-ai`, matching the command that installed nanobot. |
 | `pip is not available` | When the installer uses a virtual environment, it tries `python -m ensurepip --upgrade`. If that fails, install pip for that Python, or use a Python installer/distribution that includes pip. |
 | `externally-managed-environment` | Your system Python blocks global pip installs. Use the one-command installer, `uv tool install nanobot-ai`, `pipx install nanobot-ai`, or create a virtual environment; do not add `--break-system-packages` for nanobot. |
@@ -184,7 +172,7 @@ Langfuse tracing is optional and controlled by environment variables.
 | `LANGFUSE_SECRET_KEY is set but langfuse is not installed` | Install `langfuse` in the same Python environment that runs nanobot, then restart the process. |
 | No traces appear | Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_BASE_URL` before starting nanobot. |
 | Wrong Langfuse project or region | Check that the key pair and `LANGFUSE_BASE_URL` come from the same Langfuse project/region. |
-| Only some providers trace | Langfuse tracing applies to OpenAI-compatible provider calls; native providers may not use that client path. |
+| Only some providers trace | Langfuse tracing applies to OpenAI-compatible provider calls and the Codex OAuth provider; other native providers may not use either client path. |
 
 See [`configuration.md#langfuse-observability`](./configuration.md#langfuse-observability) for setup commands.
 
@@ -247,6 +235,11 @@ For a system-level or custom service, use `sudo systemctl edit <unit>` instead. 
 
 ## WebUI Problems
 
+Run `nanobot webui` to prepare the local WebSocket channel and open the browser. Finish model setup in **Settings → Models**.
+
+<details>
+<summary>Manual WebSocket configuration</summary>
+
 The packaged WebUI is served by the WebSocket channel.
 
 Minimal config:
@@ -272,6 +265,10 @@ Open:
 ```text
 http://127.0.0.1:8765
 ```
+
+</details>
+
+For first access, copy the complete login link printed by `nanobot webui`, including the fragment after `#`. In WSL, open that link in your Windows browser if automatic opening fails. The plain page address does not sign in a new browser.
 
 If accessing from another device, bind the WebSocket channel to `0.0.0.0` and set `token` or `tokenIssueSecret`. The WebSocket channel refuses public binds without a token or token issue secret.
 
@@ -299,7 +296,7 @@ Then check:
 |---|---|
 | Bot never replies | Gateway is not running, the channel is not enabled, or the bot/app token is wrong. |
 | Unknown sender ignored | Configure `allowFrom`, pairing, or the channel-specific allow list. |
-| Telegram shows a saved configuration but cannot complete a live check | The token is saved. Confirm the gateway can reach `api.telegram.org`, or open **Settings → Channels → Telegram → Advanced → Network proxy** and enter an HTTP or SOCKS proxy. |
+| Telegram shows a saved configuration but cannot complete a live check | The token is saved. Confirm the gateway can reach `api.telegram.org`, or open **Channels → Telegram → Advanced → Network proxy** and enter an HTTP or SOCKS proxy. |
 | Telegram rejects the token | Copy the current token from BotFather or regenerate it. |
 | Telegram receives no messages | Confirm the channel is enabled, the gateway is running, and the sender is paired or listed in `allowFrom`. |
 | Discord replies missing | Enable Message Content intent and invite the bot with the required permissions. |

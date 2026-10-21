@@ -12,7 +12,7 @@
         "placeholder": "••••••"
       },
       "allowFrom": {
-        "label": "Pengguna yang diizinkan",
+        "label": "Pengguna diizinkan",
         "placeholder": "Open ID, dipisahkan koma"
       },
       "msgFormat": {
@@ -23,24 +23,33 @@
         }
       },
       "ackMessage": {
-        "label": "Pesan pengakuan"
+        "label": "Pesan penerimaan"
       },
       "mediaDir": {
         "label": "Direktori media"
       },
       "downloadChunkSize": {
-        "label": "Unduh ukuran potongan"
+        "label": "Ukuran chunk (byte)"
       },
       "downloadMaxBytes": {
-        "label": "Ukuran unduhan maksimum"
+        "label": "Batas unduhan (byte)"
       },
       "showCompactionNotices": {
-        "label": "Notifikasi pemadatan konteks",
+        "label": "Pemberitahuan pemadatan",
         "choices": {
           "true": "Aktif",
           "false": "Nonaktif"
         }
       }
     }
+  },
+  "custom": {
+    "scanTitle": "Pindai dengan QQ seluler",
+    "waiting": "Menunggu pindaian QQ…",
+    "connected": "QQ terhubung.",
+    "stopped": "Login QQ dihentikan.",
+    "connecting": "Menghubungkan…",
+    "qrAlt": "Kode QR login QQ",
+    "scanAgainWarning": "Memindai ulang menggantikan App Secret saat ini. App Secret lama tidak lagi berfungsi setelah pemindaian baru selesai."
   }
 }
