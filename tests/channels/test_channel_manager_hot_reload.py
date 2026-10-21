@@ -14,6 +14,7 @@ from nanobot.channels.contracts import (
 from nanobot.channels.manager import ChannelManager
 from nanobot.channels.plugin import ChannelPlugin
 from nanobot.config.schema import Config
+from nanobot.security.network import configure_ssrf_whitelist, validate_url_target
 
 
 class _HotChannel(BaseChannel):
@@ -111,6 +112,7 @@ def test_descriptor_rejects_runtime_class_owned_by_another_name():
 
 @pytest.mark.asyncio
 async def test_apply_channel_feature_action_starts_and_stops_channel(monkeypatch):
+    monkeypatch.setattr("nanobot.security.network._allowed_networks", [])
     disabled = Config.model_validate({
         "channels": {
             "websocket": {"enabled": False},
@@ -118,6 +120,7 @@ async def test_apply_channel_feature_action_starts_and_stops_channel(monkeypatch
         }
     })
     enabled = Config.model_validate({
+        "tools": {"ssrfWhitelist": ["10.0.0.0/8"]},
         "channels": {
             "websocket": {"enabled": False},
             "hot": {"enabled": True},
@@ -138,6 +141,7 @@ async def test_apply_channel_feature_action_starts_and_stops_channel(monkeypatch
     channel = manager.channels["hot"]
     await asyncio.wait_for(channel.started.wait(), timeout=1)
     assert channel.is_running is True
+    assert validate_url_target("http://10.23.45.67/api")[0]
 
     disabled_result = await manager.apply_channel_feature_action("disable", "hot")
 
@@ -145,10 +149,13 @@ async def test_apply_channel_feature_action_starts_and_stops_channel(monkeypatch
     assert disabled_result["requires_restart"] is False
     assert "hot" not in manager.channels
     assert channel.is_running is False
+    assert not validate_url_target("http://10.23.45.67/api")[0]
 
 
 @pytest.mark.asyncio
 async def test_apply_channel_feature_action_keeps_running_channel_when_rebuild_fails(monkeypatch):
+    monkeypatch.setattr("nanobot.security.network._allowed_networks", [])
+    configure_ssrf_whitelist(["10.0.0.0/8"])
     enabled = Config.model_validate({
         "channels": {
             "websocket": {"enabled": False},
@@ -175,6 +182,7 @@ async def test_apply_channel_feature_action_keeps_running_channel_when_rebuild_f
     assert manager.channels["hot"] is old_channel
     assert old_channel.is_running is True
     assert not old_channel.stopped.is_set()
+    assert validate_url_target("http://10.23.45.67/api")[0]
 
 
 @pytest.mark.asyncio

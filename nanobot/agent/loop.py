@@ -74,6 +74,7 @@ from nanobot.runtime_context import (
     resolve_runtime_context,
     runtime_context_blocks_from_metadata,
 )
+from nanobot.security.network import configure_ssrf_whitelist
 from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScopeResolver,
@@ -473,6 +474,7 @@ class AgentLoop:
 
         The tool registry is caller-owned so application composition can share
         it with infrastructure such as an ``MCPProvider``.
+        Successful construction activates the config's process-wide network policy.
 
         Extra keyword arguments are forwarded to ``AgentLoop.__init__``,
         allowing callers to override or extend the standard config-derived
@@ -498,7 +500,7 @@ class AgentLoop:
             config,
             provider_snapshot_loader,
         )
-        return cls(
+        agent = cls(
             bus=bus,
             provider=provider,
             workspace=config.workspace_path,
@@ -526,6 +528,8 @@ class AgentLoop:
             tool_registry=tool_registry,
             **extra,
         )
+        configure_ssrf_whitelist(config.tools.ssrf_whitelist)
+        return agent
 
     def _sync_subagent_runtime_limits(self) -> None:
         """Keep subagent runtime limits aligned with mutable loop settings."""

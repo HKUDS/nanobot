@@ -5,6 +5,7 @@ import asyncio
 import pytest
 
 from nanobot.config.schema import MCPServerConfig
+from nanobot.security.network import configure_ssrf_whitelist, validate_url_target
 from nanobot.webui.mcp_oauth_api import (
     McpOAuthError,
     McpOAuthManager,
@@ -337,6 +338,24 @@ def test_redirect_uri_requires_https_except_for_loopback() -> None:
         validate_mcp_oauth_redirect_uri("http://192.0.2.10/auth/mcp/callback")
     with pytest.raises(McpOAuthError, match="Invalid"):
         validate_mcp_oauth_redirect_uri("https://agent.example.com/wrong")
+
+
+@pytest.mark.asyncio
+async def test_invalid_oauth_callback_keeps_active_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("nanobot.security.network._allowed_networks", [])
+    configure_ssrf_whitelist(["10.0.0.0/8"])
+    manager = McpOAuthManager()
+
+    with pytest.raises(McpOAuthError):
+        await manager.start(
+            "demo",
+            _config(),
+            "https://gateway.example/wrong",
+            reload_mcp=lambda: asyncio.sleep(0, result={"ok": True}),
+            ssrf_whitelist=[],
+        )
+
+    assert validate_url_target("http://10.23.45.67/mcp")[0]
 
 
 def test_remote_http_redirect_prepares_a_manual_loopback_callback() -> None:

@@ -16,7 +16,7 @@ from nanobot.agent.tools.mcp import MCPConnection, connect_mcp_servers
 from nanobot.agent.tools.mcp_oauth import MCP_OAUTH_CALLBACK_PATH, MCPOAuthHandlers
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import MCPServerConfig
-from nanobot.security.network import validate_url_target
+from nanobot.security.network import configure_ssrf_whitelist, validate_url_target
 from nanobot.webui.http_utils import is_loopback_host
 
 McpReload = Callable[[], Awaitable[dict[str, Any]]]
@@ -112,10 +112,13 @@ class McpOAuthManager:
         *,
         reload_mcp: McpReload,
         reset_credentials: bool = False,
+        ssrf_whitelist: list[str] | None = None,
     ) -> dict[str, Any]:
         self._prune()
         redirect_uri, manual_callback = prepare_mcp_oauth_redirect_uri(redirect_uri)
         await self._cancel_name(name)
+        if ssrf_whitelist is not None:
+            configure_ssrf_whitelist(ssrf_whitelist)
 
         loop = asyncio.get_running_loop()
         now = time.monotonic()

@@ -29,6 +29,7 @@ class ProviderSnapshot:
     signature: tuple[object, ...]
     generation: GenerationSettings | None = None
     model_preset: str | None = None
+    ssrf_whitelist: tuple[str, ...] | None = None
 
 
 def _resolve_model_preset(
@@ -308,6 +309,7 @@ def build_provider_snapshot(
         signature=provider_signature(config, preset=resolved),
         generation=resolved.to_generation_settings(),
         model_preset=selected_preset,
+        ssrf_whitelist=tuple(config.tools.ssrf_whitelist),
     )
 
 

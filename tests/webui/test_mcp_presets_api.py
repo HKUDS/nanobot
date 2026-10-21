@@ -12,6 +12,7 @@ from nanobot.agent.plugins import AGENT_PLUGIN_MCP_SCHEMA, AGENT_PLUGIN_SCHEMA
 from nanobot.agent.tools.mcp_oauth import MCPOAuthStorage, mcp_oauth_has_credentials
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config
+from nanobot.security.network import validate_url_target
 from nanobot.webui.mcp_presets_api import (
     McpPresetError,
     custom_mcp_action,
@@ -609,7 +610,11 @@ def test_test_mcp_preset_connects_and_reports_tools(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _use_config(tmp_path, monkeypatch)
+    monkeypatch.setattr("nanobot.security.network._allowed_networks", [])
     mcp_presets_action("enable", {"name": ["playwright"]})
+    config = load_config()
+    config.tools.ssrf_whitelist = ["10.0.0.0/8"]
+    save_config(config)
 
     class FakeStack:
         async def aclose(self) -> None:
@@ -617,6 +622,7 @@ def test_test_mcp_preset_connects_and_reports_tools(
 
     async def fake_connect(servers, registry):
         assert list(servers) == ["playwright"]
+        assert validate_url_target("http://10.23.45.67/api")[0]
 
         class FakeTool:
             name = "mcp_playwright_browser_navigate"

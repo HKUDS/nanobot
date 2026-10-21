@@ -532,6 +532,7 @@ def channels_login(
     """Authenticate with a channel via QR code or other interactive login."""
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.registry import discover_all
+    from nanobot.config.loader import resolve_ssrf_whitelist
 
     _, loaded = _load_inspection_config(config=config)
     channel_cfg: Any = getattr(loaded.channels, channel_name, None) or {}
@@ -548,6 +549,9 @@ def channels_login(
     channel_factory = all_channels[channel_name]
     channel = channel_factory(channel_cfg, bus=MessageBus())
 
+    from nanobot.security.network import configure_ssrf_whitelist
+
+    configure_ssrf_whitelist(resolve_ssrf_whitelist(loaded))
     success = asyncio.run(channel.login(force=force))
 
     if not success:

@@ -25,8 +25,8 @@ from nanobot.channels.contracts import (
 )
 from nanobot.channels.plugin import ChannelPlugin
 from nanobot.channels.registry import load_channel_plugin
-from nanobot.config.loader import load_config
-from nanobot.security.network import resolve_url_target
+from nanobot.config.loader import load_config, resolve_ssrf_whitelist
+from nanobot.security.network import configure_ssrf_whitelist, resolve_url_target
 
 CheckStatus = str
 SetupStatus = str
@@ -75,6 +75,7 @@ def validate_channel_config(
         context = ChannelValidationContext(
             allow_local_service_access=config.tools.webui_allow_local_service_access,
         )
+        configure_ssrf_whitelist(resolve_ssrf_whitelist(config))
         custom_payload = setup_spec.validator(values, context)
         if cast(object, custom_payload) is not None:
             payload = dict(custom_payload)
