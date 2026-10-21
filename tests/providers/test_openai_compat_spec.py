@@ -1455,9 +1455,23 @@ def test_minimax_reasoning_split_enabled_with_reasoning_effort() -> None:
     assert kw["extra_body"] == {"reasoning_split": True}
 
 
-def test_minimax_reasoning_split_disabled_for_minimal() -> None:
-    kw = _build_kwargs_for("minimax", "MiniMax-M2.7", reasoning_effort="minimal")
-    assert kw["extra_body"] == {"reasoning_split": False}
+@pytest.mark.parametrize("model", ["MiniMax-M2.7", "MiniMax-M3.1-Flash"])
+@pytest.mark.parametrize("effort", ["none", "minimal"])
+def test_minimax_off_presets_map_to_low_effort(model, effort) -> None:
+    # MiniMax-M3.1-Flash returns HTTP 400 for reasoning_split=false.
+    kw = _build_kwargs_for("minimax", model, reasoning_effort=effort)
+    assert kw["reasoning_effort"] == "low"
+    assert kw["extra_body"] == {"reasoning_split": True}
+
+
+def test_minimax_m31_flash_builtin_metadata() -> None:
+    from nanobot.providers.registry import find_by_name
+
+    meta = find_by_name("minimax").model_metadata("MiniMax-M3.1-Flash")
+    assert meta is not None
+    assert meta.reasoning_efforts == ("low", "medium", "high", "xhigh", "max")
+    assert meta.default_reasoning_effort == "max"
+    assert meta.input_modalities == ("text", "image")
 
 
 def test_volcengine_thinking_enabled() -> None:

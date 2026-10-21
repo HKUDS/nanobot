@@ -752,6 +752,19 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://api.minimax.io/v1",
         thinking_style="reasoning_split",
+        builtin_models=(
+            ProviderModelSpec(
+                id="MiniMax-M3.1-Flash",
+                label="MiniMax-M3.1-Flash",
+                aliases=("minimax-m3.1-flash",),
+                reasoning_efforts=("low", "medium", "high", "xhigh", "max"),
+                default_reasoning_effort="max",
+                input_modalities=("text", "image"),
+            ),
+        ),
+        # MiniMax-M3.1-Flash rejects reasoning_split=false (HTTP 400, error 2013),
+        # so map the "off" presets to the lowest effort instead of disabling thinking.
+        reasoning_effort_remap=(("none", "low"), ("minimal", "low")),
     ),
     # MiniMax Anthropic-compatible endpoint: supports thinking mode
     ProviderSpec(
