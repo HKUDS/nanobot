@@ -945,6 +945,7 @@ export function projectThreadEvent(
       ...(latencyMs !== undefined ? { latencyMs } : {}),
       ...(event.source ? { source: event.source } : {}),
       ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
+      ...(event.agent_ui ? { agentUi: event.agent_ui } : {}),
       ...turnFieldsForProjection(state, event, "answer"),
     };
     if (options.sideChannel) {
