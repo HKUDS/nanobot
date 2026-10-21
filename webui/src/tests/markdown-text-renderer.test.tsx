@@ -926,6 +926,23 @@ describe("MarkdownTextRenderer", () => {
     expect(container.textContent).toBe(source);
   });
 
+  it.each([
+    ["**`ThreadTranscript` 已经朝这个方向走了一步：它把正文、来源覆盖和分页接纳集中起来，因此可以看作一个隐式的状态转换模型。**但“集中到一个类”不等于已经有清晰的状态机；还要看合法状态、输入事件、转换条件和不变量是否明确。", "ThreadTranscript", "CODE"],
+    ["**参考 [说明](https://example.com) 的结论。**继续阅读。", "说明", "A"],
+  ])("parses CJK emphasis around nested inline syntax: %s", (source, label, tag) => {
+    const { container, rerender } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+    expect(screen.getByText(label).tagName).toBe(tag);
+    expect(screen.getByText(label).closest("strong")).not.toBeNull();
+    if (tag === "A") expect(screen.getByText(label)).toHaveAttribute("href", "https://example.com");
+    expect(container.textContent).not.toContain("**");
+    for (let end = 1; end <= source.length; end += 1) {
+      rerender(<MarkdownTextRenderer streaming preserveStreamingLayout>{source.slice(0, end)}</MarkdownTextRenderer>);
+    }
+    expect(screen.getByText(label).closest("strong")).not.toBeNull();
+    rerender(<MarkdownTextRenderer preserveStreamingLayout>{source}</MarkdownTextRenderer>);
+    expect(screen.getByText(label).closest("strong")).not.toBeNull();
+  });
+
   it("renders bold CJK text when more CJK text follows immediately", () => {
     render(
       <MarkdownTextRenderer streaming>
@@ -943,7 +960,7 @@ describe("MarkdownTextRenderer", () => {
 
   it.each([
     ["**边界说明：**issue 只有截图，没有原始消息。", "issue 只有截图，没有原始消息。"],
-    ["**边界说明： **issue 只有截图，没有原始消息。", " issue 只有截图，没有原始消息。"],
+    ["**边界说明：** issue 只有截图，没有原始消息。", " issue 只有截图，没有原始消息。"],
   ])("renders CJK bold labels before Latin text through stream completion: %s", (source, following) => {
     const { container, rerender } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
     expect(container.querySelector("strong")).toHaveTextContent("边界说明：");
@@ -956,6 +973,41 @@ describe("MarkdownTextRenderer", () => {
     rerender(<MarkdownTextRenderer preserveStreamingLayout>{source}</MarkdownTextRenderer>);
     expect(container.querySelector("strong")).toHaveTextContent("边界说明：");
     expect(container.textContent).toBe(`边界说明：${following}`);
+  });
+
+  it.each([
+    ["前文**「重点」**后文", "strong", "「重点」", "前文「重点」后文"],
+    ["**日本語。**続き", "strong", "日本語。", "日本語。続き"],
+    ["**한국어(설명)**입니다", "strong", "한국어(설명)", "한국어(설명)입니다"],
+    ["*说明。*继续", "em", "说明。", "说明。继续"],
+    ["**包含 *强调* 的结论。**继续", "strong em", "强调", "包含 强调 的结论。继续"],
+    ["**English.** Next", "strong", "English.", "English. Next"],
+    ["**中文。** 继续", "strong", "中文。", "中文。 继续"],
+    ["**中文**。继续", "strong", "中文", "中文。继续"],
+  ])("preserves emphasis grammar and CJK delimiter boundaries: %s", (source, selector, label, text) => {
+    const { container, rerender } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+    expect(container.querySelector(selector)).toHaveTextContent(label);
+    expect(container.textContent).toBe(text);
+    rerender(<MarkdownTextRenderer streaming preserveStreamingLayout>{source}</MarkdownTextRenderer>);
+    expect(container.querySelector(selector)).toHaveTextContent(label);
+    expect(container.textContent).toBe(text);
+    rerender(<MarkdownTextRenderer preserveStreamingLayout>{source}</MarkdownTextRenderer>);
+    expect(container.querySelector(selector)).toHaveTextContent(label);
+    expect(container.textContent).toBe(text);
+  });
+
+  it.each([
+    "**边界说明： **issue 只有截图，没有原始消息。",
+    "** 边界说明：**继续说明。",
+    "**English.**Next",
+  ])("keeps invalid emphasis boundaries literal after streaming completes: %s", (source) => {
+    const { container, rerender } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+    expect(container.querySelector("strong")).toBeNull();
+    expect(container.textContent).toBe(source);
+    rerender(<MarkdownTextRenderer streaming preserveStreamingLayout>{source}</MarkdownTextRenderer>);
+    rerender(<MarkdownTextRenderer preserveStreamingLayout>{source}</MarkdownTextRenderer>);
+    expect(container.querySelector("strong")).toBeNull();
+    expect(container.textContent).toBe(source);
   });
 
   it("keeps literal bold markers in code and escaped text", () => {
@@ -977,7 +1029,7 @@ describe("MarkdownTextRenderer", () => {
     ["\\*\\*字面符号：\\*\\*issue 和 **结论：**继续说明。", "**字面符号：**issue 和 结论：继续说明。"],
     ["&#42;&#42;字面符号：&#42;&#42;issue 和 **结论：**继续说明。", "**字面符号：**issue 和 结论：继续说明。"],
     ["- 第一行\n  **结论：**继续 &amp; 其他说明。", "第一行\n结论：继续 & 其他说明。"],
-  ])("recovers CJK bold labels without reinterpreting decoded text: %s", (source, text) => {
+  ])("parses CJK bold labels without reinterpreting decoded text: %s", (source, text) => {
     const { container, rerender } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
     expect(container.querySelectorAll("strong")).toHaveLength(1);
     expect(container.textContent?.trim()).toBe(text);

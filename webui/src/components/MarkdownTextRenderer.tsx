@@ -8,7 +8,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Globe2 } from "lucide-react";
-import { decodeString } from "micromark-util-decode-string";
+import remarkCjkFriendly from "remark-cjk-friendly/parseOnly";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -61,10 +61,6 @@ type MarkdownAstNode = {
   type: string;
   value?: string;
   children?: MarkdownAstNode[];
-  position?: {
-    start: { offset: number };
-    end: { offset: number };
-  };
   data?: {
     hName?: string;
   };
@@ -263,54 +259,8 @@ function remarkSafeHtmlSubset() {
   };
 }
 
-// Model output can put CJK punctuation or whitespace before a closing `**`
-// followed immediately by a word, which CommonMark leaves as literal text.
-const STRONG_BEFORE_WORD = /(?<!\\)\*\*([^\s*][^*\r\n]*?)(?<!\\)\*\*(?=[\p{L}\p{N}])/gu;
-const CJK_CHARACTER = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
-
-function normalizeCjkStrongBoundaries(node: MarkdownAstNode, source: string): void {
-  if (!node.children) return;
-  node.children = node.children.flatMap((child) => {
-    if (child.type !== "text" || !child.value?.includes("**") || !child.position) {
-      normalizeCjkStrongBoundaries(child, source);
-      return [child];
-    }
-
-    // Match source delimiters before decoding escapes and character references.
-    // Paragraph continuation indentation is not part of the parsed text value.
-    const textSource = source.slice(child.position.start.offset, child.position.end.offset)
-      .replace(/(\r\n?|\n)[\t ]+/g, "$1");
-
-    const replacement: MarkdownAstNode[] = [];
-    let cursor = 0;
-    for (const match of textSource.matchAll(STRONG_BEFORE_WORD)) {
-      const start = match.index;
-      const end = start + match[0].length;
-      const content = decodeString(match[1]);
-      if (!CJK_CHARACTER.test(content + textSource.slice(end, end + 1))) continue;
-      const label = content.trimEnd();
-      if (start > cursor) replacement.push(safeText(decodeString(textSource.slice(cursor, start))));
-      replacement.push({
-        type: "strong",
-        children: [safeText(label)],
-      });
-      if (label.length < content.length) replacement.push(safeText(content.slice(label.length)));
-      cursor = end;
-    }
-    if (cursor === 0) return [child];
-    if (cursor < textSource.length) replacement.push(safeText(decodeString(textSource.slice(cursor))));
-    return replacement;
-  });
-}
-
-function remarkCjkStrongBoundaries() {
-  return (tree: MarkdownAstNode, file: { toString(): string }) => {
-    normalizeCjkStrongBoundaries(tree, file.toString());
-  };
-}
-
 const remarkPlugins: NonNullable<StreamdownProps["remarkPlugins"]> = [
-  remarkCjkStrongBoundaries,
+  remarkCjkFriendly,
   remarkBreaks,
   [remarkGfm, { singleTilde: false }],
   remarkCjkAutolinks,
