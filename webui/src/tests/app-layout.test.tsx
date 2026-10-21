@@ -402,6 +402,9 @@ describe("App layout", () => {
       }] },
     });
     render(<App />);
+    // Await the lazy module itself; cold Vite transformation is not the task
+    // capability contract exercised by the timed DOM assertions below.
+    await act(async () => { await import("@/components/thread/ThreadShell"); });
     await screen.findByRole("textbox", {}, { timeout: 5_000 });
     if (supported) await screen.findByRole("button", { name: /Config check Running/ });
     else expect(screen.queryByText("Config check")).not.toBeInTheDocument();
@@ -3130,6 +3133,7 @@ describe("App layout", () => {
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     fireEvent.click(within(screen.getByRole("navigation", { name: "Sidebar navigation" }))
       .getByRole("button", { name: "Settings" }));
+    await act(async () => { await import("@/components/settings/SettingsView"); });
     const nav = await screen.findByRole("navigation", { name: "Settings sections" });
     for (const name of ["Overview", "Appearance", "Models", "Capabilities", "System", "Advanced", "About"]) {
       expect(within(nav).getByRole("button", { name })).toBeInTheDocument();
