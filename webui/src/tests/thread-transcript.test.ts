@@ -41,6 +41,52 @@ function receive(thread: ThreadTranscript, ...events: ThreadProjectionEvent[]): 
 }
 
 describe("ThreadTranscript admission", () => {
+  it.each(["succeeded", "failed", "cancelled"] as const)("reconciles one idle compaction across live phases and history (%s)", (phase) => {
+    const thread = new ThreadTranscript();
+    const base = [
+      input("turn-before-idle", "Question"),
+      { ...at("turn-before-idle", 2), event: "stream_end" as const, stream_id: "answer-before-idle", text: "Answer" },
+      { ...at("turn-before-idle", 3), event: "turn_end" as const },
+    ];
+    const completed = { completed_turn_ids: ["turn-before-idle"] };
+    expect(thread.accept(history(base, completed), thread.begin("initial"))).toBe(true);
+    const compaction = { event: "context_compaction" as const, chat_id: "hydration-chat", compaction_id: "idle-one" };
+    receive(thread, { ...compaction, phase: "started" });
+    const staleRead = thread.begin("latest");
+    receive(thread, { ...compaction, phase });
+    expect(thread.accept(history(base, completed), staleRead)).toBe(true);
+    expect(thread.messages.map((row) => row.id).filter((id) => id === "compaction-idle-one")).toHaveLength(1);
+    expect(thread.messages.at(-1)?.compaction?.phase).toBe(phase);
+
+    const body = history([...base, { ...compaction, phase }], completed);
+    expect(thread.accept(body, thread.begin("latest"))).toBe(true);
+    expect(thread.messages.map((row) => row.content)).toEqual(["Question", "Answer", ""]);
+    expect(thread.messages[2]).toMatchObject({ id: "compaction-idle-one", compaction: { phase } });
+    const owners = thread.save().units.filter((unit) => unit.rows.has("compaction-idle-one"));
+    expect(owners).toHaveLength(1);
+    expect(thread.accept(body, thread.begin("latest"))).toBe(true);
+    const restored = new ThreadTranscript([], thread.save());
+    receive(restored, { ...compaction, phase });
+    expect(restored.accept(body, restored.begin("latest"))).toBe(true);
+    expect(restored.messages.map((row) => row.id).filter((id) => id === "compaction-idle-one")).toHaveLength(1);
+  });
+
+  it("keeps distinct native and idle compactions when history refreshes a live idle notice", () => {
+    const thread = new ThreadTranscript();
+    const native: ThreadProjectionEvent = { ...at("turn-native", 2), event: "context_compaction", compaction_id: "native", phase: "succeeded" };
+    const base: ThreadProjectionEvent[] = [
+      input("turn-native", "Question"), native,
+      { ...at("turn-native", 3), event: "stream_end", stream_id: "answer-native", text: "Answer" },
+      { ...at("turn-native", 4), event: "turn_end" },
+    ];
+    const completed = { completed_turn_ids: ["turn-native"] };
+    expect(thread.accept(history(base, completed), thread.begin("initial"))).toBe(true);
+    const idle: ThreadProjectionEvent = { event: "context_compaction", chat_id: "hydration-chat", compaction_id: "idle", phase: "succeeded" };
+    receive(thread, idle);
+    expect(thread.accept(history([...base, idle], completed), thread.begin("latest"))).toBe(true);
+    expect(thread.messages.map((row) => row.compaction?.id ?? row.content)).toEqual(["Question", "native", "Answer", "idle"]);
+  });
+
   it("installs an older safe prefix without replacing or redirecting the received foreground", () => {
     const thread = new ThreadTranscript();
     const read = thread.begin("initial");

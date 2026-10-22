@@ -112,6 +112,10 @@ async function installBackend(page: Page) {
       // The fixture's non-consuming observer acknowledges client dispatch, not a model installation.
       await expect(page.getByLabel("Synthetic frame receipt")).toHaveText(`${"chat_id" in event ? event.chat_id : "-"}/${turn}/${event.event}/${sequence}`);
     },
+    refreshThread() {
+      expect(socket, "The fixture must establish its WebSocket before refresh").toBeDefined();
+      socket!.send(JSON.stringify({ event: "session_updated", chat_id: A, scope: "thread" }));
+    },
     async ready() {
       await expect(page.getByLabel("Synthetic transport status")).toHaveText("open");
       await expect.poll(() => attached.includes(A)).toBe(true);
@@ -155,6 +159,52 @@ async function expectBefore(body: Locator, first: string, second: string) {
   expect(text.indexOf(first), `${first} must be in the rendered body`).toBeGreaterThanOrEqual(0);
   expect(text.indexOf(second), `${second} must follow ${first}`).toBeGreaterThan(text.indexOf(first));
 }
+
+test("idle compaction stays singular across live updates, thread refresh and cold replay", async ({ page }) => {
+  const { backend, body } = await openFixture(page);
+  const base = closedTurn("idle-completed", "Before idle compression", "Completed answer before idle compression.");
+  await backend.release(await backend.read(), history(base));
+  await expect(body.getByText("Completed answer before idle compression.", { exact: true })).toBeVisible();
+  const compaction = { event: "context_compaction" as const, chat_id: A, compaction_id: "idle-once" };
+  await backend.send({ ...compaction, phase: "started" });
+  await expect(body.locator('[data-context-compaction="started"]')).toHaveCount(1);
+  await backend.send({ ...compaction, phase: "succeeded" });
+  await expect(body.locator('[data-context-compaction="succeeded"]')).toHaveCount(1);
+
+  const completed = history([...base, { ...compaction, phase: "succeeded" }]);
+  backend.refreshThread();
+  await backend.release(await backend.read(A, null, 1), completed);
+  await expect(body.locator('[data-context-compaction="succeeded"]')).toHaveCount(1);
+  await expectBefore(body, "Completed answer before idle compression.", "Context compacted");
+  await page.reload();
+  await backend.ready();
+  await backend.release(await backend.read(A, null, 2), completed);
+  await expect(body.locator('[data-context-compaction="succeeded"]')).toHaveCount(1);
+  await expectBefore(body, "Completed answer before idle compression.", "Context compacted");
+  backend.healthy();
+});
+
+test("pre-request compaction precedes the answer in live output and history replay", async ({ page }) => {
+  const { backend, body } = await openFixture(page);
+  const base = closedTurn("before-native", "Previous question", "Previous answer.");
+  await backend.release(await backend.read(), history(base));
+  await expect(body.getByText("Previous answer.", { exact: true })).toBeVisible();
+  const question = input(TURN, "Question requiring native compression");
+  const compact: ThreadProjectionEvent = { ...at(TURN, 2, "activity"), event: "context_compaction", compaction_id: "native-before-answer", phase: "succeeded" };
+  await backend.send(question);
+  await backend.send({ event: "context_compaction", chat_id: A, compaction_id: "native-before-answer", phase: "started" });
+  await backend.send(compact);
+  await backend.send(delta(3, LIVE));
+  await backend.send(end(4, LIVE, "live-wire"));
+  const complete: ThreadProjectionEvent = { ...at(TURN, 5, "complete"), event: "turn_end" };
+  await backend.send(complete);
+  await expectBefore(body, "Context compacted", LIVE);
+  backend.refreshThread();
+  await backend.release(await backend.read(A, null, 1), history([...base, question, compact, end(4, LIVE, "live-wire"), complete]));
+  await expect(body.locator('[data-context-compaction="succeeded"]')).toHaveCount(1);
+  await expectBefore(body, "Context compacted", LIVE);
+  backend.healthy();
+});
 
 for (const width of [1440, 390]) {
   test(`synthetic live-first latest admits its prefix without refresh, then prepends two cursor pages (${width}px)`, async ({ page }) => {

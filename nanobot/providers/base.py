@@ -301,6 +301,8 @@ class LLMResponse:
     # True only when this response installed a new provider-native compaction
     # boundary. Replaying an older compaction item does not set this flag.
     provider_compaction_applied: bool = field(default=False, repr=False)
+    # Identity of the native lifecycle already reported by its operation owner.
+    provider_compaction_event_id: str | None = field(default=None, repr=False)
     # State immediately after native compaction, before the normal response
     # continues. An archive prompt can resume this state without replaying H.
     provider_compaction_state: ProviderConversationState | None = field(

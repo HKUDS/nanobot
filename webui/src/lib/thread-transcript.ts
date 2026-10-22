@@ -178,8 +178,9 @@ export class ThreadTranscript {
 
   registerInput(row: UIMessage, received = true): void {
     if (row.role === "user" && row.turnId) this.knownTurns.add(row.turnId);
-    const identity = row.sessionMessage?.message_id
-      ? `input:${row.sessionMessage.message_id}` : row.role === "user" && row.turnId
+    const identity = row.kind === "compaction" && row.compaction
+      ? `compaction:${row.compaction.id}` : row.sessionMessage?.message_id
+        ? `input:${row.sessionMessage.message_id}` : row.role === "user" && row.turnId
         ? `user:${row.turnId}` : row.turnId && row.turnSeq !== undefined
           ? `fact:${row.turnId}:${row.turnSeq}` : `replay:${row.id}`;
     if (this.bySource.has(identity)) return;
@@ -199,6 +200,9 @@ export class ThreadTranscript {
       const ranges = members.get(receipt.turn_id) ?? [];
       for (const [first, last] of receipt.ranges) addRange(ranges, first, last);
       members.set(receipt.turn_id, ranges);
+    }
+    if (event.event === "context_compaction") {
+      return { source: `compaction:${event.compaction_id}`, members, text: null };
     }
     if (event.event === "user_message") {
       return { source: event.provenance?.session_message?.message_id
