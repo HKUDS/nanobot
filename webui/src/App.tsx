@@ -2471,7 +2471,7 @@ function Shell({
         });
       } catch (e) {
         setPairingError((e as Error).message);
-        requestPairingRefresh();
+        void requestPairingRefresh().catch(() => {});
       } finally {
         setPairingBusyCode(null);
       }

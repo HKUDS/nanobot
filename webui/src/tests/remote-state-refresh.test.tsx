@@ -181,6 +181,31 @@ describe("remote directory state refresh", () => {
     expect(mocks.mutate).not.toHaveBeenCalled();
   });
 
+  it("coalesces manual, wake and state requests into one awaited follow-up", async () => {
+    let finishFirst!: (next: RemoteDirectory) => void;
+    let finishFollowUp!: (next: RemoteDirectory) => void;
+    mocks.read.mockImplementationOnce(() => new Promise<RemoteDirectory>((resolve) => { finishFirst = resolve; }))
+      .mockImplementationOnce(() => new Promise<RemoteDirectory>((resolve) => { finishFollowUp = resolve; }));
+    const { result } = renderHook(() => useHostSessions());
+    let completed = false;
+    let refresh!: Promise<unknown>;
+    act(() => {
+      refresh = result.current.refresh().then(() => { completed = true; });
+      window.dispatchEvent(new Event("online"));
+      window.dispatchEvent(new Event("pageshow"));
+      invalidate();
+    });
+    expect(mocks.read).toHaveBeenCalledTimes(1);
+    await act(async () => finishFirst(directory));
+    expect(mocks.read).toHaveBeenCalledTimes(2);
+    expect(completed).toBe(false);
+    const latest = { available: true, profiles: [{ ...profile, name: "Coalesced snapshot" }] };
+    await act(async () => { finishFollowUp(latest); await refresh; });
+    expect(mocks.read).toHaveBeenCalledTimes(2);
+    expect(completed).toBe(true);
+    expect(result.current.directory).toEqual(latest);
+  });
+
   it("does not let a hidden read swallow the visible-return refresh", async () => {
     let finish!: (next: RemoteDirectory) => void;
     mocks.read.mockImplementationOnce(() => new Promise<RemoteDirectory>((resolve) => { finish = resolve; }));
@@ -188,9 +213,9 @@ describe("remote directory state refresh", () => {
     const { result } = renderHook(() => useHostSessions());
     visibility.mockReturnValue("hidden");
     act(() => document.dispatchEvent(new Event("visibilitychange")));
+    mocks.read.mockResolvedValue({ available: true, profiles: [{ ...profile, name: "Visible snapshot" }] });
     visibility.mockReturnValue("visible");
     act(() => document.dispatchEvent(new Event("visibilitychange")));
-    mocks.read.mockResolvedValue({ available: true, profiles: [{ ...profile, name: "Visible snapshot" }] });
     await act(async () => finish(directory));
     expect(mocks.read).toHaveBeenCalledTimes(2);
     expect(result.current.directory?.profiles[0].name).toBe("Visible snapshot");
@@ -230,7 +255,7 @@ describe("remote directory state refresh", () => {
         signal.addEventListener("abort", () => reject(new DOMException("Hidden", "AbortError")), { once: true });
       });
     });
-    function DirectoryPage({ refresh }: { refresh: () => Promise<RemoteDirectory> }) {
+    function DirectoryPage({ refresh }: { refresh: () => Promise<void> }) {
       useEffect(() => { void refresh().catch(() => {}); }, [refresh]);
       return null;
     }
@@ -266,6 +291,19 @@ describe("remote directory state refresh", () => {
     controller.abort();
     await rejected;
     expect(requestSignal?.aborted).toBe(true);
+  });
+
+  it("still awaits an explicit legacy directory refresh when no host view needs polling", async () => {
+    vi.useFakeTimers(); mocks.state.capabilities = [];
+    const { result } = renderHook(() => useHostSessions());
+    await act(async () => {});
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(mocks.read).toHaveBeenCalledTimes(1);
+    const latest = { available: true, profiles: [{ ...profile, name: "Saved profile" }] };
+    mocks.read.mockResolvedValue(latest);
+    await act(async () => { await result.current.refresh(); });
+    expect(mocks.read).toHaveBeenCalledTimes(2);
+    expect(result.current.directory).toEqual(latest);
   });
 
   it("keeps visible legacy sampling and its browser debounce while stopping hidden reads", async () => {

@@ -311,6 +311,7 @@ describe("remote instance UX", () => {
     expect(mocks.request).not.toHaveBeenCalled();
   });
   it("manages connections without changing the remote host, route, frame or authorization", async () => {
+    mocks.read.mockResolvedValue({ available: true, machine_name: "Xubin-Mac", profiles: [{ ...profile, connected: true }] });
     view();
     await chooseHost("Team server ubuntu@example.test");
     const frame = await readyRemote();
@@ -1320,6 +1321,7 @@ describe("remote instance UX", () => {
   });
 
   it("tolerates transient health failures and covers, rather than reloads, the remote frame", async () => {
+    mocks.read.mockResolvedValue({ available: true, profiles: [{ ...profile, connected: true }] });
     const timer = vi.spyOn(window, "setTimeout");
     const tick = () => {
       const callback = [...timer.mock.calls].reverse().find(([, delay]) => delay === 5_000)?.[0];
@@ -1329,6 +1331,7 @@ describe("remote instance UX", () => {
     fireEvent.click(screen.getByRole("button", { name: "Team server ubuntu@example.test" }));
     const frame = await readyRemote();
     fireEvent.load(frame);
+    mocks.read.mockResolvedValue({ available: true, profiles: [profile] });
     await act(async () => { tick?.(); });
     expect(screen.queryByRole("region", { name: "Server connection lost" })).not.toBeInTheDocument();
     await act(async () => { tick?.(); });

@@ -136,19 +136,31 @@ describe("WebUI state refresh", () => {
       .mockResolvedValue(undefined);
     const { result, unmount } = renderHook(() => useStateRefresh("pairing", true, read, 15_000));
     const retry = result.current;
-    act(() => retry());
+    const cancelled = expect(retry()).rejects.toMatchObject({ name: "AbortError" });
     expect(read).toHaveBeenCalledTimes(1);
     visibility("hidden");
-    act(() => retry());
+    await act(async () => { await retry(); });
     visibility("visible");
     await act(async () => {});
     expect(read).toHaveBeenCalledTimes(2);
     expect((read.mock.calls[0][0] as AbortSignal).aborted).toBe(true);
-    await act(async () => finish());
+    await act(async () => { finish(); await cancelled; });
     expect(read).toHaveBeenCalledTimes(2);
     unmount();
-    act(() => retry());
+    await act(async () => { await retry(); });
     expect(read).toHaveBeenCalledTimes(2);
+  });
+
+  it("propagates a failed follow-up to the caller awaiting an explicit refresh", async () => {
+    let finish!: () => void;
+    const failure = new Error("directory unavailable");
+    const read = vi.fn().mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }))
+      .mockRejectedValue(failure);
+    const { result, unmount } = renderHook(() => useStateRefresh("remote_instances", true, read, 5000));
+    const rejected = expect(result.current()).rejects.toBe(failure);
+    await act(async () => { finish(); await rejected; });
+    expect(read).toHaveBeenCalledTimes(2);
+    unmount();
   });
 
   it("bounds transient retries and lets a later change recover a failed read", async () => {

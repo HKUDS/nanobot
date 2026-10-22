@@ -22,9 +22,7 @@ export function useHostSessions() {
   const stateEvents = webuiCapabilities.includes("webui.state-events.v1");
   const stateEventsRef = useRef(stateEvents);
   stateEventsRef.current = stateEvents;
-  const [directory, setDirectory] = useState<RemoteDirectory | null>(null);
-  const directoryRef = useRef(directory);
-  directoryRef.current = directory;
+  const [directory, setDirectory] = useState<RemoteDirectory | null>(() => window.top === window ? null : { available: false, profiles: [] });
   const [directoryError, setDirectoryError] = useState(false);
   const [selected, setSelected] = useState<SelectedRemote | null>(() => readPairReturn() ? null : readSelectedRemote());
   const [recentIds, setRecentIds] = useState(readRecentRemotes);
@@ -39,13 +37,6 @@ export function useHostSessions() {
   const [failure, setFailure] = useState<SwitchFailure | null>(null);
   const clearError = useCallback(() => setFailure(null), []);
   const directoryGeneration = useRef(0);
-  const directoryRead = useRef<Promise<RemoteDirectory> | null>(null);
-  const queuedRead = useRef(false);
-  const queuedHealth = useRef(false);
-  const queuedSignal = useRef<AbortSignal>();
-  const activeReadSignal = useRef<AbortSignal>();
-  const directoryAbort = useRef<AbortController | null>(null);
-  const followReadSignal = useRef<((signal?: AbortSignal) => void) | null>(null);
   const mounted = useRef(true);
   const epoch = useRef(0);
   const waiter = useRef<{ id: string; finish: (ready: boolean) => void } | null>(null);
@@ -136,70 +127,29 @@ export function useHostSessions() {
     }
     publish();
   }, [applyFrameHealth, publish]);
-  const refresh = useCallback((signal = activeReadSignal.current, checkHealth = false): Promise<RemoteDirectory> => {
-    if (document.visibilityState === "hidden") return Promise.resolve(directoryRef.current || { available: false, profiles: [] });
-    if (directoryRead.current) {
-      queuedRead.current = true;
-      queuedHealth.current ||= checkHealth;
-      queuedSignal.current = signal;
-      followReadSignal.current?.(signal);
-      return directoryRead.current;
-    }
-    const read = async () => {
-      let next: RemoteDirectory = { available: false, profiles: [] };
-      let error: unknown;
-      do {
-        queuedRead.current = false;
-        queuedHealth.current = false;
-        const generation = ++directoryGeneration.current;
-        const controller = new AbortController();
-        const linkedSignals = new Set<AbortSignal>();
-        const abort = () => controller.abort();
-        const follow = (source?: AbortSignal) => {
-          if (!source) return;
-          if (source.aborted) abort();
-          else if (!linkedSignals.has(source)) {
-            linkedSignals.add(source); source.addEventListener("abort", abort, { once: true });
-          }
-        };
-        directoryAbort.current = controller;
-        followReadSignal.current = follow;
-        follow(signal);
-        error = undefined;
-        try {
-          next = await (window.top === window ? readRemoteInstances(getToken(), controller.signal) : Promise.resolve({ available: false, profiles: [] }));
-          if (mounted.current && !controller.signal.aborted && generation === directoryGeneration.current) {
-            applyDirectory(next);
-            if (stateEventsRef.current || checkHealth) applyHealth(next);
-          }
-        } catch (reason) {
-          error = reason;
-          if (mounted.current && !controller.signal.aborted && generation === directoryGeneration.current) {
-            setDirectoryError(true);
-            if (!stateEventsRef.current && checkHealth) {
-              for (const [id, frame] of cache.current) {
-                if (id === pendingRef.current?.id) continue;
-                if (++frame.failures >= 2) { frame.offline = true; frame.error = "directory_unavailable"; }
-              }
-              publish();
-            }
-          }
-        } finally {
-          for (const source of linkedSignals) source.removeEventListener("abort", abort);
-          followReadSignal.current = null;
-          directoryAbort.current = null;
-        }
-        checkHealth = queuedHealth.current;
-        signal = queuedSignal.current;
-      } while (queuedRead.current && mounted.current && !signal?.aborted && document.visibilityState !== "hidden");
-      directoryRead.current = null;
-      if (error) throw error;
+  const refresh = useStateRefresh("remote_instances", window.top === window, async (signal) => {
+    const generation = ++directoryGeneration.current;
+    try {
+      const next = await readRemoteInstances(getToken(), signal);
+      if (mounted.current && !signal.aborted && generation === directoryGeneration.current) {
+        applyDirectory(next);
+        applyHealth(next);
+      }
       return next;
-    };
-    const task = read();
-    directoryRead.current = task;
-    return task;
-  }, [applyDirectory, applyHealth, getToken, publish]);
+    } catch (reason) {
+      if (mounted.current && !signal.aborted && generation === directoryGeneration.current) {
+        setDirectoryError(true);
+        if (!stateEventsRef.current) {
+          for (const [id, frame] of cache.current) {
+            if (id === pendingRef.current?.id) continue;
+            if (++frame.failures >= 2) { frame.offline = true; frame.error = "directory_unavailable"; }
+          }
+          publish();
+        }
+      }
+      throw reason;
+    }
+  }, () => cache.current.size ? 5_000 : null);
 
   const connect = useCallback(async (id: string, stillWanted: () => boolean = () => true) => {
     cancel();
@@ -297,16 +247,11 @@ export function useHostSessions() {
 
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; directoryGeneration.current += 1; directoryAbort.current?.abort(); cancel(); };
+    return () => { mounted.current = false; directoryGeneration.current += 1; cancel(); };
   }, [cancel]);
-  useStateRefresh("remote_instances", window.top === window, async (signal, initial) => {
-    activeReadSignal.current = signal;
-    if (!stateEvents && !initial && !cache.current.size) return;
-    await refresh(signal, !initial || cache.current.size > 0);
-  }, 5_000);
   useEffect(() => {
     const wake = () => {
-      if (document.visibilityState !== "hidden" && window.top === window) void refresh(undefined, true).catch(() => {});
+      void refresh().catch(() => {});
     };
     window.addEventListener("online", wake);
     window.addEventListener("pageshow", wake);

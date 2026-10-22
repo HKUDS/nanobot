@@ -18,7 +18,7 @@ export const RemoteContext = createContext<{
   openHostIds: string[];
   directory: RemoteDirectory | null;
   directoryError: boolean;
-  refresh: () => Promise<RemoteDirectory>;
+  refresh: () => Promise<void>;
   rename: (id: string, name: string) => Promise<void>;
   connect: (id: string, stillWanted?: () => boolean) => Promise<void>;
   disconnect: (id: string) => Promise<void>;
