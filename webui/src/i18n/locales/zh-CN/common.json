@@ -2008,16 +2008,16 @@
     "compaction": {
       "reasons": {
         "idle": {
-          "started": "正在空闲自动压缩",
-          "succeeded": "空闲自动压缩完成",
-          "failed": "空闲自动压缩失败",
-          "cancelled": "空闲自动压缩已中断"
+          "started": "会话空闲，正在自动压缩上下文",
+          "succeeded": "会话空闲，已自动压缩上下文",
+          "failed": "空闲时自动压缩上下文失败",
+          "cancelled": "空闲时的上下文压缩已中断"
         },
         "context_pressure": {
-          "started": "正在上下文容量压缩",
-          "succeeded": "上下文容量压缩完成",
-          "failed": "上下文容量压缩失败",
-          "cancelled": "上下文容量压缩已取消"
+          "started": "上下文较长，正在压缩",
+          "succeeded": "上下文较长，已自动压缩",
+          "failed": "上下文较长，自动压缩失败",
+          "cancelled": "上下文较长，压缩已取消"
         },
         "manual": {
           "started": "正在手动压缩",
@@ -2026,10 +2026,10 @@
           "cancelled": "手动压缩已取消"
         },
         "provider_native": {
-          "started": "正在模型服务端压缩",
-          "succeeded": "模型服务端压缩完成",
-          "failed": "模型服务端压缩失败",
-          "cancelled": "模型服务端压缩已取消"
+          "started": "模型服务正在压缩上下文",
+          "succeeded": "模型服务已压缩上下文",
+          "failed": "模型服务未能完成上下文压缩",
+          "cancelled": "模型服务的上下文压缩已取消"
         }
       },
       "cancelled": "上下文压缩已取消",

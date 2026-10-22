@@ -1808,16 +1808,16 @@
     "compaction": {
       "reasons": {
         "idle": {
-          "started": "正在閒置自動壓縮",
-          "succeeded": "閒置自動壓縮完成",
-          "failed": "閒置自動壓縮失敗",
-          "cancelled": "閒置自動壓縮已中斷"
+          "started": "對話閒置，正在自動壓縮上下文",
+          "succeeded": "對話閒置，已自動壓縮上下文",
+          "failed": "閒置時自動壓縮上下文失敗",
+          "cancelled": "閒置時的上下文壓縮已中斷"
         },
         "context_pressure": {
-          "started": "正在上下文容量壓縮",
-          "succeeded": "上下文容量壓縮完成",
-          "failed": "上下文容量壓縮失敗",
-          "cancelled": "上下文容量壓縮已取消"
+          "started": "上下文較長，正在壓縮",
+          "succeeded": "上下文較長，已自動壓縮",
+          "failed": "上下文較長，自動壓縮失敗",
+          "cancelled": "上下文較長，壓縮已取消"
         },
         "manual": {
           "started": "正在手動壓縮",
@@ -1826,10 +1826,10 @@
           "cancelled": "手動壓縮已取消"
         },
         "provider_native": {
-          "started": "正在模型服務端壓縮",
-          "succeeded": "模型服務端壓縮完成",
-          "failed": "模型服務端壓縮失敗",
-          "cancelled": "模型服務端壓縮已取消"
+          "started": "模型服務正在壓縮上下文",
+          "succeeded": "模型服務已壓縮上下文",
+          "failed": "模型服務未能完成上下文壓縮",
+          "cancelled": "模型服務的上下文壓縮已取消"
         }
       },
       "cancelled": "上下文壓縮已取消",

@@ -1824,26 +1824,26 @@
         "idle": {
           "started": "Compactação automática por inatividade em andamento",
           "succeeded": "Compactação automática por inatividade concluída",
-          "failed": "Compactação automática por inatividade falhou",
+          "failed": "Falha na compactação automática por inatividade",
           "cancelled": "Compactação automática por inatividade interrompida"
         },
         "context_pressure": {
-          "started": "Compactação por capacidade do contexto em andamento",
-          "succeeded": "Compactação por capacidade do contexto concluída",
-          "failed": "Compactação por capacidade do contexto falhou",
-          "cancelled": "Compactação por capacidade do contexto cancelada"
+          "started": "Compactando um contexto longo",
+          "succeeded": "Contexto longo compactado",
+          "failed": "Falha ao compactar um contexto longo",
+          "cancelled": "Compactação de um contexto longo cancelada"
         },
         "manual": {
           "started": "Compactação manual em andamento",
           "succeeded": "Compactação manual concluída",
-          "failed": "Compactação manual falhou",
+          "failed": "Falha na compactação manual",
           "cancelled": "Compactação manual cancelada"
         },
         "provider_native": {
-          "started": "Compactação do provedor em andamento",
-          "succeeded": "Compactação do provedor concluída",
-          "failed": "Compactação do provedor falhou",
-          "cancelled": "Compactação do provedor cancelada"
+          "started": "Compactando o contexto no servidor do provedor",
+          "succeeded": "Contexto compactado no servidor do provedor",
+          "failed": "Falha na compactação no servidor do provedor",
+          "cancelled": "Compactação cancelada no servidor do provedor"
         }
       },
       "cancelled": "Compactação do contexto cancelada",

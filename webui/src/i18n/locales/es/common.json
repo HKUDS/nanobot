@@ -1809,28 +1809,28 @@
     "compaction": {
       "reasons": {
         "idle": {
-          "started": "Compactación automática por inactividad en curso",
-          "succeeded": "Compactación automática por inactividad completada",
-          "failed": "Compactación automática por inactividad fallida",
-          "cancelled": "Compactación automática por inactividad interrumpida"
+          "started": "Compresión automática por inactividad en curso",
+          "succeeded": "Compresión automática por inactividad completada",
+          "failed": "Falló la compresión automática por inactividad",
+          "cancelled": "Compresión automática por inactividad interrumpida"
         },
         "context_pressure": {
-          "started": "Compactación por capacidad del contexto en curso",
-          "succeeded": "Compactación por capacidad del contexto completada",
-          "failed": "Compactación por capacidad del contexto fallida",
-          "cancelled": "Compactación por capacidad del contexto cancelada"
+          "started": "Comprimiendo un contexto extenso",
+          "succeeded": "Contexto extenso comprimido",
+          "failed": "Falló la compresión de un contexto extenso",
+          "cancelled": "Compresión de un contexto extenso cancelada"
         },
         "manual": {
-          "started": "Compactación manual en curso",
-          "succeeded": "Compactación manual completada",
-          "failed": "Compactación manual fallida",
-          "cancelled": "Compactación manual cancelada"
+          "started": "Compresión manual en curso",
+          "succeeded": "Compresión manual completada",
+          "failed": "Falló la compresión manual",
+          "cancelled": "Compresión manual cancelada"
         },
         "provider_native": {
-          "started": "Compactación del proveedor en curso",
-          "succeeded": "Compactación del proveedor completada",
-          "failed": "Compactación del proveedor fallida",
-          "cancelled": "Compactación del proveedor cancelada"
+          "started": "Comprimiendo el contexto en el servidor del proveedor",
+          "succeeded": "Contexto comprimido en el servidor del proveedor",
+          "failed": "Falló la compresión en el servidor del proveedor",
+          "cancelled": "Compresión cancelada en el servidor del proveedor"
         }
       },
       "cancelled": "Compresión de contexto cancelada",

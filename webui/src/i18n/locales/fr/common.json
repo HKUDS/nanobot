@@ -1808,28 +1808,28 @@
     "compaction": {
       "reasons": {
         "idle": {
-          "started": "Compactage automatique à l’inactivité en cours",
-          "succeeded": "Compactage automatique à l’inactivité terminé",
-          "failed": "Compactage automatique à l’inactivité échoué",
-          "cancelled": "Compactage automatique à l’inactivité interrompu"
+          "started": "Conversation inactive : compression automatique en cours",
+          "succeeded": "Conversation inactive : compression automatique terminée",
+          "failed": "Conversation inactive : échec de la compression automatique",
+          "cancelled": "Conversation inactive : compression automatique interrompue"
         },
         "context_pressure": {
-          "started": "Compactage de capacité du contexte en cours",
-          "succeeded": "Compactage de capacité du contexte terminé",
-          "failed": "Compactage de capacité du contexte échoué",
-          "cancelled": "Compactage de capacité du contexte annulé"
+          "started": "Compression d’un contexte volumineux en cours",
+          "succeeded": "Contexte volumineux compressé",
+          "failed": "Échec de la compression d’un contexte volumineux",
+          "cancelled": "Compression d’un contexte volumineux annulée"
         },
         "manual": {
-          "started": "Compactage manuel en cours",
-          "succeeded": "Compactage manuel terminé",
-          "failed": "Compactage manuel échoué",
-          "cancelled": "Compactage manuel annulé"
+          "started": "Compression manuelle en cours",
+          "succeeded": "Compression manuelle terminée",
+          "failed": "Échec de la compression manuelle",
+          "cancelled": "Compression manuelle annulée"
         },
         "provider_native": {
-          "started": "Compactage côté fournisseur en cours",
-          "succeeded": "Compactage côté fournisseur terminé",
-          "failed": "Compactage côté fournisseur échoué",
-          "cancelled": "Compactage côté fournisseur annulé"
+          "started": "Compression en cours sur le serveur du fournisseur",
+          "succeeded": "Contexte compressé sur le serveur du fournisseur",
+          "failed": "Échec de la compression sur le serveur du fournisseur",
+          "cancelled": "Compression annulée sur le serveur du fournisseur"
         }
       },
       "cancelled": "Compression du contexte annulée",

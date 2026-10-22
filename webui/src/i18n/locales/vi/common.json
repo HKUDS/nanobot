@@ -1808,28 +1808,28 @@
     "compaction": {
       "reasons": {
         "idle": {
-          "started": "Tự động nén khi nhàn rỗi: đang thực hiện",
-          "succeeded": "Tự động nén khi nhàn rỗi: hoàn tất",
-          "failed": "Tự động nén khi nhàn rỗi: thất bại",
-          "cancelled": "Tự động nén khi nhàn rỗi: bị gián đoạn"
+          "started": "Đang tự động nén ngữ cảnh khi không có tin nhắn mới",
+          "succeeded": "Đã tự động nén ngữ cảnh khi không có tin nhắn mới",
+          "failed": "Không thể tự động nén ngữ cảnh khi không có tin nhắn mới",
+          "cancelled": "Quá trình tự động nén ngữ cảnh khi không có tin nhắn mới bị gián đoạn"
         },
         "context_pressure": {
-          "started": "Nén theo dung lượng ngữ cảnh: đang thực hiện",
-          "succeeded": "Nén theo dung lượng ngữ cảnh: hoàn tất",
-          "failed": "Nén theo dung lượng ngữ cảnh: thất bại",
-          "cancelled": "Nén theo dung lượng ngữ cảnh: đã hủy"
+          "started": "Đang nén vì ngữ cảnh đã dài",
+          "succeeded": "Đã nén ngữ cảnh dài",
+          "failed": "Nén ngữ cảnh dài không thành công",
+          "cancelled": "Đã hủy nén ngữ cảnh dài"
         },
         "manual": {
-          "started": "Nén thủ công: đang thực hiện",
-          "succeeded": "Nén thủ công: hoàn tất",
-          "failed": "Nén thủ công: thất bại",
-          "cancelled": "Nén thủ công: đã hủy"
+          "started": "Đang nén ngữ cảnh theo yêu cầu của bạn",
+          "succeeded": "Đã nén ngữ cảnh theo yêu cầu của bạn",
+          "failed": "Không thể nén ngữ cảnh theo yêu cầu của bạn",
+          "cancelled": "Đã hủy lần nén ngữ cảnh bạn yêu cầu"
         },
         "provider_native": {
-          "started": "Nén phía nhà cung cấp: đang thực hiện",
-          "succeeded": "Nén phía nhà cung cấp: hoàn tất",
-          "failed": "Nén phía nhà cung cấp: thất bại",
-          "cancelled": "Nén phía nhà cung cấp: đã hủy"
+          "started": "Nhà cung cấp mô hình đang nén ngữ cảnh",
+          "succeeded": "Nhà cung cấp mô hình đã nén ngữ cảnh",
+          "failed": "Nén ngữ cảnh trên máy chủ nhà cung cấp không thành công",
+          "cancelled": "Đã hủy nén ngữ cảnh trên máy chủ nhà cung cấp"
         }
       },
       "cancelled": "Đã hủy nén ngữ cảnh",

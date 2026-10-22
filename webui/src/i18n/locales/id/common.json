@@ -1808,28 +1808,28 @@
     "compaction": {
       "reasons": {
         "idle": {
-          "started": "Pemadatan otomatis saat tidak aktif berlangsung",
-          "succeeded": "Pemadatan otomatis saat tidak aktif selesai",
-          "failed": "Pemadatan otomatis saat tidak aktif gagal",
-          "cancelled": "Pemadatan otomatis saat tidak aktif terhenti"
+          "started": "Memadatkan konteks secara otomatis saat tidak ada pesan baru",
+          "succeeded": "Konteks dipadatkan otomatis saat tidak ada pesan baru",
+          "failed": "Gagal memadatkan konteks secara otomatis saat tidak ada pesan baru",
+          "cancelled": "Pemadatan konteks otomatis saat tidak ada pesan baru terhenti"
         },
         "context_pressure": {
-          "started": "Pemadatan kapasitas konteks berlangsung",
-          "succeeded": "Pemadatan kapasitas konteks selesai",
-          "failed": "Pemadatan kapasitas konteks gagal",
-          "cancelled": "Pemadatan kapasitas konteks dibatalkan"
+          "started": "Memadatkan konteks karena sudah panjang",
+          "succeeded": "Konteks yang panjang telah dipadatkan",
+          "failed": "Gagal memadatkan konteks yang panjang",
+          "cancelled": "Pemadatan konteks yang panjang dibatalkan"
         },
         "manual": {
-          "started": "Pemadatan manual berlangsung",
-          "succeeded": "Pemadatan manual selesai",
-          "failed": "Pemadatan manual gagal",
-          "cancelled": "Pemadatan manual dibatalkan"
+          "started": "Memadatkan konteks atas permintaan Anda",
+          "succeeded": "Konteks dipadatkan atas permintaan Anda",
+          "failed": "Pemadatan konteks yang Anda minta gagal",
+          "cancelled": "Pemadatan konteks yang Anda minta dibatalkan"
         },
         "provider_native": {
-          "started": "Pemadatan penyedia model berlangsung",
-          "succeeded": "Pemadatan penyedia model selesai",
-          "failed": "Pemadatan penyedia model gagal",
-          "cancelled": "Pemadatan penyedia model dibatalkan"
+          "started": "Penyedia model sedang memadatkan konteks",
+          "succeeded": "Penyedia model telah memadatkan konteks",
+          "failed": "Pemadatan konteks di server penyedia model gagal",
+          "cancelled": "Pemadatan konteks di server penyedia model dibatalkan"
         }
       },
       "cancelled": "Pemadatan konteks dibatalkan",

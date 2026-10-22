@@ -2008,16 +2008,16 @@
     "compaction": {
       "reasons": {
         "idle": {
-          "started": "Idle context auto-compaction in progress",
-          "succeeded": "Idle context auto-compaction complete",
-          "failed": "Idle context auto-compaction failed",
-          "cancelled": "Idle context auto-compaction interrupted"
+          "started": "Automatically compacting context after inactivity",
+          "succeeded": "Context automatically compacted after inactivity",
+          "failed": "Automatic context compaction failed after inactivity",
+          "cancelled": "Automatic context compaction interrupted after inactivity"
         },
         "context_pressure": {
-          "started": "Context capacity compaction in progress",
-          "succeeded": "Context capacity compaction complete",
-          "failed": "Context capacity compaction failed",
-          "cancelled": "Context capacity compaction cancelled"
+          "started": "Compacting a long context",
+          "succeeded": "Long context compacted",
+          "failed": "Failed to compact a long context",
+          "cancelled": "Compaction of a long context cancelled"
         },
         "manual": {
           "started": "Manual compaction in progress",
@@ -2026,10 +2026,10 @@
           "cancelled": "Manual compaction cancelled"
         },
         "provider_native": {
-          "started": "Provider compaction in progress",
-          "succeeded": "Provider compaction complete",
-          "failed": "Provider compaction failed",
-          "cancelled": "Provider compaction cancelled"
+          "started": "Compacting context on the provider's server",
+          "succeeded": "Context compacted on the provider's server",
+          "failed": "Failed to compact context on the provider's server",
+          "cancelled": "Context compaction cancelled on the provider's server"
         }
       },
       "cancelled": "Context compaction cancelled",
