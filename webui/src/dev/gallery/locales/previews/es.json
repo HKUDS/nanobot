@@ -61,16 +61,6 @@
     "scope": "Ámbito del archivo",
     "hint": "Haz clic derecho para abrir el menú de copia, o enfoca el archivo y pulsa Mayús+F10."
   },
-  "webLinks": {
-    "title": "Web links · Menú de enlaces",
-    "description": "Abre el menú real de enlaces para elegir enlaces del mensaje y copiar direcciones.",
-    "options": "WebLink recibe atributos de enlace. useMessageWebLinks recoge los enlaces renderizados. MessageLinksMenu recibe entradas y funciones de volver y cerrar; expanded controla el ancho. Todos los enlaces apuntan a recursos locales de la galería.",
-    "width": "Ancho del menú de enlaces",
-    "message": "Consulta la <gallery>galería de componentes</gallery> y la <brand>imagen de marca</brand>.",
-    "close": "Cerrar menú de enlaces",
-    "open": "Ver enlaces del mensaje",
-    "hint": "Haz clic derecho en un enlace para copiar su dirección. El menú recoge los enlaces del mensaje renderizado."
-  },
   "workbench": {
     "title": "PaneWorkbench · Paneles múltiples",
     "description": "Cambia la disposición, activa o añade paneles y ajusta su posición y tamaño.",
@@ -234,14 +224,6 @@
     "description": "Compara texto, imágenes, truncamiento, carga y errores. Selecciona una imagen para ampliarla.",
     "options": "state aporta la instantánea visual; path determina el tipo y nombre del archivo. Las funciones de apertura y error de imagen actualizan la vista previa.",
     "state": "Estado de la vista previa del archivo"
-  },
-  "webPreview": {
-    "title": "WebPreviewPanelView · Contenido web",
-    "description": "Explora la barra de título, el aislamiento y las restricciones; actualiza un documento local.",
-    "options": "El entorno de ejecución elige restriction antes de aportar el contenido. children lo contiene y onRefresh solicita una actualización. Este iframe usa un srcDoc local.",
-    "state": "Estado de la vista previa web",
-    "frame": "Página web local de ejemplo",
-    "refreshes": "Actualizaciones: {{amount}}"
   },
   "session": {
     "title": "SessionInfoPopoverView · Automatizaciones de sesión",

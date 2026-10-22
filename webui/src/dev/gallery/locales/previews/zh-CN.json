@@ -61,16 +61,6 @@
     "scope": "文件范围",
     "hint": "右键打开复制菜单，也可聚焦文件后按 Shift+F10。"
   },
-  "webLinks": {
-    "title": "Web links · 链接菜单",
-    "description": "选择消息链接并复制地址。",
-    "options": "WebLink 接收链接属性；useMessageWebLinks 收集实际渲染的消息链接。MessageLinksMenu 接收条目、返回与关闭回调，expanded 控制宽度。示例链接均指向本地画廊资源。",
-    "width": "链接菜单宽度",
-    "message": "查看<gallery>组件画廊</gallery>和<brand>品牌图片</brand>。",
-    "close": "关闭链接菜单",
-    "open": "查看消息链接",
-    "hint": "右键链接可复制地址；消息菜单从实际渲染的链接中收集条目。"
-  },
   "workbench": {
     "title": "PaneWorkbench · 多窗格",
     "description": "切换布局、激活或添加窗格并调整尺寸。",
@@ -234,14 +224,6 @@
     "description": "比较文件显示状态，点击图片试用缩放。",
     "options": "state 为显示快照；path 决定文件类型和名称；图片打开与失败回调更新当前预览。",
     "state": "文件预览状态"
-  },
-  "webPreview": {
-    "title": "WebPreviewPanelView · 网页内容",
-    "description": "查看隔离与限制提示，试用刷新本地文档。",
-    "options": "运行时先决定 restriction，再提供内容。children 接收内容，onRefresh 请求刷新；此示例的 iframe 使用本地 srcDoc。",
-    "state": "网页预览状态",
-    "frame": "本地示例网页",
-    "refreshes": "刷新次数：{{amount}}"
   },
   "session": {
     "title": "SessionInfoPopoverView · 会话任务",

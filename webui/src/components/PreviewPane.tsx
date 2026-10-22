@@ -1,15 +1,11 @@
 import { useEffect, useId, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
-import { Globe2, PanelRightClose, X } from "lucide-react";
+import { PanelRightClose, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { FileReferenceIcon, fileKindForPath, splitFilePath } from "@/components/FileReferenceChip";
 import { FileActions } from "@/components/FileActions";
 import { SidebarSelectionHighlight, SIDEBAR_SELECTION_ITEM_CLASS } from "@/components/SidebarSelectionHighlight";
 import type { PreviewTab } from "@/hooks/useFilePreviewState";
 import { cn } from "@/lib/utils";
-
-function tabName(tab: PreviewTab) {
-  return tab.kind === "web" ? new URL(tab.value).host : splitFilePath(tab.value).name;
-}
 
 /** One stable sidebar shell: switching targets never replays its opening animation. */
 export function PreviewPane({ tabs, activeId, width, isClosing, onSelect, onCloseTab, onClose, onResizeStart, children }: {
@@ -72,7 +68,7 @@ export function PreviewPane({ tabs, activeId, width, isClosing, onSelect, onClos
             highlightClassName="rounded-compact">
           {tabs.map((tab, index) => {
             const selected = tab.id === activeId;
-            const name = tabName(tab);
+            const name = splitFilePath(tab.value).name;
             const item = <div key={tab.id} role="presentation" data-preview-tab-active={selected ? "" : undefined}
               className={cn(SIDEBAR_SELECTION_ITEM_CLASS, "group flex min-h-8 max-w-56 shrink-0 items-center rounded-compact", selected ? "text-foreground" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground")}>
               <button type="button" role="tab" id={`${id}-tab-${index}`} aria-selected={selected} aria-controls={`${id}-panel`}
@@ -93,8 +89,7 @@ export function PreviewPane({ tabs, activeId, width, isClosing, onSelect, onClos
                 }}
                 className="touch-target flex h-8 min-w-0 items-center gap-1.5 rounded-compact pl-2.5 pr-1.5 text-[12.5px] font-medium leading-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
                 <span aria-hidden className="flex size-3.5 shrink-0 items-center justify-center text-muted-foreground">
-                  {tab.kind === "web" ? <Globe2 className="size-3.5" />
-                    : <FileReferenceIcon kind={fileKindForPath(tab.value)} className="size-3.5" />}
+                  <FileReferenceIcon kind={fileKindForPath(tab.value)} className="size-3.5" />
                 </span>
                 <span className="truncate">{name}</span>
               </button>
@@ -104,7 +99,7 @@ export function PreviewPane({ tabs, activeId, width, isClosing, onSelect, onClos
                 <X className="size-3" aria-hidden />
               </button>
             </div>;
-            return tab.kind === "file" ? <FileActions key={tab.id} path={tab.value} className="shrink-0">{item}</FileActions> : item;
+            return <FileActions key={tab.id} path={tab.value} className="shrink-0">{item}</FileActions>;
           })}
           </SidebarSelectionHighlight>
         </div>

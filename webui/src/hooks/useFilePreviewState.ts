@@ -2,7 +2,6 @@ import { useCallback, useState, useSyncExternalStore } from "react";
 
 export interface PreviewTab {
   id: string;
-  kind: "file" | "web";
   value: string;
   canonicalPath?: string;
 }
@@ -37,11 +36,11 @@ export class FilePreviewStore {
     this.listeners.forEach((listener) => listener());
   }
 
-  open(key: string, kind: PreviewTab["kind"], value: string) {
+  open(key: string, value: string) {
     const previous = this.get(key);
-    const id = `${kind}:${value}`;
+    const id = `file:${value}`;
     const tabs = previous.tabs.some((tab) => tab.id === id)
-      ? previous.tabs : [...previous.tabs, { id, kind, value }];
+      ? previous.tabs : [...previous.tabs, { id, value }];
     this.update(key, { tabs, activeId: id });
   }
 
@@ -51,8 +50,7 @@ export class FilePreviewStore {
     const id = `file:${path}`;
     const current = previous.tabs.find(tab => tab.id === id);
     if (!current || current.canonicalPath === canonicalPath) return;
-    const existing = previous.tabs.find(tab => tab.id !== id && tab.kind === "file"
-      && tab.canonicalPath === canonicalPath);
+    const existing = previous.tabs.find(tab => tab.id !== id && tab.canonicalPath === canonicalPath);
     const tabs = existing
       ? previous.tabs.filter(tab => tab.id !== id)
       : previous.tabs.map(tab => tab.id === id ? { ...tab, canonicalPath } : tab);
@@ -94,16 +92,13 @@ export function useFilePreviewState(key: string | null, sharedStore?: FilePrevie
   const snapshot = useCallback(() => store.get(key), [key, store]);
   const state = useSyncExternalStore(store.subscribe, snapshot, snapshot);
   const openFile = useCallback((path: string) => {
-    if (key) store.open(key, "file", path);
+    if (key) store.open(key, path);
   }, [key, store]);
   const resolveFile = useCallback((path: string, canonicalPath: string) => {
     if (key) store.resolveFile(key, path, canonicalPath);
   }, [key, store]);
   const setWidth = useCallback((width: number) => {
     if (key) store.update(key, { width });
-  }, [key, store]);
-  const openWeb = useCallback((url: string) => {
-    if (key) store.open(key, "web", url);
   }, [key, store]);
   const selectTab = useCallback((id: string) => {
     if (key) store.select(key, id);
@@ -114,5 +109,5 @@ export function useFilePreviewState(key: string | null, sharedStore?: FilePrevie
   const close = useCallback(() => {
     if (key) store.close(key);
   }, [key, store]);
-  return { state, openFile, resolveFile, openWeb, selectTab, closeTab, close, setWidth };
+  return { state, openFile, resolveFile, selectTab, closeTab, close, setWidth };
 }

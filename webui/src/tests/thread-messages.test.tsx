@@ -52,6 +52,19 @@ function openMessageBlockMenu(root: ParentNode): {
 }
 
 describe("ThreadMessages", () => {
+  it("preserves native context menus and navigation on rendered reply links", async () => {
+    await preloadMarkdownText();
+    render(<ThreadMessages messages={[
+      { id: "reply", role: "assistant", content: "[**Website**](https://example.com/?q=one#two)", createdAt: 1 },
+    ]} />);
+    const link = await screen.findByRole("link", { name: "Website" });
+    expect(fireEvent.contextMenu(within(link).getByText("Website"))).toBe(true);
+    link.focus();
+    expect(fireEvent.keyDown(link, { key: "F10", shiftKey: true })).toBe(true);
+    expect(link).toHaveFocus();
+    expect(fireEvent.click(link, { ctrlKey: true })).toBe(true);
+  });
+
   it.each(["diff", "collapsed_diff"] as const)(
     "keeps completed %s edits visible when answer activity is toggled",
     (fileEditDisplayMode) => {

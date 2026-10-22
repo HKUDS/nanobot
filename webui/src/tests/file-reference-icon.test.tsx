@@ -41,7 +41,7 @@ describe("shared file icons", () => {
       const open = vi.fn();
       render(<>
         <FileReferenceChip path={path} onOpen={open} />
-        <PreviewPane tabs={[{ id: path, kind: "file", value: path }]} activeId={path}
+        <PreviewPane tabs={[{ id: path, value: path }]} activeId={path}
           width={544} isClosing={false} onSelect={() => {}} onCloseTab={() => {}}
           onClose={() => {}} onResizeStart={() => {}}><p>Preview</p></PreviewPane>
         <AttachmentTile attachment={{ kind: "file", name: path, url: `/download/${path}` }} />

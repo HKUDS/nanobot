@@ -355,32 +355,7 @@
   "previewTabs": {
     "title": "Vista previa",
     "closeTab": "Cerrar {{name}}",
-    "closeAll": "Cerrar panel de vista previa",
-    "websiteInfo": "Acerca de las vistas previas web"
-  },
-  "webPreview": {
-    "viewLinks": "Ver enlaces",
-    "back": "Atrás",
-    "original": "Enlace original",
-    "actions": "Acciones del enlace",
-    "open": "Vista previa del sitio",
-    "external": "Abrir en navegador",
-    "copy": "Copiar enlace",
-    "copied": "Enlace copiado",
-    "copyFailed": "No se pudo copiar el enlace",
-    "title": "Vista previa web",
-    "resize": "Cambiar ancho de la vista previa",
-    "refresh": "Actualizar sitio",
-    "close": "Cerrar vista previa",
-    "isolated": "Vista previa aislada y limitada. El inicio de sesión y algunas funciones pueden no funcionar.",
-    "blockedHint": "Algunos sitios bloquean la inserción. Si la vista está vacía o falla, ábrela en el navegador.",
-    "loopback": "Localhost apunta al dispositivo de este navegador, no a una pasarela remota. No se reenvían puertos.",
-    "native": "La aplicación nativa no admite vistas previas incrustadas. Abre el enlace en el navegador.",
-    "unsupported": "Este navegador no admite vistas previas con credenciales aisladas. Abre el enlace en una pestaña nueva.",
-    "sameOrigin": "No se puede incrustar la propia aplicación nanobot. Ábrela en una pestaña nueva.",
-    "mixedContent": "Una página HTTPS no puede previsualizar un sitio HTTP aquí. Ábrelo en una pestaña nueva.",
-    "invalid": "No se puede previsualizar esta dirección.",
-    "frame": "Vista previa web: {{host}}"
+    "closeAll": "Cerrar panel de vista previa"
   },
   "starPrompt": {
     "footerAction": "Dale una estrella a nanobot",

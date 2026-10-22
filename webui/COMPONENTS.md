@@ -23,7 +23,7 @@ Change state selectors to inspect streaming, completion, disabled, missing-media
 
 Feature screens that own gateway requests, session state, or host connections are indexed with their source and callers. Exercise their complete workflows in the running WebUI. The gallery does not emulate those services.
 
-Runtime adapters and presentation views have separate responsibilities. Adapters subscribe to clients, load data, enforce browser restrictions, and perform service actions. Their views receive display data and operation callbacks. Production screens and gallery examples mount the same views, including host menus, pairing, file/web previews, session tasks, automation results, version information, and notification preferences. Connected source entries link to the corresponding view examples.
+Runtime adapters and presentation views have separate responsibilities. Adapters subscribe to clients, load data, enforce browser restrictions, and perform service actions. Their views receive display data and operation callbacks. Production screens and gallery examples mount the same views, including host menus, pairing, file previews, session tasks, automation results, version information, and notification preferences. Connected source entries link to the corresponding view examples.
 
 Every channel registration has a preview. Channels with shared configuration forms use their production setup view; Linear, Feishu, Weixin, and WhatsApp use their channel-owned views, including authorization, verification, assistant management, and connection reset. The source inventory includes channel `webui/index.ts` registrations as well as `.tsx` components. Connected adapters link to the views they own.
 

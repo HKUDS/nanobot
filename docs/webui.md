@@ -357,17 +357,13 @@ Leave remote package installs disabled when the WebUI is exposed beyond a privat
 
 ## Troubleshooting
 
-### Links and website previews
+### Links and message actions
 
-HTTP(S) links in replies have a **Link actions** menu: right-click the link or press Shift+F10 while it is focused. Touch and hold keeps the browser's native link menu. For in-app actions on touch devices, open the message's existing **Message actions → View links** entry. It lists only the web links rendered in that message, not URLs inside code blocks or file references. Choose a link to copy it, open it externally, or preview it beside the current conversation. On phone-sized screens, Copy and Message actions sit below the message, leaving the full text width available. Message actions opens a bottom sheet; close it with its close button, by tapping outside, or with Escape. Desktop keeps the hover-triggered message popover. On desktop, hovering or focusing a message also reveals a short timestamp below its actions: a 24-hour clock for today, or month/day for every other date. Hover or focus that label for the full local date and time, including the year. Replies use their completion timestamp when available, otherwise their creation timestamp. There is no persistent action button beside each link and no custom long-press gesture to interfere with scrolling or text selection. Ordinary clicks still open links in a browser tab. File and session links keep their own behavior.
+HTTP(S) links in replies open in a new browser tab. Right-click, use the browser's keyboard context-menu shortcut, or touch and hold a link to use the browser's native open, copy, and share actions. File and session links keep their own behavior.
 
-The sidebar shares space with file previews and has refresh, external-open and close controls. Escape closes it when focus is in the nanobot page, unless a menu or dialog handles Escape first. Once focus is inside a third-party page, use the sidebar's close button. The opened address and width are remembered per session for this app connection, not written to browser storage. Returning to a session reloads the original address; it does not preserve the website's DOM, navigation history or forms. The header shows the **original link**, not a live address bar for navigation inside the embedded page.
+`localhost` and loopback addresses refer to the device running your browser, not a remote nanobot gateway. Opening a link does not forward remote ports.
 
-This is a restricted preview, not a full browser. It requires browser support for credentialless iframes and is disabled in the native host until a separate untrusted-content boundary is available. Unsupported browsers can still copy links and open new tabs. Previews use an opaque-origin sandbox with scripts but without same-origin access, forms, popups, downloads or top navigation. No gateway token, host bridge or parent storage is passed into the frame.
-
-Sites may refuse embedding via CSP or X-Frame-Options, and sign-in or some interactive features may not work. Use **Open in browser** if the frame is blank or reports a failure. The browser does not reliably expose an embedding failure to nanobot, so a frame load event is not presented as a success signal. Nanobot does not proxy pages or bypass their headers. Same-origin nanobot URLs and HTTP pages embedded from an HTTPS WebUI are not previewed.
-
-`localhost` and loopback addresses refer to the device running your browser, not a remote nanobot gateway. This feature does not forward remote ports.
+On phone-sized screens, Copy and Message actions sit below the message, leaving the full text width available. Message actions opens a bottom sheet; close it with its close button, by tapping outside, or with Escape. Desktop keeps the hover-triggered message popover. On desktop, hovering or focusing a message also reveals a short timestamp below its actions: a 24-hour clock for today, or month/day for every other date. Hover or focus that label for the full local date and time, including the year. Replies use their completion timestamp when available, otherwise their creation timestamp.
 
 ### Connection checks
 
