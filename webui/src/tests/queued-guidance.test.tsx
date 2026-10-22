@@ -215,14 +215,16 @@ describe("merged waiting messages", () => {
     expect(onQuotedContextChange).toHaveBeenLastCalledWith("new selection");
   });
 
-  it("auto-sends attachment-only guidance after completion", async () => {
+  it("keeps restored attachment-only guidance manual after historical completion", () => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify([
       { id: "first", text: "", images: [PNG], autoAfterTurnId: "turn-a" },
       { id: "second", text: "", images: [DOCUMENT], autoAfterTurnId: "turn-a" },
     ]));
     const onSend = vi.fn();
     render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />);
-    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(onSend).toHaveBeenCalledTimes(1);
     expect(onSend).toHaveBeenCalledWith("", [
       expect.objectContaining({ media: expect.objectContaining({ name: "first.png" }) }),
       expect.objectContaining({ media: expect.objectContaining({ name: "second.txt" }) }),
@@ -289,5 +291,48 @@ describe("merged waiting messages", () => {
     expect(onSend).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Send now" }));
     expect(onSend).toHaveBeenCalledWith("stopped\nnew input");
+  });
+});
+
+
+describe("waiting-message execution authorization", () => {
+  it.each([undefined, "earlier-page"])("retains an earlier page's completed-turn draft for manual confirmation (page=%s)", (autoSendPageId) => {
+    const target = mention("alpha");
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([{
+      id: "queued-prompt-1792147773397-1", text: "old instruction @alpha", images: [PNG, DOCUMENT],
+      quotedContext: "original quote", sessionMentions: [target], autoAfterTurnId: "old-turn", autoSendPageId,
+    }]));
+    const onSend = vi.fn();
+    const view = render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["old-turn"]} />);
+    expect(screen.getByRole("group", { name: "Waiting to send" })).toHaveTextContent("old instruction @alpha");
+    expect(onSend).not.toHaveBeenCalled();
+    view.rerender(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" isStreaming activeTurnId="new-turn" completedTurnIds={["old-turn"]} />);
+    view.rerender(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["old-turn", "new-turn"]} />);
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend).toHaveBeenCalledWith("old instruction @alpha", [
+      expect.objectContaining({ media: { data_url: PNG.dataUrl, name: PNG.name } }),
+      expect.objectContaining({ media: { data_url: DOCUMENT.dataUrl, name: DOCUMENT.name } }),
+    ], { quotedContext: "original quote", sessionMentions: [target] });
+  });
+
+  it.each([
+    { event: "pagehide", leaveTopic: true },
+    { event: "freeze", leaveTopic: false },
+  ])("revokes automatic delivery on $event while retaining the waiting message", ({ event, leaveTopic }) => {
+    const onSend = vi.fn();
+    const first = render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" isStreaming activeTurnId="turn-a" />);
+    enter("confirm after returning");
+    if (leaveTopic) first.unmount();
+    act(() => (event === "pagehide" ? window : document).dispatchEvent(new Event(event)));
+    const props = { onSend, pendingQueueKey: "chat-a", completedTurnIds: ["turn-a"] };
+    if (leaveTopic) render(<ThreadComposer {...props} />);
+    else first.rerender(<ThreadComposer {...props} />);
+    expect(screen.getByRole("group", { name: "Waiting to send" })).toHaveTextContent("confirm after returning");
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(onSend).toHaveBeenCalledOnce();
+    expect(onSend).toHaveBeenCalledWith("confirm after returning");
   });
 });
