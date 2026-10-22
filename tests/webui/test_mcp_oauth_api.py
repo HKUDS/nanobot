@@ -543,3 +543,65 @@ async def test_current_same_identity_admission_allows_reconnect(tmp_path, monkey
         assert (await manager.status(second["flow_id"]))["status"] == "connected"
     finally:
         await manager.close()
+
+
+@pytest.mark.parametrize("server_url, expected_path", [
+    ("https://mcp.figma.com:443/mcp/", "/callback"),
+    ("https://mcp.linear.app/mcp", "/auth/mcp/callback"),
+    ("https://mcp.figma.com.example.org/mcp", "/auth/mcp/callback"),
+    ("https://mcp.figma.com/other", "/auth/mcp/callback"),
+])
+def test_figma_callback_selection_matches_only_the_official_endpoint(server_url, expected_path):
+    prepared, manual = prepare_mcp_oauth_redirect_uri(
+        "https://agent.example/auth/mcp/callback", server_url=server_url,
+    )
+    assert prepared == f"https://agent.example{expected_path}"
+    assert manual is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("gateway_url, expected_callback, manual", [
+    ("http://127.0.0.1:8789/auth/mcp/callback", "http://127.0.0.1:8789/callback", False),
+    ("https://agent.example/auth/mcp/callback", "https://agent.example/callback", False),
+    ("http://agent.example:8789/auth/mcp/callback", "http://127.0.0.1:8789/callback", True),
+])
+async def test_figma_flow_uses_short_callback_with_existing_completion_contract(
+    monkeypatch, gateway_url, expected_callback, manual,
+):
+    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.validate_url_target", lambda _: (True, ""))
+    manager = McpOAuthManager(RuntimeAdmission())
+    cfg = MCPServerConfig(type="streamableHttp", auth="oauth", url="https://mcp.figma.com/mcp")
+    received = []
+
+    async def connect(servers, _registry, *, oauth_handlers, network):
+        handlers = oauth_handlers["design-service"]
+        assert handlers.redirect_uri == expected_callback
+        await handlers.redirect_handler("https://www.figma.com/oauth/mcp?state=figma-state")
+        received.append(await handlers.callback_handler())
+        return {"design-service": _Connection()}
+
+    async def reload_mcp():
+        return {"ok": True}
+
+    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_servers", connect)
+    try:
+        started = await manager.start("design-service", cfg, gateway_url, reload_mcp=reload_mcp)
+        assert started["status"] == "authorization_required"
+        if manual:
+            assert started["completion_input"] == "callback_url"
+            with pytest.raises(McpOAuthError):
+                manager.submit_callback_url(
+                    flow_id=started["flow_id"],
+                    callback_url="http://127.0.0.1:8789/auth/mcp/callback?code=code&state=figma-state",
+                )
+            manager.submit_callback_url(
+                flow_id=started["flow_id"],
+                callback_url=f"{expected_callback}?code=code&state=figma-state",
+            )
+        else:
+            manager.submit_callback(state="figma-state", code="code", error=None)
+        await asyncio.wait_for(manager._flows[started["flow_id"]].task, timeout=2)
+        assert received == [("code", "figma-state")]
+        assert (await manager.status(started["flow_id"]))["status"] == "connected"
+    finally:
+        await manager.close()

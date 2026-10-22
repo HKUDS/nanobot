@@ -125,7 +125,7 @@ Datadog uses the MCP endpoint for your Datadog site and a Personal or Service Ac
 
 Figma uses the desktop app's local MCP endpoint, and Supabase starts a local server in read-only mode. Their **(remote)** variants use browser sign-in. GitHub uses Docker; **GitHub (remote)** uses a personal access token. Changes to credentials retain the connection's tool selection, timeout, and other saved settings.
 
-Figma (remote) also requires [Figma's approval of the MCP client](https://developers.figma.com/docs/figma-mcp-server/remote-server-installation/). A client rejected during registration cannot connect until Figma approves it, even when its network connection works.
+Figma (remote) also requires [Figma's approval of the MCP client](https://developers.figma.com/docs/figma-mcp-server/remote-server-installation/). A client rejected during registration cannot connect until Figma approves it, even when its network connection works. Browser sign-in for the official Figma endpoint uses `/callback`; reverse proxies must forward that path to nanobot. Other MCP services continue to use `/auth/mcp/callback`.
 
 ## Local servers
 

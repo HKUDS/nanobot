@@ -27,6 +27,8 @@ from nanobot.security.network import validate_url_target
 from nanobot.webui.http_utils import is_loopback_host
 
 McpReload = Callable[[], Awaitable[dict[str, Any]]]
+_FIGMA_CALLBACK_PATH = "/callback"
+MCP_OAUTH_CALLBACK_PATHS = (MCP_OAUTH_CALLBACK_PATH, _FIGMA_CALLBACK_PATH)
 _FLOW_TTL_S = 300
 _START_WAIT_S = 20
 _OAUTH_ERROR_RE = re.compile(r"^[a-zA-Z0-9_.-]{1,80}$")
@@ -74,7 +76,7 @@ def _parse_mcp_oauth_redirect_uri(redirect_uri: str) -> tuple[str, SplitResult, 
     if (
         not parsed.netloc
         or not parsed.hostname
-        or parsed.path != MCP_OAUTH_CALLBACK_PATH
+        or parsed.path not in MCP_OAUTH_CALLBACK_PATHS
         or parsed.query
         or parsed.fragment
         or parsed.username is not None
@@ -94,9 +96,22 @@ def validate_mcp_oauth_redirect_uri(redirect_uri: str) -> str:
     raise McpOAuthError("MCP OAuth callbacks must use HTTPS or localhost")
 
 
-def prepare_mcp_oauth_redirect_uri(redirect_uri: str) -> tuple[str, bool]:
-    """Use a pasteable loopback callback when a remote WebUI is served over HTTP."""
+def prepare_mcp_oauth_redirect_uri(
+    redirect_uri: str, *, server_url: str = "",
+) -> tuple[str, bool]:
+    """Select Figma's short path and use a pasteable callback for remote HTTP."""
     cleaned, parsed, port = _parse_mcp_oauth_redirect_uri(redirect_uri)
+    server = urlsplit(server_url)
+    if (
+        server.scheme == "https"
+        and server.netloc.lower() in {"mcp.figma.com", "mcp.figma.com:443"}
+        and server.path in {"/mcp", "/mcp/"}
+        and not server.query
+        and not server.fragment
+    ):
+        # Figma rejects the gateway's nested path during client registration.
+        parsed = parsed._replace(path=_FIGMA_CALLBACK_PATH)
+        cleaned = urlunsplit(parsed)
     if parsed.scheme != "http" or is_loopback_host(parsed.netloc):
         return validate_mcp_oauth_redirect_uri(cleaned), False
 
@@ -155,7 +170,7 @@ class McpOAuthManager:
             raise McpOAuthError("MCP authorization was cancelled", status=409)
         self._check_oauth_admission(admission)
         self._prune()
-        redirect_uri, manual_callback = prepare_mcp_oauth_redirect_uri(redirect_uri)
+        redirect_uri, manual_callback = prepare_mcp_oauth_redirect_uri(redirect_uri, server_url=cfg.url)
         await self._cancel_name(name, admission=admission)
         self._check_oauth_admission(admission)
         self._admission.check()

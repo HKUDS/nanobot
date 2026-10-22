@@ -11,7 +11,6 @@ from typing import Any, cast
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
-from nanobot.agent.tools.mcp_oauth import MCP_OAUTH_CALLBACK_PATH
 from nanobot.api.runtime import ApiRuntime, api_runtime_paths
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.registry import load_channel_plugin
@@ -24,7 +23,7 @@ from nanobot.webui import settings_system as system_domain
 from nanobot.webui.cli_apps_api import cli_apps_action, cli_apps_payload
 from nanobot.webui.http_utils import http_response as _http_response
 from nanobot.webui.http_utils import is_local_browser_request as _is_local_browser_request
-from nanobot.webui.mcp_oauth_api import McpOAuthManager
+from nanobot.webui.mcp_oauth_api import MCP_OAUTH_CALLBACK_PATHS, McpOAuthManager
 from nanobot.webui.mcp_presets_api import (
     ensure_mcp_oauth_server,
     mcp_presets_settings_action,
@@ -298,7 +297,7 @@ class WebUISettingsRouter:
                 405,
                 "WebUI mutations require an authenticated WebSocket",
             )
-        if path == MCP_OAUTH_CALLBACK_PATH:
+        if path in MCP_OAUTH_CALLBACK_PATHS:
             return self._handle_mcp_oauth_callback(request)
         if path == "/api/settings/mcp-oauth/start":
             return await self._handle_mcp_oauth_start(request)

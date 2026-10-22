@@ -508,16 +508,17 @@ async def test_mcp_oauth_start_uses_gateway_callback_and_requires_api_auth(monke
 
 
 @pytest.mark.asyncio
-async def test_mcp_oauth_callback_is_state_authenticated_and_returns_close_page() -> None:
+@pytest.mark.parametrize("callback_path", ["/auth/mcp/callback", "/callback"])
+async def test_mcp_oauth_callback_is_state_authenticated_and_returns_close_page(callback_path) -> None:
     router = _router(authorized=False)
     submit = MagicMock(return_value="xmind")
     router._mcp_oauth = SimpleNamespace(submit_callback=submit)
     request = SimpleNamespace(
-        path="/auth/mcp/callback?code=oauth-code&state=state-123",
+        path=f"{callback_path}?code=oauth-code&state=state-123",
         headers=Headers(),
     )
 
-    response = await router.dispatch(None, request, "/auth/mcp/callback")
+    response = await router.dispatch(None, request, callback_path)
 
     assert response is not None
     assert response.status_code == 200
@@ -1246,4 +1247,19 @@ async def test_delayed_oauth_start_cannot_reconcile_a_replaced_config(
     finally:
         resume.set()
         await old_start
+        await router.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("query, expected_status", [("code=secret-code", 400), ("code=secret-code&state=unknown", 410)])
+async def test_short_mcp_callback_rejects_missing_or_unknown_state(query, expected_status) -> None:
+    router = _router(authorized=False)
+    try:
+        request = SimpleNamespace(path=f"/callback?{query}", headers=Headers())
+        response = await router.dispatch(None, request, "/callback")
+        assert response is not None
+        assert response.status_code == expected_status
+        assert response.headers["Cache-Control"] == "no-store"
+        assert b"secret-code" not in response.body
+    finally:
         await router.close()
