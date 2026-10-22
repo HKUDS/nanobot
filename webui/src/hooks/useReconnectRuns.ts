@@ -37,7 +37,12 @@ export function useReconnectRuns(client: NanobotClient, getToken: () => string):
       }
       if (body.run_state) {
         const pendingFreshRetry = needsFreshRetry.delete(chatId);
-        if (!client.ingestRunSnapshot(chatId, body.run_state) && pendingFreshRetry) needsFreshRetry.add(chatId);
+        if (!client.ingestRunSnapshot(chatId, body.run_state) && pendingFreshRetry) {
+          // A pre-ready response can belong to the process that just exited.
+          // Once the socket baseline is fresh, replace that rejected page once.
+          if (freshness.get(chatId) === "fresh") retry.add(chatId);
+          else needsFreshRetry.add(chatId);
+        }
       }
     };
     const drain = () => {
@@ -84,7 +89,7 @@ export function useReconnectRuns(client: NanobotClient, getToken: () => string):
       freshness.set(chatId, state.freshness);
       // Socket open precedes the authenticated ready pin. Retry reads/ingestion
       // after a fresh baseline, never granting HTTP snapshots their own epoch.
-      if (state.freshness === "fresh" && previous !== "fresh" && needsFreshRetry.delete(chatId) && !inFlight.has(chatId)) enqueue(chatId);
+      if (state.freshness === "fresh" && previous !== "fresh" && !inFlight.has(chatId) && needsFreshRetry.delete(chatId)) enqueue(chatId);
     });
     const unsubscribeCompletion = client.onRunCompletion(enqueue);
     return () => {

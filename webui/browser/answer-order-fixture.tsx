@@ -6,6 +6,13 @@ import { NanobotClient } from "@/lib/nanobot-client";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { ClientProvider } from "@/providers/ClientProvider";
 
+const fixtureSettings = {
+  ...settings,
+  model_presets: [{
+    ...settings.agent, name: "default", active: true, is_default: true,
+  }],
+};
+
 // The browser spec controls HTTP and WebSocket frames; all projection and caching
 // run through the real client and thread, without model calls or saved user data.
 export function AnswerOrderFixture() {
@@ -30,7 +37,7 @@ export function AnswerOrderFixture() {
       <ThreadShell
         session={{ key: `websocket:${chatId}`, channel: "websocket", chatId, createdAt: null, updatedAt: null, preview: "" }}
         title={chatId} onToggleSidebar={() => {}} onTurnEnd={onTurnEnd}
-        settingsSnapshot={settings} messageCache={cache}
+        settingsSnapshot={fixtureSettings} messageCache={cache}
       />
     </main>
   </ClientProvider>;

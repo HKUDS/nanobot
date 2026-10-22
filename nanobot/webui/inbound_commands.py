@@ -1058,7 +1058,7 @@ class WebUICommandRouter:
             return
         if action == "runs.stop":
             # A cached response must not bypass connection-owned temporary policy.
-            stop_chat_id = cast(dict[str, Any], payload).get("chat_id")
+            stop_chat_id = payload.get("chat_id")
             if is_valid_webui_chat_id(stop_chat_id):
                 try:
                     self._temporary_chats.message_policy(connection, stop_chat_id, "/stop")
@@ -1134,7 +1134,7 @@ class WebUICommandRouter:
                 self.execute_webui_request(
                     connection,
                     action,
-                    cast(dict[str, Any], payload),
+                    payload,
                     client_id=client_id,
                 )
             )

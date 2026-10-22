@@ -136,6 +136,39 @@ describe("durable run recovery", () => {
     close();
   });
 
+  it("retries a pre-ready HTTP page rejected after a restarted host's idle baseline", async () => {
+    const reads: Array<(value: Response) => void> = [];
+    const fetchMock = vi.fn().mockImplementation(() => new Promise<Response>((resolve) => reads.push(resolve)));
+    vi.stubGlobal("fetch", fetchMock);
+    const { client, sockets, running, close } = setup();
+    running();
+    act(() => sockets.at(-1)!.close());
+    await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+    const socket = sockets.at(-1)!;
+    socket.onSend = () => {};
+    // Recovery starts at transport-open, before ready pins the restarted authority.
+    act(() => { socket.readyState = 1; socket.onopen?.(); });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    act(() => {
+      socket.receive({ event: "ready", chat_id: "default", client_id: "test", run_state_instance_id: "restarted-host" });
+      socket.receive({ event: "run_state", chat_id: "inactive", run_state: {
+        instance_id: "restarted-host", revision: 1, runs: [], completed: [],
+      } });
+    });
+    // The old process's response may already be in transit when it exits.
+    const stale = completedThread();
+    stale.events = stale.events.slice(0, 1);
+    stale.has_pending_tool_calls = true;
+    await act(async () => { reads[0](response(stale)); });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const fresh = completedThread();
+    fresh.run_state = { instance_id: "restarted-host", revision: 1, runs: [], completed: [] };
+    await act(async () => { reads[1](response(fresh)); });
+    expect(client.hasUnsettledRun("inactive")).toBe(false);
+    expect(webuiThreadCache.get("websocket:inactive")).toEqual(fresh);
+    close();
+  });
+
   it("aborts outstanding recovery reads without starting queued chats after another drop", async () => {
     const reads: Array<{ signal: AbortSignal; resolve: (value: Response) => void }> = [];
     const fetchMock = vi.fn().mockImplementation((_url: string, init: RequestInit) => (

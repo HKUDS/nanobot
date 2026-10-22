@@ -3242,6 +3242,32 @@ describe("useNanobotStream", () => {
     }
   });
 
+  it.each(["first", undefined])("preserves an old host's in-flight answer when a second input is admitted as guidance (stream %s)", async (streamId) => {
+    const fake = fakeClient({ autoRunSnapshots: false, instanceId: null });
+    const { result } = renderHook(() => useNanobotStream("legacy-guide", EMPTY_MESSAGES), { wrapper: wrap(fake.client) });
+    act(() => { result.current.send("research this"); });
+    const activeTurnId = fake.client.sendMessage.mock.calls.at(-1)![3]!.turnId!;
+    act(() => {
+      fake.emit("legacy-guide", { event: "user_message", chat_id: "legacy-guide", turn_id: activeTurnId,
+        text: "research this", starts_turn: true });
+      fake.emit("legacy-guide", { event: "delta", chat_id: "legacy-guide", turn_id: activeTurnId,
+        stream_id: streamId, turn_seq: 1, text: "Initial findings" });
+    });
+    await flushStreamFrame();
+    // Without runs.v1 the composer cannot claim execution or label this input as guidance.
+    expect(result.current.isStreaming).toBe(false);
+    act(() => { result.current.send("focus on primary sources"); });
+    const guidanceTurnId = fake.client.sendMessage.mock.calls.at(-1)![3]!.turnId!;
+    act(() => {
+      fake.emit("legacy-guide", { event: "user_message", chat_id: "legacy-guide", turn_id: guidanceTurnId,
+        text: "focus on primary sources", active_turn_id: activeTurnId, starts_turn: false });
+      fake.emit("legacy-guide", { event: "stream_end", chat_id: "legacy-guide", turn_id: activeTurnId,
+        stream_id: streamId, turn_seq: 2, text: "Initial findings", resuming: true });
+    });
+    expect(result.current.messages.filter((message) => message.content === "Initial findings")).toHaveLength(1);
+    expect(result.current.isStreaming).toBe(false);
+  });
+
   it("keeps guided output in place while the active turn resumes", async () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-guide", EMPTY_MESSAGES), {

@@ -960,12 +960,11 @@ export function useNanobotStream(
       )) : undefined;
       setMessages((prev) => {
         let projection = { ...transcriptRef.current.projection, messages: prev };
-        if (!sideChannel && !continueActiveTurn) {
-          projection = resetThreadProjectionCursor(projection, prev);
-        } else if (continueActiveTurn) {
-          // Guidance belongs to the active backend turn. Preserve the answer
-          // cursor so its resuming stream_end can finalize the text already
-          // shown before the new user row, while starting fresh activity after it.
+        if (!sideChannel) {
+          // Submitting input does not close an outstanding answer. In particular,
+          // a host without runs.v1 may admit it as guidance into that same turn.
+          // Preserve the transcript cursor until actual turn/output boundaries,
+          // while starting fresh activity after the optimistic user row.
           projection = clearThreadProjectionActivity(projection);
         }
         const next: UIMessage[] = [

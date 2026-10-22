@@ -1467,6 +1467,8 @@ class AgentLoop:
                     try:
                         await self._dispatch_inbound(msg)
                     except (SessionOperationQueueFullError, SessionConflictError) as exc:
+                        if (admission := msg.execution_admission) is not None:
+                            await self.executions.reject(admission)
                         key = self._effective_session_key(msg)
                         logger.warning("Session input rejected for {}: {}", key, exc)
                         if msg.is_user_input:
@@ -1736,6 +1738,7 @@ class AgentLoop:
         session_key = self._effective_session_key(msg)
         admission = msg.execution_admission
         assert admission is not None
+        followup_ids: frozenset[str] = frozenset()
         if self.executions.stop_requested(admission):
             # Only the steering prefix belongs to this root. An independently
             # admitted successor is a FIFO barrier, including during cleanup.
@@ -1751,19 +1754,25 @@ class AgentLoop:
             root_followup_id = msg.metadata.get(PENDING_FOLLOWUP_ID_KEY)
             if isinstance(root_followup_id, str):
                 followup_ids |= {root_followup_id}
-            if followup_ids:
-                await self.sessions.state.acknowledge_followups(session_key, tuple(followup_ids))
-        if self.executions.has_started(admission) and (worker is None or not worker.cancelling()):
-            # An unstarted root owns no child resources. A whole-session
-            # cancel/close already drains these after its worker;
-            # a root Stop/supersede must drain them before that worker can take B.
-            await self.subagents.cancel_by_session(session_key)
-            await self._exec_session_manager.terminate_by_owner(session_key)
-        for coordinator in self._automation_turn_coordinators:
-            coordinator.complete(msg, error=asyncio.CancelledError())
-        if not entered and msg.channel != "system" and self.commands.requires_session_queue(command_text(msg)):
-            delivery = self.turn_delivery_factory.unrouted(msg, session_key)
-            await delivery.complete(None, publish_completion=True)
+        try:
+            try:
+                if self.executions.has_started(admission) and (worker is None or not worker.cancelling()):
+                    # An unstarted root owns no child resources. A whole-session
+                    # cancel/close already drains these after its worker;
+                    # a root Stop/supersede must drain them before that worker can take B.
+                    try:
+                        await self.subagents.cancel_by_session(session_key)
+                    finally:
+                        await self._exec_session_manager.terminate_by_owner(session_key)
+            finally:
+                if followup_ids:
+                    await self.sessions.state.acknowledge_followups(session_key, tuple(followup_ids))
+        finally:
+            for coordinator in self._automation_turn_coordinators:
+                coordinator.complete(msg, error=asyncio.CancelledError())
+            if not entered and msg.channel != "system" and self.commands.requires_session_queue(command_text(msg)):
+                delivery = self.turn_delivery_factory.unrouted(msg, session_key)
+                await delivery.complete(None, publish_completion=True)
 
     async def _execute_one(
         self,

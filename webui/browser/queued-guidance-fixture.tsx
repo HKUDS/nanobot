@@ -15,6 +15,7 @@ export function QueuedGuidanceFixture() {
     {away ? <p>Another topic</p> : <ThreadComposer
       pendingQueueKey="queued-fixture"
       isStreaming={!completed}
+      queueAutoSendAllowed={completed}
       activeTurnId={completed ? null : "turn-a"}
       completedTurnIds={completed ? ["turn-a"] : []}
       onStop={() => setCompleted(true)}

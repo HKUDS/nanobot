@@ -790,6 +790,10 @@ class SessionState:
         from nanobot.session.recovery import acknowledge_pending_followups
 
         values = tuple(identifiers)
+        self._bind_loop()
+        # Consuming accepted input is settlement, not new work to reject when busy.
+        while not self._closed and self._admitted >= self._capacity:
+            await asyncio.wait(self._pending, return_when=asyncio.FIRST_COMPLETED)
         await self._execute(key, lambda: self._change(
             key, lambda session: acknowledge_pending_followups(session, values), history=False,
         ))

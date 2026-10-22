@@ -15,6 +15,7 @@ from nanobot.bus.events import (
 )
 from nanobot.bus.runtime_events import TurnExecutionChanged
 from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.session.state import SessionOperationQueueFullError
 from nanobot.webui.run_state import RunStateAuthority
 
 
@@ -172,7 +173,7 @@ async def test_stop_a_preserves_worker_and_queue_until_cleanup_then_runs_b(
         monkeypatch.setattr(TurnDelivery, "abort_stream", abort_stream)
     elif cleanup in {"checkpoint", "subagents", "exec"}:
         target, method = {
-            "checkpoint": (loop.sessions.state, "restore_interruption"),
+            "checkpoint": (loop.sessions.state, "finish_turn"),
             "subagents": (loop.subagents, "cancel_by_session"),
             "exec": (loop._exec_session_manager, "terminate_by_owner"),
         }[cleanup]
@@ -339,6 +340,32 @@ async def test_stale_existing_session_input_retires_accepted_owner(loop_factory)
         assert msg.session_key not in loop._pending_queues
     finally:
         await loop.aclose()
+
+
+async def test_bus_admission_rejection_releases_transport_reservation(loop_factory, monkeypatch):
+    loop = loop_factory()
+    authority = RunStateAuthority(loop.bus, "gateway")
+    msg = message(require_existing_session=True)
+    admission = await loop.executions.reserve_if_idle(msg, msg.session_key)
+    assert admission is not None
+    monkeypatch.setattr(loop.sessions.state, "read_metadata", AsyncMock(
+        side_effect=SessionOperationQueueFullError("session storage busy"),
+    ))
+    runner = asyncio.create_task(loop.run())
+    try:
+        await loop.bus.publish_inbound(msg)
+        failed = await asyncio.wait_for(loop.bus.consume_outbound(), 2)
+        assert failed.chat_id == msg.chat_id
+        assert "error" in failed.content
+        assert authority.snapshot(msg.session_key)["runs"] == []
+        assert not await loop.executions.request_stop(msg.session_key, admission.execution_id)
+        replacement = await loop.executions.reserve_if_idle(message("retry"), msg.session_key)
+        assert replacement is not None
+        await loop.executions.reject(replacement)
+    finally:
+        runner.cancel()
+        await asyncio.gather(runner, return_exceptions=True)
+        authority.close()
 
 
 async def test_targeted_stop_acknowledges_steering_journal_without_a_new_owner(loop_factory):
@@ -547,7 +574,9 @@ async def test_new_input_during_stop_cleanup_becomes_a_durable_independent_root(
         await asyncio.wait_for(b_started.wait(), 2)
         assert loop._active_tasks[a.session_key] == {worker}
         assert loop._pending_queues[a.session_key] is queue
-        assert visible_message(requests[1][-1])["content"] == "B after Stop"
+        next_prompt = visible_message(requests[1][-1])["content"]
+        assert next_prompt.endswith("B after Stop")
+        assert "steer A" not in next_prompt
         release_b.set()
         await finish_worker(loop, a.session_key)
         saved = await loop.sessions.state.read(a.session_key)
@@ -816,4 +845,29 @@ async def test_cancellation_during_recovery_admission_unregisters_the_root(loop_
         assert [fact.phase for fact in facts] == ["queued", "stopping", "exited"]
     finally:
         release_admission.set()
+        await loop.aclose()
+
+
+async def test_stop_drains_children_even_when_journal_commit_fails(loop_factory, monkeypatch):
+    loop = loop_factory()
+    msg = message()
+    admission = await loop.executions.admit(msg, msg.session_key)
+    assert admission is not None
+    await loop.executions.running(admission)
+    assert loop.executions.accept_steering(msg.session_key, "consumed-input")
+    await loop.executions.request_stop(msg.session_key, admission.execution_id)
+    cancel_children = AsyncMock(return_value=0)
+    terminate_exec = AsyncMock(return_value=0)
+    monkeypatch.setattr(loop.subagents, "cancel_by_session", cancel_children)
+    monkeypatch.setattr(loop._exec_session_manager, "terminate_by_owner", terminate_exec)
+    monkeypatch.setattr(loop.sessions.state, "acknowledge_followups", AsyncMock(
+        side_effect=OSError("journal commit failed"),
+    ))
+    try:
+        with pytest.raises(OSError, match="journal commit failed"):
+            await loop._settle_cancelled_execution(msg, asyncio.Queue(), True, worker=None)
+        cancel_children.assert_awaited_once_with(msg.session_key)
+        terminate_exec.assert_awaited_once_with(msg.session_key)
+    finally:
+        await loop.executions.retire(admission, "exited", outcome="cancelled")
         await loop.aclose()
