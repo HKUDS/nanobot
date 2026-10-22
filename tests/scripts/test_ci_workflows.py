@@ -42,6 +42,12 @@ def test_accepted_handoff_uses_the_producer_id_and_requires_native_success():
     assert "name" not in download["with"]
 
 
+def test_ci_runs_for_distinct_revisions_do_not_cancel_each_other():
+    concurrency = workflow("ci.yml")["concurrency"]
+    assert concurrency["group"] == "${{ github.workflow }}-${{ github.ref }}-${{ github.sha }}"
+    assert concurrency["cancel-in-progress"] == "true"
+
+
 def test_windows_installer_matrix_has_an_independent_required_job():
     jobs = workflow("ci.yml")["jobs"]
     installer = jobs["windows_installers"]
