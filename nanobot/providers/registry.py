@@ -763,11 +763,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
                 input_modalities=("text", "image"),
             ),
         ),
-        # reasoning_split controls output format, not whether the model thinks.
-        # M3.1-Flash always thinks and rejects reasoning_split=false, so map legacy
-        # off presets to low effort with split output. reasoning_effort only tunes
-        # thinking depth on M3.1-Flash.
-        # Identity entries keep the low/medium/high menu for models without metadata.
         reasoning_effort_remap=(
             ("none", "low"), ("minimal", "low"),
             ("low", "low"), ("medium", "medium"), ("high", "high"),
