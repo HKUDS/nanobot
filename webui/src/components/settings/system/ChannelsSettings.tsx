@@ -20,7 +20,7 @@ type ChannelFilter = "all" | "enabled";
 export function ChannelsSettings({
   token, nanobotFeatures, loading, actionKey, chatAppsDocsUrl, showBrandLogos,
   error, requiresRestartPending, onAction, onFeaturesUpdate, onDismissStatus,
-  onRestart, isRestarting, onConfigureMcp,
+  onRestart, isRestarting, onConfigureMcp, onBeforeCloseChange,
 }: {
   token: string;
   nanobotFeatures: NanobotFeaturesPayload | null;
@@ -34,6 +34,7 @@ export function ChannelsSettings({
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
   onDismissStatus: () => void;
   onConfigureMcp?: (name: string) => void;
+  onBeforeCloseChange?: (handler: (() => Promise<boolean>) | null) => void;
   onRestart?: () => void;
   isRestarting?: boolean;
 }) {
@@ -93,8 +94,11 @@ export function ChannelsSettings({
     });
   }, []);
   const setBeforeChannelClose = useCallback(
-    (handler: (() => Promise<boolean>) | null) => { beforeCloseRef.current = handler; },
-    [],
+    (handler: (() => Promise<boolean>) | null) => {
+      beforeCloseRef.current = handler;
+      onBeforeCloseChange?.(handler);
+    },
+    [onBeforeCloseChange],
   );
 
   return (

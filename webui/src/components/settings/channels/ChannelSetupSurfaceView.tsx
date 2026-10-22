@@ -38,7 +38,6 @@ export interface ChannelSetupSurfaceViewProps {
   connectFlow?: ReactNode;
   onAdvancedOpenChange: (open: boolean) => void;
   onChangeField: (key: string, value: string) => void;
-  onFieldBlur: (key: string) => void;
   onToggleSecret: (key: string) => void;
   onClearSecret: (key: string, clear: boolean) => void;
   onApplyPreset: (preset: ChannelProviderPreset) => void;
@@ -55,7 +54,7 @@ export function ChannelSetupSurfaceView({
   configuredFields, fieldValues, visibleSecrets, clearedSecrets, fieldErrors, actionPending,
   enabled, autoSaving, autoSaveState, advancedOpen, advancedPanelId, validation, validating,
   notice, connectFlow, onAdvancedOpenChange,
-  onChangeField: setFieldValue, onFieldBlur: saveSecretOnBlur, onToggleSecret: toggleSecret,
+  onChangeField: setFieldValue, onToggleSecret: toggleSecret,
   onClearSecret: setSecretCleared, onApplyPreset: applyPreset, onSubmit: saveCredentialSettings,
   onCheckConnection: checkCurrentSettings, onToggleEnabled: toggleEnabled,
   onSaveConnectionSettings: saveConnectionSettings, onCopyCommand: copyCommand, onNotice: setNotice,
@@ -70,7 +69,6 @@ export function ChannelSetupSurfaceView({
     configuredFields,
     visibleSecrets,
     onChange: setFieldValue,
-    onFieldBlur: saveSecretOnBlur,
     onToggleSecret: toggleSecret,
     errors: fieldErrors,
     clearedSecrets,
@@ -217,7 +215,6 @@ export function ChannelSetupSurfaceView({
                   configuredFields={configuredFields}
                   visibleSecrets={visibleSecrets}
                   onChange={setFieldValue}
-                  onFieldBlur={saveSecretOnBlur}
                   onToggleSecret={toggleSecret}
                   errors={fieldErrors}
                   clearedSecrets={clearedSecrets}

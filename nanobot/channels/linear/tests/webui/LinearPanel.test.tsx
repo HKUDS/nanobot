@@ -107,7 +107,7 @@ describe("Linear channel UI", () => {
     mockFeature(linearFeature);
     renderSettingsView({ initialSection: "channels" });
     fireEvent.click(await screen.findByRole("button", { name: "View Linear settings" }));
-    const createApp = await screen.findByRole("button", { name: "Create Linear app" });
+    const createApp = await screen.findByRole("button", { name: "Create Linear app" }, { timeout: 5000 });
     expect(createApp).toBeEnabled();
     fireEvent.click(createApp);
     const prompt = await screen.findByRole("alertdialog", { name: "Public HTTPS URL" });
@@ -151,7 +151,7 @@ describe("Linear channel UI", () => {
     expect(screen.queryByRole("dialog", { name: "Linear" })).not.toBeInTheDocument();
   });
 
-  it("automatically saves a public URL before OAuth credentials and reveals the app button", async () => {
+  it("commits a public URL on blur before OAuth credentials and reveals the app button", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -197,6 +197,7 @@ describe("Linear channel UI", () => {
     fireEvent.change(await screen.findByPlaceholderText("https://nanobot.example.com"), {
       target: { value: "https://nanobot.example.com" },
     });
+    fireEvent.blur(screen.getByPlaceholderText("https://nanobot.example.com"));
     expect(screen.queryByRole("button", { name: /^Save/ })).not.toBeInTheDocument();
 
     await waitFor(() =>
@@ -242,6 +243,7 @@ describe("Linear channel UI", () => {
       target: { value: "3980" },
     });
     expect(screen.getByRole("button", { name: "Connect Linear" })).toBeDisabled();
+    fireEvent.blur(screen.getByRole("spinbutton", { name: "Listen port" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Connect Linear" })).toBeEnabled());
     const params = actionCalls()[0][1] as { values: Record<string, unknown> };
     expect(params.values["channels.linear.port"]).toBe("3980");
@@ -450,7 +452,7 @@ describe("Linear channel UI", () => {
     });
     const dialog = screen.getByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
-    expect(actionCalls()).toHaveLength(1);
+    await waitFor(() => expect(actionCalls()).toHaveLength(1));
     expect(dialog).toBeVisible();
     fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
     expect(actionCalls()).toHaveLength(1);

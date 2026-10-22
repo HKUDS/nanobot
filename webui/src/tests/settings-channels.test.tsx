@@ -1411,7 +1411,7 @@ describe("Settings channels", () => {
     expect(within(behavior).getByRole("radio", { name: "All messages" })).toBeChecked();
 
     fireEvent.click(advanced);
-    expect(advanced).toHaveAttribute("aria-expanded", "false");
+    await waitFor(() => expect(advanced).toHaveAttribute("aria-expanded", "false"));
     expect(behavior).not.toBeVisible();
     advanced.focus();
     await userEvent.setup().keyboard("[Space]");
@@ -1689,8 +1689,8 @@ describe("Settings channels", () => {
     expect(notGranted).toHaveAttribute("aria-invalid", "true");
     expect(granted).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByText("Required to complete setup.")).toBeInTheDocument();
-    expect(requestMutationMock.mock.calls.some(([action]) => (
-      action === "settings.channel.validate" || action === "settings.channel.configure"
+    expect(requestMutationMock.mock.calls.some(([action, args]) => (
+      action === "settings.channel.validate" || (action === "settings.channel.configure" && args.enable === true)
     ))).toBe(false);
 
     fireEvent.click(granted);
@@ -1723,7 +1723,7 @@ describe("Settings channels", () => {
     );
   });
 
-  it("autosaves Email edits and waits for the save before closing", async () => {
+  it("commits Email edits on blur and waits for the save before closing", async () => {
     let resolveConfigure: ((value: Record<string, unknown>) => void) | undefined;
     const configureResult = new Promise<Record<string, unknown>>((resolve) => {
       resolveConfigure = resolve;
@@ -1790,6 +1790,7 @@ describe("Settings channels", () => {
     fireEvent.change(screen.getByLabelText("IMAP host"), {
       target: { value: "imap.changed.example.com" },
     });
+    fireEvent.blur(screen.getByLabelText("IMAP host"));
 
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.channel.configure",

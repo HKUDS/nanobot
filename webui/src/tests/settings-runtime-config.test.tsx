@@ -59,12 +59,14 @@ describe("Runtime configuration settings", () => {
   });
 
   it("places common settings in their feature pages and reserves advanced for low-frequency controls", () => {
-    renderSettingsView({ initialSection: "runtime", initialSettings: runtimeSettings() });
+    const payload = runtimeSettings();
+    payload.image_generation.enabled = true;
+    renderSettingsView({ initialSection: "runtime", initialSettings: payload });
     expect(document.getElementById("runtime-tools.exec.enable")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     expect(document.getElementById("runtime-tools.exec.sandbox")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Capabilities" }));
-    fireEvent.click(screen.getByRole("switch", { name: "Image generation" }));
+    fireEvent.click(within(screen.getByRole("region", { name: "Image generation" })).getByRole("button", { name: "Configure" }));
     expect(document.getElementById("runtime-tools.image_generation.save_dir")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.getByRole("switch", { name: "Web access" })).toBeInTheDocument();

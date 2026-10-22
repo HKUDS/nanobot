@@ -92,7 +92,6 @@ function ChannelFormPreview({ name, mode, locale, t }: {
       notice={notice ? "key" in notice ? t(notice.key) : notice.message : null}
       onAdvancedOpenChange={setAdvancedOpen}
       onChangeField={(key, value) => { setValues((current) => ({ ...current, [key]: value })); setErrors({}); setSaved(false); }}
-      onFieldBlur={() => { setSaved(true); }}
       onToggleSecret={(key) => setVisibleSecrets((current) => ({ ...current, [key]: !current[key] }))}
       onClearSecret={(key, clear) => setClearedSecrets((current) => {
         const next = new Set(current); if (clear) next.add(key); else next.delete(key); return next;

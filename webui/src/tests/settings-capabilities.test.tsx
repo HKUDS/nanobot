@@ -111,7 +111,17 @@ describe("Settings capabilities", () => {
     expect(screen.getAllByRole("alert")).toHaveLength(1);
   });
 
-  it("keeps a rejected image save attached to the feature when its editor is collapsed", async () => {
+  it("retains an invalid capability draft while navigating to repair its provider", () => {
+    renderSettingsView({ initialSection: "capabilities", initialSettings: settingsPayload() });
+    fireEvent.click(screen.getByRole("switch", { name: "Image generation" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Image generation" })).getByRole("button", { name: "Configure provider" }));
+    expect(screen.getByRole("button", { name: "Models" })).toHaveAttribute("aria-current", "page");
+    fireEvent.click(screen.getByRole("button", { name: "Capabilities" }));
+    expect(screen.getByRole("switch", { name: "Image generation" })).toBeChecked();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps a rejected image draft in its editor until retry succeeds", async () => {
     const payload = settingsPayload();
     payload.image_generation.providers = [{ name: "openrouter", label: "OpenRouter", configured: true }];
     requestMutationMock.mockRejectedValue(new Error("image generation provider is not configured"));
@@ -120,8 +130,11 @@ describe("Settings capabilities", () => {
     const image = within(screen.getByRole("dialog", { name: "Image generation" }));
     await waitFor(() => expect(image.getByRole("alert")).toHaveTextContent("Configure this provider before enabling image generation."));
     fireEvent.click(image.getByRole("button", { name: "Close" }));
-    expect(screen.getByRole("region", { name: "Image generation" })).toContainElement(screen.getByRole("alert"));
-    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    await act(async () => {});
+    expect(screen.getByRole("dialog", { name: "Image generation" })).toContainElement(screen.getByRole("alert"));
+    requestMutationMock.mockResolvedValue({ ...payload, image_generation: { ...payload.image_generation, enabled: true } });
+    fireEvent.click(image.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
   it("keeps capabilities together and separates expanding settings from enabling a feature", () => {
@@ -228,6 +241,10 @@ describe("Settings capabilities", () => {
       },
     };
 
+    requestMutationMock.mockImplementation(async (_action, args) => {
+      payload.image_generation = { ...payload.image_generation, provider: args.provider, model: args.model };
+      return { ...payload };
+    });
     renderSettingsView({ initialSection: "image", initialSettings: payload });
 
     fireEvent.keyDown(screen.getByRole("combobox", { name: "OpenRouter" }), { key: "ArrowDown" });
@@ -392,7 +409,9 @@ describe("Settings capabilities", () => {
     fireEvent.click(await screen.findByRole("option", { name: "DeepSeek" }));
     expect(await screen.findByText("Add the required credential before saving.")).toBeVisible();
     expect(requestMutationMock).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByPlaceholderText("Enter API key"), { target: { value: "sk-deepseek-search-key" } });
+    const key = screen.getByPlaceholderText("Enter API key");
+    fireEvent.change(key, { target: { value: "sk-deepseek-search-key" } });
+    fireEvent.blur(key);
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.web_search.update",
       { provider: "deepseek", api_key: "sk-deepseek-search-key", max_results: 5, timeout: 30, use_jina_reader: true },
@@ -403,10 +422,38 @@ describe("Settings capabilities", () => {
     fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
     const timeout = screen.getAllByRole("spinbutton").find((input) => (input as HTMLInputElement).value === "30")!;
     fireEvent.change(timeout, { target: { value: "45" } });
+    fireEvent.blur(timeout);
     await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
       "settings.web_search.update",
       { provider: "deepseek", max_results: 5, timeout: 45, use_jina_reader: true },
       20_000,
+    ));
+  });
+
+  it("keeps a newer credential draft visible when an older save response arrives", async () => {
+    const payload = settingsPayload();
+    payload.web_search = { ...payload.web_search, provider: "deepseek", api_key_hint: "old-key",
+      providers: [...payload.web_search.providers, { name: "deepseek", label: "DeepSeek", credential: "api_key" }] };
+    let finish!: (value: SettingsPayload) => void;
+    requestMutationMock.mockImplementationOnce(() => new Promise<SettingsPayload>((resolve) => { finish = resolve; }))
+      .mockResolvedValue({ ...payload, web_search: { ...payload.web_search, api_key_hint: "latest-key" } });
+    renderSettingsView({ initialSection: "browser", initialSettings: payload });
+    const credential = screen.getByText("old-key").parentElement!;
+    fireEvent.click(within(credential).getByRole("button", { name: "Edit" }));
+    const key = credential.querySelector("input")!;
+    fireEvent.focus(key);
+    fireEvent.change(key, { target: { value: "first-key" } });
+    fireEvent.blur(key);
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledTimes(1));
+    fireEvent.focus(key);
+    fireEvent.change(key, { target: { value: "latest-key" } });
+    await act(async () => finish({ ...payload, web_search: { ...payload.web_search, api_key_hint: "first-key" } }));
+    expect(key).toBeVisible();
+    expect(key).toHaveValue("latest-key");
+    expect(requestMutationMock).toHaveBeenCalledTimes(1);
+    fireEvent.blur(key);
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.web_search.update", expect.objectContaining({ api_key: "latest-key" }), 20_000,
     ));
   });
 
@@ -432,6 +479,33 @@ describe("Settings capabilities", () => {
     expect(await screen.findByText("App safety")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Local services" }));
     expect(await screen.findByRole("tooltip")).toHaveTextContent("Allow Full Access shell commands to reach services on this Mac.");
+  });
+
+  it("keeps a newer focused transcription draft through automatic native restart", async () => {
+    const payload = {
+      ...settingsPayload(), surface: "native" as const, runtime_surface: "native" as const,
+      runtime_capabilities: { can_restart_engine: true, can_open_logs: true, can_export_diagnostics: true },
+      transcription: { ...DEFAULT_TRANSCRIPTION_SETTINGS, enabled: true, language: "en" },
+    };
+    const saved = { ...payload, requires_restart: true, transcription: { ...payload.transcription, language: "zh" } };
+    let finishRestart!: (token: string) => void;
+    const restart = vi.fn(() => new Promise<string>((resolve) => { finishRestart = resolve; }));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/settings") return jsonResponse({ ...saved, requires_restart: false });
+      return jsonResponse({ apps: [], presets: [], installed_count: 0 });
+    }));
+    requestMutationMock.mockResolvedValueOnce(saved);
+    renderSettingsView({ initialSection: "voice", initialSettings: payload, onNativeEngineRestart: restart });
+    const language = screen.getByPlaceholderText("Auto");
+    fireEvent.focus(language);
+    fireEvent.change(language, { target: { value: "zh" } });
+    fireEvent.blur(language);
+    await waitFor(() => expect(restart).toHaveBeenCalledTimes(1));
+    fireEvent.focus(language);
+    fireEvent.change(language, { target: { value: "ja" } });
+    await act(async () => finishRestart("fresh-token"));
+    expect(language).toHaveValue("ja");
+    expect(requestMutationMock).toHaveBeenCalledTimes(1);
   });
 
   it("refreshes settings with a fresh token after native engine restart", async () => {
