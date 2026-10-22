@@ -1387,7 +1387,7 @@
 @layer components {
   @media (prefers-reduced-motion: no-preference) {
     .segmented-control-indicator[data-animate="true"] {
-      transition-property: transform, width;
+      transition-property: translate, scale;
       transition-duration: 220ms, 160ms;
       transition-timing-function:
         cubic-bezier(0.2, 0.95, 0.25, 1.08),
