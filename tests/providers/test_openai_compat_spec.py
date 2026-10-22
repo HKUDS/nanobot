@@ -1476,6 +1476,7 @@ def test_minimax_m31_flash_builtin_metadata() -> None:
 
     meta = find_by_name("minimax").model_metadata("MiniMax-M3.1-Flash")
     assert meta is not None
+    assert meta.context_window == 1_000_000
     assert meta.reasoning_efforts == ("low", "medium", "high", "xhigh", "max")
     assert meta.default_reasoning_effort == "max"
     assert meta.input_modalities == ("text", "image")

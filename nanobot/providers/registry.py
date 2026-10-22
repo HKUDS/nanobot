@@ -757,13 +757,16 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
                 id="MiniMax-M3.1-Flash",
                 label="MiniMax-M3.1-Flash",
                 aliases=("minimax-m3.1-flash",),
+                context_window=1_000_000,
                 reasoning_efforts=("low", "medium", "high", "xhigh", "max"),
                 default_reasoning_effort="max",
                 input_modalities=("text", "image"),
             ),
         ),
-        # MiniMax-M3.1-Flash rejects reasoning_split=false (HTTP 400, error 2013),
-        # so map the "off" presets to the lowest effort instead of disabling thinking.
+        # reasoning_split controls output format, not whether the model thinks.
+        # M3.1-Flash always thinks and rejects reasoning_split=false, so map legacy
+        # off presets to low effort with split output. reasoning_effort only tunes
+        # thinking depth on M3.1-Flash.
         # Identity entries keep the low/medium/high menu for models without metadata.
         reasoning_effort_remap=(
             ("none", "low"), ("minimal", "low"),
