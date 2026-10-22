@@ -6,8 +6,8 @@ for (const width of [360, 1024]) {
     await page.setViewportSize({ width, height: 800 });
     await page.goto("/browser/fixture.html?case=file-edit-path");
     const references = page.getByTestId("activity-file-reference");
-    await expect(references).toHaveCount(3);
-    for (let index = 0; index < 3; index++) {
+    await expect(references).toHaveCount(4);
+    for (let index = 0; index < 4; index++) {
       const row = page.getByTestId("activity-step").nth(index);
       const stats = row.getByTestId("activity-diff-pair");
       await expect(stats).toHaveText(index === 1 ? "+33-0" : "+12345-6789");
@@ -49,6 +49,18 @@ for (const width of [360, 1024]) {
     await expect(hint).toBeHidden();
     await page.getByRole("button", { name: /View changes/ }).first().click();
     await expect(page.getByTestId("file-edit-diff")).toBeVisible();
+    const imagePath = references.nth(3);
+    await expect(imagePath).toContainText("…");
+    await imagePath.hover();
+    await expect(hint).toContainText(longEditPath.replace("serve_fixture.py", "screenshot.png"));
+    await expect(surface.locator(".select-text")).toHaveText(longEditPath.replace("serve_fixture.py", "screenshot.png"));
+    await expect(page.getByTestId("file-image-quick-look")).toHaveCount(1);
+    await expect(surface.locator('[data-testid="file-image-quick-look"] img:visible')).toHaveCount(1);
+    expect(await surface.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath("image-path-hint.png") });
+    await page.mouse.move(0, 0);
+    await imagePath.focus();
+    await expect(hint).toContainText(longEditPath.replace("serve_fixture.py", "screenshot.png"));
     await page.setViewportSize({ width: 1600, height: 800 });
     await page.getByLabel("File edits").evaluate((element) => { (element as HTMLElement).style.maxWidth = "none"; });
     await expect(longPath).not.toContainText("…");

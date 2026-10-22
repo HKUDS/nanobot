@@ -126,23 +126,23 @@ export function FileReferenceChip({
           </span>
         </TooltipTrigger>
         <TooltipContent
-          aria-label={imageQuickLook ? t("filePreview.aria") : undefined}
+          aria-label={truncateFromStart ? fullPath : imageQuickLook ? t("filePreview.aria") : undefined}
           side="top"
           align={truncateFromStart ? "start" : "center"}
           sideOffset={8}
           collisionPadding={12}
           className={cn(
             "rounded-control text-popover-foreground",
+            imageQuickLook && truncateFromStart && "space-y-2",
             imageQuickLook
-              ? "w-max max-w-[calc(100vw-2rem)] p-2"
+              ? cn("w-max p-2", truncateFromStart ? "max-w-[min(38rem,calc(100vw-2rem))]" : "max-w-[calc(100vw-2rem)]")
               : cn("max-w-[min(38rem,calc(100vw-2rem))] px-2.5 py-1.5 font-mono text-[11px] leading-snug", truncateFromStart ? "text-left [overflow-wrap:anywhere]" : "break-all"),
           )}
         >
-          {imageQuickLook
-            ? tooltipOpen ? <FileImageQuickLook key={targetPath} path={targetPath} /> : null
-            : truncateFromStart ? <span className="select-text whitespace-pre-wrap [overflow-wrap:anywhere]">{fullPath.split(/([\\/])/).map((part, index) => (
-              <span key={index}>{part}{/^[\\/]$/.test(part) ? <wbr /> : null}</span>
-            ))}</span> : fullPath}
+          {truncateFromStart ? <span className="block max-w-full select-text whitespace-pre-wrap text-left font-mono text-[11px] leading-snug [overflow-wrap:anywhere]">{fullPath.split(/([\\/])/).map((part, index) => (
+            <span key={index}>{part}{/^[\\/]$/.test(part) ? <wbr /> : null}</span>
+          ))}</span> : !imageQuickLook ? fullPath : null}
+          {imageQuickLook && tooltipOpen ? <FileImageQuickLook key={targetPath} path={targetPath} /> : null}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
