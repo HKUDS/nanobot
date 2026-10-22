@@ -447,6 +447,63 @@ describe("local attachment paths and video ingress", () => {
     expect(onSend.mock.calls[0][1][0].media).toEqual({ path: local.path, name: local.name });
   });
 
+  it.each(["append", "prepend"])("keeps %s text written while the pasted path is being checked", async (edit) => {
+    let complete!: (attachment: typeof local) => void;
+    const inspect = vi.fn(() => new Promise<typeof local>((resolve) => { complete = resolve; }));
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} onInspectAttachment={inspect} />);
+    const input = screen.getByLabelText(/message input/i) as HTMLTextAreaElement;
+    fireEvent.paste(input, { clipboardData: { items: [], getData: () => local.path } });
+    const typed = edit === "append" ? `${local.path} describe it` : `请看 ${local.path}`;
+    fireEvent.change(input, { target: { value: typed, selectionStart: typed.length } });
+    await act(async () => complete(local));
+    await screen.findByTestId("composer-chip");
+    expect(input).toHaveValue(edit === "append" ? " describe it" : "请看 ");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSend.mock.calls[0][0]).toBe(edit === "append" ? "describe it" : "请看");
+    expect(onSend.mock.calls[0][1][0].media).toEqual({ path: local.path, name: local.name });
+  });
+
+  it.each(["edit", "remove"])("does not attach a path after the user chooses to %s it during inspection", async (edit) => {
+    let complete!: (attachment: typeof local) => void;
+    render(<ThreadComposer onSend={vi.fn()} onInspectAttachment={() => new Promise((resolve) => { complete = resolve; })} />);
+    const input = screen.getByLabelText(/message input/i);
+    fireEvent.paste(input, { clipboardData: { items: [], getData: () => local.path } });
+    const typed = edit === "edit" ? local.path.replace("clip", "other") : "keep my new text";
+    fireEvent.change(input, { target: { value: typed } });
+    await act(async () => complete(local));
+    expect(screen.queryByTestId("composer-chip")).not.toBeInTheDocument();
+    expect(input).toHaveValue(typed);
+    expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled();
+  });
+
+  it("lets an IME composition finish before converting its pasted path", async () => {
+    let complete!: (attachment: typeof local) => void;
+    render(<ThreadComposer onSend={vi.fn()} onInspectAttachment={() => new Promise((resolve) => { complete = resolve; })} />);
+    const input = screen.getByLabelText(/message input/i);
+    fireEvent.paste(input, { clipboardData: { items: [], getData: () => local.path } });
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: `${local.path}你` } });
+    await act(async () => complete(local));
+    expect(screen.queryByTestId("composer-chip")).not.toBeInTheDocument();
+    fireEvent.compositionEnd(input);
+    await screen.findByTestId("composer-chip");
+    expect(input).toHaveValue("你");
+  });
+
+  it("ignores an inspection reply after the workspace scope changes", async () => {
+    let complete!: (attachment: typeof local) => void;
+    const inspect = () => new Promise<typeof local>((resolve) => { complete = resolve; });
+    const view = render(<ThreadComposer onSend={vi.fn()} onInspectAttachment={inspect} workspaceScope={{ project_path: "C:\\project", access_mode: "full" }} />);
+    const input = screen.getByLabelText(/message input/i);
+    fireEvent.paste(input, { clipboardData: { items: [], getData: () => local.path } });
+    view.rerender(<ThreadComposer onSend={vi.fn()} onInspectAttachment={inspect} workspaceScope={{ project_path: "C:\\project", access_mode: "restricted" }} />);
+    await act(async () => complete(local));
+    expect(screen.queryByTestId("composer-chip")).not.toBeInTheDocument();
+    expect(input).toHaveValue(local.path);
+    expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled();
+  });
+
   it("keeps mixed local and uploaded attachment order across draft remounts", async () => {
     encodeImage.mockImplementation(async (file) => resolveReady(file));
     const firstLocal = { ...local, path: "C:\\project\\first.png", name: "first.png", kind: "image" as const, mime: "image/png" };

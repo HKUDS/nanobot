@@ -1,4 +1,4 @@
-import { pastedFilePath, isLocalAttachment, type LocalAttachment } from "../../../../packages/client-events/attachments";
+import { pastedFilePath, PastedPathRange, isLocalAttachment, type LocalAttachment } from "../../../../packages/client-events/attachments";
 import {
   NewChatIcon,
   CompactIcon,
@@ -1118,7 +1118,9 @@ export function ThreadComposer({
   } | null>(null);
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [sendPending, setSendPending] = useState(false);
-  const [checkingPath, setCheckingPath] = useState(false);
+  const [pathInspection, setPathInspection] = useState<{
+    generation: number; scope: string; range: PastedPathRange; attachment?: LocalAttachment;
+  } | null>(null);
   const pathCheckGeneration = useRef(0);
   const pathCheckScope = useRef("");
   const scopeIdentity = `${workspaceScope?.project_path ?? ""}:${workspaceScope?.access_mode ?? ""}`;
@@ -1217,7 +1219,7 @@ export function ThreadComposer({
   const maxTextBytes = ingressLimits?.message.max_text_bytes ?? 64 * 1024;
   const { images, enqueue, addLocal, remove, clear, restoreReadyImages, encoding: encodingFiles, full } =
     useAttachedImages({ ingressLimits });
-  const encoding = encodingFiles || checkingPath;
+  const encoding = encodingFiles || pathInspection !== null;
   const restoredDraftAttachments = useRef(false);
   const [draftAttachmentsReady, setDraftAttachmentsReady] = useState(!initialDraft?.attachments.length);
   useLayoutEffect(() => {
@@ -1287,38 +1289,6 @@ export function ThreadComposer({
     onDragLeave,
     onDrop,
   } = useClipboardAndDrop(addFiles);
-
-  const onPaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    onAttachmentPaste(event);
-    if (event.defaultPrevented || interactionDisabled || !onInspectAttachment) return;
-    const raw = event.clipboardData.getData("text/plain");
-    const path = pastedFilePath(raw);
-    if (!path) return;
-    event.preventDefault();
-    const input = event.currentTarget;
-    const before = value.slice(0, input.selectionStart);
-    const after = value.slice(input.selectionEnd);
-    const pasted = before + raw + after;
-    // Keep the original paste in the draft until the gateway confirms it.
-    setValue(pasted);
-    const generation = ++pathCheckGeneration.current;
-    setCheckingPath(true);
-    void onInspectAttachment(path).then((local) => {
-      if (generation !== pathCheckGeneration.current || pathCheckScope.current !== scopeIdentity
-        || textareaRef.current?.value !== pasted) return;
-      const rejection = addLocal(local);
-      if (rejection) { setInlineError(formatRejection(rejection)); return; }
-      setValue(before + after);
-      setCursorPosition(before.length);
-      setInlineError(null);
-    }).catch((error: unknown) => {
-      if (generation === pathCheckGeneration.current) {
-        setInlineError(error instanceof Error ? error.message : t("message.attachmentUnavailable"));
-      }
-    }).finally(() => {
-      if (generation === pathCheckGeneration.current) setCheckingPath(false);
-    });
-  }, [addLocal, formatRejection, interactionDisabled, onAttachmentPaste, onInspectAttachment, scopeIdentity, t, value]);
 
   useEffect(() => {
     if (compactWhenIdle || interactionDisabled || hasTouchPrimaryPointer || (workspaceError && showProjectPicker)) {
@@ -1568,6 +1538,49 @@ export function ThreadComposer({
     resetKey: pendingQueueKey,
   });
   const { rawSelection, replace: replaceMentionInput } = mentionInput;
+  const onPaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    onAttachmentPaste(event);
+    if (event.defaultPrevented || interactionDisabled || !onInspectAttachment) return;
+    const raw = event.clipboardData.getData("text/plain");
+    const path = pastedFilePath(raw);
+    if (!path) return;
+    event.preventDefault();
+    const { start, end } = rawSelection();
+    const pasted = value.slice(0, start) + raw + value.slice(end);
+    const generation = ++pathCheckGeneration.current;
+    replaceMentionInput(pasted, start + raw.length);
+    setPathInspection({ generation, scope: scopeIdentity, range: new PastedPathRange(pasted, start, start + raw.length) });
+    void onInspectAttachment(path).then((attachment) => {
+      if (generation !== pathCheckGeneration.current) return;
+      setPathInspection((current) => current?.generation === generation ? { ...current, attachment } : current);
+    }).catch((error: unknown) => {
+      if (generation !== pathCheckGeneration.current || pathCheckScope.current !== scopeIdentity) return;
+      setInlineError(error instanceof Error ? error.message : t("message.attachmentUnavailable"));
+      setPathInspection(null);
+    });
+  }, [interactionDisabled, onAttachmentPaste, onInspectAttachment, rawSelection, replaceMentionInput, scopeIdentity, t, value]);
+
+  useLayoutEffect(() => {
+    if (!pathInspection) return;
+    if (pathInspection.scope !== scopeIdentity || !pathInspection.range.update(value)) {
+      pathCheckGeneration.current += 1;
+      setPathInspection(null);
+      return;
+    }
+    // Let the native IME commit before removing the confirmed path from its text.
+    if (!pathInspection.attachment || mentionInput.isComposing) return;
+    const edited = pathInspection.range.replace("", rawSelection().start);
+    if (edited) {
+      const rejection = addLocal(pathInspection.attachment);
+      if (rejection) setInlineError(formatRejection(rejection));
+      else {
+        replaceMentionInput(edited.value, edited.cursor);
+        setInlineError(null);
+      }
+    }
+    setPathInspection(null);
+  }, [addLocal, formatRejection, mentionInput.isComposing, pathInspection, rawSelection, replaceMentionInput, scopeIdentity, value]);
+
   const draftText = composerMentionText(mentionInput.segments).raw;
   const sessionDragInsertion = sessionDragPreview
     ? mentionInsertion(

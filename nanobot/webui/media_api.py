@@ -206,7 +206,7 @@ def serve_signed_media(
     secret: bytes,
     request: WsRequest | None = None,
     media_dir: MediaDirProvider = _default_media_dir,
-    scope_for_session: Callable[[str], WorkspaceScope] | None = None,
+    scope_for_session: Callable[[str], WorkspaceScope | None] | None = None,
 ) -> Response:
     """Serve a signed media URL, including browser-friendly byte ranges."""
     try:
@@ -234,9 +234,10 @@ def serve_signed_media(
             session_key, path = reference
             if not isinstance(session_key, str) or not isinstance(path, str):
                 return _http_error(400, "invalid local attachment")
-            candidate = resolve_file_path(
-                path, scope=scope_for_session(session_key), literal=True,
-            )
+            scope = scope_for_session(session_key)
+            if scope is None:
+                return _http_error(404, "attachment unavailable")
+            candidate = resolve_file_path(path, scope=scope, literal=True)
         except (ValueError, WebUIFilePreviewError) as exc:
             return _http_error(getattr(exc, "status", 404), "attachment unavailable")
     else:

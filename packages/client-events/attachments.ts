@@ -30,13 +30,50 @@ export function pastedFilePath(text: string): string | null {
   const quoted = (value.startsWith('"') && value.endsWith('"'))
     || (value.startsWith("'") && value.endsWith("'"));
   if (quoted) value = value.slice(1, -1);
-  if (!value || /["'`<>|]/.test(value) || /^[a-z][a-z\d+.-]*:\/\//i.test(value)
+  if (!value || /["`<>|]/.test(value) || /^[a-z][a-z\d+.-]*:\/\//i.test(value)
     || /^[a-z]:[\\/]fakepath[\\/]/i.test(value)) return null;
   if (/^(?:[a-z]:[\\/]|\/|\\\\|\.{1,2}[\\/]|~[\\/])/i.test(value)) return value;
   // Bare relative names and relative directory paths; whitespace needs quotes.
   return (quoted || !/\s/.test(value)) && /(?:[\\/]|\.[\w-]+$)/u.test(value)
     ? value : null;
 }
+/** One in-flight paste owns only its original text range, not the whole composer. */
+export class PastedPathRange {
+  private valid = true;
+
+  constructor(private value: string, private start: number, private end: number) {}
+
+  update(next: string): boolean {
+    if (!this.valid || next === this.value) return this.valid;
+    let start = 0;
+    while (start < this.value.length && start < next.length && this.value[start] === next[start]) start += 1;
+    let oldEnd = this.value.length;
+    let newEnd = next.length;
+    while (oldEnd > start && newEnd > start && this.value[oldEnd - 1] === next[newEnd - 1]) {
+      oldEnd -= 1;
+      newEnd -= 1;
+    }
+    if (oldEnd <= this.start) {
+      const shift = newEnd - oldEnd;
+      this.start += shift;
+      this.end += shift;
+    } else if (start < this.end) {
+      this.valid = false;
+    }
+    this.value = next;
+    return this.valid;
+  }
+
+  replace(text: string, cursor: number): { value: string; cursor: number } | null {
+    if (!this.valid) return null;
+    const shift = text.length - (this.end - this.start);
+    return {
+      value: this.value.slice(0, this.start) + text + this.value.slice(this.end),
+      cursor: cursor <= this.start ? cursor : cursor >= this.end ? cursor + shift : this.start + text.length,
+    };
+  }
+}
+
 export interface UploadCapability { path: string; token: string }
 
 // Allow the gateway's five-minute body budget plus request/response overhead.

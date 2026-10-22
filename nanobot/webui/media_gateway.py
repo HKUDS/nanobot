@@ -49,7 +49,7 @@ class WebUIMediaGateway:
         payload: str,
         *,
         request: WsRequest | None = None,
-        scope_for_session: Callable[[str], WorkspaceScope] | None = None,
+        scope_for_session: Callable[[str], WorkspaceScope | None] | None = None,
     ) -> Response:
         return serve_signed_media(
             sig,

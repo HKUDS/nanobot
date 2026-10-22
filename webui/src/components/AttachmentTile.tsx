@@ -106,6 +106,12 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
       <span className="text-xs text-muted-foreground">
         {pending ? t("message.delivery.sending") : t("message.attachmentUnavailable", { defaultValue: "Attachment unavailable" })}
       </span>
+      {attachment.kind === "video" && failed && !pending ? (
+        <button type="button" onClick={() => setFailedUrl(undefined)}
+          className="shrink-0 rounded-sm px-1 text-foreground underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2">
+          {t("common.retry")}
+        </button>
+      ) : null}
     </div>
   );
 }

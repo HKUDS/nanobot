@@ -1682,7 +1682,7 @@ class GatewayHTTPHandler:
             sig,
             payload,
             request=request,
-            scope_for_session=self.workspaces.scope_for_session_key,
+            scope_for_session=self.workspaces.existing_scope_for_session_key,
         )
 
     # -- Misc routes --------------------------------------------------------

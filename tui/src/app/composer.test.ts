@@ -134,6 +134,48 @@ describe("NanobotTui composer", () => {
     expect(ui.composer.plainText).toBe("./missing.mp4")
   })
 
+  test.each([false, true])("preserves text %s while a native pasted path is checked", async (prepend) => {
+    setup = await createRenderer({ width: 100, height: 24, screenMode: "alternate-screen" })
+    const transport = client()
+    let complete!: (file: Awaited<ReturnType<typeof transport.inspectAttachment>>) => void
+    transport.inspectAttachment = () => new Promise((resolve) => { complete = resolve })
+    const sent: Array<{ content: string; options: MessageOptions }> = []
+    transport.sendAttachments = async (content, options) => { sent.push({ content, options }); return "accepted" }
+    const app = NanobotTui.mount(setup.renderer, options, transport, new MockTreeSitterClient({ autoResolveTimeout: 0 }))
+    app.accept({ event: "attached", chat_id: "chat" })
+    const ui = app as unknown as { ready: boolean; composer: TextareaRenderable; pathInspectionPending: boolean }
+    await waitUntil(() => ui.ready)
+    const path = "/project/image.png"
+    await setup.mockInput.pasteBracketedText(path)
+    if (prepend) ui.composer.cursorOffset = 0
+    await setup.mockInput.typeText(prepend ? "请看 " : " describe it")
+    complete({ path, name: "image.png", size: 6, kind: "image", mime: "image/png", url: "/api/media/sig/path" })
+    await waitUntil(() => !ui.pathInspectionPending)
+    expect(ui.composer.plainText).toContain("[Image #1: image.png]")
+    ui.composer.submit()
+    await waitUntil(() => sent.length === 1)
+    expect(sent[0]?.content).toBe(prepend ? "请看" : "describe it")
+    expect(sent[0]?.options.media).toEqual([{ path, name: "image.png" }])
+  })
+
+  test("cancels an edited native path and clears checking status without losing the text", async () => {
+    setup = await createRenderer({ width: 100, height: 24, screenMode: "alternate-screen" })
+    const transport = client()
+    let complete!: (file: Awaited<ReturnType<typeof transport.inspectAttachment>>) => void
+    transport.inspectAttachment = () => new Promise((resolve) => { complete = resolve })
+    const app = NanobotTui.mount(setup.renderer, options, transport, new MockTreeSitterClient({ autoResolveTimeout: 0 }))
+    app.accept({ event: "attached", chat_id: "chat" })
+    const ui = app as unknown as { ready: boolean; composer: TextareaRenderable; pathInspectionPending: boolean; status: { plainText: string }; draft: { imageCount: number } }
+    await waitUntil(() => ui.ready)
+    await setup.mockInput.pasteBracketedText("/project/image.png")
+    ui.composer.setText("/project/other.png")
+    complete({ path: "/project/image.png", name: "image.png", size: 6, kind: "image", mime: "image/png", url: "/api/media/sig/path" })
+    await waitUntil(() => !ui.pathInspectionPending)
+    expect(ui.draft.imageCount).toBe(0)
+    expect(ui.composer.plainText).toBe("/project/other.png")
+    expect(ui.status.plainText).not.toContain("Checking local attachment")
+  })
+
   test("allows one referenced video plus four non-video attachments including a clipboard image", async () => {
     setup = await createRenderer({ width: 100, height: 24, screenMode: "alternate-screen" })
     const transport = client()

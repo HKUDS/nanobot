@@ -407,9 +407,13 @@ async def test_temporary_chat_disposal_never_deletes_borrowed_source(tmp_path, m
         "media": [{"path": str(source)}],
     })
     channel._handle_message.assert_awaited_once()
+    url = channel.gateway.media.local_attachment_url(str(source), session_key=f"websocket:{chat_id}")
+    sig, payload = url.split("/")[-2:]
+    assert channel.gateway.http._handle_media_fetch(sig, payload).status_code == 200
     channel.gateway.uploads.store.discard_owner(channel.gateway.uploads.owner(conn))
     channel.gateway.uploads.store.prune()
     await channel.gateway.temporary_chats.discard(conn, chat_id)
+    assert channel.gateway.http._handle_media_fetch(sig, payload).status_code == 404
     assert source.read_text(encoding="utf-8") == "borrowed"
 
 
@@ -441,3 +445,34 @@ async def test_large_local_files_and_upload_share_count_but_not_byte_budget(tmp_
     assert channel._handle_message.await_args.kwargs["metadata"]["local_media_paths"] == [str(source) for source in sources]
     assert all(source.stat().st_size == 64 * 1024 * 1024 + 1 for source in sources)
     assert [path for path in channel.gateway.uploads.store.media_dir.iterdir() if path.is_file()] == [Path(uploaded)]
+
+
+@pytest.mark.parametrize("persisted", [False, True])
+async def test_deleted_local_attachment_scope_never_reverts_to_default(tmp_path, monkeypatch, persisted):
+    from nanobot.security.workspace_access import default_workspace_scope
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path / "data")
+    project = tmp_path / "nested"
+    project.mkdir()
+    source = tmp_path / "original.txt"
+    source.write_text("borrowed", encoding="utf-8")
+    manager = SessionManager(tmp_path)
+    channel = _make_channel(manager, workspace=tmp_path, restricted=True)
+    workspaces = channel.gateway.workspaces
+    key = "websocket:scoped-media"
+    await workspaces.stage_scope("scoped-media", default_workspace_scope(project, False))
+    if persisted:
+        await workspaces.persist_scope("scoped-media", default_workspace_scope(project, False))
+    url = channel.gateway.media.local_attachment_url(str(source), session_key=key)
+    sig, payload = url.split("/")[-2:]
+
+    def fetch():
+        return channel.gateway.http._handle_media_fetch(sig, payload)
+
+    assert bytes(fetch().body) == b"borrowed"
+    await workspaces.stage_scope("scoped-media", default_workspace_scope(project, True))
+    assert fetch().status_code == 403
+    workspaces.discard_draft_scope(key)
+    await manager.state.delete(key)
+    assert fetch().status_code == 404
+    assert source.read_text(encoding="utf-8") == "borrowed"

@@ -1,4 +1,4 @@
-import { pastedFilePath } from "../../../packages/client-events/attachments"
+import { pastedFilePath, PastedPathRange } from "../../../packages/client-events/attachments"
 import {
   BoxRenderable,
   CliRenderEvents,
@@ -222,7 +222,8 @@ export class NanobotTui {
   private apiRefreshPromise: Promise<GatewayApiConnection> | null = null
   private skillLoadId = 0
   private clipboardImagePending = false
-  private pathInspectionPending = false
+  private pathInspection: PastedPathRange | null = null
+  private get pathInspectionPending(): boolean { return this.pathInspection !== null }
   private clipboardPasteGeneration = 0
   private composerValue = ""
   private composerCursor = 0
@@ -1877,6 +1878,11 @@ export class NanobotTui {
       value = edit.value
       cursor = edit.cursor
     }
+    if (this.pathInspection && !this.pathInspection.update(value)) {
+      this.pathInspection = null
+      if (this.activeTurn) this.renderActiveStatus()
+      else this.status.content = this.ready ? this.readyStatus() : this.connectionMessage
+    }
     this.composerValue = value
     this.composerCursor = cursor
     this.draft.prune(value)
@@ -1936,6 +1942,7 @@ export class NanobotTui {
 
   private setComposer(content: string): void {
     this.clipboardPasteGeneration += 1
+    this.pathInspection = null
     this.draft.clear()
     this.composer.setText(content)
     this.composer.cursorOffset = content.length
@@ -1987,21 +1994,32 @@ export class NanobotTui {
       const cursor = this.composerStringCursor()
       const generation = this.clipboardPasteGeneration
       const chatId = this.client.activeChatId
-      this.pathInspectionPending = true
+      const range = new PastedPathRange(pasted, cursor - value.length, cursor)
+      this.pathInspection = range
       this.status.content = "Checking local attachment…"
       void this.client.inspectAttachment(path).then((file) => {
         if (this.quitting || this.composer.isDestroyed || generation !== this.clipboardPasteGeneration
-          || chatId !== this.client.activeChatId || this.composer.plainText !== pasted) return
-        const insertion = this.draft.localFile(file, pasted)
+          || chatId !== this.client.activeChatId || this.pathInspection !== range) return
+        if (!range.update(this.composer.plainText)) return
+        const insertion = this.draft.localFile(file, this.composer.plainText)
         if (!insertion) throw new Error("Too many attachments; remove one and paste the path again")
-        const start = cursor - value.length
-        this.composer.setText(pasted.slice(0, start) + insertion.text + pasted.slice(start + value.length))
-        this.composer.cursorOffset = this.composerOffsetForStringIndex(this.composer.plainText, start + insertion.text.length)
+        const edited = range.replace(insertion.text, this.composerStringCursor())!
+        this.pathInspection = null
+        this.composer.setText(edited.value)
+        this.setComposerStringCursor(edited.value, edited.cursor)
         this.status.content = `Attached ${file.name}. Review before sending.`
       }).catch((error: unknown) => {
-        if (generation !== this.clipboardPasteGeneration || this.quitting) return
+        if (generation !== this.clipboardPasteGeneration || this.quitting || this.pathInspection !== range) return
+        this.pathInspection = null
         this.status.content = error instanceof Error ? error.message : "Attachment unavailable; path retained"
-      }).finally(() => { this.pathInspectionPending = false })
+      }).finally(() => {
+        if (this.pathInspection !== range) return
+        this.pathInspection = null
+        if (!this.quitting && !this.composer.isDestroyed) {
+          if (this.activeTurn) this.renderActiveStatus()
+          else this.status.content = this.ready ? this.readyStatus() : this.connectionMessage
+        }
+      })
       return
     }
     const insertion = this.draft.paste(value)

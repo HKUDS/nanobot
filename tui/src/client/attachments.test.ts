@@ -10,6 +10,9 @@ test("recognizes whole paths across native platforms without consuming prose, co
     ["'./clips/my clip.webm'", "./clips/my clip.webm"],
     ["/tmp/my clip.mov", "/tmp/my clip.mov"], ["clips/clip.mp4", "clips/clip.mp4"],
     ["clip.mp4", "clip.mp4"],
+    ['"C:\\project\\O\'Reilly.png"', "C:\\project\\O'Reilly.png"],
+    ["/tmp/O'Reilly.png", "/tmp/O'Reilly.png"],
+    ['"O\'Reilly notes.pdf"', "O'Reilly notes.pdf"],
   ]) expect(pastedFilePath(text!)).toBe(path!)
   for (const text of ["please read ./file.txt", "const p = './file.txt'", "https://host/clip.mp4",
     "C:\\fakepath\\clip.mp4", "line\n./clip.mp4", "`./clip.mp4`"]) expect(pastedFilePath(text)).toBeNull()

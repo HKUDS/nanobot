@@ -1049,6 +1049,23 @@ describe("MessageBubble", () => {
     expect(content.querySelectorAll("li")).toHaveLength(1000);
   });
 
+  it("retries a failed video locally without replacing a healthy player on history updates", () => {
+    const message: UIMessage = { id: "retry-video", role: "user", content: "watch", createdAt: 0,
+      media: [{ kind: "video", name: "clip.webm", url: "/api/media/sig/clip" }] };
+    const { container, rerender } = render(<MessageBubble message={message} />);
+    const original = container.querySelector("video")!;
+    fireEvent.error(original);
+    expect(container.querySelector("video")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    const retried = container.querySelector("video")!;
+    expect(retried).toHaveAttribute("src", "/api/media/sig/clip");
+    expect(retried).not.toBe(original);
+    rerender(<MessageBubble message={{ ...message, media: [...message.media!] }} />);
+    expect(container.querySelector("video")).toBe(retried);
+    fireEvent.error(retried);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
+  });
+
   it("renders video media as an inline player", () => {
     const message: UIMessage = {
       id: "a1",

@@ -279,14 +279,21 @@ class WebUIWorkspaceController:
         return self._scope_from_metadata_value(raw_scope, default_scope=default_scope)
 
     def scope_for_session_key(self, session_key: str) -> WorkspaceScope:
+        return self.existing_scope_for_session_key(session_key) or self.default_scope()
+
+    def existing_scope_for_session_key(self, session_key: str) -> WorkspaceScope | None:
+        """Resolve live authority without turning a deleted session into a default scope."""
         draft = self._draft_scopes.get(session_key)
         if draft is not None:
             self._draft_scopes.move_to_end(session_key)
             return draft
         if self._sessions is None:
-            return self.default_scope()
+            return None
+        identity = self._sessions.state.peek_identity(session_key)
+        if identity is not None and not identity.policy.persist:
+            return self.restricted_default_scope()
         data = self._sessions.read_session_metadata(session_key)
-        return self._scope_from_snapshot(data)
+        return self._scope_from_snapshot(data) if data is not None else None
 
     async def async_scope_for_session_key(self, session_key: str) -> WorkspaceScope:
         draft = self._draft_scopes.get(session_key)
