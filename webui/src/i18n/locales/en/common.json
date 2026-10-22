@@ -2538,7 +2538,6 @@
     "turnLatencyTitle": "Response time (end-to-end)",
     "fileEditViewDiff": "View changes",
     "fileEditViewLargeDiff": "Expand changes",
-    "fileEditDiffLineCount": "{{count}} lines",
     "fileEditUnchangedLinesHidden": "{{count}} unchanged lines hidden",
     "fileEditShowMoreLines": "Show {{count}} more lines",
     "fileEditShowFewerLines": "Show fewer lines",

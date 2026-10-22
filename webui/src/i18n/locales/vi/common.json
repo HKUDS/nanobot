@@ -2159,7 +2159,6 @@
     "turnLatencyTitle": "Thời gian phản hồi (end-to-end)",
       "fileEditViewDiff": "Xem thay đổi",
       "fileEditViewLargeDiff": "Mở rộng thay đổi",
-    "fileEditDiffLineCount": "{{count}} dòng",
     "fileEditUnchangedLinesHidden": "Đã ẩn {{count}} dòng không đổi",
     "fileEditShowMoreLines": "Hiển thị thêm {{count}} dòng",
     "fileEditShowFewerLines": "Hiển thị ít dòng hơn",

@@ -2159,7 +2159,6 @@
     "turnLatencyTitle": "Waktu respons (ujung ke ujung)",
     "fileEditViewDiff": "Lihat perubahan",
     "fileEditViewLargeDiff": "Perluas perubahan",
-    "fileEditDiffLineCount": "{{count}} baris",
     "fileEditUnchangedLinesHidden": "{{count}} baris tidak berubah disembunyikan",
     "fileEditShowMoreLines": "Tampilkan {{count}} baris lagi",
     "fileEditShowFewerLines": "Tampilkan lebih sedikit baris",

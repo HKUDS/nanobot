@@ -2159,7 +2159,6 @@
     "turnLatencyTitle": "応答時間（全行程）",
     "fileEditViewDiff": "変更を表示",
     "fileEditViewLargeDiff": "変更を展開",
-    "fileEditDiffLineCount": "{{count}} 行",
     "fileEditUnchangedLinesHidden": "未変更の {{count}} 行を非表示",
     "fileEditShowMoreLines": "さらに {{count}} 行を表示",
     "fileEditShowFewerLines": "表示行数を減らす",

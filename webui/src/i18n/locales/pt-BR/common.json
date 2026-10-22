@@ -2352,7 +2352,6 @@
     "turnLatencyTitle": "Tempo de resposta (ponta a ponta)",
     "fileEditViewDiff": "Ver alterações",
     "fileEditViewLargeDiff": "Expandir alterações",
-    "fileEditDiffLineCount": "{{count}} linhas",
     "fileEditUnchangedLinesHidden": "{{count}} linhas inalteradas ocultas",
     "fileEditShowMoreLines": "Mostrar mais {{count}} linhas",
     "fileEditShowFewerLines": "Mostrar menos linhas",

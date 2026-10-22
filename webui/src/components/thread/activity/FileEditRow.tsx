@@ -198,10 +198,6 @@ function FileUnifiedDiff({
       : EMPTY_VISIBLE_DIFF,
     [lineLimit, renderableDiff, shouldRenderBody, totalLineCount],
   );
-  const lineCountLabel = t("message.fileEditDiffLineCount", {
-    count: diff.truncated ? `${totalLineCount}+` : totalLineCount,
-    defaultValue: "{{count}} lines",
-  });
   const viewDiffLabel = shouldAutoCollapse
     ? tx("message.fileEditViewLargeDiff", "View large diff")
     : tx("message.fileEditViewDiff", "View diff");
@@ -323,7 +319,6 @@ function FileUnifiedDiff({
           aria-hidden
         />
         <span className="min-w-0 flex-1">{viewDiffLabel}</span>
-        <span className="shrink-0 text-muted-foreground">{lineCountLabel}</span>
       </button>
       <DisclosureContent id={contentId} open={open} onExitComplete={releaseBody}>
         {shouldRenderBody ? renderBody() : null}

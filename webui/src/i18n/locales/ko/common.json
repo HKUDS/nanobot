@@ -2159,7 +2159,6 @@
     "turnLatencyTitle": "응답 시간(엔드투엔드)",
     "fileEditViewDiff": "변경 보기",
     "fileEditViewLargeDiff": "변경 펼치기",
-    "fileEditDiffLineCount": "{{count}}줄",
     "fileEditUnchangedLinesHidden": "변경되지 않은 {{count}}줄 숨김",
     "fileEditShowMoreLines": "{{count}}줄 더 보기",
     "fileEditShowFewerLines": "간략히 보기",

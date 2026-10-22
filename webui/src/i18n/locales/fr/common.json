@@ -2159,7 +2159,6 @@
     "turnLatencyTitle": "Temps de réponse (de bout en bout)",
     "fileEditViewDiff": "Voir les modifications",
     "fileEditViewLargeDiff": "Déplier les modifications",
-    "fileEditDiffLineCount": "{{count}} lignes",
     "fileEditUnchangedLinesHidden": "{{count}} lignes inchangées masquées",
     "fileEditShowMoreLines": "Afficher {{count}} lignes de plus",
     "fileEditShowFewerLines": "Afficher moins de lignes",

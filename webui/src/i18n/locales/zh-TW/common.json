@@ -2158,7 +2158,6 @@
     "turnLatencyTitle": "回覆耗時",
     "fileEditViewDiff": "檢視修改",
     "fileEditViewLargeDiff": "展開修改",
-    "fileEditDiffLineCount": "{{count}} 行",
     "fileEditUnchangedLinesHidden": "已隱藏 {{count}} 行未修改內容",
     "fileEditShowMoreLines": "顯示其餘 {{count}} 行",
     "fileEditShowFewerLines": "收起部分行",
