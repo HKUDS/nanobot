@@ -1146,7 +1146,6 @@ export default function App() {
       modelName={state.modelName}
       ingressLimits={state.ingressLimits}
       webuiCapabilities={state.webuiCapabilities}
-      checkUpdatesOnConnect={state.runtimeSurface !== "native" && state.webuiCapabilities.includes("webui.core.v1")}
       allowUpdateFlow={state.runtimeSurface !== "native"}
     >
       <BrowserNotifications client={state.client} />

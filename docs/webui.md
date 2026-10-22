@@ -81,6 +81,10 @@ Share WebUI access only with people you trust to administer the same agent. To g
 | Automations | Review, search, run, pause, edit, and delete scheduled and local-trigger agent turns |
 | Settings | Adjust models, providers, image generation, voice, web tools, runtime, and safety options |
 
+## Check for updates
+
+Open **Settings → About** to check for updates automatically. Startup, reconnecting, and normal chatting do not trigger background version checks. Use **Check again** or **Retry** to check manually; changing the update channel also refreshes its status. Checking does not install updates or restart nanobot.
+
 ## Topic Workspace
 
 The sidebar is the topic switcher. Each topic keeps its own history, title, workspace selection, and linked automations. Use a new topic when you want a separate context; use fork when you want to continue from an existing point without changing the original thread.

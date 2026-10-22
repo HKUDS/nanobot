@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react";
+import { createContext, useContext, useMemo, useSyncExternalStore, type ReactNode } from "react";
 
 import { checkVersion, changeUpdateChannel, type ReleaseStatus, type UpdateChannel, type UpdateMethod, type WebUIMutationTransport } from "@/lib/api";
 
@@ -96,20 +96,14 @@ function createVersionCheck(token: string, channels: boolean, client?: WebUIMuta
   };
 }
 
-export function VersionCheckProvider({ token, autoCheck = false, channels = false, client, children }: {
+export function VersionCheckProvider({ token, channels = false, client, children }: {
   token: string;
-  autoCheck?: boolean;
   channels?: boolean;
   client?: WebUIMutationTransport;
   children: ReactNode;
 }) {
   const store = useMemo(() => createVersionCheck(token, channels, client), [token, channels, client]);
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
-
-  useEffect(() => {
-    // One quiet check on connection, not a timer or an installation request.
-    if (autoCheck && token) void store.check();
-  }, [autoCheck, store, token]);
 
   return <VersionCheckContext.Provider value={{ ...snapshot, check: store.check, dismiss: store.dismiss, changeChannel: store.changeChannel }}>
     {children}

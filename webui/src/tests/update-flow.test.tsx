@@ -564,7 +564,7 @@ describe("Real update consent and recovery", () => {
     vi.mocked(api.readUpdateJob).mockResolvedValue({ job: {
       ...job("restart_failed", "confirmed"), mutation_started: true, running_version: "0.3.6",
     } });
-    render(<ClientProvider client={client} token="gateway-a" checkUpdatesOnConnect webuiCapabilities={["webui.update-flow.v1"]}>
+    render(<ClientProvider client={client} token="gateway-a" webuiCapabilities={["webui.update-flow.v1"]}>
       <AboutSettings settings={settingsPayload()} />
     </ClientProvider>);
     fireEvent.click(await screen.findByRole("button", { name: "Close" }));

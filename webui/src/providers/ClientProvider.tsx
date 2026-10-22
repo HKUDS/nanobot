@@ -29,7 +29,6 @@ export function ClientProvider({
   modelName = null,
   ingressLimits = null,
   webuiCapabilities = [],
-  checkUpdatesOnConnect = false,
   allowUpdateFlow = true,
   children,
 }: {
@@ -38,7 +37,6 @@ export function ClientProvider({
   modelName?: string | null;
   ingressLimits?: WebUIIngressLimits | null;
   webuiCapabilities?: string[];
-  checkUpdatesOnConnect?: boolean;
   allowUpdateFlow?: boolean;
   children: ReactNode;
 }) {
@@ -52,7 +50,7 @@ export function ClientProvider({
 
   return (
     <ClientContext.Provider value={value}>
-      <VersionCheckProvider token={token} client={client} autoCheck={checkUpdatesOnConnect}
+      <VersionCheckProvider token={token} client={client}
         channels={allowUpdateFlow && webuiCapabilities.includes("webui.update-channels.v1")}>
         <UpdateFlowProvider client={client} token={token} enabled={allowUpdateFlow && webuiCapabilities.includes("webui.update-flow.v1")}
           canSettleHandoff={webuiCapabilities.includes("webui.update-jobs.settle-handoff.v1")}>

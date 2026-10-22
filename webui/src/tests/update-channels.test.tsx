@@ -22,7 +22,7 @@ function Controls() {
   </>;
 }
 function view(client: NanobotClient, token = "channel-a", native = false) {
-  return <ClientProvider client={client} token={token} checkUpdatesOnConnect allowUpdateFlow={!native}
+  return <ClientProvider client={client} token={token} allowUpdateFlow={!native}
     webuiCapabilities={["webui.update-channels.v1"]}>
     <AboutSettings settings={settingsPayload()} /><Controls />
   </ClientProvider>;

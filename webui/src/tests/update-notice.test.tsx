@@ -40,16 +40,30 @@ function Surface() {
   </>;
 }
 
-const view = (token = "host-a") => <ClientProvider client={client} token={token} checkUpdatesOnConnect><Surface /></ClientProvider>;
+const view = (token = "host-a") => <ClientProvider client={client} token={token}><Surface /></ClientProvider>;
 
 describe("Sidebar update entry", () => {
+  it("does not check on connection, rerender, credential change or remount before About opens", async () => {
+    const fetcher = vi.fn(async () => jsonResponse(available()));
+    vi.stubGlobal("fetch", fetcher);
+    const mounted = render(view());
+    mounted.rerender(view());
+    mounted.rerender(view("host-b"));
+    mounted.unmount();
+    render(view("host-b"));
+    await act(async () => {});
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /Update available/ })).toBeNull();
+  });
+
   it("keeps About update actions available after dismissing the sidebar notice", async () => {
     const fetcher = vi.fn(async () => jsonResponse(available()));
     vi.stubGlobal("fetch", fetcher);
     const { rerender } = render(view("dismiss-sidebar"));
+    fireEvent.click(screen.getByText("Refresh version"));
     fireEvent.click(await screen.findByRole("button", { name: "Update available v0.3.6" }));
     fireEvent.click(screen.getByRole("button", { name: "Dismiss update notice" }));
-    rerender(<ClientProvider client={client} token="dismiss-sidebar" checkUpdatesOnConnect>
+    rerender(<ClientProvider client={client} token="dismiss-sidebar">
       <Surface />
       <AboutSettings settings={settingsPayload()} onRequestUpdate={vi.fn()} />
     </ClientProvider>);
@@ -63,13 +77,16 @@ describe("Sidebar update entry", () => {
     let resolve!: (response: Response) => void;
     const fetcher = vi.fn().mockImplementation(() => new Promise<Response>(done => { resolve = done; }));
     vi.stubGlobal("fetch", fetcher);
-    const surface = (about: boolean) => <ClientProvider client={client} token="about-entry" checkUpdatesOnConnect>
+    const surface = (about: boolean) => <ClientProvider client={client} token="about-entry">
       {about && <AboutSettings settings={settingsPayload()} />}
     </ClientProvider>;
     const mounted = render(surface(false));
-    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher).not.toHaveBeenCalled();
     mounted.rerender(surface(true));
     expect(screen.getByRole("status")).toHaveTextContent("Checking...");
+    expect(fetcher).toHaveBeenCalledOnce();
+    mounted.rerender(surface(false));
+    mounted.rerender(surface(true));
     expect(fetcher).toHaveBeenCalledOnce();
     await act(async () => resolve(jsonResponse({ updateAvailable: null })));
     expect(screen.getByText("You're up to date")).toBeVisible();
@@ -102,7 +119,7 @@ describe("Sidebar update entry", () => {
   it("uses the same direct confirmation in About when an update action is available", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(available())));
     const requestUpdate = vi.fn();
-    render(<ClientProvider client={client} token="about-update" checkUpdatesOnConnect>
+    render(<ClientProvider client={client} token="about-update">
       <AboutSettings settings={{ ...settingsPayload(), version: { current: "0.3.5" } }} onRequestUpdate={requestUpdate} />
     </ClientProvider>);
     const button = await screen.findByRole("button", { name: /^Update$/ });
@@ -117,6 +134,7 @@ describe("Sidebar update entry", () => {
     vi.stubGlobal("fetch", fetcher);
     render(view());
     fireEvent.change(screen.getByLabelText("Draft"), { target: { value: "Keep writing" } });
+    fireEvent.click(screen.getByText("Refresh version"));
     fireEvent.click(await screen.findByRole("button", { name: "Update available v0.3.6" }));
     expect(screen.getByRole("dialog", { name: "Update available v0.3.6" })).toBeVisible();
     expect(screen.queryByRole("link", { name: "Installation guide" })).toBeNull();
@@ -138,6 +156,7 @@ describe("Sidebar update entry", () => {
     vi.stubGlobal("fetch", fetcher);
     render(view());
     fireEvent.click(screen.getByText("Refresh version"));
+    fireEvent.click(screen.getByText("Refresh version"));
     expect(fetcher).toHaveBeenCalledTimes(1);
     await act(async () => resolve(jsonResponse(available())));
     fireEvent.click(screen.getByRole("button", { name: "Update available v0.3.6" }));
@@ -157,7 +176,10 @@ describe("Sidebar update entry", () => {
     vi.stubGlobal("fetch", fetcher);
     const { rerender } = render(view());
     fireEvent.change(screen.getByLabelText("Draft"), { target: { value: "Keep this draft" } });
+    fireEvent.click(screen.getByText("Refresh version"));
     rerender(view("host-b"));
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByText("Refresh version"));
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
     await act(async () => resolveOld(jsonResponse(available())));
     expect(screen.queryByRole("button", { name: /Update available/ })).toBeNull();
@@ -168,6 +190,7 @@ describe("Sidebar update entry", () => {
     const fetcher = vi.fn().mockImplementation(() => failure ? Promise.reject(failure) : Promise.resolve(jsonResponse({ updateAvailable: null })));
     vi.stubGlobal("fetch", fetcher);
     render(view());
+    fireEvent.click(screen.getByText("Refresh version"));
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole("button", { name: /Update available/ })).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
