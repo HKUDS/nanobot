@@ -226,7 +226,7 @@ describe("ThreadMessages", () => {
     expect(screen.getByText("latest answer").closest(".thread-render-unit")).toBeNull();
   });
 
-  it("recycles offscreen historical content while preserving its measured space", () => {
+  it("recycles historical content using the latest intersection in each batch", () => {
     let notify: (entries: Array<{ isIntersecting: boolean }>) => void = () => {};
     vi.stubGlobal("IntersectionObserver", class {
       constructor(callback: typeof notify) { notify = callback; }
@@ -243,8 +243,15 @@ describe("ThreadMessages", () => {
     act(() => notify([{ isIntersecting: false }]));
     expect(unit.style.height).toBe("240px");
     expect(unit.childElementCount).toBe(0);
+    act(() => notify([{ isIntersecting: false }, { isIntersecting: true }]));
+    expect(screen.getByText("historical answer")).toBeVisible();
+    expect(unit.style.height).toBe("");
+    act(() => notify([{ isIntersecting: true }, { isIntersecting: false }]));
+    expect(unit.style.height).toBe("240px");
+    expect(unit.childElementCount).toBe(0);
     act(() => notify([{ isIntersecting: true }]));
     expect(screen.getByText("historical answer")).toBeVisible();
+    expect(unit.style.height).toBe("");
     expect(view.container).toHaveTextContent("old question");
   });
 

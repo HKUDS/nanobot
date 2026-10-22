@@ -612,7 +612,8 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   useEffect(() => {
     const element = elementRef.current;
     if (!element || !deferOffscreenRender || interacted || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver(([entry]) => {
+    const observer = new IntersectionObserver((entries) => {
+      const entry = entries[entries.length - 1];
       if (!entry) return;
       if (!entry.isIntersecting) {
         const height = element.getBoundingClientRect().height;
