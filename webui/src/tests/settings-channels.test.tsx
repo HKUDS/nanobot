@@ -216,6 +216,32 @@ function catalogFeature(
   };
 }
 
+function configuredEmailFeature(overrides: Partial<NanobotFeatureInfo> = {}): NanobotFeatureInfo {
+  return {
+    ...catalogFeature("email", true),
+    display_name: "Email",
+    webui: "webui/index.ts",
+    config_values: {
+      "channels.email.consentGranted": "true",
+      "channels.email.imapHost": "imap.example.com",
+      "channels.email.imapUsername": "bot@example.com",
+      "channels.email.smtpHost": "smtp.example.com",
+      "channels.email.smtpUsername": "bot@example.com",
+    },
+    configured_fields: [
+      "channels.email.consentGranted",
+      "channels.email.imapHost",
+      "channels.email.imapUsername",
+      "channels.email.imapPassword",
+      "channels.email.smtpHost",
+      "channels.email.smtpUsername",
+      "channels.email.smtpPassword",
+    ],
+    setup: channelSetupContract("email"),
+    ...overrides,
+  };
+}
+
 describe("Settings channels", () => {
   installSettingsViewTestHooks();
 
@@ -1737,38 +1763,7 @@ describe("Settings channels", () => {
         if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
         if (url === "/api/settings/nanobot-features") {
           return jsonResponse({
-            features: [{
-              name: "email",
-              display_name: "Email",
-              webui: "webui/index.ts",
-              type: "channel",
-              enabled: true,
-              configured: true,
-              installed: true,
-              ready: true,
-              running: true,
-              runtime_status: "running",
-              status: "enabled",
-              install_supported: true,
-              requires_restart: false,
-              config_values: {
-                "channels.email.consentGranted": "true",
-                "channels.email.imapHost": "imap.example.com",
-                "channels.email.imapUsername": "bot@example.com",
-                "channels.email.smtpHost": "smtp.example.com",
-                "channels.email.smtpUsername": "bot@example.com",
-              },
-              configured_fields: [
-                "channels.email.consentGranted",
-                "channels.email.imapHost",
-                "channels.email.imapUsername",
-                "channels.email.imapPassword",
-                "channels.email.smtpHost",
-                "channels.email.smtpUsername",
-                "channels.email.smtpPassword",
-              ],
-              setup: channelSetupContract("email"),
-            }],
+            features: [configuredEmailFeature({ running: true, runtime_status: "running" })],
             enabled_count: 1,
           });
         }
@@ -1820,28 +1815,7 @@ describe("Settings channels", () => {
     const configureResult = new Promise<Record<string, unknown>>((resolve) => {
       resolveConfigure = resolve;
     });
-    const emailFeature: NanobotFeatureInfo = {
-      ...catalogFeature("email", true),
-      display_name: "Email",
-      webui: "webui/index.ts",
-      config_values: {
-        "channels.email.consentGranted": "true",
-        "channels.email.imapHost": "imap.example.com",
-        "channels.email.imapUsername": "bot@example.com",
-        "channels.email.smtpHost": "smtp.example.com",
-        "channels.email.smtpUsername": "bot@example.com",
-      },
-      configured_fields: [
-        "channels.email.consentGranted",
-        "channels.email.imapHost",
-        "channels.email.imapUsername",
-        "channels.email.imapPassword",
-        "channels.email.smtpHost",
-        "channels.email.smtpUsername",
-        "channels.email.smtpPassword",
-      ],
-      setup: channelSetupContract("email"),
-    };
+    const emailFeature = configuredEmailFeature();
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/settings") return jsonResponse(settingsPayload());

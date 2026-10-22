@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import type { SettingsExitGuard } from "@/components/settings/contracts";
 import { isCapabilitySection, type SettingsSectionKey } from "@/components/settings/contracts";
 import { SettingsFeature } from "@/components/settings/shared/SettingsFeature";
+import type { EditCompletion } from "@/components/settings/shared/useEditCompletion";
 import { SettingsSectionSkeleton } from "@/components/settings/shared/SettingsSectionSkeleton";
 
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
@@ -136,28 +137,26 @@ export function SettingsPage({
   const registerChannelCompletion = useCallback((handler: (() => Promise<boolean>) | null) => {
     channelCompletion.current = handler;
   }, []);
-  const latestController = useRef(controller);
-  latestController.current = controller;
+  const editOwners = new Map<SettingsSectionKey, EditCompletion[]>([
+    ["models", [controller.modelEdits]],
+    ["advanced", [controller.safetyEdits]],
+    ["capabilities", [controller.imageEdits, controller.transcriptionEdits, controller.webEdits]],
+  ]);
+  const latestEditOwners = useRef(editOwners);
+  latestEditOwners.current = editOwners;
   const flushEdits = useCallback(async () => {
-    const current = latestController.current;
     const results = await Promise.all([
-      current.modelEdits.commit(), current.safetyEdits.commit(),
-      current.imageEdits.commit(), current.transcriptionEdits.commit(), current.webEdits.commit(),
+      ...[...latestEditOwners.current.values()].flat().map((edits) => edits.commit()),
       channelCompletion.current?.() ?? true,
     ]);
     return results.every(Boolean);
   }, []);
   const needsCompletion = useCallback(() => {
-    const current = latestController.current;
-    return Boolean(channelCompletion.current) || [
-      current.modelEdits, current.safetyEdits, current.imageEdits, current.transcriptionEdits, current.webEdits,
-    ].some((edits) => edits.needsCompletion());
+    return Boolean(channelCompletion.current) ||
+      [...latestEditOwners.current.values()].flat().some((edits) => edits.needsCompletion());
   }, []);
   const selectSection = (section: SettingsSectionKey) => {
-    const owners = activeSection === "models" ? [controller.modelEdits]
-      : activeSection === "advanced" ? [controller.safetyEdits]
-      : isCapabilitySection(activeSection) ? [controller.imageEdits, controller.transcriptionEdits, controller.webEdits]
-      : [];
+    const owners = editOwners.get(isCapabilitySection(activeSection) ? "capabilities" : activeSection) ?? [];
     const channel = activeSection === "channels" ? channelCompletion.current : null;
     if (!channel && !owners.some((edits) => edits.needsCompletion())) {
       selectSectionNow(section);

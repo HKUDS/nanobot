@@ -5,7 +5,7 @@ import { useModelPresetDrag } from "@/components/settings/models/useModelPresetD
 import { ReasoningEffortPicker } from "@/components/settings/models/ReasoningEffortPicker";
 import { RemoveActionButton } from "@/components/settings/shared/RemoveActionButton";
 import { ToggleButton } from "@/components/ui/toggle-button";
-import { useEditCompletion, type EditCompletion } from "@/components/settings/shared/useEditCompletion";
+import type { EditCompletion } from "@/components/settings/shared/useEditCompletion";
 import { useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
   GripVertical,
@@ -197,7 +197,7 @@ export function ModelPresetDeleteDialog({
 }
 
 export function ModelsSettings({
-  editCompletion,
+  editCompletion: edits,
   token,
   form,
   setForm,
@@ -228,7 +228,7 @@ export function ModelsSettings({
   onSelectConfiguration,
   onDeleteConfiguration,
 }: {
-  editCompletion?: EditCompletion;
+  editCompletion: EditCompletion;
   token: string;
   form: AgentSettingsDraft;
   setForm: Dispatch<SetStateAction<AgentSettingsDraft>>;
@@ -260,8 +260,6 @@ export function ModelsSettings({
   onDeleteConfiguration: (preset: SettingsPayload["model_presets"][number], onDeleted: () => void) => void;
 }) {
   const { t } = useTranslation();
-  const localEdits = useEditCompletion(form, dirty, onSave, !editCompletion && !creating && !!form.model.trim(), editingPresetName);
-  const edits = editCompletion ?? localEdits;
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const [editorOpen, setEditorOpen] = useState(false);
