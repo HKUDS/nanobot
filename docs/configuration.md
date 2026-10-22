@@ -2502,8 +2502,6 @@ Configure **Auto-compact idle sessions** and **Idle timeout** in **Settings → 
 
 When a session is idle for longer than the configured timeout, nanobot summarizes its conversation context to reduce input token usage on later requests. Summarization is lossy and may omit details. When you return, the model receives that summary and new messages instead of replaying the messages covered by the summary. The original conversation remains in your saved chat history, but even its most recent messages are no longer included verbatim in the model's context after idle compaction.
 
-WebUI compaction notices distinguish idle auto-compaction, context-capacity compaction, manual `/compact`, and provider-native compaction. Older notices without a recorded reason keep their generic wording.
-
 If your provider retains its prompt cache longer, you can increase the idle timeout to delay compaction. Set the timeout to `0` to disable idle compaction if preserving the full context matters more than reducing subsequent input usage.
 
 ```json
