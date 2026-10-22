@@ -327,6 +327,57 @@ async def test_turn_resuming_during_archive_commits_reply(tmp_path, monkeypatch,
         await loop.aclose()
 
 
+async def test_idle_scan_skips_session_with_inflight_direct_turn(tmp_path, monkeypatch):
+    """A direct turn outliving the idle TTL must not be scheduled for archival.
+
+    The direct entry point installs no pending queue, so its in-flight turns
+    must reach the idle scan's active set through a separate registration.
+    """
+    monkeypatch.setattr("nanobot.config.home._home_path", tmp_path / "home")
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
+    loop = _make_loop(tmp_path / "workspace")
+    session = loop.sessions.get_or_create("cli:direct")
+    _add_turns(session, 1, prefix="old")
+    session.updated_at = datetime.now() - timedelta(minutes=20)
+    loop.sessions.save(session)
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def respond(**_kwargs):
+        entered.set()
+        await release.wait()
+        return LLMResponse(content="direct reply")
+
+    loop.provider.chat_stream_with_retry.side_effect = respond
+    loop.consolidator.archive_session = AsyncMock(return_value="Direct summary.")
+    turn = None
+    try:
+        turn = asyncio.create_task(loop.process_direct("hello", session_key=session.key))
+        await asyncio.wait_for(entered.wait(), 5)
+
+        # The turn's start refreshed the persisted idle timestamp; a clock
+        # past the TTL models a direct turn outliving the threshold.
+        clock = MagicMock(wraps=datetime)
+        clock.now.return_value = datetime.now() + timedelta(minutes=20)
+        monkeypatch.setattr("nanobot.agent.autocompact.datetime", clock)
+
+        await loop._check_expired_sessions_if_due()
+        assert session.key not in loop.auto_compact._archiving
+
+        release.set()
+        response = await asyncio.wait_for(turn, 5)
+        assert response is not None and response.content == "direct reply"
+
+        # The turn has ended, so the next scan schedules archival as usual.
+        await loop._check_expired_sessions_if_due()
+        await _drain_background_tasks(loop)
+        loop.consolidator.archive_session.assert_awaited_once()
+    finally:
+        release.set()
+        if turn is not None:
+            await asyncio.gather(turn, return_exceptions=True)
+        await loop.aclose()
+
+
 class TestSessionTTLConfig:
     """Test session TTL configuration."""
 
