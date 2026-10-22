@@ -32,6 +32,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { CatalogSkeleton } from "@/components/settings/shared/CatalogSkeleton";
+import { ProxySettingsControl } from "@/components/settings/shared/ProxySettingsControl";
 
 import {
   DismissibleStatusMessage,
@@ -53,7 +54,6 @@ import {
 import { Input, SearchInput } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Textarea } from "@/components/ui/textarea";
-import { ToggleButton } from "@/components/ui/toggle-button";
 import { SettingsTextEditor } from "@/components/settings/shared/SettingsTextEditor";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { isGenericRepositoryLogoUrl, logoFallbackUrls } from "@/lib/provider-brand";
@@ -104,6 +104,7 @@ export const DEFAULT_CUSTOM_MCP_FORM: CustomMcpForm = {
 export function AppsCatalogSettings({
   setupName,
   onSetupOpened,
+  onConfigureProxy,
   cliApps,
   mcpPresets,
   cliAppsLoading,
@@ -149,6 +150,7 @@ export function AppsCatalogSettings({
 }: {
   setupName?: string | null;
   onSetupOpened?: () => void;
+  onConfigureProxy?: () => void;
   cliApps: CliAppsPayload | null;
   mcpPresets: McpPresetsPayload | null;
   cliAppsLoading: boolean;
@@ -328,6 +330,7 @@ export function AppsCatalogSettings({
                   preset={item.preset}
                   openConnection={setupName === item.preset.name}
                   onConnectionOpened={onSetupOpened}
+                  onConfigureProxy={onConfigureProxy}
                   values={mcpFieldValues[item.preset.name] ?? {}}
                   actionKey={mcpActionKey}
                   oauthFlow={mcpOAuthFlow?.name === item.preset.name ? mcpOAuthFlow : null}
@@ -390,6 +393,7 @@ export function AppsCatalogSettings({
 
       {filter === "mcp" ? (
         <McpCustomServerPanel
+          onConfigureProxy={onConfigureProxy}
           form={customMcpForm}
           configImport={mcpConfigImport}
           actionKey={mcpActionKey}
@@ -497,6 +501,7 @@ function CliAppsCatalogRow({
 function McpAppsCatalogRow({
   openConnection = false,
   onConnectionOpened,
+  onConfigureProxy,
   preset,
   values,
   actionKey,
@@ -518,6 +523,7 @@ function McpAppsCatalogRow({
 }: {
   openConnection?: boolean;
   onConnectionOpened?: () => void;
+  onConfigureProxy?: () => void;
   preset: McpPresetInfo;
   values: Record<string, string>;
   actionKey: string | null;
@@ -877,6 +883,7 @@ function McpAppsCatalogRow({
 
       {managementOpen ? (
         <McpManagementDialog
+          onConfigureProxy={onConfigureProxy}
           preset={preset}
           values={values}
           actionKey={actionKey}
@@ -998,6 +1005,7 @@ function appsSearchText(item: AppsCatalogItem): string {
 }
 
 function McpCustomServerPanel({
+  onConfigureProxy,
   form,
   configImport,
   actionKey,
@@ -1006,6 +1014,7 @@ function McpCustomServerPanel({
   onSave,
   onImportConfig,
 }: {
+  onConfigureProxy?: () => void;
   form: CustomMcpForm;
   configImport: string;
   actionKey: string | null;
@@ -1165,18 +1174,13 @@ function McpCustomServerPanel({
           ) : null}
 
           {remote ? (
-            <div className="mt-3 flex items-center justify-between gap-4 rounded-control bg-background/55 px-3 py-3">
-              <div className="min-w-0">
-                <p className="text-[13px] font-medium text-foreground">{t("settings.network.useProxy")}</p>
-                <p className="mt-1 text-[12px] text-muted-foreground">{t("settings.network.useProxyHelp")}</p>
-              </div>
-              <ToggleButton
-                checked={form.useProxy}
-                disabled={customBusy}
-                onChange={(useProxy) => update("useProxy", useProxy)}
-                label={t("settings.network.useProxy")}
-              />
-            </div>
+            <ProxySettingsControl
+              className="mt-3 rounded-control bg-background/55 px-3 py-3"
+              checked={form.useProxy}
+              disabled={customBusy}
+              onChange={(useProxy) => update("useProxy", useProxy)}
+              onConfigure={onConfigureProxy}
+            />
           ) : null}
 
           {remote && form.auth === "headers" ? (

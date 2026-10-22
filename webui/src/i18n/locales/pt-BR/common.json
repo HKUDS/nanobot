@@ -493,7 +493,9 @@
     },
     "network": {
       "useProxy": "Usar proxy",
-      "useProxyHelp": "Usa o proxy compartilhado dos ajustes avançados."
+      "useProxyHelp": "Usa o proxy compartilhado dos ajustes avançados.",
+      "configureProxy": "Configurar proxy",
+      "sharedProxyScope": "Compartilhado por todos os recursos com proxy ativado."
     },
     "runtimeConfig": {
       "apiSaved": "Salvo. Reinicie o serviço de API para aplicar as alterações.",

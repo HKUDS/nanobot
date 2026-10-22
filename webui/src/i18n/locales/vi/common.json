@@ -493,7 +493,9 @@
     },
     "network": {
       "useProxy": "Dùng proxy",
-      "useProxyHelp": "Dùng proxy chung trong phần Nâng cao."
+      "useProxyHelp": "Dùng proxy chung trong phần Nâng cao.",
+      "configureProxy": "Cấu hình proxy",
+      "sharedProxyScope": "Dùng chung cho mọi tính năng đã bật proxy."
     },
     "runtimeConfig": {
       "apiSaved": "Đã lưu. Khởi động lại dịch vụ API để áp dụng thay đổi.",

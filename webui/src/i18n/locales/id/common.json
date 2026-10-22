@@ -493,7 +493,9 @@
     },
     "network": {
       "useProxy": "Gunakan proxy",
-      "useProxyHelp": "Menggunakan proxy bersama di pengaturan Lanjutan."
+      "useProxyHelp": "Menggunakan proxy bersama di pengaturan Lanjutan.",
+      "configureProxy": "Atur proxy",
+      "sharedProxyScope": "Dipakai bersama oleh semua fitur yang mengaktifkan proxy."
     },
     "runtimeConfig": {
       "apiSaved": "Tersimpan. Mulai ulang layanan API untuk menerapkan perubahan.",

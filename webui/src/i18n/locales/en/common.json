@@ -493,7 +493,9 @@
     },
     "network": {
       "useProxy": "Use proxy",
-      "useProxyHelp": "Uses the shared proxy in Advanced."
+      "useProxyHelp": "Uses the shared proxy in Advanced.",
+      "configureProxy": "Configure proxy",
+      "sharedProxyScope": "Shared by all features with proxy enabled."
     },
     "runtimeConfig": {
       "apiSaved": "Saved. Restart the API service to apply changes.",

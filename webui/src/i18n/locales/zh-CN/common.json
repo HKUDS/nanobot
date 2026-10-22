@@ -493,7 +493,9 @@
     },
     "network": {
       "useProxy": "使用代理",
-      "useProxyHelp": "使用高级设置中的共享代理。"
+      "useProxyHelp": "使用高级设置中的共享代理。",
+      "configureProxy": "配置代理",
+      "sharedProxyScope": "供所有启用代理的功能共用。"
     },
     "runtimeConfig": {
       "apiSaved": "已保存，重启 API 服务后生效。",

@@ -6,6 +6,7 @@ import { Check, ExternalLink, Loader2, RotateCcw, Search, Server, Trash2, X } fr
 import { useTranslation } from "react-i18next";
 
 import { SkeletonStatus } from "@/components/settings/shared/SkeletonStatus";
+import { ProxySettingsControl } from "@/components/settings/shared/ProxySettingsControl";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -15,7 +16,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input, SearchInput } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { ToggleButton } from "@/components/ui/toggle-button";
 import type { McpPresetInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -37,6 +37,7 @@ interface McpManagementDialogProps {
   onAction: (action: McpAction, name: string, values?: Record<string, string>) => void;
   onOAuthConnect: (name: string, reset?: boolean, values?: Record<string, string>) => void;
   onToolsChange: (name: string, enabledTools: string[]) => void;
+  onConfigureProxy?: () => void;
 }
 
 export function McpManagementDialog({
@@ -53,6 +54,7 @@ export function McpManagementDialog({
   onAction,
   onOAuthConnect,
   onToolsChange,
+  onConfigureProxy,
 }: McpManagementDialogProps) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -229,6 +231,7 @@ export function McpManagementDialog({
             />
           ) : (
             <ConnectionPanel
+              onConfigureProxy={onConfigureProxy}
               preset={preset}
               values={connectionValues}
               busy={busy}
@@ -530,6 +533,7 @@ function ToolsPanel({
 }
 
 function ConnectionPanel({
+  onConfigureProxy,
   preset,
   values,
   busy,
@@ -546,6 +550,7 @@ function ConnectionPanel({
   connectBusy: boolean;
   removeBusy: boolean;
   requiredFieldsComplete: boolean;
+  onConfigureProxy?: () => void;
   onFieldChange: (presetName: string, fieldName: string, value: string) => void;
   onConnect: () => void;
   onRemove: () => void;
@@ -627,18 +632,13 @@ function ConnectionPanel({
       ) : null}
 
       {preset.transport !== "stdio" ? (
-        <div className="flex items-center justify-between gap-4 rounded-control bg-muted/40 px-4 py-3.5">
-          <div className="min-w-0">
-            <p className="text-[13px] font-medium text-foreground">{t("settings.network.useProxy")}</p>
-            <p className="mt-1 text-[12px] text-muted-foreground">{t("settings.network.useProxyHelp")}</p>
-          </div>
-          <ToggleButton
-            checked={values.use_proxy === "true"}
-            disabled={busy}
-            onChange={(checked) => onFieldChange(preset.name, "use_proxy", String(checked))}
-            label={t("settings.network.useProxy")}
-          />
-        </div>
+        <ProxySettingsControl
+          className="rounded-control bg-muted/40 px-4 py-3.5"
+          checked={values.use_proxy === "true"}
+          disabled={busy}
+          onChange={(checked) => onFieldChange(preset.name, "use_proxy", String(checked))}
+          onConfigure={onConfigureProxy}
+        />
       ) : null}
 
       {hasFields ? (

@@ -43,6 +43,37 @@ async function connectXmind() {
 describe("SettingsView Apps catalog", () => {
   installSettingsViewTestHooks();
 
+  it.each([null, "", "  ", "http://127.0.0.1:8080"])("offers inline proxy setup for missing shared proxy %j", async (proxy) => {
+    const settings = { ...settingsPayload(), runtime_config: { "network.proxy": proxy } };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settings);
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [xmindMcpPreset], installed_count: 0 });
+      return { ok: false, status: 404, text: async () => "Not found" } as Response;
+    }));
+    renderSettingsView({ initialSection: "apps" });
+    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Xmind" }));
+    const dialog = await screen.findByRole("dialog", { name: "Xmind" });
+    const configure = within(dialog).queryByRole("button", { name: "Configure proxy" });
+    if (proxy?.trim()) {
+      expect(configure).not.toBeInTheDocument();
+      expect(within(dialog).getByRole("switch", { name: "Use proxy" })).toBeInTheDocument();
+    } else {
+      expect(configure).toBeInTheDocument();
+      expect(within(dialog).queryByRole("switch", { name: "Use proxy" })).not.toBeInTheDocument();
+      fireEvent.click(configure!);
+      const setup = await screen.findByRole("dialog", { name: "Shared proxy" });
+      expect(dialog).toBeInTheDocument();
+      const input = within(setup).getByRole("textbox", { name: "Shared proxy" });
+      await waitFor(() => expect(input).toHaveFocus());
+      fireEvent.click(within(setup).getByRole("button", { name: "Cancel" }));
+      expect(await screen.findByRole("dialog", { name: "Xmind" })).toBe(dialog);
+    }
+    expect(requestMutationMock).not.toHaveBeenCalled();
+  });
+
   it("collects an instance MCP URL before starting browser authorization", async () => {
     const metabasePreset = {
       ...xmindMcpPreset,

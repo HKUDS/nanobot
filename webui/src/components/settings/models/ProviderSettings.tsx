@@ -25,6 +25,7 @@ import { ModelAPIControl } from "@/components/settings/models/ModelAPIControl";
 import { ProviderAPIControl } from "@/components/settings/models/ProviderAPIControl";
 import { Button } from "@/components/ui/button";
 import { SettingsHint } from "@/components/settings/shared/SettingsHint";
+import { ProxySettingsControl } from "@/components/settings/shared/ProxySettingsControl";
 import {
   Dialog,
   DialogContent,
@@ -381,11 +382,13 @@ function ProviderRequestOptions({
 }
 
 function ProviderAdvancedOptions({
+  onConfigureProxy,
   fields,
   form,
   onChange,
   children,
 }: {
+  onConfigureProxy?: () => void;
   fields: ProviderAdvancedField[];
   form: ProviderForm;
   onChange: (value: Partial<ProviderForm>) => void;
@@ -467,17 +470,12 @@ function ProviderAdvancedOptions({
               </label>
             ) : null}
             {enabled.has("use_proxy") ? (
-              <div className="flex items-center justify-between gap-4 px-3 py-2 md:col-span-2">
-                <div className="min-w-0">
-                  <p className="text-[13px] font-medium text-foreground">{t("settings.network.useProxy")}</p>
-                  <p className="mt-1 text-[12px] text-muted-foreground">{t("settings.network.useProxyHelp")}</p>
-                </div>
-                <ToggleButton
-                  checked={form.useProxy}
-                  onChange={(useProxy) => onChange({ useProxy })}
-                  label={t("settings.network.useProxy")}
-                />
-              </div>
+              <ProxySettingsControl
+                className="px-3 py-2 md:col-span-2"
+                checked={form.useProxy}
+                onChange={(useProxy) => onChange({ useProxy })}
+                onConfigure={onConfigureProxy}
+              />
             ) : null}
             {enabled.has("region") ? (
               <label className="block space-y-1.5">
@@ -531,6 +529,7 @@ type ProviderSettingsView =
   | { kind: "provider"; name: string; adding: boolean };
 
 export function ProvidersSettings({
+  onConfigureProxy,
   entry,
   onClose,
   onCloseAutoFocus,
@@ -556,6 +555,7 @@ export function ProvidersSettings({
   onProviderOAuthLogout,
 }: {
   entry: ProviderSettingsEntry;
+  onConfigureProxy?: () => void;
   onClose: () => void;
   onCloseAutoFocus: (event: Event) => void;
   onProviderAdded?: (provider: string) => void;
@@ -783,6 +783,7 @@ export function ProvidersSettings({
                 />
                 {supportsOauthAdvancedSettings ? (
                   <ProviderAdvancedOptions
+                    onConfigureProxy={onConfigureProxy}
                     fields={advancedFields}
                     form={form}
                     onChange={(value) => onChangeProviderForm(provider.name, value)}
@@ -898,6 +899,7 @@ export function ProvidersSettings({
                   onChange={(value) => onChangeProviderForm(provider.name, value)}
                 />
                 <ProviderAdvancedOptions
+                  onConfigureProxy={onConfigureProxy}
                   fields={advancedFields}
                   form={form}
                   onChange={(value) => onChangeProviderForm(provider.name, value)}
@@ -1035,6 +1037,7 @@ export function ProvidersSettings({
           </div>
         </label>
         <ProviderAdvancedOptions
+          onConfigureProxy={onConfigureProxy}
           fields={CUSTOM_PROVIDER_ADVANCED_FIELDS}
           form={customProviderDraft}
           onChange={(value) =>

@@ -493,7 +493,9 @@
     },
     "network": {
       "useProxy": "프록시 사용",
-      "useProxyHelp": "고급 설정의 공유 프록시를 사용합니다."
+      "useProxyHelp": "고급 설정의 공유 프록시를 사용합니다.",
+      "configureProxy": "프록시 설정",
+      "sharedProxyScope": "프록시를 켠 모든 기능에서 함께 사용합니다."
     },
     "runtimeConfig": {
       "apiSaved": "저장했습니다. API 서비스를 다시 시작하면 적용됩니다.",

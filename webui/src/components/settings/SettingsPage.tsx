@@ -6,6 +6,7 @@ import type { SettingsExitGuard } from "@/components/settings/contracts";
 import { isCapabilitySection, type SettingsSectionKey } from "@/components/settings/contracts";
 import { SettingsFeature } from "@/components/settings/shared/SettingsFeature";
 import type { EditCompletion } from "@/components/settings/shared/useEditCompletion";
+import { SharedProxySetupDialog } from "@/components/settings/shared/SharedProxySetupDialog";
 import { SettingsSectionSkeleton } from "@/components/settings/shared/SettingsSectionSkeleton";
 
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
@@ -94,6 +95,7 @@ export function SettingsPage({
   const [mcpSetupName, setMcpSetupName] = useState<string | null>(null);
   const presetDeletedCallback = useRef<(() => void) | null>(null);
   const [providerPanel, setProviderPanel] = useState<ProviderSettingsEntry | null>(null);
+  const [proxySetupOpen, setProxySetupOpen] = useState(false);
   const providerSetupOrigin = useRef<{
     trigger: HTMLButtonElement | null;
     onAdded?: (provider: string) => void;
@@ -129,6 +131,9 @@ export function SettingsPage({
     transcriptionDirty,
   } = controller;
   const { providerOAuthFlow } = modelState;
+  const configureProxy = settings?.runtime_config && !String(settings.runtime_config["network.proxy"] ?? "").trim()
+    ? () => setProxySetupOpen(true)
+    : undefined;
 
   const restartInProgress = isRestarting || hostEngineApplying;
   const latestExitState = useRef({ requiresRestart: settings?.requires_restart, restartInProgress });
@@ -327,6 +332,7 @@ export function SettingsPage({
               }}
             />
             {providerPanel ? <ProvidersSettings
+              onConfigureProxy={configureProxy}
               entry={providerPanel}
               onClose={() => setProviderPanel(null)}
               onProviderAdded={providerSetupOrigin.current?.onAdded
@@ -518,6 +524,7 @@ export function SettingsPage({
         return (
           <div className="settings-stack">
             <AppsCatalogSettings
+              onConfigureProxy={configureProxy}
               setupName={mcpSetupName}
               onSetupOpened={() => setMcpSetupName(null)}
               cliApps={systemState.cliApps}
@@ -793,6 +800,11 @@ export function SettingsPage({
         </div>
       </div>
     </div>
+    {proxySetupOpen ? <SharedProxySetupDialog
+      busy={controller.runtimeConfigState.saving !== null}
+      onClose={() => setProxySetupOpen(false)}
+      onSave={controller.runtimeConfigState.saveProxy}
+    /> : null}
     </DialogLayoutContext.Provider>
   );
 }

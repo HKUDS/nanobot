@@ -145,7 +145,18 @@ export function useRuntimeConfigSettings(
     change(field, next);
     void save(field.group, { [field.path]: next });
   };
-  return { value, visible, dirty, discard, change, commit, reject, save, saveList, saving, errors, invalidField, saved };
+  const saveProxy = async (next: string) => {
+    setSaving("proxy");
+    try {
+      const payload = await updateRuntimeConfigSettings(client, { "network.proxy": next.trim() || null });
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
+      discard("proxy");
+      setSaved((prev) => ({ ...prev, proxy: true }));
+    } finally {
+      setSaving(null);
+    }
+  };
+  return { value, visible, dirty, discard, change, commit, reject, save, saveList, saveProxy, saving, errors, invalidField, saved };
 }
 
 export type RuntimeConfigController = ReturnType<typeof useRuntimeConfigSettings>;

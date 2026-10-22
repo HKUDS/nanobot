@@ -111,6 +111,17 @@ describe("McpManagementDialog", () => {
     expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
   });
 
+  it("shows proxy guidance on demand without changing the connection draft", async () => {
+    const onAction = vi.fn();
+    renderDialog({ initialTab: "connection", onAction });
+    expect(screen.queryByText("Uses the shared proxy in Advanced.")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Use proxy" }));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Uses the shared proxy in Advanced.");
+    expect(onAction).not.toHaveBeenCalled();
+    expect(screen.getByRole("switch", { name: "Use proxy" })).not.toBeChecked();
+    expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+  });
+
   it("preserves the configured proxy flag when reconnecting OAuth", () => {
     const onOAuthConnect = vi.fn();
     renderDialog({

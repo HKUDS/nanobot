@@ -493,7 +493,9 @@
     },
     "network": {
       "useProxy": "プロキシを使う",
-      "useProxyHelp": "詳細設定の共有プロキシを使います。"
+      "useProxyHelp": "詳細設定の共有プロキシを使います。",
+      "configureProxy": "プロキシを設定",
+      "sharedProxyScope": "プロキシを有効にしたすべての機能で共有します。"
     },
     "runtimeConfig": {
       "apiSaved": "保存しました。API サービスを再起動すると反映されます。",
