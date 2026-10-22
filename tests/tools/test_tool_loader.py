@@ -337,7 +337,7 @@ def test_web_search_tool_create():
     mock_config = MagicMock()
     mock_config.web.enable = True
     mock_config.web.search = MagicMock()
-    mock_config.web.proxy = None
+    mock_config.web.use_proxy = False
     mock_config.web.user_agent = None
     ctx = ToolContext(config=mock_config, workspace="/tmp")
     tool = WebSearchTool.create(ctx)
@@ -349,7 +349,7 @@ def test_web_fetch_tool_create():
     mock_config = MagicMock()
     mock_config.web.enable = True
     mock_config.web.fetch = MagicMock()
-    mock_config.web.proxy = None
+    mock_config.web.use_proxy = False
     mock_config.web.user_agent = None
     ctx = ToolContext(config=mock_config, workspace="/tmp")
     tool = WebFetchTool.create(ctx)
@@ -442,7 +442,7 @@ def test_loader_registers_builtin_tools():
     mock_config.web.enable = True
     mock_config.web.search = MagicMock()
     mock_config.web.fetch = MagicMock()
-    mock_config.web.proxy = None
+    mock_config.web.use_proxy = False
     mock_config.web.user_agent = None
     mock_config.image_generation.enabled = False
     mock_config.my.enable = True

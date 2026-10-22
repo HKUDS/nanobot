@@ -22,6 +22,7 @@ from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.config.network import NetworkConfig
 from nanobot.config.paths import get_media_dir, get_runtime_subdir
 from nanobot.config_base import Base
 from nanobot.events import ContextCompactionEvent
@@ -35,7 +36,7 @@ class WhatsAppConfig(Base):
     allow_from: list[str] = Field(default_factory=list)
     group_policy: Literal["open", "mention"] = "open"
     database_path: str = ""
-    proxy: str = ""
+    use_proxy: bool = False
     lid_mappings: dict[str, str] = Field(default_factory=dict)
 
 
@@ -299,19 +300,24 @@ class WhatsAppChannel(BaseChannel):
 
     name = "whatsapp"
     display_name = "WhatsApp"
+    uses_shared_proxy = True
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
         return WhatsAppConfig().model_dump(by_alias=True)
 
-    def __init__(self, config: Any, bus: MessageBus):
+    def __init__(
+        self, config: Any, bus: MessageBus, *, network: NetworkConfig | None = None,
+    ):
         legacy_bridge_fields = (
             _legacy_bridge_config_fields(cast(dict[str, Any], config))
             if isinstance(config, dict) else []
         )
         if isinstance(config, dict):
             config = WhatsAppConfig.model_validate(config)
-        super().__init__(config, bus)
+        super().__init__(config, bus, network=network)
+        self.config: WhatsAppConfig = config
+        self._proxy = self.network.resolve_proxy(self.config.use_proxy)
         if legacy_bridge_fields:
             self.logger.warning(
                 "Ignoring deprecated WhatsApp bridge config fields: {}. "
@@ -348,11 +354,9 @@ class WhatsAppChannel(BaseChannel):
         return api.NewAClient(str(db_path))
 
     async def _connect_client(self, client: Any) -> Any:
-        proxy = self.config.proxy.strip()
+        proxy = self._proxy
         if not proxy:
             return await client.connect()
-        if "://" not in proxy:
-            proxy = f"http://{proxy}"
         from neonize._binder import ProxySettings
 
         return await client.connect(ProxySettings(proxy_address=proxy))
@@ -513,8 +517,12 @@ class WhatsAppChannel(BaseChannel):
 
     async def _fetch_remote_media(self, url: str) -> bytes:
         timeout = httpx.Timeout(_REMOTE_MEDIA_TIMEOUT_SECONDS, connect=10.0)
+        transport = (
+            PinnedDNSAsyncTransport(inner=httpx.AsyncHTTPTransport(proxy=self._proxy))
+            if self._proxy else PinnedDNSAsyncTransport()
+        )
         async with httpx.AsyncClient(
-            transport=PinnedDNSAsyncTransport(),
+            transport=transport,
             follow_redirects=True,
             max_redirects=_REMOTE_MEDIA_MAX_REDIRECTS,
             timeout=timeout,

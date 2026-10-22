@@ -62,7 +62,7 @@ describe("RecoveryNotice", () => {
     expect(notice).toHaveAttribute("data-recovery-status", "awaiting_user");
     expect(notice).toHaveAttribute("aria-live", "assertive");
     expect(notice).toHaveClass(
-      "max-w-[49.5rem]",
+      "thread-composer-notice",
       "rounded-control",
       "animate-in",
       "fade-in-0",
@@ -135,5 +135,22 @@ describe("RecoveryNotice", () => {
 
     expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+  });
+
+  it("shows model authorization recovery after loading saved state", () => {
+    const onOpenSettings = vi.fn();
+    render(
+      <RecoveryNotice
+        state={{ ...INTERRUPTED, reason: "model_request_failed", failure_error_kind: "authentication" }}
+        onContinue={vi.fn().mockResolvedValue(undefined)}
+        onDismiss={vi.fn().mockResolvedValue(undefined)}
+        onOpenSettings={onOpenSettings}
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("Model provider authorization failed");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("Task interrupted");
+    fireEvent.click(screen.getByRole("button", { name: "Open model settings" }));
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
   });
 });

@@ -5,7 +5,7 @@ import { channelTranslator } from "@/channel-plugins/i18n";
 import type { ChannelPluginPanelProps } from "@/channel-plugins/types";
 import { channelValuesForSubmit, defaultChannelFieldValues } from "@/components/settings/channels/CredentialForm";
 import { channelSetup } from "@/components/settings/channels/ChannelIdentity";
-import { useAutoSave } from "@/components/settings/shared/useAutoSave";
+import { useEditCompletion } from "@/components/settings/shared/useEditCompletion";
 import { configureChannel, disableNanobotFeature, fetchNanobotFeatures } from "@/lib/api";
 import { useClient } from "@/providers/ClientProvider";
 
@@ -71,16 +71,20 @@ export function LinearPanel({
     setTouchedFields(new Set());
     setVisibleSecrets({});
     setClearedSecrets(new Set());
-  }, [savedValuesKey, feature.name]);
+  }, [feature.name]);
+
+  useEffect(() => {
+    const savedValues = defaultChannelFieldValues(editableFields, feature.config_values);
+    setFieldValues((current) => ({
+      ...savedValues,
+      ...Object.fromEntries(Object.entries(current).filter(([key]) => touchedFields.has(key))),
+    }));
+  }, [savedValuesKey]);
 
   const busy = saving || resetting || Boolean(actionKey);
   const savedValues = defaultChannelFieldValues(editableFields, feature.config_values);
   const dirty = clearedSecrets.size > 0 || editableFields.some(
     (field) => fieldValues[field.key] !== savedValues[field.key],
-  );
-  const secretFields = editableFields.filter((field) => field.secret);
-  const touchedSecret = secretFields.some((field) =>
-    touchedFields.has(field.key) && Boolean(fieldValues[field.key]?.trim()),
   );
   const memberConfigScope = JSON.stringify([
     feature.config_values?.["channels.linear.clientId"],
@@ -155,8 +159,7 @@ export function LinearPanel({
 
   const saveSettings = useCallback(async (): Promise<boolean> => {
     if (savePromiseRef.current) return savePromiseRef.current;
-    if (!dirty) return true;
-    if (busy || connecting) return false;
+    if (resetting || actionKey || connecting) return false;
     const save = (async () => {
       setSaving(true);
       setSaved(false);
@@ -167,10 +170,10 @@ export function LinearPanel({
           feature.name,
           channelValuesForSubmit(editableFields, fieldValues, touchedFields, clearedSecrets),
         );
-        setTouchedFields(new Set());
-        setClearedSecrets(new Set());
+        setTouchedFields((current) => current === touchedFields ? new Set() : current);
+        setClearedSecrets((current) => current === clearedSecrets ? new Set() : current);
         setVisibleSecrets({});
-        setFieldValues((current) => Object.fromEntries(
+        setFieldValues((current) => current !== fieldValues ? current : Object.fromEntries(
           editableFields.map((field) => [field.key, field.secret ? "" : current[field.key] ?? ""]),
         ));
         if (payload.nanobot_features) onFeaturesUpdate(payload.nanobot_features);
@@ -187,15 +190,11 @@ export function LinearPanel({
     const result = await save;
     if (savePromiseRef.current === save) savePromiseRef.current = null;
     return result;
-  }, [busy, connecting, dirty, client, feature.name, editableFields, fieldValues,
+  }, [resetting, actionKey, connecting, client, feature.name, editableFields, fieldValues,
     touchedFields, clearedSecrets, onFeaturesUpdate]);
 
-  useAutoSave(
-    { fieldValues, clearedSecrets: [...clearedSecrets] },
-    dirty,
-    busy || connecting,
-    () => void saveSettings(),
-    !touchedSecret && !notice,
+  const edits = useEditCompletion(
+    { fieldValues, clearedSecrets: [...clearedSecrets] }, dirty, saveSettings, true, feature.name,
   );
 
   useEffect(() => {
@@ -203,10 +202,10 @@ export function LinearPanel({
       if (secretSavePromiseRef.current) {
         try { await secretSavePromiseRef.current; } catch { return false; }
       }
-      return saveSettings();
+      return edits.commit();
     } : null);
     return () => onBeforeCloseChange?.(null);
-  }, [dirty, saving, saveSettings, onBeforeCloseChange]);
+  }, [dirty, saving, edits.commit, onBeforeCloseChange]);
 
   const saveSecret = async (key: string, value: string) => {
     if (busy || dirty || connecting || savePromiseRef.current || secretSavePromiseRef.current) {
@@ -235,20 +234,19 @@ export function LinearPanel({
     visibleSecrets,
     clearedSecrets,
     onChange: setFieldValue,
-    onFieldBlur: () => { void saveSettings(); },
     onToggleSecret: (key: string) => {
       setVisibleSecrets((current) => ({ ...current, [key]: !current[key] }));
     },
-    disabled: busy || connecting,
+    disabled: resetting || Boolean(actionKey) || connecting,
     compact: true,
   };
 
-  return <LinearPanelView feature={feature} showBrandLogos={showBrandLogos} fields={fields}
+  return <div onChangeCapture={edits.onChangeCapture} onFocusCapture={edits.onFocusCapture} onBlurCapture={edits.onBlurCapture}><LinearPanelView feature={feature} showBrandLogos={showBrandLogos} fields={fields}
     advancedFields={advancedFields} formProps={formProps}
     state={{ busy, dirty, saving, saved, connecting, credentialsSaved, connectionGeneration, notice }}
     workspaces={{ installations: cachedInstallations, logos, loading: loadingInstallations, inspectionError,
       disconnectingId, notice: workspaceNotice, error: workspaceError }}
-    onSave={saveSettings} onSaveSecret={saveSecret} onRefreshWorkspaces={loadInstallations}
+    onSave={edits.commit} onSaveSecret={saveSecret} onRefreshWorkspaces={loadInstallations}
     onDisconnectWorkspace={disconnectWorkspace} onClearWorkspaceError={() => setWorkspaceError(null)}
     onRequestConnection={() => setConnectRequestId(id => id + 1)} onConfigureMcp={onConfigureMcp}
     renderMemberAccess={(organizationId, disabled) => <LinearMemberAccess organizationId={organizationId}
@@ -268,5 +266,5 @@ export function LinearPanel({
       idleLabel={tx("custom.connect", "Connect Linear")} onFeaturesUpdate={(payload) => {
         onFeaturesUpdate(payload);
         void workspaceStore.load(true);
-      }} onActiveChange={setConnecting} renderActions={renderActions} />} />;
+      }} onActiveChange={setConnecting} renderActions={renderActions} />} /></div>;
 }

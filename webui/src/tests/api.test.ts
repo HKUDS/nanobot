@@ -191,6 +191,40 @@ describe("webui API helpers", () => {
   });
 
   it.each([
+    {},
+    { stream_id: "answer-1" },
+    { projection_receipts: [] },
+    { stream_id: "answer-1", projection_receipts: [{ turn_id: "turn-1", ranges: [[1, 3], [5, 5]] }] },
+  ])("accepts optional stream identity and projection receipts: %j", async (metadata) => {
+    const event = { event: "stream_end", chat_id: "chat-1", text: "Reply", turn_id: "turn-1", turn_seq: 6, ...metadata };
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      schemaVersion: 3, projection: "events", events: [event],
+    })));
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).resolves.toMatchObject({ events: [event] });
+  });
+
+  it.each([
+    { stream_id: 123 },
+    { projection_receipts: null },
+    { projection_receipts: [{ turn_id: "", ranges: [[1, 2]] }] },
+    { projection_receipts: [{ turn_id: "turn-1", ranges: [[2, 1]] }] },
+    { projection_receipts: [{ turn_id: "turn-1", ranges: [[1]] }] },
+    { projection_receipts: [{ turn_id: "turn-1", ranges: [[-1, 2]] }] },
+    { projection_receipts: [{ turn_id: "turn-1", ranges: [[1, 2.5]] }] },
+  ])("rejects malformed stream identity or projection receipts at the HTTP boundary: %j", async (metadata) => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      schemaVersion: 3,
+      projection: "events",
+      events: [{ event: "stream_end", chat_id: "chat-1", text: "Reply", ...metadata }],
+    })));
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).rejects.toThrow(
+      "Invalid WebUI thread event metadata",
+    );
+  });
+
+  it.each([
     null,
     "backup",
     [null],
@@ -313,22 +347,22 @@ describe("webui API helpers", () => {
   });
 
   it("aborts a WebUI thread request when its caller signal is aborted", async () => {
-    let requestSignal: AbortSignal | null = null;
+    const request: { signal?: AbortSignal | null } = {};
     vi.mocked(fetch).mockImplementation((_input, init) => new Promise((_resolve, reject) => {
-      requestSignal = init?.signal ?? null;
-      requestSignal?.addEventListener("abort", () => {
+      request.signal = init?.signal;
+      request.signal?.addEventListener("abort", () => {
         reject(new DOMException("Aborted", "AbortError"));
       });
     }));
     const controller = new AbortController();
 
-    const request = fetchWebuiThread("tok", "websocket:chat-1", {
+    const pending = fetchWebuiThread("tok", "websocket:chat-1", {
       signal: controller.signal,
     });
     controller.abort();
 
-    await expect(request).rejects.toMatchObject({ name: "AbortError" });
-    expect(requestSignal?.aborted).toBe(true);
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(request.signal?.aborted).toBe(true);
   });
 
   it("percent-encodes websocket keys and paths when fetching file previews", async () => {
@@ -807,7 +841,7 @@ describe("webui API helpers", () => {
   it("serializes OAuth provider advanced settings", async () => {
     await updateProviderSettings(mutationTransport, {
       provider: "xai_grok",
-      proxy: "http://127.0.0.1:7890",
+      use_proxy: true,
       extraBody: '{"tools":[]}',
     });
 
@@ -815,7 +849,7 @@ describe("webui API helpers", () => {
       "settings.provider.update",
       {
         provider: "xai_grok",
-        proxy: "http://127.0.0.1:7890",
+        use_proxy: true,
         extraBody: '{"tools":[]}',
       },
       20_000,
@@ -830,7 +864,7 @@ describe("webui API helpers", () => {
       extraHeaders: '{"X-Tenant":"engineering"}',
       extraBody: '{"service_tier":"priority"}',
       extraQuery: '{"api-version":"2026-01-01"}',
-      proxy: "http://127.0.0.1:7890",
+      use_proxy: true,
       thinkingStyle: "enable_thinking",
     };
     await createProviderSettings(mutationTransport, update);
@@ -1146,6 +1180,18 @@ describe("webui API helpers", () => {
       { flow_id: "flow-123" },
       20_000,
     );
+  });
+
+  it.each(["true", "false"])("preserves explicit MCP proxy flag %s across setup and edits", async (use_proxy) => {
+    await runMcpPresetAction(mutationTransport, "enable", "notion", { use_proxy });
+    expect(requestMutation).toHaveBeenLastCalledWith("settings.mcp.enable", { name: "notion", use_proxy }, 20_000);
+    await startMcpOAuth(mutationTransport, "notion", false, { use_proxy });
+    expect(requestMutation).toHaveBeenLastCalledWith("settings.mcp.oauth_start", { name: "notion", use_proxy }, 30_000);
+    await runMcpPresetAction(mutationTransport, "proxy", "notion", { use_proxy });
+    expect(requestMutation).toHaveBeenLastCalledWith("settings.mcp.proxy", { name: "notion", use_proxy }, 20_000);
+    const custom = { name: "docs", transport: "sse", url: "https://example.com/sse", use_proxy };
+    await saveCustomMcpServer(mutationTransport, custom);
+    expect(requestMutation).toHaveBeenLastCalledWith("settings.mcp.custom", custom, 20_000);
   });
 
   it("serializes custom MCP, mcp.json import, and tool allowlist actions", async () => {

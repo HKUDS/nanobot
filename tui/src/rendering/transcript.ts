@@ -24,6 +24,8 @@ import type {
   ToolProgressEvent,
 } from "../client"
 import { renderLatexAsUnicode } from "./latex"
+import { TranscriptDiagrams } from "./mermaid/controller"
+import type { DiagramInput } from "./mermaid/types"
 import { hideScrollbars } from "./scrollbox"
 import { mergeToolEvent, renderToolEvent } from "./tool-renderers"
 
@@ -35,6 +37,7 @@ export interface TranscriptTheme {
   userBackground: ColorInput | null
   border: ColorInput
   syntax: SyntaxStyle
+  diagramColors: DiagramInput["colors"]
 }
 
 export interface TranscriptHeader {
@@ -108,6 +111,8 @@ function projectUserMessage(media: readonly UserMessageMedia[]): UserMessageProj
 /** Projects gateway events into retained, reflowable conversation cells. */
 export class Transcript {
   readonly root: ScrollBoxRenderable
+  readonly diagrams: TranscriptDiagrams
+  private readonly diagramStates = new WeakMap<MarkdownRenderable, { settled: boolean }>()
   private live: { row: BoxRenderable; markdown: MarkdownRenderable; content: string } | null = null
   private activity: Activity | null = null
   private readonly styledText: Array<{
@@ -168,11 +173,13 @@ export class Transcript {
       onMouseScroll: () => this.scheduleNavigationUpdate(),
     })
     hideScrollbars(this.root)
+    this.diagrams = new TranscriptDiagrams(renderer, this.root, theme.diagramColors)
   }
 
   setTheme(theme: TranscriptTheme): void {
     const previousSyntax = this.theme.syntax
     this.theme = theme
+    this.diagrams.setTheme(theme.diagramColors)
     this.codeRailColor = parseColor(theme.border)
     for (const { renderable, tone } of this.styledText) renderable.fg = theme[tone]
     for (const { text, phase } of this.compactions.values()) {
@@ -222,6 +229,7 @@ export class Transcript {
   }
 
   reset(header: TranscriptHeader): void {
+    this.diagrams.reset()
     if (this.navigationTimer) clearTimeout(this.navigationTimer)
     this.navigationTimer = null
     this.clearStreamTimer()
@@ -381,6 +389,9 @@ export class Transcript {
       // anchors and avoids the one-frame jump caused by replacing the row.
       this.live.markdown.content = renderLatexAsUnicode(content)
       this.live.markdown.streaming = false
+      const state = this.diagramStates.get(this.live.markdown)
+      if (state) state.settled = true
+      this.live.markdown.requestRender()
       this.live = null
     } else if (fallback.trim()) {
       this.assistant(fallback)
@@ -437,6 +448,7 @@ export class Transcript {
   }
 
   destroy(): void {
+    this.diagrams.destroy()
     if (this.navigationTimer) clearTimeout(this.navigationTimer)
     this.clearStreamTimer()
     this.pendingStream = ""
@@ -709,6 +721,7 @@ export class Transcript {
   }
 
   private createMarkdown(content: string, streaming: boolean, id = "markdown"): MarkdownRenderable {
+    const state = { settled: !streaming }
     const markdown = new MarkdownRenderable(this.renderer, {
       id: this.id(id),
       content: renderLatexAsUnicode(content),
@@ -724,7 +737,11 @@ export class Transcript {
         if (token.type !== "code") return undefined
         const code = context.defaultRender()
         if (!(code instanceof CodeRenderable)) return code
-        return this.decorateCodeBlock(code)
+        this.decorateCodeBlock(code)
+        if (token.lang?.trim().toLowerCase() === "mermaid") {
+          return this.diagrams.create(token.text, code, state, this.id("mermaid"))
+        }
+        return code
       },
       tableOptions: {
         style: "columns",
@@ -735,6 +752,7 @@ export class Transcript {
       treeSitterClient: this.treeSitterClient,
     })
     this.markdown.add(markdown)
+    this.diagramStates.set(markdown, state)
     return markdown
   }
 

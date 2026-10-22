@@ -1,0 +1,503 @@
+{
+  "common": {
+    "unavailable": "Không khả dụng",
+    "selected": "Đã chọn: {{value}}",
+    "savingPreview": "Đang lưu giá trị xem trước…",
+    "savedPreview": "Đã lưu giá trị xem trước",
+    "providerAction": "Đã chọn thao tác cấu hình nhà cung cấp",
+    "reset": "Đặt lại bản xem trước"
+  },
+  "button": {
+    "title": "Nút bấm",
+    "description": "Cùng một nút với nhiều kiểu hiển thị và kích thước, thay đổi qua các tùy chọn.",
+    "options": "variant đổi kiểu hiển thị; size đổi kích thước; disabled chặn tương tác; onClick do bên gọi cung cấp.",
+    "variants": "Biến thể — các kiểu của cùng một nút",
+    "sizes": "Kích thước",
+    "add": "Thêm ví dụ",
+    "clicks": "Số lần bấm nút: {{count}}"
+  },
+  "input": {
+    "title": "Ô nhập văn bản",
+    "description": "Nhập văn bản và biến thể ô tìm kiếm dùng chung.",
+    "options": "Dùng Input cho ô thông thường và SearchInput cho tìm kiếm. Cung cấp nhãn và giải thích dữ liệu nhập không hợp lệ.",
+    "name": "Tên ví dụ",
+    "projectName": "Tên dự án",
+    "search": "Tìm kiếm",
+    "searchName": "Tìm kiếm ví dụ",
+    "searchProjects": "Tìm dự án",
+    "invalid": "Không hợp lệ",
+    "invalidName": "Tên không hợp lệ",
+    "required": "Nhập tên dự án.",
+    "disabledName": "Ô tên bị vô hiệu hóa"
+  },
+  "textarea": {
+    "title": "Ô nhập nhiều dòng",
+    "description": "Văn bản nhiều dòng với kiểu hiển thị tiêu điểm dùng chung.",
+    "options": "Nhận các thuộc tính textarea gốc: value, onChange, rows và disabled.",
+    "notes": "Ghi chú ví dụ",
+    "disabledNotes": "Ghi chú bị vô hiệu hóa",
+    "readOnly": "Bản xem trước chỉ đọc"
+  },
+  "toggle": {
+    "title": "Công tắc",
+    "description": "Công tắc bật/tắt được điều khiển, dùng chung cho cài đặt, không gian làm việc và kênh.",
+    "options": "Bên gọi quản lý checked và onChange. label cung cấp tên hỗ trợ tiếp cận.",
+    "enable": "Bật ví dụ",
+    "unavailableOn": "Công tắc đang bật không thể thao tác",
+    "unavailableOff": "Công tắc đang tắt không thể thao tác"
+  },
+  "select": {
+    "title": "Bộ chọn",
+    "description": "Chọn một mục với điều hướng bàn phím và các tùy chọn bị vô hiệu hóa.",
+    "options": "Kết hợp Select, SelectTrigger, SelectValue, SelectContent và SelectItem. Thành phần gốc quản lý value/onValueChange.",
+    "fast": "Nhanh",
+    "model": "Mô hình ví dụ",
+    "disabledModel": "Bộ chọn mô hình bị vô hiệu hóa"
+  },
+  "segmented": {
+    "title": "Lựa chọn phân đoạn",
+    "description": "Một nhóm ít lựa chọn luôn hiển thị.",
+    "options": "value, options và onChange được điều khiển từ bên ngoài. mode=\"tabs\" thêm điều hướng thẻ bằng phím mũi tên.",
+    "day": "Ngày",
+    "week": "Tuần",
+    "month": "Tháng",
+    "period": "Khoảng thời gian ví dụ",
+    "selected": "Khoảng thời gian đã chọn: {{value}}"
+  },
+  "combobox": {
+    "title": "Lựa chọn có tìm kiếm",
+    "description": "Các tùy chọn tìm kiếm được với điều hướng bàn phím và con trỏ dùng chung.",
+    "options": "useComboboxNavigation cung cấp thuộc tính cho ô nhập, danh sách và tùy chọn; bên gọi lọc giá trị và quản lý lựa chọn.",
+    "search": "Tìm trong tùy chọn ví dụ",
+    "placeholder": "Nhập hoặc dùng phím mũi tên",
+    "choices": "Tùy chọn ví dụ",
+    "empty": "Không có tùy chọn phù hợp",
+    "selected": "Tùy chọn đã chọn: {{value}}"
+  },
+  "chevron": {
+    "title": "Mũi tên điều khiển",
+    "description": "Biểu tượng mũi tên dùng chung cho các bộ chọn.",
+    "options": "className có thể điều chỉnh vị trí. Biểu tượng chỉ để trang trí; điều khiển chứa nó cung cấp tên hỗ trợ tiếp cận."
+  },
+  "dialog": {
+    "title": "Hộp thoại",
+    "description": "Trình soạn thảo dạng hộp thoại với thay đổi tạm, bộ chọn lồng nhau và khôi phục tiêu điểm.",
+    "options": "Bên gọi quản lý open/onOpenChange cùng hành vi bản nháp và lưu. Luôn cung cấp DialogTitle và thêm mô tả khi cần.",
+    "open": "Mở hộp thoại",
+    "edit": "Sửa nhãn ví dụ",
+    "help": "Thay đổi chỉ áp dụng cho bản xem trước này.",
+    "label": "Nhãn ví dụ",
+    "save": "Lưu nhãn",
+    "saved": "Nhãn đã lưu: {{name}}"
+  },
+  "alert": {
+    "title": "Hộp thoại xác nhận",
+    "description": "Xác nhận rõ ràng với điều khiển hủy và thực hiện riêng biệt.",
+    "options": "Kết hợp tiêu đề, mô tả và chân hộp thoại; thực hiện thao tác trong trình xử lý của AlertDialogAction.",
+    "remove": "Xóa ví dụ",
+    "confirmTitle": "Xóa ví dụ này?",
+    "help": "Thao tác này chỉ thay đổi trạng thái xem trước.",
+    "confirm": "Xác nhận xóa",
+    "removed": "Đã xóa ví dụ.",
+    "available": "Ví dụ khả dụng."
+  },
+  "sheet": {
+    "title": "Bảng bên",
+    "description": "Bảng dạng hộp thoại gắn vào một cạnh vùng hiển thị.",
+    "options": "SheetContent hỗ trợ side. Cần có SheetTitle và SheetDescription.",
+    "open": "Mở bảng bên",
+    "panelTitle": "Bảng bên ví dụ",
+    "help": "Các điều khiển bổ trợ bên cạnh trang hiện tại.",
+    "notes": "Ghi chú bảng bên",
+    "placeholder": "Thử chỉnh sửa tại đây"
+  },
+  "popover": {
+    "title": "Bảng nổi",
+    "description": "Một vùng tương tác nhỏ neo vào điều khiển kích hoạt.",
+    "options": "Kết hợp phần kích hoạt và nội dung; có thể điều khiển open/onOpenChange. Nội dung dùng cổng hiển thị của hộp thoại chứa nó.",
+    "open": "Mở bảng nổi",
+    "note": "Ghi chú nhanh"
+  },
+  "menu": {
+    "title": "Menu thả xuống",
+    "description": "Thao tác, lựa chọn đơn, menu lồng nhau và mục bị vô hiệu hóa.",
+    "options": "Dùng onSelect cho thao tác và nhóm lựa chọn đơn cho lựa chọn cần giữ lại.",
+    "view": "Tùy chọn hiển thị",
+    "layout": "Bố cục",
+    "comfortable": "Thoáng",
+    "compact": "Gọn",
+    "rename": "Đổi tên",
+    "more": "Thao tác khác",
+    "duplicate": "Nhân bản",
+    "none": "Không có",
+    "status": "Mật độ: {{density}}. Thao tác: {{action}}."
+  },
+  "tooltip": {
+    "title": "Chú giải và gợi ý",
+    "description": "HoverHint kết hợp các thành phần chú giải cơ bản dùng chung; tooltip.tsx là điểm nhập công khai.",
+    "options": "Dùng HoverHint cho gợi ý thông thường. Giữ lỗi quan trọng luôn hiển thị. Di chuột và tiêu điểm bàn phím tuân theo quy tắc thời gian chung của sản phẩm.",
+    "primitive": "Chú giải cơ bản",
+    "primitiveHelp": "Độ trễ con trỏ dùng chung và hiển thị ngay khi có tiêu điểm bàn phím.",
+    "hint": "Gợi ý khi di chuột",
+    "hintHelp": "Gợi ý kết hợp có cùng hành vi tiêu điểm và con trỏ."
+  },
+  "truncated": {
+    "title": "Gợi ý văn bản bị cắt",
+    "description": "Chỉ hiển thị gợi ý khi đo được văn bản bị cắt ngắn.",
+    "options": "Cung cấp text và giới hạn chiều rộng. Thêm tabIndex nếu bản thân văn bản cần nhận tiêu điểm bàn phím."
+  },
+  "disclosure": {
+    "title": "Nội dung thu gọn",
+    "description": "Nội dung có thể mở rộng, giữ trạng thái thành phần con khi thu gọn.",
+    "options": "Disclosure quản lý việc mở rộng; DisclosureContent nhận thuộc tính open được điều khiển cho phần kích hoạt tùy chỉnh.",
+    "show": "Hiện tùy chọn nâng cao",
+    "help": "Bản nháp này vẫn được giữ khi đóng rồi mở lại.",
+    "draft": "Bản nháp vùng thu gọn"
+  },
+  "expandable": {
+    "title": "Văn bản mở rộng",
+    "description": "Bản xem trước giới hạn dòng của cùng văn bản đang được gắn kết.",
+    "options": "Bên gọi quản lý expanded. lines đặt số dòng khi thu gọn; cần cung cấp nút chuyển hỗ trợ tiếp cận.",
+    "less": "Thu gọn",
+    "more": "Xem thêm"
+  },
+  "imageViewport": {
+    "title": "Vùng hiển thị ảnh",
+    "description": "Điều khiển vừa khung, thu phóng, di chuyển và chụm ngón cho từng ảnh.",
+    "options": "Dùng className để giới hạn vùng và gắn kết lại khi danh tính ảnh thay đổi. Đặt panWithArrows=false nếu thư viện ảnh quản lý điều hướng bằng phím mũi tên."
+  },
+  "streaming": {
+    "title": "Nhãn động",
+    "description": "Hiệu ứng văn bản dùng chung cho trạng thái suy nghĩ và nhãn công cụ đang hoạt động.",
+    "options": "active điều khiển hiệu ứng. Thành phần con dạng chuỗi hoặc số cung cấp lớp phủ ký tự; tôn trọng tùy chọn giảm chuyển động.",
+    "animate": "Bật hiệu ứng nhãn",
+    "working": "Đang xử lý bước tiếp theo…"
+  },
+  "markdown": {
+    "title": "Phản hồi Markdown",
+    "description": "Trình kết xuất luồng thực tế, gồm bảng, mã và công thức.",
+    "options": "children là văn bản Markdown. streaming điều khiển nội dung chưa hoàn tất; onOpenFilePreview do màn hình cung cấp.",
+    "state": "Trạng thái Markdown"
+  },
+  "code": {
+    "title": "Hiển thị mã",
+    "description": "Tô màu cú pháp, số dòng, sao chép, đầu ra ANSI và các dòng thích ứng với vùng nhìn thấy.",
+    "options": "code và language cung cấp nội dung; showLineNumbers, wrapLongLines và chrome điều khiển trình bày. Tô sáng theo vùng nhìn thấy yêu cầu số dòng và không ngắt dòng.",
+    "format": "Định dạng mã"
+  },
+  "math": {
+    "title": "Công thức toán học",
+    "description": "Lớp bọc dùng chung để điều chỉnh kích thước công thức khối đã được Markdown kết xuất.",
+    "options": "Dùng MarkdownText cho mã TeX. DisplayMath nhận các nút công thức đã kết xuất và co giãn theo chiều rộng hiện có."
+  },
+  "message": {
+    "title": "Tin nhắn",
+    "description": "Tin nhắn người dùng và trợ lý, gồm trạng thái suy nghĩ và gửi.",
+    "options": "message là UIMessage được môi trường chạy trò chuyện chiếu ra. Dữ liệu và thao tác mạng nằm ngoài trình kết xuất.",
+    "state": "Trạng thái tin nhắn"
+  },
+  "activity": {
+    "title": "Hoạt động tác tử",
+    "description": "Các thành phần hoạt động cơ bản kết hợp thành chuỗi đang chạy, hoàn tất hoặc thất bại.",
+    "options": "Truyền văn bản, trạng thái và giá trị mở rộng được điều khiển. gateway quản lý thực thi công cụ; các thành phần này hiển thị trạng thái được chiếu ra.",
+    "state": "Trạng thái hoạt động",
+    "working": "Đang xử lý",
+    "details": "Chi tiết hoạt động",
+    "collapse": "Thu gọn",
+    "readError": "Không thể đọc tệp",
+    "read": "Đọc mã nguồn"
+  },
+  "files": {
+    "title": "Chỉnh sửa tệp",
+    "description": "Tham chiếu tệp, số dòng thay đổi và phần khác biệt có thể mở rộng.",
+    "options": "edits chứa tóm tắt hiển thị; displayMode chọn summary/diff/collapsed_diff; onOpenFilePreview do màn hình cung cấp.",
+    "error": "Không thể áp dụng chỉnh sửa ví dụ.",
+    "state": "Trạng thái chỉnh sửa tệp",
+    "operation": "Thao tác tệp",
+    "display": "Hiển thị khác biệt",
+    "selected": "Tệp đã chọn: {{path}}",
+    "hint": "Chọn một tham chiếu tệp để thử hàm gọi lại."
+  },
+  "media": { "study": "Bài tập màu sắc {{count}}" },
+  "imageGallery": {
+    "title": "Ảnh thu nhỏ",
+    "description": "Bố cục nhiều ảnh, chọn ảnh thu nhỏ và hiển thị ảnh bổ sung.",
+    "options": "images cung cấp URL và tên; size chọn ảnh thu nhỏ lớn hoặc gọn, align điều khiển căn chỉnh. Chỉ hiện bốn ảnh thu nhỏ; ImageLightbox kết hợp chứa mọi ảnh có thể xem.",
+    "sixImages": "Sáu ảnh",
+    "compact": "Ảnh thu nhỏ gọn",
+    "hint": "Chọn ảnh thu nhỏ hoặc +2 để xem cả sáu ảnh."
+  },
+  "imageLightbox": {
+    "title": "Trình xem ảnh toàn màn hình",
+    "description": "Xem toàn màn hình có điều khiển và chuyển giữa các ảnh.",
+    "options": "index là null khi đóng. Bên gọi quản lý index và hàm gọi lại mở; ImageLightbox kết hợp ZoomableImage và đặt lại góc nhìn khi đổi ảnh.",
+    "open": "Mở trình xem toàn màn hình",
+    "hint": "Dùng trước/sau, ←/→ hoặc Home/End; đóng bằng × hoặc Escape."
+  },
+  "zoomableImage": {
+    "title": "Thu phóng ảnh",
+    "description": "Thu phóng một ảnh, di chuyển trong giới hạn và thao tác cử chỉ.",
+    "options": "src và alt cung cấp một ảnh. Đặt trong vùng chứa có định vị và chiều cao rõ ràng; gắn kết lại khi đổi ảnh. Đưa tiêu điểm vào vùng ảnh để dùng +, − và 0.",
+    "hint": "Thu phóng bằng +/−, nhấp đúp, Ctrl+con lăn hoặc chụm ngón. Kéo hoặc cuộn để di chuyển sau khi phóng to; nhấp phần trăm hoặc nhấn 0 để đặt lại."
+  },
+  "attachment": {
+    "title": "Tệp đính kèm",
+    "description": "Xem trước ảnh, phát video, tải tệp và tệp đính kèm không khả dụng.",
+    "options": "attachment.kind chọn image, video hoặc file. Ảnh mở ImageLightbox, video dùng điều khiển gốc, tệp dùng liên kết tải xuống. Thiếu URL hoặc tải ảnh thất bại sẽ hiển thị ô không khả dụng.",
+    "image": "Ảnh",
+    "video": "Video có thể phát",
+    "file": "Tải tệp",
+    "unavailable": "Tệp đính kèm không khả dụng (không có URL)"
+  },
+  "fileReference": {
+    "title": "Tham chiếu tệp",
+    "description": "Tham chiếu tệp với thao tác mở do bên gọi quản lý.",
+    "options": "path cung cấp nhãn; onOpen cung cấp thao tác. Thành phần không quyết định quyền của không gian làm việc.",
+    "select": "Chọn tham chiếu tệp."
+  },
+  "settingsComposition": {
+    "title": "Kết hợp cài đặt",
+    "description": "Các thành phần hàng, nhóm và khả năng thực tế của cài đặt kết hợp với điều khiển dùng chung.",
+    "options": "Bộ điều khiển cài đặt bên ngoài quản lý giá trị và lưu trữ lâu dài. Hàm gọi lại của thư viện chỉ cập nhật trạng thái xem trước cục bộ.",
+    "preferences": "Tùy chọn ví dụ",
+    "keepDrafts": "Giữ bản nháp",
+    "switchHint": "Hàng cài đặt dùng chung với công tắc được điều khiển.",
+    "projectLabel": "Nhãn dự án",
+    "projectName": "Nhãn dự án trong cài đặt",
+    "capability": "Khả năng ví dụ",
+    "notes": "Ghi chú",
+    "capabilityNotes": "Ghi chú khả năng",
+    "localOnly": "Chỉ xem trước cục bộ"
+  },
+  "modelPickers": {
+    "title": "Chọn mô hình",
+    "description": "Chọn nhà cung cấp, tìm hoặc nhập ID mô hình và điều chỉnh mức suy luận.",
+    "options": "Bên gọi cung cấp giá trị và thao tác của ProviderPicker. models của ModelIdPicker có thể cung cấp danh mục cố định; savedValues của ReasoningEffortPicker cung cấp tùy chọn hiện có.",
+    "chooseProvider": "Chọn nhà cung cấp",
+    "configure": "Cấu hình {{provider}}"
+  },
+  "providerIcons": {
+    "title": "Biểu tượng nhà cung cấp",
+    "description": "So sánh kích thước thường, gọn, lấp đầy và trạng thái chưa cấu hình của bộ chọn.",
+    "options": "provider chọn biểu tượng hiện có; compact và fill điều khiển kích thước. showBrandLogos=false dùng biểu tượng tích hợp.",
+    "size": "Kích thước biểu tượng"
+  },
+  "timezone": {
+    "title": "Chọn múi giờ",
+    "description": "Tìm theo tên múi giờ, tên tiếng Trung hoặc độ lệch UTC, rồi xem cùng thời điểm theo giờ địa phương.",
+    "options": "value là múi giờ IANA; onChange cập nhật giá trị của bên gọi. Thành phần cung cấp tìm kiếm và điều hướng bàn phím."
+  },
+  "textEditor": {
+    "title": "Soạn thảo văn bản và gợi ý",
+    "description": "Mở trình soạn thảo để sửa, lưu hoặc hủy. Xóa nội dung rồi lưu để xem phản hồi lỗi.",
+    "options": "SettingsTextEditor đóng sau khi onSave thành công và hiển thị lỗi khi thất bại; SettingsHint mở khi di chuột, nhận tiêu điểm hoặc nhấp.",
+    "state": "Trạng thái chỉnh sửa",
+    "hint": "Mở trình soạn thảo để sửa, lưu hoặc hủy. Xóa nội dung để xem trạng thái lỗi.",
+    "instructions": "Hướng dẫn ví dụ",
+    "edit": "Sửa hướng dẫn ví dụ",
+    "help": "Sau khi lưu, nội dung đã sửa sẽ xuất hiện bên dưới.",
+    "required": "Nhập nội dung."
+  },
+  "removePreset": {
+    "title": "Xóa cấu hình sẵn",
+    "description": "Xóa cấu hình mô hình chưa dùng và xem trạng thái vô hiệu hóa của cấu hình mà mô hình mặc định đang dùng.",
+    "options": "Đây là nút xóa của ModelsSettings; bên gọi cung cấp disabled và thao tác xóa. Quản lý nhà cung cấp dùng hộp thoại ProvidersSettings.",
+    "defaultModel": "Mô hình mặc định",
+    "codeAssistant": "Trợ lý lập trình",
+    "remove": "Xóa {{name}}",
+    "primaryHint": "Không thể xóa cấu hình mà mô hình mặc định đang dùng.",
+    "count": "Số cấu hình xem trước: {{count}}"
+  },
+  "loading": {
+    "title": "Bố cục tải dữ liệu",
+    "description": "Chuyển bố cục tải danh mục ứng dụng, kênh và kỹ năng; xem vùng trạng thái dùng chung.",
+    "options": "layout của CatalogSkeleton chọn bố cục. SkeletonStatus dùng label để cung cấp trạng thái cho trình đọc màn hình và đánh dấu nội dung trang trí là aria-hidden.",
+    "layout": "Bố cục danh mục",
+    "catalog": "Đang tải danh mục xem trước"
+  },
+  "sidebar": {
+    "title": "Điều hướng cài đặt",
+    "description": "Chọn mục, xử lý trạng thái chờ khởi động lại và thu hẹp trình duyệt để xem menu di động.",
+    "options": "activeSection và onSelectSection điều khiển lựa chọn; quay lại, đăng xuất và khởi động lại là hàm gọi lại của bên gọi.",
+    "back": "Quay lại trò chuyện",
+    "logout": "Đăng xuất",
+    "restart": "Đã xử lý thao tác khởi động lại trong bản xem trước",
+    "hint": "Chọn mục cài đặt hoặc thu hẹp trình duyệt để xem điều hướng di động.",
+    "toggleRestart": "Đổi trạng thái chờ khởi động lại"
+  },
+  "providerSearch": {
+    "title": "Tìm nhà cung cấp",
+    "description": "Tìm nhà cung cấp theo nhóm OAuth, khóa API và cục bộ; chọn một mục hoặc nhà cung cấp tùy chỉnh.",
+    "options": "providers là danh mục hiện có. query là giá trị tìm kiếm được điều khiển; onSelect và onCustom chuyển lựa chọn cho thành phần cha.",
+    "closed": "Đã đóng tìm kiếm",
+    "custom": "Đã chọn nhà cung cấp tùy chỉnh",
+    "hint": "Tìm nhà cung cấp hoặc dùng phím mũi tên để chọn."
+  },
+  "requestParameters": {
+    "title": "Tham số yêu cầu",
+    "description": "Sửa tiêu đề, tham số truy vấn và nội dung yêu cầu; nhập JSON không hợp lệ để xem phản hồi kiểm tra thực tế.",
+    "options": "fields chọn mục hiển thị; form giữ văn bản JSON. Tiêu đề và tham số truy vấn chỉ nhận chuỗi; nội dung yêu cầu nhận mọi kiểu giá trị trong đối tượng JSON."
+  },
+  "requestAPI": {
+    "title": "API yêu cầu",
+    "description": "Chọn API nhà cung cấp hỗ trợ, API mặc định, ghi đè theo mô hình và tùy chọn dự phòng.",
+    "options": "ProviderAPIControl giữ ít nhất một API. ModelAPIControl cho phép null để chọn tự động và hiển thị API theo khả năng nhà cung cấp.",
+    "providerAPI": "API nhà cung cấp",
+    "modelOverride": "Ghi đè mô hình"
+  },
+  "usage": {
+    "title": "Mức dùng token",
+    "description": "Chuyển giữa có dữ liệu, trống và không khả dụng. Di chuột lên cột để xem mức dùng hằng ngày, mở chi tiết để xem xu hướng mô hình.",
+    "options": "usage là bản thống kê do bên gọi cung cấp; timeZone xác định ranh giới ngày. Hộp thoại chi tiết và biểu đồ chỉ hiển thị dữ liệu được truyền vào.",
+    "state": "Trạng thái mức dùng"
+  },
+  "overview": {
+    "title": "Tổng quan cài đặt",
+    "description": "Xem mô hình hiện tại, trạng thái khả năng và mức dùng; chọn hàng tính năng để thử chuyển mục.",
+    "options": "settings cung cấp dữ liệu tổng quan; onSelectSection nhận mục cài đặt đã chọn.",
+    "selected": "Mục đã chọn: {{section}}"
+  },
+  "web": {
+    "title": "Cài đặt tìm kiếm web",
+    "description": "Chuyển giữa nhà cung cấp không cần thông tin xác thực, dùng khóa API hoặc URL máy chủ; chỉnh tìm kiếm và thử tự động lưu.",
+    "options": "settings giữ cấu hình hiện tại; form giữ giá trị chỉnh sửa. Thành phần cha cung cấp lưu, hiển thị thông tin xác thực và chuyển nhà cung cấp.",
+    "unsaved": "Chưa lưu bản nháp xem trước"
+  },
+  "image": {
+    "title": "Cài đặt tạo ảnh",
+    "description": "Bật/tắt tạo ảnh, chọn mô hình từ danh mục cố định, tỷ lệ và kích thước; mở tùy chọn nâng cao để chỉnh số lượng.",
+    "options": "form là cấu hình được điều khiển; dirty đánh dấu thay đổi. Thành phần dùng lại thông tin xác thực nhà cung cấp; thành phần cha thực hiện lưu."
+  },
+  "voice": {
+    "title": "Cài đặt chép lời",
+    "description": "Bật/tắt chép lời, sửa mô hình, ngôn ngữ, giới hạn thời lượng và dung lượng tải lên; thử tự động lưu.",
+    "options": "settings cung cấp thông tin nhà cung cấp; thành phần cha quản lý form và hàm gọi lại lưu."
+  },
+  "safety": {
+    "title": "Cài đặt truy cập",
+    "description": "Chuyển quyền truy cập dịch vụ cục bộ và quyền mặc định; xem hàng cài đặt, gợi ý và phản hồi tự động lưu.",
+    "options": "form cung cấp giá trị hiển thị; onSave xử lý yêu cầu lưu. Việc thực thi quyền lúc chạy vẫn do gateway quản lý."
+  },
+  "channelCatalog": {
+    "title": "Danh mục và nhận diện kênh",
+    "description": "Chuyển trạng thái đang chạy, đang khởi động, thất bại và chưa cài; thử công tắc, cài đặt và menu trợ giúp.",
+    "options": "feature cung cấp trạng thái cài đặt và chạy. Thành phần cha xử lý onAction và onSelect; nhận diện, lỗi và trợ giúp dùng cùng dữ liệu kênh.",
+    "exampleChannel": "Kênh ví dụ",
+    "state": "Trạng thái kênh",
+    "error": "Kết nối ví dụ thất bại.",
+    "stopped": "Đã dừng",
+    "running": "Đang chạy",
+    "starting": "Đang khởi động",
+    "failed": "Thất bại",
+    "selected": "Đã chọn cài đặt kênh",
+    "hint": "Dùng công tắc hoặc nút cài đặt để xem thay đổi trạng thái."
+  },
+  "credentials": {
+    "title": "Thông tin xác thực kênh",
+    "description": "Nhập thông tin xác thực, hiện/ẩn bí mật, áp dụng cấu hình kết nối, kiểm tra trường bắt buộc và sao chép lệnh hỗ trợ.",
+    "options": "fields định nghĩa nhóm và điều khiển; values và visibleSecrets được điều khiển. requirements định nghĩa các tổ hợp thông tin xác thực; cấu hình sẵn và hàm lưu chỉ cập nhật ví dụ này.",
+    "botToken": "Token bot",
+    "tokenPlaceholder": "Token ví dụ",
+    "serverURL": "URL máy chủ",
+    "replyMode": "Chế độ trả lời",
+    "mentions": "Lượt nhắc đến",
+    "allMessages": "Mọi tin nhắn",
+    "allowFrom": "Người gửi được phép",
+    "local": "Máy chủ cục bộ",
+    "hosted": "Máy chủ được lưu trữ",
+    "required": "Nhập token bot.",
+    "checkSave": "Kiểm tra và lưu",
+    "command": "Lệnh ví dụ",
+    "applied": "Đã áp dụng {{name}}",
+    "incomplete": "Điền đủ thông tin xác thực.",
+    "saved": "Đã lưu thông tin xác thực xem trước.",
+    "hint": "Điền thông tin xác thực, đổi hiển thị bí mật hoặc áp dụng cấu hình kết nối."
+  },
+  "channelValidation": {
+    "title": "Kiểm tra kết nối",
+    "description": "Chuyển giữa đang kiểm tra, thành công và thất bại; xem từng kiểm tra hiện lần lượt cùng tóm tắt danh tính.",
+    "options": "validation cung cấp bản ghi kiểm tra; validating điều khiển tải. Thành phần chỉ hiển thị kết quả.",
+    "expired": "Token ví dụ đã hết hạn.",
+    "result": "Kết quả kiểm tra"
+  },
+  "runAt": {
+    "title": "Chọn giờ lên lịch",
+    "description": "Nhập ngày giờ hoặc mở lịch để chọn bằng chuột, phím mũi tên và phím chuyển trang.",
+    "options": "value dùng giờ địa phương YYYY-MM-DDTHH:mm; onChange trả về giá trị đã sửa. Dữ liệu không hợp lệ được báo trên điều khiển biểu mẫu hiện có."
+  },
+  "automationCalendar": {
+    "title": "Lịch tự động hóa",
+    "description": "Đổi tháng, chuyển lịch và lịch sử, mở kết quả bản ghi thành công hoặc thất bại. Vùng chứa hẹp tự hiện danh sách lịch.",
+    "options": "jobs và month quyết định nội dung lịch. onInspect xử lý tác vụ đã lên lịch; bên gọi cung cấp hiển thị kết quả qua renderRunDialog. Lịch không đọc dịch vụ.",
+    "providerError": "Nhà cung cấp ví dụ không khả dụng.",
+    "state": "Trạng thái lịch",
+    "previousMonth": "Tháng trước",
+    "nextMonth": "Tháng sau",
+    "planned": "Đã lên lịch",
+    "recorded": "Lịch sử chạy",
+    "running": "Đang chạy",
+    "failed": "Thất bại",
+    "completed": "Hoàn tất",
+    "skipped": "Đã bỏ qua",
+    "system": "Tác vụ hệ thống",
+    "noEntries": "Không có lịch trong tháng này",
+    "more": "Thêm {{count}} mục",
+    "selected": "Tác vụ đã chọn: {{name}}",
+    "hint": "Chọn bản ghi chạy để xem kết quả hoặc chọn tác vụ đã lên lịch."
+  },
+  "providers": {
+    "title": "Quản lý nhà cung cấp",
+    "description": "Xem hộp thoại quản lý nhà cung cấp thực tế và quy trình thêm mới.",
+    "options": "Dùng lại ProvidersSettings từ cài đặt. Bên gọi quản lý danh mục, biểu mẫu và hàm lưu; bản xem trước thay đổi dữ liệu ví dụ cục bộ, hỗ trợ cấu hình, tìm kiếm, tạo và hủy.",
+    "invalidParameters": "Nhập JSON tham số yêu cầu hợp lệ; giá trị tiêu đề và tham số truy vấn phải là chuỗi.",
+    "saved": "Đã lưu cấu hình xem trước cho {{name}}",
+    "added": "Đã thêm {{name}}",
+    "signedIn": "Đã đặt xác thực xem trước thành đã đăng nhập",
+    "signedOut": "Đã đặt xác thực xem trước thành chưa đăng nhập",
+    "builtInIcons": "Dùng biểu tượng tích hợp",
+    "brandIcons": "Dùng biểu tượng thương hiệu",
+    "configured": "Số nhà cung cấp đã cấu hình: {{count}}",
+    "providerAdded": "Đã thêm nhà cung cấp"
+  },
+  "runResult": {
+    "title": "Kết quả chạy tự động",
+    "description": "Mở kết quả để so sánh phản hồi Markdown, đang tải, thử lại, phản hồi trống và thiếu lịch sử.",
+    "options": "result cung cấp trạng thái tải và phản hồi đã lấy. Bên gọi xử lý onRetry; giao diện này không đọc môi trường chạy hay yêu cầu kết quả.",
+    "state": "Kết quả chạy",
+    "view": "Xem kết quả chạy"
+  },
+  "chatBinding": {
+    "title": "Trò chuyện chạy tác vụ",
+    "description": "Chọn trò chuyện, sửa hướng dẫn, xác nhận, đổi lại hoặc hủy; so sánh tác vụ bận, lỗi tải và xung đột.",
+    "options": "data và job cung cấp trò chuyện khả dụng và phiên bản liên kết. Giao diện quản lý bản nháp xác nhận; điểm vào tính năng nối onSave, onSaved và onReload với thao tác dữ liệu.",
+    "state": "Trạng thái liên kết trò chuyện",
+    "setChat": "Đặt trò chuyện chạy tác vụ",
+    "saved": "Lần chạy tiếp theo sẽ diễn ra trong {{title}}",
+    "hint": "Chọn trò chuyện đích rồi xác nhận hoặc sửa hướng dẫn tác vụ."
+  },
+  "about": {
+    "title": "Giới thiệu và phiên bản",
+    "description": "So sánh kiểm tra phiên bản, liên kết commit, cập nhật và trang giới thiệu; các nút dùng kết quả ví dụ để cập nhật hiển thị.",
+    "options": "AboutSettingsView nhận tổ hợp liên kết phiên bản và hỗ trợ. VersionCheckRowView hiển thị checking/result và yêu cầu kiểm tra qua onCheck. Điểm vào tính năng quản lý kiểm tra thực tế và dữ liệu liên kết chẩn đoán.",
+    "error": "Không thể lấy thông tin phiên bản. Hãy thử lại.",
+    "state": "Trạng thái phiên bản",
+    "selectedLink": "Đã chọn liên kết GitHub",
+    "preferenceSaved": "Đã lưu tùy chọn mẫu; sẽ không cài đặt hay khởi động lại.",
+    "updateRequested": "Đã chọn xem xét bản cập nhật; bản xem trước này không cài đặt hay khởi động lại.",
+    "dismissed": "Đã ẩn thông báo cập nhật"
+  },
+  "appearance": {
+    "title": "Tùy chọn giao diện",
+    "description": "Đổi giao diện, hiển thị hoạt động, khác biệt tệp và thông báo; giá trị ví dụ xuất hiện bên dưới.",
+    "options": "Bên gọi quản lý giao diện và tùy chọn. onChangeBrowserNotifications giao yêu cầu quyền cho điểm vào tính năng; hàm gọi lại xem trước chỉ đổi công tắc ví dụ."
+  },
+  "starInvitation": {
+    "title": "Lời mời ủng hộ",
+    "description": "Mở hộp thoại mời thực tế, so sánh lưu và lỗi; thử để sau, liên kết GitHub và không nhắc lại.",
+    "options": "open, saving và error là trạng thái hiển thị. Điểm vào StarPrompt hiện có quản lý nhận lời mời và lưu tùy chọn lâu dài; giao diện chỉ gọi thao tác được truyền vào.",
+    "state": "Trạng thái lời mời",
+    "view": "Xem lời mời",
+    "dismissed": "Đã chọn không nhắc lại trong bản xem trước",
+    "starred": "Đã chọn liên kết GitHub trong bản xem trước"
+  }
+}

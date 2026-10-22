@@ -1,0 +1,503 @@
+{
+  "common": {
+    "unavailable": "Indisponible",
+    "selected": "Sélection : {{value}}",
+    "savingPreview": "Enregistrement des valeurs d’aperçu…",
+    "savedPreview": "Valeurs d’aperçu enregistrées",
+    "providerAction": "Action de configuration du fournisseur sélectionnée",
+    "reset": "Réinitialiser l’aperçu"
+  },
+  "button": {
+    "title": "Boutons",
+    "description": "Un même bouton, plusieurs apparences et tailles, selon ses options.",
+    "options": "variant change l’apparence ; size définit les dimensions ; disabled bloque les interactions ; onClick relève de l’appelant.",
+    "variants": "Variantes — différents styles du même bouton",
+    "sizes": "Tailles",
+    "add": "Ajouter un exemple",
+    "clicks": "Clics sur les boutons : {{count}}"
+  },
+  "input": {
+    "title": "Champs de saisie",
+    "description": "Saisie de texte et variante partagée pour la recherche.",
+    "options": "Utilisez Input pour les champs ordinaires et SearchInput pour la recherche. Fournissez un libellé et expliquez les saisies invalides.",
+    "name": "Nom d’exemple",
+    "projectName": "Nom du projet",
+    "search": "Recherche",
+    "searchName": "Recherche d’exemple",
+    "searchProjects": "Rechercher des projets",
+    "invalid": "Invalide",
+    "invalidName": "Nom invalide",
+    "required": "Saisissez un nom de projet.",
+    "disabledName": "Champ de nom désactivé"
+  },
+  "textarea": {
+    "title": "Saisie multiligne",
+    "description": "Texte multiligne avec le style de focus partagé.",
+    "options": "Accepte les propriétés natives de textarea : value, onChange, rows et disabled.",
+    "notes": "Notes d’exemple",
+    "disabledNotes": "Notes désactivées",
+    "readOnly": "Aperçu en lecture seule"
+  },
+  "toggle": {
+    "title": "Interrupteurs",
+    "description": "Un interrupteur contrôlé, partagé par les paramètres, espaces de travail et canaux.",
+    "options": "L’appelant gère checked et onChange. label fournit le nom accessible.",
+    "enable": "Activer l’exemple",
+    "unavailableOn": "Interrupteur activé non modifiable",
+    "unavailableOff": "Interrupteur désactivé non modifiable"
+  },
+  "select": {
+    "title": "Sélecteurs",
+    "description": "Un choix unique avec navigation au clavier et options désactivées.",
+    "options": "Composez Select, SelectTrigger, SelectValue, SelectContent et SelectItem. La racine gère value/onValueChange.",
+    "fast": "Rapide",
+    "model": "Modèle d’exemple",
+    "disabledModel": "Sélecteur de modèle désactivé"
+  },
+  "segmented": {
+    "title": "Choix segmentés",
+    "description": "Un petit ensemble de choix toujours visibles.",
+    "options": "value, options et onChange sont contrôlés. mode=\"tabs\" ajoute la navigation entre onglets avec les flèches.",
+    "day": "Jour",
+    "week": "Semaine",
+    "month": "Mois",
+    "period": "Période d’exemple",
+    "selected": "Période sélectionnée : {{value}}"
+  },
+  "combobox": {
+    "title": "Choix avec recherche",
+    "description": "Des options recherchables avec navigation partagée au clavier et au pointeur.",
+    "options": "useComboboxNavigation fournit les propriétés du champ, de la liste et des options ; l’appelant filtre les valeurs et gère la sélection.",
+    "search": "Rechercher dans les options d’exemple",
+    "placeholder": "Saisissez du texte ou utilisez les flèches",
+    "choices": "Options d’exemple",
+    "empty": "Aucune option correspondante",
+    "selected": "Option sélectionnée : {{value}}"
+  },
+  "chevron": {
+    "title": "Chevron de contrôle",
+    "description": "Le chevron partagé par les contrôles de sélection.",
+    "options": "className permet d’ajuster la position. L’icône est décorative ; le contrôle qui la contient fournit son nom accessible."
+  },
+  "dialog": {
+    "title": "Boîtes de dialogue",
+    "description": "Un éditeur modal avec brouillon, sélection imbriquée et restauration du focus.",
+    "options": "L’appelant gère open/onOpenChange ainsi que le brouillon et l’enregistrement. Fournissez toujours DialogTitle et une description si nécessaire.",
+    "open": "Ouvrir la boîte de dialogue",
+    "edit": "Modifier le libellé d’exemple",
+    "help": "Les modifications s’appliquent uniquement à cet aperçu.",
+    "label": "Libellé d’exemple",
+    "save": "Enregistrer le libellé",
+    "saved": "Libellé enregistré : {{name}}"
+  },
+  "alert": {
+    "title": "Confirmations",
+    "description": "Une confirmation explicite avec des commandes distinctes pour annuler et agir.",
+    "options": "Composez un titre, une description et un pied de page ; exécutez l’action dans le gestionnaire d’AlertDialogAction.",
+    "remove": "Retirer l’exemple",
+    "confirmTitle": "Retirer cet exemple ?",
+    "help": "Seul l’état de l’aperçu sera modifié.",
+    "confirm": "Confirmer le retrait",
+    "removed": "Exemple retiré.",
+    "available": "Exemple disponible."
+  },
+  "sheet": {
+    "title": "Panneaux latéraux",
+    "description": "Un panneau modal attaché à un bord de la zone d’affichage.",
+    "options": "SheetContent prend en charge side. Incluez SheetTitle et SheetDescription.",
+    "open": "Ouvrir le panneau",
+    "panelTitle": "Panneau latéral d’exemple",
+    "help": "Des commandes complémentaires à côté de la page actuelle.",
+    "notes": "Notes du panneau",
+    "placeholder": "Essayez de modifier ici"
+  },
+  "popover": {
+    "title": "Panneaux contextuels",
+    "description": "Une petite surface interactive ancrée à son déclencheur.",
+    "options": "Composez le déclencheur et le contenu ; open/onOpenChange peuvent être contrôlés. Le contenu utilise le portail de sa boîte de dialogue.",
+    "open": "Ouvrir le panneau contextuel",
+    "note": "Note rapide"
+  },
+  "menu": {
+    "title": "Menus déroulants",
+    "description": "Actions, choix exclusifs, sous-menus et entrées désactivées.",
+    "options": "Utilisez onSelect pour les actions et un groupe radio pour un choix persistant.",
+    "view": "Options d’affichage",
+    "layout": "Disposition",
+    "comfortable": "Aérée",
+    "compact": "Compacte",
+    "rename": "Renommer",
+    "more": "Autres actions",
+    "duplicate": "Dupliquer",
+    "none": "Aucune",
+    "status": "Densité : {{density}}. Action : {{action}}."
+  },
+  "tooltip": {
+    "title": "Infobulles et conseils",
+    "description": "HoverHint compose les primitives d’infobulle partagées ; tooltip.tsx est leur point d’import public.",
+    "options": "Utilisez HoverHint pour les conseils ordinaires. Gardez les erreurs essentielles visibles. Le survol et le focus clavier suivent les règles de temporisation du produit.",
+    "primitive": "Infobulle de base",
+    "primitiveHelp": "Délai partagé au pointeur et affichage immédiat au focus clavier.",
+    "hint": "Conseil au survol",
+    "hintHelp": "Un conseil composé avec le même comportement au focus et au pointeur."
+  },
+  "truncated": {
+    "title": "Texte tronqué",
+    "description": "Affiche un conseil uniquement si le texte mesuré est tronqué.",
+    "options": "Fournissez text et une largeur limitée. Ajoutez tabIndex si le texte lui-même doit recevoir le focus clavier."
+  },
+  "disclosure": {
+    "title": "Contenu repliable",
+    "description": "Un contenu dépliable qui conserve l’état des enfants une fois replié.",
+    "options": "Disclosure gère l’ouverture ; DisclosureContent accepte une propriété open contrôlée pour les déclencheurs personnalisés.",
+    "show": "Afficher les options avancées",
+    "help": "Ce brouillon est conservé après fermeture et réouverture.",
+    "draft": "Brouillon du contenu repliable"
+  },
+  "expandable": {
+    "title": "Texte dépliable",
+    "description": "Un aperçu limité en lignes du même texte maintenu dans le DOM.",
+    "options": "L’appelant gère expanded. lines définit le nombre de lignes repliées ; fournissez une commande accessible.",
+    "less": "Afficher moins",
+    "more": "Afficher plus"
+  },
+  "imageViewport": {
+    "title": "Zone d’image",
+    "description": "Commandes d’ajustement, zoom, déplacement et pincement propres à l’image.",
+    "options": "Fournissez une className délimitant la zone et remontez le composant si l’identité de l’image change. Définissez panWithArrows=false si une galerie gère les flèches."
+  },
+  "streaming": {
+    "title": "Libellés animés",
+    "description": "Une animation de texte partagée pour la réflexion et les libellés d’outils actifs.",
+    "options": "active contrôle l’animation. Les enfants de type chaîne ou nombre fournissent la superposition des glyphes ; les préférences de réduction des animations sont respectées.",
+    "animate": "Animer le libellé",
+    "working": "Traitement de l’étape suivante…"
+  },
+  "markdown": {
+    "title": "Réponses Markdown",
+    "description": "Le moteur de rendu en continu de production, avec tableaux, code et mathématiques.",
+    "options": "children est du texte Markdown. streaming contrôle le contenu incomplet ; onOpenFilePreview relève de l’écran.",
+    "state": "État du Markdown"
+  },
+  "code": {
+    "title": "Affichage de code",
+    "description": "Coloration syntaxique, numéros de ligne, copie, sortie ANSI et lignes adaptées à la zone visible.",
+    "options": "code et language fournissent le contenu ; showLineNumbers, wrapLongLines et chrome contrôlent la présentation. La coloration de la zone visible exige des numéros de ligne sans retour automatique.",
+    "format": "Format du code"
+  },
+  "math": {
+    "title": "Formules mathématiques",
+    "description": "L’enveloppe partagée qui adapte les formules en bloc rendues par Markdown.",
+    "options": "Utilisez MarkdownText pour le code TeX. DisplayMath accepte des nœuds mathématiques déjà rendus et les adapte à la largeur disponible."
+  },
+  "message": {
+    "title": "Messages",
+    "description": "Messages de l’utilisateur et de l’assistant, avec les états de réflexion et d’envoi.",
+    "options": "message est un UIMessage projeté par le runtime de chat. Les données et actions réseau restent hors du moteur de rendu.",
+    "state": "État du message"
+  },
+  "activity": {
+    "title": "Activité de l’agent",
+    "description": "Des primitives d’activité composées en une séquence en cours, terminée ou en échec.",
+    "options": "Transmettez le texte, l’état et l’ouverture contrôlée. La passerelle exécute les outils ; ces composants affichent la projection de leur état.",
+    "state": "État de l’activité",
+    "working": "Traitement en cours",
+    "details": "Détails de l’activité",
+    "collapse": "Replier",
+    "readError": "Lecture du fichier impossible",
+    "read": "Lire le code source"
+  },
+  "files": {
+    "title": "Modifications de fichiers",
+    "description": "Références de fichiers, nombre de lignes modifiées et différences dépliables.",
+    "options": "edits contient les résumés d’affichage ; displayMode choisit summary/diff/collapsed_diff ; l’écran fournit onOpenFilePreview.",
+    "error": "La modification d’exemple n’a pas pu être appliquée.",
+    "state": "État de la modification",
+    "operation": "Opération sur le fichier",
+    "display": "Affichage des différences",
+    "selected": "Fichier sélectionné : {{path}}",
+    "hint": "Sélectionnez une référence de fichier pour essayer son rappel."
+  },
+  "media": { "study": "Étude de couleur {{count}}" },
+  "imageGallery": {
+    "title": "Miniatures d’images",
+    "description": "Disposition multi-image, sélection des miniatures et images supplémentaires.",
+    "options": "images fournit les URL et les noms ; size choisit des miniatures grandes ou compactes, align définit l’alignement. Seules quatre miniatures apparaissent ; l’ImageLightbox composée inclut toutes les images consultables.",
+    "sixImages": "Six images",
+    "compact": "Miniatures compactes",
+    "hint": "Sélectionnez une miniature ou +2 pour voir les six images."
+  },
+  "imageLightbox": {
+    "title": "Visionneuse plein écran",
+    "description": "Affichage plein écran contrôlé et navigation entre images.",
+    "options": "index vaut null à la fermeture. L’appelant gère index et les rappels d’ouverture ; ImageLightbox compose ZoomableImage et réinitialise la vue au changement d’image.",
+    "open": "Ouvrir la visionneuse plein écran",
+    "hint": "Utilisez précédent/suivant, ←/→ ou Home/End ; fermez avec × ou Échap."
+  },
+  "zoomableImage": {
+    "title": "Zoom d’image",
+    "description": "Zoom sur une image, déplacement limité et gestes.",
+    "options": "src et alt fournissent une image. Placez-la dans un conteneur positionné de hauteur définie ; remontez-la au changement d’image. Placez le focus dans la zone pour les touches +, − et 0.",
+    "hint": "Zoomez avec +/−, un double-clic, Ctrl+molette ou un pincement. Faites glisser ou défiler pour déplacer l’image agrandie ; cliquez sur le pourcentage ou appuyez sur 0 pour réinitialiser."
+  },
+  "attachment": {
+    "title": "Pièces jointes",
+    "description": "Aperçu d’images, lecture vidéo, téléchargement et pièces jointes indisponibles.",
+    "options": "attachment.kind choisit image, video ou file. Les images ouvrent ImageLightbox, les vidéos utilisent les commandes natives et les fichiers des liens de téléchargement. Sans URL, ou si une image échoue à charger, la vignette est indisponible.",
+    "image": "Image",
+    "video": "Vidéo lisible",
+    "file": "Télécharger un fichier",
+    "unavailable": "Pièces jointes indisponibles (sans URL)"
+  },
+  "fileReference": {
+    "title": "Références de fichiers",
+    "description": "Une référence de fichier dont l’ouverture relève de l’appelant.",
+    "options": "path fournit le libellé ; onOpen fournit l’action. Le composant ne décide pas des permissions de l’espace de travail.",
+    "select": "Sélectionnez la référence de fichier."
+  },
+  "settingsComposition": {
+    "title": "Composition des paramètres",
+    "description": "Les véritables lignes, groupes et capacités des paramètres composés avec les contrôles partagés.",
+    "options": "Le contrôleur des paramètres englobant gère les valeurs et leur persistance. Un rappel de la galerie ne modifie que l’état local de l’aperçu.",
+    "preferences": "Préférences d’exemple",
+    "keepDrafts": "Conserver les brouillons",
+    "switchHint": "Une ligne de paramètre partagée avec un interrupteur contrôlé.",
+    "projectLabel": "Libellé du projet",
+    "projectName": "Libellé du projet dans les paramètres",
+    "capability": "Capacité d’exemple",
+    "notes": "Notes",
+    "capabilityNotes": "Notes de la capacité",
+    "localOnly": "Aperçu local uniquement"
+  },
+  "modelPickers": {
+    "title": "Sélection des modèles",
+    "description": "Choisissez un fournisseur, recherchez ou saisissez un ID de modèle, puis ajustez l’effort de raisonnement.",
+    "options": "L’appelant fournit les valeurs et actions de ProviderPicker. models de ModelIdPicker peut fournir un catalogue fixe ; savedValues de ReasoningEffortPicker fournit les options existantes.",
+    "chooseProvider": "Choisir un fournisseur",
+    "configure": "Configurer {{provider}}"
+  },
+  "providerIcons": {
+    "title": "Icônes des fournisseurs",
+    "description": "Comparez les tailles normale, compacte et remplie, ainsi que l’état non configuré du sélecteur.",
+    "options": "provider choisit une icône existante ; compact et fill contrôlent la taille. showBrandLogos=false utilise les icônes intégrées.",
+    "size": "Taille des icônes"
+  },
+  "timezone": {
+    "title": "Sélection du fuseau horaire",
+    "description": "Recherchez par nom de fuseau, nom chinois ou décalage UTC, puis affichez le même instant en heure locale.",
+    "options": "value est un fuseau IANA ; onChange met à jour la valeur de l’appelant. Le composant fournit la recherche et la navigation au clavier."
+  },
+  "textEditor": {
+    "title": "Éditeur de texte et conseils",
+    "description": "Ouvrez l’éditeur pour modifier, enregistrer ou annuler. Videz le contenu et enregistrez pour voir l’erreur.",
+    "options": "SettingsTextEditor se ferme après la réussite d’onSave et affiche une erreur en cas d’échec ; SettingsHint s’ouvre au survol, au focus ou au clic.",
+    "state": "État d’édition",
+    "hint": "Ouvrez l’éditeur pour modifier, enregistrer ou annuler. Videz le contenu pour voir l’état d’erreur.",
+    "instructions": "Consignes d’exemple",
+    "edit": "Modifier les consignes d’exemple",
+    "help": "Le contenu modifié apparaît ci-dessous après l’enregistrement.",
+    "required": "Saisissez du contenu."
+  },
+  "removePreset": {
+    "title": "Supprimer des préréglages",
+    "description": "Supprimez les préréglages inutilisés et observez le bouton désactivé pour celui du modèle par défaut.",
+    "options": "Il s’agit du bouton de suppression de ModelsSettings ; l’appelant fournit disabled et l’action de suppression. La gestion des fournisseurs utilise la boîte ProvidersSettings.",
+    "defaultModel": "Modèle par défaut",
+    "codeAssistant": "Assistant de programmation",
+    "remove": "Supprimer {{name}}",
+    "primaryHint": "Le préréglage utilisé par le modèle par défaut ne peut pas être supprimé.",
+    "count": "Préréglages d’aperçu : {{count}}"
+  },
+  "loading": {
+    "title": "Écrans de chargement",
+    "description": "Changez les dispositions de chargement des catalogues d’apps, canaux et compétences, et observez le conteneur d’état partagé.",
+    "options": "layout de CatalogSkeleton choisit la disposition. SkeletonStatus utilise label pour les lecteurs d’écran et marque le contenu décoratif avec aria-hidden.",
+    "layout": "Disposition du catalogue",
+    "catalog": "Chargement du catalogue d’aperçu"
+  },
+  "sidebar": {
+    "title": "Navigation des paramètres",
+    "description": "Sélectionnez des sections, gérez un redémarrage en attente et réduisez la largeur du navigateur pour voir le menu mobile.",
+    "options": "activeSection et onSelectSection contrôlent la sélection ; retour, déconnexion et redémarrage sont des rappels de l’appelant.",
+    "back": "Retour au chat",
+    "logout": "Se déconnecter",
+    "restart": "Action de redémarrage de l’aperçu traitée",
+    "hint": "Choisissez une section, ou réduisez la largeur du navigateur pour voir la navigation mobile.",
+    "toggleRestart": "Basculer le redémarrage en attente"
+  },
+  "providerSearch": {
+    "title": "Recherche de fournisseurs",
+    "description": "Recherchez les fournisseurs regroupés par OAuth, clé API et accès local, puis choisissez une entrée ou un fournisseur personnalisé.",
+    "options": "providers est le catalogue existant. query est une recherche contrôlée ; onSelect et onCustom transmettent la sélection au parent.",
+    "closed": "Recherche fermée",
+    "custom": "Fournisseur personnalisé sélectionné",
+    "hint": "Recherchez un fournisseur ou utilisez les flèches pour choisir."
+  },
+  "requestParameters": {
+    "title": "Paramètres des requêtes",
+    "description": "Modifiez les en-têtes, paramètres de requête et corps ; saisissez du JSON invalide pour voir la validation réelle.",
+    "options": "fields choisit les entrées visibles ; form contient le texte JSON. Les en-têtes et paramètres de requête n’acceptent que des chaînes ; le corps accepte toute valeur d’un objet JSON."
+  },
+  "requestAPI": {
+    "title": "API des requêtes",
+    "description": "Sélectionnez les API prises en charge, l’API par défaut, les remplacements par modèle et les options de repli.",
+    "options": "ProviderAPIControl conserve au moins une API. ModelAPIControl accepte null pour la sélection automatique et affiche les API disponibles selon les capacités du fournisseur.",
+    "providerAPI": "API du fournisseur",
+    "modelOverride": "Remplacement par modèle"
+  },
+  "usage": {
+    "title": "Utilisation des jetons",
+    "description": "Comparez les états avec données, vide et indisponible. Survolez les barres pour l’usage quotidien et ouvrez les détails pour les tendances par modèle.",
+    "options": "usage est un relevé statistique fourni par l’appelant ; timeZone définit les limites des dates. La boîte de détails et les graphiques affichent uniquement les données fournies.",
+    "state": "État de l’utilisation"
+  },
+  "overview": {
+    "title": "Vue d’ensemble des paramètres",
+    "description": "Consultez le modèle actuel, les capacités et l’utilisation ; sélectionnez les lignes de fonctions pour essayer la navigation par section.",
+    "options": "settings fournit les données d’ensemble ; onSelectSection reçoit la section sélectionnée.",
+    "selected": "Section sélectionnée : {{section}}"
+  },
+  "web": {
+    "title": "Paramètres de recherche web",
+    "description": "Passez entre les fournisseurs sans identifiants, avec clé API ou URL de serveur ; ajustez la recherche et essayez l’enregistrement automatique.",
+    "options": "settings contient la configuration actuelle ; form les valeurs modifiées. Le parent fournit l’enregistrement, la visibilité des identifiants et le changement de fournisseur.",
+    "unsaved": "Brouillon d’aperçu non enregistré"
+  },
+  "image": {
+    "title": "Génération d’images",
+    "description": "Activez la génération, choisissez un modèle dans un catalogue fixe, un format et une taille, puis ajustez le nombre dans les options avancées.",
+    "options": "form est une configuration contrôlée ; dirty signale les modifications. Le composant réutilise les identifiants du fournisseur ; le parent assure l’enregistrement."
+  },
+  "voice": {
+    "title": "Paramètres de transcription",
+    "description": "Activez la transcription ; modifiez le modèle, la langue et les limites de durée et de taille ; essayez l’enregistrement automatique.",
+    "options": "settings fournit les informations du fournisseur ; le parent gère form et les rappels d’enregistrement."
+  },
+  "safety": {
+    "title": "Paramètres d’accès",
+    "description": "Basculez l’accès aux services locaux et les permissions par défaut ; observez les lignes, conseils et retours d’enregistrement automatique.",
+    "options": "form fournit les valeurs affichées ; onSave traite les demandes d’enregistrement. La passerelle reste responsable de l’application des permissions à l’exécution."
+  },
+  "channelCatalog": {
+    "title": "Catalogue et identité des canaux",
+    "description": "Comparez les états en cours, démarrage, échec et non installé ; essayez l’interrupteur, l’installation et le menu d’aide.",
+    "options": "feature fournit les états d’installation et d’exécution. Le parent gère onAction et onSelect ; l’identité, les erreurs et l’aide utilisent les mêmes données du canal.",
+    "exampleChannel": "Canal d’exemple",
+    "state": "État du canal",
+    "error": "La connexion d’exemple a échoué.",
+    "stopped": "Arrêté",
+    "running": "En cours",
+    "starting": "Démarrage",
+    "failed": "Échec",
+    "selected": "Paramètres du canal sélectionnés",
+    "hint": "Utilisez l’interrupteur ou le bouton d’installation pour voir les changements d’état."
+  },
+  "credentials": {
+    "title": "Identifiants des canaux",
+    "description": "Saisissez les identifiants, affichez ou masquez les secrets, appliquez des préréglages, vérifiez les champs requis et copiez une commande d’aide.",
+    "options": "fields définit les groupes et contrôles ; values et visibleSecrets sont contrôlés. requirements définit les combinaisons d’identifiants ; les rappels de préréglage et d’enregistrement ne modifient que cet exemple.",
+    "botToken": "Jeton du bot",
+    "tokenPlaceholder": "Jeton d’exemple",
+    "serverURL": "URL du serveur",
+    "replyMode": "Mode de réponse",
+    "mentions": "Mentions",
+    "allMessages": "Tous les messages",
+    "allowFrom": "Expéditeurs autorisés",
+    "local": "Serveur local",
+    "hosted": "Serveur hébergé",
+    "required": "Saisissez un jeton de bot.",
+    "checkSave": "Vérifier et enregistrer",
+    "command": "Commande d’exemple",
+    "applied": "{{name}} appliqué",
+    "incomplete": "Complétez les identifiants.",
+    "saved": "Identifiants d’aperçu enregistrés.",
+    "hint": "Renseignez les identifiants, affichez les secrets ou appliquez un préréglage de connexion."
+  },
+  "channelValidation": {
+    "title": "Vérification de connexion",
+    "description": "Comparez vérification, réussite et échec ; observez les vérifications apparaître avec un résumé d’identité.",
+    "options": "validation fournit les résultats ; validating contrôle le chargement. Le composant ne fait que les afficher.",
+    "expired": "Le jeton d’exemple a expiré.",
+    "result": "Résultat de vérification"
+  },
+  "runAt": {
+    "title": "Sélection de l’heure planifiée",
+    "description": "Saisissez une date et une heure, ou ouvrez le calendrier pour choisir avec la souris, les flèches et les touches de page.",
+    "options": "value utilise l’heure locale au format YYYY-MM-DDTHH:mm ; onChange renvoie la valeur modifiée. Les saisies invalides sont signalées sur le contrôle existant."
+  },
+  "automationCalendar": {
+    "title": "Calendrier des automatisations",
+    "description": "Changez de mois, comparez plans et historique, puis ouvrez les résultats des exécutions réussies ou échouées. Les conteneurs étroits affichent un agenda.",
+    "options": "jobs et month définissent le calendrier. onInspect gère les tâches planifiées ; l’appelant fournit les résultats via renderRunDialog. Le calendrier ne consulte aucun service.",
+    "providerError": "Le fournisseur d’exemple était indisponible.",
+    "state": "État du calendrier",
+    "previousMonth": "Mois précédent",
+    "nextMonth": "Mois suivant",
+    "planned": "Planifié",
+    "recorded": "Historique d’exécution",
+    "running": "En cours",
+    "failed": "Échec",
+    "completed": "Terminé",
+    "skipped": "Ignoré",
+    "system": "Tâche système",
+    "noEntries": "Aucune planification ce mois-ci",
+    "more": "{{count}} de plus",
+    "selected": "Tâche sélectionnée : {{name}}",
+    "hint": "Sélectionnez une exécution pour voir son résultat, ou choisissez une tâche planifiée."
+  },
+  "providers": {
+    "title": "Gestion des fournisseurs",
+    "description": "Consultez la véritable boîte de gestion des fournisseurs et le parcours d’ajout.",
+    "options": "Réutilise ProvidersSettings des paramètres. L’appelant contrôle le catalogue, les formulaires et l’enregistrement ; cet aperçu modifie les données locales et permet configuration, recherche, création et annulation.",
+    "invalidParameters": "Saisissez des paramètres JSON valides ; les valeurs des en-têtes et paramètres de requête doivent être des chaînes.",
+    "saved": "Configuration d’aperçu enregistrée pour {{name}}",
+    "added": "{{name}} ajouté",
+    "signedIn": "Autorisation d’aperçu définie sur connecté",
+    "signedOut": "Autorisation d’aperçu définie sur déconnecté",
+    "builtInIcons": "Utiliser les icônes intégrées",
+    "brandIcons": "Utiliser les icônes de marque",
+    "configured": "Fournisseurs configurés : {{count}}",
+    "providerAdded": "Fournisseur ajouté"
+  },
+  "runResult": {
+    "title": "Résultats des automatisations",
+    "description": "Ouvrez les résultats pour comparer réponses Markdown, chargement, nouvelle tentative, réponses vides et historique manquant.",
+    "options": "result fournit l’état de chargement et la réponse récupérée. L’appelant gère onRetry ; cette vue ne lit ni le runtime ni les résultats par requête.",
+    "state": "Résultat d’exécution",
+    "view": "Voir le résultat d’exécution"
+  },
+  "chatBinding": {
+    "title": "Chat d’exécution",
+    "description": "Choisissez le chat, modifiez les consignes, confirmez, revenez au précédent ou annulez ; comparez tâches occupées, erreurs de chargement et conflits.",
+    "options": "data et job fournissent les chats et versions de liaison. La vue gère le brouillon de confirmation ; le point d’entrée de la fonction relie onSave, onSaved et onReload aux opérations de données.",
+    "state": "État de la liaison au chat",
+    "setChat": "Définir le chat d’exécution",
+    "saved": "La prochaine exécution aura lieu dans {{title}}",
+    "hint": "Choisissez un chat cible, puis confirmez ou modifiez les consignes de la tâche."
+  },
+  "about": {
+    "title": "À propos et version",
+    "description": "Comparez les états de vérification, liens de commit, mises à jour et page À propos ; les boutons affichent des résultats d’exemple.",
+    "options": "AboutSettingsView accepte la composition des liens de version et d’assistance. VersionCheckRowView affiche checking/result et demande une vérification via onCheck. Le point d’entrée gère les vérifications réelles et les liens de diagnostic.",
+    "error": "Impossible d’obtenir la version. Réessayez.",
+    "state": "État de la version",
+    "selectedLink": "Lien GitHub sélectionné",
+    "preferenceSaved": "Préférence d’exemple enregistrée ; rien ne sera installé ni redémarré.",
+    "updateRequested": "Examen de la mise à jour sélectionné ; cet aperçu n’installe ni ne redémarre rien.",
+    "dismissed": "Avis de mise à jour masqué"
+  },
+  "appearance": {
+    "title": "Préférences d’apparence",
+    "description": "Changez l’apparence, l’affichage d’activité, les différences et les notifications ; les valeurs d’exemple apparaissent ci-dessous.",
+    "options": "L’appelant gère le thème et les préférences. onChangeBrowserNotifications délègue les demandes d’autorisation au point d’entrée ; les rappels d’aperçu ne changent que les interrupteurs d’exemple."
+  },
+  "starInvitation": {
+    "title": "Invitation à soutenir le projet",
+    "description": "Ouvrez la véritable invitation, comparez l’enregistrement et les erreurs, puis essayez le report, le lien GitHub et le refus définitif.",
+    "options": "open, saving et error sont des états d’affichage. Le point d’entrée StarPrompt existant gère la réception des invitations et la persistance des préférences ; la vue appelle uniquement les actions fournies.",
+    "state": "État de l’invitation",
+    "view": "Voir l’invitation",
+    "dismissed": "Ne plus rappeler sélectionné dans l’aperçu",
+    "starred": "Lien GitHub sélectionné dans l’aperçu"
+  }
+}

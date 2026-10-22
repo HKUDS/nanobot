@@ -1,12 +1,12 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { HostNavigationContext } from "@/components/remote/HostSwitcher";
-import { AboutSettings, AppearanceSettings } from "@/components/settings/overview/OverviewSettings";
+import { AboutSettings } from "@/components/settings/overview/OverviewSettings";
 import { VersionCheckRowView } from "@/components/settings/overview/VersionCheckRowView";
 import { NanobotClient } from "@/lib/nanobot-client";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type { SettingsPayload } from "@/lib/types";
-import { DEFAULT_LOCAL_PREFS } from "@/lib/local-preferences";
+import { DEFAULT_LOCAL_PREFS, LOCAL_PREFS_STORAGE_KEY, readLocalPreferences, writeLocalPreferences } from "@/lib/local-preferences";
 import { jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
 
   const thirdPartyBrandNotice =
@@ -15,31 +15,100 @@ import { jsonResponse, settingsPayload, renderSettingsView, installSettingsViewT
 describe("Settings overview and appearance", () => {
   installSettingsViewTestHooks();
 
+  it.each([{ capabilities: [] }, { capabilities: ["webui.core.v1", "webui.self-update.v1"] }])(
+    "checks on About entry without calling the legacy updater (%j)",
+    async ({ capabilities }) => {
+      const fetcher = vi.fn(async () => jsonResponse({
+        updateAvailable: { currentVersion: "0.2.2", latestVersion: "0.3.6" },
+      }));
+      vi.stubGlobal("fetch", fetcher);
+      render(
+        <ClientProvider client={new NanobotClient({ url: "ws://localhost:8765" })} token="tok"
+          webuiCapabilities={capabilities}>
+          <AboutSettings settings={settingsPayload()} />
+        </ClientProvider>,
+      );
+      expect(await screen.findByRole("link", { name: "Installation guide" })).toBeVisible();
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(fetcher).toHaveBeenCalledWith("/api/settings/version-check", expect.any(Object));
+      expect(screen.queryByRole("button", { name: /^Update$/ })).not.toBeInTheDocument();
+    },
+  );
+
   it("displays a caller-owned version result and delegates checking without a client provider", () => {
     const check = vi.fn();
-    render(<VersionCheckRowView currentVersion="0.3.5" checking={false}
+    const { rerender } = render(<VersionCheckRowView currentVersion="0.3.5" checking={false}
       result={{ type: "update", latestVersion: "0.3.6", pypiUrl: "https://pypi.org/project/nanobot-ai/" }} onCheck={check} />);
-    expect(screen.getByText("Update available v0.3.6")).toBeVisible();
+    expect(screen.getByText("v0.3.6")).toBeVisible();
     expect(screen.getByRole("link", { name: "PyPI" })).toHaveAttribute("href", "https://pypi.org/project/nanobot-ai/");
-    fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+    rerender(<VersionCheckRowView currentVersion="0.3.5" checking={false} result={{ type: "up-to-date" }} onCheck={check} />);
+    expect(screen.getByText("You're up to date")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
     expect(check).toHaveBeenCalledTimes(1);
   });
 
-  it.each(["granted", "denied"])("updates task notifications only after browser permission is %s", async (permission) => {
-    const requestPermission = vi.fn().mockResolvedValue(permission);
-    vi.stubGlobal("Notification", { permission: "default", requestPermission });
-    const changePreferences = vi.fn();
-    render(<AppearanceSettings theme="light" onToggleTheme={vi.fn()} localPrefs={DEFAULT_LOCAL_PREFS} onChangeLocalPrefs={changePreferences} />);
-    fireEvent.click(screen.getByRole("switch", { name: "Task notifications" }));
-    expect(changePreferences).not.toHaveBeenCalled();
-    await waitFor(() => expect(requestPermission).toHaveBeenCalledTimes(1));
-    await act(async () => { await Promise.resolve(); });
-    if (permission === "granted") {
-      expect(changePreferences).toHaveBeenCalledTimes(1);
-      expect(changePreferences.mock.calls[0][0](DEFAULT_LOCAL_PREFS).browserNotifications).toBe(true);
-    } else expect(changePreferences).not.toHaveBeenCalled();
+  it("delegates update actions and keeps saved-job details available in the shared view", () => {
+    const requestUpdate = vi.fn();
+    const props = { currentVersion: "0.3.5", checking: false, onCheck: vi.fn(),
+      onRequestUpdate: requestUpdate };
+    const { rerender } = render(<VersionCheckRowView {...props}
+      result={{ type: "update", latestVersion: "0.3.7.dev2026101501",
+        releaseUrl: "https://github.com/HKUDS/nanobot/releases/tag/v0.3.7.dev2026101501" }} />);
+    expect(screen.getByText("v0.3.7.dev2026101501")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Release notes" })).toHaveAttribute("href",
+      "https://github.com/HKUDS/nanobot/releases/tag/v0.3.7.dev2026101501");
+    expect(requestUpdate).not.toHaveBeenCalled();
+    expect(screen.queryByRole("link", { name: "Installation guide" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Update$/ }));
+    expect(requestUpdate).toHaveBeenCalledTimes(1);
+
+    rerender(<VersionCheckRowView {...props} currentVersion="0.3.6"
+      result={{ type: "up-to-date" }} hasPendingUpdate />);
+    expect(screen.queryByRole("button", { name: /^Update$/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "View details" }));
+    expect(requestUpdate).toHaveBeenCalledTimes(2);
   });
 
+  it("lets the visible Preview label toggle the setting without consenting to an update", () => {
+    const changeChannel = vi.fn().mockResolvedValue(undefined);
+    const requestUpdate = vi.fn();
+    render(<VersionCheckRowView currentVersion="0.3.6" checking={false} result={null} onCheck={vi.fn()}
+      releaseStatus={{ channel: "stable", revision: 1, currentVersion: "0.3.6", state: "current" }}
+      canChangeChannel onChangeChannel={changeChannel} onRequestUpdate={requestUpdate} />);
+    const toggle = screen.getByRole("switch", { name: "Receive preview updates" });
+    expect(toggle).toHaveAccessibleDescription("Try new features early.");
+    fireEvent.click(document.querySelector(`label[for="${toggle.id}"]`)!);
+    expect(changeChannel).toHaveBeenCalledTimes(1);
+    expect(changeChannel).toHaveBeenCalledWith("preview");
+    expect(requestUpdate).not.toHaveBeenCalled();
+  });
+
+  it("opens the notifications section and preserves independent browser-local channel preferences", () => {
+    writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, notificationSound: true });
+    renderSettingsView({ initialSection: "appearance", initialSettings: settingsPayload(), showSidebar: true });
+    fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
+    expect(screen.getByRole("switch", { name: "Browser notifications" })).toHaveAttribute("aria-checked", "false");
+    const sound = screen.getByRole("switch", { name: "Completion sound" });
+    expect(sound).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(sound);
+    expect(readLocalPreferences()).toMatchObject({ browserNotifications: false, notificationSound: false });
+  });
+
+
+  it.each(["local", "other tab"])("preserves a %s notification opt-out when another preference changes", (source) => {
+    writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, browserNotifications: true, notificationSound: true });
+    renderSettingsView({ initialSection: "appearance", initialSettings: settingsPayload(), showSidebar: true });
+    act(() => {
+      const next = { ...readLocalPreferences(), browserNotifications: false };
+      if (source === "local") writeLocalPreferences(next);
+      else {
+        localStorage.setItem(LOCAL_PREFS_STORAGE_KEY, JSON.stringify(next));
+        window.dispatchEvent(new StorageEvent("storage", { key: LOCAL_PREFS_STORAGE_KEY }));
+      }
+    });
+    fireEvent.click(screen.getByRole("switch", { name: "Code wrapping" }));
+    expect(readLocalPreferences()).toMatchObject({ browserNotifications: false, notificationSound: true, codeWrap: false });
+  });
 
   it("links the host's short commit beside its version", () => {
     const commit = "abcdef12".repeat(5);
@@ -63,7 +132,7 @@ describe("Settings overview and appearance", () => {
       initialSettings: { ...settingsPayload(), version: { current: "0.3.5", commit } },
     });
     expect(screen.getByText("v0.3.5")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Check for updates" })).toBeEnabled();
+    expect(screen.getByText("Checking...")).toBeVisible();
     expect(document.querySelector('a[href*="/commit/"]')).toBeNull();
     const reportUrl = new URL(screen.getByRole("link", { name: "Report an issue" }).getAttribute("href")!);
     expect(reportUrl.searchParams.get("version")).toBe("0.3.5");
@@ -99,6 +168,18 @@ describe("Settings overview and appearance", () => {
     expect(url.searchParams.get("additional")).toBeNull();
     expect(url.href).not.toContain(encodeURIComponent(payload.runtime.config_path));
     expect(url.href).not.toContain("private-host");
+  });
+
+  it("saves the reading size immediately while preserving the other local preferences", async () => {
+    const previous = { ...DEFAULT_LOCAL_PREFS, codeWrap: false, brandLogos: false, notificationSound: true };
+    writeLocalPreferences(previous);
+    renderSettingsView({ initialSection: "appearance", initialSettings: settingsPayload() });
+
+    expect(screen.getByRole("radio", { name: "Standard reading text" })).toBeChecked();
+    fireEvent.click(screen.getByRole("radio", { name: "Large reading text" }));
+
+    await waitFor(() => expect(readLocalPreferences()).toEqual({ ...previous, readingTextSize: "large" }));
+    expect(screen.getByRole("radio", { name: "Large reading text" })).toBeChecked();
   });
 
   it("persists the file edit display local preference", async () => {

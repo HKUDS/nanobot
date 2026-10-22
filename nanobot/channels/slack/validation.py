@@ -10,16 +10,21 @@ from nanobot.channels.validation import (
     official_action,
     payload,
     required_checks,
+    resolve_proxy,
     status_from_checks,
     string_value,
 )
 
 
-def validate(values: dict[str, Any], _context: ChannelValidationContext) -> dict[str, Any]:
+def validate(values: dict[str, Any], context: ChannelValidationContext) -> dict[str, Any]:
     checks, missing = required_checks("slack", values)
+    try:
+        proxy = resolve_proxy(values, context)
+    except ValueError as exc:
+        checks.append(check("network_proxy", "Network proxy", "fail", str(exc)))
+        return status_from_checks("slack", checks, missing)
     app_token = string_value(values.get("appToken"))
     bot_token = string_value(values.get("botToken"))
-    proxy = string_value(values.get("proxy"))
     if app_token:
         checks.append(
             check(
@@ -76,13 +81,13 @@ def validate(values: dict[str, Any], _context: ChannelValidationContext) -> dict
                         message_from_response(data, "Slack rejected the bot token."),
                     )
                 )
-            except Exception as exc:
+            except Exception:
                 checks.append(
                     check(
                         "auth_test",
                         "Workspace identity",
                         "warn",
-                        f"Could not reach Slack now: {exc}",
+                        "Could not reach Slack now. Try again later.",
                     )
                 )
     return status_from_checks("slack", checks, missing)

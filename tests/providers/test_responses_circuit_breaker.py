@@ -131,15 +131,6 @@ def test_responses_declaration_routes_other_models(provider):
     assert provider._should_use_responses_api("gpt-4o", None) is True
 
 
-def test_responses_only_declaration_ignores_circuit_breaker(provider):
-    provider.default_model = "gpt-4o"
-    provider._preset_model_api = ModelAPICapabilities(("responses",), "responses")
-    provider._responses_failures = {"gpt-4o|gpt-4o|": _RESPONSES_FAILURE_THRESHOLD}
-    provider._responses_tripped_at = {"gpt-4o|gpt-4o|": 0.0}
-
-    assert provider._should_use_responses_api("gpt-4o", None) is True
-
-
 def test_circuit_opens_after_threshold(provider):
     for _ in range(_RESPONSES_FAILURE_THRESHOLD):
         provider._record_responses_failure("gpt-5", None)

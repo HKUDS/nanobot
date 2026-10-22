@@ -1,5 +1,6 @@
 """Tests for ReadFileTool enhancements: description fix, read dedup, PDF support, device blacklist, office docs."""
 
+import base64
 import os
 import sys
 from unittest.mock import patch
@@ -95,14 +96,18 @@ class TestReadDedup:
         assert "unchanged" not in read_result.lower()
 
     @pytest.mark.asyncio
-    async def test_dedup_does_not_apply_to_images(self, tool, tmp_path):
+    async def test_repeated_image_reads_return_full_content(self, tool, tmp_path):
         f = tmp_path / "img.png"
         f.write_bytes(b"\x89PNG\r\n\x1a\nfake-png-data")
         first = await tool.execute(path=str(f))
-        assert isinstance(first, list)
         second = await tool.execute(path=str(f))
-        # Images should always return full content blocks, not a stub
-        assert isinstance(second, list)
+
+        assert second == first
+        assert second[0]["type"] == "image_url"
+        encoded = base64.b64encode(f.read_bytes()).decode("ascii")
+        assert second[0]["image_url"]["url"] == f"data:image/png;base64,{encoded}"
+        assert second[0]["_meta"]["path"] == str(f)
+        assert second[1] == {"type": "text", "text": f"(Image file: {f})"}
 
     @pytest.mark.asyncio
     async def test_known_text_extension_falls_back_to_latin1(self, tool, tmp_path):

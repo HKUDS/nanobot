@@ -37,7 +37,8 @@ class LinearWebhookError(ValueError):
 
 class _ReusableThreadingHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
-    daemon_threads = True
+    # server_close() must join request writers, not only stop accepting sockets.
+    daemon_threads = False
 
 
 class SharedLinearHttpServer:
@@ -64,6 +65,10 @@ class SharedLinearHttpServer:
 
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
+
+            def setup(self) -> None:
+                super().setup()
+                self.connection.settimeout(5)
 
             def do_GET(self) -> None:  # noqa: N802
                 parsed = urlparse(self.path)
@@ -99,6 +104,7 @@ class SharedLinearHttpServer:
                 self.send_response(status.value)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(len(body)))
+                self.send_header("Connection", "close")
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("X-Content-Type-Options", "nosniff")
                 self.end_headers()
@@ -124,7 +130,7 @@ class SharedLinearHttpServer:
             self._server.server_close()
             self._server = None
         if self._thread is not None and self._thread.is_alive():
-            self._thread.join(timeout=2)
+            self._thread.join()
         self._thread = None
 
     def _handle_oauth_callback(
@@ -192,10 +198,11 @@ class LinearServerLease:
         self._closed = False
 
     def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        _release_server(self._server)
+        with _SERVER_GUARD:
+            if self._closed:
+                return
+            _release_server(self._server)
+            self._closed = True
 
 
 _SERVER_GUARD = threading.RLock()
@@ -222,10 +229,10 @@ def _release_server(server: SharedLinearHttpServer) -> None:
     with _SERVER_GUARD:
         if _shared_server is not server:
             return
-        server._references -= 1  # pyright: ignore[reportPrivateUsage]
-        if server._references <= 0:  # pyright: ignore[reportPrivateUsage]
+        if server._references == 1:  # pyright: ignore[reportPrivateUsage]
             server.close()
             _shared_server = None
+        server._references -= 1  # pyright: ignore[reportPrivateUsage]
 
 
 def _handler_response(
@@ -237,6 +244,7 @@ def _handler_response(
     handler.send_response(status.value)
     handler.send_header("Content-Type", content_type)
     handler.send_header("Content-Length", str(len(body)))
+    handler.send_header("Connection", "close")
     handler.send_header("Cache-Control", "no-store")
     handler.send_header("X-Content-Type-Options", "nosniff")
     handler.end_headers()

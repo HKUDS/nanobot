@@ -8,6 +8,7 @@ import pytest
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import RecoveryStateEvent, SessionUpdatedEvent
 from nanobot.bus.queue import MessageBus
+from nanobot.providers.base import ProviderConversationState
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.recovery import (
     PENDING_FOLLOWUPS_KEY,
@@ -18,7 +19,7 @@ from nanobot.session.recovery import (
     pending_followups,
     record_pending_followup,
 )
-from nanobot.webui import session_list_index, transcript
+from nanobot.webui import history as history_module
 from nanobot.webui.recovery import RecoveryActionError, RecoveryCoordinator
 
 
@@ -27,8 +28,8 @@ def _isolate_webui_transcripts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     """Recovery scans must discover only test-owned transcripts, not active user chats."""
     webui_dir = tmp_path / "isolated-webui"
     webui_dir.mkdir()
-    monkeypatch.setattr(session_list_index, "get_webui_dir", lambda: webui_dir)
-    monkeypatch.setattr(transcript, "get_webui_dir", lambda: webui_dir)
+    monkeypatch.setattr(history_module, "get_webui_dir", lambda: webui_dir)
+    monkeypatch.setattr(history_module, "get_webui_dir", lambda: webui_dir)
 
 
 def _persist(manager: SessionManager, session: Session) -> None:
@@ -68,7 +69,7 @@ async def test_stale_incomplete_transcript_waits_for_confirmation(tmp_path: Path
     _persist(sessions, session)
     monkeypatch.setattr(
         "nanobot.webui.transcript.has_unfinished_transcript_tail",
-        lambda _key: True,
+        lambda _key, **_kwargs: True,
     )
 
     coordinator, bus, restarted = _coordinator(tmp_path)
@@ -101,7 +102,7 @@ async def test_materialized_interruption_can_continue_from_saved_context(
     _persist(sessions, session)
     monkeypatch.setattr(
         "nanobot.webui.transcript.has_unfinished_transcript_tail",
-        lambda _key: True,
+        lambda _key, **_kwargs: True,
     )
 
     coordinator, bus, restarted = _coordinator(tmp_path)
@@ -131,8 +132,8 @@ async def test_transcript_only_interruption_is_discovered_without_materializing_
 ) -> None:
     webui_dir = tmp_path / "webui"
     webui_dir.mkdir()
-    monkeypatch.setattr(session_list_index, "get_webui_dir", lambda: webui_dir)
-    monkeypatch.setattr(transcript, "get_webui_dir", lambda: webui_dir)
+    monkeypatch.setattr(history_module, "get_webui_dir", lambda: webui_dir)
+    monkeypatch.setattr(history_module, "get_webui_dir", lambda: webui_dir)
     unfinished_key = "websocket:unfinished"
     completed_key = "websocket:completed"
     (webui_dir / f"{SessionManager.safe_key(unfinished_key)}.jsonl").write_text(
@@ -154,7 +155,9 @@ async def test_transcript_only_interruption_is_discovered_without_materializing_
     assert restored.metadata[RECOVERY_METADATA_KEY]["status"] == "awaiting_user"
     assert restored.metadata[RECOVERY_METADATA_KEY]["reason"] == "interrupted_without_checkpoint"
     assert restored.metadata[RECOVERY_METADATA_KEY]["can_continue"] is False
-    assert sessions.read_session_metadata(completed_key) is None
+    completed = sessions.get_existing(completed_key)
+    assert completed is not None and completed.messages == []
+    assert RECOVERY_METADATA_KEY not in completed.metadata
     event = bus.outbound.get_nowait().event
     assert isinstance(event, RecoveryStateEvent)
     assert event.status == "awaiting_user"
@@ -195,7 +198,7 @@ async def test_scan_loads_only_sessions_that_need_webui_recovery(
     monkeypatch.setattr(restarted.state, "get", tracked_get_or_create)
     monkeypatch.setattr(
         "nanobot.webui.transcript.has_unfinished_transcript_tail",
-        lambda _key: False,
+        lambda _key, **_kwargs: False,
     )
 
     await coordinator.scan()
@@ -733,6 +736,58 @@ async def test_dismiss_does_not_queue_work(tmp_path: Path) -> None:
 
     assert result["status"] == "recovered"
     assert bus.inbound.empty()
+
+
+@pytest.mark.asyncio
+async def test_model_failure_waits_across_restart_and_rejects_duplicate_continue(tmp_path: Path) -> None:
+    coordinator, bus, sessions = _coordinator(tmp_path)
+    session = sessions.get_or_create("websocket:chat")
+    session.messages = [{"role": "user", "content": "finish this"}]
+    _persist(sessions, session)
+
+    await coordinator.turn_completed("websocket:chat", failure_kind="model", failure_error_kind="connection")
+    assert bus.inbound.empty()
+    coordinator, bus, sessions = _coordinator(tmp_path)
+    await coordinator.scan()
+    assert bus.inbound.empty()
+    state = sessions.get_or_create("websocket:chat").metadata[RECOVERY_METADATA_KEY]
+    assert state["failure_error_kind"] == "connection"
+    assert state["status"] == "awaiting_user"
+    payload = {"chat_id": "chat", "recovery_id": state["recovery_id"]}
+    await coordinator.handle_action("continue", payload)
+    with pytest.raises(RecoveryActionError):
+        await coordinator.handle_action("continue", payload)
+    continuation = bus.inbound.get_nowait()
+    assert continuation.metadata["_skip_user_persist"] is True
+    assert bus.inbound.empty()
+    await coordinator.turn_completed("websocket:chat", failure_kind="model", failure_error_kind="authentication")
+    failed_again = sessions.get_or_create("websocket:chat").metadata[RECOVERY_METADATA_KEY]
+    assert failed_again["status"] == "awaiting_user"
+    assert failed_again["failure_error_kind"] == "authentication"
+    with pytest.raises(RecoveryActionError, match="stale"):
+        await coordinator.handle_action("continue", payload)
+
+
+@pytest.mark.asyncio
+async def test_new_input_after_model_failure_does_not_change_saved_context(tmp_path: Path) -> None:
+    coordinator, _, sessions = _coordinator(tmp_path)
+    session = sessions.get_or_create("websocket:chat")
+    session.messages = [{"role": "user", "content": "finish this"}]
+    session.provider_state = ProviderConversationState(
+        kind="openai_responses", provider="openai_codex", model="test-model", version=1,
+        payload={"response_id": "saved-response"},
+    )
+    _persist(sessions, session)
+    await coordinator.turn_completed("websocket:chat", failure_kind="model")
+    before = sessions.get_or_create("websocket:chat")
+    assert before.provider_state is not None
+    await coordinator.admit(InboundMessage(
+        channel="websocket", sender_id="user", chat_id="chat", content="new request",
+    ))
+    after = sessions.get_or_create("websocket:chat")
+    assert after.messages == before.messages
+    assert after.provider_state == before.provider_state
+    assert after.metadata[RECOVERY_METADATA_KEY]["reason"] == "superseded"
 
 
 @pytest.mark.asyncio

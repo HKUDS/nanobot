@@ -26,6 +26,7 @@ from nanobot.cron.types import (
     CronSchedule,
     CronStore,
 )
+from nanobot.runtime_admission import RuntimeAdmission
 from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META
 from nanobot.utils.helpers import atomic_write_text
 from nanobot.utils.run_records import (
@@ -202,7 +203,10 @@ class CronService:
         store_path: Path,
         on_job: Callable[[CronJob], Coroutine[Any, Any, str | CronRunResult | None]] | None = None,
         max_sleep_ms: int = 300_000,  # 5 minutes
+        *,
+        admission: RuntimeAdmission | None = None,
     ):
+        self.admission = admission if admission is not None else RuntimeAdmission()
         self.store_path = store_path
         self._action_path = store_path.parent / "action.jsonl"
         self._run_records_dir = store_path.parent / "runs"
@@ -550,6 +554,13 @@ class CronService:
 
     async def _on_timer(self) -> None:
         """Handle timer tick - run due jobs."""
+        # Do not spin on an overdue timestamp or consume jobs while paused.
+        # stop() cancels this waiter; an aborted maintenance wakes it normally.
+        await self.admission.wait_until_open()
+        with self.admission.activity():
+            await self._run_timer()
+
+    async def _run_timer(self) -> None:
         reload_store = self._active_executions == 0
         self._active_executions += 1
         try:
@@ -934,6 +945,10 @@ class CronService:
 
     async def run_job(self, job_id: str, force: bool = False) -> bool:
         """Manually run a job without disturbing the service's running state."""
+        with self.admission.activity():
+            return await self._run_job(job_id, force)
+
+    async def _run_job(self, job_id: str, force: bool) -> bool:
         reload_store = self._active_executions == 0
         self._active_executions += 1
         try:

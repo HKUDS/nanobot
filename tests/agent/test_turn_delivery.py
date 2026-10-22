@@ -26,7 +26,7 @@ async def test_internal_compaction_never_reaches_its_result_destination(channel,
     msg = InboundMessage(channel=channel, sender_id="user", chat_id="chat", content="check")
     delivery = factory.create(msg, key)
     metadata = {"_compaction_route": {"channel": channel, "chat_id": "chat"}} if legacy_route else {}
-    idle_events = factory.session_events(key, metadata)
+    idle_events = factory.session_events(key, metadata, generation="generation")
     for sink in (delivery.events, idle_events):
         assert not sink.accepts(ContextCompactionEvent)
         for phase in ("started", "succeeded", "failed", "cancelled"):
@@ -39,7 +39,7 @@ async def test_internal_compaction_never_reaches_its_result_destination(channel,
     # The same destination still receives the user's own compaction lifecycle.
     user_delivery = factory.create(msg, f"{channel}:chat")
     user_delivery.remember_session_route(metadata)
-    for sink in (user_delivery.events, factory.session_events(f"{channel}:chat", metadata)):
+    for sink in (user_delivery.events, factory.session_events(f"{channel}:chat", metadata, generation="generation")):
         await sink.emit(ContextCompactionEvent("user-compact", "succeeded"))
         assert factory.bus.outbound.get_nowait().event == ContextCompactionEvent(
             "user-compact", "succeeded",
@@ -79,7 +79,7 @@ async def test_session_route_delivers_automatic_and_manual_compaction(
     session_metadata = {}
     delivery.remember_session_route(session_metadata)
 
-    sink = factory.session_events(key, session_metadata)
+    sink = factory.session_events(key, session_metadata, generation="generation")
     assert sink.publish is not None
     await sink.emit(automatic)
     await sink.emit(notified)
@@ -100,7 +100,7 @@ async def test_idle_compaction_keeps_its_route_when_a_unified_session_moves() ->
         metadata={"slack": {"thread_ts": "1700000000.000100"}},
     )
     factory.create(original, key).remember_session_route(session_metadata)
-    sink = factory.session_events(key, session_metadata)
+    sink = factory.session_events(key, session_metadata, generation="generation")
     assert sink.publish is not None
     await sink.emit(ContextCompactionEvent("compact-1", "started", notify=True))
 
@@ -119,7 +119,7 @@ async def test_idle_compaction_keeps_its_route_when_a_unified_session_moves() ->
 async def test_automatic_compaction_reaches_legacy_websocket_session() -> None:
     factory = TurnDeliveryFactory(MessageBus())
     event = ContextCompactionEvent(compaction_id="compact-1", phase="succeeded")
-    sink = factory.session_events("websocket:chat", {})
+    sink = factory.session_events("websocket:chat", {}, generation="generation")
     assert sink.publish is not None
     await sink.emit(event)
     assert factory.bus.outbound.get_nowait().event is event
@@ -474,3 +474,32 @@ async def test_late_subagent_route_requires_webui_owned_session(tmp_path: Path) 
         "injected_event": "subagent_result",
         "subagent_task_id": "sub-1",
     }
+
+
+@pytest.mark.asyncio
+async def test_unified_display_route_admits_alias_generation_and_rejects_stale_lifetime(tmp_path):
+    from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
+    from nanobot.session.sqlite_store import SessionConflictError
+
+    sessions = SessionManager(tmp_path)
+    alias = await sessions.state.get_header("websocket:chat")
+    source = await sessions.state.get_header("unified:default")
+    policy = WebuiTurnRoutePolicy(sessions)
+    factory = TurnDeliveryFactory(MessageBus(), route_policy=policy, route_admission=policy.admit)
+    message = InboundMessage(channel="system", sender_id="cron", chat_id="websocket:chat", content="notice")
+    delivery = factory.create(message, source.key)
+    await delivery.bind_session_generation(source.generation)
+    assert delivery.route.metadata[HISTORY_GENERATION_METADATA_KEY] == alias.generation
+    assert delivery.delivery_message.session_generation == source.generation
+    response = delivery.background_response("done", stop_reason="end_turn", streamed=False, latency_ms=1)
+    assert response.metadata[HISTORY_GENERATION_METADATA_KEY] == alias.generation
+    await sessions.state.delete(alias.key)
+    replacement = await sessions.state.get_header(alias.key)
+    stale = factory.create(InboundMessage(
+        channel="websocket", sender_id="user", chat_id="chat", content="old queued input",
+        metadata={HISTORY_GENERATION_METADATA_KEY: alias.generation},
+    ), source.key)
+    with pytest.raises(SessionConflictError):
+        await stale.bind_session_generation(source.generation)
+    assert replacement.generation != alias.generation
+    await sessions.state.aclose()

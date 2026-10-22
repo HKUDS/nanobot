@@ -26,6 +26,7 @@ from nanobot.channels.matrix.runtime import (
     MatrixConfig,
     _build_matrix_text_content,
 )
+from nanobot.config.network import NetworkConfig
 from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META, RuntimeContextBlock
 
 _ROOM_SEND_UNSET = object()
@@ -330,8 +331,9 @@ async def test_start_skips_load_store_when_device_id_missing(
     )
 
     channel = MatrixChannel(
-        _make_config(device_id="", e2ee_enabled=True, proxy="127.0.0.1:7890"),
+        _make_config(device_id="", e2ee_enabled=True, use_proxy=True),
         MessageBus(),
+        network=NetworkConfig(proxy="127.0.0.1:7890"),
     )
     await channel.start()
 

@@ -54,6 +54,32 @@ describe("CredentialForm", () => {
     expect(onChange).toHaveBeenCalledWith(key, "");
   });
 
+  it.each(["telegram", "discord", "matrix", "slack", "whatsapp"])("renders %s proxy configuration as a switch and submits both boolean states", (channel) => {
+    const key = `channels.${channel}.useProxy`;
+    const setup = channelSetup({
+      name: channel, display_name: channel, type: "channel", enabled: true,
+      webui: channel === "whatsapp" ? "webui/index.tsx" : "webui/index.ts",
+      installed: true, ready: true, status: "enabled",
+      install_supported: true, requires_restart: false,
+      setup: { fields: [{ key, field: "use_proxy", kind: "bool", choices: [], required: false, default_value: "false" }] },
+    });
+    const proxyFields = [...setup.fields ?? [], ...setup.manualFields ?? []];
+    expect(proxyFields[0].section).toBe("connection");
+    const onChange = vi.fn();
+    const { rerender } = render(<CredentialForm fields={proxyFields} values={{ [key]: "true" }}
+      visibleSecrets={{}} onChange={onChange} onToggleSecret={vi.fn()} />);
+    const useProxy = screen.getByRole("switch", { name: "Use proxy" });
+    expect(useProxy).toBeChecked();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    fireEvent.click(useProxy);
+    expect(onChange).toHaveBeenCalledWith(key, "false");
+    expect(channelValuesForSubmit(proxyFields, { [key]: "false" }, new Set([key]))).toEqual({ [key]: "false" });
+    rerender(<CredentialForm fields={proxyFields} values={{ [key]: "false" }}
+      visibleSecrets={{}} onChange={onChange} onToggleSecret={vi.fn()} />);
+    fireEvent.click(screen.getByRole("switch", { name: "Use proxy" }));
+    expect(onChange).toHaveBeenLastCalledWith(key, "true");
+  });
+
   it("uses native radio semantics for option fields", () => {
     const onChange = vi.fn();
     render(

@@ -1,3 +1,4 @@
+import { pastedFilePath, PastedPathRange, isLocalAttachment, type LocalAttachment } from "../../../../packages/client-events/attachments";
 import {
   NewChatIcon,
   CompactIcon,
@@ -32,6 +33,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type Ref,
@@ -44,7 +46,11 @@ import {
   mcpPresetInitials,
   splitCapabilityMentionSegments,
 } from "@/components/CliAppMentionText";
-import type { CapabilityMentionSegment } from "@/lib/composer-mention-text";
+import {
+  composerMentionText,
+  isCapabilityMentionStart,
+  type CapabilityMentionSegment,
+} from "@/lib/composer-mention-text";
 import { INLINE_TOKEN_HIGHLIGHT_COLOR } from "@/components/InlineTokenHighlight";
 import {
   ArrowUp,
@@ -52,7 +58,7 @@ import {
   ChevronUp,
   CornerDownRight,
   FileText,
-  GripVertical,
+  Video,
   ImageIcon,
   Loader2,
   Quote,
@@ -90,11 +96,15 @@ import {
 } from "@/components/thread/ComposerUsagePopover";
 import {
   ACCEPT_ATTR,
+  acceptedAttachmentKind,
   MAX_ATTACHMENTS_PER_MESSAGE,
+  MAX_ATTACHMENT_BYTES,
+  MAX_TOTAL_ATTACHMENT_BYTES,
+  MAX_VIDEO_BYTES,
+  MAX_VIDEOS_PER_MESSAGE,
   useAttachedImages,
   type AttachedImage,
   type AttachmentError,
-  type AttachmentKind,
   type RestoredReadyImage,
 } from "@/hooks/useAttachedImages";
 import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
@@ -136,8 +146,8 @@ import {
 } from "@/lib/session-drag";
 import { formatQuotedUserMessage } from "@/lib/user-message-quote";
 import { cn } from "@/lib/utils";
-import { composerMentionText } from "@/lib/composer-mention-text";
-import type { ComposerDraftStore } from "@/lib/composer-draft";
+import type { ComposerDraft, ComposerDraftStore } from "@/lib/composer-draft";
+import { useLocalPreferences } from "@/hooks/useLocalPreferences";
 
 const VOICE_SHORTCUT_CODE = "KeyD";
 const VOICE_SHORTCUT_ARIA = "Control+Shift+D";
@@ -147,8 +157,8 @@ type VoiceShortcutPlatform = "apple" | "chromeos" | "linux" | "other" | "windows
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
 function utf8Bytes(value: string): number {
@@ -238,6 +248,7 @@ interface ThreadComposerProps {
   onStop?: () => void;
   surfaceRef?: Ref<HTMLDivElement>;
   onTranscribeAudio?: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
+  onInspectAttachment?: (path: string) => Promise<LocalAttachment>;
   /** Sustained objective for this chat (WebSocket ``goal_state``). */
   goalState?: GoalStateWsPayload;
   workspaceScope?: WorkspaceScopePayload | null;
@@ -299,7 +310,6 @@ const SLASH_RECENTS_LIMIT = 5;
 const QUEUED_PROMPTS_STORAGE_PREFIX = "nanobot.webui.composerQueuedGuidance.v1:";
 const EMPTY_COMPLETED_TURN_IDS: readonly string[] = [];
 const QUEUED_PROMPTS_LIMIT = 20;
-const QUEUED_PROMPT_MAX_CHARS = 4000;
 const SESSION_MENTIONS_LIMIT = 8;
 
 function VoiceRecordingMeter({
@@ -356,21 +366,52 @@ interface QueuedPrompt {
   sessionMentions?: SessionMention[];
   autoAfterTurnId?: string;
   autoPaused?: boolean;
+  autoSendPageId?: string;
+}
+
+let queuedPromptPageId: string | undefined;
+
+function getQueuedPromptPageId(): string {
+  return queuedPromptPageId ??= crypto.randomUUID();
+}
+
+function canAutoSendQueuedPrompt(prompt: QueuedPrompt): boolean {
+  return !prompt.autoPaused && prompt.autoSendPageId === getQueuedPromptPageId();
 }
 
 function pauseQueuedPrompt(prompt: QueuedPrompt): QueuedPrompt {
-  return { ...prompt, autoAfterTurnId: undefined, autoPaused: true };
+  return { ...prompt, autoAfterTurnId: undefined, autoSendPageId: undefined, autoPaused: true };
 }
 
-function waitForNextQueuedTurn(prompt: QueuedPrompt): QueuedPrompt {
-  return { ...prompt, autoAfterTurnId: undefined, autoPaused: false };
+function mergeQueuedPrompt(first: QueuedPrompt, next: QueuedPrompt): QueuedPrompt {
+  const prompts = [first, next];
+  const mentions = new Map<string, SessionMention>();
+  for (const prompt of prompts) {
+    for (const mention of prompt.sessionMentions ?? []) {
+      if (!mentions.has(mention.session_key)) mentions.set(mention.session_key, mention);
+    }
+  }
+  return {
+    id: first.id,
+    text: prompts.map((prompt) => prompt.text).filter(Boolean).join("\n"),
+    images: prompts.flatMap((prompt) => prompt.images ?? []),
+    quotedContext: [...new Set(prompts.map((prompt) => prompt.quotedContext).filter(Boolean))].join("\n\n"),
+    sessionMentions: [...mentions.values()],
+    autoAfterTurnId: first.autoAfterTurnId,
+    autoPaused: prompts.some((prompt) => prompt.autoPaused),
+    autoSendPageId: first.autoSendPageId,
+  };
 }
 
-interface QueuedPromptImage {
-  dataUrl: string;
-  name?: string;
-  kind?: AttachmentKind;
+function queuedUploadBytes(image: QueuedPromptImage): number {
+  if (image.local) return 0;
+  const dataUrl = image.dataUrl ?? "";
+  const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  return Math.floor(base64.length * 3 / 4) - padding;
 }
+
+type QueuedPromptImage = RestoredReadyImage;
 
 interface CliAppMentionQuery {
   query: string;
@@ -408,7 +449,7 @@ function mentionInsertion(
   const to = Math.min(Math.max(end, from), value.length);
   const prefix = value.slice(0, from);
   const suffix = value.slice(to);
-  const leadingSpace = prefix && !/\s$/.test(prefix) ? " " : "";
+  const leadingSpace = prefix && !isCapabilityMentionStart(value, from) ? " " : "";
   const trailingSpace = /^\s/.test(suffix) ? "" : " ";
   const tokenStart = prefix.length + leadingSpace.length;
   const tokenEnd = tokenStart + name.length + 1;
@@ -508,22 +549,25 @@ function normalizeQueuedSessionMentions(value: unknown): SessionMention[] {
       session_key: sessionKey,
       title: candidate.title?.trim().slice(0, 160) ?? "",
     }];
-  }).slice(0, SESSION_MENTIONS_LIMIT);
+  });
 }
 
 function normalizeQueuedPrompt(item: unknown, index: number): QueuedPrompt | null {
   if (!item || typeof item !== "object") return null;
   const record = item as Partial<QueuedPrompt>;
   if (typeof record.text !== "string") return null;
-  const text = record.text.trim().slice(0, QUEUED_PROMPT_MAX_CHARS);
+  const text = record.text.trim();
   const images = Array.isArray(record.images)
-    ? record.images.flatMap((image) => {
+    ? record.images.flatMap((image): QueuedPromptImage[] => {
         if (!image || typeof image !== "object") return [];
         const candidate = image as Partial<QueuedPromptImage>;
+        if (isLocalAttachment(candidate.local)) {
+          return [{ local: candidate.local, kind: candidate.local.kind, name: candidate.local.name }];
+        }
         if (typeof candidate.dataUrl !== "string" || !candidate.dataUrl.startsWith("data:")) {
           return [];
         }
-        const kind = candidate.kind === "file" || candidate.kind === "image"
+        const kind = candidate.kind === "file" || candidate.kind === "image" || candidate.kind === "video"
           ? candidate.kind
           : candidate.dataUrl.startsWith("data:image/")
             ? "image"
@@ -535,17 +579,17 @@ function normalizeQueuedPrompt(item: unknown, index: number): QueuedPrompt | nul
             ? { name: candidate.name.trim() }
             : {}),
         }];
-      }).slice(0, MAX_ATTACHMENTS_PER_MESSAGE)
+      })
     : [];
   const quotedContext = typeof record.quotedContext === "string"
-    ? record.quotedContext.trim().slice(0, QUEUED_PROMPT_MAX_CHARS)
+    ? record.quotedContext.trim()
     : "";
   const sessionMentions = normalizeQueuedSessionMentions(record.sessionMentions);
   if (!text && images.length === 0) return null;
   const id = typeof record.id === "string" && record.id.trim()
     ? record.id
     : `queued-prompt-restored-${index}`;
-  return {
+  const prompt: QueuedPrompt = {
     id,
     text,
     ...(images.length > 0 ? { images } : {}),
@@ -555,57 +599,139 @@ function normalizeQueuedPrompt(item: unknown, index: number): QueuedPrompt | nul
       ? { autoAfterTurnId: record.autoAfterTurnId.trim() }
       : {}),
     ...(record.autoPaused === true ? { autoPaused: true } : {}),
+    ...(typeof record.autoSendPageId === "string" ? { autoSendPageId: record.autoSendPageId } : {}),
   };
+  return canAutoSendQueuedPrompt(prompt) ? prompt : pauseQueuedPrompt(prompt);
 }
 
-function readQueuedPrompts(storageKey: string): QueuedPrompt[] {
-  if (typeof window === "undefined") return [];
+function readQueuedPrompt(storageKey: string): QueuedPrompt | null {
+  if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(storageKey);
     const parsed = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(parsed)) return [];
-    return parsed
+    if (!Array.isArray(parsed)) return null;
+    return parsed.slice(0, QUEUED_PROMPTS_LIMIT)
       .map((item, index) => normalizeQueuedPrompt(item, index))
       .filter((item): item is QueuedPrompt => item != null)
-      .slice(0, QUEUED_PROMPTS_LIMIT);
+      .reduce<QueuedPrompt | null>((pending, prompt) => (
+        pending ? mergeQueuedPrompt(pending, prompt) : prompt
+      ), null);
   } catch {
-    return [];
+    return null;
   }
 }
 
-function storeQueuedPrompts(storageKey: string, prompts: QueuedPrompt[]): void {
+function storeQueuedPrompt(storageKey: string, prompt: QueuedPrompt | null): void {
   if (typeof window === "undefined") return;
   try {
-    if (prompts.length === 0) {
+    if (!prompt) {
       window.localStorage.removeItem(storageKey);
       return;
     }
-    window.localStorage.setItem(
-      storageKey,
-      JSON.stringify(
-        prompts.slice(0, QUEUED_PROMPTS_LIMIT).map((prompt) => ({
-          id: prompt.id,
-          text: prompt.text.slice(0, QUEUED_PROMPT_MAX_CHARS),
-          ...(prompt.images?.length ? { images: prompt.images.slice(0, MAX_ATTACHMENTS_PER_MESSAGE) } : {}),
-          ...(prompt.quotedContext ? { quotedContext: prompt.quotedContext } : {}),
-          ...(prompt.sessionMentions?.length
-            ? { sessionMentions: prompt.sessionMentions.slice(0, SESSION_MENTIONS_LIMIT) }
-            : {}),
-          ...(prompt.autoAfterTurnId ? { autoAfterTurnId: prompt.autoAfterTurnId } : {}),
-          ...(prompt.autoPaused ? { autoPaused: true } : {}),
-        })),
-      ),
-    );
+    // Retain the v1 array shape so existing queued drafts remain readable.
+    window.localStorage.setItem(storageKey, JSON.stringify([prompt]));
   } catch {
-    // localStorage persistence is a convenience; the in-memory queue still works.
+    // localStorage persistence is a convenience; the in-memory draft still works.
   }
 }
 
+interface QueuedPromptSnapshot {
+  prompt: QueuedPrompt | null;
+  sending: boolean;
+  error: string | null;
+}
+
+// Delivery can outlive the composer during attachment upload or topic navigation.
+// Keep one owner per mounted/sending topic; idle, unmounted owners are reloaded from storage.
+const queuedPromptStores = new Map<string, QueuedPromptStore>();
+
+class QueuedPromptStore {
+  private snapshot: QueuedPromptSnapshot;
+  private listeners = new Set<() => void>();
+
+  constructor(private storageKey: string | null) {
+    this.snapshot = { prompt: storageKey ? readQueuedPrompt(storageKey) : null, sending: false, error: null };
+  }
+
+  getSnapshot = () => this.snapshot;
+
+  subscribe = (listener: () => void) => {
+    if (this.storageKey) queuedPromptStores.set(this.storageKey, this);
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+      this.release();
+    };
+  };
+
+  private release() {
+    if (this.storageKey && !this.snapshot.sending && this.listeners.size === 0
+      && queuedPromptStores.get(this.storageKey) === this) queuedPromptStores.delete(this.storageKey);
+  }
+
+  private publish(next: QueuedPromptSnapshot) {
+    if (this.storageKey && next.prompt !== this.snapshot.prompt) storeQueuedPrompt(this.storageKey, next.prompt);
+    this.snapshot = next;
+    for (const listener of this.listeners) listener();
+    this.release();
+  }
+
+  set = (next: QueuedPrompt | null | ((current: QueuedPrompt | null) => QueuedPrompt | null)) => {
+    const prompt = typeof next === "function" ? next(this.snapshot.prompt) : next;
+    if (prompt !== this.snapshot.prompt) this.publish({ ...this.snapshot, prompt, error: null });
+  };
+
+  send(prompt: QueuedPrompt, send: () => void | boolean | Promise<void | boolean>) {
+    if (this.snapshot.sending) return;
+    const retained = pauseQueuedPrompt(prompt);
+    this.publish({ prompt: retained, sending: true, error: null });
+    const finish = (accepted: void | boolean, error?: unknown) => {
+      const failed = accepted === false || error !== undefined;
+      this.publish({
+        prompt: failed ? retained : null,
+        sending: false,
+        error: failed ? error instanceof Error ? error.message : "Message not sent; queued draft retained" : null,
+      });
+    };
+    try {
+      const result = send();
+      if (result instanceof Promise) void result.then((accepted) => finish(accepted), (error: unknown) => finish(false, error));
+      else finish(result);
+    } catch (error) {
+      finish(false, error);
+    }
+  }
+}
+
+function queuedPromptStoreFor(storageKey: string | null): QueuedPromptStore {
+  if (!storageKey) return new QueuedPromptStore(null);
+  let store = queuedPromptStores.get(storageKey);
+  if (!store) {
+    store = new QueuedPromptStore(storageKey);
+    queuedPromptStores.set(storageKey, store);
+  }
+  return store;
+}
+
+function expireQueuedPromptAuthorization(): void {
+  queuedPromptPageId = undefined;
+  for (const store of queuedPromptStores.values()) {
+    store.set((prompt) => prompt && !prompt.autoPaused ? pauseQueuedPrompt(prompt) : prompt);
+  }
+}
+
+// Saved content survives a page's lifetime; permission to execute it does not.
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", expireQueuedPromptAuthorization);
+  document.addEventListener("freeze", expireQueuedPromptAuthorization);
+}
+
 function readyImagesToQueuedImages(
-  images: Array<AttachedImage & { dataUrl: string }>,
+  images: AttachedImage[],
 ): QueuedPromptImage[] {
   return images.map((img) => ({
     dataUrl: img.dataUrl,
+    local: img.local,
     kind: img.kind,
     name: img.file.name,
   }));
@@ -613,44 +739,26 @@ function readyImagesToQueuedImages(
 
 function queuedImagesToSendImages(images?: QueuedPromptImage[]): SendAttachment[] | undefined {
   if (!images?.length) return undefined;
-  return images.map((img) => ({
-    media: {
-      data_url: img.dataUrl,
-      ...(img.name ? { name: img.name } : {}),
-    },
-    preview: {
-      kind: img.kind ?? (img.dataUrl.startsWith("data:image/") ? "image" : "file"),
-      url: img.dataUrl,
-      ...(img.name ? { name: img.name } : {}),
-    },
-  }));
+  return images.flatMap((img): SendAttachment[] => {
+    if (img.local) return [{
+      media: { path: img.local.path, name: img.local.name },
+      preview: { kind: img.local.kind, url: img.local.url, name: img.local.name },
+    }];
+    if (!img.dataUrl) return [];
+    return [{
+      media: { data_url: img.dataUrl, ...(img.name ? { name: img.name } : {}) },
+      preview: {
+        kind: img.kind ?? (img.dataUrl.startsWith("data:image/") ? "image" : img.dataUrl.startsWith("data:video/") ? "video" : "file"),
+        url: img.dataUrl, ...(img.name ? { name: img.name } : {}),
+      },
+    }];
+  });
 }
 
 function queuedPromptLabel(prompt: QueuedPrompt): string {
   const text = prompt.text.trim();
   if (text) return text;
   return prompt.images?.map((img) => img.name).filter(Boolean).join(", ") || "File attachment";
-}
-
-function suppressNativeDragPreview(dataTransfer: DataTransfer): void {
-  if (typeof document === "undefined" || typeof dataTransfer.setDragImage !== "function") {
-    return;
-  }
-  const ghost = document.createElement("div");
-  ghost.style.position = "fixed";
-  ghost.style.left = "-9999px";
-  ghost.style.top = "-9999px";
-  ghost.style.width = "1px";
-  ghost.style.height = "1px";
-  ghost.style.opacity = "0";
-  document.body.appendChild(ghost);
-  try {
-    dataTransfer.setDragImage(ghost, 0, 0);
-  } catch {
-    ghost.remove();
-    return;
-  }
-  window.setTimeout(() => ghost.remove(), 0);
 }
 
 function visualViewportBounds(): { top: number; bottom: number; height: number } {
@@ -903,7 +1011,7 @@ function GoalStateStrip({
             id="nanobot-goal-panel-scroll"
             className="min-h-0 flex-1 overflow-y-auto scrollbar-thin px-3 pb-3 pt-2"
           >
-            <MarkdownText className="max-w-none text-[13.5px] leading-relaxed text-foreground/90">
+            <MarkdownText className="max-w-none text-foreground/90">
               {markdownBody}
             </MarkdownText>
           </div>
@@ -953,6 +1061,20 @@ function GoalStateStrip({
   );
 }
 
+function autosizeTextarea(input: HTMLTextAreaElement) {
+  const container = input.parentElement!;
+  const previousMinHeight = container.style.minHeight;
+  // Measuring the one-row textarea must not expand the sibling transcript and
+  // clamp its native scroll offset, even temporarily before paint.
+  container.style.minHeight = `${container.getBoundingClientRect().height}px`;
+  try {
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 260)}px`;
+  } finally {
+    container.style.minHeight = previousMinHeight;
+  }
+}
+
 export function ThreadComposer({
   onSend,
   disabled,
@@ -984,6 +1106,7 @@ export function ThreadComposer({
   onStop,
   surfaceRef,
   onTranscribeAudio,
+  onInspectAttachment,
   goalState,
   workspaceScope = null,
   workspaceControlsHidden = false,
@@ -1012,7 +1135,7 @@ export function ThreadComposer({
   const [value, setValue] = useState(initialDraft?.text ?? "");
   const [composerFocused, setComposerFocused] = useState(false);
   const blurFrame = useRef<number | null>(null);
-  const [selectedSessionMentions, setSelectedSessionMentions] = useState<SessionMention[]>(
+  const [boundSessionMentions, setBoundSessionMentions] = useState<SessionMention[]>(
     initialDraft?.sessionMentions ?? [],
   );
   const [sessionDragPreview, setSessionDragPreview] = useState<{
@@ -1022,8 +1145,24 @@ export function ThreadComposer({
   } | null>(null);
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [sendPending, setSendPending] = useState(false);
+  const [pathInspection, setPathInspection] = useState<{
+    generation: number; scope: string; range: PastedPathRange; attachment?: LocalAttachment;
+  } | null>(null);
+  const pathCheckGeneration = useRef(0);
+  const pathCheckScope = useRef("");
+  const scopeIdentity = `${workspaceScope?.project_path ?? ""}:${workspaceScope?.access_mode ?? ""}`;
+  pathCheckScope.current = scopeIdentity;
+  useEffect(() => () => { pathCheckGeneration.current += 1; }, []);
   const [modelSetupAttentionRequest, setModelSetupAttentionRequest] = useState(0);
-  const interactionDisabled = !!disabled || sendPending;
+  const queuedPromptStorageKey = queuedPromptsStorageKey(pendingQueueKey);
+  const queuedPromptStore = useMemo(() => queuedPromptStoreFor(queuedPromptStorageKey), [queuedPromptStorageKey]);
+  const queueSnapshot = useSyncExternalStore(queuedPromptStore.subscribe, queuedPromptStore.getSnapshot);
+  const queuedPrompt = queueSnapshot.prompt;
+  const setQueuedPrompt = queuedPromptStore.set;
+  const interactionDisabled = !!disabled || sendPending || queueSnapshot.sending;
+  useEffect(() => {
+    if (queueSnapshot.error) setInlineError(queueSnapshot.error);
+  }, [queueSnapshot.error]);
   const [voiceErrorFading, setVoiceErrorFading] = useState(false);
   const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
@@ -1031,11 +1170,11 @@ export function ThreadComposer({
   const [selectedCliAppIndex, setSelectedCliAppIndex] = useState(0);
   const [cursorPosition, setCursorPosition] = useState(0);
   const [recentSlashCommands, setRecentSlashCommands] = useState<string[]>(() => readSlashRecents());
-  const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
   const hasTouchPrimaryPointer = useMediaQuery("(hover: none) and (pointer: coarse)");
   // Coarser than hasTouchPrimaryPointer on purpose: tablets with a physical
   // keyboard still get the newline-on-Enter behavior.
   const hasCoarsePointer = useMediaQuery("(pointer: coarse)");
+  const { readingTextSize } = useLocalPreferences();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionOverlayRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -1051,10 +1190,7 @@ export function ThreadComposer({
       previousWidth = width;
       setCompactControls(width <= 512);
       const input = textareaRef.current;
-      if (input) {
-        input.style.height = "auto";
-        input.style.height = `${Math.min(input.scrollHeight, 260)}px`;
-      }
+      if (input) autosizeTextarea(input);
     };
     update();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
@@ -1068,20 +1204,14 @@ export function ThreadComposer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
   const queuedPromptCounterRef = useRef(0);
-  // Only the prompt queued by the immediately preceding Enter can use the second-Enter shortcut.
+  // A fresh queue submission arms Enter for the complete pending message.
   const secondEnterPromptIdRef = useRef<string | null>(null);
-  const draggedQueuedPromptIdRef = useRef<string | null>(null);
   const previousPendingQueueKeyRef = useRef(pendingQueueKey);
   const previousQueueRunRef = useRef({ key: pendingQueueKey, isStreaming });
-  const skipQueuedPromptPersistRef = useRef(false);
   const voiceShortcutDownRef = useRef(false);
   const voiceErrorFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isHero = variant === "hero";
   const voiceShortcutLabel = useMemo(getVoiceShortcutLabel, []);
-  const queuedPromptStorageKey = useMemo(
-    () => queuedPromptsStorageKey(pendingQueueKey),
-    [pendingQueueKey],
-  );
   const projectPickerAvailable =
     isHero
     && !!workspaceDefaultScope
@@ -1095,32 +1225,16 @@ export function ThreadComposer({
 
   useEffect(() => {
     secondEnterPromptIdRef.current = null;
-    skipQueuedPromptPersistRef.current = true;
-    setQueuedPrompts(queuedPromptStorageKey ? readQueuedPrompts(queuedPromptStorageKey) : []);
   }, [pendingQueueKey, queuedPromptStorageKey]);
 
   useEffect(() => {
     if (!isStreaming || !activeTurnId) return;
-    // The next lifecycle owner, not a guidance input, releases the remaining queue.
-    setQueuedPrompts((items) => {
-      let changed = false;
-      const next = items.map((item) => {
-        if (item.autoPaused || item.autoAfterTurnId === activeTurnId) return item;
-        changed = true;
-        return { ...item, autoAfterTurnId: activeTurnId };
-      });
-      return changed ? next : items;
-    });
-  }, [activeTurnId, isStreaming, pendingQueueKey]);
-
-  useEffect(() => {
-    if (!queuedPromptStorageKey) return;
-    if (skipQueuedPromptPersistRef.current) {
-      skipQueuedPromptPersistRef.current = false;
-      return;
-    }
-    storeQueuedPrompts(queuedPromptStorageKey, queuedPrompts);
-  }, [queuedPromptStorageKey, queuedPrompts]);
+    setQueuedPrompt((prompt) => (
+      !prompt || prompt.autoPaused || prompt.autoAfterTurnId === activeTurnId
+        ? prompt
+        : { ...prompt, autoAfterTurnId: activeTurnId }
+    ));
+  }, [activeTurnId, isStreaming, pendingQueueKey, setQueuedPrompt]);
 
   const resolvedPlaceholder = isStreaming
     ? t("thread.composer.placeholderStreaming")
@@ -1128,33 +1242,45 @@ export function ThreadComposer({
 
   const maxAttachments = ingressLimits?.attachments.max_count
     ?? MAX_ATTACHMENTS_PER_MESSAGE;
+  const maxFileBytes = ingressLimits?.attachments.max_file_bytes ?? MAX_ATTACHMENT_BYTES;
   const maxTextBytes = ingressLimits?.message.max_text_bytes ?? 64 * 1024;
-  const { images, enqueue, remove, clear, restoreReadyImages, encoding, full } =
+  const { images, enqueue, addLocal, remove, clear, restoreReadyImages, encoding: encodingFiles, full } =
     useAttachedImages({ ingressLimits });
+  const encoding = encodingFiles || pathInspection !== null;
   const restoredDraftAttachments = useRef(false);
-  const [draftAttachmentsReady, setDraftAttachmentsReady] = useState(!initialDraft?.files.length);
+  const [draftAttachmentsReady, setDraftAttachmentsReady] = useState(!initialDraft?.attachments.length);
   useLayoutEffect(() => {
     if (restoredDraftAttachments.current) return;
     restoredDraftAttachments.current = true;
-    if (initialDraft?.files.length) enqueue(initialDraft.files);
+    for (const attachment of initialDraft?.attachments ?? []) {
+      if (attachment instanceof File) enqueue([attachment], { restoringDraft: true });
+      else addLocal(attachment, { restoringDraft: true });
+    }
     setDraftAttachmentsReady(true);
-  }, [enqueue, initialDraft]);
+  }, [enqueue, addLocal, initialDraft]);
 
   const formatRejection = useCallback(
-    (reason: AttachmentError): string => {
+    (reason: Exclude<AttachmentError, "too_large">): string => {
       const key = `thread.composer.imageRejected.${reason}`;
-      const fallback = reason === "too_many_attachments"
+      const fallback = reason === "too_many_videos"
+        ? "Max 1 video per message"
+        : reason === "too_many_attachments"
         ? `Max ${maxAttachments} attachments per message`
         : reason === "empty_file"
           ? "Empty files cannot be attached"
           : reason === "total_too_large"
             ? "Attachments are too large together — remove some or use smaller files"
-            : reason === "too_large"
-              ? "File is too large"
-              : "Unsupported file type";
+            : "Unsupported file type";
       return t(key, { max: maxAttachments, defaultValue: fallback });
     },
     [maxAttachments, t],
+  );
+
+  const formatUploadTooLarge = useCallback(
+    (size: number, maximum: number) => t("thread.composer.imageRejected.too_large", {
+      size: formatBytes(size), max: formatBytes(maximum),
+    }),
+    [t],
   );
 
   const textTooLargeMessage = useCallback(
@@ -1171,17 +1297,20 @@ export function ThreadComposer({
       secondEnterPromptIdRef.current = null;
       const { rejected } = enqueue(files);
       if (rejected.length > 0) {
-        setInlineError(formatRejection(rejected[0].reason));
+        const { reason, file } = rejected[0];
+        setInlineError(reason === "too_large"
+          ? formatUploadTooLarge(file.size, acceptedAttachmentKind(file) === "video" ? MAX_VIDEO_BYTES : maxFileBytes)
+          : formatRejection(reason));
       } else {
         setInlineError(null);
       }
     },
-    [enqueue, formatRejection, interactionDisabled],
+    [enqueue, formatRejection, formatUploadTooLarge, interactionDisabled, maxFileBytes],
   );
 
   const {
     isDragging,
-    onPaste,
+    onPaste: onAttachmentPaste,
     onDragEnter,
     onDragOver,
     onDragLeave,
@@ -1208,11 +1337,11 @@ export function ThreadComposer({
     return () => cancelAnimationFrame(id);
   }, [focusRequest, interactionDisabled]);
 
-  const normalizedQuotedContext = quotedContext?.trim().slice(0, QUEUED_PROMPT_MAX_CHARS) || null;
+  const normalizedQuotedContext = quotedContext?.trim() || null;
 
   const readyImages = useMemo(
-    () => images.filter((img): img is AttachedImage & { dataUrl: string } =>
-      img.status === "ready" && typeof img.dataUrl === "string",
+    () => images.filter((img) =>
+      img.status === "ready" && (typeof img.dataUrl === "string" || !!img.local),
     ),
     [images],
   );
@@ -1395,12 +1524,12 @@ export function ThreadComposer({
     if (interactionDisabled || cliAppMenuDismissed) return null;
     const caret = Math.min(Math.max(cursorPosition, 0), value.length);
     const beforeCaret = value.slice(0, caret);
-    const match = /(?:^|\s)@([\p{L}\p{N}_-]*)$/iu.exec(beforeCaret);
-    if (!match) return null;
+    const match = /@([\p{L}\p{N}_-]*)$/iu.exec(beforeCaret);
+    if (!match || !isCapabilityMentionStart(value, match.index)) return null;
     const query = match[1].toLowerCase();
     return {
       query,
-      start: caret - query.length - 1,
+      start: match.index,
       end: caret,
     };
   }, [cliAppMenuDismissed, cursorPosition, interactionDisabled, value]);
@@ -1414,9 +1543,13 @@ export function ThreadComposer({
     () => sessionMentionOptions(sessions),
     [sessions],
   );
+  const sessionMentionCatalog = useMemo(
+    () => [...availableSessionMentions, ...boundSessionMentions],
+    [availableSessionMentions, boundSessionMentions],
+  );
   const mentionSegments = useMemo(
-    () => splitCapabilityMentionSegments(value, cliApps, mcpPresets, selectedSessionMentions),
-    [cliApps, mcpPresets, selectedSessionMentions, value],
+    () => splitCapabilityMentionSegments(value, cliApps, mcpPresets, sessionMentionCatalog),
+    [cliApps, mcpPresets, sessionMentionCatalog, value],
   );
   const editMentionInput = useCallback((next: string, cursor: number) => {
     secondEnterPromptIdRef.current = null;
@@ -1432,20 +1565,50 @@ export function ThreadComposer({
     resetKey: pendingQueueKey,
   });
   const { rawSelection, replace: replaceMentionInput } = mentionInput;
-  const draftText = composerMentionText(mentionInput.segments).raw;
+  const onPaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    onAttachmentPaste(event);
+    if (event.defaultPrevented || interactionDisabled || !onInspectAttachment) return;
+    const raw = event.clipboardData.getData("text/plain");
+    const path = pastedFilePath(raw);
+    if (!path) return;
+    event.preventDefault();
+    const { start, end } = rawSelection();
+    const pasted = value.slice(0, start) + raw + value.slice(end);
+    const generation = ++pathCheckGeneration.current;
+    replaceMentionInput(pasted, start + raw.length);
+    setPathInspection({ generation, scope: scopeIdentity, range: new PastedPathRange(pasted, start, start + raw.length) });
+    void onInspectAttachment(path).then((attachment) => {
+      if (generation !== pathCheckGeneration.current) return;
+      setPathInspection((current) => current?.generation === generation ? { ...current, attachment } : current);
+    }).catch((error: unknown) => {
+      if (generation !== pathCheckGeneration.current || pathCheckScope.current !== scopeIdentity) return;
+      setInlineError(error instanceof Error ? error.message : t("message.attachmentUnavailable"));
+      setPathInspection(null);
+    });
+  }, [interactionDisabled, onAttachmentPaste, onInspectAttachment, rawSelection, replaceMentionInput, scopeIdentity, t, value]);
+
   useLayoutEffect(() => {
-    if (!draftKey || !draftStore || !draftAttachmentsReady) return;
-    if (!draftText && images.length === 0 && !quotedContext) {
-      draftStore.delete(draftKey);
+    if (!pathInspection) return;
+    if (pathInspection.scope !== scopeIdentity || !pathInspection.range.update(value)) {
+      pathCheckGeneration.current += 1;
+      setPathInspection(null);
       return;
     }
-    draftStore.set(draftKey, {
-      text: draftText,
-      files: images.map((image) => image.file),
-      sessionMentions: selectedSessionMentions,
-      quotedContext,
-    }, persistDraft);
-  }, [draftAttachmentsReady, draftKey, draftStore, images, persistDraft, quotedContext, selectedSessionMentions, draftText]);
+    // Let the native IME commit before removing the confirmed path from its text.
+    if (!pathInspection.attachment || mentionInput.isComposing) return;
+    const edited = pathInspection.range.replace("", rawSelection().start);
+    if (edited) {
+      const rejection = addLocal(pathInspection.attachment);
+      if (rejection) setInlineError(formatRejection(rejection));
+      else {
+        replaceMentionInput(edited.value, edited.cursor, { preserveFocus: true });
+        setInlineError(null);
+      }
+    }
+    setPathInspection(null);
+  }, [addLocal, formatRejection, mentionInput.isComposing, pathInspection, rawSelection, replaceMentionInput, scopeIdentity, value]);
+
+  const draftText = composerMentionText(mentionInput.segments).raw;
   const sessionDragInsertion = sessionDragPreview
     ? mentionInsertion(
         value,
@@ -1459,7 +1622,7 @@ export function ThreadComposer({
         sessionDragInsertion.value,
         cliApps,
         mcpPresets,
-        [...selectedSessionMentions, sessionDragPreview.mention],
+        sessionMentionCatalog,
       )
     : mentionInput.segments;
   const activeSessionMentions = useMemo(() => {
@@ -1468,17 +1631,41 @@ export function ThreadComposer({
       if (segment.kind !== "session" || seen.has(segment.mention.session_key)) return [];
       seen.add(segment.mention.session_key);
       return [segment.mention];
-    }).slice(0, SESSION_MENTIONS_LIMIT);
+    });
   }, [mentionSegments]);
+  useLayoutEffect(() => {
+    // Pin resolved identities so a catalog refresh cannot retarget an existing reference.
+    if (activeSessionMentions.length !== boundSessionMentions.length
+      || activeSessionMentions.some((mention, index) => mention !== boundSessionMentions[index])) {
+      setBoundSessionMentions(activeSessionMentions);
+    }
+  }, [activeSessionMentions, boundSessionMentions]);
+  useLayoutEffect(() => {
+    if (!draftKey || !draftStore || !draftAttachmentsReady) return;
+    if (!draftText && images.length === 0 && !quotedContext) {
+      draftStore.delete(draftKey);
+      return;
+    }
+    draftStore.set(draftKey, {
+      text: draftText,
+      attachments: images.flatMap((image): ComposerDraft["attachments"] => (
+        image.local ? [image.local] : image.file instanceof File ? [image.file] : []
+      )),
+      sessionMentions: activeSessionMentions,
+      quotedContext,
+    }, persistDraft);
+  }, [activeSessionMentions, draftAttachmentsReady, draftKey, draftStore, images, persistDraft, quotedContext, draftText]);
+  const insertableSessionMentions = useMemo(() => availableSessionMentions.filter((mention) => {
+    const bound = activeSessionMentions.find(
+      (active) => active.name.toLowerCase() === mention.name.toLowerCase(),
+    );
+    return (!bound || bound.session_key === mention.session_key)
+      && (activeSessionMentions.length < SESSION_MENTIONS_LIMIT
+        || activeSessionMentions.some((active) => active.session_key === mention.session_key));
+  }), [activeSessionMentions, availableSessionMentions]);
   const filteredMentionCandidates = useMemo<MentionCandidate[]>(() => {
     if (!cliAppMention) return [];
-    const sessionCandidates: MentionCandidate[] = availableSessionMentions
-      .filter((mention) => (
-        activeSessionMentions.length < SESSION_MENTIONS_LIMIT
-        || activeSessionMentions.some(
-          (selected) => selected.session_key === mention.session_key,
-        )
-      ))
+    const sessionCandidates: MentionCandidate[] = insertableSessionMentions
       .filter((mention) => [
         mention.name,
         mention.title,
@@ -1490,7 +1677,7 @@ export function ThreadComposer({
         mention,
       }));
     const sessionNames = new Set(
-      availableSessionMentions.map((mention) => mention.name.toLowerCase()),
+      sessionMentionCatalog.map((mention) => mention.name.toLowerCase()),
     );
     const cliCandidates: MentionCandidate[] = cliApps
       .filter((app) => app.installed)
@@ -1551,7 +1738,7 @@ export function ThreadComposer({
       remaining -= extra;
     }
     return groups.flatMap(({ candidates }, index) => candidates.slice(0, counts[index]));
-  }, [activeSessionMentions, availableSessionMentions, cliAppMention, cliApps, mcpPresets]);
+  }, [cliAppMention, cliApps, insertableSessionMentions, mcpPresets, sessionMentionCatalog]);
 
   const showCliAppMenu = filteredMentionCandidates.length > 0;
   const showAnyPalette = showSlashMenu || showCliAppMenu;
@@ -1665,23 +1852,22 @@ export function ThreadComposer({
     };
   }, [filteredMentionCandidates.length, filteredSlashCommands.length, showAnyPalette]);
 
-  const resizeTextarea = useCallback((restoreFocus = true) => {
-    requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (!el) return;
-      el.style.height = "auto";
-      el.style.height = `${Math.min(el.scrollHeight, 260)}px`;
-      if (restoreFocus) el.focus();
-    });
+  const focusTextarea = useCallback(() => {
+    requestAnimationFrame(() => textareaRef.current?.focus());
   }, []);
 
   useLayoutEffect(() => {
     const el = textareaRef.current;
     if (!el || mentionInput.isComposing) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 260)}px`;
+    autosizeTextarea(el);
     if (mentionOverlayRef.current) mentionOverlayRef.current.scrollTop = el.scrollTop;
   }, [compactControls, mentionInput.isComposing, mentionInput.value]);
+
+  useEffect(() => {
+    // The parent projects typography tokens in its layout effect; measure after it.
+    const input = textareaRef.current;
+    if (input) autosizeTextarea(input);
+  }, [readingTextSize]);
 
   // Runs before paint so switching sessions never flashes stale draft text.
   useLayoutEffect(() => {
@@ -1689,18 +1875,11 @@ export function ThreadComposer({
     previousPendingQueueKeyRef.current = pendingQueueKey;
     secondEnterPromptIdRef.current = null;
     setValue("");
-    setSelectedSessionMentions([]);
     setInlineError(null);
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
     setCursorPosition(0);
     clear();
-    requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (!el) return;
-      el.style.height = "auto";
-      el.style.height = `${Math.min(el.scrollHeight, 260)}px`;
-    });
   }, [clear, pendingQueueKey]);
 
   const appendTranscription = useCallback((text: string) => {
@@ -1715,8 +1894,8 @@ export function ThreadComposer({
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
     setInlineError(null);
-    resizeTextarea();
-  }, [resizeTextarea]);
+    focusTextarea();
+  }, [focusTextarea]);
 
   const clearVoiceErrorTimers = useCallback(() => {
     if (voiceErrorFadeTimerRef.current !== null) clearTimeout(voiceErrorFadeTimerRef.current);
@@ -1787,11 +1966,9 @@ export function ThreadComposer({
 
   const handleStop = useCallback(() => {
     secondEnterPromptIdRef.current = null;
-    if (queuedPrompts.length > 0) {
-      setQueuedPrompts((items) => items.map(pauseQueuedPrompt));
-    }
+    setQueuedPrompt((prompt) => prompt ? pauseQueuedPrompt(prompt) : null);
     onStop?.();
-  }, [onStop, queuedPrompts.length]);
+  }, [onStop, setQueuedPrompt]);
 
   const chooseSlashCommand = useCallback(
     (command: SlashPaletteCommand) => {
@@ -1801,7 +1978,7 @@ export function ThreadComposer({
         setSlashMenuDismissed(true);
         setCliAppMenuDismissed(false);
         setInlineError(null);
-        resizeTextarea();
+        focusTextarea();
         return;
       }
 
@@ -1824,43 +2001,29 @@ export function ThreadComposer({
       setSlashMenuDismissed(true);
       setCliAppMenuDismissed(false);
       setInlineError(null);
-      resizeTextarea();
+      focusTextarea();
     },
-    [handleStop, isStreaming, onStop, recentSlashCommands, replaceMentionInput, resizeTextarea, skillQuery, value],
+    [handleStop, isStreaming, onStop, recentSlashCommands, replaceMentionInput, focusTextarea, skillQuery, value],
   );
 
-  const insertMentionCandidate = useCallback(
-    (candidate: MentionCandidate, start: number, end: number) => {
-      if (candidate.kind === "session") {
-        const alreadySelected = activeSessionMentions.some(
-          (mention) => mention.session_key === candidate.mention.session_key,
-        );
-        if (!alreadySelected && activeSessionMentions.length >= SESSION_MENTIONS_LIMIT) return;
-        const name = candidate.name.toLowerCase();
-        setSelectedSessionMentions([
-          ...activeSessionMentions.filter((mention) => (
-            mention.name.toLowerCase() !== name
-            && mention.session_key !== candidate.mention.session_key
-          )),
-          candidate.mention,
-        ]);
-      }
-      const insertion = mentionInsertion(value, candidate.name, start, end);
+  const insertMention = useCallback(
+    (name: string, start: number, end: number) => {
+      const insertion = mentionInsertion(value, name, start, end);
       replaceMentionInput(insertion.value, insertion.cursor);
       setCliAppMenuDismissed(true);
       setSlashMenuDismissed(false);
       setInlineError(null);
-      resizeTextarea();
+      focusTextarea();
     },
-    [activeSessionMentions, replaceMentionInput, resizeTextarea, value],
+    [replaceMentionInput, focusTextarea, value],
   );
 
   const chooseMentionCandidate = useCallback(
     (candidate: MentionCandidate) => {
       if (!cliAppMention) return;
-      insertMentionCandidate(candidate, cliAppMention.start, cliAppMention.end);
+      insertMention(candidate.name, cliAppMention.start, cliAppMention.end);
     },
-    [cliAppMention, insertMentionCandidate],
+    [cliAppMention, insertMention],
   );
 
   const handleSessionDrop = useCallback((event: React.DragEvent) => {
@@ -1871,30 +2034,14 @@ export function ThreadComposer({
     setSessionDragPreview(null);
     if (interactionDisabled) return true;
     const sessionKey = readDraggedSession(event.dataTransfer);
-    const mention = availableSessionMentions.find(
+    const mention = insertableSessionMentions.find(
       (candidate) => candidate.session_key === (sessionKey ?? preview?.mention.session_key),
     );
     if (!mention) return true;
     const caret = preview?.start ?? rawSelection().start;
-    insertMentionCandidate(
-      {
-        kind: "session",
-        name: mention.name,
-        displayName: mention.title || mention.name,
-        mention,
-      },
-      caret,
-      preview?.end ?? rawSelection().end,
-    );
+    insertMention(mention.name, caret, preview?.end ?? rawSelection().end);
     return true;
-  }, [
-    availableSessionMentions,
-    insertMentionCandidate,
-    interactionDisabled,
-    rawSelection,
-    sessionDragPreview,
-    value.length,
-  ]);
+  }, [insertableSessionMentions, insertMention, interactionDisabled, rawSelection, sessionDragPreview]);
 
   const previewSessionDrop = useCallback((event: React.DragEvent) => {
     if (!hasDraggedSession(event.dataTransfer)) return false;
@@ -1904,13 +2051,10 @@ export function ThreadComposer({
       return true;
     }
     const sessionKey = readDraggedSession(event.dataTransfer);
-    const mention = availableSessionMentions.find(
+    const mention = insertableSessionMentions.find(
       (candidate) => candidate.session_key === sessionKey,
     );
-    const alreadySelected = mention && activeSessionMentions.some(
-      (candidate) => candidate.session_key === mention.session_key,
-    );
-    if (!mention || (!alreadySelected && activeSessionMentions.length >= SESSION_MENTIONS_LIMIT)) {
+    if (!mention) {
       event.dataTransfer.dropEffect = "none";
       setSessionDragPreview(null);
       return true;
@@ -1926,7 +2070,7 @@ export function ThreadComposer({
         : { mention, start, end }
     ));
     return true;
-  }, [activeSessionMentions, availableSessionMentions, interactionDisabled, rawSelection]);
+  }, [insertableSessionMentions, interactionDisabled, rawSelection]);
 
   useEffect(() => {
     if (!sessionDragPreview) return;
@@ -1940,66 +2084,76 @@ export function ThreadComposer({
 
   const clearComposerText = useCallback((restoreFocus = true) => {
     setValue("");
-    setSelectedSessionMentions([]);
     setInlineError(null);
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
     setCursorPosition(0);
-    resizeTextarea(restoreFocus);
-  }, [resizeTextarea]);
+    if (restoreFocus) focusTextarea();
+  }, [focusTextarea]);
+
+  const queuedPromptError = useCallback((prompt: QueuedPrompt): string | null => {
+    if (utf8Bytes(formatQuotedUserMessage(prompt.text, prompt.quotedContext)) > maxTextBytes) {
+      return textTooLargeMessage();
+    }
+    const attachments = prompt.images ?? [];
+    const videos = attachments.filter((item) => item.kind === "video").length;
+    if (videos > MAX_VIDEOS_PER_MESSAGE) return formatRejection("too_many_videos");
+    if (attachments.length - videos > maxAttachments) return formatRejection("too_many_attachments");
+    const oversized = attachments.find((item) => queuedUploadBytes(item) > (item.kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes));
+    if (oversized) {
+      return formatUploadTooLarge(queuedUploadBytes(oversized), oversized.kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes);
+    }
+    const total = attachments.reduce((sum, item) => sum + (item.kind === "video" ? 0 : queuedUploadBytes(item)), 0);
+    if (total > (ingressLimits?.attachments.max_total_bytes ?? MAX_TOTAL_ATTACHMENT_BYTES)) {
+      return formatRejection("total_too_large");
+    }
+    if ((prompt.sessionMentions?.length ?? 0) > SESSION_MENTIONS_LIMIT) {
+      return t("thread.composer.queued.tooManyMentions", { max: SESSION_MENTIONS_LIMIT });
+    }
+    return null;
+  }, [formatRejection, formatUploadTooLarge, ingressLimits, maxAttachments, maxFileBytes, maxTextBytes, t, textTooLargeMessage]);
+
+  const collectGuidancePrompt = useCallback((): QueuedPrompt => {
+    queuedPromptCounterRef.current += 1;
+    const prompt: QueuedPrompt = {
+      id: `queued-prompt-${Date.now()}-${queuedPromptCounterRef.current}`,
+      text: value.trim(),
+      autoSendPageId: getQueuedPromptPageId(),
+      images: readyImagesToQueuedImages(readyImages),
+      ...(activeTurnId ? { autoAfterTurnId: activeTurnId } : {}),
+      ...(normalizedQuotedContext ? { quotedContext: normalizedQuotedContext } : {}),
+      sessionMentions: activeSessionMentions,
+    };
+    return queuedPrompt ? mergeQueuedPrompt(queuedPrompt, prompt) : prompt;
+  }, [activeSessionMentions, activeTurnId, normalizedQuotedContext, queuedPrompt, readyImages, value]);
 
   const queueGuidancePrompt = useCallback(() => {
-    const text = value.trim();
-    if (!canQueueGuidance || (!text && readyImages.length === 0)) return;
-    if (utf8Bytes(formatQuotedUserMessage(text, normalizedQuotedContext)) > maxTextBytes) {
-      setInlineError(textTooLargeMessage());
+    if (!canQueueGuidance) return;
+    const prompt = collectGuidancePrompt();
+    const error = queuedPromptError(prompt);
+    if (error) {
+      setInlineError(error);
       return;
     }
-    const queuedImages = readyImagesToQueuedImages(readyImages);
-    queuedPromptCounterRef.current += 1;
-    const id = `queued-prompt-${Date.now()}-${queuedPromptCounterRef.current}`;
-    secondEnterPromptIdRef.current = id;
-    setQueuedPrompts((items) => [
-      ...items,
-      {
-        id,
-        text,
-        ...(activeTurnId ? { autoAfterTurnId: activeTurnId } : {}),
-        ...(queuedImages.length > 0 ? { images: queuedImages } : {}),
-        ...(normalizedQuotedContext ? { quotedContext: normalizedQuotedContext } : {}),
-        ...(activeSessionMentions.length > 0
-          ? { sessionMentions: activeSessionMentions }
-          : {}),
-      },
-    ]);
+    secondEnterPromptIdRef.current = prompt.id;
+    setQueuedPrompt(prompt);
     clear();
     clearComposerText();
     onQuotedContextChange?.(null);
-  }, [
-    activeSessionMentions,
-    activeTurnId,
-    canQueueGuidance,
-    clear,
-    clearComposerText,
-    maxTextBytes,
-    normalizedQuotedContext,
-    onQuotedContextChange,
-    readyImages,
-    textTooLargeMessage,
-    value,
-  ]);
+  }, [canQueueGuidance, clear, clearComposerText, collectGuidancePrompt, onQuotedContextChange, queuedPromptError, setQueuedPrompt]);
 
-  const removeQueuedPrompt = useCallback((id: string) => {
+  const removeQueuedPrompt = useCallback(() => {
     secondEnterPromptIdRef.current = null;
-    setQueuedPrompts((items) => items.filter((item) => item.id !== id));
+    setQueuedPrompt(null);
     requestAnimationFrame(() => textareaRef.current?.focus());
-  }, []);
+  }, [setQueuedPrompt]);
 
-  const editQueuedPrompt = useCallback((prompt: QueuedPrompt) => {
+  const editQueuedPrompt = useCallback((pending: QueuedPrompt) => {
+    const prompt = hasComposerContent || normalizedQuotedContext ? collectGuidancePrompt() : pending;
     secondEnterPromptIdRef.current = null;
-    setQueuedPrompts((items) => items.filter((item) => item.id !== prompt.id));
+    setQueuedPrompt(null);
     replaceMentionInput(prompt.text, prompt.text.length);
-    setSelectedSessionMentions(prompt.sessionMentions ?? []);
+    setBoundSessionMentions(prompt.sessionMentions ?? []);
     setInlineError(null);
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
@@ -2009,90 +2163,40 @@ export function ThreadComposer({
     } else {
       clear();
     }
-    resizeTextarea();
-  }, [clear, onQuotedContextChange, replaceMentionInput, resizeTextarea, restoreReadyImages]);
-
-  const moveQueuedPrompt = useCallback((dragId: string, targetId: string) => {
-    if (dragId === targetId) return;
-    secondEnterPromptIdRef.current = null;
-    setQueuedPrompts((items) => {
-      const from = items.findIndex((item) => item.id === dragId);
-      const to = items.findIndex((item) => item.id === targetId);
-      if (from === -1 || to === -1) return items;
-      const next = [...items];
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved);
-      return next;
-    });
-  }, []);
-
-  const observeQueuedSend = useCallback((prompt: QueuedPrompt, result: void | boolean | Promise<void | boolean>) => {
-    const restore = (error?: unknown) => {
-      setQueuedPrompts((items) => (items.some((item) => item.id === prompt.id)
-        ? items
-        : [prompt, ...items]).map(pauseQueuedPrompt));
-      setInlineError(error instanceof Error ? error.message : "Message not sent; queued draft retained");
-    };
-    if (result instanceof Promise) void result.then((accepted) => { if (accepted === false) restore(); }).catch(restore);
-    else if (result === false) restore();
-  }, []);
+    focusTextarea();
+  }, [clear, collectGuidancePrompt, hasComposerContent, normalizedQuotedContext, onQuotedContextChange, replaceMentionInput, focusTextarea, restoreReadyImages, setQueuedPrompt]);
 
   const sendQueuedPrompt = useCallback(
-    (prompt: QueuedPrompt) => {
+    (prompt: QueuedPrompt, extraOptions?: SendOptions) => {
+      if (interactionDisabled) return;
       secondEnterPromptIdRef.current = null;
+      const error = queuedPromptError(prompt);
+      if (error) {
+        setQueuedPrompt(pauseQueuedPrompt(prompt));
+        setInlineError(error);
+        return;
+      }
       const text = prompt.text.trim();
       const queuedImages = queuedImagesToSendImages(prompt.images);
-      setQueuedPrompts((items) => {
-        const remaining = items.filter((item) => item.id !== prompt.id);
-        return isStreaming ? remaining : remaining.map(waitForNextQueuedTurn);
-      });
-      if (text || queuedImages?.length) {
-        const options: SendOptions | undefined = (
-          prompt.quotedContext
-          || prompt.sessionMentions?.length
-          || isStreaming
-        )
-          ? {
-              ...(prompt.quotedContext ? { quotedContext: prompt.quotedContext } : {}),
-              ...(prompt.sessionMentions?.length
-                ? { sessionMentions: prompt.sessionMentions }
-                : {}),
-              ...(isStreaming ? { continueActiveTurn: true } : {}),
-            }
-          : undefined;
-        observeQueuedSend(prompt, onSend(text, queuedImages, options));
-      }
+      const options: SendOptions | undefined = (
+        extraOptions || prompt.quotedContext || prompt.sessionMentions?.length || isStreaming
+      )
+        ? {
+            ...extraOptions,
+            ...(prompt.quotedContext ? { quotedContext: prompt.quotedContext } : {}),
+            ...(prompt.sessionMentions?.length ? { sessionMentions: prompt.sessionMentions } : {}),
+            ...(isStreaming ? { continueActiveTurn: true } : {}),
+          }
+        : undefined;
+      queuedPromptStore.send(prompt, () => (
+        options ? onSend(text, queuedImages, options)
+          : queuedImages?.length ? onSend(text, queuedImages)
+          : onSend(text)
+      ));
       requestAnimationFrame(() => textareaRef.current?.focus());
     },
-    [isStreaming, onSend, observeQueuedSend],
+    [interactionDisabled, isStreaming, onSend, queuedPromptStore, queuedPromptError, setQueuedPrompt],
   );
-
-  const sendNextQueuedPrompt = useCallback(() => {
-    if (queuedPrompts.length === 0) return;
-    const nextPrompt = queuedPrompts.find((prompt) => prompt.text.trim());
-    if (!nextPrompt) {
-      setQueuedPrompts([]);
-      return;
-    }
-    setQueuedPrompts((items) => items.filter((item) => item.id !== nextPrompt.id).map(waitForNextQueuedTurn));
-    const queuedImages = queuedImagesToSendImages(nextPrompt.images);
-    const options: SendOptions | undefined = (
-      nextPrompt.quotedContext || nextPrompt.sessionMentions?.length
-    )
-      ? {
-          ...(nextPrompt.quotedContext ? { quotedContext: nextPrompt.quotedContext } : {}),
-          ...(nextPrompt.sessionMentions?.length
-            ? { sessionMentions: nextPrompt.sessionMentions }
-            : {}),
-        }
-      : undefined;
-    const result = queuedImages?.length && options ? onSend(nextPrompt.text.trim(), queuedImages, options)
-      : queuedImages?.length ? onSend(nextPrompt.text.trim(), queuedImages)
-      : options ? onSend(nextPrompt.text.trim(), undefined, options)
-      : onSend(nextPrompt.text.trim());
-    observeQueuedSend(nextPrompt, result);
-    requestAnimationFrame(() => textareaRef.current?.focus());
-  }, [onSend, queuedPrompts, observeQueuedSend]);
 
   useEffect(() => {
     const previous = previousQueueRunRef.current;
@@ -2100,15 +2204,13 @@ export function ThreadComposer({
     if (!isStreaming) secondEnterPromptIdRef.current = null;
     // Switching to an idle session is not completion of the previous session's run.
     if (previous.key !== pendingQueueKey) return;
-    if (isStreaming || interactionDisabled || queuedPrompts.length === 0) return;
-    const first = queuedPrompts[0];
-    if (first.autoPaused) return;
-    const waitingTurnCompleted = queuedPromptStorageKey !== null && first.autoAfterTurnId !== undefined
-      ? completedTurnIds.includes(first.autoAfterTurnId)
+    if (isStreaming || interactionDisabled || !queuedPrompt || !canAutoSendQueuedPrompt(queuedPrompt)) return;
+    const waitingTurnCompleted = queuedPromptStorageKey !== null && queuedPrompt.autoAfterTurnId !== undefined
+      ? completedTurnIds.includes(queuedPrompt.autoAfterTurnId)
       : previous.isStreaming;
     if (!waitingTurnCompleted) return;
-    sendNextQueuedPrompt();
-  }, [completedTurnIds, interactionDisabled, sendNextQueuedPrompt, isStreaming, pendingQueueKey, queuedPrompts, queuedPromptStorageKey]);
+    sendQueuedPrompt(queuedPrompt);
+  }, [completedTurnIds, interactionDisabled, sendQueuedPrompt, isStreaming, pendingQueueKey, queuedPrompt, queuedPromptStorageKey]);
 
   const submit = useCallback(() => {
     if (modelNeedsSetup) {
@@ -2126,16 +2228,7 @@ export function ThreadComposer({
     }
     // Keep self-contained local previews across drafts and optimistic bubbles.
     // The client decodes these to HTTP binary; WS messages contain only refs.
-    const payload: SendAttachment[] | undefined =
-      readyImages.length > 0
-        ? readyImages.map((img) => ({
-            media: {
-              data_url: img.dataUrl,
-              name: img.file.name,
-            },
-            preview: { kind: img.kind, url: img.dataUrl, name: img.file.name },
-          }))
-        : undefined;
+    const payload = queuedImagesToSendImages(readyImagesToQueuedImages(readyImages));
     const attachedCliApps = activeCliMentionApps.map(cliAppMentionPayload);
     const attachedMcpPresets = activeMcpPresetMentions.map(mcpPresetMentionPayload);
     const options: SendOptions | undefined =
@@ -2166,7 +2259,6 @@ export function ThreadComposer({
       && onStop
     ) {
       handleStop();
-      setQueuedPrompts([]);
       clear();
       clearComposerText();
       onQuotedContextChange?.(null);
@@ -2175,14 +2267,29 @@ export function ThreadComposer({
     const isSlashSideChannel = isSideChannelLifecycle(slashLifecycle);
     const finalizeActiveTurn =
       slashLifecycle === "finalize_active_turn";
+    if (!slashLifecycle) {
+      const prompt = collectGuidancePrompt();
+      const error = queuedPromptError(prompt);
+      if (error) {
+        setInlineError(error);
+        return;
+      }
+      if (queuedPrompt) {
+        sendQueuedPrompt(prompt, options);
+        if (draftKey) draftStore?.delete(draftKey);
+        clear();
+        clearComposerText(!hasTouchPrimaryPointer);
+        onQuotedContextChange?.(null);
+        return;
+      }
+    }
     const submittedDraft = draftKey ? draftStore?.get(draftKey) : undefined;
     const finishSend = () => {
       // A pending send can finish after this composer unmounts and a newer draft is started.
       if (draftKey && draftStore && draftStore.get(draftKey) !== submittedDraft) return;
       if (draftKey) draftStore?.delete(draftKey);
       if (hasTouchPrimaryPointer) textareaRef.current?.blur();
-      // Sending new guidance must not discard other messages still waiting.
-      if (!isStreaming || finalizeActiveTurn) setQueuedPrompts([]);
+      if (!isStreaming || finalizeActiveTurn) setQueuedPrompt(null);
       // Bubble owns the data URL copy; safe to revoke every staged blob
       // preview here without affecting the rendered message.
       clear();
@@ -2222,6 +2329,11 @@ export function ThreadComposer({
     draftStore,
     clear,
     clearComposerText,
+    collectGuidancePrompt,
+    queuedPrompt,
+    queuedPromptError,
+    sendQueuedPrompt,
+    setQueuedPrompt,
     hasTouchPrimaryPointer,
     hasComposerContent,
     handleStop,
@@ -2308,9 +2420,7 @@ export function ThreadComposer({
         if (!e.repeat) queueGuidancePrompt();
         return;
       }
-      const secondEnterPrompt = queuedPrompts.find(
-        (prompt) => prompt.id === secondEnterPromptIdRef.current,
-      );
+      const secondEnterPrompt = queuedPrompt?.id === secondEnterPromptIdRef.current ? queuedPrompt : null;
       if (
         isStreaming
         && value.length === 0
@@ -2326,13 +2436,6 @@ export function ThreadComposer({
       secondEnterPromptIdRef.current = null;
       submit();
     }
-  };
-
-  const onInput: React.FormEventHandler<HTMLTextAreaElement> = (e) => {
-    if ((e.nativeEvent as InputEvent).isComposing) return;
-    const el = e.currentTarget;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 260)}px`;
   };
 
   const onFilePick: React.ChangeEventHandler<HTMLInputElement> = (e) => {
@@ -2398,7 +2501,7 @@ export function ThreadComposer({
   const relaxedHeroInput = isHero && images.length === 0 && !isStreaming;
   const compactIdle = compactWhenIdle && !compactControls && !isHero && !composerFocused
     && value.length === 0 && images.length === 0 && !inlineError
-    && !normalizedQuotedContext && !queuedPrompts.length && !goalState?.active
+    && !normalizedQuotedContext && !queuedPrompt && !goalState?.active
     && !isDragging && !sessionDragPreview && !voiceRecorder.isRecording && !showProjectPicker;
   useLayoutEffect(() => {
     if (!compactWhenIdle || compactControls) return;
@@ -2467,15 +2570,15 @@ export function ThreadComposer({
   ) : null;
   const inputTextClasses = cn(
     // Keep the overlay's CJK/Latin spacing aligned with the native textarea caret.
-    "w-full resize-none bg-transparent [text-autospace:no-autospace]",
+    "w-full resize-none bg-transparent text-composer [text-autospace:no-autospace]",
     compactControls
-      ? "min-h-[52px] px-4 pb-2 pt-3 text-[16px] leading-6"
+      ? "min-h-[52px] px-4 pb-2 pt-3"
       : isHero
         ? cn(
-            "min-h-[78px] px-4 text-[16px] leading-6 sm:px-5",
+            "min-h-[78px] px-4 sm:px-5",
             relaxedHeroInput ? "pb-2 pt-[27px]" : "pb-1.5 pt-4",
           )
-        : "min-h-[50px] px-3.5 pb-1.5 pt-3 text-[16px] leading-5 sm:px-4",
+        : "min-h-[50px] px-3.5 pb-1.5 pt-3 sm:px-4",
   );
   const paletteBeside = showAnyPalette && slashPaletteLayout.placement === "beside";
 
@@ -2556,8 +2659,8 @@ export function ThreadComposer({
           "thread-composer-surface group/composer relative mx-auto flex w-full flex-col overflow-visible transition-all duration-200",
           paletteBeside && "col-start-1 row-start-1",
           isHero
-            ? "max-w-[58rem] rounded-prominent bg-muted/80 focus-within:bg-muted dark:bg-card dark:focus-within:bg-white/[0.06]"
-            : "max-w-[49.5rem] rounded-panel bg-muted/80 focus-within:bg-muted dark:bg-card dark:focus-within:bg-white/[0.06]",
+            ? "max-w-[var(--composer-content-width,58rem)] rounded-prominent bg-muted/80 focus-within:bg-muted dark:bg-card dark:focus-within:bg-white/[0.06]"
+            : "max-w-[var(--composer-content-width,49.5rem)] rounded-panel bg-muted/80 focus-within:bg-muted dark:bg-card dark:focus-within:bg-white/[0.06]",
           compactWhenIdle && "thread-composer-collapsible transition-colors motion-reduce:transition-none",
           interactionDisabled && "opacity-60",
           sessionDragPreview && "ring-1 ring-primary/25",
@@ -2566,29 +2669,18 @@ export function ThreadComposer({
             "goal-shell-glow ring-1 ring-sky-400/35 motion-reduce:ring-sky-400/25 dark:ring-sky-400/45",
         )}
       >
-        {queuedPrompts.length > 0 ? (
-          <QueuedPromptStack
-            prompts={queuedPrompts}
-            isHero={isHero}
+        {queuedPrompt ? (
+          <QueuedPromptPreview
+            prompt={queuedPrompt}
+            disabled={interactionDisabled}
+            editDisabled={encoding || hasErrors}
             label={t("thread.composer.queued.label")}
             guideLabel={t("thread.composer.queued.guide")}
             deleteLabel={t("thread.composer.queued.delete")}
-            dragLabel={t("thread.composer.queued.drag")}
             editLabel={t("thread.composer.queued.edit")}
-            onGuide={sendQueuedPrompt}
+            onGuide={() => sendQueuedPrompt(queuedPrompt)}
             onDelete={removeQueuedPrompt}
-            onEdit={editQueuedPrompt}
-            onDragStart={(id) => {
-              secondEnterPromptIdRef.current = null;
-              draggedQueuedPromptIdRef.current = id;
-            }}
-            onDragEnd={() => {
-              draggedQueuedPromptIdRef.current = null;
-            }}
-            onDrop={(targetId) => {
-              const dragId = draggedQueuedPromptIdRef.current;
-              if (dragId) moveQueuedPrompt(dragId, targetId);
-            }}
+            onEdit={() => editQueuedPrompt(queuedPrompt)}
           />
         ) : null}
         {images.length > 0 ? (
@@ -2608,7 +2700,9 @@ export function ThreadComposer({
                     current: formatBytes(current),
                   })
                 }
-                formatError={formatRejection}
+                formatError={(reason) => reason === "too_large"
+                  ? formatUploadTooLarge(img.file.size, img.kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes)
+                  : formatRejection(reason)}
                 onRemove={() => removeChip(img.id)}
                 onKeyDown={onChipKey(img.id)}
                 registerRef={(el) => {
@@ -2625,7 +2719,7 @@ export function ThreadComposer({
             aria-label={t("thread.composer.quotedContext")}
           >
             <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-            <p className="line-clamp-2 min-w-0 flex-1 text-[13px]/[1.45]">
+            <p className="line-clamp-2 min-w-0 flex-1 text-reading-small">
               {normalizedQuotedContext}
             </p>
             <button
@@ -2667,7 +2761,6 @@ export function ThreadComposer({
             onBlur={() => {
               secondEnterPromptIdRef.current = null;
             }}
-            onInput={onInput}
             onKeyDown={onKeyDown}
             onKeyUp={() => setCursorPosition(rawSelection().start)}
             onSelect={() => setCursorPosition(rawSelection().start)}
@@ -2866,40 +2959,29 @@ export function ThreadComposer({
   );
 }
 
-function QueuedPromptStack({
-  prompts,
-  isHero,
+function QueuedPromptPreview({
+  prompt,
+  disabled,
+  editDisabled,
   label,
   guideLabel,
   deleteLabel,
-  dragLabel,
   editLabel,
   onGuide,
   onDelete,
   onEdit,
-  onDragStart,
-  onDragEnd,
-  onDrop,
 }: {
-  prompts: QueuedPrompt[];
-  isHero: boolean;
+  prompt: QueuedPrompt;
+  disabled: boolean;
+  editDisabled: boolean;
   label: string;
   guideLabel: string;
   deleteLabel: string;
-  dragLabel: string;
   editLabel: string;
-  onGuide: (prompt: QueuedPrompt) => void;
-  onDelete: (id: string) => void;
-  onEdit: (prompt: QueuedPrompt) => void;
-  onDragStart: (id: string) => void;
-  onDragEnd: () => void;
-  onDrop: (targetId: string) => void;
+  onGuide: () => void;
+  onDelete: () => void;
+  onEdit: () => void;
 }) {
-  const stripMaxHeight = Math.min(
-    320,
-    96 + prompts.length * 34 + Math.max(0, prompts.length - 1) * 4,
-  );
-
   return (
     <div
       role="group"
@@ -2909,150 +2991,57 @@ function QueuedPromptStack({
         "border border-black/[0.05] bg-popover/90 p-1.5",
         "shadow-[0_10px_28px_rgba(15,23,42,0.07)] backdrop-blur-md",
         "dark:border-white/[0.08] dark:bg-popover/90 dark:shadow-[0_14px_34px_rgba(0,0,0,0.30)]",
-        isHero ? "max-w-none" : "max-w-none",
       )}
-      style={{ "--composer-strip-max-height": `${stripMaxHeight}px` } as CSSProperties}
+      style={{ "--composer-strip-max-height": "224px" } as CSSProperties}
       aria-label={label}
     >
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 px-2 pb-1">
-        <span className="text-[11.5px] font-semibold text-foreground/75">{label}</span>
-      </div>
-      <div className="flex max-h-[216px] flex-col gap-1 overflow-y-auto">
-        {prompts.map((prompt) => (
-          <QueuedPromptRow
-            key={prompt.id}
-            prompt={prompt}
-            isHero={isHero}
-            guideLabel={guideLabel}
-            deleteLabel={deleteLabel}
-            dragLabel={dragLabel}
-            editLabel={editLabel}
-            onGuide={onGuide}
-            onDelete={onDelete}
-            onEdit={onEdit}
-            onDragStart={onDragStart}
-            onDragEnd={onDragEnd}
-            onDrop={onDrop}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function QueuedPromptRow({
-  prompt,
-  isHero,
-  guideLabel,
-  deleteLabel,
-  dragLabel,
-  editLabel,
-  onGuide,
-  onDelete,
-  onEdit,
-  onDragStart,
-  onDragEnd,
-  onDrop,
-}: {
-  prompt: QueuedPrompt;
-  isHero: boolean;
-  guideLabel: string;
-  deleteLabel: string;
-  dragLabel: string;
-  editLabel: string;
-  onGuide: (prompt: QueuedPrompt) => void;
-  onDelete: (id: string) => void;
-  onEdit: (prompt: QueuedPrompt) => void;
-  onDragStart: (id: string) => void;
-  onDragEnd: () => void;
-  onDrop: (targetId: string) => void;
-}) {
-  const displayLabel = queuedPromptLabel(prompt);
-
-  return (
-    <div
-      data-queued-prompt-row="true"
-      onDragEnter={(event) => {
-        event.preventDefault();
-        onDrop(prompt.id);
-      }}
-      onDragOver={(event) => {
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "move";
-      }}
-      onDrop={(event) => {
-        event.preventDefault();
-        onDrop(prompt.id);
-      }}
-      onDragEnd={onDragEnd}
-      className={cn(
-        "queued-prompt-row group/queued flex min-h-8 items-center gap-1.5 rounded-control px-2 py-0.5",
-        "text-[13px] transition-colors hover:bg-muted/55 dark:hover:bg-white/[0.055]",
-        isHero && "text-[13.5px]",
-      )}
-    >
-      <span
-        draggable
-        role="button"
-        tabIndex={0}
-        aria-label={dragLabel}
-        onDragStart={(event) => {
-          event.dataTransfer.effectAllowed = "move";
-          event.dataTransfer.setData("text/plain", prompt.id);
-          suppressNativeDragPreview(event.dataTransfer);
-          onDragStart(prompt.id);
-        }}
-        onDragEnd={onDragEnd}
-        className={cn(
-          "inline-flex h-7 w-7 shrink-0 cursor-grab items-center justify-center rounded-lg",
-          "text-muted-foreground/45 transition-colors hover:text-muted-foreground",
-          "active:cursor-grabbing",
-        )}
-      >
-        <GripVertical className="pointer-events-none h-3.5 w-3.5" aria-hidden />
-      </span>
-      <div className="flex min-h-7 min-w-0 flex-1 items-center">
-        <p
-          title={displayLabel}
-          className={cn(
-            "line-clamp-3 whitespace-pre-wrap break-words font-medium leading-[1.28] text-foreground/88",
-            isHero && "text-[13.5px]",
-          )}
+      <div className="flex min-w-0 items-center gap-1 px-1 pb-1">
+        <span className="min-w-0 flex-1 truncate text-[11.5px] font-semibold text-foreground/75">{label}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={disabled}
+          className="h-7 shrink-0 rounded-full px-2 text-[11.5px] font-medium text-muted-foreground hover:bg-muted/70 hover:text-foreground dark:hover:bg-white/[0.07]"
+          onClick={onGuide}
         >
-          {displayLabel}
-        </p>
+          <CornerDownRight className="mr-1 h-3 w-3" aria-hidden />
+          {guideLabel}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          disabled={disabled || editDisabled}
+          aria-label={editLabel}
+          title={editLabel}
+          className="h-7 w-7 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+          onClick={onEdit}
+        >
+          <EditIcon className="h-3.5 w-3.5" aria-hidden />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          disabled={disabled}
+          aria-label={deleteLabel}
+          className="h-7 w-7 shrink-0 rounded-full text-muted-foreground hover:text-destructive"
+          onClick={onDelete}
+        >
+          <Trash2 className="h-3 w-3" aria-hidden />
+        </Button>
       </div>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="h-7 shrink-0 rounded-full px-2 text-[11.5px] font-medium text-muted-foreground hover:bg-muted/70 hover:text-foreground dark:hover:bg-white/[0.07]"
-        onClick={() => onGuide(prompt)}
-      >
-        <CornerDownRight className="mr-1 h-3 w-3" aria-hidden />
-        {guideLabel}
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        aria-label={editLabel}
-        title={editLabel}
-        className="h-7 w-7 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
-        onClick={() => onEdit(prompt)}
-      >
-        <EditIcon className="h-3.5 w-3.5" aria-hidden />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        aria-label={deleteLabel}
-        className="h-7 w-7 shrink-0 rounded-full text-muted-foreground hover:text-destructive"
-        onClick={() => onDelete(prompt.id)}
-      >
-        <Trash2 className="h-3 w-3" aria-hidden />
-      </Button>
+      <div className="max-h-40 overflow-y-auto px-2 pb-1 text-[13px]">
+        <p className="whitespace-pre-wrap break-words font-medium leading-relaxed text-foreground/88">
+          {queuedPromptLabel(prompt)}
+        </p>
+        {prompt.text && prompt.images?.length ? (
+          <p className="mt-1 break-words text-xs text-muted-foreground">
+            {prompt.images.map((image) => image.name).filter(Boolean).join(", ")}
+          </p>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -3479,6 +3468,8 @@ function AttachmentChip({
           <div className="flex h-full w-full items-center justify-center">
             {image.kind === "image" ? (
               <ImageIcon className="h-4 w-4 text-muted-foreground" aria-hidden />
+            ) : image.kind === "video" ? (
+              <Video className="h-4 w-4 text-muted-foreground" aria-hidden />
             ) : (
               <FileText className="h-4 w-4 text-muted-foreground" aria-hidden />
             )}

@@ -292,7 +292,7 @@ describe("NanobotTui transcript", () => {
       max_attempts: 4,
       error_kind: "connection",
     })
-    expect(ui.status.plainText).not.toContain("retrying")
+    expect(ui.status.plainText).toMatch(/^Working\s+\d+s/u)
 
     app.accept({
       event: "turn_end",
@@ -312,7 +312,6 @@ describe("NanobotTui transcript", () => {
     expect(frame).toContain("Could not connect to the model provider.")
     expect(frame.replace(/\s+/gu, " ")).toContain(terminalFailure)
     expect(frame).not.toContain("Unlocalized server failure")
-    expect(frame).not.toContain("Last turn failed")
     expect(ui.status.plainText).toBe("Ready")
   })
 

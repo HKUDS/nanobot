@@ -1,11 +1,9 @@
 import { channelValidationMessage } from "./validationMessages";
 import {
   Suspense,
-  useCallback,
   useEffect,
   useId,
   useMemo,
-  useRef,
   useState,
   type ComponentType,
   type ReactNode,
@@ -21,7 +19,7 @@ import type {
   ChannelFeatureAction,
   ChannelPluginConnectFlowProps,
 } from "@/channel-plugins/types";
-import { useAutoSave } from "@/components/settings/shared/useAutoSave";
+import { useEditCompletion } from "@/components/settings/shared/useEditCompletion";
 import {
   type ChannelProviderPreset,
   type ChannelSetupPresentation,
@@ -121,7 +119,7 @@ export function ChannelSetupPanel({
   const header = (
     <div className="flex min-w-0 items-center gap-3">
       <ChannelLogo feature={feature} showBrandLogos={showBrandLogos} />
-      <h3 className="sr-only">{displayName}</h3>
+      <h3 className="text-ui-heading">{displayName}</h3>
       {missingSupport && feature.install_supported ? (
         <Button
           type="button"
@@ -188,10 +186,9 @@ function ChannelSetupSurface({
   const [saving, setSaving] = useState(false);
   const [autoSaving, setAutoSaving] = useState(false);
   const [autoSaveState, setAutoSaveState] = useState<"idle" | "saved">("idle");
-  const autoSavePromiseRef = useRef<Promise<boolean> | null>(null);
   const [validating, setValidating] = useState(false);
   const [pendingEnabled, setPendingEnabled] = useState<boolean | null>(null);
-  const actionPending = saving || autoSaving || validating || pendingEnabled !== null;
+  const actionPending = saving || validating || pendingEnabled !== null;
   const [validation, setValidation] = useState<ChannelValidationPayload | null>(null);
   const [visibleSecrets, setVisibleSecrets] = useState<Record<string, boolean>>({});
   const [touchedFields, setTouchedFields] = useState<Set<string>>(() => new Set());
@@ -206,10 +203,6 @@ function ChannelSetupSurface({
   );
   const mode = setup.mode ?? "credentials";
   const fields = setup.fields ?? [];
-  const secretFieldKeys = useMemo(
-    () => new Set(fields.filter((field) => field.secret).map((field) => field.key)),
-    [fields],
-  );
   const requirementKeys = new Set(
     (setup.requirements ?? []).flatMap((requirement) => requirement.alternatives.flat()),
   );
@@ -239,7 +232,15 @@ function ChannelSetupSurface({
     setClearedSecrets(new Set());
     setFieldErrors({});
     setFieldValues(defaultChannelFieldValues(editableFields, feature.config_values));
-  }, [configValuesKey, feature.name]);
+  }, [feature.name]);
+
+  useEffect(() => {
+    const saved = defaultChannelFieldValues(editableFields, feature.config_values);
+    setFieldValues((current) => ({
+      ...saved,
+      ...Object.fromEntries(Object.entries(current).filter(([key]) => touchedFields.has(key))),
+    }));
+  }, [configValuesKey]);
 
   const toggleSecret = (key: string) => {
     setVisibleSecrets((current) => ({ ...current, [key]: !current[key] }));
@@ -263,22 +264,8 @@ function ChannelSetupSurface({
     setAutoSaveState("idle");
   };
 
-  const saveConnectionSettings = async () => {
-    if (mode !== "connect" || saving || !touchedFields.size) return;
-    setSaving(true);
-    try {
-      const payload = await configureChannel(client, feature.name,
-        channelValuesForSubmit(editableFields, fieldValues, touchedFields, clearedSecrets));
-      setTouchedFields(new Set());
-      if (payload.nanobot_features) onFeaturesUpdate(payload.nanobot_features);
-    } catch (err) {
-      setNotice((err as Error).message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const setSecretCleared = (key: string, clear: boolean) => {
+    edits.complete();
     setClearedSecrets((current) => {
       const next = new Set(current);
       if (clear) next.add(key);
@@ -289,6 +276,7 @@ function ChannelSetupSurface({
   };
 
   const applyPreset = (preset: ChannelProviderPreset) => {
+    edits.complete();
     const values = Object.fromEntries(
       Object.entries(preset.values).filter(([key]) => !(fieldValues[key] ?? "").trim()),
     );
@@ -302,63 +290,35 @@ function ChannelSetupSurface({
     setAutoSaveState("idle");
   };
 
-  const credentialDirty = touchedFields.size > 0 || clearedSecrets.size > 0;
-  const touchedSecret = fields.some(
-    (field) => field.secret && touchedFields.has(field.key),
-  );
-  const saveCredentialDraft = useCallback(async (): Promise<boolean> => {
-    const activeSave = autoSavePromiseRef.current;
-    if (activeSave) return activeSave;
-    if (mode !== "credentials" || !credentialDirty) return true;
+  const draftDirty = touchedFields.size > 0 || clearedSecrets.size > 0;
+  const saveChannelDraft = async (): Promise<boolean> => {
+    if (mode !== "credentials" && mode !== "connect") return true;
     if (saving || validating || pendingEnabled !== null) return false;
 
-    const values = channelValuesForSubmit(fields, fieldValues, touchedFields, clearedSecrets);
-    const save = (async () => {
-      setAutoSaving(true);
-      setAutoSaveState("idle");
-      setNotice(null);
-      try {
-        const payload = await configureChannel(client, feature.name, values);
-        setTouchedFields(new Set());
-        setClearedSecrets(new Set());
-        setAutoSaveState("saved");
-        if (payload.nanobot_features) onFeaturesUpdate(payload.nanobot_features);
-        return true;
-      } catch (err) {
-        setNotice((err as Error).message);
-        return false;
-      } finally {
-        setAutoSaving(false);
-      }
-    })();
-    autoSavePromiseRef.current = save;
-    const saved = await save;
-    if (autoSavePromiseRef.current === save) autoSavePromiseRef.current = null;
-    return saved;
-  }, [
-    clearedSecrets,
-    client,
-    credentialDirty,
-    feature.name,
-    fieldValues,
-    fields,
-    mode,
-    onFeaturesUpdate,
-    pendingEnabled,
-    saving,
-    touchedFields,
-    validating,
-  ]);
-  const saveSecretOnBlur = (key: string) => {
-    if (secretFieldKeys.has(key)) void saveCredentialDraft();
+    const values = channelValuesForSubmit(editableFields, fieldValues, touchedFields, clearedSecrets);
+    setAutoSaving(true);
+    setAutoSaveState("idle");
+    setNotice(null);
+    try {
+      const payload = await configureChannel(client, feature.name, values);
+      setTouchedFields((current) => current === touchedFields ? new Set() : current);
+      setClearedSecrets((current) => current === clearedSecrets ? new Set() : current);
+      setAutoSaveState("saved");
+      if (payload.nanobot_features) onFeaturesUpdate(payload.nanobot_features);
+      return true;
+    } catch (err) {
+      setNotice((err as Error).message);
+      return false;
+    } finally {
+      setAutoSaving(false);
+    }
   };
-
-  useAutoSave(
+  const edits = useEditCompletion(
     { fieldValues, touchedFields: [...touchedFields], clearedSecrets: [...clearedSecrets] },
-    mode === "credentials" && credentialDirty,
-    actionPending,
-    () => void saveCredentialDraft(),
-    !touchedSecret,
+    (mode === "credentials" || mode === "connect") && draftDirty,
+    saveChannelDraft,
+    true,
+    feature.name,
   );
 
   useEffect(() => {
@@ -369,9 +329,9 @@ function ChannelSetupSurface({
 
   useEffect(() => {
     if (!onBeforeCloseChange) return;
-    onBeforeCloseChange(credentialDirty ? saveCredentialDraft : null);
+    onBeforeCloseChange(draftDirty ? edits.commit : null);
     return () => onBeforeCloseChange(null);
-  }, [credentialDirty, onBeforeCloseChange, saveCredentialDraft]);
+  }, [draftDirty, onBeforeCloseChange, edits.commit]);
 
   const copyCommand = () => {
     if (!setup.command) return;
@@ -494,23 +454,28 @@ function ChannelSetupSurface({
     }
   };
 
-  return <ChannelSetupSurfaceView
+  return <div onChangeCapture={edits.onChangeCapture} onFocusCapture={edits.onFocusCapture} onBlurCapture={edits.onBlurCapture}><ChannelSetupSurfaceView
     header={header} feature={feature} setup={setup}
     primaryFields={primaryFields} advancedFields={advancedFields} savedSecretFields={savedSecretFields}
     availablePresets={availablePresets} configuredFields={configuredFields}
     fieldValues={fieldValues} visibleSecrets={visibleSecrets} clearedSecrets={clearedSecrets} fieldErrors={fieldErrors}
     actionPending={actionPending} enabled={enabled} autoSaving={autoSaving} autoSaveState={autoSaveState}
     advancedOpen={advancedOpen} advancedPanelId={advancedPanelId} validation={validation} validating={validating} notice={notice}
-    onAdvancedOpenChange={setAdvancedOpen} onChangeField={setFieldValue} onFieldBlur={saveSecretOnBlur}
+    onAdvancedOpenChange={(open) => {
+      if (!open && edits.needsCompletion()) {
+        void edits.commit().then((saved) => { if (saved) setAdvancedOpen(false); });
+      } else setAdvancedOpen(open);
+    }} onChangeField={setFieldValue}
     onToggleSecret={toggleSecret} onClearSecret={setSecretCleared} onApplyPreset={applyPreset}
     onSubmit={saveCredentialSettings} onCheckConnection={checkCurrentSettings} onToggleEnabled={toggleEnabled}
-    onSaveConnectionSettings={saveConnectionSettings} onCopyCommand={copyCommand} onNotice={setNotice}
+    onCopyCommand={copyCommand} onNotice={setNotice}
     connectFlow={mode === "connect" && ConnectFlow ? <Suspense fallback={<ChannelPluginLoading compact />}>
       <ConnectFlow token={token} feature={feature}
         idleLabel={setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect")}
-        connectRequestId={connectRequestId} onFeaturesUpdate={onFeaturesUpdate} />
+        connectRequestId={connectRequestId} onOpenAdvanced={() => setAdvancedOpen(true)}
+        onFeaturesUpdate={onFeaturesUpdate} />
     </Suspense> : undefined}
-  />;
+  /></div>;
 }
 
 function ChannelPluginLoading({ compact = false }: { compact?: boolean }) {

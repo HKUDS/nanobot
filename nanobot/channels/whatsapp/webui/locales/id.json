@@ -16,9 +16,8 @@
           "allowlist": "Daftar izin"
         }
       },
-      "proxy": {
-        "label": "Proxy jaringan",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "Gunakan proxy"
       }
     }
   },

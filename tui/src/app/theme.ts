@@ -4,6 +4,7 @@ import {
   SyntaxStyle,
   TextAttributes,
   parseColor,
+  rgbToHex,
   type ColorInput,
   type TextChunk,
 } from "@opentui/core"
@@ -142,6 +143,13 @@ export function transcriptTheme(palette: Palette, backgroundKnown: boolean): Tra
     userBackground: backgroundKnown ? palette.userBackground : null,
     border: palette.border,
     syntax: syntaxStyle(palette),
+    diagramColors: {
+      foreground: rgbToHex(parseColor(palette.text)),
+      muted: rgbToHex(parseColor(palette.muted)),
+      surface: rgbToHex(parseColor(palette.userBackground)),
+      border: rgbToHex(parseColor(palette.border)),
+      accent: rgbToHex(parseColor(palette.accent)),
+    },
   }
 }
 

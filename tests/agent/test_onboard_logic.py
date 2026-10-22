@@ -313,16 +313,6 @@ class TestFormatValue:
 class TestSyncWorkspaceTemplates:
     """Tests for sync_workspace_templates file synchronization."""
 
-    def test_creates_missing_files(self, tmp_path):
-        """Should create template files that don't exist."""
-        workspace = tmp_path / "workspace"
-
-        added = sync_workspace_templates(workspace, silent=True)
-
-        # Check that some files were created
-        assert isinstance(added, list)
-        # The actual files depend on the templates directory
-
     def test_does_not_overwrite_existing_files(self, tmp_path):
         """Should not overwrite files that already exist."""
         workspace = tmp_path / "workspace"
@@ -398,13 +388,16 @@ class TestProviderChannelInfo:
         assert "openai_codex" not in names
         assert "github_copilot" not in names
 
-    def test_get_channel_names_returns_dict(self):
-        from nanobot.cli.onboard import _get_channel_names
+    def test_get_channel_names_maps_display_names(self, monkeypatch):
+        monkeypatch.setattr(onboard_wizard, "_get_channel_info", lambda: {
+            "first": ("First channel", Config),
+            "second": ("Second channel", Config),
+        })
 
-        names = _get_channel_names()
-        assert isinstance(names, dict)
-        # Should include at least some channels
-        assert len(names) >= 0
+        assert onboard_wizard._get_channel_names() == {
+            "first": "First channel",
+            "second": "Second channel",
+        }
 
     def test_get_provider_info_returns_valid_structure(self):
         from nanobot.cli.onboard import _get_provider_info
@@ -1090,7 +1083,8 @@ class TestMainMenuInteraction:
 
         config = Config()
         config.providers.openai.api_key = "${UNRELATED_MISSING_KEY}"
-        config.providers.openai_codex.proxy = "${CODEX_PROXY}"
+        config.network.proxy = "${CODEX_PROXY}"
+        config.providers.openai_codex.use_proxy = True
         token = SimpleNamespace(access="existing-token", account_id="account-123")
         token_proxies: list[str | None] = []
         login_calls: list[object] = []
@@ -1113,7 +1107,8 @@ class TestMainMenuInteraction:
         assert token_proxies == ["http://127.0.0.1:8080"]
         assert login_calls == []
         assert config.providers.openai.api_key == "${UNRELATED_MISSING_KEY}"
-        assert config.providers.openai_codex.proxy == "${CODEX_PROXY}"
+        assert config.network.proxy == "${CODEX_PROXY}"
+        assert config.providers.openai_codex.use_proxy is True
 
     def test_quick_start_openai_codex_reports_incomplete_installation(self, monkeypatch):
         import oauth_cli_kit
@@ -1139,7 +1134,8 @@ class TestMainMenuInteraction:
         import oauth_cli_kit
 
         config = Config()
-        config.providers.openai_codex.proxy = "http://127.0.0.1:8080"
+        config.network.proxy = "http://127.0.0.1:8080"
+        config.providers.openai_codex.use_proxy = True
         prompts: list[str] = []
         printed: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
@@ -1777,26 +1773,6 @@ class TestMainMenuInteraction:
         assert loginchat["enabled"] is True
         assert calls == {"force": False}
 
-    def test_main_menu_dispatch_includes_channel_common(self):
-        """Advanced menu dispatch should route [H] to Channel Common."""
-
-        # We verify by checking the dispatch table is set up correctly
-        # The menu items are defined inline in run_onboard, so we test
-        # that _configure_general_settings handles the new sections.
-        from nanobot.cli.onboard import _SETTINGS_GETTER, _SETTINGS_SECTIONS, _SETTINGS_SETTER
-
-        assert "Channel Common" in _SETTINGS_SECTIONS
-        assert "Channel Common" in _SETTINGS_GETTER
-        assert "Channel Common" in _SETTINGS_SETTER
-
-    def test_main_menu_dispatch_includes_api_server(self):
-        """Advanced menu dispatch should route [I] to API Server."""
-        from nanobot.cli.onboard import _SETTINGS_GETTER, _SETTINGS_SECTIONS, _SETTINGS_SETTER
-
-        assert "API Server" in _SETTINGS_SECTIONS
-        assert "API Server" in _SETTINGS_GETTER
-        assert "API Server" in _SETTINGS_SETTER
-
     def test_run_onboard_channel_common_edit(self, monkeypatch):
         """run_onboard should handle [H] Channel Common through Advanced Settings."""
         initial_config = Config()
@@ -2164,12 +2140,6 @@ class TestModelPresetWizard:
         _handle_model_preset_field(defaults, "model_preset", "Model Preset", "fast")
         assert defaults.model_preset is None
         _MODEL_PRESET_CACHE.clear()
-
-    def test_main_menu_dispatch_includes_model_presets(self):
-        """_configure_model_presets should be importable and callable."""
-        from nanobot.cli.onboard import _configure_model_presets
-
-        assert callable(_configure_model_presets)
 
     def test_run_onboard_model_presets_edit(self, monkeypatch):
         """run_onboard should handle [M] Model Presets through Advanced Settings."""

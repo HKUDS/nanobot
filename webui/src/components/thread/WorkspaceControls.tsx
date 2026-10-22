@@ -121,7 +121,7 @@ function WorkspaceDirectorySkeleton() {
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
-    const measure = () => setRows(Math.max(1, Math.ceil(viewport.clientHeight / DIRECTORY_ROW_HEIGHT)));
+    const measure = () => setRows(Math.max(1, Math.floor(viewport.clientHeight / DIRECTORY_ROW_HEIGHT)));
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(viewport);
@@ -129,7 +129,7 @@ function WorkspaceDirectorySkeleton() {
   }, []);
   const widths = ["64%", "78%", "52%", "70%", "60%", "74%"];
   return (
-    <div ref={viewportRef} role="status" aria-label={t("workspace.picker.loading")} className="workspace-directory-loading h-full">
+    <div ref={viewportRef} role="status" aria-label={t("workspace.picker.loading")} className="workspace-directory-loading flex h-full flex-col justify-center">
       <span className="sr-only">{t("workspace.picker.loading")}</span>
       <div aria-hidden="true">
         {Array.from({ length: rows }, (_, index) => (
@@ -636,7 +636,7 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
             <div className={cn("mr-[var(--picker-toolbar-inset)] flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[var(--picker-field-radius)] bg-[#fcfcfc] dark:bg-muted", compact && showLocations && canBrowse && "hidden")}>
             <div ref={attachColumns} data-workspace-columns className="sidebar-scrollbar flex flex-1 min-h-0 min-w-0 overflow-x-auto overscroll-x-contain">
               {columns.map((column, columnIndex) => (!compact || columnIndex === currentColumnIndex) && <WorkspaceDirectoryColumn key={columnIndex} options={column.options} selectedPath={column.selectedPath} initialScrollTop={previewingPath ? 0 : currentVisit.scrollTops[columnIndex] ?? 0} visitRevision={history.revision} activeIndex={highlightActive && columnIndex === activeColumn ? activeOption : null}
-                id={`${optionsId}-${columnIndex}`} data-workspace-column={columnIndex} data-current-directory={columnIndex === currentColumnIndex ? "" : undefined} role="listbox" tabIndex={0} aria-activedescendant={highlightActive && columnIndex === activeColumn && column.options.length ? `${optionsId}-${columnIndex}-${activeOption}` : undefined} aria-label={column.path || t("thread.composer.workspace.projectAria")} aria-busy={columnIndex === currentColumnIndex && loading} style={{ width: `${compact ? 100 : 100 / columnCount}%` }} className="sidebar-scrollbar relative min-w-0 shrink-0 overflow-x-hidden overflow-y-auto px-2 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50"
+                id={`${optionsId}-${columnIndex}`} data-workspace-column={columnIndex} data-current-directory={columnIndex === currentColumnIndex ? "" : undefined} role="listbox" tabIndex={0} aria-activedescendant={highlightActive && columnIndex === activeColumn && column.options.length ? `${optionsId}-${columnIndex}-${activeOption}` : undefined} aria-label={column.path || t("thread.composer.workspace.projectAria")} aria-busy={columnIndex === currentColumnIndex && loading} style={{ width: `${compact ? 100 : 100 / columnCount}%` }} className="sidebar-scrollbar relative min-w-0 shrink-0 overflow-x-hidden overflow-y-auto px-2 outline-none [scrollbar-gutter:stable] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50"
                 onFocus={event => { if (event.target === event.currentTarget) { setActiveColumn(columnIndex); setActiveIndex(0); } }}
                 onKeyDown={event => {
                   if (event.target !== event.currentTarget || event.altKey || event.metaKey || event.ctrlKey || pickingFolder) return;

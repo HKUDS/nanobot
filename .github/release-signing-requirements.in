@@ -1,0 +1,3 @@
+# This isolated signing job never installs nanobot or candidate dependencies.
+sigstore==4.5.0
+packaging==26.3

@@ -43,6 +43,7 @@ from nanobot.session.summary import (
     SUMMARY_CONTINUATION_TEXT,
     SessionSummaryCheckpoint,
 )
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import (
     estimate_prompt_tokens_chain,
     maybe_persist_tool_result,
@@ -529,6 +530,11 @@ class ContextGovernor:
                 if message.get("role") == "tool"
                 and isinstance(message.get("tool_call_id"), str)
             )
+            if response.provider_compaction_event_id is None:
+                response.provider_compaction_event_id = uuid4().hex
+                await shield_and_drain(state.events.emit(ContextCompactionEvent(
+                    response.provider_compaction_event_id, "succeeded", reason="provider_native",
+                )))
         if (
             not response.provider_compaction_applied
             or response.provider_compaction_state is None
@@ -553,39 +559,17 @@ class ContextGovernor:
             )
             return
 
-        compaction_id = uuid4().hex
-        await state.events.emit(
-            ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
+        summary = await compaction.consolidate_provider_compaction(
+            response.provider_compaction_state,
+            await self.prepare_in_background(deepcopy, accepted_messages),
+            compaction.active_summary,
         )
-        try:
-            summary = await compaction.consolidate_provider_compaction(
-                response.provider_compaction_state,
-                await self.prepare_in_background(deepcopy, accepted_messages),
-                compaction.active_summary,
-            )
-        except (Exception, asyncio.CancelledError) as exc:
-            await state.events.emit(
-                ContextCompactionEvent(
-                    compaction_id=compaction_id,
-                    phase="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
-                ),
-            )
-            raise
         if not summary:
-            await state.events.emit(
-                ContextCompactionEvent(compaction_id=compaction_id, phase="failed"),
-            )
             return
         compaction.active_summary = summary
         compaction.summary_checkpoint = SessionSummaryCheckpoint(
             summary=summary,
             transcript_boundary=transcript_boundary,
-        )
-        await state.events.emit(
-            ContextCompactionEvent(
-                compaction_id=compaction_id,
-                phase="succeeded",
-            ),
         )
 
     async def _compact_request_history(
@@ -601,7 +585,7 @@ class ContextGovernor:
         measured, _source = pressure
         compaction_id = uuid4().hex
         await state.events.emit(
-            ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
+            ContextCompactionEvent(compaction_id=compaction_id, phase="started", reason="context_pressure"),
         )
         try:
             delta_messages = await self.prepare_in_background(
@@ -661,6 +645,7 @@ class ContextGovernor:
                 ContextCompactionEvent(
                     compaction_id=compaction_id,
                     phase="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
+                    reason="context_pressure",
                 ),
             )
             raise
@@ -668,6 +653,7 @@ class ContextGovernor:
             ContextCompactionEvent(
                 compaction_id=compaction_id,
                 phase="succeeded",
+                reason="context_pressure",
             ),
         )
         return prepared

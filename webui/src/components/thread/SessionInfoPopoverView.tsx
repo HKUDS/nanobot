@@ -3,7 +3,6 @@ import {
   CalendarClock,
   ChevronRight,
   CircleAlert,
-  RefreshCcw,
 } from "lucide-react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
@@ -15,6 +14,7 @@ import {
 } from "@/components/settings/system/AutomationsSettings";
 import type { AutomationAction } from "@/components/settings/system/AutomationsSettings";
 import { Button } from "@/components/ui/button";
+import { SkeletonStatus } from "@/components/settings/shared/SkeletonStatus";
 import { formControlFocusClassName } from "@/components/ui/form-control";
 import {
   Popover,
@@ -112,12 +112,18 @@ export function SessionInfoPopoverView({ title, jobs, loading, loadFailed, now, 
       setActionKey(null);
     }
   };
-  const automationContent = loading ? (
-    <div className="mx-2 flex items-center gap-2 rounded-floating bg-muted/45 px-3 py-3 text-[12.5px] text-muted-foreground">
-      <RefreshCcw className="h-3.5 w-3.5 animate-spin" />
-      {t("thread.sessionInfo.loading")}
-    </div>
-  ) : loadFailed ? (
+  const automationContent = loading && jobs.length === 0 ? (
+    <SkeletonStatus label={t("thread.sessionInfo.loading")} className="space-y-1 px-2">
+      {[0, 1, 2].map((index) => <div key={index} data-session-job-skeleton className="grid min-h-12 grid-cols-[0.375rem_minmax(0,1fr)_1rem] items-center gap-2.5 px-3 py-2">
+        <div className="h-1.5 w-1.5 rounded-full bg-muted-foreground/20" />
+        <div className="min-w-0">
+          <div className="flex h-5 items-center"><div className="h-3 w-2/3 rounded bg-muted-foreground/20" /></div>
+          <div className="flex h-4 items-center"><div className="h-2.5 w-1/2 rounded bg-muted-foreground/15" /></div>
+        </div>
+        <div className="h-4 w-4" />
+      </div>)}
+    </SkeletonStatus>
+  ) : loadFailed && jobs.length === 0 ? (
     <div className="mx-2 flex items-center gap-2 rounded-floating bg-destructive/10 px-3 py-3 text-[12.5px] text-destructive">
       <CircleAlert className="h-3.5 w-3.5" />
       {t("thread.sessionInfo.loadFailed")}
@@ -175,7 +181,7 @@ export function SessionInfoPopoverView({ title, jobs, loading, loadFailed, now, 
                   {t("thread.sessionInfo.automations")}
                 </span>
                 <span className="rounded-full bg-muted/70 px-2 py-0.5 text-[11px] tabular-nums text-muted-foreground">
-                  {t("thread.sessionInfo.count", { count: jobs.length })}
+                  {loading && jobs.length === 0 ? "—" : t("thread.sessionInfo.count", { count: jobs.length })}
                 </span>
               </div>
             </div>

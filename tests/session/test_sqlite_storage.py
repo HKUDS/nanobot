@@ -760,3 +760,32 @@ async def test_delivery_requires_explicit_nonempty_generation(tmp_path):
         "current",
     ]
     await state.aclose()
+
+
+def test_committed_version_tracks_history_and_session_replacement(tmp_path, monkeypatch):
+    manager = SessionManager(tmp_path)
+    key = "websocket:version"
+    assert manager.read_session_version(key) is None
+    session = manager.get_or_create(key)
+    session.messages = [{"role": "user", "content": "first"}]
+    manager.save(session)
+    first = manager.read_session_version(key)
+    assert first == (session.generation, session.revision)
+    # Administrative edits may preserve updated_at, so it is not a version token.
+    session.messages[0]["content"] = "edited"
+    manager.save(session)
+    second = manager.read_session_version(key)
+    assert second == (first[0], first[1] + 1)
+    assert manager.read_session_metadata(key)["updated_at"] == session.updated_at.isoformat()
+    manager.delete_session(key)
+    assert manager.read_session_version(key) is None
+    replacement = manager.get_or_create(key)
+    manager.save(replacement)
+    assert manager.read_session_version(key) == (replacement.generation, first[1])
+    assert replacement.generation != first[0]
+
+    def unexpected_decode(*args, **kwargs):
+        pytest.fail("version read decoded history or metadata")
+
+    monkeypatch.setattr("nanobot.session.sqlite_store._object", unexpected_decode)
+    assert manager.read_session_version(key) == (replacement.generation, replacement.revision)

@@ -1,58 +1,52 @@
-"""On-demand version checker for nanobot-ai releases.
-
-Checks PyPI for newer versions when explicitly requested (no background polling).
-"""
+"""Channel-aware discovery using the same verified feed as update planning."""
 
 from __future__ import annotations
 
-import logging
-import time
 from typing import Any
 
 import httpx
-from packaging.version import InvalidVersion, Version
+from packaging.version import Version
 
-from nanobot import __version__
-
-logger = logging.getLogger(__name__)
-
-_PYPI_URL = "https://pypi.org/pypi/nanobot-ai/json"
-_CACHE_TTL_S = 300  # 5 minutes cache to avoid hammering PyPI
-
-_cache: tuple[float, str | None] = (0.0, None)
+import nanobot
+from nanobot.installation_lock import installation_state_dir
+from nanobot.release_feed import ReleaseFeed, ReleaseFeedError
+from nanobot.update_channel import read_update_channel
 
 
-def check_for_update() -> dict[str, Any] | None:
-    """Check PyPI for a newer version. Returns update info dict or None if up-to-date.
+async def check_for_update() -> dict[str, Any]:
+    """Check fresh release data on the caller's event loop without installing.
 
-    Uses a short cache to avoid repeated requests within the TTL window.
-    This is a blocking call — invoke from a thread or background task.
+    The feed shares the gateway's pinned-DNS transport lock. Keep discovery on
+    that loop rather than creating a temporary event loop in a worker thread.
     """
-    global _cache
-    now = time.monotonic()
-    cached_at, cached_val = _cache
-    if now - cached_at < _CACHE_TTL_S and cached_val is not None:
-        latest = cached_val
-    else:
-        try:
-            resp = httpx.get(_PYPI_URL, timeout=5.0, follow_redirects=True)
-            resp.raise_for_status()
-            latest = resp.json().get("info", {}).get("version")
-        except Exception:
-            logger.debug("PyPI version check failed", exc_info=True)
-            return None
-        _cache = (now, latest)
-
-    if not isinstance(latest, str) or not latest:
-        return None
-    try:
-        if Version(latest) <= Version(__version__):
-            return None
-    except InvalidVersion:
-        logger.debug("PyPI returned an invalid nanobot version: %r", latest)
-        return None
-    return {
-        "currentVersion": __version__,
-        "latestVersion": latest,
-        "pypiUrl": "https://pypi.org/project/nanobot-ai/",
+    selection = read_update_channel()
+    current = nanobot.__version__
+    status: dict[str, Any] = {
+        "channel": selection.channel, "revision": selection.revision,
+        "currentVersion": current, "state": "unavailable",
     }
+    result: dict[str, Any] = {"updateAvailable": None, "releaseStatus": status}
+    try:
+        async with ReleaseFeed(installation_state_dir() / "releases") as feed:
+            target, withdrawn = await feed.discover(selection.channel, current)
+        if target is not None and Version(target.version) > Version(current):
+            result["updateAvailable"] = {
+                "currentVersion": current, "latestVersion": target.version,
+                "releaseUrl": f"https://github.com/HKUDS/nanobot/releases/tag/v{target.version}",
+            }
+            status["state"] = "available"
+        elif target is not None:
+            status["state"] = (
+                "waiting_stable" if selection.channel == "stable" and Version(current).is_prerelease
+                else "ahead" if Version(current) > Version(target.version) else "current"
+            )
+        if withdrawn:
+            status["state"] = "withdrawn"
+    except ReleaseFeedError as exc:
+        # This concerns the candidate, not necessarily the installed version.
+        status["state"] = "unavailable" if exc.code == "withdrawn" else exc.code
+    except (httpx.HTTPError, ValueError, OSError):
+        status["state"] = "unavailable"
+    if read_update_channel() != selection:
+        raise ValueError("Update channel changed while checking; check again")
+    return result

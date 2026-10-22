@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import sqlite3
+import subprocess
 from functools import partial
 from unittest.mock import AsyncMock, MagicMock
 
@@ -33,6 +34,7 @@ from nanobot.cron.bound_runner import run_bound_cron_job
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronSchedule
 from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequest
+from nanobot.runtime_admission import RuntimeBusyError, RuntimeMaintenanceError
 from nanobot.session.manager import SessionManager
 
 
@@ -60,6 +62,58 @@ async def drain(manager):
     async with asyncio.timeout(5):
         while manager.bus.outbound_size or manager._outbound_tasks:
             await asyncio.sleep(0.01)
+
+
+async def test_parked_gateway_neither_initializes_nor_records_scheduled_delivery(tmp_path):
+    manager = make_manager(tmp_path)
+    try:
+        with manager.bus.admission.pause_before_start():
+            manager._dispatch_task = asyncio.create_task(manager._dispatch_outbound())
+            await asyncio.sleep(0)
+            assert not manager._outbox.path.exists()
+            with pytest.raises(RuntimeMaintenanceError):
+                await manager.bus.publish_outbound(message())
+            with pytest.raises(RuntimeMaintenanceError):
+                await manager._recover_scheduled()
+            assert not manager._outbox.path.exists()
+            assert manager.bus.outbound_size == 0
+        await manager.bus.publish_outbound(message())
+        assert manager._outbox.path.exists()
+    finally:
+        await manager.stop_all()
+
+
+async def test_scheduled_recovery_remains_busy_while_waiting_for_a_send_slot(tmp_path, monkeypatch):
+    manager = make_manager(tmp_path)
+    channel = MagicMock(spec=BaseChannel, send=AsyncMock(), stop=AsyncMock())
+    channel.has_pending_delivery = False
+    manager.channels["whatsapp"] = channel
+    manager._outbox.record(message())
+    manager._outbound_slots = asyncio.Semaphore(0)
+    queued = asyncio.Event()
+    queue = manager._queue_outbound
+
+    async def wait_for_slot(channel, msg):
+        queued.set()
+        await queue(channel, msg)
+
+    monkeypatch.setattr(manager, "_queue_outbound", wait_for_slot)
+    recovery = asyncio.create_task(manager._recover_scheduled())
+    try:
+        await asyncio.wait_for(queued.wait(), 2)
+        assert not manager._outbound_tasks
+        with pytest.raises(RuntimeBusyError):
+            with manager.bus.admission.pause_if_idle(lambda: False):
+                pytest.fail("Durable recovery was admitted during maintenance")
+        manager._outbound_slots.release()
+        await asyncio.wait_for(recovery, 2)
+        await drain(manager)
+        channel.send.assert_awaited_once()
+        assert rows(manager._outbox)[0]["status"] == "sent"
+    finally:
+        recovery.cancel()
+        await asyncio.gather(recovery, return_exceptions=True)
+        await manager.stop_all()
 
 
 @pytest.mark.parametrize("legacy_message,one_shot,origin", [
@@ -306,7 +360,9 @@ async def test_recovery_rechecks_attachment_workspace_boundary(tmp_path):
     manager = make_manager(tmp_path, sessions)
     manager.config.agents.defaults.workspace = str(workspace)
     manager.config.tools.restrict_to_workspace = True
-    attachment = workspace / "report.txt"
+    reports = workspace / "reports"
+    reports.mkdir()
+    attachment = reports / "report.txt"
     attachment.write_text("report")
     msg = message(generation=session.generation)
     msg.media = [str(attachment)]
@@ -314,9 +370,19 @@ async def test_recovery_rechecks_attachment_workspace_boundary(tmp_path):
     try:
         await manager.bus.publish_outbound(msg)
         attachment.unlink()
-        private = tmp_path / "private.txt"
-        private.write_text("not authorized")
-        attachment.symlink_to(private)
+        reports.rmdir()
+        private = tmp_path / "private"
+        private.mkdir()
+        (private / "report.txt").write_text("not authorized")
+        if os.name == "nt":
+            # Directory junctions resolve across the same workspace boundary
+            # without requiring Windows' privileged symlink capability.
+            subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(reports), str(private)],
+                check=True, capture_output=True,
+            )
+        else:
+            reports.symlink_to(private, target_is_directory=True)
         await manager._send_scheduled(channel, msg)
         channel.send.assert_not_called()
         assert rows(manager._outbox)[0]["error"] == "attachment_access_denied"

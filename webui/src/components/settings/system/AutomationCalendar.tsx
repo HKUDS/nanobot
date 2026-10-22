@@ -2,6 +2,7 @@ import { CircleAlert, Loader2, X } from "lucide-react";
 import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import type { AutomationRunRecord } from "@/components/settings/system/AutomationRunDialogView";
+import { SkeletonStatus } from "@/components/settings/shared/SkeletonStatus";
 import { Button } from "@/components/ui/button";
 import { formControlFocusClassName } from "@/components/ui/form-control";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -40,6 +41,7 @@ export interface AutomationCalendarRunProps {
 
 interface AutomationCalendarProps {
   jobs: SessionAutomationJob[];
+  loadingLabel?: string;
   month: Date;
   locale: string;
   copy: CalendarCopy;
@@ -226,7 +228,7 @@ function CalendarOverflowEntries({ entries, dayLabel, locale, copy, onInspect }:
   );
 }
 
-export function AutomationCalendar({ jobs, month, locale, copy, onInspect, renderRunDialog }: AutomationCalendarProps) {
+export function AutomationCalendar({ jobs, loadingLabel, month, locale, copy, onInspect, renderRunDialog }: AutomationCalendarProps) {
   const calendarRef = useRef<HTMLElement | null>(null);
   const runTrigger = useRef<HTMLElement | null>(null);
   const [selectedRun, setSelectedRun] = useState<{ job: SessionAutomationJob; run: AutomationRunRecord } | null>(null);
@@ -273,8 +275,7 @@ export function AutomationCalendar({ jobs, month, locale, copy, onInspect, rende
     return () => observer.disconnect();
   }, []);
 
-  return (
-    <section ref={calendarRef} tabIndex={-1} className="automation-calendar overflow-hidden bg-[hsl(var(--settings-surface))]">
+  const content = <>
       <div className="automation-calendar-header bg-foreground/[0.025]">
         {wideCalendar ? <div className="automation-calendar-weekdays" aria-hidden>
           {weekdayLabels.map((label) => <div key={label}>{label}</div>)}
@@ -307,6 +308,7 @@ export function AutomationCalendar({ jobs, month, locale, copy, onInspect, rende
                   </time>
                 </div>
                 <div className="space-y-0.5 px-1 pb-1">
+                  {loadingLabel ? <div className="flex h-7 items-center px-2"><div className="h-2.5 w-3/4 rounded bg-muted-foreground/15" /></div> : null}
                   {entries.slice(0, 3).map((entry) => (
                     <CalendarEntryRow
                       key={entry.id}
@@ -333,7 +335,15 @@ export function AutomationCalendar({ jobs, month, locale, copy, onInspect, rende
       </div> : null}
 
       {!wideCalendar ? <div className="automation-calendar-agenda px-3 py-2 sm:px-4">
-        {visibleEntries.length ? (
+        {loadingLabel ? <div>
+          {[0, 1, 2].map((index) => <div key={index} data-agenda-skeleton-row className="grid grid-cols-[5.25rem_minmax(0,1fr)] gap-2 py-2.5">
+            <div className="pt-2"><div className="mt-1 h-2.5 w-16 rounded bg-muted-foreground/15" /></div>
+            <div className="px-2 py-2">
+              <div className="flex h-4 items-center"><div className="h-3 w-2/3 rounded bg-muted-foreground/20" /></div>
+              <div className="mt-1 flex h-4 items-center"><div className="h-2.5 w-1/2 rounded bg-muted-foreground/15" /></div>
+            </div>
+          </div>)}
+        </div> : visibleEntries.length ? (
           <ol>
             {days.filter((day) => entriesByDay.has(dateKey(day))).map((day) => (
               <li key={dateKey(day)} className="grid grid-cols-[5.25rem_minmax(0,1fr)] gap-2 py-2.5">
@@ -357,7 +367,11 @@ export function AutomationCalendar({ jobs, month, locale, copy, onInspect, rende
           <div className="flex min-h-28 items-center justify-center text-[13px] text-muted-foreground">{copy.noEntries}</div>
         )}
       </div> : null}
+    </>;
 
+  return (
+    <section ref={calendarRef} tabIndex={-1} className="automation-calendar overflow-hidden bg-[hsl(var(--settings-surface))]">
+      {loadingLabel ? <SkeletonStatus label={loadingLabel} className="">{content}</SkeletonStatus> : content}
       {selectedRun ? renderRunDialog({
         job: selectedRun.job, run: selectedRun.run, locale, open: runOpen,
         onOpenChange: setRunOpen,

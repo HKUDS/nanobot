@@ -12,6 +12,8 @@ export function resolveModelRequestFailureCopy(
   let titleKey = "errors.modelRequestFailed.unknownTitle";
   if (details.errorKind === "billing") {
     titleKey = "errors.modelRequestFailed.billingTitle";
+  } else if (details.errorKind === "authentication") {
+    titleKey = "errors.modelRequestFailed.authenticationTitle";
   } else if (details.errorKind === "connection") {
     titleKey = "errors.modelRequestFailed.connectionTitle";
   } else if (details.errorKind === "timeout") {
@@ -25,6 +27,8 @@ export function resolveModelRequestFailureCopy(
   let bodyKey = "errors.modelRequestFailed.body";
   if (details.errorKind === "billing") {
     bodyKey = "errors.modelRequestFailed.billingBody";
+  } else if (details.errorKind === "authentication") {
+    bodyKey = "errors.modelRequestFailed.authenticationBody";
   } else if (typeof attempts === "number" && Number.isInteger(attempts) && attempts > 0) {
     bodyKey = "errors.modelRequestFailed.bodyWithAttempt";
   }

@@ -100,21 +100,89 @@ async def _poll_if_running(
         return initial, initial
     final = await tool.execute(
         session_id=_session_id(initial),
-        input="",
+        until_exit=True,
         timeout_ms=timeout_ms,
     )
     return f"{initial}\n{final}", final
 
 
-def test_exec_keeps_one_shot_behavior_without_yield_time_ms(tmp_path):
+@pytest.mark.parametrize("diagnostic", [False, True], ids=["silent", "error-output"])
+def test_exec_default_observation_returns_live_session(tmp_path, diagnostic):
+    async def run() -> None:
+        manager = ExecSessionManager()
+        tool = ExecTool(working_dir=str(tmp_path), timeout=20, session_manager=manager)
+        observer = ExecSessionTool(manager=manager)
+        release = tmp_path / "release"
+        command = _python_command(
+            "import sys,time\n"
+            "from pathlib import Path\n"
+            "assert sys.stdin.read() == ''\n"
+            + ("print('locator failed', file=sys.stderr, flush=True)\n" if diagnostic else "")
+            + "print('ready with stdin EOF', flush=True)\n"
+            "while not Path('release').exists(): time.sleep(0.01)\n"
+            "print('released', flush=True)\n"
+            "sys.exit(7)"
+        )
+        try:
+            initial = await asyncio.wait_for(tool.execute(command=command), timeout=5)
+            sid = _session_id(initial)
+            assert "Initial wait ended; session remains active." in initial
+            assert "Elapsed:" in initial
+            assert "Runtime remaining:" in initial
+            combined = initial
+            expected = ["ready with stdin EOF"]
+            if diagnostic:
+                expected.append("locator failed")
+            for marker in expected:
+                if marker not in combined:
+                    combined += await observer.execute(session_id=sid, wait_for=marker)
+            assert "ready with stdin EOF" in combined
+            if diagnostic:
+                assert "locator failed" in combined
+            assert "released" not in combined
+            release.touch()
+            final = await observer.execute(session_id=sid, until_exit=True, timeout_ms=5000)
+            assert "released" in final
+            assert "Exit code: 7" in final
+        finally:
+            release.touch()
+            await manager.close_all()
+
+    asyncio.run(run())
+
+
+def test_exec_short_command_returns_output_and_exit_code(tmp_path):
     async def run() -> str:
-        tool = ExecTool(working_dir=str(tmp_path), timeout=5)
-        return await tool.execute(command="echo hello")
+        manager = ExecSessionManager()
+        tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
+        try:
+            initial = await tool.execute(command="echo hello")
+            combined, _ = await _poll_if_running(initial, ExecSessionTool(manager=manager), timeout_ms=5000)
+            return combined
+        finally:
+            await manager.close_all()
 
     result = asyncio.run(run())
 
     assert "hello" in result
     assert "Exit code: 0" in result
+
+
+def test_trusted_user_shell_waits_for_complete_result(tmp_path):
+    async def run() -> str:
+        manager = ExecSessionManager()
+        tool = ExecTool(working_dir=str(tmp_path), timeout=10, session_manager=manager)
+        try:
+            return await tool.execute_to_completion(
+                command=_python_command("import time,sys; time.sleep(1.2); print('user result'); sys.exit(7)"),
+                working_dir=str(tmp_path),
+            )
+        finally:
+            await manager.close_all()
+
+    result = asyncio.run(run())
+    assert "user result" in result
+    assert "Exit code: 7" in result
     assert "session_id:" not in result
 
 
@@ -123,7 +191,7 @@ def test_exec_accepts_command_aliases(tmp_path):
         tool = ExecTool(working_dir="/")
         return await tool.execute(
             cmd=_python_command("import os; print(os.getcwd())"),
-            workdir=str(tmp_path),
+            workdir=str(tmp_path), yield_time_ms=10000,
         )
 
     result = asyncio.run(run())
@@ -342,7 +410,7 @@ def test_exec_one_shot_accepts_max_output_tokens_alias(tmp_path):
     async def run() -> str:
         tool = ExecTool(working_dir=str(tmp_path), timeout=5)
         command = _python_command("print('A' * 2000)")
-        return await tool.execute(command=command, max_output_tokens=1000)
+        return await tool.execute(command=command, max_output_tokens=1000, yield_time_ms=10000)
 
     result = asyncio.run(run())
 
@@ -439,16 +507,17 @@ def test_exec_session_can_terminate_session(tmp_path):
 
         initial = await exec_tool.execute(command=command, yield_time_ms=100)
         sid = _session_id(initial)
-        waited = await stdin_tool.execute(
-            session_id=sid,
-            wait_for="ready",
-            timeout_ms=10000,
-        )
+        if "ready" not in initial:
+            initial += await stdin_tool.execute(
+                session_id=sid,
+                wait_for="ready",
+                timeout_ms=10000,
+            )
         result = await stdin_tool.execute(
             session_id=sid,
             terminate=True,
         )
-        return initial + waited, result
+        return initial, result
 
     initial, result = asyncio.run(run())
     assert "ready" in initial

@@ -1,4 +1,106 @@
 {
+  "updates": {
+    "guide": {
+      "entry": "通过{{method}}更新",
+      "methods": {
+        "managed": "nanobot 安装器",
+        "uv": "uv",
+        "pipx": "pipx",
+        "pip": "pip",
+        "source": "源码",
+        "container": "容器部署",
+        "system": "系统包管理器"
+      },
+      "host": "网关：{{host}}",
+      "where": "请在这台机器的终端，用原安装账户操作。远程网关请通过 SSH 或服务器控制台连接，不是在浏览器所在的电脑上操作。这里的命令只供复制，不会自动执行。",
+      "containerHost": "这是容器的名称和内部路径，不是部署主机。请在管理此容器的服务器或托管控制台操作，不要在运行中的容器内升级。",
+      "beforeTitle": "准备并停止服务",
+      "before": "完成任务，备份配置、聊天记录和工作区数据。通过原启动器或服务管理器，停止共用此安装的所有网关。保留原配置路径和启动参数。",
+      "installTitle": "在 {{shell}} 中更新",
+      "inspectCommand": "检查此安装",
+      "updateCommand": "更新命令",
+      "versionCommand": "已安装的版本",
+      "reasons": {
+        "restart": "目标版本的文件已安装，无需再次安装。请停止旧网关，用原启动器和配置重新启动，再核对实际运行版本。",
+        "registry": "沿用原软件源和凭据。包管理器会保留记录的可选依赖和版本约束，实际选中的稳定版可能与提示不同。请检查命令输出，失败时不要强制覆盖。",
+        "preview": "Preview 通过 GitHub 分发，不一定在你的软件源中。选择本次发布中适合网关 Python 和平台的 wheel，校验文件后用原安装工具安装，并保留可选依赖。普通 upgrade 命令不能保证装到此 Preview。",
+        "policy": "安装记录包含固定版本、锁文件、固定来源、版本约束或无法识别的选项。请先检查，再沿用原流程更新，保留可选依赖和注入的包。不要为了更新直接解除限制。",
+        "extras": "此 pip 环境未记录最初选择的可选依赖。请先检查下面的包信息，再给原 pip 安装命令加上 --upgrade 和目标版本，保留可选依赖与软件源参数。这里不会猜测安装命令。",
+        "manager": "未能确认包管理器程序或环境布局。请用原安装账户和管理器设置，定位上面的安装路径；不要使用 PATH 中其他环境的 pip 或 nanobot。",
+        "source": "先检查此工作区，保留本地修改并确认目标分支或版本，再按仓库流程更新代码、依赖及 WebUI/TUI 构建。不要用 PyPI 安装覆盖可编辑源码环境。",
+        "container": "在原 Compose 项目或托管控制台中选择目标镜像标签或摘要，拉取或构建后，只重建 nanobot 服务，保留原挂载、凭据和端口。先备份数据卷，切勿为更新删除它们。",
+        "system": "通过操作系统的包管理器更新，或请服务器管理员处理。不要使用 sudo pip，也不要绕过系统 Python 的托管限制。",
+        "review": "安装环境或更新检查已变化。请关闭弹窗重新检查，再复制更新命令。"
+      },
+      "verifyTitle": "原方式启动并验证",
+      "verify": "使用原启动器和配置启动。终端命令仅检查已安装文件；请重新连接同一网关，核对运行版本是否为 v{{version}}，并确认聊天记录和设置仍在。",
+      "check": "检查运行中的网关",
+      "verified": "已确认：此网关正在运行 v{{version}}。",
+      "observed": "此网关报告 v{{version}}，与提示的 v{{target}} 不同。请检查安装输出，并重启同一安装环境；包已更新不代表运行中的进程已更新。",
+      "checkFailed": "无法读取运行版本。请重新连接同一网关后重试，目前尚未确认更新成功。"
+    },
+    "automaticRecovery": "更新失败时，nanobot 会尝试自动恢复服务，安全时恢复原程序。聊天数据不会回退。",
+    "restored": "已恢复原版本",
+    "restoredDescription": "更新未完成，已重新运行 v{{version}}。配置和聊天记录未被回退。",
+    "recoveryBeforeInstall": "更新在安装前停止，尚未修改安装文件。请恢复原更新以继续。",
+    "channel": {
+      "settings": "更新设置",
+      "receivePreview": "接收预览更新",
+      "previewWarning": "这是预览版，可能存在问题。",
+      "preview": "预览版",
+      "hint": "提前体验新功能。",
+      "saving": "正在保存…",
+      "saved": "更新偏好已保存",
+      "ahead": "当前版本领先于所选频道，不会安装更旧的版本。",
+      "waiting_stable": "已退出预览更新。保留当前版本，等待更新的正式版。",
+      "withdrawn": "当前预览版已撤回。请在修复版可用时升级，不要直接降级覆盖当前数据。",
+      "unavailable": "无法检查此频道的更新。",
+      "publishing": "新版本仍在发布中，请稍后再检查。",
+      "unsupported": "此 Python 版本或平台暂无兼容更新。",
+      "releaseNotes": "更新说明"
+    },
+    "reviewAgain": "重新确认更新",
+    "reviewAgainDescription": "尚未修改安装文件。请重新查看更新内容，再确认安装并重启。",
+    "settleFailed": "暂时无法安全结束上次更新。请重新检查状态，或按更新恢复说明处理。",
+    "ownerGuide": "查看此安装方式的更新说明",
+    "recoveryTitle": "在网关电脑上恢复",
+    "recoveryDescription": "在运行 nanobot 的电脑上打开终端并运行此命令。它会先显示原更新记录，再询问是否恢复。请保留原备份。",
+    "confirm": "现在更新 nanobot？",
+    "reviewingTitle": "正在检查更新…",
+    "preparing": "正在下载更新…",
+    "installing": "正在安装更新…",
+    "working": "正在更新 nanobot…",
+    "reconnecting": "正在重新连接…",
+    "done": "更新完成",
+    "failed": "更新未完成",
+    "confirmDescription": "更新至 v{{version}} 后将重启 {{host}} 上的 nanobot。请先结束正在运行的任务。",
+    "reviewing": "正在核对安装环境和目标版本，不会修改文件。",
+    "workingDescription": "正在准备并校验文件，随后备份并重启所选网关。",
+    "reconnectingDescription": "正在等待更新后的网关重新连接，请勿重复发起更新。",
+    "delayed": "重连时间较长。进度已保存，你可以关闭此窗口，稍后再检查。",
+    "doneDescription": "当前已运行 v{{version}}。",
+    "preparationFailed": "准备或停止网关时失败，尚未修改安装文件。请结束正在运行的任务后重新检查。",
+    "repairRequired": "安装或重启失败，备份和更新记录已保留。请按更新恢复流程处理，不要发起另一次安装。",
+    "reviewFailed": "无法核实这次更新。请检查连接，并确认网关由原安装环境支持的后台启动方式运行。",
+    "confirmationUnknown": "请求可能已被接收，正在核对已保存的进度，请勿重复提交。",
+    "statusFailed": "无法读取更新记录。请重新连接同一个网关后检查。",
+    "sharedInstallation": "此安装由 {{count}} 个运行中的网关共用，它们都会重启。",
+    "cancel": "取消",
+    "close": "关闭",
+    "hide": "收起",
+    "return": "完成",
+    "wait": "请稍候",
+    "checkAgain": "重新检查",
+    "apply": "更新并重启",
+    "blocked": {
+      "review_changed": "更新方案已变化或过期，请关闭后重新检查。",
+      "not_upgrade": "目标版本无需升级，不会修改文件。",
+      "installation_owner": "请使用原包管理器或部署工具更新此安装。",
+      "installation_policy": "此安装的来源、可选依赖或版本设置需要通过原安装方式更新。",
+      "external_restart": "此网关无法在这里重启。请通过原启动方式或部署工具停止、更新并重启。",
+      "permission": "请在网关本机打开 localhost，或允许远程安装后更新。"
+    }
+  },
   "remote": {
     "compatibility": {
       "title": "版本检查",
@@ -253,32 +355,7 @@
   "previewTabs": {
     "title": "预览",
     "closeTab": "关闭 {{name}}",
-    "closeAll": "关闭预览栏",
-    "websiteInfo": "关于网页预览"
-  },
-  "webPreview": {
-    "viewLinks": "查看链接",
-    "back": "返回",
-    "original": "原链接",
-    "actions": "链接操作",
-    "open": "预览网页",
-    "external": "浏览器打开",
-    "copy": "复制链接",
-    "copied": "链接已复制",
-    "copyFailed": "无法复制链接",
-    "title": "网页预览",
-    "resize": "调整网页预览宽度",
-    "refresh": "刷新网页",
-    "close": "关闭预览",
-    "isolated": "受限的隔离预览，登录及部分交互功能可能无法使用。",
-    "blockedHint": "部分网站禁止嵌入。如果页面空白或加载失败，请在浏览器中打开。",
-    "loopback": "localhost 指向当前浏览器所在设备，而非远程网关。不会自动转发端口。",
-    "native": "原生客户端暂不支持嵌入预览，请在浏览器中打开此链接。",
-    "unsupported": "此浏览器不支持凭据隔离预览，请在新标签页中打开。",
-    "sameOrigin": "不能在此嵌入 nanobot 应用自身，请在新标签页中打开。",
-    "mixedContent": "HTTPS 页面不能在此预览 HTTP 网站，请在新标签页中打开。",
-    "invalid": "无法预览此地址。",
-    "frame": "网页预览：{{host}}"
+    "closeAll": "关闭预览栏"
   },
   "starPrompt": {
     "footerAction": "给 nanobot 点个 Star",
@@ -388,6 +465,16 @@
       "title": "离开设置前重启 nanobot？",
       "description": "更改已保存，重启后生效。",
       "later": "稍后重启"
+    },
+    "network": {
+      "useProxy": "使用代理",
+      "useProxyHelp": "使用高级设置中的共享代理。",
+      "configureProxy": "配置代理",
+      "sharedProxyScope": "供所有启用代理的功能共用。",
+      "authentication": "认证（可选）",
+      "username": "用户名",
+      "password": "密码",
+      "proxyReferenceAuth": "请在引用的代理 URL 中设置认证信息。"
     },
     "runtimeConfig": {
       "apiSaved": "已保存，重启 API 服务后生效。",
@@ -507,9 +594,13 @@
           "label": "禁止命令",
           "help": "阻止匹配规则的命令\n\n每行一个正则表达式，与内置拒绝规则一同检查。完整匹配允许规则的命令会跳过这些检查。"
         },
-        "tools_web_proxy": {
-          "label": "网页代理",
-          "help": "用于智能体搜索和读取网页。留空使用默认网络设置，包括环境变量中的代理。\n\n127.0.0.1 指运行 nanobot 的机器，不是打开网页的手机。本设置不影响模型、MCP 或浏览器的连接。"
+        "network_proxy": {
+          "label": "共享代理",
+          "help": "启用“使用代理”的功能共用此地址。127.0.0.1 指运行 nanobot 的设备。"
+        },
+        "tools_web_use_proxy": {
+          "label": "使用代理",
+          "help": "网页搜索和读取使用共享代理。"
         },
         "tools_web_user_agent": {
           "label": "User-Agent",
@@ -597,9 +688,13 @@
           "title": "Shell 与沙箱",
           "help": "设置命令超时、环境和访问规则"
         },
+        "proxy": {
+          "title": "共享代理",
+          "help": "为使用代理的功能设置共享地址。"
+        },
         "network": {
           "title": "网页连接",
-          "help": "设置代理和 User-Agent\n\n设置网页访问代理和 User-Agent 标识。"
+          "help": "设置网页请求的代理开关和 User-Agent。"
         },
         "safety": {
           "title": "全局权限",
@@ -643,6 +738,13 @@
       "search": "搜索高级设置",
       "noResults": "没有匹配的设置。",
       "pending": "有未保存的修改",
+      "idleCompaction": {
+        "label": "空闲自动压缩",
+        "help": "空闲超时后压缩上下文，减少后续用量。",
+        "wait": "空闲时限",
+        "minutes": "分钟",
+        "numberError": "请输入非负整数分钟数。"
+      },
       "numberError": "请输入允许范围内的有效数字。",
       "activeModel": "使用当前模型",
       "none": "无",
@@ -665,6 +767,7 @@
       "byok": "BYOK",
       "overview": "总览",
       "appearance": "外观",
+      "notifications": "通知",
       "models": "模型",
       "providers": "提供商",
       "image": "图片",
@@ -771,6 +874,41 @@
       "autoProviderCustomOnly": "自动选择提供商时，请手动输入模型 ID。",
       "availableCount": "可用模型：{{count}} 个"
     },
+    "notifications": {
+      "scope": "本浏览器",
+      "intro": "选择任务结束时的提醒方式。",
+      "pageRequired": "页面关闭、挂起或断开连接后，无法接收新提醒。",
+      "revoked": "通知权限已撤销，已关闭提醒。请先在浏览器站点设置中允许通知，再在此开启。",
+      "retry": "重新检查",
+      "statusOff": "未开启",
+      "statusPermission": "需要授权",
+      "statusOn": "已开启",
+      "statusBlocked": "已被拒绝",
+      "statusRevoked": "权限已撤销",
+      "statusUnavailable": "不可用",
+      "statusWorker": "尚未就绪",
+      "statusBusy": "检查中…",
+      "statusError": "发送失败",
+      "test": "测试通知",
+      "testBody": "这是一条测试通知。",
+      "waiting": "等待浏览器响应…",
+      "insecure": "请通过 HTTPS 或 localhost 打开 nanobot，再开启通知。",
+      "unsupported": "此浏览器不支持通知，请更换浏览器。iPhone 或 iPad 请从主屏幕打开 nanobot。",
+      "denied": "通知已被浏览器阻止。请先在浏览器站点设置中允许通知，再在此开启。",
+      "dismissed": "尚未获得通知权限。请重新开启，并选择“允许”。",
+      "permissionFailed": "无法请求通知权限，请在支持的浏览器中重试。",
+      "workerUnavailable": "通知服务尚未就绪，请重新检查或刷新页面。",
+      "displayFailed": "浏览器未能发送通知，请检查本站的通知权限后重试。",
+      "submitted": "已发送至浏览器。若未显示，请检查系统通知和勿扰设置。",
+      "completed": "任务已完成，点击查看结果。",
+      "failed": "任务失败，点击查看详情。",
+      "interrupted": "任务需要处理，点击继续。"
+    },
+    "readingTextSize": {
+      "small": "阅读字号：小",
+      "standard": "阅读字号：标准",
+      "large": "阅读字号：大"
+    },
     "rows": {
       "theme": "主题",
       "language": "语言",
@@ -785,11 +923,12 @@
       "currentModel": "当前配置",
       "selectedPreset": "所选预设",
       "presetModel": "预设模型",
+      "readingTextSize": "阅读字号",
       "activityMode": "处理过程",
       "fileEditDisplay": "修改预览",
       "codeWrap": "代码换行",
       "brandLogos": "品牌图标",
-      "browserNotifications": "任务通知",
+      "browserNotifications": "浏览器通知",
       "notificationSound": "完成音效",
       "maxResults": "结果上限",
       "timeout": "搜索超时",
@@ -835,8 +974,8 @@
       "fileEditDisplay": "默认显示行数或展开修改内容",
       "codeWrap": "长代码自动换行，方便阅读",
       "brandLogos": "在设置中显示提供商与应用图标\n\n在设置中显示提供商和命令行应用的品牌图标。",
-      "browserNotifications": "页面在后台时通知，默认关闭",
-      "notificationSound": "回复结束播放提示音，默认关闭\n\n回合结束时播放短促提示音，页面在后台时也会播放。默认关闭。",
+      "browserNotifications": "页面在后台时提醒任务状态。",
+      "notificationSound": "回复结束时播放提示音，后台也会播放。",
       "maxResults": "每次搜索最多显示多少条结果",
       "timeout": "每次搜索最长等待时间，单位秒",
       "jinaReader": "优先用 Jina Reader 读取网页\n\n读取网页时，优先使用可用的 Jina Reader。",
@@ -905,10 +1044,16 @@
       "noDescription": "暂无描述。"
     },
     "about": {
+      "updateNotice": "有可用更新",
+      "viewUpdateDetails": "查看详情",
+      "updateNow": "更新",
+      "dismissUpdate": "暂时收起提示",
+      "updateInstructions": "请在运行 nanobot 的电脑上，使用原安装方式更新。此页面不会自动安装或重启。",
+      "installationGuide": "安装指南",
       "documentation": "官方文档",
       "sourceCode": "代码仓库",
       "reportIssue": "问题反馈",
-      "version": "版本",
+      "version": "版本与更新",
       "checking": "正在检查...",
       "checkForUpdates": "检查更新",
       "upToDate": "已是最新版本",
@@ -1227,7 +1372,6 @@
       "defaultAPIDescription": "预设选择「自动」时使用此协议。单个预设可改用支持列表中的其他协议。",
       "declareAPIs": "设置支持的协议",
       "openaiDefaultAPIDescription": "设为「自动」的预设使用此默认协议。此处选择「自动」会遵循已知模型规则；单个预设可以覆盖此默认值。",
-      "proxy": "网络代理",
       "thinkingStyle": "推理格式",
       "region": "区域",
       "profile": "AWS 配置名称",
@@ -1323,6 +1467,7 @@
       "loading": "正在加载聊天平台...",
       "empty": "没有匹配的聊天平台。",
       "restartRequired": "重启 nanobot 以应用更新后的聊天平台支持。",
+      "restartBeforeInstall": "重启 nanobot 后可继续安装。",
       "requires": "需要：{{requirements}}",
       "setUp": "设置",
       "setupGuide": "配置指南",
@@ -1636,19 +1781,16 @@
       "signInBeforeSaving": "请先登录此提供商，再保存模型预设。",
       "signedIn": "已登录",
       "notSignedIn": "未登录",
-      "proxyLabel": "网络代理",
-      "proxySaveBeforeSignIn": "请先保存代理更改再登录。",
-      "saveProxy": "保存代理",
       "localCodeHelp": "请在浏览器中完成登录。若 nanobot 未自动完成连接，请将授权码粘贴到下方。",
       "remoteCodeHelp": "点击“登录”在你的电脑上打开 xAI。完成登录后，请将 xAI 显示的授权码粘贴到下方。",
-      "localCallbackHelp": "请在浏览器中完成登录。若 nanobot 未自动完成连接，请复制地址栏中完整的 localhost 回调地址，粘贴到下方。",
-      "remoteCallbackHelp": "在此浏览器中打开 ChatGPT 并完成登录。当 localhost 页面无法打开时，请复制地址栏中的完整 URL 并粘贴到下方。",
+      "localCallbackHelp": "在浏览器中完成登录。若 nanobot 未自动连接，请复制 localhost 页面地址栏中的完整链接（即使页面无法打开），粘贴到下方，再点击“完成登录”。",
+      "remoteCallbackHelp": "在此浏览器中打开 ChatGPT 并完成登录。跳转到 localhost 页面后，即使页面无法打开，也请复制地址栏中的完整链接，粘贴到下方，再点击“完成登录”。",
       "authorizationCode": "授权码",
       "callbackUrl": "回调 URL",
-      "callbackUrlPlaceholder": "http://localhost:1455/auth/callback?code=…&state=…",
+      "callbackUrlPlaceholder": "在此粘贴完整的回调链接",
       "openChatGPT": "打开 ChatGPT",
       "pasteCallbackToContinue": "粘贴回调 URL 以继续。",
-      "waitingForCallback": "正在等待浏览器回调…",
+      "waitingForCallback": "等待完成登录…",
       "finishSignIn": "完成登录"
     },
     "skills": {
@@ -1854,6 +1996,32 @@
       "messages": "消息状态"
     },
     "compaction": {
+      "reasons": {
+        "idle": {
+          "started": "会话空闲，正在自动压缩上下文",
+          "succeeded": "会话空闲，已自动压缩上下文",
+          "failed": "空闲时自动压缩上下文失败",
+          "cancelled": "空闲期间的自动压缩未完成"
+        },
+        "context_pressure": {
+          "started": "上下文较长，正在压缩",
+          "succeeded": "上下文较长，已自动压缩",
+          "failed": "上下文较长，自动压缩失败",
+          "cancelled": "上下文较长，压缩已取消"
+        },
+        "manual": {
+          "started": "正在手动压缩",
+          "succeeded": "手动压缩完成",
+          "failed": "手动压缩失败",
+          "cancelled": "手动压缩已取消"
+        },
+        "provider_native": {
+          "started": "模型服务正在压缩上下文",
+          "succeeded": "模型服务已压缩上下文",
+          "failed": "模型服务未能完成上下文压缩",
+          "cancelled": "模型服务的上下文压缩已取消"
+        }
+      },
       "cancelled": "上下文压缩已取消",
       "empty": "无需压缩上下文",
       "started": "正在压缩上下文",
@@ -1995,7 +2163,7 @@
         "guide": "立即发送",
         "delete": "删除消息",
         "edit": "编辑消息",
-        "drag": "拖动排序"
+        "tooManyMentions": "每条消息最多提及 {{max}} 个会话"
       },
       "attachImage": "添加文件",
       "imageMode": {
@@ -2138,10 +2306,11 @@
         "unsupported_type": "不支持的文件类型",
         "empty_file": "不能附加空文件",
         "too_many_attachments": "每条消息最多 {{max}} 个附件",
+        "too_many_videos": "每条消息最多 1 个视频",
         "too_many_images": "每条消息最多 {{max}} 张图片",
         "magic_mismatch": "文件看起来不像真实的图片",
         "decode_failed": "无法解码这张图片",
-        "too_large": "文件太大，请换一个小一点的",
+        "too_large": "文件为 {{size}}，超过上传上限 {{max}}",
         "total_too_large": "附件总大小过大，请移除部分文件或使用更小的文件",
         "io": "无法读取该文件"
       },
@@ -2161,8 +2330,8 @@
     "loadEarlier": "加载更早消息",
     "history": {
       "loading": "正在加载更早的消息…",
-      "error": "加载失败",
-      "retry": "重试"
+      "exhausted": "没有更早的消息",
+      "retryLabel": "加载失败，重试"
     },
     "forkedFromHistory": "从历史消息分叉",
     "promptNavigator": {
@@ -2386,7 +2555,6 @@
     "turnLatencyTitle": "回复耗时",
     "fileEditViewDiff": "查看修改",
     "fileEditViewLargeDiff": "展开修改",
-    "fileEditDiffLineCount": "{{count}} 行",
     "fileEditUnchangedLinesHidden": "已隐藏 {{count}} 行未修改内容",
     "fileEditShowMoreLines": "显示剩余 {{count}} 行",
     "fileEditShowFewerLines": "收起部分行",
@@ -2409,6 +2577,24 @@
     "safeResume": "正在从已保存的对话上下文继续。",
     "dismiss": "忽略",
     "continue": "继续"
+  },
+  "diagram": {
+    "graph": "图形",
+    "source": "源码",
+    "copy": "复制源码",
+    "enlarge": "放大查看",
+    "title": "Mermaid 图表",
+    "errors": {
+      "syntax": "图表语法有误，请检查源码。",
+      "unsupported": "暂不支持此类图表，可查看源码。",
+      "policy": "图表含不支持的样式或资源，可查看源码。",
+      "limit": "图表超出渲染限制，可查看源码。",
+      "load": "图表渲染器加载失败，请重试。",
+      "deadline": "图表渲染超时，请简化源码或重试。",
+      "worker": "图表渲染失败，请重试。",
+      "image": "图表显示失败，请重试。",
+      "capability": "此浏览器无法渲染图表，可查看源码。"
+    }
   },
   "lightbox": {
     "viewAll": "查看全部 {{count}} 张图片",
@@ -2508,6 +2694,8 @@
       "body": "网关拒绝了这条消息。请检查消息内容或附件后重试。"
     },
     "modelRequestFailed": {
+      "authenticationTitle": "模型提供商验证失败",
+      "authenticationBody": "请在模型设置中重新登录或检查 API 密钥。",
       "billingTitle": "模型提供商账户额度不足",
       "billingBody": "请为提供商账户充值或检查账单状态后重试。",
       "connectionTitle": "无法连接模型提供商",
@@ -2515,8 +2703,8 @@
       "rateLimitTitle": "模型提供商请求受限",
       "serverTitle": "模型提供商服务异常",
       "unknownTitle": "模型提供商请求失败",
-      "bodyWithAttempt": "模型提供商请求在第 {{attempts}} 次尝试后仍然失败，已停止重试。请检查提供商配置或服务状态后重试。",
-      "body": "请检查提供商配置或服务状态后重试。"
+      "bodyWithAttempt": "已尝试 {{attempts}} 次，仍未成功。可稍后继续或切换模型。",
+      "body": "可稍后继续或切换模型。"
     }
   },
   "workspace": {

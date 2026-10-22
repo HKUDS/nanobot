@@ -30,8 +30,8 @@ function emitTask(snapshot: SubagentTaskSnapshot, chatId = "a") {
   act(() => { chatHandlers.get(chatId)?.forEach((handler) => handler({ event: "subagent_task", chat_id: chatId, task: snapshot })); });
 }
 const messages: UIMessage[] = [
-  { id: "prompt-a", role: "user", content: "Inspect config", turnId: "turn-a" },
-  { id: "answer-a", role: "assistant", content: "Main answer", turnId: "turn-a" },
+  { id: "prompt-a", role: "user", content: "Inspect config", turnId: "turn-a", createdAt: 100_000 },
+  { id: "answer-a", role: "assistant", content: "Main answer", turnId: "turn-a", createdAt: 101_000 },
 ];
 
 function task(overrides: Partial<SubagentTaskSnapshot> = {}): SubagentTaskSnapshot {
@@ -174,21 +174,34 @@ describe("session-owned task UI", () => {
     expect(await within(screen.getByRole("dialog")).findByText("Latest child response")).toBeVisible();
   });
 
-  it("retries a failed history read through the shared history controls", async () => {
-    let offline = true;
+  it("shares history loading, actual failure details and keyboard retry with the main thread", async () => {
+    let rejectRead!: (reason: Error) => void;
+    let resolveRead!: (value: Response) => void;
+    let reads = 0;
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       if (!url.endsWith("/webui-thread")) return response([task()]);
-      if (offline) throw new Error("offline");
-      return childThread("Recovered child response");
+      reads += 1;
+      return new Promise<Response>((resolve, reject) => { resolveRead = resolve; rejectRead = reject; });
     }));
     const user = userEvent.setup();
     render(layout({ historyEnabled: true }));
     await user.click(await screen.findByRole("button", { name: /Config check Running/ }));
     const detail = screen.getByRole("dialog");
-    expect(await within(detail).findByRole("alert")).toHaveTextContent("Loading failed.");
-    offline = false;
-    await user.click(within(detail).getByRole("button", { name: "Retry" }));
+    const loading = within(detail).getByRole("status");
+    expect(loading.querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
+    expect(loading.closest(".thread-history-status")).toHaveAttribute("data-state", "loading");
+    await act(async () => { rejectRead(new Error("offline")); });
+    const retry = await within(detail).findByRole("button", { name: "Loading failed. Retry" });
+    expect(retry.closest(".thread-history-status")).toHaveAttribute("data-state", "error");
+    expect(retry.querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
+    act(() => { retry.focus(); });
+    expect(screen.getByRole("tooltip")).toHaveTextContent("offline");
+    await user.keyboard("{Enter}");
+    expect(reads).toBe(2);
+    expect(within(detail).getByRole("status").closest(".thread-history-status")).toHaveAttribute("data-state", "loading");
+    await act(async () => { resolveRead(childThread("Recovered child response")); });
     expect(await within(detail).findByText("Recovered child response")).toBeVisible();
+    expect(within(detail).queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("keeps the same work block under its prompt, folds completed work and restores it after refresh", async () => {
@@ -337,7 +350,7 @@ describe("session-owned task UI", () => {
   });
 
   it("anchors replay once when multiple prompts share a turn and preserves row order", async () => {
-    const replay = [...messages, { id: "followup", role: "user", content: "Focus on errors", turnId: "turn-a" } satisfies UIMessage];
+    const replay = [...messages, { id: "followup", role: "user", content: "Focus on errors", turnId: "turn-a", createdAt: 102_000 } satisfies UIMessage];
     const keys = unitKeysForDisplay(buildDisplayUnits(replay));
     expect(new Set(keys).size).toBe(keys.length);
     vi.mocked(fetch).mockImplementation(async () => response([
@@ -362,13 +375,13 @@ describe("session-owned task UI", () => {
 
   it("prefers the exact initiating follow-up over a turn fallback", async () => {
     vi.mocked(fetch).mockImplementation(async () => response([task({ origin_message_id: "followup" })]));
-    render(layout({ threadMessages: [...messages, { id: "followup", role: "user", content: "Check more", turnId: "turn-a" }] }));
+    render(layout({ threadMessages: [...messages, { id: "followup", role: "user", content: "Check more", turnId: "turn-a", createdAt: 102_000 }] }));
     await screen.findByRole("button", { name: /Config check Running/ });
     const group = screen.getByRole("region", { name: "Subtasks" });
     expect(screen.getByText("Check more").compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("keeps legacy work with an unknown origin separate from the latest request after refresh", async () => {
+  it("keeps legacy work separate after refresh and preserves its disclosure through local history prepends", async () => {
     vi.mocked(fetch).mockImplementation(async () => response([
       task({ task_id: "legacy", revision: 0, label: "Nanjing weather", state: "done", completed_at: 102,
         origin_turn_id: "websocket:a:1791046873588004336", result: "## Nanjing\n\n- **Rain**" }),
@@ -389,6 +402,13 @@ describe("session-owned task UI", () => {
     expect(within(detail).getByRole("heading", { name: "Nanjing" })).toBeVisible();
     expect(within(detail).getByRole("list")).toHaveTextContent("Rain");
     await user.keyboard("{Escape}");
+    view.rerender(layout({ threadMessages: [
+      { id: "cached-prompt", role: "user", content: "Earlier cached prompt", createdAt: 99_000 },
+      ...messages,
+    ] }));
+    const expanded = screen.getByRole("region", { name: "Other tasks" });
+    expect(within(expanded).getByRole("button", { name: /Other tasks/ })).toHaveAttribute("aria-expanded", "true");
+    expect(within(expanded).getByRole("button", { name: /Nanjing weather Completed/ })).toBeVisible();
     view.unmount();
     render(layout());
     const restored = await screen.findByRole("region", { name: "Other tasks" });
@@ -408,7 +428,7 @@ describe("session-owned task UI", () => {
     await user.click(within(otherWork).getByRole("button", { name: /Earlier check Running/ }));
     const detail = screen.getByRole("dialog", { name: "Earlier check" });
     view.rerender(layout({ threadMessages: [
-      { id: "older-prompt", role: "user", content: "Inspect earlier work", turnId: "older-turn" },
+      { id: "older-prompt", role: "user", content: "Inspect earlier work", turnId: "older-turn", createdAt: 99_000 },
       ...messages,
     ] }));
     expect(detail).toBeVisible();

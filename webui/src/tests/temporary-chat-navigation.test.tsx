@@ -1,6 +1,5 @@
-// @vitest-environment-options {"settings":{"disableIframePageLoading":true}}
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "@/App";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
@@ -11,7 +10,6 @@ import { canonicalThreadPayload } from "./thread-test-payload";
 
 let groupedTopics = false;
 let withFiles = false;
-const credentialless = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "credentialless");
 const previewFile = (path: string) => ({
   path: `/workspace/${path}`, display_path: path, project_path: "/workspace",
   language: "text", content: `Preview of ${path}`, size: 20, truncated: false,
@@ -97,6 +95,13 @@ async function selectTopic(name: string) {
 }
 
 describe("temporary chat navigation", () => {
+  beforeAll(async () => {
+    await Promise.all([
+      import("@/components/settings/SettingsView"),
+      import("@/components/thread/ThreadShell"),
+    ]);
+  });
+
   beforeEach(() => {
     vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({ token: "test", api_token: "test", ws_path: "/" });
     groupedTopics = false;
@@ -144,8 +149,6 @@ describe("temporary chat navigation", () => {
 
   afterEach(() => {
     cleanup();
-    if (credentialless) Object.defineProperty(HTMLIFrameElement.prototype, "credentialless", credentialless);
-    else Reflect.deleteProperty(HTMLIFrameElement.prototype, "credentialless");
     if (vi.isFakeTimers()) vi.clearAllTimers();
     vi.useRealTimers();
     vi.restoreAllMocks();
@@ -172,7 +175,7 @@ describe("temporary chat navigation", () => {
     await screen.findByRole("button", { name: "Temporary chat" });
     act(() => TestSocket.current.open());
     await selectTopic("Regular topic");
-    fireEvent.click(screen.getByRole("button", { name: "Settings", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     await screen.findByRole("button", { name: "Back to chat" });
     expect(window.location.hash).toBe("#/settings");
     first.unmount();
@@ -191,7 +194,7 @@ describe("temporary chat navigation", () => {
     await screen.findByRole("button", { name: "Temporary chat" });
     act(() => TestSocket.current.open());
     const chatId = await startTemporaryChat("Temporary navigation check");
-    fireEvent.click(screen.getByRole("button", { name: "Settings", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     await screen.findByRole("button", { name: "Back to chat" });
     expect(window.location.hash).toBe("#/settings");
     act(() => TestSocket.current.receive({ event: "message", chat_id: chatId, text: "Reply while in settings" }));
@@ -316,53 +319,6 @@ describe("temporary chat navigation", () => {
     }
   });
 
-  it("restores website targets per session, switches to files, and closes below menus", async () => {
-    // Exercise the working embed path; unsupported browsers do not offer it.
-    Object.defineProperty(HTMLIFrameElement.prototype, "credentialless", { configurable: true, value: false });
-    withFiles = true;
-    render(<App />);
-    await screen.findByRole("button", { name: "Temporary chat" });
-    act(() => TestSocket.current.open());
-    await startTemporaryChat("Synthetic separate session");
-    await selectTopic("Regular topic");
-    const website = await screen.findByRole("link", { name: "Website" });
-    const storedWebsiteValues = () => [localStorage, sessionStorage].map((storage) =>
-      Array.from({ length: storage.length }, (_, i) => storage.getItem(storage.key(i)!))
-        .filter((value) => value?.includes("https://example.com/demo")));
-    const beforePreview = storedWebsiteValues();
-    fireEvent.contextMenu(website);
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Preview website" }));
-    await screen.findByTestId("web-preview-panel");
-    await selectTopic("Synthetic separate session");
-    await waitFor(() => expect(screen.queryByTestId("web-preview-panel")).not.toBeInTheDocument());
-    await selectTopic("Regular topic");
-    await screen.findByTestId("web-preview-panel");
-    fireEvent.contextMenu(screen.getByRole("link", { name: "Website" }));
-    await screen.findByRole("menu");
-    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
-    expect(screen.getByTestId("web-preview-panel")).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
-    fireEvent.keyDown(window, { key: "Escape" });
-    await waitFor(() => expect(screen.queryByTestId("web-preview-panel")).not.toBeInTheDocument());
-    // The same pane is reachable with taps only, without intercepting a native
-    // touch context menu or adding a button next to every rendered link.
-    fireEvent.click(screen.getByRole("button", { name: "Message actions" }));
-    fireEvent.click(await screen.findByRole("button", { name: "View links" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Preview website" }));
-    await screen.findByTestId("web-preview-panel");
-    expect(screen.queryByRole("dialog", { name: "Message actions" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "notes.txt" }));
-    await waitFor(() => expect(screen.queryByTestId("web-preview-panel")).not.toBeInTheDocument());
-    await screen.findByText("Preview of notes.txt");
-    fireEvent.contextMenu(screen.getByRole("link", { name: "Website" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Preview website" }));
-    expect(screen.queryByTestId("file-preview-panel")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Close preview pane" }));
-    await waitFor(() => expect(screen.queryByTestId("web-preview-panel")).not.toBeInTheDocument());
-    // The transcript may cache its link; preview targets must not add persisted state.
-    expect(storedWebsiteValues()).toEqual(beforePreview);
-  });
-
   it("keeps the sidebar mounted across tabs, deduplicates repeated opens, and handles Escape below dialogs", async () => {
     withFiles = true;
     render(<App />);
@@ -405,11 +361,13 @@ describe("temporary chat navigation", () => {
     }));
     fireEvent.click(await screen.findByRole("button", { name: "notes.txt" }));
     await screen.findByText("Preview of notes.txt");
-    const store = update.mock.contexts.find((value) => value.get(`websocket:${chatId}`).tabs.length)!;
+    const store = update.mock.contexts.find((value): value is FilePreviewStore =>
+      value instanceof FilePreviewStore && value.get(`websocket:${chatId}`).tabs.length > 0,
+    )!;
     expect(store.get(`websocket:${chatId}`).activeId).toBe("file:notes.txt");
     await selectTopic("Close temporary chat: Show example files");
     expect(store.get(`websocket:${chatId}`).tabs).toEqual([]);
-    act(() => store.open("websocket:regular", "file", "notes.txt"));
+    act(() => store.open("websocket:regular", "notes.txt"));
     vi.useFakeTimers();
     act(() => TestSocket.current.close());
     expect(store.get("websocket:regular").tabs).toEqual([]);

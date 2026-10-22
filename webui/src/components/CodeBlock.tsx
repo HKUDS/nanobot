@@ -28,18 +28,6 @@ interface HighlightedCodeProps {
   viewportHighlight: boolean;
 }
 
-const CODE_FONT_STACK = [
-  '"JetBrains Mono"',
-  '"SFMono-Regular"',
-  '"SF Mono"',
-  '"Fira Code"',
-  '"Cascadia Code"',
-  '"Source Code Pro"',
-  "Menlo",
-  "Consolas",
-  "monospace",
-].join(", ");
-
 const ANSI_LANGUAGES = new Set(["ansi", "ansi-output"]);
 
 const LazyHighlightedCode = lazy(async () => {
@@ -69,9 +57,9 @@ const LazyHighlightedCode = lazy(async () => {
             background: "transparent",
             margin: 0,
             padding: chrome === "none" ? "0.75rem 1rem" : "1rem 3.5rem 1rem 1.25rem",
-            fontFamily: CODE_FONT_STACK,
-            fontSize: "13px",
-            lineHeight: chrome === "none" ? 1.55 : 1.6,
+            fontFamily: "inherit",
+            fontSize: "inherit",
+            lineHeight: "inherit",
             tabSize: 2,
             // FilePreviewPanel owns both scroll axes. Replacing this <pre>
             // during progressive highlighting must not reset horizontal scroll.
@@ -80,7 +68,8 @@ const LazyHighlightedCode = lazy(async () => {
           codeTagProps={{
             style: {
               background: "transparent",
-              fontFamily: CODE_FONT_STACK,
+              fontFamily: "inherit",
+              fontSize: "inherit",
               ...(viewportHighlight ? { lineHeight: "inherit" } : {}),
             },
           }}
@@ -88,7 +77,7 @@ const LazyHighlightedCode = lazy(async () => {
             minWidth: "2.6em",
             paddingRight: "1.15rem",
             color: "var(--code-comment)",
-            fontFamily: CODE_FONT_STACK,
+            fontFamily: "inherit",
             userSelect: "none",
           }}
           PreTag="pre"
@@ -136,16 +125,15 @@ function CodeTextBlock({
   return (
     <pre
       className={cn(
-        "m-0 bg-transparent font-mono text-[13px] text-foreground/90",
+        "m-0 bg-transparent font-mono text-code text-foreground/90",
         compact ? "overflow-visible" : "overflow-x-auto",
         showLineNumbers ? "whitespace-pre" : "whitespace-pre-wrap",
         chrome === "default"
-          ? "py-4 pl-5 pr-14 leading-[1.6]"
-          : compact ? "px-4 py-3 leading-[1.55]" : "p-3 leading-[1.55]",
+          ? "py-4 pl-5 pr-14"
+          : compact ? "px-4 py-3" : "p-3",
         className,
       )}
       data-testid={testId}
-      style={compact ? { fontFamily: CODE_FONT_STACK } : undefined}
     >
       <code className="text-inherit">
         {showLineNumbers && compact ? (
@@ -246,7 +234,7 @@ export const CodeBlock = memo(function CodeBlock({
     <div
       ref={rootRef}
       className={cn(
-        "not-prose relative code-content",
+        "not-prose relative code-content font-mono text-code",
         useViewportHighlight ? "overflow-visible" : "overflow-hidden",
         hasChrome && "rounded-floating bg-secondary/70",
         className,

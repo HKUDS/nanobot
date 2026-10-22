@@ -71,7 +71,12 @@ class AutoCompact:
         active_keys = set(active_session_keys)
         for info in await self.sessions.state.list_sessions():
             key = info.get("key", "")
-            if not key or is_dream_session(key) or key in self._archiving:
+            if (
+                not key
+                or is_dream_session(key)
+                or key.startswith("subagent:")
+                or key in self._archiving
+            ):
                 continue
             if key in active_keys or not self._is_expired(info.get("updated_at"), now):
                 continue
@@ -96,6 +101,7 @@ class AutoCompact:
                     key,
                     runtime=runtime,
                     events=self._bind_events(key) if self._bind_events else NO_EVENTS,
+                    reason="idle",
                 )
                 if summary:
                     session = await self.sessions.state.get(key)

@@ -260,19 +260,36 @@ class TestBuildUserContent:
         builder = _builder(tmp_path)
         result = builder.build_user_content("hello", [str(png)])
         assert isinstance(result, list)
-        assert len(result) == 2
-        assert result[0]["type"] == "image_url"
-        assert result[0]["image_url"]["url"].startswith("data:image/png;base64,")
-        assert result[1]["type"] == "text"
-        assert result[1]["text"] == "hello"
+        assert len(result) == 3
+        assert result[0] == {"type": "text", "text": f"[image: {png}]"}
+        assert result[1]["type"] == "image_url"
+        assert result[1]["image_url"]["url"].startswith("data:image/png;base64,")
+        assert result[2]["type"] == "text"
+        assert result[2]["text"] == "hello"
+
+    def test_images_keep_paired_paths_in_provider_visible_content(self, tmp_path):
+        from nanobot.providers.base import LLMProvider
+        from nanobot.providers.openai_responses.converters import convert_user_message
+
+        paths = [tmp_path / "original.png", tmp_path / "uploaded.png"]
+        for index, path in enumerate(paths):
+            path.write_bytes(b"\x89PNG\r\n\x1a\n" + bytes([index]) * 16)
+        content = _builder(tmp_path).build_user_content("compare these", [str(path) for path in paths])
+        clean = LLMProvider._sanitize_empty_content([{"role": "user", "content": content}])[0]
+        converted = convert_user_message(clean["content"])["content"]
+        image_indexes = [index for index, block in enumerate(converted) if block["type"] == "input_image"]
+        assert len(image_indexes) == 2
+        for index, path in zip(image_indexes, paths, strict=True):
+            assert index > 0
+            assert converted[index - 1] == {"type": "input_text", "text": f"[image: {path}]"}
+        assert converted[-1] == {"type": "input_text", "text": "compare these"}
 
     def test_image_meta_includes_path(self, tmp_path):
         png = tmp_path / "test.png"
         png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
         builder = _builder(tmp_path)
         result = builder.build_user_content("hello", [str(png)])
-        assert "_meta" in result[0]
-        assert "path" in result[0]["_meta"]
+        assert result[1]["_meta"]["path"] == str(png)
 
 
 # ---------------------------------------------------------------------------

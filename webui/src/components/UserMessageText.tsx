@@ -92,7 +92,7 @@ export function UserMessageText({
             title={t("message.skill", { name: segment.name })}
             color={INLINE_TOKEN_HIGHLIGHT_COLOR}
           >
-            {segment.name}
+            {segment.text}
           </InlineTokenHighlight>
         );
         return (

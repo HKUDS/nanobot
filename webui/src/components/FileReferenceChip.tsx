@@ -1,4 +1,4 @@
-import { useEffect, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type HTMLAttributes } from "react";
 import { File, FileCode2, FileImage, FileJson2, FileText, FileVideo2, type LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { FileActions, useFilePreviewLoader } from "@/components/FileActions";
@@ -32,6 +32,7 @@ interface FileReferenceChipProps {
   tooltipPath?: string;
   display?: "name" | "path";
   showIcon?: boolean;
+  truncateFromStart?: boolean;
   active?: boolean;
   className?: string;
   textClassName?: string;
@@ -45,6 +46,7 @@ export function FileReferenceChip({
   tooltipPath,
   display = "name",
   showIcon = true,
+  truncateFromStart = false,
   active = false,
   className,
   textClassName,
@@ -68,18 +70,19 @@ export function FileReferenceChip({
     setTooltipOpen(false);
     onOpen(targetPath);
   };
+  const Text = truncateFromStart ? StartTruncatedText : "span";
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     openPreview(event);
   };
   return (
-    <FileActions path={targetPath}>
+    <FileActions path={targetPath} className={truncateFromStart ? "min-w-0" : undefined}>
     <TooltipProvider>
       <Tooltip open={tooltipOpen} onOpenChange={setTooltipOpen}>
         <TooltipTrigger asChild>
           <span
             onContextMenuCapture={() => setTooltipOpen(false)}
-            className={cn("not-prose inline-flex max-w-full align-baseline leading-[inherit]", className)}
+            className={cn("not-prose inline-flex max-w-full align-baseline leading-[inherit]", truncateFromStart && "min-w-0", className)}
           >
             <span
               data-testid={testId}
@@ -90,6 +93,7 @@ export function FileReferenceChip({
               onKeyDown={interactive ? onKeyDown : undefined}
               className={cn(
                 "inline-flex max-w-full items-baseline gap-[0.28em] font-medium leading-[inherit]",
+                truncateFromStart && "min-w-0",
                 interactive
                   ? "text-sky-600 transition-colors hover:text-sky-700 dark:text-sky-300 dark:hover:text-sky-200"
                   : "text-muted-foreground",
@@ -100,11 +104,12 @@ export function FileReferenceChip({
               )}
             >
               {showIcon ? <FileReferenceIcon kind={kind} className="translate-y-[0.12em]" /> : null}
-              <span
+              <Text
                 data-sheen-text={active ? displayText : undefined}
                 className={cn(
-                  "min-w-0 max-w-full [overflow-wrap:anywhere] sm:truncate",
-                  active && "streaming-text-sheen file-reference-sheen",
+                  "min-w-0 max-w-full",
+                  !truncateFromStart && "[overflow-wrap:anywhere] sm:truncate",
+                  active && !truncateFromStart && "streaming-text-sheen file-reference-sheen",
                   textClassName,
                 )}
               >
@@ -116,31 +121,53 @@ export function FileReferenceChip({
                 ) : (
                   displayText
                 )}
-              </span>
+              </Text>
             </span>
           </span>
         </TooltipTrigger>
         <TooltipContent
-          aria-label={imageQuickLook ? t("filePreview.aria") : undefined}
+          aria-label={truncateFromStart ? fullPath : imageQuickLook ? t("filePreview.aria") : undefined}
           side="top"
-          align="center"
+          align={truncateFromStart ? "start" : "center"}
           sideOffset={8}
           collisionPadding={12}
           className={cn(
             "rounded-control text-popover-foreground",
+            imageQuickLook && truncateFromStart && "space-y-2",
             imageQuickLook
-              ? "w-max max-w-[calc(100vw-2rem)] p-2"
-              : "max-w-[min(38rem,calc(100vw-2rem))] break-all px-2.5 py-1.5 font-mono text-[11px] leading-snug",
+              ? cn("w-max p-2", truncateFromStart ? "max-w-[min(38rem,calc(100vw-2rem))]" : "max-w-[calc(100vw-2rem)]")
+              : cn("max-w-[min(38rem,calc(100vw-2rem))] px-2.5 py-1.5 font-mono text-[11px] leading-snug", truncateFromStart ? "text-left [overflow-wrap:anywhere]" : "break-all"),
           )}
         >
-          {imageQuickLook
-            ? tooltipOpen ? <FileImageQuickLook key={targetPath} path={targetPath} /> : null
-            : fullPath}
+          {truncateFromStart ? <span className="block max-w-full select-text whitespace-pre-wrap text-left font-mono text-[11px] leading-snug [overflow-wrap:anywhere]">{fullPath.split(/([\\/])/).map((part, index) => (
+            <span key={index}>{part}{/^[\\/]$/.test(part) ? <wbr /> : null}</span>
+          ))}</span> : !imageQuickLook ? fullPath : null}
+          {imageQuickLook && tooltipOpen ? <FileImageQuickLook key={targetPath} path={targetPath} /> : null}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
     </FileActions>
   );
+}
+
+function StartTruncatedText({ children, className, ...props }: HTMLAttributes<HTMLSpanElement> & { "data-sheen-text"?: string }) {
+  const container = useRef<HTMLSpanElement>(null);
+  const content = useRef<HTMLSpanElement>(null);
+  const [clipped, setClipped] = useState(false);
+  useLayoutEffect(() => {
+    const update = () => setClipped(content.current!.getBoundingClientRect().width > container.current!.getBoundingClientRect().width);
+    const observer = new ResizeObserver(update);
+    observer.observe(container.current!);
+    observer.observe(content.current!);
+    update();
+    return () => observer.disconnect();
+  }, []);
+  return <span ref={container} className={cn("inline-flex items-baseline overflow-hidden whitespace-nowrap", className)}>
+    {clipped ? <span aria-hidden className="shrink-0">…</span> : null}
+    <span className="flex min-w-0 justify-end overflow-hidden">
+      <span ref={content} className={cn("shrink-0", props["data-sheen-text"] && "streaming-text-sheen file-reference-sheen")} {...props}>{children}</span>
+    </span>
+  </span>;
 }
 
 /** Only loads after the normal hover/focus delay, through the session's guarded preview API. */

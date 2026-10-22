@@ -20,7 +20,7 @@ from uuid import uuid4
 
 from loguru import logger
 
-from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
+from nanobot.events import NO_EVENTS, CompactionReason, ContextCompactionEvent, EventSink
 from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import LLMResponse, ProviderConversationState
 from nanobot.providers.conversation_state import ProviderConversationStateController
@@ -1222,6 +1222,7 @@ class Consolidator:
         max_suffix: int = 0,
         events: EventSink = NO_EVENTS,
         notify: bool = False,
+        reason: CompactionReason | None = None,
     ) -> str | None:
         """Replace archived history with a summary checkpoint.
 
@@ -1244,7 +1245,7 @@ class Consolidator:
 
             compaction_id = uuid4().hex
             await events.emit(
-                ContextCompactionEvent(compaction_id=compaction_id, phase="started", notify=notify),
+                ContextCompactionEvent(compaction_id=compaction_id, phase="started", notify=notify, reason=reason),
             )
             archive_end = archive_start + len(messages_to_archive)
             try:
@@ -1261,12 +1262,13 @@ class Consolidator:
                         compaction_id=compaction_id,
                         phase="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
                         notify=notify,
+                        reason=reason,
                     ),
                 )
                 raise
             if not summary:
                 await events.emit(
-                    ContextCompactionEvent(compaction_id=compaction_id, phase="failed", notify=notify),
+                    ContextCompactionEvent(compaction_id=compaction_id, phase="failed", notify=notify, reason=reason),
                 )
                 return None
 
@@ -1275,6 +1277,7 @@ class Consolidator:
                     compaction_id=compaction_id,
                     phase="succeeded",
                     notify=notify,
+                    reason=reason,
                 ),
             )
 

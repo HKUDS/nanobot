@@ -33,6 +33,7 @@ dependencies = [
     "aiohttp>=3.14.3,<4.0.0",
     "yarl>=1.17.0,<2.0.0",
     "cryptography>=46.0.0",
+    "sigstore==4.5.0",
     "ddgs>=9.5.5,<10.0.0",
     "oauth-cli-kit>=0.1.6,<1.0.0",
     "loguru>=0.7.3,<1.0.0",
@@ -104,6 +105,7 @@ dev = [
     "pytest-xdist>=3.8.0,<4.0.0",
     "ruff>=0.1.0",
     "basedpyright>=1.39.0,<2.0.0",
+    "setproctitle>=1.3.7,<2.0.0",
     "pymupdf>=1.25.0",
     "pypdf>=5.0.0,<6.0.0",
     "python-docx>=1.1.0,<2.0.0",
@@ -123,7 +125,7 @@ nanobot-desktop-tui = "nanobot.cli.desktop_tui:main"
 # my_plugin = "my_package.plugins:MyTool"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "filelock>=3.25.2"]
 build-backend = "hatchling.build"
 
 [tool.hatch.metadata]
@@ -135,6 +137,8 @@ allow-direct-references = true
 [tool.hatch.build]
 include = [
     "nanobot/**/*.py",
+    "nanobot/cli/assets/*.png",
+    "nanobot/update_contract.json",
     "nanobot/webui/mcp_presets.json",
     "nanobot/templates/**/*.md",
     "nanobot/skills/**/*.md",
@@ -193,6 +197,9 @@ omit = ["tests/*", "**/tests/*"]
 
 [tool.coverage.report]
 fail_under = 75
+# Discovery of unexecuted source files also includes colocated channel tests.
+# Match run.omit so the application gate never counts test bodies as product code.
+omit = ["tests/*", "**/tests/*"]
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",

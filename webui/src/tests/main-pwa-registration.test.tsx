@@ -28,7 +28,7 @@ describe("service worker registration in main entry", () => {
 
   afterEach(() => {
     document.body.innerHTML = "";
-    delete (navigator as Navigator & { serviceWorker?: unknown }).serviceWorker;
+    Reflect.deleteProperty(navigator, "serviceWorker");
   });
 
   it("registers /sw.js with updateViaCache none only after window load", async () => {

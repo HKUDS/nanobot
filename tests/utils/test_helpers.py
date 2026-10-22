@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.utils import helpers, token_encoding
+from nanobot.utils import atomic_file, file_io, token_encoding
 from nanobot.utils.helpers import (
     _write_text_atomic,
     atomic_write_lines,
@@ -161,11 +161,12 @@ def test_write_text_atomic_fsyncs_file_and_parent_directory(
     def fake_fsync(fd: int) -> None:
         fsync_calls.append(fd)
 
-    monkeypatch.setattr(helpers.os, "fsync", fake_fsync)
-    monkeypatch.setattr(helpers.os, "open", lambda path, flags: 12345)
-    monkeypatch.setattr(helpers.os, "close", lambda fd: closed_fds.append(fd))
+    with monkeypatch.context() as patch:
+        patch.setattr(file_io.os, "fsync", fake_fsync)
+        patch.setattr(file_io.os, "open", lambda path, flags: 12345)
+        patch.setattr(file_io.os, "close", lambda fd: closed_fds.append(fd))
 
-    _write_text_atomic(target, '{"approved": {}}')
+        _write_text_atomic(target, '{"approved": {}}')
 
     assert target.read_text(encoding="utf-8") == '{"approved": {}}'
     assert len(fsync_calls) == 2
@@ -183,10 +184,11 @@ def test_write_text_atomic_keeps_file_when_directory_fsync_is_unsupported(
     def fake_open(path, flags):
         raise OSError("directory fsync unsupported")
 
-    monkeypatch.setattr(helpers.os, "fsync", lambda fd: fsync_calls.append(fd))
-    monkeypatch.setattr(helpers.os, "open", fake_open)
+    with monkeypatch.context() as patch:
+        patch.setattr(file_io.os, "fsync", lambda fd: fsync_calls.append(fd))
+        patch.setattr(file_io.os, "open", fake_open)
 
-    _write_text_atomic(target, '{"pending": {}}')
+        _write_text_atomic(target, '{"pending": {}}')
 
     assert target.read_text(encoding="utf-8") == '{"pending": {}}'
     assert len(fsync_calls) == 1
@@ -213,7 +215,22 @@ def test_atomic_write_lines_round_trip_replaces_target(tmp_path: Path) -> None:
     atomic_write_lines(target, ['{"a": 1}', "café"])
 
     assert target.read_text(encoding="utf-8") == '{"a": 1}\ncafé\n'
+    assert target.read_bytes() == '{"a": 1}\ncafé\n'.encode("utf-8")
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+@pytest.mark.parametrize("name", ["status.json", "更新状态-🐈.json"])
+def test_atomic_record_reader_does_not_block_concurrent_replacement(tmp_path: Path, name: str) -> None:
+    """The update UI can poll while a detached worker commits its next phase."""
+    from nanobot.utils.atomic_file import _open_snapshot, read_atomic_bytes
+
+    target = tmp_path / name
+    atomic_write_lines(target, ['{"phase":"checking"}'])
+    with _open_snapshot(target) as previous:
+        atomic_write_lines(target, ['{"phase":"stopping"}'])
+        assert previous.read() == b'{"phase":"checking"}\n'
+        assert read_atomic_bytes(target) == b'{"phase":"stopping"}\n'
+    assert read_atomic_bytes(target, max_bytes=2) == b'{"'
 
 
 def test_atomic_write_lines_empty_input_replaces_file_with_empty(tmp_path: Path) -> None:
@@ -243,7 +260,7 @@ def test_atomic_writes_clean_temp_when_replace_fails(
     def fail_replace(*_args: object, **_kwargs: object) -> None:
         raise error_type("replace failed")
 
-    monkeypatch.setattr(helpers.os, "replace", fail_replace)
+    monkeypatch.setattr("nanobot.utils.atomic_file.replace_atomic", fail_replace)
 
     with pytest.raises(error_type, match="replace failed"):
         write(target, "new")
@@ -269,7 +286,7 @@ def test_atomic_write_lines_skips_fsync_when_disabled(
 ) -> None:
     target = tmp_path / "session.jsonl"
     fsync_calls: list[int] = []
-    monkeypatch.setattr(helpers.os, "fsync", lambda fd: fsync_calls.append(fd))
+    monkeypatch.setattr(atomic_file.os, "fsync", lambda fd: fsync_calls.append(fd))
 
     atomic_write_lines(target, ["line"], fsync=False)
 
@@ -283,7 +300,7 @@ def test_atomic_write_lines_suppresses_directory_permission_error(
     """Windows directory open raises PermissionError; the replace must still stick."""
     target = tmp_path / "history.jsonl"
     opened: list[tuple[object, int]] = []
-    real_open = helpers.os.open
+    real_open = atomic_file.os.open
 
     def open_directory(path: object, flags: int, *args: object, **kwargs: object) -> int:
         opened.append((path, flags))
@@ -291,12 +308,12 @@ def test_atomic_write_lines_suppresses_directory_permission_error(
             raise PermissionError("directory open denied")
         return real_open(path, flags, *args, **kwargs)
 
-    monkeypatch.setattr(helpers.os, "open", open_directory)
+    monkeypatch.setattr(atomic_file.os, "open", open_directory)
 
     atomic_write_lines(target, ["ok"])
 
     assert target.read_text(encoding="utf-8") == "ok\n"
-    assert opened == [(str(tmp_path), os.O_RDONLY)]
+    assert opened == [(str(atomic_file.io_path(tmp_path)), os.O_RDONLY)]
 
 
 @pytest.mark.parametrize("error_number", [errno.EINVAL, errno.EIO], ids=["unsupported", "io-error"])
@@ -317,9 +334,9 @@ def test_atomic_writes_directory_fsync_errors(
     target = tmp_path / "session.jsonl"
     directory_fd = 12345
     fsync_calls = 0
-    real_fsync = helpers.os.fsync
-    real_open = helpers.os.open
-    real_close = helpers.os.close
+    real_fsync = atomic_file.os.fsync
+    real_open = atomic_file.os.open
+    real_close = atomic_file.os.close
     opened: list[tuple[object, int]] = []
     closed: list[int] = []
 
@@ -342,9 +359,9 @@ def test_atomic_writes_directory_fsync_errors(
             return
         raise OSError(error_number, "directory fsync failed")
 
-    monkeypatch.setattr(helpers.os, "open", tracking_open)
-    monkeypatch.setattr(helpers.os, "close", tracking_close)
-    monkeypatch.setattr(helpers.os, "fsync", fsync_then_error)
+    monkeypatch.setattr(atomic_file.os, "open", tracking_open)
+    monkeypatch.setattr(atomic_file.os, "close", tracking_close)
+    monkeypatch.setattr(atomic_file.os, "fsync", fsync_then_error)
 
     if error_number == errno.EINVAL:
         write(target, "ok")
@@ -355,5 +372,5 @@ def test_atomic_writes_directory_fsync_errors(
 
     assert target.read_text(encoding="utf-8") == expected_content
     assert fsync_calls == 2
-    assert opened == [(str(tmp_path), directory_fd)]
+    assert opened == [(str(atomic_file.io_path(tmp_path)), directory_fd)]
     assert closed == [directory_fd]

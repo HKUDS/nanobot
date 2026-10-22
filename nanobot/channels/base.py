@@ -10,6 +10,7 @@ from loguru import logger
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.config.network import NetworkConfig
 from nanobot.pairing import (
     PAIRING_CODE_META_KEY,
     format_pairing_reply,
@@ -29,20 +30,26 @@ class BaseChannel(ABC):
 
     name: str = "base"
     display_name: str = "Base"
+    # Opt-in construction capability, not a channel configuration field.
+    uses_shared_proxy: bool = False
     send_progress: bool = True
     send_tool_hints: bool = True
     show_reasoning: bool = True
     show_compaction_notices: bool = False
 
-    def __init__(self, config: Any, bus: MessageBus):
+    def __init__(
+        self, config: Any, bus: MessageBus, *, network: NetworkConfig | None = None,
+    ):
         """
         Initialize the channel.
 
         Args:
             config: Channel-specific configuration.
             bus: The message bus for communication.
+            network: Instance-scoped shared network settings.
         """
         self.config = config
+        self.network = network if network is not None else NetworkConfig()
         self.logger = logger.bind(channel=self.name)
         self.bus = bus
         self._running = False
@@ -106,6 +113,16 @@ class BaseChannel(ABC):
         A normal return confirms this adapter completed, not a recipient read receipt.
         """
         pass
+
+    @property
+    def has_pending_delivery(self) -> bool:
+        """Whether delivery outlives an awaited ``send``/streaming call.
+
+        The manager already accounts for awaited sends and retries. Channels
+        that enqueue their own writes must expose that work here, including
+        transport cleanup, before a gateway can be considered idle.
+        """
+        return False
 
     def progress_transport_defaults(self) -> tuple[bool, bool] | None:
         """Return channel-owned defaults for progress and tool-hint messages.

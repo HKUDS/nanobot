@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import queue
 import threading
@@ -189,6 +190,50 @@ def test_pending_login_accepts_authorization_code_from_remote_browser(
     assert exchanged["code"] == "remote-code"
     assert exchanged["redirect_uri"] == callback_url
     assert get_xai_oauth_login_status() == token
+
+
+@pytest.mark.asyncio
+async def test_cancel_joins_accepted_callback_request_and_expiry_timer(monkeypatch):
+    entered, release, server_closing = threading.Event(), threading.Event(), threading.Event()
+    monkeypatch.setattr(xai_oauth, "_discover", lambda _: _Discovery(
+        authorization_endpoint="https://auth.x.ai/oauth2/authorize",
+        token_endpoint="https://auth.x.ai/oauth2/token", userinfo_endpoint=None,
+    ))
+    callback_page = xai_oauth._callback_page
+
+    def render_callback(*args):
+        entered.set()
+        assert release.wait(3)
+        return callback_page(*args)
+
+    monkeypatch.setattr(xai_oauth, "_callback_page", render_callback)
+    flow = start_xai_oauth_login(timeout_s=5)
+    server_close = flow._server.server_close
+
+    def observed_close():
+        server_closing.set()
+        server_close()
+
+    monkeypatch.setattr(flow._server, "server_close", observed_close)
+    params = parse_qs(urlsplit(flow.authorization_url).query)
+    request = asyncio.create_task(asyncio.to_thread(httpx.get, flow.redirect_uri, params={
+        "code": "fixture-code", "state": params["state"][0],
+    }, trust_env=False))
+    try:
+        assert await asyncio.to_thread(entered.wait, 1)
+        flow.cancel()
+        closing = asyncio.create_task(asyncio.to_thread(flow.wait_closed))
+        assert await asyncio.to_thread(server_closing.wait, 1)
+        assert flow.has_pending_work
+        assert not closing.done()
+    finally:
+        release.set()
+        flow.cancel()
+        await asyncio.to_thread(flow.wait_closed)
+        response = await request
+    await closing
+    assert response.status_code == 200
+    assert not flow.has_pending_work
 
 
 def test_expired_token_refreshes_once_and_persists_rotated_refresh_token(

@@ -71,11 +71,12 @@ Test-Trace 'PowerShell started'
         result = subprocess.run(
             ["powershell.exe", "-NoProfile", "-NonInteractive", "-STA", "-EncodedCommand",
              base64.b64encode(script.encode("utf-16-le")).decode("ascii")],
-            input=base64.b64encode(content) + b"\n", capture_output=True, timeout=15,
+            # Cold C# compilation on a Windows runner is not the acknowledgement deadline.
+            input=base64.b64encode(content) + b"\n", capture_output=True, timeout=60,
         )
     except subprocess.TimeoutExpired as exc:
         stages = (exc.stderr or b"").decode("utf-8", errors="replace")
-        pytest.fail(f"Windows handoff exceeded 15s. Native stages:\n{stages}", pytrace=False)
+        pytest.fail(f"Windows handoff exceeded 60s. Native stages:\n{stages}", pytrace=False)
 
     assert result.returncode == (0 if opens else 1), result.stderr
     assert result.stdout == b"private;" + (b"1" if opens else b"") + b"removed=True"

@@ -7,18 +7,21 @@ import inspect
 import json
 import platform
 import re
+import subprocess
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 from zoneinfo import ZoneInfo
 
+import httpx
+from pydantic import ValidationError
 from pydantic.alias_generators import to_snake
 
 from nanobot.build_info import COMMIT
 from nanobot.channels._setup import channel_setup_spec
-from nanobot.channels.connect import ChannelConnectError
+from nanobot.channels.connect import ChannelConnectError, ChannelConnector, ManagedChannelConnector
 from nanobot.channels.contracts import (
     RouteFieldType,
     channel_instance_config,
@@ -27,7 +30,26 @@ from nanobot.channels.contracts import (
 from nanobot.config.schema import Config
 from nanobot.llm_usage import llm_usage_payload
 from nanobot.optional_features import OptionalFeatureError, with_channel_runtime_status
+from nanobot.runtime_admission import RuntimeAdmission
 from nanobot.security.workspace_access import workspace_sandbox_status
+from nanobot.update_channel import UpdateChannelRequest
+from nanobot.update_guidance import installation_method
+from nanobot.update_jobs import UpdateJobNotFoundError, read_update_job
+from nanobot.update_plan import (
+    UpdatePlan,
+    UpdatePlanNotFoundError,
+    UpdatePlanRequest,
+    inspect_update_installation,
+    preview_release_update,
+    read_release_plan,
+    review_plan,
+)
+from nanobot.update_service import (
+    UpdateExecutionRequest,
+    UpdateJobRequest,
+    UpdateJobService,
+    UpdateRetryRequest,
+)
 from nanobot.webui.settings_capabilities import network_safety_payload
 from nanobot.webui.settings_contracts import (
     QueryParams,
@@ -40,9 +62,10 @@ from nanobot.webui.settings_contracts import (
 from nanobot.webui.settings_runtime import runtime_config_payload
 
 if TYPE_CHECKING:
+    from nanobot.channels.plugin import ChannelPlugin
     from nanobot.webui.settings_services import WebUISettingsServices
 
-LoadChannelPlugin = Callable[[str], Any]
+LoadChannelPlugin = Callable[[str], "ChannelPlugin"]
 ListPendingPairings = Callable[[], Iterable[dict[str, Any]]]
 SettingsOperation = Callable[..., Any]
 
@@ -63,7 +86,7 @@ class SystemSettingsOperations:
     mcp_presets_action: SettingsOperation
     reload_mcp: SettingsOperation
     mcp_runtime_status: Callable[[], Mapping[str, str]] | None
-    check_for_update: SettingsOperation
+    check_for_update: Callable[[], Awaitable[dict[str, Any]]]
     channel_feature_action: SettingsOperation | None = None
     channel_runtime_status: Callable[[], dict[str, Any]] | None = None
 
@@ -424,28 +447,54 @@ def pairing_payload(
 class SystemSettingsHandler:
     """Handle channel and system commands behind a transport-neutral request DTO."""
 
-    def __init__(self, settings: WebUISettingsServices, logger: Any) -> None:
+    def __init__(
+        self, settings: WebUISettingsServices, logger: Any, admission: RuntimeAdmission,
+    ) -> None:
         self.settings = settings
         self.logger = logger
-        self._channel_connectors: dict[str, Any] = {}
+        self._admission = admission
+        self._channel_connectors: dict[str, ChannelConnector] = {}
+        self._pending_channel_restarts: set[str] = set()
+        self._remove_pending_work: Callable[[], None] | None = None
+        self._closing_connectors = False
+        self._update_jobs = UpdateJobService()
+        self._remove_update_work: Callable[[], None] | None = None
+
+    def _has_pending_connectors(self) -> bool:
+        return self._closing_connectors or any(
+            not isinstance(connector, ManagedChannelConnector) or connector.has_pending_work
+            for connector in self._channel_connectors.values()
+        )
 
     async def close(self) -> None:
         """Release channel-owned setup sessions during gateway shutdown."""
+        await self._update_jobs.close()
+        if self._remove_update_work is not None:
+            self._remove_update_work()
+            self._remove_update_work = None
         connectors = tuple(self._channel_connectors.items())
-        self._channel_connectors.clear()
-        for channel_name, connector in connectors:
-            close = getattr(connector, "close", None)
-            if not callable(close):
-                continue
-            try:
-                result = close()
-                if inspect.isawaitable(result):
-                    await result
-            except Exception:
-                self.logger.exception(
-                    "failed to close {} WebUI connector",
-                    channel_name,
-                )
+        self._closing_connectors = True
+        try:
+            for channel_name, connector in connectors:
+                close = getattr(connector, "close", None)
+                if not callable(close):
+                    continue
+                try:
+                    result = close()
+                    if inspect.isawaitable(result):
+                        await result
+                    if isinstance(connector, ManagedChannelConnector) and not connector.has_pending_work:
+                        del self._channel_connectors[channel_name]
+                except Exception:
+                    self.logger.exception(
+                        "failed to close {} WebUI connector",
+                        channel_name,
+                    )
+            if not self._channel_connectors and self._remove_pending_work is not None:
+                self._remove_pending_work()
+                self._remove_pending_work = None
+        finally:
+            self._closing_connectors = False
 
     async def handle(
         self,
@@ -516,8 +565,121 @@ class SystemSettingsHandler:
                 operations,
             )
         if action == "version-check":
-            return await self._version_check(operations)
+            return await self._version_check(request, operations)
+        if action == "update-channel":
+            if not self.allow_feature_package_install(request):
+                return SettingsRouteResult.failure(403, "Changing update channels requires package-install permission.")
+            try:
+                options = UpdateChannelRequest.model_validate(request.payload or {})
+            except (ValidationError, ValueError):
+                return SettingsRouteResult.failure(400, "Invalid update channel request")
+            try:
+                self._admission.check()
+                selection = self._update_jobs.change_channel(options)
+            except (RuntimeError, ValueError, OSError, KeyError) as exc:
+                self.logger.warning("could not change update channel ({})", type(exc).__name__)
+                return SettingsRouteResult.failure(409, "Could not change channels. Finish or recover any pending update, then check again.")
+            return SettingsRouteResult.success({"channel": selection.channel, "revision": selection.revision})
+        if action in {"update-plan-create", "update-plan-read"}:
+            return await self._update_plan(request, create=action == "update-plan-create")
+        if action == "update-job-read":
+            return await self._update_job(request)
+        if action in {"update-job-prepare", "update-job-settle"}:
+            return self._update_job_action(request, prepare=action == "update-job-prepare")
+        if action in {"update-job-execute", "update-job-retry"}:
+            return await self._execute_update_job(request, retry=action == "update-job-retry")
         return SettingsRouteResult.failure(404, "unknown settings action")
+
+    async def _execute_update_job(self, request: SettingsRequest, *, retry: bool) -> SettingsRouteResult:
+        if not self.allow_feature_package_install(request):
+            return SettingsRouteResult.failure(
+                403, "Updating from a remote WebUI is disabled. Use localhost or enable remote package installation.",
+            )
+        try:
+            options = (UpdateRetryRequest if retry else UpdateExecutionRequest).model_validate(request.payload or {})
+        except (ValidationError, ValueError):
+            return SettingsRouteResult.failure(400, "Confirm the saved update plan and its gateway restart.")
+        try:
+            self._admission.check()
+            job = await self._update_jobs.execute(
+                options.id, previous_confirmation_id=options.previous_confirmation_id if isinstance(options, UpdateRetryRequest) else None,
+            )
+        except UpdateJobNotFoundError:
+            return SettingsRouteResult.failure(404, "No saved update job is available. Review and prepare the update first.")
+        except (RuntimeError, ValueError, OSError, KeyError) as exc:
+            self.logger.warning("could not confirm an update handoff ({})", type(exc).__name__)
+            return SettingsRouteResult.failure(409, "Could not confirm this update. Read its saved state before starting a new review.")
+        return SettingsRouteResult.success({"job": job.model_dump(mode="json")})
+
+    def _update_job_action(self, request: SettingsRequest, *, prepare: bool) -> SettingsRouteResult:
+        if not self.allow_feature_package_install(request):
+            return SettingsRouteResult.failure(
+                403, "Preparing updates from a remote WebUI is disabled. Use localhost or enable remote package installation.",
+            )
+        try:
+            options = UpdateJobRequest.model_validate(request.payload or {})
+        except (ValidationError, ValueError):
+            return SettingsRouteResult.failure(400, "Invalid update job request")
+        try:
+            self._admission.check()
+            if prepare:
+                if self._remove_update_work is None:
+                    self._remove_update_work = self._admission.register_pending_work(self._update_jobs.has_pending_work)
+                job = self._update_jobs.prepare(options.id)
+            else:
+                job = self._update_jobs.settle(options.id)
+        except (UpdatePlanNotFoundError, UpdateJobNotFoundError):
+            return SettingsRouteResult.failure(404, "This saved update is no longer available. Check again.")
+        except (RuntimeError, ValueError, OSError, KeyError) as exc:
+            self.logger.warning("could not accept an update preparation action ({})", type(exc).__name__)
+            return SettingsRouteResult.failure(409, "Could not accept this preparation action. Read the saved update state before trying again.")
+        return SettingsRouteResult.success({"job": job.model_dump(mode="json")})
+
+    async def _update_job(self, request: SettingsRequest) -> SettingsRouteResult:
+        plan_id = query_first(request.query, "id") or ""
+        try:
+            UpdatePlan.canonical_id(plan_id)
+        except ValueError:
+            return SettingsRouteResult.failure(400, "Invalid update job identifier")
+        try:
+            job = await asyncio.to_thread(read_update_job, plan_id)
+        except UpdateJobNotFoundError:
+            return SettingsRouteResult.failure(404, "No saved update job is available for this installation.")
+        except (ValueError, OSError, KeyError) as exc:
+            self.logger.warning("could not read the gateway's update job ({})", type(exc).__name__)
+            return SettingsRouteResult.failure(409, "Could not read this update's saved state. No recovery action was started.")
+        return SettingsRouteResult.success({"job": job.model_dump(mode="json")})
+
+    async def _update_plan(self, request: SettingsRequest, *, create: bool) -> SettingsRouteResult:
+        plan_id = query_first(request.query, "id") or ""
+        try:
+            options = UpdatePlanRequest.model_validate(request.payload or {}) if create else None
+            if options is None:
+                UpdatePlan.canonical_id(plan_id)
+        except (ValidationError, ValueError):
+            return SettingsRouteResult.failure(400, "Invalid update plan request")
+        try:
+            if options is not None:
+                plan = await preview_release_update(
+                    options.channel, restart_running=options.restart_running, extras=options.extras,
+                )
+                review = review_plan(plan, plan.installation)
+            else:
+                review = await read_release_plan(plan_id)
+        except UpdatePlanNotFoundError:
+            return SettingsRouteResult.failure(404, "The update plan is no longer available. Check again.")
+        except (RuntimeError, ValueError, OSError, subprocess.SubprocessError, httpx.HTTPError) as exc:
+            # A parser/subprocess error may contain local configuration or source
+            # credentials. Neither belongs in a remote response.
+            self.logger.warning("could not inspect the gateway's update plan ({})", type(exc).__name__)
+            return SettingsRouteResult.failure(409, "Could not verify an update plan for this installation. No update was started.")
+        return SettingsRouteResult.success({
+            "plan": review.model_dump(mode="json"),
+            "installation_allowed": self.allow_feature_package_install(request),
+            # This exact review is consumed by the durable preparation/handoff
+            # routes, never by the legacy unbound latest-release mutation.
+            "execution_available": review.execution_blocked_reason is None,
+        })
 
     async def _cli_apps(
         self,
@@ -632,6 +794,8 @@ class SystemSettingsHandler:
                     action,
                 )
             return SettingsRouteResult.failure(status, message)
+        if install_only and payload.get("requires_restart"):
+            self._pending_channel_restarts.add((query_first(request.query, "name") or "").strip())
         if not install_only:
             payload = await self._apply_feature_runtime_change(
                 action,
@@ -651,16 +815,22 @@ class SystemSettingsHandler:
         payload: dict[str, Any],
         operations: SystemSettingsOperations,
     ) -> dict[str, Any]:
-        if operations.channel_runtime_status is None:
-            return payload
-        try:
-            return with_channel_runtime_status(
-                payload,
-                operations.channel_runtime_status(),
-            )
-        except Exception:
-            self.logger.exception("failed to load channel runtime status")
-            return payload
+        if operations.channel_runtime_status is not None:
+            try:
+                payload = with_channel_runtime_status(
+                    payload,
+                    operations.channel_runtime_status(),
+                )
+            except Exception:
+                self.logger.exception("failed to load channel runtime status")
+        return {
+            **payload,
+            "features": [
+                {**feature, "restart_pending": feature["name"] in self._pending_channel_restarts}
+                if feature["type"] == "channel" else feature
+                for feature in payload["features"]
+            ],
+        }
 
     async def _apply_feature_runtime_change(
         self,
@@ -883,10 +1053,15 @@ class SystemSettingsHandler:
         action: str,
         operations: SystemSettingsOperations,
     ) -> SettingsRouteResult:
+        self._admission.check()
         try:
             connector = self._channel_connectors.get(channel_name)
             if connector is None:
                 plugin = operations.load_channel_plugin(channel_name)
+                if self._remove_pending_work is None:
+                    self._remove_pending_work = self._admission.register_pending_work(
+                        self._has_pending_connectors,
+                    )
                 connector = plugin.load_connector()
                 self._channel_connectors[channel_name] = connector
         except ImportError:
@@ -1055,11 +1230,25 @@ class SystemSettingsHandler:
 
     async def _version_check(
         self,
+        request: SettingsRequest,
         operations: SystemSettingsOperations,
     ) -> SettingsRouteResult:
         try:
-            update_info = await asyncio.to_thread(operations.check_for_update)
-        except Exception:
-            self.logger.exception("version check failed")
+            update_info = await operations.check_for_update()
+        except Exception as exc:
+            self.logger.warning("version check failed ({})", type(exc).__name__)
             return SettingsRouteResult.failure(500, "version check failed")
-        return SettingsRouteResult.success({"updateAvailable": update_info})
+        if query_first(request.query, "channel_status") == "1":
+            try:
+                method = installation_method(await asyncio.to_thread(inspect_update_installation))
+            except (RuntimeError, ValueError, OSError, subprocess.SubprocessError):
+                method = None  # Unknown owner must not imply one-click eligibility.
+            return SettingsRouteResult.success({
+                **update_info, "can_change_channel": self.allow_feature_package_install(request),
+                "installation_method": method,
+            })
+        # An older client cannot interpret waiting/withdrawn/unavailable states.
+        # Report a failure rather than converting them to its green "up to date".
+        if update_info["releaseStatus"]["state"] not in {"available", "current", "ahead"}:
+            return SettingsRouteResult.failure(409, "No verified update result is available. Open this gateway's current WebUI to check its release channel.")
+        return SettingsRouteResult.success({"updateAvailable": update_info["updateAvailable"]})

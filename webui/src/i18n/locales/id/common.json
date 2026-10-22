@@ -1,4 +1,106 @@
 {
+  "updates": {
+    "guide": {
+      "entry": "Perbarui melalui {{method}}",
+      "methods": {
+        "managed": "penginstal nanobot",
+        "uv": "uv",
+        "pipx": "pipx",
+        "pip": "pip",
+        "source": "kode sumber",
+        "container": "deployment container",
+        "system": "pengelola paket sistem"
+      },
+      "host": "Gateway: {{host}}",
+      "where": "Gunakan terminal di mesin ini dengan akun instalasi awal. Untuk gateway jarak jauh, gunakan SSH atau konsol server, bukan komputer browser. Perintah hanya disalin; halaman ini tidak menjalankannya.",
+      "containerHost": "Nama dan jalur ini milik bagian dalam container, bukan host deployment. Gunakan server atau panel yang mengelolanya; jangan memperbarui di dalam container yang sedang berjalan.",
+      "beforeTitle": "Siapkan dan hentikan",
+      "before": "Selesaikan tugas dan cadangkan konfigurasi, percakapan, serta data workspace. Hentikan semua gateway yang memakai instalasi ini melalui peluncur atau pengelola layanan awal. Pertahankan jalur profil dan pengaturan peluncuran.",
+      "installTitle": "Perbarui di {{shell}}",
+      "inspectCommand": "Periksa instalasi ini",
+      "updateCommand": "Perintah pembaruan",
+      "versionCommand": "Versi terpasang",
+      "reasons": {
+        "restart": "Paket tujuan sudah terpasang. Jangan instal ulang. Hentikan gateway lama, mulai dengan peluncur dan profil awal, lalu periksa versi yang berjalan.",
+        "registry": "Gunakan sumber paket dan kredensial awal. Pengelola mempertahankan extras dan batasan versi sehingga dapat memilih versi stabil lain dari pemberitahuan. Periksa hasilnya; jangan paksa pembaruan yang gagal.",
+        "preview": "Preview didistribusikan di GitHub dan mungkin tidak tersedia di indeks paket. Pilih wheel yang sesuai dengan Python dan platform gateway, verifikasi checksum lalu instal dengan pengelola awal dan extras yang sama. Perintah upgrade umum tidak menjamin Preview ini.",
+        "policy": "Ada versi yang dipatok, berkas lock, sumber tetap, batasan, atau opsi tak dikenal. Periksa lalu ikuti alur awal dengan mempertahankan extras dan paket yang diinjeksi. Jangan hapus batasannya.",
+        "extras": "Lingkungan pip ini tidak mencatat extras awal. Periksa paket lalu gunakan kembali perintah pip awal dengan --upgrade dan versi tujuan, serta pertahankan extras dan opsi indeks. Tidak ada perintah instalasi hasil tebakan.",
+        "manager": "Program pengelola atau struktur lingkungan tidak dapat dikonfirmasi. Gunakan akun dan pengaturan awal untuk menargetkan jalur di atas; jangan memakai pip atau nanobot lain dari PATH.",
+        "source": "Periksa repositori, pertahankan perubahan lokal dan pastikan branch atau revisi tujuan. Ikuti alur repositori untuk memperbarui kode, dependensi, dan build WebUI/TUI. Jangan ganti instalasi editable dengan paket PyPI.",
+        "container": "Di proyek Compose atau panel awal, pilih tag/digest, tarik atau build image lalu buat ulang hanya layanan nanobot dengan mount, rahasia, dan port yang sama. Cadangkan volume data; jangan pernah menghapusnya.",
+        "system": "Gunakan pengelola paket OS atau hubungi administrator server. Jangan gunakan sudo pip atau lewati pembatasan Python yang dikelola sistem.",
+        "review": "Instalasi atau hasil pemeriksaan telah berubah. Tutup dan periksa lagi sebelum menyalin perintah."
+      },
+      "verifyTitle": "Mulai ulang dan verifikasi",
+      "verify": "Jalankan dengan peluncur dan profil yang sama. Perintah hanya memeriksa berkas terpasang. Sambungkan kembali ke gateway yang sama, bandingkan versi aktif dengan v{{version}}, dan pastikan percakapan serta pengaturan tetap ada.",
+      "check": "Periksa gateway yang berjalan",
+      "verified": "Terkonfirmasi: gateway ini menjalankan v{{version}}.",
+      "observed": "Gateway melaporkan v{{version}}, bukan v{{target}}. Periksa keluaran instalasi dan mulai ulang lingkungan yang sama; pembaruan paket saja tidak memperbarui proses aktif.",
+      "checkFailed": "Versi aktif tidak dapat dibaca. Sambungkan kembali ke gateway yang sama lalu coba lagi; keberhasilan belum dikonfirmasi."
+    },
+    "automaticRecovery": "Jika pembaruan gagal, nanobot akan mencoba memulihkan layanan dengan program sebelumnya jika aman. Data chat tidak akan dikembalikan ke versi lama.",
+    "restored": "Versi sebelumnya dipulihkan",
+    "restoredDescription": "Pembaruan belum selesai. v{{version}} berjalan kembali. Konfigurasi dan chat Anda tidak dikembalikan ke data lama.",
+    "recoveryBeforeInstall": "Pembaruan berhenti sebelum instalasi. Tidak ada berkas paket yang diubah. Pulihkan pembaruan tersimpan untuk melanjutkan.",
+    "channel": {
+      "settings": "Pengaturan pembaruan",
+      "receivePreview": "Terima pembaruan pratinjau",
+      "previewWarning": "Ini adalah versi pratinjau dan mungkin memiliki bug.",
+      "preview": "Pratinjau",
+      "hint": "Coba fitur baru lebih awal.",
+      "saving": "Menyimpan…",
+      "saved": "Preferensi pembaruan disimpan",
+      "ahead": "Versi ini lebih baru dari saluran yang dipilih. Versi lama tidak akan diinstal.",
+      "waiting_stable": "Pembaruan pratinjau dinonaktifkan. Gunakan versi ini sampai versi stabil yang lebih baru tersedia.",
+      "withdrawn": "Pratinjau ini ditarik. Perbarui saat versi baru tersedia; jangan turunkan versi dengan data saat ini.",
+      "unavailable": "Pembaruan di saluran ini tidak dapat diperiksa.",
+      "publishing": "Versi masih diterbitkan. Periksa lagi nanti.",
+      "unsupported": "Tidak ada pembaruan yang cocok untuk versi Python dan platform ini.",
+      "releaseNotes": "Catatan rilis"
+    },
+    "reviewAgain": "Tinjau pembaruan",
+    "reviewAgainDescription": "Tidak ada berkas paket yang diubah. Tinjau kembali pembaruan sebelum menyetujui instalasi dan mulai ulang.",
+    "settleFailed": "Pembaruan sebelumnya belum dapat diakhiri dengan aman. Periksa statusnya lagi atau ikuti petunjuk pemulihan.",
+    "ownerGuide": "Petunjuk pembaruan untuk instalasi Anda",
+    "recoveryTitle": "Pulihkan di komputer gateway",
+    "recoveryDescription": "Jalankan perintah ini di terminal komputer yang menjalankan nanobot. Pembaruan tersimpan akan ditampilkan sebelum meminta konfirmasi perbaikan. Simpan cadangan asli.",
+    "confirm": "Perbarui nanobot sekarang?",
+    "reviewingTitle": "Memeriksa pembaruan…",
+    "preparing": "Mengunduh pembaruan…",
+    "installing": "Memasang pembaruan…",
+    "working": "Memperbarui nanobot…",
+    "reconnecting": "Menghubungkan kembali…",
+    "done": "Pembaruan selesai",
+    "failed": "Pembaruan belum selesai",
+    "confirmDescription": "Pembaruan ke v{{version}} akan memulai ulang nanobot di {{host}}. Selesaikan tugas yang berjalan sebelum melanjutkan.",
+    "reviewing": "Memeriksa instalasi dan versi tujuan yang tepat. Tidak ada berkas yang diubah.",
+    "workingDescription": "Menyiapkan dan memverifikasi berkas, lalu mencadangkan dan memulai ulang gateway terpilih.",
+    "reconnectingDescription": "Menunggu gateway yang diperbarui terhubung kembali. Jangan mulai pembaruan lain.",
+    "delayed": "Penyambungan memerlukan waktu lebih lama. Progres tersimpan; Anda dapat menutup dan memeriksa lagi nanti.",
+    "doneDescription": "Kini menjalankan v{{version}}.",
+    "preparationFailed": "Persiapan atau penghentian gateway gagal. Paket belum diubah. Selesaikan tugas lalu periksa kembali.",
+    "repairRequired": "Instalasi atau mulai ulang gagal. Cadangan dan catatan disimpan. Ikuti prosedur pemulihan; jangan mulai instalasi lain.",
+    "reviewFailed": "Pembaruan tidak dapat diverifikasi. Periksa koneksi dan peluncur latar belakang yang didukung instalasi asal.",
+    "confirmationUnknown": "Permintaan mungkin telah diterima. Memeriksa progres tersimpan sebelum tindakan berikutnya.",
+    "statusFailed": "Catatan pembaruan tidak dapat dibaca. Sambungkan kembali ke gateway yang sama lalu periksa.",
+    "sharedInstallation": "{{count}} gateway aktif yang berbagi instalasi ini akan dimulai ulang.",
+    "cancel": "Batal",
+    "close": "Tutup",
+    "hide": "Sembunyikan",
+    "return": "Selesai",
+    "wait": "Tunggu",
+    "checkAgain": "Periksa lagi",
+    "apply": "Perbarui dan mulai ulang",
+    "blocked": {
+      "review_changed": "Tinjauan berubah atau kedaluwarsa. Tutup lalu periksa lagi.",
+      "not_upgrade": "Versi tujuan bukan peningkatan. Berkas tidak akan diubah.",
+      "installation_owner": "Perbarui dengan pengelola paket atau alat penerapan asal.",
+      "installation_policy": "Sumber, ekstra, atau batasan versi memerlukan pembaruan melalui metode pemasangan asal.",
+      "external_restart": "Gateway ini tidak dapat dimulai ulang di sini. Gunakan alat peluncuran atau penerapan asal untuk menghentikan, memperbarui, dan memulainya ulang.",
+      "permission": "Buka localhost pada gateway atau izinkan pemasangan paket jarak jauh."
+    }
+  },
   "remote": {
     "compatibility": {
       "title": "Periksa versi",
@@ -253,32 +355,7 @@
   "previewTabs": {
     "title": "Pratinjau",
     "closeTab": "Tutup {{name}}",
-    "closeAll": "Tutup panel pratinjau",
-    "websiteInfo": "Tentang pratinjau situs"
-  },
-  "webPreview": {
-    "viewLinks": "Lihat tautan",
-    "back": "Kembali",
-    "original": "Tautan asli",
-    "actions": "Tindakan tautan",
-    "open": "Pratinjau situs",
-    "external": "Buka di browser",
-    "copy": "Salin tautan",
-    "copied": "Tautan disalin",
-    "copyFailed": "Tidak dapat menyalin tautan",
-    "title": "Pratinjau situs",
-    "resize": "Ubah lebar pratinjau",
-    "refresh": "Muat ulang situs",
-    "close": "Tutup pratinjau",
-    "isolated": "Pratinjau terisolasi dan terbatas. Login dan beberapa interaksi mungkin tidak berfungsi.",
-    "blockedHint": "Beberapa situs memblokir penyematan. Jika kosong atau gagal, buka di browser.",
-    "loopback": "Localhost merujuk ke perangkat browser ini, bukan gateway jarak jauh. Port tidak diteruskan.",
-    "native": "Aplikasi native tidak mendukung pratinjau tertanam. Buka tautan ini di browser.",
-    "unsupported": "Browser ini tidak mendukung pratinjau dengan kredensial terisolasi. Buka di tab baru.",
-    "sameOrigin": "Aplikasi nanobot sendiri tidak dapat disematkan di sini. Buka di tab baru.",
-    "mixedContent": "Halaman HTTPS tidak dapat menampilkan situs HTTP di sini. Buka di tab baru.",
-    "invalid": "Alamat ini tidak dapat dipratinjau.",
-    "frame": "Pratinjau situs: {{host}}"
+    "closeAll": "Tutup panel pratinjau"
   },
   "starPrompt": {
     "footerAction": "Beri bintang untuk nanobot",
@@ -389,6 +466,16 @@
       "description": "Perubahan sudah disimpan. Mulai ulang untuk menerapkannya.",
       "later": "Mulai ulang nanti"
     },
+    "network": {
+      "useProxy": "Gunakan proxy",
+      "useProxyHelp": "Menggunakan proxy bersama di pengaturan Lanjutan.",
+      "configureProxy": "Atur proxy",
+      "sharedProxyScope": "Dipakai bersama oleh semua fitur yang mengaktifkan proxy.",
+      "authentication": "Autentikasi (opsional)",
+      "username": "Nama pengguna",
+      "password": "Kata sandi",
+      "proxyReferenceAuth": "Atur autentikasi di URL proxy yang dirujuk."
+    },
     "runtimeConfig": {
       "apiSaved": "Tersimpan. Mulai ulang layanan API untuk menerapkan perubahan.",
       "commandRuntime": {
@@ -426,7 +513,8 @@
         "tools_exec_allowed_env_keys": {"label": "Variabel lingkungan", "help": "Variabel tambahan untuk perintah, satu nama per baris.\n\nVariabel tambahan yang diteruskan ke perintah, satu per baris. Variabel dasar yang diperlukan tetap tersedia."},
         "tools_exec_allow_patterns": {"label": "Perintah diizinkan", "help": "Hanya jalankan perintah yang cocok sepenuhnya dengan aturan izin.\n\nSatu ekspresi reguler per baris. Jika diisi, setiap bagian perintah harus cocok sepenuhnya dengan salah satu aturan. Perintah yang diizinkan melewati aturan pemblokiran bawaan dan tambahan, tetapi tetap mengikuti batasan jaringan dan ruang kerja."},
         "tools_exec_deny_patterns": {"label": "Perintah diblokir", "help": "Blokir perintah yang cocok dengan aturan ini.\n\nAturan pemblokiran tambahan berupa ekspresi reguler, satu per baris. Aturan izin eksplisit mengesampingkan aturan pemblokiran bawaan dan tambahan."},
-        "tools_web_proxy": {"label": "Proxy web", "help": "Digunakan untuk pencarian web dan pembacaan halaman oleh agen. Kosongkan untuk memakai pengaturan jaringan default, termasuk variabel lingkungan proxy.\n\n127.0.0.1 adalah mesin yang menjalankan nanobot. Pengaturan ini tidak mengubah koneksi model, MCP, atau browser."},
+        "network_proxy": {"label": "Proxy bersama", "help": "Alamat untuk fitur yang mengaktifkan proxy. 127.0.0.1 adalah perangkat yang menjalankan nanobot."},
+        "tools_web_use_proxy": {"label": "Gunakan proxy", "help": "Gunakan proxy bersama untuk pencarian web dan pembacaan halaman."},
         "tools_web_user_agent": {"label": "Header User-Agent", "help": "User-Agent untuk permintaan web; kosongkan untuk nilai default.\n\nHeader User-Agent kustom. Kosongkan untuk memakai nilai default."},
         "tools_restrict_to_workspace": {"label": "Batas ruang kerja", "help": "Batas ruang kerja global; izin chat WebUI diatur terpisah.\n\nKebijakan alat global. Izin setiap percakapan WebUI diatur secara terpisah."},
         "tools_ssrf_whitelist": {"label": "IP diizinkan", "help": "IP atau rentang CIDR diizinkan, satu per baris.\n\nIP atau rentang CIDR yang dikecualikan dari perlindungan permintaan keluar, satu per baris."},
@@ -450,7 +538,8 @@
         "sessions": {"title": "Percakapan", "help": "Atur chat bersama di berbagai platform."},
         "tools": {"title": "Alat bawaan", "help": "Pilih alat yang boleh digunakan agen."},
         "shell": {"title": "Shell dan sandbox", "help": "Atur batas waktu perintah, lingkungan, dan aturan akses."},
-        "network": {"title": "Koneksi web", "help": "Atur proxy dan User-Agent.\n\nProxy dan identitas permintaan web."},
+        "proxy": {"title": "Proxy bersama", "help": "Tetapkan satu alamat untuk fitur yang menggunakan proxy."},
+        "network": {"title": "Koneksi web", "help": "Atur penggunaan proxy dan User-Agent untuk permintaan web."},
         "safety": {"title": "Izin global", "help": "Atur batas ruang kerja, pengecualian jaringan, dan pemasangan jarak jauh.\n\nPembatasan ruang kerja, jaringan privat, dan instalasi jarak jauh."},
         "cli": {"title": "Batas CLI", "help": "Atur batas waktu pemasangan dan eksekusi, serta durasi cache daftar.\n\nBatas waktu instalasi, eksekusi, dan cache katalog."},
         "gateway": {"title": "Gateway", "help": "Atur opsi penerapan dan mulai ulang."},
@@ -463,6 +552,13 @@
       "save": "Simpan perubahan", "saving": "Menyimpan…", "discard": "Buang perubahan", "saved": "Tersimpan.",
       "restart": "Mulai ulang nanobot", "restartHelp": "Mulai ulang untuk menerapkan perubahan. Argumen baris perintah dan variabel lingkungan mungkin lebih diutamakan.",
       "search": "Cari pengaturan lanjutan", "noResults": "Tidak ada pengaturan yang cocok.", "pending": "Perubahan belum disimpan",
+      "idleCompaction": {
+        "label": "Padatkan sesi tidak aktif secara otomatis",
+        "help": "Padatkan konteks secara otomatis saat batas waktu tidak aktif tercapai untuk mengurangi penggunaan token pada permintaan berikutnya.",
+        "wait": "Batas waktu tidak aktif",
+        "minutes": "menit",
+        "numberError": "Masukkan jumlah menit berupa bilangan bulat nol atau lebih."
+      },
       "numberError": "Masukkan angka yang valid dalam rentang yang diizinkan.", "activeModel": "Gunakan model aktif", "none": "Tidak ada",
       "auto": "Otomatis", "manual": "Manual", "standard": "Standar", "persistent": "Terus-menerus",
       "unavailable": "Perbarui gateway untuk mengedit pengaturan ini.", "advancedOptions": "Opsi lanjutan"
@@ -479,6 +575,7 @@
       "byok": "BYOK",
       "overview": "Ringkasan",
       "appearance": "Tampilan",
+      "notifications": "Notifikasi",
       "models": "Model",
       "providers": "Penyedia",
       "image": "Gambar",
@@ -516,6 +613,41 @@
       "hostSafety": "Keamanan aplikasi",
       "voiceInput": "Transkripsi"
     },
+    "notifications": {
+      "scope": "Browser ini",
+      "intro": "Pilih cara menerima notifikasi saat tugas selesai.",
+      "pageRequired": "Notifikasi baru tidak diterima jika halaman ditutup, ditangguhkan, atau terputus.",
+      "revoked": "Izin notifikasi telah dicabut. Notifikasi kini dinonaktifkan. Izinkan notifikasi di pengaturan situs pada browser ini, lalu aktifkan di sini.",
+      "retry": "Periksa lagi",
+      "statusOff": "Nonaktif",
+      "statusPermission": "Perlu izin",
+      "statusOn": "Aktif",
+      "statusBlocked": "Diblokir",
+      "statusRevoked": "Izin dicabut",
+      "statusUnavailable": "Tidak tersedia",
+      "statusWorker": "Belum siap",
+      "statusBusy": "Memeriksa…",
+      "statusError": "Gagal mengirim",
+      "test": "Uji notifikasi",
+      "testBody": "Ini adalah notifikasi uji.",
+      "waiting": "Menunggu browser…",
+      "insecure": "Buka nanobot melalui HTTPS atau localhost untuk menggunakan notifikasi.",
+      "unsupported": "Browser ini tidak mendukung notifikasi. Coba browser lain; di iPhone atau iPad, buka nanobot dari Layar Utama.",
+      "denied": "Notifikasi diblokir. Izinkan notifikasi di pengaturan situs pada browser ini, lalu aktifkan di sini.",
+      "dismissed": "Izin belum diberikan. Aktifkan notifikasi dan pilih Izinkan.",
+      "permissionFailed": "Tidak dapat meminta izin. Coba lagi di browser yang mendukung notifikasi.",
+      "workerUnavailable": "Layanan notifikasi belum siap. Periksa lagi atau muat ulang halaman ini.",
+      "displayFailed": "Browser tidak dapat mengirim notifikasi. Periksa izin situs, lalu coba lagi.",
+      "submitted": "Dikirim ke browser. Jika tidak muncul, periksa notifikasi sistem dan mode Jangan Ganggu.",
+      "completed": "Tugas selesai. Klik untuk melihat hasilnya.",
+      "failed": "Tugas gagal. Klik untuk melihat detailnya.",
+      "interrupted": "Tugas perlu perhatian. Klik untuk melanjutkan."
+    },
+    "readingTextSize": {
+      "small": "Teks bacaan kecil",
+      "standard": "Teks bacaan standar",
+      "large": "Teks bacaan besar"
+    },
     "rows": {
       "theme": "Tema",
       "language": "Bahasa",
@@ -529,6 +661,7 @@
       "pendingChanges": "Perubahan tertunda",
       "selectedPreset": "Preset dipilih",
       "presetModel": "Model prasetel",
+      "readingTextSize": "Ukuran teks bacaan",
       "activityMode": "Detail aktivitas",
       "fileEditDisplay": "Pratinjau perubahan",
       "codeWrap": "Bungkus baris kode",
@@ -550,7 +683,7 @@
       "webuiDefaultAccess": "Akses bawaan",
       "currentModel": "Konfigurasi saat ini",
       "brandLogos": "Logo merek",
-      "browserNotifications": "Notifikasi tugas",
+      "browserNotifications": "Notifikasi browser",
       "notificationSound": "Suara selesai",
       "cliAppsCatalog": "Katalog",
       "cliAppsFilter": "Saring",
@@ -594,8 +727,8 @@
       "selectedModelProvider": "Ditentukan oleh model yang dipilih.",
       "selectedModelValue": "Ditentukan oleh model yang dipilih.",
       "brandLogos": "Tampilkan logo penyedia dan aplikasi di Pengaturan.\n\nTampilkan logo penyedia pihak ketiga dan CLI di Pengaturan.",
-      "browserNotifications": "Beri notifikasi saat halaman di latar belakang. Nonaktif secara default.",
-      "notificationSound": "Putar suara saat balasan selesai. Nonaktif secara default.\n\nPutar dentang singkat saat giliran selesai, meskipun halaman ini berada di latar belakang. Nonaktif secara default.",
+      "browserNotifications": "Terima notifikasi status tugas saat halaman ini di latar belakang.",
+      "notificationSound": "Putar nada saat balasan selesai, termasuk di latar belakang.",
       "cliAppsCatalog": "Pasang alat CLI untuk nanobot; aplikasi desktop tetap tidak berubah.\n\nMemasang alat baris perintah yang dapat digunakan nanobot di komputer ini. Aplikasi desktop tidak diubah.",
       "cliAppsFilter": "Cari berdasarkan nama, kategori, atau kemampuan.",
       "logs": "Buka folder log mesin aplikasi desktop.",
@@ -803,7 +936,6 @@
       "defaultAPIDescription": "Preset yang diatur ke Otomatis memakai API ini. Setiap preset dapat memilih API lain dari daftar yang didukung.",
       "declareAPIs": "Atur API yang didukung",
       "openaiDefaultAPIDescription": "Menetapkan API default untuk preset yang memakai Otomatis. Otomatis di sini mengikuti aturan model yang sudah diketahui. Setiap preset dapat mengubah pilihan ini.",
-      "proxy": "Proksi jaringan",
       "thinkingStyle": "Format penalaran",
       "region": "Wilayah",
       "profile": "Profil AWS",
@@ -946,10 +1078,16 @@
       "noDescription": "Tidak ada deskripsi."
     },
     "about": {
+      "updateNotice": "Pembaruan tersedia",
+      "viewUpdateDetails": "Lihat detail",
+      "updateNow": "Perbarui",
+      "dismissUpdate": "Tutup pemberitahuan",
+      "updateInstructions": "Perbarui di komputer yang menjalankan nanobot dengan metode instalasi semula. Halaman ini tidak akan memasang atau memulai ulang apa pun.",
+      "installationGuide": "Panduan instalasi",
       "documentation": "Dokumentasi",
       "sourceCode": "Kode sumber",
       "reportIssue": "Laporkan masalah",
-      "version": "Versi",
+      "version": "Versi & pembaruan",
       "checking": "Memeriksa pembaruan...",
       "checkForUpdates": "Periksa pembaruan",
       "upToDate": "Anda sudah menggunakan versi terbaru",
@@ -1124,6 +1262,7 @@
       "loading": "Memuat kanal...",
       "empty": "Tidak ada kanal yang cocok dengan filter ini.",
       "restartRequired": "Mulai ulang nanobot untuk menerapkan dukungan kanal yang diperbarui.",
+      "restartBeforeInstall": "Mulai ulang nanobot sebelum memasang kanal lain.",
       "requires": "Memerlukan: {{requirements}}",
       "setUp": "Siapkan",
       "setupGuide": "Panduan penyiapan",
@@ -1436,19 +1575,16 @@
       "signInBeforeSaving": "Masuk ke penyedia ini sebelum menyimpan prasetel.",
       "signedIn": "Sudah masuk",
       "notSignedIn": "Belum masuk",
-      "proxyLabel": "Proksi jaringan",
-      "proxySaveBeforeSignIn": "Simpan perubahan proksi sebelum login.",
-      "saveProxy": "Simpan proksi",
       "localCodeHelp": "Selesaikan proses masuk di browser. nanobot biasanya menyelesaikannya secara otomatis; jika tidak, tempel kode otorisasi di bawah.",
       "remoteCodeHelp": "Pilih Masuk untuk membuka xAI di komputer Anda. Setelah masuk, tempel kode otorisasi yang ditampilkan xAI di bawah.",
-      "localCallbackHelp": "Selesaikan proses masuk di browser. nanobot biasanya menyelesaikannya secara otomatis; jika tidak, salin URL callback localhost lengkap dari bilah alamat dan tempel di bawah.",
-      "remoteCallbackHelp": "Buka ChatGPT di browser ini dan selesaikan proses masuk. Saat halaman localhost gagal dimuat, salin URL lengkap dari bilah alamat dan tempel di bawah.",
+      "localCallbackHelp": "Selesaikan proses masuk di browser. Jika nanobot tidak terhubung otomatis, salin URL lengkap dari bilah alamat halaman localhost, meskipun halaman tidak dapat dimuat, tempel di bawah, lalu pilih “Selesaikan masuk”.",
+      "remoteCallbackHelp": "Buka ChatGPT di browser ini dan selesaikan proses masuk. Setelah diarahkan ke halaman localhost, salin URL lengkap dari bilah alamat, meskipun halaman tidak dapat dimuat, tempel di bawah, lalu pilih “Selesaikan masuk”.",
       "authorizationCode": "Kode otorisasi",
       "callbackUrl": "URL callback",
-      "callbackUrlPlaceholder": "http://localhost:1455/auth/callback?code=…&state=…",
+      "callbackUrlPlaceholder": "Tempel URL callback lengkap di sini",
       "openChatGPT": "Buka ChatGPT",
       "pasteCallbackToContinue": "Tempel URL callback untuk melanjutkan.",
-      "waitingForCallback": "Menunggu callback browser…",
+      "waitingForCallback": "Menunggu proses masuk selesai…",
       "finishSignIn": "Selesaikan masuk"
     },
     "skills": {
@@ -1654,6 +1790,32 @@
       "messages": "Status pesan"
     },
     "compaction": {
+      "reasons": {
+        "idle": {
+          "started": "Memadatkan konteks secara otomatis saat tidak ada pesan baru",
+          "succeeded": "Konteks dipadatkan otomatis saat tidak ada pesan baru",
+          "failed": "Gagal memadatkan konteks secara otomatis saat tidak ada pesan baru",
+          "cancelled": "Pemadatan konteks otomatis saat tidak ada pesan baru tidak selesai"
+        },
+        "context_pressure": {
+          "started": "Memadatkan konteks karena sudah panjang",
+          "succeeded": "Konteks yang panjang telah dipadatkan",
+          "failed": "Gagal memadatkan konteks yang panjang",
+          "cancelled": "Pemadatan konteks yang panjang dibatalkan"
+        },
+        "manual": {
+          "started": "Memadatkan konteks atas permintaan Anda",
+          "succeeded": "Konteks dipadatkan atas permintaan Anda",
+          "failed": "Pemadatan konteks yang Anda minta gagal",
+          "cancelled": "Pemadatan konteks yang Anda minta dibatalkan"
+        },
+        "provider_native": {
+          "started": "Penyedia model sedang memadatkan konteks",
+          "succeeded": "Penyedia model telah memadatkan konteks",
+          "failed": "Pemadatan konteks di server penyedia model gagal",
+          "cancelled": "Pemadatan konteks di server penyedia model dibatalkan"
+        }
+      },
       "cancelled": "Pemadatan konteks dibatalkan",
       "empty": "Tidak ada konteks yang perlu dipadatkan.",
       "started": "Memadatkan konteks",
@@ -1796,7 +1958,7 @@
         "guide": "Kirim sekarang",
         "delete": "Hapus pesan",
         "edit": "Ubah pesan",
-        "drag": "Seret untuk mengurutkan"
+        "tooManyMentions": "Satu pesan dapat menyebut hingga {{max}} percakapan"
       },
       "attachImage": "Lampirkan file",
       "imageMode": {
@@ -1924,10 +2086,11 @@
         "unsupported_type": "Tipe file tidak didukung",
         "empty_file": "File kosong tidak dapat dilampirkan",
         "too_many_attachments": "Maksimal {{max}} lampiran per pesan",
+        "too_many_videos": "Maksimal 1 video per pesan",
         "too_many_images": "Maksimal {{max}} gambar per pesan",
         "magic_mismatch": "File ini tampaknya bukan gambar asli",
         "decode_failed": "Tidak dapat mendekode gambar ini",
-        "too_large": "File terlalu besar — coba yang lebih kecil",
+        "too_large": "Ukuran file {{size}} melebihi batas unggahan {{max}}",
         "total_too_large": "Total lampiran terlalu besar — hapus beberapa atau gunakan file yang lebih kecil",
         "io": "Tidak dapat membaca file ini"
       },
@@ -1961,8 +2124,8 @@
     "loadEarlier": "Muat pesan sebelumnya",
     "history": {
       "loading": "Memuat pesan sebelumnya…",
-      "error": "Gagal memuat.",
-      "retry": "Coba lagi"
+      "exhausted": "Tidak ada pesan sebelumnya",
+      "retryLabel": "Gagal memuat. Coba lagi"
     },
     "forkedFromHistory": "Cabang dari riwayat",
     "promptNavigator": {
@@ -2007,7 +2170,6 @@
     "turnLatencyTitle": "Waktu respons (ujung ke ujung)",
     "fileEditViewDiff": "Lihat perubahan",
     "fileEditViewLargeDiff": "Perluas perubahan",
-    "fileEditDiffLineCount": "{{count}} baris",
     "fileEditUnchangedLinesHidden": "{{count}} baris tidak berubah disembunyikan",
     "fileEditShowMoreLines": "Tampilkan {{count}} baris lagi",
     "fileEditShowFewerLines": "Tampilkan lebih sedikit baris",
@@ -2210,6 +2372,24 @@
     "dismiss": "Abaikan",
     "continue": "Lanjutkan"
   },
+  "diagram": {
+    "graph": "Diagram",
+    "source": "Sumber",
+    "copy": "Salin sumber",
+    "enlarge": "Perbesar diagram",
+    "title": "Diagram Mermaid",
+    "errors": {
+      "syntax": "Periksa sintaks diagram pada sumber.",
+      "unsupported": "Jenis diagram ini belum didukung. Lihat sumber.",
+      "policy": "Diagram memakai gaya atau sumber daya yang tidak didukung. Lihat sumber.",
+      "limit": "Diagram melampaui batas perenderan. Lihat sumber.",
+      "load": "Tidak dapat memuat perender diagram. Coba lagi.",
+      "deadline": "Perenderan diagram terlalu lama. Sederhanakan sumber atau coba lagi.",
+      "worker": "Tidak dapat merender diagram. Coba lagi.",
+      "image": "Tidak dapat menampilkan diagram. Coba lagi.",
+      "capability": "Browser ini tidak dapat merender diagram. Lihat sumber."
+    }
+  },
   "lightbox": {
     "viewAll": "Lihat semua {{count}} gambar",
     "zoomIn": "Perbesar",
@@ -2308,6 +2488,8 @@
       "body": "Gateway menolak pesan ini. Periksa teks atau lampiran, lalu coba lagi."
     },
     "modelRequestFailed": {
+      "authenticationTitle": "Otorisasi penyedia model gagal",
+      "authenticationBody": "Masuk kembali atau periksa kunci API di pengaturan model.",
       "billingTitle": "Kuota penyedia model tidak tersedia",
       "billingBody": "Tambahkan kredit atau periksa tagihan akun penyedia, lalu coba lagi.",
       "connectionTitle": "Tidak dapat terhubung ke penyedia model",
@@ -2315,8 +2497,8 @@
       "rateLimitTitle": "Batas permintaan penyedia model tercapai",
       "serverTitle": "Kesalahan layanan penyedia model",
       "unknownTitle": "Permintaan ke penyedia model gagal",
-      "bodyWithAttempt": "Permintaan masih gagal pada percobaan ke-{{attempts}}, sehingga percobaan ulang dihentikan. Periksa konfigurasi atau status layanan penyedia, lalu coba lagi.",
-      "body": "Periksa konfigurasi atau status layanan penyedia, lalu coba lagi."
+      "bodyWithAttempt": "Dihentikan setelah {{attempts}} percobaan. Coba lagi nanti atau pilih model lain.",
+      "body": "Coba lagi nanti atau pilih model lain."
     }
   },
   "workspace": {

@@ -13,12 +13,14 @@ interface AttachmentTileProps {
   className?: string;
   inline?: boolean;
   variant?: "default" | "compact";
+  pending?: boolean;
 }
 
-export function AttachmentTile({ attachment, className, inline = false, variant = "default" }: AttachmentTileProps) {
+export function AttachmentTile({ attachment, className, inline = false, variant = "default", pending = false }: AttachmentTileProps) {
   const { t } = useTranslation();
+  const videoUrl = attachment.url;
   const [failedUrl, setFailedUrl] = useState<string | undefined>(undefined);
-  const failed = !!attachment.url && failedUrl === attachment.url;
+  const failed = !!videoUrl && failedUrl === videoUrl;
   const [imageOpen, setImageOpen] = useState(false);
   const hasUrl = typeof attachment.url === "string" && attachment.url.length > 0;
   const label = attachmentLabel(attachment, t);
@@ -36,7 +38,7 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
     );
   }
 
-  if (attachment.kind === "video" && hasUrl) {
+  if (attachment.kind === "video" && hasUrl && !failed) {
     return (
       <AttachmentFrame
         attachment={attachment}
@@ -45,9 +47,10 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
         variant={variant}
       >
         <video
-          src={attachment.url}
+          src={videoUrl}
           controls
           preload="metadata"
+          onError={() => setFailedUrl(videoUrl)}
           className={cn(
             "block w-full bg-black",
             variant === "compact" ? "max-h-40" : "max-h-[26rem]",
@@ -100,9 +103,15 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
       aria-label={label}
     >
       {body}
-      <span className="sr-only">
-        {t("message.attachmentUnavailable", { defaultValue: "Attachment unavailable" })}
+      <span className="text-xs text-muted-foreground">
+        {pending ? t("message.delivery.sending") : t("message.attachmentUnavailable", { defaultValue: "Attachment unavailable" })}
       </span>
+      {attachment.kind === "video" && failed && !pending ? (
+        <button type="button" onClick={() => setFailedUrl(undefined)}
+          className="shrink-0 rounded-sm px-1 text-foreground underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2">
+          {t("common.retry")}
+        </button>
+      ) : null}
     </div>
   );
 }

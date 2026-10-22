@@ -1,8 +1,10 @@
 export type LocalActivityMode = "auto" | "expanded";
+export type ReadingTextSize = "small" | "standard" | "large";
 export type FileEditDisplayMode = "summary" | "diff" | "collapsed_diff";
 
 export interface LocalPreferences {
   activityMode: LocalActivityMode;
+  readingTextSize: ReadingTextSize;
   codeWrap: boolean;
   brandLogos: boolean;
   browserNotifications: boolean;
@@ -20,6 +22,7 @@ type PersistedLocalPreferences = Partial<LocalPreferences> & {
 
 export const DEFAULT_LOCAL_PREFS: LocalPreferences = {
   activityMode: "auto",
+  readingTextSize: "standard",
   codeWrap: true,
   brandLogos: true,
   browserNotifications: false,
@@ -38,6 +41,8 @@ export function readLocalPreferences(): LocalPreferences {
     const parsed = JSON.parse(raw) as PersistedLocalPreferences;
     return {
       activityMode: parsed.activityMode === "expanded" ? "expanded" : "auto",
+      readingTextSize: parsed.readingTextSize === "small" || parsed.readingTextSize === "large"
+        ? parsed.readingTextSize : "standard",
       codeWrap: parsed.codeWrap !== false,
       brandLogos: parsed.schemaVersion === LOCAL_PREFS_SCHEMA_VERSION
         ? parsed.brandLogos !== false

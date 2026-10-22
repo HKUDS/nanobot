@@ -301,6 +301,8 @@ class LLMResponse:
     # True only when this response installed a new provider-native compaction
     # boundary. Replaying an older compaction item does not set this flag.
     provider_compaction_applied: bool = field(default=False, repr=False)
+    # Identity of the native lifecycle already reported by its operation owner.
+    provider_compaction_event_id: str | None = field(default=None, repr=False)
     # State immediately after native compaction, before the normal response
     # continues. An archive prompt can resume this state without replaying H.
     provider_compaction_state: ProviderConversationState | None = field(
@@ -324,6 +326,9 @@ class LLMResponse:
     error_code: str | None = None  # Provider/code semantic, e.g. rate_limit_exceeded.
     error_retry_after_s: float | None = None
     error_should_retry: bool | None = None
+    # A failed fallback must not replace the selected model's public diagnosis.
+    # Keep this separate from the last response's retry policy.
+    primary_error_kind: str | None = field(default=None, repr=False)
     is_fallback: bool = field(default=False, repr=False)
 
     @property
@@ -1556,9 +1561,14 @@ class LLMProvider(ABC):
     @classmethod
     def public_error_kind(cls, response: LLMResponse) -> str:
         """Return a stable public category without exposing provider details."""
+        if response.primary_error_kind is not None:
+            return response.primary_error_kind
         if cls.is_arrearage_response(response):
             return "billing"
         kind = (response.error_kind or "").strip().lower()
+        # A plain 403 can be a policy or permission rejection, not bad credentials.
+        if kind in {"authentication", "oauth_auth_required"} or response.error_status_code == 401:
+            return "authentication"
         if kind in {"connection", "timeout"}:
             return kind
         if response.error_status_code == 429:
@@ -1641,6 +1651,15 @@ class LLMProvider(ABC):
                 identical_error_count = 1 if error_key else 0
 
             if not self.is_transient_response(response):
+                # Removing the user's images cannot repair account access.
+                # Do not rebuild native provider state for an unrelated failure.
+                if (
+                    (response.error_kind or "").lower() in {"authentication", "oauth_auth_required"}
+                    or response.error_status_code in {401, 403}
+                    or self.is_arrearage_response(response)
+                ):
+                    await _finish_retry_status("cleared", response)
+                    return response
                 stripped = self._strip_image_content(kw["messages"])
                 provider_context = kw.get("provider_context")
                 stripped_context: ProviderCallContext | None = None

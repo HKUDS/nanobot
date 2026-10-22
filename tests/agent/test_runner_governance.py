@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -346,6 +347,7 @@ async def test_native_compaction_uses_provider_request_boundary(
             provider_compaction_applied=True,
             provider_compaction_state=compacted_state,
             provider_compaction_scope=scope,
+            provider_compaction_event_id="native-already-reported" if scope == "prior_context" else None,
         ),
         LLMResponse(content="done"),
     ])
@@ -399,10 +401,46 @@ async def test_native_compaction_uses_provider_request_boundary(
     assert result.provider_compaction_applied is True
     assert any(message.get("content") == "inspect the project" for message in result.messages)
     assert any(message.get("content") == "complete tool result" for message in result.messages)
-    assert [event.phase for event in compaction_events] == ["started", "succeeded"]
-    assert {event.compaction_id for event in compaction_events} == {
-        compaction_events[0].compaction_id
-    }
+    assert [event.phase for event in compaction_events] == ([] if scope == "prior_context" else ["succeeded"])
+    assert all(event.reason == "provider_native" for event in compaction_events)
+
+
+@pytest.mark.parametrize("error", [RuntimeError("checkpoint failed"), asyncio.CancelledError()])
+async def test_native_checkpoint_failure_does_not_relabel_completed_compaction(monkeypatch, error):
+    provider = MagicMock(spec=LLMProvider)
+    provider.can_resume_conversation_state.return_value = False
+    compacted = ProviderConversationState(
+        kind="openai_responses", provider="openai:test", model="test-model", version=1,
+        payload={"items": [{"type": "compaction", "encrypted_content": "opaque"}]},
+    )
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(
+        content="done", provider_compaction_applied=True,
+        provider_compaction_state=compacted, provider_compaction_scope="current_request",
+    ))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    monkeypatch.setattr("nanobot.agent.context_governance.estimate_prompt_tokens_chain", lambda *_args: (100, "test-counter"))
+    notices: list[ContextCompactionEvent] = []
+
+    async def observe(event) -> None:
+        if isinstance(event, ContextCompactionEvent):
+            notices.append(event)
+
+    async def consolidate(*_args):
+        assert [notice.phase for notice in notices] == ["succeeded"]
+        raise error
+
+    with pytest.raises(type(error)):
+        await AgentRunner().run(make_run_spec(
+            provider, initial_messages=None,
+            transcript_input=TranscriptInput(history=[], current_message="question"),
+            transcript_builder=_build_transcript, consolidate_provider_compaction=consolidate,
+            tools=tools, model="test-model", context_window_tokens=1_624,
+            max_tokens=100, max_iterations=1, max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            events=EventSink(observe),
+        ))
+    assert [notice.phase for notice in notices] == ["succeeded"]
+    assert all(notice.reason == "provider_native" for notice in notices)
 
 
 async def test_runner_keeps_current_tool_exchange_outside_summary(monkeypatch):
@@ -540,6 +578,7 @@ async def test_repeated_pressure_advances_summary_boundary(monkeypatch):
     assert [event.phase for event in compaction_events] == [
         "started", "succeeded", "started", "succeeded",
     ]
+    assert all(event.reason == "context_pressure" for event in compaction_events)
     first_id, second_id = compaction_events[0].compaction_id, compaction_events[2].compaction_id
     assert first_id == compaction_events[1].compaction_id
     assert second_id == compaction_events[3].compaction_id

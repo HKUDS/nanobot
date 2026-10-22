@@ -1,3 +1,4 @@
+import { isCompactionPhase, isCompactionReason } from "../../../packages/client-events/notifications";
 import type {
   ApiServicePayload,
   AutomationChatsPayload,
@@ -316,7 +317,17 @@ function parseThreadProjectionEvent(value: unknown): ThreadProjectionEvent {
   if (!isRecord(value) || typeof value.event !== "string" || typeof value.chat_id !== "string") {
     throw new Error("Invalid WebUI thread event");
   }
-  if (!hasValidProjectionMetadata(value)) {
+  if (!hasValidProjectionMetadata(value)
+    || (value.stream_id !== undefined && typeof value.stream_id !== "string")
+    || (value.projection_receipts !== undefined && (
+      !Array.isArray(value.projection_receipts)
+      || !value.projection_receipts.every((receipt: unknown) => isRecord(receipt)
+        && typeof receipt.turn_id === "string" && receipt.turn_id.length > 0
+        && Array.isArray(receipt.ranges)
+        && receipt.ranges.every((range: unknown) => Array.isArray(range)
+          && range.length === 2 && Number.isSafeInteger(range[0]) && range[0] >= 0
+          && Number.isSafeInteger(range[1]) && range[1] >= range[0]))
+    ))) {
     throw new Error("Invalid WebUI thread event metadata");
   }
   switch (value.event) {
@@ -370,7 +381,9 @@ function parseThreadProjectionEvent(value: unknown): ThreadProjectionEvent {
       if (value.text !== undefined && typeof value.text !== "string") break;
       return value as unknown as ThreadProjectionEvent;
     case "context_compaction":
-      if (typeof value.compaction_id !== "string" || typeof value.phase !== "string") break;
+      if (typeof value.compaction_id !== "string" || !value.compaction_id
+        || !isCompactionPhase(value.phase)
+        || (value.reason !== undefined && !isCompactionReason(value.reason))) break;
       return value as unknown as ThreadProjectionEvent;
     case "turn_end":
       return value as unknown as ThreadProjectionEvent;
@@ -763,24 +776,40 @@ export async function fetchSettingsUsage(
   );
 }
 
+export type UpdateChannel = "stable" | "preview";
+export interface ReleaseStatus {
+  channel: UpdateChannel;
+  revision: number;
+  currentVersion: string;
+  state: "available" | "current" | "ahead" | "waiting_stable" | "withdrawn" | "unavailable" | "publishing" | "unsupported";
+}
 export interface VersionCheckResult {
+  installation_method?: UpdateMethod | null;
+  releaseStatus?: ReleaseStatus;
+  can_change_channel?: boolean;
   updateAvailable: {
     currentVersion: string;
     latestVersion: string;
     pypiUrl?: string;
+    releaseUrl?: string;
   } | null;
 }
 
 export async function checkVersion(
   token: string,
   base: string = "",
+  channelStatus = false,
 ): Promise<VersionCheckResult> {
   return request<VersionCheckResult>(
-    `${base}/api/settings/version-check`,
+    `${base}/api/settings/version-check${channelStatus ? "?channel_status=1" : ""}`,
     token,
     undefined,
-    10_000,
+    90_000,
   );
+}
+
+export function changeUpdateChannel(transport: WebUIMutationTransport, channel: UpdateChannel, revision: number): Promise<{ channel: UpdateChannel; revision: number }> {
+  return mutation(transport, "settings.nanobot.update.channel", { channel, revision });
 }
 
 export async function fetchWorkspaces(
@@ -793,6 +822,73 @@ export async function fetchWorkspaces(
     undefined,
     API_READ_TIMEOUT_MS,
   );
+}
+
+export type UpdateMethod = "managed" | "uv" | "pipx" | "pip" | "source" | "container" | "system";
+export interface UpdateGuide {
+  method: UpdateMethod;
+  host: string;
+  environment: string;
+  shell: "sh" | "powershell";
+  inspect_command: string | null;
+  update_command: string | null;
+  verify_command: string | null;
+  reason: "registry" | "preview" | "policy" | "extras" | "manager" | "source" | "container" | "system" | "review" | "restart";
+}
+export interface UpdateReview {
+  id: string;
+  installation_id: string;
+  host: string;
+  running_version: string;
+  target_version: string;
+  channel?: UpdateChannel;
+  action: "upgrade" | "downgrade" | "restart" | "none";
+  validity: "current" | "expired" | "installation_changed" | "profiles_changed" | "channel_changed";
+  execution_blocked_reason: string | null;
+  automatic_recovery?: boolean;
+  guide?: UpdateGuide | null;
+  profiles: { id: string; workspace: string; reviewed_state: string; stop: boolean; restart: boolean }[];
+}
+export interface UpdateReviewResponse {
+  plan: UpdateReview;
+  installation_allowed: boolean;
+  execution_available: boolean;
+}
+export type UpdateJobPhase = "preparation_requested" | "preparing" | "preparation_failed" | "ready"
+  | "checking" | "stopping" | "handoff_failed" | "backing_up" | "installing" | "verifying"
+  | "installed" | "restarting" | "activating" | "finalizing" | "restart_failed" | "succeeded" | "failed" | "cancelled";
+export interface UpdateJob {
+  id: string;
+  installation_id: string;
+  target_version: string;
+  running_version: string;
+  recorded_phase: UpdateJobPhase;
+  recovery_active?: boolean;
+  service_restored?: boolean;
+  automatic_recovery?: boolean;
+  previous_version?: string;
+  mutation_started: boolean;
+  execution_confirmation_id: string | null;
+  recovery_command?: string;
+}
+export function createUpdateReview(transport: WebUIMutationTransport): Promise<UpdateReviewResponse> {
+  return mutation(transport, "settings.nanobot.update.plan", { restart_running: true }, 60_000);
+}
+export function readUpdateReview(token: string, id: string): Promise<UpdateReviewResponse> {
+  return request(`/api/settings/nanobot-update/plan?id=${encodeURIComponent(id)}`, token, undefined, API_READ_TIMEOUT_MS);
+}
+export function readUpdateJob(token: string, id: string): Promise<{ job: UpdateJob }> {
+  return request(`/api/settings/nanobot-update/job?id=${encodeURIComponent(id)}`, token, undefined, API_READ_TIMEOUT_MS);
+}
+export function prepareUpdate(transport: WebUIMutationTransport, id: string): Promise<{ job: UpdateJob }> {
+  return mutation(transport, "settings.nanobot.update.prepare", { id });
+}
+export function settleUpdate(transport: WebUIMutationTransport, id: string): Promise<{ job: UpdateJob }> {
+  return mutation(transport, "settings.nanobot.update.settle", { id });
+}
+export function executeUpdate(transport: WebUIMutationTransport, id: string, previousConfirmation?: string): Promise<{ job: UpdateJob }> {
+  return mutation(transport, previousConfirmation ? "settings.nanobot.update.retry" : "settings.nanobot.update.execute",
+    { id, confirm_restart: true, ...(previousConfirmation ? { previous_confirmation_id: previousConfirmation } : {}) });
 }
 
 export async function fetchWorkspaceDirectories(
@@ -1118,7 +1214,7 @@ export async function fetchProviderModels(
 
 export async function runMcpPresetAction(
   transport: WebUIMutationTransport,
-  action: "enable" | "disable" | "remove" | "test" | "reconnect",
+  action: "enable" | "disable" | "remove" | "test" | "reconnect" | "proxy",
   name: string,
   values: Record<string, string> = {},
 ): Promise<McpPresetsPayload> {

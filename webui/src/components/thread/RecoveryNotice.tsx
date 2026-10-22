@@ -8,14 +8,16 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { RecoveryState } from "@/lib/types";
+import { resolveModelRequestFailureCopy } from "@/lib/model-request-failure";
 
 interface RecoveryNoticeProps {
   state: RecoveryState;
   onContinue: () => Promise<void>;
   onDismiss: () => Promise<void>;
+  onOpenSettings?: () => void;
 }
 
-export function RecoveryNotice({ state, onContinue, onDismiss }: RecoveryNoticeProps) {
+export function RecoveryNotice({ state, onContinue, onDismiss, onOpenSettings }: RecoveryNoticeProps) {
   const { t } = useTranslation();
   const [pending, setPending] = useState<"continue" | "dismiss" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -33,14 +35,17 @@ export function RecoveryNotice({ state, onContinue, onDismiss }: RecoveryNoticeP
   if (!waiting || hiddenRecoveryId === state.recovery_id) return null;
 
   const contextUnavailable = state.can_continue === false;
-  const title = state.status === "failed"
+  const modelFailure = state.reason === "model_request_failed"
+    ? resolveModelRequestFailureCopy({ errorKind: state.failure_error_kind }, t)
+    : null;
+  const title = modelFailure?.title ?? (state.status === "failed"
     ? t("recovery.failed", { defaultValue: "Task recovery failed" })
-    : t("recovery.interrupted", { defaultValue: "Task interrupted" });
-  const detail = state.status === "failed" || contextUnavailable
+    : t("recovery.interrupted", { defaultValue: "Task interrupted" }));
+  const detail = contextUnavailable || state.status === "failed"
     ? t("recovery.failedHelp", {
         defaultValue: "The saved task could not be restored safely. Review it before continuing.",
       })
-    : t("recovery.review", { defaultValue: "Review the task before continuing. Tools will not be replayed automatically." });
+    : modelFailure?.body ?? t("recovery.review", { defaultValue: "Review the task before continuing. Tools will not be replayed automatically." });
   const run = (action: "continue" | "dismiss") => {
     setPending(action);
     setError(null);
@@ -60,13 +65,18 @@ export function RecoveryNotice({ state, onContinue, onDismiss }: RecoveryNoticeP
       role="alert"
       aria-live="assertive"
       data-recovery-status={state.status}
-      className="mx-auto mb-2 flex w-full max-w-[49.5rem] items-center gap-3 rounded-control border border-border/70 bg-muted/35 px-3 py-2 text-sm transition-[background-color,border-color,opacity,transform] duration-200 ease-out motion-reduce:transition-none animate-in fade-in-0 slide-in-from-bottom-1 duration-200 motion-reduce:animate-none"
+      className="thread-composer-notice mb-2 flex flex-wrap items-center gap-3 rounded-control border border-border/70 bg-muted/35 px-3 py-2 text-sm transition-[background-color,border-color,opacity,transform] duration-200 ease-out motion-reduce:transition-none animate-in fade-in-0 slide-in-from-bottom-1 duration-200 motion-reduce:animate-none"
     >
       <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 basis-48">
         <p className="font-medium">
           {title}
         </p>
+        {modelFailure && onOpenSettings ? (
+          <Button variant="link" size="sm" className="h-auto px-0 py-1" onClick={onOpenSettings}>
+            {t("thread.composer.reauthSettings")}
+          </Button>
+        ) : null}
         <p className={cn(
           "mt-0.5 text-xs",
           error ? "text-destructive" : "text-muted-foreground",
@@ -74,7 +84,7 @@ export function RecoveryNotice({ state, onContinue, onDismiss }: RecoveryNoticeP
           {error ?? detail}
         </p>
       </div>
-      <div className="flex shrink-0 items-center gap-1.5">
+      <div className="ms-auto flex shrink-0 items-center gap-1.5">
         <Button
           type="button"
           size="sm"

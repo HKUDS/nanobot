@@ -549,6 +549,7 @@ def _print_webui_ready(
     dev: bool,
     managed: bool,
     provider_error: str | None = None,
+    detached: bool = False,
 ) -> None:
     """Show one ready state and a complete browser handoff in the local terminal."""
     ws_cfg = _webui_config_dict(config)
@@ -575,7 +576,11 @@ def _print_webui_ready(
     console.print()
     log_command = _gateway_instance_command("logs", config_path=config_path, workspace=workspace)
     console.print(Text(f"Logs: {log_command}", style="dim"), soft_wrap=True)
-    if managed:
+    if detached:
+        stop_command = _gateway_instance_command("stop", config_path=config_path, workspace=workspace)
+        lifecycle = "Running in the background. Closing the browser or terminal does not stop nanobot.\n"
+        lifecycle += f"Stop nanobot: {stop_command}"
+    elif managed:
         lifecycle = "Keep this terminal open while using WebUI.\n"
         lifecycle += "Ctrl+C stops development mode." if dev else "Press Ctrl+C to exit."
     else:

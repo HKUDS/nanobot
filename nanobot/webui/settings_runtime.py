@@ -20,6 +20,7 @@ RUNTIME_CONFIG_PATHS = (
     "agents.defaults.timezone",
     "agents.defaults.timezone_mode",
     "agents.defaults.unified_session",
+    "agents.defaults.session_ttl_minutes",
     "agents.defaults.max_tool_iterations",
     "agents.defaults.max_concurrent_subagents",
     "agents.defaults.max_tool_result_chars",
@@ -51,7 +52,8 @@ RUNTIME_CONFIG_PATHS = (
     "tools.max_session_messages_per_minute",
     "tools.webui_allow_remote_package_install",
     "tools.web.enable",
-    "tools.web.proxy",
+    "network.proxy",
+    "tools.web.use_proxy",
     "tools.web.user_agent",
     "tools.image_generation.save_dir",
     "api.host",
@@ -166,12 +168,18 @@ def update_runtime_config(
                     re.compile(pattern)
                 except re.error:
                     raise WebUISettingsError(f"{path}: invalid regular expression") from None
+    if values.get("tools.web.use_proxy") is True:
+        try:
+            validated.network.resolve_proxy(True)
+        except ValueError as exc:
+            raise WebUISettingsError(str(exc)) from None
     before = runtime_config_payload(config)
     after = runtime_config_payload(validated)
     if before == after:
         return False
     config.agents = validated.agents
     config.tools = validated.tools
+    config.network = validated.network
     config.gateway = validated.gateway
     config.api = validated.api
     return True

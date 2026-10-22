@@ -1,5 +1,8 @@
 """WebUI CLI command."""
 
+import hashlib
+import sys
+from contextlib import ExitStack
 from pathlib import Path
 
 import typer
@@ -7,6 +10,7 @@ from pydantic import ValidationError
 from rich.console import Console
 
 from nanobot.cli import terminal as cli_terminal
+from nanobot.cli.dock import dock_icon, request_gateway_icon
 from nanobot.cli.runtime_config import (
     _print_config_error,
     _print_runtime_config_validation_error,
@@ -84,6 +88,8 @@ def webui(
         help="Run the Vite development server with live frontend updates",
     ),
     no_open: bool = typer.Option(False, "--no-open", help="Do not open a browser"),
+    no_dock: bool = typer.Option(False, "--no-dock", help="Do not show the macOS Dock icon"),
+    detach: bool = typer.Option(False, "--detach", help="Keep the gateway running and return to the terminal"),
     yes: bool = typer.Option(
         False,
         "--yes",
@@ -98,6 +104,14 @@ def webui(
         GatewayInstance,
         GatewayRuntime,
     )
+    from nanobot.installation_receipt import RECEIPT_NAME, managed_extras
+
+    receipt = Path(sys.prefix) / RECEIPT_NAME
+    if receipt.exists() and not dev:
+        managed_extras(str(Path(sys.prefix).resolve()), hashlib.sha256(receipt.read_bytes()).hexdigest())
+        detach = True
+    if detach and dev:
+        raise typer.BadParameter("--detach cannot keep a Vite development server alive")
 
     cli_terminal._ensure_interactive_tty_mode()
     config_path = _resolve_webui_config_path(config)
@@ -207,7 +221,7 @@ def webui(
     def announce_ready(url: str, *, managed: bool) -> None:
         _print_webui_ready(
             runtime_config, config_path, url, workspace=workspace, dev=dev, managed=managed,
-            provider_error=provider_error,
+            provider_error=provider_error, detached=detach,
         )
         if not no_open:
             _open_webui_browser(url, wait=False)
@@ -228,8 +242,31 @@ def webui(
             )
             raise typer.Exit(1)
 
+    if detach:
+        status = runtime.status()
+        if existing_gateway and not status.running:
+            raise typer.BadParameter("The existing gateway has another owner; use its launch command")
+        request_gateway_icon(runtime.paths.state_path, enabled=not no_dock)
+        if changed_webui and status.running:
+            result = runtime.restart(start_options, timeout_s=20)
+            if result.ok:
+                # Restart retains the old lifetime; detached launch promotes it.
+                result = runtime.start_background(start_options)
+        else:
+            result = runtime.start_background(start_options)
+        if not result.ok and result.message != "gateway_already_running":
+            console.print(f"[red]Gateway could not start: {result.message}[/red]")
+            raise typer.Exit(1)
+        if not _wait_for_webui(webui_url, timeout_s=20):
+            console.print("[red]WebUI did not become ready. Check the gateway logs.[/red]")
+            console.print(f"Logs: {runtime.paths.log_path}", markup=False)
+            raise typer.Exit(1)
+        announce_ready(webui_url, managed=True)
+        return
+
     lease = GatewayClientLease(runtime, kind="webui")
     lease.acquire()
+    desktop = ExitStack()
     try:
         if not existing_gateway:
             console.print("[dim]Starting WebUI…[/dim]")
@@ -249,6 +286,9 @@ def webui(
                     output=lambda message: console.print(message, style="dim", markup=False),
                 ) as dev_server:
                     managed = not existing_gateway or runtime.status().running
+                    desktop.enter_context(dock_icon(
+                        dev_browser_url, instance=runtime.paths.state_path, enabled=not no_dock,
+                    ))
                     announce_ready(dev_browser_url, managed=managed)
                     if managed:
                         _attach_to_background_gateway(
@@ -268,8 +308,12 @@ def webui(
             return
 
         managed = not existing_gateway or runtime.status().running
+        desktop.enter_context(dock_icon(
+            webui_url, instance=runtime.paths.state_path, enabled=managed and not no_dock,
+        ))
         announce_ready(webui_url, managed=managed)
         if managed:
             _attach_to_background_gateway(runtime, log_cursor=log_cursor)
     finally:
+        desktop.close()
         lease.release(wait_for_stop=False)

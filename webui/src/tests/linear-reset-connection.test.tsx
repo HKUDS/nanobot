@@ -59,7 +59,7 @@ async function openReset() {
   fireEvent.click(screen.getByRole("button", { name: "Reset Linear connection" }));
   const dialog = await screen.findByRole("alertdialog");
   return { dialog, onWorkspaceRemoved, onWorkspacesChange,
-    confirm: () => fireEvent.click(within(dialog).getByRole("button", { name: "Reset", exact: true })) };
+    confirm: () => fireEvent.click(within(dialog).getByRole("button", { name: "Reset" })) };
 }
 
 describe("reset Linear connection", () => {
@@ -79,7 +79,7 @@ describe("reset Linear connection", () => {
     expect(within(dialog).getByText("Keeps").tagName).toBe("DT");
     expect(within(dialog).getByText("Member access settings and this instance’s app configuration, including saved credentials.").tagName).toBe("DD");
     expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
-    expect(within(dialog).getByRole("button", { name: "Reset", exact: true })).toBeEnabled();
+    expect(within(dialog).getByRole("button", { name: "Reset" })).toBeEnabled();
   });
 
   it("inspects fresh installations, revokes each, stops the channel, then clears settings", async () => {

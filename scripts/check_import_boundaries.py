@@ -52,6 +52,32 @@ _TOOL_CONFIG_MODULES = (
 
 IMPORT_RULES = (
     ImportRule(
+        "update-policy-direction",
+        ("nanobot.agent", "nanobot.session", "nanobot.runtime_admission",
+         "nanobot.data_access", "nanobot.installation_lock"),
+        ("nanobot.update_service", "nanobot.update_plan", "nanobot.update_jobs",
+         "nanobot.update_worker", "nanobot.update_stop", "nanobot.update_restart"),
+    ),
+    ImportRule(
+        "update-domain",
+        ("nanobot.update_service", "nanobot.update_plan", "nanobot.update_jobs",
+         "nanobot.update_worker", "nanobot.update_stop",
+         "nanobot.update_profiles", "nanobot.update_handoff", "nanobot.update_guidance"),
+        ("nanobot.agent", "nanobot.session", "nanobot.api", "nanobot.cli",
+         "nanobot.channels", "nanobot.webui"),
+    ),
+    ImportRule(
+        "update-restart-adapter",
+        ("nanobot.update_restart",),
+        (*_ADAPTERS, "nanobot.agent", "nanobot.session"),
+        # This protected-startup entry composes the existing CLI, not a second
+        # agent runtime. Keep its frozen worker entry and launch semantics stable.
+        allowed_targets=("nanobot.gateway.runtime", "nanobot.cli.gateway_runtime._run_gateway",
+                         "nanobot.cli.entry.configure_windows_console",
+                         "nanobot.cli.process_identity.set_cli_process_identity",
+                         "nanobot.cli.runtime_config._load_runtime_config"),
+    ),
+    ImportRule(
         "core-execution",
         ("nanobot.agent.loop", "nanobot.agent.runner", "nanobot.agent.turn_delivery"),
         _ADAPTERS,

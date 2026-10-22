@@ -12,11 +12,11 @@ const supportedTargets = new Set([
 ])
 if (!supportedTargets.has(target)) throw new Error(`unsupported target: ${target}`)
 const nativePackagesByTarget: Record<string, string[]> = {
-  "darwin-arm64": ["@opentui/core-darwin-arm64"],
-  "darwin-x64": ["@opentui/core-darwin-x64"],
-  "linux-arm64": ["@opentui/core-linux-arm64", "@opentui/core-linux-arm64-musl"],
-  "linux-x64": ["@opentui/core-linux-x64", "@opentui/core-linux-x64-musl"],
-  "win32-x64": ["@opentui/core-win32-x64"],
+  "darwin-arm64": ["@opentui/core-darwin-arm64", "@resvg/resvg-js-darwin-arm64"],
+  "darwin-x64": ["@opentui/core-darwin-x64", "@resvg/resvg-js-darwin-x64"],
+  "linux-arm64": ["@opentui/core-linux-arm64", "@opentui/core-linux-arm64-musl", "@resvg/resvg-js-linux-arm64-gnu", "@resvg/resvg-js-linux-arm64-musl"],
+  "linux-x64": ["@opentui/core-linux-x64", "@opentui/core-linux-x64-musl", "@resvg/resvg-js-linux-x64-gnu", "@resvg/resvg-js-linux-x64-musl"],
+  "win32-x64": ["@opentui/core-win32-x64", "@resvg/resvg-js-win32-x64-msvc"],
 }
 
 const root = join(import.meta.dir, "..")
@@ -86,7 +86,18 @@ async function readPackageNotice(path: string): Promise<PackageNotice> {
     .filter((entry) => entry.isFile() && /^(licen[cs]e|copying|notice)([._-].*)?$/i.test(entry.name))
     .map((entry) => entry.name)
     .sort()
-  if (!licenseNames.length) throw new Error(`${manifest.name ?? basename(path)} has no license file`)
+  if (!licenseNames.length) {
+    // These exact npm releases put their MIT declaration in the README only.
+    const readme = new Map([
+      ["fontkit@2.0.4", "README.md"], ["dfa@1.2.0", "README.md"], ["brotli@1.3.3", "readme.md"],
+    ]).get(`${manifest.name}@${manifest.version}`)
+    if (readme && manifest.license === "MIT") licenseNames.push(readme)
+    else if (typeof manifest.name === "string" && manifest.name.startsWith("@resvg/resvg-js-") && manifest.version === "2.6.2") {
+      const wrapper = JSON.parse(await readFile(join(path, "..", "resvg-js", "package.json"), "utf8")) as PackageManifest
+      if (wrapper.version !== manifest.version || wrapper.license !== manifest.license) throw new Error("resvg native license version mismatch")
+      licenseNames.push("../resvg-js/LICENSE")
+    } else throw new Error(`${manifest.name ?? basename(path)} has no license file`)
+  }
   return {
     name: String(manifest.name ?? basename(path)),
     version: String(manifest.version ?? "unknown"),
@@ -110,6 +121,8 @@ const sections = [
   `Target: ${target}`,
   "Runtime: Bun 1.3.13",
   "The release archive also contains SOURCE_OFFER.md, RELINKING.md, and the complete TUI application source.",
+  "fontkit 2.0.4, dfa 1.2.0 and brotli 1.3.3 declare MIT in their included README notices.",
+  "resvg's unmodified native binding includes its upstream MPL-2.0 text; source is listed in RELINKING.md.",
   "",
   "===== nanobot project license =====",
   "",

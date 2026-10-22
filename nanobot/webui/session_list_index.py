@@ -1,47 +1,16 @@
-"""SQLite sidebar queries and a rebuildable display-transcript cache.
-
-The core ``SessionManager`` owns model context while the WebUI transcript owns
-durable display history. The sidebar discovers both without reconstructing one
-store from the other, so core session writes stay independent from UI state.
-"""
+"""Sidebar projection from session headers and SQLite display summaries."""
 
 from __future__ import annotations
 
 import json
-import os
-import re
-import secrets
-import stat
-from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 from typing import Any, cast
 
-from loguru import logger
-
-from nanobot.config.paths import get_webui_dir
 from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
-from nanobot.session.manager import (
-    _SESSION_LIST_PREVIEW_MAX_CHARS,  # pyright: ignore[reportPrivateUsage]
-    _SESSION_LIST_PREVIEW_MAX_RECORDS,  # pyright: ignore[reportPrivateUsage]
-    SessionManager,
-    message_preview_text,  # pyright: ignore[reportPrivateUsage]
-    )
+from nanobot.session.manager import SessionManager
 from nanobot.session.model_selection import model_preset_from_metadata
 from nanobot.session.recovery import recovery_state_from_metadata
-from nanobot.webui.session_identity import (
-    WEBUI_SESSION_STORAGE_PREFIX,
-    is_webui_session_key,
-    webui_chat_id,
-    webui_session_key,
-)
 
-_INDEX_VERSION = 8
-_INDEX_FILENAME = ".webui_session_index.json"
-_MODEL_PRESET_FIELD = "model_preset"
-_ROW_SOURCE_FIELD = "_source"
-_SESSION_SOURCE = "session"
-_TRANSCRIPT_SOURCE = "webui_transcript"
 _WORKSPACE_SCOPE_PRESENT_FIELD = "_workspace_scope_present"
 _WORKSPACE_SCOPE_VALUE_FIELD = "_workspace_scope_value"
 WEBUI_SESSION_INDEX_INTERNAL_FIELDS = frozenset(
@@ -49,205 +18,30 @@ WEBUI_SESSION_INDEX_INTERNAL_FIELDS = frozenset(
 )
 _INDEXED_WORKSPACE_SCOPE_KEYS = ("project_path", "path", "access_mode")
 _MAX_INDEXED_WORKSPACE_SCOPE_BYTES = 4096
-_WEBUI_ACTIVITY_MTIME_NS = "webui_activity_mtime_ns"
-_WEBUI_ACTIVITY_SIZE = "webui_activity_size"
-_WEBUI_ACTIVITY_FILES = "webui_activity_files"
-_VISIBLE_TRANSCRIPT_ROLES = {"user", "assistant"}
-_WEBUI_SESSION_STEM_PREFIX = SessionManager.safe_key(WEBUI_SESSION_STORAGE_PREFIX)
-_WEBUI_CHAT_ID_RE = re.compile(r"^[A-Za-z0-9_:-]{1,64}$")
-_TRANSCRIPT_SEGMENTS_SUFFIX = ".segments"
-_TRANSCRIPT_NON_ANSWER_KINDS = {"progress", "reasoning", "tool_hint"}
-
-
-@dataclass
-class _WebuiFiles:
-    signature: dict[str, int] = field(default_factory=lambda: {
-        _WEBUI_ACTIVITY_MTIME_NS: 0, _WEBUI_ACTIVITY_SIZE: 0, _WEBUI_ACTIVITY_FILES: 0,
-    })
-    records: list[tuple[Path, float]] = field(default_factory=list)
 
 
 def list_webui_sessions(
     session_manager: SessionManager,
     stored_sessions: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return session rows for the WebUI sidebar, backed by a rebuildable cache."""
-    webui_dir = get_webui_dir()
-    rows, changed = _reconcile_index(session_manager, stored_sessions, webui_dir)
-    if changed:
-        try:
-            _write_index_rows(session_manager.sessions_dir, [row for row in rows if row.get(_ROW_SOURCE_FIELD) == _TRANSCRIPT_SOURCE])
-        except Exception as e:
-            logger.debug("Failed to write WebUI transcript list cache: {}", e)
-    sessions = [_public_row(session_manager.sessions_dir, webui_dir, row) for row in rows]
-    return sorted(sessions, key=lambda row: row.get("updated_at", ""), reverse=True)
-
-
-def _reconcile_index(
-    session_manager: SessionManager,
-    stored_sessions: list[dict[str, Any]] | None,
-    webui_dir: Path,
-) -> tuple[list[dict[str, Any]], bool]:
-    files_by_stem = _read_webui_files(webui_dir)
-    activity_by_stem: dict[str, dict[str, int]] = {}
-    for stem, files in files_by_stem.items():
-        identity = os.path.normcase(stem)
-        previous = activity_by_stem.get(identity)
-        activity_by_stem[identity] = files.signature if previous is None else {
-            _WEBUI_ACTIVITY_MTIME_NS: max(previous[_WEBUI_ACTIVITY_MTIME_NS], files.signature[_WEBUI_ACTIVITY_MTIME_NS]),
-            _WEBUI_ACTIVITY_SIZE: previous[_WEBUI_ACTIVITY_SIZE] + files.signature[_WEBUI_ACTIVITY_SIZE],
-            _WEBUI_ACTIVITY_FILES: previous[_WEBUI_ACTIVITY_FILES] + files.signature[_WEBUI_ACTIVITY_FILES],
-        }
+    """Read one database snapshot; no display files or sidebar sidecar cache."""
     stored = session_manager.list_session_metadata() if stored_sessions is None else stored_sessions
-    session_keys = {row["key"] for row in stored}
-    session_stems = {os.path.normcase(SessionManager.safe_key(key)) for key in session_keys if is_webui_session_key(key)}
     rows: list[dict[str, Any]] = []
     for row in stored:
         metadata = row["metadata"]
         if not session_manager.types.public_history(metadata):
             continue
-        signature = activity_by_stem.get(os.path.normcase(SessionManager.safe_key(row["key"])))
-        activity = _webui_activity_updated_at(signature) if signature is not None else None
+        millis = row["history_updated_at_ms"]
+        activity = datetime.fromtimestamp(millis / 1000).isoformat() if millis else None
         rows.append({
             "key": row["key"], "created_at": row["created_at"],
             "updated_at": _visible_activity_updated_at(row["updated_at"], row["visible_updated_at"], activity),
-            "title": row["title"], "preview": row["preview"],
-            _MODEL_PRESET_FIELD: model_preset_from_metadata(metadata),
+            "title": row["title"], "preview": row["preview"] or row["history_preview"],
+            "model_preset": model_preset_from_metadata(metadata),
             "recovery_state": recovery_state_from_metadata(metadata),
-            **_indexed_workspace_scope_fields(metadata),
-            _ROW_SOURCE_FIELD: _SESSION_SOURCE, "file": "sessions.sqlite3",
+            **_indexed_workspace_scope_fields(metadata), "path": row["path"],
         })
-
-    transcripts = [
-        (stem, files) for stem, files in sorted(files_by_stem.items())
-        if stem.startswith(_WEBUI_SESSION_STEM_PREFIX) and files.records
-        and os.path.normcase(stem) not in session_stems
-    ]
-    if not transcripts:
-        return rows, False
-    # Only transcript-only sessions use the file cache; SQLite rows are fresh.
-    existing_rows = _read_index_rows(session_manager.sessions_dir)
-    existing_by_source = {
-        (row.get(_ROW_SOURCE_FIELD), row.get("file")): row
-        for row in existing_rows or []
-        if isinstance(row.get(_ROW_SOURCE_FIELD), str)
-        and isinstance(row.get("file"), str)
-    }
-    changed = existing_rows is None
-    expected_sources: set[tuple[str, str]] = set()
-    for stem, files in transcripts:
-        files.signature = activity_by_stem[os.path.normcase(stem)]
-        identity = (_TRANSCRIPT_SOURCE, stem)
-        row = existing_by_source.get(identity)
-        cached_key = row.get("key") if row is not None else None
-        key = (
-            cached_key
-            if isinstance(cached_key, str) and _valid_transcript_session_key(cached_key, stem)
-            else None
-        )
-        if key is not None and row is not None and _indexed_transcript_row_matches(
-            row,
-            key,
-            files.signature,
-        ):
-            rows.append(row)
-            expected_sources.add(identity)
-            continue
-
-        changed = True
-        scanned = _scan_transcript_row(key, stem, files, webui_dir)
-        scanned_key = scanned.get("key") if scanned is not None else None
-        if scanned is not None and scanned_key not in session_keys:
-            rows.append(scanned)
-            expected_sources.add(identity)
-
-    if set(existing_by_source) != expected_sources:
-        changed = True
-    transcript_rows = [row for row in rows if row.get(_ROW_SOURCE_FIELD) == _TRANSCRIPT_SOURCE]
-    if existing_rows is not None and transcript_rows != existing_rows:
-        changed = True
-    return rows, changed
-
-
-def _index_path(sessions_dir: Path) -> Path:
-    return sessions_dir / _INDEX_FILENAME
-
-
-def _read_index_rows(sessions_dir: Path) -> list[dict[str, Any]] | None:
-    path = _index_path(sessions_dir)
-    if not path.is_file():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(data, dict):
-        return None
-    index_data = cast(dict[str, Any], data)
-    if index_data.get("version") != _INDEX_VERSION:
-        return None
-    rows = index_data.get("sessions")
-    if not isinstance(rows, list):
-        return None
-    index_rows = cast(list[Any], rows)
-    if not all(isinstance(row, dict) for row in index_rows):
-        return None
-    return [cast(dict[str, Any], row) for row in index_rows]
-
-
-def _write_index_rows(sessions_dir: Path, rows: list[dict[str, Any]]) -> None:
-    path = _index_path(sessions_dir)
-    tmp_path = path.with_name(f"{path.name}.{secrets.token_hex(8)}.tmp")
-    data = {"version": _INDEX_VERSION, "sessions": rows}
-    try:
-        with open(tmp_path, "x", encoding="utf-8") as file:
-            file.write(json.dumps(data, ensure_ascii=False) + "\n")
-        os.replace(tmp_path, path)
-    finally:
-        tmp_path.unlink(missing_ok=True)
-
-
-
-def _indexed_transcript_row_matches(
-    row: dict[str, Any],
-    session_key: str,
-    signature: dict[str, int],
-) -> bool:
-    if not all(isinstance(row.get(key), str) for key in ("key", "created_at", "updated_at")):
-        return False
-    if row.get(_ROW_SOURCE_FIELD) != _TRANSCRIPT_SOURCE:
-        return False
-    if row.get("key") != session_key or row.get("file") != SessionManager.safe_key(session_key):
-        return False
-    if not isinstance(row.get("title", ""), str) or not isinstance(row.get("preview", ""), str):
-        return False
-    if not isinstance(row.get(_WORKSPACE_SCOPE_PRESENT_FIELD), bool):
-        return False
-    return (
-        row.get(_WEBUI_ACTIVITY_MTIME_NS) == signature[_WEBUI_ACTIVITY_MTIME_NS]
-        and row.get(_WEBUI_ACTIVITY_SIZE) == signature[_WEBUI_ACTIVITY_SIZE]
-        and row.get(_WEBUI_ACTIVITY_FILES) == signature[_WEBUI_ACTIVITY_FILES]
-    )
-
-
-def _public_row(sessions_dir: Path, webui_dir: Path, row: dict[str, Any]) -> dict[str, Any]:
-    file = str(row.get("file", ""))
-    if row.get(_ROW_SOURCE_FIELD) == _TRANSCRIPT_SOURCE:
-        path = webui_dir / f"{file}.jsonl"
-    else:
-        path = sessions_dir / file
-    return {
-        "key": row.get("key"),
-        "created_at": row.get("created_at"),
-        "updated_at": row.get("updated_at"),
-        "title": row.get("title", ""),
-        "preview": row.get("preview", ""),
-        _MODEL_PRESET_FIELD: row.get(_MODEL_PRESET_FIELD),
-        "recovery_state": row.get("recovery_state"),
-        _WORKSPACE_SCOPE_PRESENT_FIELD: row.get(_WORKSPACE_SCOPE_PRESENT_FIELD, False),
-        _WORKSPACE_SCOPE_VALUE_FIELD: row.get(_WORKSPACE_SCOPE_VALUE_FIELD),
-        "path": str(path),
-    }
+    return sorted(rows, key=lambda row: row.get("updated_at", ""), reverse=True)
 
 
 def indexed_workspace_scope(row: dict[str, Any]) -> tuple[bool, object]:
@@ -295,67 +89,6 @@ def _indexed_workspace_scope_fields(metadata: object) -> dict[str, object]:
     }
 
 
-
-def _read_webui_files(webui_dir: Path) -> dict[str, _WebuiFiles]:
-    """Discover present display files once per request, including all segment activity."""
-    files_by_stem: dict[str, _WebuiFiles] = {}
-
-    def add_file(stem: str, entry: os.DirEntry[str]) -> None:
-        try:
-            info = entry.stat(follow_symlinks=False)
-        except OSError:
-            return
-        if not stat.S_ISREG(info.st_mode):
-            return
-        files = files_by_stem.setdefault(stem, _WebuiFiles())
-        signature = files.signature
-        signature[_WEBUI_ACTIVITY_MTIME_NS] = max(signature[_WEBUI_ACTIVITY_MTIME_NS], info.st_mtime_ns)
-        signature[_WEBUI_ACTIVITY_SIZE] += info.st_size
-        signature[_WEBUI_ACTIVITY_FILES] += 1
-        if os.path.normcase(entry.name).endswith(".jsonl"):
-            files.records.append((Path(entry.path), info.st_mtime))
-
-    try:
-        with os.scandir(webui_dir) as entries:
-            for entry in entries:
-                name = os.path.normcase(entry.name)
-                if name.endswith(_TRANSCRIPT_SEGMENTS_SUFFIX) and entry.is_dir(follow_symlinks=False):
-                    stem = entry.name[:-len(_TRANSCRIPT_SEGMENTS_SUFFIX)]
-                    try:
-                        with os.scandir(entry.path) as segments:
-                            for segment in segments:
-                                add_file(stem, segment)
-                    except OSError:
-                        pass
-                elif name.endswith((".jsonl", ".json")):
-                    add_file(entry.name.rsplit(".", 1)[0], entry)
-    except OSError:
-        pass
-    return files_by_stem
-
-
-def _transcript_record(line: str) -> dict[str, Any] | None:
-    try:
-        value: object = json.loads(line)
-    except json.JSONDecodeError:
-        return None
-    return cast(dict[str, Any], value) if isinstance(value, dict) else None
-
-
-def _valid_transcript_session_key(key: str, stem: str) -> bool:
-    chat_id = webui_chat_id(key)
-    if chat_id is None:
-        return False
-    return _WEBUI_CHAT_ID_RE.fullmatch(chat_id) is not None and SessionManager.safe_key(key) == stem
-
-
-def _webui_activity_updated_at(signature: dict[str, int]) -> str | None:
-    mtime_ns = signature.get(_WEBUI_ACTIVITY_MTIME_NS, 0)
-    if mtime_ns <= 0:
-        return None
-    return datetime.fromtimestamp(mtime_ns / 1_000_000_000).isoformat()
-
-
 def _timestamp(value: str | None) -> float:
     if not value:
         return 0.0
@@ -371,128 +104,9 @@ def _latest_updated_at(stored: str | None, activity: str | None) -> str | None:
     return stored
 
 
-
 def _visible_activity_updated_at(
     stored: str | None,
     visible_message_at: str | None,
     webui_activity: str | None,
 ) -> str | None:
     return _latest_updated_at(visible_message_at, webui_activity) or stored
-
-
-
-def _transcript_preview(record: dict[str, Any]) -> tuple[str, str]:
-    text = record.get("text")
-    if not isinstance(text, str) or not text.strip():
-        return "", ""
-    preview = message_preview_text({"content": text})
-    if not preview:
-        return "", ""
-    event = record.get("event")
-    if event == "user" or record.get("role") == "user":
-        return preview, ""
-    if (
-        event == "message"
-        and record.get("kind") not in _TRANSCRIPT_NON_ANSWER_KINDS
-    ) or record.get("role") == "assistant":
-        return "", preview
-    return "", ""
-
-
-def _transcript_created_at(record: dict[str, Any]) -> str | None:
-    value = record.get("created_at_ms")
-    if (
-        not isinstance(value, int | float)
-        or isinstance(value, bool)
-        or value < 0
-    ):
-        return None
-    try:
-        return datetime.fromtimestamp(value / 1000).isoformat()
-    except (OSError, OverflowError, ValueError):
-        return None
-
-
-def _scan_transcript_row(
-    session_key: str | None,
-    stem: str,
-    files: _WebuiFiles,
-    webui_dir: Path,
-) -> dict[str, Any] | None:
-    signature = files.signature
-    activity_updated_at = _webui_activity_updated_at(signature)
-    if activity_updated_at is None:
-        return None
-
-    preview = ""
-    fallback_preview = ""
-    created_at: str | None = None
-    saw_record = False
-    scanned_records = 0
-    scanned_chars = 0
-    paths = [path for path, _ in sorted(files.records, key=lambda item: (item[0].parent == webui_dir, item[0]))]
-    for path in paths:
-        try:
-            with open(path, encoding="utf-8") as handle:
-                for line in handle:
-                    if not line.strip():
-                        continue
-                    scanned_records += 1
-                    scanned_chars += len(line)
-                    record = _transcript_record(line)
-                    if record is not None:
-                        saw_record = True
-                        chat_id = record.get("chat_id")
-                        if isinstance(chat_id, str) and chat_id.strip():
-                            candidate = webui_session_key(chat_id.strip())
-                            if _valid_transcript_session_key(candidate, stem):
-                                session_key = candidate
-                        if created_at is None:
-                            created_at = _transcript_created_at(record)
-                        user_preview, assistant_preview = _transcript_preview(record)
-                        if user_preview:
-                            preview = user_preview
-                            break
-                        if not fallback_preview and assistant_preview:
-                            fallback_preview = assistant_preview
-                    if (
-                        scanned_records >= _SESSION_LIST_PREVIEW_MAX_RECORDS
-                        or scanned_chars >= _SESSION_LIST_PREVIEW_MAX_CHARS
-                    ):
-                        break
-        except OSError:
-            continue
-        if preview or (
-            scanned_records >= _SESSION_LIST_PREVIEW_MAX_RECORDS
-            or scanned_chars >= _SESSION_LIST_PREVIEW_MAX_CHARS
-        ):
-            break
-    if not saw_record:
-        return None
-    if session_key is None:
-        fallback = webui_session_key(stem.removeprefix(_WEBUI_SESSION_STEM_PREFIX))
-        if not _valid_transcript_session_key(fallback, stem):
-            return None
-        session_key = fallback
-
-    if created_at is None:
-        try:
-            earliest_mtime = min(mtime for _, mtime in files.records)
-            created_at = datetime.fromtimestamp(earliest_mtime).isoformat()
-        except (OSError, OverflowError, ValueError):
-            created_at = activity_updated_at
-    return {
-        "key": session_key,
-        "created_at": created_at,
-        "updated_at": activity_updated_at,
-        "title": "",
-        "preview": preview or fallback_preview,
-        _MODEL_PRESET_FIELD: None,
-        "recovery_state": None,
-        **_indexed_workspace_scope_fields({}),
-        _ROW_SOURCE_FIELD: _TRANSCRIPT_SOURCE,
-        "file": stem,
-        "mtime_ns": signature[_WEBUI_ACTIVITY_MTIME_NS],
-        "size": signature[_WEBUI_ACTIVITY_SIZE],
-        **signature,
-    }

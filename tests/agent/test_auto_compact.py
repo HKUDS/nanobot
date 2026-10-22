@@ -10,13 +10,14 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.subagent_status import SubagentStatus
 from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext
 from nanobot.config.schema import AgentDefaults, Config
-from nanobot.events import NO_EVENTS
+from nanobot.events import NO_EVENTS, ContextCompactionEvent
 from nanobot.providers.base import LLMResponse
 from nanobot.runtime_context import public_history_message
 from nanobot.sdk.clients import RuntimeClient
@@ -98,6 +99,7 @@ def _make_fake_compact(
         max_suffix: int = 8,
         trigger: str = "policy",
         events=NO_EVENTS,
+        reason=None,
     ) -> str:
         state["count"] += 1
         session = await loop.sessions.state.get(key)
@@ -147,6 +149,88 @@ async def test_heartbeat_idle_compaction_persists_summary_without_channel_notice
     refreshed = loop.sessions.get_or_create(HEARTBEAT_SESSION_KEY)
     assert refreshed.metadata["_last_summary"]["text"] == "Heartbeat summary."
     assert loop.bus.outbound.empty()
+
+
+@pytest.mark.parametrize("outcome", ["succeeded", "failed", "cancelled"])
+async def test_idle_compaction_emits_its_real_trigger_for_each_phase(tmp_path, monkeypatch, outcome):
+    loop = _make_loop(tmp_path)
+    try:
+        key = "websocket:idle-reason"
+        session = await loop.sessions.state.get(key)
+        _add_turns(session, 1)
+        await loop.sessions.state.finish_turn(session)
+        clock = MagicMock(wraps=datetime)
+        clock.now.return_value = datetime.now() + timedelta(minutes=20)
+        monkeypatch.setattr("nanobot.agent.autocompact.datetime", clock)
+        if outcome == "succeeded":
+            loop.consolidator.archive_session = AsyncMock(return_value="Idle summary.")
+        else:
+            error = asyncio.CancelledError() if outcome == "cancelled" else RuntimeError("summary failed")
+            loop.consolidator.archive_session = AsyncMock(side_effect=error)
+
+        await loop.auto_compact.check_expired(loop.schedule_background, loop.runtime_for_session)
+        await _drain_background_tasks(loop)
+
+        events = [loop.bus.outbound.get_nowait().event for _ in range(loop.bus.outbound_size)]
+        assert len(events) == 2
+        assert all(isinstance(event, ContextCompactionEvent) for event in events)
+        assert [event.phase for event in events] == ["started", outcome]
+        assert [event.reason for event in events] == ["idle", "idle"]
+        assert events[0].compaction_id == events[1].compaction_id
+        assert all(event.notify is False for event in events)
+    finally:
+        await loop.aclose()
+
+
+@pytest.mark.parametrize("reopen", [False, True])
+async def test_idle_compaction_skips_subagent_sessions(tmp_path, monkeypatch, reopen):
+    loop = _make_loop(tmp_path)
+    try:
+        parent = await loop.sessions.state.get("cli:parent")
+        _add_turns(parent, 1)
+        await loop.sessions.state.finish_turn(parent)
+        assert loop.subagents.sessions is not None
+        child_keys = []
+        for completed in (False, True):
+            status = SubagentStatus(
+                task_id=f"idle-{completed}",
+                label="Idle task",
+                task_description="Inspect the workspace",
+                started_at=time.monotonic(),
+                owner=parent.key,
+                state="done" if completed else "running",
+                phase="done" if completed else "running",
+                result="Task observation" if completed else None,
+                finished_at=time.monotonic() if completed else None,
+                completed_at=time.time() if completed else None,
+            )
+            child = await loop.subagents.sessions.create(status)
+            child.add_message("assistant", "Task observation")
+            await loop.sessions.state.finish_turn(child)
+            child_keys.append(child.key)
+
+        if reopen:
+            await loop.aclose()
+            loop = _make_loop(tmp_path)
+
+        clock = MagicMock(wraps=datetime)
+        clock.now.return_value = datetime.now() + timedelta(minutes=20)
+        monkeypatch.setattr("nanobot.agent.autocompact.datetime", clock)
+        loop.consolidator.archive_session = AsyncMock(return_value="Conversation summary.")
+        await loop._check_expired_sessions_if_due()
+        await _drain_background_tasks(loop)
+
+        loop.consolidator.archive_session.assert_awaited_once()
+        assert loop.consolidator.archive_session.await_args.args[0].key == parent.key
+        compacted_parent = await loop.sessions.state.get(parent.key)
+        assert compacted_parent.metadata["_last_summary"]["text"] == "Conversation summary."
+        for key in child_keys:
+            child = await loop.sessions.state.get(key)
+            assert len(child.messages) == 2
+            assert child.last_archived == 0
+            assert "_last_summary" not in child.metadata
+    finally:
+        await loop.aclose()
 
 
 async def test_expired_unified_turn_keeps_latest_delivery_route(tmp_path, monkeypatch):
@@ -415,11 +499,13 @@ class TestAutoCompact:
         await loop.aclose()
 
     @pytest.mark.asyncio
-    async def test_auto_compact_stores_summary(self, tmp_path):
-        """_archive should store the summary in _summaries."""
+    async def test_auto_compact_stores_summary_in_cache_and_metadata(self, tmp_path):
+        """_archive caches and persists the summary without exposing archived history."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         _add_turns(session, 6, prefix="hello")
+        last_active = datetime.now() - timedelta(minutes=20)
+        session.updated_at = last_active
         loop.sessions.save(session)
 
         loop.consolidator.compact_idle_session = _make_fake_compact(
@@ -431,7 +517,12 @@ class TestAutoCompact:
         entry = loop.auto_compact._summaries.get("cli:test")
         assert entry is not None
         assert entry["text"] == "User said hello."
+        loop.sessions.invalidate("cli:test")
         session_after = loop.sessions.get_or_create("cli:test")
+        meta = session_after.metadata.get("_last_summary")
+        assert meta is not None
+        assert meta["text"] == "User said hello."
+        assert meta["last_active"] == last_active.isoformat()
         assert len(session_after.messages) == 13
         assert session_after.get_history(max_messages=12) == []
         await loop.aclose()
@@ -1185,29 +1276,6 @@ class TestProactiveAutoCompact:
 
 class TestSummaryPersistence:
     """Test that summary survives restart via session metadata."""
-
-    @pytest.mark.asyncio
-    async def test_summary_persisted_in_session_metadata(self, tmp_path):
-        """After archive, _last_summary should be in session metadata."""
-        loop = _make_loop(tmp_path, session_ttl_minutes=15)
-        session = loop.sessions.get_or_create("cli:test")
-        _add_turns(session, 6, prefix="hello")
-        session.updated_at = datetime.now() - timedelta(minutes=20)
-        loop.sessions.save(session)
-
-        loop.consolidator.compact_idle_session = _make_fake_compact(
-            loop, summary="User said hello.",
-        )
-
-        await loop.auto_compact._archive("cli:test", runtime=loop.llm_runtime())
-
-        # Summary should be persisted in session metadata
-        session_after = loop.sessions.get_or_create("cli:test")
-        meta = session_after.metadata.get("_last_summary")
-        assert meta is not None
-        assert meta["text"] == "User said hello."
-        assert "last_active" in meta
-        await loop.aclose()
 
     @pytest.mark.asyncio
     async def test_summary_recovered_after_restart(self, tmp_path):

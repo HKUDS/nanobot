@@ -417,9 +417,10 @@ async def test_factory_builds_xai_provider_and_applies_explicit_body_overrides(m
                     "provider": "xai_grok",
                 }
             },
+            "network": {"proxy": "http://127.0.0.1:7890"},
             "providers": {
                 "xaiGrok": {
-                    "proxy": "http://127.0.0.1:7890",
+                    "useProxy": True,
                     "extraBody": {
                         "parallel_tool_calls": False,
                         "max_turns": 2,

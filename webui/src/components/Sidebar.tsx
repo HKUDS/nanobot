@@ -24,6 +24,7 @@ import {
   type SidebarPaneGroup,
 } from "@/components/ChatList";
 import { HostSwitcher } from "@/components/remote/HostSwitcher";
+import { UpdateNotice } from "@/components/UpdateNotice";
 import {
   SIDEBAR_SELECTION_ACTION_ITEM_CLASS,
   SidebarSelectionHighlight,
@@ -35,6 +36,7 @@ import type {
   SidebarViewState,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import type { UpdateMethod } from "@/lib/api";
 import { sidebarShortcutAria, sidebarShortcutLabel } from "@/lib/sidebar-shortcuts";
 
 interface SidebarProps {
@@ -42,6 +44,7 @@ interface SidebarProps {
   temporarySessions?: ChatSummary[];
   activeKey: string | null;
   loading: boolean;
+  initialLoading?: boolean;
   newChatActive: boolean;
   onNewChat: () => void;
   onSelect: (key: string) => void;
@@ -65,6 +68,8 @@ interface SidebarProps {
   onRequestRenameProject: (projectKey: string, label: string) => void;
   onNewChatInProject: (projectPath: string, projectName: string) => void;
   onOpenSettings: () => void;
+  onOpenUpdates?: () => void;
+  availableUpdate?: { version: string; onDismiss: () => void; onRequestUpdate?: () => void; installationMethod?: UpdateMethod | null };
   onOpenApps: () => void;
   onOpenSkills: () => void;
   onOpenAutomations: () => void;
@@ -272,6 +277,7 @@ export function Sidebar(props: SidebarProps) {
             temporarySessions={props.temporarySessions}
             activeKey={props.activeKey}
             loading={props.loading}
+            initialLoading={props.initialLoading}
             emptyLabel={t("chat.noSessions")}
             onSelect={props.onSelect}
             onCloseTemporaryChat={props.onCloseTemporaryChat}
@@ -311,6 +317,11 @@ export function Sidebar(props: SidebarProps) {
           />
         )}
       </div>
+      {props.onOpenUpdates && props.availableUpdate && (
+        <UpdateNotice version={props.availableUpdate.version} collapsed={collapsed}
+          onOpen={props.onOpenUpdates} onDismiss={props.availableUpdate.onDismiss}
+          onRequestUpdate={props.availableUpdate.onRequestUpdate} installationMethod={props.availableUpdate.installationMethod} />
+      )}
       <div
         className={cn(
           "flex items-center justify-between gap-1 bg-sidebar/55 px-2.5 py-3 text-xs",
@@ -377,7 +388,7 @@ function SidebarActionButton({
         collapsed
           ? "w-8 justify-center gap-0 px-0"
           : iconOnly ? "w-8 shrink-0 justify-center gap-0 rounded-control px-0"
-          : "w-full justify-start gap-2 px-2 text-[13px] leading-5 [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:stroke-[1.75]",
+          : "w-full justify-start gap-2 px-2 text-[13px] leading-5 [&_svg]:h-4 [&_svg]:w-4 [&_svg]:stroke-[1.75]",
         active
           ? "text-sidebar-accent-foreground"
           : compact

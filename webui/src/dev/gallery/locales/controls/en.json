@@ -1,0 +1,503 @@
+{
+  "common": {
+    "unavailable": "Unavailable",
+    "selected": "Selected: {{value}}",
+    "savingPreview": "Saving preview values…",
+    "savedPreview": "Preview values saved",
+    "providerAction": "Provider configuration action selected",
+    "reset": "Reset preview"
+  },
+  "button": {
+    "title": "Buttons",
+    "description": "One button, several appearances and sizes. The same component changes through its options.",
+    "options": "variant changes appearance; size changes dimensions; disabled blocks interaction; onClick belongs to the caller.",
+    "variants": "Variants — different styles of the same button",
+    "sizes": "Sizes",
+    "add": "Add example",
+    "clicks": "Button clicks: {{count}}"
+  },
+  "input": {
+    "title": "Text inputs",
+    "description": "Text entry and the shared search-field variant.",
+    "options": "Use Input for regular fields and SearchInput for search. Supply a label and describe invalid input.",
+    "name": "Example name",
+    "projectName": "Project name",
+    "search": "Search",
+    "searchName": "Example search",
+    "searchProjects": "Search projects",
+    "invalid": "Invalid",
+    "invalidName": "Invalid name",
+    "required": "Enter a project name.",
+    "disabledName": "Disabled name"
+  },
+  "textarea": {
+    "title": "Multiline inputs",
+    "description": "Multiline text using the shared focus treatment.",
+    "options": "Accepts native textarea props: value, onChange, rows and disabled.",
+    "notes": "Example notes",
+    "disabledNotes": "Disabled notes",
+    "readOnly": "Read-only preview"
+  },
+  "toggle": {
+    "title": "Switches",
+    "description": "A controlled on/off switch shared by settings, workspaces and channels.",
+    "options": "The caller owns checked and onChange. label supplies its accessible name.",
+    "enable": "Enable example",
+    "unavailableOn": "Unavailable enabled switch",
+    "unavailableOff": "Unavailable disabled switch"
+  },
+  "select": {
+    "title": "Selection controls",
+    "description": "A single choice with keyboard navigation and disabled options.",
+    "options": "Compose Select, SelectTrigger, SelectValue, SelectContent and SelectItem. The root owns value/onValueChange.",
+    "fast": "Fast",
+    "model": "Example model",
+    "disabledModel": "Disabled model"
+  },
+  "segmented": {
+    "title": "Segmented choices",
+    "description": "A short, always-visible set of choices.",
+    "options": "value, options and onChange are controlled. mode=\"tabs\" adds arrow-key tab navigation.",
+    "day": "Day",
+    "week": "Week",
+    "month": "Month",
+    "period": "Example period",
+    "selected": "Selected period: {{value}}"
+  },
+  "combobox": {
+    "title": "Searchable choices",
+    "description": "Searchable options with shared keyboard and pointer navigation.",
+    "options": "useComboboxNavigation supplies input/list/option props; the caller filters values and owns selection.",
+    "search": "Search example options",
+    "placeholder": "Type or use arrow keys",
+    "choices": "Example options",
+    "empty": "No matching options",
+    "selected": "Selected option: {{value}}"
+  },
+  "chevron": {
+    "title": "Control chevron",
+    "description": "The shared chevron used by selection controls.",
+    "options": "className may adjust placement. The icon is decorative; the owning control supplies its accessible name."
+  },
+  "dialog": {
+    "title": "Dialogs",
+    "description": "A modal editor with staged changes, nested selection and focus return.",
+    "options": "The caller owns open/onOpenChange and draft/save behavior. Always provide DialogTitle and a description when useful.",
+    "open": "Open dialog",
+    "edit": "Edit example label",
+    "help": "Changes apply only to this preview.",
+    "label": "Example label",
+    "save": "Save label",
+    "saved": "Saved label: {{name}}"
+  },
+  "alert": {
+    "title": "Confirmation dialogs",
+    "description": "An explicit confirmation with separate cancel and action controls.",
+    "options": "Compose title, description and footer; perform the action in AlertDialogAction's handler.",
+    "remove": "Remove example",
+    "confirmTitle": "Remove this example?",
+    "help": "This changes only the preview state.",
+    "confirm": "Confirm removal",
+    "removed": "Example removed.",
+    "available": "Example available."
+  },
+  "sheet": {
+    "title": "Side panels",
+    "description": "A modal panel attached to an edge of the viewport.",
+    "options": "SheetContent supports side. Include SheetTitle and SheetDescription.",
+    "open": "Open sheet",
+    "panelTitle": "Example side panel",
+    "help": "Supporting controls beside the current page.",
+    "notes": "Panel notes",
+    "placeholder": "Try editing here"
+  },
+  "popover": {
+    "title": "Popovers",
+    "description": "A small interactive surface anchored to its trigger.",
+    "options": "Compose trigger and content; open/onOpenChange can be controlled. Content follows the owning dialog's portal.",
+    "open": "Open popover",
+    "note": "Quick note"
+  },
+  "menu": {
+    "title": "Dropdown menus",
+    "description": "Actions, radio choices, nested menus and disabled entries.",
+    "options": "Use onSelect for actions and a radio group for a persistent choice.",
+    "view": "View options",
+    "layout": "Layout",
+    "comfortable": "Comfortable",
+    "compact": "Compact",
+    "rename": "Rename",
+    "more": "More actions",
+    "duplicate": "Duplicate",
+    "none": "None",
+    "status": "Density: {{density}}. Action: {{action}}."
+  },
+  "tooltip": {
+    "title": "Tooltips and hints",
+    "description": "HoverHint composes the shared tooltip primitives; tooltip.tsx is their public import surface.",
+    "options": "Use HoverHint for ordinary hints. Keep essential errors visible. Hover and keyboard focus share the product's timing rules.",
+    "primitive": "Primitive tooltip",
+    "primitiveHelp": "Shared pointer delay and immediate keyboard focus.",
+    "hint": "Hover hint",
+    "hintHelp": "A composed hint with the same focus and pointer behavior."
+  },
+  "truncated": {
+    "title": "Truncated text hints",
+    "description": "Shows a hint only when the measured text is truncated.",
+    "options": "Supply text and a constrained width. Add tabIndex when the text itself should receive keyboard focus."
+  },
+  "disclosure": {
+    "title": "Collapsible content",
+    "description": "Expandable content that preserves child state while folded.",
+    "options": "Disclosure owns expansion; DisclosureContent accepts a controlled open prop for custom triggers.",
+    "show": "Show advanced options",
+    "help": "This draft survives closing and reopening.",
+    "draft": "Disclosure draft"
+  },
+  "expandable": {
+    "title": "Expandable text",
+    "description": "A line-limited preview of the same mounted text.",
+    "options": "The caller owns expanded. lines sets the collapsed line count; provide an accessible toggle.",
+    "less": "Show less",
+    "more": "Show more"
+  },
+  "imageViewport": {
+    "title": "Image viewport",
+    "description": "Image-local fit, zoom, pan and pinch controls.",
+    "options": "Supply a bounded className and remount for a different image identity. Set panWithArrows=false when a gallery owns arrow navigation."
+  },
+  "streaming": {
+    "title": "Animated labels",
+    "description": "A shared text animation for active thinking and tool labels.",
+    "options": "active controls animation. String or number children supply the glyph overlay; reduced-motion settings are respected.",
+    "animate": "Animate label",
+    "working": "Working through the next step…"
+  },
+  "markdown": {
+    "title": "Markdown replies",
+    "description": "The production streaming renderer, including tables, code and math.",
+    "options": "children is Markdown text. streaming controls incomplete content; onOpenFilePreview belongs to the screen.",
+    "state": "Markdown state"
+  },
+  "code": {
+    "title": "Code display",
+    "description": "Syntax highlighting, line numbers, clipboard copying, ANSI output and viewport-aware rows.",
+    "options": "code and language supply content; showLineNumbers, wrapLongLines and chrome control presentation. Viewport highlighting requires line numbers and unwrapped lines.",
+    "format": "Code format"
+  },
+  "math": {
+    "title": "Math formulas",
+    "description": "The shared fitting wrapper around Markdown's rendered display math.",
+    "options": "Use MarkdownText for TeX source. DisplayMath itself accepts already-rendered math nodes and scales them to the available width."
+  },
+  "message": {
+    "title": "Messages",
+    "description": "User and assistant messages, including thinking and delivery states.",
+    "options": "message is a UIMessage projected by the chat runtime. Data and network actions remain outside the renderer.",
+    "state": "Message state"
+  },
+  "activity": {
+    "title": "Agent activity",
+    "description": "Activity primitives composed into a working, completed or failed sequence.",
+    "options": "Pass text, status and controlled expansion. The gateway owns tool execution; these components render its projected state.",
+    "state": "Activity state",
+    "working": "Working",
+    "details": "Activity details",
+    "collapse": "Collapse",
+    "readError": "Could not read file",
+    "read": "Read source"
+  },
+  "files": {
+    "title": "File edits",
+    "description": "File references, line-change counts and expandable diffs.",
+    "options": "edits contains display summaries; displayMode selects summary/diff/collapsed_diff; onOpenFilePreview is supplied by the screen.",
+    "error": "Example edit could not be applied.",
+    "state": "File edit state",
+    "operation": "File operation",
+    "display": "Diff display",
+    "selected": "Selected file: {{path}}",
+    "hint": "Select a file reference to exercise its callback."
+  },
+  "media": { "study": "Color study {{count}}" },
+  "imageGallery": {
+    "title": "Image thumbnails",
+    "description": "Multi-image layout, thumbnail selection and overflow.",
+    "options": "images supplies URLs and names; size selects large or compact thumbnails, align controls alignment. Only four thumbnails are shown; the composed ImageLightbox includes all viewable images.",
+    "sixImages": "Six images",
+    "compact": "Compact thumbnails",
+    "hint": "Select a thumbnail or +2 to view all six images."
+  },
+  "imageLightbox": {
+    "title": "Full-screen image viewer",
+    "description": "Controlled full-screen viewing and image navigation.",
+    "options": "index is null when closed. The caller owns index and open callbacks; ImageLightbox composes ZoomableImage and resets the view on image changes.",
+    "open": "Open full-screen viewer",
+    "hint": "Use previous/next, ←/→ or Home/End; close with × or Escape."
+  },
+  "zoomableImage": {
+    "title": "Image zoom",
+    "description": "Single-image zoom, bounded panning and gestures.",
+    "options": "src and alt supply one image. Place it in a positioned container with a defined height; remount when changing images. Focus the viewport for +, − and 0 keyboard controls.",
+    "hint": "Zoom with +/−, double-click, Ctrl+wheel or pinch. Drag or scroll to pan after zooming; click the percentage or press 0 to reset."
+  },
+  "attachment": {
+    "title": "Attachments",
+    "description": "Image preview, video playback, file download and unavailable attachments.",
+    "options": "attachment.kind selects image, video or file. Images open ImageLightbox, videos use native controls, files use download links. Missing URLs render unavailable tiles; failed image loads also render an unavailable tile.",
+    "image": "Image",
+    "video": "Playable video",
+    "file": "Download file",
+    "unavailable": "Unavailable attachments (no URL)"
+  },
+  "fileReference": {
+    "title": "File references",
+    "description": "A file reference with a caller-owned open action.",
+    "options": "path supplies the label; onOpen supplies the action. The component does not decide workspace permissions.",
+    "select": "Select the file reference."
+  },
+  "settingsComposition": {
+    "title": "Settings composition",
+    "description": "The actual settings row/group/capability components composed with shared controls.",
+    "options": "The containing settings controller owns values and persistence. A gallery callback updates only local preview state.",
+    "preferences": "Example preferences",
+    "keepDrafts": "Keep drafts",
+    "switchHint": "A shared setting row with a controlled switch.",
+    "projectLabel": "Project label",
+    "projectName": "Settings project label",
+    "capability": "Example capability",
+    "notes": "Notes",
+    "capabilityNotes": "Capability notes",
+    "localOnly": "Local preview only"
+  },
+  "modelPickers": {
+    "title": "Model pickers",
+    "description": "Choose a provider, search for or enter a model ID, and adjust reasoning effort.",
+    "options": "The caller supplies ProviderPicker values and actions. ModelIdPicker's models can supply a fixed catalog; ReasoningEffortPicker's savedValues supplies existing options.",
+    "chooseProvider": "Choose provider",
+    "configure": "Configure {{provider}}"
+  },
+  "providerIcons": {
+    "title": "Provider icons",
+    "description": "Compare regular, compact and fill sizes, and the picker's unconfigured state.",
+    "options": "provider selects an existing icon; compact and fill control size. showBrandLogos=false uses built-in icons.",
+    "size": "Icon size"
+  },
+  "timezone": {
+    "title": "Timezone picker",
+    "description": "Search by timezone name, Chinese name or UTC offset, then view the same instant in local time.",
+    "options": "value is an IANA timezone; onChange updates the caller's value. The component provides search and keyboard navigation."
+  },
+  "textEditor": {
+    "title": "Text editor and hints",
+    "description": "Open the editor to change, save or cancel. Clear the content and save to see error feedback.",
+    "options": "SettingsTextEditor closes after onSave succeeds and shows errors on failure; SettingsHint opens on hover, focus or click.",
+    "state": "Editing state",
+    "hint": "Open the editor to change, save or cancel. Clear the content to see the error state.",
+    "instructions": "Example instructions",
+    "edit": "Edit example instructions",
+    "help": "After saving, the updated content appears below.",
+    "required": "Enter some content."
+  },
+  "removePreset": {
+    "title": "Remove model presets",
+    "description": "Delete unused model presets and view the disabled state of the preset used by the default model.",
+    "options": "This is the delete button used by ModelsSettings; the caller supplies disabled and the delete action. Provider management uses the ProvidersSettings dialog.",
+    "defaultModel": "Default model",
+    "codeAssistant": "Coding assistant",
+    "remove": "Delete {{name}}",
+    "primaryHint": "The preset used by the default model cannot be deleted.",
+    "count": "Preview presets: {{count}}"
+  },
+  "loading": {
+    "title": "Loading layouts",
+    "description": "Switch loading layouts for app, channel and skill catalogs, and view the shared status container.",
+    "options": "CatalogSkeleton's layout selects the layout. SkeletonStatus uses label for screen-reader status and marks decorative content as aria-hidden.",
+    "layout": "Catalog layout",
+    "catalog": "Loading preview catalog"
+  },
+  "sidebar": {
+    "title": "Settings navigation",
+    "description": "Select sections, handle a pending restart, and narrow the browser to view the mobile menu.",
+    "options": "activeSection and onSelectSection control selection; back, sign-out and restart actions are caller callbacks.",
+    "back": "Back to chat",
+    "logout": "Sign out",
+    "restart": "Preview restart action handled",
+    "hint": "Choose a settings section, or narrow the browser to see mobile navigation.",
+    "toggleRestart": "Toggle pending restart"
+  },
+  "providerSearch": {
+    "title": "Provider search",
+    "description": "Search providers grouped by OAuth, API key and local access, then select an entry or a custom provider.",
+    "options": "providers is the existing catalog. query is a controlled search value; onSelect and onCustom pass selection to the parent.",
+    "closed": "Search closed",
+    "custom": "Custom provider selected",
+    "hint": "Search providers, or use arrow keys to choose."
+  },
+  "requestParameters": {
+    "title": "Request parameters",
+    "description": "Edit headers, query parameters and request body; enter invalid JSON to see real validation feedback.",
+    "options": "fields selects visible entries; form holds JSON text. Headers and query parameters accept only string values; the request body accepts any JSON object values."
+  },
+  "requestAPI": {
+    "title": "Request API controls",
+    "description": "Select supported provider APIs, the default API, model overrides and fallback options.",
+    "options": "ProviderAPIControl keeps at least one API. ModelAPIControl allows null for automatic selection and shows available APIs based on provider capabilities.",
+    "providerAPI": "Provider API",
+    "modelOverride": "Model override"
+  },
+  "usage": {
+    "title": "Token usage",
+    "description": "Switch between data, empty records and unavailable states. Hover over bars for daily usage; open details for model trends.",
+    "options": "usage is a caller-supplied statistics record; timeZone defines date boundaries. The details dialog and charts only display supplied data.",
+    "state": "Usage state"
+  },
+  "overview": {
+    "title": "Settings overview",
+    "description": "View the current model, capability status and usage; select feature rows to try section navigation.",
+    "options": "settings supplies overview data; onSelectSection receives the selected settings section.",
+    "selected": "Selected section: {{section}}"
+  },
+  "web": {
+    "title": "Web search settings",
+    "description": "Switch between providers requiring no credentials, an API key or a server URL; adjust search options and try autosave.",
+    "options": "settings holds the current configuration; form holds edited values. The parent supplies save, credential visibility and provider switching actions.",
+    "unsaved": "Preview draft not saved"
+  },
+  "image": {
+    "title": "Image generation settings",
+    "description": "Toggle image generation, choose from a fixed model catalog, aspect ratios and image sizes, and expand advanced options to adjust the count.",
+    "options": "form is controlled configuration; dirty marks changes. The component reuses provider credentials; the parent implements saving."
+  },
+  "voice": {
+    "title": "Transcription settings",
+    "description": "Toggle transcription; edit the model, language, duration and upload size limits; try autosave.",
+    "options": "settings supplies provider information; the parent manages form and save callbacks."
+  },
+  "safety": {
+    "title": "Access settings",
+    "description": "Toggle local service access and default permissions; view setting rows, hints and autosave feedback.",
+    "options": "form supplies display values; onSave handles save requests. Runtime permission enforcement remains the gateway's responsibility."
+  },
+  "channelCatalog": {
+    "title": "Channel catalog and identity",
+    "description": "Switch running, starting, failed and uninstalled states; try the switch, installation entry and help menu.",
+    "options": "feature supplies installation and runtime states. The parent handles onAction and onSelect; identity, errors and help use the same channel data.",
+    "exampleChannel": "Example channel",
+    "state": "Channel state",
+    "error": "Example connection failed.",
+    "stopped": "Stopped",
+    "running": "Running",
+    "starting": "Starting",
+    "failed": "Failed",
+    "selected": "Channel settings selected",
+    "hint": "Use the switch or install button to see state changes."
+  },
+  "credentials": {
+    "title": "Channel credentials",
+    "description": "Enter credentials, reveal or hide secrets, apply connection presets, check required fields and copy a helper command.",
+    "options": "fields defines groups and controls; values and visibleSecrets are controlled. requirements defines credential combinations; preset and save callbacks update only this example.",
+    "botToken": "Bot token",
+    "tokenPlaceholder": "Example token",
+    "serverURL": "Server URL",
+    "replyMode": "Reply mode",
+    "mentions": "Mentions",
+    "allMessages": "All messages",
+    "allowFrom": "Allow from",
+    "local": "Local server",
+    "hosted": "Hosted server",
+    "required": "Enter a bot token.",
+    "checkSave": "Check and save",
+    "command": "Example command",
+    "applied": "Applied {{name}}",
+    "incomplete": "Complete the credentials.",
+    "saved": "Preview credentials saved.",
+    "hint": "Fill in credentials, toggle secret visibility, or apply a connection preset."
+  },
+  "channelValidation": {
+    "title": "Connection checks",
+    "description": "Switch between checking, success and failure; watch checks appear in sequence with an identity summary.",
+    "options": "validation supplies check records; validating controls loading. The component only displays the results.",
+    "expired": "The example token has expired.",
+    "result": "Check result"
+  },
+  "runAt": {
+    "title": "Scheduled time picker",
+    "description": "Enter a date and time, or open the calendar and choose with the mouse, arrow keys and page keys.",
+    "options": "value uses YYYY-MM-DDTHH:mm local time; onChange returns the edited value. Invalid input is shown on the existing form control."
+  },
+  "automationCalendar": {
+    "title": "Automation calendar",
+    "description": "Change months, switch schedules and history, and select successful or failed records to open results. Narrow containers automatically show an agenda.",
+    "options": "jobs and month determine calendar content. onInspect handles scheduled jobs; the caller supplies result display through renderRunDialog. The calendar does not read services.",
+    "providerError": "Example provider was unavailable.",
+    "state": "Schedule state",
+    "previousMonth": "Previous month",
+    "nextMonth": "Next month",
+    "planned": "Scheduled",
+    "recorded": "Run history",
+    "running": "Running",
+    "failed": "Failed",
+    "completed": "Completed",
+    "skipped": "Skipped",
+    "system": "System job",
+    "noEntries": "No schedules this month",
+    "more": "{{count}} more",
+    "selected": "Selected job: {{name}}",
+    "hint": "Select a run record to view its result, or choose a scheduled job."
+  },
+  "providers": {
+    "title": "Provider management",
+    "description": "View the actual provider management dialog and add-provider flow.",
+    "options": "Reuses ProvidersSettings from settings. The caller controls the catalog, forms and save callbacks; this preview changes local sample data and supports configuration, search, creation and cancellation.",
+    "invalidParameters": "Enter valid request parameter JSON; header and query parameter values must be strings.",
+    "saved": "Saved preview configuration for {{name}}",
+    "added": "Added {{name}}",
+    "signedIn": "Preview authorization set to signed in",
+    "signedOut": "Preview authorization set to signed out",
+    "builtInIcons": "Use built-in icons",
+    "brandIcons": "Use brand icons",
+    "configured": "Configured providers: {{count}}",
+    "providerAdded": "Provider added"
+  },
+  "runResult": {
+    "title": "Automation run results",
+    "description": "Open run results to compare Markdown replies, loading, retry, empty replies and missing history.",
+    "options": "result supplies loading state and the retrieved reply. The caller handles onRetry; this view does not read runtime state or request results.",
+    "state": "Run result",
+    "view": "View run result"
+  },
+  "chatBinding": {
+    "title": "Automation run chat",
+    "description": "Choose the run chat, edit instructions, confirm, switch back or cancel; compare busy jobs, loading errors and conflicts.",
+    "options": "data and job supply available chats and binding versions. The view manages the confirmation draft; the feature entry connects onSave, onSaved and onReload to data operations.",
+    "state": "Chat binding state",
+    "setChat": "Set run chat",
+    "saved": "The next run will take place in {{title}}",
+    "hint": "Choose a target chat, then confirm or edit the task instructions."
+  },
+  "about": {
+    "title": "About and version views",
+    "description": "Compare version-check states, commit links, update entries and the About page; buttons update the view with sample results.",
+    "options": "AboutSettingsView accepts composed version and support links. VersionCheckRowView displays checking/result and requests checks through onCheck. The feature entry owns actual checks and diagnostic link data.",
+    "error": "Could not get version information. Try again.",
+    "state": "Version state",
+    "selectedLink": "GitHub link selected",
+    "preferenceSaved": "Sample preference saved; nothing will be installed or restarted.",
+    "updateRequested": "Update review selected; this preview does not install or restart anything.",
+    "dismissed": "Update notice dismissed"
+  },
+  "appearance": {
+    "title": "Appearance preferences",
+    "description": "Toggle appearance, activity display, file diffs and notification preferences; sample values appear below.",
+    "options": "The caller manages theme and preferences. onChangeBrowserNotifications delegates permission requests to the feature entry; preview callbacks only change sample switches."
+  },
+  "starInvitation": {
+    "title": "Support invitation",
+    "description": "Open the actual invitation dialog, compare saving and error states, and try postponing, the GitHub link and permanent dismissal.",
+    "options": "open, saving and error are display states. The existing StarPrompt entry owns claiming invitations and persisting preferences; the view only calls supplied actions.",
+    "state": "Invitation state",
+    "view": "View invitation",
+    "dismissed": "Never remind again selected in preview",
+    "starred": "GitHub link selected in preview"
+  }
+}

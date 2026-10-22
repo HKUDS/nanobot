@@ -12,6 +12,7 @@ from loguru import logger
 
 import nanobot.providers.base as provider_base
 from nanobot.config.schema import Config
+from nanobot.events import ContextCompactionEvent, EventSink
 from nanobot.providers.factory import make_provider
 from nanobot.providers.openai_codex_provider import (
     OpenAICodexProvider,
@@ -930,8 +931,9 @@ async def test_codex_replayed_tool_turn_omits_server_item_ids(monkeypatch) -> No
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("inline_compaction", [False, True])
 async def test_codex_compacts_state_at_ninety_percent_before_next_request(
-    monkeypatch,
+    monkeypatch, inline_compaction,
 ) -> None:
     _mock_codex_token(monkeypatch)
     provider = OpenAICodexProvider(default_model="openai-codex/gpt-5.6-sol")
@@ -951,6 +953,16 @@ async def test_codex_compacts_state_at_ninety_percent_before_next_request(
         usage=provider_base.LLMUsage.reported(input_tokens=90, output_tokens=5),
     )
     bodies: list[dict[str, Any]] = []
+    timeline: list[str] = []
+    notices: list[ContextCompactionEvent] = []
+
+    async def observe(event) -> None:
+        if isinstance(event, ContextCompactionEvent):
+            timeline.append(event.phase)
+            notices.append(event)
+
+    async def answer_delta(text: str) -> None:
+        timeline.append(f"answer:{text}")
 
     async def fake_request(
         url,
@@ -962,62 +974,68 @@ async def test_codex_compacts_state_at_ninety_percent_before_next_request(
         on_thinking_delta=None,
         on_tool_call_delta=None,
     ):
-        _ = (
-            url,
-            headers,
-            verify,
-            proxy,
-            on_content_delta,
-            on_thinking_delta,
-            on_tool_call_delta,
-        )
+        _ = (url, headers, verify, proxy, on_thinking_delta, on_tool_call_delta)
         bodies.append(body)
         if body["input"][-1].get("type") == "compaction_trigger":
+            timeline.append("compact-request")
             compact_item = {
                 "type": "compaction",
                 "encrypted_content": "compacted opaque state",
             }
-            return provider_base.LLMResponse(
-                content=None,
-                provider_state=build_responses_state(
-                    provider=state_provider,
-                    model="gpt-5.6-sol",
-                    input_items=body["input"],
-                    output_items=[compact_item],
-                    usage=provider_base.LLMUsage.reported(
-                        input_tokens=95,
-                        output_tokens=2,
-                    ),
-                ),
-            )
-        return provider_base.LLMResponse(content="done")
+            async def compact_events():
+                yield {"type": "response.completed", "response": {
+                    "status": "completed", "output": [compact_item],
+                    "usage": {"input_tokens": 95, "output_tokens": 2},
+                }}
+
+            return await provider._responses.consume(compact_events(), provider=state_provider, body=body)
+        timeline.append("generation-request")
+
+        async def answer_events():
+            yield {"type": "response.output_text.delta", "delta": "done"}
+            yield {"type": "response.completed", "response": {
+                "status": "completed", "output": [
+                    *([{"type": "compaction", "encrypted_content": "new inline state"}] if inline_compaction else []),
+                    {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "done"}]},
+                ],
+            }}
+
+        return await provider._responses.consume(
+            answer_events(), provider=state_provider, body=body, on_content_delta=on_content_delta,
+        )
 
     monkeypatch.setattr(
         "nanobot.providers.openai_codex_provider._request_codex",
         fake_request,
     )
 
-    response = await provider.chat_with_retry(
+    response = await provider.chat_stream_with_retry(
         [
             {"role": "system", "content": "system"},
             {"role": "user", "content": "new question"},
         ],
         max_tokens=5,
+        on_content_delta=answer_delta,
         provider_context=provider_base.ProviderCallContext(
             conversation_state=state.with_pending_messages([
                 {"role": "user", "content": "new question"},
             ]),
             context_window_tokens=100,
+            events=EventSink(observe),
         ),
     )
 
+    assert timeline == ["started", "compact-request", "succeeded", "generation-request", "answer:done"]
+    assert all(notice.reason == "provider_native" for notice in notices)
+    assert len({notice.compaction_id for notice in notices}) == 1
+    assert response.provider_compaction_event_id == (None if inline_compaction else notices[0].compaction_id)
     assert response.content == "done"
     assert response.provider_compaction_applied is True
     assert response.provider_compaction_state is not None
-    assert response.provider_compaction_scope == "prior_context"
+    assert response.provider_compaction_scope == ("current_request" if inline_compaction else "prior_context")
     assert responses_state_items(response.provider_compaction_state) == [{
         "type": "compaction",
-        "encrypted_content": "compacted opaque state",
+        "encrypted_content": "new inline state" if inline_compaction else "compacted opaque state",
     }]
     assert len(bodies) == 2
     assert bodies[0]["input"][-1] == {"type": "compaction_trigger"}
@@ -1065,6 +1083,11 @@ async def test_codex_disables_unsupported_native_compaction_and_continues(
         usage=provider_base.LLMUsage.reported(input_tokens=90, output_tokens=5),
     )
     bodies: list[dict[str, Any]] = []
+    notices: list[ContextCompactionEvent] = []
+
+    async def observe(event) -> None:
+        if isinstance(event, ContextCompactionEvent):
+            notices.append(event)
 
     async def fake_request(
         url,
@@ -1107,14 +1130,73 @@ async def test_codex_disables_unsupported_native_compaction_and_continues(
                 {"role": "user", "content": "new"},
             ]),
             context_window_tokens=100,
+            events=EventSink(observe),
         ),
     )
 
     assert response.content == "done"
+    assert [notice.phase for notice in notices] == ["started", "failed"]
+    assert all(notice.reason == "provider_native" for notice in notices)
+    assert len({notice.compaction_id for notice in notices}) == 1
     assert len(bodies) == 2
     assert bodies[0]["input"][-1] == {"type": "compaction_trigger"}
     assert bodies[1]["input"][-1] != {"type": "compaction_trigger"}
     assert provider.supports_native_compaction() is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_during", ["compaction", "terminal", "generation"])
+async def test_codex_native_compaction_terminal_survives_cancellation(monkeypatch, cancel_during) -> None:
+    _mock_codex_token(monkeypatch)
+    provider = OpenAICodexProvider(default_model="openai-codex/gpt-5.6-sol")
+    state_provider = provider._responses_state_provider()
+    state = build_responses_state(
+        provider=state_provider, model="gpt-5.6-sol",
+        input_items=[{"type": "message", "role": "user", "content": "old"}],
+        output_items=[{"type": "reasoning", "encrypted_content": "opaque"}],
+        usage=provider_base.LLMUsage.reported(input_tokens=90, output_tokens=5),
+    )
+    entered = asyncio.Event()
+    settle = asyncio.Event()
+    notices: list[ContextCompactionEvent] = []
+    requests: list[str] = []
+
+    async def observe(event) -> None:
+        if isinstance(event, ContextCompactionEvent):
+            notices.append(event)
+            if cancel_during == "terminal" and event.phase == "succeeded":
+                entered.set()
+                await settle.wait()
+
+    async def fake_request(_url, _headers, body, **_kwargs):
+        stage = "compaction" if body["input"][-1].get("type") == "compaction_trigger" else "generation"
+        requests.append(stage)
+        if stage == cancel_during:
+            entered.set()
+            await asyncio.Future()
+        return provider_base.LLMResponse(content=None, provider_state=build_responses_state(
+            provider=state_provider, model="gpt-5.6-sol", input_items=body["input"],
+            output_items=[{"type": "compaction", "encrypted_content": "compacted"}],
+        ))
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
+    task = asyncio.create_task(provider.chat(
+        [{"role": "user", "content": "new"}], max_tokens=5,
+        provider_context=provider_base.ProviderCallContext(
+            conversation_state=state.with_pending_messages([{"role": "user", "content": "new"}]),
+            context_window_tokens=100, events=EventSink(observe),
+        ),
+    ))
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    task.cancel()
+    settle.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    terminal = "cancelled" if cancel_during == "compaction" else "succeeded"
+    assert [notice.phase for notice in notices] == ["started", terminal]
+    assert all(notice.reason == "provider_native" for notice in notices)
+    assert len({notice.compaction_id for notice in notices}) == 1
+    assert requests == (["compaction", "generation"] if cancel_during == "generation" else ["compaction"])
 
 
 @pytest.mark.asyncio

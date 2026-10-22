@@ -9,6 +9,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import type { SSHDiscovery } from "@/lib/remote-instances";
 import { StatePicker, type ComponentExample } from "./example";
+import { useGalleryTranslation } from "./i18n";
 import "@/components/remote/remote-layout.css";
 
 const routes = [{ id: "gallery-ssh", name: "开发 SSH 路由" }, { id: "gallery-vpn", name: "VPN 路由" }];
@@ -20,18 +21,19 @@ function RouteEditor({ story }: { story: RouteStory }) {
   const [route, setRoute] = useState(initial);
   const [original, setOriginal] = useState(story === "saving" || story === "save_error" ? "direct" : initial);
   const [saved, setSaved] = useState(story === "refresh_error");
-  const [error, setError] = useState(story === "save_error" ? t("remote.errors.pair_route_mismatch")
-    : story === "refresh_error" ? t("remote.errors.directory_unavailable") : "");
+  const [error, setError] = useState(story === "save_error" ? "remote.errors.pair_route_mismatch"
+    : story === "refresh_error" ? "remote.errors.directory_unavailable" : "");
   return <PairRouteSettingsView hasSavedRoute={story === "saved_route"} routes={routes}
-    route={route} original={original} busy={story === "saving"} error={error} saved={saved}
+    route={route} original={original} busy={story === "saving"} error={error ? t(error) : ""} saved={saved}
     onRouteChange={(next) => { setRoute(next); setError(""); setSaved(false); }}
     onSave={() => { setOriginal(route); setSaved(true); setError(""); }} />;
 }
 
 function PairRoutePreview() {
+  const { t } = useGalleryTranslation();
   const [story, setStory] = useState<RouteStory>("direct");
   return <>
-    <StatePicker label="路由状态" value={story} options={["direct", "saved_route", "saving", "save_error", "refresh_error"]} onChange={setStory} />
+    <StatePicker label={t("previews.pairRoute.state")} value={story} options={["direct", "saved_route", "saving", "save_error", "refresh_error"]} onChange={setStory} />
     <RouteEditor key={story} story={story} />
   </>;
 }
@@ -60,20 +62,21 @@ function pairState(story: PairStory): QuickPairSetupState {
 }
 
 function QuickPairPreview() {
+  const { t } = useGalleryTranslation();
   const [story, setStory] = useState<PairStory>("invite");
   const [state, setState] = useState(() => pairState("invite"));
   const [open, setOpen] = useState(false);
   const [feedback, setFeedback] = useState("");
   return <div className="space-y-4">
-    <StatePicker label="配对阶段" value={story} options={["invite", "copied", "manual", "confirm", "existing", "saved_retry", "waiting", "expired"]}
+    <StatePicker label={t("previews.quickPair.state")} value={story} options={["invite", "copied", "manual", "confirm", "existing", "saved_retry", "waiting", "expired"]}
       onChange={(next) => { setStory(next); setState(pairState(next)); setFeedback(""); }} />
-    <Button variant="outline" onClick={() => setOpen(true)}>打开快速配对</Button>
+    <Button variant="outline" onClick={() => setOpen(true)}>{t("previews.quickPair.open")}</Button>
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="remote-dialog max-w-sm">
         <QuickPairSetupView state={state} routeSettings={<RouteEditor story="saved_route" />}
           onStart={() => { setState(pairState("invite")); setStory("invite"); }}
           onReview={() => setState((current) => ({ ...current, preview, error: "" }))}
-          onConnect={() => { setFeedback("已选择连接：开发主机。"); setOpen(false); }}
+          onConnect={() => { setFeedback("previews.quickPair.connected"); setOpen(false); }}
           onCopyCommand={() => {
             if (!state.request) return;
             void copyTextToClipboard(state.request.command).then((copied) => setState((current) => ({
@@ -84,10 +87,10 @@ function QuickPairPreview() {
           onManualChange={(manual) => setState((current) => ({ ...current, manual, panel: null, error: "" }))}
           onPanelChange={(panel) => setState((current) => ({ ...current, panel }))}
           onBack={() => setState((current) => ({ ...current, preview: null, error: "", manual: current.manual || !current.request?.command }))}
-          onCancel={() => setOpen(false)} onSSH={() => { setFeedback("已选择 SSH 连接方式。"); setOpen(false); }} />
+          onCancel={() => setOpen(false)} onSSH={() => { setFeedback("previews.quickPair.ssh"); setOpen(false); }} />
       </DialogContent>
     </Dialog>
-    <p role="status" className="text-xs text-muted-foreground">{feedback || "示例邀请与回执仅用于展示；确认动作更新本地反馈。"}</p>
+    <p role="status" className="text-xs text-muted-foreground">{t(feedback || "previews.quickPair.hint", { name: preview.hostname })}</p>
   </div>;
 }
 
@@ -103,35 +106,36 @@ type SSHStory = "ready" | "custom_config" | "imported" | "loading" | "error" | "
 
 function SSHHostPreview() {
   const { t } = useTranslation();
+  const { t: g } = useGalleryTranslation();
   const [story, setStory] = useState<SSHStory>("ready");
   const [value, setValue] = useState("");
-  const [feedback, setFeedback] = useState("");
+  const [feedback, setFeedback] = useState<{ key: string; value?: string } | null>(null);
   const input = useRef<HTMLInputElement>(null);
   return <div className="space-y-4">
-    <StatePicker label="SSH 地址状态" value={story} options={["ready", "custom_config", "imported", "loading", "error", "partial", "address_only"]}
-      onChange={(next) => { setStory(next); setValue(next === "custom_config" ? "developer@192.0.2.10" : next === "imported" ? "dev" : ""); setFeedback(""); }} />
+    <StatePicker label={g("previews.sshHost.state")} value={story} options={["ready", "custom_config", "imported", "loading", "error", "partial", "address_only"]}
+      onChange={(next) => { setStory(next); setValue(next === "custom_config" ? "developer@192.0.2.10" : next === "imported" ? "dev" : ""); setFeedback(null); }} />
     <SSHHostPickerView disabled={false} value={value} imported={story === "imported"}
       suggestions={story !== "address_only"} customConfig={story === "custom_config"}
       discovery={story === "error" ? null : story === "partial" ? { ...discovery, incomplete: true } : discovery}
       busy={story === "loading"} error={story === "error" ? t("remote.discoveryError") : ""}
-      onRefresh={() => { setStory("ready"); setFeedback("已刷新示例地址。"); }}
-      onChange={setValue} onBlur={() => setFeedback(value ? `已输入：${value}` : "")}
+      onRefresh={() => { setStory("ready"); setFeedback({ key: "previews.sshHost.refreshed" }); }}
+      onChange={setValue} onBlur={() => setFeedback(value ? { key: "previews.sshHost.entered", value } : null)}
       inputRef={input} />
-    <p role="status" className="text-xs text-muted-foreground">{feedback || "输入内容筛选地址；按方向键选择 SSH 别名。"}</p>
+    <p role="status" className="text-xs text-muted-foreground">{feedback ? g(feedback.key, { value: feedback.value }) : g("previews.sshHost.hint")}</p>
   </div>;
 }
 
 export const remoteExamples: ComponentExample[] = [
-  { title: "PairRouteSettingsView · 配对路由", files: ["webui/src/components/remote/PairRouteSettingsView.tsx"], Preview: PairRoutePreview,
-    description: "切换已存路由、保存、出错和刷新失败状态，选择路由后在本地保存。",
-    options: "route 与 original 由调用方管理；routes 提供 SSH 路由。保存成功与目录刷新失败分别呈现，画廊与实际设置使用同一个视图。",
+  { title: "previews.pairRoute.title", files: ["webui/src/components/remote/PairRouteSettingsView.tsx"], Preview: PairRoutePreview,
+    description: "previews.pairRoute.description",
+    options: "previews.pairRoute.options",
     code: '<PairRouteSettingsView hasSavedRoute={hasSavedRoute} routes={routes} route={route} original={original} busy={busy} error={error} saved={saved} onRouteChange={setRoute} onSave={save} />' },
-  { title: "QuickPairSetupView · 快速配对", files: ["webui/src/components/remote/QuickPairSetupView.tsx"], Preview: QuickPairPreview,
-    description: "体验邀请复制、回执输入、访问确认、已有主机和保存后重试界面。",
-    options: "state 提供当前配对结果与显示状态，回调交给所属界面执行动作，routeSettings 组合路由设置。画廊使用示例数据和本地回调；实际配对由 QuickPairSetup 管理。",
+  { title: "previews.quickPair.title", files: ["webui/src/components/remote/QuickPairSetupView.tsx"], Preview: QuickPairPreview,
+    description: "previews.quickPair.description",
+    options: "previews.quickPair.options",
     code: '<QuickPairSetupView state={state} routeSettings={routeSettings} onStart={start} onReview={review} onConnect={connect} onCopyCommand={copy} onCodeChange={setCode} onManualChange={setManual} onPanelChange={setPanel} onBack={back} onCancel={cancel} onSSH={showSSH} />' },
-  { title: "SSHHostPickerView · SSH 地址", files: ["webui/src/components/remote/SSHHostPickerView.tsx"], Preview: SSHHostPreview,
-    description: "筛选 SSH 别名，使用方向键选择，查看导入、读取和错误状态。",
-    options: "discovery 提供当前配置文件的地址；value、busy、error 与回调由调用方控制。customConfig 保留自定义配置的别名发现行为，inputRef 用于选择后的焦点。",
+  { title: "previews.sshHost.title", files: ["webui/src/components/remote/SSHHostPickerView.tsx"], Preview: SSHHostPreview,
+    description: "previews.sshHost.description",
+    options: "previews.sshHost.options",
     code: '<SSHHostPickerView disabled={false} value={host} imported={false} discovery={discovery} busy={busy} error={error} onRefresh={refresh} onChange={setHost} onBlur={validateHost} inputRef={hostInput} />' },
 ];

@@ -4,6 +4,22 @@ import { useTranslation } from "react-i18next";
 
 import { SettingsGroup } from "@/components/settings/shared/SettingsControls";
 
+export function AboutSettingsLayout({ versionCheck, links, starLink }: {
+  versionCheck: ReactNode;
+  links: ReactNode;
+  starLink: ReactNode;
+}) {
+  return <div className="flex flex-1 flex-col gap-5">
+    <div className="flex flex-col items-center gap-3 py-6 text-center">
+      <img src="/brand/nanobot_mark.svg" alt="" className="h-16 w-16 select-none" draggable={false} />
+      <h1><img src="/brand/nanobot_wordmark.svg" alt="nanobot" width={800} height={164} className="h-auto w-40 select-none dark:brightness-150" draggable={false} /></h1>
+    </div>
+    {versionCheck}
+    {links}
+    <div className="mt-auto pt-8 text-center">{starLink}</div>
+  </div>;
+}
+
 export function AboutSettingsView({ reportIssueUrl, versionCheck, starLink }: {
   reportIssueUrl: string;
   versionCheck: ReactNode;
@@ -16,12 +32,7 @@ export function AboutSettingsView({ reportIssueUrl, versionCheck, starLink }: {
     { key: "reportIssue", icon: MessageCircle, href: reportIssueUrl },
   ];
   return (
-    <div className="flex flex-1 flex-col gap-5">
-      <div className="flex flex-col items-center gap-4 py-6 text-center">
-        <img src="/brand/nanobot_mark.svg" alt="" className="h-16 w-16 select-none" draggable={false} />
-        <h1><img src="/brand/nanobot_wordmark.svg" alt="nanobot" className="h-auto w-40 select-none dark:brightness-150" draggable={false} /></h1>
-        {versionCheck}
-      </div>
+    <AboutSettingsLayout versionCheck={versionCheck} starLink={starLink} links={
       <SettingsGroup>
         {links.map(({ key, icon: Icon, href }) => (
           <a key={key} href={href} target="_blank" rel="noopener noreferrer"
@@ -32,9 +43,6 @@ export function AboutSettingsView({ reportIssueUrl, versionCheck, starLink }: {
           </a>
         ))}
       </SettingsGroup>
-      <div className="mt-auto pt-8 text-center">
-        {starLink}
-      </div>
-    </div>
+    } />
   );
 }

@@ -1,4 +1,106 @@
 {
+  "updates": {
+    "guide": {
+      "entry": "{{method}}로 업데이트",
+      "methods": {
+        "managed": "nanobot 설치 프로그램",
+        "uv": "uv",
+        "pipx": "pipx",
+        "pip": "pip",
+        "source": "소스 코드",
+        "container": "컨테이너 배포",
+        "system": "시스템 패키지 관리자"
+      },
+      "host": "게이트웨이: {{host}}",
+      "where": "이 컴퓨터의 터미널에서 원래 설치 계정으로 실행하세요. 원격 게이트웨이는 브라우저 컴퓨터가 아닌 SSH 또는 서버 콘솔을 사용하세요. 명령은 복사만 하며 자동 실행되지 않습니다.",
+      "containerHost": "컨테이너 내부의 이름과 경로이며 배포 호스트가 아닙니다. 이를 관리하는 서버나 호스팅 콘솔에서 작업하세요. 실행 중인 컨테이너 안에서 업데이트하지 마세요.",
+      "beforeTitle": "준비하고 서비스 중지",
+      "before": "작업을 마치고 설정, 채팅, 작업 공간 데이터를 백업하세요. 같은 설치를 쓰는 모든 게이트웨이를 기존 실행기나 서비스 관리자로 중지하세요. 프로필 경로와 실행 설정은 유지하세요.",
+      "installTitle": "{{shell}}에서 업데이트",
+      "inspectCommand": "설치 확인",
+      "updateCommand": "업데이트 명령",
+      "versionCommand": "설치된 버전",
+      "reasons": {
+        "restart": "대상 패키지는 이미 설치되어 있습니다. 다시 설치하지 마세요. 이전 게이트웨이를 중지하고 기존 실행기와 프로필로 재시작한 뒤 실행 버전을 확인하세요.",
+        "registry": "기존 저장소와 인증 정보를 사용하세요. 관리자는 기록된 extras와 버전 제한을 유지하므로 알림과 다른 안정 버전을 선택할 수 있습니다. 출력을 확인하고 실패한 업데이트를 강제하지 마세요.",
+        "preview": "Preview는 GitHub로 배포되며 패키지 저장소에 없을 수 있습니다. 게이트웨이의 Python과 플랫폼에 맞는 wheel을 선택하고 체크섬을 검증한 뒤 기존 도구와 extras로 설치하세요. 일반 upgrade 명령으로 해당 Preview를 보장할 수 없습니다.",
+        "policy": "버전 고정, 잠금 파일, 고정 소스, 버전 제한 또는 알 수 없는 옵션이 있습니다. 아래에서 확인하고 extras 및 주입된 패키지를 유지하며 기존 절차로 업데이트하세요. 제한을 임의로 해제하지 마세요.",
+        "extras": "이 pip 환경은 원래 extras를 기록하지 않습니다. 패키지를 확인한 뒤 기존 pip 명령에 --upgrade와 대상 버전을 추가하고 extras 및 저장소 옵션을 유지하세요. 추측한 설치 명령은 제공하지 않습니다.",
+        "manager": "패키지 관리자나 환경 구조를 확인하지 못했습니다. 원래 계정과 설정으로 위 경로를 지정하세요. PATH의 다른 pip나 nanobot을 사용하지 마세요.",
+        "source": "로컬 변경을 보존하고 대상 브랜치나 리비전을 확인한 뒤 저장소 절차에 따라 코드, 의존성, WebUI/TUI를 업데이트하고 빌드하세요. 편집 가능한 환경을 PyPI 패키지로 대체하지 마세요.",
+        "container": "기존 Compose 프로젝트나 관리 콘솔에서 이미지 태그 또는 다이제스트를 선택하고 가져오거나 빌드한 뒤 기존 마운트, 비밀 정보, 포트를 유지해 nanobot 서비스만 재생성하세요. 데이터 볼륨은 백업하고 삭제하지 마세요.",
+        "system": "OS 패키지 관리자를 사용하거나 서버 관리자에게 요청하세요. sudo pip나 시스템 Python 관리 제한 우회는 사용하지 마세요.",
+        "review": "설치 또는 검토 내용이 변경되었습니다. 창을 닫고 다시 확인한 뒤 명령을 복사하세요."
+      },
+      "verifyTitle": "재시작하고 검증",
+      "verify": "같은 실행기와 프로필로 시작하세요. 명령은 설치 파일만 확인합니다. 동일한 게이트웨이에 재접속해 실행 버전을 v{{version}}과 비교하고 채팅 및 설정이 남아 있는지 확인하세요.",
+      "check": "실행 중인 게이트웨이 확인",
+      "verified": "확인됨: 이 게이트웨이는 v{{version}} 실행 중입니다.",
+      "observed": "게이트웨이는 알림의 v{{target}}이 아닌 v{{version}}을 보고합니다. 설치 출력을 확인하고 동일한 환경을 재시작하세요. 패키지 업데이트만으로 실행 프로세스는 바뀌지 않습니다.",
+      "checkFailed": "실행 버전을 읽지 못했습니다. 동일한 게이트웨이에 재접속하고 다시 시도하세요. 업데이트 성공은 아직 확인되지 않았습니다."
+    },
+    "automaticRecovery": "업데이트 실패 시 안전한 경우 이전 프로그램으로 서비스를 자동 복구합니다. 채팅 데이터는 이전 상태로 되돌리지 않습니다.",
+    "restored": "이전 버전 복구됨",
+    "restoredDescription": "업데이트가 완료되지 않아 v{{version}}이 다시 실행 중입니다. 설정과 채팅 기록은 이전 데이터로 되돌리지 않았습니다.",
+    "recoveryBeforeInstall": "설치 전에 업데이트가 중단되었습니다. 패키지 파일은 변경되지 않았습니다. 저장된 업데이트를 복구하여 계속하세요.",
+    "channel": {
+      "settings": "업데이트 설정",
+      "receivePreview": "미리 보기 업데이트 받기",
+      "previewWarning": "미리 보기 버전이며 오류가 있을 수 있습니다.",
+      "preview": "미리 보기",
+      "hint": "새 기능을 미리 사용해 보세요.",
+      "saving": "저장 중…",
+      "saved": "업데이트 설정 저장됨",
+      "ahead": "현재 버전이 선택한 채널보다 최신입니다. 이전 버전을 설치하지 않습니다.",
+      "waiting_stable": "미리 보기 업데이트를 중단했습니다. 더 새로운 안정판이 나올 때까지 현재 버전을 사용하세요.",
+      "withdrawn": "이 미리 보기 버전은 철회되었습니다. 새 버전이 나오면 업데이트하세요. 현재 데이터에 이전 버전을 덮어쓰지 마세요.",
+      "unavailable": "이 채널의 업데이트를 확인할 수 없습니다.",
+      "publishing": "릴리스를 게시 중입니다. 나중에 다시 확인하세요.",
+      "unsupported": "이 Python 버전과 플랫폼에 맞는 업데이트가 없습니다.",
+      "releaseNotes": "릴리스 노트"
+    },
+    "reviewAgain": "업데이트 다시 검토",
+    "reviewAgainDescription": "패키지 파일은 변경되지 않았습니다. 설치 및 재시작을 승인하기 전에 업데이트를 다시 검토하세요.",
+    "settleFailed": "이전 업데이트를 안전하게 종료하지 못했습니다. 상태를 다시 확인하거나 복구 안내를 따르세요.",
+    "ownerGuide": "설치 방식별 업데이트 안내",
+    "recoveryTitle": "게이트웨이 컴퓨터에서 복구",
+    "recoveryDescription": "nanobot이 실행 중인 컴퓨터의 터미널에서 실행하세요. 저장된 업데이트를 표시한 후 복구 여부를 확인합니다. 원본 백업을 보관하세요.",
+    "confirm": "nanobot을 업데이트할까요?",
+    "reviewingTitle": "업데이트 확인 중…",
+    "preparing": "업데이트 다운로드 중…",
+    "installing": "업데이트 설치 중…",
+    "working": "nanobot 업데이트 중…",
+    "reconnecting": "다시 연결 중…",
+    "done": "업데이트 완료",
+    "failed": "업데이트를 완료하지 못했습니다",
+    "confirmDescription": "v{{version}} 업데이트 후 {{host}}의 nanobot이 다시 시작됩니다. 진행 중인 작업을 먼저 끝내세요.",
+    "reviewing": "설치 환경과 대상 버전을 확인합니다. 파일은 변경하지 않습니다.",
+    "workingDescription": "파일을 준비하고 검증한 뒤 백업하고 선택한 게이트웨이를 다시 시작합니다.",
+    "reconnectingDescription": "업데이트된 게이트웨이에 다시 연결하고 있습니다. 업데이트를 중복 실행하지 마세요.",
+    "delayed": "다시 연결하는 데 시간이 걸립니다. 진행 상황은 저장되어 있으니 닫고 나중에 확인할 수 있습니다.",
+    "doneDescription": "현재 v{{version}}이 실행 중입니다.",
+    "preparationFailed": "준비 또는 게이트웨이 종료에 실패했습니다. 패키지 파일은 변경되지 않았습니다. 작업을 마친 후 다시 확인하세요.",
+    "repairRequired": "설치 또는 재시작에 실패했습니다. 백업과 기록은 보존됩니다. 다른 설치를 시작하지 말고 업데이트 복구 절차를 따르세요.",
+    "reviewFailed": "업데이트를 검증하지 못했습니다. 연결과 원래 설치 환경이 지원하는 백그라운드 실행 방식을 확인하세요.",
+    "confirmationUnknown": "요청이 수락되었을 수 있습니다. 다시 실행하기 전에 저장된 진행 상황을 확인합니다.",
+    "statusFailed": "업데이트 기록을 읽지 못했습니다. 같은 게이트웨이에 다시 연결해 확인하세요.",
+    "sharedInstallation": "이 설치를 공유하는 실행 중인 게이트웨이 {{count}}개가 다시 시작됩니다.",
+    "cancel": "취소",
+    "close": "닫기",
+    "hide": "접기",
+    "return": "완료",
+    "wait": "잠시 기다려 주세요",
+    "checkAgain": "다시 확인",
+    "apply": "업데이트 및 재시작",
+    "blocked": {
+      "review_changed": "검토 내용이 바뀌었거나 만료되었습니다. 닫고 다시 확인하세요.",
+      "not_upgrade": "대상 버전은 업그레이드가 아닙니다. 파일을 변경하지 않습니다.",
+      "installation_owner": "원래 패키지 관리자 또는 배포 도구로 업데이트하세요.",
+      "installation_policy": "설치 출처, 추가 종속성 또는 버전 제약에 따라 원래 설치 방식으로 업데이트하세요.",
+      "external_restart": "이 게이트웨이는 여기서 재시작할 수 없습니다. 원래 실행 방식이나 배포 도구로 중지, 업데이트 및 재시작하세요.",
+      "permission": "게이트웨이의 localhost를 열거나 원격 패키지 설치를 허용하세요."
+    }
+  },
   "remote": {
     "compatibility": {
       "title": "버전 확인",
@@ -253,32 +355,7 @@
   "previewTabs": {
     "title": "미리보기",
     "closeTab": "{{name}} 닫기",
-    "closeAll": "미리보기 패널 닫기",
-    "websiteInfo": "웹 미리보기 정보"
-  },
-  "webPreview": {
-    "viewLinks": "링크 보기",
-    "back": "뒤로",
-    "original": "원본 링크",
-    "actions": "링크 작업",
-    "open": "웹사이트 미리보기",
-    "external": "브라우저에서 열기",
-    "copy": "링크 복사",
-    "copied": "링크를 복사했습니다",
-    "copyFailed": "링크를 복사하지 못했습니다",
-    "title": "웹사이트 미리보기",
-    "resize": "웹 미리보기 너비 조절",
-    "refresh": "웹사이트 새로고침",
-    "close": "미리 보기 닫기",
-    "isolated": "제한된 격리 미리보기입니다. 로그인 및 일부 상호작용이 작동하지 않을 수 있습니다.",
-    "blockedHint": "일부 사이트는 삽입을 차단합니다. 비어 있거나 실패하면 브라우저에서 여세요.",
-    "loopback": "localhost는 원격 게이트웨이가 아닌 이 브라우저의 기기를 가리킵니다. 포트는 전달되지 않습니다.",
-    "native": "네이티브 호스트에서는 삽입 미리보기를 지원하지 않습니다. 브라우저에서 여세요.",
-    "unsupported": "이 브라우저는 인증 정보 격리 미리보기를 지원하지 않습니다. 새 탭에서 여세요.",
-    "sameOrigin": "nanobot 앱 자체는 여기에 삽입할 수 없습니다. 새 탭에서 여세요.",
-    "mixedContent": "HTTPS 페이지에서 HTTP 사이트를 미리 볼 수 없습니다. 새 탭에서 여세요.",
-    "invalid": "이 주소를 미리 볼 수 없습니다.",
-    "frame": "웹 미리보기: {{host}}"
+    "closeAll": "미리보기 패널 닫기"
   },
   "starPrompt": {
     "footerAction": "nanobot에 스타 남기기",
@@ -389,6 +466,16 @@
       "description": "변경 사항이 저장되었습니다. 적용하려면 다시 시작하세요.",
       "later": "나중에 다시 시작"
     },
+    "network": {
+      "useProxy": "프록시 사용",
+      "useProxyHelp": "고급 설정의 공유 프록시를 사용합니다.",
+      "configureProxy": "프록시 설정",
+      "sharedProxyScope": "프록시를 켠 모든 기능에서 함께 사용합니다.",
+      "authentication": "인증 (선택 사항)",
+      "username": "사용자 이름",
+      "password": "비밀번호",
+      "proxyReferenceAuth": "참조된 프록시 URL에서 인증 정보를 설정하세요."
+    },
     "runtimeConfig": {
       "apiSaved": "저장했습니다. API 서비스를 다시 시작하면 적용됩니다.",
       "commandRuntime": {
@@ -426,7 +513,8 @@
         "tools_exec_allowed_env_keys": {"label": "환경 변수", "help": "명령에 추가로 전달할 변수 이름을 한 줄에 하나씩 입력하세요.\n\n명령에 전달할 환경 변수를 추가합니다. 한 줄에 하나씩 입력하세요. 실행에 필요한 기본 환경 변수는 계속 전달됩니다."},
         "tools_exec_allow_patterns": {"label": "허용 명령", "help": "허용 규칙과 완전히 일치하는 명령만 실행합니다.\n\n정규식을 한 줄에 하나씩 입력하세요. 규칙을 추가하면 명령의 각 부분이 규칙 중 하나와 완전히 일치해야 실행됩니다. 허용된 명령에는 기본 및 추가 차단 규칙이 적용되지 않지만, 네트워크와 작업 공간 제한은 유지됩니다."},
         "tools_exec_deny_patterns": {"label": "차단 명령", "help": "이 규칙과 일치하는 명령을 차단합니다.\n\n추가 차단 정규식을 한 줄에 하나씩 입력하세요. 명시적 허용 규칙이 기본 및 추가 차단 규칙보다 우선합니다."},
-        "tools_web_proxy": {"label": "웹 프록시", "help": "에이전트의 웹 검색과 페이지 읽기에 사용합니다. 비워 두면 프록시 환경 변수를 포함한 기본 네트워크 설정을 사용합니다.\n\n127.0.0.1은 nanobot이 실행되는 기기입니다. 모델, MCP 또는 브라우저 연결에는 영향을 주지 않습니다."},
+        "network_proxy": {"label": "공유 프록시", "help": "프록시 사용이 켜진 기능에서 공유하는 주소입니다. 127.0.0.1은 nanobot을 실행하는 기기를 뜻합니다."},
+        "tools_web_use_proxy": {"label": "프록시 사용", "help": "웹 검색과 페이지 읽기에 공유 프록시를 사용합니다."},
         "tools_web_user_agent": {"label": "User-Agent 헤더", "help": "웹 요청의 User-Agent입니다. 비워 두면 기본값을 사용합니다.\n\n사용자 지정 User-Agent 헤더입니다. 비워 두면 기본값을 사용합니다."},
         "tools_restrict_to_workspace": {"label": "작업 공간 제한", "help": "전체 작업 공간 제한입니다. WebUI 채팅 권한은 별도로 설정합니다.\n\n전체 도구 접근 정책입니다. WebUI의 대화별 권한은 별도로 설정합니다."},
         "tools_ssrf_whitelist": {"label": "허용 IP", "help": "허용할 IP 또는 CIDR 범위를 한 줄에 하나씩 입력하세요.\n\n외부 요청 보호에서 제외할 IP/CIDR 범위를 한 줄에 하나씩 입력하세요."},
@@ -450,7 +538,8 @@
         "sessions": {"title": "대화", "help": "플랫폼 간 채팅 공유를 설정하세요."},
         "tools": {"title": "기본 도구", "help": "에이전트가 사용할 도구를 선택하세요."},
         "shell": {"title": "셸 및 샌드박스", "help": "명령 제한 시간, 환경 및 접근 규칙을 설정하세요."},
-        "network": {"title": "웹 연결", "help": "프록시와 User-Agent를 설정하세요.\n\n웹 프록시 및 요청 식별 정보입니다."},
+        "proxy": {"title": "공유 프록시", "help": "프록시를 사용하는 기능의 공통 주소를 설정합니다."},
+        "network": {"title": "웹 연결", "help": "웹 요청의 프록시 사용 여부와 User-Agent를 설정합니다."},
         "safety": {"title": "전체 권한", "help": "작업 공간 제한, 네트워크 예외 및 원격 설치를 설정하세요.\n\n작업 공간 제한, 사설 네트워크 및 원격 설치입니다."},
         "cli": {"title": "CLI 제한", "help": "설치와 실행 제한 시간, 목록 캐시 시간을 설정하세요.\n\n설치, 실행 및 카탈로그 캐시의 시간 제한입니다."},
         "gateway": {"title": "게이트웨이", "help": "배포와 재시작 옵션을 설정하세요."},
@@ -463,6 +552,13 @@
       "save": "변경 사항 저장", "saving": "저장 중…", "discard": "변경 사항 취소", "saved": "저장했습니다.",
       "restart": "nanobot 다시 시작", "restartHelp": "다시 시작하면 적용됩니다. 명령줄 인수와 환경 변수 설정이 우선 적용될 수 있습니다.",
       "search": "고급 설정 검색", "noResults": "일치하는 설정이 없습니다.", "pending": "저장하지 않은 변경 사항",
+      "idleCompaction": {
+        "label": "유휴 시 자동 압축",
+        "help": "유휴 시간 제한에 도달하면 컨텍스트를 자동으로 압축해 이후 요청의 토큰 사용량을 줄입니다.",
+        "wait": "유휴 시간 제한",
+        "minutes": "분",
+        "numberError": "분 단위로 0 이상의 정수를 입력하세요."
+      },
       "numberError": "허용 범위 내의 유효한 숫자를 입력하세요.", "activeModel": "현재 모델 사용", "none": "없음",
       "auto": "자동", "manual": "수동", "standard": "표준", "persistent": "계속",
       "unavailable": "이 설정을 편집하려면 게이트웨이를 업데이트하세요.", "advancedOptions": "고급 옵션"
@@ -479,6 +575,7 @@
       "byok": "BYOK",
       "overview": "개요",
       "appearance": "외관",
+      "notifications": "알림",
       "models": "모델",
       "providers": "제공업체",
       "image": "이미지",
@@ -516,6 +613,41 @@
       "hostSafety": "앱 보안",
       "voiceInput": "음성 텍스트 변환"
     },
+    "notifications": {
+      "scope": "이 브라우저",
+      "intro": "작업이 끝났을 때 알림을 받을 방법을 선택하세요.",
+      "pageRequired": "페이지가 닫히거나 일시 중지되거나 연결이 끊기면 새 알림을 받을 수 없습니다.",
+      "revoked": "알림 권한이 취소되어 알림이 꺼졌습니다. 이 브라우저의 사이트 설정에서 알림을 허용한 후 여기에서 다시 켜세요.",
+      "retry": "다시 확인",
+      "statusOff": "꺼짐",
+      "statusPermission": "권한 필요",
+      "statusOn": "켜짐",
+      "statusBlocked": "차단됨",
+      "statusRevoked": "권한 취소됨",
+      "statusUnavailable": "사용 불가",
+      "statusWorker": "준비되지 않음",
+      "statusBusy": "확인 중…",
+      "statusError": "전송 실패",
+      "test": "알림 테스트",
+      "testBody": "테스트 알림입니다.",
+      "waiting": "브라우저 응답 대기 중…",
+      "insecure": "알림을 사용하려면 HTTPS 또는 localhost로 nanobot을 여세요.",
+      "unsupported": "이 브라우저는 알림을 지원하지 않습니다. 다른 브라우저를 사용하세요. iPhone이나 iPad에서는 홈 화면에서 nanobot을 여세요.",
+      "denied": "알림이 차단되었습니다. 이 브라우저의 사이트 설정에서 알림을 허용한 후 여기에서 켜세요.",
+      "dismissed": "알림 권한을 받지 못했습니다. 알림을 켜고 허용을 선택하세요.",
+      "permissionFailed": "권한을 요청할 수 없습니다. 지원하는 브라우저에서 다시 시도하세요.",
+      "workerUnavailable": "알림 서비스가 준비되지 않았습니다. 다시 확인하거나 이 페이지를 새로 고침하세요.",
+      "displayFailed": "브라우저가 알림을 보내지 못했습니다. 사이트 알림 권한을 확인하고 다시 시도하세요.",
+      "submitted": "브라우저에 전달했습니다. 표시되지 않으면 시스템 알림과 방해 금지 설정을 확인하세요.",
+      "completed": "작업이 완료되었습니다. 눌러서 결과를 확인하세요.",
+      "failed": "작업이 실패했습니다. 눌러서 자세히 확인하세요.",
+      "interrupted": "확인이 필요합니다. 눌러서 계속하세요."
+    },
+    "readingTextSize": {
+      "small": "읽기 글자 크기: 작게",
+      "standard": "읽기 글자 크기: 표준",
+      "large": "읽기 글자 크기: 크게"
+    },
     "rows": {
       "theme": "테마",
       "language": "언어",
@@ -529,6 +661,7 @@
       "pendingChanges": "적용 대기 변경",
       "selectedPreset": "선택한 프리셋",
       "presetModel": "프리셋 모델",
+      "readingTextSize": "읽기 글자 크기",
       "activityMode": "처리 과정",
       "fileEditDisplay": "수정 미리 보기",
       "codeWrap": "코드 줄바꿈",
@@ -550,7 +683,7 @@
       "webuiDefaultAccess": "기본 권한",
       "currentModel": "현재 설정",
       "brandLogos": "브랜드 로고",
-      "browserNotifications": "작업 알림",
+      "browserNotifications": "브라우저 알림",
       "notificationSound": "완료 알림음",
       "cliAppsCatalog": "카탈로그",
       "cliAppsFilter": "필터",
@@ -594,8 +727,8 @@
       "selectedModelProvider": "선택한 모델에 의해 설정됩니다.",
       "selectedModelValue": "선택한 모델에 의해 설정됩니다.",
       "brandLogos": "설정에 제공업체와 앱 로고를 표시합니다.\n\n설정에서 타사 제공업체와 CLI 로고를 표시합니다.",
-      "browserNotifications": "페이지가 백그라운드일 때 알립니다. 기본은 꺼짐입니다.",
-      "notificationSound": "답변이 끝나면 알림음을 재생합니다. 기본은 꺼짐입니다.\n\n턴이 끝나면 이 페이지가 백그라운드에 있어도 짧은 알림음을 재생합니다. 기본적으로 꺼져 있습니다.",
+      "browserNotifications": "페이지가 백그라운드에 있을 때 작업 상태를 알립니다.",
+      "notificationSound": "응답이 끝나면 백그라운드에서도 알림음을 재생합니다.",
       "cliAppsCatalog": "nanobot용 CLI 도구를 설치합니다. 데스크톱 앱은 변경되지 않습니다.\n\nnanobot이 이 컴퓨터에서 사용할 수 있는 명령줄 도구를 설치합니다. 데스크톱 앱은 변경하지 않습니다.",
       "cliAppsFilter": "이름, 분류 또는 기능으로 검색하세요.",
       "logs": "데스크톱 앱의 엔진 로그 폴더를 엽니다.",
@@ -803,7 +936,6 @@
       "defaultAPIDescription": "자동으로 설정한 프리셋은 이 API를 사용합니다. 개별 프리셋에서는 지원 목록의 다른 API를 선택할 수 있습니다.",
       "declareAPIs": "지원 API 설정",
       "openaiDefaultAPIDescription": "자동을 사용하는 프리셋의 기본 API를 설정합니다. 여기서 자동을 선택하면 알려진 모델 규칙을 따릅니다. 개별 프리셋에서 이 설정을 바꿀 수 있습니다.",
-      "proxy": "네트워크 프록시",
       "thinkingStyle": "추론 형식",
       "region": "리전",
       "profile": "AWS 프로필",
@@ -946,10 +1078,16 @@
       "noDescription": "설명이 없습니다."
     },
     "about": {
+      "updateNotice": "업데이트가 있습니다",
+      "viewUpdateDetails": "자세히 보기",
+      "updateNow": "업데이트",
+      "dismissUpdate": "업데이트 알림 닫기",
+      "updateInstructions": "nanobot이 실행 중인 컴퓨터에서 기존 설치 방법으로 업데이트하세요. 이 페이지에서는 설치하거나 다시 시작하지 않습니다.",
+      "installationGuide": "설치 안내",
       "documentation": "공식 문서",
       "sourceCode": "소스 코드",
       "reportIssue": "문제 신고",
-      "version": "버전",
+      "version": "버전 및 업데이트",
       "checking": "확인 중...",
       "checkForUpdates": "업데이트 확인",
       "upToDate": "최신 버전입니다",
@@ -1124,6 +1262,7 @@
       "loading": "채널을 불러오는 중...",
       "empty": "일치하는 채널이 없습니다.",
       "restartRequired": "업데이트된 채널 지원을 적용하려면 nanobot을 다시 시작하세요.",
+      "restartBeforeInstall": "다른 채널을 설치하려면 nanobot을 다시 시작하세요.",
       "requires": "필요: {{requirements}}",
       "setUp": "설정",
       "setupGuide": "설정 가이드",
@@ -1436,19 +1575,16 @@
       "signInBeforeSaving": "프리셋을 저장하기 전에 이 제공업체에 로그인하세요.",
       "signedIn": "로그인됨",
       "notSignedIn": "로그인 안 됨",
-      "proxyLabel": "네트워크 프록시",
-      "proxySaveBeforeSignIn": "로그인하기 전에 프록시 변경 사항을 저장하세요.",
-      "saveProxy": "프록시 저장",
       "localCodeHelp": "브라우저에서 로그인을 완료하세요. 일반적으로 nanobot이 자동으로 완료합니다. 완료되지 않으면 인증 코드를 아래에 붙여 넣으세요.",
       "remoteCodeHelp": "로그인을 선택하여 사용자 컴퓨터에서 xAI를 여세요. 로그인 후 xAI에 표시된 인증 코드를 아래에 붙여 넣으세요.",
-      "localCallbackHelp": "브라우저에서 로그인을 완료하세요. 일반적으로 nanobot이 자동으로 완료합니다. 완료되지 않으면 주소 표시줄에서 전체 localhost 콜백 URL을 복사해 아래에 붙여 넣으세요.",
-      "remoteCallbackHelp": "이 브라우저에서 ChatGPT를 열고 로그인을 완료하세요. localhost 페이지가 열리지 않으면 주소 표시줄의 전체 URL을 복사해 아래에 붙여 넣으세요.",
+      "localCallbackHelp": "브라우저에서 로그인을 완료하세요. nanobot이 자동으로 연결되지 않으면 localhost 페이지가 열리지 않더라도 주소 표시줄의 전체 URL을 복사해 아래에 붙여 넣고 ‘로그인 완료’를 선택하세요.",
+      "remoteCallbackHelp": "이 브라우저에서 ChatGPT를 열고 로그인을 완료하세요. localhost로 이동하면 페이지가 열리지 않더라도 주소 표시줄의 전체 URL을 복사해 아래에 붙여 넣고 ‘로그인 완료’를 선택하세요.",
       "authorizationCode": "인증 코드",
       "callbackUrl": "콜백 URL",
-      "callbackUrlPlaceholder": "http://localhost:1455/auth/callback?code=…&state=…",
+      "callbackUrlPlaceholder": "전체 콜백 URL을 여기에 붙여 넣으세요",
       "openChatGPT": "ChatGPT 열기",
       "pasteCallbackToContinue": "계속하려면 콜백 URL을 붙여 넣으세요.",
-      "waitingForCallback": "브라우저 콜백 대기 중…",
+      "waitingForCallback": "로그인 완료 대기 중…",
       "finishSignIn": "로그인 완료"
     },
     "skills": {
@@ -1654,6 +1790,32 @@
       "messages": "메시지 상태"
     },
     "compaction": {
+      "reasons": {
+        "idle": {
+          "started": "새 메시지가 없어 컨텍스트를 자동 압축 중",
+          "succeeded": "새 메시지가 없어 컨텍스트를 자동 압축했습니다",
+          "failed": "새 메시지가 없을 때의 자동 압축에 실패했습니다",
+          "cancelled": "새 메시지가 없을 때의 자동 압축이 완료되지 않았습니다"
+        },
+        "context_pressure": {
+          "started": "컨텍스트가 길어져 압축 중",
+          "succeeded": "길어진 컨텍스트를 압축했습니다",
+          "failed": "길어진 컨텍스트 압축에 실패했습니다",
+          "cancelled": "길어진 컨텍스트 압축이 취소되었습니다"
+        },
+        "manual": {
+          "started": "요청하신 대로 컨텍스트를 압축 중",
+          "succeeded": "요청하신 대로 컨텍스트를 압축했습니다",
+          "failed": "요청하신 컨텍스트 압축에 실패했습니다",
+          "cancelled": "요청하신 컨텍스트 압축이 취소되었습니다"
+        },
+        "provider_native": {
+          "started": "모델 제공업체에서 컨텍스트를 압축 중",
+          "succeeded": "모델 제공업체에서 컨텍스트를 압축했습니다",
+          "failed": "모델 제공업체의 컨텍스트 압축에 실패했습니다",
+          "cancelled": "모델 제공업체의 컨텍스트 압축이 취소되었습니다"
+        }
+      },
       "cancelled": "컨텍스트 압축이 취소되었습니다",
       "empty": "압축할 컨텍스트가 없습니다.",
       "started": "컨텍스트 압축 중",
@@ -1796,7 +1958,7 @@
         "guide": "지금 보내기",
         "delete": "메시지 삭제",
         "edit": "메시지 편집",
-        "drag": "드래그하여 순서 변경"
+        "tooManyMentions": "메시지 하나에서 최대 {{max}}개의 대화를 멘션할 수 있습니다"
       },
       "attachImage": "파일 첨부",
       "imageMode": {
@@ -1924,10 +2086,11 @@
         "unsupported_type": "지원하지 않는 파일 형식입니다",
         "empty_file": "빈 파일은 첨부할 수 없습니다",
         "too_many_attachments": "메시지당 최대 {{max}}개까지 가능합니다",
+        "too_many_videos": "메시지당 동영상은 최대 1개까지 가능합니다",
         "too_many_images": "메시지당 최대 {{max}}장까지 가능합니다",
         "magic_mismatch": "이미지 파일이 아닌 것 같습니다",
         "decode_failed": "이 이미지를 디코딩할 수 없습니다",
-        "too_large": "파일이 너무 큽니다. 더 작은 파일을 선택해 주세요",
+        "too_large": "파일 크기 {{size}}가 업로드 한도 {{max}}를 초과합니다",
         "total_too_large": "첨부 파일의 전체 크기가 너무 큽니다. 일부를 제거하거나 더 작은 파일을 사용해 주세요",
         "io": "이 파일을 읽을 수 없습니다"
       },
@@ -1961,8 +2124,8 @@
     "loadEarlier": "이전 메시지 불러오기",
     "history": {
       "loading": "이전 메시지를 불러오는 중…",
-      "error": "불러오지 못했습니다.",
-      "retry": "다시 시도"
+      "exhausted": "이전 메시지가 없습니다",
+      "retryLabel": "불러오지 못했습니다. 다시 시도"
     },
     "forkedFromHistory": "기록에서 분기됨",
     "promptNavigator": {
@@ -2007,7 +2170,6 @@
     "turnLatencyTitle": "응답 시간(엔드투엔드)",
     "fileEditViewDiff": "변경 보기",
     "fileEditViewLargeDiff": "변경 펼치기",
-    "fileEditDiffLineCount": "{{count}}줄",
     "fileEditUnchangedLinesHidden": "변경되지 않은 {{count}}줄 숨김",
     "fileEditShowMoreLines": "{{count}}줄 더 보기",
     "fileEditShowFewerLines": "간략히 보기",
@@ -2210,6 +2372,24 @@
     "dismiss": "닫기",
     "continue": "계속"
   },
+  "diagram": {
+    "graph": "다이어그램",
+    "source": "소스",
+    "copy": "소스 복사",
+    "enlarge": "다이어그램 확대",
+    "title": "Mermaid 다이어그램",
+    "errors": {
+      "syntax": "소스의 다이어그램 문법을 확인하세요.",
+      "unsupported": "지원하지 않는 다이어그램 유형입니다. 소스를 확인하세요.",
+      "policy": "지원하지 않는 스타일이나 리소스가 있습니다. 소스를 확인하세요.",
+      "limit": "다이어그램이 렌더링 제한을 초과했습니다. 소스를 확인하세요.",
+      "load": "다이어그램 렌더러를 불러오지 못했습니다. 다시 시도하세요.",
+      "deadline": "다이어그램 렌더링 시간이 초과되었습니다. 소스를 단순화하거나 다시 시도하세요.",
+      "worker": "다이어그램을 렌더링하지 못했습니다. 다시 시도하세요.",
+      "image": "다이어그램을 표시하지 못했습니다. 다시 시도하세요.",
+      "capability": "이 브라우저에서는 다이어그램을 렌더링할 수 없습니다. 소스를 확인하세요."
+    }
+  },
   "lightbox": {
     "viewAll": "이미지 {{count}}개 모두 보기",
     "zoomIn": "확대",
@@ -2308,6 +2488,8 @@
       "body": "게이트웨이가 이 메시지를 거부했습니다. 텍스트나 첨부 파일을 확인한 후 다시 시도하세요."
     },
     "modelRequestFailed": {
+      "authenticationTitle": "모델 제공업체 인증 실패",
+      "authenticationBody": "모델 설정에서 다시 로그인하거나 API 키를 확인하세요.",
       "billingTitle": "모델 제공업체 할당량을 사용할 수 없음",
       "billingBody": "제공업체 계정에 크레딧을 추가하거나 결제 상태를 확인한 후 다시 시도하세요.",
       "connectionTitle": "모델 제공업체에 연결할 수 없음",
@@ -2315,8 +2497,8 @@
       "rateLimitTitle": "모델 제공업체 요청 한도 초과",
       "serverTitle": "모델 제공업체 서비스 오류",
       "unknownTitle": "모델 제공업체 요청 실패",
-      "bodyWithAttempt": "{{attempts}}번째 시도에서도 요청이 실패하여 재시도를 중지했습니다. 제공업체 설정 또는 서비스 상태를 확인한 후 다시 시도하세요.",
-      "body": "제공업체 설정 또는 서비스 상태를 확인한 후 다시 시도하세요."
+      "bodyWithAttempt": "{{attempts}}회 시도 후 중지했습니다. 나중에 다시 시도하거나 다른 모델을 선택하세요.",
+      "body": "나중에 다시 시도하거나 다른 모델을 선택하세요."
     }
   },
   "workspace": {

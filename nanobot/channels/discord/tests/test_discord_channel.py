@@ -22,6 +22,7 @@ from nanobot.channels.discord.runtime import (
     DiscordConfig,
 )
 from nanobot.command.builtin import build_help_text
+from nanobot.config.network import NetworkConfig
 
 
 # Minimal Discord client test double used to control startup/readiness behavior.
@@ -1566,25 +1567,20 @@ async def test_start_typing_uses_typing_context_when_trigger_typing_missing() ->
     assert channel._typing_tasks == {}
 
 
-def test_config_accepts_proxy_fields() -> None:
-    config = DiscordConfig(
-        enabled=True,
-        token="token",
-        allow_from=["*"],
-        proxy="http://127.0.0.1:7890",
-        proxy_username="user",
-        proxy_password="pass",
-    )
-    assert config.proxy == "http://127.0.0.1:7890"
-    assert config.proxy_username == "user"
-    assert config.proxy_password == "pass"
+def test_config_accepts_proxy_opt_in() -> None:
+    config = DiscordConfig.model_validate({
+        "enabled": True,
+        "token": "token",
+        "allowFrom": ["*"],
+        "useProxy": True,
+    })
+    assert config.use_proxy is True
+    assert config.model_dump(by_alias=True)["useProxy"] is True
 
 
-def test_config_proxy_defaults_to_none() -> None:
+def test_config_proxy_defaults_to_disabled() -> None:
     config = DiscordConfig(enabled=True, token="token", allow_from=["*"])
-    assert config.proxy is None
-    assert config.proxy_username is None
-    assert config.proxy_password is None
+    assert config.use_proxy is False
 
 
 @pytest.mark.asyncio
@@ -1595,9 +1591,10 @@ async def test_start_passes_proxy_to_client(monkeypatch) -> None:
             enabled=True,
             token="token",
             allow_from=["*"],
-            proxy="http://127.0.0.1:7890",
+            use_proxy=True,
         ),
         MessageBus(),
+        network=NetworkConfig(proxy="http://127.0.0.1:7890"),
     )
     monkeypatch.setattr("nanobot.channels.discord.runtime.DiscordBotClient", _FakeDiscordClient)
 
@@ -1610,19 +1607,15 @@ async def test_start_passes_proxy_to_client(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_start_passes_proxy_auth_when_credentials_provided(monkeypatch) -> None:
+async def test_start_passes_shared_url_credentials_to_aiohttp(monkeypatch) -> None:
     aiohttp = pytest.importorskip("aiohttp")
+
     _FakeDiscordClient.instances.clear()
+    network = NetworkConfig(proxy="http://user:p%40ss@127.0.0.1:7890")
     channel = DiscordChannel(
-        DiscordConfig(
-            enabled=True,
-            token="token",
-            allow_from=["*"],
-            proxy="http://127.0.0.1:7890",
-            proxy_username="user",
-            proxy_password="pass",
-        ),
+        DiscordConfig(enabled=True, token="token", allow_from=["*"], use_proxy=True),
         MessageBus(),
+        network=network,
     )
     monkeypatch.setattr("nanobot.channels.discord.runtime.DiscordBotClient", _FakeDiscordClient)
 
@@ -1630,54 +1623,51 @@ async def test_start_passes_proxy_auth_when_credentials_provided(monkeypatch) ->
 
     assert channel.is_running is False
     assert len(_FakeDiscordClient.instances) == 1
-    assert _FakeDiscordClient.instances[0].proxy == "http://127.0.0.1:7890"
-    assert _FakeDiscordClient.instances[0].proxy_auth is not None
-    assert isinstance(_FakeDiscordClient.instances[0].proxy_auth, aiohttp.BasicAuth)
-    assert _FakeDiscordClient.instances[0].proxy_auth.login == "user"
-    assert _FakeDiscordClient.instances[0].proxy_auth.password == "pass"
+    client = _FakeDiscordClient.instances[0]
+    assert client.proxy == network.proxy
+    # aiohttp extracts URL credentials for the proxy connection, not the destination request.
+    proxy_connection = AsyncMock(side_effect=RuntimeError("stop before opening proxy socket"))
+    monkeypatch.setattr(aiohttp.TCPConnector, "_create_direct_connection", proxy_connection)
+    async with aiohttp.ClientSession() as session:
+        with pytest.raises(RuntimeError, match="stop before opening proxy socket"):
+            await session.get(
+                "https://discord.com/api/v10/users/@me",
+                proxy=client.proxy, proxy_auth=client.proxy_auth,
+            )
+
+    proxy_connection.assert_awaited_once()
+    request = proxy_connection.await_args.args[0]
+    assert request.url.host == "127.0.0.1"
+    assert request.url.port == 7890
+    auth = aiohttp.BasicAuth.decode(request.headers["Proxy-Authorization"])
+    assert auth.login == "user"
+    assert auth.password == "p@ss"
 
 
 @pytest.mark.asyncio
-async def test_start_no_proxy_auth_when_only_username(monkeypatch) -> None:
+async def test_start_without_opt_in_ignores_shared_proxy_credentials(monkeypatch) -> None:
     _FakeDiscordClient.instances.clear()
     channel = DiscordChannel(
-        DiscordConfig(
-            enabled=True,
-            token="token",
-            allow_from=["*"],
-            proxy="http://127.0.0.1:7890",
-            proxy_username="user",
-        ),
+        DiscordConfig(enabled=True, token="token", allow_from=["*"], use_proxy=False),
         MessageBus(),
+        network=NetworkConfig(proxy="http://user:pass@127.0.0.1:7890"),
     )
     monkeypatch.setattr("nanobot.channels.discord.runtime.DiscordBotClient", _FakeDiscordClient)
 
     await channel.start()
 
     assert channel.is_running is False
+    assert _FakeDiscordClient.instances[0].proxy is None
     assert _FakeDiscordClient.instances[0].proxy_auth is None
 
 
-@pytest.mark.asyncio
-async def test_start_no_proxy_auth_when_only_password(monkeypatch) -> None:
-    _FakeDiscordClient.instances.clear()
-    channel = DiscordChannel(
-        DiscordConfig(
-            enabled=True,
-            token="token",
-            allow_from=["*"],
-            proxy="http://127.0.0.1:7890",
-            proxy_password="pass",
-        ),
-        MessageBus(),
-    )
-    monkeypatch.setattr("nanobot.channels.discord.runtime.DiscordBotClient", _FakeDiscordClient)
-
-    await channel.start()
-
-    assert channel.is_running is False
-    assert _FakeDiscordClient.instances[0].proxy == "http://127.0.0.1:7890"
-    assert _FakeDiscordClient.instances[0].proxy_auth is None
+def test_proxy_opt_in_without_shared_address_fails_before_start() -> None:
+    with pytest.raises(ValueError, match="Advanced"):
+        DiscordChannel(
+            DiscordConfig(enabled=True, token="token", use_proxy=True),
+            MessageBus(),
+            network=NetworkConfig(),
+        )
 
 
 # ---------------------------------------------------------------------------

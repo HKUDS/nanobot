@@ -28,7 +28,7 @@ describe("usePageVisibility", () => {
       if (original) {
         Object.defineProperty(document, "visibilityState", original);
       } else {
-        delete (document as Document & { visibilityState?: DocumentVisibilityState }).visibilityState;
+        Reflect.deleteProperty(document, "visibilityState");
       }
     }
   });

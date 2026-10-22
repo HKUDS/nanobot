@@ -71,6 +71,45 @@ afterEach(() => {
 });
 
 describe("NanobotClient", () => {
+  it("emits live task notices without mounted chats, not when the chat replays", () => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    lastSocket().fakeOpen();
+    const broken = client.onTaskNotice(() => { throw new Error("optional notification failed"); });
+    const notice = vi.fn();
+    const unsubscribe = client.onTaskNotice(notice);
+    client.attach("away");
+    const event = { event: "turn_end", chat_id: "away", turn_id: "turn", outcome: "completed" };
+    lastSocket().fakeMessage(event);
+    expect(notice).toHaveBeenCalledWith({ event, temporary: false });
+    const replay = vi.fn();
+    client.onTranscript("away", replay);
+    expect(replay).toHaveBeenCalledWith(event);
+    expect(notice).toHaveBeenCalledOnce();
+    broken(); unsubscribe(); client.close();
+  });
+  it("ignores in-flight task notices after a Temporary Chat is discarded", async () => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    const created = client.newTemporaryChat();
+    socket.fakeMessage({ event: "attached", chat_id: "temporary", temporary: true });
+    await created;
+    const notice = vi.fn();
+    client.onTaskNotice(notice);
+    client.sendMessage("temporary", "work", undefined, { turnId: "temporary-turn" });
+    client.discardTemporaryChat("temporary");
+    socket.fakeMessage({ event: "turn_end", chat_id: "temporary", turn_id: "temporary-turn" });
+    expect(notice).not.toHaveBeenCalled();
+    client.attach("regular");
+    const event = { event: "turn_end", chat_id: "regular", turn_id: "regular-turn" };
+    socket.fakeMessage(event);
+    expect(notice).toHaveBeenCalledWith({ event, temporary: false });
+    client.close();
+  });
   it("bounds regular replay tails but retains temporary events until discard", async () => {
     const client = new NanobotClient({
       url: "ws://test", reconnect: false,
@@ -89,8 +128,8 @@ describe("NanobotClient", () => {
     }
     const regular = vi.fn();
     const temporary = vi.fn();
-    client.onChat("regular", regular);
-    const unsubscribe = client.onChat("temporary", temporary);
+    client.onTranscript("regular", regular);
+    const unsubscribe = client.onTranscript("temporary", temporary);
     expect(regular).toHaveBeenCalledTimes(2_000);
     expect(regular.mock.calls[0][0].text).toBe("10");
     expect(temporary.mock.calls.filter(([event]) => event.event === "delta")).toHaveLength(2_010);
@@ -98,7 +137,7 @@ describe("NanobotClient", () => {
     socket.fakeMessage({ event: "delta", chat_id: "temporary", text: "discard me" });
     client.discardTemporaryChat("temporary");
     const discarded = vi.fn();
-    client.onChat("temporary", discarded);
+    client.onTranscript("temporary", discarded);
     expect(discarded).not.toHaveBeenCalled();
     client.close();
   });
@@ -393,7 +432,7 @@ describe("NanobotClient", () => {
     });
     await secondCreation;
     lastSocket().sent = [];
-    client.onChat("temp-drop-a", firstHandler);
+    client.onTranscript("temp-drop-a", firstHandler);
     client.onChat("temp-drop-b", secondHandler);
     firstHandler.mockClear();
     secondHandler.mockClear();
@@ -486,9 +525,9 @@ describe("NanobotClient", () => {
   });
 
   it("uses the host socket bridge for native host URLs", async () => {
-    let socketEventHandler:
-      | ((event: { id: string; type: "open" | "close" | "error"; message?: string }) => void)
-      | null = null;
+    const socketEvents: {
+      handler?: (event: { id: string; type: "open" | "close" | "error"; message?: string }) => void;
+    } = {};
     const openSocket = vi.fn(async () => "host-socket-1");
     Object.defineProperty(window, "nanobotHost", {
       configurable: true,
@@ -497,7 +536,7 @@ describe("NanobotClient", () => {
         sendSocket: vi.fn(async () => undefined),
         closeSocket: vi.fn(async () => undefined),
         onSocketEvent: vi.fn((handler) => {
-          socketEventHandler = handler;
+          socketEvents.handler = handler;
           return vi.fn();
         }),
       },
@@ -511,13 +550,13 @@ describe("NanobotClient", () => {
 
     client.connect();
     await Promise.resolve();
-    socketEventHandler?.({ id: "host-socket-1", type: "open" });
+    socketEvents.handler?.({ id: "host-socket-1", type: "open" });
 
     expect(openSocket).toHaveBeenCalledWith("nanobot-host://engine/");
     expect(status).toHaveBeenLastCalledWith("open");
   });
 
-  it("buffers chat events while no chat handler is registered and replays on subscribe", () => {
+  it("buffers transcript events independently of live observers", () => {
     const client = new NanobotClient({
       url: "ws://test",
       reconnect: false,
@@ -525,16 +564,24 @@ describe("NanobotClient", () => {
     });
     client.connect();
     lastSocket().fakeOpen();
-    // Nobody listening yet — deltas must not be dropped (user switched away).
     lastSocket().fakeMessage({ event: "delta", chat_id: "chat-queue", text: "a" });
+    const observer = vi.fn();
+    const secondObserver = vi.fn();
+    client.onChat("chat-queue", observer);
+    client.onChat("chat-queue", secondObserver);
+    expect(observer).not.toHaveBeenCalled();
+    expect(secondObserver).not.toHaveBeenCalled();
     lastSocket().fakeMessage({ event: "delta", chat_id: "chat-queue", text: "b" });
     const handler = vi.fn();
-    client.onChat("chat-queue", handler);
+    client.onTranscript("chat-queue", handler);
     expect(handler).toHaveBeenCalledTimes(2);
     expect(handler.mock.calls[0][0]).toMatchObject({ event: "delta", text: "a" });
     expect(handler.mock.calls[1][0]).toMatchObject({ event: "delta", text: "b" });
     lastSocket().fakeMessage({ event: "delta", chat_id: "chat-queue", text: "c" });
     expect(handler).toHaveBeenCalledTimes(3);
+    for (const listener of [observer, secondObserver]) {
+      expect(listener.mock.calls.map(([event]) => event.text)).toEqual(["b", "c"]);
+    }
   });
 
   it("records goal_status run strip without an onChat subscriber", () => {
@@ -1441,6 +1488,8 @@ describe("NanobotClient", () => {
             explicit: true,
             title: "Research",
             paneKeys: ["websocket:a", "websocket:b"],
+            layoutPaneKeys: ["websocket:a", "websocket:b"],
+            splitRatios: [0.5, 0.5],
             layout: "columns",
           },
         },
@@ -1824,8 +1873,10 @@ describe("NanobotClient", () => {
       reconnect: false,
       socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
     });
+    const observer = vi.fn();
+    client.onChat("chat-rejoin", observer);
     const h1 = vi.fn();
-    const unsub = client.onChat("chat-rejoin", h1);
+    const unsub = client.onTranscript("chat-rejoin", h1);
     client.connect();
     lastSocket().fakeOpen();
     lastSocket().fakeMessage({ event: "delta", chat_id: "chat-rejoin", text: "live" });
@@ -1834,9 +1885,17 @@ describe("NanobotClient", () => {
     lastSocket().fakeMessage({ event: "delta", chat_id: "chat-rejoin", text: "queued" });
     expect(h1).toHaveBeenCalledTimes(1);
     const h2 = vi.fn();
-    client.onChat("chat-rejoin", h2);
+    const unsub2 = client.onTranscript("chat-rejoin", h2);
     expect(h2).toHaveBeenCalledTimes(1);
     expect(h2.mock.calls[0][0]).toMatchObject({ event: "delta", text: "queued" });
+    unsub();
+    lastSocket().fakeMessage({ event: "delta", chat_id: "chat-rejoin", text: "next" });
+    expect(h2).toHaveBeenCalledTimes(2);
+    unsub2();
+    const h3 = vi.fn();
+    client.onTranscript("chat-rejoin", h3);
+    expect(h3).not.toHaveBeenCalled();
+    expect(observer.mock.calls.map(([event]) => event.text)).toEqual(["live", "queued", "next"]);
   });
 
   it("dispatches runtime model updates globally", () => {
@@ -2339,14 +2398,14 @@ describe("NanobotClient", () => {
     client.connect();
     lastSocket().fakeOpen();
     client.sendMessage("chat-x", "look", [
-      { data_url: "data:image/png;base64,AAAA", name: "shot.png" },
+      { reference: "uploaded-shot", name: "shot.png" },
     ]);
     const lastFrame = JSON.parse(lastSocket().sent.at(-1) as string);
     expect(lastFrame).toEqual({
       type: "message",
       chat_id: "chat-x",
       content: "look",
-      media: [{ data_url: "data:image/png;base64,AAAA", name: "shot.png" }],
+      media: [{ reference: "uploaded-shot", name: "shot.png" }],
       webui: true,
     });
   });

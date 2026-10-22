@@ -28,9 +28,10 @@ class LinearConnectSession:
     flow: LinearOAuthFlow
     config: LinearConfig
     state: LinearStateStore
-    server: LinearServerLease
+    server: LinearServerLease | None
     completion_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
     result: dict[str, Any] | None = None
+    expiry_task: asyncio.Task[None] | None = None
 
 
 class LinearConnectStore:
@@ -38,6 +39,16 @@ class LinearConnectStore:
 
     def __init__(self) -> None:
         self._sessions: dict[str, LinearConnectSession] = {}
+
+    @property
+    def has_pending_work(self) -> bool:
+        # A deadline alone does not close the callback/webhook listener. Cached
+        # success, however, is retained only after releasing that listener.
+        return any(session.server is not None for session in self._sessions.values())
+
+    async def close(self) -> None:
+        for session_id in tuple(self._sessions):
+            await self.cancel(session_id)
 
     async def handle(self, action: str, query: QueryParams) -> dict[str, Any]:
         await self._cleanup()
@@ -103,11 +114,18 @@ class LinearConnectStore:
                 f"Unable to start the Linear callback listener on {config.host}:{config.port}: {exc}",
                 status=502,
             ) from exc
-        self._sessions[flow.session_id] = LinearConnectSession(
+        session = LinearConnectSession(
             flow=flow,
             config=config,
             state=state,
             server=lease,
+        )
+        self._sessions[flow.session_id] = session
+        session.expiry_task = asyncio.create_task(
+            self._expire_session(session), name=f"linear-connect-expire-{flow.session_id}",
+        )
+        session.expiry_task.add_done_callback(
+            lambda task: task.exception() if not task.cancelled() else None,
         )
         return {
             "session_id": flow.session_id,
@@ -129,6 +147,7 @@ class LinearConnectStore:
             if self._sessions.get(session_id) is not session:
                 return _terminal(session_id, "cancelled", "Linear authorization cancelled.")
             if session.result is not None:
+                await self._release_listener(session)
                 return dict(session.result)
             flow = session.flow
             if time.monotonic() >= flow.deadline:
@@ -169,8 +188,7 @@ class LinearConnectStore:
             }
             # A browser may miss the first successful poll while switching tabs.
             # Retain its result until the session expires, but release the callback listener.
-            OAUTH_FLOWS.remove(flow)
-            await asyncio.to_thread(session.server.close)
+            await self._release_listener(session)
             return dict(session.result)
 
     async def cancel(self, session_id: str) -> dict[str, Any]:
@@ -291,11 +309,26 @@ class LinearConnectStore:
             await self.cancel(session_id)
 
     async def _close_session(self, session_id: str) -> None:
-        session = self._sessions.pop(session_id, None)
+        session = self._sessions.get(session_id)
         if session is None:
             return
+        expiry_task = session.expiry_task
+        if expiry_task is not None and expiry_task is not asyncio.current_task():
+            expiry_task.cancel()
+            await asyncio.gather(expiry_task, return_exceptions=True)
+        await self._release_listener(session)
+        self._sessions.pop(session_id, None)
+
+    async def _expire_session(self, session: LinearConnectSession) -> None:
+        await asyncio.sleep(max(0, session.flow.deadline - time.monotonic()))
+        await self.cancel(session.flow.session_id)
+
+    @staticmethod
+    async def _release_listener(session: LinearConnectSession) -> None:
         OAUTH_FLOWS.remove(session.flow)
-        await asyncio.to_thread(session.server.close)
+        if session.server is not None:
+            await asyncio.to_thread(session.server.close)
+            session.server = None
 
 
 def _load_linear_config() -> LinearConfig:

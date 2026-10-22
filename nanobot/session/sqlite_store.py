@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, TypeVar, cast
 
 from nanobot.providers.base import ProviderConversationState
+from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind, HistoryReader
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import (
     Session,
@@ -69,8 +70,36 @@ def _create_schema_v1(db: sqlite3.Connection) -> None:
         db.execute(statement)
 
 
+def _create_schema_v2(db: sqlite3.Connection) -> None:
+    for statement in (
+        """CREATE TABLE history_heads (
+            session_key TEXT PRIMARY KEY REFERENCES sessions(key) ON DELETE CASCADE,
+            revision INTEGER NOT NULL DEFAULT 0,
+            updated_at_ms INTEGER NOT NULL DEFAULT 0,
+            preview TEXT NOT NULL DEFAULT '', user_preview TEXT NOT NULL DEFAULT ''
+        )""",
+        """CREATE TABLE history_turns (
+            session_key TEXT NOT NULL REFERENCES sessions(key) ON DELETE CASCADE,
+            ordinal INTEGER NOT NULL, record_count INTEGER NOT NULL,
+            byte_count INTEGER NOT NULL, user_count INTEGER NOT NULL,
+            completed INTEGER NOT NULL,
+            PRIMARY KEY (session_key, ordinal)
+        )""",
+        """CREATE TABLE history_entries (
+            session_key TEXT NOT NULL, turn_ordinal INTEGER NOT NULL,
+            position INTEGER NOT NULL, kind TEXT NOT NULL, record TEXT NOT NULL,
+            PRIMARY KEY (session_key, turn_ordinal, position),
+            FOREIGN KEY (session_key, turn_ordinal)
+                REFERENCES history_turns(session_key, ordinal) ON DELETE CASCADE
+        )""",
+    ):
+        db.execute(statement)
+
+
 # Entries upgrade version N to N+1. Preserve released entries and append upgrades.
-_SCHEMA_MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (_create_schema_v1,)
+_SCHEMA_MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
+    _create_schema_v1, _create_schema_v2,
+)
 
 
 def _schema_version(db: sqlite3.Connection) -> int:
@@ -369,6 +398,12 @@ class SqliteSessionStore:
             if updated_at is not None:
                 db.execute("UPDATE sessions SET updated_at=? WHERE key=?", (updated_at.isoformat(), key))
 
+    def read_version(self, key: str) -> tuple[str, int] | None:
+        """Read the committed lifecycle and revision without decoding history or metadata."""
+        with self.transaction(write=False) as db:
+            row = db.execute("SELECT generation, revision FROM sessions WHERE key=?", (key,)).fetchone()
+            return (str(row[0]), int(row[1])) if row is not None else None
+
     def read_metadata(self, key: str) -> SessionMetadataPayload | None:
         with self.transaction(write=False) as db:
             row = db.execute("SELECT created_at, updated_at, metadata FROM sessions WHERE key=?", (key,)).fetchone()
@@ -384,6 +419,110 @@ class SqliteSessionStore:
         return {"key": key, "created_at": session.created_at.isoformat(),
                 "updated_at": session.updated_at.isoformat(),
                 "metadata": session.metadata, "messages": session.messages}
+
+    def migrate_history(
+        self, name: str, collect: Callable[[list[SessionInfo]], list[HistoryImport]],
+    ) -> None:
+        """Commit a channel-owned legacy import and its once-only marker together."""
+        with self.transaction() as db:
+            marker = db.execute("SELECT value FROM storage_meta WHERE key=?", (name,)).fetchone()
+            if marker is not None:
+                if marker[0] != "complete":
+                    raise RuntimeError(f"invalid history import marker: {name}")
+                return
+            for item in collect(self.list_sessions()):
+                session = self.load(item.key, history=False)
+                if session is None:
+                    session = Session(key=item.key)
+                    if item.created_at_ms:
+                        session.created_at = datetime.fromtimestamp(item.created_at_ms / 1000)
+                    if item.updated_at_ms:
+                        session.updated_at = datetime.fromtimestamp(item.updated_at_ms / 1000)
+                    self.save(session)
+                revision = self.project_history(item.key, lambda reader: reader.revision)
+                if revision is not None and revision[1] >= 0:
+                    raise SessionConflictError(f"history already exists before import: {item.key}")
+                self.append_history(item.key, item.facts, expected_generation=session.generation)
+                db.execute("UPDATE history_heads SET updated_at_ms=max(updated_at_ms, ?) WHERE session_key=?",
+                           (item.updated_at_ms, item.key))
+                # Import ownership survives deletion: another namespace must not
+                # mistake this instance-wide backup for a new orphan later.
+                db.execute("INSERT INTO storage_meta (key, value) VALUES (?, 'complete')", (f"{name}:{item.key}",))
+            db.execute("INSERT INTO storage_meta (key, value) VALUES (?, 'complete')", (name,))
+
+    def project_history(self, key: str, project: Callable[[HistoryReader], _T]) -> _T:
+        """Project durable display facts and canonical messages from one snapshot."""
+        with self.transaction(write=False) as db:
+            return project(HistoryReader(db, key, self.path))
+
+    def append_history(
+        self, key: str, facts: list[HistoryFact], *, expected_generation: str | None,
+    ) -> None:
+        encoded = [(fact, fact.encode()) for fact in facts]
+        with self.transaction() as db:
+            row = db.execute("SELECT generation FROM sessions WHERE key=?", (key,)).fetchone()
+            if row is None or (expected_generation is not None and row[0] != expected_generation):
+                raise SessionConflictError("history belongs to a deleted or replaced session")
+            db.execute("INSERT OR IGNORE INTO history_heads (session_key) VALUES (?)", (key,))
+            tail = db.execute(
+                "SELECT ordinal, record_count, completed FROM history_turns WHERE session_key=? ORDER BY ordinal DESC LIMIT 1",
+                (key,),
+            ).fetchone()
+            ordinal, position = (int(tail[0]), int(tail[1])) if tail is not None else (0, 0)
+            completed = tail is not None and bool(tail[2])
+            for fact, record in encoded:
+                if completed:
+                    ordinal, position = ordinal + 1, 0
+                if position == 0:
+                    db.execute(
+                        "INSERT INTO history_turns VALUES (?, ?, 0, 0, 0, 0)", (key, ordinal),
+                    )
+                db.execute("INSERT INTO history_entries VALUES (?, ?, ?, ?, ?)", (
+                    key, ordinal, position, fact.kind.value, record,
+                ))
+                completed = fact.kind is HistoryKind.COMPLETION
+                db.execute(
+                    """UPDATE history_turns SET record_count=record_count+1, byte_count=byte_count+?,
+                       user_count=user_count+?, completed=? WHERE session_key=? AND ordinal=?""",
+                    (len(record.encode("utf-8")), int(fact.kind is HistoryKind.INPUT),
+                     int(completed), key, ordinal),
+                )
+                position += 1
+                if fact.kind in {HistoryKind.INPUT, HistoryKind.ANSWER, HistoryKind.ANSWER_SEGMENT}:
+                    preview = message_preview_text({"content": fact.content.get("text", "")})
+                    if preview:
+                        field = "user_preview" if fact.kind is HistoryKind.INPUT else "preview"
+                        db.execute(f"UPDATE history_heads SET {field}=? WHERE session_key=? AND {field}=''", (preview, key))
+                db.execute("UPDATE history_heads SET updated_at_ms=max(updated_at_ms, ?) WHERE session_key=?",
+                           (fact.created_at_ms, key))
+            if encoded:
+                db.execute("UPDATE history_heads SET revision=revision+1 WHERE session_key=?", (key,))
+
+    def copy_history_prefix(self, source_key: str, target: Session, before_input: int) -> bool:
+        """Copy a display prefix alongside its canonical fork, in the caller's transaction."""
+        def select(reader: HistoryReader) -> list[HistoryFact] | None:
+            revision = reader.revision
+            if revision is None or revision[1] < 0:
+                return None
+            copied: list[HistoryFact] = []
+            inputs = 0
+            for fact in reader.all_facts():
+                if fact.kind is HistoryKind.FORK_BOUNDARY:
+                    continue
+                if fact.kind is HistoryKind.INPUT:
+                    if inputs == before_input:
+                        return copied
+                    inputs += 1
+                copied.append(fact)
+            return copied if inputs == before_input else None
+
+        facts = self.project_history(source_key, select)
+        if facts is None:
+            return False
+        facts.append(HistoryFact(HistoryKind.FORK_BOUNDARY, created_at_ms=int(target.created_at.timestamp() * 1000)))
+        self.append_history(target.key, facts, expected_generation=target.generation)
+        return True
+
 
     def delete(self, key: str) -> bool:
         with self.transaction() as db:
@@ -427,10 +566,13 @@ class SqliteSessionStore:
                 SELECT json_group_array(json_object(
                     'key', key, 'created_at', created_at, 'updated_at', updated_at,
                     'title', title, 'preview', preview, 'visible_updated_at', visible_updated_at,
-                    'metadata', metadata
+                    'metadata', metadata, 'history_updated_at_ms', history_updated_at_ms,
+                    'history_preview', history_preview
                 )) FROM (
-                    SELECT key, created_at, updated_at, title, preview, visible_updated_at, metadata
-                    FROM sessions ORDER BY updated_at DESC
+                    SELECT sessions.*, coalesce(history_heads.updated_at_ms, 0) AS history_updated_at_ms,
+                           coalesce(nullif(history_heads.user_preview, ''), history_heads.preview, '') AS history_preview
+                    FROM sessions LEFT JOIN history_heads ON history_heads.session_key=sessions.key
+                    ORDER BY sessions.updated_at DESC
                 )
             """).fetchone()[0]
             # The SQL projection constructs this list and its dictionary fields.

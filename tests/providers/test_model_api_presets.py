@@ -602,7 +602,8 @@ async def test_custom_messages_uses_its_proxy_and_does_not_inherit_native_creden
     config = _config()
     connection = config.get_provider(preset=config.model_presets["messages"])
     connection.api_key = None
-    connection.proxy = "http://proxy.test:8080"
+    config.network.proxy = "http://proxy.test:8080"
+    connection.use_proxy = True
     monkeypatch.setenv("ANTHROPIC_API_KEY", "native-key")
     monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "native-token")
     requests = []
@@ -612,7 +613,7 @@ async def test_custom_messages_uses_its_proxy_and_does_not_inherit_native_creden
         return _answer(request)
 
     def transport(**kwargs):
-        assert kwargs.pop("proxy") == connection.proxy
+        assert kwargs.pop("proxy") == config.network.proxy
         assert kwargs["trust_env"] is False
         return DefaultAsyncHttpxClient(transport=httpx.MockTransport(handler), **kwargs)
 

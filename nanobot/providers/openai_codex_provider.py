@@ -13,6 +13,7 @@ import re
 import ssl
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
+from uuid import uuid4
 
 import httpx
 from loguru import logger
@@ -21,6 +22,7 @@ from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
 from oauth_cli_kit.storage import FileTokenStorage
 
 from nanobot import __version__
+from nanobot.events import NO_EVENTS, ContextCompactionEvent
 from nanobot.providers.base import (
     CONTEXT_SAFETY_BUFFER,
     LLMProvider,
@@ -47,6 +49,7 @@ from nanobot.providers.openai_responses.state import (
 )
 from nanobot.providers.openai_responses.websocket import ResponsesWebSocketError
 from nanobot.providers.registry import ProviderModelSpec, find_by_name
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import estimate_prompt_tokens
 
 DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
@@ -258,8 +261,18 @@ class OpenAICodexProvider(LLMProvider):
         )
 
         stage = "oauth_token"
-        native_compaction_applied = False
         native_compaction_state: ProviderConversationState | None = None
+        native_compaction_event_id: str | None = None
+        events = provider_context.events if provider_context is not None else NO_EVENTS
+
+        def finish_compaction(result: LLMResponse) -> LLMResponse:
+            if native_compaction_state is not None and not result.provider_compaction_applied:
+                result.provider_compaction_applied = True
+                result.provider_compaction_state = native_compaction_state
+                result.provider_compaction_scope = "prior_context"
+                result.provider_compaction_event_id = native_compaction_event_id
+            return result
+
         input_budget = (
             provider_context.compaction_input_budget if provider_context is not None else None
         )
@@ -353,12 +366,26 @@ class OpenAICodexProvider(LLMProvider):
                 stage = "codex_compaction"
 
                 async def send_compaction(request: dict[str, Any]) -> LLMResponse:
-                    return await _send(
-                        request,
-                        emit_deltas=False,
-                        trace_name="codex_compaction",
-                        validate=responses_compaction_items,
-                    )
+                    nonlocal native_compaction_event_id
+                    compaction_id = uuid4().hex
+                    try:
+                        await events.emit(ContextCompactionEvent(compaction_id, "started", reason="provider_native"))
+                        compacted = await _send(
+                            request,
+                            emit_deltas=False,
+                            trace_name="codex_compaction",
+                            validate=responses_compaction_items,
+                        )
+                    except (Exception, asyncio.CancelledError) as exc:
+                        await shield_and_drain(events.emit(ContextCompactionEvent(
+                            compaction_id,
+                            "cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
+                            reason="provider_native",
+                        )))
+                        raise
+                    native_compaction_event_id = compaction_id
+                    await shield_and_drain(events.emit(ContextCompactionEvent(compaction_id, "succeeded", reason="provider_native")))
+                    return compacted
 
                 native_compaction_state = await self._responses.compact_before_request(
                     body, state=sanitized_state,
@@ -369,14 +396,13 @@ class OpenAICodexProvider(LLMProvider):
                     max_output_tokens=max_tokens, input_budget=input_budget,
                     send=send_compaction,
                 )
-                native_compaction_applied = native_compaction_state is not None
 
             if input_budget is not None:
                 estimated = estimate_prompt_tokens([{
                     "role": "user", "content": json.dumps(body, ensure_ascii=False),
                 }])
                 if input_budget <= 0 or estimated > input_budget:
-                    return LLMResponse(
+                    return finish_compaction(LLMResponse(
                         content=(
                             "Codex input still exceeds the local budget after native compaction "
                             f"({estimated}/{input_budget} estimated tokens); request not sent."
@@ -384,16 +410,10 @@ class OpenAICodexProvider(LLMProvider):
                         finish_reason="error", error_kind="context_window_exceeded",
                         error_should_retry=False,
                         preserve_provider_state_on_error=True,
-                    )
+                    ))
             stage = "codex_request"
             result = await _send(body, emit_deltas=True, trace_name="codex_request")
-            result.provider_compaction_applied = (
-                result.provider_compaction_applied or native_compaction_applied
-            )
-            if native_compaction_state is not None:
-                result.provider_compaction_state = native_compaction_state
-                result.provider_compaction_scope = "prior_context"
-            return result
+            return finish_compaction(result)
         except Exception as e:
             response = _codex_error_response(e)
             if input_budget is not None and stage != "codex_request":
@@ -416,12 +436,12 @@ class OpenAICodexProvider(LLMProvider):
                 request_model,
                 request_effort,
                 replayed,
-                native_compaction_applied,
+                native_compaction_state is not None,
                 getattr(e, "error_param", None),
                 getattr(e, "error_message", None),
                 getattr(e, "request_id", None),
             )
-            return response
+            return finish_compaction(response)
 
     async def chat(
         self,

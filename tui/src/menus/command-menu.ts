@@ -11,6 +11,7 @@ type TuiCommandAction =
   | "context"
   | "usage"
   | "diff"
+  | "diagrams"
   | "branch"
   | "detach"
   | "exit"

@@ -23,14 +23,8 @@
         "label": "Allowed users",
         "placeholder": "User IDs, comma separated"
       },
-      "proxy": {
-        "label": "Network proxy"
-      },
-      "proxyUsername": {
-        "label": "Proxy username"
-      },
-      "proxyPassword": {
-        "label": "Proxy password"
+      "useProxy": {
+        "label": "Use proxy"
       },
       "intents": {
         "label": "Gateway intents"

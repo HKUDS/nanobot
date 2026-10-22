@@ -799,6 +799,7 @@ async def test_manager_surfaces_actionable_weixin_auth_error_without_traceback(
     )
     manager = manager_mod.ChannelManager.__new__(manager_mod.ChannelManager)
     manager._channel_errors = {}
+    manager.bus = channel.bus
 
     await manager._start_channel("weixin", channel)
 

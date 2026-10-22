@@ -505,15 +505,20 @@ export function ModelIdPicker({
         ) : loading ? (
           <SkeletonStatus
             label={tx("settings.models.loadingModels", "Loading models...")}
-            className="space-y-0.5 py-1"
+            className="text-[12px]"
           >
             {["w-3/5", "w-4/5", "w-1/2"].map((width) => (
-              <div key={width} className="flex items-center gap-2 px-2 py-1.5">
-                <div className="h-3.5 w-3.5 shrink-0 rounded-full bg-muted-foreground/20" />
+              <div key={width} className="flex items-center justify-between gap-2 px-2 py-1.5">
+                <div className="h-5 w-5 shrink-0 rounded-md bg-muted-foreground/20" />
                 <div className="min-w-0 flex-1">
-                  <div className={cn("h-3 rounded bg-muted-foreground/20", width)} />
-                  <div className="mt-1.5 h-2.5 w-2/5 rounded bg-muted-foreground/10" />
+                  <div className="flex h-[1.5em] items-center">
+                    <div className={cn("h-3 rounded bg-muted-foreground/20", width)} />
+                  </div>
+                  {providerHasManagedModels ? <div className="mt-0.5 flex h-[1.5em] items-center text-[10.5px]">
+                    <div className="h-2.5 w-2/5 rounded bg-muted-foreground/10" />
+                  </div> : null}
                 </div>
+                <div className="ml-2 h-2.5 w-7 shrink-0 rounded bg-muted-foreground/10" />
               </div>
             ))}
           </SkeletonStatus>

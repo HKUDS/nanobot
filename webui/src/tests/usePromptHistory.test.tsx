@@ -55,6 +55,27 @@ it("loads the complete index without bodies, reads bounded windows and leaves li
   expect(latest).toHaveLength(1);
 });
 
+it.each(["older", "newer"] as const)("keeps one pending %s page when boundary inputs arrive before the next render", async (operation) => {
+  const { result } = renderHook(() => usePromptHistory("a", 1, latest), { wrapper: wrapper() });
+  await waitFor(() => expect(result.current.prompts).toHaveLength(2000));
+  await act(async () => result.current.jump("u10"));
+  let finish!: (body: WebuiThreadPersistedPayload) => void;
+  vi.mocked(api.fetchWebuiThread).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  const load = result.current[operation];
+  act(() => {
+    load();
+    load();
+  });
+  expect(api.fetchWebuiThread).toHaveBeenCalledTimes(2);
+  const options = vi.mocked(api.fetchWebuiThread).mock.lastCall?.[2];
+  if (typeof options !== "object") throw new Error("expected page options");
+  expect(options.signal?.aborted).toBe(false);
+  expect(result.current.loading).toBe(true);
+  await act(async () => finish(page(operation === "older" ? 9 : 11)));
+  expect(result.current.loading).toBe(false);
+  expect(result.current.window?.messages).toHaveLength(4);
+});
+
 it("keeps the current page on failure and offers retry; superseded jumps and session reads cannot win", async () => {
   const { result, rerender } = renderHook(({ key }) => usePromptHistory(key, 1, latest), {
     wrapper: wrapper(), initialProps: { key: "a" },
@@ -142,4 +163,61 @@ it("reuses the full directory during token updates and conditional revalidation"
   await waitFor(() => expect(api.fetchPromptIndex).toHaveBeenCalledTimes(2));
   expect(api.fetchPromptIndex).toHaveBeenLastCalledWith("test", "a", expect.any(AbortSignal), { prompts: index, revision: "first" });
   expect(result.current.prompts).toBe(anchors);
+});
+
+
+it("merges a live input by transport identity without adding an anchor or reordering unknown-time prompts", async () => {
+  const recovered = [
+    { id: "old", preview: "older", answerPreview: "", createdAt: 1000, cursor: "0", turnId: "old-input" },
+    { id: "persisted", preview: "same", answerPreview: "answer", createdAt: 0, cursor: "1", turnId: "input" },
+  ];
+  vi.mocked(api.fetchPromptIndex).mockResolvedValue({ prompts: recovered, revision: "recovered" });
+  const users: UIMessage[] = [
+    { id: "optimistic", role: "user", content: "same", createdAt: 2000, turnId: "input" },
+    { id: "distinct", role: "user", content: "same", createdAt: 3000, turnId: "other-input" },
+  ];
+  const { result, rerender } = renderHook(({ key, version }) => usePromptHistory(key, version, users), {
+    wrapper: wrapper(), initialProps: { key: "a", version: 1 },
+  });
+  await waitFor(() => expect(result.current.prompts.map((prompt) => prompt.id)).toEqual(["old", "persisted", "distinct"]));
+  vi.mocked(api.fetchWebuiThread).mockResolvedValue({ schemaVersion: 3, projection: "events", events: [
+    { event: "user_message", chat_id: "a", text: "same", starts_turn: true, projection_id: "persisted", turn_id: "input", created_at_ms: 0 },
+    { event: "message", chat_id: "a", text: "answer", projection_id: "answer" },
+  ] });
+  await act(async () => result.current.jump("persisted"));
+  expect(result.current.target?.id).toBe("persisted");
+  expect(result.current.window?.messages[0].createdAt).toBe(0);
+  rerender({ key: "a", version: 2 });
+  await waitFor(() => expect(api.fetchPromptIndex).toHaveBeenCalledTimes(2));
+  expect(result.current.prompts.map((prompt) => prompt.id)).toEqual(["old", "persisted", "distinct"]);
+  rerender({ key: "b", version: 1 });
+  await waitFor(() => expect(api.fetchPromptIndex).toHaveBeenCalledTimes(3));
+  expect(result.current.prompts.map((prompt) => prompt.id)).toEqual(["old", "persisted", "distinct"]);
+  expect(result.current.window).toBeNull();
+  expect(result.current.target).toBeNull();
+});
+
+
+it("keeps the request operation with failures and retries", async () => {
+  const { result } = renderHook(() => usePromptHistory("a", 1, latest), { wrapper: wrapper() });
+  await waitFor(() => expect(result.current.prompts).toHaveLength(2000));
+  let finish!: (body: WebuiThreadPersistedPayload) => void;
+  vi.mocked(api.fetchWebuiThread).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  act(() => result.current.jump("u10"));
+  expect(result.current.operation).toBe("jump");
+  expect(result.current.loading).toBe(true);
+  await act(async () => finish(page(10)));
+  expect(result.current.operation).toBeNull();
+
+  for (const operation of ["older", "newer"] as const) {
+    vi.mocked(api.fetchWebuiThread).mockRejectedValueOnce(new Error("offline"));
+    await act(async () => result.current[operation]());
+    expect(result.current.operation).toBe(operation);
+    expect(result.current.error).toBe("offline");
+    await act(async () => result.current.retry());
+    expect(result.current.operation).toBeNull();
+    expect(result.current.error).toBeNull();
+  }
+  act(() => result.current.cancel());
+  expect(result.current.operation).toBeNull();
 });

@@ -80,11 +80,15 @@ def _make_tool(loop=None):
 class TestInspectSummary:
 
     @pytest.mark.asyncio
-    async def test_inspect_returns_current_state(self):
+    async def test_inspect_returns_current_state_and_description_keys(self):
         tool = _make_tool()
         result = await tool.execute(action="check")
         assert "max_iterations: 40" in result
         assert "context_window_tokens: 65536" in result
+        assert "model" in result
+        assert "workspace" in result
+        assert "provider_retry_mode" in result
+        assert "max_tool_result_chars" in result
 
     @pytest.mark.asyncio
     async def test_inspect_includes_scratchpad(self):
@@ -93,18 +97,6 @@ class TestInspectSummary:
         tool._runtime_control.set_scratchpad("task", "review", max_keys=64)
         result = await tool.execute(action="check")
         assert "task" in result
-
-    @pytest.mark.asyncio
-    async def test_inspect_summary_shows_all_description_keys(self):
-        """check without key should show all top-level keys listed in description."""
-        tool = _make_tool()
-        result = await tool.execute(action="check")
-        assert "max_iterations" in result
-        assert "context_window_tokens" in result
-        assert "model" in result
-        assert "workspace" in result
-        assert "provider_retry_mode" in result
-        assert "max_tool_result_chars" in result
 
 
 # ---------------------------------------------------------------------------
@@ -635,19 +627,6 @@ class TestSubagentHookStatus:
         await hook.after_iteration(context)
 
         assert status.error == "something went wrong"
-
-    @pytest.mark.asyncio
-    async def test_after_iteration_no_status_is_noop(self):
-        """after_iteration with no status should be a no-op."""
-        from nanobot.agent.hook import AgentHookContext
-        from nanobot.agent.subagent import _SubagentHook
-
-        hook = _SubagentHook()
-        context = AgentHookContext(iteration=1, messages=[])
-        result = await hook.after_iteration(context)
-
-        assert result is None
-        assert context.iteration == 1
 
 
 # ---------------------------------------------------------------------------

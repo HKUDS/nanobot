@@ -1,6 +1,6 @@
 # My Tool
 
-Let the agent sense and adjust its own runtime state — like asking a coworker "are you busy? can you switch to a bigger monitor?"
+This page is for operators configuring the agent's runtime self-inspection tool. It describes what the agent can read or change at runtime, and what it saves. It is not a user preference store: scratchpad values last only through the next conversation turn.
 
 ## Why You Need It
 
