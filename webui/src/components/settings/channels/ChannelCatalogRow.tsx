@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Download, Loader2 } from "lucide-react";
+import { Download, Loader2, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { ChannelFeatureAction } from "@/channel-plugins/types";
 import { ToggleButton } from "@/components/ui/toggle-button";
+import { HoverHint } from "@/components/ui/hover-hint";
 import {
   ChannelLogo,
   ChannelStatusBadge,
@@ -98,7 +99,7 @@ export function ChannelCatalogRow({
           </ChannelStatusBadge>
         </div>
       ) : null}
-      <div className="flex min-w-16 shrink-0 items-center justify-center">
+      <div className="flex w-16 shrink-0 items-center justify-center">
         {!feature.installed ? (
           <Button ref={installButtonRef} type="button" variant="outline" size="icon"
             className={cn(
@@ -117,16 +118,18 @@ export function ChannelCatalogRow({
             <span className="sr-only">{tx("settings.channels.install", "Install")}</span>
           </Button>
         ) : feature.restart_pending ? (
-          <Button type="button" variant="outline" size="sm"
-            className="h-[22px] min-w-0 rounded-full border-border/70 bg-background px-2 text-[12px] font-medium"
-            aria-label={t("app.system.restart")}
-            title={t("settings.channels.restartRequired")}
-            aria-busy={isRestarting}
-            disabled={isRestarting || anyActionBusy || !onRestart}
-            onClick={onRestart}>
-            {isRestarting ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
-            {t("app.system.restartAction")}
-          </Button>
+          <HoverHint content={t("settings.channels.restartRequired")}>
+            <Button type="button" variant="outline" size="icon"
+              className="h-[22px] w-[38px] min-w-0 shrink-0 rounded-full border-border/70 bg-background p-0"
+              aria-label={t("app.system.restart")}
+              aria-busy={isRestarting}
+              disabled={isRestarting || anyActionBusy || !onRestart}
+              onClick={onRestart}>
+              {isRestarting
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                : <RotateCcw className="h-3.5 w-3.5" aria-hidden />}
+            </Button>
+          </HoverHint>
         ) : (
           <ToggleButton checked={checked}
             label={checked ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}

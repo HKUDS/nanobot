@@ -522,8 +522,9 @@ describe("Settings channels", () => {
     finishInstall(installedPayload);
     expect(requestMutationMock).not.toHaveBeenCalledWith("settings.channel.connect.start", expect.anything(), expect.anything());
     const restartButton = await within(installationGroup).findByRole("button", { name: "Restart nanobot" });
-    expect(restartButton).toHaveTextContent("Restart");
     expect(restartButton).toBeEnabled();
+    await act(async () => { restartButton.focus(); });
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Restart nanobot to apply updated channel support.");
     expect(screen.queryByRole("switch", { name: "WhatsApp channel" })).not.toBeInTheDocument();
     expect(restart).not.toHaveBeenCalled();
     fireEvent.click(restartButton);
