@@ -120,35 +120,6 @@ describe("McpManagementDialog", () => {
     expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
   });
 
-  it("saves an edited OAuth client name through the existing reauthorization flow", () => {
-    const onOAuthConnect = vi.fn();
-    renderDialog({ initialTab: "connection", onOAuthConnect,
-      preset: { ...connectedPreset, source: "preset", auth: "oauth", oauth_client_name: "My client" } });
-    fireEvent.click(screen.getByText("Advanced options"));
-    const input = screen.getByRole("textbox", { name: "OAuth client name" });
-    expect(input).toHaveValue("My client");
-    fireEvent.change(input, { target: { value: "  New client  " } });
-    fireEvent.click(screen.getByRole("button", { name: "Save and reauthorize" }));
-    expect(onOAuthConnect).toHaveBeenCalledTimes(1);
-    expect(onOAuthConnect).toHaveBeenCalledWith("docs", true, { oauth_client_name: "  New client  ", use_proxy: "false" });
-  });
-
-  it("does not label whitespace-only edits as a client identity change", () => {
-    renderDialog({ initialTab: "connection",
-      preset: { ...connectedPreset, auth: "oauth", oauth_client_name: "nanobot" } });
-    fireEvent.click(screen.getByText("Advanced options"));
-    fireEvent.change(screen.getByRole("textbox", { name: "OAuth client name" }), { target: { value: "  " } });
-    expect(screen.getByRole("button", { name: "Reconnect" })).toBeInTheDocument();
-  });
-
-  it.each([
-    { auth: null, transport: "streamableHttp" },
-    { auth: "oauth" as const, transport: "stdio" },
-  ])("only exposes client name for remote OAuth: $auth/$transport", ({ auth, transport }) => {
-    renderDialog({ initialTab: "connection", preset: { ...connectedPreset, auth, transport } });
-    expect(screen.queryByText("OAuth client name")).not.toBeInTheDocument();
-  });
-
   it("preserves the configured proxy flag when reconnecting OAuth", () => {
     const onOAuthConnect = vi.fn();
     renderDialog({
@@ -293,9 +264,10 @@ describe("MCP connection draft lifecycle", () => {
   it("opens management from an uninstalled MCP body without connecting or materializing it", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url === "/api/settings/mcp-presets") {
+        return jsonResponse({ presets: [{ ...metabasePreset, installed: false, configured: false, available: false, status: "not_installed" }], installed_count: 0 });
+      }
       if (url === "/api/settings") return jsonResponse(settingsPayload());
-      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
-      if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [{ ...metabasePreset, installed: false, configured: false, runtime_status: undefined }], installed_count: 0 });
       return { ok: false, status: 404, text: async () => "Not found" } as Response;
     }));
     renderSettingsView({ initialSection: "apps" });
@@ -409,9 +381,9 @@ describe("MCP connection draft lifecycle", () => {
     await act(async () => fireEvent.click(cancel));
   });
 
-  it("retires consumed OAuth connection drafts only after success, preserving a failed attempt", async () => {
+  it("retires the consumed OAuth proxy draft only after success, preserving a failed attempt", async () => {
     const { result } = renderMcpActions();
-    const drafts = { docs: { use_proxy: "true", oauth_client_name: "New identity" }, metabase: { mcp_url: "https://analytics.example.com/mcp", use_proxy: "true" } };
+    const drafts = { docs: { use_proxy: "true" }, metabase: { mcp_url: "https://analytics.example.com/mcp", use_proxy: "true" } };
     await act(async () => result.current.state.setMcpFieldValues(drafts));
     vi.stubGlobal("open", vi.fn(() => null));
     requestMutationMock.mockResolvedValueOnce({
@@ -489,7 +461,7 @@ describe("MCP connection draft lifecycle", () => {
   it("retains failed proxy drafts, then retires applied or removed flags without discarding other edits", async () => {
     const { result } = renderMcpActions();
     const drafts = {
-      metabase: { use_proxy: "true", oauth_client_name: "Unsaved name", mcp_url: "https://analytics.example.com/mcp" }, docs: { use_proxy: "true" },
+      metabase: { use_proxy: "true", mcp_url: "https://analytics.example.com/mcp" }, docs: { use_proxy: "true" },
     };
     await act(async () => result.current.state.setMcpFieldValues(drafts));
     const payload: McpPresetsPayload = { presets: [{ ...metabasePreset, use_proxy: true }], installed_count: 1 };
@@ -500,7 +472,7 @@ describe("MCP connection draft lifecycle", () => {
     requestMutationMock.mockResolvedValueOnce(payload);
     await act(async () => result.current.actions.handleMcpPresetAction("proxy", "metabase", { use_proxy: "true" }));
     expect(result.current.state.mcpFieldValues).toEqual({
-      metabase: { mcp_url: drafts.metabase.mcp_url, oauth_client_name: "Unsaved name" }, docs: drafts.docs,
+      metabase: { mcp_url: drafts.metabase.mcp_url }, docs: drafts.docs,
     });
 
     await act(async () => result.current.state.setMcpFieldValues(drafts));

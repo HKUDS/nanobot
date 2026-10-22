@@ -13,12 +13,7 @@ from typing import Any
 from urllib.parse import SplitResult, parse_qs, urlsplit, urlunsplit
 
 from nanobot.agent.tools.mcp import MCPConnection, connect_mcp_servers
-from nanobot.agent.tools.mcp_oauth import (
-    MCP_OAUTH_CALLBACK_PATH,
-    MCPOAuthAdmission,
-    MCPOAuthHandlers,
-    is_mcp_oauth_admission_current,
-)
+from nanobot.agent.tools.mcp_oauth import MCP_OAUTH_CALLBACK_PATH, MCPOAuthHandlers
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import MCPServerConfig
@@ -27,8 +22,6 @@ from nanobot.security.network import validate_url_target
 from nanobot.webui.http_utils import is_loopback_host
 
 McpReload = Callable[[], Awaitable[dict[str, Any]]]
-_FIGMA_CALLBACK_PATH = "/callback"
-MCP_OAUTH_CALLBACK_PATHS = (MCP_OAUTH_CALLBACK_PATH, _FIGMA_CALLBACK_PATH)
 _FLOW_TTL_S = 300
 _START_WAIT_S = 20
 _OAUTH_ERROR_RE = re.compile(r"^[a-zA-Z0-9_.-]{1,80}$")
@@ -76,7 +69,7 @@ def _parse_mcp_oauth_redirect_uri(redirect_uri: str) -> tuple[str, SplitResult, 
     if (
         not parsed.netloc
         or not parsed.hostname
-        or parsed.path not in MCP_OAUTH_CALLBACK_PATHS
+        or parsed.path != MCP_OAUTH_CALLBACK_PATH
         or parsed.query
         or parsed.fragment
         or parsed.username is not None
@@ -96,22 +89,9 @@ def validate_mcp_oauth_redirect_uri(redirect_uri: str) -> str:
     raise McpOAuthError("MCP OAuth callbacks must use HTTPS or localhost")
 
 
-def prepare_mcp_oauth_redirect_uri(
-    redirect_uri: str, *, server_url: str = "",
-) -> tuple[str, bool]:
-    """Select Figma's short path and use a pasteable callback for remote HTTP."""
+def prepare_mcp_oauth_redirect_uri(redirect_uri: str) -> tuple[str, bool]:
+    """Use a pasteable loopback callback when a remote WebUI is served over HTTP."""
     cleaned, parsed, port = _parse_mcp_oauth_redirect_uri(redirect_uri)
-    server = urlsplit(server_url)
-    if (
-        server.scheme == "https"
-        and server.netloc.lower() in {"mcp.figma.com", "mcp.figma.com:443"}
-        and server.path in {"/mcp", "/mcp/"}
-        and not server.query
-        and not server.fragment
-    ):
-        # Figma rejects the gateway's nested path during client registration.
-        parsed = parsed._replace(path=_FIGMA_CALLBACK_PATH)
-        cleaned = urlunsplit(parsed)
     if parsed.scheme != "http" or is_loopback_host(parsed.netloc):
         return validate_mcp_oauth_redirect_uri(cleaned), False
 
@@ -163,16 +143,11 @@ class McpOAuthManager:
         reload_mcp: McpReload,
         network: NetworkConfig | None = None,
         reset_credentials: bool = False,
-        admission: MCPOAuthAdmission | None = None,
     ) -> dict[str, Any]:
         self._admission.check()
-        if admission is not None and not admission.matches_identity(name, cfg.url, cfg.oauth_client_name):
-            raise McpOAuthError("MCP authorization was cancelled", status=409)
-        self._check_oauth_admission(admission)
         self._prune()
-        redirect_uri, manual_callback = prepare_mcp_oauth_redirect_uri(redirect_uri, server_url=cfg.url)
-        await self._cancel_name(name, admission=admission)
-        self._check_oauth_admission(admission)
+        redirect_uri, manual_callback = prepare_mcp_oauth_redirect_uri(redirect_uri)
+        await self._cancel_name(name)
         self._admission.check()
         if self._remove_pending_work is None:
             self._remove_pending_work = self._admission.register_pending_work(
@@ -197,7 +172,6 @@ class McpOAuthManager:
             redirect_handler=lambda url: self._receive_authorization_url(flow, url),
             callback_handler=lambda: self._wait_for_callback(flow),
             reset_credentials=reset_credentials,
-            admission=admission,
         )
         flow.task = asyncio.create_task(
             self._connect_and_reload(flow, handlers, reload_mcp),
@@ -473,14 +447,7 @@ class McpOAuthManager:
             payload["hot_reload"] = flow.reload_result
         return payload
 
-    @staticmethod
-    def _check_oauth_admission(admission: MCPOAuthAdmission | None) -> None:
-        if not is_mcp_oauth_admission_current(admission):
-            raise McpOAuthError("MCP authorization was cancelled", status=409)
-
-    async def _cancel_name(self, name: str, *, admission: MCPOAuthAdmission | None = None) -> None:
-        # No await separates the epoch check from the cancellation snapshot.
-        self._check_oauth_admission(admission)
+    async def _cancel_name(self, name: str) -> None:
         for flow in list(self._flows.values()):
             if flow.name == name and flow.task is not None and not flow.task.done():
                 await self._cancel_flow(flow)

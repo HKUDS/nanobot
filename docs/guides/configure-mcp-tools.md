@@ -56,7 +56,7 @@ Restart nanobot and ask a question that requires the MCP tool.
 - Prefer `enabledTools` over exposing every tool by default.
 - Use `toolTimeout` for slow MCP operations.
 - Use HTTP MCP only for endpoints you trust.
-- For deployment-managed OAuth servers, set `auth` to `oauth` and complete the browser connection from **Apps → MCP**. Click an MCP entry to open its management dialog. For OAuth connections, use **Advanced options → OAuth client name** to customize the name shown during authorization (default: `nanobot`). Changing it requires reconnecting and authorizing that server again; other MCP servers keep their credentials. For manual configuration, set the optional `oauthClientName` field. Names are trimmed, blank values use the default, and names must be at most 128 characters without control characters.
+- For deployment-managed OAuth servers, set `auth` to `oauth` and complete the browser connection from **Apps → MCP**.
 - Keep MCP server commands stable and versioned in deployment docs or scripts.
 
 ## Security notes

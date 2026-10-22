@@ -451,11 +451,10 @@ describe("SettingsView Apps catalog", () => {
       .toBeInTheDocument();
   });
 
-  it("saves and reopens the OAuth client name for a custom remote MCP", async () => {
+  it("configures OAuth for a custom remote MCP without importing JSON", async () => {
     const customPreset = {
       ...xmindMcpPreset,
       name: "team-mcp",
-      oauth_client_name: "Team assistant",
       display_name: "team-mcp",
       source: "custom",
       installed: true,
@@ -520,11 +519,6 @@ describe("SettingsView Apps catalog", () => {
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("switch", { name: "Use proxy" }));
-    expect(screen.queryByRole("textbox", { name: "OAuth client name" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
-    const clientName = screen.getByRole("textbox", { name: "OAuth client name" });
-    expect(clientName).toHaveValue("nanobot");
-    fireEvent.change(clientName, { target: { value: "Team assistant" } });
     fireEvent.click(screen.getByRole("button", { name: "Save MCP server" }));
 
     await waitFor(() => {
@@ -538,7 +532,6 @@ describe("SettingsView Apps catalog", () => {
         transport: "streamableHttp",
         url: "https://mcp.example.com/mcp",
         auth: "oauth",
-        oauth_client_name: "Team assistant",
         use_proxy: "true",
       });
       expect(values).not.toHaveProperty("headers");
@@ -547,8 +540,6 @@ describe("SettingsView Apps catalog", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Connect team-mcp" }));
     const connection = await screen.findByRole("dialog", { name: "team-mcp" });
     expect(within(connection).getByRole("switch", { name: "Use proxy" })).toBeChecked();
-    fireEvent.click(within(connection).getByText("Advanced options"));
-    expect(within(connection).getByRole("textbox", { name: "OAuth client name" })).toHaveValue("Team assistant");
     expect(requestMutationMock).not.toHaveBeenCalledWith("settings.mcp.oauth_start", expect.anything(), expect.anything());
   });
 

@@ -87,9 +87,9 @@ Only features with a **Use proxy** switch use this address. Turning a switch off
   "tools": {
     "web": { "useProxy": true },
     "mcpServers": {
-      "figma-remote": {
+      "notion": {
         "type": "streamableHttp",
-        "url": "https://mcp.figma.com/mcp",
+        "url": "https://mcp.notion.com/mcp",
         "auth": "oauth",
         "useProxy": true
       }
@@ -2225,8 +2225,6 @@ MCP servers can run locally over stdio or connect remotely over HTTP:
 
 Remote HTTP servers may use browser OAuth instead of static headers. In the WebUI, open **Apps → MCP → Add MCP server**, choose **Custom**, select HTTP or SSE, and choose **OAuth** under **Authentication**. Save the server, then choose **Connect**. For manual configuration, add `auth: "oauth"` and open **Apps → MCP** to connect. Known presets such as Xmind, Notion, and Linear add the config automatically on first click.
 
-Click an MCP entry to open its management dialog. For OAuth connections, **Advanced options → OAuth client name** sets the name shown during authorization for that service (default: `nanobot`). Changing an existing service's name requires reconnecting and authorizing it again; other services are unaffected. The optional configuration field is `oauthClientName`. Names are trimmed, blank names use `nanobot`, and names must be at most 128 characters without control characters. This setting is only used with OAuth.
-
 The [MCP service presets](./mcp-presets.md) include hosted services with browser sign-in or API keys, plus local servers for Google Workspace, Microsoft 365, Firebase, and databases. Services such as Metabase and Sigma first ask for your instance or organization MCP URL. Credential fields accept the token itself; nanobot adds the required authorization header.
 
 <details>
@@ -2239,8 +2237,7 @@ The [MCP service presets](./mcp-presets.md) include hosted services with browser
       "notion": {
         "type": "streamableHttp",
         "url": "https://mcp.notion.com/mcp",
-        "auth": "oauth",
-        "oauthClientName": "My workspace"
+        "auth": "oauth"
       }
     }
   }

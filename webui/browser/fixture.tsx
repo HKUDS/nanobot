@@ -149,17 +149,13 @@ const unbrandedPlugin: McpPresetInfo = {
 };
 function AppsFixture() {
   const noop = () => {};
-  const oauth = parameters.has("oauth");
-  const configured = parameters.has("configured");
+  const managing = parameters.has("manage");
   const [actions, setActions] = useState<unknown[]>([]);
-  const [fields, setFields] = useState<Record<string, Record<string, string>>>({});
-  const presets: McpPresetInfo[] = oauth ? [{
-    name: "design", display_name: "Design MCP", category: "design",
-    description: "Read design context", docs_url: "", transport: "streamableHttp", auth: "oauth",
-    oauth_client_name: configured ? "Workspace client" : "nanobot",
-    requires: "", note: "", install_supported: true, installed: configured, configured,
-    available: true, status: configured ? "configured" : "not_installed", required_fields: [],
-    connection_summary: "https://design.example/mcp", source: "preset",
+  const presets: McpPresetInfo[] = managing ? [{
+    name: "design", display_name: "Design MCP", category: "design", description: "Read design context",
+    docs_url: "", transport: "streamableHttp", auth: "oauth", requires: "", note: "",
+    install_supported: true, installed: false, configured: false, available: true,
+    status: "not_installed", required_fields: [], connection_summary: "https://design.example/mcp", source: "preset",
   }] : [
     unbrandedPlugin,
     { ...unbrandedPlugin, name: "test-mcp", display_name: "Test MCP", source: "builtin", logo_url: "/missing-app-icon.svg" },
@@ -167,24 +163,22 @@ function AppsFixture() {
   ];
   return <main className="mx-auto max-w-4xl p-6"><AppsCatalogSettings
     cliApps={{ apps: [], installed_count: 0 }}
-    mcpPresets={{ presets, installed_count: oauth ? Number(configured) : 3 }}
-    cliAppsLoading={false} mcpPresetsLoading={false} query="" filter={oauth ? "mcp" : "ready"}
+    mcpPresets={{ presets, installed_count: managing ? 0 : 3 }}
+    cliAppsLoading={false} mcpPresetsLoading={false} query="" filter={managing ? "mcp" : "ready"}
     cliActionKey={null} mcpActionKey={null} mcpOAuthFlow={null} mcpOAuthPopupBlocked={false}
     mcpOAuthCallbackUrl="" mcpOAuthCompleting={false} mcpOAuthCallbackError={null}
     cliMessage={null} cliError={null} cliFocusName={null} mcpMessage={null} mcpError={null}
-    mcpFieldValues={fields} customMcpForm={DEFAULT_CUSTOM_MCP_FORM} mcpConfigImport=""
+    mcpFieldValues={{}} customMcpForm={DEFAULT_CUSTOM_MCP_FORM} mcpConfigImport=""
     showBrandLogos={parameters.get("logos") !== "hidden"} requiresRestartPending={false}
     onQueryChange={noop} onFilterChange={noop} onCliAction={noop}
     onMcpAction={(action, name, values) => setActions((prev) => [...prev, { action, name, values }])}
     onMcpOAuthConnect={(name, reset, values) => setActions((prev) => [...prev, { action: "oauth", name, reset, values }])}
     onMcpOAuthCancel={noop} onMcpOAuthOpen={noop}
     onMcpOAuthCallbackUrlChange={noop} onMcpOAuthComplete={noop} onDismissStatus={noop}
-    onBackToChat={noop}
-    onMcpFieldChange={(name, field, value) => setFields((prev) => ({ ...prev, [name]: { ...prev[name], [field]: value } }))}
-    onCustomMcpFormChange={noop}
+    onBackToChat={noop} onMcpFieldChange={noop} onCustomMcpFormChange={noop}
     onMcpConfigImportChange={noop} onSaveCustomMcp={noop} onImportMcpConfig={noop}
     onMcpToolsChange={noop}
-  />{oauth && <output data-testid="mcp-actions">{JSON.stringify(actions)}</output>}</main>;
+  />{managing && <output data-testid="mcp-actions">{JSON.stringify(actions)}</output>}</main>;
 }
 if (parameters.get("case") === "skeleton-additions") installSkeletonPreviewApi();
 if (parameters.get("case") === "idle-compaction") installIdleCompactionApi();

@@ -416,18 +416,6 @@ class MCPServerConfig(Base):
 
     type: Literal["stdio", "sse", "streamableHttp"] | None = None  # auto-detected if omitted
     auth: Literal["oauth"] | None = None  # Remote MCP OAuth; tokens are stored outside config
-    oauth_client_name: str = "nanobot"  # OAuth dynamic registration display name
-
-    @field_validator("oauth_client_name")
-    @classmethod
-    def normalize_oauth_client_name(cls, value: str) -> str:
-        if any(ord(char) < 32 or 127 <= ord(char) <= 159 or char in "\u2028\u2029" for char in value):
-            raise ValueError("OAuth client name must not contain control characters")
-        value = value.strip() or "nanobot"
-        if len(value) > 128:
-            raise ValueError("OAuth client name must be at most 128 characters")
-        return value
-
     command: str = ""  # Stdio: command to run (e.g. "npx")
     args: list[str] = Field(default_factory=list)  # Stdio: command arguments
     env: dict[str, str] = Field(default_factory=dict)  # Stdio: extra env vars

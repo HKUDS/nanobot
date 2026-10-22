@@ -1159,15 +1159,6 @@ describe("webui API helpers", () => {
       30_000,
     );
 
-    await startMcpOAuth(mutationTransport, "notion", true, { oauth_client_name: " " });
-    expect(requestMutation).toHaveBeenLastCalledWith(
-      "settings.mcp.oauth_start", { name: "notion", reset: true, oauth_client_name: " " }, 30_000,
-    );
-    await saveCustomMcpServer(mutationTransport, { name: "notion", auth: "oauth", oauth_client_name: "" });
-    expect(requestMutation).toHaveBeenLastCalledWith(
-      "settings.mcp.custom", { name: "notion", auth: "oauth", oauth_client_name: "" }, 20_000,
-    );
-
     await fetchMcpOAuthStatus("tok", "flow-123");
     expect(fetch).toHaveBeenCalledWith(
       "/api/settings/mcp-oauth/status?flow_id=flow-123",

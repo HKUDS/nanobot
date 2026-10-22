@@ -222,7 +222,7 @@ async def test_saved_oauth_http_403_projects_failed_runtime_without_details(
     oauth_mod = ModuleType("nanobot.agent.tools.mcp_oauth")
     oauth_mod.MCPAuthorizationRequiredError = AuthorizationRequiredError  # type: ignore[attr-defined]
     oauth_mod.create_mcp_oauth_auth = create_auth  # type: ignore[attr-defined]
-    oauth_mod.mcp_oauth_has_credentials = lambda _name, _url, _client_name: True  # type: ignore[attr-defined]
+    oauth_mod.mcp_oauth_has_credentials = lambda _name, _url: True  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "nanobot.agent.tools.mcp_oauth", oauth_mod)
     monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
     monkeypatch.setattr(mcp_mod, "_probe_http_url", reachable)
@@ -1740,8 +1740,8 @@ async def test_connect_mcp_servers_attaches_oauth_to_remote_http_client(
     def _validate(_url: str) -> tuple[bool, str]:
         return True, ""
 
-    async def _create_auth(name: str, url: str, handlers: object, *, oauth_client_name: str) -> object:
-        captured.update(name=name, url=url, handlers=handlers, oauth_client_name=oauth_client_name)
+    async def _create_auth(name: str, url: str, handlers: object) -> object:
+        captured.update(name=name, url=url, handlers=handlers)
         return oauth_auth
 
     oauth_mod = ModuleType("nanobot.agent.tools.mcp_oauth")
@@ -1786,7 +1786,7 @@ async def test_connect_mcp_servers_attaches_oauth_to_remote_http_client(
     url = "https://mcp.example.com/sse" if transport == "sse" else "https://mcp.example.com/mcp"
     registry = ToolRegistry()
     stacks = await connect_mcp_servers(
-        {"remote": MCPServerConfig(type=transport, url=url, auth="oauth", oauth_client_name="My remote")},
+        {"remote": MCPServerConfig(type=transport, url=url, auth="oauth")},
         registry,
         oauth_handlers={"remote": oauth_handlers},  # type: ignore[arg-type]
     )
@@ -1794,7 +1794,6 @@ async def test_connect_mcp_servers_attaches_oauth_to_remote_http_client(
         await stack.aclose()
 
     assert captured["name"] == "remote"
-    assert captured["oauth_client_name"] == "My remote"
     assert captured["url"] == url
     assert captured["handlers"] is oauth_handlers
     if transport == "sse":
@@ -1814,7 +1813,7 @@ async def test_connect_mcp_servers_skips_background_oauth_without_credentials(
     class AuthorizationRequiredError(RuntimeError):
         pass
 
-    async def _create_auth(*_args: object, **_kwargs: object) -> object:
+    async def _create_auth(*_args: object) -> object:
         raise AuthorizationRequiredError
 
     probe_called = False

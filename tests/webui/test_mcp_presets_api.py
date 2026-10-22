@@ -359,7 +359,7 @@ def test_instance_oauth_setup_saves_endpoint_before_authorization(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _use_config(tmp_path, monkeypatch)
-    name, cfg, network, _admission = ensure_mcp_oauth_server(
+    name, cfg, network = ensure_mcp_oauth_server(
         {"name": ["metabase"], "mcp_url": ["https://analytics.example.com/api/metabase-mcp"]}
     )
     assert name == "metabase"
@@ -373,7 +373,7 @@ def test_instance_oauth_setup_saves_endpoint_before_authorization(
     config = load_config()
     config.tools.mcp_servers[name].enabled_tools = ["search"]
     save_config(config)
-    _, updated, _network, _admission = ensure_mcp_oauth_server(
+    _, updated, _network = ensure_mcp_oauth_server(
         {"name": [name], "mcp_url": ["https://other.example.com/api/metabase-mcp"]}
     )
     assert updated.url == "https://other.example.com/api/metabase-mcp"
@@ -946,7 +946,7 @@ def test_oauth_setup_persists_proxy_choice_without_credential_fields(
     if installed:
         mcp_presets_action("enable", {"name": ["xmind"]})
 
-    name, cfg, network, _admission = ensure_mcp_oauth_server({
+    name, cfg, network = ensure_mcp_oauth_server({
         "name": ["xmind"], "use_proxy": ["true"],
     })
 
@@ -962,7 +962,7 @@ def test_oauth_setup_persists_proxy_choice_without_credential_fields(
     assert payload["proxy_configured"] is True
     assert "shared.example" not in json.dumps(payload)
 
-    _, updated, _, _admission = ensure_mcp_oauth_server({"name": [name], "use_proxy": ["false"]})
+    _, updated, _ = ensure_mcp_oauth_server({"name": [name], "use_proxy": ["false"]})
     assert updated.use_proxy is False
     assert load_config().tools.mcp_servers[name].use_proxy is False
 
@@ -1076,61 +1076,31 @@ def test_enable_preset_preserves_proxy_choice_on_later_enable(tmp_path, monkeypa
     assert load_config().tools.mcp_servers["xmind"].use_proxy is False
 
 
-def test_oauth_client_name_custom_import_and_partial_update_roundtrip(tmp_path, monkeypatch) -> None:
-    _use_config(tmp_path, monkeypatch)
-    monkeypatch.setattr("nanobot.agent.tools.mcp_oauth.get_data_dir", lambda: tmp_path)
-    query = {"name": ["work"], "transport": ["streamableHttp"],
-             "url": ["https://mcp.example.com/mcp"], "auth": ["oauth"]}
-    payload = custom_mcp_action("custom", {**query, "oauth_client_name": [" Work MCP "]})
-    row = next(row for row in payload["presets"] if row["name"] == "work")
-    assert row["oauth_client_name"] == "Work MCP"
-    custom_mcp_action("custom", query)
-    assert load_config().tools.mcp_servers["work"].oauth_client_name == "Work MCP"
-    server = {"type": "streamableHttp", "url": query["url"][0], "auth": "oauth"}
-    custom_mcp_action("import", {"config": [json.dumps({"mcpServers": {"work": server}})]})
-    assert load_config().tools.mcp_servers["work"].oauth_client_name == "Work MCP"
-    custom_mcp_action("import", {"config": [json.dumps({"mcpServers": {"work": {
-        **server, "oauthClientName": "Imported",
-    }}})]})
-    assert load_config().tools.mcp_servers["work"].oauth_client_name == "Imported"
-    custom_mcp_action("custom", {**query, "oauth_client_name": [" "]})
-    assert load_config().tools.mcp_servers["work"].oauth_client_name == "nanobot"
-
-
-def test_oauth_client_name_preset_reconnect_and_settings_preserve_override(tmp_path, monkeypatch) -> None:
-    _use_config(tmp_path, monkeypatch)
-    monkeypatch.setattr("nanobot.agent.tools.mcp_oauth.get_data_dir", lambda: tmp_path)
-    name, cfg, _, _admission = ensure_mcp_oauth_server({"name": ["xmind"], "oauth_client_name": ["My Xmind"]})
-    assert cfg.oauth_client_name == "My Xmind"
-    _, cfg, _, _admission = ensure_mcp_oauth_server({"name": [name]})
-    assert cfg.oauth_client_name == "My Xmind"
-    mcp_presets_action("enable", {"name": [name]})
-    mcp_presets_action("proxy", {"name": [name], "use_proxy": ["false"]})
-    custom_mcp_action("tools", {"name": [name], "enabled_tools": ['["*"]']})
-    assert load_config().tools.mcp_servers[name].oauth_client_name == "My Xmind"
-    row = next(row for row in mcp_presets_payload()["presets"] if row["name"] == name)
-    assert row["oauth_client_name"] == "My Xmind"
-
-
 @pytest.mark.asyncio
-async def test_oauth_client_name_save_invalidates_only_changed_effective_identity(tmp_path, monkeypatch) -> None:
+async def test_saved_figma_remote_remains_manageable_as_custom_without_rewriting_credentials(
+    tmp_path, monkeypatch,
+) -> None:
     _use_config(tmp_path, monkeypatch)
     monkeypatch.setattr("nanobot.agent.tools.mcp_oauth.get_data_dir", lambda: tmp_path)
-    query = {"name": ["work"], "transport": ["streamableHttp"],
-             "url": ["https://mcp.example.com/mcp"], "auth": ["oauth"]}
-    custom_mcp_action("custom", {**query, "oauth_client_name": ["Work"]})
-    storage = MCPOAuthStorage("work", query["url"][0], "Work")
-    await storage.set_tokens(OAuthToken(access_token="keep"))
-    other = MCPOAuthStorage("other", query["url"][0])
-    await other.set_tokens(OAuthToken(access_token="other"))
-    custom_mcp_action("custom", {**query, "oauth_client_name": [" Work "]})
-    assert (await storage.get_tokens()).access_token == "keep"
-    custom_mcp_action("custom", query)
-    assert (await storage.get_tokens()).access_token == "keep"
-    with pytest.raises(McpPresetError):
-        custom_mcp_action("custom", {**query, "oauth_client_name": ["bad\nname"]})
-    assert load_config().tools.mcp_servers["work"].oauth_client_name == "Work"
-    custom_mcp_action("custom", {**query, "oauth_client_name": ["New"]})
-    await storage.set_tokens(OAuthToken(access_token="late"))
-    assert not mcp_oauth_has_credentials("work", query["url"][0], "New")
-    assert (await other.get_tokens()).access_token == "other"
+    custom_mcp_action("custom", {
+        "name": ["figma-remote"], "transport": ["streamableHttp"],
+        "url": ["https://mcp.figma.com/mcp"], "auth": ["oauth"],
+    })
+    storage = MCPOAuthStorage("figma-remote", "https://mcp.figma.com/mcp")
+    await storage.set_tokens(OAuthToken(access_token="saved-access", refresh_token="saved-refresh"))
+    config_path = tmp_path / "config.json"
+    credentials_path = tmp_path / "auth/mcp.json"
+    original_config = config_path.read_bytes()
+    original_credentials = credentials_path.read_bytes()
+
+    rows = mcp_presets_payload()["presets"]
+    saved = next(row for row in rows if row["name"] == "figma-remote")
+    assert saved["source"] == "custom"
+    assert saved["installed"] is True
+    assert saved["connection_summary"] == "https://mcp.figma.com/mcp"
+    local = next(row for row in rows if row["name"] == "figma")
+    assert local["source"] == "preset"
+    assert local["install_supported"] is True
+    assert config_path.read_bytes() == original_config
+    assert credentials_path.read_bytes() == original_credentials
+    assert (await storage.get_tokens()).access_token == "saved-access"

@@ -414,7 +414,7 @@ async def test_settings_shutdown_joins_browser_authorization_and_releases_admiss
     config = MCPServerConfig(type="streamableHttp", auth="oauth", url="https://mcp.example/mcp")
     monkeypatch.setattr(
         "nanobot.webui.settings_routes.ensure_mcp_oauth_server",
-        lambda _query, *, config_path=None: ("linear", config, NetworkConfig(), None),
+        lambda _query, *, config_path=None: ("linear", config, NetworkConfig()),
     )
     monkeypatch.setattr("nanobot.webui.mcp_oauth_api.validate_url_target", lambda _: (True, ""))
     cleanup_started, allow_cleanup = asyncio.Event(), asyncio.Event()
@@ -461,7 +461,7 @@ async def test_mcp_oauth_start_uses_gateway_callback_and_requires_api_auth(monke
     network = SimpleNamespace(proxy="http://shared.example:8080")
     monkeypatch.setattr(
         "nanobot.webui.settings_routes.ensure_mcp_oauth_server",
-        lambda _query, *, config_path=None: ("xmind", config, network, None),
+        lambda _query, *, config_path=None: ("xmind", config, network),
     )
     router = _router()
     start = AsyncMock(return_value={
@@ -488,7 +488,6 @@ async def test_mcp_oauth_start_uses_gateway_callback_and_requires_api_auth(monke
         reload_mcp=ANY,
         network=network,
         reset_credentials=False,
-        admission=None,
     )
 
     denied = _router(authorized=False)
@@ -508,17 +507,16 @@ async def test_mcp_oauth_start_uses_gateway_callback_and_requires_api_auth(monke
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("callback_path", ["/auth/mcp/callback", "/callback"])
-async def test_mcp_oauth_callback_is_state_authenticated_and_returns_close_page(callback_path) -> None:
+async def test_mcp_oauth_callback_is_state_authenticated_and_returns_close_page() -> None:
     router = _router(authorized=False)
     submit = MagicMock(return_value="xmind")
     router._mcp_oauth = SimpleNamespace(submit_callback=submit)
     request = SimpleNamespace(
-        path=f"{callback_path}?code=oauth-code&state=state-123",
+        path="/auth/mcp/callback?code=oauth-code&state=state-123",
         headers=Headers(),
     )
 
-    response = await router.dispatch(None, request, callback_path)
+    response = await router.dispatch(None, request, "/auth/mcp/callback")
 
     assert response is not None
     assert response.status_code == 200
@@ -1059,7 +1057,7 @@ async def test_first_mcp_oauth_request_saves_proxy_flag_before_starting_flow(tmp
     router = _router(config_path=config_path)
     captured = {}
 
-    async def start(name, cfg, redirect_uri, *, reload_mcp, network, reset_credentials, admission):
+    async def start(name, cfg, redirect_uri, *, reload_mcp, network, reset_credentials):
         saved = load_config(config_path)
         assert name == "xmind"
         assert cfg.auth == "oauth"
@@ -1145,121 +1143,3 @@ async def test_mcp_proxy_mutation_persists_reloads_and_keeps_oauth_credentials(
         reload.assert_awaited_once()
     finally:
         await gateway.http.settings_routes.close()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("existing_credentials", [False, True])
-@pytest.mark.parametrize("pending_new", [False, True])
-async def test_delayed_oauth_start_cannot_reconcile_a_replaced_config(
-    tmp_path, monkeypatch, existing_credentials, pending_new,
-) -> None:
-    from mcp.shared.auth import OAuthToken
-
-    from nanobot.agent.tools.mcp_oauth import (
-        MCPOAuthStorage,
-        create_mcp_oauth_auth,
-    )
-    from nanobot.config.loader import load_config
-    from nanobot.webui.mcp_presets_api import ensure_mcp_oauth_server
-
-    monkeypatch.setattr("nanobot.agent.tools.mcp_oauth.get_data_dir", lambda: tmp_path)
-    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.validate_url_target", lambda _: (True, ""))
-    config_path = tmp_path / "config.json"
-    router = _router(config_path=config_path)
-    name, cfg, _, admission = router.settings.mutate(
-        ensure_mcp_oauth_server,
-        {"name": ["xmind"], "oauth_client_name": ["Old"]},
-    )
-    assert admission.generation is None
-    if existing_credentials:
-        await MCPOAuthStorage(name, cfg.url, "Old").set_tokens(OAuthToken(access_token="old"))
-    await MCPOAuthStorage("other", cfg.url).set_tokens(OAuthToken(access_token="other"))
-
-    paused, resume = asyncio.Event(), asyncio.Event()
-    first_start = True
-    to_thread = asyncio.to_thread
-
-    async def delayed_to_thread(func, *args, **kwargs):
-        nonlocal first_start
-        result = await to_thread(func, *args, **kwargs)
-        # Pause delivery of the completed config mutation before manager startup.
-        if first_start and args and args[0] is ensure_mcp_oauth_server:
-            first_start = False
-            paused.set()
-            await resume.wait()
-        return result
-
-    monkeypatch.setattr(asyncio, "to_thread", delayed_to_thread)
-    constructed = []
-
-    class Connection:
-        async def aclose(self):
-            pass
-
-    async def connect(servers, _registry, *, oauth_handlers, network):
-        current = servers[name]
-        constructed.append(current.oauth_client_name)
-        auth = await create_mcp_oauth_auth(
-            name, current.url, oauth_handlers[name],
-            oauth_client_name=current.oauth_client_name,
-        )
-        if pending_new:
-            await oauth_handlers[name].redirect_handler("https://auth.example/authorize?state=new-state")
-            assert await oauth_handlers[name].callback_handler() == ("new-code", "new-state")
-        await auth.context.storage.set_tokens(OAuthToken(access_token="new"))
-        return {name: Connection()}
-
-    async def reload_mcp():
-        return {"ok": True}
-
-    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_servers", connect)
-    monkeypatch.setattr(router, "_reload_mcp_runtime", reload_mcp)
-    path = "/api/settings/mcp-oauth/start"
-    old_start = asyncio.create_task(router.dispatch(
-        None, _mutation_request(path, {"name": name}), path,
-    ))
-    try:
-        await asyncio.wait_for(paused.wait(), timeout=2)
-        assert constructed == []  # No old provider/storage exists at invalidation time.
-        new_response = await router.dispatch(
-            None, _mutation_request(path, {"name": name, "oauth_client_name": "New"}), path,
-        )
-        assert new_response.status_code == 200
-        new_payload = json.loads(new_response.body)
-        assert new_payload["status"] == ("authorization_required" if pending_new else "connected")
-        assert constructed == ["New"]
-        assert load_config(config_path).tools.mcp_servers[name].oauth_client_name == "New"
-        store_path = tmp_path / "auth/mcp.json"
-        authorized_store = store_path.read_bytes()
-        resume.set()
-        old_response = await old_start
-        assert old_response.status_code == 409
-        assert constructed == ["New"]
-        assert store_path.read_bytes() == authorized_store
-        if pending_new:
-            assert (await router._mcp_oauth.status(new_payload["flow_id"]))["status"] == "authorization_required"
-            assert await MCPOAuthStorage(name, cfg.url, "New").get_tokens() is None
-            router._mcp_oauth.submit_callback(state="new-state", code="new-code", error=None)
-            await router._mcp_oauth._flows[new_payload["flow_id"]].task
-            assert (await router._mcp_oauth.status(new_payload["flow_id"]))["status"] == "connected"
-        assert (await MCPOAuthStorage(name, cfg.url, "New").get_tokens()).access_token == "new"
-        assert (await MCPOAuthStorage("other", cfg.url).get_tokens()).access_token == "other"
-    finally:
-        resume.set()
-        await old_start
-        await router.close()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("query, expected_status", [("code=secret-code", 400), ("code=secret-code&state=unknown", 410)])
-async def test_short_mcp_callback_rejects_missing_or_unknown_state(query, expected_status) -> None:
-    router = _router(authorized=False)
-    try:
-        request = SimpleNamespace(path=f"/callback?{query}", headers=Headers())
-        response = await router.dispatch(None, request, "/callback")
-        assert response is not None
-        assert response.status_code == expected_status
-        assert response.headers["Cache-Control"] == "no-store"
-        assert b"secret-code" not in response.body
-    finally:
-        await router.close()

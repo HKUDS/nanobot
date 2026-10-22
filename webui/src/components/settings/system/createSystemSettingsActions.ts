@@ -306,15 +306,14 @@ export function createSystemSettingsActions({
     setAutomations(payload);
   };
 
-  const retireMcpConnectionDrafts = (names: string[], retireClientName = true) => {
+  const retireMcpProxyDrafts = (names: string[]) => {
     setMcpFieldValues((prev) => {
       const next = { ...prev };
       for (const name of names) {
         const key = name.trim().toLowerCase();
-        if (!prev[key]) continue;
+        if (prev[key]?.use_proxy === undefined) continue;
         const fields = { ...prev[key] };
         delete fields.use_proxy;
-        if (retireClientName) delete fields.oauth_client_name;
         next[key] = fields;
       }
       return next;
@@ -405,7 +404,7 @@ export function createSystemSettingsActions({
       try {
         const payload = await fetchMcpPresets(getToken());
         setMcpPresets(payload);
-        retireMcpConnectionDrafts([flow.name]);
+        retireMcpProxyDrafts([flow.name]);
         notifyMcpPresetsChanged(payload);
         setMcpMessage(null);
         setMcpError(null);
@@ -598,7 +597,7 @@ export function createSystemSettingsActions({
         (action === "proxy" || action === "remove")
         && payload.last_action?.ok !== false
       ) {
-        retireMcpConnectionDrafts([name], action === "remove");
+        retireMcpProxyDrafts([name]);
       }
       await maybeRestartHostEngine(payload);
       if (action === "enable") {
@@ -637,7 +636,6 @@ export function createSystemSettingsActions({
             ? customMcpForm.headers
             : "",
         tool_timeout: customMcpForm.toolTimeout,
-        ...(expectsOAuthAuthorization ? { oauth_client_name: customMcpForm.oauthClientName } : {}),
         ...(customMcpForm.transport !== "stdio" ? { use_proxy: String(customMcpForm.useProxy) } : {}),
       });
       setMcpPresets(payload);
@@ -647,7 +645,7 @@ export function createSystemSettingsActions({
         expectsOAuthAuthorization ? name : undefined,
       );
       if (payload.last_action?.ok !== false) {
-        retireMcpConnectionDrafts([name]);
+        retireMcpProxyDrafts([name]);
       }
       notifyMcpPresetsChanged(payload);
       if (payload.requires_restart) {
@@ -673,7 +671,7 @@ export function createSystemSettingsActions({
       if (payload.last_action?.ok !== false) {
         // The accepted import has been validated by the server; its response has no name list.
         const config: { mcpServers?: object } = JSON.parse(mcpConfigImport);
-        retireMcpConnectionDrafts(Object.keys(config.mcpServers ?? config));
+        retireMcpProxyDrafts(Object.keys(config.mcpServers ?? config));
       }
       notifyMcpPresetsChanged(payload);
       if (payload.requires_restart) {

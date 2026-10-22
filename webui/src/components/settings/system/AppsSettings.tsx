@@ -31,7 +31,6 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { OAuthClientNameField } from "@/components/settings/system/OAuthClientNameField";
 import { CatalogSkeleton } from "@/components/settings/shared/CatalogSkeleton";
 import { ProxySettingsControl } from "@/components/settings/shared/ProxySettingsControl";
 
@@ -87,7 +86,6 @@ export interface CustomMcpForm {
   headers: string;
   toolTimeout: string;
   useProxy: boolean;
-  oauthClientName: string;
 }
 
 export const DEFAULT_CUSTOM_MCP_FORM: CustomMcpForm = {
@@ -101,7 +99,6 @@ export const DEFAULT_CUSTOM_MCP_FORM: CustomMcpForm = {
   headers: "",
   toolTimeout: "30",
   useProxy: false,
-  oauthClientName: "nanobot",
 };
 
 export function AppsCatalogSettings({
@@ -1234,10 +1231,6 @@ function McpCustomServerPanel({
           </Button>
 
           {advancedOpen ? (
-            <>
-              {remote && form.auth === "oauth" ? (
-                <OAuthClientNameField value={form.oauthClientName} onChange={(value) => update("oauthClientName", value)} disabled={customBusy} />
-              ) : null}
             <div
               className={cn(
                 "mt-2 grid gap-2",
@@ -1278,7 +1271,6 @@ function McpCustomServerPanel({
                 />
               </label>
             </div>
-            </>
           ) : null}
 
           <div className="mt-3 flex justify-end">

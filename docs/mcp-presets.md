@@ -25,7 +25,6 @@ Browser sign-in uses the service's MCP OAuth flow. API-key presets ask for the c
 | Airtable | Browser OAuth | [Official guide](https://support.airtable.com/articles/9897799762-using-the-airtable-mcp-server) |
 | Miro | Browser OAuth | [Official guide](https://developers.miro.com/docs/connecting-to-miro-mcp) |
 | Whimsical | Browser OAuth | [Official guide](https://whimsical.com/learn/integrations/mcp) |
-| Figma (remote) | Browser OAuth | [Official guide](https://developers.figma.com/docs/figma-mcp-server/) |
 | Supabase (remote) | Browser OAuth | [Official guide](https://supabase.com/docs/guides/ai-tools/mcp) |
 | Neon | Browser OAuth | [Official guide](https://neon.com/docs/ai/neon-mcp-server) |
 | Vercel | Browser OAuth | [Official guide](https://vercel.com/docs/agent-resources/vercel-mcp) |
@@ -123,9 +122,7 @@ Browser sign-in uses the service's MCP OAuth flow. API-key presets ask for the c
 
 Datadog uses the MCP endpoint for your Datadog site and a Personal or Service Access Token. DigitalOcean publishes separate endpoints for its services; copy the endpoint for the service you need. Metabase requires an instance with MCP enabled. Copy Sigma's URL from **Profile → Integrations** and Descript's URL from **Settings → Descript MCP**.
 
-Figma uses the desktop app's local MCP endpoint, and Supabase starts a local server in read-only mode. Their **(remote)** variants use browser sign-in. GitHub uses Docker; **GitHub (remote)** uses a personal access token. Changes to credentials retain the connection's tool selection, timeout, and other saved settings.
-
-Figma (remote) also requires [Figma's approval of the MCP client](https://developers.figma.com/docs/figma-mcp-server/remote-server-installation/). A client rejected during registration cannot connect until Figma approves it, even when its network connection works. Browser sign-in for the official Figma endpoint uses `/callback`; reverse proxies must forward that path to nanobot. Other MCP services continue to use `/auth/mcp/callback`.
+Figma uses the desktop app's local MCP endpoint. Supabase starts a local server in read-only mode; **Supabase (remote)** uses browser sign-in. GitHub uses Docker; **GitHub (remote)** uses a personal access token. Changes to credentials retain the connection's tool selection, timeout, and other saved settings.
 
 ## Local servers
 

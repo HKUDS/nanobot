@@ -194,7 +194,6 @@ export default defineConfig(({ mode }) => {
         "/webui": { target, changeOrigin: true },
         "/api": { target, changeOrigin: true },
         "/auth": { target, changeOrigin: true },
-        "/callback": { target, changeOrigin: true },
       },
     },
     test: {
