@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 
-export type StartupSurface = "chat" | "settings" | "skills" | "apps" | "channels" | "automations" | "remote";
+export type StartupSurface = "chat" | "settings" | "skills" | "apps" | "channels" | "automations" | "extensions" | "remote";
 
 /** Also inlined in index.html: keep document startup independent of app modules. */
 export function readStartupLayout() {
@@ -23,7 +23,7 @@ export function readStartupLayout() {
   const section = new URLSearchParams(query).get("section") || "overview";
   const page = path === "/settings" ? section : path.slice(1);
   let surface: StartupSurface = "chat";
-  if (page === "skills" || page === "apps" || page === "channels" || page === "automations" || page === "remote") surface = page;
+  if (page === "skills" || page === "apps" || page === "channels" || page === "automations" || page === "extensions" || page === "remote") surface = page;
   else if (path === "/settings") surface = "settings";
   const now = new Date();
   const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);

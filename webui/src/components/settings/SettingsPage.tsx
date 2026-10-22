@@ -7,6 +7,7 @@ import { isCapabilitySection, type SettingsSectionKey } from "@/components/setti
 import { SettingsFeature } from "@/components/settings/shared/SettingsFeature";
 import { SettingsSectionSkeleton } from "@/components/settings/shared/SettingsSectionSkeleton";
 
+import { ExtensionsCatalogSettings } from "@/components/settings/ExtensionsCatalogSettings";
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
 import { ImageGenerationSettings } from "@/components/settings/capabilities/ImageGenerationSettings";
 import { AdvancedSettings } from "@/components/settings/capabilities/SecuritySettings";
@@ -44,7 +45,7 @@ import { RuntimeConfigSettings } from "@/components/settings/system/RuntimeConfi
 import { RuntimeSettings } from "@/components/settings/system/RuntimeSettings";
 import type { SettingsController } from "@/components/settings/useSettingsController";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
-import type { ChatSummary, SessionAutomationJob, SkillSummary } from "@/lib/types";
+import type { ChatSummary, SessionAutomationJob, SkillSummary, WebUIExtensionSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface SettingsPageProps {
@@ -58,6 +59,11 @@ interface SettingsPageProps {
   skills: SkillSummary[];
   skillsLoading: boolean;
   skillsError: boolean;
+  extensions: WebUIExtensionSummary[];
+  onOpenExtension?: (extensionId: string) => void;
+  onToggleExtension?: (extensionId: string, enabled: boolean) => Promise<void> | void;
+  onEditExtension?: (extensionId: string, config: Record<string, unknown>) => Promise<void> | void;
+  onDeleteExtension?: (extensionId: string) => Promise<void> | void;
   onStartAutomationChat?: (
     content: string,
     images?: SendAttachment[],
@@ -82,6 +88,11 @@ export function SettingsPage({
   skills,
   skillsLoading,
   skillsError,
+  extensions = [],
+  onOpenExtension,
+  onToggleExtension,
+  onEditExtension,
+  onDeleteExtension,
   onStartAutomationChat,
   titleOverrides,
   sessions,
@@ -403,6 +414,142 @@ export function SettingsPage({
               {settings.runtime_config ? runtimeConfiguration("network") : null}
             </WebSettings>
           </div>
+        );
+      case "channels":
+        return (
+          <ChannelsSettings
+            onConfigureMcp={(name) => {
+              setMcpSetupName(name);
+              systemState.setAppsKindFilter("mcp");
+              systemState.setAppsQuery(name);
+              selectSection("apps");
+            }}
+            token={token}
+            nanobotFeatures={systemState.nanobotFeatures}
+            loading={systemState.nanobotFeaturesLoading}
+            actionKey={systemState.nanobotFeatureAction}
+            chatAppsDocsUrl={settings.docs?.chat_apps_url}
+            showBrandLogos={localPrefs.brandLogos}
+            error={systemState.nanobotFeaturesError}
+            requiresRestartPending={pendingRestartSections.runtime}
+            onAction={systemActions.handleNanobotFeatureAction}
+            onFeaturesUpdate={systemState.setNanobotFeatures}
+            onDismissStatus={() => {
+              systemState.setNanobotFeaturesError(null);
+            }}
+            onRestart={restartViaSettingsSurface}
+            isRestarting={restartInProgress}
+          />
+        );
+      case "apps":
+        return (
+          <div className="settings-stack">
+            <AppsCatalogSettings
+              setupName={mcpSetupName}
+              onSetupOpened={() => setMcpSetupName(null)}
+              cliApps={systemState.cliApps}
+              mcpPresets={systemState.mcpPresets}
+              cliAppsLoading={systemState.cliAppsLoading}
+              mcpPresetsLoading={systemState.mcpPresetsLoading}
+              query={systemState.appsQuery}
+              filter={systemState.appsKindFilter}
+              cliActionKey={systemState.cliAppsAction}
+              mcpActionKey={systemState.mcpPresetAction}
+              mcpOAuthFlow={systemState.mcpOAuthFlow}
+              mcpOAuthPopupBlocked={systemState.mcpOAuthPopupBlocked}
+              mcpOAuthCallbackUrl={systemState.mcpOAuthCallbackUrl}
+              mcpOAuthCompleting={systemState.mcpOAuthCompleting}
+              mcpOAuthCallbackError={systemState.mcpOAuthCallbackError}
+              cliMessage={systemState.cliAppsMessage}
+              cliError={systemState.cliAppsError}
+              cliFocusName={systemState.cliAppsFocusName}
+              mcpMessage={systemState.mcpMessage}
+              mcpError={systemState.mcpError}
+              mcpFieldValues={systemState.mcpFieldValues}
+              customMcpForm={systemState.customMcpForm}
+              mcpConfigImport={systemState.mcpConfigImport}
+              showBrandLogos={localPrefs.brandLogos}
+              requiresRestartPending={pendingRestartSections.runtime}
+              onQueryChange={systemState.setAppsQuery}
+              onFilterChange={systemState.setAppsKindFilter}
+              onCliAction={systemActions.handleCliAppAction}
+              onMcpAction={systemActions.handleMcpPresetAction}
+              onMcpOAuthConnect={systemActions.handleMcpOAuthConnect}
+              onMcpOAuthCancel={() => void systemActions.handleMcpOAuthCancel()}
+              onMcpOAuthOpen={systemActions.handleMcpOAuthOpen}
+              onMcpOAuthCallbackUrlChange={(value) => {
+                systemState.setMcpOAuthCallbackUrl(value);
+                systemState.setMcpOAuthCallbackError(null);
+              }}
+              onMcpOAuthComplete={() => void systemActions.handleMcpOAuthComplete()}
+              onDismissStatus={() => {
+                systemState.setCliAppsMessage(null);
+                systemState.setCliAppsError(null);
+                systemState.setMcpMessage(null);
+                systemState.setMcpError(null);
+              }}
+              onBackToChat={onBackToChat}
+              onMcpFieldChange={(presetName, fieldName, value) => {
+                systemState.setMcpFieldValues((prev) => ({
+                  ...prev,
+                  [presetName]: {
+                    ...(prev[presetName] ?? {}),
+                    [fieldName]: value,
+                  },
+                }));
+              }}
+              onCustomMcpFormChange={systemState.setCustomMcpForm}
+              onMcpConfigImportChange={systemState.setMcpConfigImport}
+              onSaveCustomMcp={systemActions.handleSaveCustomMcp}
+              onImportMcpConfig={systemActions.handleImportMcpConfig}
+              onMcpToolsChange={systemActions.handleMcpToolsChange}
+              onRestart={restartViaSettingsSurface}
+              isRestarting={restartInProgress}
+            />
+          </div>
+        );
+      case "automations":
+        return (
+          <div className="settings-stack">
+            <AutomationsSettings
+              token={token}
+              payload={systemState.automations}
+              titleOverrides={titleOverrides}
+              sessions={sessions}
+              settingsSnapshot={controller.settings}
+              onStartChat={onStartAutomationChat}
+              loading={systemState.automationsLoading}
+              filter={systemState.automationsFilter}
+              actionKey={systemState.automationAction}
+              error={systemState.automationsError}
+              onFilterChange={systemState.setAutomationsFilter}
+              onAction={systemActions.handleAutomationAction}
+              onRequestEdit={(job) => {
+                setAutomationDetailReturn(null);
+                systemState.setAutomationPendingEdit(job);
+              }}
+              onRequestDelete={systemState.setAutomationPendingDelete}
+              onChangeChat={systemActions.handleAutomationChat}
+              onManageModels={() => selectSection("models")}
+              returnToDetailJob={automationDetailReturn}
+              onReturnToDetailHandled={() => setAutomationDetailReturn(null)}
+            />
+          </div>
+        );
+      case "skills":
+        return <SkillsCatalogSettings skills={skills} loading={skillsLoading} error={skillsError} />;
+      case "extensions":
+        return (
+          <ExtensionsCatalogSettings
+            extensions={extensions}
+            onOpenExtension={(extensionId) => {
+              selectSection("extensions");
+              onOpenExtension?.(extensionId);
+            }}
+            onToggleExtension={onToggleExtension}
+            onEditExtension={onEditExtension}
+            onDeleteExtension={onDeleteExtension}
+          />
         );
       case "runtime":
         return (
