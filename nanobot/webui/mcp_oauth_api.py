@@ -13,7 +13,12 @@ from typing import Any
 from urllib.parse import SplitResult, parse_qs, urlsplit, urlunsplit
 
 from nanobot.agent.tools.mcp import MCPConnection, connect_mcp_servers
-from nanobot.agent.tools.mcp_oauth import MCP_OAUTH_CALLBACK_PATH, MCPOAuthHandlers
+from nanobot.agent.tools.mcp_oauth import (
+    MCP_OAUTH_CALLBACK_PATH,
+    MCPOAuthAdmission,
+    MCPOAuthHandlers,
+    is_mcp_oauth_admission_current,
+)
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import MCPServerConfig
@@ -143,11 +148,16 @@ class McpOAuthManager:
         reload_mcp: McpReload,
         network: NetworkConfig | None = None,
         reset_credentials: bool = False,
+        admission: MCPOAuthAdmission | None = None,
     ) -> dict[str, Any]:
         self._admission.check()
+        if admission is not None and not admission.matches_identity(name, cfg.url, cfg.oauth_client_name):
+            raise McpOAuthError("MCP authorization was cancelled", status=409)
+        self._check_oauth_admission(admission)
         self._prune()
         redirect_uri, manual_callback = prepare_mcp_oauth_redirect_uri(redirect_uri)
-        await self._cancel_name(name)
+        await self._cancel_name(name, admission=admission)
+        self._check_oauth_admission(admission)
         self._admission.check()
         if self._remove_pending_work is None:
             self._remove_pending_work = self._admission.register_pending_work(
@@ -172,6 +182,7 @@ class McpOAuthManager:
             redirect_handler=lambda url: self._receive_authorization_url(flow, url),
             callback_handler=lambda: self._wait_for_callback(flow),
             reset_credentials=reset_credentials,
+            admission=admission,
         )
         flow.task = asyncio.create_task(
             self._connect_and_reload(flow, handlers, reload_mcp),
@@ -447,7 +458,14 @@ class McpOAuthManager:
             payload["hot_reload"] = flow.reload_result
         return payload
 
-    async def _cancel_name(self, name: str) -> None:
+    @staticmethod
+    def _check_oauth_admission(admission: MCPOAuthAdmission | None) -> None:
+        if not is_mcp_oauth_admission_current(admission):
+            raise McpOAuthError("MCP authorization was cancelled", status=409)
+
+    async def _cancel_name(self, name: str, *, admission: MCPOAuthAdmission | None = None) -> None:
+        # No await separates the epoch check from the cancellation snapshot.
+        self._check_oauth_admission(admission)
         for flow in list(self._flows.values()):
             if flow.name == name and flow.task is not None and not flow.task.done():
                 await self._cancel_flow(flow)

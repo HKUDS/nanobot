@@ -1243,6 +1243,7 @@ export interface McpPresetInfo {
   docs_url: string;
   transport: "stdio" | "streamableHttp" | "sse" | "oauth" | string;
   auth?: "oauth" | null;
+  oauth_client_name?: string;
   use_proxy?: boolean;
   requires: string;
   note: string;

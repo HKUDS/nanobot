@@ -50,6 +50,7 @@ _LOGO_URI = AnyHttpUrl(
 
 class _StoredServer(TypedDict, total=False):
     server_fingerprint: str
+    oauth_client_name: str
     write_lease: str
     tokens: dict[str, Any]
     expires_at: float
@@ -71,6 +72,48 @@ class MCPAuthorizationRequiredError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class MCPOAuthAdmission:
+    """Config identity and credential epoch captured under the settings mutation lock.
+
+    A missing generation is a bound snapshot, not an unbound invocation.
+    """
+
+    server_name: str
+    server_fingerprint: str
+    oauth_client_name: str
+    generation: str | None
+
+    def matches_identity(self, server_name: str, server_url: str, oauth_client_name: str) -> bool:
+        return (
+            self.server_name == server_name
+            and self.server_fingerprint == _server_fingerprint(server_url)
+            and self.oauth_client_name == oauth_client_name
+        )
+
+
+def is_mcp_oauth_admission_current(admission: MCPOAuthAdmission | None) -> bool:
+    """Read the admitted epoch without claiming credentials or changing the store."""
+    if admission is None:
+        return True
+    return (
+        _read_store_unlocked(_store_path())["generations"].get(admission.server_name)
+        == admission.generation
+    )
+
+
+def capture_mcp_oauth_admission(
+    server_name: str, server_url: str, oauth_client_name: str,
+) -> MCPOAuthAdmission:
+    """Bind admission while the caller still owns its config mutation lock."""
+    path = _store_path()
+    with _with_store_lock(path):
+        generation = _read_store_unlocked(path)["generations"].get(server_name)
+    return MCPOAuthAdmission(
+        server_name, _server_fingerprint(server_url), oauth_client_name, generation,
+    )
+
+
+@dataclass(frozen=True)
 class MCPOAuthHandlers:
     """Browser callbacks supplied only for a user-initiated OAuth attempt."""
 
@@ -78,6 +121,7 @@ class MCPOAuthHandlers:
     redirect_handler: Callable[[str], Awaitable[None]]
     callback_handler: Callable[[], Awaitable[tuple[str, str | None]]]
     reset_credentials: bool = False
+    admission: MCPOAuthAdmission | None = None
 
 
 @dataclass(frozen=True)
@@ -122,6 +166,9 @@ def _stored_server(value: object) -> _StoredServer | None:
     fingerprint = raw.get("server_fingerprint")
     if isinstance(fingerprint, str):
         entry["server_fingerprint"] = fingerprint
+    client_name = raw.get("oauth_client_name")
+    if isinstance(client_name, str):
+        entry["oauth_client_name"] = client_name
     write_lease = raw.get("write_lease")
     if isinstance(write_lease, str) and write_lease:
         entry["write_lease"] = write_lease
@@ -206,21 +253,47 @@ def _write_store_unlocked(path: Path, payload: _CredentialStore) -> None:
 
 
 class MCPOAuthStorage:
-    """Persistent MCP SDK token storage, isolated by config name and server URL."""
+    """Persistent MCP SDK storage, bound to config name, URL, and OAuth client name."""
 
-    def __init__(self, server_name: str, server_url: str) -> None:
+    def __init__(
+        self, server_name: str, server_url: str, oauth_client_name: str = "nanobot",
+        *, admission: MCPOAuthAdmission | None = None,
+    ) -> None:
         self.server_name = server_name
         self.server_fingerprint = _server_fingerprint(server_url)
-        self._observed_generation = self._read_generation_sync()
+        self.oauth_client_name = oauth_client_name
+        if admission is not None and not admission.matches_identity(
+            server_name, server_url, oauth_client_name,
+        ):
+            raise MCPAuthorizationRequiredError("MCP authorization was cancelled")
+        self._observed_generation = (
+            admission.generation if admission is not None else self._read_generation_sync()
+        )
         self._write_lease: str | None = None
 
     def _read_generation_sync(self) -> str | None:
         path = _store_path()
-        if not path.exists():
-            return None
-        # Writes replace the whole file atomically, so this observes either side
-        # of a concurrent deletion without blocking the async connection path.
         return _read_store_unlocked(path)["generations"].get(self.server_name)
+
+    def reconcile_identity(self) -> bool:
+        """Claim the interactive config identity; background readers never reconcile it."""
+        path = _store_path()
+        with _with_store_lock(path):
+            payload = _read_store_unlocked(path)
+            if not self._generation_is_current(payload):
+                return False
+            entry = payload["servers"].get(self.server_name)
+            if entry is None or entry.get("oauth_client_name", "nanobot") != self.oauth_client_name:
+                # Retire old SDK browser claims and refresh leases, including flows
+                # created before there were any credentials to persist.
+                self._observed_generation = secrets.token_urlsafe(24)
+                payload["generations"][self.server_name] = self._observed_generation
+                payload["servers"][self.server_name] = _StoredServer(
+                    server_fingerprint=self.server_fingerprint,
+                    oauth_client_name=self.oauth_client_name,
+                )
+                _write_store_unlocked(path, payload)
+            return True
 
     def _generation_is_current(self, payload: _CredentialStore) -> bool:
         return payload["generations"].get(self.server_name) == self._observed_generation
@@ -228,7 +301,10 @@ class MCPOAuthStorage:
     def _entry_unlocked(self, payload: _CredentialStore) -> _StoredServer | None:
         servers = payload["servers"]
         entry = servers.get(self.server_name)
-        if entry is None or entry.get("server_fingerprint") != self.server_fingerprint:
+        if (
+            entry is None or entry.get("server_fingerprint") != self.server_fingerprint
+            or entry.get("oauth_client_name", "nanobot") != self.oauth_client_name
+        ):
             return None
         return entry
 
@@ -251,6 +327,7 @@ class MCPOAuthStorage:
             self._write_lease = secrets.token_urlsafe(24)
             entry = _StoredServer(
                 server_fingerprint=self.server_fingerprint,
+                oauth_client_name=self.oauth_client_name,
                 write_lease=self._write_lease,
             )
             payload["servers"][self.server_name] = entry
@@ -293,7 +370,10 @@ class MCPOAuthStorage:
                     return False
                 entry = self._entry_unlocked(payload)
                 if entry is None:
-                    entry = _StoredServer(server_fingerprint=self.server_fingerprint)
+                    entry = _StoredServer(
+                        server_fingerprint=self.server_fingerprint,
+                        oauth_client_name=self.oauth_client_name,
+                    )
                     payload["servers"][self.server_name] = entry
                 self._write_lease = secrets.token_urlsafe(24)
                 entry["write_lease"] = self._write_lease
@@ -535,7 +615,8 @@ class MCPOAuthStorage:
             raise MCPAuthorizationRequiredError("MCP authorization was cancelled")
 
     def has_credentials(self) -> bool:
-        entry = self._read_entry_sync()
+        payload = _read_store_unlocked(_store_path())
+        entry = self._entry_unlocked(payload) if self._generation_is_current(payload) else None
         raw_tokens = entry.get("tokens") if entry is not None else None
         if not isinstance(raw_tokens, dict):
             return False
@@ -830,10 +911,17 @@ async def create_mcp_oauth_auth(
     server_name: str,
     server_url: str,
     handlers: MCPOAuthHandlers | None = None,
+    *,
+    oauth_client_name: str = "nanobot",
 ) -> OAuthClientProvider:
     """Build the official MCP SDK OAuth provider for one configured server."""
-    storage = MCPOAuthStorage(server_name, server_url)
+    storage = MCPOAuthStorage(
+        server_name, server_url, oauth_client_name,
+        admission=handlers.admission if handlers is not None else None,
+    )
     if handlers is not None:
+        if not await asyncio.to_thread(storage.reconcile_identity):
+            raise MCPAuthorizationRequiredError("MCP authorization was cancelled")
         await storage.prepare_redirect_uri(
             handlers.redirect_uri,
             reset=handlers.reset_credentials,
@@ -858,7 +946,7 @@ async def create_mcp_oauth_auth(
     metadata = OAuthClientMetadata(
         redirect_uris=[AnyUrl(redirect_uri)],
         token_endpoint_auth_method="none",
-        client_name="nanobot",
+        client_name=oauth_client_name,
         client_uri=_CLIENT_URI,
         logo_uri=_LOGO_URI,
         software_id="https://github.com/HKUDS/nanobot",
@@ -873,9 +961,11 @@ async def create_mcp_oauth_auth(
     )
 
 
-def mcp_oauth_has_credentials(server_name: str, server_url: str) -> bool:
-    """Return whether this exact configured MCP instance has an access token."""
-    return MCPOAuthStorage(server_name, server_url).has_credentials()
+def mcp_oauth_has_credentials(
+    server_name: str, server_url: str, oauth_client_name: str = "nanobot",
+) -> bool:
+    """Return whether this exact configured MCP identity has an access token."""
+    return MCPOAuthStorage(server_name, server_url, oauth_client_name).has_credentials()
 
 
 def delete_mcp_oauth_credentials(server_name: str) -> bool:

@@ -431,3 +431,115 @@ def test_remote_http_redirect_prepares_a_manual_loopback_callback() -> None:
     assert prepare_mcp_oauth_redirect_uri(
         "http://agent.example.com:9443/auth/mcp/callback"
     ) == ("http://127.0.0.1:9443/auth/mcp/callback", True)
+
+
+@pytest.mark.asyncio
+async def test_identity_change_during_previous_flow_cleanup_rejects_old_start(tmp_path, monkeypatch):
+    from nanobot.agent.tools.mcp_oauth import (
+        MCPOAuthStorage,
+        capture_mcp_oauth_admission,
+        delete_mcp_oauth_credentials,
+    )
+
+    monkeypatch.setattr("nanobot.agent.tools.mcp_oauth.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.validate_url_target", lambda _: (True, ""))
+    manager = McpOAuthManager(RuntimeAdmission())
+    cfg = _config().model_copy(update={"oauth_client_name": "Old"})
+    assert MCPOAuthStorage("xmind", cfg.url, "Old").reconcile_identity()
+    admitted = capture_mcp_oauth_admission("xmind", cfg.url, "Old")
+    closing, release = asyncio.Event(), asyncio.Event()
+    constructed = []
+
+    async def connect(servers, _registry, *, oauth_handlers, network):
+        current = servers["xmind"].oauth_client_name
+        constructed.append(current)
+        handlers = oauth_handlers["xmind"]
+        await handlers.redirect_handler(f"https://auth.example/authorize?state={current}")
+        try:
+            await handlers.callback_handler()
+        finally:
+            if current == "Old":
+                closing.set()
+                await release.wait()
+        return {"xmind": _Connection()}
+
+    async def reload_mcp():
+        return {"ok": True}
+
+    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_servers", connect)
+    redirect = "https://agent.example/auth/mcp/callback"
+    old_start = None
+    new_start = None
+    try:
+        await manager.start("xmind", cfg, redirect, reload_mcp=reload_mcp, admission=admitted)
+        old_start = asyncio.create_task(manager.start(
+            "xmind", cfg, redirect, reload_mcp=reload_mcp, admission=admitted,
+        ))
+        await asyncio.wait_for(closing.wait(), timeout=2)
+        delete_mcp_oauth_credentials("xmind")
+        new_cfg = cfg.model_copy(update={"oauth_client_name": "New"})
+        new_admitted = capture_mcp_oauth_admission("xmind", cfg.url, "New")
+        store_path = tmp_path / "auth/mcp.json"
+        before = store_path.read_bytes()
+        new_start = asyncio.create_task(manager.start(
+            "xmind", new_cfg, redirect, reload_mcp=reload_mcp, admission=new_admitted,
+        ))
+        await asyncio.sleep(0)
+        release.set()
+        with pytest.raises(McpOAuthError) as error:
+            await old_start
+        assert error.value.status == 409
+        new = await new_start
+        assert new["status"] == "authorization_required"
+        assert constructed == ["Old", "New"]
+        assert store_path.read_bytes() == before
+        manager.submit_callback(state="New", code="new-code", error=None)
+        await manager._flows[new["flow_id"]].task
+        assert (await manager.status(new["flow_id"]))["status"] == "connected"
+    finally:
+        release.set()
+        if old_start is not None:
+            await asyncio.gather(old_start, return_exceptions=True)
+        if new_start is not None:
+            await asyncio.gather(new_start, return_exceptions=True)
+        await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_current_same_identity_admission_allows_reconnect(tmp_path, monkeypatch):
+    from nanobot.agent.tools.mcp_oauth import MCPOAuthStorage, capture_mcp_oauth_admission
+
+    monkeypatch.setattr("nanobot.agent.tools.mcp_oauth.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.validate_url_target", lambda _: (True, ""))
+    cfg = _config()
+    assert MCPOAuthStorage("xmind", cfg.url, cfg.oauth_client_name).reconcile_identity()
+    admitted = capture_mcp_oauth_admission("xmind", cfg.url, cfg.oauth_client_name)
+    manager = McpOAuthManager(RuntimeAdmission())
+
+    async def connect(servers, _registry, *, oauth_handlers, network):
+        handlers = oauth_handlers["xmind"]
+        await handlers.redirect_handler("https://auth.example/authorize?state=same-identity")
+        await handlers.callback_handler()
+        return {"xmind": _Connection()}
+
+    async def reload_mcp():
+        return {"ok": True}
+
+    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_servers", connect)
+    try:
+        first = await manager.start(
+            "xmind", cfg, "https://agent.example/auth/mcp/callback",
+            reload_mcp=reload_mcp, admission=admitted,
+        )
+        second = await manager.start(
+            "xmind", cfg, "https://agent.example/auth/mcp/callback",
+            reload_mcp=reload_mcp, admission=admitted,
+        )
+        assert first["flow_id"] != second["flow_id"]
+        assert second["status"] == "authorization_required"
+        assert manager._flows[first["flow_id"]].task.cancelled()
+        manager.submit_callback(state="same-identity", code="code", error=None)
+        await manager._flows[second["flow_id"]].task
+        assert (await manager.status(second["flow_id"]))["status"] == "connected"
+    finally:
+        await manager.close()

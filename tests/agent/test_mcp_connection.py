@@ -175,7 +175,7 @@ async def test_connect_mcp_does_not_report_failure_before_oauth_authorization(
     monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", connect)
     monkeypatch.setattr(
         "nanobot.agent.tools.mcp_oauth.mcp_oauth_has_credentials",
-        lambda _name, _url: False,
+        lambda _name, _url, _client_name: False,
     )
 
     await provider.connect()
@@ -526,7 +526,7 @@ async def test_reload_mcp_servers_skips_oauth_server_waiting_for_authorization(
     monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", _fake_connect)
     monkeypatch.setattr(
         "nanobot.agent.tools.mcp_oauth.mcp_oauth_has_credentials",
-        lambda name, _url: name == "linear",
+        lambda name, _url, _client_name: name == "linear",
     )
     provider, _registry = _make_provider(mcp_servers={"notion": notion})
 

@@ -788,9 +788,11 @@ async def test_separate_providers_share_storage_refresh_lock(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("client_name", ["nanobot", "Company workspace"])
 async def test_official_mcp_sdk_completes_discovery_registration_and_token_exchange(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    client_name: str,
 ) -> None:
     _use_data_dir(tmp_path, monkeypatch)
     server_url = "https://mcp.example.com/mcp"
@@ -813,6 +815,7 @@ async def test_official_mcp_sdk_completes_discovery_registration_and_token_excha
             redirect_handler=redirect,
             callback_handler=callback,
         ),
+        oauth_client_name=client_name,
     )
 
     async def respond(request: httpx.Request) -> httpx.Response:
@@ -845,6 +848,7 @@ async def test_official_mcp_sdk_completes_discovery_registration_and_token_excha
             })
         if request.url.path == "/register":
             registration = json.loads(request.content)
+            assert registration["client_name"] == client_name
             assert registration["client_uri"] == "https://github.com/HKUDS/nanobot"
             assert registration["logo_uri"].endswith(
                 "/webui/public/brand/nanobot_apple_touch.png"
@@ -875,9 +879,144 @@ async def test_official_mcp_sdk_completes_discovery_registration_and_token_excha
     )
     assert ("POST", "https://auth.example.com/register") in requests
     assert ("POST", "https://auth.example.com/token") in requests
-    snapshot = await MCPOAuthStorage("company-mcp", server_url).get_snapshot()
+    snapshot = await MCPOAuthStorage("company-mcp", server_url, client_name).get_snapshot()
     assert snapshot.tokens is not None
     assert snapshot.tokens.access_token == "access-token"
     assert snapshot.tokens.refresh_token == "refresh-token"
     assert snapshot.token_issuer == "https://auth.example.com"
     assert snapshot.oauth_issuer == "https://auth.example.com"
+
+
+@pytest.mark.parametrize("raw, expected", [("  Work MCP  ", "Work MCP"), ("   ", "nanobot"), ("nanobot", "nanobot")])
+def test_oauth_client_name_normalization(raw, expected) -> None:
+    cfg = MCPServerConfig.model_validate({"oauthClientName": raw})
+    assert cfg.oauth_client_name == expected
+    assert cfg.model_dump(by_alias=True)["oauthClientName"] == expected
+
+
+@pytest.mark.parametrize("raw", ["a\nb", "a\rb", "a\tb", "a\x00b", "a\x7fb", "a\x85b", "a\u2028b", "a\u2029b", "x" * 129])
+def test_oauth_client_name_rejects_invalid_values(raw) -> None:
+    with pytest.raises(ValueError):
+        MCPServerConfig(oauth_client_name=raw)
+
+
+@pytest.mark.asyncio
+async def test_client_name_change_retires_old_flow_and_keeps_reads_nonmutating(tmp_path, monkeypatch) -> None:
+    _use_data_dir(tmp_path, monkeypatch)
+    url = "https://mcp.example.com/mcp"
+    old = MCPOAuthStorage("work", url)
+    await old.prepare_redirect_uri("https://agent.example/auth/mcp/callback")
+    await old.set_oauth_metadata(_oauth_metadata())
+    await old.set_tokens(OAuthToken(access_token="old", refresh_token="refresh"))
+    await old.set_client_info(OAuthClientInformationFull(client_id="old-client", redirect_uris=["https://agent.example/auth/mcp/callback"]))
+    other = MCPOAuthStorage("other", url)
+    await other.set_tokens(OAuthToken(access_token="other"))
+    before = (tmp_path / "auth/mcp.json").read_text()
+    with pytest.raises(MCPAuthorizationRequiredError):
+        await create_mcp_oauth_auth("work", url, oauth_client_name="Work")
+    assert not mcp_oauth_has_credentials("work", url, "Work")
+    assert (tmp_path / "auth/mcp.json").read_text() == before
+
+    async def redirect(_url):
+        return None
+
+    async def callback():
+        return "code", "state"
+
+    auth = await create_mcp_oauth_auth(
+        "work", url,
+        MCPOAuthHandlers("https://agent.example/auth/mcp/callback", redirect, callback),
+        oauth_client_name="Work",
+    )
+    assert auth.context.client_metadata.client_name == "Work"
+    current = MCPOAuthStorage("work", url, "Work")
+    assert await current.get_client_info() is None
+    assert await current.get_tokens() is None
+    await current.set_tokens(OAuthToken(access_token="new"))
+    await old.set_tokens(OAuthToken(access_token="stale"))
+    await old.set_client_info(OAuthClientInformationFull(client_id="stale-client", redirect_uris=["https://agent.example/auth/mcp/callback"]))
+    with pytest.raises(MCPAuthorizationRequiredError):
+        await old.prepare_redirect_uri("https://old.example/auth/mcp/callback")
+    assert (await current.get_tokens()).access_token == "new"
+    before = (tmp_path / "auth/mcp.json").read_text()
+    with pytest.raises(MCPAuthorizationRequiredError):
+        await create_mcp_oauth_auth("work", url)
+    assert not mcp_oauth_has_credentials("work", url)
+    assert (tmp_path / "auth/mcp.json").read_text() == before
+    assert (await other.get_tokens()).access_token == "other"
+
+
+@pytest.mark.asyncio
+async def test_legacy_default_credentials_and_same_name_flow_survive(tmp_path, monkeypatch) -> None:
+    _use_data_dir(tmp_path, monkeypatch)
+    url = "https://mcp.example.com/mcp"
+    storage = MCPOAuthStorage("work", url)
+    await storage.set_tokens(OAuthToken(access_token="legacy"))
+    await storage.set_client_info(OAuthClientInformationFull(client_id="legacy-client", redirect_uris=["https://agent.example/auth/mcp/callback"]))
+    path = tmp_path / "auth/mcp.json"
+    payload = json.loads(path.read_text())
+    payload["servers"]["work"].pop("oauth_client_name", None)
+    path.write_text(json.dumps(payload))
+    auth = await create_mcp_oauth_auth("work", url)
+    assert auth.context.client_metadata.client_name == "nanobot"
+    assert mcp_oauth_has_credentials("work", url)
+    assert storage.reconcile_identity()
+    assert (await storage.get_client_info()).client_id == "legacy-client"
+    await storage.set_tokens(OAuthToken(access_token="still-current"))
+    assert (await MCPOAuthStorage("work", url).get_tokens()).access_token == "still-current"
+
+
+@pytest.mark.asyncio
+async def test_client_name_change_during_refresh_cannot_restore_old_credentials(tmp_path, monkeypatch) -> None:
+    _use_data_dir(tmp_path, monkeypatch)
+    url = "https://mcp.example.com/mcp"
+    storage = MCPOAuthStorage("work", url)
+    await storage.set_oauth_metadata(_oauth_metadata())
+    await storage.set_tokens(OAuthToken(access_token="expired", refresh_token="refresh", expires_in=-1))
+    await storage.set_client_info(OAuthClientInformationFull(client_id="old-client", redirect_uris=["https://agent.example/auth/mcp/callback"]))
+    auth = await create_mcp_oauth_auth("work", url)
+
+    async def redirect(_url):
+        return None
+
+    async def callback():
+        return "code", "state"
+
+    async def respond(request):
+        if request.url.path == "/mcp":
+            assert "Authorization" not in request.headers
+            return httpx.Response(200, json={"ok": True})
+        assert request.url.path == "/oauth/token"
+        await create_mcp_oauth_auth(
+            "work", url,
+            MCPOAuthHandlers("https://agent.example/auth/mcp/callback", redirect, callback),
+            oauth_client_name="New name",
+        )
+        await MCPOAuthStorage("work", url, "New name").set_tokens(OAuthToken(access_token="new-identity"))
+        return httpx.Response(200, json={"access_token": "stale-refresh", "token_type": "Bearer"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond), auth=auth) as client:
+        response = await client.get(url)
+    assert response.status_code == 200
+    assert (await MCPOAuthStorage("work", url, "New name").get_tokens()).access_token == "new-identity"
+
+
+def test_admission_epoch_check_is_nonmutating_and_none_is_bound(tmp_path, monkeypatch):
+    from nanobot.agent.tools.mcp_oauth import (
+        MCPOAuthStorage,
+        capture_mcp_oauth_admission,
+        is_mcp_oauth_admission_current,
+    )
+
+    monkeypatch.setattr("nanobot.agent.tools.mcp_oauth.get_data_dir", lambda: tmp_path)
+    admitted = capture_mcp_oauth_admission("xmind", "https://mcp.example/mcp", "Old")
+    assert admitted.generation is None
+    assert is_mcp_oauth_admission_current(admitted)
+    assert not (tmp_path / "auth/mcp.json").exists()
+    storage = MCPOAuthStorage("xmind", "https://mcp.example/mcp", "New")
+    assert storage.reconcile_identity()
+    store_path = tmp_path / "auth/mcp.json"
+    before = store_path.read_bytes()
+    assert not is_mcp_oauth_admission_current(admitted)
+    assert is_mcp_oauth_admission_current(None)
+    assert store_path.read_bytes() == before

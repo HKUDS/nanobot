@@ -1096,6 +1096,7 @@ async def connect_mcp_servers(
                         name,
                         cfg.url,
                         (oauth_handlers or {}).get(name),
+                        oauth_client_name=cfg.oauth_client_name,
                     )
                 except MCPAuthorizationRequiredError:
                     logger.info("MCP server '{}': waiting for browser authorization", name)
@@ -1513,7 +1514,7 @@ class MCPProvider:
                 authorization_pending = {
                     name
                     for name, cfg in oauth_servers.items()
-                    if not mcp_oauth_has_credentials(name, cfg.url)
+                    if not mcp_oauth_has_credentials(name, cfg.url, cfg.oauth_client_name)
                 }
             for name in authorization_pending:
                 self._runtime_statuses.pop(name, None)
@@ -1580,7 +1581,7 @@ class MCPProvider:
             authorization_pending = {
                 name
                 for name, cfg in next_servers.items()
-                if cfg.auth == "oauth" and not mcp_oauth_has_credentials(name, cfg.url)
+                if cfg.auth == "oauth" and not mcp_oauth_has_credentials(name, cfg.url, cfg.oauth_client_name)
             }
             removed = sorted(current_names - next_names)
             added = sorted(next_names - current_names)

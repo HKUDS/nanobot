@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, ExternalLink, Loader2, RotateCcw, Search, Server, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { OAuthClientNameField } from "@/components/settings/system/OAuthClientNameField";
 import { SkeletonStatus } from "@/components/settings/shared/SkeletonStatus";
 import { ProxySettingsControl } from "@/components/settings/shared/ProxySettingsControl";
 import { Button } from "@/components/ui/button";
@@ -78,7 +79,10 @@ export function McpManagementDialog({
   const remote = preset.transport !== "stdio";
   const useProxy = values.use_proxy ?? String(preset.use_proxy ?? false);
   const proxyDirty = remote && useProxy !== String(preset.use_proxy ?? false);
-  const connectionValues = remote ? { ...values, use_proxy: useProxy } : values;
+  const supportsClientName = remote && isOAuth;
+  const clientName = values.oauth_client_name ?? preset.oauth_client_name ?? "nanobot";
+  const connectionValues = { ...values, ...(remote ? { use_proxy: useProxy } : {}), ...(supportsClientName ? { oauth_client_name: clientName } : {}) };
+  if (!supportsClientName) delete connectionValues.oauth_client_name;
   const inspectionRequestedRef = useRef(false);
   const allowAllTools = draftEnabledTools.includes("*");
   const selectedTools = new Set(allowAllTools ? toolNames : draftEnabledTools);
@@ -123,7 +127,9 @@ export function McpManagementDialog({
   const connect = () => {
     onOpenChange(false);
     if (isOAuth) {
-      onOAuthConnect(preset.name, configuredInstalled, connectionValues);
+      const oauthValues = { ...connectionValues };
+      if (values.oauth_client_name === undefined) delete oauthValues.oauth_client_name;
+      onOAuthConnect(preset.name, configuredInstalled, oauthValues);
       return;
     }
     if (configuredInstalled && proxyDirty) {
@@ -567,7 +573,11 @@ function ConnectionPanel({
   const connectionLabel = preset.transport === "stdio"
     ? tx("settings.mcp.command", "Command")
     : tx("settings.mcp.endpointLabel", "Endpoint");
-  const connectLabel = configuredInstalled
+  const isRemoteOAuth = preset.auth === "oauth" && preset.transport !== "stdio";
+  const clientNameDirty = isRemoteOAuth && (values.oauth_client_name?.trim() || "nanobot") !== (preset.oauth_client_name?.trim() || "nanobot");
+  const connectLabel = clientNameDirty && configuredInstalled
+    ? tx("settings.mcp.saveReauthorize", "Save and reauthorize")
+    : configuredInstalled
     ? tx("settings.mcp.reconnect", "Reconnect")
     : tx("settings.mcp.setup", "Connect");
   return (
@@ -625,6 +635,12 @@ function ConnectionPanel({
         </div>
       </section>
 
+      {isRemoteOAuth ? (
+        <details className="mt-3 rounded-control bg-muted/40 px-4 py-3">
+          <summary className="cursor-pointer text-[12.5px] font-medium">{tx("settings.mcp.advancedOptions", "Advanced options")}</summary>
+          <OAuthClientNameField value={values.oauth_client_name ?? "nanobot"} disabled={busy} onChange={(value) => onFieldChange(preset.name, "oauth_client_name", value)} />
+        </details>
+      ) : null}
       {preset.error ? (
         <div role="alert" className="rounded-control bg-destructive/10 px-3.5 py-3 text-[12.5px] leading-5 text-destructive">
           {preset.error}

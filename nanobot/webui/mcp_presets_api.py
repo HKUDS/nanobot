@@ -21,6 +21,8 @@ from nanobot.agent.plugins import (
     set_agent_plugin_enabled,
 )
 from nanobot.agent.tools.mcp_oauth import (
+    MCPOAuthAdmission,
+    capture_mcp_oauth_admission,
     delete_mcp_oauth_credentials,
     mcp_oauth_has_credentials,
 )
@@ -309,6 +311,19 @@ def _validate_proxy(cfg: MCPServerConfig, network: NetworkConfig) -> None:
         raise McpPresetError(str(exc)) from None
 
 
+def _oauth_client_name(value: object) -> str:
+    try:
+        return MCPServerConfig.model_validate({"oauth_client_name": value}).oauth_client_name
+    except ValueError:
+        raise McpPresetError("OAuth client name must be at most 128 characters without control characters") from None
+
+
+def _apply_oauth_client_name(cfg: MCPServerConfig, query: QueryParams) -> None:
+    value = _query_first(query, "oauth_client_name")
+    if value is not None:
+        cfg.oauth_client_name = _oauth_client_name(value)
+
+
 def _materialize_server(
     preset: McpPreset,
     query: QueryParams,
@@ -318,6 +333,7 @@ def _materialize_server(
         raise McpPresetError(f"{preset.display_name} is not supported yet", status=409)
 
     cfg = _clone_server(existing or preset.server)
+    _apply_oauth_client_name(cfg, query)
     cfg.use_proxy = _proxy_enabled(query, cfg.use_proxy)
     for field_spec in preset.fields:
         value = _resolve_field_value(field_spec, query, existing)
@@ -363,7 +379,7 @@ def _status_for(preset: McpPreset, cfg: MCPServerConfig | None) -> str:
         return "not_installed" if preset.install_supported else "coming_soon"
     if any(field.required and not _field_configured(field, cfg) for field in preset.fields):
         return "missing_credentials"
-    if cfg.auth == "oauth" and not mcp_oauth_has_credentials(preset.name, cfg.url):
+    if cfg.auth == "oauth" and not mcp_oauth_has_credentials(preset.name, cfg.url, cfg.oauth_client_name):
         return "authorization_required"
     if cfg.command and not _command_available(cfg.command):
         return "missing_dependency"
@@ -499,6 +515,7 @@ def _preset_payload(preset: McpPreset, configured_servers: dict[str, MCPServerCo
         "docs_url": preset.docs_url,
         "transport": preset.transport,
         "auth": (cfg.auth if cfg is not None else (preset.server.auth if preset.server else None)),
+        "oauth_client_name": cfg.oauth_client_name if cfg is not None else "nanobot",
         "use_proxy": cfg.use_proxy if cfg is not None else False,
         "requires": preset.requires,
         "note": preset.note,
@@ -526,7 +543,7 @@ def _custom_payload(
     transport = cfg.type
     if not transport:
         transport = "stdio" if cfg.command else ("sse" if cfg.url.rstrip("/").endswith("/sse") else "streamableHttp")
-    if cfg.auth == "oauth" and not mcp_oauth_has_credentials(name, cfg.url):
+    if cfg.auth == "oauth" and not mcp_oauth_has_credentials(name, cfg.url, cfg.oauth_client_name):
         status = "authorization_required"
     else:
         status = "missing_dependency" if cfg.command and not _command_available(cfg.command) else "configured"
@@ -539,6 +556,7 @@ def _custom_payload(
         "docs_url": "",
         "transport": transport,
         "auth": cfg.auth,
+        "oauth_client_name": cfg.oauth_client_name,
         "use_proxy": cfg.use_proxy,
         "requires": "",
         "note": "",
@@ -1059,7 +1077,7 @@ def _mcp_server_config(name: str, raw: Any) -> tuple[str, MCPServerConfig]:
         enabled_tools = cast(list[object], enabled_tools_value)
         if not all(isinstance(item, str) for item in enabled_tools):
             enabled_tools_value = ["*"]
-    return server_name, MCPServerConfig(
+    cfg = MCPServerConfig(
         type=transport,
         auth=auth,
         command=command if transport == "stdio" else "",
@@ -1072,6 +1090,9 @@ def _mcp_server_config(name: str, raw: Any) -> tuple[str, MCPServerConfig]:
         tool_timeout=timeout_int,
         enabled_tools=cast(list[str], enabled_tools_value),
     )
+    if "oauthClientName" in server or "oauth_client_name" in server:
+        cfg.oauth_client_name = _oauth_client_name(server.get("oauthClientName", server.get("oauth_client_name")))
+    return server_name, cfg
 
 
 def _import_mcp_servers(raw_json: str | None) -> dict[str, MCPServerConfig]:
@@ -1099,7 +1120,10 @@ def _oauth_credentials_replaced(
 ) -> bool:
     if previous is None or previous.auth != "oauth":
         return False
-    return replacement.auth != "oauth" or replacement.url != previous.url
+    return (
+        replacement.auth != "oauth" or replacement.url != previous.url
+        or replacement.oauth_client_name != previous.oauth_client_name
+    )
 
 
 def custom_mcp_action(
@@ -1111,6 +1135,10 @@ def custom_mcp_action(
     config = load_config(config_path) if config_path is not None else load_config()
     if action == "custom":
         name, cfg = _custom_server_from_query(query)
+        previous = config.tools.mcp_servers.get(name)
+        if previous is not None and "oauth_client_name" not in query:
+            cfg.oauth_client_name = previous.oauth_client_name
+        _apply_oauth_client_name(cfg, query)
         _validate_proxy(cfg, config.network)
         delete_credentials = _oauth_credentials_replaced(config.tools.mcp_servers.get(name), cfg)
         config.tools.mcp_servers[name] = cfg
@@ -1126,7 +1154,10 @@ def custom_mcp_action(
 
     if action in {"import", "import-cursor"}:
         servers = _import_mcp_servers(_query_first(query, "config"))
-        for cfg in servers.values():
+        for name, cfg in servers.items():
+            previous = config.tools.mcp_servers.get(name)
+            if previous is not None and "oauth_client_name" not in cfg.model_fields_set:
+                cfg.oauth_client_name = previous.oauth_client_name
             _validate_proxy(cfg, config.network)
         delete_credentials = [
             name
@@ -1169,8 +1200,8 @@ def ensure_mcp_oauth_server(
     query: QueryParams,
     *,
     config_path: Path | None = None,
-) -> tuple[str, MCPServerConfig, NetworkConfig]:
-    """Materialize an OAuth preset on first click and return its saved config."""
+) -> tuple[str, MCPServerConfig, NetworkConfig, MCPOAuthAdmission]:
+    """Return saved config and admission; the caller must hold the settings mutation lock."""
     name = _validated_server_name((_query_first(query, "name") or "").strip())
     config = load_config(config_path) if config_path is not None else load_config()
     cfg = config.tools.mcp_servers.get(name)
@@ -1184,14 +1215,19 @@ def ensure_mcp_oauth_server(
         if preset.server is None or preset.server.auth != "oauth":
             raise McpPresetError("MCP server does not support browser authorization", status=409)
         cfg = _materialize_server(preset, query, cfg)
+    previous = config.tools.mcp_servers.get(name)
     cfg = _clone_server(cfg)
+    _apply_oauth_client_name(cfg, query)
     cfg.use_proxy = _proxy_enabled(query, cfg.use_proxy)
     _validate_proxy(cfg, config.network)
     if cfg.auth != "oauth" or cfg.type not in {"sse", "streamableHttp"} or not cfg.url:
         raise McpPresetError("MCP server is not configured for OAuth", status=409)
     config.tools.mcp_servers[name] = cfg
     save_config(config, config_path)
-    return name, cfg, config.network
+    if _oauth_credentials_replaced(previous, cfg):
+        delete_mcp_oauth_credentials(name)
+    admission = capture_mcp_oauth_admission(name, cfg.url, cfg.oauth_client_name)
+    return name, cfg, config.network, admission
 
 
 def mcp_presets_action(
@@ -1230,6 +1266,8 @@ def mcp_presets_action(
         _validate_proxy(cfg, config.network)
         config.tools.mcp_servers[preset.name] = cfg
         save_config(config, config_path)
+        if _oauth_credentials_replaced(existing, cfg):
+            delete_mcp_oauth_credentials(preset.name)
         payload = mcp_presets_payload(
             last_action=_action_message(action, preset),
             config_path=config_path,

@@ -163,6 +163,10 @@ function compactMcpValues(values: Record<string, unknown>): Record<string, unkno
   const payload: Record<string, unknown> = {};
   Object.entries(values).forEach(([key, value]) => {
     if (value === null || value === undefined) return;
+    if (key === "oauth_client_name") {
+      payload[key] = value;
+      return;
+    }
     if (typeof value === "string") {
       const trimmed = value.trim();
       if (trimmed) payload[key] = trimmed;

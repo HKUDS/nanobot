@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { OAuthClientNameField } from "@/components/settings/system/OAuthClientNameField";
 import { CatalogSkeleton } from "@/components/settings/shared/CatalogSkeleton";
 import { ProxySettingsControl } from "@/components/settings/shared/ProxySettingsControl";
 
@@ -86,6 +87,7 @@ export interface CustomMcpForm {
   headers: string;
   toolTimeout: string;
   useProxy: boolean;
+  oauthClientName: string;
 }
 
 export const DEFAULT_CUSTOM_MCP_FORM: CustomMcpForm = {
@@ -99,6 +101,7 @@ export const DEFAULT_CUSTOM_MCP_FORM: CustomMcpForm = {
   headers: "",
   toolTimeout: "30",
   useProxy: false,
+  oauthClientName: "nanobot",
 };
 
 export function AppsCatalogSettings({
@@ -612,8 +615,14 @@ function McpAppsCatalogRow({
   return (
     <article className="min-w-0 rounded-control transition-colors settings-hover">
       <div className="group flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-3 py-3">
+        <button
+          type="button"
+          aria-label={preset.display_name}
+          onClick={() => openManagement()}
+          className="flex min-w-0 flex-[1_1_8rem] items-center gap-3 rounded-control text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
         <McpPresetLogo preset={preset} showBrandLogos={showBrandLogos} />
-        <div className="min-w-[8rem] flex-[1_1_8rem]">
+        <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
             <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">{preset.display_name}</h3>
             {showTypeBadge ? (
@@ -641,6 +650,7 @@ function McpAppsCatalogRow({
             ) : null}
           </p>
         </div>
+        </button>
         <div className="ml-auto flex shrink-0 items-center gap-1">
           {oauthFlow ? (
             <>
@@ -1224,6 +1234,10 @@ function McpCustomServerPanel({
           </Button>
 
           {advancedOpen ? (
+            <>
+              {remote && form.auth === "oauth" ? (
+                <OAuthClientNameField value={form.oauthClientName} onChange={(value) => update("oauthClientName", value)} disabled={customBusy} />
+              ) : null}
             <div
               className={cn(
                 "mt-2 grid gap-2",
@@ -1264,6 +1278,7 @@ function McpCustomServerPanel({
                 />
               </label>
             </div>
+            </>
           ) : null}
 
           <div className="mt-3 flex justify-end">
