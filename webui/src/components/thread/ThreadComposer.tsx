@@ -1574,7 +1574,7 @@ export function ThreadComposer({
       const rejection = addLocal(pathInspection.attachment);
       if (rejection) setInlineError(formatRejection(rejection));
       else {
-        replaceMentionInput(edited.value, edited.cursor);
+        replaceMentionInput(edited.value, edited.cursor, { preserveFocus: true });
         setInlineError(null);
       }
     }

@@ -477,6 +477,20 @@ describe("local attachment paths and video ingress", () => {
     expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled();
   });
 
+  it("does not steal toolbar focus when a pending path is confirmed", async () => {
+    let complete!: (attachment: typeof local) => void;
+    render(<ThreadComposer onSend={vi.fn()} onInspectAttachment={() => new Promise((resolve) => { complete = resolve; })} />);
+    const input = screen.getByLabelText(/message input/i);
+    await waitFor(() => expect(input).toHaveFocus());
+    fireEvent.paste(input, { clipboardData: { items: [], getData: () => local.path } });
+    const attach = screen.getByRole("button", { name: /attach/i });
+    attach.focus();
+    expect(attach).toHaveFocus();
+    await act(async () => complete(local));
+    await screen.findByTestId("composer-chip");
+    expect(attach).toHaveFocus();
+  });
+
   it("lets an IME composition finish before converting its pasted path", async () => {
     let complete!: (attachment: typeof local) => void;
     render(<ThreadComposer onSend={vi.fn()} onInspectAttachment={() => new Promise((resolve) => { complete = resolve; })} />);
