@@ -199,7 +199,7 @@ export function useSettingsController({
     if (!shouldApplyRestartedSettings || !initialSettings) {
       return;
     }
-    applyPayload(initialSettings);
+    applyPayload(initialSettings, { preserveAgentForm: true, preserveCapabilityForms: true });
   }, [applyPayload, initialSettings, settings]);
 
   useEffect(() => {

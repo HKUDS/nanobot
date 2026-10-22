@@ -203,6 +203,7 @@ export function ModelsSettings({
   setForm,
   editingPresetName,
   presetNameError,
+  error,
   settings,
   dirty,
   creating,
@@ -233,6 +234,7 @@ export function ModelsSettings({
   setForm: Dispatch<SetStateAction<AgentSettingsDraft>>;
   editingPresetName: string;
   presetNameError: string | null;
+  error?: string | null;
   settings: SettingsPayload;
   dirty: boolean;
   creating: boolean;
@@ -624,6 +626,7 @@ export function ModelsSettings({
               </div>
             )}
           </div>
+          {error ? <p role="alert" className="settings-list-inset pb-4 text-[13px] text-destructive">{error}</p> : null}
         </DialogContent>
       </Dialog>
       <div className="settings-list-inset flex min-h-[58px] flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -943,6 +946,7 @@ export function ModelsSettings({
             {creating ? tx("settings.models.newPreset", "New model preset") : selectedPreset?.name}
           </DialogTitle>
           <div className="settings-grid !px-0 pt-8">{renderPresetEditor()}</div>
+          {error && !advancedOpen ? <p role="alert" className="settings-list-inset pb-4 text-[13px] text-destructive">{error}</p> : null}
         </DialogContent>
       </Dialog>
     </div>

@@ -468,7 +468,7 @@ function ChannelSetupSurface({
     }} onChangeField={setFieldValue}
     onToggleSecret={toggleSecret} onClearSecret={setSecretCleared} onApplyPreset={applyPreset}
     onSubmit={saveCredentialSettings} onCheckConnection={checkCurrentSettings} onToggleEnabled={toggleEnabled}
-    onSaveConnectionSettings={() => { void edits.commit(); }} onCopyCommand={copyCommand} onNotice={setNotice}
+    onCopyCommand={copyCommand} onNotice={setNotice}
     connectFlow={mode === "connect" && ConnectFlow ? <Suspense fallback={<ChannelPluginLoading compact />}>
       <ConnectFlow token={token} feature={feature}
         idleLabel={setup.primaryActionLabel ?? tx("settings.channels.connect", "Connect")}

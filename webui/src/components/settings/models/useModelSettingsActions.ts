@@ -139,7 +139,7 @@ export function useModelSettingsActions({
 
   const presetNameConflict = (name: string, currentName?: string) => {
     const normalized = name.toLowerCase();
-    return settings?.model_presets.some(
+    return latestSettings.current?.model_presets.some(
       (preset) =>
         !preset.is_default &&
         preset.name !== currentName &&

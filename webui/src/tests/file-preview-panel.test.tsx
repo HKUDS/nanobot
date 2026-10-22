@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
+import { preloadMarkdownText } from "@/components/MarkdownText";
 import { CodeBlock } from "@/components/CodeBlock";
 import { PreviewPane } from "@/components/PreviewPane";
 import { FilePreviewStore, useFilePreviewState } from "@/hooks/useFilePreviewState";
@@ -38,6 +39,8 @@ vi.mock("@/lib/api", async (importOriginal) => {
 });
 
 describe("FilePreviewPanel", () => {
+  beforeAll(preloadMarkdownText);
+
   beforeEach(async () => {
     await setAppLanguage("en");
     vi.mocked(fetchFilePreview).mockReset();

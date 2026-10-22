@@ -169,10 +169,10 @@ export function SettingsPage({
   };
   // Credential repair retains the capability draft in this controller rather than discarding it.
   const configureCapabilityProviders = () => selectSectionNow("models");
-  const requestExit = useCallback<SettingsExitGuard>((leave) => {
+  const requestExit = useCallback<SettingsExitGuard>((leave, { promptRestart = true } = {}) => {
     const finish = () => {
       const current = latestExitState.current;
-      if (current.requiresRestart && !current.restartInProgress) setPendingExit(() => leave);
+      if (promptRestart && current.requiresRestart && !current.restartInProgress) setPendingExit(() => leave);
       else leave();
     };
     if (!needsCompletion()) finish();
@@ -284,6 +284,7 @@ export function SettingsPage({
               setForm={modelState.setForm}
               editingPresetName={modelState.modelPresetEditingName}
               presetNameError={modelState.modelPresetNameError}
+              error={error}
               settings={settings}
               dirty={modelDirty}
               creating={modelState.modelPresetCreating}

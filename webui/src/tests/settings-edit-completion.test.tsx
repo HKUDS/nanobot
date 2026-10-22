@@ -4,6 +4,8 @@ import { installSettingsViewTestHooks, renderSettingsView, requestMutationMock, 
 import { describe, expect, it, vi } from "vitest";
 import { useEditCompletion, type EditCompletion } from "@/components/settings/shared/useEditCompletion";
 import { NumberInput } from "@/components/settings/shared/SettingsControls";
+import { ReasoningEffortPicker } from "@/components/settings/models/ReasoningEffortPicker";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -27,6 +29,36 @@ function Editor({ save, identity = "a", expose }: {
 }
 
 describe("settings edit completion", () => {
+  it("does not restore a closing picker over a newer focused input", async () => {
+    vi.useFakeTimers();
+    try {
+      render(<Dialog open><DialogContent aria-describedby={undefined}><DialogTitle>Model</DialogTitle>
+        <ReasoningEffortPicker token="test" provider={undefined} model="test" value="" onChange={() => {}} />
+        <input aria-label="Next field" />
+      </DialogContent></Dialog>);
+      const effort = screen.getByRole("combobox", { name: "Reasoning effort" });
+      effort.focus();
+      fireEvent.click(effort);
+      const option = screen.getByRole("option", { name: "Default" });
+      option.focus();
+      fireEvent.click(option);
+      // The enclosing Radix focus scope recovers here after the option is removed.
+      screen.getByRole("dialog").focus();
+      await act(async () => { vi.runOnlyPendingTimers(); });
+      expect(effort).toHaveFocus();
+      fireEvent.click(effort);
+      const selected = screen.getByRole("option", { name: "Default" });
+      selected.focus();
+      fireEvent.click(selected);
+      const next = screen.getByRole("textbox", { name: "Next field" });
+      next.focus();
+      await act(async () => { vi.runOnlyPendingTimers(); });
+      expect(next).toHaveFocus();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps text draft through pauses, then deduplicates blur and close", async () => {
     const pending = deferred<boolean>();
     const save = vi.fn(() => pending.promise);
@@ -197,8 +229,68 @@ describe("model editor completion boundaries", () => {
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledTimes(1));
     await act(async () => {});
     expect(screen.getByRole("textbox", { name: "Preset name" })).toHaveValue("Renamed");
+    expect(within(screen.getByRole("dialog")).getByRole("alert")).toHaveTextContent("Save failed");
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(requestMutationMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a failed context-window save visible in the advanced dialog", async () => {
+    const payload = settingsPayload();
+    requestMutationMock.mockRejectedValueOnce(new Error("Save failed"));
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    fireEvent.click(within(screen.getByTestId("model-call-order-row-primary")).getAllByRole("button")[0]);
+    fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
+    const context = screen.getByRole("textbox", { name: "Context window" });
+    fireEvent.focus(context);
+    fireEvent.change(context, { target: { value: "500k" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledTimes(1));
+    expect(within(screen.getByRole("dialog", { name: "Advanced options" })).getByRole("alert")).toHaveTextContent("Save failed");
+    expect(context).toHaveValue("500k");
+  });
+
+  it("does not let an unchanged reasoning selection complete subsequent typing", async () => {
+    renderSettingsView({ initialSection: "models", initialSettings: settingsPayload() });
+    fireEvent.click(within(screen.getByTestId("model-call-order-row-primary")).getAllByRole("button")[0]);
+    const effort = screen.getByRole("combobox", { name: "Reasoning effort" });
+    fireEvent.click(effort);
+    fireEvent.click(await screen.findByRole("option", { name: "Default" }));
+    fireEvent.focus(effort);
+    fireEvent.change(effort, { target: { value: "m" } });
+    await act(async () => {});
+    expect(effort).toHaveValue("m");
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    fireEvent.blur(effort);
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.model_configuration.update", { name: "primary", reasoning_effort: "m" }, 20_000,
+    ));
+  });
+
+  it("queues a rename back to its original name using the latest catalog", async () => {
+    const payload = settingsPayload();
+    const first = deferred<ReturnType<typeof settingsPayload>>();
+    requestMutationMock.mockReturnValueOnce(first.promise).mockResolvedValueOnce(payload);
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    fireEvent.click(within(screen.getByTestId("model-call-order-row-primary")).getAllByRole("button")[0]);
+    const name = screen.getByRole("textbox", { name: "Preset name" });
+    fireEvent.focus(name);
+    fireEvent.change(name, { target: { value: "First" } });
+    fireEvent.blur(name);
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledTimes(1));
+    fireEvent.focus(name);
+    fireEvent.change(name, { target: { value: "primary" } });
+    fireEvent.blur(name);
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await act(async () => first.resolve({
+      ...payload, model_presets: payload.model_presets.map((preset) => ({ ...preset, name: "First", label: "First" })),
+      model_call_order: ["First"],
+    }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.model_configuration.update", { name: "First", new_name: "primary" }, 20_000,
+    ));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByTestId("model-call-order-row-primary")).toBeInTheDocument();
     expect(requestMutationMock).toHaveBeenCalledTimes(2);
   });
 

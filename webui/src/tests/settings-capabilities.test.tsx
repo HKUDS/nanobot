@@ -1,4 +1,7 @@
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
+import { SettingsView } from "@/components/settings/SettingsView";
+import { ClientProvider } from "@/providers/ClientProvider";
 import { expect, it, vi } from "vitest";
 import type { SettingsPayload } from "@/lib/types";
 import { DEFAULT_TRANSCRIPTION_SETTINGS } from "@/components/settings/capabilities/TranscriptionSettings";
@@ -490,12 +493,30 @@ describe("Settings capabilities", () => {
     const saved = { ...payload, requires_restart: true, transcription: { ...payload.transcription, language: "zh" } };
     let finishRestart!: (token: string) => void;
     const restart = vi.fn(() => new Promise<string>((resolve) => { finishRestart = resolve; }));
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === "/api/settings") return jsonResponse({ ...saved, requires_restart: false });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/settings") return jsonResponse(
+        (init?.headers as Record<string, string> | undefined)?.Authorization === "Bearer fresh-token"
+          ? { ...saved, requires_restart: false } : payload,
+      );
       return jsonResponse({ apps: [], presets: [], installed_count: 0 });
     }));
     requestMutationMock.mockResolvedValueOnce(saved);
-    renderSettingsView({ initialSection: "voice", initialSettings: payload, onNativeEngineRestart: restart });
+    let refreshParent!: (snapshot: SettingsPayload) => void;
+    let parentSnapshot: SettingsPayload = payload;
+    function Parent() {
+      const [snapshot, setSnapshot] = useState<SettingsPayload>(payload);
+      parentSnapshot = snapshot;
+      refreshParent = setSnapshot;
+      return <ClientProvider client={{ requestMutation: requestMutationMock, status: "open",
+        onStatus: (handler: (status: "open") => void) => { handler("open"); return () => {}; },
+      } as never} token="tok">
+        <SettingsView theme="light" initialSection="voice" initialSettings={snapshot}
+          onSettingsChange={setSnapshot} onNativeEngineRestart={restart}
+          onToggleTheme={() => {}} onBackToChat={() => {}} onModelNameChange={() => {}} />
+      </ClientProvider>;
+    }
+    render(<Parent />);
+    await act(async () => {});
     const language = screen.getByPlaceholderText("Auto");
     fireEvent.focus(language);
     fireEvent.change(language, { target: { value: "zh" } });
@@ -503,6 +524,9 @@ describe("Settings capabilities", () => {
     await waitFor(() => expect(restart).toHaveBeenCalledTimes(1));
     fireEvent.focus(language);
     fireEvent.change(language, { target: { value: "ja" } });
+    expect(parentSnapshot.requires_restart).toBe(true);
+    await act(async () => refreshParent({ ...saved, requires_restart: false }));
+    expect(language).toHaveValue("ja");
     await act(async () => finishRestart("fresh-token"));
     expect(language).toHaveValue("ja");
     expect(requestMutationMock).toHaveBeenCalledTimes(1);

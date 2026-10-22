@@ -83,7 +83,11 @@ export function ReasoningEffortPicker({ token, provider, model, savedValues, val
         onOpenAutoFocus={(event) => event.preventDefault()}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
-          if (restoreFocus.current) input.current?.focus({ preventScroll: true });
+          const active = document.activeElement;
+          const owner = input.current?.closest('[role="dialog"]');
+          if (restoreFocus.current && (active === document.body || active === input.current || active === owner)) {
+            input.current?.focus({ preventScroll: true });
+          }
           restoreFocus.current = false;
         }}
         onEscapeKeyDown={() => { restoreFocus.current = true; }}

@@ -86,8 +86,10 @@ export function useEditCompletion(value: unknown, dirty: boolean, onSave: Draft[
     commit,
     complete: () => { completed.current = true; },
     onChangeCapture: (event: FormEvent<HTMLElement>) => {
-      if (isDraftInput(event.target)) focused.current = true;
-      else completed.current = true;
+      if (isDraftInput(event.target)) {
+        focused.current = true;
+        completed.current = false;
+      } else completed.current = true;
     },
     needsCompletion: () => latest.current.dirty || outstanding.current > 0,
     onFocusCapture: (event: FocusEvent<HTMLElement>) => {

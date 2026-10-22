@@ -100,7 +100,6 @@ function ChannelFormPreview({ name, mode, locale, t }: {
       onSubmit={() => { if (validate()) setEnabled(true); }}
       onCheckConnection={() => { if (validate()) setChecked(true); }}
       onToggleEnabled={(next) => { if (!next || validate()) setEnabled(next); }}
-      onSaveConnectionSettings={() => setSaved(true)}
       onCopyCommand={() => { if (setup.command) void copyTextToClipboard(setup.command).then((ok) => setNotice({ key: ok ? "settings.channels.commandCopied" : "settings.channels.commandCopyFailed" })); }}
       onNotice={(message) => setNotice(message ? { message } : null)} />
   </aside>;
