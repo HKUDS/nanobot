@@ -1721,16 +1721,12 @@ class AgentLoop:
                     try:
                         key = self._effective_session_key(msg)
                         session = await self.sessions.state.get(key)
-                        if restore_runtime_checkpoint(session):
-                            self._clear_pending_user_turn(session)
-                            await self.sessions.state.restore_interruption(session)
-                            logger.info(
-                                "Restored partial context for cancelled session {}",
-                                key,
-                            )
+                        restore_runtime_checkpoint(session)
+                        await self.sessions.state.finish_turn(session)
+                        logger.info("Saved cancelled turn for session {}", key)
                     except Exception:
                         logger.opt(exception=log_content).debug(
-                            "Could not restore checkpoint for cancelled session {}",
+                            "Could not finalize cancelled turn for session {}",
                             session_key,
                         )
                     raise

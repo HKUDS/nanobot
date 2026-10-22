@@ -15,8 +15,10 @@ from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.session.manager import SessionManager
 from nanobot.session.recovery import (
+    PENDING_USER_TURN_KEY,
     RECOVERY_METADATA_KEY,
     REQUEST_ORIGIN_METADATA_KEY,
+    RUNTIME_CHECKPOINT_KEY,
 )
 from nanobot.session.turn_continuation import INTERNAL_CONTINUATION_META
 from nanobot.session.webui_turns import WebuiTurnCoordinator, WebuiTurnRoutePolicy
@@ -277,3 +279,80 @@ async def test_recovery_preserves_turn_origin_until_the_next_user_turn(
         }
     finally:
         await loop.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_tools", [False, True], ids=["before_response", "after_tools"])
+@pytest.mark.parametrize("gateway_shutdown", [False, True], ids=["explicit_stop", "gateway_shutdown"])
+async def test_recovery_distinguishes_explicit_stop_from_gateway_shutdown(
+    tmp_path: Path, with_tools: bool, gateway_shutdown: bool,
+) -> None:
+    bus = MessageBus()
+    sessions = SessionManager(tmp_path)
+    recovery = RecoveryCoordinator(sessions, bus)
+    provider = MagicMock(aclose=AsyncMock())
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings()
+    provider.can_resume_conversation_state.return_value = False
+    entered = asyncio.Event()
+    requests = 0
+    note = tmp_path / "note.txt"
+    note.write_text("saved evidence", encoding="utf-8")
+
+    async def respond(**kwargs):
+        nonlocal requests
+        requests += 1
+        if with_tools and requests == 1:
+            return LLMResponse(content=None, tool_calls=[ToolCallRequest(
+                "read-once", "read_file", {"path": str(note)},
+            )])
+        entered.set()
+        await asyncio.Event().wait()
+
+    provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    loop = AgentLoop(
+        bus=bus, provider=provider, workspace=tmp_path, model="test-model",
+        session_manager=sessions, recovery_admission=recovery,
+        turn_delivery_factory=TurnDeliveryFactory(bus, WebuiTurnRoutePolicy(sessions)),
+    )
+    coordinator = WebuiTurnCoordinator(bus, sessions, loop.schedule_background, recovery=recovery)
+    request = InboundMessage(
+        channel="websocket", sender_id="user", chat_id="chat", content="Read the note and summarize",
+        metadata={"webui": True, "webui_turn_id": "request-1"},
+    )
+    try:
+        with coordinator.connected():
+            await loop._dispatch_inbound(request)
+            await asyncio.wait_for(entered.wait(), 5)
+            if gateway_shutdown:
+                loop.preserve_inflight_turns_on_shutdown()
+            else:
+                await loop._dispatch_inbound(InboundMessage(
+                    channel="websocket", sender_id="user", chat_id="chat", content="/stop",
+                    metadata={"webui": True},
+                ))
+                outbound = [bus.outbound.get_nowait() for _ in range(bus.outbound.qsize())]
+                assert any(message.content == "Stopped 1 task(s)." for message in outbound)
+    finally:
+        await loop.aclose()
+
+    restarted = SessionManager(tmp_path)
+    try:
+        saved = await restarted.state.get(request.session_key)
+        assert bool(saved.metadata.get(PENDING_USER_TURN_KEY)) is gateway_shutdown
+        assert (RUNTIME_CHECKPOINT_KEY in saved.metadata) is (gateway_shutdown and with_tools)
+        if with_tools and not gateway_shutdown:
+            assert any(
+                row.get("role") == "tool" and "saved evidence" in row["content"]
+                for row in saved.messages
+            )
+
+        await RecoveryCoordinator(restarted, MessageBus()).scan()
+        restored = await restarted.state.get(request.session_key)
+        if gateway_shutdown:
+            assert restored.metadata[RECOVERY_METADATA_KEY]["status"] == "awaiting_user"
+            assert restored.metadata[RECOVERY_METADATA_KEY]["reason"] == "restart_requires_confirmation"
+        else:
+            assert RECOVERY_METADATA_KEY not in restored.metadata
+    finally:
+        await restarted.state.aclose()
