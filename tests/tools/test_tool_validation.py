@@ -979,6 +979,7 @@ async def test_exec_timeout_parameter(runtime_parameter) -> None:
     started_at = time.monotonic()
     result = await tool.execute(
         command=[sys.executable, "-c", "import time; time.sleep(10)"],
+        yield_time_ms=5000,
         **{runtime_parameter: 1},
     )
 

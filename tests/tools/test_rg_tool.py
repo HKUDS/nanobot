@@ -181,6 +181,7 @@ async def test_direct_process_preserves_arguments_and_output_limit(tmp_path):
 async def test_direct_process_timeout(tmp_path):
     result = await ExecTool(working_dir=str(tmp_path)).execute(
         command=[sys.executable, "-c", "import time; time.sleep(20)"], timeout=1,
+        yield_time_ms=5000,
     )
     assert "Reason: max_runtime" in result
     assert "Exit code:" in result

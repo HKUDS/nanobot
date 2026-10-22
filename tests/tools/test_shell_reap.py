@@ -377,6 +377,7 @@ async def test_execute_timeout_kills_background_process_tree(tmp_path):
     result = await ExecTool(working_dir=str(tmp_path), timeout=1).execute(
         command=command,
         timeout=1,
+        yield_time_ms=5000,
     )
 
     assert "timed out" in result.lower()
@@ -557,7 +558,7 @@ async def test_real_timeout_leaves_no_zombie(tmp_path):
     import os
 
     tool = ExecTool(working_dir=str(tmp_path), timeout=1)
-    result = await tool.execute(command="sleep 30", timeout=1)
+    result = await tool.execute(command="sleep 30", timeout=1, yield_time_ms=5000)
     assert "timed out" in result.lower()
 
     await asyncio.sleep(0.05)
