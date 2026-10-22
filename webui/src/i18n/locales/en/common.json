@@ -2011,7 +2011,7 @@
           "started": "Automatically compacting context after inactivity",
           "succeeded": "Context automatically compacted after inactivity",
           "failed": "Automatic context compaction failed after inactivity",
-          "cancelled": "Automatic context compaction interrupted after inactivity"
+          "cancelled": "Automatic compaction after inactivity did not finish"
         },
         "context_pressure": {
           "started": "Compacting a long context",

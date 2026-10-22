@@ -1811,7 +1811,7 @@
           "started": "Memadatkan konteks secara otomatis saat tidak ada pesan baru",
           "succeeded": "Konteks dipadatkan otomatis saat tidak ada pesan baru",
           "failed": "Gagal memadatkan konteks secara otomatis saat tidak ada pesan baru",
-          "cancelled": "Pemadatan konteks otomatis saat tidak ada pesan baru terhenti"
+          "cancelled": "Pemadatan konteks otomatis saat tidak ada pesan baru tidak selesai"
         },
         "context_pressure": {
           "started": "Memadatkan konteks karena sudah panjang",

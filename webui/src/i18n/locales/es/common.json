@@ -1812,7 +1812,7 @@
           "started": "Compresión automática por inactividad en curso",
           "succeeded": "Compresión automática por inactividad completada",
           "failed": "Falló la compresión automática por inactividad",
-          "cancelled": "Compresión automática por inactividad interrumpida"
+          "cancelled": "No se completó la compresión automática por inactividad"
         },
         "context_pressure": {
           "started": "Comprimiendo un contexto extenso",

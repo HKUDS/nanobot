@@ -1811,7 +1811,7 @@
           "started": "對話閒置，正在自動壓縮上下文",
           "succeeded": "對話閒置，已自動壓縮上下文",
           "failed": "閒置時自動壓縮上下文失敗",
-          "cancelled": "閒置時的上下文壓縮已中斷"
+          "cancelled": "閒置期間的自動壓縮未完成"
         },
         "context_pressure": {
           "started": "上下文較長，正在壓縮",

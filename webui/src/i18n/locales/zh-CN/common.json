@@ -2011,7 +2011,7 @@
           "started": "会话空闲，正在自动压缩上下文",
           "succeeded": "会话空闲，已自动压缩上下文",
           "failed": "空闲时自动压缩上下文失败",
-          "cancelled": "空闲时的上下文压缩已中断"
+          "cancelled": "空闲期间的自动压缩未完成"
         },
         "context_pressure": {
           "started": "上下文较长，正在压缩",

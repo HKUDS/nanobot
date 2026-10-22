@@ -1811,7 +1811,7 @@
           "started": "Conversation inactive : compression automatique en cours",
           "succeeded": "Conversation inactive : compression automatique terminée",
           "failed": "Conversation inactive : échec de la compression automatique",
-          "cancelled": "Conversation inactive : compression automatique interrompue"
+          "cancelled": "Conversation inactive : compression automatique non terminée"
         },
         "context_pressure": {
           "started": "Compression d’un contexte volumineux en cours",

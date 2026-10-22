@@ -1811,7 +1811,7 @@
           "started": "Đang tự động nén ngữ cảnh khi không có tin nhắn mới",
           "succeeded": "Đã tự động nén ngữ cảnh khi không có tin nhắn mới",
           "failed": "Không thể tự động nén ngữ cảnh khi không có tin nhắn mới",
-          "cancelled": "Quá trình tự động nén ngữ cảnh khi không có tin nhắn mới bị gián đoạn"
+          "cancelled": "Quá trình tự động nén ngữ cảnh khi không có tin nhắn mới không hoàn tất"
         },
         "context_pressure": {
           "started": "Đang nén vì ngữ cảnh đã dài",
