@@ -56,7 +56,6 @@ class FakeSocket {
     this.fakeMessage({ event: "run_state", chat_id: chatId, run_state: {
       instance_id: "gateway", revision: ++this.runtimeRevision,
       runs: startedAt === null ? [] : [{ run_id: turnId ?? `owner:${chatId}`, turn_id: turnId, phase: "running", started_at: startedAt }],
-      completed: [],
     } });
   }
 

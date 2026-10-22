@@ -2,7 +2,7 @@ import { useEffect } from "react";
 
 import { persistedCanonicalRunState } from "@/lib/canonical-run-snapshot";
 import { fetchLatestWebuiThread } from "@/lib/latest-thread-request";
-import type { NanobotClient, RunState } from "@/lib/nanobot-client";
+import type { NanobotClient } from "@/lib/nanobot-client";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
 
 const RECONNECT_READ_CONCURRENCY = 4;
@@ -11,12 +11,9 @@ const RECONNECT_READ_CONCURRENCY = 4;
 export function useReconnectRuns(client: NanobotClient, getToken: () => string): void {
   useEffect(() => {
     let controller: AbortController | null = null;
-    let workers = 0;
     const queued = new Set<string>();
     const inFlight = new Set<string>();
-    const retry = new Set<string>();
-    const freshness = new Map<string, RunState["freshness"]>();
-    const needsFreshRetry = new Set<string>();
+    const refreshPending = new Set<string>();
     const recover = async (chatId: string, signal: AbortSignal) => {
       const generation = client.getRunGeneration(chatId);
       const turnId = client.getRunTurnId(chatId);
@@ -40,52 +37,41 @@ export function useReconnectRuns(client: NanobotClient, getToken: () => string):
     const drain = () => {
       if (!controller || controller.signal.aborted) return;
       const signal = controller.signal;
-      while (workers < RECONNECT_READ_CONCURRENCY && queued.size > 0) {
-        const chatId = queued.values().next().value!;
+      for (const chatId of queued) {
+        if (inFlight.size >= RECONNECT_READ_CONCURRENCY) break;
+        const { freshness } = client.getRunState(chatId);
+        // Ready establishes legacy unavailability; current hosts also owe a socket baseline.
+        if (freshness !== "fresh" && freshness !== "unavailable") continue;
         queued.delete(chatId);
         inFlight.add(chatId);
-        workers += 1;
         void recover(chatId, signal).catch(() => {
           // A failed read leaves this result unresolved; other chats can recover.
         }).finally(() => {
           if (signal !== controller?.signal) return;
-          workers -= 1;
           inFlight.delete(chatId);
-          if (retry.delete(chatId) && client.getUnsettledRunChatIds().includes(chatId)) queued.add(chatId);
+          if (refreshPending.delete(chatId) && client.getUnsettledRunChatIds().includes(chatId)) queued.add(chatId);
           drain();
         });
       }
     };
     const enqueue = (chatId: string) => {
       if (!controller || !client.getUnsettledRunChatIds().includes(chatId)) return;
-      if (inFlight.has(chatId)) retry.add(chatId);
+      if (inFlight.has(chatId)) refreshPending.add(chatId);
       else queued.add(chatId);
       drain();
     };
     const unsubscribe = client.onStatus((status) => {
       controller?.abort();
       controller = status === "open" ? new AbortController() : null;
-      workers = 0;
       queued.clear();
       inFlight.clear();
-      retry.clear();
-      freshness.clear();
-      needsFreshRetry.clear();
-      if (status === "open") for (const chatId of client.getUnsettledRunChatIds()) {
-        needsFreshRetry.add(chatId);
-        enqueue(chatId);
+      refreshPending.clear();
+      if (status === "open") {
+        for (const chatId of client.getUnsettledRunChatIds()) queued.add(chatId);
+        drain();
       }
     });
-    const unsubscribeRuns = client.onRunStatus((chatId, state) => {
-      const previous = freshness.get(chatId);
-      freshness.set(chatId, state.freshness);
-      // Socket open precedes the authenticated ready pin. Retry reads/ingestion
-      // after a fresh baseline, never granting HTTP snapshots their own epoch.
-      if (state.freshness === "fresh" && previous !== "fresh" && needsFreshRetry.delete(chatId)) {
-        if (inFlight.has(chatId)) retry.add(chatId);
-        else enqueue(chatId);
-      }
-    });
+    const unsubscribeRuns = client.onRunStatus(drain);
     const unsubscribeCompletion = client.onRunCompletion(enqueue);
     return () => {
       controller?.abort();

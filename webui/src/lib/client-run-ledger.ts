@@ -40,10 +40,8 @@ export type RunObservation = Readonly<{
   turnId: string | null;
   systemCommand?: boolean;
 }> & (
-  | { kind: "admission" | "input"; owner?: { turnId: string; startedAt?: number } }
-  | { kind: "status"; activity: "running" | "idle"; startedAt?: number }
-  | { kind: "completed" | "message" | "progress" | "activity" | "rejection" }
-  | { kind: "recovery"; active: boolean }
+  | { kind: "admission" | "input"; owner?: string }
+  | { kind: "completed" | "message" | "receipt" | "idle" | "rejection" }
 );
 
 type Command =
@@ -267,7 +265,7 @@ export class ClientRunLedger {
     const { chatId, turnId } = observation;
     let chat = this.chats.get(chatId);
     const effects: RunEffect[] = [];
-    if (observation.kind === "status" && observation.activity === "idle"
+    if (observation.kind === "idle"
       && ((turnId === null && this.hasOpenTurn(chat))
         || (turnId !== null && chat?.latestTurnId != null && turnId !== chat.latestTurnId))) {
       return { forward: "drop", effects };
@@ -275,11 +273,11 @@ export class ClientRunLedger {
     if (turnId !== null && chat?.fenced.has(turnId)) return { forward: "drop", effects };
     if (turnId && chat?.closed.has(turnId) && observation.kind !== "admission" && observation.kind !== "input"
       && observation.kind !== "message" && observation.kind !== "completed"
-      && !(observation.kind === "status" && observation.activity === "idle")) return { forward: "drop", effects };
+      && observation.kind !== "idle") return { forward: "drop", effects };
     let forward: ObservationResult["forward"] = "normal";
     if (!observation.systemCommand) {
-      if ((observation.kind === "admission" || observation.kind === "input") && observation.owner?.turnId) {
-        const owner = observation.owner.turnId;
+      if ((observation.kind === "admission" || observation.kind === "input") && observation.owner) {
+        const owner = observation.owner;
         chat = this.ensureChat(chatId);
         if (chat.closed.has(owner) || chat.fenced.has(owner)) {
           if (turnId && turnId !== owner && chat.turns.get(turnId)?.delivery?.role === "candidate-owner") {

@@ -1220,11 +1220,11 @@ def _trace_summary(line: str) -> str:
 def has_pending_tool_calls(
     lines: list[dict[str, Any]],
     *,
-    active_turn_started_at: float | None = None,
-    active_turn_id: str | None = None,
-    active_turn_transcript_persistence_failed: bool = False,
+    transcript_pending: bool = False,
 ) -> bool:
-    """Return True when the selected transcript tail looks like an unfinished turn."""
+    """Return True when the selected transcript has not safely finished persisting."""
+    if transcript_pending:
+        return True
     # An older canonical turn can remain unsafe even after a later turn
     # completes. Recovery removes this marker only after matching durable
     # session history, so no later turn_end may hide it.
@@ -1233,20 +1233,6 @@ def has_pending_tool_calls(
         for rec in lines
     ):
         return True
-    if active_turn_started_at is not None:
-        if active_turn_transcript_persistence_failed:
-            return True
-        if active_turn_id is None:
-            return True
-        for rec in reversed(lines):
-            transcript_turn_id = rec.get("turn_id")
-            if not isinstance(transcript_turn_id, str) or not transcript_turn_id:
-                continue
-            if transcript_turn_id != active_turn_id:
-                return True
-            return rec.get("event") != "turn_end"
-        return True
-
     for rec in reversed(lines):
         ev = rec.get("event")
         if ev == "turn_end":
@@ -1750,9 +1736,8 @@ def build_webui_thread_response(
     session_messages: list[dict[str, Any]] | None = None,
     session_messages_loader: Callable[[], list[dict[str, Any]] | None] | None = None,
     session_version_loader: Callable[[], tuple[str, int] | None] | None = None,
-    active_turn_started_at: float | None = None,
     active_turn_id: str | None = None,
-    active_turn_transcript_persistence_failed: bool = False,
+    transcript_pending: bool = False,
     limit: int | None = None,
     direction: str | None = None,
     before: str | None = None,
@@ -1769,7 +1754,7 @@ def build_webui_thread_response(
         after=after,
         stats=replay_stats,
     )
-    if not lines and active_turn_started_at is None:
+    if not lines and not transcript_pending:
         return None
     session_turns: list[_SessionBackfillTurn] | None = None
 
@@ -1801,14 +1786,7 @@ def build_webui_thread_response(
         "schemaVersion": WEBUI_TRANSCRIPT_SCHEMA_VERSION,
         "sessionKey": session_key,
         "completed_turn_ids": completed_turn_ids(lines),
-        "has_pending_tool_calls": has_pending_tool_calls(
-            lines,
-            active_turn_started_at=active_turn_started_at,
-            active_turn_id=active_turn_id,
-            active_turn_transcript_persistence_failed=(
-                active_turn_transcript_persistence_failed
-            ),
-        ),
+        "has_pending_tool_calls": has_pending_tool_calls(lines, transcript_pending=transcript_pending),
         "active_turn_id": active_turn_id,
     }
     replay_started = time.perf_counter()

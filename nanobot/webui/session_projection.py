@@ -12,8 +12,8 @@ from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.model_selection import model_preset_from_metadata
 from nanobot.session.recovery import recovery_state_from_metadata
 from nanobot.session.state import SessionState
-from nanobot.session.webui_turns import websocket_turn_id, websocket_turn_wall_started_at
 from nanobot.webui.run_state import RunStateAuthority
+from nanobot.webui.session_identity import webui_session_key
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
@@ -93,7 +93,7 @@ class WebUISessionProjection:
                 }
             )
         active_turn = self.active_turn_status(chat_id)
-        if active_turn is not None:
+        if active_turn is not None and active_turn[0] is not None:
             started_at, turn_id = active_turn
             event: dict[str, Any] = {
                 "event": "goal_status",
@@ -118,10 +118,10 @@ class WebUISessionProjection:
             return None
         return goal_state
 
-    @staticmethod
-    def active_turn_status(chat_id: str) -> tuple[float, str | None] | None:
-        """Return same-process running-turn state for reconnect hydration."""
-        started_at = websocket_turn_wall_started_at(chat_id)
-        if started_at is None:
+    def active_turn_status(self, chat_id: str) -> tuple[float | None, str | None] | None:
+        """Derive protocol-1 timing hints from the execution projection."""
+        runs = self._runs.snapshot(webui_session_key(chat_id))["runs"] if self._runs is not None else []
+        if not runs:
             return None
-        return started_at, websocket_turn_id(chat_id)
+        active = next((run for run in reversed(runs) if run["started_at"] is not None), runs[-1])
+        return active["started_at"], active["turn_id"]

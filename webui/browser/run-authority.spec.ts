@@ -17,8 +17,8 @@ async function host(page: Page, authority = true) {
       ? { schemaVersion: 3, projection: "events", events: [], has_pending_tool_calls: false }
       : path.endsWith("/commands") ? { commands: [] } : {} });
   });
-  const snapshot = (runs: unknown[] = [], completed: unknown[] = []) => ({
-    instance_id: "protocol-host", revision: ++revision, runs, completed,
+  const snapshot = (runs: unknown[] = []) => ({
+    instance_id: "protocol-host", revision: ++revision, runs,
   });
   const emit = (event: unknown) => wire.send(JSON.stringify(event));
   await page.routeWebSocket("**/answer-order-socket", (socket) => {
@@ -38,8 +38,8 @@ async function host(page: Page, authority = true) {
   await page.goto("/browser/fixture.html?case=answer-order");
   await expect(page.getByRole("textbox", { name: "Message input", exact: true })).toBeVisible();
   await expect(page.getByRole("status", { name: "Loading conversation…" })).toHaveCount(0);
-  return { emit, frames, errors, state: (runs: unknown[], completed: unknown[] = []) =>
-    emit({ event: "run_state", chat_id: "answer-order", run_state: snapshot(runs, completed) }) };
+  return { emit, frames, errors, state: (runs: unknown[]) =>
+    emit({ event: "run_state", chat_id: "answer-order", run_state: snapshot(runs) }) };
 }
 
 const base = { chat_id: "answer-order", turn_id: "protocol-turn" };
@@ -63,7 +63,7 @@ test("Stop targets the authoritative owner and waits beyond ACK and transcript c
   emit({ event: "turn_end", ...base, turn_seq: 3 });
   await expect(page.getByText("Final text", { exact: true })).toBeVisible();
   await expect(pending).toBeDisabled();
-  state([], [{ run_id: owner.run_id, turn_id: base.turn_id, outcome: "cancelled" }]);
+  state([]);
   await expect(pending).toHaveCount(0);
   await expect(page.locator("[data-run-status]")).toHaveCount(0);
   await expect(page.getByText("Final text", { exact: true })).toBeVisible();

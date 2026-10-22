@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import OrderedDict, deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from threading import RLock
@@ -10,7 +9,7 @@ from typing import Literal, TypedDict
 
 from nanobot.bus.events import INBOUND_META_TURN_ID
 from nanobot.bus.queue import MessageBus
-from nanobot.bus.runtime_events import ExecutionOutcome, TurnExecutionChanged
+from nanobot.bus.runtime_events import TurnExecutionChanged
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.webui.session_identity import is_webui_session_key, webui_session_key
 
@@ -24,17 +23,10 @@ class ServerRun(TypedDict):
     started_at: float | None
 
 
-class ServerRunCompletion(TypedDict):
-    run_id: str
-    turn_id: str | None
-    outcome: ExecutionOutcome
-
-
 class ServerRunSnapshot(TypedDict):
     instance_id: str
     revision: int
     runs: list[ServerRun]
-    completed: list[ServerRunCompletion]
 
 
 @dataclass
@@ -63,14 +55,10 @@ class RunStateAuthority:
     from worker threads without holding this lock across history or network work.
     """
 
-    RECEIPTS_PER_SESSION = 32
-    RECEIPT_SESSIONS = 256
-
     def __init__(self, bus: MessageBus, instance_id: str) -> None:
         self.instance_id = instance_id
         self._revision = 0
         self._runs: dict[str, dict[str, _Run]] = {}
-        self._completed: OrderedDict[str, deque[ServerRunCompletion]] = OrderedDict()
         self._listeners: list[RunStateListener] = []
         self._lock = RLock()
         self._unsubscribe = bus.subscribe(self._execution_changed, TurnExecutionChanged)
@@ -99,7 +87,6 @@ class RunStateAuthority:
             instance_id=self.instance_id,
             revision=self._revision,
             runs=[run.payload() for run in self._runs.get(session_key, {}).values()],
-            completed=[ServerRunCompletion(**receipt) for receipt in self._completed.get(session_key, ())],
         )
 
     def _changed(self, session_key: str) -> None:
@@ -119,32 +106,17 @@ class RunStateAuthority:
     ) -> None:
         if run_id in self._runs.get(session_key, {}):
             return
-        # An ended owner's delayed status/admission must not resurrect it.
-        if any(receipt["run_id"] == run_id for receipt in self._completed.get(session_key, ())):
-            return
         self._runs.setdefault(session_key, {})[run_id] = _Run(run_id, turn_id, execution_session_key)
         self._changed(session_key)
 
-    def _finish(
-        self, session_key: str, run_id: str, outcome: ExecutionOutcome,
-    ) -> None:
-        with self._lock:
-            runs = self._runs.get(session_key)
-            if not runs or run_id not in runs:
-                return
-            run = runs.pop(run_id)
-            if not runs:
-                self._runs.pop(session_key, None)
-            receipts = self._completed.setdefault(
-                session_key, deque(maxlen=self.RECEIPTS_PER_SESSION),
-            )
-            receipts.append(ServerRunCompletion(
-                run_id=run_id, turn_id=run.turn_id, outcome=outcome,
-            ))
-            self._completed.move_to_end(session_key)
-            while len(self._completed) > self.RECEIPT_SESSIONS:
-                self._completed.popitem(last=False)
-            self._changed(session_key)
+    def _finish(self, session_key: str, run_id: str) -> None:
+        runs = self._runs.get(session_key)
+        if not runs or run_id not in runs:
+            return
+        runs.pop(run_id)
+        if not runs:
+            self._runs.pop(session_key, None)
+        self._changed(session_key)
 
     def _execution_changed(self, event: TurnExecutionChanged) -> None:
         context = event.context
@@ -163,7 +135,7 @@ class RunStateAuthority:
                 )
                 return
             if event.phase == "injected" or event.phase == "rejected" or event.phase == "exited":
-                self._finish(session_key, event.execution_id, event.outcome)
+                self._finish(session_key, event.execution_id)
                 return
             run = self._runs.get(session_key, {}).get(event.execution_id)
             if run is None or run.phase == "stopping":

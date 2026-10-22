@@ -16,7 +16,6 @@ from loguru import logger
 from websockets.asyncio.server import ServerConnection
 
 from nanobot.bus.events import (
-    INBOUND_META_EXECUTION_ID,
     INBOUND_META_LOCAL_MEDIA,
     INBOUND_META_USER_SHELL,
     ExecutionAdmission,
@@ -37,13 +36,7 @@ from nanobot.security.workspace_access import (
 )
 from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.keys import session_key_for_channel
-from nanobot.session.webui_turns import (
-    clear_websocket_turn_if_current,
-    clear_websocket_turns,
-    register_queued_websocket_turn_if_idle,
-    websocket_turn_id,
-    websocket_turn_wall_started_at,
-)
+from nanobot.session.webui_turns import clear_websocket_turns
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.prompt_templates import render_template
 from nanobot.webui.attachments import inspect_local_attachment
@@ -58,7 +51,6 @@ from nanobot.webui.forking import handle_webui_fork_chat
 from nanobot.webui.gateway_services import GatewayServices
 from nanobot.webui.mcp_presets_api import normalize_mcp_preset_mentions
 from nanobot.webui.metadata import (
-    WEBSOCKET_TURN_OWNER_METADATA_KEY,
     WEBUI_RESTART_CONTROL_METADATA_KEY,
     WEBUI_SYSTEM_COMMAND_TURN_PREFIX,
 )
@@ -270,12 +262,13 @@ class WebUICommandRouter:
             body["mcp_presets"] = mcp_presets
         if session_mentions:
             body["session_mentions"] = session_mentions
-        active_turn_id = websocket_turn_id(chat_id)
-        if active_turn_id is not None:
-            body["active_turn_id"] = active_turn_id
-        started_at = websocket_turn_wall_started_at(chat_id)
-        if active_turn_id is not None and started_at is not None:
-            body["started_at"] = started_at
+        active_turn = self._session_projection.active_turn_status(chat_id)
+        if active_turn is not None:
+            started_at, active_turn_id = active_turn
+            if active_turn_id is not None:
+                body["active_turn_id"] = active_turn_id
+                if started_at is not None:
+                    body["started_at"] = started_at
         raw = json.dumps(body, ensure_ascii=False)
         for connection in self._transport.webui_subscribers(chat_id):
             if connection is not origin:
@@ -467,7 +460,7 @@ class WebUICommandRouter:
                 lambda: self._workspaces.scope_for_set_request(
                     envelope,
                     chat_id=chat_id,
-                    chat_running=websocket_turn_wall_started_at(chat_id) is not None,
+                    chat_running=bool(self.gateway.runs.snapshot(webui_session_key(chat_id))["runs"]),
                     can_change_project=self.workspace_project_selection_available(connection),
                 ),
                 chat_id=chat_id,
@@ -699,7 +692,7 @@ class WebUICommandRouter:
                 lambda: self._workspaces.scope_for_message(
                     envelope,
                     chat_id=chat_id,
-                    chat_running=websocket_turn_wall_started_at(chat_id) is not None,
+                    chat_running=bool(self.gateway.runs.snapshot(webui_session_key(chat_id))["runs"]),
                     can_change_project=self.workspace_project_selection_available(connection),
                 ),
                 chat_id=chat_id,
@@ -798,7 +791,6 @@ class WebUICommandRouter:
         if temporary_policy is not None:
             self._temporary_chats.register_media(connection, chat_id, [str(item.path) for item in uploaded])
         is_webui = metadata.get("webui") is True
-        queued_owner = None
         execution_admission = None
         accepted = False
         admission_session_key = (
@@ -822,11 +814,6 @@ class WebUICommandRouter:
                 ),
                 execution_session_key,
             )
-            if execution_admission is not None:
-                queued_owner = execution_admission.execution_id
-                register_queued_websocket_turn_if_idle(chat_id, turn_id, owner=queued_owner)
-                metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = queued_owner
-                metadata[INBOUND_META_EXECUTION_ID] = queued_owner
         session_generation: str | None = None
         session_created = False
         execution_generation: str | None = None
@@ -925,7 +912,6 @@ class WebUICommandRouter:
         finally:
             if not accepted and execution_admission is not None:
                 await self.gateway.executions.reject(execution_admission)
-                clear_websocket_turn_if_current(chat_id, execution_admission.execution_id)
 
         media = self._media.augment_transcript_user_media(
             media_paths, local_paths=[item["path"] for item in local],
@@ -940,21 +926,21 @@ class WebUICommandRouter:
                 chat_id,
                 content,
                 turn_id=turn_id,
-                starts_turn=queued_owner is not None,
+                starts_turn=execution_admission is not None,
                 media=media,
                 cli_apps=cli_apps,
                 mcp_presets=mcp_presets,
                 session_mentions=session_mentions,
             )
         if is_webui and turn_id:
-            active_turn_id = websocket_turn_id(chat_id)
-            started_at = websocket_turn_wall_started_at(chat_id)
+            active_turn = self._session_projection.active_turn_status(chat_id)
+            started_at, active_turn_id = active_turn if active_turn is not None else (None, None)
             await self._transport.webui_send_event(
                 connection,
                 "message_accepted",
                 chat_id=chat_id,
                 turn_id=turn_id,
-                starts_turn=queued_owner is not None,
+                starts_turn=execution_admission is not None,
                 **({"media_urls": media} if media else {}),
                 **(
                     {"active_turn_id": active_turn_id}
@@ -1037,7 +1023,7 @@ class WebUICommandRouter:
                     scope = policy.workspace_scope if policy is not None else (
                         await self._workspaces.scope_for_message(
                             payload, chat_id=chat_id,
-                            chat_running=websocket_turn_wall_started_at(chat_id) is not None,
+                            chat_running=bool(self.gateway.runs.snapshot(webui_session_key(chat_id))["runs"]),
                             can_change_project=self.workspace_project_selection_available(connection),
                         )
                     )

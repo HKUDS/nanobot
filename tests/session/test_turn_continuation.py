@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from nanobot.agent.tools.context import RequestContext
 from nanobot.agent.turn_delivery import TurnDeliveryFactory
-from nanobot.bus.events import INBOUND_META_EXECUTION_ID, ExecutionAdmission, InboundMessage
+from nanobot.bus.events import ExecutionAdmission, InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import TurnExecutionChanged
 from nanobot.session.goal_state import (
@@ -60,7 +60,6 @@ def test_prepare_continuation_returns_unadmitted_intent_without_queuing_or_publi
                 "webui": True,
                 "original_command": "/goal",
                 "goal_requested": True,
-                INBOUND_META_EXECUTION_ID: "previous-owner",
             },
             execution_admission=ExecutionAdmission(execution_id="previous-owner"),
         ),
@@ -86,8 +85,6 @@ def test_prepare_continuation_returns_unadmitted_intent_without_queuing_or_publi
     assert pending.empty()
     assert facts == []
     assert continuation.execution_admission is None
-    assert INBOUND_META_EXECUTION_ID not in continuation.metadata
-    assert ctx.msg.metadata[INBOUND_META_EXECUTION_ID] == "previous-owner"
     assert ctx.msg.execution_admission.execution_id == "previous-owner"
     assert continuation.sender_id == "system:continuation"
     assert continuation.metadata[INTERNAL_CONTINUATION_META] is True

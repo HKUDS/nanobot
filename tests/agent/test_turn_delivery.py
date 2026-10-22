@@ -1,7 +1,9 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from nanobot.agent.execution import ExecutionLifecycle
 from nanobot.agent.turn_delivery import TurnDeliveryFactory
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import ContextCompactionEvent
@@ -11,6 +13,7 @@ from nanobot.events import RetryStatusEvent
 from nanobot.providers.base import LLMProvider, ProviderCallContext
 from nanobot.session.keys import HEARTBEAT_SESSION_KEY
 from nanobot.session.manager import SessionManager
+from nanobot.session.turn_continuation import INTERNAL_CONTINUATION_META
 from nanobot.session.webui_turns import WebuiTurnRoutePolicy
 from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
@@ -262,9 +265,11 @@ async def test_next_model_request_clears_exhaustion_within_the_same_turn() -> No
     assert completed[0].failure_attempts is None
 
 
-def test_websocket_lifecycles_get_distinct_internal_owners(tmp_path: Path) -> None:
+async def test_websocket_lifecycles_use_their_admitted_execution_owners(tmp_path: Path) -> None:
+    bus = MessageBus()
+    executions = ExecutionLifecycle(bus)
     factory = TurnDeliveryFactory(
-        MessageBus(),
+        bus,
         route_policy=WebuiTurnRoutePolicy(SessionManager(tmp_path / "sessions")),
     )
     first_msg = InboundMessage(
@@ -282,52 +287,60 @@ def test_websocket_lifecycles_get_distinct_internal_owners(tmp_path: Path) -> No
         metadata={WEBSOCKET_TURN_OWNER_METADATA_KEY: "attacker-reused-owner"},
     )
 
+    first_admission = await executions.admit(first_msg, first_msg.session_key)
+    second_admission = await executions.admit(second_msg, second_msg.session_key)
+    assert first_admission is not None
+    assert second_admission is not None
     first = factory.create(first_msg, first_msg.session_key)
     second = factory.create(second_msg, second_msg.session_key)
     first_owner = first.lifecycle_message.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY]
     second_owner = second.lifecycle_message.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY]
 
+    assert first_owner == first_admission.execution_id
+    assert second_owner == second_admission.execution_id
     assert first_owner == first.delivery_message.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY]
     assert first_owner != second_owner
-    assert first_owner != "attacker-reused-owner"
-    assert second_owner != "attacker-reused-owner"
     assert WEBUI_TURN_METADATA_KEY not in first.lifecycle_message.metadata
     assert first_msg.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] == first_owner
     assert second_msg.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] == second_owner
 
 
-def test_websocket_lifecycle_reuses_registered_ingress_owner(tmp_path: Path) -> None:
-    from nanobot.session import webui_turns as wth
-
-    owner = wth.register_queued_websocket_turn_if_idle("chat-queued", "turn-queued")
-    assert owner is not None
+async def test_internal_continuation_keeps_display_owner_with_a_new_execution(tmp_path: Path) -> None:
+    bus = MessageBus()
+    executions = ExecutionLifecycle(bus)
+    factory = TurnDeliveryFactory(
+        bus,
+        route_policy=WebuiTurnRoutePolicy(SessionManager(tmp_path / "sessions")),
+    )
     msg = InboundMessage(
         channel="websocket",
         sender_id="user",
-        chat_id="chat-queued",
-        content="queued",
-        metadata={
-            WEBSOCKET_TURN_OWNER_METADATA_KEY: owner,
-            WEBUI_TURN_METADATA_KEY: "turn-queued",
-        },
+        chat_id="chat-continuation",
+        content="start",
+        metadata={WEBUI_TURN_METADATA_KEY: "turn-continuation"},
     )
-    factory = TurnDeliveryFactory(
-        MessageBus(),
-        route_policy=WebuiTurnRoutePolicy(SessionManager(tmp_path / "sessions")),
+    first_admission = await executions.admit(msg, msg.session_key)
+    assert first_admission is not None
+    first = factory.create(msg, msg.session_key)
+    continuation = replace(
+        msg,
+        sender_id="system:continuation",
+        metadata={**msg.metadata, INTERNAL_CONTINUATION_META: True},
+        execution_admission=None,
     )
+    next_admission = await executions.admit(continuation, continuation.session_key)
+    assert next_admission is not None
+    assert next_admission.execution_id != first_admission.execution_id
 
-    try:
-        delivery = factory.create(msg, msg.session_key)
+    next_delivery = factory.create(continuation, continuation.session_key)
 
-        assert delivery.lifecycle_message.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] == owner
-        assert msg.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] == owner
-    finally:
-        wth.clear_websocket_turn_if_current("chat-queued", owner)
+    assert first.route.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] == first_admission.execution_id
+    assert next_delivery.route.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] == first_admission.execution_id
+    assert next_delivery.lifecycle_message.metadata[WEBUI_TURN_METADATA_KEY] == "turn-continuation"
+    assert continuation.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] == first_admission.execution_id
 
 
 async def test_internal_user_input_uses_the_persisted_webui_route(tmp_path: Path) -> None:
-    from nanobot.session import webui_turns as wth
-
     sessions = SessionManager(tmp_path / "sessions")
     target = sessions.get_or_create("websocket:target")
     target.metadata["webui"] = True
@@ -351,72 +364,7 @@ async def test_internal_user_input_uses_the_persisted_webui_route(tmp_path: Path
     assert (delivery.route.channel, delivery.route.chat_id) == ("websocket", "target")
     assert delivery.route.publish_lifecycle
     assert delivery.route.metadata["_wants_stream"] is True
-    owner = delivery.route.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY]
-    wth.clear_websocket_turn_if_current("target", owner)
-
-
-@pytest.mark.asyncio
-async def test_same_chat_different_sessions_restore_previous_active_projection(
-    tmp_path: Path,
-) -> None:
-    from unittest.mock import AsyncMock, MagicMock
-
-    from nanobot.session import webui_turns as wth
-
-    factory = TurnDeliveryFactory(
-        MessageBus(),
-        route_policy=WebuiTurnRoutePolicy(SessionManager(tmp_path / "sessions")),
-    )
-    first_msg = InboundMessage(
-        channel="websocket",
-        sender_id="user",
-        chat_id="shared-chat",
-        content="first",
-        metadata={WEBUI_TURN_METADATA_KEY: "turn-first"},
-        session_key_override="websocket:session-first",
-    )
-    second_msg = InboundMessage(
-        channel="websocket",
-        sender_id="user",
-        chat_id="shared-chat",
-        content="second",
-        metadata={WEBUI_TURN_METADATA_KEY: "turn-second"},
-        session_key_override="websocket:session-second",
-    )
-    first = factory.create(first_msg, first_msg.session_key)
-    second = factory.create(second_msg, second_msg.session_key)
-    first_owner = first.lifecycle_message.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY]
-    second_owner = second.lifecycle_message.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY]
-    bus = MagicMock()
-    bus.publish_outbound = AsyncMock()
-
-    try:
-        await wth.publish_turn_run_status(
-            bus,
-            first.lifecycle_message,
-            "running",
-            started_at=100.0,
-        )
-        await wth.publish_turn_run_status(
-            bus,
-            second.lifecycle_message,
-            "running",
-            started_at=200.0,
-        )
-
-        assert wth.websocket_turn_wall_started_at("shared-chat") == 200.0
-        assert wth.websocket_turn_id("shared-chat") == "turn-second"
-        assert wth.clear_websocket_turn_if_current("shared-chat", second_owner) is True
-        assert wth.websocket_turn_wall_started_at("shared-chat") == 100.0
-        assert wth.websocket_turn_id("shared-chat") == "turn-first"
-        assert wth._WEBSOCKET_TURN_OWNERS["shared-chat"] == first_owner
-        assert wth.clear_websocket_turn_if_current("shared-chat", first_owner) is True
-        assert wth.websocket_turn_wall_started_at("shared-chat") is None
-    finally:
-        wth._WEBSOCKET_ACTIVE_TURNS.pop("shared-chat", None)
-        wth._WEBSOCKET_TURN_WALL_STARTED_AT.pop("shared-chat", None)
-        wth._WEBSOCKET_TURN_IDS.pop("shared-chat", None)
-        wth._WEBSOCKET_TURN_OWNERS.pop("shared-chat", None)
+    assert isinstance(delivery.route.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY], str)
 
 
 async def test_late_subagent_route_requires_webui_owned_session(tmp_path: Path) -> None:

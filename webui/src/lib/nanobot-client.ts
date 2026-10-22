@@ -183,37 +183,24 @@ function runObservation(event: InboundEvent): RunObservation | null {
     case "user_message": {
       const activeTurnId = event.active_turn_id ?? (event.starts_turn ? event.turn_id : undefined);
       if (event.event === "user_message" && event.provenance?.session_message && !activeTurnId) {
-        return { ...base, kind: "activity" };
+        return { ...base, kind: "receipt" };
       }
       return {
         ...base,
         kind: event.event === "message_accepted" ? "admission" : "input",
-        ...(activeTurnId ? { owner: { turnId: activeTurnId, startedAt: event.started_at } } : {}),
+        ...(activeTurnId ? { owner: activeTurnId } : {}),
       };
     }
     case "goal_status":
-      return { ...base, kind: "status", activity: event.status, startedAt: event.started_at };
+      return { ...base, kind: event.status === "idle" ? "idle" : "receipt" };
     case "turn_end":
       return { ...base, kind: "completed" };
     case "error":
       return { ...base, kind: "rejection" };
-    case "delta":
-    case "reasoning_delta":
-      return { ...base, kind: event.text ? "activity" : "progress" };
-    case "stream_end":
-      return { ...base, kind: "activity" };
-    case "retry_status":
-      return { ...base, kind: event.state === "recovered" || event.state === "cleared" ? "progress" : "activity" };
-    case "recovery_state":
-      return { ...base, kind: "recovery", active: event.status === "resuming" };
-    case "attached":
-      return event.recovery_state && event.recovery_state.status !== "recovered"
-        ? { ...base, kind: "recovery", active: event.recovery_state.status === "resuming" }
-        : { ...base, kind: "progress" };
     case "message":
       return { ...base, kind: "message" };
     default:
-      return { ...base, kind: "progress" };
+      return { ...base, kind: "receipt" };
   }
 }
 
@@ -382,7 +369,7 @@ export class NanobotClient {
     this.rawSend({ type: "watch_runs", chat_ids: ids });
   }
 
-  /** Last ``goal_status`` ``started_at`` (unix sec) for *chatId*, if the turn is running. */
+  /** Last server-confirmed execution clock (unix sec) for *chatId*, or null when unknown. */
   getRunStartedAt(chatId: string): number | null {
     return this.runs.view(chatId).startedAt;
   }

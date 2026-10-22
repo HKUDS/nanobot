@@ -748,7 +748,7 @@ def test_thread_response_marks_unfinished_tool_tail_pending(history, tmp_path, m
     assert out["completed_turn_ids"] == []
 
 
-def test_thread_response_reports_active_registry_without_transcript(history,
+def test_thread_response_protects_pending_transcript_before_first_record(history,
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -756,7 +756,7 @@ def test_thread_response_reports_active_registry_without_transcript(history,
 
     out = history.build(
         "websocket:active-without-transcript",
-        active_turn_started_at=1_700_000_000.0,
+        transcript_pending=True,
         active_turn_id="turn-active",
     )
 
@@ -867,7 +867,7 @@ def test_later_completion_does_not_hide_older_incomplete_turn(history,
     assert out["has_pending_tool_calls"] is True
 
 
-def test_active_registry_does_not_hide_a_newer_queued_turn(history, tmp_path, monkeypatch) -> None:
+def test_pending_transcript_guard_survives_an_older_completion(history, tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:queued-tail"
     for event in (
@@ -880,12 +880,15 @@ def test_active_registry_does_not_hide_a_newer_queued_turn(history, tmp_path, mo
 
     out = history.build(
         key,
-        active_turn_started_at=1_700_000_000.0,
-        active_turn_id="turn-old",
+        transcript_pending=True,
+        active_turn_id="turn-new",
     )
 
     assert out is not None
     assert out["has_pending_tool_calls"] is True
+    assert out["completed_turn_ids"] == ["turn-old"]
+    assert out["active_turn_id"] == "turn-new"
+    assert _conversation_events(out)[-1]["content"] == "queued next"
 
 
 def test_build_response_restores_session_users_for_legacy_transcript(history,

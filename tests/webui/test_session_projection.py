@@ -2,10 +2,27 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import RuntimeEventContext, TurnExecutionChanged
 from nanobot.providers.base import LLMUsage
+from nanobot.session import webui_turns as wth
+from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.session.recovery import RECOVERY_METADATA_KEY
+from nanobot.webui.run_state import RunStateAuthority
 from nanobot.webui.session_projection import WebUISessionProjection
+
+
+async def _running_authority(chat_id: str) -> RunStateAuthority:
+    bus = MessageBus()
+    runs = RunStateAuthority(bus, "gateway-instance")
+    context = RuntimeEventContext(
+        channel="websocket", chat_id=chat_id, session_key=f"websocket:{chat_id}",
+        metadata={"webui_turn_id": "turn-1"},
+    )
+    await bus.publish(TurnExecutionChanged(context, "execution-1", "queued"))
+    await bus.publish(TurnExecutionChanged(context, "execution-1", "running", started_at=42.5))
+    return runs
 
 
 async def test_attach_fields_restore_session_runtime_metadata() -> None:
@@ -52,9 +69,7 @@ async def test_attach_fields_tolerate_missing_or_invalid_session_metadata() -> N
     assert await WebUISessionProjection(None).attach_fields("websocket:missing") == {}
 
 
-async def test_hydration_events_restore_goal_and_running_turn(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_hydration_events_restore_goal_and_running_turn() -> None:
     sessions = MagicMock()
     sessions.state.read_metadata = AsyncMock(side_effect=lambda key: sessions.read_session_metadata(key))
     sessions.read_session_metadata.return_value = {
@@ -66,16 +81,9 @@ async def test_hydration_events_restore_goal_and_running_turn(
             }
         }
     }
-    monkeypatch.setattr(
-        "nanobot.webui.session_projection.websocket_turn_wall_started_at",
-        lambda _chat_id: 42.5,
-    )
-    monkeypatch.setattr(
-        "nanobot.webui.session_projection.websocket_turn_id",
-        lambda _chat_id: "turn-1",
-    )
+    runs = await _running_authority("chat-1")
 
-    events = await WebUISessionProjection(sessions).hydration_events(
+    events = await WebUISessionProjection(sessions, runs=runs).hydration_events(
         "websocket:chat-1",
         "chat-1",
     )
@@ -101,21 +109,20 @@ async def test_hydration_events_restore_goal_and_running_turn(
     )
 
 
-async def test_hydration_events_are_quiet_without_actionable_state(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    sessions = MagicMock()
-    sessions.state.read_metadata = AsyncMock(side_effect=lambda key: sessions.read_session_metadata(key))
-    sessions.read_session_metadata.return_value = {"metadata": {}}
-    monkeypatch.setattr(
-        "nanobot.webui.session_projection.websocket_turn_wall_started_at",
-        lambda _chat_id: None,
-    )
-
-    assert await WebUISessionProjection(sessions).hydration_events(
-        "websocket:chat-1",
-        "chat-1",
-    ) == ()
+@pytest.mark.parametrize("with_authority", [False, True])
+async def test_hydration_is_quiet_for_pending_transcript_without_execution(history, with_authority) -> None:
+    sessions = history.sessions
+    generation = (await history.metadata("chat-1"))[HISTORY_GENERATION_METADATA_KEY]
+    runs = RunStateAuthority(MessageBus(), "gateway-instance") if with_authority else None
+    wth.mark_websocket_turn_transcript_persistence_failed("chat-1", "failed-owner", generation)
+    try:
+        assert wth.has_pending_webui_transcript("chat-1", generation) is True
+        assert await WebUISessionProjection(sessions, runs=runs).hydration_events(
+            "websocket:chat-1",
+            "chat-1",
+        ) == ()
+    finally:
+        wth.clear_websocket_turns("chat-1")
 
 
 async def test_hydration_yields_during_metadata_read_and_reads_live_turn_on_loop(
@@ -136,15 +143,16 @@ async def test_hydration_yields_during_metadata_read_and_reads_live_turn_on_loop
         assert release.wait(timeout=3)
         return {"metadata": {}}
 
-    def active_turn(_chat_id):
+    runs = await _running_authority("chat-io")
+    snapshot = runs.snapshot
+
+    def live_snapshot(session_key):
         assert threading.get_ident() == loop_thread
-        return 42.5
+        return snapshot(session_key)
 
     monkeypatch.setattr(sessions._store, "read_metadata", read_metadata)
-    monkeypatch.setattr(
-        "nanobot.webui.session_projection.websocket_turn_wall_started_at", active_turn,
-    )
-    projection = WebUISessionProjection(sessions)
+    monkeypatch.setattr(runs, "snapshot", live_snapshot)
+    projection = WebUISessionProjection(sessions, runs=runs)
     task = asyncio.create_task(projection.hydration_events("websocket:chat-io", "chat-io"))
     try:
         async with asyncio.timeout(2):

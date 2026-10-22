@@ -22,7 +22,7 @@ async def test_idle_snapshot_is_explicit_and_restart_identity_is_not_shared():
     await fact(bus, "old-owner", "queued")
     new = RunStateAuthority(MessageBus(), "new-gateway")
     assert new.snapshot("websocket:chat") == {
-        "instance_id": "new-gateway", "revision": 0, "runs": [], "completed": [],
+        "instance_id": "new-gateway", "revision": 0, "runs": [],
     }
     assert len(old.snapshot("websocket:chat")["runs"]) == 1
     contract = webui_contract()
@@ -46,15 +46,14 @@ async def test_phases_and_clock_are_independent_and_snapshots_are_detached():
     assert running["runs"][0]["phase"] == "running"
     assert running["runs"][0]["started_at"] is None
     assert running["revision"] > queued["revision"]
+    running["runs"][0]["phase"] = "queued"
+    assert authority.snapshot("websocket:chat")["runs"][0]["phase"] == "running"
     await fact(bus, "A", "stopping")
     await fact(bus, "A", "running", started_at=42)
     assert authority.snapshot("websocket:chat")["runs"][0]["phase"] == "stopping"
-    await fact(bus, "A", "exited", outcome="cancelled")
+    await fact(bus, "A", "exited")
     idle = authority.snapshot("websocket:chat")
     assert idle["runs"] == []
-    assert idle["completed"] == [{"run_id": "A", "turn_id": "turn-A", "outcome": "cancelled"}]
-    idle["completed"][0]["outcome"] = "failed"
-    assert authority.snapshot("websocket:chat")["completed"][0]["outcome"] == "cancelled"
     assert queued["runs"][0]["phase"] == "queued"
     assert [snapshot["revision"] for _, snapshot in observed] == [1, 2, 3, 4]
 
@@ -65,13 +64,12 @@ async def test_ending_one_owner_never_clears_another_or_reopens_from_late_status
     await fact(bus, "A", "queued")
     await fact(bus, "B", "queued")
     await fact(bus, "B", "running", started_at=2)
-    await fact(bus, "A", "exited", outcome="completed")
+    await fact(bus, "A", "exited")
     snapshot = authority.snapshot("websocket:chat")
     assert [run["run_id"] for run in snapshot["runs"]] == ["B"]
     await fact(bus, "A", "running", started_at=1)
     await fact(bus, "unknown", "running", started_at=3)
-    await fact(bus, "A", "queued")
-    await fact(bus, "A", "exited", outcome="failed")
+    await fact(bus, "A", "exited")
     assert authority.snapshot("websocket:chat") == snapshot
 
 
@@ -88,28 +86,11 @@ async def test_system_facts_are_keyed_by_target_not_source_channel_or_chat():
     assert authority.snapshot("websocket:target") == snapshot
     await fact(bus, "system-A", "exited", key="websocket:target", channel="system")
     assert authority.execution_session_key("websocket:target", "system-A") is None
-    assert authority.snapshot("websocket:target")["completed"][0]["outcome"] == "unknown"
+    assert authority.snapshot("websocket:target")["runs"] == []
     await fact(bus, "internal", "queued", key="cron:job", channel="system")
     assert authority.snapshot("cron:job")["runs"] == []
     # A notification delivery destination is not the internal job's execution target.
     await fact(bus, "internal-delivery", "queued", key="heartbeat:default", channel="websocket")
-    assert authority.snapshot("websocket:chat")["runs"] == []
-
-
-async def test_completion_receipts_and_retained_idle_sessions_are_bounded():
-    bus = MessageBus()
-    authority = RunStateAuthority(bus, "gateway")
-    for index in range(authority.RECEIPTS_PER_SESSION + 5):
-        await fact(bus, str(index), "queued")
-        await fact(bus, str(index), "exited", outcome="completed")
-    snapshot = authority.snapshot("websocket:chat")
-    assert len(snapshot["completed"]) == authority.RECEIPTS_PER_SESSION
-    assert snapshot["completed"][0]["run_id"] == "5"
-    for index in range(authority.RECEIPT_SESSIONS):
-        key = f"websocket:chat-{index}"
-        await fact(bus, str(index), "queued", key=key, channel="system")
-        await fact(bus, str(index), "exited", key=key, channel="system")
-    assert authority.snapshot("websocket:chat")["completed"] == []
     assert authority.snapshot("websocket:chat")["runs"] == []
 
 

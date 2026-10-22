@@ -9,9 +9,9 @@ from dataclasses import dataclass, field
 from typing import Literal, Protocol
 from uuid import uuid4
 
-from nanobot.bus.events import INBOUND_META_EXECUTION_ID, ExecutionAdmission, InboundMessage
+from nanobot.bus.events import ExecutionAdmission, InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.bus.runtime_events import ExecutionOutcome, RuntimeEventPublisher
+from nanobot.bus.runtime_events import RuntimeEventPublisher
 from nanobot.utils.cancellation import shield_and_drain
 
 
@@ -38,8 +38,7 @@ class _Execution:
     input_ids: set[str] = field(default_factory=set)
     entered: bool = False
     started_at: float | None = None
-    task: asyncio.Task[ExecutionOutcome] | None = None
-    done: asyncio.Event = field(default_factory=asyncio.Event)
+    task: asyncio.Task[None] | None = None
 
 
 class ExecutionLifecycle:
@@ -56,7 +55,6 @@ class ExecutionLifecycle:
         record = _Execution(admission, msg, session_key, msg.session_key)
         self._executions[admission.execution_id] = record
         msg.execution_admission = admission
-        msg.metadata = {**msg.metadata, INBOUND_META_EXECUTION_ID: admission.execution_id}
         return record
 
     async def reserve_if_idle(
@@ -116,14 +114,6 @@ class ExecutionLifecycle:
             await self._publisher.execution_changed(record.msg, session_key, execution_id, "stopping")
         return True
 
-    async def cancel_and_wait(self, session_key: str, execution_id: str) -> bool:
-        record = self._executions.get(execution_id)
-        if not await self.request_stop(session_key, execution_id):
-            return False
-        assert record is not None
-        await record.done.wait()
-        return True
-
     def has_started(self, admission: ExecutionAdmission) -> bool:
         return self._executions[admission.execution_id].started_at is not None
 
@@ -138,28 +128,24 @@ class ExecutionLifecycle:
 
     async def retire(
         self, admission: ExecutionAdmission, phase: Literal["injected", "rejected", "exited"],
-        *, outcome: ExecutionOutcome = "unknown",
     ) -> None:
         record = self._executions.pop(admission.execution_id, None)
         if record is None:
             return
         if self._steering_owner.get(record.session_key) is record:
             self._steering_owner.pop(record.session_key)
-        try:
-            await self._publisher.execution_changed(
-                record.msg, record.session_key, admission.execution_id, phase, outcome=outcome,
-            )
-        finally:
-            record.done.set()
+        await self._publisher.execution_changed(
+            record.msg, record.session_key, admission.execution_id, phase,
+        )
 
     async def reject(self, admission: ExecutionAdmission) -> None:
-        await self.retire(admission, "rejected", outcome="failed")
+        await self.retire(admission, "rejected")
 
     async def execute(
         self,
         msg: InboundMessage,
         session_key: str,
-        invoke: Callable[[], Awaitable[ExecutionOutcome]],
+        invoke: Callable[[], Awaitable[None]],
         settle_cancelled: Callable[[bool], Awaitable[None]],
     ) -> None:
         """Await one independent root, including cleanup if it never got its first step."""
@@ -167,37 +153,34 @@ class ExecutionLifecycle:
         if admission is None:
             return
         record = self._executions[admission.execution_id]
-        outcome: ExecutionOutcome = "cancelled"
+        cancelled = record.stop_requested
 
-        async def run() -> ExecutionOutcome:
+        async def run() -> None:
             record.entered = True
-            return await invoke()
+            await invoke()
 
-        if not record.stop_requested:
+        if not cancelled:
             record.task = asyncio.create_task(run())
         try:
             if record.task is not None:
-                outcome = await asyncio.shield(record.task)
+                await asyncio.shield(record.task)
         except asyncio.CancelledError:
-            outcome = "cancelled"
+            cancelled = True
             task = record.task
             if task is not None and not task.done() and not task.cancelling():
                 task.cancel()
             raise  # The caller distinguishes a root Stop from cancellation of itself.
-        except Exception:
-            outcome = "failed"
-            raise
         finally:
-            await shield_and_drain(self._settle(record, outcome, settle_cancelled))
+            await shield_and_drain(self._settle(record, cancelled, settle_cancelled))
 
     async def _settle(
-        self, record: _Execution, outcome: ExecutionOutcome,
+        self, record: _Execution, cancelled: bool,
         settle_cancelled: Callable[[bool], Awaitable[None]],
     ) -> None:
         try:
             if record.task is not None:
                 await asyncio.gather(record.task, return_exceptions=True)
-            if outcome == "cancelled":
+            if cancelled:
                 await settle_cancelled(record.entered)
         finally:
-            await self.retire(record.admission, "exited", outcome=outcome)
+            await self.retire(record.admission, "exited")

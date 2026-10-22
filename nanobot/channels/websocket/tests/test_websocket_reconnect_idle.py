@@ -1,11 +1,14 @@
 """Test websocket subscribe hydration only replays known active turns."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import RuntimeEventContext, TurnExecutionChanged
 from nanobot.channels.websocket.runtime import WebSocketChannel
 from nanobot.webui.outbound_projection import WebUIOutboundProjector
+from nanobot.webui.run_state import RunStateAuthority
 from nanobot.webui.session_projection import WebUISessionProjection
 
 
@@ -31,8 +34,7 @@ async def test_hydrate_after_subscribe_is_quiet_when_no_turn_active():
     channel.send_goal_state = mock_send_goal_state
     channel.send_goal_status = mock_send_goal_status
 
-    with patch("nanobot.webui.session_projection.websocket_turn_wall_started_at", return_value=None):
-        await channel._hydrate_after_subscribe("test-chat")
+    await channel._hydrate_after_subscribe("test-chat")
 
     assert sent_events == []
 
@@ -44,7 +46,9 @@ async def test_hydrate_after_subscribe_pushes_running_when_turn_active():
     channel.gateway = MagicMock()
     channel.gateway.session_manager = MagicMock()
     channel.gateway.session_manager.state.read_metadata = AsyncMock(return_value={})
-    channel._session_projection = WebUISessionProjection(channel.gateway.session_manager)
+    bus = MessageBus()
+    runs = RunStateAuthority(bus, "gateway-instance")
+    channel._session_projection = WebUISessionProjection(channel.gateway.session_manager, runs=runs)
     channel._outbound = WebUIOutboundProjector(channel, channel._session_projection)
     channel._turn_models = {}
 
@@ -58,18 +62,13 @@ async def test_hydrate_after_subscribe_pushes_running_when_turn_active():
 
     channel.send_goal_state = mock_send_goal_state
     channel.send_goal_status = mock_send_goal_status
-
-    with (
-        patch(
-            "nanobot.webui.session_projection.websocket_turn_wall_started_at",
-            return_value=1234567890.0,
-        ),
-        patch(
-            "nanobot.webui.session_projection.websocket_turn_id",
-            return_value="turn-active",
-        ),
-    ):
-        await channel._hydrate_after_subscribe("test-chat")
+    context = RuntimeEventContext(
+        channel="websocket", chat_id="test-chat", session_key="websocket:test-chat",
+        metadata={"webui_turn_id": "turn-active"},
+    )
+    await bus.publish(TurnExecutionChanged(context, "execution-active", "queued"))
+    await bus.publish(TurnExecutionChanged(context, "execution-active", "running", started_at=1234567890.0))
+    await channel._hydrate_after_subscribe("test-chat")
 
     running_events = [e for e in sent_events if e[0] == "goal_status" and e[2] == "running"]
     assert len(running_events) == 1

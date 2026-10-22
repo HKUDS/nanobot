@@ -10,6 +10,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import WebSocketChannel
 from nanobot.providers.base import GenerationSettings, LLMResponse
 from nanobot.session import webui_turns as wth
+from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.webui_turns import WebuiTurnCoordinator, WebuiTurnRoutePolicy
 from nanobot.webui.metadata import WEBSOCKET_TURN_OWNER_METADATA_KEY
 
@@ -80,13 +81,10 @@ async def test_process_direct_websocket_clears_run_status(tmp_path) -> None:
             for event in status_messages
         }
         assert len(owners) == 1
-        assert wth.websocket_turn_wall_started_at("chat-1") is None
-        assert "chat-1" not in wth._WEBSOCKET_ACTIVE_TURNS
+        generation = status_messages[0].metadata[HISTORY_GENERATION_METADATA_KEY]
+        assert wth.has_pending_webui_transcript("chat-1", generation) is False
     finally:
-        wth._WEBSOCKET_ACTIVE_TURNS.clear()
-        wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
-        wth._WEBSOCKET_TURN_IDS.clear()
-        wth._WEBSOCKET_TURN_OWNERS.clear()
+        wth.clear_websocket_turns("chat-1")
 
 
 @pytest.mark.asyncio

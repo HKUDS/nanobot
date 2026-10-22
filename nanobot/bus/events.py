@@ -18,8 +18,6 @@ OUTBOUND_META_AGENT_UI = "_agent_ui"
 # services. Never accept these keys verbatim from an untrusted client.
 INBOUND_META_RUNTIME_CONTROL = "_runtime_control"
 INBOUND_META_USER_SHELL = "_user_shell"
-INBOUND_META_EXECUTION_ID = "_execution_id"
-INBOUND_META_STOP_EXECUTION_ID = "_stop_execution_id"
 RUNTIME_CONTROL_SESSION_DISCARD = "session_discard"
 
 # Transport-provided turn correlation; the persisted spelling is retained for clients.

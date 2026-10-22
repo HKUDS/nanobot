@@ -7,13 +7,8 @@ import pytest
 
 from agent.session_helpers import visible_message
 from nanobot.agent.turn_delivery import TurnDelivery
-from nanobot.bus.events import (
-    INBOUND_META_EXECUTION_ID,
-    INBOUND_META_STOP_EXECUTION_ID,
-    InboundMessage,
-    OutboundMessage,
-)
-from nanobot.bus.runtime_events import TurnExecutionChanged
+from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.runtime_events import TurnCompleted, TurnExecutionChanged
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.session.state import SessionOperationQueueFullError
 from nanobot.webui.run_state import RunStateAuthority
@@ -33,9 +28,22 @@ async def finish_worker(loop, key):
             await asyncio.sleep(0)
 
 
+def observe_exit(bus, execution_id):
+    exited = asyncio.Event()
+
+    def changed(fact):
+        if fact.execution_id == execution_id and fact.phase == "exited":
+            exited.set()
+
+    bus.subscribe(changed, TurnExecutionChanged)
+    return exited
+
+
 async def test_accepted_queued_is_not_running_until_concurrency_slot_is_acquired(loop_factory, monkeypatch):
     loop = loop_factory()
     authority = RunStateAuthority(loop.bus, "gateway")
+    facts = []
+    loop.bus.subscribe(facts.append, TurnExecutionChanged)
     loop._concurrency_gate = asyncio.Semaphore(0)
     entered, release = asyncio.Event(), asyncio.Event()
 
@@ -61,7 +69,9 @@ async def test_accepted_queued_is_not_running_until_concurrency_slot_is_acquired
         release.set()
         await finish_worker(loop, msg.session_key)
         assert authority.snapshot(msg.session_key)["runs"] == []
-        assert authority.snapshot(msg.session_key)["completed"][0]["outcome"] == "completed"
+        assert msg.execution_admission is not None
+        assert {fact.execution_id for fact in facts} == {msg.execution_admission.execution_id}
+        assert [fact.phase for fact in facts] == ["queued", "running", "exited"]
     finally:
         release.set()
         await loop.aclose()
@@ -97,20 +107,17 @@ async def test_queued_cancellation_exits_once_without_entering_execution(
         owner = authority.snapshot(msg.session_key)["runs"][0]["run_id"]
         if waiting_for != "worker_start":
             await asyncio.wait_for(waiting.wait(), 2)
-        assert await loop._cancel_execution(msg.session_key, owner) == 1
+        assert await loop.executions.request_stop(msg.session_key, owner)
         await finish_worker(loop, msg.session_key)
         snapshot = authority.snapshot(msg.session_key)
         assert snapshot["runs"] == []
-        assert snapshot["completed"] == [{
-            "run_id": owner, "turn_id": None, "outcome": "cancelled",
-        }]
-        assert [(fact.phase, fact.outcome) for fact in facts if fact.phase == "exited"] == [
-            ("exited", "cancelled"),
+        assert [(fact.execution_id, fact.phase) for fact in facts] == [
+            (owner, "queued"), (owner, "stopping"), (owner, "exited"),
         ]
         loop._process_message.assert_not_awaited()
         cancel_children.assert_not_awaited()
         terminate_exec.assert_not_awaited()
-        assert await loop._cancel_execution(msg.session_key, owner) == 0
+        assert not await loop.executions.request_stop(msg.session_key, owner)
         assert authority.snapshot(msg.session_key) == snapshot
         assert len([fact for fact in facts if fact.phase == "exited"]) == 1
     finally:
@@ -122,6 +129,9 @@ async def test_queued_cancellation_exits_once_without_entering_execution(
 async def test_failure_always_ends_execution_owner(loop_factory, monkeypatch, failure):
     loop = loop_factory()
     authority = RunStateAuthority(loop.bus, "gateway")
+    facts, delivered = [], []
+    loop.bus.subscribe(facts.append, TurnExecutionChanged)
+    loop.bus.subscribe(delivered.append, TurnCompleted)
 
     async def process(msg, **kwargs):
         if failure == "internal":
@@ -141,7 +151,11 @@ async def test_failure_always_ends_execution_owner(loop_factory, monkeypatch, fa
         await finish_worker(loop, msg.session_key)
         snapshot = authority.snapshot(msg.session_key)
         assert snapshot["runs"] == []
-        assert snapshot["completed"][0]["outcome"] == "failed"
+        assert msg.execution_admission is not None
+        assert {fact.execution_id for fact in facts} == {msg.execution_admission.execution_id}
+        assert [fact.phase for fact in facts] == ["queued", "running", "exited"]
+        if failure != "delivery":
+            assert [event.outcome for event in delivered] == ["failed"]
     finally:
         await loop.aclose()
 
@@ -211,7 +225,6 @@ async def test_stop_a_preserves_worker_and_queue_until_cleanup_then_runs_b(
 
     monkeypatch.setattr(loop, "_process_message", process)
     a, b = message("A"), message("/compact")
-    stop_tasks = []
     try:
         await loop._dispatch_inbound(a)
         await asyncio.wait_for(a_started.wait(), 2)
@@ -219,15 +232,15 @@ async def test_stop_a_preserves_worker_and_queue_until_cleanup_then_runs_b(
         queue = loop._pending_queues[a.session_key]
         assert roots["A"] is not worker
         await loop._dispatch_inbound(b)
-        owner_a, owner_b = (msg.metadata[INBOUND_META_EXECUTION_ID] for msg in (a, b))
-        cancel = asyncio.create_task(loop._cancel_execution(a.session_key, owner_a))
-        stop_tasks.append(cancel)
+        owner_a, owner_b = (msg.execution_admission.execution_id for msg in (a, b))
+        exited_a = observe_exit(loop.bus, owner_a)
+        assert await loop.executions.request_stop(a.session_key, owner_a)
         await asyncio.wait_for(cleaning.wait(), 2)
         pending = authority.snapshot(a.session_key)
         assert [(run["run_id"], run["phase"]) for run in pending["runs"]] == [
             (owner_a, "stopping"), (owner_b, "queued"),
         ]
-        assert pending["completed"] == []
+        assert not exited_a.is_set()
         assert not b_started.is_set()
         assert loop._active_tasks[a.session_key] == {worker}
         assert loop._pending_queues[a.session_key] is queue
@@ -238,7 +251,7 @@ async def test_stop_a_preserves_worker_and_queue_until_cleanup_then_runs_b(
         assert not b_started.is_set()
         assert not worker.cancelling()
         release_cleanup.set()
-        await asyncio.wait_for(cancel, 2)
+        await asyncio.wait_for(exited_a.wait(), 2)
         await asyncio.wait_for(b_started.wait(), 2)
         assert loop._active_tasks[a.session_key] == {worker}
         assert loop._pending_queues[a.session_key] is queue
@@ -248,18 +261,14 @@ async def test_stop_a_preserves_worker_and_queue_until_cleanup_then_runs_b(
         assert all(pending_queue is queue for pending_queue in queues)
         active = authority.snapshot(a.session_key)
         assert [run["run_id"] for run in active["runs"]] == [owner_b]
-        assert active["completed"] == [{
-            "run_id": owner_a, "turn_id": None, "outcome": "cancelled",
-        }]
-        assert await loop._cancel_execution(a.session_key, owner_a) == 0
+        assert not await loop.executions.request_stop(a.session_key, owner_a)
         assert authority.snapshot(a.session_key) == active
         b_exit.set()
         await finish_worker(loop, a.session_key)
         assert cancellations == 1
         assert authority.snapshot(a.session_key)["runs"] == []
-        assert [(fact.phase, fact.outcome) for fact in facts if fact.execution_id == owner_a] == [
-            ("queued", "unknown"), ("running", "unknown"),
-            ("stopping", "unknown"), ("exited", "cancelled"),
+        assert [fact.phase for fact in facts if fact.execution_id == owner_a] == [
+            "queued", "running", "stopping", "exited",
         ]
         assert [fact.phase for fact in facts if fact.execution_id == owner_b] == [
             "queued", "running", "exited",
@@ -267,7 +276,6 @@ async def test_stop_a_preserves_worker_and_queue_until_cleanup_then_runs_b(
     finally:
         release_cleanup.set()
         b_exit.set()
-        await asyncio.gather(*stop_tasks, return_exceptions=True)
         await loop.aclose()
 
 
@@ -275,6 +283,8 @@ async def test_real_runner_steering_input_does_not_own_another_execution(loop_fa
     loop = loop_factory()
     loop.provider.provider_name = "test"
     authority = RunStateAuthority(loop.bus, "gateway")
+    facts = []
+    loop.bus.subscribe(facts.append, TurnExecutionChanged)
     calls = 0
 
     async def chat(**kwargs):
@@ -292,8 +302,9 @@ async def test_real_runner_steering_input_does_not_own_another_execution(loop_fa
         await finish_worker(loop, msg.session_key)
         snapshot = authority.snapshot(msg.session_key)
         assert snapshot["runs"] == []
-        assert len(snapshot["completed"]) == 1
-        assert snapshot["completed"][0]["outcome"] == "completed"
+        assert msg.execution_admission is not None
+        assert {fact.execution_id for fact in facts} == {msg.execution_admission.execution_id}
+        assert [fact.phase for fact in facts] == ["queued", "running", "exited"]
         assert calls >= 2
     finally:
         await loop.aclose()
@@ -303,8 +314,9 @@ async def test_system_session_message_executes_under_target_session(loop_factory
     loop = loop_factory()
     loop.provider.provider_name = "test"
     authority = RunStateAuthority(loop.bus, "gateway")
-    seen = []
+    seen, facts = [], []
     authority.subscribe(lambda key, state: seen.append((key, state)))
+    loop.bus.subscribe(facts.append, TurnExecutionChanged)
     loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="system answer"))
     msg = InboundMessage(
         channel="system", sender_id="session-message", chat_id="source-session",
@@ -318,7 +330,8 @@ async def test_system_session_message_executes_under_target_session(loop_factory
         assert [state["runs"][0]["phase"] for _, state in seen if state["runs"]] == ["queued", "running"]
         snapshot = authority.snapshot(msg.session_key)
         assert snapshot["runs"] == []
-        assert snapshot["completed"][0]["outcome"] == "completed"
+        assert {fact.context.session_key for fact in facts} == {msg.session_key}
+        assert [fact.phase for fact in facts] == ["queued", "running", "exited"]
         assert authority.snapshot("websocket:source-session")["runs"] == []
     finally:
         await loop.aclose()
@@ -328,15 +341,18 @@ async def test_stale_existing_session_input_retires_accepted_owner(loop_factory)
     loop = loop_factory()
     authority = RunStateAuthority(loop.bus, "gateway")
     msg = message(require_existing_session=True)
+    facts = []
+    loop.bus.subscribe(facts.append, TurnExecutionChanged)
     admission = await loop.executions.reserve_if_idle(msg, msg.session_key)
     assert admission is not None
-    msg.execution_admission = admission
-    msg.metadata[INBOUND_META_EXECUTION_ID] = admission.execution_id
+    assert msg.execution_admission is admission
     try:
         await loop._dispatch_inbound(msg)
         snapshot = authority.snapshot(msg.session_key)
         assert snapshot["runs"] == []
-        assert snapshot["completed"][0]["outcome"] == "cancelled"
+        assert [(fact.execution_id, fact.phase) for fact in facts] == [
+            (admission.execution_id, "queued"), (admission.execution_id, "exited"),
+        ]
         assert msg.session_key not in loop._pending_queues
     finally:
         await loop.aclose()
@@ -374,6 +390,8 @@ async def test_targeted_stop_acknowledges_steering_journal_without_a_new_owner(l
     loop = loop_factory()
     loop.provider.provider_name = "test"
     authority = RunStateAuthority(loop.bus, "gateway")
+    facts = []
+    loop.bus.subscribe(facts.append, TurnExecutionChanged)
     entered = asyncio.Event()
 
     async def chat(**kwargs):
@@ -389,14 +407,17 @@ async def test_targeted_stop_acknowledges_steering_journal_without_a_new_owner(l
         session = await loop.sessions.state.read(msg.session_key)
         assert session is not None and pending_followups(session)
         assert len(authority.snapshot(msg.session_key)["runs"]) == 1
-        owner = msg.metadata[INBOUND_META_EXECUTION_ID]
-        assert await loop._cancel_execution(msg.session_key, owner) == 1
+        owner = msg.execution_admission.execution_id
+        exited = observe_exit(loop.bus, owner)
+        assert await loop.executions.request_stop(msg.session_key, owner)
+        await asyncio.wait_for(exited.wait(), 2)
         session = await loop.sessions.state.read(msg.session_key)
         assert session is not None and not pending_followups(session)
         state = authority.snapshot(msg.session_key)
         assert state["runs"] == []
-        assert len(state["completed"]) == 1
-        assert state["completed"][0]["outcome"] == "cancelled"
+        assert {fact.execution_id for fact in facts} == {owner}
+        assert [fact.phase for fact in facts] == ["queued", "running", "stopping", "exited"]
+        await finish_worker(loop, msg.session_key)
     finally:
         await loop.aclose()
 
@@ -441,10 +462,9 @@ async def test_internal_continuation_is_admitted_before_previous_owner_exits(loo
         assert any(len(state["runs"]) == 2 for state in observed)
         final = authority.snapshot(msg.session_key)
         assert final["runs"] == []
-        assert len({receipt["run_id"] for receipt in final["completed"]}) == 2
-        assert [receipt["outcome"] for receipt in final["completed"]] == ["completed", "completed"]
         owners = [fact.execution_id for fact in facts if fact.phase == "queued"]
         assert len(owners) == len(set(owners)) == 2
+        assert [fact.execution_id for fact in facts if fact.phase == "exited"] == owners
         assert [fact.phase for fact in facts] == [
             "queued", "running", "queued", "exited", "running", "exited",
         ]
@@ -503,13 +523,13 @@ async def test_stop_before_root_first_frame_settles_once_and_keeps_fifo(loop_fac
         assert [fact.phase for fact in facts if fact.execution_id == owner_a] == [
             "queued", "stopping", "exited",
         ]
-        assert authority.snapshot(a.session_key)["completed"] == [{
-            "run_id": owner_a, "turn_id": None, "outcome": "cancelled",
-        }]
+        owner_b = b.execution_admission.execution_id
+        assert [run["run_id"] for run in authority.snapshot(a.session_key)["runs"]] == [owner_b]
         release_b.set()
         await finish_worker(loop, a.session_key)
-        assert [receipt["outcome"] for receipt in authority.snapshot(a.session_key)["completed"]] == [
-            "cancelled", "completed",
+        assert authority.snapshot(a.session_key)["runs"] == []
+        assert [fact.phase for fact in facts if fact.execution_id == owner_b] == [
+            "queued", "running", "exited",
         ]
     finally:
         armed = False
@@ -551,26 +571,28 @@ async def test_new_input_during_stop_cleanup_becomes_a_durable_independent_root(
     loop.provider.chat_stream_with_retry = chat
     a = message("A", metadata={"webui": True, "webui_turn_id": "turn-a"})
     b = message("B after Stop", metadata={"webui": True, "webui_turn_id": "turn-b"})
-    stop = None
     try:
         await loop._dispatch_inbound(a)
         await asyncio.wait_for(started.wait(), 2)
         worker, = loop._active_tasks[a.session_key]
         queue = loop._pending_queues[a.session_key]
         await loop._dispatch_inbound(message("steer A", metadata={"webui": True}))
-        owner_a = a.metadata[INBOUND_META_EXECUTION_ID]
-        stop = asyncio.create_task(loop._cancel_execution(a.session_key, owner_a))
+        owner_a = a.execution_admission.execution_id
+        exited_a = observe_exit(loop.bus, owner_a)
+        assert await loop.executions.request_stop(a.session_key, owner_a)
         await asyncio.wait_for(cleaning.wait(), 2)
         await loop._dispatch_inbound(b)
         snapshot = authority.snapshot(a.session_key)
         assert [(run["turn_id"], run["phase"]) for run in snapshot["runs"]] == [
             ("turn-a", "stopping"), ("turn-b", "queued"),
         ]
+        owner_b = snapshot["runs"][1]["run_id"]
+        assert owner_b != owner_a
         assert not b_started.is_set()
         saved = await loop.sessions.state.read(a.session_key)
         assert [followup.content for followup in pending_followups(saved)] == ["steer A", "B after Stop"]
         release_cleanup.set()
-        await asyncio.wait_for(stop, 2)
+        await asyncio.wait_for(exited_a.wait(), 2)
         await asyncio.wait_for(b_started.wait(), 2)
         assert loop._active_tasks[a.session_key] == {worker}
         assert loop._pending_queues[a.session_key] is queue
@@ -586,16 +608,15 @@ async def test_new_input_during_stop_cleanup_becomes_a_durable_independent_root(
         ]
         final = authority.snapshot(a.session_key)
         assert final["runs"] == []
-        assert [(receipt["turn_id"], receipt["outcome"]) for receipt in final["completed"]] == [
-            ("turn-a", "cancelled"), ("turn-b", "completed"),
+        assert [fact.phase for fact in facts if fact.execution_id == owner_a] == [
+            "queued", "running", "stopping", "exited",
         ]
-        assert len([fact for fact in facts if fact.phase == "queued"]) == 2
-        assert len([fact for fact in facts if fact.phase == "exited"]) == 2
+        assert [fact.phase for fact in facts if fact.execution_id == owner_b] == [
+            "queued", "running", "exited",
+        ]
     finally:
         release_cleanup.set()
         release_b.set()
-        if stop is not None:
-            await asyncio.gather(stop, return_exceptions=True)
         await loop.aclose()
 
 
@@ -643,9 +664,9 @@ async def test_stop_does_not_ack_followup_committed_before_its_enqueue_returns(
         await asyncio.wait_for(a_started.wait(), 2)
         queue = loop._pending_queues[a.session_key]
         await loop._dispatch_inbound(message("steer A", metadata={"webui": True}))
-        owner_a = a.metadata[INBOUND_META_EXECUTION_ID]
-        stop = asyncio.create_task(loop._cancel_execution(a.session_key, owner_a))
-        tasks.append(stop)
+        owner_a = a.execution_admission.execution_id
+        exited_a = observe_exit(loop.bus, owner_a)
+        assert await loop.executions.request_stop(a.session_key, owner_a)
         await asyncio.wait_for(cleaning.wait(), 2)
         dispatch_b = asyncio.create_task(loop._dispatch_inbound(b))
         tasks.append(dispatch_b)
@@ -656,7 +677,7 @@ async def test_stop_does_not_ack_followup_committed_before_its_enqueue_returns(
         assert [item.content for item in pending_followups(saved)] == ["steer A", b.content]
 
         release_cleanup.set()
-        assert await asyncio.wait_for(stop, 2) == 1
+        await asyncio.wait_for(exited_a.wait(), 2)
         await finish_worker(loop, a.session_key)
         assert a.session_key not in loop._pending_queues
         assert not dispatch_b.done()
@@ -682,9 +703,6 @@ async def test_stop_does_not_ack_followup_committed_before_its_enqueue_returns(
         active = authority.snapshot(a.session_key)
         assert [(run["turn_id"], run["phase"]) for run in active["runs"]] == [("turn-b", "queued")]
         assert active["runs"][0]["run_id"] != owner_a
-        assert active["completed"] == [{
-            "run_id": owner_a, "turn_id": "turn-a", "outcome": "cancelled",
-        }]
         assert roots[0].done() and roots[1] is not roots[0]
         assert loop._pending_queues[a.session_key] is not queue
 
@@ -708,7 +726,7 @@ async def test_stop_does_not_ack_followup_committed_before_its_enqueue_returns(
             await asyncio.wait_for(loop.aclose(), 3)
 
 
-async def test_bus_scoped_stop_of_queued_b_does_not_block_dispatch_of_session_c(
+async def test_stop_of_queued_b_returns_without_cancelling_a_or_blocking_session_c(
     loop_factory, monkeypatch,
 ):
     loop = loop_factory()
@@ -751,21 +769,14 @@ async def test_bus_scoped_stop_of_queued_b_does_not_block_dispatch_of_session_c(
         await asyncio.wait_for(a_started.wait(), 2)
         await loop.bus.publish_inbound(b)
         await asyncio.wait_for(b_dispatched.wait(), 2)
-        owner_a, owner_b = (msg.metadata[INBOUND_META_EXECUTION_ID] for msg in (a, b))
+        owner_a, owner_b = (msg.execution_admission.execution_id for msg in (a, b))
         assert [(run["run_id"], run["phase"]) for run in authority.snapshot(a.session_key)["runs"]] == [
             (owner_a, "running"), (owner_b, "queued"),
         ]
-        await loop.bus.publish_inbound(message(
-            "/stop", metadata={INBOUND_META_STOP_EXECUTION_ID: owner_b},
-        ))
+        exited_b = observe_exit(loop.bus, owner_b)
+        assert await asyncio.wait_for(loop.executions.request_stop(a.session_key, owner_b), 2)
         await loop.bus.publish_inbound(c)
-        try:
-            await asyncio.wait_for(c_dispatched.wait(), 2)
-        except TimeoutError:
-            pytest.fail(
-                "bus scoped Stop B waited for physical exit behind A, blocking session C dispatch",
-                pytrace=False,
-            )
+        await asyncio.wait_for(c_dispatched.wait(), 2)
         assert not release_a.is_set()
         assert not a_cancelled.is_set() and not roots["A"].cancelling(), "Stop B must not cancel A"
         assert not b_started.is_set(), "a stopped queued root must never run"
@@ -773,7 +784,7 @@ async def test_bus_scoped_stop_of_queued_b_does_not_block_dispatch_of_session_c(
         assert [(run["run_id"], run["phase"]) for run in waiting["runs"]] == [
             (owner_a, "running"), (owner_b, "stopping"),
         ]
-        assert waiting["completed"] == [], "B cannot physically exit until A releases the FIFO"
+        assert not exited_b.is_set(), "B cannot physically exit until A releases the FIFO"
 
         release_a.set()
         await finish_worker(loop, a.session_key)
@@ -781,13 +792,17 @@ async def test_bus_scoped_stop_of_queued_b_does_not_block_dispatch_of_session_c(
         assert not b_started.is_set() and not a_cancelled.is_set()
         final = authority.snapshot(a.session_key)
         assert final["runs"] == []
-        assert [(receipt["run_id"], receipt["outcome"]) for receipt in final["completed"]] == [
-            (owner_a, "completed"), (owner_b, "cancelled"),
+        assert [fact.phase for fact in facts if fact.execution_id == owner_a] == [
+            "queued", "running", "exited",
         ]
+        assert exited_b.is_set()
         assert [fact.phase for fact in facts if fact.execution_id == owner_b] == [
             "queued", "stopping", "exited",
         ]
-        assert authority.snapshot(c.session_key)["completed"][0]["outcome"] == "completed"
+        assert authority.snapshot(c.session_key)["runs"] == []
+        assert [fact.phase for fact in facts if fact.execution_id == c.execution_admission.execution_id] == [
+            "queued", "running", "exited",
+        ]
     finally:
         release_a.set()
         loop.stop()
@@ -832,16 +847,15 @@ async def test_cancellation_during_recovery_admission_unregisters_the_root(loop_
         root = coordinator._active_recovery_tasks[msg.session_key]
         worker, = loop._active_tasks[msg.session_key]
         assert root is not worker
-        owner = recovery.metadata[INBOUND_META_EXECUTION_ID]
-        assert await loop._cancel_execution(msg.session_key, owner) == 1
+        owner = recovery.execution_admission.execution_id
+        assert await loop.executions.request_stop(msg.session_key, owner)
         await finish_worker(loop, msg.session_key)
         assert root.cancelled()
         assert coordinator._active_recovery_tasks == {}
         assert not worker.cancelling()
         loop._process_message.assert_not_awaited()
-        assert authority.snapshot(msg.session_key)["completed"] == [{
-            "run_id": owner, "turn_id": recovery.metadata.get("webui_turn_id"), "outcome": "cancelled",
-        }]
+        assert authority.snapshot(msg.session_key)["runs"] == []
+        assert {fact.execution_id for fact in facts} == {owner}
         assert [fact.phase for fact in facts] == ["queued", "stopping", "exited"]
     finally:
         release_admission.set()
@@ -869,5 +883,5 @@ async def test_stop_drains_children_even_when_journal_commit_fails(loop_factory,
         cancel_children.assert_awaited_once_with(msg.session_key)
         terminate_exec.assert_awaited_once_with(msg.session_key)
     finally:
-        await loop.executions.retire(admission, "exited", outcome="cancelled")
+        await loop.executions.retire(admission, "exited")
         await loop.aclose()

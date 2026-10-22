@@ -31,6 +31,7 @@ from nanobot.channels.base import BaseChannel
 from nanobot.channels.websocket.binary_http import BinaryHTTPBridge
 from nanobot.config_base import Base
 from nanobot.runtime_admission import RuntimeMaintenanceError
+from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     mark_websocket_turn_transcript_persistence_failed,
@@ -1221,9 +1222,10 @@ class WebSocketChannel(BaseChannel):
     ) -> bool:
         if not persisted and phase in {"answer", "complete"} and (metadata or {}).get("webui") is True:
             owner = (metadata or {}).get(WEBSOCKET_TURN_OWNER_METADATA_KEY)
+            generation = (metadata or {}).get(HISTORY_GENERATION_METADATA_KEY)
             mark_websocket_turn_transcript_persistence_failed(
-                chat_id,
-                owner if isinstance(owner, str) else None,
+                chat_id, owner if isinstance(owner, str) else None,
+                generation if isinstance(generation, str) else None,
             )
         return persisted
 

@@ -13,7 +13,7 @@ const CHAT_ID = "completed-turn";
 const TURN_ID = "turn-1";
 
 function setup() {
-  const { client, receiveRaw: receive, updateRuns, setConnected } = createStreamClient({ autoRunSnapshots: false });
+  const { client, receive, updateRuns, setConnected } = createStreamClient();
   updateRuns(CHAT_ID, []);
   const wrapper = ({ children }: { children: ReactNode }) => (
     <ClientProvider client={client} token="test">{children}</ClientProvider>

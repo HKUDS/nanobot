@@ -36,7 +36,7 @@ function completedThread(chatId = "inactive", turnId = "turn-old"): WebuiThreadP
     schemaVersion: 1,
     projection: "events",
     has_pending_tool_calls: false,
-    run_state: { instance_id: "recovery-host", revision: 2, runs: [], completed: [] },
+    run_state: { instance_id: "recovery-host", revision: 2, runs: [] },
     events: [
       { event: "user_message", chat_id: chatId, turn_id: turnId, text: "Take your time", starts_turn: true },
       { event: "message", chat_id: chatId, turn_id: turnId, text: "The complete answer" },
@@ -60,7 +60,7 @@ function setup(authority = true) {
         if (frame.type !== "watch_runs") return;
         for (const chatId of frame.chat_ids as string[]) socket.receive({
           event: "run_state", chat_id: chatId,
-          run_state: baselines.get(chatId) ?? { instance_id: "recovery-host", revision: 0, runs: [], completed: [] },
+          run_state: baselines.get(chatId) ?? { instance_id: "recovery-host", revision: 0, runs: [] },
         });
       };
       sockets.push(socket);
@@ -75,7 +75,7 @@ function setup(authority = true) {
     const revision = (revisions.get(chatId) ?? -1) + 2;
     revisions.set(chatId, revision);
     const runState = {
-      instance_id: "recovery-host", revision, completed: [],
+      instance_id: "recovery-host", revision,
       runs: [{ run_id: `owner:${turnId}`, turn_id: turnId, phase: "running", started_at: startedAt }],
     };
     baselines.set(chatId, runState);
@@ -137,12 +137,14 @@ describe("durable run recovery", () => {
     close();
   });
 
-  it.each(["old-epoch", "missing-run-state"])("retries a pre-ready %s HTTP page after a restarted host's idle baseline", async (kind) => {
-    const reads: Array<(value: Response) => void> = [];
-    const fetchMock = vi.fn().mockImplementation(() => new Promise<Response>((resolve) => reads.push(resolve)));
+  it.each(["restart", "legacy"])("starts one recovery read at the authenticated %s boundary, not socket open", async (kind) => {
+    const body = completedThread();
+    if (kind === "legacy") delete body.run_state;
+    else body.run_state = { instance_id: "restarted-host", revision: 1, runs: [] };
+    const fetchMock = vi.fn().mockResolvedValue(response(body));
     vi.stubGlobal("fetch", fetchMock);
-    const { client, sockets, running, close } = setup(kind !== "missing-run-state");
-    if (kind === "missing-run-state") act(() => {
+    const { client, sockets, running, close } = setup(kind !== "legacy");
+    if (kind === "legacy") act(() => {
       client.sendMessage("inactive", "Take your time", undefined, { turnId: "turn-old" });
       sockets[0].receive({ event: "user_message", chat_id: "inactive", turn_id: "turn-old",
         text: "Take your time", starts_turn: true });
@@ -152,27 +154,18 @@ describe("durable run recovery", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(10); });
     const socket = sockets.at(-1)!;
     socket.onSend = () => {};
-    // Recovery starts at transport-open, before ready pins the restarted authority.
     act(() => { socket.readyState = 1; socket.onopen?.(); });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    act(() => {
-      socket.receive({ event: "ready", chat_id: "default", client_id: "test", run_state_instance_id: "restarted-host" });
-      socket.receive({ event: "run_state", chat_id: "inactive", run_state: {
-        instance_id: "restarted-host", revision: 1, runs: [], completed: [],
-      } });
-    });
-    // The old process's response may already be in transit when it exits.
-    const stale = completedThread();
-    stale.events = stale.events.slice(0, 1);
-    stale.has_pending_tool_calls = true;
-    if (kind === "missing-run-state") Reflect.deleteProperty(stale, "run_state");
-    await act(async () => { reads[0](response(stale)); });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const fresh = completedThread();
-    fresh.run_state = { instance_id: "restarted-host", revision: 1, runs: [], completed: [] };
-    await act(async () => { reads[1](response(fresh)); });
+    expect(fetchMock).not.toHaveBeenCalled();
+    act(() => socket.receive({ event: "ready", chat_id: "default", client_id: "test",
+      ...(kind === "restart" ? { run_state_instance_id: "restarted-host" } : {}) }));
+    if (kind === "restart") {
+      expect(fetchMock).not.toHaveBeenCalled();
+      act(() => socket.receive({ event: "run_state", chat_id: "inactive", run_state: body.run_state }));
+    }
+    await act(async () => {});
+    expect(fetchMock).toHaveBeenCalledOnce();
     expect(client.hasUnsettledRun("inactive")).toBe(false);
-    expect(webuiThreadCache.get("websocket:inactive")).toEqual(fresh);
+    expect(webuiThreadCache.get("websocket:inactive")).toEqual(body);
     close();
   });
 
@@ -236,6 +229,83 @@ describe("durable run recovery", () => {
     expect(mounted.result.current.messages.at(-1)?.content).toBe("The complete answer");
     expect(client.getRunStartedAt("inactive")).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    mounted.unmount();
+    close();
+  });
+
+  it.each(["stale first", "canonical first"] as const)("recovers an ACK-lost send after mounted pre-baseline history returns %s", async (order) => {
+    const idle: WebuiThreadPersistedPayload = {
+      schemaVersion: 1, projection: "events", events: [],
+      completed_turn_ids: [], has_pending_tool_calls: false, active_turn_id: null,
+      run_state: { instance_id: "recovery-host", revision: 0, runs: [] },
+    };
+    const reads: Array<{ signal: AbortSignal; resolve: (value: Response) => void }> = [];
+    const fetchMock = vi.fn().mockResolvedValueOnce(response(idle))
+      .mockImplementation((_url: string, init: RequestInit) => new Promise<Response>((resolve) => {
+        reads.push({ signal: init.signal!, resolve });
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { client, sockets, close } = setup();
+    sockets[0].receive({ event: "run_state", chat_id: "inactive", run_state: idle.run_state });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <ClientProvider client={client} token="renewed-token">{children}</ClientProvider>
+    );
+    const mounted = renderHook(() => {
+      const stream = useNanobotStream("inactive", undefined, undefined, undefined, { key: "websocket:inactive" });
+      useEffect(() => {
+        let refreshOnOpen = false;
+        return client.onStatus((status) => {
+          if (status !== "open") refreshOnOpen = true;
+          else if (refreshOnOpen) {
+            refreshOnOpen = false;
+            stream.refreshHistory();
+          }
+        });
+      }, [stream.refreshHistory]);
+      return stream;
+    }, { wrapper });
+    await act(async () => {});
+    let turnId = "";
+    act(() => { turnId = mounted.result.current.send("Take your time")!.turnId; });
+    expect(client.getRunState("inactive")).toMatchObject({ active: false, freshness: "fresh", delivery: "sending" });
+    act(() => sockets[0].close());
+    await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+    const socket = sockets.at(-1)!;
+    socket.onSend = () => {};
+    await act(async () => { socket.readyState = 1; socket.onopen?.(); });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(client.getRunState("inactive")).toMatchObject({ active: false, freshness: "unknown", delivery: "unknown", unsettled: true });
+
+    // HTTP observed execution before reattachment; its ACK and active snapshot
+    // never reached this client. The task finishes before the socket baseline.
+    const stale = completedThread("inactive", turnId);
+    stale.events = stale.events.slice(0, 1);
+    stale.completed_turn_ids = [];
+    stale.has_pending_tool_calls = true;
+    stale.active_turn_id = turnId;
+    stale.run_state = { instance_id: "recovery-host", revision: 1,
+      runs: [{ run_id: `owner:${turnId}`, turn_id: turnId, phase: "running", started_at: 123 }],
+    };
+    act(() => socket.receive({ event: "ready", chat_id: "default", client_id: "test", run_state_instance_id: "recovery-host" }));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const completed = completedThread("inactive", turnId);
+    completed.completed_turn_ids = [turnId];
+    await act(async () => socket.receive({ event: "run_state", chat_id: "inactive", run_state: completed.run_state }));
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    if (order === "stale first") {
+      await act(async () => { reads[0].resolve(response(stale)); });
+      expect(client.getRunState("inactive")).toMatchObject({ delivery: "unknown", unsettled: true });
+      await act(async () => { reads[1].resolve(response(completed)); });
+    } else {
+      await act(async () => { reads[1].resolve(response(completed)); });
+      expect(reads[0].signal.aborted).toBe(true);
+      await act(async () => { reads[0].resolve(response(stale)); });
+    }
+    expect(mounted.result.current.messages.at(-1)?.content).toBe("The complete answer");
+    expect(mounted.result.current.history.hasPendingToolCalls).toBe(false);
+    expect(webuiThreadCache.get("websocket:inactive")).toEqual(completed);
+    expect(client.getRunState("inactive")).toMatchObject({ active: false, freshness: "fresh", delivery: "none", unsettled: false });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     mounted.unmount();
     close();
   });
@@ -409,7 +479,7 @@ describe("durable run recovery", () => {
     body.events = body.events.slice(0, 1);
     body.has_pending_tool_calls = true;
     body.active_turn_id = "turn-running";
-    body.run_state = { instance_id: "recovery-host", revision: 2, completed: [],
+    body.run_state = { instance_id: "recovery-host", revision: 2,
       runs: [{ run_id: "owner:turn-running", turn_id: "turn-running", phase: "running", started_at: 456 }],
     };
     const fetchMock = vi.fn().mockImplementation((url: string) => Promise.resolve(response(
@@ -422,9 +492,8 @@ describe("durable run recovery", () => {
     const runStatus = vi.fn();
     client.onRunStatus(runStatus);
     await reopen();
-    // The completed chat settles immediately; only the still-open result needs one fresh read.
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(fetchMock.mock.calls.filter(([url]) => url.includes("websocket%3Arunning"))).toHaveLength(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.filter(([url]) => url.includes("websocket%3Arunning"))).toHaveLength(1);
     expect(client.getRunStartedAt("inactive")).toBeNull();
     expect(client.getRunStartedAt("running")).toBe(456);
     expect(client.getRunTurnId("running")).toBe("turn-running");

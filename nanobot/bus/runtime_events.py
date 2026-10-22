@@ -58,9 +58,6 @@ class TurnRunStatusChanged(AgentEvent):
     started_at: float | None = None
 
 
-ExecutionOutcome = Literal["completed", "failed", "cancelled", "unknown"]
-
-
 @dataclass(frozen=True)
 class TurnExecutionChanged(AgentEvent):
     """One admitted execution owner changed phase, independently of delivery/storage."""
@@ -69,7 +66,6 @@ class TurnExecutionChanged(AgentEvent):
     execution_id: str
     phase: Literal["queued", "running", "stopping", "injected", "rejected", "exited"]
     started_at: float | None = None
-    outcome: ExecutionOutcome = "unknown"
 
 
 @dataclass(frozen=True)
@@ -271,7 +267,6 @@ class RuntimeEventPublisher:
         phase: Literal["queued", "running", "stopping", "injected", "rejected", "exited"],
         *,
         started_at: float | None = None,
-        outcome: ExecutionOutcome = "unknown",
     ) -> None:
         await self.bus.publish(TurnExecutionChanged(
             context=self._context(
@@ -284,7 +279,6 @@ class RuntimeEventPublisher:
             execution_id=execution_id,
             phase=phase,
             started_at=started_at,
-            outcome=outcome,
         ))
 
     async def session_turn_persisted(

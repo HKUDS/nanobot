@@ -56,7 +56,7 @@ class TestSocket {
   }
 
   snapshot(chatId: string): ServerRunSnapshot {
-    return this.snapshots.get(chatId) ?? { instance_id: "navigation-host", revision: 0, runs: [], completed: [] };
+    return this.snapshots.get(chatId) ?? { instance_id: "navigation-host", revision: 0, runs: [] };
   }
 
   setRunning(chatId: string, turnId: string) {
@@ -73,8 +73,6 @@ class TestSocket {
     const run_state: ServerRunSnapshot = {
       ...current, revision: current.revision + 1,
       runs: current.runs.filter((run) => run.turn_id !== turnId),
-      completed: current.runs.filter((run) => run.turn_id === turnId)
-        .map((run) => ({ run_id: run.run_id, turn_id: run.turn_id, outcome: "completed" })),
     };
     this.snapshots.set(chatId, run_state);
     this.receive({ event: "run_state", chat_id: chatId, run_state });

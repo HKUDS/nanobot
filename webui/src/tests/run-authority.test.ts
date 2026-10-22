@@ -23,7 +23,7 @@ const run = (id = "owner-a", turn = "turn-a", phase: ServerRun["phase"] = "runni
   run_id: id, turn_id: turn, phase, started_at: null,
 });
 const snapshot = (revision: number, runs: ServerRun[] = [], instance = "host-a"): ServerRunSnapshot => ({
-  instance_id: instance, revision, runs, completed: [],
+  instance_id: instance, revision, runs,
 });
 let clients: NanobotClient[];
 function setup(reconnect = false) {
@@ -219,15 +219,10 @@ describe("delivery, cancellation and final result are not execution", () => {
     expect(client.isRunCompleted("chat", "guidance")).toBe(false);
   });
 
-  it("does not equate a runtime completion receipt with a delivered result", () => {
-    const { client, socket } = setup(); socket.open(); update(socket, snapshot(1, [run()]));
-    update(socket, { ...snapshot(2), completed: [{ run_id: "owner-a", turn_id: "turn-a", outcome: "failed" }] });
-    expect(client.getRunState("chat")).toMatchObject({ active: false, unsettled: true });
-    expect(client.isRunCompleted("chat", "turn-a")).toBe(false);
-  });
 });
 
-it("rejects malformed runtime snapshots at the network boundary", () => {
+it("decodes runtime snapshots at the network boundary, ignoring extra old-host fields", () => {
+  expect(decodeRunSnapshot({ ...snapshot(1), completed: [{ legacy: "receipt" }] })).toEqual(snapshot(1));
   expect(decodeRunSnapshot({ ...snapshot(1), runs: [{ ...run(), phase: "invented" }] })).toBeNull();
   expect(decodeRunSnapshot({ ...snapshot(1), runs: [run(), run()] })).toBeNull();
   expect(decodeRunSnapshot({ ...snapshot(1), revision: -1 })).toBeNull();

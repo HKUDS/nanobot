@@ -25,7 +25,6 @@ async function openThread(page: Page, events: ThreadProjectionEvent[] = []) {
   const snapshot = (active: boolean) => ({
     instance_id: "answer-order-host", revision: ++revision,
     runs: active ? [{ run_id: "answer-owner", turn_id: turnId, phase: "running" as const, started_at: 100 }] : [],
-    completed: [],
   });
   const initiallyActive = !events.some((event) => event.event === "turn_end");
   const attached = new Set<string>();

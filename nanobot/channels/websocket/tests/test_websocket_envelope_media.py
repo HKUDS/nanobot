@@ -25,7 +25,7 @@ from nanobot.webui.gateway_services import build_gateway_services
 def _make_channel(
     session_manager: SessionManager | None = None, *, workspace: Path | None = None, restricted: bool = False,
 ) -> WebSocketChannel:
-    bus = MagicMock(spec=MessageBus)
+    bus = MagicMock(spec=MessageBus, wraps=MessageBus())
     bus.admission = RuntimeAdmission()
     bus.publish_inbound = AsyncMock()
     cfg = {"enabled": True, "allowFrom": ["*"], "websocketRequiresToken": False}
@@ -49,15 +49,9 @@ def _make_channel(
 
 @pytest.fixture(autouse=True)
 def isolate_websocket_turn_state() -> None:
-    wth._WEBSOCKET_ACTIVE_TURNS.clear()
-    wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
-    wth._WEBSOCKET_TURN_IDS.clear()
-    wth._WEBSOCKET_TURN_OWNERS.clear()
+    wth._WEBSOCKET_PENDING_TRANSCRIPTS.clear()
     yield
-    wth._WEBSOCKET_ACTIVE_TURNS.clear()
-    wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
-    wth._WEBSOCKET_TURN_IDS.clear()
-    wth._WEBSOCKET_TURN_OWNERS.clear()
+    wth._WEBSOCKET_PENDING_TRANSCRIPTS.clear()
 
 
 def test_max_message_bytes_keeps_existing_transport_guard() -> None:
@@ -105,13 +99,20 @@ async def test_webui_message_acceptance_echoes_turn_id() -> None:
     await channel._dispatch_envelope(mock_conn, "client-1", envelope)
 
     channel._handle_message.assert_awaited_once()
+    admission = channel._handle_message.await_args.kwargs["execution_admission"]
+    assert admission is not None
+    assert channel.gateway.runs.snapshot("websocket:abc123")["runs"] == [{
+        "run_id": admission.execution_id,
+        "turn_id": "turn-accepted",
+        "phase": "queued",
+        "started_at": None,
+    }]
     assert json.loads(mock_conn.send.await_args.args[0]) == {
         "event": "message_accepted",
         "chat_id": "abc123",
         "turn_id": "turn-accepted",
         "starts_turn": True,
         "active_turn_id": "turn-accepted",
-        "started_at": wth.websocket_turn_wall_started_at("abc123"),
     }
 
 

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import sqlite3
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
@@ -11,13 +12,15 @@ from websockets.datastructures import Headers
 from websockets.http11 import Request
 
 from nanobot.agent.execution import ExecutionLifecycle
-from nanobot.bus.events import INBOUND_META_EXECUTION_ID, OutboundMessage
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.bus.runtime_events import RuntimeEventContext, TurnExecutionChanged
+from nanobot.bus.runtime_events import RuntimeEventContext, TurnCompleted, TurnExecutionChanged
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
+from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.manager import SessionManager
 from nanobot.session.webui_turns import (
     clear_websocket_turns,
+    has_pending_webui_transcript,
     websocket_turn_transcript_persistence_failed,
 )
 from nanobot.webui.gateway_services import build_gateway_services
@@ -101,7 +104,7 @@ async def test_initial_ready_and_reconnect_attach_include_explicit_idle(channel)
     assert ready["run_state_instance_id"] == channel.gateway.tokens.instance_id
     assert ready["run_state"] == {
         "instance_id": channel.gateway.tokens.instance_id, "revision": 0,
-        "runs": [], "completed": [],
+        "runs": [],
     }
     second = Connection()
     await dispatch(channel, second, {"type": "attach", "chat_id": ready["chat_id"]})
@@ -120,14 +123,15 @@ async def test_watch_registers_idle_baseline_and_receives_no_chat_text(channel):
     await flush(channel)
     assert {event["event"] for event in connection.sent} == {"run_state"}
     assert connection.sent[-1]["run_state"]["runs"][0]["phase"] == "running"
+    baseline_revision = connection.sent[-1]["run_state"]["revision"]
     await dispatch(channel, connection, {"type": "watch_runs", "chat_ids": ["other"]})
     baseline_count = len(connection.sent)
     assert connection.sent[-1]["chat_id"] == "other"
-    await execution(channel, "A", "exited", outcome="completed")
+    await execution(channel, "A", "exited")
     assert len(connection.sent) == baseline_count
     await dispatch(channel, connection, {"type": "watch_runs", "chat_ids": ["background"]})
     assert connection.sent[-1]["run_state"]["runs"] == []
-    assert connection.sent[-1]["run_state"]["completed"][0]["outcome"] == "completed"
+    assert connection.sent[-1]["run_state"]["revision"] > baseline_revision
 
 
 async def test_watch_handoff_captures_changes_during_authorization(channel, monkeypatch):
@@ -149,7 +153,7 @@ async def test_watch_handoff_captures_changes_during_authorization(channel, monk
     await task
     assert connection.sent[-1]["run_state"]["runs"][0]["run_id"] == "A"
     baseline_revision = connection.sent[-1]["run_state"]["revision"]
-    await execution(channel, "A", "exited", outcome="cancelled")
+    await execution(channel, "A", "exited")
     assert connection.sent[-1]["run_state"]["revision"] > baseline_revision
     assert connection.sent[-1]["run_state"]["runs"] == []
 
@@ -185,13 +189,14 @@ async def test_transport_acceptance_registers_queued_root_but_not_steering_input
         queued = channel.gateway.runs.snapshot(webui_session_key(chat_id))
         assert queued["runs"][0]["phase"] == "queued"
         assert queued["runs"][0]["started_at"] is None
-        assert queued["runs"][0]["run_id"] == first.metadata[INBOUND_META_EXECUTION_ID]
+        assert first.execution_admission is not None
+        assert queued["runs"][0]["run_id"] == first.execution_admission.execution_id
         await dispatch(channel, connection, {
             "type": "message", "chat_id": chat_id, "webui": True,
             "turn_id": "second-input", "content": "steer",
         })
         second = channel.bus.inbound.get_nowait()
-        assert INBOUND_META_EXECUTION_ID not in second.metadata
+        assert second.execution_admission is None
         assert channel.gateway.runs.snapshot(webui_session_key(chat_id)) == queued
     finally:
         clear_websocket_turns(chat_id)
@@ -205,6 +210,8 @@ async def test_failed_transport_admission_retires_its_reservation_before_retry(c
         "type": "message", "chat_id": chat_id, "webui": True,
         "turn_id": "retry-input", "content": "hello",
     }
+    facts = []
+    channel.bus.subscribe(facts.append, TurnExecutionChanged)
     try:
         with monkeypatch.context() as patch:
             target, method = (
@@ -216,15 +223,16 @@ async def test_failed_transport_admission_retires_its_reservation_before_retry(c
                 await dispatch(channel, connection, envelope)
         rejected = channel.gateway.runs.snapshot(key)
         assert rejected["runs"] == []
-        assert len(rejected["completed"]) == 1
-        receipt = rejected["completed"][0]
-        assert receipt["outcome"] == "failed" and receipt["turn_id"] == "retry-input"
-        assert channel.gateway.runs.execution_session_key(key, receipt["run_id"]) is None
+        rejected_owner = facts[0].execution_id
+        assert [(fact.execution_id, fact.phase) for fact in facts] == [
+            (rejected_owner, "queued"), (rejected_owner, "rejected"),
+        ]
+        assert channel.gateway.runs.execution_session_key(key, rejected_owner) is None
         assert channel.bus.inbound.empty()
         await dispatch(channel, connection, envelope)
         accepted = channel.bus.inbound.get_nowait()
         assert accepted.execution_admission is not None
-        assert accepted.execution_admission.execution_id != receipt["run_id"]
+        assert accepted.execution_admission.execution_id != rejected_owner
         assert channel.gateway.runs.snapshot(key)["runs"][0]["run_id"] == accepted.execution_admission.execution_id
     finally:
         clear_websocket_turns(chat_id)
@@ -248,7 +256,7 @@ async def test_stop_request_is_correlated_cached_and_cannot_stop_new_owner(chann
     assert response["result"]["run_state"]["runs"][0]["phase"] == "running"
     stop.assert_awaited_once_with("websocket:background", "A")
     assert channel.bus.inbound.empty()
-    await execution(channel, "A", "exited", outcome="completed")
+    await execution(channel, "A", "exited")
     await execution(channel, "B", "queued")
     await dispatch(channel, connection, envelope)
     assert channel.bus.inbound.empty()
@@ -262,7 +270,7 @@ async def test_stop_request_is_correlated_cached_and_cannot_stop_new_owner(chann
     assert connection.sent[-1]["error"]["status"] == 403
 
 
-async def test_execution_idle_is_independent_of_canonical_transcript_failure(channel, monkeypatch):
+async def test_execution_idle_is_independent_of_canonical_transcript_failure(channel, monkeypatch, tmp_path):
     from nanobot.agent.loop import AgentLoop
     from nanobot.session.webui_turns import WebuiTurnCoordinator, WebuiTurnRoutePolicy
 
@@ -284,6 +292,9 @@ async def test_execution_idle_is_independent_of_canonical_transcript_failure(cha
     async def process(msg, **kwargs):
         return OutboundMessage(channel="websocket", chat_id=chat_id, content="answer", metadata=kwargs["delivery"].route.metadata)
 
+    facts, delivered = [], []
+    channel.bus.subscribe(facts.append, TurnExecutionChanged)
+    channel.bus.subscribe(delivered.append, TurnCompleted)
     monkeypatch.setattr(loop, "_process_message", process)
     monkeypatch.setattr(channel._transcripts, "prepare_and_append", AsyncMock(return_value=False))
     try:
@@ -299,13 +310,132 @@ async def test_execution_idle_is_independent_of_canonical_transcript_failure(cha
         await flush(channel)
         snapshot = channel.gateway.runs.snapshot(msg.session_key)
         assert snapshot["runs"] == []
-        assert snapshot["completed"][0]["outcome"] == "completed"
-        assert websocket_turn_transcript_persistence_failed(chat_id)
-        # Reconnect remains explicitly idle while legacy record safety stays unresolved.
+        assert msg.execution_admission is not None
+        assert {fact.execution_id for fact in facts} == {msg.execution_admission.execution_id}
+        assert [fact.phase for fact in facts] == ["queued", "running", "exited"]
+        assert [event.outcome for event in delivered] == ["completed"]
+        assert websocket_turn_transcript_persistence_failed(chat_id, msg.execution_admission.execution_id)
+        assert has_pending_webui_transcript(chat_id, msg.metadata[HISTORY_GENERATION_METADATA_KEY])
+        # Execution is idle even though canonical transcript protection remains unsettled.
         reconnect = Connection()
         await dispatch(channel, reconnect, {"type": "attach", "chat_id": chat_id})
         attached = next(event for event in reconnect.sent if event["event"] == "attached")
         assert attached["run_state"]["runs"] == []
+
+        next_project = tmp_path / "next-project"
+        next_project.mkdir()
+        await dispatch(channel, reconnect, {
+            "type": "set_workspace_scope", "chat_id": chat_id,
+            "workspace_scope": {
+                "project_path": str(next_project), "access_mode": "restricted",
+            },
+        })
+        updated = reconnect.sent[-1]
+        assert updated["event"] == "session_updated"
+        assert updated["workspace_scope"]["project_path"] == str(next_project)
+
+        token = channel.gateway.tokens.issue_api_token(60)
+        headers = Headers({"Authorization": f"Bearer {token}"})
+        thread = await channel.gateway.http._handle_webui_thread_get_async(
+            Request(f"/api/sessions/{msg.session_key}/webui-thread", headers), msg.session_key,
+        )
+        assert thread.status_code == 200
+        body = json.loads(thread.body)
+        assert body["workspace_scope"]["project_path"] == str(next_project)
+        assert body["run_state"] == snapshot
+        assert body["has_pending_tool_calls"] is True
+        assert body["active_turn_id"] is None
+        assert websocket_turn_transcript_persistence_failed(chat_id, msg.execution_admission.execution_id)
+        assert has_pending_webui_transcript(chat_id, msg.metadata[HISTORY_GENERATION_METADATA_KEY])
+    finally:
+        unsubscribe()
+        clear_websocket_turns(chat_id)
+        await loop.aclose()
+
+
+@pytest.mark.parametrize("storage_busy", [False, True])
+async def test_reset_discards_old_compaction_completion_without_poisoning_new_transcript(channel, monkeypatch, storage_busy):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.command.builtin import cmd_compact, cmd_new
+    from nanobot.command.router import CommandContext
+    from nanobot.session.webui_turns import WebuiTurnCoordinator, WebuiTurnRoutePolicy
+
+    chat_id = "reset-compaction"
+    key = f"websocket:{chat_id}"
+    connection = Connection()
+    sessions = channel.gateway.session_manager
+    assert sessions is not None
+    provider = MagicMock(aclose=AsyncMock())
+    provider.get_default_model.return_value = "test"
+    loop = AgentLoop(
+        bus=channel.bus, provider=provider,
+        workspace=channel.gateway.workspaces.default_scope().project_path,
+        model="test", session_manager=sessions, executions=channel.gateway.executions,
+    )
+    loop.turn_delivery_factory.route_policy = WebuiTurnRoutePolicy(sessions)
+    coordinator = WebuiTurnCoordinator(channel.bus, sessions, lambda coro: coro.close())
+    unsubscribe = coordinator.subscribe()
+    compacting = asyncio.Event()
+
+    async def compact(*args, **kwargs):
+        compacting.set()
+        await asyncio.Event().wait()
+
+    async def process(msg, *, delivery, **kwargs):
+        await delivery.bind_session_generation(msg.session_generation)
+        await cmd_compact(CommandContext(
+            msg=msg, session=await sessions.state.get(key), key=key, raw="/compact",
+            loop=loop, runtime=MagicMock(),
+        ))
+
+    monkeypatch.setattr(loop.consolidator, "compact_idle_session", compact)
+    monkeypatch.setattr(loop, "_process_message", process)
+    try:
+        await dispatch(channel, connection, {
+            "type": "message", "chat_id": chat_id, "webui": True,
+            "turn_id": "compact-old", "content": "/compact",
+        })
+        msg = channel.bus.inbound.get_nowait()
+        await loop._dispatch_inbound(msg)
+        await asyncio.wait_for(compacting.wait(), 2)
+        previous_generation = (await sessions.state.get(key)).generation
+        await cmd_new(CommandContext(
+            msg=InboundMessage(channel="websocket", sender_id="browser", chat_id=chat_id, content="/new"),
+            session=None, key=key, raw="/new", loop=loop,
+        ))
+        assert (await sessions.state.get(key)).generation != previous_generation
+        # The sender is independent of the FIFO worker: cancelled /compact output
+        # can reach the recorder only after /new has replaced its generation.
+        assert not channel.bus.outbound.empty()
+        blocker = None
+        admissions = []
+        try:
+            if storage_busy:
+                # Real admission pressure rejects the old write before the store
+                # can check its generation; no mocked append result or capacity.
+                blocker = sqlite3.connect(sessions._store.path, isolation_level=None)
+                blocker.execute("BEGIN IMMEDIATE")
+                scope = channel.gateway.workspaces.default_scope()
+                admissions = [
+                    asyncio.create_task(channel.gateway.workspaces.persist_scope(f"load-{index}", scope))
+                    for index in range(sessions.state._capacity)
+                ]
+                async with asyncio.timeout(2):
+                    while sessions.state._admitted < sessions.state._capacity:
+                        await asyncio.sleep(0)
+            while not channel.bus.outbound.empty():
+                await channel.send(channel.bus.outbound.get_nowait())
+        finally:
+            if blocker is not None:
+                blocker.rollback()
+                blocker.close()
+            await asyncio.gather(*admissions)
+        assert channel.gateway.runs.snapshot(key)["runs"] == []
+        token = channel.gateway.tokens.issue_api_token(60)
+        thread = await channel.gateway.http._handle_webui_thread_get_async(
+            Request(f"/api/sessions/{key}/webui-thread", Headers({"Authorization": f"Bearer {token}"})), key,
+        )
+        assert thread.status_code == 404, "reset chat must not acquire a phantom unfinished transcript"
     finally:
         unsubscribe()
         clear_websocket_turns(chat_id)
@@ -323,6 +453,8 @@ async def test_sessions_and_thread_return_independently_versioned_runtime_snapsh
             "type": "message", "chat_id": chat_id, "webui": True,
             "turn_id": "http-turn", "content": "hello",
         })
+        accepted = channel.bus.inbound.get_nowait()
+        assert accepted.execution_admission is not None
         token = channel.gateway.tokens.issue_api_token(60)
         headers = Headers({"Authorization": f"Bearer {token}"})
         unauthorized = await channel.gateway.http._handle_webui_thread_get_async(
@@ -337,7 +469,10 @@ async def test_sessions_and_thread_return_independently_versioned_runtime_snapsh
         assert thread.status_code == 200
         body = json.loads(thread.body)
         assert row["run_state"] == body["run_state"] == channel.gateway.runs.snapshot(key)
-        assert body["run_state"]["runs"][0]["phase"] == "queued"
+        assert body["run_state"]["runs"] == [{
+            "run_id": accepted.execution_admission.execution_id,
+            "turn_id": "http-turn", "phase": "queued", "started_at": None,
+        }]
         assert isinstance(body["run_state"]["revision"], int)
         assert body["run_state"]["instance_id"] == channel.gateway.tokens.instance_id
     finally:
@@ -358,7 +493,7 @@ async def test_state_watch_uses_bounded_backpressure_without_blocking_runtime(ch
         for index in range(300):
             context = RuntimeEventContext(channel="websocket", chat_id="background", session_key="websocket:background")
             await channel.bus.publish(TurnExecutionChanged(context, str(index), "queued"))
-            await channel.bus.publish(TurnExecutionChanged(context, str(index), "exited", outcome="completed"))
+            await channel.bus.publish(TurnExecutionChanged(context, str(index), "exited"))
     assert channel.gateway.runs.snapshot("websocket:background")["runs"] == []
     if channel._outbound_retire_tasks:
         await asyncio.gather(*tuple(channel._outbound_retire_tasks))
@@ -422,6 +557,8 @@ async def test_stop_during_scope_persistence_cancels_the_accepted_root(channel, 
     origin, other_tab = Connection(), Connection()
     channel.gateway.endpoint.webui_connections.update((cast(Any, origin), cast(Any, other_tab)))
     loop, unsubscribe = execution_loop(channel)
+    facts = []
+    channel.bus.subscribe(facts.append, TurnExecutionChanged)
     entered, release = asyncio.Event(), asyncio.Event()
     persist = channel.gateway.workspaces.persist_scope
     process = AsyncMock(return_value=OutboundMessage(channel="websocket", chat_id="early-stop", content="must not run"))
@@ -451,7 +588,9 @@ async def test_stop_during_scope_persistence_cancels_the_accepted_root(channel, 
         response = next(event for event in other_tab.sent if event["event"] == "webui_response")
         assert response["ok"] is True
         # A request ACK is not a claim of physical exit while admission is blocked.
-        assert response["result"]["run_state"]["runs"][0]["run_id"] == owner
+        assert [(run["run_id"], run["phase"]) for run in response["result"]["run_state"]["runs"]] == [
+            (owner, "stopping"),
+        ]
         assert channel.bus.inbound.empty()
         release.set()
         await asyncio.wait_for(sending, 2)
@@ -460,9 +599,8 @@ async def test_stop_during_scope_persistence_cancels_the_accepted_root(channel, 
         process.assert_not_awaited()
         snapshot = channel.gateway.runs.snapshot(key)
         assert snapshot["runs"] == []
-        assert snapshot["completed"] == [{
-            "run_id": owner, "turn_id": "accepted-before-persistence", "outcome": "cancelled",
-        }]
+        assert {fact.execution_id for fact in facts} == {owner}
+        assert [fact.phase for fact in facts] == ["queued", "stopping", "exited"]
     finally:
         release.set()
         await asyncio.gather(sending, return_exceptions=True)
@@ -478,11 +616,12 @@ async def test_unified_chat_steering_relinquishes_its_provisional_owner(channel,
     from nanobot.providers.base import LLMResponse
     from nanobot.session.keys import UNIFIED_SESSION_KEY
     from nanobot.session.recovery import pending_followups
-    from nanobot.session.webui_turns import websocket_turn_wall_started_at
 
     connection = Connection()
     channel.gateway.endpoint.webui_connections.add(cast(Any, connection))
     loop, unsubscribe = execution_loop(channel)
+    facts = []
+    channel.bus.subscribe(facts.append, TurnExecutionChanged)
     entered, release = asyncio.Event(), asyncio.Event()
     requests = []
 
@@ -515,15 +654,13 @@ async def test_unified_chat_steering_relinquishes_its_provisional_owner(channel,
         assert journal is not None and pending_followups(journal)
         reconciled = channel.gateway.runs.snapshot(webui_session_key("unified-b"))
         assert reconciled["runs"] == []
-        assert reconciled["completed"] == [{
-            "run_id": owner_b, "turn_id": "turn-b", "outcome": "unknown",
-        }]
+        assert [fact.phase for fact in facts if fact.execution_id == owner_b] == ["queued", "injected"]
         if stop_b:
             await dispatch(channel, connection, {
                 "type": "webui_request", "request_id": "stop-steering", "action": "runs.stop",
                 "payload": {"chat_id": "unified-b", "run_ids": [owner_b]},
             })
-            # A no-longer-root steering receipt cannot cancel A or erase its journal.
+            # A retired provisional owner cannot cancel A or erase its journal.
             assert channel.bus.inbound.empty()
         assert channel.gateway.runs.snapshot(webui_session_key("unified-a"))["runs"][0]["phase"] == "running"
         release.set()
@@ -532,7 +669,6 @@ async def test_unified_chat_steering_relinquishes_its_provisional_owner(channel,
         assert any("steer from B" in str(row.get("content")) for row in requests[-1])
         assert channel.gateway.runs.snapshot(webui_session_key("unified-a"))["runs"] == []
         assert channel.gateway.runs.snapshot(webui_session_key("unified-b"))["runs"] == []
-        assert websocket_turn_wall_started_at("unified-b") is None
         journal = await loop.sessions.state.read(UNIFIED_SESSION_KEY)
         assert journal is not None and not pending_followups(journal)
         outbound = []
@@ -564,11 +700,12 @@ async def test_rejected_unified_followup_retires_only_its_transport_owner(
     from nanobot.session.recovery import pending_followups
     from nanobot.session.sqlite_store import SessionConflictError
     from nanobot.session.state import SessionOperationQueueFullError
-    from nanobot.session.webui_turns import websocket_turn_wall_started_at
 
     connection = Connection()
     channel.gateway.endpoint.webui_connections.add(cast(Any, connection))
     loop, unsubscribe = execution_loop(channel)
+    facts = []
+    channel.bus.subscribe(facts.append, TurnExecutionChanged)
     entered, release = asyncio.Event(), asyncio.Event()
     failure_entered, failure_release = asyncio.Event(), asyncio.Event()
     requests = []
@@ -632,14 +769,9 @@ async def test_rejected_unified_followup_retires_only_its_transport_owner(
         # Rejection is terminal before the failure response can block or fail.
         snapshot = channel.gateway.runs.snapshot(webui_session_key("rejection-b"))
         assert snapshot["runs"] == []
-        assert snapshot["completed"] == [{
-            "run_id": owner_b, "turn_id": "turn-b", "outcome": "failed",
-        }]
-        assert websocket_turn_wall_started_at("rejection-b") is None
+        assert [fact.phase for fact in facts if fact.execution_id == owner_b] == ["queued", "rejected"]
         preserved_a = channel.gateway.runs.snapshot(webui_session_key("rejection-a"))
         assert preserved_a["runs"] == active_a["runs"]
-        assert preserved_a["completed"] == active_a["completed"]
-        assert websocket_turn_wall_started_at("rejection-a") is not None
         journal = await loop.sessions.state.read(UNIFIED_SESSION_KEY)
         assert journal is not None and pending_followups(journal) == kept
         assert loop._pending_queues[UNIFIED_SESSION_KEY].qsize() == 1
@@ -682,8 +814,6 @@ async def test_rejected_unified_followup_retires_only_its_transport_owner(
 async def test_inline_control_does_not_reserve_a_unified_execution_owner(
     channel, monkeypatch, content, reply,
 ):
-    from nanobot.session.webui_turns import websocket_turn_wall_started_at
-
     connection = Connection()
     loop, unsubscribe = execution_loop(channel)
     entered, release = asyncio.Event(), asyncio.Event()
@@ -711,7 +841,6 @@ async def test_inline_control_does_not_reserve_a_unified_execution_owner(
         assert b.execution_admission is None
         await loop._dispatch_inbound(b)
         assert channel.gateway.runs.snapshot(webui_session_key("inline-b"))["runs"] == []
-        assert websocket_turn_wall_started_at("inline-b") is None
         assert channel.gateway.runs.snapshot(webui_session_key("inline-a")) == active_a
         assert loop._pending_queues[b.session_key].empty()
         responses = []

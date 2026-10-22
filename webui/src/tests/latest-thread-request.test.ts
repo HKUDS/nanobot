@@ -7,12 +7,27 @@ import type { WebuiThreadPersistedPayload } from "@/lib/types";
 
 const KEY = "websocket:shared";
 
-function connectedClient(url: string): NanobotClient {
-  const socket = { readyState: 1, onopen: null as (() => void) | null, send() {}, close() {} };
+class TestSocket {
+  readyState = 1;
+  onopen: (() => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  send() {}
+  close() {}
+  receive(payload: unknown) {
+    this.onmessage?.({ data: JSON.stringify(payload) } as MessageEvent);
+  }
+}
+
+function connectedClient(url: string, authority = true) {
+  const socket = new TestSocket();
   const client = new NanobotClient({ url, reconnect: false, socketFactory: () => socket as unknown as WebSocket });
   client.connect();
   socket.onopen?.();
-  return client;
+  socket.receive({ event: "ready", chat_id: "default", client_id: "test",
+    ...(authority ? { run_state_instance_id: "host" } : {}) });
+  if (authority) socket.receive({ event: "run_state", chat_id: "shared",
+    run_state: { instance_id: "host", revision: 0, runs: [] } });
+  return { client, socket };
 }
 
 function cachedThread(revision = "cached"): WebuiThreadPersistedPayload {
@@ -31,8 +46,8 @@ afterEach(() => {
 });
 
 describe("shared latest thread requests", () => {
-  it("shares a conditional read and lets one consumer cancel while another receives the owning 304 body", async () => {
-    const client = connectedClient("ws://host");
+  it.each([true, false])("shares an authenticated conditional read (run authority: %s) while one consumer cancels", async (authority) => {
+    const { client } = connectedClient("ws://host", authority);
     const body = cachedThread();
     webuiThreadCache.set(KEY, body);
     const read = deferredResponse();
@@ -55,7 +70,7 @@ describe("shared latest thread requests", () => {
   });
 
   it("aborts the network after its final consumer cancels and starts a new read for recovery", async () => {
-    const client = connectedClient("ws://host");
+    const { client } = connectedClient("ws://host");
     const reads = [deferredResponse(), deferredResponse()];
     const fetchMock = vi.fn().mockReturnValueOnce(reads[0].promise).mockReturnValueOnce(reads[1].promise);
     vi.stubGlobal("fetch", fetchMock);
@@ -73,13 +88,7 @@ describe("shared latest thread requests", () => {
   });
 
   it.each(["thread update", "turn end"] as const)("replaces surviving reads only for their own chat's %s", async (invalidation) => {
-    const socket = {
-      readyState: 1, onopen: null as (() => void) | null,
-      onmessage: null as ((event: MessageEvent) => void) | null, send() {}, close() {},
-    };
-    const client = new NanobotClient({ url: "ws://host", reconnect: false, socketFactory: () => socket as unknown as WebSocket });
-    client.connect();
-    socket.onopen?.();
+    const { client, socket } = connectedClient("ws://host");
     const reads = [deferredResponse(), deferredResponse()];
     const fetchMock = vi.fn().mockReturnValueOnce(reads[0].promise).mockReturnValueOnce(reads[1].promise);
     vi.stubGlobal("fetch", fetchMock);
@@ -103,9 +112,39 @@ describe("shared latest thread requests", () => {
     await Promise.all([first, surviving, fresh].map((read) => expect(read).resolves.toEqual(body)));
   });
 
+  it("shares only post-baseline reads for the requested chat", async () => {
+    const socket = new TestSocket();
+    const client = new NanobotClient({ url: "ws://host", reconnect: false, socketFactory: () => socket as unknown as WebSocket });
+    client.connect();
+    socket.onopen?.();
+    socket.receive({ event: "ready", chat_id: "default", client_id: "test", run_state_instance_id: "host" });
+    const reads = [deferredResponse(), deferredResponse(), deferredResponse()];
+    const fetchMock = vi.fn()
+      .mockReturnValueOnce(reads[0].promise)
+      .mockReturnValueOnce(reads[1].promise)
+      .mockReturnValueOnce(reads[2].promise);
+    vi.stubGlobal("fetch", fetchMock);
+    const first = fetchLatestWebuiThread(client, "token", KEY);
+    socket.receive({ event: "run_state", chat_id: "another-chat",
+      run_state: { instance_id: "host", revision: 0, runs: [] } });
+    const second = fetchLatestWebuiThread(client, "token", KEY);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    socket.receive({ event: "run_state", chat_id: "shared",
+      run_state: { instance_id: "host", revision: 0, runs: [] } });
+    const fresh = fetchLatestWebuiThread(client, "token", KEY);
+    const shared = fetchLatestWebuiThread(client, "token", KEY);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const body = cachedThread("fresh");
+    reads[0].resolve(new Response(JSON.stringify(cachedThread("before-baseline")), { status: 200 }));
+    reads[1].resolve(new Response(JSON.stringify(cachedThread("still-syncing")), { status: 200 }));
+    reads[2].resolve(new Response(JSON.stringify(body), { status: 200 }));
+    await Promise.all([first, second]);
+    await Promise.all([fresh, shared].map((read) => expect(read).resolves.toEqual(body)));
+  });
+
   it("keeps host clients and renewed credentials in separate reads", async () => {
-    const firstHost = connectedClient("ws://first-host");
-    const secondHost = connectedClient("ws://second-host");
+    const { client: firstHost } = connectedClient("ws://first-host");
+    const { client: secondHost } = connectedClient("ws://second-host");
     const reads = [deferredResponse(), deferredResponse(), deferredResponse()];
     const fetchMock = vi.fn()
       .mockReturnValueOnce(reads[0].promise)
@@ -123,7 +162,7 @@ describe("shared latest thread requests", () => {
   });
 
   it("does not join a pending read after a newer canonical page changes its cached baseline", async () => {
-    const client = connectedClient("ws://host");
+    const { client } = connectedClient("ws://host");
     const oldBody = cachedThread("old");
     const newBody = cachedThread("new");
     webuiThreadCache.set(KEY, oldBody);

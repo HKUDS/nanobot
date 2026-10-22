@@ -368,6 +368,7 @@ async def test_same_session_projects_one_turn_to_both_clients(bus: MagicMock) ->
                 assert state_a.event == state_b.event == "run_state"
                 assert state_a.raw == state_b.raw
                 assert state_a.raw["run_state"]["runs"][0]["phase"] == "queued"
+                assert state_a.raw["run_state"]["runs"][0]["started_at"] is None
                 assert state_a.raw["run_state"]["runs"][0]["turn_id"] == "turn-a"
                 assert accepted.event == "message_accepted"
                 assert accepted.raw["turn_id"] == "turn-a"
@@ -380,7 +381,6 @@ async def test_same_session_projects_one_turn_to_both_clients(bus: MagicMock) ->
                     "starts_turn": True,
                     "turn_id": "turn-a",
                     "active_turn_id": "turn-a",
-                    "started_at": projected.raw["started_at"],
                 }
 
                 await ch.send_delta(chat_id, "shared reply", stream_id="stream-a")

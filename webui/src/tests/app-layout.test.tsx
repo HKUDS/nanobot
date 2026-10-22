@@ -2973,7 +2973,7 @@ describe("App layout", () => {
   });
 
   it("watches only websocket sidebar sessions without attaching background transcript streams", async () => {
-    const runStateSnapshot = { instance_id: "sidebar-host", revision: 4, runs: [], completed: [] };
+    const runStateSnapshot = { instance_id: "sidebar-host", revision: 4, runs: [] };
     mockSessions = [
       { key: "websocket:web-chat", channel: "websocket", chatId: "web-chat", createdAt: null,
         updatedAt: null, preview: "Browser chat", runState: runStateSnapshot },

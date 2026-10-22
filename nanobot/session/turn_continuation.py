@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Mapping, MutableMapping
 
 from loguru import logger
 
-from nanobot.bus.events import INBOUND_META_EXECUTION_ID, InboundMessage
+from nanobot.bus.events import InboundMessage
 from nanobot.session.goal_state import (
     goal_state_runtime_lines,
     sustained_goal_active,
@@ -139,7 +139,6 @@ def prepare_continuation(
         "message_id": request.message_id,
         "turn_id": request.turn_id,
     }
-    metadata.pop(INBOUND_META_EXECUTION_ID, None)
     return dataclasses.replace(
         ctx.msg,
         sender_id=_GOAL_CONTINUATION_SENDER,

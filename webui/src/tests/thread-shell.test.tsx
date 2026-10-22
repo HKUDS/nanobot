@@ -36,7 +36,7 @@ async function openMessageActions(text: string): Promise<HTMLElement> {
 }
 
 function makeClient(options?: Parameters<typeof createStreamClient>[0]) {
-  const { client: lifecycle, receive, receiveRaw, updateRuns, setConnected, adoptSnapshot } = createStreamClient(options);
+  const { client: lifecycle, receive, updateRuns, setConnected, adoptSnapshot } = createStreamClient(options);
   const errorHandlers = new Set<(err: StreamError) => void>();
   const statusHandlers = new Set<(status: ConnectionStatus) => void>();
   const runtimeModelHandlers = new Set<
@@ -94,7 +94,6 @@ function makeClient(options?: Parameters<typeof createStreamClient>[0]) {
       if (accepted) adoptSnapshot(chatId, value);
       return accepted;
     },
-    _receiveRaw: receiveRaw,
     _updateRuns: updateRuns,
     hasUnsettledRun: lifecycle.hasUnsettledRun.bind(lifecycle),
     getRunGeneration: lifecycle.getRunGeneration.bind(lifecycle),
@@ -280,7 +279,7 @@ function publishReconnectCompletion(
 }
 
 function idleRunState() {
-  return { instance_id: "fixture-host", revision: 100, runs: [], completed: [] };
+  return { instance_id: "fixture-host", revision: 100, runs: [] };
 }
 
 function httpJson(body: unknown) {
@@ -504,7 +503,7 @@ describe("ThreadShell", () => {
       onToggleSidebar={() => {}} onTurnEnd={onTurnEnd} />);
     const view = render(shell(chatId));
     act(() => {
-      client._emitChat(chatId, { event: "goal_status", chat_id: chatId, turn_id: turnId, status: "running", started_at: 100 });
+      client._updateRuns(chatId, [{ run_id: "owner", turn_id: turnId, phase: "running", started_at: 100 }]);
       client._emitChat(chatId, { event: "delta", chat_id: chatId, turn_id: turnId, stream_id: "first", turn_seq: 1, text: "Earlier answer" });
       client._emitChat(chatId, { event: "stream_end", chat_id: chatId, turn_id: turnId, stream_id: "first", turn_seq: 2, resuming: true, response_sources: [source] });
       client._emitChat(chatId, { event: "message", chat_id: chatId, turn_id: turnId, turn_seq: 3, kind: "tool_hint", text: "read_file(earlier)" });
@@ -1109,7 +1108,7 @@ describe("ThreadShell", () => {
     expect(screen.queryByText("failed to read file")).not.toBeInTheDocument();
   });
 
-  it("hides actions for a complete assistant-only message until turn_end", async () => {
+  it("hides actions for a complete assistant-only message until turn_end and execution exit", async () => {
     const client = makeClient();
     vi.mocked(fetch).mockImplementation(async (input) => (
       String(input).includes("websocket%3Aassistant-only-actions/webui-thread")
@@ -1132,13 +1131,9 @@ describe("ThreadShell", () => {
     expect(within(oldMenu).getByRole("button", { name: "Copy" })).toBeInTheDocument();
     const turnId = "turn-automation";
     const startedAt = Date.now() / 1000;
-    act(() => client._emitChat("assistant-only-actions", {
-      event: "goal_status",
-      chat_id: "assistant-only-actions",
-      status: "running",
-      started_at: startedAt,
-      turn_id: turnId,
-    }));
+    act(() => client._updateRuns("assistant-only-actions", [{
+      run_id: "owner", turn_id: turnId, phase: "running", started_at: startedAt,
+    }]));
     expect(screen.getAllByRole("button", { name: "Message actions" })).toHaveLength(1);
 
     act(() => client._emitChat("assistant-only-actions", {
@@ -1152,11 +1147,10 @@ describe("ThreadShell", () => {
     expect(screen.getByText("new automation").closest("[data-thread-display-unit]"))
       .not.toHaveAttribute("data-message-context-block");
 
-    act(() => client._emitChat("assistant-only-actions", {
-      event: "turn_end",
-      chat_id: "assistant-only-actions",
-      turn_id: turnId,
-    }));
+    act(() => {
+      client._emitChat("assistant-only-actions", { event: "turn_end", chat_id: "assistant-only-actions", turn_id: turnId });
+      client._updateRuns("assistant-only-actions", []);
+    });
     await waitFor(() => expect(screen.getAllByRole("button", { name: "Message actions" })).toHaveLength(2));
     const newMenu = await openMessageActions("new automation");
     expect(within(newMenu).getByRole("button", { name: "Copy" })).toBeInTheDocument();
@@ -1785,10 +1779,9 @@ describe("ThreadShell", () => {
     ) as Response);
     render(wrap(client, <ThreadShell session={session(chatId)} title="Queued chat" onToggleSidebar={() => {}} />));
     await screen.findByText("Initial question");
-    act(() => client._emitChat(chatId, {
-      event: "goal_status", chat_id: chatId, turn_id: owner,
-      status: "running", started_at: 1_000,
-    }));
+    act(() => client._updateRuns(chatId, [{
+      run_id: "owner", turn_id: owner, phase: "running", started_at: 1_000,
+    }]));
     const input = screen.getByLabelText("Message input");
     for (const text of ["first persisted follow-up", "second persisted follow-up"]) {
       fireEvent.change(input, { target: { value: text } });
@@ -1807,15 +1800,17 @@ describe("ThreadShell", () => {
     act(() => client._emitSessionUpdate(chatId, "thread"));
     await waitFor(() => expect(refreshStarted).toBe(true));
     try {
-      act(() => client._emitChat(chatId, { event: "turn_end", chat_id: chatId, turn_id: owner }));
+      act(() => {
+        client._emitChat(chatId, { event: "turn_end", chat_id: chatId, turn_id: owner });
+        client._updateRuns(chatId, []);
+      });
       await waitFor(() => expectSendMessageWithTurn(client, chatId, "first persisted follow-up\nsecond persisted follow-up"));
       expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
       expect(client.sendMessage).toHaveBeenCalledTimes(1);
       const nextTurnId = client.sendMessage.mock.calls[0][3]!.turnId!;
-      act(() => client._emitChat(chatId, {
-        event: "goal_status", chat_id: chatId, turn_id: nextTurnId,
-        status: "running", started_at: 2_000,
-      }));
+      act(() => client._updateRuns(chatId, [{
+        run_id: "next-owner", turn_id: nextTurnId, phase: "running", started_at: 2_000,
+      }]));
       expect(client.sendMessage).toHaveBeenCalledTimes(1);
       act(() => client._emitChat(chatId, { event: "turn_end", chat_id: chatId, turn_id: nextTurnId }));
       expect(client.sendMessage).toHaveBeenCalledTimes(1);
@@ -1831,10 +1826,9 @@ describe("ThreadShell", () => {
       session={session(chatId)} title="Temporary chat" temporary
       temporaryChatIds={[chatId]} onToggleSidebar={() => {}}
     />));
-    act(() => client._emitChat(chatId, {
-      event: "goal_status", chat_id: chatId, turn_id: "temporary-owner",
-      status: "running", started_at: 1_000,
-    }));
+    act(() => client._updateRuns(chatId, [{
+      run_id: "owner", turn_id: "temporary-owner", phase: "running", started_at: 1_000,
+    }]));
     const input = screen.getByLabelText("Message input");
     for (const text of ["first temporary follow-up", "second temporary follow-up"]) {
       fireEvent.change(input, { target: { value: text } });
@@ -1842,17 +1836,17 @@ describe("ThreadShell", () => {
     }
     expect(client.sendMessage).not.toHaveBeenCalled();
 
-    act(() => client._emitChat(chatId, {
-      event: "turn_end", chat_id: chatId, turn_id: "temporary-owner",
-    }));
+    act(() => {
+      client._emitChat(chatId, { event: "turn_end", chat_id: chatId, turn_id: "temporary-owner" });
+      client._updateRuns(chatId, []);
+    });
     await waitFor(() => expectSendMessageWithTurn(client, chatId, "first temporary follow-up\nsecond temporary follow-up"));
     expect(client.sendMessage).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
     const nextTurnId = client.sendMessage.mock.calls[0][3]!.turnId!;
-    act(() => client._emitChat(chatId, {
-      event: "goal_status", chat_id: chatId, turn_id: nextTurnId,
-      status: "running", started_at: 2_000,
-    }));
+    act(() => client._updateRuns(chatId, [{
+      run_id: "next-owner", turn_id: nextTurnId, phase: "running", started_at: 2_000,
+    }]));
     expect(client.sendMessage).toHaveBeenCalledTimes(1);
 
     act(() => client._emitChat(chatId, {
@@ -2334,8 +2328,7 @@ describe("ThreadShell", () => {
       ],
       page: { before_cursor: null, has_more_before: false, after_cursor: null, has_more_after: false,
         loaded_event_count: 3, user_message_offset: 0 },
-      run_state: { instance_id: instanceId, revision: 6, runs: [],
-        completed: [{ run_id: "5c27927cf18740e896d9c1ad9b51e652", turn_id: turnId, outcome: "completed" }] },
+      run_state: { instance_id: instanceId, revision: 6, runs: [] },
     };
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input).includes("/webui-thread")
       ? httpJson(body) : { ok: false, status: 404, json: async () => ({}) }));
@@ -2654,9 +2647,9 @@ describe("ThreadShell", () => {
   });
 
   it.each(["syncing", "unavailable", "fresh"] as const)("keeps pending history separate from %s runtime and local delivery", async (freshness) => {
-    const client = makeClient(freshness === "unavailable" ? { instanceId: null }
-      : freshness === "syncing" ? { autoRunSnapshots: false } : {});
+    const client = makeClient(freshness === "unavailable" ? { instanceId: null } : {});
     const chatId = "pending-not-runtime";
+    if (freshness === "fresh") client._updateRuns(chatId, []);
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input).includes("/webui-thread")
       ? httpJson({
           ...transcriptFromSimpleMessages([{ role: "user", content: "Old unfinished request", turnId: "old-turn" }]),
@@ -2677,7 +2670,7 @@ describe("ThreadShell", () => {
         .toHaveTextContent("Sending message…");
     }
     if (freshness === "unavailable") expect(screen.getByText(/Update nanobot on this host/)).toBeInTheDocument();
-    act(() => client._receiveRaw({ event: "goal_status", chat_id: chatId, turn_id: "old-turn", status: "running", started_at: 123 }));
+    act(() => client._emitChat(chatId, { event: "goal_status", chat_id: chatId, turn_id: "old-turn", status: "running", started_at: 123 }));
     expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
     expect(client.getRunState(chatId).active).toBe(false);
   });
@@ -2696,12 +2689,9 @@ describe("ThreadShell", () => {
     const { rerender } = render(view("chat-a"));
 
     await act(async () => {
-      client._emitChat("chat-a", {
-        event: "goal_status",
-        chat_id: "chat-a", turn_id: "running-chat-a-turn",
-        status: "running",
-        started_at: Date.now() / 1000,
-      });
+      client._updateRuns("chat-a", [{
+        run_id: "owner", turn_id: "running-chat-a-turn", phase: "running", started_at: Date.now() / 1000,
+      }]);
     });
     expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
 
@@ -2837,12 +2827,9 @@ describe("ThreadShell", () => {
 
     await waitFor(() => expect(screen.getByText("question")).toBeInTheDocument());
     act(() => {
-      client._emitChat("resume-chat", {
-        event: "goal_status",
-        chat_id: "resume-chat", turn_id: turnId,
-        status: "running",
-        started_at: 1_700,
-      });
+      client._updateRuns("resume-chat", [{
+        run_id: "owner", turn_id: turnId, phase: "running", started_at: 1_700,
+      }]);
       client._emitChat("resume-chat", {
         event: "delta",
         chat_id: "resume-chat", turn_id: turnId, turn_seq: 2, stream_id: streamId,
@@ -2888,10 +2875,9 @@ describe("ThreadShell", () => {
     />));
     await screen.findByText("question");
     act(() => {
-      client._emitChat(chatId, {
-        event: "goal_status", chat_id: chatId, turn_id: turnId,
-        status: "running", started_at: 1_700,
-      });
+      client._updateRuns(chatId, [{
+        run_id: "owner", turn_id: turnId, phase: "running", started_at: 1_700,
+      }]);
       client._emitChat(chatId, {
         event: "delta", chat_id: chatId, turn_id: turnId, turn_seq: 2,
         stream_id: "cached-answer", text: "cached prefix",
@@ -2911,11 +2897,12 @@ describe("ThreadShell", () => {
       has_pending_tool_calls: false,
     }));
     expect(client.reconcileCanonicalCompletion).toHaveBeenCalledTimes(1);
-    act(() => client._emitStatus("open"));
+    act(() => {
+      client._emitStatus("open");
+      client._updateRuns(chatId, []);
+    });
     await screen.findByText("full cached answer");
-    // The authenticated baseline lets the cached runtime snapshot confirm exit.
-    // That terminal fact invalidates the older revalidation, so one fresh 304 read follows.
-    expect(historyCalls).toBe(3);
+    expect(historyCalls).toBe(2);
     expect(screen.queryByText("cached prefix")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
   });
@@ -2943,10 +2930,9 @@ describe("ThreadShell", () => {
     />));
     await screen.findByText("question");
     act(() => {
-      client._emitChat(chatId, {
-        event: "goal_status", chat_id: chatId, turn_id: turnId,
-        status: "running", started_at: 1_700,
-      });
+      client._updateRuns(chatId, [{
+        run_id: "owner", turn_id: turnId, phase: "running", started_at: 1_700,
+      }]);
       client._emitChat(chatId, {
         event: "delta", chat_id: chatId, turn_id: turnId, turn_seq: 2,
         stream_id: "published-answer", text: "old active prefix",
@@ -3352,13 +3338,9 @@ describe("ThreadShell", () => {
 
     await waitFor(() => expect(screen.getByText("strict question")).toBeInTheDocument());
     act(() => {
-      client._emitChat("strict-canonical", {
-        event: "goal_status",
-        chat_id: "strict-canonical",
-        status: "running",
-        started_at: 2_100,
-        turn_id: turnId,
-      });
+      client._updateRuns("strict-canonical", [{
+        run_id: "owner", turn_id: turnId, phase: "running", started_at: 2_100,
+      }]);
       client._emitChat("strict-canonical", {
         event: "delta",
         chat_id: "strict-canonical",
@@ -3415,9 +3397,9 @@ describe("ThreadShell", () => {
       onToggleSidebar={() => {}} onNewChat={() => {}} />));
     await screen.findByText("layout question");
     act(() => {
-      client._emitChat(chatId, {
-        event: "goal_status", chat_id: chatId, status: "running", started_at: 2_200, turn_id: turnId,
-      });
+      client._updateRuns(chatId, [{
+        run_id: "owner", turn_id: turnId, phase: "running", started_at: 2_200,
+      }]);
       client._emitChat(chatId, {
         event: "delta", chat_id: chatId, text: "layout partial", turn_id: turnId,
         turn_seq: 2, stream_id: "layout-answer",
@@ -3433,15 +3415,12 @@ describe("ThreadShell", () => {
       // Keep both owners registered until the pending canonical read commits;
       // exiting the old owner would trigger an independent completion refresh.
       client._updateRuns(chatId, [
-        { run_id: `run:${turnId}`, turn_id: turnId, phase: "running", started_at: 2_200 },
-        { run_id: `run:${newerTurnId}`, turn_id: newerTurnId, phase: "running", started_at: 2_300 },
+        { run_id: "owner", turn_id: turnId, phase: "running", started_at: 2_200 },
+        { run_id: "newer-owner", turn_id: newerTurnId, phase: "running", started_at: 2_300 },
       ]);
       for (const event of streamedThreadPayload(chatId, [
         { role: "user", content: "newer layout question", turnId: newerTurnId },
       ]).events) client._emitChat(chatId, event);
-      client._emitChat(chatId, {
-        event: "goal_status", chat_id: chatId, status: "running", started_at: 2_300, turn_id: newerTurnId,
-      });
       client._emitChat(chatId, {
         event: "delta", chat_id: chatId, text: "newer layout partial", turn_id: newerTurnId,
         turn_seq: 2, stream_id: "newer-layout-answer",
@@ -3529,13 +3508,9 @@ describe("ThreadShell", () => {
     )?.turnId ?? "";
     expect(newTurnId).not.toBe("");
     act(() => {
-      client._emitChat("chat-version-a", {
-        event: "goal_status",
-        chat_id: "chat-version-a",
-        status: "running",
-        started_at: 2_000,
-        turn_id: newTurnId,
-      });
+      client._updateRuns("chat-version-a", [{
+        run_id: "owner", turn_id: newTurnId, phase: "running", started_at: 2_000,
+      }]);
       client._emitChat("chat-version-a", {
         event: "delta",
         chat_id: "chat-version-a",
@@ -3607,13 +3582,9 @@ describe("ThreadShell", () => {
 
     const newTurnId = "turn-started-during-refresh";
     act(() => {
-      client._emitChat("run-generation-chat", {
-        event: "goal_status",
-        chat_id: "run-generation-chat",
-        status: "running",
-        started_at: 3_000,
-        turn_id: newTurnId,
-      });
+      client._updateRuns("run-generation-chat", [{
+        run_id: "owner", turn_id: newTurnId, phase: "running", started_at: 3_000,
+      }]);
     });
     const input = screen.getByRole("textbox", { name: "Message input" });
     fireEvent.change(input, { target: { value: "queued for the new run" } });
@@ -3664,10 +3635,9 @@ describe("ThreadShell", () => {
     />));
     await screen.findByText("guided question");
     act(() => {
-      client._emitChat(chatId, {
-        event: "goal_status", chat_id: chatId, status: "running",
-        started_at: 1_700, turn_id: turnId,
-      });
+      client._updateRuns(chatId, [{
+        run_id: "owner", turn_id: turnId, phase: "running", started_at: 1_700,
+      }]);
       client._emitChat(chatId, {
         event: "delta", chat_id: chatId, text: "first partial segment", turn_id: turnId,
         turn_seq: 2, stream_id: "guided-first-answer",
@@ -3698,10 +3668,9 @@ describe("ThreadShell", () => {
     const newerTurnId = client.sendMessage.mock.calls[0]?.[3]?.turnId;
     expect(newerTurnId).toBeTruthy();
     act(() => {
-      client._emitChat(chatId, {
-        event: "goal_status", chat_id: chatId, status: "running",
-        started_at: 2_000, turn_id: newerTurnId,
-      });
+      client._updateRuns(chatId, [{
+        run_id: "newer-owner", turn_id: newerTurnId!, phase: "running", started_at: 2_000,
+      }]);
       client._emitChat(chatId, {
         event: "delta", chat_id: chatId, turn_id: newerTurnId, text: "newer live reply",
         turn_seq: 2, stream_id: "newer-guidance-answer",
@@ -3768,9 +3737,9 @@ describe("ThreadShell", () => {
       createId: () => `cached-${index}`, now: index + 2,
     }));
     messageCache.set(chatId, owner.save());
-    client._emitChat(chatId, {
-      event: "goal_status", chat_id: chatId, turn_id: newerTurnId, status: "running", started_at: 2_000,
-    });
+    client._updateRuns(chatId, [{
+      run_id: "newer-owner", turn_id: newerTurnId, phase: "running", started_at: 2_000,
+    }]);
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       if (!String(input).includes(`websocket%3A${chatId}/webui-thread`)) {
         return { ok: false, status: 404, json: async () => ({}) };
@@ -3833,9 +3802,9 @@ describe("ThreadShell", () => {
       createId: () => `cached-${index}`, now: index + 3,
     }));
     messageCache.set(chatId, owner.save());
-    client._emitChat(chatId, {
-      event: "goal_status", chat_id: chatId, turn_id: "new", status: "running", started_at: 2_000,
-    });
+    client._updateRuns(chatId, [{
+      run_id: "new-owner", turn_id: "new", phase: "running", started_at: 2_000,
+    }]);
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       if (!String(input).includes(`websocket%3A${chatId}/webui-thread`)) {
         return { ok: false, status: 404, json: async () => ({}) };
@@ -3904,10 +3873,9 @@ describe("ThreadShell", () => {
       status: "running", started_at: 4_000,
     }));
     expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
-    act(() => client._emitChat("initial-completion", {
-      event: "goal_status", chat_id: "initial-completion", turn_id: "new-turn",
-      status: "running", started_at: 5_000,
-    }));
+    act(() => client._updateRuns("initial-completion", [{
+      run_id: "new-owner", turn_id: "new-turn", phase: "running", started_at: 5_000,
+    }]));
     expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
   });
 
@@ -3932,6 +3900,7 @@ describe("ThreadShell", () => {
               historyCalls === 1 ? [] : [turnId],
             ),
             has_pending_tool_calls: false,
+            ...(historyCalls > 1 ? { run_state: idleRunState() } : {}),
           });
         }
         return {
@@ -3956,13 +3925,9 @@ describe("ThreadShell", () => {
 
     await waitFor(() => expect(screen.getByText("question")).toBeInTheDocument());
     act(() => {
-      client._emitChat("late-frame-chat", {
-        event: "goal_status",
-        chat_id: "late-frame-chat",
-        status: "running",
-        started_at: 4_000,
-        turn_id: turnId,
-      });
+      client._updateRuns("late-frame-chat", [{
+        run_id: "owner", turn_id: turnId, phase: "running", started_at: 4_000,
+      }]);
       client._emitChat("late-frame-chat", {
         event: "delta",
         chat_id: "late-frame-chat",
@@ -4049,13 +4014,9 @@ describe("ThreadShell", () => {
 
     await waitFor(() => expect(screen.getByText("question")).toBeInTheDocument());
     act(() => {
-      client._emitChat("visibility-complete-a", {
-        event: "goal_status",
-        chat_id: "visibility-complete-a",
-        status: "running",
-        started_at: 5_000,
-        turn_id: turnId,
-      });
+      client._updateRuns("visibility-complete-a", [{
+        run_id: "owner", turn_id: turnId, phase: "running", started_at: 5_000,
+      }]);
     });
     expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
 
@@ -4110,13 +4071,9 @@ describe("ThreadShell", () => {
 
     await waitFor(() => expect(screen.getByText("stop")).toBeInTheDocument());
     act(() => {
-      client._emitChat("empty-answer", {
-        event: "goal_status",
-        chat_id: "empty-answer",
-        status: "running",
-        started_at: 5_000,
-        turn_id: turnId,
-      });
+      client._updateRuns("empty-answer", [{
+        run_id: "owner", turn_id: turnId, phase: "running", started_at: 5_000,
+      }]);
     });
     expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
 
@@ -4140,10 +4097,9 @@ describe("ThreadShell", () => {
     async (turnId) => {
       const client = makeClient();
       const chatId = "running-history";
-      client._emitChat(chatId, {
-        event: "goal_status", chat_id: chatId, status: "running",
-        started_at: 1_700, turn_id: turnId,
-      });
+      client._updateRuns(chatId, [{
+        run_id: "owner", turn_id: turnId, phase: "running", started_at: 1_700,
+      }]);
       vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
         if (String(input).includes(`websocket%3A${chatId}/webui-thread`)) {
           return httpJson({
@@ -4286,10 +4242,9 @@ describe("ThreadShell", () => {
     const client = makeClient();
     const chatId = "running-paged-history";
     const turnId = "current-turn";
-    client._emitChat(chatId, {
-      event: "goal_status", chat_id: chatId, status: "running",
-      started_at: 1_700, turn_id: turnId,
-    });
+    client._updateRuns(chatId, [{
+      run_id: "owner", turn_id: turnId, phase: "running", started_at: 1_700,
+    }]);
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (!url.includes(`websocket%3A${chatId}/webui-thread`)) {
@@ -4394,13 +4349,9 @@ describe("ThreadShell", () => {
 
     await waitFor(() => expect(screen.getByText("question")).toBeInTheDocument());
     act(() => {
-      client._emitChat("before-delta-chat", {
-        event: "goal_status",
-        chat_id: "before-delta-chat",
-        status: "running",
-        started_at: 1_700,
-        turn_id: turnId,
-      });
+      client._updateRuns("before-delta-chat", [{
+        run_id: "owner", turn_id: turnId, phase: "running", started_at: 1_700,
+      }]);
     });
     const input = screen.getByRole("textbox", { name: "Message input" });
     fireEvent.change(input, { target: { value: "queued guidance" } });
@@ -4408,7 +4359,12 @@ describe("ThreadShell", () => {
     expect(client.sendMessage).not.toHaveBeenCalled();
 
     act(() => client._emitStatus("reconnecting"));
-    act(() => client._emitStatus("open"));
+    act(() => {
+      client._emitStatus("open");
+      client._updateRuns("before-delta-chat", [{
+        run_id: "owner", turn_id: turnId, phase: "running", started_at: 1_700,
+      }]);
+    });
     await waitFor(() => expect(historyCalls).toBe(2));
     await screen.findByText("missed prefix");
     expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
@@ -4428,7 +4384,10 @@ describe("ThreadShell", () => {
     expect(client.sendMessage).not.toHaveBeenCalled();
 
     act(() => client._emitStatus("reconnecting"));
-    act(() => client._emitStatus("open"));
+    act(() => {
+      client._emitStatus("open");
+      client._updateRuns("before-delta-chat", []);
+    });
     await waitFor(() => expect(historyCalls).toBe(3));
     await waitFor(() =>
       expect(screen.getByText("missed prefix resumed suffix")).toBeInTheDocument(),
@@ -4494,13 +4453,9 @@ describe("ThreadShell", () => {
 
     await waitFor(() => expect(screen.getByText("question")).toBeInTheDocument());
     act(() => {
-      client._emitChat("active-resume-chat", {
-        event: "goal_status",
-        chat_id: "active-resume-chat",
-        status: "running",
-        started_at: 1_700,
-        turn_id: turnId,
-      });
+      client._updateRuns("active-resume-chat", [{
+        run_id: "owner", turn_id: turnId, phase: "running", started_at: 1_700,
+      }]);
       client._emitChat("active-resume-chat", {
         event: "delta",
         chat_id: "active-resume-chat",
@@ -4517,7 +4472,12 @@ describe("ThreadShell", () => {
 
     act(() => client._emitStatus("reconnecting"));
     expect(client.sendMessage).not.toHaveBeenCalled();
-    act(() => client._emitStatus("open"));
+    act(() => {
+      client._emitStatus("open");
+      client._updateRuns("active-resume-chat", [{
+        run_id: "owner", turn_id: turnId, phase: "running", started_at: 1_700,
+      }]);
+    });
     await waitFor(() => expect(historyCalls).toBe(2));
     expect(client.sendMessage).not.toHaveBeenCalled();
 
@@ -4536,7 +4496,10 @@ describe("ThreadShell", () => {
 
     act(() => client._emitStatus("reconnecting"));
     expect(client.sendMessage).not.toHaveBeenCalled();
-    act(() => client._emitStatus("open"));
+    act(() => {
+      client._emitStatus("open");
+      client._updateRuns("active-resume-chat", []);
+    });
 
     await waitFor(() => expect(historyCalls).toBe(3));
     await waitFor(() =>
@@ -4581,13 +4544,9 @@ describe("ThreadShell", () => {
 
     await waitFor(() => expect(screen.getByText("research this")).toBeInTheDocument());
     act(() => {
-      client._emitChat("timing-chat", {
-        event: "goal_status",
-        chat_id: "timing-chat",
-        status: "running",
-        started_at: Date.now() / 1000 - 215,
-        turn_id: turnId,
-      });
+      client._updateRuns("timing-chat", [{
+        run_id: "owner", turn_id: turnId, phase: "running", started_at: Date.now() / 1000 - 215,
+      }]);
       client._emitChat("timing-chat", {
         event: "message",
         chat_id: "timing-chat",
@@ -4668,13 +4627,9 @@ describe("ThreadShell", () => {
       await waitFor(() => expect(screen.getByText("question")).toBeInTheDocument());
       expect(historyCalls).toBe(1);
       act(() => {
-        client._emitChat("visible-chat", {
-          event: "goal_status",
-          chat_id: "visible-chat",
-          status: "running",
-          started_at: 6_000,
-          turn_id: turnId,
-        });
+        client._updateRuns("visible-chat", [{
+          run_id: "owner", turn_id: turnId, phase: "running", started_at: 6_000,
+        }]);
       });
 
       act(() => {
@@ -5854,6 +5809,9 @@ describe("ThreadShell", () => {
 
     await screen.findByLabelText("Message input");
     act(() => {
+      client._updateRuns("resuming-chat", [{
+        run_id: "owner", turn_id: "resumed-turn", phase: "running", started_at: null,
+      }]);
       client._emitChat("resuming-chat", {
         event: "attached",
         chat_id: "resuming-chat",

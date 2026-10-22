@@ -1018,8 +1018,6 @@ class GatewayHTTPHandler:
         stored_sessions: list[dict[str, Any]],
     ) -> dict[str, Any]:
         assert self.session_manager is not None
-        from nanobot.session.webui_turns import websocket_turn_wall_started_at
-
         sessions = list_webui_sessions(self.session_manager, stored_sessions)
         cleaned: list[dict[str, Any]] = []
         default_scope: WorkspaceScope | None = None
@@ -1037,9 +1035,12 @@ class GatewayHTTPHandler:
             # older clients and compact list responses stay unchanged.
             if row.get("recovery_state") is None:
                 row.pop("recovery_state", None)
-            chat_id = key.split(":", 1)[1]
-            row["run_state"] = self.runs.snapshot(key)
-            started_at = websocket_turn_wall_started_at(chat_id)
+            run_state = self.runs.snapshot(key)
+            row["run_state"] = run_state
+            started_at = next((
+                run["started_at"] for run in reversed(run_state["runs"])
+                if run["started_at"] is not None
+            ), None)
             if started_at is not None:
                 row["run_started_at"] = started_at
             if default_scope is None:
@@ -1231,24 +1232,18 @@ class GatewayHTTPHandler:
 
             if before is not None or direction is not None or decode_transcript_cursor(after) is None:
                 return _http_error(400, "invalid navigation cursor")
-        from nanobot.session.webui_turns import (
-            websocket_turn_id,
-            websocket_turn_transcript_persistence_failed,
-            websocket_turn_wall_started_at,
-        )
+        from nanobot.session.webui_turns import has_pending_webui_transcript
 
         chat_id = decoded_key.split(":", 1)[1]
-        active_turn_started_at = websocket_turn_wall_started_at(chat_id)
-        active_turn_id = websocket_turn_id(chat_id)
-        active_turn_transcript_persistence_failed = (
-            websocket_turn_transcript_persistence_failed(chat_id)
-        )
+        run_state = self.runs.snapshot(decoded_key)
+        runs = run_state["runs"]
+        active = next((run for run in reversed(runs) if run["started_at"] is not None), runs[-1]) if runs else None
+        active_turn_id = active["turn_id"] if active is not None else None
+        history_revision = history.revision
+        transcript_pending = has_pending_webui_transcript(chat_id, history_revision[0] if history_revision else None)
         revision_variant = {
             "active_turn_id": active_turn_id,
-            "active_turn_started_at": active_turn_started_at,
-            "active_turn_transcript_persistence_failed": (
-                active_turn_transcript_persistence_failed
-            ),
+            "transcript_pending": transcript_pending,
             "before": before,
             "after": after,
             "direction": direction,
@@ -1274,11 +1269,8 @@ class GatewayHTTPHandler:
             ),
             session_messages_loader=lambda: self._read_session_messages(decoded_key),
             session_version_loader=lambda: self._read_session_version(decoded_key),
-            active_turn_started_at=active_turn_started_at,
             active_turn_id=active_turn_id,
-            active_turn_transcript_persistence_failed=(
-                active_turn_transcript_persistence_failed
-            ),
+            transcript_pending=transcript_pending,
             limit=limit,
             direction=direction,
             before=before,
@@ -1290,7 +1282,7 @@ class GatewayHTTPHandler:
         if data is None:
             return _http_error(404, "webui thread not found")
         data["workspace_scope"] = scope.payload()
-        data["run_state"] = self.runs.snapshot(decoded_key)
+        data["run_state"] = run_state
         revision_variant["session_version"] = self._read_session_version(decoded_key)
         final_revision = webui_transcript_revision(decoded_key, history=history, variant=revision_variant)
         response_headers = list(_NO_STORE_HEADERS)

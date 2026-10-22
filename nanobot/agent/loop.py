@@ -47,10 +47,8 @@ from nanobot.agent.turn_delivery import (
 from nanobot.agent.turn_delivery import TurnRoute as TurnRoute
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
 from nanobot.bus.events import (
-    INBOUND_META_EXECUTION_ID,
     INBOUND_META_LOCAL_MEDIA,
     INBOUND_META_RUNTIME_CONTROL,
-    INBOUND_META_STOP_EXECUTION_ID,
     INBOUND_META_TURN_ID,
     INBOUND_META_USER_SHELL,
     RUNTIME_CONTROL_SESSION_DISCARD,
@@ -64,7 +62,6 @@ from nanobot.bus.outbound_events import (
     StreamEndEvent,
 )
 from nanobot.bus.queue import MessageBus
-from nanobot.bus.runtime_events import ExecutionOutcome
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.command.router import command_text
 from nanobot.config.network import NetworkConfig
@@ -989,10 +986,6 @@ class AgentLoop:
         exec_cancelled = await self._exec_session_manager.terminate_by_owner(key)
         return cancelled + sub_cancelled + exec_cancelled
 
-    async def _cancel_execution(self, key: str, execution_id: str) -> int:
-        """Cancel and settle only this owner; the FIFO worker is not a Stop target."""
-        return int(await self.executions.cancel_and_wait(key, execution_id))
-
     async def discard_session(self, key: str) -> None:
         """Stop active work for *key* and forget its cached session."""
         with self.bus.admission.activity():
@@ -1490,17 +1483,10 @@ class AgentLoop:
         ):
             admission = msg.execution_admission
             if admission is not None:
-                await self.executions.retire(admission, "exited", outcome="cancelled")
+                await self.executions.retire(admission, "exited")
             return
         if msg.is_user_input:
             await self.runtime_event_publisher.user_input_accepted(msg, effective_key)
-        if (
-            msg.channel != "system"
-            and raw.strip().lower() == "/stop"
-            and isinstance(execution_id := msg.metadata.get(INBOUND_META_STOP_EXECUTION_ID), str)
-        ):
-            await self.executions.request_stop(effective_key, execution_id)
-            return
         if msg.channel != "system" and self.commands.is_priority(raw):
             await self._dispatch_command_inline(
                 msg, effective_key, raw,
@@ -1603,7 +1589,7 @@ class AgentLoop:
     ) -> None:
         admission = msg.execution_admission
         if admission is not None:
-            await self.executions.retire(admission, "exited", outcome="cancelled")
+            await self.executions.retire(admission, "exited")
         for coordinator in self._automation_turn_coordinators:
             coordinator.complete(msg, error=error)
         if msg.channel != "system" and self.commands.requires_session_queue(command_text(msg)):
@@ -1643,11 +1629,8 @@ class AgentLoop:
         elif (admission := msg.execution_admission) is not None:
             # Transport can reserve a root before the shared-session FIFO knows
             # this input belongs to an existing execution instead. Its durable
-            # follow-up journal remains owned by that execution, not this receipt.
-            pending.put_nowait(dataclasses.replace(
-                msg, execution_admission=None,
-                metadata={key: value for key, value in msg.metadata.items() if key != INBOUND_META_EXECUTION_ID},
-            ))
+            # follow-up journal remains owned by that execution, not this reservation.
+            pending.put_nowait(dataclasses.replace(msg, execution_admission=None))
             await self.executions.retire(admission, "injected")
             return
         pending = self._pending_queues.get(session_key)
@@ -1721,9 +1704,9 @@ class AgentLoop:
         """Await one root task without lending it the FIFO worker's cancellation scope."""
         session_key = self._effective_session_key(msg)
 
-        async def invoke() -> ExecutionOutcome:
+        async def invoke() -> None:
             assert msg.execution_admission is not None
-            return await self._execute_one(msg, pending, msg.execution_admission)
+            await self._execute_one(msg, pending, msg.execution_admission)
 
         await self.executions.execute(
             msg, session_key, invoke,
@@ -1779,7 +1762,7 @@ class AgentLoop:
         msg: InboundMessage,
         pending: asyncio.Queue[InboundMessage],
         admission: ExecutionAdmission,
-    ) -> ExecutionOutcome:
+    ) -> None:
         """Process one root message while later inputs remain in its session inbox."""
         session_key = self._effective_session_key(msg)
         # The request context is reset before errors reach this boundary, and
@@ -1796,7 +1779,6 @@ class AgentLoop:
 
         delivery = self.turn_delivery_factory.unrouted(msg, session_key)
         completion_published = False
-        outcome: ExecutionOutcome = "unknown"
         try:
             if recovery_admission is not None:
                 recovery_id = msg.metadata.get(RECOVERY_INBOUND_METADATA_KEY)
@@ -1807,14 +1789,14 @@ class AgentLoop:
                         recovery_task_registered = True
                 if not await recovery_admission.admit(msg):
                     logger.info("Skipped stale recovery for session {}", session_key)
-                    return "unknown"
+                    return
             async with lock, gate:
                 # A preceding user turn may have completed or blocked the goal
                 # while its older continuation was still waiting in the inbox.
                 if turn_continuation.sustained_goal_continuation_inbound(msg.metadata) and not (
                     sustained_goal_active((await self.sessions.state.get(session_key)).metadata)
                 ):
-                    return "unknown"
+                    return
                 await self.executions.running(admission)
                 try:
                     await self.sessions.state.read(session_key)
@@ -1829,7 +1811,6 @@ class AgentLoop:
                         delivery=delivery,
                     )
                     continuing = turn_continuation.internal_continuation_pending(msg.metadata)
-                    outcome = delivery.execution_outcome(response)
                     await delivery.complete(
                         response,
                         publish_completion=not continuing,
@@ -1868,7 +1849,6 @@ class AgentLoop:
                         )
                     raise
                 except Exception as exc:
-                    outcome = "failed"
                     logger.opt(exception=log_content).error(
                         "Error processing message for session {}", session_key,
                     )
@@ -1893,7 +1873,6 @@ class AgentLoop:
                 and recovery_admission is not None
             ):
                 recovery_admission.unregister_recovery_task(session_key, current_task)
-        return outcome
 
     async def aclose(self) -> None:
         """Stop active work, then close resources owned by the agent loop.

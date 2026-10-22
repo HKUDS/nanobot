@@ -29,6 +29,7 @@ function fakeClient() {
     onError: () => () => {},
     onChat: () => () => {},
     getRunStartedAt: () => null,
+    getRunState: () => ({ freshness: "unavailable" as const }),
     onSessionUpdate: (handler: (chatId: string, scope?: string) => void) => {
       sessionUpdateHandlers.add(handler);
       return () => sessionUpdateHandlers.delete(handler);
