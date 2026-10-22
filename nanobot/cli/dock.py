@@ -58,7 +58,10 @@ def _directory(instance: Path, url: str) -> Path:
     _private_directory(root)
     origin = urlsplit(url)._replace(query="", fragment="").geturl()
     identity = "\0".join((str(instance), sys.executable, str(_WORKER), origin)).encode()
-    digest = hashlib.sha256(identity + _WORKER.read_bytes() + _ICON.read_bytes()).hexdigest()
+    # Keep the app's path/identity stable across updates so ordinary code/icon
+    # changes do not create another Automation permission entry. Service leases
+    # still stop the old helper before the updated installation starts its own.
+    digest = hashlib.sha256(identity).hexdigest()
     directory = root / digest[:12]
     _private_directory(directory)
     return directory
@@ -66,15 +69,35 @@ def _directory(instance: Path, url: str) -> Path:
 
 def _bundle(directory: Path) -> Path:
     """Give the existing interpreter a Dock identity, without copying its runtime."""
+    interpreter = sys.executable
+    if sys.platform == "darwin":
+        import ctypes
+
+        # Framework Python's command-line stub execs Python.app, which discards
+        # our bundle identity and its Automation usage description. Link to this
+        # process's actual interpreter image instead, not that launcher stub.
+        size = ctypes.c_uint32(4096)
+        buffer = ctypes.create_string_buffer(size.value)
+        image_path = ctypes.CDLL(None)._NSGetExecutablePath
+        image_path.argtypes = (ctypes.c_char_p, ctypes.POINTER(ctypes.c_uint32))
+        image_path.restype = ctypes.c_int
+        if image_path(buffer, ctypes.byref(size)) != 0:
+            raise OSError("Dock interpreter path unavailable")
+        interpreter = str(Path(os.fsdecode(buffer.value)).resolve(strict=True))
     contents = directory / "nanobot.app" / "Contents"
     executable = contents / "MacOS" / "nanobot"
     executable.parent.mkdir(parents=True, exist_ok=True)
     resources = contents / "Resources"
     resources.mkdir(exist_ok=True)
     if not executable.is_symlink():
-        executable.symlink_to(sys.executable)
-    elif os.readlink(executable) != sys.executable:
-        raise ValueError("Dock interpreter does not match this installation")
+        executable.symlink_to(interpreter)
+    elif os.readlink(executable) != interpreter:
+        replacement = executable.with_name(f".nanobot-{uuid4().hex}")
+        try:
+            replacement.symlink_to(interpreter)
+            replacement.replace(executable)
+        finally:
+            replacement.unlink(missing_ok=True)
     shutil.copyfile(_ICON, resources / "dock-icon.png")
     (contents / "Info.plist").write_bytes(plistlib.dumps({
         "CFBundleExecutable": "nanobot",
@@ -85,6 +108,7 @@ def _bundle(directory: Path) -> Path:
         "CFBundleIconFile": "dock-icon.png",
         "LSMinimumSystemVersion": "13.0",
         "NSHighResolutionCapable": True,
+        "NSAppleEventsUsageDescription": "Restore your existing nanobot browser tab without reloading it or losing your draft.",
     }))
     return executable
 

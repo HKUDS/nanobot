@@ -20,6 +20,67 @@ from typing import Any
 from urllib.parse import urlsplit
 
 
+def _applescript_string(value: str) -> str:
+    return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+
+def _browser_root(url: str) -> str:
+    """Use the browser's HTTP origin spelling, but keep path case significant."""
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    if ":" in host:
+        host = f"[{ipaddress.IPv6Address(host).compressed}]"
+    authority = host if parts.port == 80 else f"{host}:{parts.port}"
+    return parts._replace(netloc=authority, query="", fragment="").geturl().rstrip("/")
+
+
+def _browser_script(bundle_id: str, url: str) -> str | None:
+    """Focus a matching tab without navigating it; errors must not mean absence.
+
+    Only URL properties leave the browser, not page contents. The script returns
+    a boolean and never returns URLs, titles, credentials or browser history.
+    """
+    if bundle_id not in {"com.google.Chrome", "com.apple.Safari"}:
+        return None
+    quoted_root = _applescript_string(_browser_root(url))
+    quoted_url = _applescript_string(url)
+    if bundle_id == "com.google.Chrome":
+        select_tab = "set active tab index of targetWindow to tabIndex\nset minimized of targetWindow to false"
+        create_window = f"set newWindow to make new window\nset URL of active tab of newWindow to {quoted_url}\nset newWindowID to id of newWindow"
+    else:
+        select_tab = "set current tab of targetWindow to tab tabIndex of targetWindow\nset miniaturized of targetWindow to false"
+        create_window = f"make new document with properties {{URL:{quoted_url}}}\nset newWindowID to id of window 1"
+    # A repeat variable refers to an item of the live windows list. Activation or
+    # deminimization reorders that list, so capture a stable ID before either.
+    return f'''with timeout of 15 seconds
+considering case
+tell application id "{bundle_id}"
+    repeat with w in windows
+        set tabIndex to 0
+        repeat with t in tabs of w
+            set tabIndex to tabIndex + 1
+            set address to URL of t
+            if address is not missing value then
+                if address is {quoted_root} or address starts with {quoted_root} & "/" or address starts with {quoted_root} & "?" or address starts with {quoted_root} & "#" then
+                    set targetWindowID to id of w
+                    set targetWindow to window id targetWindowID
+                    activate
+                    {select_tab}
+                    set index of targetWindow to 1
+                    return true
+                end if
+            end if
+        end repeat
+    end repeat
+    {create_window}
+    activate
+    set index of window id newWindowID to 1
+    return true
+end tell
+end considering
+end timeout'''
+
+
 def is_local_browser_url(url: str) -> bool:
     try:
         parts = urlsplit(url)
@@ -132,6 +193,8 @@ class _AppKit:
             function.argtypes = arguments
             function.restype = result
         self.clients = clients
+        self.opening = False
+        self.started = False
         self.callbacks: list[Any] = []
         self.pool = self.send(self.cls("NSAutoreleasePool"), "new")
         self.app = self.send(self.cls("NSApplication"), "sharedApplication")
@@ -146,18 +209,22 @@ class _AppKit:
         delegate_class = self.objc.objc_allocateClassPair(self.cls("NSObject"), b"NanobotDock", 0)
 
         def open_page(_self: int, _cmd: int, _sender: int) -> None:
-            url = self.clients.current_url()
-            if url is None:
+            if not self.started or self.opening or self.clients.current_url() is None:
                 return
-            target = self.send(self.cls("NSURL"), "URLWithString:", self.string(url), types=(c.c_void_p,))
-            workspace = self.send(self.cls("NSWorkspace"), "sharedWorkspace")
-            if not self.send(workspace, "openURL:", target, types=(c.c_void_p,), result=c.c_bool):
-                alert = self.send(self.cls("NSAlert"), "new")
-                self.send(alert, "setMessageText:", self.string("Could not open the browser"),
-                          types=(c.c_void_p,), result=None)
-                self.send(alert, "setInformativeText:", self.string("Use the WebUI link in your terminal."),
-                          types=(c.c_void_p,), result=None)
-                self.send(alert, "runModal", result=c.c_long)
+            # A Dock click can deliver both activation and reopen. Coalesce them
+            # on the next run-loop turn, including events from permission dialogs.
+            self.opening = True
+            self.send(self.delegate, "performSelector:withObject:afterDelay:",
+                      self.selector("focusPage:"), None, 0.0,
+                      types=(c.c_void_p, c.c_void_p, c.c_double), result=None)
+
+        def focus_page(_self: int, _cmd: int, _sender: int) -> None:
+            try:
+                url = self.clients.current_url()
+                if url is not None:
+                    self.focus_browser(url)
+            finally:
+                self.opening = False
 
         def reopen(_self: int, _cmd: int, sender: int, _visible: bool) -> bool:
             open_page(_self, _cmd, sender)
@@ -165,6 +232,8 @@ class _AppKit:
 
         for selector, callback, signature, result, arguments in (
             ("openPage:", open_page, b"v@:@", None, (c.c_void_p,)),
+            ("focusPage:", focus_page, b"v@:@", None, (c.c_void_p,)),
+            ("applicationDidBecomeActive:", open_page, b"v@:@", None, (c.c_void_p,)),
             ("applicationShouldHandleReopen:hasVisibleWindows:", reopen, b"B@:@B",
              c.c_bool, (c.c_void_p, c.c_bool)),
         ):
@@ -193,6 +262,47 @@ class _AppKit:
         self.send(bar, "addItem:", root, types=(c.c_void_p,), result=None)
         self.send(self.app, "setMainMenu:", bar, types=(c.c_void_p,), result=None)
         self.send(self.app, "finishLaunching", result=None)
+        self.started = True
+
+    def focus_browser(self, url: str) -> None:
+        target = self.send(self.cls("NSURL"), "URLWithString:", self.string(url), types=(c.c_void_p,))
+        workspace = self.send(self.cls("NSWorkspace"), "sharedWorkspace")
+        application = self.send(workspace, "URLForApplicationToOpenURL:", target, types=(c.c_void_p,))
+        bundle = self.send(self.cls("NSBundle"), "bundleWithURL:", application, types=(c.c_void_p,))
+        identifier = self.send(bundle, "bundleIdentifier")
+        raw = self.send(identifier, "UTF8String", result=c.c_char_p)
+        source = _browser_script(raw.decode() if raw else "", url)
+        if source is None:
+            self.alert("Window reuse needs Chrome or Safari",
+                       "Switch to your existing nanobot page, or use Chrome or Safari as your default browser.")
+            return
+        script = self.send(self.send(self.cls("NSAppleScript"), "alloc"), "initWithSource:",
+                           self.string(source), types=(c.c_void_p,))
+        error = c.c_void_p()
+        try:
+            result = self.send(script, "executeAndReturnError:", c.byref(error),
+                               types=(c.POINTER(c.c_void_p),))
+            if result:
+                return
+            number = self.send(error.value or 0, "objectForKey:", self.string("NSAppleScriptErrorNumber"),
+                               types=(c.c_void_p,))
+            if self.send(number, "integerValue", result=c.c_long) == -1743:
+                self.alert("Allow nanobot to restore your browser window",
+                           "In System Settings → Privacy & Security → Automation, allow browser control for the app that requested it. Then click the cat again. Your existing page is unchanged.")
+            else:
+                self.alert("Could not restore the browser window",
+                           "Check that your browser responds, then click the cat again. No extra page was opened to work around this error.")
+        finally:
+            self.send(script, "release", result=None)
+
+    def alert(self, title: str, detail: str) -> None:
+        alert = self.send(self.cls("NSAlert"), "new")
+        try:
+            self.send(alert, "setMessageText:", self.string(title), types=(c.c_void_p,), result=None)
+            self.send(alert, "setInformativeText:", self.string(detail), types=(c.c_void_p,), result=None)
+            self.send(alert, "runModal", result=c.c_long)
+        finally:
+            self.send(alert, "release", result=None)
 
     def cls(self, name: str) -> int:
         return self.objc.objc_getClass(name.encode())

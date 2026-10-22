@@ -1,7 +1,6 @@
 """The Dock shortcut never owns gateway execution, data, or credentials on disk."""
 
 import asyncio
-import os
 import socket
 import sys
 import tempfile
@@ -13,6 +12,129 @@ import pytest
 
 from nanobot.cli import dock
 from nanobot.cli._macos_dock import _Clients, _serve, is_local_browser_url
+
+
+@pytest.mark.parametrize("url,root", [
+    ("http://LOCALHOST:8765/#/chat", "http://localhost:8765"),
+    ("http://[0:0:0:0:0:0:0:1]:8765/#/chat", "http://[::1]:8765"),
+    ("http://127.0.0.1:80/#/chat", "http://127.0.0.1"),
+    ("http://localhost:8765/WebUI/?token=private#/chat", "http://localhost:8765/WebUI"),
+])
+def test_window_lookup_matches_browser_origin_normalization(url, root):
+    from nanobot.cli._macos_dock import _browser_root
+
+    assert is_local_browser_url(url)
+    assert _browser_root(url) == root
+
+
+def test_activation_and_reopen_share_one_deferred_focus_request(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from nanobot.cli import _macos_dock as native
+
+    def function(value):
+        return lambda *_: value
+
+    objc = SimpleNamespace(**{name: function(value) for name, value in (
+        ("objc_getClass", 1), ("sel_registerName", 2), ("objc_allocateClassPair", 3),
+        ("class_addMethod", True), ("objc_registerClassPair", None),
+    )})
+    monkeypatch.setattr(native.c, "CDLL", lambda *_: objc)
+    queued = []
+
+    def send(app, _target, selector, *_args, **_kwargs):
+        if selector == "activationPolicy":
+            return 0
+        if selector == "finishLaunching":
+            app.callbacks[2](1, 1, 1)
+        if selector == "performSelector:withObject:afterDelay:":
+            queued.append(app.callbacks[1])
+        return 1
+
+    monkeypatch.setattr(native._AppKit, "send", send)
+    clients = native._Clients()
+    first, other = socket.socketpair()
+    with first, other:
+        clients.add(first, "http://localhost:5173/#/existing")
+        app = native._AppKit(tmp_path / "icon.png", clients)
+        assert not queued  # Startup must not open a page or request permission.
+        focused = []
+
+        def focus(_self, url):
+            focused.append(url)
+            app.callbacks[2](1, 1, 1)  # Permission/modal reactivation is not a new request.
+
+        monkeypatch.setattr(native._AppKit, "focus_browser", focus)
+        app.callbacks[2](1, 1, 1)  # Command-Tab activation.
+        assert app.callbacks[3](1, 1, 1, False) is False  # Dock reopen in the same turn.
+        assert len(queued) == 1
+        queued.pop()(1, 1, 1)
+        assert focused == ["http://localhost:5173/#/existing"]
+        assert not queued and not app.opening
+        app.callbacks[0](1, 1, 1)  # Menu action uses the same path.
+        clients.remove(first)  # Gateway stopped before the queued action ran.
+        queued.pop()(1, 1, 1)
+        assert len(focused) == 1
+        assert not app.opening
+
+
+@pytest.mark.parametrize("bundle,error,expected", [
+    (b"com.google.Chrome", -1743, "Allow nanobot"),
+    (b"com.apple.Safari", -1712, "Could not restore"),
+    (b"org.mozilla.firefox", 0, "Window reuse needs"),
+])
+def test_browser_failure_never_falls_back_to_opening_a_duplicate(monkeypatch, bundle, error, expected):
+    from nanobot.cli import _macos_dock as native
+
+    app = object.__new__(native._AppKit)
+    calls, alerts = [], []
+    monkeypatch.setattr(app, "cls", lambda _: 1)
+    monkeypatch.setattr(app, "string", lambda _: 1)
+
+    def send(_target, selector, *_args, **_kwargs):
+        calls.append(selector)
+        if selector == "UTF8String":
+            return bundle
+        if selector == "executeAndReturnError:":
+            return None
+        if selector == "integerValue":
+            return error
+        return 1
+
+    monkeypatch.setattr(app, "send", send)
+    monkeypatch.setattr(app, "alert", lambda title, detail: alerts.append((title, detail)))
+    app.focus_browser("http://localhost:5173/#/?bootstrapSecret=private")
+    assert len(alerts) == 1 and alerts[0][0].startswith(expected)
+    assert not any("openURL" in call for call in calls)
+    assert "private" not in str(alerts)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="native AppleScript parser")
+def test_browser_script_quotes_urls_without_evaluating_them():
+    import subprocess
+
+    from nanobot.cli._macos_dock import _applescript_string
+
+    url = 'http://localhost:5173/#/quote" & error "injected\\路径'
+    result = subprocess.run(["/usr/bin/osascript", "-"], input="return " + _applescript_string(url),
+                            capture_output=True, text=True, check=True, timeout=10)
+    assert result.stdout.rstrip("\n") == url
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="native AppleScript parser")
+@pytest.mark.parametrize("browser", ["com.google.Chrome", "com.apple.Safari"])
+def test_browser_script_compiles(browser):
+    import subprocess
+
+    from nanobot.cli._macos_dock import _browser_script
+
+    # Compiling Chrome's terminology requires its optional app dictionary.
+    if browser == "com.google.Chrome" and not any((root / "Google Chrome.app").is_dir()
+                                                   for root in (Path("/Applications"), Path.home() / "Applications")):
+        pytest.skip("Chrome is not installed in a standard Applications directory")
+    subprocess.run(["/usr/bin/osacompile", "-o", "/dev/null"],
+                   input=_browser_script(browser, 'http://localhost:5173/#/quote" & error "injected\\路径'),
+                   text=True, capture_output=True, check=True, timeout=10)
 
 
 @pytest.mark.parametrize("platform", ["linux", "win32"])
@@ -234,11 +356,66 @@ def test_bundle_uses_current_python_and_never_contains_the_login_url(tmp_path):
 
     executable = dock._bundle(tmp_path)
     assert executable.is_symlink()
-    assert os.readlink(executable) == sys.executable
+    assert executable.resolve().is_file()
     info = plistlib.loads((executable.parent.parent / "Info.plist").read_bytes())
     assert info["CFBundleDisplayName"] == "nanobot"
+    assert "browser tab" in info["NSAppleEventsUsageDescription"]
     assert (executable.parent.parent / "Resources" / "dock-icon.png").read_bytes() == dock._ICON.read_bytes()
     assert len([path for path in tmp_path.rglob("*") if path.is_file()]) == 3
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="real macOS bundle identity")
+def test_framework_python_keeps_the_helpers_bundle_identity(tmp_path):
+    import subprocess
+
+    executable = dock._bundle(tmp_path)
+    # Run the actual helper interpreter. Framework Python launchers used to exec
+    # Python.app and lose this bundle's name and Automation usage description.
+    result = subprocess.run([str(executable), "-I", "-S", "-c", """
+import ctypes as c
+objc = c.CDLL('/usr/lib/libobjc.A.dylib')
+c.CDLL('/System/Library/Frameworks/Foundation.framework/Foundation')
+objc.objc_getClass.argtypes = [c.c_char_p]
+objc.objc_getClass.restype = c.c_void_p
+objc.sel_registerName.argtypes = [c.c_char_p]
+objc.sel_registerName.restype = c.c_void_p
+send = c.CFUNCTYPE(c.c_void_p, c.c_void_p, c.c_void_p)(('objc_msgSend', objc))
+bundle = send(objc.objc_getClass(b'NSBundle'), objc.sel_registerName(b'mainBundle'))
+identifier = send(bundle, objc.sel_registerName(b'bundleIdentifier'))
+text = c.CFUNCTYPE(c.c_char_p, c.c_void_p, c.c_void_p)(('objc_msgSend', objc))
+print(text(identifier, objc.sel_registerName(b'UTF8String')).decode())
+"""], capture_output=True, text=True, timeout=10, check=True)
+    assert result.stdout.strip() == f"dev.nanobot.webui.{tmp_path.name}"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="macOS interpreter wrapper")
+def test_cached_bundle_refreshes_an_obsolete_interpreter_link(tmp_path):
+    executable = dock._bundle(tmp_path)
+    current = executable.resolve()
+    obsolete = tmp_path / "previous-python"
+    obsolete.write_text("old installation")
+    executable.unlink()
+    executable.symlink_to(obsolete)
+    assert dock._bundle(tmp_path).resolve() == current
+    assert obsolete.read_text() == "old installation"
+    assert not list(executable.parent.glob(".nanobot-*"))
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="macOS private-directory contract")
+def test_code_updates_keep_the_same_dock_identity(monkeypatch, tmp_path):
+    worker = tmp_path / "_macos_dock.py"
+    icon = tmp_path / "icon.png"
+    worker.write_text("old code")
+    icon.write_bytes(b"old icon")
+    monkeypatch.setattr(dock, "_WORKER", worker)
+    monkeypatch.setattr(dock, "_ICON", icon)
+    monkeypatch.setattr(dock, "_private_directory", lambda *_: None)
+    before = dock._directory(tmp_path / "gateway.json", "http://localhost:5173/#/old")
+    worker.write_text("updated code")
+    icon.write_bytes(b"updated icon")
+    assert dock._directory(tmp_path / "gateway.json", "http://localhost:5173/#/new") == before
+    assert dock._directory(tmp_path / "other.json", "http://localhost:5173/") != before
+    assert dock._directory(tmp_path / "gateway.json", "http://localhost:5174/") != before
 
 
 async def test_background_presence_waits_for_activation_and_remembers_explicit_requests(monkeypatch, tmp_path):
