@@ -20,10 +20,11 @@ class TestSocket {
   onSend: ((frame: Record<string, unknown>) => void) | null = null;
   send(value: string) { this.onSend?.(JSON.parse(value)); }
   close() { this.readyState = 3; this.onclose?.(); }
-  open() {
+  open(authority = true) {
     this.readyState = 1;
     this.onopen?.();
-    this.receive({ event: "ready", chat_id: "default", client_id: "test", run_state_instance_id: "recovery-host" });
+    this.receive({ event: "ready", chat_id: "default", client_id: "test",
+      ...(authority ? { run_state_instance_id: "recovery-host" } : {}) });
   }
   receive(payload: unknown) {
     this.onmessage?.({ data: JSON.stringify(payload) } as MessageEvent);
@@ -48,7 +49,7 @@ function response(body: WebuiThreadPersistedPayload): Response {
   return new Response(JSON.stringify(body), { status: 200 });
 }
 
-function setup() {
+function setup(authority = true) {
   const sockets: TestSocket[] = [];
   const baselines = new Map<string, unknown>();
   const client = new NanobotClient({
@@ -67,7 +68,7 @@ function setup() {
     },
   });
   client.connect();
-  sockets[0].open();
+  sockets[0].open(authority);
   const hook = renderHook(() => useReconnectRuns(client, () => "renewed-token"));
   const revisions = new Map<string, number>();
   const running = (chatId = "inactive", turnId = "turn-old", startedAt = 123) => {
@@ -136,12 +137,17 @@ describe("durable run recovery", () => {
     close();
   });
 
-  it("retries a pre-ready HTTP page rejected after a restarted host's idle baseline", async () => {
+  it.each(["old-epoch", "missing-run-state"])("retries a pre-ready %s HTTP page after a restarted host's idle baseline", async (kind) => {
     const reads: Array<(value: Response) => void> = [];
     const fetchMock = vi.fn().mockImplementation(() => new Promise<Response>((resolve) => reads.push(resolve)));
     vi.stubGlobal("fetch", fetchMock);
-    const { client, sockets, running, close } = setup();
-    running();
+    const { client, sockets, running, close } = setup(kind !== "missing-run-state");
+    if (kind === "missing-run-state") act(() => {
+      client.sendMessage("inactive", "Take your time", undefined, { turnId: "turn-old" });
+      sockets[0].receive({ event: "user_message", chat_id: "inactive", turn_id: "turn-old",
+        text: "Take your time", starts_turn: true });
+    });
+    else running();
     act(() => sockets.at(-1)!.close());
     await act(async () => { await vi.advanceTimersByTimeAsync(10); });
     const socket = sockets.at(-1)!;
@@ -159,6 +165,7 @@ describe("durable run recovery", () => {
     const stale = completedThread();
     stale.events = stale.events.slice(0, 1);
     stale.has_pending_tool_calls = true;
+    if (kind === "missing-run-state") Reflect.deleteProperty(stale, "run_state");
     await act(async () => { reads[0](response(stale)); });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const fresh = completedThread();
@@ -415,7 +422,9 @@ describe("durable run recovery", () => {
     const runStatus = vi.fn();
     client.onRunStatus(runStatus);
     await reopen();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // The completed chat settles immediately; only the still-open result needs one fresh read.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.filter(([url]) => url.includes("websocket%3Arunning"))).toHaveLength(2);
     expect(client.getRunStartedAt("inactive")).toBeNull();
     expect(client.getRunStartedAt("running")).toBe(456);
     expect(client.getRunTurnId("running")).toBe("turn-running");
