@@ -1115,6 +1115,7 @@ export interface NanobotFeatureInfo {
   status: "enabled" | "missing_dependency" | "not_enabled" | string;
   install_supported: boolean;
   requires_restart: boolean;
+  restart_pending?: boolean;
 }
 
 export interface ChannelSetupContractField {

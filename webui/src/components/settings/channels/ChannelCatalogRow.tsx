@@ -22,6 +22,8 @@ export function ChannelCatalogRow({
   actionKey,
   actionsDisabled = false,
   onAction,
+  onRestart,
+  isRestarting = false,
 }: {
   feature: NanobotFeatureInfo;
   showBrandLogos: boolean;
@@ -29,6 +31,8 @@ export function ChannelCatalogRow({
   actionKey: string | null;
   actionsDisabled?: boolean;
   onAction: ChannelFeatureAction;
+  onRestart?: () => void;
+  isRestarting?: boolean;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -94,7 +98,7 @@ export function ChannelCatalogRow({
           </ChannelStatusBadge>
         </div>
       ) : null}
-      <div className="flex w-16 shrink-0 items-center justify-center">
+      <div className="flex min-w-16 shrink-0 items-center justify-center">
         {!feature.installed ? (
           <Button ref={installButtonRef} type="button" variant="outline" size="icon"
             className={cn(
@@ -111,6 +115,17 @@ export function ChannelCatalogRow({
               ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
               : <Download className="h-3.5 w-3.5" aria-hidden />}
             <span className="sr-only">{tx("settings.channels.install", "Install")}</span>
+          </Button>
+        ) : feature.restart_pending ? (
+          <Button type="button" variant="outline" size="sm"
+            className="h-[22px] min-w-0 rounded-full border-border/70 bg-background px-2 text-[12px] font-medium"
+            aria-label={t("app.system.restart")}
+            title={t("settings.channels.restartRequired")}
+            aria-busy={isRestarting}
+            disabled={isRestarting || anyActionBusy || !onRestart}
+            onClick={onRestart}>
+            {isRestarting ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+            {t("app.system.restartAction")}
           </Button>
         ) : (
           <ToggleButton checked={checked}

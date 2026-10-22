@@ -189,7 +189,7 @@ For image generation, configure an image provider first and then use the WebUI i
 
 ## Channels
 
-**Channels** provides credential or QR-based setup, connection validation, and restart guidance. Missing channel support can be installed from a local WebUI.
+**Channels** provides credential or QR-based setup, connection validation, and restart guidance. Missing channel support can be installed from a local WebUI. When newly installed support needs a restart, select the restart icon in that channel's row before continuing setup.
 
 The platform itself may still require you to create a bot, enable event permissions, copy a token, or configure a webhook. Use [`chat-apps.md`](./chat-apps.md) for those platform-side prerequisites and for manual JSON/reference options.
 

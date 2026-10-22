@@ -456,7 +456,8 @@ describe("Settings channels", () => {
     expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("requires a restart before enabling newly installed channel support", async () => {
+  it("replaces the installed channel switch with an in-row restart action", async () => {
+    const restart = vi.fn();
     const whatsappFeature = {
       name: "whatsapp",
       display_name: "WhatsApp",
@@ -490,7 +491,7 @@ describe("Settings channels", () => {
       finishInstall = resolve;
     }));
     const installedPayload = {
-      features: [{ ...whatsappFeature, installed: true }, weixinFeature],
+      features: [{ ...whatsappFeature, installed: true, restart_pending: true }, weixinFeature],
       enabled_count: 0,
       requires_restart: true,
       last_action: {
@@ -500,7 +501,7 @@ describe("Settings channels", () => {
       },
     };
 
-    renderSettingsView({ initialSection: "channels" });
+    renderSettingsView({ initialSection: "channels", onRestart: restart });
 
     requestMutationMock.mockResolvedValueOnce({ status: "pending", session_id: "test-link" });
     expect(screen.queryByRole("switch", { name: "WhatsApp channel" })).not.toBeInTheDocument();
@@ -520,13 +521,47 @@ describe("Settings channels", () => {
     );
     finishInstall(installedPayload);
     expect(requestMutationMock).not.toHaveBeenCalledWith("settings.channel.connect.start", expect.anything(), expect.anything());
-    expect(await screen.findByText("Restart nanobot to apply updated channel support.")).toBeInTheDocument();
-    const installedGroup = await screen.findByRole("region", { name: "Requires dependencies" });
-    expect(within(installedGroup).getByRole("switch", { name: "WhatsApp channel" })).toBeDisabled();
+    const restartButton = await within(installationGroup).findByRole("button", { name: "Restart nanobot" });
+    expect(restartButton).toHaveTextContent("Restart");
+    expect(restartButton).toBeEnabled();
+    expect(screen.queryByRole("switch", { name: "WhatsApp channel" })).not.toBeInTheDocument();
+    expect(restart).not.toHaveBeenCalled();
+    fireEvent.click(restartButton);
+    expect(restart).toHaveBeenCalledTimes(1);
     expect(requestMutationMock.mock.calls.map(([action]) => action)).toEqual([
       "settings.feature.enable",
     ]);
+  });
 
+  it("keeps a refreshed pending restart on its channel and restores switches after restart", async () => {
+    let restartPending = true;
+    const installed = { ...uninstalledConnectFeature("whatsapp"), installed: true };
+    const other = { ...catalogFeature("Existing", false), requires_restart: true };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") {
+        return jsonResponse({ ...settingsPayload(), requires_restart: restartPending });
+      }
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({
+          features: [{ ...installed, restart_pending: restartPending }, other],
+          enabled_count: 0,
+          requires_restart: restartPending,
+        });
+      }
+      return jsonResponse({});
+    }));
+    renderSettingsView({ initialSection: "channels" });
+
+    const installationGroup = await screen.findByRole("region", { name: "Requires dependencies" });
+    expect(await within(installationGroup).findByRole("button", { name: "Restart nanobot" })).toBeEnabled();
+    expect(screen.getByRole("switch", { name: "Existing channel" })).toBeDisabled();
+
+    restartPending = false;
+    await act(async () => { fireEvent(window, new Event("focus")); });
+    expect(await screen.findByRole("switch", { name: "WhatsApp channel" })).toBeEnabled();
+    expect(screen.getByRole("switch", { name: "WhatsApp channel" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("switch", { name: "Existing channel" })).toBeEnabled();
   });
 
   it.each([
@@ -699,6 +734,7 @@ describe("Settings channels", () => {
       fireEvent.click(await screen.findByRole("button", { name: "Install WhatsApp" }));
 
       expect(await screen.findByRole("alert")).toHaveTextContent("Package install failed");
+      expect(screen.getByRole("button", { name: "Install WhatsApp" })).toBeEnabled();
       expect(consoleError).toHaveBeenCalledWith(
         "nanobot feature action failed",
         expect.objectContaining({

@@ -1408,12 +1408,33 @@ async def test_nanobot_feature_channel_action_can_apply_without_restart(
 
 
 @pytest.mark.asyncio
-async def test_nanobot_feature_install_only_does_not_start_channel(
+@pytest.mark.parametrize("installed_now", [True, False])
+async def test_nanobot_feature_install_only_tracks_pending_restart_without_starting_channel(
     bus: MagicMock,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    installed_now: bool,
 ) -> None:
     runtime_calls: list[tuple[str, str, str | None]] = []
+
+    def features_payload(**_kwargs: Any) -> dict[str, Any]:
+        return {
+            "features": [{
+                "name": name,
+                "type": "channel",
+                "enabled": False,
+                "installed": True,
+                "ready": False,
+                "status": "not_enabled",
+                "requires_restart": True,
+            } for name in ("whatsapp", "email")],
+            "enabled_count": 0,
+        }
+
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.nanobot_features_payload",
+        features_payload,
+    )
 
     def feature_action(
         action: str,
@@ -1425,18 +1446,7 @@ async def test_nanobot_feature_install_only_does_not_start_channel(
         assert action == "enable"
         assert query == {"name": ["whatsapp"], "install_only": ["true"]}
         assert allow_install is True
-        return {
-            "features": [{
-                "name": "whatsapp",
-                "type": "channel",
-                "enabled": False,
-                "installed": True,
-                "ready": False,
-                "status": "not_enabled",
-            }],
-            "enabled_count": 0,
-            "requires_restart": False,
-        }
+        return {**features_payload(), "requires_restart": installed_now}
 
     async def channel_feature_action(
         action: str,
@@ -1465,7 +1475,28 @@ async def test_nanobot_feature_install_only_does_not_start_channel(
 
     assert response.status_code == 200
     assert runtime_calls == []
-    assert response.json()["features"][0]["enabled"] is False
+    features = response.json()["features"]
+    assert features[0]["enabled"] is False
+    assert [feature["restart_pending"] for feature in features] == [installed_now, False]
+
+    # Refreshing the catalog keeps the pending installation tied to its channel.
+    refreshed = await _http_get(
+        f"http://127.0.0.1:{channel.config.port}/api/settings/nanobot-features",
+        headers={"Authorization": f"Bearer {channel.gateway.tokens.issue_api_token(300)}"},
+    )
+    assert refreshed.status_code == 200
+    assert [feature["restart_pending"] for feature in refreshed.json()["features"]] == [
+        installed_now, False,
+    ]
+
+    # A new gateway owns a fresh runtime; installed support is ready to configure.
+    restarted = _ch(bus, session_manager=SessionManager(tmp_path), port=_free_port())
+    after_restart = await _http_get(
+        f"http://127.0.0.1:{restarted.config.port}/api/settings/nanobot-features",
+        headers={"Authorization": f"Bearer {restarted.gateway.tokens.issue_api_token(300)}"},
+    )
+    assert after_restart.status_code == 200
+    assert all(not feature["restart_pending"] for feature in after_restart.json()["features"])
 
 
 @pytest.mark.asyncio
