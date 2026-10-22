@@ -31,6 +31,7 @@ import { AnswerOrderFixture } from "./answer-order-fixture";
 import { SidebarActivityFixture } from "./sidebar-activity-fixture";
 import { HistoryHydrationFixture } from "./history-hydration-fixture";
 import { IdleCompactionFixture, installIdleCompactionApi } from "./idle-compaction-fixture";
+import { FileEditPathFixture } from "./file-edit-path-fixture";
 
 const history: UIMessage[] = [
   { id: "question", role: "user", content: "Earlier question", createdAt: 1_700_000_000_000 },
@@ -172,7 +173,9 @@ if (parameters.get("case") === "skeleton-additions") installSkeletonPreviewApi()
 if (parameters.get("case") === "idle-compaction") installIdleCompactionApi();
 await initializeI18n();
 createRoot(document.getElementById("root")!).render(<TooltipProvider>
-  {parameters.get("case") === "answer-order"
+  {parameters.get("case") === "file-edit-path"
+    ? <FileEditPathFixture />
+    : parameters.get("case") === "answer-order"
     ? <AnswerOrderFixture />
     : parameters.get("case") === "sidebar-activity"
     ? <SidebarActivityFixture />

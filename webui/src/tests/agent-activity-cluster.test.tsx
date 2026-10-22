@@ -471,7 +471,7 @@ describe("AgentActivityCluster", () => {
       expect(screen.queryByText("Edited files")).not.toBeInTheDocument();
       const fileRef = screen.getByTestId("activity-file-reference");
       expect(fileRef).toHaveTextContent("src/app.tsx");
-      expect(fileRef).toHaveAttribute("aria-label", "src/app.tsx");
+      expect(fileRef).toHaveAttribute("aria-label", "/Users/renxubin/project/src/app.tsx");
       expect(screen.queryByTestId("activity-header-file-reference")).not.toBeInTheDocument();
       expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
       for (const diffPair of screen.getAllByTestId("activity-diff-pair")) {
