@@ -44,7 +44,7 @@ describe("Runtime configuration settings", () => {
     expect([...paths, visibilityOnly].sort()).toEqual([...runtimeConfigKeys].sort());
   });
 
-  it("keeps local service controls available when tool families are disabled", () => {
+  it("keeps chat permissions and local services available when tool families are disabled", () => {
     const payload = runtimeSettings();
     renderSettingsView({ initialSection: "advanced", initialSettings: {
       ...payload, runtime_config: {
@@ -53,11 +53,9 @@ describe("Runtime configuration settings", () => {
       },
     } });
     expect(screen.getByRole("switch", { name: "Local services" })).toBeVisible();
-  });
-
-  it("keeps chat permission settings discoverable within the advanced page", () => {
-    renderSettingsView({ initialSection: "advanced", initialSettings: runtimeSettings() });
-    expect(screen.getByRole("switch", { name: "Local services" })).toBeInTheDocument();
+    expect(screen.getByText("Default access")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Default Permission" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Full Access" })).toBeVisible();
   });
 
   it("places common settings in their feature pages and reserves advanced for low-frequency controls", () => {

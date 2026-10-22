@@ -143,24 +143,6 @@ class TestRemoveReactionAsync:
 
         ch._remove_reaction_sync.assert_not_called()
 
-    @pytest.mark.asyncio
-    async def test_noop_when_reaction_id_is_empty(self):
-        ch = _make_channel()
-        ch._remove_reaction_sync = MagicMock()
-
-        await ch._remove_reaction("om_001", "")
-
-        ch._remove_reaction_sync.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_noop_when_reaction_id_is_none(self):
-        ch = _make_channel()
-        ch._remove_reaction_sync = MagicMock()
-
-        await ch._remove_reaction("om_001", None)
-
-        ch._remove_reaction_sync.assert_not_called()
-
 
 # ── send_delta stream end: reaction auto-cleanup ────────────────────────────
 

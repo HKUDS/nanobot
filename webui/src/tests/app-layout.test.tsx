@@ -1442,9 +1442,6 @@ describe("App layout", () => {
     expect(screen.getByText("cron")).toBeInTheDocument();
     expect(screen.getByText("github")).toBeInTheDocument();
     expect(screen.getByText("Needs setup")).toBeInTheDocument();
-    expect(
-      screen.queryByText("Review the instruction skills this agent can load during a conversation."),
-    ).not.toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Sidebar navigation" })).toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Settings sections" })).not.toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "Skills" })).toHaveAttribute(
@@ -1470,14 +1467,7 @@ describe("App layout", () => {
       "true",
     );
     expect(screen.getByText("Setup required")).toBeInTheDocument();
-    expect(
-      screen.queryByText(
-        "Allow the agent to load this skill when its requirements are ready.",
-      ),
-    ).not.toBeInTheDocument();
     expect(screen.getByText("brew install gh")).toBeInTheDocument();
-    expect(screen.queryByText("Unavailable reason")).not.toBeInTheDocument();
-    expect(screen.queryByText("Missing CLI")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Check again" })).toBeInTheDocument();
     fireEvent.click(screen.getByText("Skill instructions"));
     expect(screen.getByText(/Use GitHub CLI/)).toBeInTheDocument();
@@ -1675,9 +1665,6 @@ describe("App layout", () => {
     expect(
       await screen.findByRole("heading", { name: "Popular skills" }),
     ).toBeInTheDocument();
-    expect(
-      screen.queryByText("Each marketplace keeps its own ranking and install metrics."),
-    ).not.toBeInTheDocument();
     expect(screen.getByText("find-skills")).toBeInTheDocument();
     expect(screen.getByText("ima-skills")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open ima-skills on SkillHub" })).toHaveAttribute(

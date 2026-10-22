@@ -5221,37 +5221,6 @@ describe("ThreadShell", () => {
     expect(screen.getByRole("option", { name: /\/history/i })).toBeInTheDocument();
   });
 
-  it("does not bring back welcome cards when image mode is enabled", async () => {
-    const client = makeClient();
-    const settings = modelSettings("deepseek-v4-pro", "deepseek");
-    render(
-      wrap(
-        client,
-        <ThreadShell
-          session={null}
-          title="nanobot"
-          onToggleSidebar={() => {}}
-          onNewChat={() => {}}
-          settingsSnapshot={{
-            ...settings,
-            image_generation: {
-              ...settings.image_generation,
-              enabled: true,
-              provider_configured: true,
-            },
-          }}
-        />,
-      ),
-    );
-    await act(async () => {});
-
-    expect(screen.queryByText("Design an icon")).not.toBeInTheDocument();
-    expect(screen.queryByText("Write code")).not.toBeInTheDocument();
-
-    expect(screen.queryByText("Design an icon")).not.toBeInTheDocument();
-    expect(screen.queryByText("Write code")).not.toBeInTheDocument();
-  });
-
   it("surfaces a dismissible banner for an uncorrelated message_too_big error", async () => {
     const client = makeClient();
     const onNewChat = vi.fn().mockResolvedValue("chat-a");

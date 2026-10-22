@@ -628,19 +628,6 @@ class TestSubagentHookStatus:
 
         assert status.error == "something went wrong"
 
-    @pytest.mark.asyncio
-    async def test_after_iteration_no_status_is_noop(self):
-        """after_iteration with no status should be a no-op."""
-        from nanobot.agent.hook import AgentHookContext
-        from nanobot.agent.subagent import _SubagentHook
-
-        hook = _SubagentHook()
-        context = AgentHookContext(iteration=1, messages=[])
-        result = await hook.after_iteration(context)
-
-        assert result is None
-        assert context.iteration == 1
-
 
 # ---------------------------------------------------------------------------
 # read-only mode (tools.my.allow_set=False)

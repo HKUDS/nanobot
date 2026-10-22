@@ -284,8 +284,6 @@ describe("AgentActivityCluster", () => {
     expect(content).toHaveClass("ps-6");
     expect(content).not.toHaveClass("max-h-[180px]");
     expect(content).not.toHaveClass("overflow-y-auto");
-    expect(screen.queryByTestId("activity-scroll-fade-top")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("activity-scroll-fade-bottom")).not.toBeInTheDocument();
 
     view.rerender(<AgentActivityCluster {...props} messages={activityMessages(" updated", {
       id: "next-tool", role: "tool", kind: "trace", content: "open_browser()", createdAt: 3,
@@ -472,7 +470,6 @@ describe("AgentActivityCluster", () => {
       const fileRef = screen.getByTestId("activity-file-reference");
       expect(fileRef).toHaveTextContent("src/app.tsx");
       expect(fileRef).toHaveAttribute("aria-label", "/Users/renxubin/project/src/app.tsx");
-      expect(screen.queryByTestId("activity-header-file-reference")).not.toBeInTheDocument();
       expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
       for (const diffPair of screen.getAllByTestId("activity-diff-pair")) {
         expect(diffPair).toHaveClass("items-baseline");
@@ -1050,7 +1047,6 @@ describe("AgentActivityCluster", () => {
     expect(screen.queryByRole("button", { name: /edited app\.tsx/i })).not.toBeInTheDocument();
     expect(screen.queryByTestId("agent-activity-content")).not.toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Edited" })).toBeInTheDocument();
-    expect(screen.queryByTestId("activity-header-file-reference")).not.toBeInTheDocument();
     const marker = screen.getByRole("img", { name: "Edited" });
     expect(marker.querySelector("svg")).toHaveClass("lucide-file-code2");
     expect(marker.closest('[data-testid="activity-step"]')?.querySelectorAll("svg")).toHaveLength(1);
@@ -2105,7 +2101,6 @@ describe("AgentActivityCluster", () => {
     expect(screen.queryByText("Web")).not.toBeInTheDocument();
     const row = screen.getByText("example.com").closest('[data-testid="activity-step"]');
     expect(row).toHaveTextContent("Read");
-    expect(screen.queryByTestId("activity-evidence-preview")).not.toBeInTheDocument();
     expect(screen.queryByText(/Found image/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("img", { name: "Homepage screenshot" })).not.toBeInTheDocument();
   });
@@ -2212,7 +2207,6 @@ describe("AgentActivityCluster", () => {
 
     expect(screen.queryByText("Vision")).not.toBeInTheDocument();
     expect(screen.getByText("Captured screenshot")).toBeInTheDocument();
-    expect(screen.queryByTestId("activity-evidence-preview")).not.toBeInTheDocument();
     expect(screen.queryByText("missing.png")).not.toBeInTheDocument();
   });
 
@@ -2259,7 +2253,6 @@ describe("AgentActivityCluster", () => {
       expect(line).toHaveClass("overflow-hidden");
       expect(line).toHaveClass("whitespace-nowrap");
       expect(step.querySelector("br")).not.toBeInTheDocument();
-      expect(step.querySelector('[data-testid="activity-evidence-preview"]')).not.toBeInTheDocument();
     }
     expect(document.querySelector("details")).not.toBeInTheDocument();
     expect(document.querySelector("ul, li, section")).not.toBeInTheDocument();

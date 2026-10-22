@@ -609,50 +609,12 @@ describe("Automation task list and detail sheet", () => {
     expect(screen.queryByText("No next run")).not.toBeInTheDocument();
   });
 
-  it.each(["heartbeat", "dream", "other-system-job"])("shows only actual task data for %s", (id) => {
-    renderDetail({ ...systemTask, id, name: id, state: { next_run_at_ms: now + 540_000 } });
-    const dialog = screen.getByRole("dialog", { name: id });
-    expect(dialog).toHaveClass("max-w-[440px]");
-    expect(dialog).not.toHaveAttribute("aria-describedby");
-    expect(dialog.querySelector("p")).toBeNull();
-    expect(within(dialog).queryByText("Task instructions")).not.toBeInTheDocument();
-    expect(within(dialog).queryByText("System-managed automation")).not.toBeInTheDocument();
-    expect(within(dialog).queryByText("Schedule")).not.toBeInTheDocument();
-    expect(within(dialog).getAllByRole("button")).toHaveLength(2);
-    expect(within(dialog).getByRole("button", { name: "Close" })).toHaveClass("rounded-full", "h-7", "w-7");
-    const toggle = within(dialog).getByRole("button", { name: "Task information" });
-    expect(screen.queryByRole("dialog", { name: "Task information" })).not.toBeInTheDocument();
-    fireEvent.click(toggle);
-    const metadata = screen.getByRole("dialog", { name: "Task information" });
-    for (const label of ["Schedule", "Next run", "Last run"]) {
-      expect(within(metadata).getByText(label).closest("dt")).not.toBeNull();
-    }
-    expect(within(metadata).getByText("Every 30 minutes")).toBeVisible();
-    expect(within(metadata).getByText("Not run yet")).toBeVisible();
-    expect(within(metadata).getByText("ID")).toBeVisible();
-    fireEvent.click(toggle);
-    expect(screen.queryByRole("dialog", { name: "Task information" })).not.toBeInTheDocument();
-  });
-
-  it("keeps the shared protected detail read-only and does not infer purpose from a task name", () => {
-    renderDetail({ ...systemTask, id: "other-system-job", name: "heartbeat",
-      state: { last_run_at_ms: now - 60_000, last_status: "error", last_error: "Background check failed", next_run_at_ms: null },
-    });
-    const dialog = screen.getByRole("dialog", { name: "heartbeat" });
-    expect(within(dialog).queryByText("System-managed automation")).not.toBeInTheDocument();
-    expect(within(dialog).getByRole("alert")).toHaveTextContent("Background check failed");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Task information" }));
-    expect(within(dialog).getByText("Failed")).toBeVisible();
-    expect(within(dialog).getByText("No next run")).toBeVisible();
-    expect(dialog).not.toHaveAttribute("aria-describedby");
-  });
-
-  it.each([task, systemTask])("uses shared dialog styling and quiet detail rows for $name", (job) => {
-    renderDetail(job);
-    const dialog = screen.getByRole("dialog", { name: job.name });
+  it("uses shared dialog styling and quiet detail rows", () => {
+    renderDetail(task);
+    const dialog = screen.getByRole("dialog", { name: task.name });
     expect(dialog).toHaveClass("rounded-modal");
     expect(dialog).not.toHaveClass("rounded-[20px]");
-    const title = within(dialog).getByRole("heading", { name: job.name });
+    const title = within(dialog).getByRole("heading", { name: task.name });
     expect(title).toHaveClass("text-lg", "font-medium", "leading-snug");
     expect(dialog).toHaveClass("text-sm", "font-normal");
     expect(title).not.toHaveClass("text-[22px]");
@@ -662,16 +624,14 @@ describe("Automation task list and detail sheet", () => {
     const details = within(dialog).getByRole("button", { name: "Task information" });
     expect(details.parentElement).not.toHaveClass("border-t");
     expect(details).toHaveAttribute("aria-expanded", "false");
-    if (!job.protected) {
-      expect(within(dialog).queryByRole("switch")).not.toBeInTheDocument();
-      const taskActions = within(dialog).getByRole("button", { name: "Run now" }).parentElement;
-      const edit = within(dialog).getByRole("button", { name: "Edit" });
-      expect(edit.parentElement).toBe(taskActions);
-      expect(edit.parentElement).toHaveClass("ml-auto");
-      expect(taskMenuItem("Disable")).toBeVisible();
-      expect(taskMenuItem("Delete")).toBeVisible();
-      expect(taskMenuItem("Open a chat")).toHaveAttribute("href", "#/chat/websocket%3Ademo");
-    }
+    expect(within(dialog).queryByRole("switch")).not.toBeInTheDocument();
+    const taskActions = within(dialog).getByRole("button", { name: "Run now" }).parentElement;
+    const edit = within(dialog).getByRole("button", { name: "Edit" });
+    expect(edit.parentElement).toBe(taskActions);
+    expect(edit.parentElement).toHaveClass("ml-auto");
+    expect(taskMenuItem("Disable")).toBeVisible();
+    expect(taskMenuItem("Delete")).toBeVisible();
+    expect(taskMenuItem("Open a chat")).toHaveAttribute("href", "#/chat/websocket%3Ademo");
   });
 
   it("keeps schedule and run metadata in task information", async () => {

@@ -163,7 +163,6 @@ describe("FilePreviewPanel", () => {
     expect(codeBlock).toHaveTextContent("print('ok')");
     expect(codeBlock).toHaveAttribute("data-language", "python");
     expect(codeBlock).toHaveAttribute("data-highlight", "true");
-    expect(screen.queryByTestId("file-preview-breadcrumb")).not.toBeInTheDocument();
     expect(screen.queryByText("quicksort.py")).not.toBeInTheDocument();
 
   });

@@ -528,7 +528,7 @@ describe("NanobotTui composer", () => {
     ui.composer.setText("ask @github next")
     ui.composer.submit()
     await waitUntil(() => sent.length === 2)
-    expect(ui.status.plainText).not.toContain("Steering")
+    expect(ui.status.plainText).toMatch(/^Thinking\s+\d+s/u)
     expect(ui.composer.placeholder).toBe("Enter send now  Tab send next")
     expect(sentOptions[1]).toEqual({
       cliApps: [{ name: "github" }],

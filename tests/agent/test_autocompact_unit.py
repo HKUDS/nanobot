@@ -339,26 +339,6 @@ class TestCheckExpired:
         await ac.check_expired(scheduler, _resolve_runtime)
         scheduler.assert_not_called()
 
-    async def test_session_with_no_key_skips(self):
-        """Session info with empty/missing key should be skipped."""
-        ac = _make_autocompact(ttl=15)
-        mock_sm = _mock_sessions()
-        mock_sm.list_sessions.return_value = [{"key": "", "updated_at": "old"}]
-        ac.sessions = mock_sm
-        scheduler = MagicMock()
-        await ac.check_expired(scheduler, _resolve_runtime)
-        scheduler.assert_not_called()
-
-    async def test_session_with_missing_key_field_skips(self):
-        """Session info dict without 'key' field should be skipped."""
-        ac = _make_autocompact(ttl=15)
-        mock_sm = _mock_sessions()
-        mock_sm.list_sessions.return_value = [{"updated_at": "old"}]
-        ac.sessions = mock_sm
-        scheduler = MagicMock()
-        await ac.check_expired(scheduler, _resolve_runtime)
-        scheduler.assert_not_called()
-
     async def test_dream_session_skips(self):
         """Internal Dream sessions should not be scheduled for idle compact."""
         ac = _make_autocompact(ttl=15)

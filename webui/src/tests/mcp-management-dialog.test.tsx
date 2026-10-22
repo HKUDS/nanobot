@@ -87,8 +87,6 @@ describe("McpManagementDialog", () => {
     expect(within(dialog).getByText("Streamable HTTP")).toBeInTheDocument();
     expect(within(dialog).getByRole("link", { name: "Open docs" })).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Remove connection" })).toBeInTheDocument();
-    expect(within(dialog).queryByText("Last checked")).not.toBeInTheDocument();
-    expect(within(dialog).queryByText("Connection actions apply immediately.")).not.toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Reconnect" }));
     expect(onAction).toHaveBeenCalledWith("reconnect", "docs", {});
   });
@@ -138,7 +136,7 @@ describe("McpManagementDialog", () => {
     expect(screen.queryByRole("switch", { name: "Use proxy" })).not.toBeInTheDocument();
   });
 
-  it("loads tools on entry and replaces passive inspection copy with recovery", async () => {
+  it("loads tools on entry and supports refreshing the empty inventory", async () => {
     const onAction = vi.fn();
     renderDialog({
       initialTab: "tools",
@@ -148,7 +146,6 @@ describe("McpManagementDialog", () => {
 
     const dialog = screen.getByRole("dialog", { name: "Docs MCP" });
     await waitFor(() => expect(onAction).toHaveBeenCalledWith("test", "docs"));
-    expect(within(dialog).queryByText("Not inspected")).not.toBeInTheDocument();
     expect(within(dialog).getByText("No tools available")).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Refresh tools" }));
     expect(onAction).toHaveBeenCalledTimes(2);

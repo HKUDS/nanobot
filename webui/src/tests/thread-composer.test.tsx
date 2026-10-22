@@ -4078,6 +4078,7 @@ describe("ThreadComposer", () => {
   });
 
   it("keeps temporary chat guidance in memory only", async () => {
+    const setItem = vi.spyOn(window.localStorage, "setItem");
     const onSend = vi.fn();
     const view = render(
       <ThreadComposer
@@ -4094,11 +4095,7 @@ describe("ThreadComposer", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(await screen.findByText("do not persist this")).toBeInTheDocument();
-    expect(
-      window.localStorage.getItem(
-        "nanobot.webui.composerQueuedGuidance.v1:temporary-private",
-      ),
-    ).toBeNull();
+    expect(setItem).not.toHaveBeenCalled();
 
     view.unmount();
     render(
@@ -4114,11 +4111,7 @@ describe("ThreadComposer", () => {
     await waitFor(() => {
       expect(screen.queryByText("do not persist this")).not.toBeInTheDocument();
     });
-    expect(
-      window.localStorage.getItem(
-        "nanobot.webui.composerQueuedGuidance.v1:temporary-private",
-      ),
-    ).toBeNull();
+    expect(setItem).not.toHaveBeenCalled();
   });
 
 });

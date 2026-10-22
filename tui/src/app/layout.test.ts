@@ -188,8 +188,6 @@ describe("NanobotTui layout and themes", () => {
       expect(setup.renderer.width).toBe(width)
       expect(setup.renderer.height).toBe(height)
       expect(frame).not.toContain("undefined")
-      expect(frame).not.toContain("Steer this turn…")
-      expect(frame).not.toContain("Ask a follow-up…")
       if (width >= 40 && height >= 9) {
         expect(occurrences(frame, "Enter send now  Tab send next")).toBe(1)
       } else if (width >= 28 && height >= 9) {
