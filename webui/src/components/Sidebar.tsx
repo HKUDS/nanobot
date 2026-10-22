@@ -388,7 +388,7 @@ function SidebarActionButton({
         collapsed
           ? "w-8 justify-center gap-0 px-0"
           : iconOnly ? "w-8 shrink-0 justify-center gap-0 rounded-control px-0"
-          : "w-full justify-start gap-2 px-2 text-[13px] leading-5 [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:stroke-[1.75]",
+          : "w-full justify-start gap-2 px-2 text-[13px] leading-5 [&_svg]:h-4 [&_svg]:w-4 [&_svg]:stroke-[1.75]",
         active
           ? "text-sidebar-accent-foreground"
           : compact

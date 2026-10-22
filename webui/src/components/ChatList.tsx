@@ -831,7 +831,6 @@ export const ChatList = memo(function ChatList({
                     const tabPartiallySelected = !tabSelected && tabDeleteKeys.some((key) => (
                       selectedDeleteKeys.has(key)
                     ));
-                    const projectMode = group.kind === "project";
 
                     if (isWorkbenchTab) {
                       return (
@@ -1042,10 +1041,7 @@ export const ChatList = memo(function ChatList({
                                   partial={tabPartiallySelected}
                                 />
                               ) : null}
-                              <span className={cn(
-                                "relative flex min-w-0 flex-1 items-center overflow-hidden",
-                                projectMode ? "gap-2" : "gap-1.5",
-                              )}>
+                              <span className="relative flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
                                 <SidebarSessionHandle handle={s.handle} />
                                 <span className="min-w-0 flex-1 truncate font-normal leading-5">
                                   {title}
