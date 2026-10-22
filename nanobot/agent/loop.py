@@ -38,6 +38,7 @@ from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, res
 from nanobot.agent.tools.message import capture_message_deliveries
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.runtime_control import AgentRuntimeControl
+from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.turn_delivery import (
     TurnDelivery,
     TurnDeliveryFactory,
@@ -871,7 +872,7 @@ class AgentLoop:
         """Execute one trusted user command with the active workspace policy."""
         metadata = dict(ctx.msg.metadata or {})
         tool = self.tools.get("exec")
-        if tool is None:
+        if not isinstance(tool, ExecTool):
             content = "Shell execution is disabled in this nanobot configuration."
         else:
             session = ctx.session or await self.sessions.state.get(ctx.key)
@@ -899,7 +900,7 @@ class AgentLoop:
             try:
                 for turn_scope in ctx.turn_scopes:
                     turn_scope_stack.enter_context(turn_scope)
-                result = await tool.execute(
+                result = await tool.execute_to_completion(
                     command=ctx.args.strip(),
                     working_dir=str(scope.project_path),
                 )

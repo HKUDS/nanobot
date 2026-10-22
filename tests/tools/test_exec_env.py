@@ -62,7 +62,7 @@ async def test_exec_child_receives_filtered_env(monkeypatch, allowed_env_keys, e
 async def test_exec_has_working_path():
     """Basic commands should be available via the login shell's PATH."""
     tool = ExecTool()
-    result = await tool.execute(command="echo hello")
+    result = await tool.execute(command="echo hello", yield_time_ms=10000)
     assert "hello" in result
 
 

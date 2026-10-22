@@ -135,7 +135,7 @@ def _exec_parameters(config: ExecToolConfig) -> dict[str, Any]:
             nullable=True,
         ),
         yield_time_ms=IntegerSchema(
-            description="Return after this many milliseconds if still running; omit to wait for exit.",
+            description="Return after this many milliseconds if still running (default 1000, max 30000); execution continues.",
             minimum=0,
             maximum=MAX_YIELD_MS,
             nullable=True,
@@ -317,11 +317,23 @@ class ExecTool(Tool):
             return prepared
         return await self._execute_session(prepared, yield_time_ms, max_output_chars)
 
+    async def execute_to_completion(self, command: str, working_dir: str) -> str:
+        """Return the complete result for a trusted user shell command, without an agent observer."""
+        try:
+            prepared = self._prepare_command(command, working_dir)
+        except ValueError as exc:
+            return ToolResult.error(f"Error: {exc}")
+        if isinstance(prepared, str):
+            return prepared
+        return await self._execute_session(prepared, None, None, until_exit=True)
+
     async def _execute_session(
         self,
         prepared: _PreparedCommand,
         yield_time_ms: int | None,
         max_output_chars: int | None,
+        *,
+        until_exit: bool = False,
     ) -> str:
         try:
             session_id, poll = await self._session_manager.start(
@@ -331,11 +343,10 @@ class ExecTool(Tool):
                 timeout=prepared.timeout,
                 shell_program=prepared.shell_program,
                 login=prepared.login,
-                yield_time_ms=(
-                    0 if yield_time_ms is None
-                    else clamp_session_int(yield_time_ms, DEFAULT_YIELD_MS, 0, MAX_YIELD_MS)
+                yield_time_ms=0 if until_exit else clamp_session_int(
+                    yield_time_ms, DEFAULT_YIELD_MS, 0, MAX_YIELD_MS,
                 ),
-                until_exit=yield_time_ms is None,
+                until_exit=until_exit,
                 stdin=(asyncio.subprocess.DEVNULL if yield_time_ms is None else asyncio.subprocess.PIPE),
                 idle_timeout=self._exec_config.idle_timeout,
                 idle_action=self._exec_config.idle_action,
@@ -348,7 +359,7 @@ class ExecTool(Tool):
                 ),
             )
             result = format_session_poll(session_id, poll)
-            if not poll.done and yield_time_ms is not None:
+            if not poll.done:
                 result += "\nInitial wait ended; session remains active."
             return ToolResult.error(result) if poll.failed else result
         except Exception as exc:

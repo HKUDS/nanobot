@@ -7,6 +7,7 @@ platform-specific binaries (all subprocess calls are mocked).
 
 import asyncio
 import os
+import re
 import shutil
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -876,10 +877,24 @@ class TestResolveShellWindows:
 )
 class TestWindowsRealExec:
 
+    async def _execute(self, command, shell=None, **kwargs):
+        manager = ExecSessionManager()
+        try:
+            initial = await ExecTool(session_manager=manager, **kwargs).execute(command=command, shell=shell)
+            match = re.search(r"session_id:\s*([0-9a-f]+)", initial)
+            if match is None:
+                return initial
+            final = await ExecSessionTool(manager=manager).execute(
+                session_id=match.group(1), until_exit=True,
+            )
+            return initial + "\n" + final
+        finally:
+            await manager.close_all()
+
     @pytest.mark.skipif(shutil.which("pwsh") is None, reason="requires PowerShell 7")
     @pytest.mark.asyncio
     async def test_single_line_and_separator_uses_pwsh(self):
-        result = await ExecTool(timeout=10).execute(command="echo before && echo after")
+        result = await self._execute(command="echo before && echo after", timeout=10)
 
         assert "before" in result
         assert "after" in result
@@ -887,7 +902,7 @@ class TestWindowsRealExec:
 
     @pytest.mark.asyncio
     async def test_explicit_cmd_preserves_embedded_quotes(self):
-        result = await ExecTool(timeout=10).execute(command='echo "a & b"', shell="cmd")
+        result = await self._execute(command='echo "a & b"', shell="cmd", timeout=10)
 
         assert '"a & b"' in result
         assert r'\"a & b\"' not in result
@@ -895,13 +910,14 @@ class TestWindowsRealExec:
 
     @pytest.mark.asyncio
     async def test_default_powershell_preserves_native_exit_code(self):
-        result = await ExecTool(timeout=10).execute(command="cmd /c exit 7")
+        result = await self._execute(command="cmd /c exit 7", timeout=10)
 
         assert "Exit code: 7" in result
 
     @pytest.mark.asyncio
     async def test_windows_powershell_output_and_redirection_are_utf8(self, tmp_path):
-        result = await ExecTool(working_dir=str(tmp_path), timeout=180).execute(
+        result = await self._execute(
+            working_dir=str(tmp_path), timeout=180,
             command=(
                 "Write-Output 'file café λ 你好' > marker.txt; "
                 "Write-Output 'café λ 你好'; "
@@ -922,7 +938,8 @@ class TestWindowsRealExec:
     @pytest.mark.asyncio
     async def test_windows_powershell_native_pipeline_input_is_utf8(self):
         python = sys.executable.replace("'", "''")
-        result = await ExecTool(timeout=180).execute(
+        result = await self._execute(
+            timeout=180,
             command=(
                 f"[string][char]0x4F1A | & '{python}' "
                 '-c "import sys; print(sys.stdin.buffer.read().hex())"'

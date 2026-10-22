@@ -762,7 +762,7 @@ def format_session_poll(session_id: str, poll: _SessionPoll) -> str:
             nullable=True,
         ),
         until_exit=BooleanSchema(
-            description="Wait for the process to exit.",
+            description="Wait for exit within timeout_ms; return the active session if the wait expires.",
             default=False,
         ),
         timeout_ms=IntegerSchema(
