@@ -17,11 +17,15 @@ except ImportError:
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.slack.runtime import SLACK_MAX_MESSAGE_LEN, SlackChannel, SlackConfig
+from nanobot.events import ContextCompactionEvent
 
 
 class _FakeAsyncWebClient:
     def __init__(self) -> None:
         self.chat_post_calls: list[dict[str, object | None]] = []
+        self.chat_update_calls: list[dict[str, object | None]] = []
+        self.chat_update_error: Exception | None = None
+        self._posted_message_count = 0
         self.file_upload_calls: list[dict[str, object | None]] = []
         self.reactions_add_calls: list[dict[str, object | None]] = []
         self.reactions_remove_calls: list[dict[str, object | None]] = []
@@ -41,7 +45,7 @@ class _FakeAsyncWebClient:
         text: str,
         thread_ts: str | None = None,
         blocks: list[dict[str, object]] | None = None,
-    ) -> None:
+    ) -> dict[str, object]:
         call: dict[str, object | None] = {
             "channel": channel,
             "text": text,
@@ -50,6 +54,21 @@ class _FakeAsyncWebClient:
         if blocks is not None:
             call["blocks"] = blocks
         self.chat_post_calls.append(call)
+        self._posted_message_count += 1
+        return {"ok": True, "ts": f"1700000000.{self._posted_message_count:06d}"}
+
+    async def chat_update(
+        self,
+        *,
+        channel: str,
+        ts: str,
+        text: str,
+    ) -> dict[str, object]:
+        call: dict[str, object | None] = {"channel": channel, "ts": ts, "text": text}
+        self.chat_update_calls.append(call)
+        if self.chat_update_error is not None:
+            raise self.chat_update_error
+        return {"ok": True}
 
     async def files_upload_v2(
         self,
@@ -984,3 +1003,133 @@ async def test_download_follows_safe_redirect(
     assert validated == [url, "https://cdn.example/file.bin"]
     assert requests[0].headers["Authorization"] == "Bearer xoxb-test"
     assert "Authorization" not in requests[1].headers
+
+
+# ── compaction notices ─────────────────────────────────────────────
+
+
+def _compaction_message(
+    content: str,
+    phase: str,
+    compaction_id: str = "c1",
+    chat_id: str = "C123",
+) -> OutboundMessage:
+    return OutboundMessage(
+        channel="slack",
+        chat_id=chat_id,
+        content=content,
+        event=ContextCompactionEvent(
+            compaction_id=compaction_id,
+            phase=phase,
+            notify=True,
+        ),  # type: ignore[arg-type]
+    )
+
+
+@pytest.mark.asyncio
+async def test_automatic_compaction_is_received_but_not_sent() -> None:
+    """Without notify or show_compaction_notices, automatic compaction stays silent."""
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    channel._web_client = fake_web
+
+    await channel.send(
+        OutboundMessage(
+            channel="slack",
+            chat_id="C123",
+            content="Compressing context…",
+            event=ContextCompactionEvent(compaction_id="c1", phase="started"),
+        )
+    )
+
+    assert fake_web.chat_post_calls == []
+    assert fake_web.chat_update_calls == []
+
+
+@pytest.mark.asyncio
+async def test_compaction_notice_with_notify_posts_as_usual() -> None:
+    """event.notify=True requests a notice even under the default silence."""
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    channel._web_client = fake_web
+
+    await channel.send(_compaction_message("Compressing context…", "started"))
+
+    assert [call["text"] for call in fake_web.chat_post_calls] == ["Compressing context…"]
+    assert fake_web.chat_update_calls == []
+
+
+@pytest.mark.asyncio
+async def test_compaction_outcome_edits_the_start_notice_in_place() -> None:
+    """One message per compaction: the outcome replaces the start text in place (#6084)."""
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    channel._web_client = fake_web
+
+    await channel.send(_compaction_message("Compressing context…", "started"))
+    await channel.send(_compaction_message("Context compacted.", "succeeded"))
+
+    assert [call["text"] for call in fake_web.chat_post_calls] == ["Compressing context…"]
+    assert fake_web.chat_update_calls == [
+        {"channel": "C123", "ts": "1700000000.000001", "text": "Context compacted."}
+    ]
+    assert channel._compaction_notices == {}
+
+
+@pytest.mark.asyncio
+async def test_compaction_outcome_falls_back_to_send_when_edit_fails() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    fake_web.chat_update_error = RuntimeError("message_not_found")
+    channel._web_client = fake_web
+
+    await channel.send(_compaction_message("Compressing context…", "started"))
+    await channel.send(_compaction_message("Context compacted.", "succeeded"))
+
+    assert len(fake_web.chat_update_calls) == 1
+    assert [call["text"] for call in fake_web.chat_post_calls] == [
+        "Compressing context…",
+        "Context compacted.",
+    ]
+    assert channel._compaction_notices == {}
+
+
+@pytest.mark.asyncio
+async def test_compaction_outcome_without_a_start_notice_is_sent() -> None:
+    """After a restart the notice map is empty, so the outcome is posted as usual."""
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    channel._web_client = fake_web
+
+    await channel.send(_compaction_message("Unable to compact context.", "failed"))
+
+    assert [call["text"] for call in fake_web.chat_post_calls] == ["Unable to compact context."]
+    assert fake_web.chat_update_calls == []
+
+
+@pytest.mark.asyncio
+async def test_multi_chunk_compaction_start_is_not_editable() -> None:
+    """A start notice split across chunks must not be remembered for editing."""
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    channel._web_client = fake_web
+
+    await channel.send(_compaction_message("x" * (SLACK_MAX_MESSAGE_LEN + 10), "started"))
+    await channel.send(_compaction_message("Context compacted.", "succeeded"))
+
+    assert len(fake_web.chat_post_calls) == 3
+    assert fake_web.chat_update_calls == []
+
+
+@pytest.mark.asyncio
+async def test_stop_clears_in_flight_compaction_notices() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    channel._web_client = fake_web
+
+    await channel.send(_compaction_message("Compressing context…", "started"))
+    assert channel._compaction_notices
+
+    await channel.stop()
+
+    assert channel._compaction_notices == {}
