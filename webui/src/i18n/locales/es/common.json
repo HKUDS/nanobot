@@ -1921,7 +1921,6 @@
       "placeholderThread": "Escribe tu mensaje…",
       "placeholderHero": "Describe lo que quieres hacer",
       "placeholderOpening": "Abriendo un nuevo tema…",
-      "placeholderStreaming": "El modelo está respondiendo…",
       "inputAria": "Entrada de mensaje",
       "goalStateStrip": "Objetivo: {{label}}",
       "goalStateFallback": "Objetivo",

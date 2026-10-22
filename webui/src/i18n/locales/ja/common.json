@@ -1920,7 +1920,6 @@
       "placeholderThread": "メッセージを入力…",
       "placeholderHero": "やりたいことを入力",
       "placeholderOpening": "新しいトピックを開いています…",
-      "placeholderStreaming": "モデルが応答しています…",
       "inputAria": "メッセージ入力欄",
       "goalStateStrip": "目標: {{label}}",
       "goalStateFallback": "目標",

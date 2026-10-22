@@ -1,4 +1,4 @@
-import { FullAccessIcon, WorkspaceIcon, RestrictedAccessIcon } from "@/components/icons/product-icons";
+import { WorkspaceIcon } from "@/components/icons/product-icons";
 import type { HTMLAttributes, ReactElement } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, FolderSearch, History, Search, Star } from "lucide-react";
@@ -152,9 +152,8 @@ function WorkspacePickerPath({ path }: { path: string }) {
   );
 }
 
-export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, controls, error, onLoadProjects, onResolveProject, onFavoriteProject, onBrowseDirectories, layoutAnchor, onChange }: {
+export function WorkspaceProjectPicker({ disabled, scope, defaultScope, controls, error, onLoadProjects, onResolveProject, onFavoriteProject, onBrowseDirectories, layoutAnchor, onChange }: {
   layoutAnchor?: HTMLElement | null;
-  isHero: boolean;
   disabled?: boolean;
   scope: WorkspaceScopePayload | null;
   defaultScope: WorkspaceScopePayload | null;
@@ -217,7 +216,7 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
   const currentProjectScope = selectedProjectScope(scope, defaultScope);
   const displayedScope = scope ?? defaultScope;
   const projectLabel = displayedScope ? displayedScope.project_name || projectNameFromPath(displayedScope.project_path) : "";
-  const visible = isHero && !!defaultScope && !!onChange && controls?.can_change_project !== false;
+  const visible = !!defaultScope && !!onChange && controls?.can_change_project !== false;
   const canBrowse = controls?.can_browse_directories === true && !!onBrowseDirectories;
   const directoryCache = useMemo(() => onBrowseDirectories ? createWorkspaceDirectoryCache(onBrowseDirectories) : null, [onBrowseDirectories]);
   const previousColumns = useMemo<PickerColumn[]>(() => currentVisit.ancestors.map(ancestor => {
@@ -680,20 +679,7 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
   );
 }
 
-export function WorkspaceProjectLabel({ scope }: { scope: WorkspaceScopePayload }) {
-  const projectLabel = scope.project_name || projectNameFromPath(scope.project_path);
-  return (
-    <HoverHint content={scope.project_path}>
-      <span className="thread-composer-workspace-label inline-flex h-7 min-w-0 max-w-[17.5rem] shrink items-center gap-1.5 px-2 text-[12px] font-medium text-muted-foreground">
-        <WorkspaceIcon className="h-3 w-3 shrink-0" />
-        <span className="min-w-0 truncate">{projectLabel}</span>
-        <span className="sr-only">: {scope.project_path}</span>
-      </span>
-    </HoverHint>
-  );
-}
-
-export function WorkspaceAccessToggle({
+export function WorkspaceFullAccessSlider({
   scope,
   disabled,
   onChange,
@@ -703,50 +689,42 @@ export function WorkspaceAccessToggle({
   onChange?: (scope: WorkspaceScopePayload) => void;
 }) {
   const { t } = useTranslation();
-  const mode = scope.access_mode;
-  const isFull = mode === "full";
-  const accessLabel = t(
-    isFull ? "thread.composer.workspace.full" : "thread.composer.workspace.default",
-  );
-  const alternateAccessLabel = t(
-    isFull ? "thread.composer.workspace.default" : "thread.composer.workspace.full",
-  );
-  const shortAccessLabel = t(
-    isFull ? "thread.composer.workspace.fullShort" : "thread.composer.workspace.defaultShort",
-  );
-  const accessAriaLabel = `${t("thread.composer.workspace.accessAria")}: ${accessLabel}`;
+  const coarsePointer = useMediaQuery("(pointer: coarse)");
+  const descriptionId = useId();
+  const isFull = scope.access_mode === "full";
+  const label = t("thread.composer.workspace.full");
+  const defaultLabel = t("thread.composer.workspace.defaultShort");
+  const description = t("thread.composer.workspace.fullDescription");
+  const [dragValue, setDragValue] = useState<number | null>(null);
+  const dragging = useRef(false);
+  const value = dragValue ?? Number(isFull);
+  const commit = (next: number) => {
+    setDragValue(null);
+    if (!disabled && next !== Number(isFull)) onChange?.(scopeWithAccessMode(scope, next ? "full" : "restricted"));
+  };
 
   return (
-    <span className="thread-composer-access-slot inline-grid min-w-0 max-w-[min(12.5rem,42vw)] shrink-0">
-      {/* Reserve both label widths outside the button's hover and focus surface. */}
-      <span aria-hidden className="invisible pointer-events-none col-start-1 row-start-1 inline-flex min-w-0 items-center gap-1.5 px-2 text-[12px] font-medium">
-        <span className="w-3 shrink-0" />
-        <span className="min-w-0 truncate">{alternateAccessLabel}</span>
-      </span>
-      <HoverHint side="top" contentClassName="w-max max-w-[calc(100vw-2rem)] text-left leading-relaxed"
-        content={t(isFull ? "thread.composer.workspace.fullDescription" : "thread.composer.workspace.defaultDescription")}>
-        <Button
-          type="button"
-          variant={null}
-          aria-label={accessAriaLabel}
-          aria-pressed={isFull}
-          disabled={disabled || !onChange}
-          onClick={() => onChange?.(scopeWithAccessMode(scope, isFull ? "restricted" : "full"))}
-          className="settings-hover thread-composer-access touch-target col-start-1 row-start-1 h-7 w-fit min-w-0 max-w-full justify-self-start gap-1.5 rounded-md bg-transparent px-2 py-0 text-[12px] font-medium text-muted-foreground shadow-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-offset-0"
-        >
-          {isFull ? (
-            <FullAccessIcon className="thread-composer-access-icon h-3 w-3 shrink-0 text-orange-600 dark:text-orange-300" />
-          ) : (
-            <RestrictedAccessIcon className="thread-composer-access-icon h-3 w-3 shrink-0" />
-          )}
-          <span aria-hidden className="thread-composer-access-label-full min-w-0 truncate">
-            {accessLabel}
-          </span>
-          <span aria-hidden className="thread-composer-access-label-short hidden min-w-0 truncate">
-            {shortAccessLabel}
-          </span>
-        </Button>
+    <span className="thread-composer-access inline-flex h-7 shrink-0 items-center gap-1.5 px-2 text-[12px] font-medium">
+      <span aria-hidden className={value === 0 ? "text-foreground" : "text-muted-foreground"}>{defaultLabel}</span>
+      <HoverHint enabled={!coarsePointer} content={description}>
+        <input type="range" min={0} max={1} step={1} value={value} disabled={disabled || !onChange}
+          aria-label={label} aria-valuetext={value ? label : defaultLabel} aria-describedby={descriptionId}
+          onPointerDown={() => { dragging.current = true; setDragValue(Number(isFull)); }}
+          onChange={event => {
+            const next = Number(event.currentTarget.value);
+            if (dragging.current) setDragValue(next);
+            else commit(next);
+          }}
+          onPointerUp={event => {
+            if (!dragging.current) return;
+            dragging.current = false;
+            commit(Number(event.currentTarget.value));
+          }}
+          onPointerCancel={() => { dragging.current = false; setDragValue(null); }}
+          className="-my-2 h-11 w-[4.25rem] shrink-0 cursor-pointer appearance-none rounded-md bg-transparent accent-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-55 [&::-webkit-slider-runnable-track]:h-1 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-foreground/20 [&::-webkit-slider-thumb]:-mt-1.5 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-background [&::-webkit-slider-thumb]:bg-foreground [&::-webkit-slider-thumb]:shadow-sm [&::-moz-range-track]:h-1 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-foreground/20 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-background [&::-moz-range-thumb]:bg-foreground" />
       </HoverHint>
+      <span aria-hidden className={value === 1 ? "text-foreground" : "text-muted-foreground"}>{label}</span>
+      <span id={descriptionId} className="sr-only">{description}</span>
     </span>
   );
 }

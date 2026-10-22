@@ -1920,7 +1920,6 @@
       "placeholderThread": "메시지를 입력하세요…",
       "placeholderHero": "하고 싶은 일을 알려 주세요",
       "placeholderOpening": "새 주제를 여는 중…",
-      "placeholderStreaming": "모델이 응답 중입니다…",
       "inputAria": "메시지 입력",
       "goalStateStrip": "목표: {{label}}",
       "goalStateFallback": "목표",

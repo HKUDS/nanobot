@@ -2126,7 +2126,6 @@
       "placeholderThread": "Type your message…",
       "placeholderHero": "Describe what you’d like to do",
       "placeholderOpening": "Opening a new topic…",
-      "placeholderStreaming": "Model is responding…",
       "inputAria": "Message input",
       "goalStateStrip": "Goal: {{label}}",
       "goalStateFallback": "Goal",

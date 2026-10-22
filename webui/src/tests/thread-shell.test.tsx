@@ -5838,6 +5838,24 @@ describe("ThreadShell", () => {
     expect(screen.getByRole("option", { name: /Other project/i })).toBeInTheDocument();
   });
 
+  it("allows project selection before first input and locks it after acceptance without duplicating the sidebar label", async () => {
+    const client = makeClient();
+    const scope = { project_path: "/srv/alpha", project_name: "alpha", access_mode: "restricted" as const };
+    const props = {
+      title: "Project chat", onToggleSidebar: () => {}, workspaceScope: scope,
+      workspaceDefaultScope: scope, workspaceControls: { can_change_project: true },
+      onWorkspaceScopeChange: vi.fn(),
+    };
+    const { rerender } = render(wrap(client, <ThreadShell {...props} session={{ ...session("project-chat"), projectLocked: false }} />));
+    expect(await screen.findByRole("button", { name: "Switch directory" })).toBeEnabled();
+    expect(screen.getByTestId("thread-header")).not.toHaveTextContent("alpha");
+
+    rerender(wrap(client, <ThreadShell {...props} session={{ ...session("project-chat"), projectLocked: true }} />));
+    expect(screen.queryByRole("button", { name: "Switch directory" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("thread-header")).not.toHaveTextContent("alpha");
+    expect(screen.getByRole("slider", { name: "Full Access" })).toHaveValue("0");
+  });
+
   it("keeps normal running controls when attaching to a resumed task", async () => {
     const client = makeClient();
     render(wrap(

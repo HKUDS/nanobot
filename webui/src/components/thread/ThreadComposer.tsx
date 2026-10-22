@@ -82,8 +82,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
-  WorkspaceAccessToggle,
-  WorkspaceProjectLabel,
+  WorkspaceFullAccessSlider,
   WorkspaceProjectPicker,
 } from "@/components/thread/WorkspaceControls";
 import {
@@ -258,6 +257,7 @@ interface ThreadComposerProps {
   workspaceDefaultScope?: WorkspaceScopePayload | null;
   workspaceControls?: WorkspacesPayload["controls"] | null;
   workspaceScopeDisabled?: boolean;
+  workspaceProjectLocked?: boolean;
   workspaceError?: string | null;
   onFavoriteWorkspaceProject?: (path: string, pinned: boolean) => Promise<ProjectDirectory[]>;
   onResolveWorkspaceProject?: (path: string) => Promise<ProjectDirectory>;
@@ -1115,6 +1115,7 @@ export function ThreadComposer({
   workspaceDefaultScope = null,
   workspaceControls = null,
   workspaceScopeDisabled = false,
+  workspaceProjectLocked = false,
   workspaceError = null,
   onLoadWorkspaceProjects,
   onResolveWorkspaceProject,
@@ -1214,7 +1215,7 @@ export function ThreadComposer({
   const isHero = variant === "hero";
   const voiceShortcutLabel = useMemo(getVoiceShortcutLabel, []);
   const projectPickerAvailable =
-    isHero
+    !workspaceProjectLocked
     && !!workspaceDefaultScope
     && !!onWorkspaceScopeChange
     && !!onLoadWorkspaceProjects
@@ -1237,9 +1238,7 @@ export function ThreadComposer({
     ));
   }, [activeTurnId, isStreaming, pendingQueueKey, setQueuedPrompt]);
 
-  const resolvedPlaceholder = isStreaming
-    ? t("thread.composer.placeholderStreaming")
-    : placeholder ?? t("thread.composer.placeholderThread");
+  const resolvedPlaceholder = placeholder ?? t("thread.composer.placeholderThread");
 
   const maxAttachments = ingressLimits?.attachments.max_count
     ?? MAX_ATTACHMENTS_PER_MESSAGE;
@@ -2526,7 +2525,7 @@ export function ThreadComposer({
     return () => observer?.disconnect();
   }, [compactControls, compactWhenIdle, modelLabel, voiceRecorder.isRecording, workspaceScope]);
   const accessControl = workspaceScope && !workspaceControlsHidden ? (
-    <WorkspaceAccessToggle
+    <WorkspaceFullAccessSlider
       scope={workspaceScope}
       disabled={interactionDisabled || workspaceScopeDisabled}
       onChange={onWorkspaceScopeChange}
@@ -2535,7 +2534,6 @@ export function ThreadComposer({
   const workspaceControl = showProjectPicker ? (
     <WorkspaceProjectPicker
       layoutAnchor={workspacePickerLayoutAnchor}
-      isHero={isHero}
       disabled={interactionDisabled || workspaceScopeDisabled}
       scope={workspaceScope}
       defaultScope={workspaceDefaultScope}
@@ -2547,8 +2545,6 @@ export function ThreadComposer({
       onBrowseDirectories={onBrowseWorkspaceDirectories}
       onChange={onWorkspaceScopeChange}
     />
-  ) : !isHero && workspaceScope && !workspaceControlsHidden ? (
-    <WorkspaceProjectLabel scope={workspaceScope} />
   ) : null;
   const modelControl = modelLabel && !voiceRecorder.isRecording ? (
     <ModelPresetBadge
@@ -2933,13 +2929,13 @@ export function ThreadComposer({
       </div>
       {accessControl || workspaceControl || compactControls && usageControl ? (
         <div className={cn(
-          "thread-composer-meta mx-auto mt-1 flex w-full min-w-0 items-center gap-2 px-2 sm:px-3",
+          "thread-composer-meta mx-auto mt-1 flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-2 sm:px-3",
           isHero ? "max-w-[58rem]" : "max-w-[49.5rem]",
           paletteBeside && "col-start-1 row-start-2",
         )}>
-          <div className="thread-composer-workspace-group flex min-w-0 items-center gap-1">
-            {accessControl}
+          <div className="thread-composer-workspace-group flex min-w-0 flex-auto items-center gap-1">
             {workspaceControl}
+            {accessControl}
           </div>
           {compactControls ? <div className="ml-auto shrink-0">{usageControl}</div> : null}
         </div>

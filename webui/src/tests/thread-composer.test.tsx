@@ -1310,7 +1310,7 @@ describe("ThreadComposer", () => {
     );
     const form = container.querySelector("form")!;
     const input = screen.getByRole("textbox");
-    const access = screen.getByRole("button", { name: "Workspace access mode: Full Access" });
+    const access = screen.getByRole("slider", { name: "Full Access" });
     const meta = container.querySelector(".thread-composer-meta")!;
     expect(form).toHaveAttribute("data-compact-controls", "true");
     expect(container.querySelector(".thread-composer-surface")).not.toHaveAttribute("data-compact");
@@ -1329,7 +1329,7 @@ describe("ThreadComposer", () => {
     expect(screen.getByRole("textbox")).toBe(input);
     expect(input).toHaveValue("keep this draft");
     expect(container.querySelector(".thread-composer-footer-actions")).toContainElement(screen.getByLabelText("codex"));
-    expect(screen.getAllByRole("button", { name: "Workspace access mode: Full Access" })).toHaveLength(1);
+    expect(screen.getAllByRole("slider", { name: "Full Access" })).toHaveLength(1);
 
     width = 320;
     fireEvent(window, new Event("resize"));
@@ -1399,77 +1399,47 @@ describe("ThreadComposer", () => {
     expect(screen.getByRole("progressbar", { name: "Context 50%" })).toBeVisible();
   });
 
-  it.each([
-    ["restricted", "Default Permission", "Read files, edit files, and run commands only inside the working directory."],
-    ["full", "Full Access", "Allow file access and commands outside the working directory."],
-  ] as const)("explains %s workspace access on hover", async (mode, label, explanation) => {
+  it.each(["restricted", "full"] as const)("explains Full Access with the %s slider on hover", async (mode) => {
     const user = userEvent.setup();
     render(<ThreadComposer onSend={vi.fn()} workspaceScope={{ project_path: "/tmp/project", project_name: "project", access_mode: mode, restrict_to_workspace: mode === "restricted" }} onWorkspaceScopeChange={vi.fn()} />);
-    const access = screen.getByRole("button", { name: `Workspace access mode: ${label}` });
-    expect(access).not.toHaveAttribute("title");
+    const access = screen.getByRole("slider", { name: "Full Access" });
+    expect(access).toHaveValue(mode === "full" ? "1" : "0");
+    expect(access).toHaveAttribute("aria-valuetext", mode === "full" ? "Full Access" : "Default");
+    expect(document.getElementById(access.getAttribute("aria-describedby")!)).toHaveTextContent("Allow file access and commands outside the working directory.");
     await user.hover(access);
-    expect(await screen.findByRole("tooltip")).toHaveTextContent(explanation);
-    expect(access).toHaveAttribute("aria-describedby");
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Allow file access and commands outside the working directory.");
   });
 
-  it("toggles workspace access directly by click and keyboard", async () => {
-    const user = userEvent.setup();
+  it("commits Full Access on release and cancels an interrupted drag", () => {
     const onWorkspaceScopeChange = vi.fn();
     const restricted: WorkspaceScopePayload = {
       project_path: "/tmp/project", project_name: "project",
       access_mode: "restricted", restrict_to_workspace: true,
     };
-    const composer = (workspaceScope: WorkspaceScopePayload) => (
+    const composer = (workspaceScope: WorkspaceScopePayload, disabled = false) => (
       <ThreadComposer onSend={vi.fn()} placeholder="Type your message..."
-        workspaceScope={workspaceScope}
-        workspaceControls={{ can_change_project: true }}
+        workspaceScope={workspaceScope} workspaceScopeDisabled={disabled}
         onWorkspaceScopeChange={onWorkspaceScopeChange} />
     );
     const { rerender } = render(composer(restricted));
-    const access = screen.getByRole("button", { name: /Workspace access mode/ });
-    expect(access).toHaveAttribute("aria-pressed", "false");
-    await user.click(access);
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    const access = screen.getByRole("slider", { name: "Full Access" });
     const full = { ...restricted, access_mode: "full" as const, restrict_to_workspace: false };
-    expect(onWorkspaceScopeChange).toHaveBeenLastCalledWith(full);
+    expect(access).toHaveValue("0");
+    fireEvent.pointerDown(access);
+    fireEvent.change(access, { target: { value: "1" } });
+    expect(onWorkspaceScopeChange).not.toHaveBeenCalled();
+    fireEvent.pointerCancel(access);
+    expect(access).toHaveValue("0");
+    fireEvent.pointerDown(access);
+    fireEvent.change(access, { target: { value: "1" } });
+    fireEvent.pointerUp(access, { target: { value: "1" } });
+    expect(onWorkspaceScopeChange).toHaveBeenCalledWith(full);
     rerender(composer(full));
-    expect(access).toHaveAttribute("aria-pressed", "true");
-    expect(access).toHaveAccessibleName("Workspace access mode: Full Access");
-    expect(access).toHaveFocus();
-    await user.keyboard("{Enter}");
+    expect(access).toHaveValue("1");
+    fireEvent.change(access, { target: { value: "0" } });
     expect(onWorkspaceScopeChange).toHaveBeenLastCalledWith(restricted);
-    rerender(composer(restricted));
-    expect(access).toBeEnabled();
-    await user.click(access);
-    expect(onWorkspaceScopeChange).toHaveBeenLastCalledWith(full);
-  });
-
-  it("exposes full and compact workspace labels for container-driven compression", () => {
-    render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        placeholder="Type your message..."
-        variant="hero"
-        workspaceScope={{
-          project_path: "/tmp/project",
-          project_name: "project",
-          access_mode: "full",
-          restrict_to_workspace: false,
-        }}
-        workspaceControls={{ can_change_project: true }}
-        onWorkspaceScopeChange={vi.fn()}
-      />,
-    );
-
-    const accessButton = screen.getByRole("button", {
-      name: "Workspace access mode: Full Access",
-    });
-    const fullLabel = within(accessButton).getByText("Full Access");
-    const shortLabel = within(accessButton).getByText("Full");
-    expect(accessButton).not.toHaveAttribute("title");
-    expect(fullLabel).toHaveClass("thread-composer-access-label-full");
-    expect(shortLabel).toHaveClass("thread-composer-access-label-short");
-    expect(shortLabel).toHaveClass("hidden");
+    rerender(composer(full, true));
+    expect(access).toBeDisabled();
   });
 
   it("opens project selection in a searchable dialog", async () => {
@@ -1571,8 +1541,7 @@ describe("ThreadComposer", () => {
     await waitFor(() => expect(onWorkspaceScopeChange).toHaveBeenCalledWith(expect.objectContaining({ project_path: selectedPath })));
   });
 
-  it("keeps the directory as read-only context in a thread while access remains editable", async () => {
-    const user = userEvent.setup();
+  it("keeps the directory as read-only context in a thread while access remains editable", () => {
     const onWorkspaceScopeChange = vi.fn();
     const defaultScope = {
       project_path: "/Users/test/.nanobot/workspace",
@@ -1580,12 +1549,13 @@ describe("ThreadComposer", () => {
       access_mode: "full" as const,
       restrict_to_workspace: false,
     };
-    const composer = (workspaceControlsHidden: boolean, variant: "hero" | "thread" = "hero") => (
+    const composer = (workspaceControlsHidden: boolean, variant: "hero" | "thread" = "hero", workspaceProjectLocked = false) => (
       <ThreadComposer
         onSend={vi.fn()}
         placeholder="Ask anything..."
         variant={variant}
         workspaceControlsHidden={workspaceControlsHidden}
+        workspaceProjectLocked={workspaceProjectLocked}
         workspaceScope={defaultScope}
         workspaceDefaultScope={defaultScope}
         {...workspacePickerProps(defaultScope)}
@@ -1596,32 +1566,28 @@ describe("ThreadComposer", () => {
     const { container, rerender } = render(composer(false));
     const trigger = screen.getByRole("button", { name: "Switch directory" });
     expect(trigger).toHaveTextContent("workspace");
-    const access = screen.getByRole("button", { name: "Workspace access mode: Full Access" });
+    const access = screen.getByRole("slider", { name: "Full Access" });
     const meta = container.querySelector(".thread-composer-meta")!;
     expect(meta).toContainElement(trigger);
     expect(meta).toContainElement(access);
-    expect(Array.from(meta.querySelectorAll("button"))).toEqual([access, trigger]);
+    expect(Array.from(meta.querySelectorAll("button, input[type=range]"))).toEqual([trigger, access]);
     expect(container.querySelector(".thread-composer-surface")!.nextElementSibling).toBe(meta);
     rerender(composer(true));
     expect(screen.queryByRole("button", { name: "Switch directory" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Workspace access mode: Full Access" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("slider", { name: "Full Access" })).not.toBeInTheDocument();
     rerender(composer(false));
     expect(screen.getByRole("button", { name: "Switch directory" })).toBeEnabled();
     rerender(composer(false, "thread"));
+    expect(screen.getByRole("button", { name: "Switch directory" })).toBeEnabled();
+    rerender(composer(false, "thread", true));
     expect(screen.queryByRole("button", { name: "Switch directory" })).not.toBeInTheDocument();
-    const directoryName = screen.getByText("workspace");
-    expect(container.querySelector(".thread-composer-meta")).toContainElement(directoryName);
-    expect(directoryName.closest("button")).toBeNull();
-    await user.hover(directoryName);
-    expect(await screen.findByRole("tooltip")).toHaveTextContent(defaultScope.project_path);
-    await user.click(directoryName);
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(onWorkspaceScopeChange).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Workspace access mode: Full Access" }));
+    expect(container.querySelector(".thread-composer-workspace-label")).not.toBeInTheDocument();
+    const accessAfterLock = screen.getByRole("slider", { name: "Full Access" });
+    fireEvent.change(accessAfterLock, { target: { value: "0" } });
     expect(onWorkspaceScopeChange).toHaveBeenCalledWith({
       ...defaultScope, access_mode: "restricted", restrict_to_workspace: true,
     });
-    rerender(composer(true, "thread"));
+    rerender(composer(true, "thread", true));
     expect(screen.queryByText("workspace")).not.toBeInTheDocument();
   });
 
@@ -1635,13 +1601,13 @@ describe("ThreadComposer", () => {
     const input = screen.getByRole("textbox");
     const row = container.querySelector(".thread-composer-meta")!;
     const trigger = screen.getByRole("button", { name: "Switch directory" });
-    const access = screen.getByRole("button", { name: "Workspace access mode: Full Access" });
-    expect(Array.from(row.querySelectorAll(".thread-composer-workspace-group button"))).toEqual([access, trigger]);
+    const access = screen.getByRole("slider", { name: "Full Access" });
+    expect(Array.from(row.querySelectorAll(".thread-composer-workspace-group button, .thread-composer-workspace-group input[type=range]"))).toEqual([trigger, access]);
     width = 800;
     fireEvent(window, new Event("resize"));
     expect(container.querySelector(".thread-composer-meta")).toBe(row);
     expect(screen.getByRole("button", { name: "Switch directory" })).toBe(trigger);
-    expect(screen.getByRole("button", { name: "Workspace access mode: Full Access" })).toBe(access);
+    expect(screen.getByRole("slider", { name: "Full Access" })).toBe(access);
     expect(screen.getByRole("textbox")).toBe(input);
   });
 
@@ -3425,6 +3391,7 @@ describe("ThreadComposer", () => {
     );
 
     const input = screen.getByLabelText("Message input");
+    expect(input).toHaveAttribute("placeholder", "Type your message...");
     fireEvent.change(input, { target: { value: "keep the UI minimal" } });
     fireEvent.keyDown(input, { key: "Enter" });
 

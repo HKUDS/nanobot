@@ -1934,7 +1934,6 @@
       "placeholderThread": "Digite sua mensagem…",
       "placeholderHero": "Descreva o que você quer fazer",
       "placeholderOpening": "Abrindo um novo tópico…",
-      "placeholderStreaming": "O modelo está respondendo…",
       "inputAria": "Campo de mensagem",
       "goalStateStrip": "Objetivo: {{label}}",
       "goalStateFallback": "Objetivo",

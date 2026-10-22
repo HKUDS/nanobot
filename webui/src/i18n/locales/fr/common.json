@@ -1920,7 +1920,6 @@
       "placeholderThread": "Saisissez votre message…",
       "placeholderHero": "Décrivez ce que vous souhaitez faire",
       "placeholderOpening": "Ouverture d’un nouveau sujet…",
-      "placeholderStreaming": "Le modèle est en train de répondre…",
       "inputAria": "Champ de message",
       "goalStateStrip": "Objectif: {{label}}",
       "goalStateFallback": "Objectif",

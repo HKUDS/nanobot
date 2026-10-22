@@ -1920,7 +1920,6 @@
       "placeholderThread": "輸入訊息…",
       "placeholderHero": "描述你想做的事",
       "placeholderOpening": "正在開啟新話題…",
-      "placeholderStreaming": "模型正在回覆…",
       "inputAria": "訊息輸入框",
       "goalStateStrip": "目標：{{label}}",
       "goalStateFallback": "目標",
