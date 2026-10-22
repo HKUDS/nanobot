@@ -566,9 +566,9 @@
       "restart": "Khởi động lại nanobot", "restartHelp": "Khởi động lại để áp dụng thay đổi. Tham số dòng lệnh và biến môi trường có thể được ưu tiên.",
       "search": "Tìm cài đặt nâng cao", "noResults": "Không có cài đặt phù hợp.", "pending": "Thay đổi chưa lưu",
       "idleCompaction": {
-        "label": "Nén khi không hoạt động",
-        "help": "Tự động nén ngữ cảnh sau một khoảng thời gian không hoạt động.",
-        "wait": "Thời gian chờ",
+        "label": "Tự động nén khi không hoạt động",
+        "help": "Tự động nén ngữ cảnh khi hết thời gian chờ để giảm lượng token dùng cho các yêu cầu tiếp theo.",
+        "wait": "Giới hạn thời gian không hoạt động",
         "minutes": "phút",
         "numberError": "Nhập số phút là số nguyên không âm."
       },

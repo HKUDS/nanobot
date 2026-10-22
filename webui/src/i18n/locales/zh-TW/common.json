@@ -567,8 +567,8 @@
       "search": "搜尋進階設定", "noResults": "找不到相符設定。", "pending": "尚未儲存的變更",
       "idleCompaction": {
         "label": "閒置自動壓縮",
-        "help": "對話閒置一段時間後自動壓縮上下文。",
-        "wait": "等待時間",
+        "help": "閒置逾時後壓縮上下文，減少後續用量。",
+        "wait": "閒置時限",
         "minutes": "分鐘",
         "numberError": "請輸入非負整數分鐘數。"
       },

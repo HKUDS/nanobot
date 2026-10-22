@@ -566,9 +566,9 @@
       "restart": "Redémarrer nanobot", "restartHelp": "Redémarrez pour appliquer les modifications. Les arguments de ligne de commande et variables d’environnement peuvent avoir priorité.",
       "search": "Rechercher un paramètre avancé", "noResults": "Aucun paramètre correspondant.", "pending": "Modifications non enregistrées",
       "idleCompaction": {
-        "label": "Compression en cas d’inactivité",
-        "help": "Compresse automatiquement le contexte après une période d’inactivité.",
-        "wait": "Délai d’attente",
+        "label": "Compression automatique après inactivité",
+        "help": "Compresse automatiquement le contexte après le délai d’inactivité pour réduire l’utilisation de tokens dans les requêtes suivantes.",
+        "wait": "Délai d’inactivité",
         "minutes": "minutes",
         "numberError": "Saisissez un nombre entier de minutes supérieur ou égal à zéro."
       },

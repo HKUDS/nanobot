@@ -566,9 +566,9 @@
       "restart": "Mulai ulang nanobot", "restartHelp": "Mulai ulang untuk menerapkan perubahan. Argumen baris perintah dan variabel lingkungan mungkin lebih diutamakan.",
       "search": "Cari pengaturan lanjutan", "noResults": "Tidak ada pengaturan yang cocok.", "pending": "Perubahan belum disimpan",
       "idleCompaction": {
-        "label": "Pemadatan saat tidak aktif",
-        "help": "Padatkan konteks secara otomatis setelah tidak aktif selama beberapa waktu.",
-        "wait": "Waktu tunggu",
+        "label": "Padatkan sesi tidak aktif secara otomatis",
+        "help": "Padatkan konteks secara otomatis saat batas waktu tidak aktif tercapai untuk mengurangi penggunaan token pada permintaan berikutnya.",
+        "wait": "Batas waktu tidak aktif",
         "minutes": "menit",
         "numberError": "Masukkan jumlah menit berupa bilangan bulat nol atau lebih."
       },

@@ -7,8 +7,8 @@ for (const locale of ["en", "zh-CN"]) {
       await page.addInitScript((language) => localStorage.setItem("nanobot.locale", language), locale);
       await page.goto("/browser/fixture.html?case=idle-compaction");
       const chinese = locale === "zh-CN";
-      const input = page.getByRole("textbox", { name: chinese ? "等待时长" : "Wait time" });
-      const toggle = page.getByRole("switch", { name: chinese ? "空闲自动压缩" : "Idle compaction" });
+      const input = page.getByRole("textbox", { name: chinese ? "空闲时限" : "Idle timeout" });
+      const toggle = page.getByRole("switch", { name: chinese ? "空闲自动压缩" : "Auto-compact idle sessions" });
       const persisted = page.getByRole("status", { name: "Persisted minutes" });
       await expect(input).toHaveValue("720");
       for (const draft of ["37", "0"]) {

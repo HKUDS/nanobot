@@ -746,9 +746,9 @@
       "noResults": "No matching settings.",
       "pending": "Unsaved changes",
       "idleCompaction": {
-        "label": "Idle compaction",
-        "help": "Automatically compact context after a period of inactivity.",
-        "wait": "Wait time",
+        "label": "Auto-compact idle sessions",
+        "help": "Automatically compact context after the idle timeout to reduce token usage on subsequent requests.",
+        "wait": "Idle timeout",
         "minutes": "minutes",
         "numberError": "Enter a non-negative whole number of minutes."
       },

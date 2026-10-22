@@ -22,8 +22,8 @@ function setup(minutes = 720) {
   return () => persisted;
 }
 
-const input = () => screen.getByRole("textbox", { name: "Wait time" });
-const toggle = () => screen.getByRole("switch", { name: "Idle compaction" });
+const input = () => screen.getByRole("textbox", { name: "Idle timeout" });
+const toggle = () => screen.getByRole("switch", { name: "Auto-compact idle sessions" });
 
 function edit(next: string) {
   fireEvent.focus(input());
@@ -42,11 +42,11 @@ describe("Idle compaction settings", () => {
   it.each([15, 720, 0])("reads %i minutes in System → Sessions", (minutes) => {
     setup(minutes);
     const sessions = within(screen.getByRole("region", { name: "Sessions" }));
-    expect(sessions.getByRole("switch", { name: "Idle compaction" })).toHaveAttribute(
+    expect(sessions.getByRole("switch", { name: "Auto-compact idle sessions" })).toHaveAttribute(
       "aria-checked", String(minutes > 0),
     );
     if (minutes) expect(input()).toHaveValue(String(minutes));
-    else expect(screen.queryByRole("textbox", { name: "Wait time" })).not.toBeInTheDocument();
+    else expect(screen.queryByRole("textbox", { name: "Idle timeout" })).not.toBeInTheDocument();
   });
 
   it("commits minutes on blur, retains minute precision, and reads saved values after remount", async () => {
@@ -84,7 +84,7 @@ describe("Idle compaction settings", () => {
     await waitFor(() => expectSaved(0));
     await waitFor(() => expect(toggle()).toBeEnabled());
     expect(toggle()).not.toBeChecked();
-    expect(screen.queryByRole("textbox", { name: "Wait time" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Idle timeout" })).not.toBeInTheDocument();
     fireEvent.click(toggle());
     await waitFor(() => expectSaved(720));
     expect(input()).toHaveValue("720");
@@ -104,7 +104,7 @@ describe("Idle compaction settings", () => {
     fireEvent.keyDown(input(), { key: "Enter" });
     await waitFor(() => expectSaved(0));
     expect(toggle()).not.toBeChecked();
-    expect(screen.queryByRole("textbox", { name: "Wait time" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Idle timeout" })).not.toBeInTheDocument();
   });
 
   it.each(["", "-1", "1.5", "1e3", "9007199254740992"])("retains invalid input %j without saving", async (next) => {

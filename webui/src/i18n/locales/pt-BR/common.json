@@ -566,9 +566,9 @@
       "restart": "Reiniciar nanobot", "restartHelp": "Reinicie para aplicar as alterações. Os argumentos de linha de comando e as variáveis de ambiente podem ter prioridade.",
       "search": "Buscar uma configuração avançada", "noResults": "Nenhuma configuração correspondente.", "pending": "Alterações não salvas",
       "idleCompaction": {
-        "label": "Compactação por inatividade",
-        "help": "Compacta o contexto automaticamente após um período de inatividade.",
-        "wait": "Tempo de espera",
+        "label": "Compactação automática por inatividade",
+        "help": "Compacta o contexto automaticamente ao atingir o limite de inatividade para reduzir o uso de tokens nas próximas solicitações.",
+        "wait": "Limite de inatividade",
         "minutes": "minutos",
         "numberError": "Digite um número inteiro de minutos maior ou igual a zero."
       },
