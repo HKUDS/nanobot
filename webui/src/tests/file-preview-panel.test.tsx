@@ -92,7 +92,7 @@ describe("FilePreviewPanel", () => {
     });
     const store = new FilePreviewStore();
     const resource = createFilePreviewResource(path => fetchFilePreview("test", "a", path));
-    store.open("a", "file", "reports/REPORT.md");
+    store.open("a", "reports/REPORT.md");
     function View() {
       const { state, openFile, resolveFile, selectTab, closeTab, close } = useFilePreviewState("a", store);
       const active = state.tabs.find(tab => tab.id === state.activeId)!;

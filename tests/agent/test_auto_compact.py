@@ -17,7 +17,7 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext
 from nanobot.config.schema import AgentDefaults, Config
-from nanobot.events import NO_EVENTS
+from nanobot.events import NO_EVENTS, ContextCompactionEvent
 from nanobot.providers.base import LLMResponse
 from nanobot.runtime_context import public_history_message
 from nanobot.sdk.clients import RuntimeClient
@@ -99,6 +99,7 @@ def _make_fake_compact(
         max_suffix: int = 8,
         trigger: str = "policy",
         events=NO_EVENTS,
+        reason=None,
     ) -> str:
         state["count"] += 1
         session = await loop.sessions.state.get(key)
@@ -148,6 +149,37 @@ async def test_heartbeat_idle_compaction_persists_summary_without_channel_notice
     refreshed = loop.sessions.get_or_create(HEARTBEAT_SESSION_KEY)
     assert refreshed.metadata["_last_summary"]["text"] == "Heartbeat summary."
     assert loop.bus.outbound.empty()
+
+
+@pytest.mark.parametrize("outcome", ["succeeded", "failed", "cancelled"])
+async def test_idle_compaction_emits_its_real_trigger_for_each_phase(tmp_path, monkeypatch, outcome):
+    loop = _make_loop(tmp_path)
+    try:
+        key = "websocket:idle-reason"
+        session = await loop.sessions.state.get(key)
+        _add_turns(session, 1)
+        await loop.sessions.state.finish_turn(session)
+        clock = MagicMock(wraps=datetime)
+        clock.now.return_value = datetime.now() + timedelta(minutes=20)
+        monkeypatch.setattr("nanobot.agent.autocompact.datetime", clock)
+        if outcome == "succeeded":
+            loop.consolidator.archive_session = AsyncMock(return_value="Idle summary.")
+        else:
+            error = asyncio.CancelledError() if outcome == "cancelled" else RuntimeError("summary failed")
+            loop.consolidator.archive_session = AsyncMock(side_effect=error)
+
+        await loop.auto_compact.check_expired(loop.schedule_background, loop.runtime_for_session)
+        await _drain_background_tasks(loop)
+
+        events = [loop.bus.outbound.get_nowait().event for _ in range(loop.bus.outbound_size)]
+        assert len(events) == 2
+        assert all(isinstance(event, ContextCompactionEvent) for event in events)
+        assert [event.phase for event in events] == ["started", outcome]
+        assert [event.reason for event in events] == ["idle", "idle"]
+        assert events[0].compaction_id == events[1].compaction_id
+        assert all(event.notify is False for event in events)
+    finally:
+        await loop.aclose()
 
 
 @pytest.mark.parametrize("reopen", [False, True])

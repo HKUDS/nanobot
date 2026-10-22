@@ -55,6 +55,7 @@ export function ChannelsSettings({
   const hasEnabledConfigurableChannels = channels.some((feature) =>
     feature.enabled && !feature.capabilities?.includes("always_enabled"));
   const restartRequired = requiresRestartPending || Boolean(nanobotFeatures?.requires_restart);
+  const hasPendingChannelRestart = channels.some((feature) => feature.restart_pending);
   useLayoutEffect(() => {
     if (!nanobotFeatures || filterInitializedRef.current) return;
     filterInitializedRef.current = true;
@@ -120,7 +121,7 @@ export function ChannelsSettings({
         ]} />
       </div>
       {error && !selectedChannel ? <DismissibleStatusMessage message={error} isError onDismiss={onDismissStatus} /> : null}
-      {restartRequired ? (
+      {restartRequired && !hasPendingChannelRestart ? (
         <RestartRequiredNotice message={t("settings.channels.restartRequired")}
           onRestart={onRestart} isRestarting={isRestarting} />
       ) : null}
@@ -143,7 +144,8 @@ export function ChannelsSettings({
           <div className="grid grid-cols-1 gap-x-4 gap-y-1 min-[640px]:grid-cols-2">
           {group.channels.map((feature) => (
             <ChannelCatalogRow key={feature.name} feature={feature} showBrandLogos={showBrandLogos}
-              actionKey={actionKey} actionsDisabled={restartRequired || Boolean(isRestarting)} onAction={onAction}
+              actionKey={actionKey} restartRequired={restartRequired} onAction={onAction}
+              onRestart={onRestart} isRestarting={isRestarting}
               onSelect={(connect = false) => {
                 triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
                 beforeCloseRef.current = null;

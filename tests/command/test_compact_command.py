@@ -130,6 +130,7 @@ async def test_compact_emits_one_lifecycle_and_keeps_the_session(loop, command) 
     assert started.phase == "started"
     assert completed.phase == "succeeded"
     assert started.compaction_id == completed.compaction_id
+    assert started.reason == completed.reason == "manual"
     assert started.notify is True
     assert completed.notify is True
 
@@ -421,6 +422,7 @@ async def test_stop_finishes_inflight_compaction_as_cancelled(loop, command) -> 
     events = [loop.bus.outbound.get_nowait().event for _ in range(loop.bus.outbound_size)]
     assert all(isinstance(event, ContextCompactionEvent) for event in events)
     assert [event.phase for event in events] == ["started", "cancelled"]
+    assert [event.reason for event in events] == ["manual", "manual"]
     assert events[0].compaction_id == events[1].compaction_id
     loop.sessions.invalidate(key)
     reloaded = loop.sessions.get_or_create(key)

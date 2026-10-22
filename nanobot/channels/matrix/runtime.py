@@ -63,6 +63,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.config.network import NetworkConfig
 from nanobot.config.paths import get_data_dir, get_media_dir
 from nanobot.config_base import Base
 from nanobot.events import ContextCompactionEvent
@@ -303,7 +304,7 @@ class MatrixConfig(Base):
     group_allow_from: list[str] = Field(default_factory=list)
     allow_room_mentions: bool = False
     streaming: bool = False
-    proxy: str | None = None
+    use_proxy: bool = False
 
 
 class MatrixChannel(BaseChannel):
@@ -311,6 +312,7 @@ class MatrixChannel(BaseChannel):
 
     name = "matrix"
     display_name = "Matrix"
+    uses_shared_proxy = True
     _STREAM_EDIT_INTERVAL = 2 # min seconds between edit_message_text calls
     monotonic_time: Callable[[], float] = staticmethod(time.monotonic)
 
@@ -323,12 +325,15 @@ class MatrixChannel(BaseChannel):
         config: Any,
         bus: MessageBus,
         *,
+        network: NetworkConfig | None = None,
         restrict_to_workspace: bool = False,
         workspace: str | Path | None = None,
     ):
         if isinstance(config, dict):
             config = MatrixConfig.model_validate(config)
-        super().__init__(config, bus)
+        super().__init__(config, bus, network=network)
+        self.config: MatrixConfig = config
+        self._proxy = self.network.resolve_proxy(self.config.use_proxy)
         self.client: AsyncClient | None = None
         self._sync_task: asyncio.Task[None] | None = None
         self._typing_tasks: dict[str, asyncio.Task[None]] = {}
@@ -359,14 +364,11 @@ class MatrixChannel(BaseChannel):
         # Replace ':' with '_' to produce a Windows-safe filename
         safe_store_name = self.config.user_id.replace(":", "_") + f"_{self.config.device_id}.db"
 
-        proxy = self.config.proxy.strip() if self.config.proxy else ""
-        if proxy and "://" not in proxy:
-            proxy = f"http://{proxy}"
         self.client = AsyncClient(
             homeserver=self.config.homeserver,
             user=self.config.user_id,
             store_path=str(self.store_path),
-            proxy=proxy or None,
+            proxy=self._proxy,
             config=AsyncClientConfig(
                 store_sync_tokens=True,
                 encryption_enabled=self.config.e2ee_enabled,

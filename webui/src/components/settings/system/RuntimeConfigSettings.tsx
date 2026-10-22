@@ -6,6 +6,8 @@ import { SettingsGroup, SettingsRow, SettingsSectionTitle, RestartRequiredNotice
 import { ProviderPicker } from "@/components/settings/shared/ModelControls";
 import { TimezonePicker } from "@/components/settings/shared/TimezonePicker";
 import { SettingsTextEditor } from "@/components/settings/shared/SettingsTextEditor";
+import { SharedProxyEditor } from "@/components/settings/shared/SharedProxyEditor";
+import { SettingsHint } from "@/components/settings/shared/SettingsHint";
 import { ShellRuntimeControl } from "@/components/settings/system/ShellRuntimeControl";
 import { IdleCompactionControl } from "@/components/settings/system/IdleCompactionControl";
 import { Input } from "@/components/ui/input";
@@ -145,7 +147,18 @@ export function useRuntimeConfigSettings(
     change(field, next);
     void save(field.group, { [field.path]: next });
   };
-  return { value, visible, dirty, discard, change, commit, reject, save, saveList, saving, errors, invalidField, saved };
+  const saveProxy = async (next: string) => {
+    setSaving("proxy");
+    try {
+      const payload = await updateRuntimeConfigSettings(client, { "network.proxy": next.trim() || null });
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
+      discard("proxy");
+      setSaved((prev) => ({ ...prev, proxy: true }));
+    } finally {
+      setSaving(null);
+    }
+  };
+  return { value, visible, dirty, discard, change, commit, reject, save, saveList, saveProxy, saving, errors, invalidField, saved };
 }
 
 export type RuntimeConfigController = ReturnType<typeof useRuntimeConfigSettings>;
@@ -184,7 +197,9 @@ export function RuntimeConfigSettings({
         const inlineError = fields.some((field) => field.kind === "duration" && state.invalidField === field.path);
         const section = (
           <section key={group.id} aria-label={title}>
-            <SettingsSectionTitle>{title}</SettingsSectionTitle>
+            <SettingsSectionTitle>{group.id === "proxy"
+              ? <SettingsHint description={tr("fields.network_proxy.help")}>{title}</SettingsHint>
+              : title}</SettingsSectionTitle>
             <form noValidate onSubmit={(event) => { event.preventDefault(); void state.save(group.id); }}
               onBlur={(event) => {
                 if (event.relatedTarget && event.currentTarget.contains(event.relatedTarget)) return;
@@ -221,6 +236,14 @@ export function RuntimeConfigSettings({
                       : [...field.options ?? []];
                     // Keep a configured preset visible if it is no longer available.
                     if (field.kind === "preset" && current && !options.includes(String(current))) options.push(String(current));
+                    if (field.path === "network.proxy") return (
+                      <div key={field.path} className="px-4 py-4 sm:px-5">
+                        <span id={`${id}-help`} className="sr-only">{help}</span>
+                        <SharedProxyEditor value={String(current)} addressProps={common}
+                          disabled={disabled || state.saving !== null || isRestarting}
+                          onChange={(next) => state.change(field, next)} />
+                      </div>
+                    );
                     return (
                       <SettingsRow key={field.path} title={text} description={help}>
                         <span id={`${id}-help`} className="sr-only">{help}</span>

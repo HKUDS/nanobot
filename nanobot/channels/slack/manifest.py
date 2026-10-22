@@ -23,7 +23,7 @@ SETUP_SPEC = ChannelSetupSpec(
         "dm.enabled": field("bool", default=True),
         "dm.policy": field("enum", choices={"open", "allowlist"}, default="open"),
         "dm.allowFrom": field("list"),
-        "proxy": field(),
+        "useProxy": field("bool", default=False),
     },
     required=required_fields("appToken", "botToken"),
     official_url="https://api.slack.com/apps",

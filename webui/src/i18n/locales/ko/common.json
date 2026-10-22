@@ -355,32 +355,7 @@
   "previewTabs": {
     "title": "미리보기",
     "closeTab": "{{name}} 닫기",
-    "closeAll": "미리보기 패널 닫기",
-    "websiteInfo": "웹 미리보기 정보"
-  },
-  "webPreview": {
-    "viewLinks": "링크 보기",
-    "back": "뒤로",
-    "original": "원본 링크",
-    "actions": "링크 작업",
-    "open": "웹사이트 미리보기",
-    "external": "브라우저에서 열기",
-    "copy": "링크 복사",
-    "copied": "링크를 복사했습니다",
-    "copyFailed": "링크를 복사하지 못했습니다",
-    "title": "웹사이트 미리보기",
-    "resize": "웹 미리보기 너비 조절",
-    "refresh": "웹사이트 새로고침",
-    "close": "미리 보기 닫기",
-    "isolated": "제한된 격리 미리보기입니다. 로그인 및 일부 상호작용이 작동하지 않을 수 있습니다.",
-    "blockedHint": "일부 사이트는 삽입을 차단합니다. 비어 있거나 실패하면 브라우저에서 여세요.",
-    "loopback": "localhost는 원격 게이트웨이가 아닌 이 브라우저의 기기를 가리킵니다. 포트는 전달되지 않습니다.",
-    "native": "네이티브 호스트에서는 삽입 미리보기를 지원하지 않습니다. 브라우저에서 여세요.",
-    "unsupported": "이 브라우저는 인증 정보 격리 미리보기를 지원하지 않습니다. 새 탭에서 여세요.",
-    "sameOrigin": "nanobot 앱 자체는 여기에 삽입할 수 없습니다. 새 탭에서 여세요.",
-    "mixedContent": "HTTPS 페이지에서 HTTP 사이트를 미리 볼 수 없습니다. 새 탭에서 여세요.",
-    "invalid": "이 주소를 미리 볼 수 없습니다.",
-    "frame": "웹 미리보기: {{host}}"
+    "closeAll": "미리보기 패널 닫기"
   },
   "starPrompt": {
     "footerAction": "nanobot에 스타 남기기",
@@ -491,6 +466,16 @@
       "description": "변경 사항이 저장되었습니다. 적용하려면 다시 시작하세요.",
       "later": "나중에 다시 시작"
     },
+    "network": {
+      "useProxy": "프록시 사용",
+      "useProxyHelp": "고급 설정의 공유 프록시를 사용합니다.",
+      "configureProxy": "프록시 설정",
+      "sharedProxyScope": "프록시를 켠 모든 기능에서 함께 사용합니다.",
+      "authentication": "인증 (선택 사항)",
+      "username": "사용자 이름",
+      "password": "비밀번호",
+      "proxyReferenceAuth": "참조된 프록시 URL에서 인증 정보를 설정하세요."
+    },
     "runtimeConfig": {
       "apiSaved": "저장했습니다. API 서비스를 다시 시작하면 적용됩니다.",
       "commandRuntime": {
@@ -528,7 +513,8 @@
         "tools_exec_allowed_env_keys": {"label": "환경 변수", "help": "명령에 추가로 전달할 변수 이름을 한 줄에 하나씩 입력하세요.\n\n명령에 전달할 환경 변수를 추가합니다. 한 줄에 하나씩 입력하세요. 실행에 필요한 기본 환경 변수는 계속 전달됩니다."},
         "tools_exec_allow_patterns": {"label": "허용 명령", "help": "허용 규칙과 완전히 일치하는 명령만 실행합니다.\n\n정규식을 한 줄에 하나씩 입력하세요. 규칙을 추가하면 명령의 각 부분이 규칙 중 하나와 완전히 일치해야 실행됩니다. 허용된 명령에는 기본 및 추가 차단 규칙이 적용되지 않지만, 네트워크와 작업 공간 제한은 유지됩니다."},
         "tools_exec_deny_patterns": {"label": "차단 명령", "help": "이 규칙과 일치하는 명령을 차단합니다.\n\n추가 차단 정규식을 한 줄에 하나씩 입력하세요. 명시적 허용 규칙이 기본 및 추가 차단 규칙보다 우선합니다."},
-        "tools_web_proxy": {"label": "웹 프록시", "help": "에이전트의 웹 검색과 페이지 읽기에 사용합니다. 비워 두면 프록시 환경 변수를 포함한 기본 네트워크 설정을 사용합니다.\n\n127.0.0.1은 nanobot이 실행되는 기기입니다. 모델, MCP 또는 브라우저 연결에는 영향을 주지 않습니다."},
+        "network_proxy": {"label": "공유 프록시", "help": "프록시 사용이 켜진 기능에서 공유하는 주소입니다. 127.0.0.1은 nanobot을 실행하는 기기를 뜻합니다."},
+        "tools_web_use_proxy": {"label": "프록시 사용", "help": "웹 검색과 페이지 읽기에 공유 프록시를 사용합니다."},
         "tools_web_user_agent": {"label": "User-Agent 헤더", "help": "웹 요청의 User-Agent입니다. 비워 두면 기본값을 사용합니다.\n\n사용자 지정 User-Agent 헤더입니다. 비워 두면 기본값을 사용합니다."},
         "tools_restrict_to_workspace": {"label": "작업 공간 제한", "help": "전체 작업 공간 제한입니다. WebUI 채팅 권한은 별도로 설정합니다.\n\n전체 도구 접근 정책입니다. WebUI의 대화별 권한은 별도로 설정합니다."},
         "tools_ssrf_whitelist": {"label": "허용 IP", "help": "허용할 IP 또는 CIDR 범위를 한 줄에 하나씩 입력하세요.\n\n외부 요청 보호에서 제외할 IP/CIDR 범위를 한 줄에 하나씩 입력하세요."},
@@ -552,7 +538,8 @@
         "sessions": {"title": "대화", "help": "플랫폼 간 채팅 공유를 설정하세요."},
         "tools": {"title": "기본 도구", "help": "에이전트가 사용할 도구를 선택하세요."},
         "shell": {"title": "셸 및 샌드박스", "help": "명령 제한 시간, 환경 및 접근 규칙을 설정하세요."},
-        "network": {"title": "웹 연결", "help": "프록시와 User-Agent를 설정하세요.\n\n웹 프록시 및 요청 식별 정보입니다."},
+        "proxy": {"title": "공유 프록시", "help": "프록시를 사용하는 기능의 공통 주소를 설정합니다."},
+        "network": {"title": "웹 연결", "help": "웹 요청의 프록시 사용 여부와 User-Agent를 설정합니다."},
         "safety": {"title": "전체 권한", "help": "작업 공간 제한, 네트워크 예외 및 원격 설치를 설정하세요.\n\n작업 공간 제한, 사설 네트워크 및 원격 설치입니다."},
         "cli": {"title": "CLI 제한", "help": "설치와 실행 제한 시간, 목록 캐시 시간을 설정하세요.\n\n설치, 실행 및 카탈로그 캐시의 시간 제한입니다."},
         "gateway": {"title": "게이트웨이", "help": "배포와 재시작 옵션을 설정하세요."},
@@ -949,7 +936,6 @@
       "defaultAPIDescription": "자동으로 설정한 프리셋은 이 API를 사용합니다. 개별 프리셋에서는 지원 목록의 다른 API를 선택할 수 있습니다.",
       "declareAPIs": "지원 API 설정",
       "openaiDefaultAPIDescription": "자동을 사용하는 프리셋의 기본 API를 설정합니다. 여기서 자동을 선택하면 알려진 모델 규칙을 따릅니다. 개별 프리셋에서 이 설정을 바꿀 수 있습니다.",
-      "proxy": "네트워크 프록시",
       "thinkingStyle": "추론 형식",
       "region": "리전",
       "profile": "AWS 프로필",
@@ -1276,6 +1262,7 @@
       "loading": "채널을 불러오는 중...",
       "empty": "일치하는 채널이 없습니다.",
       "restartRequired": "업데이트된 채널 지원을 적용하려면 nanobot을 다시 시작하세요.",
+      "restartBeforeInstall": "다른 채널을 설치하려면 nanobot을 다시 시작하세요.",
       "requires": "필요: {{requirements}}",
       "setUp": "설정",
       "setupGuide": "설정 가이드",
@@ -1588,9 +1575,6 @@
       "signInBeforeSaving": "프리셋을 저장하기 전에 이 제공업체에 로그인하세요.",
       "signedIn": "로그인됨",
       "notSignedIn": "로그인 안 됨",
-      "proxyLabel": "네트워크 프록시",
-      "proxySaveBeforeSignIn": "로그인하기 전에 프록시 변경 사항을 저장하세요.",
-      "saveProxy": "프록시 저장",
       "localCodeHelp": "브라우저에서 로그인을 완료하세요. 일반적으로 nanobot이 자동으로 완료합니다. 완료되지 않으면 인증 코드를 아래에 붙여 넣으세요.",
       "remoteCodeHelp": "로그인을 선택하여 사용자 컴퓨터에서 xAI를 여세요. 로그인 후 xAI에 표시된 인증 코드를 아래에 붙여 넣으세요.",
       "localCallbackHelp": "브라우저에서 로그인을 완료하세요. 일반적으로 nanobot이 자동으로 완료합니다. 완료되지 않으면 주소 표시줄에서 전체 localhost 콜백 URL을 복사해 아래에 붙여 넣으세요.",
@@ -1806,6 +1790,32 @@
       "messages": "메시지 상태"
     },
     "compaction": {
+      "reasons": {
+        "idle": {
+          "started": "새 메시지가 없어 컨텍스트를 자동 압축 중",
+          "succeeded": "새 메시지가 없어 컨텍스트를 자동 압축했습니다",
+          "failed": "새 메시지가 없을 때의 자동 압축에 실패했습니다",
+          "cancelled": "새 메시지가 없을 때의 자동 압축이 완료되지 않았습니다"
+        },
+        "context_pressure": {
+          "started": "컨텍스트가 길어져 압축 중",
+          "succeeded": "길어진 컨텍스트를 압축했습니다",
+          "failed": "길어진 컨텍스트 압축에 실패했습니다",
+          "cancelled": "길어진 컨텍스트 압축이 취소되었습니다"
+        },
+        "manual": {
+          "started": "요청하신 대로 컨텍스트를 압축 중",
+          "succeeded": "요청하신 대로 컨텍스트를 압축했습니다",
+          "failed": "요청하신 컨텍스트 압축에 실패했습니다",
+          "cancelled": "요청하신 컨텍스트 압축이 취소되었습니다"
+        },
+        "provider_native": {
+          "started": "모델 제공업체에서 컨텍스트를 압축 중",
+          "succeeded": "모델 제공업체에서 컨텍스트를 압축했습니다",
+          "failed": "모델 제공업체의 컨텍스트 압축에 실패했습니다",
+          "cancelled": "모델 제공업체의 컨텍스트 압축이 취소되었습니다"
+        }
+      },
       "cancelled": "컨텍스트 압축이 취소되었습니다",
       "empty": "압축할 컨텍스트가 없습니다.",
       "started": "컨텍스트 압축 중",

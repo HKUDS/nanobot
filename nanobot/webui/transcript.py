@@ -1487,12 +1487,16 @@ def _client_projection_event(
             or phase not in {"started", "succeeded", "failed", "cancelled"}
         ):
             return None
-        return {
+        projected = {
             "event": "context_compaction",
             **common,
             "compaction_id": compaction_id,
             "phase": phase,
         }
+        reason = record.get("reason")
+        if isinstance(reason, str) and reason in {"idle", "context_pressure", "manual", "provider_native"}:
+            projected["reason"] = reason
+        return projected
 
     if event == "turn_end":
         projected = {"event": "turn_end", **common}

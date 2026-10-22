@@ -3333,6 +3333,7 @@ async def test_context_compaction_is_structured_persisted_and_summary_free(histo
             compaction_id="compact-1",
             phase=phase,
             notify=notify,
+            reason="manual",
         ),
     ))
 
@@ -3341,6 +3342,7 @@ async def test_context_compaction_is_structured_persisted_and_summary_free(histo
         "chat_id": "chat-compaction",
         "compaction_id": "compact-1",
         "phase": phase,
+        "reason": "manual",
     }
     assert _sent_ws_payloads(mock_ws) == [expected]
     [persisted] = history.read("websocket:chat-compaction")

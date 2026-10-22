@@ -123,13 +123,16 @@ def resolve_provider_route(
     provider_config = apply_request_overrides(provider_config, preset)
     if (
         provider_config
-        and provider_config.proxy
+        and provider_config.use_proxy
         and backend not in {"openai_compat", "openai_codex", "xai_grok", "anthropic"}
     ):
         raise ValueError(
-            f"providers.{provider_name}.proxy is only supported for "
+            f"providers.{provider_name}.use_proxy is only supported for "
             "OpenAI-compatible providers, Anthropic Messages, OpenAI Codex, and xAI Grok."
         )
+
+    if provider_config:
+        config.network.resolve_proxy(provider_config.use_proxy)
 
     if backend == "azure_openai":
         if not provider_config or not provider_config.api_base:
@@ -177,7 +180,7 @@ def resolve_automatic_model_api(
         from nanobot.providers.github_copilot_provider import cached_github_copilot_model_api
 
         api = cached_github_copilot_model_api(
-            setup.model, provider_config.proxy if provider_config else None,
+            setup.model, config.network.resolve_proxy(provider_config.use_proxy) if provider_config else None,
         )
         if api is not None:
             return setup.provider_name, api.preferred_api

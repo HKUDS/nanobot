@@ -355,32 +355,7 @@
   "previewTabs": {
     "title": "預覽",
     "closeTab": "關閉 {{name}}",
-    "closeAll": "關閉預覽欄",
-    "websiteInfo": "關於網頁預覽"
-  },
-  "webPreview": {
-    "viewLinks": "查看連結",
-    "back": "返回",
-    "original": "原連結",
-    "actions": "連結操作",
-    "open": "預覽網頁",
-    "external": "瀏覽器開啟",
-    "copy": "複製連結",
-    "copied": "已複製連結",
-    "copyFailed": "無法複製連結",
-    "title": "網頁預覽",
-    "resize": "調整網頁預覽寬度",
-    "refresh": "重新整理網頁",
-    "close": "關閉預覽",
-    "isolated": "受限的隔離預覽，登入及部分互動功能可能無法使用。",
-    "blockedHint": "部分網站禁止嵌入。若頁面空白或載入失敗，請在瀏覽器中開啟。",
-    "loopback": "localhost 指向目前瀏覽器所在裝置，而非遠端閘道。不會轉送任何連接埠。",
-    "native": "原生用戶端暫不支援嵌入預覽，請在瀏覽器中開啟此連結。",
-    "unsupported": "此瀏覽器不支援憑證隔離預覽，請在新分頁中開啟。",
-    "sameOrigin": "無法在此嵌入 nanobot 應用程式本身，請在新分頁中開啟。",
-    "mixedContent": "HTTPS 頁面無法在此預覽 HTTP 網站，請在新分頁中開啟。",
-    "invalid": "無法預覽此位址。",
-    "frame": "網頁預覽：{{host}}"
+    "closeAll": "關閉預覽欄"
   },
   "starPrompt": {
     "footerAction": "給 nanobot 一顆 Star",
@@ -491,6 +466,16 @@
       "description": "變更已儲存，重新啟動後生效。",
       "later": "稍後重新啟動"
     },
+    "network": {
+      "useProxy": "使用代理",
+      "useProxyHelp": "使用進階設定中的共用代理。",
+      "configureProxy": "設定代理",
+      "sharedProxyScope": "供所有啟用代理的功能共用。",
+      "authentication": "認證（選填）",
+      "username": "使用者名稱",
+      "password": "密碼",
+      "proxyReferenceAuth": "請在參照的代理 URL 中設定認證資訊。"
+    },
     "runtimeConfig": {
       "apiSaved": "已儲存，重新啟動 API 服務後生效。",
       "commandRuntime": {
@@ -528,7 +513,8 @@
         "tools_exec_allowed_env_keys": {"label": "環境變數", "help": "額外傳給命令的變數名，每行一個\n\n除必需變數外，還要從主機傳遞給命令的環境變數名稱，每行一個。"},
         "tools_exec_allow_patterns": {"label": "允許命令", "help": "只允許完整匹配規則的命令\n\n每行一個正規表示式。填寫後，只允許每段命令都完整匹配規則的命令執行，且優先於內建和自定義拒絕規則；工作區和網路限制仍生效。"},
         "tools_exec_deny_patterns": {"label": "禁止命令", "help": "阻止匹配規則的命令\n\n每行一個正規表示式，與內建拒絕規則一同檢查。完整匹配允許規則的命令會跳過這些檢查。"},
-        "tools_web_proxy": {"label": "網頁代理", "help": "用於智慧體搜尋和讀取網頁。留空使用預設網路設定，包括環境變數中的代理。\n\n127.0.0.1 指執行 nanobot 的機器，不是開啟網頁的手機。本設定不影響模型、MCP 或瀏覽器的連線。"},
+        "network_proxy": {"label": "共用代理", "help": "啟用「使用代理」的功能共用此位址。127.0.0.1 指執行 nanobot 的裝置。"},
+        "tools_web_use_proxy": {"label": "使用代理", "help": "網頁搜尋與讀取使用共用代理。"},
         "tools_web_user_agent": {"label": "User-Agent", "help": "網頁請求標識，留空使用預設值\n\n網頁請求使用的 User-Agent 標識，留空使用預設值。"},
         "tools_restrict_to_workspace": {"label": "目錄限制", "help": "全域性目錄限制，WebUI 許可權另設\n\n設定全域性工作區訪問限制；WebUI 中每個對話的許可權單獨設定。"},
         "tools_ssrf_whitelist": {"label": "允許 IP", "help": "允許訪問的 IP 或 CIDR，每行一項\n\n允許網頁等出站請求訪問這些受限地址。每行填寫一個 IP 地址或 CIDR 網段。"},
@@ -552,7 +538,8 @@
         "sessions": {"title": "對話", "help": "設定跨平臺對話共享"},
         "tools": {"title": "內建工具", "help": "選擇智慧體可以使用的工具"},
         "shell": {"title": "Shell 與沙箱", "help": "設定命令超時、環境和訪問規則"},
-        "network": {"title": "網頁連線", "help": "設定代理和 User-Agent\n\n設定網頁訪問代理和 User-Agent 標識。"},
+        "proxy": {"title": "共用代理", "help": "為使用代理的功能設定共用位址。"},
+        "network": {"title": "網頁連線", "help": "設定網頁請求的代理開關與 User-Agent。"},
         "safety": {"title": "全域性許可權", "help": "設定目錄限制、網路例外和遠端安裝\n\n設定工作區訪問限制、網路訪問例外和遠端安裝許可權。"},
         "cli": {"title": "CLI 限制", "help": "設定安裝、執行超時和列表快取\n\n設定安裝和執行超時，以及應用列表的快取時長。"},
         "gateway": {"title": "閘道器", "help": "設定部署和重啟方式"},
@@ -949,7 +936,6 @@
       "defaultAPIDescription": "預設選擇「自動」時使用此協定。個別預設可改用支援清單中的其他協定。",
       "declareAPIs": "設定支援的協定",
       "openaiDefaultAPIDescription": "設為「自動」的預設使用此預設協定。此處選擇「自動」會遵循已知模型規則；個別預設可以覆寫此預設值。",
-      "proxy": "網路代理",
       "thinkingStyle": "推理格式",
       "region": "區域",
       "profile": "AWS 設定檔名稱",
@@ -1275,6 +1261,7 @@
       "loading": "正在載入通訊管道…",
       "empty": "沒有符合條件的通訊管道。",
       "restartRequired": "重新啟動 nanobot 以套用更新後的通訊管道支援。",
+      "restartBeforeInstall": "重新啟動 nanobot 後即可繼續安裝。",
       "requires": "需要：{{requirements}}",
       "setUp": "設定",
       "setupGuide": "設定指南",
@@ -1588,9 +1575,6 @@
       "signInBeforeSaving": "請先登入此供應商，再儲存模型預設。",
       "signedIn": "已登入",
       "notSignedIn": "未登入",
-      "proxyLabel": "網路代理",
-      "proxySaveBeforeSignIn": "請先儲存代理變更再登入。",
-      "saveProxy": "儲存代理",
       "localCodeHelp": "請在瀏覽器中完成登入。nanobot 通常會自動完成；若未自動完成，請將授權碼貼到下方。",
       "remoteCodeHelp": "請點選 [登入]，在電腦上開啟 xAI。完成登入後，請將 xAI 顯示的授權碼貼到下方。",
       "localCallbackHelp": "請在瀏覽器中完成登入。nanobot 通常會自動完成；若未自動完成，請複製網址列中的完整 localhost 回呼 URL 並貼到下方。",
@@ -1806,6 +1790,32 @@
       "messages": "訊息狀態"
     },
     "compaction": {
+      "reasons": {
+        "idle": {
+          "started": "對話閒置，正在自動壓縮上下文",
+          "succeeded": "對話閒置，已自動壓縮上下文",
+          "failed": "閒置時自動壓縮上下文失敗",
+          "cancelled": "閒置期間的自動壓縮未完成"
+        },
+        "context_pressure": {
+          "started": "上下文較長，正在壓縮",
+          "succeeded": "上下文較長，已自動壓縮",
+          "failed": "上下文較長，自動壓縮失敗",
+          "cancelled": "上下文較長，壓縮已取消"
+        },
+        "manual": {
+          "started": "正在手動壓縮",
+          "succeeded": "手動壓縮完成",
+          "failed": "手動壓縮失敗",
+          "cancelled": "手動壓縮已取消"
+        },
+        "provider_native": {
+          "started": "模型服務正在壓縮上下文",
+          "succeeded": "模型服務已壓縮上下文",
+          "failed": "模型服務未能完成上下文壓縮",
+          "cancelled": "模型服務的上下文壓縮已取消"
+        }
+      },
       "cancelled": "上下文壓縮已取消",
       "empty": "無需壓縮上下文",
       "started": "正在壓縮上下文…",

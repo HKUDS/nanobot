@@ -238,6 +238,7 @@ _WEBUI_MUTATION_PATHS = {
     "settings.mcp.remove": "/api/settings/mcp-presets/remove",
     "settings.mcp.test": "/api/settings/mcp-presets/test",
     "settings.mcp.reconnect": "/api/settings/mcp-presets/reconnect",
+    "settings.mcp.proxy": "/api/settings/mcp-presets/proxy",
     "settings.mcp.custom": "/api/settings/mcp-presets/custom",
     "settings.mcp.import": "/api/settings/mcp-presets/import",
     "settings.mcp.import_cursor": "/api/settings/mcp-presets/import-cursor",

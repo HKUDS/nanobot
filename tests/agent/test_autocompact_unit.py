@@ -265,6 +265,7 @@ class TestCheckExpired:
             "cli:old",
             runtime=admitted,
             events=NO_EVENTS,
+            reason="idle",
         )
 
     @pytest.mark.parametrize("resolution_error", [KeyError, ValueError])
@@ -443,6 +444,7 @@ class TestArchiveDelegates:
             "cli:test",
             runtime=runtime,
             events=NO_EVENTS,
+            reason="idle",
         )
 
     @pytest.mark.asyncio

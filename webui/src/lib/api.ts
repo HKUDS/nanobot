@@ -1,3 +1,4 @@
+import { isCompactionPhase, isCompactionReason } from "../../../packages/client-events/notifications";
 import type {
   ApiServicePayload,
   AutomationChatsPayload,
@@ -380,7 +381,9 @@ function parseThreadProjectionEvent(value: unknown): ThreadProjectionEvent {
       if (value.text !== undefined && typeof value.text !== "string") break;
       return value as unknown as ThreadProjectionEvent;
     case "context_compaction":
-      if (typeof value.compaction_id !== "string" || typeof value.phase !== "string") break;
+      if (typeof value.compaction_id !== "string" || !value.compaction_id
+        || !isCompactionPhase(value.phase)
+        || (value.reason !== undefined && !isCompactionReason(value.reason))) break;
       return value as unknown as ThreadProjectionEvent;
     case "turn_end":
       return value as unknown as ThreadProjectionEvent;
@@ -1211,7 +1214,7 @@ export async function fetchProviderModels(
 
 export async function runMcpPresetAction(
   transport: WebUIMutationTransport,
-  action: "enable" | "disable" | "remove" | "test" | "reconnect",
+  action: "enable" | "disable" | "remove" | "test" | "reconnect" | "proxy",
   name: string,
   values: Record<string, string> = {},
 ): Promise<McpPresetsPayload> {

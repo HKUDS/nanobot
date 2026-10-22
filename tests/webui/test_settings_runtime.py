@@ -16,20 +16,32 @@ from nanobot.webui.settings_runtime import (
 from nanobot.webui.settings_services import WebUISettingsServices
 
 
-def test_web_proxy_roundtrip_while_disabled_preserves_model_proxy(tmp_path):
+def test_shared_proxy_roundtrip_preserves_independent_feature_switches(tmp_path):
     path = tmp_path / "config.json"
     config = Config()
     config.tools.web.enable = False
-    config.providers.openai.proxy = "http://model-proxy.example:8080"
+    config.providers.openai.use_proxy = True
     save_config(config, path)
-    for proxy in ("http://web-proxy.example:7890", None):
-        payload = update_runtime_config_settings({"tools.web.proxy": proxy}, local_browser=True, config_path=path)
-        assert payload["runtime_config"]["tools.web.proxy"] == proxy
+    for proxy in ("http://shared-proxy.example:7890", "http://shared-proxy.example:7891"):
+        payload = update_runtime_config_settings({"network.proxy": proxy}, local_browser=True, config_path=path)
+        assert payload["runtime_config"]["network.proxy"] == proxy
         assert payload["requires_restart"]
         saved = load_config(path)
-        assert saved.tools.web.proxy == proxy
+        assert saved.network.proxy == proxy
         assert saved.tools.web.enable is False
-        assert saved.providers.openai.proxy == "http://model-proxy.example:8080"
+        assert saved.tools.web.use_proxy is False
+        assert saved.providers.openai.use_proxy is True
+    update_runtime_config_settings({"tools.web.use_proxy": True}, config_path=path)
+    assert load_config(path).tools.web.use_proxy is True
+
+
+def test_enabling_web_proxy_without_an_address_preserves_config(tmp_path):
+    path = tmp_path / "config.json"
+    save_config(Config(), path)
+    before = path.read_bytes()
+    with pytest.raises(WebUISettingsError, match="Advanced"):
+        update_runtime_config_settings({"tools.web.use_proxy": True}, config_path=path)
+    assert path.read_bytes() == before
 
 
 def test_runtime_patch_persists_and_preserves_other_domains(tmp_path):
@@ -158,7 +170,7 @@ def test_timezone_auto_and_nullable_fields():
     }}})
     assert update_runtime_config(config, {
         "agents.defaults.timezone_mode": "auto",
-        "tools.web.proxy": None,
+        "network.proxy": None,
     }, local_browser=True)
     assert config.agents.defaults.timezone_mode == "auto"
     assert config.agents.defaults.dream.cron == "0 2 * * *"

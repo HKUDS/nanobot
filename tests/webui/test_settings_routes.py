@@ -14,6 +14,7 @@ from websockets.datastructures import Headers
 
 from nanobot.bus.queue import MessageBus
 from nanobot.config.loader import get_config_path
+from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import MCPServerConfig
 from nanobot.runtime_admission import RuntimeBusyError
 from nanobot.webui.http_utils import http_json_response
@@ -413,12 +414,12 @@ async def test_settings_shutdown_joins_browser_authorization_and_releases_admiss
     config = MCPServerConfig(type="streamableHttp", auth="oauth", url="https://mcp.example/mcp")
     monkeypatch.setattr(
         "nanobot.webui.settings_routes.ensure_mcp_oauth_server",
-        lambda _query, *, config_path=None: ("linear", config),
+        lambda _query, *, config_path=None: ("linear", config, NetworkConfig()),
     )
     monkeypatch.setattr("nanobot.webui.mcp_oauth_api.validate_url_target", lambda _: (True, ""))
     cleanup_started, allow_cleanup = asyncio.Event(), asyncio.Event()
 
-    async def connect(_servers, _registry, *, oauth_handlers):
+    async def connect(_servers, _registry, *, oauth_handlers, network):
         handlers = oauth_handlers["linear"]
         await handlers.redirect_handler("https://accounts.example/authorize?state=settings")
         try:
@@ -457,9 +458,10 @@ async def test_mcp_oauth_start_uses_gateway_callback_and_requires_api_auth(monke
         auth="oauth",
         url="https://app.xmind.com/api/mcp",
     )
+    network = SimpleNamespace(proxy="http://shared.example:8080")
     monkeypatch.setattr(
         "nanobot.webui.settings_routes.ensure_mcp_oauth_server",
-        lambda _query, *, config_path=None: ("xmind", config),
+        lambda _query, *, config_path=None: ("xmind", config, network),
     )
     router = _router()
     start = AsyncMock(return_value={
@@ -484,6 +486,7 @@ async def test_mcp_oauth_start_uses_gateway_callback_and_requires_api_auth(monke
         config,
         "https://gateway.example/auth/mcp/callback",
         reload_mcp=ANY,
+        network=network,
         reset_credentials=False,
     )
 
@@ -1040,3 +1043,103 @@ async def test_image_switch_round_trip_clears_restart(tmp_path, enabled):
     reverted = await router.dispatch(None, _mutation_request(path, {"enabled": enabled}), path)
     assert json.loads(reverted.body)["requires_restart"] is False
     assert json.loads(reverted.body)["restart_required_sections"] == []
+
+
+@pytest.mark.asyncio
+async def test_first_mcp_oauth_request_saves_proxy_flag_before_starting_flow(tmp_path) -> None:
+    from nanobot.config.loader import load_config
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({
+        "network": {"proxy": "http://shared.example:8080"},
+        "agents": {"defaults": {"workspace": str(tmp_path / "workspace")}},
+    }), encoding="utf-8")
+    router = _router(config_path=config_path)
+    captured = {}
+
+    async def start(name, cfg, redirect_uri, *, reload_mcp, network, reset_credentials):
+        saved = load_config(config_path)
+        assert name == "xmind"
+        assert cfg.auth == "oauth"
+        assert cfg.use_proxy is True
+        assert saved.tools.mcp_servers[name].use_proxy is True
+        assert network == saved.network
+        captured["network"] = network.proxy
+        return {"status": "authorization_required", "name": name, "flow_id": "first-flow"}
+
+    router._mcp_oauth = SimpleNamespace(start=start)
+    request = _mutation_request(
+        "/api/settings/mcp-oauth/start",
+        {"name": "xmind", "use_proxy": True},
+    )
+    response = await router.dispatch(None, request, "/api/settings/mcp-oauth/start")
+
+    assert response is not None
+    assert response.status_code == 200
+    assert json.loads(response.body)["flow_id"] == "first-flow"
+    assert captured == {"network": "http://shared.example:8080"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("use_proxy", [True, False])
+async def test_mcp_proxy_mutation_persists_reloads_and_keeps_oauth_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, use_proxy: bool,
+) -> None:
+    from mcp.shared.auth import OAuthToken
+    from websockets.http11 import Request
+
+    from nanobot.agent.tools.mcp_oauth import MCPOAuthStorage
+    from nanobot.bus.queue import MessageBus
+    from nanobot.channels.websocket.runtime import WebSocketConfig
+    from nanobot.config.loader import load_config, save_config
+    from nanobot.config.schema import Config
+    from nanobot.webui.gateway_services import build_gateway_services
+
+    monkeypatch.setattr("nanobot.agent.tools.mcp_oauth.get_data_dir", lambda: tmp_path)
+    config_path = tmp_path / "config.json"
+    config = Config.model_validate({
+        "network": {"proxy": "http://proxy.example:8080"},
+        "tools": {"mcpServers": {"team-docs": {
+            "type": "streamableHttp", "auth": "oauth",
+            "url": "https://mcp.example.com/mcp", "useProxy": not use_proxy,
+            "headers": {"X-Organization": "team"}, "enabledTools": ["read"],
+        }}},
+    })
+    save_config(config, config_path)
+    original = config.tools.mcp_servers["team-docs"].model_copy(deep=True)
+    storage = MCPOAuthStorage("team-docs", original.url)
+    await storage.set_tokens(OAuthToken(access_token="synthetic-access", token_type="Bearer"))
+
+    async def reload_mcp() -> dict[str, object]:
+        assert load_config(config_path).tools.mcp_servers["team-docs"].use_proxy is use_proxy
+        return {"ok": True, "connected": ["team-docs"], "requires_restart": False}
+
+    reload = AsyncMock(side_effect=reload_mcp)
+    gateway = build_gateway_services(
+        config=WebSocketConfig(), bus=MessageBus(), session_manager=None,
+        static_dist_path=None, workspace_path=tmp_path, config_path=config_path,
+        default_restrict_to_workspace=True, runtime_model_name=None,
+        runtime_surface="browser", runtime_capabilities_overrides=None, mcp_reload=reload,
+    )
+    connection = SimpleNamespace(
+        remote_address=("127.0.0.1", 12345),
+        request=Request("/", Headers({"Host": "127.0.0.1:8765"})),
+    )
+    path = "/api/settings/mcp-presets/proxy"
+    try:
+        http_response = await gateway.http.dispatch(connection, Request(path, Headers()))
+        assert http_response.status_code == 405
+        response = await gateway.http.dispatch_webui_mutation(
+            connection, "settings.mcp.proxy", {"name": "team-docs", "use_proxy": str(use_proxy).lower()},
+        )
+        assert response.status_code == 200
+        payload = json.loads(response.body)
+        assert payload["hot_reload"]["ok"] is True
+        assert payload["requires_restart"] is False
+        row = next(row for row in payload["presets"] if row["name"] == "team-docs")
+        assert row["use_proxy"] is use_proxy
+        assert load_config(config_path).tools.mcp_servers["team-docs"] == original.model_copy(update={"use_proxy": use_proxy})
+        assert storage.has_credentials() is True
+        reload.assert_awaited_once()
+    finally:
+        await gateway.http.settings_routes.close()

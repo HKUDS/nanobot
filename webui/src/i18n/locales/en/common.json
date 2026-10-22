@@ -355,32 +355,7 @@
   "previewTabs": {
     "title": "Preview",
     "closeTab": "Close {{name}}",
-    "closeAll": "Close preview pane",
-    "websiteInfo": "About website previews"
-  },
-  "webPreview": {
-    "viewLinks": "View links",
-    "back": "Back",
-    "original": "Original link",
-    "actions": "Link actions",
-    "open": "Preview website",
-    "external": "Open in browser",
-    "copy": "Copy link",
-    "copied": "Link copied",
-    "copyFailed": "Could not copy link",
-    "title": "Website preview",
-    "resize": "Resize website preview",
-    "refresh": "Refresh website",
-    "close": "Close preview",
-    "isolated": "Restricted, isolated preview. Sign-in and interactive features may not work.",
-    "blockedHint": "Some sites block embedding. If this view stays blank or fails, open it in your browser.",
-    "loopback": "Localhost points to this browser’s device, not a remote gateway. No ports are forwarded.",
-    "native": "Embedded previews are unavailable in the native host. Open this link in your browser.",
-    "unsupported": "This browser does not support credential-isolated previews. Open this link in a new tab.",
-    "sameOrigin": "The nanobot application itself cannot be embedded here. Open it in a new tab.",
-    "mixedContent": "An HTTPS page cannot preview an HTTP website here. Open it in a new tab.",
-    "invalid": "This address cannot be previewed.",
-    "frame": "Website preview: {{host}}"
+    "closeAll": "Close preview pane"
   },
   "starPrompt": {
     "footerAction": "Star nanobot on GitHub",
@@ -490,6 +465,16 @@
       "title": "Restart before leaving?",
       "description": "Your changes are saved. Restart to apply them.",
       "later": "Restart later"
+    },
+    "network": {
+      "useProxy": "Use proxy",
+      "useProxyHelp": "Uses the shared proxy in Advanced.",
+      "configureProxy": "Configure proxy",
+      "sharedProxyScope": "Shared by all features with proxy enabled.",
+      "authentication": "Authentication (optional)",
+      "username": "Username",
+      "password": "Password",
+      "proxyReferenceAuth": "Set authentication in the referenced proxy URL."
     },
     "runtimeConfig": {
       "apiSaved": "Saved. Restart the API service to apply changes.",
@@ -609,9 +594,13 @@
           "label": "Blocked commands",
           "help": "Block commands that match these rules.\n\nOne regular expression per line, checked alongside built-in deny rules. Commands that fully match allow rules skip these checks."
         },
-        "tools_web_proxy": {
-          "label": "Web proxy",
-          "help": "Used for the agent's web search and page reading. Leave blank to use the default network settings, including proxy environment variables.\n\n127.0.0.1 refers to the machine that runs nanobot. This setting does not change model, MCP, or browser connections."
+        "network_proxy": {
+          "label": "Shared proxy",
+          "help": "Address used by features with Use proxy enabled. 127.0.0.1 is the machine running nanobot."
+        },
+        "tools_web_use_proxy": {
+          "label": "Use proxy",
+          "help": "Use the shared proxy for web search and page reading."
         },
         "tools_web_user_agent": {
           "label": "User agent",
@@ -699,9 +688,13 @@
           "title": "Shell and sandbox",
           "help": "Set command timeouts, environment, and access rules."
         },
+        "proxy": {
+          "title": "Shared proxy",
+          "help": "Set one address for features that use a proxy."
+        },
         "network": {
           "title": "Web connections",
-          "help": "Set the proxy and User-Agent.\n\nSet the proxy and User-Agent header for web requests."
+          "help": "Set the proxy preference and User-Agent for web requests."
         },
         "safety": {
           "title": "Global permissions",
@@ -1379,7 +1372,6 @@
       "defaultAPIDescription": "Presets set to Auto use this API. A preset can choose another API from the supported list.",
       "declareAPIs": "Set supported APIs",
       "openaiDefaultAPIDescription": "Sets the default API for presets using Auto. Auto here follows known model rules. Individual presets can override this choice.",
-      "proxy": "Network proxy",
       "thinkingStyle": "Reasoning format",
       "region": "Region",
       "profile": "AWS profile",
@@ -1475,6 +1467,7 @@
       "loading": "Loading channels…",
       "empty": "No channels match this filter.",
       "restartRequired": "Restart nanobot to apply updated channel support.",
+      "restartBeforeInstall": "Restart nanobot before installing another channel.",
       "requires": "Requires: {{requirements}}",
       "setUp": "Set up",
       "setupGuide": "Setup guide",
@@ -1788,9 +1781,6 @@
       "signInBeforeSaving": "Sign in before saving this provider in the preset.",
       "signedIn": "Signed in",
       "notSignedIn": "Not signed in",
-      "proxyLabel": "Network proxy",
-      "proxySaveBeforeSignIn": "Save proxy changes before signing in.",
-      "saveProxy": "Save proxy",
       "localCodeHelp": "Complete sign-in in your browser. If nanobot does not connect automatically, paste the authorization code below.",
       "remoteCodeHelp": "Select Sign in to open xAI on your computer. After signing in, paste the authorization code shown by xAI below.",
       "localCallbackHelp": "Complete sign-in in your browser. If nanobot does not connect automatically, copy the full localhost callback URL from the address bar and paste it below.",
@@ -2006,6 +1996,32 @@
       "messages": "Message status"
     },
     "compaction": {
+      "reasons": {
+        "idle": {
+          "started": "Automatically compacting context after inactivity",
+          "succeeded": "Context automatically compacted after inactivity",
+          "failed": "Automatic context compaction failed after inactivity",
+          "cancelled": "Automatic compaction after inactivity did not finish"
+        },
+        "context_pressure": {
+          "started": "Compacting a long context",
+          "succeeded": "Long context compacted",
+          "failed": "Failed to compact a long context",
+          "cancelled": "Compaction of a long context cancelled"
+        },
+        "manual": {
+          "started": "Manual compaction in progress",
+          "succeeded": "Manual compaction complete",
+          "failed": "Manual compaction failed",
+          "cancelled": "Manual compaction cancelled"
+        },
+        "provider_native": {
+          "started": "Compacting context on the provider's server",
+          "succeeded": "Context compacted on the provider's server",
+          "failed": "Failed to compact context on the provider's server",
+          "cancelled": "Context compaction cancelled on the provider's server"
+        }
+      },
       "cancelled": "Context compaction cancelled",
       "empty": "Nothing to compact.",
       "started": "Compressing context",

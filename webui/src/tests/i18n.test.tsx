@@ -434,6 +434,15 @@ describe("webui i18n", () => {
       expect(notice?.textContent).toBe(copy[phase]);
       expect(notice).toHaveAttribute("aria-busy", String(phase === "started"));
     }
+    for (const reason of ["idle", "context_pressure", "manual", "provider_native"] as const) {
+      for (const phase of ["started", "succeeded", "failed", "cancelled"] as const) {
+        rerender(<ContextCompactionNotice compaction={{ id: "compact-1", reason, phase, announce: true }} />);
+        const notice = container.querySelector("[data-context-compaction]");
+        expect(copy.reasons[reason][phase]).toBeTruthy();
+        expect(notice?.textContent).toBe(copy.reasons[reason][phase]);
+        expect(notice).toHaveAttribute("aria-busy", String(phase === "started"));
+      }
+    }
     for (const compactReply of ["empty", "failed"] as const) {
       rerender(<MessageBubble message={{
         id: "reply", role: "assistant", content: "original command reply",

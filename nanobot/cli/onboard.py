@@ -30,7 +30,7 @@ from nanobot.cli.models import (
     get_model_catalog,
     get_model_context_limit,
 )
-from nanobot.config.loader import get_config_path, load_config, resolve_config_env_vars
+from nanobot.config.loader import get_config_path, load_config
 from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.providers.oauth_guidance import OAUTH_CLI_KIT_MISSING_MESSAGE
 
@@ -1321,7 +1321,8 @@ def _run_channel_login(
 
     console.print(f"[{_UI_ACCENT}]Starting {display_name} login...[/]")
     try:
-        channel = channel_cls(model, bus=None)
+        kwargs = {"network": config.network} if channel_cls.uses_shared_proxy else {}
+        channel = channel_cls(model, bus=None, **kwargs)
         success = asyncio.run(channel.login(force=False))
     except KeyboardInterrupt:
         console.print("\n[dim]Login cancelled.[/dim]")
@@ -1601,9 +1602,7 @@ def _quick_start_requires_api_key(provider_name: str, info: _QuickStartProviderI
 
 def _quick_start_codex_proxy(config: Config) -> str | None:
     """Resolve only the Codex proxy without validating unrelated provider secrets."""
-    proxy_config = Config()
-    proxy_config.providers.openai_codex.proxy = config.providers.openai_codex.proxy
-    return resolve_config_env_vars(proxy_config).providers.openai_codex.proxy or None
+    return config.network.resolve_proxy(config.providers.openai_codex.use_proxy)
 
 
 def _quick_start_oauth_login(config: Config, provider_name: str) -> bool:

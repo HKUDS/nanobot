@@ -456,7 +456,7 @@ export function useModelSettingsActions({
         if (provider.provider_api_configurable) update.api = providerForm.api;
       }
       for (const field of provider.advanced_fields ?? []) {
-        if (field === "proxy") update.proxy = providerForm.proxy.trim();
+        if (field === "use_proxy") update.use_proxy = providerForm.useProxy;
         if (field === "extra_headers") {
           update.extraHeaders = providerForm.extraHeaders.trim();
         }
@@ -500,7 +500,7 @@ export function useModelSettingsActions({
         apiKey: draft.apiKey.trim() || undefined,
         apiBase: draft.apiBase.trim(),
         ...(settings?.provider_api_configuration_supported ? { api: draft.api } : {}),
-        proxy: draft.proxy.trim(),
+        use_proxy: draft.useProxy,
         extraHeaders: draft.extraHeaders.trim(),
         extraBody: draft.extraBody.trim(),
         extraQuery: draft.extraQuery.trim(),

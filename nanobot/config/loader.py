@@ -11,6 +11,7 @@ from pydantic_settings import SettingsError
 
 from nanobot.config.errors import ConfigIssue, ConfigLoadError, validation_issues
 from nanobot.config.home import get_home_path
+from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import Config
 from nanobot.utils.file_io import write_text_atomic
 
@@ -156,8 +157,9 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
         settings = provider.model_dump(
             mode="json",
             by_alias=True,
-            include={"proxy", "extra_body"},
+            include={"use_proxy", "extra_body"},
             exclude_none=True,
+            exclude_unset=True,
         )
         if settings:
             data.setdefault("providers", {})[alias] = settings
@@ -234,6 +236,9 @@ def resolve_env_refs(value: object) -> object:
 
 
 def _resolve_in_place(obj: Any) -> Any:
+    if isinstance(obj, NetworkConfig):
+        proxy = obj.resolve_environment()
+        return obj.model_copy(update={"proxy": proxy}) if proxy != obj.proxy else obj
     if isinstance(obj, str):
         new = _ENV_REF_PATTERN.sub(_env_replace, obj)
         return new if new != obj else obj

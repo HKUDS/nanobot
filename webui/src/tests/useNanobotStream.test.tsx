@@ -349,7 +349,7 @@ describe("useNanobotStream", () => {
     act(() => fake.emit("sources", { event: "stream_end", chat_id: "sources", response_sources: [] }));
     expect(result.current.messages[1].responseSources).toEqual([]);
   });
-  it.each(["succeeded", "cancelled"] as const)("updates one stable compaction row to %s", (phase) => {
+  it.each(["succeeded", "failed", "cancelled"] as const)("updates one stable compaction row to %s", (phase) => {
     const fake = fakeClient();
     const { result } = renderHook(
       () => useNanobotStream("chat-compaction", EMPTY_MESSAGES),
@@ -362,6 +362,7 @@ describe("useNanobotStream", () => {
         chat_id: "chat-compaction",
         compaction_id: "compact-1",
         phase: "started",
+        reason: "idle",
       });
     });
 
@@ -373,6 +374,7 @@ describe("useNanobotStream", () => {
       compaction: {
         id: "compact-1",
         phase: "started",
+        reason: "idle",
         announce: true,
       },
     });
@@ -383,6 +385,7 @@ describe("useNanobotStream", () => {
         chat_id: "chat-compaction",
         compaction_id: "compact-1",
         phase,
+        reason: "idle",
       });
     });
 
@@ -392,6 +395,7 @@ describe("useNanobotStream", () => {
       createdAt,
       compaction: {
         phase,
+        reason: "idle",
         announce: true,
       },
     });

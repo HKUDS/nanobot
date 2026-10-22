@@ -11,5 +11,9 @@
   {"event":"retry_status","chat_id":"chat","state":"waiting","attempt":1,"max_attempts":4,"error_kind":"connection","retry_after_s":2},
   {"event":"retry_status","chat_id":"chat","state":"recovered","attempt":2,"max_attempts":4,"error_kind":"connection"},
   {"event":"retry_status","chat_id":"chat","state":"cleared","attempt":2,"max_attempts":4,"error_kind":"connection"},
-  {"event":"retry_status","chat_id":"chat","state":"exhausted","attempt":4,"max_attempts":4,"error_kind":"connection"}
+  {"event":"retry_status","chat_id":"chat","state":"exhausted","attempt":4,"max_attempts":4,"error_kind":"connection"},
+  {"event":"context_compaction","chat_id":"chat","compaction_id":"reason-idle","phase":"succeeded","reason":"idle"},
+  {"event":"context_compaction","chat_id":"chat","compaction_id":"reason-context_pressure","phase":"succeeded","reason":"context_pressure"},
+  {"event":"context_compaction","chat_id":"chat","compaction_id":"reason-manual","phase":"succeeded","reason":"manual"},
+  {"event":"context_compaction","chat_id":"chat","compaction_id":"reason-provider_native","phase":"succeeded","reason":"provider_native"}
 ]

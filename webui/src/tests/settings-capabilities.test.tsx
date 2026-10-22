@@ -317,9 +317,10 @@ describe("Settings capabilities", () => {
     );
   });
 
-  it("edits the existing web proxy in web access even while disabled, without a duplicate advanced editor", async () => {
+  it("saves the web proxy switch separately from the shared address in Advanced", async () => {
     let payload = { ...settingsPayload(), runtime_config: {
-      "tools.web.enable": false, "tools.web.proxy": "http://old-proxy.example:8080", "tools.web.user_agent": null,
+      "tools.web.enable": false, "tools.web.use_proxy": false,
+      "network.proxy": "http://old-proxy.example:8080", "tools.web.user_agent": null,
     } } as SettingsPayload;
     requestMutationMock.mockImplementation(async (_method, update) => {
       payload = { ...payload, runtime_config: { ...payload.runtime_config, ...update.values },
@@ -329,21 +330,41 @@ describe("Settings capabilities", () => {
     renderSettingsView({ initialSection: "capabilities", initialSettings: payload });
     fireEvent.click(within(screen.getByRole("region", { name: "Web access" })).getByRole("button", { name: "Configure" }));
     fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
-    const proxy = screen.getByRole("textbox", { name: "Web proxy" });
-    expect(proxy).toHaveValue("http://old-proxy.example:8080");
-    fireEvent.change(proxy, { target: { value: "http://new-proxy.example:7890" } });
+    const useProxy = screen.getByRole("switch", { name: "Use proxy" });
+    expect(useProxy).not.toBeChecked();
+    expect(screen.queryByRole("textbox", { name: /proxy/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Shared proxy")).not.toBeInTheDocument();
+    fireEvent.click(useProxy);
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
-      "settings.runtime_config.update", { values: { "tools.web.proxy": "http://new-proxy.example:7890" } }, 20_000,
+      "settings.runtime_config.update", { values: { "tools.web.use_proxy": true } }, 20_000,
     ));
-    expect(await screen.findByText("Saved. Restart to apply changes.")).toBeVisible();
-    fireEvent.change(proxy, { target: { value: "" } });
+    await waitFor(() => expect(useProxy).toBeEnabled());
+    expect(useProxy).toBeChecked();
+    fireEvent.click(useProxy);
     await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
-      "settings.runtime_config.update", { values: { "tools.web.proxy": null } }, 20_000,
+      "settings.runtime_config.update", { values: { "tools.web.use_proxy": false } }, 20_000,
     ));
     fireEvent.click(within(screen.getByRole("dialog", { name: "Web access" })).getByRole("button", { name: "Close" }));
     expect(screen.getByRole("switch", { name: "Web access" })).not.toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
-    expect(screen.queryByRole("textbox", { name: "Web proxy" })).not.toBeInTheDocument();
+    const proxy = screen.getByRole("textbox", { name: "Shared proxy" });
+    expect(proxy).toHaveAttribute("type", "text");
+    expect(proxy).toHaveValue("http://old-proxy.example:8080");
+    expect(screen.queryByRole("switch", { name: "Use proxy" })).not.toBeInTheDocument();
+    const address = "http://user:secret@new-proxy.example:7890";
+    fireEvent.change(proxy, { target: { value: address } });
+    expect(proxy).toHaveValue("http://new-proxy.example:7890");
+    expect(screen.getByLabelText("Password")).toHaveAttribute("type", "password");
+    fireEvent.click(within(screen.getByRole("region", { name: "Shared proxy" })).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.runtime_config.update", { values: { "network.proxy": address } }, 20_000,
+    ));
+    fireEvent.click(screen.getByRole("button", { name: "System" }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    expect(screen.getByLabelText("Shared proxy", { selector: "input" })).toHaveValue("http://new-proxy.example:7890");
+    expect(screen.getByLabelText("Username")).toHaveValue("user");
+    expect(screen.getByLabelText("Password")).toHaveValue("secret");
+    expect(document.body).not.toHaveTextContent(address);
   });
 
   it("saves optional-key web search providers without an API key", async () => {

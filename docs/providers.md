@@ -72,7 +72,7 @@ These fields answer different questions:
 | `model` | `modelPresets.<name>.model` | The model ID expected by that provider or gateway. |
 | `apiKey` | `providers.<provider>.apiKey` | Credential for that provider. Use `${ENV_VAR}` for secrets. |
 | `apiBase` | `providers.<provider>.apiBase` | HTTP base URL of the provider endpoint. |
-| `proxy` | `providers.<provider>.proxy` | Optional HTTP proxy for this provider only. Supported for OpenAI-compatible providers, Anthropic Messages, OpenAI Codex, and xAI OAuth. |
+| `use_proxy` | `providers.<provider>.useProxy` | Use the shared `network.proxy` address for this provider. Supported for OpenAI-compatible providers, Anthropic Messages, OpenAI Codex, and xAI OAuth. |
 
 You usually omit `apiBase` for hosted built-in providers such as OpenRouter, Anthropic direct, OpenAI direct, Groq, or Bedrock because nanobot knows their default endpoints. Set `apiBase` for `custom`, local OpenAI-compatible servers, provider proxies, regional endpoints, or subscription endpoints. Include the API version path when the endpoint requires it, for example `https://api.example.com/v1` or `http://localhost:11434/v1`.
 

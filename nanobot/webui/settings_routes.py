@@ -97,6 +97,7 @@ _MCP_PRESET_ACTIONS_BY_PATH = {
     "/api/settings/mcp-presets/remove": "remove",
     "/api/settings/mcp-presets/test": "test",
     "/api/settings/mcp-presets/reconnect": "reconnect",
+    "/api/settings/mcp-presets/proxy": "proxy",
     "/api/settings/mcp-presets/custom": "custom",
     "/api/settings/mcp-presets/import": "import",
     "/api/settings/mcp-presets/import-cursor": "import-cursor",
@@ -653,7 +654,7 @@ class WebUISettingsRouter:
             return self._error_response(500, "MCP OAuth callback is not configured")
         query = self._parse_mcp_settings_query(request)
         try:
-            name, cfg = await asyncio.to_thread(
+            name, cfg, network = await asyncio.to_thread(
                 self.settings.mutate,
                 ensure_mcp_oauth_server,
                 query,
@@ -665,6 +666,7 @@ class WebUISettingsRouter:
                 cfg,
                 redirect_uri,
                 reload_mcp=self._reload_mcp_runtime,
+                network=network,
                 reset_credentials=reset,
             )
         except Exception as exc:

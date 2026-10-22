@@ -23,14 +23,8 @@
         "label": "允许用户",
         "placeholder": "用户 ID，用逗号分隔"
       },
-      "proxy": {
-        "label": "网络代理"
-      },
-      "proxyUsername": {
-        "label": "代理账号"
-      },
-      "proxyPassword": {
-        "label": "代理密码"
+      "useProxy": {
+        "label": "使用代理"
       },
       "intents": {
         "label": "Gateway Intents"

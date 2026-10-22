@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Trans, useTranslation } from "react-i18next";
 
@@ -7,13 +7,11 @@ import type { CapabilityMentionSegment } from "@/lib/composer-mention-text";
 import { DeleteConfirm } from "@/components/DeleteConfirm";
 import { FileActions } from "@/components/FileActions";
 import { InlineTokenHighlight, INLINE_TOKEN_HIGHLIGHT_COLOR } from "@/components/InlineTokenHighlight";
-import { MessageLinksMenu, useMessageWebLinks } from "@/components/MessageLinksMenu";
 import { RenameDialog } from "@/components/RenameDialog";
 import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { SlashCommandText } from "@/components/SlashCommandText";
 import { StartupShell } from "@/components/StartupShell";
 import { UserMessageText } from "@/components/UserMessageText";
-import { WebLink } from "@/components/WebLink";
 import * as ProductIcons from "@/components/icons/product-icons";
 import { HostCompatibilityDialog } from "@/components/remote/HostCompatibilityDialog";
 import { HostConnectionStatus } from "@/components/remote/HostConnectionStatus";
@@ -174,28 +172,6 @@ function FileActionsPreview() {
   </>;
 }
 
-function WebLinksPreview() {
-  const { t } = useGalleryTranslation();
-  const [open, setOpen] = useState(false);
-  const [display, setDisplay] = useState<"compact" | "expanded">("compact");
-  const message = useRef<HTMLDivElement>(null);
-  const links = useMessageWebLinks(message, open);
-  return <div className="space-y-4">
-    <StatePicker label={t("previews.webLinks.width")} value={display} options={["compact", "expanded"]} onChange={setDisplay} />
-    <div ref={message} className="text-sm leading-7"><p data-assistant-selectable>
-      <Trans t={t} i18nKey="previews.webLinks.message" components={{
-        gallery: <WebLink href={`${window.location.origin}/gallery.html`} className="underline underline-offset-4" />,
-        brand: <WebLink href={`${window.location.origin}/brand/nanobot_icon_512.png`} className="underline underline-offset-4" />,
-      }} />
-    </p></div>
-    <Button variant="outline" onClick={() => setOpen((value) => !value)}>{t(open ? "previews.webLinks.close" : "previews.webLinks.open")}</Button>
-    {open && links.length > 0 ? <div className="rounded-control border p-1">
-      <MessageLinksMenu links={links} onBack={() => setOpen(false)} onClose={() => setOpen(false)} expanded={display === "expanded"} />
-    </div> : null}
-    <p className="text-xs text-muted-foreground">{t("previews.webLinks.hint")}</p>
-  </div>;
-}
-
 const initialPanes: WorkbenchPane[] = [
   { key: "pane-1", title: "组件设计" }, { key: "pane-2", title: "实现" }, { key: "pane-3", title: "验证" },
 ];
@@ -289,9 +265,6 @@ export const shellExamples: ComponentExample[] = [
   { title: "previews.fileActions.title", files: ["FileActions"], Preview: FileActionsPreview,
     description: "previews.fileActions.description", options: "previews.fileActions.options",
     code: '<FileActions path="src/app.tsx" metadata={{ path: "D:/workspace/src/app.tsx", relative_path: "src/app.tsx" }}><Button>app.tsx</Button></FileActions>' },
-  { title: "previews.webLinks.title", files: ["WebLink", "MessageLinksMenu"], Preview: WebLinksPreview,
-    description: "previews.webLinks.description", options: "previews.webLinks.options",
-    code: '<WebLink href={url}>组件画廊</WebLink>\nconst links = useMessageWebLinks(messageRef, open);\n<MessageLinksMenu links={links} onBack={close} onClose={close} expanded />' },
   { title: "previews.workbench.title", files: ["workbench/PaneWorkbench"], Preview: WorkbenchPreview,
     description: "previews.workbench.description", options: "previews.workbench.options",
     code: '<PaneWorkbench panes={panes} activePaneKey={active} layout={layout} showLayoutControl onActivatePane={setActive} onAddPane={addPane} onLayoutChange={setLayout} onPaneOrderChange={reorder} renderPane={renderPane} />' },

@@ -355,32 +355,7 @@
   "previewTabs": {
     "title": "预览",
     "closeTab": "关闭 {{name}}",
-    "closeAll": "关闭预览栏",
-    "websiteInfo": "关于网页预览"
-  },
-  "webPreview": {
-    "viewLinks": "查看链接",
-    "back": "返回",
-    "original": "原链接",
-    "actions": "链接操作",
-    "open": "预览网页",
-    "external": "浏览器打开",
-    "copy": "复制链接",
-    "copied": "链接已复制",
-    "copyFailed": "无法复制链接",
-    "title": "网页预览",
-    "resize": "调整网页预览宽度",
-    "refresh": "刷新网页",
-    "close": "关闭预览",
-    "isolated": "受限的隔离预览，登录及部分交互功能可能无法使用。",
-    "blockedHint": "部分网站禁止嵌入。如果页面空白或加载失败，请在浏览器中打开。",
-    "loopback": "localhost 指向当前浏览器所在设备，而非远程网关。不会自动转发端口。",
-    "native": "原生客户端暂不支持嵌入预览，请在浏览器中打开此链接。",
-    "unsupported": "此浏览器不支持凭据隔离预览，请在新标签页中打开。",
-    "sameOrigin": "不能在此嵌入 nanobot 应用自身，请在新标签页中打开。",
-    "mixedContent": "HTTPS 页面不能在此预览 HTTP 网站，请在新标签页中打开。",
-    "invalid": "无法预览此地址。",
-    "frame": "网页预览：{{host}}"
+    "closeAll": "关闭预览栏"
   },
   "starPrompt": {
     "footerAction": "给 nanobot 点个 Star",
@@ -490,6 +465,16 @@
       "title": "离开设置前重启 nanobot？",
       "description": "更改已保存，重启后生效。",
       "later": "稍后重启"
+    },
+    "network": {
+      "useProxy": "使用代理",
+      "useProxyHelp": "使用高级设置中的共享代理。",
+      "configureProxy": "配置代理",
+      "sharedProxyScope": "供所有启用代理的功能共用。",
+      "authentication": "认证（可选）",
+      "username": "用户名",
+      "password": "密码",
+      "proxyReferenceAuth": "请在引用的代理 URL 中设置认证信息。"
     },
     "runtimeConfig": {
       "apiSaved": "已保存，重启 API 服务后生效。",
@@ -609,9 +594,13 @@
           "label": "禁止命令",
           "help": "阻止匹配规则的命令\n\n每行一个正则表达式，与内置拒绝规则一同检查。完整匹配允许规则的命令会跳过这些检查。"
         },
-        "tools_web_proxy": {
-          "label": "网页代理",
-          "help": "用于智能体搜索和读取网页。留空使用默认网络设置，包括环境变量中的代理。\n\n127.0.0.1 指运行 nanobot 的机器，不是打开网页的手机。本设置不影响模型、MCP 或浏览器的连接。"
+        "network_proxy": {
+          "label": "共享代理",
+          "help": "启用“使用代理”的功能共用此地址。127.0.0.1 指运行 nanobot 的设备。"
+        },
+        "tools_web_use_proxy": {
+          "label": "使用代理",
+          "help": "网页搜索和读取使用共享代理。"
         },
         "tools_web_user_agent": {
           "label": "User-Agent",
@@ -699,9 +688,13 @@
           "title": "Shell 与沙箱",
           "help": "设置命令超时、环境和访问规则"
         },
+        "proxy": {
+          "title": "共享代理",
+          "help": "为使用代理的功能设置共享地址。"
+        },
         "network": {
           "title": "网页连接",
-          "help": "设置代理和 User-Agent\n\n设置网页访问代理和 User-Agent 标识。"
+          "help": "设置网页请求的代理开关和 User-Agent。"
         },
         "safety": {
           "title": "全局权限",
@@ -1379,7 +1372,6 @@
       "defaultAPIDescription": "预设选择「自动」时使用此协议。单个预设可改用支持列表中的其他协议。",
       "declareAPIs": "设置支持的协议",
       "openaiDefaultAPIDescription": "设为「自动」的预设使用此默认协议。此处选择「自动」会遵循已知模型规则；单个预设可以覆盖此默认值。",
-      "proxy": "网络代理",
       "thinkingStyle": "推理格式",
       "region": "区域",
       "profile": "AWS 配置名称",
@@ -1475,6 +1467,7 @@
       "loading": "正在加载聊天平台...",
       "empty": "没有匹配的聊天平台。",
       "restartRequired": "重启 nanobot 以应用更新后的聊天平台支持。",
+      "restartBeforeInstall": "重启 nanobot 后可继续安装。",
       "requires": "需要：{{requirements}}",
       "setUp": "设置",
       "setupGuide": "配置指南",
@@ -1788,9 +1781,6 @@
       "signInBeforeSaving": "请先登录此提供商，再保存模型预设。",
       "signedIn": "已登录",
       "notSignedIn": "未登录",
-      "proxyLabel": "网络代理",
-      "proxySaveBeforeSignIn": "请先保存代理更改再登录。",
-      "saveProxy": "保存代理",
       "localCodeHelp": "请在浏览器中完成登录。若 nanobot 未自动完成连接，请将授权码粘贴到下方。",
       "remoteCodeHelp": "点击“登录”在你的电脑上打开 xAI。完成登录后，请将 xAI 显示的授权码粘贴到下方。",
       "localCallbackHelp": "请在浏览器中完成登录。若 nanobot 未自动完成连接，请复制地址栏中完整的 localhost 回调地址，粘贴到下方。",
@@ -2006,6 +1996,32 @@
       "messages": "消息状态"
     },
     "compaction": {
+      "reasons": {
+        "idle": {
+          "started": "会话空闲，正在自动压缩上下文",
+          "succeeded": "会话空闲，已自动压缩上下文",
+          "failed": "空闲时自动压缩上下文失败",
+          "cancelled": "空闲期间的自动压缩未完成"
+        },
+        "context_pressure": {
+          "started": "上下文较长，正在压缩",
+          "succeeded": "上下文较长，已自动压缩",
+          "failed": "上下文较长，自动压缩失败",
+          "cancelled": "上下文较长，压缩已取消"
+        },
+        "manual": {
+          "started": "正在手动压缩",
+          "succeeded": "手动压缩完成",
+          "failed": "手动压缩失败",
+          "cancelled": "手动压缩已取消"
+        },
+        "provider_native": {
+          "started": "模型服务正在压缩上下文",
+          "succeeded": "模型服务已压缩上下文",
+          "failed": "模型服务未能完成上下文压缩",
+          "cancelled": "模型服务的上下文压缩已取消"
+        }
+      },
       "cancelled": "上下文压缩已取消",
       "empty": "无需压缩上下文",
       "started": "正在压缩上下文",

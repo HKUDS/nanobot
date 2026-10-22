@@ -748,12 +748,12 @@ export interface SettingsPayload {
     oauth_account?: string | null;
     oauth_expires_at?: number | null;
     oauth_login_supported?: boolean;
-    proxy?: string | null;
+    use_proxy?: boolean;
     advanced_fields?: Array<
       | "extra_headers"
       | "extra_body"
       | "extra_query"
-      | "proxy"
+      | "use_proxy"
       | "thinking_style"
       | "region"
       | "profile"
@@ -779,7 +779,7 @@ export interface SettingsPayload {
   };
   web: {
     enable: boolean;
-    proxy?: string | null;
+    use_proxy?: boolean;
     user_agent?: string | null;
     search: {
       max_results: number;
@@ -1115,6 +1115,7 @@ export interface NanobotFeatureInfo {
   status: "enabled" | "missing_dependency" | "not_enabled" | string;
   install_supported: boolean;
   requires_restart: boolean;
+  restart_pending?: boolean;
 }
 
 export interface ChannelSetupContractField {
@@ -1242,6 +1243,7 @@ export interface McpPresetInfo {
   docs_url: string;
   transport: "stdio" | "streamableHttp" | "sse" | "oauth" | string;
   auth?: "oauth" | null;
+  use_proxy?: boolean;
   requires: string;
   note: string;
   install_supported: boolean;
@@ -1290,6 +1292,7 @@ export interface McpOAuthFlowPayload {
 
 export interface McpPresetsPayload {
   presets: McpPresetInfo[];
+  proxy_configured?: boolean;
   installed_count: number;
   requires_restart?: boolean;
   hot_reload?: {
@@ -1376,7 +1379,7 @@ export interface ProviderSettingsUpdate {
   apiKey?: string;
   apiBase?: string;
   api?: ModelAPIConfig | null;
-  proxy?: string;
+  use_proxy?: boolean;
   extraHeaders?: string;
   extraBody?: string;
   extraQuery?: string;
@@ -1390,7 +1393,7 @@ export interface ProviderCreationUpdate {
   apiKey?: string;
   apiBase: string;
   api?: ModelAPIConfig | null;
-  proxy?: string;
+  use_proxy?: boolean;
   extraHeaders?: string;
   extraBody?: string;
   extraQuery?: string;

@@ -369,7 +369,7 @@ class OpenAICodexProvider(LLMProvider):
                     nonlocal native_compaction_event_id
                     compaction_id = uuid4().hex
                     try:
-                        await events.emit(ContextCompactionEvent(compaction_id, "started"))
+                        await events.emit(ContextCompactionEvent(compaction_id, "started", reason="provider_native"))
                         compacted = await _send(
                             request,
                             emit_deltas=False,
@@ -380,10 +380,11 @@ class OpenAICodexProvider(LLMProvider):
                         await shield_and_drain(events.emit(ContextCompactionEvent(
                             compaction_id,
                             "cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
+                            reason="provider_native",
                         )))
                         raise
                     native_compaction_event_id = compaction_id
-                    await shield_and_drain(events.emit(ContextCompactionEvent(compaction_id, "succeeded")))
+                    await shield_and_drain(events.emit(ContextCompactionEvent(compaction_id, "succeeded", reason="provider_native")))
                     return compacted
 
                 native_compaction_state = await self._responses.compact_before_request(

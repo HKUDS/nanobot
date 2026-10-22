@@ -61,16 +61,6 @@
     "scope": "Cakupan berkas",
     "hint": "Klik kanan untuk membuka menu salin, atau fokuskan berkas lalu tekan Shift+F10."
   },
-  "webLinks": {
-    "title": "Web links · Menu tautan",
-    "description": "Buka menu tautan asli untuk memilih tautan pesan dan menyalin alamatnya.",
-    "options": "WebLink menerima atribut tautan. useMessageWebLinks mengumpulkan tautan yang dirender. MessageLinksMenu menerima entri serta callback kembali dan tutup; expanded mengatur lebar. Semua tautan menuju sumber daya galeri lokal.",
-    "width": "Lebar menu tautan",
-    "message": "Lihat <gallery>galeri komponen</gallery> dan <brand>gambar merek</brand>.",
-    "close": "Tutup menu tautan",
-    "open": "Lihat tautan pesan",
-    "hint": "Klik kanan tautan untuk menyalin alamatnya. Menu mengumpulkan tautan dari pesan yang dirender."
-  },
   "workbench": {
     "title": "PaneWorkbench · Beberapa panel",
     "description": "Ganti tata letak, aktifkan atau tambahkan panel, lalu atur posisi dan ukurannya.",
@@ -234,14 +224,6 @@
     "description": "Bandingkan teks, gambar, pemotongan, pemuatan, dan kesalahan. Pilih gambar untuk memperbesar.",
     "options": "state menyediakan snapshot tampilan; path menentukan jenis dan nama berkas. Callback pembukaan dan kesalahan gambar memperbarui pratinjau.",
     "state": "Status pratinjau berkas"
-  },
-  "webPreview": {
-    "title": "WebPreviewPanelView · Konten web",
-    "description": "Jelajahi bilah judul, keterangan isolasi, dan pembatasan; segarkan dokumen lokal.",
-    "options": "Runtime menentukan restriction sebelum menyediakan konten. children menyediakan konten; onRefresh meminta penyegaran. iframe ini memakai srcDoc lokal.",
-    "state": "Status pratinjau web",
-    "frame": "Halaman web contoh lokal",
-    "refreshes": "Penyegaran: {{amount}}"
   },
   "session": {
     "title": "SessionInfoPopoverView · Otomatisasi sesi",

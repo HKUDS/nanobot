@@ -39,9 +39,23 @@ function Group({ controls }: { controls: Control[] }) {
   return <section><Title /><SettingsGroup>{controls.map((control, index) => <Row key={index} control={control} />)}</SettingsGroup></section>;
 }
 
+function ProxyGroup() {
+  return <section><Title /><SettingsGroup>
+    <div className="px-4 py-4 sm:px-5">
+      <div data-shared-proxy-skeleton className="w-full space-y-3">
+        <div data-proxy-address-skeleton className={cn(block, "h-10 w-full rounded-control")} />
+        <div className="flex h-7 items-center justify-between gap-3 py-1">
+          <div className={cn(block, "h-3 w-40")} /><div className={cn(block, "h-3.5 w-3.5 shrink-0")} />
+        </div>
+      </div>
+    </div>
+  </SettingsGroup></section>;
+}
+
 function RuntimeGroups({ page }: { page: RuntimeConfigPage }) {
   return <>{RUNTIME_CONFIG_GROUPS.filter((group) => group.page === page).map((group) => group.id === "chat"
     ? <Group key={group.id} controls={["switch", "segments"]} />
+    : group.id === "proxy" ? <ProxyGroup key={group.id} />
     : <Group key={group.id} controls={RUNTIME_CONFIG_FIELDS.filter((field) => field.group === group.id && (!field.when || field.when.value === true)).flatMap<Control>((field) =>
       field.kind === "idle-compaction" ? ["switch", "idle-timeout"] : [
         field.kind === "boolean" || field.kind === "toggle" ? "switch" : field.kind === "list" ? "edit" : field.kind === "duration" ? "duration" : "input",

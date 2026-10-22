@@ -61,16 +61,6 @@
     "scope": "ファイルの範囲",
     "hint": "右クリックでコピーメニューを開くか、ファイルにフォーカスして Shift+F10 を押してください。"
   },
-  "webLinks": {
-    "title": "Web links · リンクメニュー",
-    "description": "実際のリンクメニューでメッセージのリンクを選び、アドレスをコピーできます。",
-    "options": "WebLink はリンク属性を受け取ります。useMessageWebLinks は表示済みのリンクを収集します。MessageLinksMenu は項目と戻る・閉じるコールバックを受け取り、expanded が幅を制御します。リンク先はすべてローカルのギャラリー素材です。",
-    "width": "リンクメニューの幅",
-    "message": "<gallery>コンポーネントギャラリー</gallery>と<brand>ブランド画像</brand>を表示します。",
-    "close": "リンクメニューを閉じる",
-    "open": "メッセージのリンクを見る",
-    "hint": "リンクを右クリックするとアドレスをコピーできます。メニューは表示済みメッセージからリンクを収集します。"
-  },
   "workbench": {
     "title": "PaneWorkbench · 複数ペイン",
     "description": "レイアウトの切り替え、ペインの選択・追加、移動やサイズ変更を試せます。",
@@ -234,14 +224,6 @@
     "description": "テキスト、画像、省略、読み込み、エラーを比較できます。画像を選択すると拡大します。",
     "options": "state は表示状態を提供し、path はファイルの種類と名前を決定します。画像の表示・エラーコールバックがプレビューを更新します。",
     "state": "ファイルプレビューの状態"
-  },
-  "webPreview": {
-    "title": "WebPreviewPanelView · ウェブ内容",
-    "description": "タイトルバー、隔離の説明、各種制限を確認し、ローカル文書を更新できます。",
-    "options": "ランタイムが restriction を決めてから内容を渡します。children が内容を提供し、onRefresh が更新を要求します。この iframe はローカルの srcDoc を使います。",
-    "state": "ウェブプレビューの状態",
-    "frame": "ローカルのサンプルページ",
-    "refreshes": "更新回数：{{amount}}"
   },
   "session": {
     "title": "SessionInfoPopoverView · セッションの自動化",

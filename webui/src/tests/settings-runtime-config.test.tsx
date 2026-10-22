@@ -26,7 +26,8 @@ function runtimeSettings() {
     "tools.exec.sandbox_ro_binds": [],
     "tools.exec.sandbox_rw_binds": [],
     "agents.defaults.max_tool_iterations": 200,
-    "tools.web.proxy": "http://localhost:8080",
+    "network.proxy": "http://localhost:8080",
+    "tools.web.use_proxy": false,
   };
   return { ...payload, advanced: { ...payload.advanced, exec_max_runtime_limit: 86400 }, runtime_config: runtimeConfig };
 }
@@ -301,22 +302,47 @@ describe("Runtime configuration settings", () => {
   });
 
   it("preserves drafts when navigating away and supports explicit clearing", async () => {
-    renderSettingsView({ initialSection: "capabilities", initialSettings: runtimeSettings() });
-    const openWebSettings = () => {
-      fireEvent.click(within(screen.getByRole("region", { name: "Web access" })).getByRole("button", { name: "Configure" }));
-      fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
-    };
-    openWebSettings();
-    const proxy = screen.getByRole("textbox", { name: "Web proxy" });
+    let payload = runtimeSettings();
+    requestMutationMock.mockImplementation(async (_method, update) => {
+      payload = { ...payload, runtime_config: { ...payload.runtime_config, ...update.values } };
+      return payload;
+    });
+    renderSettingsView({ initialSection: "advanced", initialSettings: payload });
+    const proxy = screen.getByRole("textbox", { name: "Shared proxy" });
+    expect(proxy).toHaveAttribute("type", "text");
+    expect(proxy).toHaveValue("http://localhost:8080");
     fireEvent.change(proxy, { target: { value: "" } });
-    fireEvent.click(within(screen.getByRole("dialog", { name: "Web access" })).getByRole("button", { name: "Close" }));
     fireEvent.click(screen.getByRole("button", { name: "System" }));
-    fireEvent.click(screen.getByRole("button", { name: "Capabilities" }));
-    openWebSettings();
-    expect(screen.getByRole("textbox", { name: "Web proxy" })).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    expect(screen.getByLabelText("Shared proxy", { selector: "input" })).toHaveValue("");
+    fireEvent.click(within(screen.getByRole("region", { name: "Shared proxy" })).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
-      "settings.runtime_config.update", { values: { "tools.web.proxy": null } }, 20_000,
+      "settings.runtime_config.update", { values: { "network.proxy": null } }, 20_000,
     ));
+    fireEvent.click(screen.getByRole("button", { name: "System" }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    expect(screen.getByLabelText("Shared proxy", { selector: "input" })).toHaveValue("");
+  });
+
+  it("saves proxy address and authentication together without exposing the password in the address", async () => {
+    const payload = runtimeSettings();
+    payload.runtime_config!["network.proxy"] = "http://old:p%40ss@proxy:8080";
+    requestMutationMock.mockImplementation(async (_method, update) => ({
+      ...payload, runtime_config: { ...payload.runtime_config, ...update.values }, requires_restart: true,
+    }));
+    renderSettingsView({ initialSection: "advanced", initialSettings: payload });
+    const group = within(screen.getByRole("region", { name: "Shared proxy" }));
+    expect(group.getByRole("textbox", { name: "Shared proxy" })).toHaveValue("http://proxy:8080");
+    expect(group.getByLabelText("Password")).toHaveAttribute("type", "password");
+    expect(group.getByLabelText("Password")).toHaveValue("p@ss");
+    fireEvent.change(group.getByLabelText("Username"), { target: { value: "new@user" } });
+    fireEvent.change(group.getByLabelText("Password"), { target: { value: "p:@ %密" } });
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    fireEvent.click(group.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.runtime_config.update", { values: { "network.proxy": "http://new%40user:p%3A%40%20%25%E5%AF%86@proxy:8080" } }, 20_000,
+    ));
+    expect(group.getByRole("textbox", { name: "Shared proxy" })).toHaveValue("http://proxy:8080");
   });
 
   it("keeps an existing timezone alias selectable and accepts only listed search results", () => {

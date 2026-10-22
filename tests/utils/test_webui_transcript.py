@@ -36,6 +36,38 @@ def test_history_preserves_phase_qualified_stream_identity(history, event) -> No
     assert segment["turn_seq"] == 2
 
 
+@pytest.mark.parametrize("reason", [None, "idle", "context_pressure", "manual", "provider_native"])
+def test_compaction_reason_survives_sqlite_reload_and_older_page(history, tmp_path, reason) -> None:
+    from nanobot.session.manager import SessionManager
+
+    key = "websocket:compaction-reason"
+    history.append(key, {"event": "user", "chat_id": "compaction-reason", "text": "first"})
+    compaction = {
+        "event": "context_compaction", "chat_id": "compaction-reason",
+        "compaction_id": "compact-one", "phase": "succeeded",
+        "turn_id": "turn-one", "turn_seq": 1,
+        **({"reason": reason} if reason is not None else {}),
+    }
+    history.append(key, compaction)
+    history.append(key, {"event": "turn_end", "chat_id": "compaction-reason"})
+    _append_numbered_turn(history, key, "compaction-reason", 2)
+    reopened = SessionManager(tmp_path)
+
+    def build(**kwargs):
+        return reopened.project_history(key, lambda snapshot: transcript_module.build_webui_thread_response(
+            key, history=snapshot, **kwargs,
+        ))
+
+    latest = build(limit=2, direction="latest")
+    assert latest is not None
+    older = build(limit=2, before=latest["page"]["before_cursor"])
+    assert older is not None
+    [replayed] = [event for event in older["events"] if event["event"] == "context_compaction"]
+    assert {field: replayed[field] for field in compaction} == compaction
+    if reason is None:
+        assert "reason" not in replayed
+
+
 def test_append_stamps_created_at_ms(history, tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     monkeypatch.setattr("nanobot.webui.transcript.time.time", lambda: 1_700_000_000.0)

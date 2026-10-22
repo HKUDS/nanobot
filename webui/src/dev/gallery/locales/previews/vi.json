@@ -61,16 +61,6 @@
     "scope": "Phạm vi tệp",
     "hint": "Nhấp chuột phải để mở menu sao chép, hoặc đưa tiêu điểm vào tệp rồi nhấn Shift+F10."
   },
-  "webLinks": {
-    "title": "Web links · Menu liên kết",
-    "description": "Mở menu liên kết thực để chọn liên kết trong tin nhắn và sao chép địa chỉ.",
-    "options": "WebLink nhận thuộc tính liên kết. useMessageWebLinks thu thập liên kết đã hiển thị. MessageLinksMenu nhận các mục và hàm gọi lại để quay lại, đóng; expanded điều khiển chiều rộng. Mọi liên kết đều trỏ đến tài nguyên thư viện cục bộ.",
-    "width": "Chiều rộng menu liên kết",
-    "message": "Xem <gallery>thư viện thành phần</gallery> và <brand>ảnh thương hiệu</brand>.",
-    "close": "Đóng menu liên kết",
-    "open": "Xem liên kết trong tin nhắn",
-    "hint": "Nhấp chuột phải vào liên kết để sao chép địa chỉ. Menu thu thập liên kết từ tin nhắn đã hiển thị."
-  },
   "workbench": {
     "title": "PaneWorkbench · Nhiều ngăn",
     "description": "Đổi bố cục, kích hoạt hoặc thêm ngăn, điều chỉnh vị trí và kích thước.",
@@ -234,14 +224,6 @@
     "description": "So sánh văn bản, ảnh, nội dung bị cắt, đang tải và lỗi. Chọn ảnh để phóng to.",
     "options": "state cung cấp trạng thái hiển thị; path xác định loại và tên tệp. Hàm gọi lại mở ảnh và lỗi ảnh cập nhật bản xem trước.",
     "state": "Trạng thái xem trước tệp"
-  },
-  "webPreview": {
-    "title": "WebPreviewPanelView · Nội dung web",
-    "description": "Khám phá thanh tiêu đề, thông tin cách ly và giới hạn; làm mới tài liệu cục bộ.",
-    "options": "Runtime chọn restriction trước khi cung cấp nội dung. children cung cấp nội dung; onRefresh yêu cầu làm mới. iframe này dùng srcDoc cục bộ.",
-    "state": "Trạng thái xem trước web",
-    "frame": "Trang web ví dụ cục bộ",
-    "refreshes": "Số lần làm mới: {{amount}}"
   },
   "session": {
     "title": "SessionInfoPopoverView · Tác vụ tự động của phiên",

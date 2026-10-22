@@ -7,9 +7,6 @@ import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailab
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { PreviewPane } from "@/components/PreviewPane";
 import { FileActionsProvider } from "@/components/FileActions";
-import { WebPreviewContext } from "@/components/WebLink";
-import { WebPreviewPanel } from "@/components/WebPreviewPanel";
-import { parseWebLink } from "@/lib/web-preview";
 import { createFilePreviewResource } from "@/lib/file-preview-resource";
 import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
@@ -538,7 +535,7 @@ export function ThreadShell({
   } | null>(null);
   const [heroGreetingKey, setHeroGreetingKey] = useState(randomHeroGreetingKey);
   const [submittedViewportTurnId, setSubmittedViewportTurnId] = useState<string | null>(null);
-  const { state: previewState, openFile, resolveFile, openWeb, selectTab, closeTab, close: closePreview, setWidth: setFilePreviewWidth } =
+  const { state: previewState, openFile, resolveFile, selectTab, closeTab, close: closePreview, setWidth: setFilePreviewWidth } =
     useFilePreviewState(previewSessionKey, filePreviewStore);
   const [closingPreview, setClosingPreview] = useState<{ key: string; state: FilePreviewState } | null>(null);
   const filePreviewClosing = closingPreview?.key === previewSessionKey;
@@ -1127,13 +1124,6 @@ export function ThreadShell({
     loadPreview: filePreviews.load,
   }), [resolveFileMetadata, filePreviews]);
 
-  const openWebPreview = useCallback((url: string) => {
-    const parsed = parseWebLink(url);
-    if (!parsed) return;
-    cancelPreviewClose();
-    openWeb(parsed.href);
-  }, [cancelPreviewClose, openWeb]);
-
   useEffect(() => {
     if (!previewOpen || !headerActive) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1452,7 +1442,6 @@ export function ThreadShell({
           resolve={previewSessionKey ? resolveFilePreviewAvailability : undefined}
         >
           <FileActionsProvider value={previewSessionKey ? fileActions : undefined}>
-          <WebPreviewContext.Provider value={previewSessionKey ? openWebPreview : undefined}>
           <ThreadViewport
             ref={viewportRef}
             messages={displayMessages}
@@ -1485,7 +1474,6 @@ export function ThreadShell({
             onForkFromMessage={onForkChat ? handleForkFromMessage : undefined}
             onQuoteSelection={session ? handleQuoteSelection : undefined}
           />
-          </WebPreviewContext.Provider>
           </FileActionsProvider>
         </FilePreviewAvailabilityProvider>
       </div>
@@ -1515,18 +1503,16 @@ export function ThreadShell({
           onClose={handleCloseFilePreview}
           onResizeStart={handleFilePreviewResizeStart}
         >
-          {activePreview.kind === "file" ? (
-            <FilePreviewPanel
-              key={activePreview.id}
-              sessionKey={previewSessionKey}
-              path={activePreview.value}
-              token={token}
-              loadPreview={filePreviews.load}
-              initialPreview={filePreviews.peek(activePreview.value)}
-              onOpenFilePreview={openFilePreview}
-              onResolvePath={resolveFile}
-            />
-          ) : <WebPreviewPanel key={activePreview.id} url={activePreview.value} />}
+          <FilePreviewPanel
+            key={activePreview.id}
+            sessionKey={previewSessionKey}
+            path={activePreview.value}
+            token={token}
+            loadPreview={filePreviews.load}
+            initialPreview={filePreviews.peek(activePreview.value)}
+            onOpenFilePreview={openFilePreview}
+            onResolvePath={resolveFile}
+          />
         </PreviewPane>
         </FileActionsProvider>
       ) : null}

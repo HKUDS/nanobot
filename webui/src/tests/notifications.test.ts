@@ -22,6 +22,9 @@ describe("shared notification contract", () => {
     expect(decodeNotification({ event: "delta", text: "hello" })).toBeUndefined();
     expect(decodeNotification({ ...fixtures[0], phase: "unknown" })).toBeNull();
     expect(decodeNotification({ ...fixtures[0], compaction_id: "" })).toBeNull();
+    for (const reason of [null, 42, "unknown"]) {
+      expect(decodeNotification({ ...fixtures[0], reason })).toBeNull();
+    }
   });
 
   it("allows one terminal transition, including terminal-first hydration", () => {

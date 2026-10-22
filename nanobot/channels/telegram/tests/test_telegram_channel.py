@@ -28,6 +28,7 @@ from nanobot.channels.telegram.runtime import (
     _StreamBuf,
     _telegram_command_text,
 )
+from nanobot.config.network import NetworkConfig
 from nanobot.events import ContextCompactionEvent
 
 
@@ -349,10 +350,11 @@ async def test_start_creates_separate_pools_with_proxy(monkeypatch) -> None:
         enabled=True,
         token="123:abc",
         allow_from=["*"],
-        proxy="http://127.0.0.1:7890",
+        use_proxy=True,
     )
     bus = MessageBus()
-    channel = TelegramChannel(config, bus)
+    network = NetworkConfig(proxy="http://127.0.0.1:7890")
+    channel = TelegramChannel(config, bus, network=network)
     app = _FakeApp(lambda: setattr(channel, "_running", False))
     builder = _FakeBuilder(app)
 
@@ -366,8 +368,8 @@ async def test_start_creates_separate_pools_with_proxy(monkeypatch) -> None:
 
     assert len(_FakeHTTPXRequest.instances) == 2
     api_req, poll_req = _FakeHTTPXRequest.instances
-    assert api_req.kwargs["proxy"] == config.proxy
-    assert poll_req.kwargs["proxy"] == config.proxy
+    assert api_req.kwargs["proxy"] == network.proxy
+    assert poll_req.kwargs["proxy"] == network.proxy
     assert api_req.kwargs["connection_pool_size"] == 32
     assert poll_req.kwargs["connection_pool_size"] == 4
     assert builder.request_value is api_req

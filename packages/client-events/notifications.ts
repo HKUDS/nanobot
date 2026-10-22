@@ -10,7 +10,10 @@ export interface RecoveryState {
   failure_error_kind?: string
 }
 
+export type CompactionReason = "idle" | "context_pressure" | "manual" | "provider_native"
+
 export interface ContextCompaction {
+  reason?: CompactionReason
   id: string
   phase: "started" | "succeeded" | "failed" | "cancelled"
 }
@@ -32,6 +35,7 @@ export type NotificationEvent =
       turn_id?: string
       compaction_id: string
       phase: ContextCompaction["phase"]
+      reason?: CompactionReason
     }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -40,6 +44,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function optional(value: unknown, type: "boolean" | "number" | "string"): boolean {
   return value === undefined || typeof value === type
+}
+
+export function isCompactionReason(value: unknown): value is CompactionReason {
+  return value === "idle" || value === "context_pressure" || value === "manual" || value === "provider_native"
 }
 
 export function isCompactionPhase(value: unknown): value is ContextCompaction["phase"] {
@@ -69,7 +77,9 @@ export function decodeNotification(value: unknown): NotificationEvent | null | u
     return isRecoveryState(value) ? value as unknown as NotificationEvent : null
   }
   return typeof value.compaction_id === "string" && value.compaction_id.length > 0
-    && isCompactionPhase(value.phase) ? value as unknown as NotificationEvent : null
+    && isCompactionPhase(value.phase)
+    && (value.reason === undefined || isCompactionReason(value.reason))
+    ? value as unknown as NotificationEvent : null
 }
 
 function isRetryStatus(value: Record<string, unknown>): boolean {
