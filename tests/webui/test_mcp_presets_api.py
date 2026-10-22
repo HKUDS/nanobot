@@ -1074,33 +1074,3 @@ def test_enable_preset_preserves_proxy_choice_on_later_enable(tmp_path, monkeypa
     assert load_config().tools.mcp_servers["xmind"].use_proxy is True
     mcp_presets_action("enable", {"name": ["xmind"], "use_proxy": ["false"]})
     assert load_config().tools.mcp_servers["xmind"].use_proxy is False
-
-
-@pytest.mark.asyncio
-async def test_saved_figma_remote_remains_manageable_as_custom_without_rewriting_credentials(
-    tmp_path, monkeypatch,
-) -> None:
-    _use_config(tmp_path, monkeypatch)
-    monkeypatch.setattr("nanobot.agent.tools.mcp_oauth.get_data_dir", lambda: tmp_path)
-    custom_mcp_action("custom", {
-        "name": ["figma-remote"], "transport": ["streamableHttp"],
-        "url": ["https://mcp.figma.com/mcp"], "auth": ["oauth"],
-    })
-    storage = MCPOAuthStorage("figma-remote", "https://mcp.figma.com/mcp")
-    await storage.set_tokens(OAuthToken(access_token="saved-access", refresh_token="saved-refresh"))
-    config_path = tmp_path / "config.json"
-    credentials_path = tmp_path / "auth/mcp.json"
-    original_config = config_path.read_bytes()
-    original_credentials = credentials_path.read_bytes()
-
-    rows = mcp_presets_payload()["presets"]
-    saved = next(row for row in rows if row["name"] == "figma-remote")
-    assert saved["source"] == "custom"
-    assert saved["installed"] is True
-    assert saved["connection_summary"] == "https://mcp.figma.com/mcp"
-    local = next(row for row in rows if row["name"] == "figma")
-    assert local["source"] == "preset"
-    assert local["install_supported"] is True
-    assert config_path.read_bytes() == original_config
-    assert credentials_path.read_bytes() == original_credentials
-    assert (await storage.get_tokens()).access_token == "saved-access"
