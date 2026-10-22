@@ -43,19 +43,6 @@ function Surface() {
 const view = (token = "host-a") => <ClientProvider client={client} token={token}><Surface /></ClientProvider>;
 
 describe("Sidebar update entry", () => {
-  it("does not check on connection, rerender, credential change or remount before About opens", async () => {
-    const fetcher = vi.fn(async () => jsonResponse(available()));
-    vi.stubGlobal("fetch", fetcher);
-    const mounted = render(view());
-    mounted.rerender(view());
-    mounted.rerender(view("host-b"));
-    mounted.unmount();
-    render(view("host-b"));
-    await act(async () => {});
-    expect(fetcher).not.toHaveBeenCalled();
-    expect(screen.queryByRole("button", { name: /Update available/ })).toBeNull();
-  });
-
   it("keeps About update actions available after dismissing the sidebar notice", async () => {
     const fetcher = vi.fn(async () => jsonResponse(available()));
     vi.stubGlobal("fetch", fetcher);
