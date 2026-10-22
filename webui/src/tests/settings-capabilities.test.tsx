@@ -353,12 +353,17 @@ describe("Settings capabilities", () => {
     expect(screen.queryByRole("switch", { name: "Use proxy" })).not.toBeInTheDocument();
     const address = "http://user:secret@new-proxy.example:7890";
     fireEvent.change(proxy, { target: { value: address } });
+    expect(proxy).toHaveValue("http://new-proxy.example:7890");
+    expect(screen.getByLabelText("Password")).toHaveAttribute("type", "password");
+    fireEvent.click(within(screen.getByRole("region", { name: "Shared proxy" })).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
       "settings.runtime_config.update", { values: { "network.proxy": address } }, 20_000,
     ));
     fireEvent.click(screen.getByRole("button", { name: "System" }));
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
-    expect(screen.getByLabelText("Shared proxy", { selector: "input" })).toHaveValue(address);
+    expect(screen.getByLabelText("Shared proxy", { selector: "input" })).toHaveValue("http://new-proxy.example:7890");
+    expect(screen.getByLabelText("Username")).toHaveValue("user");
+    expect(screen.getByLabelText("Password")).toHaveValue("secret");
     expect(document.body).not.toHaveTextContent(address);
   });
 

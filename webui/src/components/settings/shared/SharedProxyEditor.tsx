@@ -23,7 +23,7 @@ export function SharedProxyEditor({ value, onChange, disabled, inputRef, address
   const reference = isProxyUrlReference(parts.address);
   const credentialsDisabled = disabled || !parts.address.trim() || reference;
   return (
-    <div className="w-full space-y-3">
+    <div data-shared-proxy-editor className="w-full space-y-3">
       <Input {...addressProps} ref={inputRef} aria-label={t("settings.runtimeConfig.fields.network_proxy.label")}
         type="text" value={parts.address} disabled={disabled} autoComplete="off" spellCheck={false}
         placeholder="http://127.0.0.1:7890" className="h-10 rounded-control text-[13px]"
