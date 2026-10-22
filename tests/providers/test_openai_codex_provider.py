@@ -698,7 +698,8 @@ async def test_codex_retry_uses_structured_transient_error_metadata(monkeypatch,
 
     assert response.content == "ok"
     assert calls == 2
-    assert delays == [1]
+    assert len(delays) == 1
+    assert 0.5 <= delays[0] <= 1.0
 
 
 @pytest.mark.asyncio

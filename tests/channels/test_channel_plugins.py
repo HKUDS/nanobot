@@ -2995,6 +2995,7 @@ async def test_send_with_retry_succeeds_first_try():
     mgr.bus = MessageBus()
     mgr.channels = {"failing": _FailingChannel(fake_config, mgr.bus)}
     mgr._dispatch_task = None
+    mgr._outbound_sends = asyncio.Semaphore(32)
 
     msg = OutboundMessage(channel="failing", chat_id="123", content="test")
     await mgr._send_with_retry(mgr.channels["failing"], msg)
@@ -3032,6 +3033,7 @@ async def test_send_with_retry_retries_on_failure():
     mgr.bus = MessageBus()
     mgr.channels = {"failing": _FailingChannel(fake_config, mgr.bus)}
     mgr._dispatch_task = None
+    mgr._outbound_sends = asyncio.Semaphore(32)
 
     msg = OutboundMessage(channel="failing", chat_id="123", content="test")
 
@@ -3073,6 +3075,7 @@ async def test_send_with_retry_no_retry_when_max_is_zero():
     mgr.bus = MessageBus()
     mgr.channels = {"failing": _FailingChannel(fake_config, mgr.bus)}
     mgr._dispatch_task = None
+    mgr._outbound_sends = asyncio.Semaphore(32)
 
     msg = OutboundMessage(channel="failing", chat_id="123", content="test")
 
@@ -3123,6 +3126,7 @@ async def test_send_with_retry_calls_send_delta():
     mgr.bus = MessageBus()
     mgr.channels = {"streaming": _StreamingChannel(fake_config, mgr.bus)}
     mgr._dispatch_task = None
+    mgr._outbound_sends = asyncio.Semaphore(32)
 
     msg = outbound_message_for_event(
         channel="streaming",
@@ -3191,6 +3195,7 @@ async def test_send_with_retry_skips_send_when_streamed():
     mgr.bus = MessageBus()
     mgr.channels = {"streamed": _StreamedChannel(fake_config, mgr.bus)}
     mgr._dispatch_task = None
+    mgr._outbound_sends = asyncio.Semaphore(32)
 
     msg = outbound_message_for_event(
         channel="streamed",
@@ -3307,6 +3312,7 @@ async def test_send_with_retry_propagates_cancelled_error():
     mgr.bus = MessageBus()
     mgr.channels = {"cancelling": _CancellingChannel(fake_config, mgr.bus)}
     mgr._dispatch_task = None
+    mgr._outbound_sends = asyncio.Semaphore(32)
 
     msg = OutboundMessage(channel="cancelling", chat_id="123", content="test")
 
@@ -3344,6 +3350,7 @@ async def test_send_with_retry_propagates_cancelled_error_during_sleep():
     mgr.bus = MessageBus()
     mgr.channels = {"failing": _FailingChannel(fake_config, mgr.bus)}
     mgr._dispatch_task = None
+    mgr._outbound_sends = asyncio.Semaphore(32)
 
     msg = OutboundMessage(channel="failing", chat_id="123", content="test")
 
@@ -3835,6 +3842,7 @@ async def test_restart_notice_retries_until_running_channel_accepts_delivery():
     mgr = ChannelManager.__new__(ChannelManager)
     mgr.config = fake_config
     mgr.bus = MessageBus()
+    mgr._outbound_sends = asyncio.Semaphore(32)
     channel = _EventuallyDeliverableChannel(fake_config, mgr.bus)
     channel._running = True
     mgr.channels = {"discord": channel}

@@ -118,6 +118,7 @@ async def test_channel_manager_does_not_retry_permanent_weixin_error(monkeypatch
     manager = ChannelManager.__new__(ChannelManager)
     manager.config = Config.model_validate({"channels": {"sendMaxRetries": 3}})
     manager.bus = MessageBus()
+    manager._outbound_sends = asyncio.Semaphore(32)
     channel = _channel()
     channel.send = AsyncMock(
         side_effect=WeixinAPIError(
