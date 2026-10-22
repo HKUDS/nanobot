@@ -2118,7 +2118,7 @@
         "too_many_images": "Máx. de {{max}} imagens por mensagem",
         "magic_mismatch": "O arquivo não parece uma imagem real",
         "decode_failed": "Não foi possível decodificar esta imagem",
-        "too_large": "A imagem é grande demais — tente uma menor",
+        "too_large": "O arquivo ({{size}}) excede o limite de upload de {{max}}",
         "total_too_large": "Os anexos são grandes demais em conjunto — remova alguns ou use arquivos menores",
         "io": "Não foi possível ler este arquivo"
       },

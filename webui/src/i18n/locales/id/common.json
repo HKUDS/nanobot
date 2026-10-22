@@ -2089,7 +2089,7 @@
         "too_many_images": "Maksimal {{max}} gambar per pesan",
         "magic_mismatch": "File ini tampaknya bukan gambar asli",
         "decode_failed": "Tidak dapat mendekode gambar ini",
-        "too_large": "File terlalu besar — coba yang lebih kecil",
+        "too_large": "Ukuran file {{size}} melebihi batas unggahan {{max}}",
         "total_too_large": "Total lampiran terlalu besar — hapus beberapa atau gunakan file yang lebih kecil",
         "io": "Tidak dapat membaca file ini"
       },

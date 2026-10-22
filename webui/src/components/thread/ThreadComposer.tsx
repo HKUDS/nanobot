@@ -96,6 +96,7 @@ import {
 } from "@/components/thread/ComposerUsagePopover";
 import {
   ACCEPT_ATTR,
+  acceptedAttachmentKind,
   MAX_ATTACHMENTS_PER_MESSAGE,
   MAX_ATTACHMENT_BYTES,
   MAX_TOTAL_ATTACHMENT_BYTES,
@@ -156,8 +157,8 @@ type VoiceShortcutPlatform = "apple" | "chromeos" | "linux" | "other" | "windows
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
 function utf8Bytes(value: string): number {
@@ -390,8 +391,8 @@ function mergeQueuedPrompt(first: QueuedPrompt, next: QueuedPrompt): QueuedPromp
   };
 }
 
-function queuedAttachmentBytes(image: QueuedPromptImage): number {
-  if (image.local) return image.local.size;
+function queuedUploadBytes(image: QueuedPromptImage): number {
+  if (image.local) return 0;
   const dataUrl = image.dataUrl ?? "";
   const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
   const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
@@ -1212,6 +1213,7 @@ export function ThreadComposer({
 
   const maxAttachments = ingressLimits?.attachments.max_count
     ?? MAX_ATTACHMENTS_PER_MESSAGE;
+  const maxFileBytes = ingressLimits?.attachments.max_file_bytes ?? MAX_ATTACHMENT_BYTES;
   const maxTextBytes = ingressLimits?.message.max_text_bytes ?? 64 * 1024;
   const { images, enqueue, addLocal, remove, clear, restoreReadyImages, encoding: encodingFiles, full } =
     useAttachedImages({ ingressLimits });
@@ -1227,7 +1229,7 @@ export function ThreadComposer({
   }, [enqueue, addLocal, initialDraft]);
 
   const formatRejection = useCallback(
-    (reason: AttachmentError): string => {
+    (reason: Exclude<AttachmentError, "too_large">): string => {
       const key = `thread.composer.imageRejected.${reason}`;
       const fallback = reason === "too_many_videos"
         ? "Max 1 video per message"
@@ -1237,12 +1239,17 @@ export function ThreadComposer({
           ? "Empty files cannot be attached"
           : reason === "total_too_large"
             ? "Attachments are too large together — remove some or use smaller files"
-            : reason === "too_large"
-              ? "File is too large"
-              : "Unsupported file type";
+            : "Unsupported file type";
       return t(key, { max: maxAttachments, defaultValue: fallback });
     },
     [maxAttachments, t],
+  );
+
+  const formatUploadTooLarge = useCallback(
+    (size: number, maximum: number) => t("thread.composer.imageRejected.too_large", {
+      size: formatBytes(size), max: formatBytes(maximum),
+    }),
+    [t],
   );
 
   const textTooLargeMessage = useCallback(
@@ -1259,12 +1266,15 @@ export function ThreadComposer({
       secondEnterPromptIdRef.current = null;
       const { rejected } = enqueue(files);
       if (rejected.length > 0) {
-        setInlineError(formatRejection(rejected[0].reason));
+        const { reason, file } = rejected[0];
+        setInlineError(reason === "too_large"
+          ? formatUploadTooLarge(file.size, acceptedAttachmentKind(file) === "video" ? MAX_VIDEO_BYTES : maxFileBytes)
+          : formatRejection(reason));
       } else {
         setInlineError(null);
       }
     },
-    [enqueue, formatRejection, interactionDisabled],
+    [enqueue, formatRejection, formatUploadTooLarge, interactionDisabled, maxFileBytes],
   );
 
   const {
@@ -2046,10 +2056,11 @@ export function ThreadComposer({
     const videos = attachments.filter((item) => item.kind === "video").length;
     if (videos > MAX_VIDEOS_PER_MESSAGE) return formatRejection("too_many_videos");
     if (attachments.length - videos > maxAttachments) return formatRejection("too_many_attachments");
-    if (attachments.some((item) => queuedAttachmentBytes(item) > (item.kind === "video" ? MAX_VIDEO_BYTES : ingressLimits?.attachments.max_file_bytes ?? MAX_ATTACHMENT_BYTES))) {
-      return formatRejection("too_large");
+    const oversized = attachments.find((item) => queuedUploadBytes(item) > (item.kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes));
+    if (oversized) {
+      return formatUploadTooLarge(queuedUploadBytes(oversized), oversized.kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes);
     }
-    const total = attachments.reduce((sum, item) => sum + (item.kind === "video" ? 0 : queuedAttachmentBytes(item)), 0);
+    const total = attachments.reduce((sum, item) => sum + (item.kind === "video" ? 0 : queuedUploadBytes(item)), 0);
     if (total > (ingressLimits?.attachments.max_total_bytes ?? MAX_TOTAL_ATTACHMENT_BYTES)) {
       return formatRejection("total_too_large");
     }
@@ -2057,7 +2068,7 @@ export function ThreadComposer({
       return t("thread.composer.queued.tooManyMentions", { max: SESSION_MENTIONS_LIMIT });
     }
     return null;
-  }, [formatRejection, ingressLimits, maxAttachments, maxTextBytes, t, textTooLargeMessage]);
+  }, [formatRejection, formatUploadTooLarge, ingressLimits, maxAttachments, maxFileBytes, maxTextBytes, t, textTooLargeMessage]);
 
   const collectGuidancePrompt = useCallback((): QueuedPrompt => {
     queuedPromptCounterRef.current += 1;
@@ -2645,7 +2656,9 @@ export function ThreadComposer({
                     current: formatBytes(current),
                   })
                 }
-                formatError={formatRejection}
+                formatError={(reason) => reason === "too_large"
+                  ? formatUploadTooLarge(img.file.size, img.kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes)
+                  : formatRejection(reason)}
                 onRemove={() => removeChip(img.id)}
                 onKeyDown={onChipKey(img.id)}
                 registerRef={(el) => {

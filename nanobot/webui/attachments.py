@@ -49,9 +49,11 @@ def inspect_local_attachment(
         raise WebUIFilePreviewError(403, "file is not readable") from exc
     except OSError as exc:
         raise WebUIFilePreviewError(404, "file is unavailable") from exc
+    if info.st_size == 0:
+        raise WebUIFilePreviewError(400, "Empty files cannot be attached")
     mime = _MIME_BY_SUFFIX.get(resolved.suffix.lower()) or mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
     try:
-        validate_attachment_batch([(mime, info.st_size)], limits=limits)
+        validate_attachment_batch([mime], limits=limits)
     except ValueError as exc:
         raise WebUIFilePreviewError(400, str(exc)) from exc
     kind = "video" if mime.startswith("video/") else "image" if mime.startswith("image/") else "file"

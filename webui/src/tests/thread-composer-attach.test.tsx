@@ -431,8 +431,8 @@ describe("local attachment paths and video ingress", () => {
   const local = { path: "C:\\project\\my clip.mp4", name: "my clip.mp4", size: 12,
     mime: "video/mp4", kind: "video" as const, url: "/api/media/sig/local" };
 
-  it("confirms an independently pasted path and sends only the borrowed reference", async () => {
-    const inspect = vi.fn().mockResolvedValue(local);
+  it("confirms a large pasted video path and sends only the borrowed reference", async () => {
+    const inspect = vi.fn().mockResolvedValue({ ...local, size: 64 * 1024 * 1024 + 1 });
     const onSend = vi.fn();
     render(<ThreadComposer onSend={onSend} onInspectAttachment={inspect} />);
     const input = screen.getByLabelText(/message input/i);
@@ -458,6 +458,36 @@ describe("local attachment paths and video ingress", () => {
     }
     expect(inspect).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId("composer-chip")).not.toBeInTheDocument();
+  });
+
+  it("does not charge large local documents against a picked document's upload budget", async () => {
+    const onSend = vi.fn();
+    const document = { ...local, path: "C:\\project\\large.pdf", name: "large.pdf", mime: "application/pdf", kind: "file" as const, size: 64 * 1024 * 1024 + 1 };
+    render(<ThreadComposer onSend={onSend} onInspectAttachment={vi.fn().mockResolvedValue(document)} ingressLimits={ingressLimits({ maxFileBytes: 8, maxTotalBytes: 8 })} />);
+    const input = screen.getByLabelText(/message input/i);
+    fireEvent.paste(input, { clipboardData: { items: [], getData: () => document.path } });
+    await screen.findByText(document.name);
+    const picker = input.closest("form")!.querySelector('input[type="file"]')!;
+    fireEvent.change(picker, { target: { files: [pdfFile("upload.pdf", 8)] } });
+    await waitFor(() => expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled());
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith("", [
+      expect.objectContaining({ media: { path: document.path, name: document.name } }),
+      expect.objectContaining({ media: expect.objectContaining({ name: "upload.pdf", data_url: expect.any(String) }) }),
+    ], undefined);
+  });
+
+  it("explains the size and limit of a rejected browser video without losing the draft", () => {
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} />);
+    const input = screen.getByLabelText(/message input/i);
+    fireEvent.change(input, { target: { value: "keep this text" } });
+    const file = new File([new Uint8Array(21 * 1024 * 1024)], "large.mp4", { type: "video/mp4" });
+    fireEvent.change(input.closest("form")!.querySelector('input[type="file"]')!, { target: { files: [file] } });
+    expect(screen.getByRole("alert")).toHaveTextContent("21.0 MiB");
+    expect(screen.getByRole("alert")).toHaveTextContent("20.0 MiB");
+    expect(input).toHaveValue("keep this text");
+    expect(onSend).not.toHaveBeenCalled();
   });
 
   it("uploads picked video bytes with the existing independent video size/count allowance", async () => {

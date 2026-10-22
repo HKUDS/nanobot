@@ -6,7 +6,7 @@ import pytest
 from websockets.datastructures import Headers
 from websockets.http11 import Request
 
-from nanobot.channels.websocket.attachment_policy import MAX_VIDEO_BYTES, AttachmentIngressLimits
+from nanobot.channels.websocket.attachment_policy import AttachmentIngressLimits
 from nanobot.security.workspace_access import default_workspace_scope
 from nanobot.webui.attachments import inspect_local_attachment
 from nanobot.webui.file_preview import WebUIFilePreviewError
@@ -24,13 +24,16 @@ def test_inspect_literal_relative_path_without_reading_or_copying(tmp_path, monk
 
 
 @pytest.mark.parametrize("name", ["image.png", "notes.md", "document.pdf", "video.mov", "video.webm"])
-def test_local_supported_formats_reuse_upload_limits(tmp_path, name):
+def test_local_supported_formats_do_not_consume_upload_byte_limits(tmp_path, name):
     source = tmp_path / name
-    source.write_bytes(b"data")
-    assert inspect_local_attachment(name, scope=default_workspace_scope(tmp_path, True), limits=AttachmentIngressLimits())["size"] == 4
+    size = 64 * 1024 * 1024 + 1
+    with source.open("wb") as output:
+        output.truncate(size)
+    limits = AttachmentIngressLimits(max_file_bytes=3, max_total_bytes=3)
+    assert inspect_local_attachment(name, scope=default_workspace_scope(tmp_path, True), limits=limits)["size"] == size
 
 
-def test_reject_missing_directory_outside_unreadable_and_oversize(tmp_path, monkeypatch):
+def test_reject_missing_directory_outside_empty_and_unreadable(tmp_path, monkeypatch):
     workspace = tmp_path / "project"
     workspace.mkdir()
     source = tmp_path / "outside.mp4"
@@ -41,9 +44,8 @@ def test_reject_missing_directory_outside_unreadable_and_oversize(tmp_path, monk
             inspect_local_attachment(path, scope=scope, limits=AttachmentIngressLimits())
         assert error.value.status == status
     video = workspace / "large.mp4"
-    with video.open("wb") as output:
-        output.truncate(MAX_VIDEO_BYTES + 1)
-    with pytest.raises(WebUIFilePreviewError, match="size"):
+    video.touch()
+    with pytest.raises(WebUIFilePreviewError, match="[Ee]mpty"):
         inspect_local_attachment(str(video), scope=scope, limits=AttachmentIngressLimits())
     monkeypatch.setattr("nanobot.webui.attachments.os.open", Mock(side_effect=PermissionError))
     with pytest.raises(WebUIFilePreviewError, match="readable"):

@@ -57,6 +57,8 @@ export type AttachmentError =
   | "too_large"          // even after normalization we exceed the budget
   | "io";                // file read failed at the browser layer
 
+type AttachmentCountError = Extract<AttachmentError, "too_many_attachments" | "too_many_videos">;
+
 export const MAX_ATTACHMENTS_PER_MESSAGE = 4;
 export const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024;
 export const MAX_TOTAL_ATTACHMENT_BYTES = 24 * 1024 * 1024;
@@ -227,7 +229,7 @@ export interface UseAttachedImagesApi {
   enqueue: (files: Iterable<File>, options?: { restoringDraft: boolean }) => {
     rejected: Array<{ file: File; reason: AttachmentError }>;
   };
-  addLocal: (attachment: LocalAttachment, options?: { restoringDraft: boolean }) => AttachmentError | null;
+  addLocal: (attachment: LocalAttachment, options?: { restoringDraft: boolean }) => AttachmentCountError | null;
   remove: (id: string) => { nextFocusId: string | null };
   /** Revoke every staged blob URL and drop all attachments. Called after a
    * successful submit — the optimistic bubble holds onto an independent
@@ -292,7 +294,7 @@ export function useAttachedImages({
       let slot = maxAttachments - imagesRef.current.filter((item) => item.kind !== "video").length;
       let videoSlot = MAX_VIDEOS_PER_MESSAGE - imagesRef.current.filter((item) => item.kind === "video").length;
       let projectedDecodedBytes = imagesRef.current.reduce(
-        (total, image) => total + (image.kind === "video" ? 0 : (
+        (total, image) => total + (image.local || image.kind === "video" ? 0 : (
           image.encodedBytes
           ?? (image.kind === "image" ? Math.min(image.file.size, maxFileBytes) : image.file.size)
         )),
@@ -377,15 +379,12 @@ export function useAttachedImages({
     [maxAttachments, maxFileBytes, maxTotalBytes, setEntry],
   );
 
-  const addLocal = useCallback((local: LocalAttachment, { restoringDraft = false } = {}): AttachmentError | null => {
+  const addLocal = useCallback((local: LocalAttachment, { restoringDraft = false } = {}): AttachmentCountError | null => {
     const current = imagesRef.current;
     const videos = current.filter((item) => item.kind === "video").length;
     if (!restoringDraft && (local.kind === "video" ? videos >= MAX_VIDEOS_PER_MESSAGE : current.length - videos >= maxAttachments)) {
       return local.kind === "video" ? "too_many_videos" : "too_many_attachments";
     }
-    if (!restoringDraft && local.size > (local.kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes)) return "too_large";
-    const bytes = current.reduce((sum, item) => sum + (item.kind === "video" ? 0 : item.encodedBytes ?? item.file.size), 0);
-    if (!restoringDraft && bytes + (local.kind === "video" ? 0 : local.size) > maxTotalBytes) return "total_too_large";
     const next: AttachedAttachment[] = [...current, {
       id: uuid(), kind: local.kind, local, status: "ready", encodedBytes: local.size,
       file: { name: local.name, size: local.size, type: local.mime },
@@ -394,7 +393,7 @@ export function useAttachedImages({
     imagesRef.current = next;
     setImages(next);
     return null;
-  }, [maxAttachments, maxFileBytes, maxTotalBytes]);
+  }, [maxAttachments]);
 
   const remove = useCallback((id: string) => {
     let nextFocusId: string | null = null;

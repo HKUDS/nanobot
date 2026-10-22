@@ -16,14 +16,13 @@ from pathlib import Path
 
 from nanobot.channels.websocket.attachment_policy import (
     DOCUMENT_MIME_ALLOWED,
-    MAX_VIDEO_BYTES,
     MAX_VIDEOS_PER_MESSAGE,
     UPLOAD_IDLE_TIMEOUT_SECONDS,
     UPLOAD_MIME_ALLOWED,
     UPLOAD_TIMEOUT_SECONDS,
-    VIDEO_MIME_ALLOWED,
     AttachmentIngressLimits,
-    validate_attachment_batch,
+    validate_upload_batch,
+    validate_upload_size,
 )
 from nanobot.utils.media_decode import media_destination
 
@@ -95,9 +94,10 @@ class AttachmentStore:
             raise AttachmentUploadError("Missing authenticated owner")
         if mime not in UPLOAD_MIME_ALLOWED:
             raise AttachmentUploadError("Unsupported attachment MIME")
-        limit = MAX_VIDEO_BYTES if mime in VIDEO_MIME_ALLOWED else self.limits.max_file_bytes
-        if isinstance(size, bool) or not 0 < size <= limit:
-            raise AttachmentUploadError("Invalid attachment size")
+        try:
+            validate_upload_size(mime, size, limits=self.limits)
+        except ValueError as exc:
+            raise AttachmentUploadError(str(exc)) from exc
         if self._active + len(self._entries) >= self.max_pending:
             raise AttachmentUploadError("Too many pending attachments")
         if self._reserved_bytes + size > self.max_pending_bytes:
@@ -165,7 +165,7 @@ class AttachmentStore:
                 raise AttachmentUploadError("Invalid attachment reference")
             entries.append(entry)
         try:
-            validate_attachment_batch([(e.mime, e.size) for e in entries], limits=self.limits)
+            validate_upload_batch([(e.mime, e.size) for e in entries], limits=self.limits)
         except ValueError as exc:
             raise AttachmentUploadError(str(exc)) from exc
         return entries

@@ -255,3 +255,19 @@ async def test_filename_collision_preserves_another_uploads_crash_marker(tmp_pat
     assert (tmp_path / ".pending-attachments" / path.name).exists()
     assert path.read_bytes() == b"attachment"
     store.clear()
+
+
+async def test_video_upload_limit_explains_size_before_reading_body(tmp_path):
+    from nanobot.channels.websocket.attachment_policy import MAX_VIDEO_BYTES
+
+    async def unread():
+        pytest.fail("oversized upload body must not be consumed")
+        yield b""
+
+    with pytest.raises(AttachmentUploadError) as error:
+        await AttachmentStore(tmp_path).upload(
+            unread(), owner="owner", mime="video/mp4", size=MAX_VIDEO_BYTES + 1,
+        )
+    assert "20 MiB" in str(error.value)
+    assert "20,971,521" in str(error.value)
+    assert not list(tmp_path.iterdir())

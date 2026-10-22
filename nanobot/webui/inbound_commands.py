@@ -712,8 +712,7 @@ class WebUICommandRouter:
             ]
             uploaded = self._uploads.store.inspect(references, owner=upload_owner) if references else []
             validate_attachment_batch(
-                [(item["mime"], item["size"]) for item in local]
-                + [(item.mime, item.size) for item in uploaded],
+                [item["mime"] for item in local] + [item.mime for item in uploaded],
                 limits=self._uploads.store.limits,
             )
             media_paths = [

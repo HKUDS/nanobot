@@ -411,3 +411,33 @@ async def test_temporary_chat_disposal_never_deletes_borrowed_source(tmp_path, m
     channel.gateway.uploads.store.prune()
     await channel.gateway.temporary_chats.discard(conn, chat_id)
     assert source.read_text(encoding="utf-8") == "borrowed"
+
+
+@pytest.mark.asyncio
+async def test_large_local_files_and_upload_share_count_but_not_byte_budget(tmp_path, monkeypatch):
+    from nanobot.channels.websocket.attachment_policy import AttachmentIngressLimits
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path / "data")
+    sources = [tmp_path / "large.mp4", tmp_path / "large.pdf"]
+    for source in sources:
+        with source.open("wb") as output:
+            output.truncate(64 * 1024 * 1024 + 1)
+    channel = _make_channel(workspace=tmp_path, restricted=True)
+    channel.gateway.uploads.store.limits = AttachmentIngressLimits(max_file_bytes=8, max_total_bytes=8)
+    conn = AsyncMock()
+    owner = channel.gateway.uploads.issue(conn)["token"]
+
+    async def body():
+        yield b"uploaded"
+
+    ref = await channel.gateway.uploads.store.upload(body(), owner=owner, mime="image/png", size=8)
+    uploaded = channel.gateway.uploads.store.resolve([ref], owner=owner)[0]
+    await channel._dispatch_envelope(conn, "client", {
+        "type": "message", "chat_id": "large-local", "content": "read references",
+        "media": [{"path": str(sources[0])}, {"reference": ref}, {"path": str(sources[1])}],
+    })
+    channel._handle_message.assert_awaited_once()
+    assert channel._handle_message.await_args.kwargs["media"] == [str(sources[0]), uploaded, str(sources[1])]
+    assert channel._handle_message.await_args.kwargs["metadata"]["local_media_paths"] == [str(source) for source in sources]
+    assert all(source.stat().st_size == 64 * 1024 * 1024 + 1 for source in sources)
+    assert [path for path in channel.gateway.uploads.store.media_dir.iterdir() if path.is_file()] == [Path(uploaded)]
