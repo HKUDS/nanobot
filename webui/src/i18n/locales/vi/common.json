@@ -1811,7 +1811,7 @@
           "started": "Tự động nén khi nhàn rỗi: đang thực hiện",
           "succeeded": "Tự động nén khi nhàn rỗi: hoàn tất",
           "failed": "Tự động nén khi nhàn rỗi: thất bại",
-          "cancelled": "Tự động nén khi nhàn rỗi: đã hủy"
+          "cancelled": "Tự động nén khi nhàn rỗi: bị gián đoạn"
         },
         "context_pressure": {
           "started": "Nén theo dung lượng ngữ cảnh: đang thực hiện",

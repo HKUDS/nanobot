@@ -2011,7 +2011,7 @@
           "started": "正在空闲自动压缩",
           "succeeded": "空闲自动压缩完成",
           "failed": "空闲自动压缩失败",
-          "cancelled": "空闲自动压缩已取消"
+          "cancelled": "空闲自动压缩已中断"
         },
         "context_pressure": {
           "started": "正在上下文容量压缩",

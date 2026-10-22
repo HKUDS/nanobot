@@ -1811,7 +1811,7 @@
           "started": "유휴 시 자동 압축 중",
           "succeeded": "유휴 시 자동 압축 완료",
           "failed": "유휴 시 자동 압축 실패",
-          "cancelled": "유휴 시 자동 압축 취소됨"
+          "cancelled": "유휴 시 자동 압축 중단됨"
         },
         "context_pressure": {
           "started": "컨텍스트 용량 확보 압축 중",

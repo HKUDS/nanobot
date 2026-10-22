@@ -1811,7 +1811,7 @@
           "started": "Compactage automatique à l’inactivité en cours",
           "succeeded": "Compactage automatique à l’inactivité terminé",
           "failed": "Compactage automatique à l’inactivité échoué",
-          "cancelled": "Compactage automatique à l’inactivité annulé"
+          "cancelled": "Compactage automatique à l’inactivité interrompu"
         },
         "context_pressure": {
           "started": "Compactage de capacité du contexte en cours",

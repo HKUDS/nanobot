@@ -2011,7 +2011,7 @@
           "started": "Idle context auto-compaction in progress",
           "succeeded": "Idle context auto-compaction complete",
           "failed": "Idle context auto-compaction failed",
-          "cancelled": "Idle context auto-compaction cancelled"
+          "cancelled": "Idle context auto-compaction interrupted"
         },
         "context_pressure": {
           "started": "Context capacity compaction in progress",

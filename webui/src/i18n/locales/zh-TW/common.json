@@ -1811,7 +1811,7 @@
           "started": "正在閒置自動壓縮",
           "succeeded": "閒置自動壓縮完成",
           "failed": "閒置自動壓縮失敗",
-          "cancelled": "閒置自動壓縮已取消"
+          "cancelled": "閒置自動壓縮已中斷"
         },
         "context_pressure": {
           "started": "正在上下文容量壓縮",

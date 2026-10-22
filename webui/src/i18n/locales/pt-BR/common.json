@@ -1825,7 +1825,7 @@
           "started": "Compactação automática por inatividade em andamento",
           "succeeded": "Compactação automática por inatividade concluída",
           "failed": "Compactação automática por inatividade falhou",
-          "cancelled": "Compactação automática por inatividade cancelada"
+          "cancelled": "Compactação automática por inatividade interrompida"
         },
         "context_pressure": {
           "started": "Compactação por capacidade do contexto em andamento",

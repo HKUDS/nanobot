@@ -1811,7 +1811,7 @@
           "started": "Pemadatan otomatis saat tidak aktif berlangsung",
           "succeeded": "Pemadatan otomatis saat tidak aktif selesai",
           "failed": "Pemadatan otomatis saat tidak aktif gagal",
-          "cancelled": "Pemadatan otomatis saat tidak aktif dibatalkan"
+          "cancelled": "Pemadatan otomatis saat tidak aktif terhenti"
         },
         "context_pressure": {
           "started": "Pemadatan kapasitas konteks berlangsung",
