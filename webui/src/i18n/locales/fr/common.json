@@ -565,6 +565,13 @@
       "save": "Enregistrer les modifications", "saving": "Enregistrement…", "discard": "Annuler les modifications", "saved": "Enregistré.",
       "restart": "Redémarrer nanobot", "restartHelp": "Redémarrez pour appliquer les modifications. Les arguments de ligne de commande et variables d’environnement peuvent avoir priorité.",
       "search": "Rechercher un paramètre avancé", "noResults": "Aucun paramètre correspondant.", "pending": "Modifications non enregistrées",
+      "idleCompaction": {
+        "label": "Compression en cas d’inactivité",
+        "help": "Compresse automatiquement le contexte après une période d’inactivité.",
+        "wait": "Délai d’attente",
+        "minutes": "minutes",
+        "numberError": "Saisissez un nombre entier de minutes supérieur ou égal à zéro."
+      },
       "numberError": "Saisissez un nombre valide dans la plage autorisée.", "activeModel": "Utiliser le modèle actif", "none": "Aucun",
       "auto": "Automatique", "manual": "Manuel", "standard": "Standard", "persistent": "Continu",
       "unavailable": "Mettez à jour la passerelle pour modifier ces paramètres.", "advancedOptions": "Options avancées"

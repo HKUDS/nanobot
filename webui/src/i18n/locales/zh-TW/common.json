@@ -565,6 +565,13 @@
       "save": "儲存變更", "saving": "儲存中…", "discard": "捨棄變更", "saved": "已儲存。",
       "restart": "重新啟動 nanobot", "restartHelp": "重新啟動後生效；命令列與環境變數的設定可能優先。",
       "search": "搜尋進階設定", "noResults": "找不到相符設定。", "pending": "尚未儲存的變更",
+      "idleCompaction": {
+        "label": "閒置自動壓縮",
+        "help": "對話閒置一段時間後自動壓縮上下文。",
+        "wait": "等待時間",
+        "minutes": "分鐘",
+        "numberError": "請輸入非負整數分鐘數。"
+      },
       "numberError": "請輸入允許範圍內的有效數字。", "activeModel": "使用目前模型", "none": "無",
       "auto": "自動", "manual": "手動", "standard": "標準", "persistent": "持續",
       "unavailable": "更新閘道後可編輯這些設定。", "advancedOptions": "進階選項"

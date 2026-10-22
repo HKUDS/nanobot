@@ -565,6 +565,13 @@
       "save": "Simpan perubahan", "saving": "Menyimpan…", "discard": "Buang perubahan", "saved": "Tersimpan.",
       "restart": "Mulai ulang nanobot", "restartHelp": "Mulai ulang untuk menerapkan perubahan. Argumen baris perintah dan variabel lingkungan mungkin lebih diutamakan.",
       "search": "Cari pengaturan lanjutan", "noResults": "Tidak ada pengaturan yang cocok.", "pending": "Perubahan belum disimpan",
+      "idleCompaction": {
+        "label": "Pemadatan saat tidak aktif",
+        "help": "Padatkan konteks secara otomatis setelah tidak aktif selama beberapa waktu.",
+        "wait": "Waktu tunggu",
+        "minutes": "menit",
+        "numberError": "Masukkan jumlah menit berupa bilangan bulat nol atau lebih."
+      },
       "numberError": "Masukkan angka yang valid dalam rentang yang diizinkan.", "activeModel": "Gunakan model aktif", "none": "Tidak ada",
       "auto": "Otomatis", "manual": "Manual", "standard": "Standar", "persistent": "Terus-menerus",
       "unavailable": "Perbarui gateway untuk mengedit pengaturan ini.", "advancedOptions": "Opsi lanjutan"

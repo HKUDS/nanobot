@@ -1,7 +1,7 @@
 export interface RuntimeConfigField {
   group: string;
   path: string;
-  kind: "toggle" | "text" | "nullable" | "number" | "duration" | "boolean" | "select" | "list" | "preset";
+  kind: "toggle" | "text" | "nullable" | "number" | "duration" | "boolean" | "select" | "list" | "preset" | "idle-compaction";
   options?: string[];
   when?: { path: string; value: string | boolean | string[] };
   manual?: boolean;
@@ -39,6 +39,7 @@ export const RUNTIME_CONFIG_FIELDS: RuntimeConfigField[] = [
   { group: "execution", path: "agents.defaults.tool_hint_max_length", kind: "number", min: 20, max: 500 },
   { group: "execution", path: "tools.max_session_messages_per_minute", kind: "number", min: 1 },
   { group: "sessions", path: "agents.defaults.unified_session", kind: "boolean" },
+  { group: "sessions", path: "agents.defaults.session_ttl_minutes", kind: "idle-compaction", min: 0, manual: true },
   { group: "tools", path: "tools.exec.enable", kind: "boolean" },
   { group: "tools", path: "tools.file.enable", kind: "boolean" },
   { group: "web", path: "tools.web.enable", kind: "boolean" },

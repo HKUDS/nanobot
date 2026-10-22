@@ -565,6 +565,13 @@
       "save": "変更を保存", "saving": "保存中…", "discard": "変更を破棄", "saved": "保存しました。",
       "restart": "nanobot を再起動", "restartHelp": "再起動すると反映されます。コマンドライン引数や環境変数の設定が優先される場合があります。",
       "search": "詳細設定を検索", "noResults": "一致する設定はありません。", "pending": "未保存の変更",
+      "idleCompaction": {
+        "label": "未使用時の自動圧縮",
+        "help": "会話が一定時間使われないと、コンテキストを自動で圧縮します。",
+        "wait": "待機時間",
+        "minutes": "分",
+        "numberError": "分数を0以上の整数で入力してください。"
+      },
       "numberError": "許可された範囲内の有効な数値を入力してください。", "activeModel": "現在のモデルを使用", "none": "なし",
       "auto": "自動", "manual": "手動", "standard": "標準", "persistent": "継続",
       "unavailable": "これらの設定を編集するにはゲートウェイを更新してください。", "advancedOptions": "詳細オプション"

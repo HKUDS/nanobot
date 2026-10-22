@@ -565,6 +565,13 @@
       "save": "Guardar cambios", "saving": "Guardando…", "discard": "Descartar cambios", "saved": "Guardado.",
       "restart": "Reiniciar nanobot", "restartHelp": "Reinicia para aplicar los cambios. Los argumentos de línea de comandos y las variables de entorno pueden tener prioridad.",
       "search": "Buscar un ajuste avanzado", "noResults": "No hay ajustes que coincidan.", "pending": "Cambios sin guardar",
+      "idleCompaction": {
+        "label": "Compactación por inactividad",
+        "help": "Compacta el contexto automáticamente tras un período de inactividad.",
+        "wait": "Tiempo de espera",
+        "minutes": "minutos",
+        "numberError": "Introduce un número entero de minutos mayor o igual que cero."
+      },
       "numberError": "Introduce un número válido dentro del rango permitido.", "activeModel": "Usar el modelo activo", "none": "Ninguno",
       "auto": "Automático", "manual": "Manual", "standard": "Estándar", "persistent": "Continuo",
       "unavailable": "Actualiza la pasarela para editar estos ajustes.", "advancedOptions": "Opciones avanzadas"

@@ -41,7 +41,7 @@ const previewSettings: SettingsPayload = {
     max_tokens: 8192, context_window_tokens: 200_000, temperature: 0.1, reasoning_effort: null }],
   model_call_order: ["default"],
   runtime_config: Object.fromEntries(RUNTIME_CONFIG_FIELDS.map((field) => [field.path,
-    field.kind === "boolean" ? true : field.kind === "toggle" ? field.options?.[1] ?? "" : field.kind === "list" ? [] : field.kind === "number" ? 20 : field.kind === "duration" ? 3600 : "",
+    field.kind === "boolean" ? true : field.kind === "toggle" ? field.options?.[1] ?? "" : field.kind === "list" ? [] : field.kind === "number" ? 20 : field.kind === "duration" ? 3600 : field.kind === "idle-compaction" ? 15 : "",
   ])),
 };
 let detailState = "loaded";

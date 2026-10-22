@@ -324,6 +324,7 @@ export function RestartSettingsFooter({
             size="sm"
             variant="ghost"
             onClick={onReset}
+            data-settings-reset=""
             disabled={!dirty || saving}
             className="rounded-full"
           >

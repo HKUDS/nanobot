@@ -745,6 +745,13 @@
       "search": "Find an advanced setting",
       "noResults": "No matching settings.",
       "pending": "Unsaved changes",
+      "idleCompaction": {
+        "label": "Idle compaction",
+        "help": "Automatically compact context after a period of inactivity.",
+        "wait": "Wait time",
+        "minutes": "minutes",
+        "numberError": "Enter a non-negative whole number of minutes."
+      },
       "numberError": "Enter a valid number within the allowed range.",
       "activeModel": "Use active model",
       "none": "None",

@@ -565,6 +565,13 @@
       "save": "Lưu thay đổi", "saving": "Đang lưu…", "discard": "Hủy thay đổi", "saved": "Đã lưu.",
       "restart": "Khởi động lại nanobot", "restartHelp": "Khởi động lại để áp dụng thay đổi. Tham số dòng lệnh và biến môi trường có thể được ưu tiên.",
       "search": "Tìm cài đặt nâng cao", "noResults": "Không có cài đặt phù hợp.", "pending": "Thay đổi chưa lưu",
+      "idleCompaction": {
+        "label": "Nén khi không hoạt động",
+        "help": "Tự động nén ngữ cảnh sau một khoảng thời gian không hoạt động.",
+        "wait": "Thời gian chờ",
+        "minutes": "phút",
+        "numberError": "Nhập số phút là số nguyên không âm."
+      },
       "numberError": "Nhập số hợp lệ trong phạm vi cho phép.", "activeModel": "Dùng mô hình hiện tại", "none": "Không có",
       "auto": "Tự động", "manual": "Thủ công", "standard": "Tiêu chuẩn", "persistent": "Liên tục",
       "unavailable": "Cập nhật gateway để chỉnh sửa các cài đặt này.", "advancedOptions": "Tùy chọn nâng cao"

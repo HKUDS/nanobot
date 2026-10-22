@@ -17,6 +17,7 @@ function runtimeSettings() {
     "agents.defaults.timezone_mode": "auto",
     "agents.defaults.timezone": "UTC",
     "agents.defaults.dream.enabled": true,
+    "agents.defaults.session_ttl_minutes": 15,
     "gateway.heartbeat.enabled": true,
     "tools.exec.timeout": 60,
     "tools.exec.allowed_env_keys": ["TERM"],

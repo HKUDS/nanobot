@@ -565,6 +565,13 @@
       "save": "변경 사항 저장", "saving": "저장 중…", "discard": "변경 사항 취소", "saved": "저장했습니다.",
       "restart": "nanobot 다시 시작", "restartHelp": "다시 시작하면 적용됩니다. 명령줄 인수와 환경 변수 설정이 우선 적용될 수 있습니다.",
       "search": "고급 설정 검색", "noResults": "일치하는 설정이 없습니다.", "pending": "저장하지 않은 변경 사항",
+      "idleCompaction": {
+        "label": "유휴 시 자동 압축",
+        "help": "일정 시간 대화가 없으면 컨텍스트를 자동으로 압축합니다.",
+        "wait": "대기 시간",
+        "minutes": "분",
+        "numberError": "분 단위로 0 이상의 정수를 입력하세요."
+      },
       "numberError": "허용 범위 내의 유효한 숫자를 입력하세요.", "activeModel": "현재 모델 사용", "none": "없음",
       "auto": "자동", "manual": "수동", "standard": "표준", "persistent": "계속",
       "unavailable": "이 설정을 편집하려면 게이트웨이를 업데이트하세요.", "advancedOptions": "고급 옵션"

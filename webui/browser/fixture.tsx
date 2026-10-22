@@ -30,6 +30,7 @@ import { ThreadLoadingFixture } from "./thread-loading-fixture";
 import { AnswerOrderFixture } from "./answer-order-fixture";
 import { SidebarActivityFixture } from "./sidebar-activity-fixture";
 import { HistoryHydrationFixture } from "./history-hydration-fixture";
+import { IdleCompactionFixture, installIdleCompactionApi } from "./idle-compaction-fixture";
 
 const history: UIMessage[] = [
   { id: "question", role: "user", content: "Earlier question", createdAt: 1_700_000_000_000 },
@@ -168,6 +169,7 @@ function AppsFixture() {
   /></main>;
 }
 if (parameters.get("case") === "skeleton-additions") installSkeletonPreviewApi();
+if (parameters.get("case") === "idle-compaction") installIdleCompactionApi();
 await initializeI18n();
 createRoot(document.getElementById("root")!).render(<TooltipProvider>
   {parameters.get("case") === "answer-order"
@@ -180,6 +182,8 @@ createRoot(document.getElementById("root")!).render(<TooltipProvider>
     ? <MarkdownEmphasisFixture />
     : parameters.get("case") === "typography"
     ? <ClientProvider client={railClient} token="fixture"><TypographyFixture /></ClientProvider>
+    : parameters.get("case") === "idle-compaction"
+    ? <IdleCompactionFixture />
     : parameters.get("case") === "history-hydration"
     ? <HistoryHydrationFixture />
     : parameters.get("case") === "history-boundary"

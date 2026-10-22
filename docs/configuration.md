@@ -2496,7 +2496,7 @@ The deprecated `agents.defaults.failOnToolError` field is silently ignored when 
 
 ## Auto Compact
 
-The WebUI has no control for the idle-compaction threshold or scan interval. Configure these fields directly in `config.json`; use `/compact` for an immediate compaction.
+Set the idle-compaction threshold in **Settings → System → Sessions** and restart the gateway to apply it. The scan interval is configured directly in `config.json`; use `/compact` for an immediate compaction.
 
 When a session is idle for longer than a configured threshold, nanobot summarizes its conversation context. When you return, the model receives that summary and new messages instead of replaying the messages covered by the summary. The original conversation remains in your saved chat history, but even its most recent messages are no longer included verbatim in the model's context after idle compaction.
 

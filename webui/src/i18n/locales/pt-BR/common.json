@@ -565,6 +565,13 @@
       "save": "Salvar alterações", "saving": "Salvando…", "discard": "Descartar alterações", "saved": "Salvo.",
       "restart": "Reiniciar nanobot", "restartHelp": "Reinicie para aplicar as alterações. Os argumentos de linha de comando e as variáveis de ambiente podem ter prioridade.",
       "search": "Buscar uma configuração avançada", "noResults": "Nenhuma configuração correspondente.", "pending": "Alterações não salvas",
+      "idleCompaction": {
+        "label": "Compactação por inatividade",
+        "help": "Compacta o contexto automaticamente após um período de inatividade.",
+        "wait": "Tempo de espera",
+        "minutes": "minutos",
+        "numberError": "Digite um número inteiro de minutos maior ou igual a zero."
+      },
       "numberError": "Digite um número válido dentro do intervalo permitido.", "activeModel": "Usar o modelo ativo", "none": "Nenhum",
       "auto": "Automático", "manual": "Manual", "standard": "Padrão", "persistent": "Contínuo",
       "unavailable": "Atualize o gateway para editar estas configurações.", "advancedOptions": "Opções avançadas"
