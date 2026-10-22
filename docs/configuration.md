@@ -281,6 +281,31 @@ A Base URL is the service address nanobot sends model requests to. Change it onl
 
 </details>
 
+### Structured Decision Client
+
+The optional structured decision client sends all typed questions in one System One request. Its settings are separate from the model-provider settings:
+
+```json
+{
+  "structuredDecision": {
+    "enabled": false,
+    "provider": "openrouter",
+    "protocol": "system_one",
+    "model": "typesafe/jev-1.13",
+    "timeoutS": 15
+  },
+  "providers": {
+    "openrouter": {
+      "apiKey": "${OPENROUTER_API_KEY}"
+    }
+  }
+}
+```
+
+`enabled` defaults to `false`; it is an opt-in setting for a future caller and does not send a request by itself. `provider` defaults to `openrouter`, `protocol` is currently `system_one`, `model` defaults to `typesafe/jev-1.13`, and `timeoutS` defaults to 15 seconds (allowed range: greater than 0 and at most 120 seconds).
+
+OpenRouter is the only registered structured-decision provider initially. Its API key and optional `proxy` come from `providers.openrouter`; an unset key falls back to `OPENROUTER_API_KEY`. The decision URL is fixed at `https://openrouter.ai/api/alpha/decisions` and does not use `providers.openrouter.apiBase`. Custom or local decision endpoints and `baseUrl` overrides are not supported. Additional providers must be explicitly registered and support the System One decision API. Confidence thresholds belong to the calling policy, not this provider configuration.
+
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
 | `custom` | Any OpenAI-compatible endpoint | — |
