@@ -1806,6 +1806,32 @@
       "messages": "訊息狀態"
     },
     "compaction": {
+      "reasons": {
+        "idle": {
+          "started": "正在閒置自動壓縮",
+          "succeeded": "閒置自動壓縮完成",
+          "failed": "閒置自動壓縮失敗",
+          "cancelled": "閒置自動壓縮已取消"
+        },
+        "context_pressure": {
+          "started": "正在上下文容量壓縮",
+          "succeeded": "上下文容量壓縮完成",
+          "failed": "上下文容量壓縮失敗",
+          "cancelled": "上下文容量壓縮已取消"
+        },
+        "manual": {
+          "started": "正在手動壓縮",
+          "succeeded": "手動壓縮完成",
+          "failed": "手動壓縮失敗",
+          "cancelled": "手動壓縮已取消"
+        },
+        "provider_native": {
+          "started": "正在模型服務端壓縮",
+          "succeeded": "模型服務端壓縮完成",
+          "failed": "模型服務端壓縮失敗",
+          "cancelled": "模型服務端壓縮已取消"
+        }
+      },
       "cancelled": "上下文壓縮已取消",
       "empty": "無需壓縮上下文",
       "started": "正在壓縮上下文…",

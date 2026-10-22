@@ -1806,6 +1806,32 @@
       "messages": "État des messages"
     },
     "compaction": {
+      "reasons": {
+        "idle": {
+          "started": "Compactage automatique à l’inactivité en cours",
+          "succeeded": "Compactage automatique à l’inactivité terminé",
+          "failed": "Compactage automatique à l’inactivité échoué",
+          "cancelled": "Compactage automatique à l’inactivité annulé"
+        },
+        "context_pressure": {
+          "started": "Compactage de capacité du contexte en cours",
+          "succeeded": "Compactage de capacité du contexte terminé",
+          "failed": "Compactage de capacité du contexte échoué",
+          "cancelled": "Compactage de capacité du contexte annulé"
+        },
+        "manual": {
+          "started": "Compactage manuel en cours",
+          "succeeded": "Compactage manuel terminé",
+          "failed": "Compactage manuel échoué",
+          "cancelled": "Compactage manuel annulé"
+        },
+        "provider_native": {
+          "started": "Compactage côté fournisseur en cours",
+          "succeeded": "Compactage côté fournisseur terminé",
+          "failed": "Compactage côté fournisseur échoué",
+          "cancelled": "Compactage côté fournisseur annulé"
+        }
+      },
       "cancelled": "Compression du contexte annulée",
       "empty": "Aucun contexte à compresser.",
       "started": "Compression du contexte",

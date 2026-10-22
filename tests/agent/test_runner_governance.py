@@ -402,6 +402,7 @@ async def test_native_compaction_uses_provider_request_boundary(
     assert any(message.get("content") == "inspect the project" for message in result.messages)
     assert any(message.get("content") == "complete tool result" for message in result.messages)
     assert [event.phase for event in compaction_events] == ([] if scope == "prior_context" else ["succeeded"])
+    assert all(event.reason == "provider_native" for event in compaction_events)
 
 
 @pytest.mark.parametrize("error", [RuntimeError("checkpoint failed"), asyncio.CancelledError()])
@@ -439,6 +440,7 @@ async def test_native_checkpoint_failure_does_not_relabel_completed_compaction(m
             events=EventSink(observe),
         ))
     assert [notice.phase for notice in notices] == ["succeeded"]
+    assert all(notice.reason == "provider_native" for notice in notices)
 
 
 async def test_runner_keeps_current_tool_exchange_outside_summary(monkeypatch):
@@ -576,6 +578,7 @@ async def test_repeated_pressure_advances_summary_boundary(monkeypatch):
     assert [event.phase for event in compaction_events] == [
         "started", "succeeded", "started", "succeeded",
     ]
+    assert all(event.reason == "context_pressure" for event in compaction_events)
     first_id, second_id = compaction_events[0].compaction_id, compaction_events[2].compaction_id
     assert first_id == compaction_events[1].compaction_id
     assert second_id == compaction_events[3].compaction_id

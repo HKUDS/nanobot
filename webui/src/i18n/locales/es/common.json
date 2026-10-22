@@ -1807,6 +1807,32 @@
       "messages": "Estado de mensajes"
     },
     "compaction": {
+      "reasons": {
+        "idle": {
+          "started": "Compactación automática por inactividad en curso",
+          "succeeded": "Compactación automática por inactividad completada",
+          "failed": "Compactación automática por inactividad fallida",
+          "cancelled": "Compactación automática por inactividad cancelada"
+        },
+        "context_pressure": {
+          "started": "Compactación por capacidad del contexto en curso",
+          "succeeded": "Compactación por capacidad del contexto completada",
+          "failed": "Compactación por capacidad del contexto fallida",
+          "cancelled": "Compactación por capacidad del contexto cancelada"
+        },
+        "manual": {
+          "started": "Compactación manual en curso",
+          "succeeded": "Compactación manual completada",
+          "failed": "Compactación manual fallida",
+          "cancelled": "Compactación manual cancelada"
+        },
+        "provider_native": {
+          "started": "Compactación del proveedor en curso",
+          "succeeded": "Compactación del proveedor completada",
+          "failed": "Compactación del proveedor fallida",
+          "cancelled": "Compactación del proveedor cancelada"
+        }
+      },
       "cancelled": "Compresión de contexto cancelada",
       "empty": "No hay contexto que comprimir.",
       "started": "Comprimiendo el contexto",

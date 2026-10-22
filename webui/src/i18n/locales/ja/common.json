@@ -1806,6 +1806,32 @@
       "messages": "メッセージの状態"
     },
     "compaction": {
+      "reasons": {
+        "idle": {
+          "started": "アイドル時の自動圧縮中",
+          "succeeded": "アイドル時の自動圧縮完了",
+          "failed": "アイドル時の自動圧縮に失敗",
+          "cancelled": "アイドル時の自動圧縮をキャンセル"
+        },
+        "context_pressure": {
+          "started": "コンテキスト容量確保の圧縮中",
+          "succeeded": "コンテキスト容量確保の圧縮完了",
+          "failed": "コンテキスト容量確保の圧縮に失敗",
+          "cancelled": "コンテキスト容量確保の圧縮をキャンセル"
+        },
+        "manual": {
+          "started": "手動圧縮中",
+          "succeeded": "手動圧縮完了",
+          "failed": "手動圧縮に失敗",
+          "cancelled": "手動圧縮をキャンセル"
+        },
+        "provider_native": {
+          "started": "モデル提供元での圧縮中",
+          "succeeded": "モデル提供元での圧縮完了",
+          "failed": "モデル提供元での圧縮に失敗",
+          "cancelled": "モデル提供元での圧縮をキャンセル"
+        }
+      },
       "cancelled": "コンテキストの圧縮をキャンセルしました",
       "empty": "圧縮するコンテキストはありません。",
       "started": "コンテキストを圧縮中",

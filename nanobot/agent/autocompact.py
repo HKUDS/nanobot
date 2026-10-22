@@ -101,6 +101,7 @@ class AutoCompact:
                     key,
                     runtime=runtime,
                     events=self._bind_events(key) if self._bind_events else NO_EVENTS,
+                    reason="idle",
                 )
                 if summary:
                     session = await self.sessions.state.get(key)

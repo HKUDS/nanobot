@@ -533,7 +533,7 @@ class ContextGovernor:
             if response.provider_compaction_event_id is None:
                 response.provider_compaction_event_id = uuid4().hex
                 await shield_and_drain(state.events.emit(ContextCompactionEvent(
-                    response.provider_compaction_event_id, "succeeded",
+                    response.provider_compaction_event_id, "succeeded", reason="provider_native",
                 )))
         if (
             not response.provider_compaction_applied
@@ -585,7 +585,7 @@ class ContextGovernor:
         measured, _source = pressure
         compaction_id = uuid4().hex
         await state.events.emit(
-            ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
+            ContextCompactionEvent(compaction_id=compaction_id, phase="started", reason="context_pressure"),
         )
         try:
             delta_messages = await self.prepare_in_background(
@@ -645,6 +645,7 @@ class ContextGovernor:
                 ContextCompactionEvent(
                     compaction_id=compaction_id,
                     phase="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
+                    reason="context_pressure",
                 ),
             )
             raise
@@ -652,6 +653,7 @@ class ContextGovernor:
             ContextCompactionEvent(
                 compaction_id=compaction_id,
                 phase="succeeded",
+                reason="context_pressure",
             ),
         )
         return prepared

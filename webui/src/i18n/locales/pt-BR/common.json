@@ -1820,6 +1820,32 @@
       "messages": "Status das mensagens"
     },
     "compaction": {
+      "reasons": {
+        "idle": {
+          "started": "Compactação automática por inatividade em andamento",
+          "succeeded": "Compactação automática por inatividade concluída",
+          "failed": "Compactação automática por inatividade falhou",
+          "cancelled": "Compactação automática por inatividade cancelada"
+        },
+        "context_pressure": {
+          "started": "Compactação por capacidade do contexto em andamento",
+          "succeeded": "Compactação por capacidade do contexto concluída",
+          "failed": "Compactação por capacidade do contexto falhou",
+          "cancelled": "Compactação por capacidade do contexto cancelada"
+        },
+        "manual": {
+          "started": "Compactação manual em andamento",
+          "succeeded": "Compactação manual concluída",
+          "failed": "Compactação manual falhou",
+          "cancelled": "Compactação manual cancelada"
+        },
+        "provider_native": {
+          "started": "Compactação do provedor em andamento",
+          "succeeded": "Compactação do provedor concluída",
+          "failed": "Compactação do provedor falhou",
+          "cancelled": "Compactação do provedor cancelada"
+        }
+      },
       "cancelled": "Compactação do contexto cancelada",
       "empty": "Não há contexto para compactar.",
       "started": "Compactando contexto",

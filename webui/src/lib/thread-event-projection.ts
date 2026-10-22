@@ -1007,6 +1007,7 @@ export function projectThreadEvent(
       compaction: {
         id: event.compaction_id,
         phase: event.phase,
+        reason: event.reason,
         ...(!options.persisted ? { announce: true } : {}),
       },
       ...positionedTurnFields(state.messages[existing], turnFieldsForProjection(state, event, "activity"), options),

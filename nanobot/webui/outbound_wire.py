@@ -13,7 +13,7 @@ from nanobot.bus.outbound_events import (
     RetryStatusEvent,
     TurnEndEvent,
 )
-from nanobot.events import AgentEvent
+from nanobot.events import AgentEvent, CompactionReason
 from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
 
 _JSONValue: TypeAlias = (
@@ -102,6 +102,7 @@ class ContextCompactionWirePayload(_ChatWirePayload):
     event: Literal["context_compaction"]
     compaction_id: str
     phase: Literal["started", "succeeded", "failed", "cancelled"]
+    reason: NotRequired[CompactionReason]
 
 
 class SubagentTaskWirePayload(_ChatWirePayload):
@@ -152,6 +153,8 @@ def encode_context_compaction(
         "compaction_id": event.compaction_id,
         "phase": event.phase,
     }
+    if event.reason is not None:
+        payload["reason"] = event.reason
     return payload
 
 

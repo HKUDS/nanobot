@@ -2006,6 +2006,32 @@
       "messages": "Message status"
     },
     "compaction": {
+      "reasons": {
+        "idle": {
+          "started": "Idle context auto-compaction in progress",
+          "succeeded": "Idle context auto-compaction complete",
+          "failed": "Idle context auto-compaction failed",
+          "cancelled": "Idle context auto-compaction cancelled"
+        },
+        "context_pressure": {
+          "started": "Context capacity compaction in progress",
+          "succeeded": "Context capacity compaction complete",
+          "failed": "Context capacity compaction failed",
+          "cancelled": "Context capacity compaction cancelled"
+        },
+        "manual": {
+          "started": "Manual compaction in progress",
+          "succeeded": "Manual compaction complete",
+          "failed": "Manual compaction failed",
+          "cancelled": "Manual compaction cancelled"
+        },
+        "provider_native": {
+          "started": "Provider compaction in progress",
+          "succeeded": "Provider compaction complete",
+          "failed": "Provider compaction failed",
+          "cancelled": "Provider compaction cancelled"
+        }
+      },
       "cancelled": "Context compaction cancelled",
       "empty": "Nothing to compact.",
       "started": "Compressing context",

@@ -1806,6 +1806,32 @@
       "messages": "Trạng thái tin nhắn"
     },
     "compaction": {
+      "reasons": {
+        "idle": {
+          "started": "Tự động nén khi nhàn rỗi: đang thực hiện",
+          "succeeded": "Tự động nén khi nhàn rỗi: hoàn tất",
+          "failed": "Tự động nén khi nhàn rỗi: thất bại",
+          "cancelled": "Tự động nén khi nhàn rỗi: đã hủy"
+        },
+        "context_pressure": {
+          "started": "Nén theo dung lượng ngữ cảnh: đang thực hiện",
+          "succeeded": "Nén theo dung lượng ngữ cảnh: hoàn tất",
+          "failed": "Nén theo dung lượng ngữ cảnh: thất bại",
+          "cancelled": "Nén theo dung lượng ngữ cảnh: đã hủy"
+        },
+        "manual": {
+          "started": "Nén thủ công: đang thực hiện",
+          "succeeded": "Nén thủ công: hoàn tất",
+          "failed": "Nén thủ công: thất bại",
+          "cancelled": "Nén thủ công: đã hủy"
+        },
+        "provider_native": {
+          "started": "Nén phía nhà cung cấp: đang thực hiện",
+          "succeeded": "Nén phía nhà cung cấp: hoàn tất",
+          "failed": "Nén phía nhà cung cấp: thất bại",
+          "cancelled": "Nén phía nhà cung cấp: đã hủy"
+        }
+      },
       "cancelled": "Đã hủy nén ngữ cảnh",
       "empty": "Không có ngữ cảnh cần nén.",
       "started": "Đang nén ngữ cảnh",

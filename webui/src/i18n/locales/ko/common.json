@@ -1806,6 +1806,32 @@
       "messages": "메시지 상태"
     },
     "compaction": {
+      "reasons": {
+        "idle": {
+          "started": "유휴 시 자동 압축 중",
+          "succeeded": "유휴 시 자동 압축 완료",
+          "failed": "유휴 시 자동 압축 실패",
+          "cancelled": "유휴 시 자동 압축 취소됨"
+        },
+        "context_pressure": {
+          "started": "컨텍스트 용량 확보 압축 중",
+          "succeeded": "컨텍스트 용량 확보 압축 완료",
+          "failed": "컨텍스트 용량 확보 압축 실패",
+          "cancelled": "컨텍스트 용량 확보 압축 취소됨"
+        },
+        "manual": {
+          "started": "수동 압축 중",
+          "succeeded": "수동 압축 완료",
+          "failed": "수동 압축 실패",
+          "cancelled": "수동 압축 취소됨"
+        },
+        "provider_native": {
+          "started": "모델 제공업체 압축 중",
+          "succeeded": "모델 제공업체 압축 완료",
+          "failed": "모델 제공업체 압축 실패",
+          "cancelled": "모델 제공업체 압축 취소됨"
+        }
+      },
       "cancelled": "컨텍스트 압축이 취소되었습니다",
       "empty": "압축할 컨텍스트가 없습니다.",
       "started": "컨텍스트 압축 중",

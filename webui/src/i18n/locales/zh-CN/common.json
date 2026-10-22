@@ -2006,6 +2006,32 @@
       "messages": "消息状态"
     },
     "compaction": {
+      "reasons": {
+        "idle": {
+          "started": "正在空闲自动压缩",
+          "succeeded": "空闲自动压缩完成",
+          "failed": "空闲自动压缩失败",
+          "cancelled": "空闲自动压缩已取消"
+        },
+        "context_pressure": {
+          "started": "正在上下文容量压缩",
+          "succeeded": "上下文容量压缩完成",
+          "failed": "上下文容量压缩失败",
+          "cancelled": "上下文容量压缩已取消"
+        },
+        "manual": {
+          "started": "正在手动压缩",
+          "succeeded": "手动压缩完成",
+          "failed": "手动压缩失败",
+          "cancelled": "手动压缩已取消"
+        },
+        "provider_native": {
+          "started": "正在模型服务端压缩",
+          "succeeded": "模型服务端压缩完成",
+          "failed": "模型服务端压缩失败",
+          "cancelled": "模型服务端压缩已取消"
+        }
+      },
       "cancelled": "上下文压缩已取消",
       "empty": "无需压缩上下文",
       "started": "正在压缩上下文",

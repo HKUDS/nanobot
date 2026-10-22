@@ -1026,6 +1026,7 @@ async def test_codex_compacts_state_at_ninety_percent_before_next_request(
     )
 
     assert timeline == ["started", "compact-request", "succeeded", "generation-request", "answer:done"]
+    assert all(notice.reason == "provider_native" for notice in notices)
     assert len({notice.compaction_id for notice in notices}) == 1
     assert response.provider_compaction_event_id == (None if inline_compaction else notices[0].compaction_id)
     assert response.content == "done"
@@ -1135,6 +1136,7 @@ async def test_codex_disables_unsupported_native_compaction_and_continues(
 
     assert response.content == "done"
     assert [notice.phase for notice in notices] == ["started", "failed"]
+    assert all(notice.reason == "provider_native" for notice in notices)
     assert len({notice.compaction_id for notice in notices}) == 1
     assert len(bodies) == 2
     assert bodies[0]["input"][-1] == {"type": "compaction_trigger"}
@@ -1192,6 +1194,7 @@ async def test_codex_native_compaction_terminal_survives_cancellation(monkeypatc
         await task
     terminal = "cancelled" if cancel_during == "compaction" else "succeeded"
     assert [notice.phase for notice in notices] == ["started", terminal]
+    assert all(notice.reason == "provider_native" for notice in notices)
     assert len({notice.compaction_id for notice in notices}) == 1
     assert requests == (["compaction", "generation"] if cancel_during == "generation" else ["compaction"])
 
