@@ -129,8 +129,13 @@ def test_exec_default_observation_returns_live_session(tmp_path, diagnostic):
             assert "Initial wait ended; session remains active." in initial
             assert "Elapsed:" in initial
             assert "Runtime remaining:" in initial
-            observed = await observer.execute(session_id=sid, wait_for="ready with stdin EOF")
-            combined = initial + observed
+            combined = initial
+            expected = ["ready with stdin EOF"]
+            if diagnostic:
+                expected.append("locator failed")
+            for marker in expected:
+                if marker not in combined:
+                    combined += await observer.execute(session_id=sid, wait_for=marker)
             assert "ready with stdin EOF" in combined
             if diagnostic:
                 assert "locator failed" in combined
