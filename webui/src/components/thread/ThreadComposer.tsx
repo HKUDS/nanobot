@@ -2933,7 +2933,7 @@ export function ThreadComposer({
           isHero ? "max-w-[58rem]" : "max-w-[49.5rem]",
           paletteBeside && "col-start-1 row-start-2",
         )}>
-          <div className="thread-composer-workspace-group flex min-w-0 flex-auto items-center gap-1">
+          <div className="thread-composer-workspace-group flex min-w-0 flex-auto items-center gap-1 max-[359px]:flex-wrap">
             {workspaceControl}
             {accessControl}
           </div>

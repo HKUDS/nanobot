@@ -693,22 +693,39 @@ export function WorkspaceFullAccessSlider({
   const descriptionId = useId();
   const isFull = scope.access_mode === "full";
   const label = t("thread.composer.workspace.full");
-  const defaultLabel = t("thread.composer.workspace.defaultShort");
+  const defaultLabel = t("thread.composer.workspace.default");
   const description = t("thread.composer.workspace.fullDescription");
   const [dragValue, setDragValue] = useState<number | null>(null);
   const dragging = useRef(false);
   const value = dragValue ?? Number(isFull);
-  const commit = (next: number) => {
+  const commit = (position: number) => {
+    dragging.current = false;
     setDragValue(null);
+    const next = Number(position >= 0.5);
     if (!disabled && next !== Number(isFull)) onChange?.(scopeWithAccessMode(scope, next ? "full" : "restricted"));
   };
+  const labelMotion = dragging.current ? "transition-none" : "transition-transform duration-200 ease-out motion-reduce:transition-none";
 
   return (
-    <span className="thread-composer-access inline-flex h-7 shrink-0 items-center gap-1.5 px-2 text-[12px] font-medium">
-      <span aria-hidden className={value === 0 ? "text-foreground" : "text-muted-foreground"}>{defaultLabel}</span>
-      <HoverHint enabled={!coarsePointer} content={description}>
-        <input type="range" min={0} max={1} step={1} value={value} disabled={disabled || !onChange}
-          aria-label={label} aria-valuetext={value ? label : defaultLabel} aria-describedby={descriptionId}
+    <span className={cn(
+      "thread-composer-access relative inline-flex h-8 w-[13rem] shrink-0 items-center overflow-hidden rounded-full bg-foreground/[0.09] text-[12px] font-medium text-foreground has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring dark:bg-white/[0.12]",
+      (disabled || !onChange) && "opacity-55",
+    )}>
+      <span aria-hidden className={cn(
+        "pointer-events-none absolute inset-y-0 left-0 rounded-l-full bg-[#ef8e30]",
+        dragging.current ? "transition-none" : "transition-[width] duration-200 ease-out motion-reduce:transition-none",
+      )} style={{ width: `${value * 100}%` }} />
+      <span aria-hidden className={cn("pointer-events-none absolute inset-y-0 left-9 right-1 flex items-center justify-center truncate whitespace-nowrap", labelMotion)}
+        style={{ transform: `translateX(${Math.min(1, value * 2) * 176}px)` }}>{defaultLabel}</span>
+      <span aria-hidden className={cn("pointer-events-none absolute inset-y-0 left-1 right-9 flex items-center justify-center truncate whitespace-nowrap text-[#2e261f]", labelMotion)}
+        style={{ transform: `translateX(${(value - 1) * 176}px)` }}>{label}</span>
+      <span aria-hidden className={cn(
+        "pointer-events-none absolute top-1 h-6 w-6 rounded-full border border-black/10 bg-white shadow-sm",
+        dragging.current ? "transition-none" : "transition-[left] duration-200 ease-out motion-reduce:transition-none",
+      )} style={{ left: `calc(${value * 100}% + ${4 - value * 32}px)` }} />
+      <HoverHint enabled={!coarsePointer && !dragging.current} content={description}>
+        <input type="range" min={0} max={1} step="any" value={value} disabled={disabled || !onChange}
+          aria-label={label} aria-valuetext={value >= 0.5 ? label : defaultLabel} aria-describedby={descriptionId}
           onPointerDown={() => { dragging.current = true; setDragValue(Number(isFull)); }}
           onChange={event => {
             const next = Number(event.currentTarget.value);
@@ -716,14 +733,17 @@ export function WorkspaceFullAccessSlider({
             else commit(next);
           }}
           onPointerUp={event => {
-            if (!dragging.current) return;
-            dragging.current = false;
-            commit(Number(event.currentTarget.value));
+            if (dragging.current) commit(Number(event.currentTarget.value));
           }}
           onPointerCancel={() => { dragging.current = false; setDragValue(null); }}
-          className="-my-2 h-11 w-[4.25rem] shrink-0 cursor-pointer appearance-none rounded-md bg-transparent accent-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-55 [&::-webkit-slider-runnable-track]:h-1 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-foreground/20 [&::-webkit-slider-thumb]:-mt-1.5 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-background [&::-webkit-slider-thumb]:bg-foreground [&::-webkit-slider-thumb]:shadow-sm [&::-moz-range-track]:h-1 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-foreground/20 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-background [&::-moz-range-thumb]:bg-foreground" />
+          onKeyDown={event => {
+            if (["ArrowLeft", "ArrowDown", "Home", "ArrowRight", "ArrowUp", "End"].includes(event.key)) {
+              event.preventDefault();
+              commit(["ArrowRight", "ArrowUp", "End"].includes(event.key) ? 1 : 0);
+            }
+          }}
+          className="absolute inset-0 z-10 h-full w-full cursor-ew-resize appearance-none bg-transparent px-1 opacity-0 disabled:cursor-default [&::-webkit-slider-runnable-track]:h-full [&::-webkit-slider-runnable-track]:bg-transparent [&::-webkit-slider-thumb]:h-6 [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:appearance-none [&::-moz-range-track]:h-full [&::-moz-range-track]:bg-transparent [&::-moz-range-thumb]:h-6 [&::-moz-range-thumb]:w-6 [&::-moz-range-thumb]:border-0" />
       </HoverHint>
-      <span aria-hidden className={value === 1 ? "text-foreground" : "text-muted-foreground"}>{label}</span>
       <span id={descriptionId} className="sr-only">{description}</span>
     </span>
   );
