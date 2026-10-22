@@ -507,7 +507,7 @@ describe("MessageBubble", () => {
     );
 
     const skill = screen.getByTestId("message-skill-reference-github");
-    expect(skill).toHaveTextContent(/^github$/);
+    expect(skill).toHaveTextContent(/^\$github$/);
     expect(skill).toHaveClass(
       "font-[550]",
       "transition-colors",
@@ -517,7 +517,7 @@ describe("MessageBubble", () => {
     expect(skill.getAttribute("style")).toContain("var(--inline-token-highlight)");
     expect(skill.className).not.toMatch(/(?:^|\s)(?:bg-|border|ring|rounded)/);
     expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@Zoom");
-    expect(skill.parentElement).toHaveTextContent("Ask github to review this with @Zoom");
+    expect(skill.parentElement).toHaveTextContent("Ask $github to review this with @Zoom");
   });
 
   it("highlights well-formed skill references and leaves a bare marker plain", () => {
@@ -530,13 +530,13 @@ describe("MessageBubble", () => {
 
     render(<MessageBubble message={message} />);
 
-    expect(screen.getByTestId("message-skill-reference-unknown")).toHaveTextContent(/^unknown$/);
+    expect(screen.getByTestId("message-skill-reference-unknown")).toHaveTextContent(/^\$unknown$/);
     expect(screen.getByTestId("message-skill-reference-blocked-skill"))
-      .toHaveTextContent(/^blocked-skill$/);
+      .toHaveTextContent(/^\$blocked-skill$/);
     const references = screen.getAllByTestId(/^message-skill-reference-/);
     expect(references).toHaveLength(2);
     expect(references[0].parentElement)
-      .toHaveTextContent("Try unknown or blocked-skill and $");
+      .toHaveTextContent("Try $unknown or $blocked-skill and $");
   });
 
   it("renders fork as a contextual assistant action", () => {
