@@ -144,7 +144,7 @@ export function ChannelsSettings({
           <div className="grid grid-cols-1 gap-x-4 gap-y-1 min-[640px]:grid-cols-2">
           {group.channels.map((feature) => (
             <ChannelCatalogRow key={feature.name} feature={feature} showBrandLogos={showBrandLogos}
-              actionKey={actionKey} actionsDisabled={restartRequired || Boolean(isRestarting)} onAction={onAction}
+              actionKey={actionKey} restartRequired={restartRequired} onAction={onAction}
               onRestart={onRestart} isRestarting={isRestarting}
               onSelect={(connect = false) => {
                 triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;

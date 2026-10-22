@@ -1262,6 +1262,7 @@
       "loading": "채널을 불러오는 중...",
       "empty": "일치하는 채널이 없습니다.",
       "restartRequired": "업데이트된 채널 지원을 적용하려면 nanobot을 다시 시작하세요.",
+      "restartBeforeInstall": "다른 채널을 설치하려면 nanobot을 다시 시작하세요.",
       "requires": "필요: {{requirements}}",
       "setUp": "설정",
       "setupGuide": "설정 가이드",

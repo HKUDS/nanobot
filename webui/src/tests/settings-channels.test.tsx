@@ -522,6 +522,13 @@ describe("Settings channels", () => {
     finishInstall(installedPayload);
     expect(requestMutationMock).not.toHaveBeenCalledWith("settings.channel.connect.start", expect.anything(), expect.anything());
     const restartButton = await within(installationGroup).findByRole("button", { name: "Restart nanobot" });
+    const blockedInstallHint = within(installationGroup).getByRole("group", { name: "Install WeChat" });
+    expect(secondInstall).toBeDisabled();
+    await act(async () => { blockedInstallHint.focus(); });
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Restart nanobot before installing another channel.");
+    await userEvent.setup().keyboard("{Enter}");
+    fireEvent.click(secondInstall);
+    expect(requestMutationMock).toHaveBeenCalledTimes(1);
     expect(restartButton).toBeEnabled();
     await act(async () => { restartButton.focus(); });
     expect(await screen.findByRole("tooltip")).toHaveTextContent("Restart nanobot to apply updated channel support.");
@@ -545,7 +552,7 @@ describe("Settings channels", () => {
       }
       if (url === "/api/settings/nanobot-features") {
         return jsonResponse({
-          features: [{ ...installed, restart_pending: restartPending }, other],
+          features: [{ ...installed, restart_pending: restartPending }, other, uninstalledConnectFeature("weixin")],
           enabled_count: 0,
           requires_restart: restartPending,
         });
@@ -563,6 +570,7 @@ describe("Settings channels", () => {
     expect(await screen.findByRole("switch", { name: "WhatsApp channel" })).toBeEnabled();
     expect(screen.getByRole("switch", { name: "WhatsApp channel" })).toHaveAttribute("aria-checked", "false");
     expect(screen.getByRole("switch", { name: "Existing channel" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Install WeChat" })).toBeEnabled();
   });
 
   it.each([

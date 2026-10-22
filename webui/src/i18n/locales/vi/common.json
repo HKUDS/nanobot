@@ -1262,6 +1262,7 @@
       "loading": "Đang tải kênh...",
       "empty": "Không có kênh nào phù hợp.",
       "restartRequired": "Khởi động lại nanobot để áp dụng hỗ trợ kênh đã cập nhật.",
+      "restartBeforeInstall": "Khởi động lại nanobot trước khi cài đặt kênh khác.",
       "requires": "Yêu cầu: {{requirements}}",
       "setUp": "Thiết lập",
       "setupGuide": "Hướng dẫn thiết lập",

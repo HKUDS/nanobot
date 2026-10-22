@@ -1262,6 +1262,7 @@
       "loading": "チャンネルを読み込み中...",
       "empty": "一致するチャンネルはありません。",
       "restartRequired": "更新したチャンネルサポートを反映するには nanobot を再起動してください。",
+      "restartBeforeInstall": "別のチャンネルをインストールするには、nanobot を再起動してください。",
       "requires": "必要: {{requirements}}",
       "setUp": "設定",
       "setupGuide": "設定ガイド",

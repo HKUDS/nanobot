@@ -1467,6 +1467,7 @@
       "loading": "Loading channels…",
       "empty": "No channels match this filter.",
       "restartRequired": "Restart nanobot to apply updated channel support.",
+      "restartBeforeInstall": "Restart nanobot before installing another channel.",
       "requires": "Requires: {{requirements}}",
       "setUp": "Set up",
       "setupGuide": "Setup guide",

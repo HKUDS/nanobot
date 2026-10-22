@@ -1262,6 +1262,7 @@
       "loading": "Memuat kanal...",
       "empty": "Tidak ada kanal yang cocok dengan filter ini.",
       "restartRequired": "Mulai ulang nanobot untuk menerapkan dukungan kanal yang diperbarui.",
+      "restartBeforeInstall": "Mulai ulang nanobot sebelum memasang kanal lain.",
       "requires": "Memerlukan: {{requirements}}",
       "setUp": "Siapkan",
       "setupGuide": "Panduan penyiapan",

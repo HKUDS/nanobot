@@ -1262,6 +1262,7 @@
       "loading": "Chargement des canaux...",
       "empty": "Aucun canal ne correspond à ce filtre.",
       "restartRequired": "Redémarrez nanobot pour appliquer le support de canal mis à jour.",
+      "restartBeforeInstall": "Redémarrez nanobot avant d’installer un autre canal.",
       "requires": "Requiert : {{requirements}}",
       "setUp": "Configurer",
       "setupGuide": "Guide de configuration",

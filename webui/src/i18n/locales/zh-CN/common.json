@@ -1467,6 +1467,7 @@
       "loading": "正在加载聊天平台...",
       "empty": "没有匹配的聊天平台。",
       "restartRequired": "重启 nanobot 以应用更新后的聊天平台支持。",
+      "restartBeforeInstall": "重启 nanobot 后可继续安装。",
       "requires": "需要：{{requirements}}",
       "setUp": "设置",
       "setupGuide": "配置指南",

@@ -1261,6 +1261,7 @@
       "loading": "正在載入通訊管道…",
       "empty": "沒有符合條件的通訊管道。",
       "restartRequired": "重新啟動 nanobot 以套用更新後的通訊管道支援。",
+      "restartBeforeInstall": "重新啟動 nanobot 後即可繼續安裝。",
       "requires": "需要：{{requirements}}",
       "setUp": "設定",
       "setupGuide": "設定指南",
