@@ -146,7 +146,7 @@ import {
 } from "@/lib/session-drag";
 import { formatQuotedUserMessage } from "@/lib/user-message-quote";
 import { cn } from "@/lib/utils";
-import type { ComposerDraftStore } from "@/lib/composer-draft";
+import type { ComposerDraft, ComposerDraftStore } from "@/lib/composer-draft";
 import { useLocalPreferences } from "@/hooks/useLocalPreferences";
 
 const VOICE_SHORTCUT_CODE = "KeyD";
@@ -1219,12 +1219,14 @@ export function ThreadComposer({
     useAttachedImages({ ingressLimits });
   const encoding = encodingFiles || checkingPath;
   const restoredDraftAttachments = useRef(false);
-  const [draftAttachmentsReady, setDraftAttachmentsReady] = useState(!initialDraft?.files.length);
+  const [draftAttachmentsReady, setDraftAttachmentsReady] = useState(!initialDraft?.attachments.length);
   useLayoutEffect(() => {
     if (restoredDraftAttachments.current) return;
     restoredDraftAttachments.current = true;
-    if (initialDraft?.files.length) enqueue(initialDraft.files, { restoringDraft: true });
-    for (const local of initialDraft?.localAttachments ?? []) addLocal(local, { restoringDraft: true });
+    for (const attachment of initialDraft?.attachments ?? []) {
+      if (attachment instanceof File) enqueue([attachment], { restoringDraft: true });
+      else addLocal(attachment, { restoringDraft: true });
+    }
     setDraftAttachmentsReady(true);
   }, [enqueue, addLocal, initialDraft]);
 
@@ -1606,8 +1608,9 @@ export function ThreadComposer({
     }
     draftStore.set(draftKey, {
       text: draftText,
-      files: images.flatMap((image) => image.file instanceof File ? [image.file] : []),
-      localAttachments: images.flatMap((image) => image.local ? [image.local] : []),
+      attachments: images.flatMap((image): ComposerDraft["attachments"] => (
+        image.local ? [image.local] : image.file instanceof File ? [image.file] : []
+      )),
       sessionMentions: activeSessionMentions,
       quotedContext,
     }, persistDraft);

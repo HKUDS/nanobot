@@ -979,7 +979,7 @@ export function ThreadShell({
         if (pending.draft && pending.images?.some((image) => image.media.path !== undefined)) {
           const targetKey = `websocket:${chatId}`;
           const current = draftStore?.get(targetKey, !temporary);
-          if (!current?.text && !current?.files.length && !current?.localAttachments?.length
+          if (!current?.text && !current?.attachments.length
             && !current?.sessionMentions.length && !current?.quotedContext) {
             draftStore?.set(targetKey, pending.draft, !temporary);
             if (draftStore?.get(pending.draftKey) === pending.draft) draftStore.delete(pending.draftKey);

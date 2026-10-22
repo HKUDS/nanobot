@@ -2451,9 +2451,9 @@ class AgentLoop:
             ).startswith("data:image/"):
                 internal_meta = cast(dict[str, Any], block_data.get("_meta") or {})
                 path = cast(str, internal_meta.get("path", ""))
-                filtered.append(
-                    {"type": "text", "text": image_placeholder_text(path)}
-                )
+                reference = {"type": "text", "text": image_placeholder_text(path)}
+                if not filtered or filtered[-1] != reference:
+                    filtered.append(reference)
                 continue
 
             filtered.append(block_data)

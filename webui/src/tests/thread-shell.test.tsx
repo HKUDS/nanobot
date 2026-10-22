@@ -669,8 +669,8 @@ describe("ThreadShell", () => {
     const client = { ...makeClient(), sendAttachments: vi.fn().mockRejectedValue(new Error("file not found")) };
     const store = new ComposerDraftStore();
     store.set("new:chat", {
-      text: "keep the first draft", files: [], sessionMentions: [], quotedContext: null,
-      localAttachments: [{ path: "/project/video.mp4", name: "video.mp4", size: 8, mime: "video/mp4", kind: "video", url: "" }],
+      text: "keep the first draft", sessionMentions: [], quotedContext: null,
+      attachments: [{ path: "/project/video.mp4", name: "video.mp4", size: 8, mime: "video/mp4", kind: "video", url: "" }],
     });
     const onCreateChat = vi.fn().mockResolvedValue("created");
     const shell = (id: string | null) => wrap(client, <ThreadShell session={id ? session(id) : null}
@@ -683,7 +683,7 @@ describe("ThreadShell", () => {
     await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue("keep the first draft"));
     expect(await screen.findByTestId("composer-chip")).toHaveTextContent("video.mp4");
     expect(screen.getByRole("alert")).toHaveTextContent("file not found");
-    expect(store.get("websocket:created")?.localAttachments).toHaveLength(1);
+    expect(store.get("websocket:created")?.attachments).toHaveLength(1);
     expect(store.has("new:chat")).toBe(false);
     client.sendAttachments.mockResolvedValue(undefined);
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -721,7 +721,7 @@ describe("ThreadShell", () => {
     const client = makeClient();
     let draftStore = new ComposerDraftStore();
     draftStore.set("websocket:reload-draft", {
-      text: "original", files: [], sessionMentions: [], quotedContext: "quoted answer",
+      text: "original", attachments: [], sessionMentions: [], quotedContext: "quoted answer",
     });
     const shell = () => wrap(client, (
       <ThreadShell session={session("reload-draft")} title="Reload test" temporary={temporary}
@@ -767,8 +767,8 @@ describe("ThreadShell", () => {
   it.each([false, true])("keeps text and quote drafts scoped to the session (temporary=%s)", async (temporary) => {
     const client = makeClient();
     const draftStore: ComposerDraftStore = new Map([
-      ["websocket:draft-a", { text: "draft A", files: [], sessionMentions: [], quotedContext: "quote A" }],
-      ["websocket:draft-b", { text: "draft B", files: [], sessionMentions: [], quotedContext: "quote B" }],
+      ["websocket:draft-a", { text: "draft A", attachments: [], sessionMentions: [], quotedContext: "quote A" }],
+      ["websocket:draft-b", { text: "draft B", attachments: [], sessionMentions: [], quotedContext: "quote B" }],
     ]);
     const shell = (chatId: string) => wrap(client, (
       <ThreadShell session={session(chatId)} title="Draft test" temporary={temporary}

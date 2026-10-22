@@ -266,6 +266,10 @@ async def test_gateway_continues_image_then_pdf_attachment_turn(codex_peer, tmp_
         assert len(server.requests) == 2
         initial, continued = [body for _, body in server.requests]
         assert "input_image" in json.dumps(initial["input"])
+        assert any(
+            block.get("type") == "input_text" and str(image) in block["text"]
+            for item in initial["input"] for block in item.get("content", [])
+        )
         assert continued["previous_response_id"] == "resp_1"
         assert "input_image" not in json.dumps(continued["input"])
         assert f"[Attachment: {pdf}]" in continued["input"][0]["content"][0]["text"]

@@ -169,7 +169,7 @@ describe("merged waiting messages", () => {
     render(<ThreadComposer {...props} />);
     await waitFor(() => expect(screen.queryByLabelText("Encoding…")).not.toBeInTheDocument());
     expect(screen.getAllByTestId("composer-chip")).toHaveLength(2);
-    expect(draftStore.get("chat-a")?.files.map((file) => file.name)).toEqual(["first.png", "second.txt"]);
+    expect(draftStore.get("chat-a")?.attachments.map((file) => file.name)).toEqual(["first.png", "second.txt"]);
   });
 
   it("retains a merged rejected send after leaving the topic during upload", async () => {

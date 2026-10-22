@@ -8,6 +8,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
+import { ComposerDraftStore } from "@/lib/composer-draft";
 import type { EncodeResponse } from "@/lib/imageEncode";
 import type { WebUIIngressLimits } from "@/lib/types";
 
@@ -444,6 +445,36 @@ describe("local attachment paths and video ingress", () => {
     expect(inspect).toHaveBeenCalledWith(local.path);
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onSend.mock.calls[0][1][0].media).toEqual({ path: local.path, name: local.name });
+  });
+
+  it("keeps mixed local and uploaded attachment order across draft remounts", async () => {
+    encodeImage.mockImplementation(async (file) => resolveReady(file));
+    const firstLocal = { ...local, path: "C:\\project\\first.png", name: "first.png", kind: "image" as const, mime: "image/png" };
+    const lastLocal = { ...firstLocal, path: "C:\\project\\last.png", name: "last.png" };
+    const inspect = vi.fn().mockResolvedValueOnce(firstLocal).mockResolvedValueOnce(lastLocal);
+    const store = new ComposerDraftStore();
+    const onSend = vi.fn();
+    const composer = () => <ThreadComposer draftKey="mixed-order" draftStore={store} onSend={onSend} onInspectAttachment={inspect} />;
+    const view = render(composer());
+    const input = screen.getByLabelText(/message input/i);
+    fireEvent.paste(input, { clipboardData: { items: [], getData: () => firstLocal.path } });
+    await screen.findByText(firstLocal.name);
+    fireEvent.change(input.closest("form")!.querySelector('input[type="file"]')!, { target: { files: [pngFile("middle.png")] } });
+    await screen.findByText("middle.png");
+    fireEvent.paste(input, { clipboardData: { items: [], getData: () => lastLocal.path } });
+    await screen.findByText(lastLocal.name);
+    fireEvent.change(input, { target: { value: "compare the first, second and third images" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled());
+    expect(screen.getAllByTestId("composer-chip").map((chip) => chip.textContent)).toEqual([
+      expect.stringContaining("first.png"), expect.stringContaining("middle.png"), expect.stringContaining("last.png"),
+    ]);
+    view.unmount();
+    render(composer());
+    await waitFor(() => expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled());
+    fireEvent.keyDown(screen.getByLabelText(/message input/i), { key: "Enter" });
+    expect(onSend.mock.calls[0][1].map((item: { media: { name: string } }) => item.media.name)).toEqual([
+      "first.png", "middle.png", "last.png",
+    ]);
   });
 
   it("keeps failed path text and attachment draft, and does not consume prose or URLs", async () => {

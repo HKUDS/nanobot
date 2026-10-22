@@ -238,3 +238,27 @@ async def test_borrowed_image_origin_survives_canonical_reload(tmp_path: Path) -
     response = build_session_thread_response(persisted, augment_user_media=augment)
     augment.assert_called_once_with([str(source)], [str(source)])
     assert response["events"][0]["media_urls"][0]["url"] == "/borrowed"
+
+
+@pytest.mark.asyncio
+async def test_image_path_remains_visible_once_after_session_reload(tmp_path: Path) -> None:
+    image = tmp_path / "original.png"
+    image.write_bytes(base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9kAAAAASUVORK5CYII="
+    ))
+    loop = _make_loop(tmp_path)
+    loop.provider.aclose = AsyncMock()
+    try:
+        await loop.process_direct("edit this image", session_key="websocket:image-reference", channel="websocket", chat_id="image-reference", media=[str(image)])
+        initial = loop.provider.chat_stream_with_retry.call_args.kwargs["messages"]
+        current = initial[-1]["content"]
+        assert any(block.get("type") == "image_url" for block in current)
+        assert sum(block.get("text", "").count(str(image)) for block in current) == 1
+        loop.sessions.invalidate("websocket:image-reference")
+        await loop.process_direct("which file was that?", session_key="websocket:image-reference", channel="websocket", chat_id="image-reference")
+        following = loop.provider.chat_stream_with_retry.call_args.kwargs["messages"]
+        previous = next(message["content"] for message in following if message["role"] == "user")
+        previous_text = previous if isinstance(previous, str) else "\n".join(block.get("text", "") for block in previous)
+        assert previous_text.count(str(image)) == 1
+    finally:
+        await loop.aclose()
