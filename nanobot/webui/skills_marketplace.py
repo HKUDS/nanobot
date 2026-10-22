@@ -17,6 +17,7 @@ from urllib.parse import quote, urlparse
 
 import httpx
 
+from nanobot.agent.plugins import AgentPlugins
 from nanobot.agent.skills import SkillsLoader
 from nanobot.security.network import PinnedDNSAsyncTransport
 from nanobot.security.workspace_policy import WorkspaceBoundaryError, require_path_within
@@ -81,17 +82,18 @@ async def trending_marketplace_skills(
     *,
     limit: int = 8,
     provider: str = _PROVIDER_ALL,
+    plugins: AgentPlugins | None = None,
 ) -> dict[str, Any]:
     """Return provider-aware marketplace rankings without mixing metric semantics."""
     selected = _valid_provider(provider)
     if selected == _PROVIDER_SKILLHUB:
-        return await _trending_skillhub_skills(workspace_path, limit=limit)
+        return await _trending_skillhub_skills(workspace_path, limit=limit, plugins=plugins)
     if selected == _PROVIDER_SKILLS_SH:
-        return await _trending_skills_sh_skills(workspace_path, limit=limit)
+        return await _trending_skills_sh_skills(workspace_path, limit=limit, plugins=plugins)
 
     results = await asyncio.gather(
-        _trending_skills_sh_skills(workspace_path, limit=limit),
-        _trending_skillhub_skills(workspace_path, limit=limit),
+        _trending_skills_sh_skills(workspace_path, limit=limit, plugins=plugins),
+        _trending_skillhub_skills(workspace_path, limit=limit, plugins=plugins),
         return_exceptions=True,
     )
     payloads = [result for result in results if isinstance(result, dict)]
@@ -117,6 +119,7 @@ async def _trending_skills_sh_skills(
     workspace_path: Path,
     *,
     limit: int,
+    plugins: AgentPlugins | None,
 ) -> dict[str, Any]:
     """Return a source-diverse snapshot of skills.sh's real 24-hour leaderboard."""
     try:
@@ -130,7 +133,7 @@ async def _trending_skills_sh_skills(
             status=502,
         ) from exc
 
-    installed = _installed_skill_names(workspace_path)
+    installed = _installed_skill_names(workspace_path, plugins=plugins)
     rows = payload.get("skills", [])
     skills: list[dict[str, Any]] = []
     seen_sources: set[str] = set()
@@ -163,6 +166,7 @@ async def search_marketplace_skills(
     *,
     limit: int = 20,
     provider: str = _PROVIDER_ALL,
+    plugins: AgentPlugins | None = None,
 ) -> dict[str, Any]:
     """Search one or all catalogs and annotate locally installed results."""
     normalized = " ".join(query.split())
@@ -173,13 +177,13 @@ async def search_marketplace_skills(
 
     selected = _valid_provider(provider)
     if selected == _PROVIDER_SKILLHUB:
-        return await _search_skillhub_skills(normalized, workspace_path, limit=limit)
+        return await _search_skillhub_skills(normalized, workspace_path, limit=limit, plugins=plugins)
     if selected == _PROVIDER_SKILLS_SH:
-        return await _search_skills_sh_skills(normalized, workspace_path, limit=limit)
+        return await _search_skills_sh_skills(normalized, workspace_path, limit=limit, plugins=plugins)
 
     results = await asyncio.gather(
-        _search_skills_sh_skills(normalized, workspace_path, limit=limit),
-        _search_skillhub_skills(normalized, workspace_path, limit=limit),
+        _search_skills_sh_skills(normalized, workspace_path, limit=limit, plugins=plugins),
+        _search_skillhub_skills(normalized, workspace_path, limit=limit, plugins=plugins),
         return_exceptions=True,
     )
     payloads = [result for result in results if isinstance(result, dict)]
@@ -206,6 +210,7 @@ async def _search_skills_sh_skills(
     workspace_path: Path,
     *,
     limit: int,
+    plugins: AgentPlugins | None,
 ) -> dict[str, Any]:
     try:
         async with _skills_client() as client:
@@ -221,7 +226,7 @@ async def _search_skills_sh_skills(
             status=502,
         ) from exc
 
-    installed = _installed_skill_names(workspace_path)
+    installed = _installed_skill_names(workspace_path, plugins=plugins)
     rows = payload.get("skills", [])
     skills: list[dict[str, Any]] = []
     for row in rows:
@@ -244,6 +249,7 @@ async def _search_skillhub_skills(
     workspace_path: Path,
     *,
     limit: int,
+    plugins: AgentPlugins | None,
 ) -> dict[str, Any]:
     try:
         async with _skillhub_client() as client:
@@ -259,7 +265,7 @@ async def _search_skillhub_skills(
             status=502,
         ) from exc
 
-    installed = _installed_skill_names(workspace_path)
+    installed = _installed_skill_names(workspace_path, plugins=plugins)
     rows = payload.get("results", [])
     skills = [
         skill
@@ -279,6 +285,7 @@ async def _trending_skillhub_skills(
     workspace_path: Path,
     *,
     limit: int,
+    plugins: AgentPlugins | None,
 ) -> dict[str, Any]:
     try:
         async with _skillhub_client() as client:
@@ -291,7 +298,7 @@ async def _trending_skillhub_skills(
             status=502,
         ) from exc
 
-    installed = _installed_skill_names(workspace_path)
+    installed = _installed_skill_names(workspace_path, plugins=plugins)
     rows = payload.get("skills", [])
     skills: list[dict[str, Any]] = []
     for rank, row in enumerate(rows, start=1):
@@ -338,25 +345,28 @@ async def install_marketplace_skill(
     *,
     provider: str = _PROVIDER_SKILLS_SH,
     version: str = "",
+    plugins: AgentPlugins | None = None,
 ) -> dict[str, Any]:
     """Install one normalized marketplace result into ``<workspace>/skills``."""
     selected = _valid_provider(provider, allow_all=False)
     if selected == _PROVIDER_SKILLHUB:
-        return await _install_skillhub_skill(skill_id, version, workspace_path)
-    return await _install_skills_sh_skill(source, skill_id, workspace_path)
+        return await _install_skillhub_skill(skill_id, version, workspace_path, plugins=plugins)
+    return await _install_skills_sh_skill(source, skill_id, workspace_path, plugins=plugins)
 
 
 async def _install_skills_sh_skill(
     source: str,
     skill_id: str,
     workspace_path: Path,
+    *,
+    plugins: AgentPlugins | None,
 ) -> dict[str, Any]:
     if not _SOURCE_RE.fullmatch(source):
         raise SkillsMarketplaceError("invalid skill source")
     if not _valid_skill_id(skill_id):
         raise SkillsMarketplaceError("invalid skill name")
 
-    loader = SkillsLoader(workspace_path)
+    loader = SkillsLoader(workspace_path, plugins=plugins)
     existing = {entry["name"]: entry for entry in loader.list_skills(filter_unavailable=False)}
     if skill_id in existing:
         return {"installed": True, "already_installed": True, "name": skill_id}
@@ -439,13 +449,15 @@ async def _install_skillhub_skill(
     skill_id: str,
     requested_version: str,
     workspace_path: Path,
+    *,
+    plugins: AgentPlugins | None,
 ) -> dict[str, Any]:
     if not _valid_skill_id(skill_id):
         raise SkillsMarketplaceError("invalid SkillHub skill name")
     if requested_version and _VERSION_RE.fullmatch(requested_version) is None:
         raise SkillsMarketplaceError("invalid SkillHub skill version")
 
-    loader = SkillsLoader(workspace_path)
+    loader = SkillsLoader(workspace_path, plugins=plugins)
     existing = {entry["name"]: entry for entry in loader.list_skills(filter_unavailable=False)}
     if skill_id in existing:
         return {
@@ -740,10 +752,12 @@ def _skillhub_client() -> httpx.AsyncClient:
     )
 
 
-def _installed_skill_names(workspace_path: Path) -> set[str]:
+def _installed_skill_names(
+    workspace_path: Path, *, plugins: AgentPlugins | None,
+) -> set[str]:
     return {
         entry["name"]
-        for entry in SkillsLoader(workspace_path).list_skills(filter_unavailable=False)
+        for entry in SkillsLoader(workspace_path, plugins=plugins).list_skills(filter_unavailable=False)
     }
 
 

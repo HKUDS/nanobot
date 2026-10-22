@@ -17,8 +17,7 @@ from typing import TYPE_CHECKING, Any, Literal, Mapping, cast
 
 from nanobot.agent.plugins import (
     AgentPlugin,
-    discover_agent_plugins,
-    set_agent_plugin_enabled,
+    AgentPlugins,
 )
 from nanobot.agent.tools.mcp_oauth import (
     delete_mcp_oauth_credentials,
@@ -26,7 +25,7 @@ from nanobot.agent.tools.mcp_oauth import (
 )
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.apps.protocol import app_manifest, compact_dict
-from nanobot.config.loader import load_config, resolve_config_env_vars, save_config
+from nanobot.config.loader import get_config_path, load_config, resolve_config_env_vars, save_config
 from nanobot.config.paths import get_runtime_subdir
 from nanobot.config.schema import MCPServerConfig
 from nanobot.utils.helpers import ensure_dir
@@ -580,9 +579,13 @@ def mcp_presets_payload(
         if name not in known
     ]
     existing_names = {str(row["name"]) for row in (*preset_rows, *custom_rows)}
+    plugins = AgentPlugins(
+        home=config.runtime_data_dir or get_config_path().expanduser().resolve().parent,
+        workspace=config.workspace_path,
+    )
     plugin_rows = [
         _agent_plugin_payload(plugin)
-        for plugin in discover_agent_plugins(config.workspace_path)
+        for plugin in plugins.discover()
         if f"plugin-{plugin.name}" not in existing_names
     ]
     payload: dict[str, Any] = {
@@ -1268,14 +1271,16 @@ async def mcp_presets_settings_action(
     if name.startswith("plugin-"):
         plugin_config = load_config(config_path) if config_path is not None else load_config()
         plugin_name = name.removeprefix("plugin-")
-        plugins = discover_agent_plugins(plugin_config.workspace_path)
-        plugin = next((item for item in plugins if item.name == plugin_name), None)
+        plugins = AgentPlugins(
+            home=plugin_config.runtime_data_dir or get_config_path().expanduser().resolve().parent,
+            workspace=plugin_config.workspace_path,
+        )
+        plugin = plugins.find(plugin_name)
         if name not in plugin_config.tools.mcp_servers and plugin is not None:
             if action not in {"enable", "disable"}:
                 raise McpPresetError("Agent Plugins support enable and disable actions only")
             await asyncio.to_thread(
-                set_agent_plugin_enabled,
-                plugin_config.workspace_path,
+                plugins.set_enabled,
                 plugin_name,
                 action == "enable",
             )

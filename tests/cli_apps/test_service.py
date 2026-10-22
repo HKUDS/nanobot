@@ -12,15 +12,16 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from nanobot.agent import plugins as agent_plugins
+from nanobot.agent.plugins import AgentPlugins
 from nanobot.agent.skills import SkillsLoader
 from nanobot.apps.cli import service as cli_service
 from nanobot.apps.cli.service import CliAppError, CliAppManager, CliAppsRuntimeConfig
+from nanobot.config.loader import get_config_path
 
 
 @pytest.fixture(autouse=True)
 def _isolate_plugin_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(agent_plugins, "get_config_path", lambda: tmp_path / "config/config.json")
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config/config.json")
 
 
 def _write_cache(path: Path, registry: dict) -> None:
@@ -969,7 +970,7 @@ def test_migrated_cli_app_skill_keeps_legacy_identity_alias(
         "display_name": "Uni-Mol Tools",
         "entry_point": "unimol-tools",
     })
-    agent_plugins.set_agent_plugin_enabled(workspace, "cli-app-unimol-tools", True)
+    AgentPlugins(home=get_config_path().expanduser().resolve().parent, workspace=workspace).set_enabled("cli-app-unimol-tools", True)
 
     loader = SkillsLoader(workspace)
     assert loader.get_explicitly_invoked_skills("Use $cli-app-unimol_tools") == [

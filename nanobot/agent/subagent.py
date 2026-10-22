@@ -18,6 +18,7 @@ from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.hooks import create_file_edit_activity_hook
+from nanobot.agent.plugins import AgentPlugins
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
 from nanobot.agent.session_activity import SessionActivity
 from nanobot.agent.subagent_sessions import SubagentSessions
@@ -221,6 +222,7 @@ class SubagentManager:
         *,
         consolidator: Consolidator,
         session_manager: SessionManager | None = None,
+        plugins: AgentPlugins | None = None,
     ):
         if cast(object, consolidator) is None:
             raise TypeError("SubagentManager requires a consolidator")
@@ -249,6 +251,11 @@ class SubagentManager:
                 model or provider.get_default_model(),
                 context_window_tokens=defaults.context_window_tokens,
             )
+        if plugins is None:
+            from nanobot.config.loader import get_config_path
+
+            plugins = AgentPlugins(home=get_config_path().expanduser().resolve().parent, workspace=workspace)
+        self.plugins = plugins
         self.workspace = workspace
         self.bus = bus
         self.tools_config = tools_config or ToolsConfig()
@@ -527,6 +534,7 @@ class SubagentManager:
         ctx = ToolContext(
             config=cfg,
             workspace=str(root.resolve()),
+            plugins=self.plugins,
             exec_session_manager=exec_manager or self._exec_session_manager,
             file_state_store=FileStates(),
             workspace_sandbox=workspace_sandbox_status(
@@ -953,6 +961,7 @@ class SubagentManager:
         project_workspace = workspace.expanduser().resolve() if workspace else agent_workspace
         skills_summary = SkillsLoader(
             self.workspace,
+            plugins=self.plugins,
             disabled_skills=self.disabled_skills,
         ).build_skills_summary(workspace=project_workspace)
         history_log = (

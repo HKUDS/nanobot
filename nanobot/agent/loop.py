@@ -30,6 +30,7 @@ from nanobot.agent.goal_permission import GoalInputScope
 from nanobot.agent.hook import AgentHook, AgentTurnHookFactory
 from nanobot.agent.memory import Consolidator
 from nanobot.agent.model_runtime import ModelRuntimeResolver
+from nanobot.agent.plugins import AgentPlugins
 from nanobot.agent.runner import AgentRunner, AgentRunResult, AgentRunSpec
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
@@ -313,6 +314,7 @@ class AgentLoop:
         local_trigger_store: LocalTriggerStore | None = None,
         idle_compact_check_interval_seconds: int = 0,
         recovery_admission: RecoveryAdmission | None = None,
+        plugins: AgentPlugins | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -330,6 +332,11 @@ class AgentLoop:
         self.channels_config = channels_config
         self.restart_mode = restart_mode
         self._runtime_model_publisher = runtime_model_publisher
+        if plugins is None:
+            from nanobot.config.loader import get_config_path
+
+            plugins = AgentPlugins(home=get_config_path().expanduser().resolve().parent, workspace=workspace)
+        self.plugins = plugins
         self.workspace = workspace
         initial_model = model or provider.get_default_model()
         self.max_iterations = (
@@ -379,7 +386,9 @@ class AgentLoop:
         self._extra_hooks: list[AgentHook] = hooks or []
         self._hook_factories: list[AgentTurnHookFactory] = hook_factories or []
 
-        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
+        self.context = ContextBuilder(
+            workspace, timezone=timezone, disabled_skills=disabled_skills, plugins=self.plugins,
+        )
         self.sessions = session_manager or SessionManager(workspace)
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.
@@ -403,6 +412,7 @@ class AgentLoop:
         )
         self.subagents = SubagentManager(
             workspace=workspace,
+            plugins=self.plugins,
             bus=bus,
             tools_config=_tc,
             max_tool_result_chars=self.max_tool_result_chars,
@@ -484,6 +494,13 @@ class AgentLoop:
         if bus is None:
             bus = MessageBus()
         defaults = config.agents.defaults
+        if "plugins" not in extra:
+            from nanobot.config.loader import get_config_path
+
+            extra["plugins"] = AgentPlugins(
+                home=config.runtime_data_dir or get_config_path().expanduser().resolve().parent,
+                workspace=config.workspace_path,
+            )
         if "session_manager" not in extra:
             data_dir = config.runtime_data_dir
             extra["session_manager"] = SessionManager(
@@ -656,6 +673,7 @@ class AgentLoop:
         ctx = ToolContext(
             config=self.tools_config,
             workspace=str(self.workspace),
+            plugins=self.plugins,
             bus=self.bus,
             subagent_manager=self.subagents,
             cron_service=self.cron_service,

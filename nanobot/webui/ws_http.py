@@ -26,6 +26,7 @@ from websockets.datastructures import Headers
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
+from nanobot.agent.plugins import AgentPlugins
 from nanobot.agent.subagent import SubagentControlError
 from nanobot.agent.subagent_status import SubagentSessionError
 from nanobot.command.builtin import builtin_command_palette
@@ -413,6 +414,7 @@ class GatewayHTTPHandler:
             settings.config.path.parent / "webui", local_gateway_id=tokens.instance_id,
         )
         self.skills_workspace_path = skills_workspace_path
+        self.plugins = AgentPlugins(home=settings.config.path.parent, workspace=skills_workspace_path)
         self.disabled_skills: set[str] = (
             disabled_skills if disabled_skills is not None else set()
         )
@@ -1796,6 +1798,7 @@ class GatewayHTTPHandler:
             webui_skills_payload,
             self.skills_workspace_path,
             disabled_skills=set(self.disabled_skills),
+            plugins=self.plugins,
         )
 
     async def _handle_webui_skills(self, request: WsRequest) -> Response:
@@ -1814,6 +1817,7 @@ class GatewayHTTPHandler:
                 query,
                 self.skills_workspace_path,
                 provider=provider,
+                plugins=self.plugins,
             )
         except SkillsMarketplaceError as exc:
             return _http_error(exc.status, exc.message)
@@ -1830,6 +1834,7 @@ class GatewayHTTPHandler:
             payload = await trending_marketplace_skills(
                 self.skills_workspace_path,
                 provider=provider,
+                plugins=self.plugins,
             )
         except SkillsMarketplaceError as exc:
             return _http_error(exc.status, exc.message)
@@ -1873,6 +1878,7 @@ class GatewayHTTPHandler:
                     skill_id,
                     self.skills_workspace_path,
                     provider=provider,
+                    plugins=self.plugins,
                     version=version,
                 )
             except SkillsMarketplaceError as exc:
@@ -1912,6 +1918,7 @@ class GatewayHTTPHandler:
                     enabled=raw_enabled == "true",
                     disabled_skills=self.disabled_skills,
                     config_path=config_path,
+                    plugins=self.plugins,
                 )
             )
         except SkillManagementError as exc:
@@ -1939,6 +1946,7 @@ class GatewayHTTPHandler:
                     name,
                     disabled_skills=self.disabled_skills,
                     config_path=config_path,
+                    plugins=self.plugins,
                 )
             )
         except SkillManagementError as exc:
@@ -1966,6 +1974,7 @@ class GatewayHTTPHandler:
             self.skills_workspace_path,
             name,
             disabled_skills=set(self.disabled_skills),
+            plugins=self.plugins,
         )
         if payload is None:
             return _http_error(404, "skill not found")
