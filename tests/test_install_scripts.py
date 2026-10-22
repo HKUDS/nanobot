@@ -204,6 +204,54 @@ def test_installer_starts_and_upgrades_same_persistent_manager_environment(sandb
     assert not (sandbox["root"] / "managed").exists()
 
 
+@pytest.mark.skipif(not WINDOWS, reason="Windows PowerShell command discovery")
+def test_powershell_manager_discovery_keeps_session_functions_without_importing_modules(sandbox):
+    shell = shutil.which("powershell")
+    if not shell:
+        pytest.skip("Windows PowerShell is required")
+    uv = Path(_expose(sandbox, "uv"))
+    _wheel(sandbox["wheels"], "0.0.1")
+    _run([str(uv), "tool", "install", "--python", BASE_PYTHON, "nanobot-ai"], sandbox)
+    prefix = sandbox["root"] / "uv-tools/nanobot-ai"
+    # The session function is the only uv command; its real executable is not on PATH.
+    native = sandbox["root"] / "native"
+    native.mkdir()
+    uv = uv.rename(native / "uv.exe")
+    _wheel(sandbox["wheels"], "0.0.2")
+
+    def ps_literal(value):
+        return "'" + str(value).replace("'", "''") + "'"
+
+    modules = sandbox["root"] / "modules"
+    decoy = modules / "InstallerDecoy"
+    decoy.mkdir(parents=True)
+    marker = sandbox["root"] / "module-imported"
+    (decoy / "InstallerDecoy.psd1").write_text(
+        "@{ RootModule = 'InstallerDecoy.psm1'; ModuleVersion = '1.0'; FunctionsToExport = @('pipx') }\n",
+        encoding="utf-8-sig",
+    )
+    (decoy / "InstallerDecoy.psm1").write_text(
+        f"[IO.File]::WriteAllText({ps_literal(marker)}, 'imported')\n"
+        "function pipx { throw 'Manager discovery imported an unrelated module' }\n",
+        encoding="utf-8-sig",
+    )
+    sandbox["env"]["PSModuleAnalysisCachePath"] = str(sandbox["root"] / "module-analysis-cache")
+    command = (
+        f"$env:PSModulePath = {ps_literal(modules)} + ';' + $PSHOME + '\\Modules'\n"
+        f"function uv {{ & {ps_literal(uv)} @args }}\n"
+        f"& {ps_literal(SCRIPTS / 'install.ps1')}"
+    )
+    result = _run([shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                   "-Command", command], sandbox, check=False)
+    assert not marker.exists(), result.stdout + result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
+    identity = _identity(result)
+    assert identity["version"] == "0.0.2"
+    assert Path(identity["prefix"]).resolve() == prefix
+    assert identity["isolated"] == 1
+    assert not (sandbox["root"] / "managed").exists()
+
+
 def test_rerunning_installer_preserves_uv_version_constraint(sandbox):
     uv = _expose(sandbox, "uv")
     _wheel(sandbox["wheels"], "0.0.1")
