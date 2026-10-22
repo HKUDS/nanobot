@@ -44,6 +44,7 @@ const sessionUpdateHandlers = new Set<(
   workspaceScope?: WorkspaceScopePayload,
 ) => void>();
 const sidebarStateUpdateHandlers = new Set<(state: SidebarStatePayload) => void>();
+const stateChangeHandlers = new Map<string, Set<() => void>>();
 let mockSessions: ChatSummary[] = [];
 const HERO_GREETING_PATTERN =
   /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
@@ -261,6 +262,12 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
       return () => statusHandlers.delete(handler);
     };
     onRuntimeModelUpdate = () => () => {};
+    onStateChange = (resource: string, handler: () => void) => {
+      const handlers = stateChangeHandlers.get(resource) ?? new Set();
+      stateChangeHandlers.set(resource, handlers);
+      handlers.add(handler);
+      return () => handlers.delete(handler);
+    };
     onError = () => () => {};
     onChat = () => () => {};
     onTranscript = () => () => {};
@@ -348,6 +355,7 @@ describe("App layout", () => {
     runStatusHandlers.clear();
     sessionUpdateHandlers.clear();
     sidebarStateUpdateHandlers.clear();
+    stateChangeHandlers.clear();
     window.history.replaceState(null, "", "/");
     sessionStorage.removeItem("nanobot.remote-instance");
     Reflect.deleteProperty(window, "nanobotHost");
@@ -4435,6 +4443,177 @@ describe("App layout", () => {
     unmount();
   });
 
+  it("opens a newly delivered pairing request on notification without idle polling", async () => {
+    vi.useFakeTimers();
+    vi.mocked(fetchBootstrap).mockResolvedValue({
+      token: "tok", api_token: "api-tok", ws_path: "/", expires_in: 300,
+      terminal: { webui: { capabilities: ["webui.state-events.v1"] } },
+    });
+    let requests: Record<string, unknown>[] = [];
+    mockFetchRoutes({ "/api/settings/pairing": () => ({ requests }) });
+    render(<App />);
+    await act(async () => {});
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    const pairingReads = () => vi.mocked(fetch).mock.calls.filter(([input]) => String(input) === "/api/settings/pairing").length;
+    expect(pairingReads()).toBe(1);
+    requests = [{ code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status: "sent" }];
+    await act(async () => { for (const handler of stateChangeHandlers.get("pairing") ?? []) handler(); });
+    expect(screen.getByRole("dialog", { name: "Pair account" })).toBeVisible();
+    expect(pairingReads()).toBe(2);
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Pair account" })).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(screen.getByRole("dialog", { name: "Pair account" })).toBeVisible();
+    expect(pairingReads()).toBe(2);
+  });
+
+  it("keeps pairing countdowns aligned across windows without polling", async () => {
+    vi.useFakeTimers();
+    vi.mocked(fetchBootstrap).mockResolvedValue({
+      token: "tok", api_token: "api-tok", ws_path: "/", expires_in: 0,
+      terminal: { webui: { capabilities: ["webui.state-events.v1"] } },
+    });
+    const expiresAt = Date.now() + 600_000;
+    mockFetchRoutes({ "/api/settings/pairing": () => ({ requests: [{
+      code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status: "sent",
+      expires_at_ms: expiresAt, expires_in_seconds: Math.floor((expiresAt - Date.now()) / 1000),
+    }] }) });
+    const first = render(<App />);
+    await act(async () => {});
+    const firstPopup = within(first.container).getByRole("dialog", { name: "Pair account" });
+    expect(firstPopup).toHaveTextContent("Code expires 10 min.");
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(180_000); });
+    const second = render(<App />);
+    await act(async () => {});
+    const secondPopup = within(second.container).getByRole("dialog", { name: "Pair account" });
+    expect(secondPopup).toHaveTextContent("Code expires 7 min.");
+    await act(async () => { await vi.advanceTimersByTimeAsync(190_000); });
+    expect(firstPopup).toHaveTextContent("Code expires 4 min.");
+    expect(secondPopup).toHaveTextContent("Code expires 4 min.");
+    await act(async () => { await vi.advanceTimersByTimeAsync(50_000); });
+    expect(firstPopup).toHaveTextContent("Code expires 3 min.");
+    expect(secondPopup).toHaveTextContent("Code expires 3 min.");
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input) === "/api/settings/pairing"))
+      .toHaveLength(2);
+    expect(requestMutationSpy).not.toHaveBeenCalled();
+  });
+
+  it("pauses the pairing countdown while hidden and recalibrates before a return read finishes", async () => {
+    vi.useFakeTimers();
+    vi.mocked(fetchBootstrap).mockResolvedValue({
+      token: "tok", api_token: "api-tok", ws_path: "/", expires_in: 0,
+      terminal: { webui: { capabilities: ["webui.state-events.v1"] } },
+    });
+    let reads = 0;
+    mockFetchRoutes({ "/api/settings/pairing": () => ++reads === 1 ? { requests: [{
+      code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status: "sent",
+      expires_at_ms: Date.now() + 600_000, expires_in_seconds: 600,
+    }] } : new Promise(() => {}) });
+    const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
+    const setVisibility = (state: DocumentVisibilityState) => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: state });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+    try {
+      render(<App />);
+      await act(async () => {});
+      const popup = screen.getByRole("dialog", { name: "Pair account" });
+      expect(popup).toHaveTextContent("Code expires 10 min.");
+      await act(async () => setVisibility("hidden"));
+      await act(async () => { await vi.advanceTimersByTimeAsync(370_000); });
+      expect(popup).toHaveTextContent("Code expires 10 min.");
+      expect(reads).toBe(1);
+      await act(async () => setVisibility("visible"));
+      expect(reads).toBe(2);
+      expect(popup).toHaveTextContent("Code expires 4 min.");
+    } finally {
+      if (visibilityDescriptor) Object.defineProperty(document, "visibilityState", visibilityDescriptor);
+      else Reflect.deleteProperty(document, "visibilityState");
+    }
+  });
+
+  it("tracks the displayed pairing deadline across matches and leaves expiry decisions to the host", async () => {
+    vi.useFakeTimers();
+    vi.mocked(fetchBootstrap).mockResolvedValue({
+      token: "tok", api_token: "api-tok", ws_path: "/", expires_in: 0,
+      terminal: { webui: { capabilities: ["webui.state-events.v1"] } },
+    });
+    const requests = [
+      { code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status: "sent",
+        expires_at_ms: Date.now() + 180_000, expires_in_seconds: 180 },
+      { code: "IJKL-MNOP", channel: "feishu.second", sender_id: "bob", delivery_status: "sent",
+        expires_at_ms: Date.now() + 65_000, expires_in_seconds: 65 },
+    ];
+    mockFetchRoutes({ "/api/settings/pairing": { requests } });
+    requestMutationSpy.mockRejectedValueOnce(new Error("Approval unavailable"));
+    render(<App />);
+    await act(async () => {});
+    const popup = screen.getByRole("dialog", { name: "Pair account" });
+    const input = within(popup).getByRole("textbox", { name: "Pairing code" });
+    expect(popup).toHaveTextContent("Code expires 3 min.");
+    fireEvent.change(input, { target: { value: "IJKL-MNOP" } });
+    await act(async () => {});
+    expect(popup).toHaveTextContent("Code expires 2 min.");
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(popup).toHaveTextContent("Code expires 1 min.");
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(popup).toHaveTextContent("Code expires 59s.");
+    fireEvent.change(input, { target: { value: "" } });
+    expect(popup).toHaveTextContent("Code expires 3 min.");
+    await act(async () => { await vi.advanceTimersByTimeAsync(54_000); });
+    expect(popup).toHaveTextContent("Code expires 2 min.");
+    requestMutationSpy.mockRejectedValueOnce(new Error("Pairing request expired"));
+    fireEvent.change(input, { target: { value: "IJKL-MNOP" } });
+    await act(async () => {});
+    expect(popup).toHaveTextContent("Code expires 5s.");
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(popup).toHaveTextContent("Code expires expired.");
+    expect(input).toBeEnabled();
+    expect(requestMutationSpy).toHaveBeenCalledTimes(2);
+
+    // A stale visible snapshot can outlive its deadline until the host invalidates it.
+    mockFetchRoutes({ "/api/settings/pairing": { requests: [] } });
+    requestMutationSpy.mockRejectedValueOnce(new Error("Pairing request expired"));
+    fireEvent.click(within(popup).getByRole("button", { name: "Retry" }));
+    await act(async () => {});
+    expect(requestMutationSpy).toHaveBeenLastCalledWith("settings.pairing.approve", { code: "IJKL-MNOP" }, expect.any(Number));
+    expect(requestMutationSpy).toHaveBeenCalledTimes(3);
+    expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
+  });
+
+  it("counts down seconds-only pairing responses from a legacy host for reads and approvals", async () => {
+    vi.useFakeTimers();
+    let requests = [{
+      code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", expires_in_seconds: 2,
+    }];
+    mockFetchRoutes({ "/api/settings/pairing": () => ({ requests }) });
+    render(<App />);
+    await act(async () => {});
+    const popup = screen.getByRole("dialog", { name: "Pair account" });
+    expect(popup).toHaveTextContent("Code expires 2s.");
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(popup).toHaveTextContent("Code expires 1s.");
+    requests = [{
+      code: "IJKL-MNOP", channel: "feishu.second", sender_id: "bob", expires_in_seconds: 4,
+    }];
+    requestMutationSpy.mockResolvedValueOnce({ requests });
+    fireEvent.change(within(popup).getByRole("textbox", { name: "Pairing code" }), {
+      target: { value: "ABCD-EFGH" },
+    });
+    await act(async () => {});
+    expect(popup).toHaveTextContent("Code expires 4s.");
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(popup).toHaveTextContent("Code expires 3s.");
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input) === "/api/settings/pairing"))
+      .toHaveLength(1);
+    requests = [];
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input) === "/api/settings/pairing"))
+      .toHaveLength(2);
+  });
+
   it.each(["sending", "failed"])("explains an undelivered pairing reply (%s) without empty code slots", async (delivery_status) => {
     mockFetchRoutes({ "/api/settings/pairing": { requests: [{
       code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status,
@@ -4511,16 +4690,19 @@ describe("App layout", () => {
     expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
   });
 
-  it("reuses an in-flight pairing poll when the page becomes visible again", async () => {
+  it("reads current pairing on visible return without allowing the retired response to erase it", async () => {
     let resolvePairing!: (response: Response) => void;
     const pendingPairing = new Promise<Response>((resolve) => {
       resolvePairing = resolve;
     });
-    const fetchMock = vi.fn((input: RequestInfo | URL) => (
-      String(input) === "/api/settings/pairing"
-        ? pendingPairing
-        : Promise.resolve({ ok: false, status: 404 } as Response)
-    ));
+    const signals: (AbortSignal | null | undefined)[] = [];
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) !== "/api/settings/pairing") return Promise.resolve({ ok: false, status: 404 } as Response);
+      signals.push(init?.signal);
+      return signals.length === 1 ? pendingPairing : Promise.resolve(jsonResponse({ requests: [{
+        code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status: "sent",
+      }] }));
+    });
     vi.stubGlobal("fetch", fetchMock);
     const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
 
@@ -4543,13 +4725,16 @@ describe("App layout", () => {
       act(() => setVisibility("hidden"));
       act(() => setVisibility("visible"));
 
+      expect(signals[0]?.aborted).toBe(true);
       expect(fetchMock.mock.calls.filter(([input]) => (
         String(input) === "/api/settings/pairing"
-      ))).toHaveLength(1);
+      ))).toHaveLength(2);
+      expect(await screen.findByRole("dialog", { name: "Pair account" })).toBeVisible();
       await act(async () => {
         resolvePairing(jsonResponse({ requests: [] }));
         await pendingPairing;
       });
+      expect(screen.getByRole("dialog", { name: "Pair account" })).toBeVisible();
     } finally {
       if (visibilityDescriptor) {
         Object.defineProperty(document, "visibilityState", visibilityDescriptor);

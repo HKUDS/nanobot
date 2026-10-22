@@ -859,6 +859,8 @@ export interface SettingsPayload {
     unified_session: boolean;
   };
   usage?: {
+    /** Timezone used to group this snapshot; absent on older hosts. */
+    timezone?: string;
     days: Array<{
       date: string;
       input_tokens: number;
@@ -1573,6 +1575,10 @@ export type InboundEvent =
       text?: string;
     } & InboundTurnMetadata)
   | {
+      event: "webui_state_changed";
+      resources: WebUIStateResource[];
+    }
+  | {
       event: "runtime_model_updated";
       model_name: string;
       model_preset?: string | null;
@@ -1799,3 +1805,5 @@ export type Outbound =
        * generic websocket protocol for other clients. */
       webui?: true;
     };
+
+export type WebUIStateResource = "pairing" | "channels" | "automations" | "usage" | "remote_instances";

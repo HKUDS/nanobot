@@ -8,6 +8,7 @@ private-assistant scale: small JSON file, simple locking, no external DB.
 from __future__ import annotations
 
 import json
+import math
 import secrets
 import string
 import threading
@@ -33,8 +34,13 @@ def _store_path() -> Path:
     return get_data_dir() / "pairing.json"
 
 
-def _load() -> dict[str, Any]:
-    path = _store_path()
+def pairing_store_path() -> Path:
+    """Return the active pairing owner's persistent store path."""
+    return _store_path()
+
+
+def _load(path: Path | None = None) -> dict[str, Any]:
+    path = path if path is not None else _store_path()
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
@@ -224,6 +230,18 @@ def list_pending() -> list[dict[str, Any]]:
             for code, info in data.get("pending", {}).items()
             if isinstance(info, dict)
         ]
+
+
+def pending_expirations(path: Path) -> tuple[float, ...]:
+    """Read only the live deadlines needed by a path-scoped expiration timer."""
+    with _LOCK:
+        data = _load(path)
+        _gc_pending(data)
+        return tuple(sorted(
+            float(info["expires_at"])
+            for info in data["pending"].values()
+            if math.isfinite(info["expires_at"])
+        ))
 
 
 def revoke(channel: str, sender_id: str) -> bool:

@@ -55,6 +55,7 @@ import { useSidebarState } from "@/hooks/useSidebarState";
 import { useSkills } from "@/hooks/useSkills";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
+import { useStateRefresh } from "@/hooks/useStateRefresh";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useAppViewport } from "@/hooks/useAppViewport";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
@@ -630,7 +631,7 @@ function PairingCodePopup({
   const displayRequest = matchedRequest ?? firstRequest;
   const deliveryBlocked = displayRequest?.delivery_status === "failed"
     || displayRequest?.delivery_status === "sending";
-  const expires = formatPairingExpiry(displayRequest?.expires_in_seconds);
+  const expires = usePairingExpiry(displayRequest?.expires_at_ms);
   const isCompleteCode = normalizedCode.length === 9;
   const showNoMatch = isCompleteCode && !matchedRequest && !busyCode;
 
@@ -928,6 +929,33 @@ function pairingChannelPresentation(channel: string) {
     color: plugin?.color ?? "#10B981",
     logoUrl: plugin?.logoUrl,
   };
+}
+
+function pairingRequestsWithDeadlines(requests: PairingRequestInfo[]): PairingRequestInfo[] {
+  const receivedAt = Date.now();
+  return requests.map((request) => {
+    if (request.expires_at_ms != null || request.expires_in_seconds == null) return request;
+    // Legacy hosts only send a duration. Anchor it at receipt, not when a popup opens or changes matches.
+    return { ...request, expires_at_ms: receivedAt + request.expires_in_seconds * 1000 };
+  });
+}
+
+function usePairingExpiry(expiresAt: number | null | undefined): string {
+  const pageVisible = usePageVisibility();
+  const [, refreshExpiry] = useState(0);
+  const remainingMs = expiresAt == null ? null : Math.max(0, expiresAt - Date.now());
+
+  useEffect(() => {
+    if (!pageVisible || remainingMs == null || remainingMs === 0) return;
+    const unitMs = remainingMs > 60_000 ? 60_000 : 1_000;
+    const timer = window.setTimeout(
+      () => refreshExpiry((revision) => revision + 1),
+      remainingMs % unitMs || unitMs,
+    );
+    return () => window.clearTimeout(timer);
+  }, [pageVisible, remainingMs]);
+
+  return formatPairingExpiry(remainingMs == null ? null : Math.ceil(remainingMs / 1000));
 }
 
 function formatPairingExpiry(seconds: number | null | undefined): string {
@@ -1279,7 +1307,6 @@ function Shell({
   const [pairingRequests, setPairingRequests] = useState<PairingRequestInfo[]>([]);
   const [pairingBusyCode, setPairingBusyCode] = useState<string | null>(null);
   const [pairingError, setPairingError] = useState<string | null>(null);
-  const pairingRefreshRef = useRef<Promise<number> | null>(null);
   const [snoozedPairingCodes, setSnoozedPairingCodes] = useState<Map<string, {
     until: number;
     deliveryStatus: PairingRequestInfo["delivery_status"];
@@ -1290,7 +1317,6 @@ function Shell({
   const [updatedChatIds, setUpdatedChatIds] = useState<Set<string>>(readSessionUpdateChatIds);
   const [workspaces, setWorkspaces] = useState<WorkspacesPayload | null>(null);
   const { skills, loading: skillsLoading, error: skillsError } = useSkills(getToken);
-  const pageVisible = usePageVisibility();
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsPayload | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const settingsRefreshGenerationRef = useRef(0);
@@ -1471,61 +1497,31 @@ function Shell({
     writeSessionUpdateChatIds(updatedChatIds);
   }, [updatedChatIds]);
 
-  const refreshPairingRequests = useCallback((): Promise<number> => {
-    if (pairingRefreshRef.current) return pairingRefreshRef.current;
-
-    const request = (async () => {
-      try {
-        const payload = await fetchPairingRequests(getToken());
-        const requests = Array.isArray(payload.requests) ? payload.requests : [];
-        setPairingRequests(requests);
-        setSnoozedPairingCodes((current) => {
-          if (current.size === 0) return current;
-          const activeRequests = new Map(requests.map((request) => [request.code, request]));
-          const now = Date.now();
-          const next = new Map(
-            Array.from(current).filter(
-              ([code, snooze]) => activeRequests.has(code)
-                && snooze.until > now
-                && activeRequests.get(code)?.delivery_status === snooze.deliveryStatus,
-            ),
-          );
-          return next.size === current.size ? current : next;
-        });
-        return requests.length;
-      } catch {
-        // Pairing is an opportunistic WebUI affordance. The slash command path
-        // remains available if this polling request fails.
-        return 0;
-      }
-    })();
-    const clearRequest = () => {
-      if (pairingRefreshRef.current === request) pairingRefreshRef.current = null;
-    };
-    pairingRefreshRef.current = request;
-    void request.then(clearRequest, clearRequest);
-    return request;
-  }, [getToken]);
-
-  useEffect(() => {
-    if (!pageVisible) return undefined;
-
-    let disposed = false;
-    let timer: number | null = null;
-    const poll = async () => {
-      const requestCount = await refreshPairingRequests();
-      if (disposed) return;
-      timer = window.setTimeout(
-        () => void poll(),
-        requestCount > 0 ? PAIRING_POLL_INTERVAL_MS : PAIRING_IDLE_POLL_INTERVAL_MS,
-      );
-    };
-    void poll();
-    return () => {
-      disposed = true;
-      if (timer !== null) window.clearTimeout(timer);
-    };
-  }, [pageVisible, refreshPairingRequests]);
+  const requestPairingRefresh = useStateRefresh(
+    "pairing",
+    true,
+    async (signal) => {
+      const payload = await fetchPairingRequests(getToken(), "", signal);
+      const requests = pairingRequestsWithDeadlines(Array.isArray(payload.requests) ? payload.requests : []);
+      if (signal.aborted) return requests.length;
+      setPairingRequests(requests);
+      setSnoozedPairingCodes((current) => {
+        if (current.size === 0) return current;
+        const activeRequests = new Map(requests.map((request) => [request.code, request]));
+        const now = Date.now();
+        const next = new Map(
+          Array.from(current).filter(
+            ([code, snooze]) => activeRequests.has(code)
+              && snooze.until > now
+              && activeRequests.get(code)?.delivery_status === snooze.deliveryStatus,
+          ),
+        );
+        return next.size === current.size ? current : next;
+      });
+      return requests.length;
+    },
+    (count) => count ? PAIRING_POLL_INTERVAL_MS : PAIRING_IDLE_POLL_INTERVAL_MS,
+  );
 
   const activeSession = useMemo<ChatSummary | null>(() => {
     if (!activeKey) return null;
@@ -2438,6 +2434,17 @@ function Shell({
     void onRequestDeleteMany([{ key, label }]);
   }, [onRequestDeleteMany]);
 
+  useEffect(() => {
+    if (snoozedPairingCodes.size === 0) return;
+    const until = Math.min(...Array.from(snoozedPairingCodes.values(), (snooze) => snooze.until));
+    const timer = window.setTimeout(() => {
+      setSnoozedPairingCodes((current) => new Map(
+        Array.from(current).filter(([, snooze]) => snooze.until > Date.now()),
+      ));
+    }, Math.max(0, until - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [snoozedPairingCodes]);
+
   const visiblePairingRequests = useMemo(
     () => {
       const now = Date.now();
@@ -2455,7 +2462,7 @@ function Shell({
       setPairingError(null);
       try {
         const payload = await runPairingAction(client, action, code);
-        setPairingRequests(Array.isArray(payload.requests) ? payload.requests : []);
+        setPairingRequests(pairingRequestsWithDeadlines(Array.isArray(payload.requests) ? payload.requests : []));
         setSnoozedPairingCodes((current) => {
           if (!current.has(code)) return current;
           const next = new Map(current);
@@ -2464,12 +2471,12 @@ function Shell({
         });
       } catch (e) {
         setPairingError((e as Error).message);
-        void refreshPairingRequests();
+        requestPairingRefresh();
       } finally {
         setPairingBusyCode(null);
       }
     },
-    [client, refreshPairingRequests],
+    [client, requestPairingRefresh],
   );
 
   const onDismissPairingRequest = useCallback((request: PairingRequestInfo) => {

@@ -550,11 +550,12 @@ export async function fetchSessionAutomations(
   token: string,
   key: string,
   base: string = "",
+  signal?: AbortSignal,
 ): Promise<SessionAutomationsPayload> {
   return request<SessionAutomationsPayload>(
     `${base}/api/sessions/${encodeURIComponent(key)}/automations`,
     token,
-    undefined,
+    { signal },
     API_READ_TIMEOUT_MS,
   );
 }
@@ -562,11 +563,12 @@ export async function fetchSessionAutomations(
 export async function fetchAutomations(
   token: string,
   base: string = "",
+  signal?: AbortSignal,
 ): Promise<AutomationsPayload> {
   return request<AutomationsPayload>(
     `${base}/api/webui/automations`,
     token,
-    undefined,
+    { signal },
     API_READ_TIMEOUT_MS,
   );
 }
@@ -769,11 +771,12 @@ export async function fetchSettings(
 export async function fetchSettingsUsage(
   token: string,
   base: string = "",
+  signal?: AbortSignal,
 ): Promise<NonNullable<SettingsPayload["usage"]>> {
   return request<NonNullable<SettingsPayload["usage"]>>(
     `${base}/api/settings/usage`,
     token,
-    undefined,
+    { signal },
     API_READ_TIMEOUT_MS,
   );
 }
@@ -936,11 +939,12 @@ export async function fetchInstalledCliApps(
 export async function fetchNanobotFeatures(
   token: string,
   base: string = "",
+  signal?: AbortSignal,
 ): Promise<NanobotFeaturesPayload> {
   return request<NanobotFeaturesPayload>(
     `${base}/api/settings/nanobot-features`,
     token,
-    undefined,
+    { signal },
     API_READ_TIMEOUT_MS,
   );
 }
@@ -1004,11 +1008,12 @@ export async function disableNanobotFeature(
 export async function fetchPairingRequests(
   token: string,
   base: string = "",
+  signal?: AbortSignal,
 ): Promise<PairingPayload> {
   return request<PairingPayload>(
     `${base}/api/settings/pairing`,
     token,
-    undefined,
+    { signal },
     API_READ_TIMEOUT_MS,
   );
 }

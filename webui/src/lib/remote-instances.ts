@@ -97,9 +97,9 @@ export interface RemoteInspection {
   incomplete: boolean;
 }
 
-export async function readRemoteInstances(token: string): Promise<RemoteDirectory> {
+export async function readRemoteInstances(token: string, signal?: AbortSignal): Promise<RemoteDirectory> {
   const response = await fetchWithTimeout("/api/remote-instances", {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}` }, signal,
   });
   if (response.status === 403 || response.status === 404) return { available: false, profiles: [] };
   if (!response.ok) throw new Error("directory_unavailable");

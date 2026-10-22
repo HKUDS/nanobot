@@ -12,6 +12,7 @@ import type {
   SidebarStatePayload,
   GoalStateWsPayload,
   WorkspaceScopePayload,
+  WebUIStateResource,
 } from "./types";
 import { createHostWebSocket } from "./runtime";
 import { ClientRunLedger } from "./client-run-ledger";
@@ -87,6 +88,7 @@ type SessionUpdateHandler = (
   workspaceScope?: WorkspaceScopePayload,
 ) => void;
 type SidebarStateUpdateHandler = (state: SidebarStatePayload) => void;
+type StateChangeHandler = () => void;
 type RunStatusHandler = (chatId: string, state: RunState) => void;
 
 /** Structured errors surfaced to the UI.
@@ -238,6 +240,7 @@ export class NanobotClient {
   private runCompletionHandlers = new Set<RunCompletionHandler>();
   private errorHandlers = new Set<ErrorHandler>();
   private taskNoticeHandlers = new Set<(notice: TaskNotice) => void>();
+  private stateChangeHandlers = new Map<WebUIStateResource, Set<StateChangeHandler>>();
   private chatHandlers = new Map<string, Set<EventHandler>>();
   private transcriptHandlers = new Map<string, { handler: EventHandler }>();
   /** Inbound frames received while the transcript owner is absent, regardless of observers. */
@@ -314,6 +317,19 @@ export class NanobotClient {
     this.sessionUpdateHandlers.add(handler);
     return () => {
       this.sessionUpdateHandlers.delete(handler);
+    };
+  }
+
+  onStateChange(resource: WebUIStateResource, handler: StateChangeHandler): Unsubscribe {
+    let handlers = this.stateChangeHandlers.get(resource);
+    if (!handlers) {
+      handlers = new Set();
+      this.stateChangeHandlers.set(resource, handlers);
+    }
+    handlers.add(handler);
+    return () => {
+      handlers.delete(handler);
+      if (handlers.size === 0) this.stateChangeHandlers.delete(resource);
     };
   }
 
@@ -984,6 +1000,16 @@ export class NanobotClient {
         this.pendingNewChat = null;
       }
       this.dispatch(parsed.chat_id, parsed);
+      return;
+    }
+
+    if (parsed.event === "webui_state_changed") {
+      if (!Array.isArray(parsed.resources)) return;
+      for (const resource of new Set(parsed.resources)) {
+        for (const handler of this.stateChangeHandlers.get(resource) ?? []) {
+          try { handler(); } catch { /* One view must not block another view's refresh. */ }
+        }
+      }
       return;
     }
 

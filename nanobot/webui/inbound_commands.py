@@ -63,6 +63,7 @@ from nanobot.webui.session_access import (
 )
 from nanobot.webui.session_identity import is_valid_webui_chat_id, webui_session_key
 from nanobot.webui.sidebar_state import write_webui_sidebar_state
+from nanobot.webui.state_events import WebUIStateResource
 from nanobot.webui.temporary_chats import TemporaryChatError
 from nanobot.webui.transcription_ws import webui_transcription_event
 
@@ -231,6 +232,19 @@ class WebUICommandRouter:
     async def broadcast_webui_event(self, event: str, **fields: Any) -> None:
         for connection in tuple(self._webui_connections):
             await self._transport.webui_send_event(connection, event, **fields)
+
+    async def broadcast_state_change(self, resources: tuple[WebUIStateResource, ...]) -> None:
+        """Use the trusted WebUI audience, preserving the remote directory's local policy."""
+        if "remote_instances" not in resources:
+            await self.broadcast_webui_event("webui_state_changed", resources=list(resources))
+            return
+        for connection in tuple(self._webui_connections):
+            local = self._http_router.remote_state_events_allowed(connection)
+            visible = [resource for resource in resources if local or resource != "remote_instances"]
+            if visible:
+                await self._transport.webui_send_event(
+                    connection, "webui_state_changed", resources=visible,
+                )
 
     async def broadcast_user_message(
         self,
@@ -1162,6 +1176,14 @@ class WebUICommandRouter:
                             status=502,
                             message="WebUI mutation returned an invalid response",
                         )
+                    if action.startswith("automation."):
+                        self.gateway.state_events.notify("automations")
+                    elif action in {
+                        "settings.channel.configure", "settings.feature.enable", "settings.feature.disable",
+                    }:
+                        self.gateway.state_events.notify("channels")
+                    elif action in {"settings.pairing.approve", "settings.pairing.deny"}:
+                        self.gateway.state_events.notify("pairing")
                     if action == "sidebar.update" and isinstance(result, dict):
                         await self.broadcast_webui_event(
                             "sidebar_state_updated",

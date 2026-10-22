@@ -34,6 +34,7 @@ import { createSystemSettingsActions } from "@/components/settings/system/create
 import { useSystemSettingsEffects } from "@/components/settings/system/useSystemSettingsEffects";
 import { useSystemSettingsState } from "@/components/settings/system/useSystemSettingsState";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
+import { useStateRefresh } from "@/hooks/useStateRefresh";
 import { useEditCompletion } from "@/components/settings/shared/useEditCompletion";
 import { cancelProviderOAuth, fetchSettings, fetchSettingsUsage } from "@/lib/api";
 import {
@@ -235,35 +236,11 @@ export function useSettingsController({
   }, [applyPayload, getToken]);
 
   const hasSettings = settings !== null;
-  useEffect(() => {
-    if (activeSection !== "overview" || !hasSettings || !pageVisible) return;
-    let cancelled = false;
-    let refreshing = false;
-    const refresh = async () => {
-      if (refreshing) return;
-      refreshing = true;
-      try {
-        const usage = await fetchSettingsUsage(getToken());
-        if (!cancelled) {
-          setSettings((current) => (current ? { ...current, usage } : current));
-        }
-      } catch {
-        // Usage is best-effort telemetry; the settings snapshot remains usable.
-      } finally {
-        refreshing = false;
-      }
-    };
-    void refresh();
-    const interval = window.setInterval(() => void refresh(), 5000);
-    const onFocus = () => void refresh();
-    window.addEventListener("focus", onFocus);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [activeSection, getToken, hasSettings, pageVisible]);
-  const { refreshAutomations } = useSystemSettingsEffects({
+  useStateRefresh("usage", activeSection === "overview" && hasSettings, async (signal) => {
+    const usage = await fetchSettingsUsage(getToken(), "", signal);
+    if (!signal.aborted) setSettings((current) => (current ? { ...current, usage } : current));
+  }, 5000);
+  useSystemSettingsEffects({
     state: systemState,
     activeSection,
     getToken,
@@ -425,7 +402,6 @@ export function useSettingsController({
     applyPayload,
     maybeRestartHostEngine,
     setPendingRestartSections,
-    refreshAutomations,
   });
   const { installCapabilities } = systemActions;
   const modelActions = useModelSettingsActions({

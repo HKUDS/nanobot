@@ -4,8 +4,8 @@ import { useHostSessions, MAX_HOST_VIEWS } from "@/components/remote/useHostSess
 import type { RemoteConnection } from "@/lib/remote-instances";
 
 const mocks = vi.hoisted(() => ({ read: vi.fn(), request: vi.fn(), token: () => "token",
-  client: { requestMutation: (...args: unknown[]) => mocks.request(...args), onStatus: () => () => {} } }));
-vi.mock("@/providers/ClientProvider", () => ({ useClient: () => ({ client: mocks.client, getToken: mocks.token }) }));
+  client: { status: "open", requestMutation: (...args: unknown[]) => mocks.request(...args), onStatus: () => () => {} } }));
+vi.mock("@/providers/ClientProvider", () => ({ useClient: () => ({ client: mocks.client, getToken: mocks.token, webuiCapabilities: [] }) }));
 vi.mock("@/lib/remote-instances", async (original) => ({
   ...await original<typeof import("@/lib/remote-instances")>(), readRemoteInstances: mocks.read,
 }));
@@ -195,7 +195,7 @@ describe("host session lifecycle", () => {
     act(() => result.current.loaded(ids[0]));
     expect(result.current.selected).toBeNull();
     expect(result.current.frames).toHaveLength(0);
-    expect(vi.getTimerCount()).toBe(1); // health interval only
+    expect(vi.getTimerCount()).toBe(1); // Legacy refresh deadline only.
   });
 
   it("a timed-out cold page leaves the old host intact and can be retried", async () => {

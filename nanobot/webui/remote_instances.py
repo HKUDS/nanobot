@@ -8,6 +8,7 @@ import secrets
 import socket
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -23,6 +24,8 @@ from nanobot.webui.remote_proxy import RemoteProxy
 from nanobot.webui.remote_ssh import RemoteError, RemoteProfile, Tunnel
 
 _HEALTH_TIMEOUT_SECONDS = 12
+_HEALTH_INTERVAL_SECONDS = 5
+_TRANSIENT_HEALTH_ERRORS = {"remote_unreachable", "ssh_unreachable"}
 
 
 class _SavedProfile(RemoteProfile):
@@ -44,14 +47,22 @@ class Connection:
     proxy: RemoteProxy
     error: str = ""
     paired: bool = False
+    health_failures: int = 0
+    paused: bool = False
 
 
 class RemoteInstances:
     """List/save/connect/disconnect with credentials confined to live connections."""
 
-    def __init__(self, directory: Path, *, local_gateway_id: str = "") -> None:
+    def __init__(
+        self, directory: Path, *, local_gateway_id: str = "",
+        on_change: Callable[[], None] | None = None,
+    ) -> None:
         self.path = directory / "remote-instances.json"
         self.local_gateway_id = local_gateway_id
+        self._on_change = on_change
+        self._health_task: asyncio.Task[None] | None = None
+        self._revision = 0
         # Public identity, not an authentication capability. A new local manager
         # cannot renew a cached iframe's old proxy credentials after restart.
         self._view_session = uuid.uuid4().hex
@@ -71,8 +82,55 @@ class RemoteInstances:
         return self.path.parent / "remote-hosts" / key
 
     def resume(self) -> None:
-        """Allow a reused local channel to start again after its stop completed."""
+        """Start one sampler for this local channel, including after a full stop."""
         self._closed = False
+        if self._health_task is None or self._health_task.done():
+            self._health_task = asyncio.create_task(self._health_loop())
+
+    def _notify(self) -> None:
+        if not self._closed and self._on_change:
+            self._on_change()
+
+    def _state(self) -> tuple[int, tuple[tuple[str, str, bool, str], ...], dict[str, Compatibility]]:
+        return (self._revision, tuple((key, item.error, item.tunnel.active, item.gateway_id)
+                                     for key, item in self.connections.items()), dict(self._compatibility))
+
+    async def _health_loop(self) -> None:
+        while not self._closed:
+            await asyncio.sleep(_HEALTH_INTERVAL_SECONDS)
+            await self._sample_health()
+
+    async def _sample_health(self) -> None:
+        # The lease outlives all credential-bearing reads, including cancellation.
+        # close() joins this task before releasing any reserved listeners.
+        async with self._lock:
+            if self._closed:
+                return
+            before = self._state()
+            await asyncio.gather(*(self._sample(item) for item in self.connections.values()))
+            if self._state() != before:
+                self._notify()
+
+    async def _sample(self, connection: Connection) -> None:
+        if connection.paused:
+            return
+        previous = connection.error
+        try:
+            async with asyncio.timeout(_HEALTH_TIMEOUT_SECONDS):
+                await self._check(connection)
+        except TimeoutError:
+            if not connection.paused:
+                connection.error = connection.tunnel.error or "remote_unreachable"
+                if connection.paired and connection.error == "ssh_auth_failed":
+                    connection.error = "pair_authorization_rejected"
+        # Process exit, rejected credentials, identity and compatibility failures
+        # are reliable immediately. Only live-transport failures need two samples.
+        if connection.error in _TRANSIENT_HEALTH_ERRORS and connection.tunnel.active:
+            connection.health_failures += 1
+            if connection.health_failures < 2:
+                connection.error = previous
+        else:
+            connection.health_failures = 0
 
     def _read(self) -> dict[str, _SavedProfile]:
         if not self.path.exists():
@@ -101,6 +159,7 @@ class RemoteInstances:
             {key: profile.model_dump() for key, profile in profiles.items()}, ensure_ascii=False,
         ))
         self.path.chmod(0o600)
+        self._revision += 1
 
     def _remember_origins(self, profiles: dict[str, _SavedProfile], port: int = 0) -> set[int]:
         # Browser storage outlives edits, Forget and gateway restarts. Keep a
@@ -160,16 +219,7 @@ class RemoteInstances:
                 "client_version": __version__, "profiles": profiles}
 
     async def health(self) -> dict[str, Any]:
-        # Hold a lifetime lease through every credential-bearing request. Final
-        # shutdown cannot release the listeners halfway through a health check.
-        try:
-            # Includes lock contention and all response reads, not just each
-            # socket read. Return the directory before the browser's 20s budget.
-            async with asyncio.timeout(_HEALTH_TIMEOUT_SECONDS):
-                async with self._lock:
-                    await asyncio.gather(*(self._check(item) for item in self.connections.values()))
-        except TimeoutError:
-            pass
+        """Read cached health; browser tabs never initiate or await SSH probes."""
         return self.snapshot()
 
     async def _check(self, connection: Connection) -> None:
@@ -201,16 +251,24 @@ class RemoteInstances:
                             self._compatibility[key] = report
                     connection.error = compatibility_error(report)
                     if connection.error:
+                        connection.paused = True
                         await connection.proxy.pause()
         except (httpx.HTTPError, ValueError, AttributeError):
             connection.error = connection.tunnel.error or "remote_unreachable"
             if connection.paired and connection.error == "ssh_auth_failed":
                 connection.error = "pair_authorization_rejected"
-        except asyncio.CancelledError:
-            connection.error = "remote_unreachable"
-            raise
+        if not connection.error:
+            connection.health_failures = 0
 
     async def action(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+        before = self._state()
+        try:
+            return await self._action(action, payload)
+        finally:
+            if self._state() != before:
+                self._notify()
+
+    async def _action(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         if action == "pick_file":
             from nanobot.webui.native_file_picker import NativeFilePickerError, pick_native_file
 
@@ -448,7 +506,8 @@ class RemoteInstances:
     async def _connect(self, key: str, profile: _SavedProfile) -> dict[str, Any]:
         existing = self.connections.get(key)
         if existing:
-            await self._check(existing)
+            if not existing.paused:
+                await self._check(existing)
             if not existing.error:
                 return self._launch(key, profile, existing)
             await existing.proxy.pause()
@@ -560,6 +619,10 @@ class RemoteInstances:
 
     async def close(self) -> None:
         self._closed = True
+        if self._health_task is not None:
+            self._health_task.cancel()
+            await asyncio.gather(self._health_task, return_exceptions=True)
+            self._health_task = None
         async with self._lock:
             proxies, self._proxies = self._proxies, {}
             self.connections.clear()

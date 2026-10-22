@@ -44,7 +44,7 @@ function todayInTimeZone(timeZone?: string): string {
 
 export function TokenUsageCard({ usage, timeZone }: { usage?: Usage; timeZone?: string }) {
   const { t, i18n } = useTranslation();
-  const today = todayInTimeZone(timeZone);
+  const today = todayInTimeZone(usage?.timezone ?? timeZone);
   const byDate = new Map(usage?.days.map(day => [day.date, day]));
   const days = Array.from({ length: 30 }, (_, index) => {
     const date = new Date(`${today}T00:00:00Z`);

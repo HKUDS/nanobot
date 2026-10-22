@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { usePageVisibility } from "@/hooks/usePageVisibility";
+import { useStateRefresh } from "@/hooks/useStateRefresh";
 import { fetchSessionAutomations } from "@/lib/api";
 import type { SessionAutomationJob } from "@/lib/types";
 
@@ -17,38 +18,19 @@ export function useSessionAutomationJobs(open: boolean, token: string, sessionKe
   const tokenRef = useRef(token);
   tokenRef.current = token;
 
-  useEffect(() => {
-    if (!open || !pageVisible) return;
-    let cancelled = false;
-    let refreshing = false;
-    setSnapshot((current) => current.sessionKey === sessionKey
+  useStateRefresh("automations", open, async (signal, initial) => {
+    if (initial) setSnapshot((current) => current.sessionKey === sessionKey
       ? { ...current, loadFailed: false }
       : { sessionKey, jobs: null, loadFailed: false });
-
-    const refresh = async () => {
-      if (refreshing) return;
-      refreshing = true;
-      try {
-        const next = await fetchSessionAutomations(tokenRef.current, sessionKey);
-        if (!cancelled) setSnapshot({ sessionKey, jobs: next.jobs, loadFailed: false });
-      } catch {
-        if (!cancelled) setSnapshot((current) => current.jobs !== null
-          ? current : { sessionKey, jobs: null, loadFailed: true });
-      } finally {
-        refreshing = false;
-      }
-    };
-
-    void refresh();
-    const refreshId = window.setInterval(() => void refresh(), AUTOMATIONS_REFRESH_MS);
-    const refreshOnFocus = () => void refresh();
-    window.addEventListener("focus", refreshOnFocus);
-    return () => {
-      cancelled = true;
-      window.clearInterval(refreshId);
-      window.removeEventListener("focus", refreshOnFocus);
-    };
-  }, [open, pageVisible, sessionKey]);
+    try {
+      const next = await fetchSessionAutomations(tokenRef.current, sessionKey, "", signal);
+      if (!signal.aborted) setSnapshot({ sessionKey, jobs: next.jobs, loadFailed: false });
+    } catch (error) {
+      if (!signal.aborted) setSnapshot((current) => current.jobs !== null
+        ? current : { sessionKey, jobs: null, loadFailed: true });
+      throw error;
+    }
+  }, AUTOMATIONS_REFRESH_MS, sessionKey);
 
   useEffect(() => {
     if (!open || !pageVisible) return;

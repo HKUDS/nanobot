@@ -77,7 +77,6 @@ interface SystemSettingsActionsOptions {
   applyPayload: ApplySettingsPayload;
   maybeRestartHostEngine: MaybeRestartHostEngine;
   setPendingRestartSections: Dispatch<SetStateAction<PendingRestartSections>>;
-  refreshAutomations: (showLoading?: boolean) => Promise<void>;
 }
 
 export function createSystemSettingsActions({
@@ -90,7 +89,6 @@ export function createSystemSettingsActions({
   applyPayload,
   maybeRestartHostEngine,
   setPendingRestartSections,
-  refreshAutomations,
 }: SystemSettingsActionsOptions) {
   const {
     apiServiceAction,
@@ -271,10 +269,6 @@ export function createSystemSettingsActions({
       const payload = await runAutomationAction(client, action, job.id);
       setAutomations(payload);
       if (action === "delete") setAutomationPendingDelete(null);
-      if (action === "run") {
-        window.setTimeout(() => void refreshAutomations(false), 1200);
-        window.setTimeout(() => void refreshAutomations(false), 4000);
-      }
     } catch (err) {
       setAutomationsError((err as Error).message);
     } finally {

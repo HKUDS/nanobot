@@ -190,6 +190,8 @@ Reasoning frames only flow when the channel's `showReasoning` is `true` (default
 
 `model_preset` is omitted when no named preset is active. WebUI clients use this event to refresh model settings after default-runtime and config changes. `/model <preset>` is session-scoped; its selection is reflected through `session_updated` and the session row's `model_preset` field instead of this global event.
 
+**`webui_state_changed`** — hosts advertising `webui.state-events.v1` invalidate fixed non-session resources through the existing trusted WebUI connection. Clients refresh the relevant authoritative snapshot instead of polling unchanged state. The resource names, local-only remote-directory audience, lifecycle, and compatibility rules are defined in [WebUI state invalidation](./webui-state-events.md).
+
 **`attached`** — confirmation for `new_chat` / `attach` inbound envelopes (see [Multi-chat multiplexing](#multi-chat-multiplexing)):
 
 ```json

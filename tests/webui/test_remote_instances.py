@@ -107,9 +107,18 @@ async def test_host_contract_change_invalidates_live_proxy(manager, ssh):
     key = await save(manager)
     await manager.action("connect", {"id": key})
     ssh.state["identity"]["webui"] = {**webui_contract(), "capabilities": []}
+    await manager._sample_health()
     await manager.health()
     ssh.proxy.pause.assert_awaited_once()
     assert manager.snapshot()["profiles"][0]["connection_error"] == "host_update_required"
+    await manager._sample_health()
+    assert manager.snapshot()["profiles"][0]["connection_error"] == "host_update_required"
+    ssh.proxy.pause.assert_awaited_once()
+    # Only an explicit, freshly authenticated connect may resume a paused proxy.
+    ssh.state["identity"]["webui"] = webui_contract()
+    await manager.action("connect", {"id": key})
+    assert manager.snapshot()["profiles"][0]["connected"]
+    ssh.proxy.resume.assert_called_once()
 
 
 async def test_new_local_manager_has_new_view_identity_for_same_remote(manager, ssh):
@@ -292,6 +301,7 @@ async def test_server_restart_requires_reconnect_not_local_fallback(manager, ssh
     key = await save(manager)
     await manager.action("connect", {"id": key})
     ssh.state["identity"]["gatewayId"] = "restarted"
+    await manager._sample_health()
     profile = (await manager.health())["profiles"][0]
     assert not profile["connected"]
     assert profile["connection_error"] == "instance_changed"
@@ -311,6 +321,7 @@ async def test_health_reports_actionable_safe_errors(manager, ssh, status, ident
     key = await save(manager)
     await manager.action("connect", {"id": key})
     ssh.state.update(status=status, identity=identity)
+    await manager._sample_health()
     profile = (await manager.health())["profiles"][0]
     assert profile["connection_error"] == error
     assert not profile["connected"]
@@ -418,32 +429,34 @@ async def test_reconnect_resumes_reserved_listener(manager, ssh):
     ssh.tunnel.close.assert_not_awaited()
 
 
-async def test_shutdown_does_not_release_origin_during_health_request(manager, ssh, monkeypatch):
+async def test_shutdown_cancels_health_before_releasing_credential_bearing_origin(manager, ssh, monkeypatch):
     key = await save(manager)
     await manager.action("connect", {"id": key})
-    entered, release = asyncio.Event(), asyncio.Event()
+    entered, cancelled = asyncio.Event(), asyncio.Event()
 
     async def respond(request):
-        entered.set()
-        await release.wait()
-        ssh.tunnel.close.assert_not_awaited()
         assert request.headers["X-Nanobot-Auth"] == "private-webui-secret"
-        return httpx.Response(200, json=ssh.state["identity"])
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            ssh.tunnel.close.assert_not_awaited()
+            cancelled.set()
 
+    monkeypatch.setattr(remote_instances, "_HEALTH_INTERVAL_SECONDS", 0.01)
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: ssh.client(
         transport=httpx.MockTransport(respond), **kwargs,
     ))
-    health = asyncio.create_task(manager.health())
-    await asyncio.wait_for(entered.wait(), 2)
-    shutdown = asyncio.create_task(manager.close())
+    manager.resume()
     try:
-        await asyncio.sleep(0)
-        assert not shutdown.done()
-        ssh.tunnel.close.assert_not_awaited()
+        await asyncio.wait_for(entered.wait(), 2)
+        # A tab reads the cache even while the shared probe is hung.
+        assert (await asyncio.wait_for(manager.health(), 0.1))["profiles"][0]["connected"]
     finally:
-        release.set()
-        await asyncio.gather(health, shutdown)
+        await asyncio.wait_for(manager.close(), 1)
+    assert cancelled.is_set()
     ssh.tunnel.close.assert_awaited_once()
+    assert manager._health_task is None
 
 
 async def test_health_deadline_returns_editable_offline_directory(manager, ssh, monkeypatch):
@@ -461,7 +474,10 @@ async def test_health_deadline_returns_editable_offline_directory(manager, ssh, 
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: ssh.client(
         transport=httpx.MockTransport(respond), **kwargs,
     ))
-    directory = await asyncio.wait_for(manager.health(), 1)
+    await asyncio.wait_for(manager._sample_health(), 1)
+    assert (await manager.health())["profiles"][0]["connected"]
+    await asyncio.wait_for(manager._sample_health(), 1)
+    directory = await manager.health()
     assert not directory["profiles"][0]["connected"]
     assert cancelled.is_set()
     await manager.action("save", {"id": key, "profile": {
@@ -470,13 +486,13 @@ async def test_health_deadline_returns_editable_offline_directory(manager, ssh, 
     assert manager.snapshot()["profiles"][0]["name"] == "Repaired"
 
 
-async def test_health_budget_includes_waiting_for_connection_lock(manager, ssh, monkeypatch):
+async def test_health_cache_never_waits_for_connection_lock(manager, ssh):
     key = await save(manager)
     await manager.action("connect", {"id": key})
-    monkeypatch.setattr(remote_instances, "_HEALTH_TIMEOUT_SECONDS", 0.02)
     async with manager._lock:
-        directory = await asyncio.wait_for(manager.health(), 1)
+        directory = await asyncio.wait_for(manager.health(), 0.1)
     assert directory["profiles"][0]["id"] == key
+    assert directory["profiles"][0]["connected"]
 
 
 async def test_reconnect_keeps_origin_and_changing_target_does_not(manager, ssh):
@@ -544,6 +560,8 @@ async def test_offline_profile_can_be_edited_without_hidden_disconnect(manager, 
         ssh.tunnel.active = False
     else:
         ssh.state["status"] = 503
+    await manager._sample_health()
+    await manager._sample_health()
     assert not (await manager.health())["profiles"][0]["connected"]
     await manager.action("save", {"id": key, "profile": {"name": "Fixed", "host": "fixed.example.test"}})
     ssh.tunnel.pause.assert_awaited_once()
@@ -844,3 +862,127 @@ async def test_tunnel_reuses_closed_port_with_time_wait():
     )
     assert tunnel.port == port
     await tunnel.close()
+
+
+async def test_cached_directory_shares_debounced_health_and_change_notifications(tmp_path, ssh, monkeypatch):
+    changed = MagicMock()
+    manager = RemoteInstances(tmp_path, on_change=changed)
+    key = await save(manager)
+    await manager.action("connect", {"id": key})
+    changed.reset_mock()
+    check = AsyncMock(wraps=manager._check)
+    monkeypatch.setattr(manager, "_check", check)
+    ssh.state["status"] = 503
+    tabs = await asyncio.gather(*(manager.health() for _ in range(10)))
+    assert all(tab["profiles"][0]["connected"] for tab in tabs)
+    check.assert_not_awaited()
+    await manager._sample_health()
+    assert (await manager.health())["profiles"][0]["connected"]
+    changed.assert_not_called()
+    await manager._sample_health()
+    offline = (await manager.health())["profiles"][0]
+    assert not offline["connected"]
+    assert offline["connection_error"] == "remote_unreachable"
+    assert check.await_count == 2
+    changed.assert_called_once_with()
+    await manager._sample_health()
+    changed.assert_called_once_with()  # Stable failures do not keep waking tabs.
+    ssh.state["status"] = 200
+    await manager._sample_health()
+    assert (await manager.health())["profiles"][0]["connected"]
+    assert changed.call_count == 2
+    ssh.state["status"] = 503
+    await manager._sample_health()
+    assert (await manager.health())["profiles"][0]["connected"]
+    ssh.state["status"] = 200
+    await manager._sample_health()
+    assert changed.call_count == 2
+    ssh.proxy.resume.assert_not_called()  # Sampling is not a reconnect action.
+    await manager.close()
+
+
+async def test_resume_owns_one_shared_sampler_and_joins_it_before_reuse(manager, ssh, monkeypatch):
+    first = await save(manager)
+    await manager.action("connect", {"id": first})
+    second = await save(manager, host="another-instance")
+    # Two independent, already-authenticated connections; no SSH runs in this test.
+    from dataclasses import replace
+
+    manager.connections[second] = replace(manager.connections[first], gateway_id="remote-two")
+    entered = asyncio.Event()
+    checked = []
+
+    async def probe(connection):
+        checked.append(connection.gateway_id)
+        if len(checked) == 2:
+            entered.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(manager, "_check", probe)
+    monkeypatch.setattr(remote_instances, "_HEALTH_INTERVAL_SECONDS", 0.01)
+    manager.resume()
+    task = manager._health_task
+    manager.resume()
+    assert manager._health_task is task
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        snapshots = await asyncio.gather(*(manager.health() for _ in range(20)))
+        assert all(len(snapshot["profiles"]) == 2 for snapshot in snapshots)
+        assert sorted(checked) == ["remote-one", "remote-two"]
+    finally:
+        await manager.close()
+    assert task.done()
+    manager.resume()
+    assert manager._health_task is not task
+    await manager.close()
+    assert manager._health_task is None
+
+
+async def test_remote_directory_metadata_actions_notify_without_probing(tmp_path, ssh):
+    snapshots = []
+    manager = RemoteInstances(tmp_path, on_change=lambda: snapshots.append(manager.snapshot()))
+    key = await save(manager)
+    assert snapshots[-1]["profiles"][0]["name"] == "Team"
+    await manager.action("connect", {"id": key})
+    assert snapshots[-1]["profiles"][0]["connected"]
+    await manager.action("rename", {"id": key, "name": "Another tab's name"})
+    assert snapshots[-1]["profiles"][0]["name"] == "Another tab's name"
+    await manager.action("disconnect", {"id": key})
+    assert snapshots[-1]["profiles"][0]["connection_error"] == "disconnected"
+    await manager.action("remove", {"id": key})
+    assert snapshots[-1]["profiles"] == []
+    assert len(snapshots) == 5
+    assert "private-webui-secret" not in json.dumps(snapshots)
+    ssh.probe.assert_awaited_once()
+    await manager.close()
+
+
+@pytest.mark.parametrize("failure,code", [
+    ("auth", "remote_auth_failed"),
+    ("identity", "instance_changed"),
+    ("compatibility", "host_update_required"),
+])
+async def test_live_monitor_notifies_reliable_failures_without_browser_probes(tmp_path, ssh, monkeypatch, failure, code):
+    changed = asyncio.Event()
+    manager = RemoteInstances(tmp_path, on_change=changed.set)
+    key = await save(manager)
+    await manager.action("connect", {"id": key})
+    changed.clear()
+    if failure == "auth":
+        ssh.state["status"] = 401
+    elif failure == "identity":
+        ssh.state["identity"]["gatewayId"] = "restarted"
+    else:
+        ssh.state["identity"]["webui"] = {**webui_contract(), "capabilities": []}
+    monkeypatch.setattr(remote_instances, "_HEALTH_INTERVAL_SECONDS", 0.01)
+    manager.resume()
+    try:
+        # The real shared loop checks the authenticated synthetic HTTP identity
+        # and emits its invalidation before any directory GET is made.
+        await asyncio.wait_for(changed.wait(), 1)
+        profile = (await manager.health())["profiles"][0]
+        assert not profile["connected"]
+        assert profile["connection_error"] == code
+        assert profile["gateway_id"] == "remote-one"
+    finally:
+        await manager.close()

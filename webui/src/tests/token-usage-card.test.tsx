@@ -68,6 +68,31 @@ describe("Token usage card", () => {
     expect(screen.getByText("Unclassified")).toBeInTheDocument();
   });
 
+  it("keeps refreshed usage in the timezone that grouped its dates when settings are older", () => {
+    const initial = { ...usage([day("2026-09-09", 192)]), timezone: "UTC" };
+    const refreshed = { ...usage([day("2026-09-10", 192)]), timezone: "Pacific/Kiritimati" };
+    const { rerender } = render(<TokenUsageCard timeZone="UTC" usage={initial} />);
+    expect(screen.getByLabelText("192 tokens")).toBeInTheDocument();
+
+    rerender(<TokenUsageCard timeZone="UTC" usage={refreshed} />);
+
+    expect(screen.getByLabelText("192 tokens")).toBeInTheDocument();
+    const bars = within(screen.getByRole("group", { name: "Daily tokens" })).getAllByRole("img");
+    expect(bars[29]).toHaveAccessibleName(/2026-09-10: 192 tokens/);
+
+    rerender(<TokenUsageCard timeZone="UTC" usage={initial} />);
+    expect(screen.getByLabelText("192 tokens")).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "Daily tokens" })).getAllByRole("img")[29])
+      .toHaveAccessibleName(/2026-09-09: 192 tokens/);
+  });
+
+  it("uses settings timezone with usage from a host without snapshot timezone", () => {
+    render(<TokenUsageCard timeZone="Pacific/Kiritimati" usage={usage([day("2026-09-10", 192)])} />);
+    expect(screen.getByLabelText("192 tokens")).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "Daily tokens" })).getAllByRole("img")[29])
+      .toHaveAccessibleName(/2026-09-10: 192 tokens/);
+  });
+
   it("shows an empty state for zero usage", () => {
     render(<TokenUsageCard usage={usage([])} />);
     expect(screen.getByRole("status")).toHaveTextContent("No token usage in the last 30 days.");

@@ -685,7 +685,6 @@ class WebSocketChannel(BaseChannel):
 
     async def start(self) -> None:
         await self._transcripts.initialize()
-        self.gateway.http.remote_instances.resume()
         from nanobot.utils.logging_bridge import redirect_lib_logging
 
         redirect_lib_logging("websockets", level="WARNING")
@@ -722,8 +721,6 @@ class WebSocketChannel(BaseChannel):
                     await asyncio.wait_for(stop_event.wait(), timeout=30)
                 except TimeoutError:
                     pass
-
-        prune_task = asyncio.create_task(prune_uploads())
 
         async def runner() -> None:
             socket_path = self.config.unix_socket_path
@@ -816,13 +813,21 @@ class WebSocketChannel(BaseChannel):
                     if self._server is server:
                         self._server = None
 
-        task = asyncio.create_task(runner())
-        self._server_task = task
+        prune_task: asyncio.Task[None] | None = None
+        task: asyncio.Task[None] | None = None
         try:
+            await self.gateway.state_events.start(self._commands.broadcast_state_change)
+            self.gateway.http.remote_instances.resume()
+            prune_task = asyncio.create_task(prune_uploads())
+            task = asyncio.create_task(runner())
+            self._server_task = task
             await task
         finally:
-            prune_task.cancel()
-            await asyncio.gather(prune_task, return_exceptions=True)
+            await self.gateway.state_events.close()
+            await self.gateway.http.remote_instances.close()
+            if prune_task is not None:
+                prune_task.cancel()
+                await asyncio.gather(prune_task, return_exceptions=True)
             self._uploads.store.clear()
             self._running = False
             if self._server_task is task:
@@ -919,6 +924,7 @@ class WebSocketChannel(BaseChannel):
     # -- Outbound WebSocket events -----------------------------------------
 
     async def stop(self) -> None:
+        await self.gateway.state_events.close()
         await self.gateway.http.remote_instances.close()
         server_task = self._server_task
         if (

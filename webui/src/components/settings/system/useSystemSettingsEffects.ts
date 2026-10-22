@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useEffect } from "react";
 
 import type { SettingsSectionKey } from "@/components/settings/contracts";
 import {
@@ -6,6 +6,7 @@ import {
   CLI_APPS_REFRESH_RETRY_MS,
 } from "@/components/settings/system/AppsSettings";
 import type { SystemSettingsState } from "@/components/settings/system/useSystemSettingsState";
+import { useStateRefresh } from "@/hooks/useStateRefresh";
 import {
   fetchApiService,
   fetchAutomations,
@@ -82,51 +83,23 @@ export function useSystemSettingsEffects({
     };
   }, [activeSection, getToken]);
 
-  useEffect(() => {
-    if (
-      !pageVisible
-      || !["channels", "models", "browser", "image", "voice", "memory", "capabilities", "runtime"].includes(activeSection)
-    ) {
-      return;
-    }
-    let cancelled = false;
-    let refreshing = false;
-    const refresh = async (showLoading = false): Promise<void> => {
-      if (refreshing) return;
-      refreshing = true;
-      if (showLoading) setNanobotFeaturesLoading(true);
+  useStateRefresh("channels",
+    ["channels", "models", "browser", "image", "voice", "memory", "capabilities", "runtime"].includes(activeSection),
+    async (signal, initial) => {
+      if (initial) setNanobotFeaturesLoading(true);
       try {
-        const payload = await fetchNanobotFeatures(getToken());
-        if (!cancelled) {
+        const payload = await fetchNanobotFeatures(getToken(), "", signal);
+        if (!signal.aborted) {
           setNanobotFeatures(payload);
           setNanobotFeaturesError(null);
         }
       } catch (err) {
-        const message = (err as Error).message;
-        if (!cancelled && message !== "HTTP 404") setNanobotFeaturesError(message);
+        if (!signal.aborted && (err as Error).message !== "HTTP 404") setNanobotFeaturesError((err as Error).message);
+        throw err;
       } finally {
-        refreshing = false;
-        if (!cancelled && showLoading) setNanobotFeaturesLoading(false);
+        if (!signal.aborted && initial) setNanobotFeaturesLoading(false);
       }
-    };
-    void refresh(true);
-    const interval = activeSection === "channels"
-      ? window.setInterval(() => void refresh(false), 5000)
-      : null;
-    const refreshOnFocus = () => {
-      if (activeSection === "channels" && document.visibilityState !== "hidden") {
-        void refresh(false);
-      }
-    };
-    window.addEventListener("focus", refreshOnFocus);
-    document.addEventListener("visibilitychange", refreshOnFocus);
-    return () => {
-      cancelled = true;
-      if (interval !== null) window.clearInterval(interval);
-      window.removeEventListener("focus", refreshOnFocus);
-      document.removeEventListener("visibilitychange", refreshOnFocus);
-    };
-  }, [activeSection, getToken, pageVisible]);
+    }, activeSection === "channels" ? 5000 : null, activeSection);
 
   useEffect(() => {
     if (activeSection !== "runtime") return;
@@ -182,52 +155,19 @@ export function useSystemSettingsEffects({
     };
   }, [activeSection, getToken, pageVisible]);
 
-  const refreshAutomations = useCallback(
-    async (showLoading = false) => {
-      if (showLoading) setAutomationsLoading(true);
-      try {
-        const payload = await fetchAutomations(getToken());
+  useStateRefresh("automations", activeSection === "automations", async (signal, initial) => {
+    if (initial) setAutomationsLoading(true);
+    try {
+      const payload = await fetchAutomations(getToken(), "", signal);
+      if (!signal.aborted) {
         setAutomations(payload);
         setAutomationsError(null);
-      } catch (err) {
-        setAutomationsError((err as Error).message);
-      } finally {
-        if (showLoading) setAutomationsLoading(false);
       }
-    },
-    [getToken],
-  );
-
-  useEffect(() => {
-    if (activeSection !== "automations" || !pageVisible) return;
-    let cancelled = false;
-    let refreshing = false;
-    const refresh = async (showLoading = false) => {
-      if (cancelled || refreshing) return;
-      refreshing = true;
-      if (showLoading) setAutomationsLoading(true);
-      try {
-        const payload = await fetchAutomations(getToken());
-        if (cancelled) return;
-        setAutomations(payload);
-        setAutomationsError(null);
-      } catch (err) {
-        if (!cancelled) setAutomationsError((err as Error).message);
-      } finally {
-        refreshing = false;
-        if (!cancelled && showLoading) setAutomationsLoading(false);
-      }
-    };
-    void refresh(true);
-    const interval = window.setInterval(() => void refresh(false), 5000);
-    const refreshOnFocus = () => void refresh(false);
-    window.addEventListener("focus", refreshOnFocus);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-      window.removeEventListener("focus", refreshOnFocus);
-    };
-  }, [activeSection, getToken, pageVisible]);
-
-  return { refreshAutomations };
+    } catch (err) {
+      if (!signal.aborted) setAutomationsError((err as Error).message);
+      throw err;
+    } finally {
+      if (!signal.aborted && initial) setAutomationsLoading(false);
+    }
+  }, 5000);
 }
