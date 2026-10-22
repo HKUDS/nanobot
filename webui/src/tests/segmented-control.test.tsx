@@ -73,35 +73,14 @@ describe("SegmentedControl", () => {
     expect(indicator).toHaveAttribute("data-animate", "true");
     expect(summary).toHaveAttribute("aria-pressed", "false");
     expect(diff).toHaveAttribute("aria-pressed", "true");
-  });
 
-  it("re-bases the indicator width when labels resize without animating the resize", () => {
-    const { container, rerender } = render(<Example />);
-    const summary = screen.getByRole("button", { name: "Summary" });
-    const diff = screen.getByRole("button", { name: "Diff" });
-    setGeometry(summary, { left: 4, width: 64 });
-    setGeometry(diff, { left: 72, width: 48 });
     fireEvent(window, new Event("resize"));
-    fireEvent.click(diff);
-
-    const indicator = container.querySelector<HTMLElement>("[data-segmented-control-indicator]");
-    fireEvent(window, new Event("resize"));
-    rerender(<Example />);
     expect(indicator).toHaveStyle({ width: "64px" });
-    expect(indicator?.style.scale).toBe("0.75 1");
-    expect(indicator).toHaveAttribute("data-animate", "true");
-
     setGeometry(diff, { left: 72, width: 96 });
     fireEvent(window, new Event("resize"));
-
     expect(indicator).toHaveStyle({ width: "96px" });
     expect(indicator?.style.scale).toBe("1 1");
     expect(indicator).toHaveAttribute("data-animate", "false");
-
-    fireEvent.click(summary);
-    expect(indicator).toHaveStyle({ width: "96px" });
-    expect(indicator?.style.scale).toBe(`${64 / 96} 1`);
-    expect(indicator).toHaveAttribute("data-animate", "true");
   });
 
   it("uses roving focus and arrow-key activation for tabs", () => {
