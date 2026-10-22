@@ -42,6 +42,15 @@ RULES = (
     (("Dockerfile", "Dockerfile.*", ".dockerignore", "docker-compose*.yml", "entrypoint.sh",
       "render-config.json", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md",
       "tests/test_docker*", "scripts/docker_compose_smoke.py"), DOCKER, "Docker input or acceptance"),
+    # Shared fixture consumers live in tests/webui and webui/src/tests; the
+    # SQLite migration and release-trust fixtures have separate Python owners.
+    (("tests/webui/fixtures/runtime-config-keys.json",), PYTHON | WEBUI,
+     "shared Python and WebUI runtime configuration test contract"),
+    (("tests/session/fixtures/sqlite_v1.sql",), PYTHON, "Python session schema migration fixture"),
+    (("tests/fixtures/sigstore/bundle_v3.txt", "tests/fixtures/sigstore/bundle_v3.txt.sigstore"),
+     PYTHON | NATIVE, "release trust verification fixtures"),
+    (("tests/fixtures/sigstore/README.md", "tests/fixtures/sigstore/LICENSE"),
+     frozenset(), "test fixture provenance and license"),
     (("docs/*", ".agent/*", ".github/ISSUE_TEMPLATE/*", "AGENTS.md", "CLAUDE.md",
       "COMMUNICATION.md", "CONTRIBUTING.md", "SECURITY.md", "webui/README.md",
       "tui/README.md", "render.yaml", "images/*"), frozenset(), "documentation only"),

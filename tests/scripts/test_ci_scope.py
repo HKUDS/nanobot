@@ -29,6 +29,13 @@ def selected(result):
         ("entrypoint.sh", {"docker"}),
         ("tests/test_docker_config.py", {"python", "docker"}),
         ("tests/test_docker_smoke.py", {"python", "docker"}),
+        ("tests/test_docker.sh", {"docker"}),
+        ("tests/webui/fixtures/runtime-config-keys.json", {"python", "webui"}),
+        ("tests/session/fixtures/sqlite_v1.sql", {"python"}),
+        ("tests/fixtures/sigstore/bundle_v3.txt", {"python", "native"}),
+        ("tests/fixtures/sigstore/bundle_v3.txt.sigstore", {"python", "native"}),
+        ("tests/fixtures/sigstore/README.md", set()),
+        ("tests/fixtures/sigstore/LICENSE", set()),
         ("webui/package.json", {"webui", "docker"}),
         ("nanobot/channels/discord/webui/index.ts", {"webui", "docker"}),
         ("tui/package.json", {"tui", "native"}),
@@ -76,7 +83,10 @@ def test_existing_path_policy(path, expected):
     assert result["paths"][0]["reason"]
 
 
-@pytest.mark.parametrize("path", ["new-domain/source.txt", ".github/workflows/publish-index.yml", "uv.lock"])
+@pytest.mark.parametrize("path", [
+    "new-domain/source.txt", ".github/workflows/publish-index.yml", "uv.lock",
+    "tests/webui/fixtures/new-contract.json", "tests/fixtures/sigstore/new-proof.sigstore",
+])
 def test_new_or_cross_domain_paths_require_every_job(path):
     assert all(classify_paths([path])["outputs"].values())
 
@@ -85,6 +95,26 @@ def test_union_preserves_each_reason():
     result = classify_paths(["docs/releasing.md", "tui/package.json", "nanobot/providers/registry.py"])
     assert selected(result) == {"python", "docker", "tui", "native"}
     assert len(result["paths"]) == 3
+
+
+@pytest.mark.parametrize(
+    ("paths", "expected"),
+    [
+        (["tests/webui/fixtures/runtime-config-keys.json", "tests/session/fixtures/sqlite_v1.sql"],
+         {"python", "webui"}),
+        (["tests/webui/fixtures/runtime-config-keys.json", "nanobot/webui/settings_runtime.py",
+          "webui/src/tests/settings-runtime-config.test.tsx"],
+         {"python", "webui", "tui", "docker"}),
+        (["tests/webui/fixtures/runtime-config-keys.json", "tests/fixtures/sigstore/bundle_v3.txt"],
+         {"python", "webui", "native"}),
+        (["tests/session/fixtures/sqlite_v1.sql", "tests/webui/fixtures/new-contract.json"],
+         {"python", "webui", "tui", "docker", "native"}),
+    ],
+)
+def test_fixture_requirements_combine_with_other_changed_paths(paths, expected):
+    result = classify_paths(paths)
+    assert selected(result) == expected
+    assert len(result["paths"]) == len(paths)
 
 
 @pytest.fixture
