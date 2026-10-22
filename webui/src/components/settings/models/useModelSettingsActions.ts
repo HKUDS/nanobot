@@ -86,6 +86,8 @@ export function useModelSettingsActions({
   modelDirty,
   configuredModelProviderOptions,
 }: ModelSettingsActionsOptions) {
+  const latestState = useRef(state);
+  latestState.current = state;
   const oauthMounted = useRef(true);
   useEffect(() => {
     oauthMounted.current = true;
@@ -274,9 +276,16 @@ export function useModelSettingsActions({
           extraBody: form.extraBody !== providerJsonValue(selectedPreset.extra_body) ? form.extraBody : undefined,
         } : {}),
       });
-      applyPayload(payload);
-      setForm(agentDraftFromPayload(payload, nextName));
-      setModelPresetEditingName(nextName);
+      const sameEditor = latestState.current.modelPresetEditingName === modelPresetEditingName
+        && !latestState.current.modelPresetCreating;
+      const editedWhileSaving = latestState.current.form !== form;
+      applyPayload(payload, { preserveAgentForm: true });
+      if (sameEditor) {
+        setForm((current) => editedWhileSaving
+          ? { ...current, modelPreset: current.modelPreset === form.modelPreset ? nextName : current.modelPreset }
+          : agentDraftFromPayload(payload, nextName));
+        setModelPresetEditingName(nextName);
+      }
       onModelNameChange(payload.agent.model || null);
       setModelPresetNameError(null);
       setError(null);
@@ -459,6 +468,14 @@ export function useModelSettingsActions({
         setPendingRestartSections((prev) => ({ ...prev, image: true }));
       }
       await maybeRestartHostEngine(payload);
+      const currentForm = latestState.current.providerForms[providerName];
+      if (currentForm && currentForm !== providerForm) {
+        if (currentForm.apiKey.trim()) {
+          setEditingProviderKeys((prev) => ({ ...prev, [providerName]: true }));
+        }
+        setError(null);
+        return false;
+      }
       setProviderForms((prev) => {
         const next = { ...prev };
         delete next[providerName];
