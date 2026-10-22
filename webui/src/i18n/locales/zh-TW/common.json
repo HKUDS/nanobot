@@ -495,7 +495,11 @@
       "useProxy": "使用代理",
       "useProxyHelp": "使用進階設定中的共用代理。",
       "configureProxy": "設定代理",
-      "sharedProxyScope": "供所有啟用代理的功能共用。"
+      "sharedProxyScope": "供所有啟用代理的功能共用。",
+      "authentication": "認證（選填）",
+      "username": "使用者名稱",
+      "password": "密碼",
+      "proxyReferenceAuth": "請在參照的代理 URL 中設定認證資訊。"
     },
     "runtimeConfig": {
       "apiSaved": "已儲存，重新啟動 API 服務後生效。",

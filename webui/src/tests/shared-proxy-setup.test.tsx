@@ -76,6 +76,23 @@ describe("Inline shared proxy setup", () => {
     expect(requestMutationMock).toHaveBeenCalledWith("settings.runtime_config.update", { values: { "network.proxy": "http://127.0.0.1:7890" } }, 20_000);
   });
 
+  it("saves optional credentials from inline setup without enabling the consumer", async () => {
+    const { settings, saved } = installProxySettings();
+    renderSettingsView({ initialSection: "apps", initialSettings: settings });
+    const { parent, setup } = await openMcpSetup();
+    fireEvent.change(within(setup).getByRole("textbox", { name: "Shared proxy" }), { target: { value: "socks5://proxy:1080" } });
+    fireEvent.click(within(setup).getByRole("button", { name: "Authentication (optional)" }));
+    fireEvent.change(within(setup).getByLabelText("Username"), { target: { value: "user@org" } });
+    fireEvent.change(within(setup).getByLabelText("Password"), { target: { value: "p:a@ss" } });
+    expect(within(setup).getByLabelText("Password")).toHaveAttribute("type", "password");
+    const encoded = "socks5://user%40org:p%3Aa%40ss@proxy:1080";
+    requestMutationMock.mockResolvedValueOnce({ ...saved, runtime_config: { "network.proxy": encoded } });
+    fireEvent.click(within(setup).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Shared proxy" })).not.toBeInTheDocument());
+    expect(requestMutationMock).toHaveBeenCalledWith("settings.runtime_config.update", { values: { "network.proxy": encoded } }, 20_000);
+    expect(within(parent).getByRole("switch", { name: "Use proxy" })).not.toBeChecked();
+  });
+
   it("retains MCP tool selections when setup is cancelled", async () => {
     const { settings } = installProxySettings();
     renderSettingsView({ initialSection: "apps", initialSettings: settings });

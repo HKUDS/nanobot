@@ -495,7 +495,11 @@
       "useProxy": "プロキシを使う",
       "useProxyHelp": "詳細設定の共有プロキシを使います。",
       "configureProxy": "プロキシを設定",
-      "sharedProxyScope": "プロキシを有効にしたすべての機能で共有します。"
+      "sharedProxyScope": "プロキシを有効にしたすべての機能で共有します。",
+      "authentication": "認証（任意）",
+      "username": "ユーザー名",
+      "password": "パスワード",
+      "proxyReferenceAuth": "参照先のプロキシ URL に認証情報を設定してください。"
     },
     "runtimeConfig": {
       "apiSaved": "保存しました。API サービスを再起動すると反映されます。",

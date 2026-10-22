@@ -495,7 +495,11 @@
       "useProxy": "Dùng proxy",
       "useProxyHelp": "Dùng proxy chung trong phần Nâng cao.",
       "configureProxy": "Cấu hình proxy",
-      "sharedProxyScope": "Dùng chung cho mọi tính năng đã bật proxy."
+      "sharedProxyScope": "Dùng chung cho mọi tính năng đã bật proxy.",
+      "authentication": "Xác thực (tùy chọn)",
+      "username": "Tên người dùng",
+      "password": "Mật khẩu",
+      "proxyReferenceAuth": "Thiết lập xác thực trong URL proxy được tham chiếu."
     },
     "runtimeConfig": {
       "apiSaved": "Đã lưu. Khởi động lại dịch vụ API để áp dụng thay đổi.",

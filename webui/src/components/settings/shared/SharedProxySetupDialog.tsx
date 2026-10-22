@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { SettingsHint } from "@/components/settings/shared/SettingsHint";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { SharedProxyEditor } from "@/components/settings/shared/SharedProxyEditor";
 
 export function SharedProxySetupDialog({ onClose, onSave, busy }: {
   busy: boolean;
@@ -52,11 +52,9 @@ export function SharedProxySetupDialog({ onClose, onSave, busy }: {
             <DialogDescription>{t("settings.network.sharedProxyScope")}</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            <Input ref={input} aria-label={title} type="text" value={address} disabled={saving}
-              autoComplete="off" spellCheck={false} placeholder="http://127.0.0.1:7890"
-              aria-invalid={Boolean(error)} aria-describedby={error ? "shared-proxy-setup-error" : undefined}
-              className="h-9 rounded-full text-[13px]"
-              onChange={(event) => { setAddress(event.target.value); setError(""); }} />
+            <SharedProxyEditor value={address} inputRef={input} disabled={saving} stackCredentials
+              addressProps={{ "aria-invalid": Boolean(error), "aria-describedby": error ? "shared-proxy-setup-error" : undefined }}
+              onChange={(next) => { setAddress(next); setError(""); }} />
             {error ? <p id="shared-proxy-setup-error" role="alert" className="break-words text-[13px] text-destructive">{error}</p> : null}
           </div>
           <DialogFooter>

@@ -495,7 +495,11 @@
       "useProxy": "Gunakan proxy",
       "useProxyHelp": "Menggunakan proxy bersama di pengaturan Lanjutan.",
       "configureProxy": "Atur proxy",
-      "sharedProxyScope": "Dipakai bersama oleh semua fitur yang mengaktifkan proxy."
+      "sharedProxyScope": "Dipakai bersama oleh semua fitur yang mengaktifkan proxy.",
+      "authentication": "Autentikasi (opsional)",
+      "username": "Nama pengguna",
+      "password": "Kata sandi",
+      "proxyReferenceAuth": "Atur autentikasi di URL proxy yang dirujuk."
     },
     "runtimeConfig": {
       "apiSaved": "Tersimpan. Mulai ulang layanan API untuk menerapkan perubahan.",

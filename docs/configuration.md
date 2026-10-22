@@ -73,6 +73,8 @@ If the WebUI does not expose the option you need, start from the task below. Mos
 
 Set one proxy address in **Settings → Advanced → Shared proxy**, then turn on **Use proxy** for each provider, Web access, channel, or remote MCP connection that needs it. The address is used by the gateway, so `127.0.0.1` refers to the machine running nanobot. Restart when Settings requests it. MCP connections can select the proxy before browser sign-in.
 
+For proxies that require credentials, expand **Authentication (optional)** and enter the username and password, then choose **Save** to apply the address and credentials together. The same editor is available from **Configure proxy** without leaving the current form. Passwords are masked in the interface but remain part of the proxy URL in the local configuration; protect that file. If the address is a whole-URL `${ENV_VAR}` reference, include authentication in the referenced URL.
+
 Only features with a **Use proxy** switch use this address. Turning a switch off preserves the feature's normal environment/system proxy behavior. An enabled switch without a configured address fails rather than silently connecting directly. Use a trusted proxy and keep credentials in its URL private.
 
 <details>

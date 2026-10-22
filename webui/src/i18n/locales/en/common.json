@@ -495,7 +495,11 @@
       "useProxy": "Use proxy",
       "useProxyHelp": "Uses the shared proxy in Advanced.",
       "configureProxy": "Configure proxy",
-      "sharedProxyScope": "Shared by all features with proxy enabled."
+      "sharedProxyScope": "Shared by all features with proxy enabled.",
+      "authentication": "Authentication (optional)",
+      "username": "Username",
+      "password": "Password",
+      "proxyReferenceAuth": "Set authentication in the referenced proxy URL."
     },
     "runtimeConfig": {
       "apiSaved": "Saved. Restart the API service to apply changes.",
