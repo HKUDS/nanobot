@@ -52,14 +52,17 @@ for (const width of [390, 1440]) {
           await page.goto(fixture(surface));
           const loaded = page.locator(loadedSelector).first();
           const row = await box(loaded);
-          const icon = await box(surface === "channels" ? loaded.locator('[data-testid^="channel-logo"]') : loaded.locator(":scope > :first-child"));
+          const icon = await box(surface === "channels" ? loaded.locator('[data-testid^="channel-logo"]')
+            : loaded.locator(surface === "apps" ? ":scope > :first-child > :first-child" : ":scope > :first-child"));
           const title = await box(loaded.locator("h3"));
           const action = width === 1440 || surface !== "skills" ? await box(loaded.locator(":scope > :last-child")) : null;
           await page.goto(fixture(surface, true));
           const skeleton = status(page).locator(loadingSelector).first();
           sameBox(await box(skeleton), row);
-          sameBox(await box(skeleton.locator(":scope > :first-child")), icon);
-          const placeholder = await box(skeleton.locator(":scope > :nth-child(2) [class*='bg-muted-foreground']").first());
+          sameBox(await box(skeleton.locator(surface === "apps" ? ":scope > :first-child > :first-child" : ":scope > :first-child")), icon);
+          const placeholder = await box(skeleton.locator(surface === "apps"
+            ? ":scope > :first-child > :nth-child(2) [class*='bg-muted-foreground']"
+            : ":scope > :nth-child(2) [class*='bg-muted-foreground']").first());
           expect(placeholder.x).toBe(title.x);
           expect(placeholder.y + placeholder.height / 2).toBe(title.y + title.height / 2);
           if (action) sameBox(await box(skeleton.locator(":scope > :last-child")), action);

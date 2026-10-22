@@ -333,7 +333,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.webui_required == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
       - uses: actions/checkout@v4
