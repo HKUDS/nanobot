@@ -269,7 +269,7 @@ connection.close()
         stderr=asyncio.subprocess.PIPE,
     )
     try:
-        assert await asyncio.wait_for(process.stdout.readline(), timeout=5) == b"uncommitted\n"
+        assert (await asyncio.wait_for(process.stdout.readline(), timeout=5)).rstrip(b"\r\n") == b"uncommitted"
         # Drain startup's optional timezone invalidation before testing the WAL signal.
         await asyncio.sleep(0.2)
         while not events.empty():
@@ -278,7 +278,7 @@ connection.close()
             await asyncio.wait_for(events.get(), timeout=0.3)
         process.stdin.write(b"commit\n")
         await process.stdin.drain()
-        assert await asyncio.wait_for(process.stdout.readline(), timeout=5) == b"committed\n"
+        assert (await asyncio.wait_for(process.stdout.readline(), timeout=5)).rstrip(b"\r\n") == b"committed"
         await _resource(events, "usage")
         assert store.count() == 1001
     finally:
