@@ -66,6 +66,7 @@ for (const dark of [false, true]) {
         .toHaveText("unknown-language contents remain readable");
       const separated = page.getByRole("region", { name: "separated.ts", exact: true });
       await expect(separated.getByTestId("file-edit-diff-hunk-gap")).toHaveText(/21 unchanged lines hidden/);
+      expect(await separated.getByTestId("file-edit-diff-hunk-gap").evaluate(node => node.closest("[data-separator]")!.getBoundingClientRect().height)).toBe(26);
       await expect(separated.locator("[data-code] [data-line]")).toHaveCount(8);
       await expect(separated.locator("[data-column-number]").last()).toContainText("27");
       await page.getByRole("button", { name: "Toggle theme" }).click();
@@ -167,3 +168,58 @@ test("a changed source replaces cached syntax without stale text", async ({ page
   await expect(gap).toContainText("21");
   await expect(gap).toHaveText("…  已隐藏 21 行未修改内容");
 });
+
+
+for (const [file, renderedIndex, sourceLine, reverse] of [["long.ts", 58, 59, false], ["long-separated.ts", 249, 550, true]] as const) {
+  test(`native selection survives moving diff windows and releases pinned rows: ${file}`, async ({ page, context }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.setViewportSize({ width: 1280, height: 700 });
+    await page.addInitScript(() => localStorage.setItem("nanobot.locale", "en"));
+    await page.goto("/browser/fixture.html?case=file-diff");
+    const section = page.getByRole("region", { name: file, exact: true });
+    await section.getByTestId("file-edit-diff-toggle").click();
+    await expectKeywordColor(section.locator("[data-code] [data-line]"));
+    await section.getByTestId("file-edit-diff-expand-lines").click();
+    const scroller = page.getByTestId("diff-fixture-scroller");
+    const height = await scroller.evaluate(node => node.scrollHeight);
+    await section.getByTestId("syntax-highlighted-diff-hunk").evaluate((node, index) => {
+      const scroller = document.querySelector<HTMLElement>('[data-testid="diff-fixture-scroller"]')!;
+      const lineHeight = parseFloat(getComputedStyle(node).lineHeight) + 2;
+      scroller.scrollTop += node.getBoundingClientRect().top - scroller.getBoundingClientRect().top + index * lineHeight - 200;
+    }, renderedIndex);
+    const line = section.locator(`[data-code] [data-line="${sourceLine}"]`);
+    await expect(line).toBeVisible();
+    // Settle the scheduled window update before beginning a physical drag.
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const box = await line.evaluate(node => {
+      const text = document.createTreeWalker(node, NodeFilter.SHOW_TEXT).nextNode()!;
+      const range = document.createRange();
+      range.setStart(text, 0);
+      range.setEnd(text, 1);
+      const bounds = range.getBoundingClientRect();
+      return { x: bounds.x, y: bounds.y, height: bounds.height };
+    });
+    const left = box.x + 1;
+    const right = left + 200;
+    await page.mouse.move(reverse ? right : left, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(reverse ? left : right, box.y + box.height / 2, { steps: 8 });
+    await page.mouse.up();
+    const selected = await page.evaluate(() => document.getSelection()!.toString());
+    expect(selected).toContain("export const");
+    const first = Number(await section.locator("[data-code] [data-line]").first().getAttribute("data-line"));
+    await scroller.evaluate(node => { node.scrollTop += 3200; });
+    await expect.poll(() => section.locator("[data-code] [data-line]").count()).toBeGreaterThan(200);
+    expect(await page.evaluate(() => document.getSelection()!.toString())).toBe(selected);
+    await page.keyboard.press("ControlOrMeta+C");
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(selected);
+    await expect(line).toBeAttached();
+    expect(await scroller.evaluate(node => node.scrollHeight)).toBe(height);
+    const last = section.locator("[data-code] [data-line]").last();
+    expect(Number(await last.getAttribute("data-line"))).toBeGreaterThan(sourceLine + 100);
+    await page.evaluate(() => document.getSelection()!.removeAllRanges());
+    await expect.poll(() => section.locator("[data-code] [data-line]").count()).toBeLessThan(200);
+    expect(Number(await section.locator("[data-code] [data-line]").first().getAttribute("data-line"))).toBeGreaterThan(first);
+    await expect(line).toHaveCount(0);
+  });
+}

@@ -1,4 +1,4 @@
-import { Suspense, lazy, memo, startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Component, Suspense, lazy, memo, startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, Copy } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -6,6 +6,7 @@ import { useThemeValue } from "@/hooks/useTheme";
 import { hasAnsi, parseAnsiSegments, stripAnsi } from "@/lib/ansi";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { normalizeCodeLanguage } from "@/lib/code-language";
+import { discardCodeHighlight } from "@/lib/code-highlight-cache";
 import { cn } from "@/lib/utils";
 
 interface CodeBlockProps {
@@ -25,6 +26,34 @@ const LazyHighlightedCode = lazy(async () => {
   const { HighlightedCode } = await import("./HighlightedCode");
   return { default: HighlightedCode };
 });
+
+class CodeHighlightBoundary extends Component<{
+  code: string;
+  language: string;
+  fallback: ReactNode;
+  children: ReactNode;
+}, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: Error) {
+    discardCodeHighlight(this.props.code, this.props.language);
+    console.warn("Code highlighting failed.", error);
+  }
+
+  componentDidUpdate(previous: Readonly<{ code: string; language: string }>) {
+    if (this.state.failed && (previous.code !== this.props.code || previous.language !== this.props.language)) {
+      this.setState({ failed: false });
+    }
+  }
+
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
 
 function renderPlainText(value: string): ReactNode {
   return value;
@@ -155,6 +184,8 @@ export const CodeBlock = memo(function CodeBlock({
     };
   }, [code, deferHighlight]);
   const copyLabel = copied ? t("code.copied") : t("code.copyAria");
+  const plainBlock = <CodeTextBlock code={code} chrome={chrome} showLineNumbers={showLineNumbers}
+    testId="plain-code-fallback" compact={useViewportHighlight} />;
 
   const onCopy = useCallback(() => {
     void copyTextToClipboard(plainCode).then((ok) => {
@@ -185,35 +216,19 @@ export const CodeBlock = memo(function CodeBlock({
           compact={useViewportHighlight}
         />
       ) : highlight && withinHighlightBudget && (!deferHighlight || highlightedSource === code) ? (
-        <Suspense
-          fallback={
-            <CodeTextBlock
+        <CodeHighlightBoundary code={code} language={syntaxLanguage} fallback={plainBlock}>
+          <Suspense fallback={plainBlock}>
+            <LazyHighlightedCode
+              language={syntaxLanguage}
               code={code}
               chrome={chrome}
               showLineNumbers={showLineNumbers}
-              testId="plain-code-fallback"
-              compact={useViewportHighlight}
+              wrapLongLines={wrapLongLines}
+              viewportHighlight={useViewportHighlight}
             />
-          }
-        >
-          <LazyHighlightedCode
-            language={syntaxLanguage}
-            code={code}
-            chrome={chrome}
-            showLineNumbers={showLineNumbers}
-            wrapLongLines={wrapLongLines}
-            viewportHighlight={useViewportHighlight}
-          />
-        </Suspense>
-      ) : (
-        <CodeTextBlock
-          code={code}
-          chrome={chrome}
-          showLineNumbers={showLineNumbers}
-          testId="plain-code-fallback"
-          compact={useViewportHighlight}
-        />
-      )}
+          </Suspense>
+        </CodeHighlightBoundary>
+      ) : plainBlock}
       {hasChrome ? (
         <button
           type="button"

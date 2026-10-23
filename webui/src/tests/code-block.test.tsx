@@ -6,13 +6,44 @@ import type { HighlightedCodeProps } from "@/components/HighlightedCode";
 import { CodeBlock } from "@/components/CodeBlock";
 import { ThemeProvider } from "@/hooks/useTheme";
 
+const failures = vi.hoisted(() => new Set<string>());
+
 // Test CodeBlock's controls and enhancement boundary here; token/DOM rendering has dedicated real-engine and browser coverage.
 vi.mock("@/components/HighlightedCode", () => ({
-  HighlightedCode: ({ code, language, viewportHighlight }: HighlightedCodeProps) => <pre data-testid="highlighted-code" data-language={language || "text"}
-    style={{ overflow: viewportHighlight ? "visible" : "auto" }}><code data-code-text="">{code}</code></pre>,
+  HighlightedCode: ({ code, language, viewportHighlight }: HighlightedCodeProps) => {
+    if (failures.has(code)) throw new Error("Grammar download failed");
+    return <pre data-testid="highlighted-code" data-language={language || "text"}
+      style={{ overflow: viewportHighlight ? "visible" : "auto" }}><code data-code-text="">{code}</code></pre>;
+  },
 }));
 
 describe("CodeBlock", () => {
+  it("contains a failed grammar, preserves source and copy, and enhances changed source", async () => {
+    const source = "; 中文 😀\r\n[server]\r\nhost=localhost\r\n";
+    failures.add(source);
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { rerender } = render(<><textarea defaultValue="keep draft" /><CodeBlock code={source} language="ini" /></>);
+      await waitFor(() => expect(warnings).toHaveBeenCalledWith("Code highlighting failed.", expect.any(Error)));
+      expect(screen.getByTestId("plain-code-fallback").textContent).toBe(source);
+      expect(screen.getByRole("textbox")).toHaveValue("keep draft");
+      await user.click(screen.getByRole("button", { name: "Copy code" }));
+      expect(writeText).toHaveBeenCalledWith(source);
+      rerender(<><textarea defaultValue="keep draft" /><CodeBlock code={source + "; updated"} language="ini" /></>);
+      expect((await screen.findByTestId("highlighted-code")).textContent).toBe(source + "; updated");
+      expect(screen.getByRole("textbox")).toHaveValue("keep draft");
+    } finally {
+      failures.clear();
+      errors.mockRestore();
+      warnings.mockRestore();
+      Reflect.deleteProperty(navigator, "clipboard");
+    }
+  });
+
   it("renders and copies a large code block in full without pagination", async () => {
     const user = userEvent.setup();
     const writeText = vi.fn().mockResolvedValue(undefined);
