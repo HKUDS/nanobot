@@ -13,6 +13,7 @@ export function WorkspaceAlignmentFixture({ parameters }: { parameters: URLSearc
   return <main className="mx-auto w-full max-w-5xl px-4 pt-24" style={{ maxWidth: parameters.has("containerWidth") ? Number(parameters.get("containerWidth")) : undefined }}>
     <ThreadComposer variant={parameters.get("composerVariant") === "thread" ? "thread" : "hero"}
       onSend={() => {}} workspaceScope={scope} workspaceDefaultScope={initialScope}
+      contextUsage={parameters.has("usage") ? { contextTokens: 500, contextWindowTokens: 1000 } : null}
       workspaceControls={catalog.controls} onWorkspaceScopeChange={setScope}
       onLoadWorkspaceProjects={async () => catalog}
       onResolveWorkspaceProject={async path => ({ path, name: "workspace" })}

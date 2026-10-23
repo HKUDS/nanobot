@@ -710,7 +710,7 @@ export function WorkspaceAccessMenu({
             onPointerDown={() => { restoreTriggerFocus.current = false; }}
             onKeyDown={() => { restoreTriggerFocus.current = true; }}
             className={cn(
-              "thread-composer-access touch-target inline-flex h-8 min-w-0 shrink items-center gap-1.5 rounded-md px-2 text-[12px] font-medium outline-none transition-colors motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-55",
+              "thread-composer-access touch-target inline-flex h-8 min-w-0 max-w-full shrink items-center gap-1.5 rounded-md px-2 text-[12px] font-medium outline-none transition-colors motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-55",
               isFull ? "text-orange-600 hover:text-orange-700 dark:text-orange-300 dark:hover:text-orange-200" : "text-muted-foreground hover:text-foreground",
             )}>
             <AccessIcon className="h-3.5 w-3.5 shrink-0" />

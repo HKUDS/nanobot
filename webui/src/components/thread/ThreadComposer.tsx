@@ -1176,6 +1176,7 @@ export function ThreadComposer({
   // Coarser than hasTouchPrimaryPointer on purpose: tablets with a physical
   // keyboard still get the newline-on-Enter behavior.
   const hasCoarsePointer = useMediaQuery("(pointer: coarse)");
+  const mobileWorkspaceControls = useMediaQuery("(max-width: 639px)");
   const { readingTextSize } = useLocalPreferences();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionOverlayRef = useRef<HTMLDivElement>(null);
@@ -2563,7 +2564,7 @@ export function ThreadComposer({
       onClick={modelNeedsSetup ? onModelBadgeClick : undefined}
     />
   ) : null;
-  const usageControl = !voiceRecorder.isRecording ? (
+  const usageControl = !voiceRecorder.isRecording && (contextUsage || recentRoundUsage.length) ? (
     <ComposerUsagePopover context={contextUsage} rounds={recentRoundUsage} showLabel={compactControls} bottomSheet={compactControls} />
   ) : null;
   const inputTextClasses = cn(
@@ -2836,7 +2837,7 @@ export function ThreadComposer({
             >
               <AttachIcon className="h-3.5 w-3.5" />
             </Button>
-            {accessControl}
+            {!mobileWorkspaceControls ? accessControl : null}
             {voiceRecorder.isRecording ? (
               <VoiceRecordingMeter
                 ariaLabel={voiceRecordingStatusLabel}
@@ -2928,16 +2929,18 @@ export function ThreadComposer({
           </div>
         </div>
       </div>
-      {workspaceControl || compactControls && usageControl ? (
+      {workspaceControl || mobileWorkspaceControls && accessControl || compactControls && usageControl ? (
         <div className={cn(
           "thread-composer-meta mx-auto mt-1 flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pr-2 sm:pr-3",
           isHero ? "max-w-[58rem]" : "max-w-[49.5rem]",
           paletteBeside && "col-start-1 row-start-2",
         )}>
-          <div className="thread-composer-workspace-group flex min-w-0 flex-auto items-center gap-1 max-[359px]:flex-wrap">
+          {mobileWorkspaceControls && compactControls && usageControl ? <div className="flex w-full justify-end">{usageControl}</div> : null}
+          <div className={cn("thread-composer-workspace-group flex min-w-0 items-center gap-1", mobileWorkspaceControls ? "flex-1" : "flex-auto max-[359px]:flex-wrap")}>
             {workspaceControl}
           </div>
-          {compactControls ? <div className="ml-auto shrink-0">{usageControl}</div> : null}
+          {!mobileWorkspaceControls && compactControls && usageControl ? <div className="ml-auto shrink-0">{usageControl}</div> : null}
+          {mobileWorkspaceControls && accessControl ? <div className="ml-auto min-w-0 max-w-[55%] shrink">{accessControl}</div> : null}
         </div>
       ) : null}
     </form>

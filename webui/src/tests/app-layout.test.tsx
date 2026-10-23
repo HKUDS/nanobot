@@ -1110,12 +1110,12 @@ describe("App layout", () => {
     window.history.replaceState(null, "", "/#/chat/websocket%3Aexisting-chat");
     render(<App />);
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    // Wait for the existing chat's lazy composer before opening its sidebar menu.
+    await screen.findByRole("button", { name: "Workspace access mode: Full Access" });
     const projectSection = screen.getByRole("region", { name: "selected-project" });
     fireEvent.contextMenu(within(projectSection).getByRole("button", { name: "selected-project" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "New topic" }));
-    expect(window.location.hash).toBe("#/new");
-    // Let queued browser navigation events settle before sending the first message.
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    await userEvent.setup().click(await screen.findByRole("menuitem", { name: "New topic" }));
+    await waitFor(() => expect(window.location.hash).toBe("#/new"));
     expect(await screen.findByRole("button", { name: "Switch directory" })).toHaveTextContent("selected-project");
     fireEvent.change(screen.getByLabelText("Message input"), {
       target: { value: "project topic" },

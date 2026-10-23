@@ -1340,6 +1340,33 @@ describe("ThreadComposer", () => {
     expect(onWorkspaceScopeChange).not.toHaveBeenCalled();
   });
 
+  it.each(["thread", "hero"] as const)("places %s mobile permission opposite workspace below the composer", async (variant) => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: query === "(max-width: 639px)" || query.includes("pointer: coarse"),
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockReturnValue(rect({ width: 320, height: 160 }));
+    const scope = { project_path: "/srv/workspace", project_name: "workspace", access_mode: "full" as const };
+    const onWorkspaceScopeChange = vi.fn();
+    const { container } = render(<ThreadComposer variant={variant} onSend={vi.fn()} workspaceScope={scope}
+      workspaceDefaultScope={scope} {...workspacePickerProps(scope)} workspaceControls={{ can_change_project: true }}
+      onWorkspaceScopeChange={onWorkspaceScopeChange} contextUsage={{ contextTokens: 500, contextWindowTokens: 1000 }} />);
+    const meta = container.querySelector(".thread-composer-meta")!;
+    const workspace = screen.getByRole("button", { name: "Switch directory" });
+    const access = screen.getByRole("button", { name: "Workspace access mode: Full Access" });
+    expect(container.querySelector(".thread-composer-surface")!.nextElementSibling).toBe(meta);
+    expect(meta.querySelector(".thread-composer-workspace-group")).toContainElement(workspace);
+    expect(meta).toContainElement(access);
+    expect(meta).toContainElement(screen.getByTestId("composer-context-usage"));
+    expect(access.closest(".thread-composer-footer-primary")).toBeNull();
+    const user = userEvent.setup();
+    await user.click(access);
+    await user.click(screen.getByRole("menuitemradio", { name: "Default Permission" }));
+    expect(onWorkspaceScopeChange).toHaveBeenCalledWith(expect.objectContaining({ access_mode: "restricted" }));
+  });
+
   it.each(["handle tap", "Escape"])("opens narrow context usage as a bottom sheet and restores interaction after %s", async (dismissal) => {
     vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockReturnValue(
       rect({ width: 390, height: 160 }),
