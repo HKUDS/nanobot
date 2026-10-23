@@ -15,6 +15,7 @@ from nanobot.session.manager import Session, SessionManager
 def _mock_sessions():
     sessions = MagicMock(spec=SessionManager)
     sessions.state.get = AsyncMock(side_effect=lambda key: sessions.get_or_create(key))
+    sessions.state.get_header = AsyncMock(side_effect=lambda key: sessions.get_or_create(key))
     sessions.state.list_sessions = AsyncMock(side_effect=lambda: sessions.list_sessions())
     sessions.state.has_unarchived_messages = AsyncMock(return_value=True)
     return sessions
@@ -247,6 +248,7 @@ class TestCheckExpired:
         old_dt = datetime.now() - timedelta(minutes=20)
         session = _make_session("cli:old", updated_at=old_dt)
         _add_turns(session, 5)
+        session.updated_at = old_dt
         ac.sessions.list_sessions.return_value = [
             {"key": "cli:old", "updated_at": old_dt.isoformat()}
         ]
@@ -413,7 +415,7 @@ class TestArchiveDelegates:
     async def test_calls_compact_idle_session(self):
         ac = _make_autocompact()
         mock_sm = _mock_sessions()
-        mock_sm.get_or_create.return_value = Session(key="cli:test")
+        mock_sm.get_or_create.return_value = _make_session(updated_at=datetime.now() - timedelta(minutes=20))
         ac.sessions = mock_sm
         ac.consolidator.compact_idle_session = AsyncMock(return_value="Summary.")
 
@@ -430,7 +432,7 @@ class TestArchiveDelegates:
     @pytest.mark.asyncio
     async def test_forwards_timeout_compaction_events_with_session_key(self):
         sessions = _mock_sessions()
-        sessions.get_or_create.return_value = Session(key="cli:test")
+        sessions.get_or_create.return_value = _make_session(updated_at=datetime.now() - timedelta(minutes=20))
         consolidator = MagicMock()
         observed: list[tuple[str, ContextCompactionEvent]] = []
 
@@ -475,6 +477,7 @@ class TestArchiveDelegates:
         ac = _make_autocompact()
         mock_sm = _mock_sessions()
         session = _make_session(
+            updated_at=datetime.now() - timedelta(minutes=20),
             metadata={"_last_summary": {"text": "Hello.", "last_active": "2026-05-13T10:00:00"}}
         )
         mock_sm.get_or_create.return_value = session
@@ -490,7 +493,7 @@ class TestArchiveDelegates:
     @pytest.mark.asyncio
     async def test_no_summary_when_compact_returns_empty(self):
         mock_sm = _mock_sessions()
-        mock_sm.get_or_create.return_value = _make_session(metadata={
+        mock_sm.get_or_create.return_value = _make_session(updated_at=datetime.now() - timedelta(minutes=20), metadata={
             "_last_summary": {"text": "Previous checkpoint.", "last_active": "2026-05-13T10:00:00"},
         })
         ac = _make_autocompact(sessions=mock_sm)
@@ -498,18 +501,23 @@ class TestArchiveDelegates:
 
         await ac._archive("cli:test", runtime=_runtime())
 
+        ac.consolidator.compact_idle_session.assert_awaited_once()
         assert "cli:test" not in ac._summaries
 
     @pytest.mark.asyncio
     async def test_exception_still_removes_from_archiving(self):
         ac = _make_autocompact()
         mock_sm = _mock_sessions()
+        mock_sm.get_or_create.return_value = _make_session(
+            updated_at=datetime.now() - timedelta(minutes=20),
+        )
         ac.sessions = mock_sm
         ac.consolidator.compact_idle_session = AsyncMock(side_effect=RuntimeError("fail"))
 
         ac._archiving.add("cli:test")
         await ac._archive("cli:test", runtime=_runtime())
 
+        ac.consolidator.compact_idle_session.assert_awaited_once()
         assert "cli:test" not in ac._archiving
 
 

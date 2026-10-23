@@ -96,6 +96,10 @@ class AutoCompact:
             return
         try:
             async with self._session_lock(key):
+                # A turn may have refreshed activity while this archive waited.
+                session = await self.sessions.state.get_header(key)
+                if not self._is_expired(session.updated_at):
+                    return
                 # Idle compaction and turns share one transcript boundary.
                 summary = await self.consolidator.compact_idle_session(
                     key,
