@@ -53,6 +53,7 @@ import {
   installedMcpPresetsFromPayload,
   isMcpPresetsPayload,
 } from "@/lib/mcp-preset-events";
+import { displayTitle } from "@/lib/chat-groups";
 import type { StreamError } from "@/lib/nanobot-client";
 import { isLocalAttachment } from "../../../../packages/client-events/attachments";
 import type {
@@ -212,9 +213,12 @@ function maxFilePreviewWidth(containerWidth: number): number {
   );
 }
 
+const EMPTY_TITLE_OVERRIDES: Record<string, string> = {};
+
 interface ThreadShellProps {
   session: ChatSummary | null;
   sessions?: ChatSummary[];
+  titleOverrides?: Record<string, string>;
   title: string;
   temporary?: boolean;
   temporaryChatIds?: readonly string[];
@@ -440,6 +444,7 @@ function useInstalledSettingItems<Payload, Item>({
 export function ThreadShell({
   session,
   sessions = [],
+  titleOverrides = EMPTY_TITLE_OVERRIDES,
   title,
   temporary = false,
   temporaryChatIds = [],
@@ -486,8 +491,11 @@ export function ThreadShell({
   const historyKey = temporary ? null : session?.key ?? null;
   const previewSessionKey = session?.key ?? null;
   const mentionSessions = useMemo(
-    () => sessions.filter((candidate) => candidate.key !== historyKey),
-    [historyKey, sessions],
+    () => sessions.filter((candidate) => candidate.key !== historyKey).map((candidate) => ({
+      ...candidate,
+      title: displayTitle(candidate, titleOverrides, t("chat.newChat")),
+    })),
+    [historyKey, sessions, t, titleOverrides],
   );
   const { client, getToken, ingressLimits, modelName, token, webuiCapabilities } = useClient();
   const favoriteWorkspaceProject = useCallback(

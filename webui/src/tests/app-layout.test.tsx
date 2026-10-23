@@ -2629,6 +2629,69 @@ describe("App layout", () => {
     expect(await screen.findByRole("button", { name: "Renamed topic" })).toBeInTheDocument();
   });
 
+  it.each([false, true])("uses renamed topic titles in mention candidates and sends across reloads (split=%s)", async (split) => {
+    restoreBrowserFocus = mockBrowserFocus();
+    const user = userEvent.setup();
+    const target: ChatSummary = {
+      key: "websocket:target", channel: "websocket", chatId: "target",
+      createdAt: null, updatedAt: null, title: "Generated title", preview: "Original question",
+      handle: { id: "handle_0123456789abcdef0123456789abcdef", name: "gane" },
+    };
+    mockSessions = [
+      { ...target, key: "websocket:source", chatId: "source", title: "Source", handle: undefined },
+      { ...target, key: "websocket:second", chatId: "second", title: "Second", handle: undefined },
+      target,
+    ];
+    window.history.replaceState(null, "", split ? "/#/chat/websocket%3Asource" : "/#/new");
+    let persisted = {
+      workbench: { version: 1, tabs: split ? {
+        "tab:websocket:source": {
+          explicit: true, title: "Workspace", paneKeys: ["websocket:source", "websocket:second"],
+          layout: "columns",
+        },
+      } : {} },
+    } as Partial<SidebarStatePayload>;
+    mockFetchRoutes({ "/api/webui/sidebar-state": () => persisted });
+    setSidebarStateSpy.mockImplementation(async (state: SidebarStatePayload) => {
+      persisted = state;
+      return state;
+    });
+    const firstRender = render(<App />);
+    await act(async () => { await import("@/components/thread/ThreadShell"); });
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    await user.click(await within(sidebar).findByRole("button", { name: "Topic actions for Generated title" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    const name = screen.getByRole("textbox", { name: "Topic name" });
+    await user.clear(name);
+    await user.type(name, "会话编辑{Enter}");
+    await within(sidebar).findByText("会话编辑");
+    expect(persisted.title_overrides?.[target.key]).toBe("会话编辑");
+
+    const input = screen.getByRole("textbox", { name: /^Message / });
+    fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
+    const candidate = screen.getByRole("option", { name: /@gane/ });
+    expect(candidate).toHaveTextContent("会话编辑");
+    fireEvent.change(input, { target: { value: "@会话", selectionStart: 3 } });
+    expect(screen.getByRole("option", { name: /@gane/ })).toHaveTextContent("会话编辑");
+    fireEvent.keyDown(input, { key: "Tab" });
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(input).toHaveValue("@gane ");
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(sendMessageSpy).toHaveBeenCalled());
+    expect(sendMessageSpy.mock.calls.at(-1)?.[3]?.sessionMentions).toEqual([{
+      id: target.handle?.id, name: "gane", session_key: target.key, title: "会话编辑",
+    }]);
+
+    firstRender.unmount();
+    render(<App />);
+    await screen.findByText("会话编辑");
+    const restoredInput = await screen.findByRole("textbox", { name: /^Message / });
+    fireEvent.change(restoredInput, { target: { value: "@gane", selectionStart: 5 } });
+    expect(screen.getByRole("option", { name: /@gane/ })).toHaveTextContent("会话编辑");
+  });
+
   it("retries a failed sidebar read before enabling edits without losing saved state", async () => {
     mockSessions = [
       {
