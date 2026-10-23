@@ -9,33 +9,30 @@ import { mockBrowserFocus } from "./browser-focus";
 
 const topic: ChatSummary = {
   key: "websocket:review", chatId: "review", channel: "websocket",
-  title: "Review", preview: "", createdAt: null, updatedAt: null, generation: "existing-generation",
+  title: "Review", preview: "", createdAt: null, updatedAt: null,
 };
 
 function RenameCase({
   save,
   grouped = false,
   onSelect = vi.fn(),
-  draft = false,
 }: {
   save: (key: string, title: string) => Promise<void>;
   grouped?: boolean;
   onSelect?: ReturnType<typeof vi.fn>;
-  draft?: boolean;
 }) {
   const [titles, setTitles] = useState<Record<string, string>>({});
   const title = titles[topic.key] ?? topic.title!;
   return <ChatList
     sessions={grouped ? [{ ...topic, key: "tab:group", title: "Group" }] : [
-      { ...topic, title, generation: draft ? undefined : topic.generation },
-      { ...topic, key: "websocket:other", chatId: "other", title: "Other" },
+      topic, { ...topic, key: "websocket:other", chatId: "other", title: "Other" },
     ]}
     activeKey={null}
+    titleOverrides={titles}
     paneGroups={grouped ? {
       "tab:group": {
         tabKey: "tab:group", title: "Group", activePaneKey: "websocket:other", visible: true,
-        panes: [{ key: topic.key, chatId: topic.chatId, title,
-          generation: draft ? undefined : topic.generation }],
+        panes: [{ key: topic.key, chatId: topic.chatId, title }],
       },
     } : {}}
     onSelect={onSelect}
@@ -68,23 +65,6 @@ describe("inline sidebar topic rename", () => {
   afterEach(() => {
     restoreFocus();
     localStorage.removeItem("nanobot-webui.collapsed-pane-groups.v1");
-  });
-
-  it.each([false, true])("does not offer rename for an unsaved topic, grouped=%s", async (grouped) => {
-    const save = vi.fn().mockResolvedValue(undefined);
-    render(<RenameCase save={save} grouped={grouped} draft />);
-    if (grouped) {
-      fireEvent.contextMenu(screen.getByRole("button", { name: "Review" }));
-    } else {
-      fireEvent.pointerDown(screen.getByRole("button", { name: "Topic actions for Review" }), {
-        button: 0, ctrlKey: false,
-      });
-    }
-    const item = await screen.findByRole("menuitem", { name: "Rename Send a message first" });
-    expect(item).toHaveAttribute("data-disabled");
-    fireEvent.click(item);
-    expect(save).not.toHaveBeenCalled();
-    expect(screen.queryByRole("textbox", { name: "Topic name" })).not.toBeInTheDocument();
   });
 
   it.each([false, true])("saves an inactive topic only after acknowledgement, grouped=%s", async (grouped) => {

@@ -15,7 +15,6 @@ function session(overrides: Partial<ChatSummary>): ChatSummary {
     createdAt: "2026-05-20T10:00:00Z",
     updatedAt: "2026-05-20T10:00:00Z",
     preview: "",
-    generation: "persisted-generation",
     ...overrides,
   };
 }
@@ -273,7 +272,7 @@ describe("ChatList", () => {
             activePaneKey: "websocket:root",
             panes: [
               { key: "websocket:root", chatId: "root", title: "Root topic" },
-              { key: "websocket:child", chatId: "child", title: "Research pane", generation: "persisted-generation" },
+              { key: "websocket:child", chatId: "child", title: "Research pane" },
             ],
           },
         }}

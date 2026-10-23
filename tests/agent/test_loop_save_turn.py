@@ -64,7 +64,6 @@ from nanobot.session.webui_turns import (
     maybe_generate_webui_title_after_turn,
 )
 from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
-from nanobot.webui.session_titles import rename_session_title
 
 
 def _agent_run_result(
@@ -382,30 +381,6 @@ async def test_generate_webui_title_only_for_marked_webui_sessions(tmp_path: Pat
         loop.provider.chat_stream_with_retry.await_args.kwargs["reasoning_effort"]
         is None
     )
-
-
-@pytest.mark.asyncio
-async def test_user_renamed_title_is_not_regenerated(tmp_path: Path) -> None:
-    loop = _make_full_loop(tmp_path)
-    loop.provider.chat_stream_with_retry = AsyncMock(
-        return_value=LLMResponse(content="Generated title", finish_reason="stop")
-    )
-    session = loop.sessions.get_or_create("websocket:chat-title")
-    session.metadata[WEBUI_SESSION_METADATA_KEY] = True
-    session.add_message("user", "Help me plan")
-    session.add_message("assistant", "Let's start")
-    loop.sessions.save(session)
-
-    assert await rename_session_title(
-        loop.sessions, session.key, "My plan", expected_title="",
-        expected_generation=session.generation,
-    )
-    assert await maybe_generate_webui_title(
-        sessions=loop.sessions, session_key=session.key,
-        provider=loop.provider, model=loop.model,
-    ) is False
-    assert (await loop.sessions.state.read_metadata(session.key))["metadata"][WEBUI_TITLE_METADATA_KEY] == "My plan"
-    loop.provider.chat_stream_with_retry.assert_not_awaited()
 
 
 @pytest.mark.asyncio

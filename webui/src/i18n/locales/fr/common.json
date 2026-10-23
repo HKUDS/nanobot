@@ -1699,7 +1699,6 @@
     "pin": "Épingler",
     "unpin": "Désépingler",
     "rename": "Renommer",
-    "renameAfterFirstMessage": "Envoyez d'abord un message",
     "renamePlaceholder": "Nom du sujet",
     "renameProjectTitle": "Renommer le projet",
     "renameProjectDescription": "Changez seulement le nom du projet dans la barre latérale WebUI.",

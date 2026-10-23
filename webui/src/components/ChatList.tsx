@@ -179,7 +179,6 @@ export interface SidebarPaneGroup {
     key: string;
     chatId: string;
     title: string;
-    generation?: string;
     handle?: ChatSummary["handle"];
   }>;
 }
@@ -229,7 +228,6 @@ interface ChatListProps {
   onRequestDeleteMany?: (items: SidebarDeleteItem[]) => void;
   onTogglePin: (key: string) => void;
   onRequestRename: (key: string, title: string) => Promise<void>;
-  canRenameSessions?: boolean;
   onRequestRenameTab?: (key: string, label: string) => void;
   onToggleArchive: (key: string) => void;
   paneGroups?: Record<string, SidebarPaneGroup>;
@@ -275,7 +273,6 @@ export const ChatList = memo(function ChatList({
   onRequestDeleteMany,
   onTogglePin,
   onRequestRename,
-  canRenameSessions = true,
   onRequestRenameTab,
   onToggleArchive,
   paneGroups = {},
@@ -349,9 +346,7 @@ export const ChatList = memo(function ChatList({
   const [renamingTopic, setRenamingTopic] = useState<{ key: string } | null>(null);
   const renamingKey = renamingTopic?.key ?? null;
   const previousRenamingKeyRef = useRef<string | null>(null);
-  const beginRename = (key: string) => {
-    if (canRenameSessions) setRenamingTopic({ key });
-  };
+  const beginRename = (key: string) => setRenamingTopic({ key });
   const endRename = () => {
     setRenamingTopic((current) => current === renamingTopic ? null : current);
   };
@@ -939,7 +934,6 @@ export const ChatList = memo(function ChatList({
                                   onSelectPane={onSelectPane}
                                   onRequestDelete={onRequestDelete}
                                   onRequestRename={onRequestRename}
-                                  canRenameSessions={canRenameSessions}
                                   renamingKey={renamingKey}
                                   onBeginRename={beginRename}
                                   onEndRename={endRename}
@@ -1086,16 +1080,10 @@ export const ChatList = memo(function ChatList({
                                 {isPinned ? t("chat.unpin") : t("chat.pin")}
                               </DropdownMenuItem>
                               <DropdownMenuItem
-                                disabled={!canRenameSessions || !s.generation}
                                 onSelect={() => beginRename(s.key)}
                               >
                                 <Pencil className="h-4 w-4 shrink-0" />
                                 {t("chat.rename")}
-                                {!canRenameSessions || !s.generation ? (
-                                  <span className="ms-auto ps-2 text-xs">
-                                    {canRenameSessions ? t("chat.renameAfterFirstMessage") : t("remote.compatibility.update_host")}
-                                  </span>
-                                ) : null}
                               </DropdownMenuItem>
                               <DropdownMenuItem onSelect={() => onToggleArchive(s.key)}>
                                 {isArchived ? (
@@ -1368,7 +1356,6 @@ function ActivePaneRows({
   onSelectPane,
   onRequestDelete,
   onRequestRename,
-  canRenameSessions,
   renamingKey,
   onBeginRename,
   onEndRename,
@@ -1397,7 +1384,6 @@ function ActivePaneRows({
   onSelectPane?: (tabKey: string, paneKey: string) => void;
   onRequestDelete: (key: string, label: string) => void;
   onRequestRename: (key: string, title: string) => Promise<void>;
-  canRenameSessions: boolean;
   renamingKey: string | null;
   onBeginRename: (key: string) => void;
   onEndRename: () => void;
@@ -1543,16 +1529,10 @@ function ActivePaneRows({
                     {isPinned ? t("chat.unpin") : t("chat.pin")}
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    disabled={!canRenameSessions || !pane.generation}
                     onSelect={() => onBeginRename(pane.key)}
                   >
                     <Pencil className="h-4 w-4 shrink-0" />
                     {t("chat.rename")}
-                    {!canRenameSessions || !pane.generation ? (
-                      <span className="ms-auto ps-2 text-xs">
-                        {canRenameSessions ? t("chat.renameAfterFirstMessage") : t("remote.compatibility.update_host")}
-                      </span>
-                    ) : null}
                   </DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => onToggleArchive(pane.key)}>
                     {isArchived ? (

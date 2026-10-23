@@ -40,7 +40,6 @@ from nanobot.session.session_handles import (
     SessionHandle,
     SessionHandleResolver,
 )
-from nanobot.session.sqlite_store import SessionConflictError
 from nanobot.triggers.local_types import LocalTrigger
 from nanobot.webui.automation_chats import AutomationChat, automation_chats
 from nanobot.webui.automation_results import cron_run_response, trigger_run_response
@@ -112,10 +111,9 @@ from nanobot.webui.session_list_index import (
     indexed_workspace_scope,
     list_webui_sessions,
 )
-from nanobot.webui.session_titles import migrate_legacy_session_titles, rename_session_title
 from nanobot.webui.sidebar_state import (
     read_webui_sidebar_state,
-    write_webui_sidebar_layout,
+    write_webui_sidebar_state,
 )
 from nanobot.webui.skills_api import (
     SkillManagementError,
@@ -196,7 +194,6 @@ _WEBUI_MUTATION_PATHS = {
     "star_prompt.claim": "/api/webui/star-prompt/claim",
     "star_prompt.dismiss": "/api/webui/star-prompt/dismiss",
     "sidebar.update": "/api/webui/sidebar-state/update",
-    "session.rename": "/api/webui/session-rename",
     "workspace.favorite": "/api/workspaces/favorite",
     "workspace.resolve_project": "/api/workspaces/resolve-project",
     "recovery.continue": "/api/webui/recovery/continue",
@@ -425,8 +422,6 @@ class GatewayHTTPHandler:
         self.subagent_manager = subagent_manager
         self.discard_session = discard_session
         self._skill_install_lock = asyncio.Lock()
-        self._title_migration_lock = asyncio.Lock()
-        self._titles_migrated = False
         self.cron_service = cron_service
         self.local_trigger_store = local_trigger_store
         self.cron_pending_job_ids = cron_pending_job_ids
@@ -556,7 +551,6 @@ class GatewayHTTPHandler:
             "/api/webui/star-prompt/claim",
             "/api/webui/star-prompt/dismiss",
             "/api/webui/sidebar-state/update",
-            "/api/webui/session-rename",
             "/api/workspaces/resolve-project",
             "/api/workspaces/favorite",
             "/api/webui/subagents/cancel",
@@ -981,27 +975,11 @@ class GatewayHTTPHandler:
             return _http_error(404, "session not found")
         return _http_json_response(session_context_payload(session))
 
-    async def import_legacy_titles(self) -> None:
-        if self._titles_migrated:
-            return
-        if self.session_manager is None:
-            if (await asyncio.to_thread(read_webui_sidebar_state, strict=True))["title_overrides"]:
-                raise OSError("session manager unavailable for title import")
-            return
-        async with self._title_migration_lock:
-            if not self._titles_migrated:
-                self._titles_migrated = await migrate_legacy_session_titles(self.session_manager)
-
     async def _handle_sessions_list(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         if self.session_manager is None:
             return _http_error(503, "session manager unavailable")
-        try:
-            await self.import_legacy_titles()
-        except (OSError, ValueError):
-            self._log.exception("failed to import legacy sidebar titles")
-            return _http_error(503, "session titles unavailable")
         accept_encoding = _combined_list_header(request.headers, "Accept-Encoding")
 
         def render(stored: list[dict[str, Any]]) -> Response | None:
@@ -1753,9 +1731,7 @@ class GatewayHTTPHandler:
         if got == "/api/webui/sidebar-state":
             return self._handle_webui_sidebar_state(request)
         if got == "/api/webui/sidebar-state/update":
-            return await self._handle_webui_sidebar_state_update(request)
-        if got == "/api/webui/session-rename":
-            return await self._handle_session_rename(request)
+            return self._handle_webui_sidebar_state_update(request)
         return None
 
     def _handle_commands(self, request: WsRequest) -> Response:
@@ -2002,36 +1978,7 @@ class GatewayHTTPHandler:
             return _http_error(401, "Unauthorized")
         return _http_json_response(read_webui_sidebar_state())
 
-    async def _handle_session_rename(self, request: WsRequest) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        if self.session_manager is None:
-            return _http_error(503, "session manager unavailable")
-        payload = _mutation_payload(request) or {}
-        key, title = payload.get("key"), payload.get("title")
-        generation, previous = payload.get("generation"), payload.get("previous_title")
-        if (not isinstance(key, str) or not is_webui_session_key(key)
-                or _decode_api_key(key) != key):
-            return _http_error(404, "session not found")
-        if (not isinstance(title, str) or not title.strip() or title != title.strip()
-                or len(title) > 160 or not isinstance(generation, str)
-                or re.fullmatch(r"[0-9a-f]{32}", generation) is None
-                or not isinstance(previous, str)):
-            return _http_error(400, "invalid session rename")
-        try:
-            await self.import_legacy_titles()
-            await rename_session_title(
-                self.session_manager, key, title,
-                expected_title=previous, expected_generation=generation,
-            )
-        except SessionConflictError:
-            return _http_error(409, "session changed; refresh and try again")
-        except (OSError, ValueError):
-            self._log.exception("failed to rename session")
-            return _http_error(503, "failed to save session title")
-        return _http_json_response({"key": key, "title": title})
-
-    async def _handle_webui_sidebar_state_update(self, request: WsRequest) -> Response:
+    def _handle_webui_sidebar_state_update(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         payload = _mutation_payload(request)
@@ -2040,11 +1987,8 @@ class GatewayHTTPHandler:
             return _http_error(400, "missing state")
         if not isinstance(state_value, dict):
             return _http_error(400, "state must be an object")
-        if cast(dict[str, Any], state_value).get("title_overrides"):
-            return _http_error(409, "reload WebUI to rename topics")
         try:
-            await self.import_legacy_titles()
-            state = write_webui_sidebar_layout(cast(dict[str, Any], state_value))
+            state = write_webui_sidebar_state(cast(dict[str, Any], state_value))
         except ValueError as e:
             return _http_error(400, str(e))
         except OSError:

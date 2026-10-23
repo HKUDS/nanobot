@@ -108,13 +108,12 @@ export function AutomationsSettings({
   const jobs = useMemo(() => (payload?.jobs ?? []).map((job) => {
     const origin = job.origin;
     if (origin?.channel !== "websocket") return job;
-    // Bind the current canonical name to the stable session key, not the saved job snapshot.
-    const current = sessions.find((session) => session.key === origin.session_key);
-    const title = displayTitle(current ?? {
+    // Resolve UI-only titles from live sidebar state without changing task bindings.
+    const title = displayTitle({
       key: origin.session_key ?? "", title: origin.title, preview: origin.preview ?? "",
     }, titleOverrides, t("chat.newChat"));
     return title === origin.title ? job : { ...job, origin: { ...origin, title } };
-  }), [payload, sessions, titleOverrides, t]);
+  }), [payload, titleOverrides, t]);
   const locale = i18n.resolvedLanguage || i18n.language;
   const [inspectedJob, setInspectedJob] = useState<SessionAutomationJob | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);

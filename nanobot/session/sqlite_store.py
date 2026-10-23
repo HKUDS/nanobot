@@ -565,7 +565,7 @@ class SqliteSessionStore:
             encoded = db.execute("""
                 SELECT json_group_array(json_object(
                     'key', key, 'created_at', created_at, 'updated_at', updated_at,
-                    'generation', generation, 'title', title, 'preview', preview, 'visible_updated_at', visible_updated_at,
+                    'title', title, 'preview', preview, 'visible_updated_at', visible_updated_at,
                     'metadata', metadata, 'history_updated_at_ms', history_updated_at_ms,
                     'history_preview', history_preview
                 )) FROM (

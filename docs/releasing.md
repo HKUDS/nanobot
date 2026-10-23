@@ -60,10 +60,6 @@ Restart-capable packages include `nanobot/update_contract.json`: schema version 
 
 Before advertising protocol 1, run preparation, frozen-worker and actual-gateway restart tests against packaged code; verify the declaration is in both sdist and wheel. Retain an ID only while its entire contract is supported; incompatible request, startup or activation behavior needs a new ID. Older updaters may install a future package only if protocols overlap. Missing, malformed or non-overlapping declarations must be refused before shutdown and require the installation owner's external update route.
 
-### WebUI topic-title import window
-
-During 0.4.x, the owning Gateway imports existing `webui/sidebar-state.json` `title_overrides` into each persisted WebUI session's `title` and `title_user_edited` metadata before serving the session list. Each override is removed only after the session write succeeds or a newer explicitly edited session title already takes precedence. Missing sessions and failed imports remain retryable within the same process, but a topic that was never saved cannot be imported. Current clients edit the session directly; older cached clients that try to write sidebar title overrides receive a reload error rather than silently overwriting a newer title. In 0.5.0 remove the legacy import, override field/readers, and compatibility rejection; installations with only legacy sidebar titles must pass through 0.4.x first. Verify the imported title across session list, @mentions, automation labels, and restart before removing the importer.
-
 ### OpenAI API selector compatibility window
 
 The temporary `providers.openai.apiType` / `api_type` conversion lasts exactly two consecutive releases: the first containing `nanobot/config/provider_api_migration.py` and the next. Record the first and final supported tags in release notes. Config saves write `api`; there is no legacy runtime selector.

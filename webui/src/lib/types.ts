@@ -446,8 +446,6 @@ export interface ChatSummary {
   chatId: string;
   createdAt: string | null;
   updatedAt: string | null;
-  /** Opaque session generation for guarded metadata mutations. */
-  generation?: string;
   title?: string;
   preview: string;
   /** Model preset persisted for this session; null means it still follows the global default. */

@@ -135,7 +135,7 @@ Inside the native TUI, `/sessions` switches saved conversations, `/new-chat` sta
 
 ## Session Storage
 
-Session state lives in `<config-dir>/sessions/<workspace-id>/sessions.sqlite3`, outside the agent-readable workspace. Existing JSONL conversations are imported on the first startup. JSONL migration is available from 0.3.6 through 0.4.x and is removed in **0.5.0**; installations with only JSONL data must upgrade through that window before using 0.5.0. Existing WebUI topic renames are also imported when the WebUI lists saved sessions on 0.4.x. Before moving to 0.5.0, open the WebUI on 0.4.x, send a first message in any renamed but unsaved topic, and confirm its name is still shown after a restart; topics never saved cannot be imported.
+Session state lives in `<config-dir>/sessions/<workspace-id>/sessions.sqlite3`, outside the agent-readable workspace. Existing JSONL conversations are imported on the first startup. JSONL migration is available from 0.3.6 through 0.4.x and is removed in **0.5.0**; installations with only JSONL data must upgrade through that window before using 0.5.0.
 
 After a successful import, JSONL files and their checkpoints from `<workspace>/sessions/` move to `<config-dir>/sessions/<workspace-id>/jsonl-backup/`, preserving their contents outside the agent-readable workspace. JSONL files already in the private session directory remain there. An interrupted migration resumes on startup before nanobot serves conversations; failed imports leave their source files unchanged.
 

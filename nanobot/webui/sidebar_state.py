@@ -1,6 +1,8 @@
 """Persisted WebUI sidebar workspace state.
 
-UI layout lives here; legacy topic titles are imported into session metadata.
+This state is UI-only metadata, scoped to the active nanobot instance data
+directory (the directory containing the current config.json). It deliberately
+does not modify agent sessions.
 """
 
 from __future__ import annotations
@@ -215,27 +217,17 @@ def normalize_webui_sidebar_state(raw: Any) -> dict[str, Any]:
     return state
 
 
-def read_webui_sidebar_state(*, strict: bool = False) -> dict[str, Any]:
+def read_webui_sidebar_state() -> dict[str, Any]:
     path = webui_sidebar_state_path()
     if not path.is_file():
-        if strict:
-            try:
-                path.stat()
-            except FileNotFoundError:
-                return default_webui_sidebar_state()
-            raise OSError(f"sidebar state is not a file: {path}")
         return default_webui_sidebar_state()
     try:
         if path.stat().st_size > _MAX_STATE_FILE_BYTES:
-            if strict:
-                raise OSError("sidebar state is too large")
             logger.warning("webui sidebar state too large, ignoring: {}", path)
             return default_webui_sidebar_state()
         with open(path, encoding="utf-8") as f:
             raw = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
-        if strict:
-            raise OSError(f"could not read sidebar state: {path}") from e
         logger.warning("read webui sidebar state failed {}: {}", path, e)
         return default_webui_sidebar_state()
     return normalize_webui_sidebar_state(raw)
@@ -244,13 +236,6 @@ def read_webui_sidebar_state(*, strict: bool = False) -> dict[str, Any]:
 def write_webui_sidebar_state(raw: dict[str, Any]) -> dict[str, Any]:
     with _SIDEBAR_STATE_WRITE_LOCK:
         return _write_webui_sidebar_state(raw)
-
-
-def write_webui_sidebar_layout(raw: dict[str, Any]) -> dict[str, Any]:
-    """Preserve legacy titles not yet imported while saving a new client's layout."""
-    with _SIDEBAR_STATE_WRITE_LOCK:
-        pending = read_webui_sidebar_state(strict=True)["title_overrides"]
-        return _write_webui_sidebar_state({**raw, "title_overrides": pending})
 
 
 def _write_webui_sidebar_state(raw: dict[str, Any]) -> dict[str, Any]:
@@ -283,19 +268,3 @@ def _write_webui_sidebar_state(raw: dict[str, Any]) -> dict[str, Any]:
     finally:
         os.close(dir_fd)
     return state
-
-
-def consume_legacy_title_overrides(imported: dict[str, str]) -> None:
-    """Forget only titles that still match a successfully imported snapshot."""
-    if not imported:
-        return
-    with _SIDEBAR_STATE_WRITE_LOCK:
-        state = read_webui_sidebar_state(strict=True)
-        titles = state["title_overrides"]
-        changed = False
-        for key, title in imported.items():
-            if titles.get(key) == title:
-                del titles[key]
-                changed = True
-        if changed:
-            _write_webui_sidebar_state(state)

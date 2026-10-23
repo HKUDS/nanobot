@@ -200,7 +200,6 @@ export async function listSessions(
     key: string;
     created_at: string | null;
     updated_at: string | null;
-    generation?: string;
     title?: string;
     preview?: string;
     model_preset?: string | null;
@@ -222,7 +221,6 @@ export async function listSessions(
       ...splitKey(s.key),
       createdAt: s.created_at,
       updatedAt: s.updated_at,
-      generation: s.generation,
       title: s.title ?? "",
       preview: s.preview ?? "",
       modelPreset: s.model_preset ?? null,

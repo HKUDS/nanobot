@@ -1699,7 +1699,6 @@
     "pin": "置頂",
     "unpin": "取消置頂",
     "rename": "重新命名",
-    "renameAfterFirstMessage": "請先傳送訊息",
     "renamePlaceholder": "話題名稱",
     "renameProjectTitle": "專案改名",
     "renameProjectDescription": "僅修改 WebUI 側欄中的專案名稱",
