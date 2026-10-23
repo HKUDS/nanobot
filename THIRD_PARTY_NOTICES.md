@@ -239,3 +239,597 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+---
+
+## Pierre Diffs and Highlights — code highlighting and read-only diffs (Apache-2.0 and MIT dependencies)
+
+- **Source**: https://github.com/pierrecomputer/pierre
+- **Components**: `@pierre/diffs` 1.6.1, `@pierre/highlights` 0.2.0, `@pierre/theme` 2.0.0, and `@pierre/theming` 1.0.2; Shiki 4.5.0 and the dependencies identified below.
+- **Bundled**: `nanobot/web/dist/assets/*.{js,wasm}`
+
+The following license texts and upstream notices are retained from the distributed packages.
+
+### `@pierre/diffs 1.6.1`, `@pierre/highlights 0.2.0`, `@pierre/theme 2.0.0`, `@pierre/theming 1.0.2`
+
+```text
+Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+1.  Definitions.
+
+    "License" shall mean the terms and conditions for use, reproduction, and
+    distribution as defined by Sections 1 through 9 of this document.
+
+    "Licensor" shall mean the copyright owner or entity authorized by the
+    copyright owner that is granting the License.
+
+    "Legal Entity" shall mean the union of the acting entity and all other
+    entities that control, are controlled by, or are under common control with
+    that entity. For the purposes of this definition, "control" means (i) the
+    power, direct or indirect, to cause the direction or management of such
+    entity, whether by contract or otherwise, or (ii) ownership of fifty percent
+    (50%) or more of the outstanding shares, or (iii) beneficial ownership of
+    such entity.
+
+    "You" (or "Your") shall mean an individual or Legal Entity exercising
+    permissions granted by this License.
+
+    "Source" form shall mean the preferred form for making modifications,
+    including but not limited to software source code, documentation source, and
+    configuration files.
+
+    "Object" form shall mean any form resulting from mechanical transformation
+    or translation of a Source form, including but not limited to compiled
+    object code, generated documentation, and conversions to other media types.
+
+    "Work" shall mean the work of authorship, whether in Source or Object form,
+    made available under the License, as indicated by a copyright notice that is
+    included in or attached to the work (an example is provided in the Appendix
+    below).
+
+    "Derivative Works" shall mean any work, whether in Source or Object form,
+    that is based on (or derived from) the Work and for which the editorial
+    revisions, annotations, elaborations, or other modifications represent, as a
+    whole, an original work of authorship. For the purposes of this License,
+    Derivative Works shall not include works that remain separable from, or
+    merely link (or bind by name) to the interfaces of, the Work and Derivative
+    Works thereof.
+
+    "Contribution" shall mean any work of authorship, including the original
+    version of the Work and any modifications or additions to that Work or
+    Derivative Works thereof, that is intentionally submitted to Licensor for
+    inclusion in the Work by the copyright owner or by an individual or Legal
+    Entity authorized to submit on behalf of the copyright owner. For the
+    purposes of this definition, "submitted" means any form of electronic,
+    verbal, or written communication sent to the Licensor or its
+    representatives, including but not limited to communication on electronic
+    mailing lists, source code control systems, and issue tracking systems that
+    are managed by, or on behalf of, the Licensor for the purpose of discussing
+    and improving the Work, but excluding communication that is conspicuously
+    marked or otherwise designated in writing by the copyright owner as "Not a
+    Contribution."
+
+    "Contributor" shall mean Licensor and any individual or Legal Entity on
+    behalf of whom a Contribution has been received by Licensor and subsequently
+    incorporated within the Work.
+
+2.  Grant of Copyright License. Subject to the terms and conditions of this
+    License, each Contributor hereby grants to You a perpetual, worldwide,
+    non-exclusive, no-charge, royalty-free, irrevocable copyright license to
+    reproduce, prepare Derivative Works of, publicly display, publicly perform,
+    sublicense, and distribute the Work and such Derivative Works in Source or
+    Object form.
+
+3.  Grant of Patent License. Subject to the terms and conditions of this
+    License, each Contributor hereby grants to You a perpetual, worldwide,
+    non-exclusive, no-charge, royalty-free, irrevocable (except as stated in
+    this section) patent license to make, have made, use, offer to sell, sell,
+    import, and otherwise transfer the Work, where such license applies only to
+    those patent claims licensable by such Contributor that are necessarily
+    infringed by their Contribution(s) alone or by combination of their
+    Contribution(s) with the Work to which such Contribution(s) was submitted.
+    If You institute patent litigation against any entity (including a
+    cross-claim or counterclaim in a lawsuit) alleging that the Work or a
+    Contribution incorporated within the Work constitutes direct or contributory
+    patent infringement, then any patent licenses granted to You under this
+    License for that Work shall terminate as of the date such litigation is
+    filed.
+
+4.  Redistribution. You may reproduce and distribute copies of the Work or
+    Derivative Works thereof in any medium, with or without modifications, and
+    in Source or Object form, provided that You meet the following conditions:
+
+    (a) You must give any other recipients of the Work or Derivative Works a
+    copy of this License; and
+
+    (b) You must cause any modified files to carry prominent notices stating
+    that You changed the files; and
+
+    (c) You must retain, in the Source form of any Derivative Works that You
+    distribute, all copyright, patent, trademark, and attribution notices from
+    the Source form of the Work, excluding those notices that do not pertain to
+    any part of the Derivative Works; and
+
+    (d) If the Work includes a "NOTICE" text file as part of its distribution,
+    then any Derivative Works that You distribute must include a readable copy
+    of the attribution notices contained within such NOTICE file, excluding
+    those notices that do not pertain to any part of the Derivative Works, in at
+    least one of the following places: within a NOTICE text file distributed as
+    part of the Derivative Works; within the Source form or documentation, if
+    provided along with the Derivative Works; or, within a display generated by
+    the Derivative Works, if and wherever such third-party notices normally
+    appear. The contents of the NOTICE file are for informational purposes only
+    and do not modify the License. You may add Your own attribution notices
+    within Derivative Works that You distribute, alongside or as an addendum to
+    the NOTICE text from the Work, provided that such additional attribution
+    notices cannot be construed as modifying the License.
+
+    You may add Your own copyright statement to Your modifications and may
+    provide additional or different license terms and conditions for use,
+    reproduction, or distribution of Your modifications, or for any such
+    Derivative Works as a whole, provided Your use, reproduction, and
+    distribution of the Work otherwise complies with the conditions stated in
+    this License.
+
+5.  Submission of Contributions. Unless You explicitly state otherwise, any
+    Contribution intentionally submitted for inclusion in the Work by You to the
+    Licensor shall be under the terms and conditions of this License, without
+    any additional terms or conditions. Notwithstanding the above, nothing
+    herein shall supersede or modify the terms of any separate license agreement
+    you may have executed with Licensor regarding such Contributions.
+
+6.  Trademarks. This License does not grant permission to use the trade names,
+    trademarks, service marks, or product names of the Licensor, except as
+    required for reasonable and customary use in describing the origin of the
+    Work and reproducing the content of the NOTICE file.
+
+7.  Disclaimer of Warranty. Unless required by applicable law or agreed to in
+    writing, Licensor provides the Work (and each Contributor provides its
+    Contributions) on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+    KIND, either express or implied, including, without limitation, any
+    warranties or conditions of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or
+    FITNESS FOR A PARTICULAR PURPOSE. You are solely responsible for determining
+    the appropriateness of using or redistributing the Work and assume any risks
+    associated with Your exercise of permissions under this License.
+
+8.  Limitation of Liability. In no event and under no legal theory, whether in
+    tort (including negligence), contract, or otherwise, unless required by
+    applicable law (such as deliberate and grossly negligent acts) or agreed to
+    in writing, shall any Contributor be liable to You for damages, including
+    any direct, indirect, special, incidental, or consequential damages of any
+    character arising as a result of this License or out of the use or inability
+    to use the Work (including but not limited to damages for loss of goodwill,
+    work stoppage, computer failure or malfunction, or any and all other
+    commercial damages or losses), even if such Contributor has been advised of
+    the possibility of such damages.
+
+9.  Accepting Warranty or Additional Liability. While redistributing the Work or
+    Derivative Works thereof, You may choose to offer, and charge a fee for,
+    acceptance of support, warranty, indemnity, or other liability obligations
+    and/or rights consistent with this License. However, in accepting such
+    obligations, You may act only on Your own behalf and on Your sole
+    responsibility, not on behalf of any other Contributor, and only if You
+    agree to indemnify, defend, and hold each Contributor harmless for any
+    liability incurred by, or claims asserted against, such Contributor by
+    reason of your accepting any such warranty or additional liability.
+
+END OF TERMS AND CONDITIONS
+
+APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+Copyright 2025 Pierre Computer Company
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+this file except in compliance with the License. You may obtain a copy of the
+License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed
+under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
+```
+
+### `@shikijs/core 4.5.0`, `@shikijs/engine-javascript 4.5.0`, `@shikijs/engine-oniguruma 4.5.0`, `@shikijs/langs 4.5.0`, `@shikijs/primitive 4.5.0`, `@shikijs/themes 4.5.0`, `@shikijs/types 4.5.0`, `shiki 4.5.0`
+
+```text
+MIT License
+
+Copyright (c) 2021 Pine Wu
+Copyright (c) 2023 Anthony Fu <https://github.com/antfu>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### `@shikijs/vscode-textmate 10.1.0`
+
+```text
+The MIT License (MIT)
+
+Copyright (c) Microsoft Corporation
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### `hast-util-to-html 9.0.5`
+
+```text
+(The MIT License)
+
+Copyright (c) Titus Wormer <tituswormer@gmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+'Software'), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### `lru_map 0.4.1`
+
+```text
+MIT license
+
+Copyright (c) 2010-2016 Rasmus Andersson <https://rsms.me/>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+### `oniguruma-parser 0.12.2`
+
+```text
+MIT License
+
+Copyright (c) 2025-2026 Steven Levithan
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### `oniguruma-to-es 4.3.6`
+
+```text
+MIT License
+
+Copyright (c) 2024-2026 Steven Levithan
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### `regex 6.1.0`, `regex-recursion 6.0.2`
+
+```text
+MIT License
+
+Copyright (c) 2025 Steven Levithan
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### `regex-utilities 2.3.0`
+
+```text
+MIT License
+
+Copyright (c) 2024 Steven Levithan
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Upstream NOTICE: `@pierre/highlights`
+
+```text
+# Bundled theme licenses
+
+Community themes are pruned copies of pinned Zed theme files or conversions of
+the pinned Shiki TextMate files listed below. Theme names and appearances are
+normalized to Shiki's catalog.
+
+## Sources
+
+The Zed version is the extension version published in the
+[Zed registry](https://github.com/zed-industries/extensions) at
+`ab756766c27fca3de3d275149f6937105f464dec`. "Built in" means the theme ships
+with Zed itself. GitHub-only sources have no marketplace version.
+
+| Highlights themes                                                                      | Pinned source                                                                                                                                                                                 | Zed version                    |
+| -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `andromeeda`                                                                           | [ChocolateNao/andromeda-zed `23f6768`](https://github.com/ChocolateNao/andromeda-zed/blob/23f67684252059f46b508ae71964ad6085df552a/themes/andromeda.json)                                     | `andromeda` 0.1.2              |
+| `aurora-x`                                                                             | [iamrajjoshi/aurora `83477d4`](https://github.com/iamrajjoshi/aurora/blob/83477d4b4abc4aeca9465d9b1b56409e2cd6da97/themes/aurora.json)                                                        | `aurora-theme` 0.0.1           |
+| `ayu-dark`, `ayu-light`, `ayu-mirage`                                                  | [Zed Ayu `ce48461`](https://github.com/zed-industries/zed/blob/ce48461eaadd16c65c31f835511ab96bd3b6e746/assets/themes/ayu/ayu.json)                                                           | Built in                       |
+| `catppuccin-*`                                                                         | [catppuccin/zed `b54cb81`](https://github.com/catppuccin/zed/blob/b54cb81708d06912d50e6bb9fd2fd2103b9dda25/themes/catppuccin-mauve.json)                                                      | `catppuccin` 0.2.25            |
+| `dark-plus`, `light-plus`, `monokai`, `red`, `solarized-*`                             | [alanisme/vscode-themes-for-zed `ea65e4d`](https://github.com/alanisme/vscode-themes-for-zed/tree/ea65e4df055035888b6bd0b0c68c6986c3ce4699/themes)                                            | `vscode-classic-themes` 0.4.1  |
+| `dracula`                                                                              | [dracula/zed `92f4605`](https://github.com/dracula/zed/blob/92f46057151693648bd3acac1e0c138696f34433/themes/dracula.json)                                                                     | `dracula` 1.1.2                |
+| `everforest-dark`, `everforest-light`                                                  | [albertsko/zed-everforest `1f1c84e`](https://github.com/albertsko/zed-everforest/blob/1f1c84e081f6dcaaac7105812032086608ca7a44/themes/everforest-regular.json)                                | `everforest` 0.2.0             |
+| `github-dark`, `github-light`                                                          | [meocoder31099/Github-Classic-Theme-Zed `751146a`](https://github.com/meocoder31099/Github-Classic-Theme-Zed/blob/751146a4387066dd4e2fb7ee4ff91ab089d7c7dd/themes/github-classic.json)        | `github-classic` 0.0.3         |
+| `github-dark-default`                                                                  | [MordFustang21/zed-github-dark `dbbd661`](https://github.com/MordFustang21/zed-github-dark/blob/dbbd66167753686ff3ff627208e15f7e27a9b1f9/themes/dark-default.json)                            | `github-dark-default` 1.0.10   |
+| `github-dark-dimmed`, `github-light-default`, and both `github-*-high-contrast` themes | [PyaeSoneAungRgn/github-zed-theme `89ae5f9`](https://github.com/PyaeSoneAungRgn/github-zed-theme/blob/89ae5f92ca0bc5b96b721b69e41db83aa482cfd6/themes/github_theme.json)                      | `github-theme` 0.1.8           |
+| `gruvbox-*`                                                                            | [Zed Gruvbox `ce48461`](https://github.com/zed-industries/zed/blob/ce48461eaadd16c65c31f835511ab96bd3b6e746/assets/themes/gruvbox/gruvbox.json)                                               | Built in                       |
+| `horizon`, `horizon-bright`                                                            | [ayn2op/zed-horizon `b3cf502`](https://github.com/ayn2op/zed-horizon/blob/b3cf5022a583455f2e815c4c58996ce6dc3082f5/themes/horizon.json)                                                       | `horizon` 0.0.1                |
+| `houston`                                                                              | [rudolfjs/houston-zed `2830d5c`](https://github.com/rudolfjs/houston-zed/blob/2830d5c55d80b2c2bce44b184f2370f814509f1f/themes/houston.json)                                                   | GitHub only; manifest 0.2.0    |
+| `kanagawa-*`                                                                           | [ethangilmore/zed-kanagawa `45b4295`](https://github.com/ethangilmore/zed-kanagawa/blob/45b4295e708a5720d75514013a20a00917d50cc5/themes/Kanagawa.json)                                        | `kanagawa-themes` 0.1.2        |
+| `material-theme*`                                                                      | [Codextor/zed-material-theme `e4145b6`](https://github.com/Codextor/zed-material-theme/blob/e4145b69351b773ba8c9c8b0c44e7d89faacbfee/themes/material-theme.json)                              | `material-theme` 0.0.1         |
+| `min-dark`, `min-light`                                                                | [phibr0/zed-min-theme `0efe9ac`](https://github.com/phibr0/zed-min-theme/blob/0efe9ac439bd27ceb19d6506ed4986d9f348e216/themes/min-theme.json)                                                 | `min-theme` 0.2.2              |
+| `night-owl`, `night-owl-light`                                                         | [elGusto/night-owlz `29b5fed`](https://github.com/elGusto/night-owlz/blob/29b5fedfee923b2598d97520962215d26d51d67d/themes/NightOwl.json)                                                      | `night-owlz` 0.0.5             |
+| `nord`                                                                                 | [mikasius/zed-nord-theme `d0b459c`](https://github.com/mikasius/zed-nord-theme/blob/d0b459c49797aec598622bed992537e4a83688da/themes/nord.json)                                                | `nord` 0.1.7                   |
+| `one-dark-pro`                                                                         | [hadez8877/one-dark-pro-enhanced `0411a00`](https://github.com/hadez8877/one-dark-pro-enhanced/blob/0411a00f702b609746a29c49e2796d6993e9f461/themes/oneDark-Pro.json)                         | `one-dark-pro-enhanced` 0.0.12 |
+| `one-light`                                                                            | [Stelath/zed-atom-one-theme `ed0513f`](https://github.com/Stelath/zed-atom-one-theme/blob/ed0513f0655ec72ffcfd33e87e31fb0a06c28948/themes/one-light.json)                                     | `atom-one-theme` 0.1.0         |
+| `plastic`                                                                              | [ibnuh/zed-plastic-theme `98c34dc`](https://github.com/ibnuh/zed-plastic-theme/blob/98c34dc4b59c65d64a9410aa25e4f66be0918cf8/themes/plastic.json)                                             | `plastic-theme` 1.0.0          |
+| `rose-pine*`                                                                           | [rose-pine/zed `2c7b4ee`](https://github.com/rose-pine/zed/tree/2c7b4ee61c78334f8f1e9960d1d9e44d447ee9ef/themes)                                                                              | `rose-pine-theme` 1.5.0        |
+| `snazzy-light`                                                                         | [seyhajin/zed-snazzy-light `1d54608`](https://github.com/seyhajin/zed-snazzy-light/blob/1d54608af795053e47d4151612c56b49aff6ed9b/themes/snazzy-light.json)                                    | `snazzy-light` 0.1.0           |
+| `synthwave-84`                                                                         | [hydepwns/synthwave84-zed `332a002`](https://github.com/hydepwns/synthwave84-zed/blob/332a002eb64bece661585607fd59d3f9b4250acf/themes/synthwave84.json)                                       | `synthwave84` 0.2.0            |
+| `tokyo-night`                                                                          | [ssaunderss/zed-tokyo-night `6d731d0`](https://github.com/ssaunderss/zed-tokyo-night/blob/6d731d0724a6fa487f9031cbb4f8db0b80769568/themes/tokyo-night.json)                                   | `tokyo-night` 0.8.0            |
+| `vesper`                                                                               | [bdsqqq/vesper-zed `4ae700c`](https://github.com/bdsqqq/vesper-zed/blob/4ae700c4a2a279c722bdd6c63409a701b4a3236e/themes/vesper-dark.json)                                                     | `vesper` 0.0.2                 |
+| `vitesse-black`, `vitesse-dark`, `vitesse-light`                                       | [colinlienard/zed-vitesse-theme-refined `a2b193e`](https://github.com/colinlienard/zed-vitesse-theme-refined/blob/a2b193ec9e5d36a05de4385b127c94597b025b46/themes/vitesse-theme-refined.json) | `vitesse-theme-refined` 0.5.0  |
+
+No suitable licensed Zed port was available for `dracula-soft`, `laserwave`,
+`poimandres`, `slack-dark`, or `slack-ochin`. Those files use the corresponding
+sources from
+[`tm-themes@1.12.10`](https://github.com/shikijs/textmate-grammars-themes/blob/950dad95387e73a8b2ae36aed2ef19b8a4419f10/packages/tm-themes/index.js),
+converted with
+[Zed's scope mapping](https://github.com/zed-industries/zed/blob/ce48461eaadd16c65c31f835511ab96bd3b6e746/crates/theme_importer/src/vscode/syntax.rs).
+
+Missing syntax captures in the other community ports are supplemented from their
+corresponding TextMate themes at the same `tm-themes@1.12.10` pin. Existing Zed
+palette choices are retained. Pierre and the Aurora substitute use colors from
+their own palettes for missing captures.
+
+The Zed registry's `aurora-theme` is an MIT-licensed substitute, not an Aurora X
+port. The original Aurora X source is GPL-3.0-only; bundling it would require
+GPL-3.0 distribution terms, contrary to this package's Apache-2.0-only policy.
+
+## MIT themes
+
+Copyright notices retained from the sources:
+
+- Andromeda: Copyright (c) 2017 <eliverlara@gmail.com>; Zed port Copyright (c)
+  2025 Andrey L.
+- Aurora: Copyright (c) 2026 Raj Joshi
+- Ayu: Copyright (c) 2016 Ike Ku
+- Catppuccin: Copyright (c) 2021 Catppuccin
+- Dracula: Copyright (c) 2016 Dracula Theme; Zed port Copyright (c) 2023 Dracula
+  Theme
+- Everforest: Copyright (c) 2020 sainnhe; Zed port Copyright (c) 2025 Albert
+  Skonieczny
+- GitHub Classic: Copyright (c) 2020 Primer; Zed port Copyright (c) 2021
+  Catppuccin
+- GitHub Theme: Copyright (c) 2020 Primer; Zed port Copyright (c) 2025 Pyae Sone
+  Aung
+- Gruvbox: the original palette is by Pavel Pertsev. Zed's theme-local MIT
+  license contains the unfilled line `Copyright (c) <YEAR> <COPYRIGHT HOLDER>`
+- Horizon: Copyright (c) 2018 Jonathan Olaleye; Zed port Copyright (c) 2024
+  Ayyan
+- Houston: Copyright (c) 2022 The Astro Technology Company; Copyright (c) 2026
+  github.com/rudolfjs
+- Kanagawa: Copyright (c) 2021 Tommaso Laurenzi; Zed port Copyright (c) 2024
+  Ethan Gilmore
+- LaserWave: Copyright (c) 2019 Jared Jones
+- Min: Copyright (c) 2018-2021 Miguel Solorio; Zed port Copyright (c) 2024
+  Phillip
+- Night Owl: Copyright (c) 2018 Sarah Drasner
+- Nord: Copyright (c) 2016-present Sven Greb <development@svengreb.de>
+  (https://www.svengreb.de); Zed port Copyright (c) 2025 Sergei Metlenkin
+- One Dark Pro: Copyright (c) 2013-2022 Binaryify; Zed port Copyright (c) 2025
+  /devs/hadez
+- One Light: Copyright (c) 2015 Mahmoud Ali; Zed port Copyright (c) 2026 Alex
+- Plastic: Copyright (c) 2017-present, Will Stone; Zed port Copyright (c) 2026
+  Ibnuh
+- Poimandres: Copyright (c) 2023 drcmda
+- Rosé Pine: Copyright (c) Rosé Pine
+- Slack: Copyright (c) 2017 Felipe Mendes
+- Snazzy Light: Copyright (c) 2020 Florian Reuschel; Zed port Copyright (c) 2026
+  Christophe TES
+- Synthwave84: Copyright (c) 2019 Robb Owen; Zed port Copyright (c) 2025 DROO
+- TextMate theme collection: Copyright (c) 2021 Pine Wu; Copyright (c) 2023
+  Anthony Fu
+- Tokyo Night: Copyright (c) 2018-present Enkia; Zed port Copyright (c) 2024
+  Austin Saunders
+- Vesper: Copyright (c) 2023 Rauno Freiberg; Zed port Copyright (c) 2024 Igor
+  Bedesqui
+- Vitesse: Copyright (c) 2020 Primer; Copyright (c) 2021 Anthony Fu; Zed port
+  Copyright (c) 2024 Colin Lienard
+- VS Code Classics: Copyright (c) 2015 - present Microsoft Corporation; Zed port
+  Copyright (c) 2026 alanisme
+
+```text
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+## Apache-2.0 themes
+
+`github-dark-default` and the Material themes are Apache-2.0. The Material
+themes retain Copyright 2017 Mattia Astorino. `github-dark-default` also derives
+from the MIT-licensed GitHub/Primer theme credited above. Highlights extracts
+individual themes and prunes unused Zed style properties. The full Apache-2.0
+text is included in the package's [`LICENSE.md`](./LICENSE.md).
+```
+
+### Upstream NOTICE: `@pierre/theme`
+
+```text
+This theme was built on top of
+[GitHub's Visual Studio Code Theme](https://github.com/primer/github-vscode-theme),
+reusing its technique and build tooling, which we have since iterated on for
+more specific language tokens.
+
+`@pierre/theme` is licensed under Apache-2.0 (see `LICENSE`). The original MIT
+license for `primer/github-vscode-theme` is included below for attribution.
+
+Original license for `primer/github-vscode-theme`:
+
+```
+MIT License
+
+Copyright (c) 2020 Primer
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+```

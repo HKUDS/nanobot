@@ -10,8 +10,8 @@ test("numbered Markdown code keeps mixed text flowing after stream completion", 
   await expect(block.getByTestId("plain-code-fallback")).toBeVisible();
   await page.getByRole("button", { name: "Complete message" }).click();
   const pre = block.locator("pre");
-  await expect(pre.locator(".token").first()).toBeVisible();
-  await expect(pre.locator(".linenumber")).toHaveText(source.split("\n").map((_, index) => String(index + 1)));
+  await expect(pre.locator("[data-code-token]").first()).toBeVisible();
+  await expect(pre.locator("code > span > span[aria-hidden]")).toHaveText(source.split("\n").map((_, index) => String(index + 1)));
 
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 900 });
