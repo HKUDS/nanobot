@@ -17,7 +17,7 @@ The source app is built with Vite + React 18 + TypeScript + Tailwind 3 + shadcn/
 
 ## Layout
 
-For existing components, ownership boundaries, and interactive examples, see the [component guide](COMPONENTS.md). `bun run gallery` opens the internal component gallery without starting a gateway.
+For existing components, ownership boundaries, and interactive examples, see the [component guide](COMPONENTS.md). `bun run gallery` opens the internal component gallery without starting a gateway. State notifications, refresh scheduling, and older-host fallback follow the [state refresh contract](../docs/webui-state-events.md#client-refresh-and-compatibility).
 
 ```text
 webui/                 source tree (this directory)
