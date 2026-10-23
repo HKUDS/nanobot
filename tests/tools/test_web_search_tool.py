@@ -1308,9 +1308,13 @@ async def test_duckduckgo_timeout_returns_error(monkeypatch):
     monkeypatch.setattr("ddgs.DDGS", HangingDDGS)
     tool = _tool(provider="duckduckgo")
     tool.config.timeout = 0.2
-    result = await tool.execute(query="test")
-    gate.set()
-    assert "Error" in result
+    try:
+        result = await tool.execute(query="test")
+    finally:
+        gate.set()
+    assert is_tool_error_result(result)
+    assert result.startswith("Error: Web search timed out while waiting for ddgs.")
+    assert "tool deadline" in result
 
 
 @pytest.mark.asyncio
