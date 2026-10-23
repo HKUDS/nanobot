@@ -13,10 +13,9 @@ from nanobot.providers.base import GenerationSettings, LLMResponse
 from nanobot.runtime_context import public_history_message
 from nanobot.session.display_history import HistoryFact, HistoryKind
 from nanobot.session.history_edit import (
-    HistoryEditAnchor,
-    HistoryEditDisplay,
     HistoryEditError,
-    message_digest,
+    HistoryEditSource,
+    HistoryEditTarget,
 )
 from nanobot.session.manager import SessionManager
 
@@ -50,14 +49,14 @@ async def edited_loop(tmp_path):
 
 async def edit(loop, index=1):
     value = await loop.sessions.state.read("websocket:editing")
-    anchor = HistoryEditAnchor(value.generation, value.revision, index, message_digest(value.messages[index * 2]))
+    anchor = HistoryEditSource(str(value.revision), "live-id", f"old-{index}")
     msg = InboundMessage(channel="websocket", sender_id="webui", chat_id="editing", content="modified question",
                          metadata={"webui": True, "webui_turn_id": "edit-turn", "_wants_stream": True})
     return msg, anchor
 
 
 def display_replacement(_session, _history):
-    return HistoryEditDisplay(1, 0, HistoryFact(HistoryKind.INPUT, {"text": "modified question"}, turn_id="edit-turn"))
+    return HistoryEditTarget(2, 1, 0, HistoryFact(HistoryKind.INPUT, {"text": "modified question"}, turn_id="edit-turn"))
 
 
 async def drain(loop):
@@ -92,7 +91,10 @@ async def test_execution_lane_busy_is_checked_at_admission(edited_loop):
     async with loop._get_session_lock(msg.session_key):
         with pytest.raises(HistoryEditError, match="edit_session_busy"):
             await loop.replace_user_input(msg, anchor, display_replacement, AsyncMock())
-    assert (await loop.sessions.state.read(msg.session_key)).generation == anchor.generation
+    source = await loop.sessions.state.read(msg.session_key)
+    assert [message["content"] for message in source.messages] == [
+        item for index in range(3) for item in (f"question-{index}", f"answer-{index}")
+    ]
     assert not loop.provider.chat_stream_with_retry.called
 
 

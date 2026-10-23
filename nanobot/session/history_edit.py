@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -16,7 +14,7 @@ from nanobot.runtime_context import (
     public_history_message,
 )
 from nanobot.session.display_history import HistoryFact, HistoryReader
-from nanobot.session.manager import Session, history_prefix_boundary
+from nanobot.session.manager import Session
 
 
 class HistoryEditError(ValueError):
@@ -53,45 +51,24 @@ def ordinary_text_error(message: dict[str, Any]) -> str | None:
     return None
 
 
-def message_digest(message: dict[str, Any]) -> str:
-    return hashlib.sha256(json.dumps(
-        message, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str,
-    ).encode("utf-8")).hexdigest()
+@dataclass(frozen=True)
+class HistoryEditSource:
+    revision: str
+    message_id: str
+    turn_id: str | None
 
 
 @dataclass(frozen=True)
-class HistoryEditAnchor:
-    generation: str
-    revision: int
-    user_index: int
-    message_digest: str
-
-    def locate(self, session: Session) -> int:
-        if (session.generation, session.revision) != (self.generation, self.revision):
-            raise HistoryEditError("edit_source_changed")
-        boundary = history_prefix_boundary(session, self.user_index)
-        if boundary is None or boundary == len(session.messages):
-            raise HistoryEditError("edit_source_changed")
-        message = session.messages[boundary]
-        if message_digest(message) != self.message_digest:
-            raise HistoryEditError("edit_source_changed")
-        if reason := ordinary_text_error(message):
-            raise HistoryEditError(reason)
-        return boundary
-
-
-@dataclass(frozen=True)
-class HistoryEditDisplay:
+class HistoryEditTarget:
+    model_position: int
     turn_ordinal: int
     position: int
     input: HistoryFact
 
 
-# The adapter resolves wire identity inside the owner's transaction; the owner
-# mutates only neutral facts, together with the canonical history.
-HistoryEditProjection = Callable[[Session, HistoryReader], HistoryEditDisplay]
-
+# Resolve client identity against both histories inside the owner's transaction.
+HistoryEditProjection = Callable[[Session, HistoryReader], HistoryEditTarget]
 HistoryEditAccepted = Callable[[Session], Awaitable[None]]
 HistoryEditSubmit = Callable[
-    [InboundMessage, HistoryEditAnchor, HistoryEditProjection, HistoryEditAccepted], Awaitable[Session]
+    [InboundMessage, HistoryEditSource, HistoryEditProjection, HistoryEditAccepted], Awaitable[Session]
 ]

@@ -15,7 +15,6 @@ from nanobot.session.webui_turns import clear_websocket_turns
 from nanobot.webui import transcript
 from nanobot.webui.forking import (
     create_webui_chat_fork,
-    prepare_webui_chat_edit,
     replace_webui_chat_input,
 )
 from nanobot.webui.history import fact_from_record
@@ -62,20 +61,20 @@ def read_rows(manager, key=KEY):
     return manager.project_history(key, lambda history: transcript.read_transcript_lines(key, history=history))
 
 
-async def prepare(host, index):
-    body = host.gateway.session_manager.project_history(KEY, lambda history: transcript.build_webui_thread_response(KEY, history=history, limit=1))
+async def read_source(host, index):
+    manager = host.gateway.session_manager
+    body = await manager.state.project_history(KEY, lambda history: transcript.build_webui_thread_response(
+        KEY, history=history, limit=1, session_version_loader=lambda: manager.read_session_version(KEY),
+    ))
     assert body is not None
-    # A paged selection may have an unrelated local index; stable turn identity
-    # must resolve the actual global canonical and display boundaries.
-    return await prepare_webui_chat_edit(host.gateway, {
-        "chat_id": "edit-chat", "user_index": 0, "message_id": "live-render-id",
-        "turn_id": f"old-{index}", "text": f"question-{index}",
-    })
+    # A paged selection uses stable input identity, never a page-local index.
+    return {"revision": body["source_revision"], "message_id": "live-render-id",
+            "turn_id": f"old-{index}", "text": f"question-{index}"}
 
 
-def payload(prepared, text="replacement", turn_id="new-edit"):
+def payload(source, text="replacement", turn_id="new-edit"):
     return {"mode": "replace", "chat_id": "edit-chat", "text": text,
-            "turn_id": turn_id, "anchor": prepared["anchor"]}
+            "turn_id": turn_id, "source": source}
 
 
 @pytest.mark.parametrize("index", [0, 2, 3])
@@ -84,9 +83,7 @@ async def test_edit_keeps_identity_prefix_and_one_new_input(editing, index):
     before = await manager.state.read(KEY)
     stale_draft = await manager.state.get(KEY)
     old_metadata = deepcopy(before.metadata)
-    prepared = await prepare(host, index)
-    assert prepared["anchor"]["user_index"] == index
-    assert prepared["anchor"]["transcript_user_index"] == index
+    prepared = await read_source(host, index)
     result = await replace_webui_chat_input(host, payload(prepared))
     assert result == {"accepted": True, "turn_id": "new-edit"}
     after = await manager.state.read(KEY)
@@ -97,6 +94,10 @@ async def test_edit_keeps_identity_prefix_and_one_new_input(editing, index):
     assert after.messages[:-1] == before.messages[:index * 2]
     assert after.messages[-1]["content"] == "replacement"
     assert after.metadata["pending_user_turn"] is True
+    assert after.metadata["history_edit_receipt"] == {
+        "turn_id": "new-edit", "text": "replacement",
+        "source": {name: prepared[name] for name in ("revision", "message_id", "turn_id")},
+    }
     rows = read_rows(manager)
     assert [row["text"] for row in rows if row.get("event") == "user"] == [*[f"question-{i}" for i in range(index)], "replacement"]
     assert len(await manager.state.list_sessions()) == 1
@@ -108,28 +109,41 @@ async def test_edit_keeps_identity_prefix_and_one_new_input(editing, index):
     assert "obsolete suffix" not in str((await manager.state.read(KEY)).messages)
 
 
-@pytest.mark.parametrize("phase", ["prepare", "replace"])
-async def test_shared_history_is_rejected_without_editing_a_display_only_session(editing, phase):
+async def test_shared_history_is_rejected_without_editing_a_display_only_session(editing):
     manager, host, submissions, _ = editing
     before = await manager.state.read(KEY)
     rows = read_rows(manager)
-    prepared = await prepare(host, 1)
+    prepared = await read_source(host, 1)
     host.gateway.unified_session = True
     with pytest.raises(HistoryEditError, match="edit_shared_history"):
-        if phase == "prepare":
-            await prepare(host, 1)
-        else:
-            await replace_webui_chat_input(host, payload(prepared))
+        await replace_webui_chat_input(host, payload(prepared))
     assert (await manager.state.read(KEY)).messages == before.messages
     assert read_rows(manager) == rows
     assert not submissions
 
 
-async def test_read_only_prepare_and_cancel_do_not_change_history(editing):
+async def test_source_revision_is_shared_by_different_history_pages(editing):
+    manager, _, _, _ = editing
+    async def page(limit=1, before=None):
+        return await manager.state.project_history(KEY, lambda history: transcript.build_webui_thread_response(
+            KEY, history=history, limit=limit, before=before,
+            session_version_loader=lambda: manager.read_session_version(KEY),
+        ))
+    latest = await page()
+    full = await page(1000)
+    assert latest is not None and full is not None
+    older = await page(before=latest["page"]["before_cursor"])
+    assert older is not None
+    assert latest["source_revision"] == full["source_revision"] == older["source_revision"]
+    assert latest["source_revision"]
+    assert latest["events"][0]["text"] != older["events"][0]["text"]
+
+
+async def test_reading_the_edit_source_does_not_change_history(editing):
     manager, host, _, _ = editing
     before = await manager.state.read(KEY)
     rows = read_rows(manager)
-    await prepare(host, 2)
+    await read_source(host, 2)
     after = await manager.state.read(KEY)
     assert (after.generation, after.revision, after.messages, after.metadata) == (before.generation, before.revision, before.messages, before.metadata)
     assert read_rows(manager) == rows
@@ -138,7 +152,7 @@ async def test_read_only_prepare_and_cancel_do_not_change_history(editing):
 @pytest.mark.parametrize("failure", ["source", "display", "sql", "install"])
 async def test_rejection_preserves_the_effective_history(editing, monkeypatch, failure):
     manager, host, submissions, _ = editing
-    prepared = await prepare(host, 2)
+    prepared = await read_source(host, 2)
     if failure == "source":
         await manager.state.update_metadata(KEY, {"title": "Changed elsewhere"})
     if failure == "display":
@@ -174,7 +188,7 @@ async def test_discarded_summary_and_provider_continuation_cannot_survive(editin
         payload={"response_id": "discarded-suffix"},
     )
     await manager.state.prepare_input(source)
-    prepared = await prepare(host, 1)
+    prepared = await read_source(host, 1)
     await replace_webui_chat_input(host, payload(prepared))
     value = await manager.state.read(KEY)
     assert value.last_archived == 0
@@ -199,13 +213,13 @@ async def test_unsupported_metadata_is_explicitly_rejected(editing, extra, code)
     source.messages[2].update(extra)
     await manager.state.prepare_input(source)
     with pytest.raises(HistoryEditError, match=code):
-        await prepare(host, 1)
+        await replace_webui_chat_input(host, payload(await read_source(host, 1)))
 
 
 @pytest.mark.parametrize("text", ["/new", "! rm anything", "use @editable", "> [!QUOTE]\n> quote\n\nreply"])
 async def test_edit_never_dispatches_control_or_context_syntax(editing, text):
     manager, host, submissions, _ = editing
-    prepared = await prepare(host, 1)
+    prepared = await read_source(host, 1)
     before = await manager.state.read(KEY)
     with pytest.raises(HistoryEditError):
         await replace_webui_chat_input(host, payload(prepared, text))
@@ -225,12 +239,12 @@ async def test_new_fork_still_creates_distinct_identity_and_preserves_source(edi
     assert len(await manager.state.list_sessions()) == 2
 
 
-async def test_tampered_display_position_cannot_truncate_a_different_message(editing):
+async def test_mismatched_source_identity_cannot_truncate_a_different_message(editing):
     manager, host, submissions, _ = editing
     before = await manager.state.read(KEY)
     rows = read_rows(manager)
-    prepared = await prepare(host, 1)
-    prepared["anchor"]["transcript_user_index"] = 2
+    prepared = await read_source(host, 1)
+    prepared["turn_id"] = "old-2"
     with pytest.raises(HistoryEditError, match="edit_source_changed"):
         await replace_webui_chat_input(host, payload(prepared))
     assert (await manager.state.read(KEY)).messages == before.messages
@@ -245,7 +259,7 @@ async def test_late_old_generation_stream_completion_cannot_reappend_discarded_s
 
     manager, host, _, display = editing
     source = await manager.state.read(KEY)
-    prepared = await prepare(host, 1)
+    prepared = await read_source(host, 1)
     await replace_webui_chat_input(host, payload(prepared))
     config = WebSocketConfig(enabled=True, allow_from=["*"], websocket_requires_token=False)
     bus = MessageBus()
@@ -272,7 +286,7 @@ async def test_new_fork_and_replace_share_the_source_owner_boundary(editing, mon
 
     manager, host, _, _ = editing
     source = await manager.state.read(KEY)
-    prepared = await prepare(host, 1)
+    prepared = await read_source(host, 1)
     started, release = threading.Event(), threading.Event()
     original = manager._store.copy_history_prefix
 
@@ -299,7 +313,7 @@ async def test_edit_does_not_schedule_a_new_title_for_an_untitled_session(editin
 
     manager, host, submissions, _ = editing
     await manager.state.update_metadata(KEY, {}, remove=("title", "title_user_edited"))
-    prepared = await prepare(host, 1)
+    prepared = await read_source(host, 1)
     await replace_webui_chat_input(host, payload(prepared))
     provider = SimpleNamespace(chat_stream_with_retry=AsyncMock())
     generated = await maybe_generate_webui_title_after_turn(

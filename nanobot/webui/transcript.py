@@ -1875,6 +1875,8 @@ def build_webui_thread_response(
         augment_assistant_text=augment_assistant_text,
     )
     replay_stats.replay_ms += int((time.perf_counter() - replay_started) * 1000)
+    if session_version_loader is not None:
+        payload["source_revision"] = prompt_index_revision(session_key, session_version_loader(), history=history)
     payload["projection"] = "events"
     payload["events"] = events
     page["loaded_event_count"] = len(events)

@@ -1736,6 +1736,8 @@ export interface PromptIndex {
 export interface WebuiThreadPersistedPayload {
   /** Owner lifecycle fence; changes only when canonical history is replaced. */
   history_generation?: string | null;
+  /** Page-independent revision of the canonical and display source snapshot. */
+  source_revision?: string;
   schemaVersion: number;
   sessionKey?: string;
   savedAt?: string;

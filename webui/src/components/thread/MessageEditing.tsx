@@ -3,26 +3,14 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { useClient } from "@/providers/ClientProvider";
 import { parseQuotedUserMessage } from "@/lib/user-message-quote";
+import { fetchLatestWebuiThread } from "@/lib/latest-thread-request";
 import type { UIMessage } from "@/lib/types";
-
-interface EditAnchor {
-  generation: string;
-  revision: number;
-  user_index: number;
-  message_digest: string;
-  transcript_revision: string;
-  transcript_user_index: number;
-  display_message_id: string;
-  display_turn_id?: string;
-}
 
 interface EditDraft {
   message: UIMessage;
-  userIndex: number;
   text: string;
   turnId: string;
-  anchor: EditAnchor | null;
-  preparing: boolean;
+  revision: string | null;
   submitting: boolean;
   error: string | null;
 }
@@ -30,7 +18,7 @@ interface EditDraft {
 interface EditingContext {
   draft: EditDraft | null;
   reason: (message: UIMessage) => string | null;
-  begin: (message: UIMessage, userIndex: number) => void;
+  begin: (message: UIMessage) => void;
   change: (text: string) => void;
   cancel: () => void;
   confirm: () => void;
@@ -55,7 +43,7 @@ export function MessageEditingProvider({ chatId, busy, enabled, onBegin, childre
   onBegin?: (messageId: string) => void;
   children: ReactNode;
 }) {
-  const { client } = useClient();
+  const { client, getToken } = useClient();
   const { t } = useTranslation();
   const [draft, setDraft] = useState<EditDraft | null>(null);
   const draftRef = useRef(draft);
@@ -82,23 +70,22 @@ export function MessageEditingProvider({ chatId, busy, enabled, onBegin, childre
     const restriction = textRestriction(message.content);
     return restriction ? t(`message.editErrors.${restriction}`) : null;
   };
-  const begin = (message: UIMessage, userIndex: number) => {
+  const begin = (message: UIMessage) => {
     if (!chatId || reason(message) || submitting.current) return;
     const turnId = crypto.randomUUID();
     onBegin?.(message.id);
-    setDraft({ message, userIndex, text: message.content, turnId, anchor: null, preparing: true, submitting: false, error: null });
-    void client.requestMutation<{ anchor: EditAnchor }>("chat.edit.prepare", {
-      chat_id: chatId, user_index: userIndex, message_id: message.id,
-      text: message.content, turn_id: message.turnId,
-    }).then(({ anchor }) => {
-      if (mounted.current) setDraft((current) => current?.turnId === turnId ? { ...current, anchor, preparing: false } : current);
-    }, (error: unknown) => {
-      if (mounted.current) setDraft((current) => current?.turnId === turnId ? { ...current, preparing: false, error: errorLabel(error) } : current);
+    setDraft({ message, text: message.content, turnId, revision: null, submitting: false, error: null });
+    void fetchLatestWebuiThread(client, getToken(), `websocket:${chatId}`).then((body) => {
+      const revision = body?.source_revision;
+      if (!revision) throw new Error("edit_source_changed");
+      if (mounted.current) setDraft((current) => current?.turnId === turnId ? { ...current, revision } : current);
+    }).catch((error: unknown) => {
+      if (mounted.current) setDraft((current) => current?.turnId === turnId ? { ...current, error: errorLabel(error) } : current);
     });
   };
   const confirm = () => {
     const current = draftRef.current;
-    if (!chatId || !current?.anchor || current.preparing || busy || submitting.current || !current.text.trim()) return;
+    if (!chatId || !current?.revision || busy || submitting.current || !current.text.trim()) return;
     const restriction = textRestriction(current.text);
     if (restriction) {
       setDraft({ ...current, error: t(`message.editErrors.${restriction}`) });
@@ -107,8 +94,9 @@ export function MessageEditingProvider({ chatId, busy, enabled, onBegin, childre
     submitting.current = current.turnId;
     setDraft({ ...current, submitting: true, error: null });
     void client.requestMutation<{ accepted: boolean }>("chat.fork", {
-      mode: "replace", chat_id: chatId, anchor: current.anchor,
-      text: current.text, turn_id: current.turnId,
+      mode: "replace", chat_id: chatId, text: current.text, turn_id: current.turnId,
+      source: { revision: current.revision, message_id: current.message.id,
+        turn_id: current.message.turnId, text: current.message.content },
     }).then(() => {
       if (mounted.current) setDraft((value) => value?.turnId === current.turnId ? null : value);
     }, (error: unknown) => {
@@ -148,7 +136,7 @@ export function InlineMessageEditor({ sourceMissing = false }: { sourceMissing?:
       <Button type="button" size="sm" variant="ghost" disabled={draft.submitting} onClick={cancel}
         className="max-md:min-h-11">{t("common.cancel")}</Button>
       <Button type="submit" size="sm"
-        disabled={sourceMissing || busy || draft.preparing || draft.submitting || !draft.anchor || !draft.text.trim()}
+        disabled={sourceMissing || busy || draft.submitting || !draft.revision || !draft.text.trim()}
         className="max-md:min-h-11">{t("message.confirmEditResend")}</Button>
     </div>
   </form>;

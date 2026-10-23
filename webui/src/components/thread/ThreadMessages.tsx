@@ -618,7 +618,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   const editing = useMessageEditing();
   const isEditing = unit.type === "message" && editing?.draft?.message.id === unit.message.id;
   const editMessage = unit.type === "message" && unit.message.role === "user" && userIndex !== undefined && editing
-    ? () => editing.begin(unit.message, userIndex) : undefined;
+    ? () => editing.begin(unit.message) : undefined;
   const heightRef = useRef(0);
   const [nearViewport, setNearViewport] = useState(true);
   const [interacted, setInteracted] = useState(false);

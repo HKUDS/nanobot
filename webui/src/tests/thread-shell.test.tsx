@@ -509,6 +509,39 @@ describe("ThreadShell", () => {
     expect(fetch).toHaveBeenCalledTimes(readsBeforeSearch);
   });
 
+  it("edits a saved user message through the full shell", async () => {
+    const revision = "source-snapshot";
+    const requestMutation = vi.fn().mockResolvedValue({ accepted: true });
+    const client = Object.assign(makeClient(), { requestMutation });
+    vi.mocked(fetch).mockImplementation(async (input) => (
+      String(input).includes("/webui-thread")
+        ? httpJson({ ...transcriptFromSimpleMessages([
+            { role: "user", content: "Saved question", turnId: "saved-turn" },
+            { role: "assistant", content: "Saved answer", turnId: "saved-turn" },
+          ]), source_revision: revision })
+        : { ok: false, status: 404, json: async () => ({}) }
+    ) as Response);
+    render(wrap(client, <ThreadShell session={session("editable")} title="Editable history"
+      onToggleSidebar={() => {}} />));
+
+    const actions = await openMessageActions("Saved question");
+    const edit = within(actions).getByRole("button", { name: "Edit message" });
+    expect(edit).toBeEnabled();
+    fireEvent.click(edit);
+    const input = screen.getByRole("textbox", { name: "Edit message" });
+    expect(input).toHaveValue("Saved question");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Resend" })).toBeEnabled());
+    expect(requestMutation).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: "Edited question" } });
+    fireEvent.click(screen.getByRole("button", { name: "Resend" }));
+    await waitFor(() => expect(requestMutation).toHaveBeenCalledWith("chat.fork", {
+      mode: "replace", chat_id: "editable", text: "Edited question", turn_id: expect.any(String),
+      source: { revision, message_id: expect.any(String), turn_id: "saved-turn", text: "Saved question" },
+    }));
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Edit message" })).not.toBeInTheDocument());
+    expect(client.sendMessage).not.toHaveBeenCalled();
+  });
+
   it.each(["callback", "cached return"] as const)("keeps closed answer segments in order after %s", async (path) => {
     const client = makeClient();
     const messageCache = new ThreadMessageCache(() => false);
@@ -579,41 +612,6 @@ describe("ThreadShell", () => {
     expect(trigger).toHaveTextContent("Completed: 1");
     expect(await within(list).findByText("Inspection finished after the parent reply")).toBeVisible();
     expect(list).toBeVisible();
-  });
-
-  it("edits a saved user message through the full shell", async () => {
-    const anchor = { generation: "history-generation", revision: 1, user_index: 0, message_digest: "digest",
-      transcript_revision: "display", transcript_user_index: 0, display_message_id: "m-0" };
-    const requestMutation = vi.fn().mockResolvedValue({ anchor });
-    const client = Object.assign(makeClient(), { requestMutation });
-    vi.mocked(fetch).mockImplementation(async (input) => (
-      String(input).includes("/webui-thread")
-        ? httpJson(transcriptFromSimpleMessages([
-            { role: "user", content: "Saved question", turnId: "saved-turn" },
-            { role: "assistant", content: "Saved answer", turnId: "saved-turn" },
-          ]))
-        : { ok: false, status: 404, json: async () => ({}) }
-    ) as Response);
-    render(wrap(client, <ThreadShell session={session("editable")} title="Editable history"
-      onToggleSidebar={() => {}} />));
-
-    const actions = await openMessageActions("Saved question");
-    const edit = within(actions).getByRole("button", { name: "Edit message" });
-    expect(edit).toBeEnabled();
-    fireEvent.click(edit);
-    const input = screen.getByRole("textbox", { name: "Edit message" });
-    expect(input).toHaveValue("Saved question");
-    await waitFor(() => expect(screen.getByRole("button", { name: "Resend" })).toBeEnabled());
-    expect(requestMutation).toHaveBeenCalledWith("chat.edit.prepare", expect.objectContaining({
-      chat_id: "editable", text: "Saved question", turn_id: "saved-turn",
-    }));
-    fireEvent.change(input, { target: { value: "Edited question" } });
-    fireEvent.click(screen.getByRole("button", { name: "Resend" }));
-    await waitFor(() => expect(requestMutation).toHaveBeenCalledWith("chat.fork", {
-      mode: "replace", chat_id: "editable", anchor, text: "Edited question", turn_id: expect.any(String),
-    }));
-    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Edit message" })).not.toBeInTheDocument());
-    expect(client.sendMessage).not.toHaveBeenCalled();
   });
 
   it("renders one persisted task entry at the initiating prompt through the full shell", async () => {

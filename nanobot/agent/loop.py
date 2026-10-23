@@ -89,9 +89,9 @@ from nanobot.session.automation_turns import automation_history_overrides
 from nanobot.session.goal_state import goal_state_runtime_lines, sustained_goal_active
 from nanobot.session.history_edit import (
     HistoryEditAccepted,
-    HistoryEditAnchor,
     HistoryEditError,
     HistoryEditProjection,
+    HistoryEditSource,
 )
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
@@ -1580,24 +1580,21 @@ class AgentLoop:
         return pending_msg
 
     async def replace_user_input(
-        self, msg: InboundMessage, anchor: HistoryEditAnchor, projection: HistoryEditProjection,
+        self, msg: InboundMessage, source: HistoryEditSource, projection: HistoryEditProjection,
         accepted: HistoryEditAccepted,
     ) -> Session:
         """Reserve an idle execution lane before committing an in-place history edit."""
         key = self._effective_session_key(msg)
         lock = self._get_session_lock(key)
-        if key != msg.session_key or key in self._pending_queues or lock.locked():
-            raise HistoryEditError("edit_session_busy")
         async def admit() -> Session:
-            # shield_and_drain schedules this admission at its own boundary;
-            # another input may have reserved the lane since the caller checked.
-            if key in self._pending_queues or lock.locked():
+            self.bus.admission.check()
+            if key != msg.session_key or key in self._pending_queues or lock.locked():
                 raise HistoryEditError("edit_session_busy")
             async with lock:
                 pending: asyncio.Queue[InboundMessage] = asyncio.Queue()
                 self._pending_queues[key] = pending
                 try:
-                    session = await self.sessions.state.replace_user_input(key, anchor, msg, projection)
+                    session = await self.sessions.state.replace_user_input(key, source, msg, projection)
                     self.auto_compact.discard_summary(key)
                     msg.session_generation = session.generation
                     msg.require_existing_session = True

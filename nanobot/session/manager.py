@@ -346,6 +346,14 @@ class Session:
             out = kept
         return out
 
+    def retain_history_prefix(self, boundary: int) -> None:
+        """Keep an already resolved prefix without changing session identity."""
+        self.messages = self.messages[:boundary]
+        if self.last_archived > boundary:
+            self.last_archived = 0
+            self.metadata.pop("_last_summary", None)
+        self.provider_state = None
+
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""
         self.messages = []
@@ -397,26 +405,19 @@ def fork_session(source: Session, target_key: str, before_user_index: int) -> Se
     boundary = history_prefix_boundary(source, before_user_index)
     if boundary is None:
         return None
-    copied = [public_history_message(message) for message in source.messages[:boundary]]
-
-    metadata = deepcopy(source.metadata)
-    for key in _FORK_VOLATILE_METADATA_KEYS:
-        metadata.pop(key, None)
-
-    last_consolidated = min(source.last_archived, len(copied))
-    if source.last_archived > len(copied):
-        metadata.pop("_last_summary", None)
-        last_consolidated = 0
-
     now = datetime.now()
     target = Session(
         key=target_key,
-        messages=copied,
+        messages=source.messages,
         created_at=now,
         updated_at=now,
-        metadata=metadata,
-        last_consolidated=last_consolidated,
+        metadata=deepcopy(source.metadata),
+        last_consolidated=source.last_archived,
     )
+    target.retain_history_prefix(boundary)
+    target.messages = [public_history_message(message) for message in target.messages]
+    for key in _FORK_VOLATILE_METADATA_KEYS:
+        target.metadata.pop(key, None)
     return target
 
 

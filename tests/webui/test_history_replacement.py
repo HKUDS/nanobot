@@ -30,13 +30,13 @@ import asyncio, os, sys
 from pathlib import Path
 from nanobot.bus.events import InboundMessage
 from nanobot.session.display_history import HistoryFact, HistoryKind
-from nanobot.session.history_edit import HistoryEditAnchor, HistoryEditDisplay, message_digest
+from nanobot.session.history_edit import HistoryEditSource, HistoryEditTarget
 from nanobot.session.manager import SessionManager
 root = Path(sys.argv[1])
 manager = SessionManager(root / "workspace", sessions_root=root / "sessions")
 async def main():
     source = await manager.state.read("websocket:crash-edit")
-    anchor = HistoryEditAnchor(source.generation, source.revision, 0, message_digest(source.messages[0]))
+    anchor = HistoryEditSource(str(source.revision), "input", "old-turn")
     message = InboundMessage(channel="websocket", sender_id="webui", chat_id="crash-edit", content="replacement", metadata={"webui_turn_id": "new-edit"})
     fact = HistoryFact(HistoryKind.INPUT, {"text": "replacement"}, "new-edit", created_at_ms=2000)
     if sys.argv[2] == "True":
@@ -48,7 +48,7 @@ async def main():
             original(*args, **kwargs)
             os._exit(23)
         manager._store.replace_history_input = before_commit
-    await manager.state.replace_user_input(source.key, anchor, message, lambda _source, _history: HistoryEditDisplay(0, 0, fact))
+    await manager.state.replace_user_input(source.key, anchor, message, lambda _source, _history: HistoryEditTarget(0, 0, 0, fact))
 asyncio.run(main())
 '''
     result = subprocess.run(
@@ -77,7 +77,7 @@ asyncio.run(main())
 
 async def test_edit_within_a_turn_rebuilds_paging_summaries_and_keeps_its_prefix(tmp_path):
     from nanobot.bus.events import InboundMessage
-    from nanobot.session.history_edit import HistoryEditAnchor, HistoryEditDisplay, message_digest
+    from nanobot.session.history_edit import HistoryEditSource, HistoryEditTarget
 
     manager = SessionManager(tmp_path / "workspace", sessions_root=tmp_path / "sessions")
     key = "websocket:steering-edit"
@@ -103,10 +103,10 @@ async def test_edit_within_a_turn_rebuilds_paging_summaries_and_keeps_its_prefix
     before = await manager.state.project_history(key, lambda history: history.revision)
     replacement = HistoryFact(HistoryKind.INPUT, {"text": "替换输入"}, "new-edit", created_at_ms=4000)
     current = await manager.state.replace_user_input(
-        key, HistoryEditAnchor(source.generation, source.revision, 2, message_digest(source.messages[4])),
+        key, HistoryEditSource(str(source.revision), "input-2", "old-2"),
         InboundMessage(channel="websocket", sender_id="webui", chat_id="steering-edit", content="替换输入",
                        metadata={"webui_turn_id": "new-edit"}),
-        lambda _session, _history: HistoryEditDisplay(1, 2, replacement),
+        lambda _session, _history: HistoryEditTarget(4, 1, 2, replacement),
     )
     retained = [*facts[:5], replacement]
     assert current.messages[:-1] == source.messages[:4]
