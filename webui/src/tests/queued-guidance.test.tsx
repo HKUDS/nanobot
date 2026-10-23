@@ -235,7 +235,7 @@ describe("merged waiting messages", () => {
       { id: "second", text: "", images: [DOCUMENT], autoAfterTurnId: "turn-a" },
     ]));
     const onSend = vi.fn();
-    render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} queueAutoSendAllowed />);
+    render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />);
     expect(onSend).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Send now" }));
     expect(onSend).toHaveBeenCalledTimes(1);

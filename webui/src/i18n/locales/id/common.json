@@ -1760,19 +1760,6 @@
     "error": "Kesalahan koneksi"
   },
   "thread": {
-    "runStatus": {
-      "syncing": "Memeriksa status tugas…",
-      "unknown": "Status tugas tidak diketahui. Hubungkan kembali untuk memeriksa.",
-      "unavailable": "Status tugas tidak tersedia. Perbarui nanobot di host ini untuk mengaktifkan status tugas, penghentian, dan pengiriman otomatis pesan yang menunggu.",
-      "queued": "Tugas dalam antrean",
-      "running": "Tugas sedang berjalan",
-      "stopping": "Menghentikan tugas…",
-      "cancelPending": "Penghentian diminta. Menunggu tugas berakhir…",
-      "sending": "Mengirim pesan…",
-      "deliveryUnknown": "Penerimaan pesan belum dikonfirmasi. Periksa percakapan sebelum mengirim ulang.",
-      "resultUnknown": "Balasan belum dikonfirmasi. Hubungkan kembali untuk memeriksa percakapan.",
-      "stopFailed": "Permintaan penghentian gagal. Periksa status tugas lalu coba lagi."
-    },
     "subagents": {
       "stopFailed": "Tidak dapat menghentikan tugas ini.",
       "stopTask": "Hentikan {{label}}",

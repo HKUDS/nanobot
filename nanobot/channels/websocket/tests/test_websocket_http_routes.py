@@ -14,17 +14,14 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from nanobot.agent.execution import ExecutionLifecycle
 from nanobot.agent.skills import SkillsLoader
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
 from nanobot.config.loader import load_config, save_config
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronJob, CronPayload, CronRunResult, CronSchedule
 from nanobot.optional_features import InstallResult
-from nanobot.runtime_admission import RuntimeAdmission
 from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import Session, SessionManager
@@ -95,7 +92,6 @@ def _make_handler(
     return build_gateway_services(
         config=config,
         bus=bus,
-        executions=ExecutionLifecycle(bus),
         session_manager=session_manager,
         static_dist_path=static_dist_path,
         workspace_path=workspace,
@@ -161,8 +157,7 @@ def _ch(
 
 @pytest.fixture()
 def bus() -> MagicMock:
-    b = MagicMock(spec=MessageBus)
-    b.admission = RuntimeAdmission()
+    b = MagicMock()
     b.publish_inbound = AsyncMock()
     return b
 

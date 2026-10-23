@@ -1760,19 +1760,6 @@
     "error": "연결 오류"
   },
   "thread": {
-    "runStatus": {
-      "syncing": "작업 상태 확인 중…",
-      "unknown": "작업 상태를 알 수 없습니다. 다시 연결하여 확인하세요.",
-      "unavailable": "작업 상태를 사용할 수 없습니다. 이 호스트의 nanobot을 업데이트하면 작업 상태, 중지, 대기 메시지 자동 전송을 사용할 수 있습니다.",
-      "queued": "작업 대기 중",
-      "running": "작업 실행 중",
-      "stopping": "작업 중지 중…",
-      "cancelPending": "중지를 요청했습니다. 작업 종료를 기다리는 중…",
-      "sending": "메시지 전송 중…",
-      "deliveryUnknown": "메시지 수신이 확인되지 않았습니다. 다시 보내기 전에 대화를 확인하세요.",
-      "resultUnknown": "응답이 확인되지 않았습니다. 다시 연결하여 대화를 확인하세요.",
-      "stopFailed": "중지 요청에 실패했습니다. 작업 상태를 확인하고 다시 시도하세요."
-    },
     "subagents": {
       "stopFailed": "이 작업을 중지할 수 없습니다.",
       "stopTask": "{{label}} 중지",

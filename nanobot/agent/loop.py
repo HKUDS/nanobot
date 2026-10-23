@@ -26,7 +26,6 @@ from nanobot.agent import model_presets as preset_helpers
 from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder, PersistedPromptContextResolver, TranscriptInput
 from nanobot.agent.cron_turns import CronTurnCoordinator
-from nanobot.agent.execution import ExecutionLifecycle
 from nanobot.agent.goal_permission import GoalInputScope
 from nanobot.agent.hook import AgentHook, AgentTurnHookFactory
 from nanobot.agent.memory import Consolidator
@@ -52,7 +51,6 @@ from nanobot.bus.events import (
     INBOUND_META_TURN_ID,
     INBOUND_META_USER_SHELL,
     RUNTIME_CONTROL_SESSION_DISCARD,
-    ExecutionAdmission,
     InboundMessage,
     OutboundMessage,
 )
@@ -319,16 +317,12 @@ class AgentLoop:
         local_trigger_store: LocalTriggerStore | None = None,
         idle_compact_check_interval_seconds: int = 0,
         recovery_admission: RecoveryAdmission | None = None,
-        executions: ExecutionLifecycle | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
         _tc = tools_config or ToolsConfig()
         defaults = AgentDefaults()
         self.bus = bus
-        if executions is not None and executions.bus is not bus:
-            raise ValueError("execution lifecycle must use the agent message bus")
-        self.executions = executions if executions is not None else ExecutionLifecycle(bus)
         self._recovery_admission = recovery_admission
         if turn_delivery_factory is not None:
             if turn_delivery_factory.bus is not bus:
@@ -1200,7 +1194,7 @@ class AgentLoop:
                 for pending_msg in pending_messages:
                     # Independent turns are FIFO barriers. Their worker path
                     # owns completion, command dispatch, and control metadata.
-                    if pending_msg.execution_admission is not None or not self._can_inject_message(pending_msg):
+                    if not self._can_inject_message(pending_msg):
                         break
                     converted.append(await _to_user_message(pending_msg))
                 goal_inputs.consume_inputs(pending_messages[:len(converted)])
@@ -1460,8 +1454,6 @@ class AgentLoop:
                     try:
                         await self._dispatch_inbound(msg)
                     except (SessionOperationQueueFullError, SessionConflictError) as exc:
-                        if (admission := msg.execution_admission) is not None:
-                            await self.executions.reject(admission)
                         key = self._effective_session_key(msg)
                         logger.warning("Session input rejected for {}: {}", key, exc)
                         if msg.is_user_input:
@@ -1481,9 +1473,6 @@ class AgentLoop:
             msg.require_existing_session
             and await self.sessions.state.read_metadata(effective_key) is None
         ):
-            admission = msg.execution_admission
-            if admission is not None:
-                await self.executions.retire(admission, "exited")
             return
         if msg.is_user_input:
             await self.runtime_event_publisher.user_input_accepted(msg, effective_key)
@@ -1557,12 +1546,7 @@ class AgentLoop:
         """Persist a recoverable WebUI follow-up before adding it to the inbox."""
         if not self._can_inject_message(msg):
             return msg
-        try:
-            followup_id = await self.sessions.state.queue_followup(session_key, msg)
-        except (SessionOperationQueueFullError, SessionConflictError):
-            if (admission := msg.execution_admission) is not None:
-                await self.executions.reject(admission)
-            raise
+        followup_id = await self.sessions.state.queue_followup(session_key, msg)
         if followup_id is None:
             return msg
         pending_msg = dataclasses.replace(
@@ -1574,34 +1558,10 @@ class AgentLoop:
         )
         return pending_msg
 
-    async def _cancel_stopped_admission(self, session_key: str, msg: InboundMessage) -> bool:
-        admission = msg.execution_admission
-        if admission is None or not self.executions.stop_requested(admission):
-            return False
-        followup_id = msg.metadata.get(PENDING_FOLLOWUP_ID_KEY)
-        if isinstance(followup_id, str):
-            await self.sessions.state.acknowledge_followups(session_key, (followup_id,))
-        await self._complete_cancelled_message(session_key, msg, asyncio.CancelledError())
-        return True
-
-    async def _complete_cancelled_message(
-        self, session_key: str, msg: InboundMessage, error: asyncio.CancelledError,
-    ) -> None:
-        admission = msg.execution_admission
-        if admission is not None:
-            await self.executions.retire(admission, "exited")
-        for coordinator in self._automation_turn_coordinators:
-            coordinator.complete(msg, error=error)
-        if msg.channel != "system" and self.commands.requires_session_queue(command_text(msg)):
-            delivery = self.turn_delivery_factory.unrouted(msg, session_key)
-            await delivery.complete(None, publish_completion=True)
-
     async def _enqueue_session_message(self, msg: InboundMessage) -> None:
         """Admit session work without waiting for its execution or result."""
         self.bus.admission.check()
         session_key = self._effective_session_key(msg)
-        if await self._cancel_stopped_admission(session_key, msg):
-            return
         if not self.subagents.accepts_result(msg, session_key):
             return
         if session_key != msg.session_key:
@@ -1617,22 +1577,6 @@ class AgentLoop:
 
         if session_key in self._pending_queues:
             msg = await self._journal_pending_message(session_key, msg)
-            if await self._cancel_stopped_admission(session_key, msg):
-                return
-        pending = self._pending_queues.get(session_key)
-        followup_id = msg.metadata.get(PENDING_FOLLOWUP_ID_KEY)
-        if pending is None or not self._can_inject_message(msg) or not self.executions.accept_steering(
-            session_key, followup_id if isinstance(followup_id, str) else None,
-        ):
-            if await self.executions.admit(msg, session_key) is None:
-                return
-        elif (admission := msg.execution_admission) is not None:
-            # Transport can reserve a root before the shared-session FIFO knows
-            # this input belongs to an existing execution instead. Its durable
-            # follow-up journal remains owned by that execution, not this reservation.
-            pending.put_nowait(dataclasses.replace(msg, execution_admission=None))
-            await self.executions.retire(admission, "injected")
-            return
         pending = self._pending_queues.get(session_key)
         if pending is not None:
             pending.put_nowait(msg)
@@ -1669,9 +1613,10 @@ class AgentLoop:
                 )
                 try:
                     await self._dispatch_one(msg, pending)
-                except asyncio.CancelledError:
-                    if task_is_cancelling():
-                        raise  # Session discard/shutdown, not this root's Stop.
+                except asyncio.CancelledError as exc:
+                    for coordinator in self._automation_turn_coordinators:
+                        coordinator.complete(msg, error=exc)
+                    raise
                 except Exception:
                     logger.opt(exception=log_content).error(
                         "Session worker failed one message for {}; continuing FIFO",
@@ -1681,7 +1626,8 @@ class AgentLoop:
             await self._cancel_pending_messages(session_key, pending, exc)
             raise
         finally:
-            if self._pending_queues.get(session_key) is pending:
+            owns_queue = self._pending_queues.get(session_key) is pending
+            if owns_queue:
                 self._pending_queues.pop(session_key, None)
 
     async def _cancel_pending_messages(
@@ -1690,78 +1636,24 @@ class AgentLoop:
         pending: asyncio.Queue[InboundMessage],
         error: asyncio.CancelledError,
     ) -> None:
-        """Session-wide teardown completes its inbox, including deferred automation."""
+        """Complete queued independent turns after their session worker stops."""
         for msg in self._deferred_automation_turns.pop(session_key, []):
             pending.put_nowait(msg)
         while not pending.empty():
-            await self._complete_cancelled_message(session_key, pending.get_nowait(), error)
+            msg = pending.get_nowait()
+            for coordinator in self._automation_turn_coordinators:
+                coordinator.complete(msg, error=error)
+            if (
+                msg.channel != "system"
+                and self.commands.requires_session_queue(command_text(msg))
+            ):
+                delivery = self.turn_delivery_factory.unrouted(msg, session_key)
+                await delivery.complete(None, publish_completion=True)
 
     async def _dispatch_one(
         self,
         msg: InboundMessage,
         pending: asyncio.Queue[InboundMessage],
-    ) -> None:
-        """Await one root task without lending it the FIFO worker's cancellation scope."""
-        session_key = self._effective_session_key(msg)
-
-        async def invoke() -> None:
-            assert msg.execution_admission is not None
-            await self._execute_one(msg, pending, msg.execution_admission)
-
-        await self.executions.execute(
-            msg, session_key, invoke,
-            partial(self._settle_cancelled_execution, msg, pending, worker=asyncio.current_task()),
-        )
-
-    async def _settle_cancelled_execution(
-        self, msg: InboundMessage, pending: asyncio.Queue[InboundMessage], entered: bool,
-        *, worker: asyncio.Task[Any] | None,
-    ) -> None:
-        """Settle this root's children and steering before the worker may start its successor."""
-        session_key = self._effective_session_key(msg)
-        admission = msg.execution_admission
-        assert admission is not None
-        followup_ids: frozenset[str] = frozenset()
-        if self.executions.stop_requested(admission):
-            # Only the steering prefix belongs to this root. An independently
-            # admitted successor is a FIFO barrier, including during cleanup.
-            snapshot = [pending.get_nowait() for _ in range(pending.qsize())]
-            boundary = next(
-                (index for index, item in enumerate(snapshot) if item.execution_admission is not None),
-                len(snapshot),
-            )
-            retained = snapshot[boundary:]
-            for item in retained:
-                pending.put_nowait(item)
-            followup_ids = self.executions.input_ids(admission)
-            root_followup_id = msg.metadata.get(PENDING_FOLLOWUP_ID_KEY)
-            if isinstance(root_followup_id, str):
-                followup_ids |= {root_followup_id}
-        try:
-            try:
-                if self.executions.has_started(admission) and (worker is None or not worker.cancelling()):
-                    # An unstarted root owns no child resources. A whole-session
-                    # cancel/close already drains these after its worker;
-                    # a root Stop/supersede must drain them before that worker can take B.
-                    try:
-                        await self.subagents.cancel_by_session(session_key)
-                    finally:
-                        await self._exec_session_manager.terminate_by_owner(session_key)
-            finally:
-                if followup_ids:
-                    await self.sessions.state.acknowledge_followups(session_key, tuple(followup_ids))
-        finally:
-            for coordinator in self._automation_turn_coordinators:
-                coordinator.complete(msg, error=asyncio.CancelledError())
-            if not entered and msg.channel != "system" and self.commands.requires_session_queue(command_text(msg)):
-                delivery = self.turn_delivery_factory.unrouted(msg, session_key)
-                await delivery.complete(None, publish_completion=True)
-
-    async def _execute_one(
-        self,
-        msg: InboundMessage,
-        pending: asyncio.Queue[InboundMessage],
-        admission: ExecutionAdmission,
     ) -> None:
         """Process one root message while later inputs remain in its session inbox."""
         session_key = self._effective_session_key(msg)
@@ -1774,22 +1666,24 @@ class AgentLoop:
         recovery_task_registered = False
         recovery_admission = self._recovery_admission
         current_task: asyncio.Task[Any] | None = None
+        if recovery_admission is not None:
+            recovery_id = msg.metadata.get(RECOVERY_INBOUND_METADATA_KEY)
+            if isinstance(recovery_id, str) and recovery_id:
+                current_task = asyncio.current_task()
+                if current_task is not None:
+                    recovery_admission.register_recovery_task(session_key, current_task)
+                    recovery_task_registered = True
+            if not await recovery_admission.admit(msg):
+                logger.info("Skipped stale recovery for session {}", session_key)
+                if recovery_task_registered and current_task is not None:
+                    recovery_admission.unregister_recovery_task(session_key, current_task)
+                return
         lock = self._get_session_lock(session_key)
         gate = self._concurrency_gate or nullcontext()
 
         delivery = self.turn_delivery_factory.unrouted(msg, session_key)
         completion_published = False
         try:
-            if recovery_admission is not None:
-                recovery_id = msg.metadata.get(RECOVERY_INBOUND_METADATA_KEY)
-                if isinstance(recovery_id, str) and recovery_id:
-                    current_task = asyncio.current_task()
-                    if current_task is not None:
-                        recovery_admission.register_recovery_task(session_key, current_task)
-                        recovery_task_registered = True
-                if not await recovery_admission.admit(msg):
-                    logger.info("Skipped stale recovery for session {}", session_key)
-                    return
             async with lock, gate:
                 # A preceding user turn may have completed or blocked the goal
                 # while its older continuation was still waiting in the inbox.
@@ -1797,7 +1691,6 @@ class AgentLoop:
                     sustained_goal_active((await self.sessions.state.get(session_key)).metadata)
                 ):
                     return
-                await self.executions.running(admission)
                 try:
                     await self.sessions.state.read(session_key)
                     delivery = self.turn_delivery_factory.create(
@@ -2460,15 +2353,9 @@ class AgentLoop:
         ctx.delivery.record_usage(result.round_usages)
         if ctx.kind is TurnKind.USER:
             current = await self.sessions.state.read_metadata(ctx.session_key)
-            await self._continue_turn(ctx, session_metadata=current["metadata"] if current else {})
-
-    async def _continue_turn(self, ctx: TurnContext, *, session_metadata: Mapping[str, Any]) -> bool:
-        continuation = turn_continuation.prepare_continuation(ctx, session_metadata=session_metadata)
-        if continuation is None:
-            return False
-        await self._enqueue_session_message(continuation)
-        turn_continuation.commit_continuation(ctx)
-        return True
+            await turn_continuation.maybe_continue_turn(
+                ctx, session_metadata=current["metadata"] if current else {},
+            )
 
     async def _persist_turn(self, ctx: TurnContext) -> None:
         session = ctx.require_session()

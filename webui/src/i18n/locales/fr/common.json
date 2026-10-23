@@ -1760,19 +1760,6 @@
     "error": "Erreur de connexion"
   },
   "thread": {
-    "runStatus": {
-      "syncing": "Vérification de l’état de la tâche…",
-      "unknown": "État de la tâche inconnu. Reconnectez-vous pour vérifier.",
-      "unavailable": "État de la tâche indisponible. Mettez à jour nanobot sur cet hôte pour activer l’état des tâches, l’arrêt et l’envoi automatique des messages en attente.",
-      "queued": "Tâche en attente",
-      "running": "Tâche en cours",
-      "stopping": "Arrêt de la tâche…",
-      "cancelPending": "Arrêt demandé. En attente de la fin de la tâche…",
-      "sending": "Envoi du message…",
-      "deliveryUnknown": "Réception du message non confirmée. Vérifiez la conversation avant de le renvoyer.",
-      "resultUnknown": "Réponse non confirmée. Reconnectez-vous pour vérifier la conversation.",
-      "stopFailed": "La demande d’arrêt a échoué. Vérifiez l’état de la tâche et réessayez."
-    },
     "subagents": {
       "stopFailed": "Impossible d’arrêter cette tâche.",
       "stopTask": "Arrêter {{label}}",

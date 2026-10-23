@@ -691,13 +691,14 @@ class TestToolEventProgress:
 
         loop._process_message = cancel_after_merge  # type: ignore[method-assign]
 
-        await run_session(loop, InboundMessage(
-            channel="websocket",
-            sender_id="u1",
-            chat_id="chat1",
-            content="give a long answer",
-            metadata={"_wants_stream": True},
-        ))
+        with pytest.raises(asyncio.CancelledError):
+            await run_session(loop, InboundMessage(
+                channel="websocket",
+                sender_id="u1",
+                chat_id="chat1",
+                content="give a long answer",
+                metadata={"_wants_stream": True},
+            ))
 
         outbound = []
         while bus.outbound_size > 0:
@@ -805,7 +806,7 @@ class TestToolEventProgress:
         session.metadata.update({"webui": True, "title": "Existing title"})
         loop.sessions.save(session)
         await save_completed_subagent(loop, "sub-1", session_key)
-        msg = InboundMessage(
+        dispatch = asyncio.create_task(run_session(loop, InboundMessage(
             channel="system",
             sender_id="subagent",
             chat_id=session_key,
@@ -815,8 +816,7 @@ class TestToolEventProgress:
                 "injected_event": "subagent_result",
                 "subagent_task_id": "sub-1",
             },
-        )
-        dispatch = asyncio.create_task(run_session(loop, msg))
+        )))
 
         await asyncio.wait_for(first_request_started.wait(), timeout=5)
         await loop._pending_queues[session_key].put(InboundMessage(
@@ -845,8 +845,6 @@ class TestToolEventProgress:
         assert len(request_contexts) == 1
         request_ctx = request_contexts[0]
         assert request_ctx is not None
-        assert msg.execution_admission is not None
-        assert msg.execution_admission.execution_id
         assert request_ctx.metadata == {
             "injected_event": "subagent_result",
             "subagent_task_id": "sub-1",

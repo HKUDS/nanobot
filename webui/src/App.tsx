@@ -1316,7 +1316,6 @@ function Shell({
   const [workspaceOverrides, setWorkspaceOverrides] =
     useState<Record<string, WorkspaceScopePayload>>({});
   const runningChatIdsRef = useRef<Set<string>>(new Set());
-  const confirmedActiveChatIdsRef = useRef<Set<string>>(new Set());
   const activeChatIdRef = useRef<string | null>(null);
   const pendingCreatedSessionKeyRef = useRef<string | null>(null);
   const temporarySessionsRef = useRef<Record<string, ChatSummary>>({});
@@ -1698,15 +1697,16 @@ function Shell({
   }, [client, refreshWorkspaces, t]);
 
   useEffect(() => {
-    // Sidebar status subscriptions must not attach every conversation's text.
-    const webuiSessions = sessions.filter((session) => session.channel === "websocket");
-    client.watchRuns(webuiSessions.map((session) => session.chatId));
-    for (const session of webuiSessions) {
-      if (session.runState) client.ingestRunSnapshot(session.chatId, session.runState);
-    }
-  }, [client, sessions]);
+    if (loading) return;
+    const activeRunIds = sessions
+      .filter((session) => typeof session.runStartedAt === "number")
+      .map((session) => session.chatId);
+    if (activeRunIds.length === 0) return;
 
-  useEffect(() => () => client.watchRuns([]), [client]);
+    for (const chatId of activeRunIds) {
+      client.attach(chatId);
+    }
+  }, [client, loading, sessions]);
 
   const openHostSidebar = useCallback(() => {
     setHostSidebarOpen(true);
@@ -2255,16 +2255,11 @@ function Shell({
 
   useEffect(() => {
     return client.onRunStatus((chatId, state) => {
-      const running = state.freshness === "fresh" && state.active;
-      if (running !== runningChatIdsRef.current.has(chatId)) {
+      if (state.active) {
         const nextRunning = new Set(runningChatIdsRef.current);
-        if (running) nextRunning.add(chatId);
-        else nextRunning.delete(chatId);
+        nextRunning.add(chatId);
         runningChatIdsRef.current = nextRunning;
         setRunningChatIds(nextRunning);
-      }
-      if (running) {
-        confirmedActiveChatIdsRef.current.add(chatId);
         setUpdatedChatIds((current) => {
           if (!current.has(chatId)) return current;
           const next = new Set(current);
@@ -2274,11 +2269,11 @@ function Shell({
         return;
       }
 
-      // Losing freshness or observing idle alone never means a reply completed.
-      if (state.freshness !== "fresh" || state.unsettled || state.delivery !== "none"
-        || state.cancelPending || !confirmedActiveChatIdsRef.current.has(chatId)
-        || !state.latestTurnId || !client.isRunCompleted(chatId, state.latestTurnId)) return;
-      confirmedActiveChatIdsRef.current.delete(chatId);
+      if (!runningChatIdsRef.current.has(chatId)) return;
+      const nextRunning = new Set(runningChatIdsRef.current);
+      nextRunning.delete(chatId);
+      runningChatIdsRef.current = nextRunning;
+      setRunningChatIds(nextRunning);
       if (
         Object.values(temporarySessionsRef.current).some(
           (session) => session.chatId === chatId,

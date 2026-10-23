@@ -26,8 +26,6 @@ const getSessionAutomationsSpy = vi.fn<(key: string) => Promise<SessionAutomatio
 const toggleThemeSpy = vi.fn();
 const updateUrlSpy = vi.fn();
 const attachSpy = vi.fn();
-const watchRunsSpy = vi.fn();
-const ingestRunSnapshotSpy = vi.fn();
 const setSidebarStateSpy = vi.fn();
 const requestMutationSpy = vi.fn();
 const discardTemporaryChatSpy = vi.fn();
@@ -38,10 +36,7 @@ let mockDefaultChatId: string | null = null;
 const statusHandlers = new Set<(status: ConnectionStatus) => void>();
 const runStatusHandlers = new Set<(chatId: string, state: RunState) => void>();
 const runState = (startedAt: number | null): RunState => ({
-  active: startedAt !== null, startedAt, latestTurnId: "fixture-turn", generation: 0, unsettled: false,
-  freshness: "fresh", phase: startedAt === null ? "idle" : "running",
-  delivery: "none", cancelPending: false,
-  runs: startedAt === null ? [] : [{ run_id: "fixture-owner", turn_id: "fixture-turn", phase: "running", started_at: startedAt }],
+  active: startedAt !== null, startedAt, latestTurnId: null, generation: 0, unsettled: false,
 });
 const sessionUpdateHandlers = new Set<(
   chatId: string,
@@ -287,10 +282,7 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
     };
     onRunCompletion = () => () => {};
     getRunState = () => runState(null);
-    watchRuns = watchRunsSpy;
-    ingestRunSnapshot = ingestRunSnapshotSpy;
-    requestStop = vi.fn().mockResolvedValue(undefined);
-    isRunCompleted = () => true;
+    restorePendingRun = vi.fn();
     getRunStartedAt = () => null;
     getRunTurnId = () => null;
     getUnsettledRunChatIds = () => [];
@@ -340,8 +332,6 @@ describe("App layout", () => {
     getSessionAutomationsSpy.mockReset().mockResolvedValue([]);
     toggleThemeSpy.mockReset();
     attachSpy.mockReset();
-    watchRunsSpy.mockReset();
-    ingestRunSnapshotSpy.mockReset();
     setSidebarStateSpy.mockReset().mockImplementation(
       async (state: SidebarStatePayload) => state,
     );
@@ -2949,45 +2939,6 @@ describe("App layout", () => {
       .not.toBeInTheDocument();
   });
 
-  it("does not turn unknown runtime status or unsettled idle into unread completion", async () => {
-    mockSessions = [{
-      key: "websocket:chat-a", channel: "websocket", chatId: "chat-a",
-      createdAt: null, updatedAt: null, preview: "Uncertain task",
-    }];
-    render(<App />);
-    await waitFor(() => expect(watchRunsSpy).toHaveBeenCalledWith(["chat-a"]));
-    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    const publish = (state: RunState) => act(() => {
-      for (const handler of runStatusHandlers) handler("chat-a", state);
-    });
-    publish(runState(123));
-    expect(within(sidebar).getByRole("img", { name: "Agent running" })).toBeInTheDocument();
-    publish({ ...runState(123), freshness: "unknown", unsettled: true });
-    expect(within(sidebar).queryByRole("img", { name: "Agent running" })).not.toBeInTheDocument();
-    expect(within(sidebar).queryByRole("img", { name: "New activity" })).not.toBeInTheDocument();
-    publish({ ...runState(null), freshness: "unknown", unsettled: true });
-    publish({ ...runState(null), unsettled: true });
-    expect(within(sidebar).queryByRole("img", { name: "New activity" })).not.toBeInTheDocument();
-    publish(runState(null));
-    expect(within(sidebar).getByRole("img", { name: "New activity" })).toBeInTheDocument();
-  });
-
-  it("watches only websocket sidebar sessions without attaching background transcript streams", async () => {
-    const runStateSnapshot = { instance_id: "sidebar-host", revision: 4, runs: [] };
-    mockSessions = [
-      { key: "websocket:web-chat", channel: "websocket", chatId: "web-chat", createdAt: null,
-        updatedAt: null, preview: "Browser chat", runState: runStateSnapshot },
-      { key: "telegram:telegram-chat", channel: "telegram", chatId: "telegram-chat", createdAt: null,
-        updatedAt: null, preview: "Telegram chat", runState: runStateSnapshot },
-    ];
-    render(<App />);
-    await waitFor(() => expect(watchRunsSpy).toHaveBeenCalledWith(["web-chat"]));
-    expect(watchRunsSpy).not.toHaveBeenCalledWith(expect.arrayContaining(["telegram-chat"]));
-    expect(ingestRunSnapshotSpy).toHaveBeenCalledWith("web-chat", runStateSnapshot);
-    expect(ingestRunSnapshotSpy).not.toHaveBeenCalledWith("telegram-chat", expect.anything());
-    expect(attachSpy).not.toHaveBeenCalled();
-  });
-
   it("does not show an updated dot later when the active session finishes", async () => {
     mockSessions = [
       {
@@ -3114,8 +3065,7 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    await waitFor(() => expect(watchRunsSpy).toHaveBeenCalledWith(["chat-a", "chat-b"]));
-    expect(attachSpy).not.toHaveBeenCalledWith("chat-a");
+    await waitFor(() => expect(attachSpy).toHaveBeenCalledWith("chat-a"));
     expect(within(sidebar).queryByRole("img", { name: "Agent running" })).not.toBeInTheDocument();
     act(() => {
       for (const handler of runStatusHandlers) handler("chat-a", runState(12_345));

@@ -55,17 +55,6 @@ function Show-Usage {
     Write-Host "For current main, clone the repository and run 'python -m pip install -e .'."
 }
 
-function Test-AvailableCommand {
-    param([string]$Name)
-    # Get-Command can import modules for missing tools, even with an application filter.
-    # Enumerate session/PATH commands instead, retaining existing functions and aliases.
-    foreach ($Command in $ExecutionContext.InvokeCommand.GetCommands(
-        $Name, [System.Management.Automation.CommandTypes]::All, $false)) {
-        return $true
-    }
-    return $false
-}
-
 function Test-Python {
     param([string]$Command)
     try {
@@ -78,7 +67,7 @@ function Test-Python {
 
 function Find-Python {
     if ($env:PYTHON) {
-        if (Test-AvailableCommand $env:PYTHON) {
+        if (Get-Command $env:PYTHON -ErrorAction SilentlyContinue) {
             if (Test-Python $env:PYTHON) {
                 return $env:PYTHON
             }
@@ -88,7 +77,7 @@ function Find-Python {
     }
 
     foreach ($Candidate in @("python", "py")) {
-        if (Test-AvailableCommand $Candidate) {
+        if (Get-Command $Candidate -ErrorAction SilentlyContinue) {
             if (Test-Python $Candidate) {
                 return $Candidate
             }
@@ -119,12 +108,12 @@ function Get-InstallMethod {
     }
 
     $Existing = @()
-    if (Test-AvailableCommand uv) {
+    if (Get-Command uv -ErrorAction SilentlyContinue) {
         $ToolDir = & uv tool dir
         if ($LASTEXITCODE -ne 0 -or -not $ToolDir) { Fail "Could not inspect the uv tools directory." }
         if (Test-Path -LiteralPath (Join-Path $ToolDir $Package)) { $Existing += "uv" }
     }
-    if (Test-AvailableCommand pipx) {
+    if (Get-Command pipx -ErrorAction SilentlyContinue) {
         $ToolDir = & pipx environment --value PIPX_LOCAL_VENVS
         if ($LASTEXITCODE -ne 0 -or -not $ToolDir) { Fail "Could not inspect the pipx environments directory." }
         if (Test-Path -LiteralPath (Join-Path $ToolDir $Package)) { $Existing += "pipx" }

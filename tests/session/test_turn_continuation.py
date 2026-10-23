@@ -5,11 +5,10 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 from nanobot.agent.tools.context import RequestContext
-from nanobot.agent.turn_delivery import TurnDeliveryFactory
-from nanobot.bus.events import ExecutionAdmission, InboundMessage
-from nanobot.bus.queue import MessageBus
-from nanobot.bus.runtime_events import TurnExecutionChanged
+from nanobot.bus.events import InboundMessage
 from nanobot.session.goal_state import (
     GOAL_STATE_KEY,
     explicit_goal_requested,
@@ -22,17 +21,17 @@ from nanobot.session.turn_continuation import (
     INTERNAL_CONTINUATION_PENDING_META,
     INTERNAL_CONTINUATION_RUN_STARTED_AT_META,
     _save_skip_for_turn,
-    commit_continuation,
     internal_continuation_pending,
     internal_continuation_run_started_at,
-    prepare_continuation,
+    maybe_continue_turn,
     should_finalize_on_max_iterations,
     should_stream_budget_response,
     sustained_goal_continuation_inbound,
 )
 
 
-def test_prepare_continuation_returns_unadmitted_intent_without_queuing_or_publishing():
+@pytest.mark.asyncio
+async def test_maybe_continue_turn_queues_internal_message():
     meta = {
         GOAL_STATE_KEY: {
             "status": "active",
@@ -61,7 +60,6 @@ def test_prepare_continuation_returns_unadmitted_intent_without_queuing_or_publi
                 "original_command": "/goal",
                 "goal_requested": True,
             },
-            execution_admission=ExecutionAdmission(execution_id="previous-owner"),
         ),
         session_key="feishu:c1",
         request_context=RequestContext(
@@ -75,42 +73,27 @@ def test_prepare_continuation_returns_unadmitted_intent_without_queuing_or_publi
         visible_run_started_at=1234.5,
     )
 
-    bus = MessageBus()
-    facts = []
-    bus.subscribe(facts.append, TurnExecutionChanged)
-    ctx.delivery = TurnDeliveryFactory(bus).unrouted(ctx.msg, ctx.session_key)
-    continuation = prepare_continuation(ctx, session_metadata=ctx.session.metadata)
+    assert await maybe_continue_turn(ctx, session_metadata=ctx.session.metadata) is True
 
-    assert continuation is not None
-    assert pending.empty()
-    assert facts == []
-    assert continuation.execution_admission is None
-    assert ctx.msg.execution_admission.execution_id == "previous-owner"
-    assert continuation.sender_id == "system:continuation"
-    assert continuation.metadata[INTERNAL_CONTINUATION_META] is True
-    assert continuation.metadata[INTERNAL_CONTINUATION_KIND_META] == "sustained_goal"
-    assert sustained_goal_continuation_inbound(continuation.metadata) is True
-    assert continuation.metadata[INTERNAL_CONTINUATION_RUN_STARTED_AT_META] == 1234.5
-    assert internal_continuation_run_started_at(continuation.metadata) == 1234.5
-    assert not internal_continuation_pending(ctx.msg.metadata)
-    assert ctx.all_messages == messages
-    assert ctx.final_content == "paused"
-    assert ctx.suppress_response is False
-    assert "_sustained_goal_continuation_rounds" not in meta
-    assert continuation.metadata["webui"] is True
-    assert continuation.metadata["message_id"] == "msg-1"
-    assert continuation.metadata[REQUEST_ORIGIN_METADATA_KEY] == {
+    queued = pending.get_nowait()
+    assert queued.sender_id == "system:continuation"
+    assert queued.metadata[INTERNAL_CONTINUATION_META] is True
+    assert queued.metadata[INTERNAL_CONTINUATION_KIND_META] == "sustained_goal"
+    assert sustained_goal_continuation_inbound(queued.metadata) is True
+    assert queued.metadata[INTERNAL_CONTINUATION_RUN_STARTED_AT_META] == 1234.5
+    assert internal_continuation_run_started_at(queued.metadata) == 1234.5
+    assert internal_continuation_pending(ctx.msg.metadata)
+    assert queued.metadata["webui"] is True
+    assert queued.metadata["message_id"] == "msg-1"
+    assert queued.metadata[REQUEST_ORIGIN_METADATA_KEY] == {
         "message_id": "msg-1", "turn_id": "turn-1",
     }
     assert REQUEST_ORIGIN_METADATA_KEY not in ctx.msg.metadata
-    assert continuation.metadata["origin_message_id"] == "msg-0"
-    assert continuation.metadata["_wants_stream"] is True
-    assert not explicit_goal_requested(continuation.metadata)
-    assert sustained_goal_turn(meta, message_metadata=continuation.metadata)
-    assert "Finish the migration." in continuation.content
-
-    commit_continuation(ctx)
-
+    assert queued.metadata["origin_message_id"] == "msg-0"
+    assert queued.metadata["_wants_stream"] is True
+    assert not explicit_goal_requested(queued.metadata)
+    assert sustained_goal_turn(meta, message_metadata=queued.metadata)
+    assert "Finish the migration." in queued.content
     assert ctx.all_messages == messages[:-1]
     assert ctx.final_content == ""
     assert ctx.suppress_response is True
@@ -122,7 +105,8 @@ def test_generic_internal_continuation_is_not_a_sustained_goal_continuation() ->
     assert sustained_goal_continuation_inbound({INTERNAL_CONTINUATION_META: True}) is False
 
 
-def test_internal_continuation_respects_round_limit():
+@pytest.mark.asyncio
+async def test_internal_continuation_respects_round_limit():
     meta = {
         GOAL_STATE_KEY: {"status": "active", "objective": "x"},
         "_sustained_goal_continuation_rounds": 12,
@@ -142,7 +126,7 @@ def test_internal_continuation_respects_round_limit():
         pending_queue_available=True,
         session_metadata=meta,
     )
-    assert prepare_continuation(ctx, session_metadata=ctx.session.metadata) is None
+    assert await maybe_continue_turn(ctx, session_metadata=ctx.session.metadata) is False
 
 
 def test_internal_continuation_requires_budget_boundary_and_queue():

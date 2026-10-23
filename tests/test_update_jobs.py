@@ -1509,7 +1509,7 @@ async def test_job_recovery_capability_comes_from_its_saved_worker(managed_insta
 
 @pytest.mark.parametrize("installation", ["handoff"], indirect=True)
 async def test_stale_first_supervisor_cannot_take_new_confirmation(managed_installation, tmp_path, monkeypatch):
-    """Real frozen supervisor/worker; installed synthetic preflight refuses mutation."""
+    """Real frozen supervisor/worker/pip; synthetic preflight and restart bodies."""
     from nanobot import update_jobs
 
     plan, _, _, _, transport = managed_installation
@@ -1540,35 +1540,23 @@ async def test_stale_first_supervisor_cannot_take_new_confirmation(managed_insta
     assert not (directory / "preflight-entered.json").exists()
     assert not (directory / "approval.json").exists()
     assert not (installation_state_dir(spec.baseline.environment) / "stop.json").exists()
-    # B retains its first supervision admission and reaches the installed preflight.
-    # Refusal isolates this authorization race from pip/snapshot/restart acceptance.
-    (directory / "refuse-preflight").touch()
+    # B retains its first supervision budget and completes the explicit retry.
     try:
         completed = await asyncio.to_thread(subprocess.run, [*command, current.id], capture_output=True, timeout=40)
     except subprocess.TimeoutExpired:
-        # This is the last durable state after subprocess cleanup, not a stack
-        # location at the timeout. Do not expose the confirmation nonce.
+        # Identify the blocked phase without exposing the confirmation nonce or
+        # making a slow snapshot indistinguishable from a handoff deadlock.
         status = JobStatus.read(directory)
         progress = {"phase": status.phase.value, "attempt": status.attempt,
-                    "mutation_started": status.mutation_started, "message": status.message}
+                    "mutation_started": status.mutation_started, "message": status.message,
+                    "snapshot_complete": (directory / "program-backup.json").exists(),
+                    "activation_complete": (directory / "activation.json").exists()}
         pytest.fail(f"Confirmed supervisor exceeded 40s: {progress}", pytrace=False)
     assert completed.returncode == 0, completed.stderr.decode()
-    supervision = read_record(directory / "supervision.json")
-    assert supervision["plan_id"] == plan.id
-    assert supervision["confirmation_id"] == current.id
-    assert ExecutionConfirmation.read(directory) == current
-    assert (directory / "handoff-approval.json").read_bytes() == approval
-    assert read_record(directory / "confirmation-claimed.json") == {"id": current.id}
-    assert read_record(directory / "preflight-entered.json") == {"plan_id": plan.id}
-    status = JobStatus.read(directory)
-    assert status.phase == Phase.HANDOFF_FAILED
-    assert status.attempt == 0
-    assert status.mutation_started is False
-    assert status.message == "Controlled preflight refusal"
-    assert not (directory / "approval.json").exists()
-    assert not (directory / "program-backup.json").exists()
-    assert not (installation_state_dir(spec.baseline.environment) / "stop.json").exists()
-    assert inspect_environment(plan.installation.python) == spec.baseline
+    assert read_record(directory / "supervision.json")["confirmation_id"] == current.id
+    assert JobStatus.read(directory).phase == Phase.SUCCEEDED
+    assert JobStatus.read(directory).attempt == 1
+    assert inspect_environment(plan.installation.python).app_version == plan.target.version
     assert not pending_update_path(spec.baseline.environment).exists()
     with file_access(installation_state_dir(spec.baseline.environment) / "supervisor.lock", exclusive=True):
         pass

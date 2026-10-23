@@ -8,13 +8,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.agent.execution import ExecutionLifecycle
-from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import (
     WebSocketChannel,
     WebSocketConfig,
 )
-from nanobot.runtime_admission import RuntimeAdmission
 from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META
 from nanobot.session import webui_turns as wth
 from nanobot.session.manager import SessionManager
@@ -25,15 +22,13 @@ from nanobot.webui.gateway_services import build_gateway_services
 def _make_channel(
     session_manager: SessionManager | None = None, *, workspace: Path | None = None, restricted: bool = False,
 ) -> WebSocketChannel:
-    bus = MagicMock(spec=MessageBus, wraps=MessageBus())
-    bus.admission = RuntimeAdmission()
+    bus = MagicMock()
     bus.publish_inbound = AsyncMock()
     cfg = {"enabled": True, "allowFrom": ["*"], "websocketRequiresToken": False}
     parsed = WebSocketConfig.model_validate(cfg)
     gateway = build_gateway_services(
         config=parsed,
         bus=bus,
-        executions=ExecutionLifecycle(bus),
         session_manager=session_manager,
         static_dist_path=None,
         workspace_path=workspace or Path.cwd(),
@@ -49,9 +44,15 @@ def _make_channel(
 
 @pytest.fixture(autouse=True)
 def isolate_websocket_turn_state() -> None:
-    wth._WEBSOCKET_PENDING_TRANSCRIPTS.clear()
+    wth._WEBSOCKET_ACTIVE_TURNS.clear()
+    wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+    wth._WEBSOCKET_TURN_IDS.clear()
+    wth._WEBSOCKET_TURN_OWNERS.clear()
     yield
-    wth._WEBSOCKET_PENDING_TRANSCRIPTS.clear()
+    wth._WEBSOCKET_ACTIVE_TURNS.clear()
+    wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+    wth._WEBSOCKET_TURN_IDS.clear()
+    wth._WEBSOCKET_TURN_OWNERS.clear()
 
 
 def test_max_message_bytes_keeps_existing_transport_guard() -> None:
@@ -99,20 +100,13 @@ async def test_webui_message_acceptance_echoes_turn_id() -> None:
     await channel._dispatch_envelope(mock_conn, "client-1", envelope)
 
     channel._handle_message.assert_awaited_once()
-    admission = channel._handle_message.await_args.kwargs["execution_admission"]
-    assert admission is not None
-    assert channel.gateway.runs.snapshot("websocket:abc123")["runs"] == [{
-        "run_id": admission.execution_id,
-        "turn_id": "turn-accepted",
-        "phase": "queued",
-        "started_at": None,
-    }]
     assert json.loads(mock_conn.send.await_args.args[0]) == {
         "event": "message_accepted",
         "chat_id": "abc123",
         "turn_id": "turn-accepted",
         "starts_turn": True,
         "active_turn_id": "turn-accepted",
+        "started_at": wth.websocket_turn_wall_started_at("abc123"),
     }
 
 

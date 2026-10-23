@@ -9,11 +9,9 @@ import pytest
 from websockets.datastructures import Headers
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import WebSocketChannel
 from nanobot.command.builtin import cmd_restart
 from nanobot.command.router import CommandContext
-from nanobot.runtime_admission import RuntimeAdmission
 from nanobot.session.manager import SessionManager
 from nanobot.webui.metadata import WEBUI_RESTART_CONTROL_METADATA_KEY
 from nanobot.webui.session_list_index import list_webui_sessions
@@ -23,8 +21,7 @@ from .test_websocket_channel import _basic_handler, _sent_ws_payloads
 
 def _channel(tmp_path: Path, *, allowed: bool = True, sessions=None):
     sessions = sessions or SessionManager(tmp_path / "workspace")
-    bus = MagicMock(spec=MessageBus, wraps=MessageBus())
-    bus.admission = RuntimeAdmission()
+    bus = MagicMock()
     bus.publish_inbound = AsyncMock()
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"] if allowed else ["someone-else"]}, bus,

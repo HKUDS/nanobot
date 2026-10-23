@@ -16,7 +16,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from nanobot.agent.execution import ExecutionLifecycle
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import (
     StreamDeltaEvent,
@@ -1019,9 +1018,8 @@ def test_manager_loads_websocket_from_default_config():
             return {"enabled": True, "host": "127.0.0.1"}
 
     plugin = _channel_plugin(_FakeWebSocket, default_enabled=True)
-    bus = MessageBus()
     with patch("nanobot.channels.registry.discover_plugins", return_value={"websocket": plugin}):
-        mgr = ChannelManager(Config(), bus, executions=ExecutionLifecycle(bus), webui_static_dist=False)
+        mgr = ChannelManager(Config(), MessageBus(), webui_static_dist=False)
 
     assert "websocket" in mgr.channels
     assert mgr.channels["websocket"].config["enabled"] is True

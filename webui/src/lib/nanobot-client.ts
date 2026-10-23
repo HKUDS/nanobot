@@ -15,7 +15,6 @@ import type {
 } from "./types";
 import { createHostWebSocket } from "./runtime";
 import { ClientRunLedger } from "./client-run-ledger";
-import { decodeRunSnapshot } from "./server-run-state";
 import type { CanonicalRunSnapshot, RunEffect, RunObservation, RunState } from "./client-run-ledger";
 
 export type { CanonicalRunSnapshot, RunState } from "./client-run-ledger";
@@ -183,24 +182,37 @@ function runObservation(event: InboundEvent): RunObservation | null {
     case "user_message": {
       const activeTurnId = event.active_turn_id ?? (event.starts_turn ? event.turn_id : undefined);
       if (event.event === "user_message" && event.provenance?.session_message && !activeTurnId) {
-        return { ...base, kind: "receipt" };
+        return { ...base, kind: "activity" };
       }
       return {
         ...base,
         kind: event.event === "message_accepted" ? "admission" : "input",
-        ...(activeTurnId ? { owner: activeTurnId } : {}),
+        ...(activeTurnId ? { owner: { turnId: activeTurnId, startedAt: event.started_at } } : {}),
       };
     }
     case "goal_status":
-      return { ...base, kind: event.status === "idle" ? "idle" : "receipt" };
+      return { ...base, kind: "status", activity: event.status, startedAt: event.started_at };
     case "turn_end":
       return { ...base, kind: "completed" };
     case "error":
       return { ...base, kind: "rejection" };
+    case "delta":
+    case "reasoning_delta":
+      return { ...base, kind: event.text ? "activity" : "progress" };
+    case "stream_end":
+      return { ...base, kind: "activity" };
+    case "retry_status":
+      return { ...base, kind: event.state === "recovered" || event.state === "cleared" ? "progress" : "activity" };
+    case "recovery_state":
+      return { ...base, kind: "recovery", active: event.status === "resuming" };
+    case "attached":
+      return event.recovery_state && event.recovery_state.status !== "recovered"
+        ? { ...base, kind: "recovery", active: event.recovery_state.status === "resuming" }
+        : { ...base, kind: "progress" };
     case "message":
       return { ...base, kind: "message" };
     default:
-      return { ...base, kind: "receipt" };
+      return { ...base, kind: "progress" };
   }
 }
 
@@ -233,10 +245,6 @@ export class NanobotClient {
   /** Temporary chats are connection-owned and intentionally not reattached. */
   private temporaryChatIds = new Set<string>();
   private readonly runs = new ClientRunLedger();
-  private runWatchIds = new Set<string>();
-  private runAuthorityReady = false;
-  private watchedRunKey = "";
-  private deliveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Last tracked application frame written, for conservative transport-error attribution. */
   private lastSocketMessageSend: { chatId: string; turnId: string } | null = null;
   /** Latest ``goal_state`` snapshot per ``chat_id`` (multi-session isolation). */
@@ -341,35 +349,12 @@ export class NanobotClient {
     return this.runs.view(chatId);
   }
 
-  /** Observe execution without subscribing background conversations to transcript text. */
-  watchRuns(chatIds: readonly string[]): void {
-    this.runWatchIds = new Set(chatIds);
-    this.syncRunWatches();
+  /** Restore pending history only within its original lifecycle generation. */
+  restorePendingRun(chatId: string, generation: number, turnId: string | null): void {
+    this.applyRunEffects(this.runs.transition({ kind: "restore-pending", chatId, generation, turnId }));
   }
 
-  /** HTTP history may carry a separate versioned runtime snapshot, never infer one from its contents. */
-  ingestRunSnapshot(chatId: string, value: unknown): boolean {
-    return this.applyRunSnapshot(chatId, value, false);
-  }
-
-  private applyRunSnapshot(chatId: string, value: unknown, socketBaseline: boolean): boolean {
-    const snapshot = decodeRunSnapshot(value);
-    if (!snapshot) return false;
-    const result = this.runs.ingestSnapshot(chatId, snapshot, socketBaseline);
-    this.applyRunEffects(result.effects);
-    return result.accepted;
-  }
-
-  private syncRunWatches(): void {
-    if (!this.runAuthorityReady || this.socket?.readyState !== WS_OPEN) return;
-    const ids = Array.from(new Set([...this.runWatchIds, ...this.knownChats, ...this.runs.unresolvedChatIds()])).sort();
-    const key = JSON.stringify(ids);
-    if (key === this.watchedRunKey) return;
-    this.watchedRunKey = key;
-    this.rawSend({ type: "watch_runs", chat_ids: ids });
-  }
-
-  /** Last server-confirmed execution clock (unix sec) for *chatId*, or null when unknown. */
+  /** Last ``goal_status`` ``started_at`` (unix sec) for *chatId*, if the turn is running. */
   getRunStartedAt(chatId: string): number | null {
     return this.runs.view(chatId).startedAt;
   }
@@ -383,19 +368,9 @@ export class NanobotClient {
     return this.runs.isCompleted({ chatId, turnId });
   }
 
-  /** Cancellation is a scoped request, not a local execution-completed fact. */
-  async requestStop(chatId: string): Promise<void> {
-    const state = this.getRunState(chatId);
-    if (state.freshness !== "fresh" || !state.active) throw new Error("Current run state is not confirmed");
-    const runIds = state.runs.map((run) => run.run_id);
-    this.applyRunEffects(this.runs.transition({ kind: "cancel-request", chatId, runIds }));
-    try {
-      const result = await this.requestMutation<{ run_state?: unknown }>("runs.stop", { chat_id: chatId, run_ids: runIds });
-      if (result?.run_state) this.ingestRunSnapshot(chatId, result.run_state);
-    } catch (error) {
-      this.applyRunEffects(this.runs.transition({ kind: "cancel-rejected", chatId }));
-      throw error;
-    }
+  /** End the local optimistic run without confirming gateway cancellation. */
+  finishRunLocally(chatId: string): void {
+    this.applyRunEffects(this.runs.transition({ kind: "local-stop", chatId }));
   }
 
   updateMaxFrameBytes(maxFrameBytes?: number): void {
@@ -509,7 +484,6 @@ export class NanobotClient {
         }
       }
     }
-    this.syncRunWatches();
   }
 
   private recordGoalStateSnapshot(chatId: string, ev: InboundEvent): void {
@@ -563,13 +537,15 @@ export class NanobotClient {
     this.setStatus("connecting");
     const sock = this.socketFactory(this.currentUrl);
     this.socket = sock;
-    sock.onopen = () => { if (this.socket === sock) this.handleOpen(); };
-    sock.onmessage = (ev) => { if (this.socket === sock) this.handleMessage(ev); };
-    sock.onerror = () => { if (this.socket === sock) this.setStatus("error"); };
-    sock.onclose = (ev) => { if (this.socket === sock) this.handleClose(ev); };
+    sock.onopen = () => this.handleOpen();
+    sock.onmessage = (ev) => this.handleMessage(ev);
+    sock.onerror = () => this.setStatus("error");
+    sock.onclose = (ev) => this.handleClose(ev);
   }
 
   close(): void {
+    this.upload = null;
+    this.receipts.close();
     this.intentionallyClosed = true;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -582,7 +558,8 @@ export class NanobotClient {
     } catch {
       // ignore
     }
-    this.handleClose();
+    this.clearTemporaryChats();
+    this.setStatus("closed");
   }
 
   discardTemporaryChat(chatId: string): void {
@@ -737,7 +714,6 @@ export class NanobotClient {
   attach(chatId: string): void {
     if (this.temporaryChatIds.has(chatId)) return;
     this.knownChats.add(chatId);
-    this.syncRunWatches();
     if (this.socket?.readyState === WS_OPEN) {
       this.queueSend({ type: "attach", chat_id: chatId });
     }
@@ -756,7 +732,6 @@ export class NanobotClient {
       kind: "submit", chatId, turnId,
       role: options?.startsNewRun === false ? "supplement" : "candidate-owner",
     }));
-    let submitted = false;
     try {
       const references = await uploadAttachments(media, capability,
         typeof window !== "undefined" ? window.location.href : this.currentUrl,
@@ -766,14 +741,8 @@ export class NanobotClient {
         if (!this.sendMessage(chatId, content, references, { ...options, turnId })) {
           throw new Error("Message exceeds the gateway's WebSocket frame limit; draft retained");
         }
-        submitted = true;
       });
     } catch (error) {
-      if (submitted) {
-        // A write without a receipt may have reached the server; never silently retry or reject it as unsent.
-        this.applyRunEffects(this.runs.transition({ kind: "delivery-unknown", chatId, turnId }));
-        throw error;
-      }
       this.applyRunEffects(this.runs.transition({ kind: "reject", chatId, turnId }));
       this.emitError({ kind: "turn_rejected", chatId, turnId, detail: "attachment_rejected",
         reason: error instanceof Error ? error.message : "Attachment send failed" });
@@ -874,8 +843,6 @@ export class NanobotClient {
   }
 
   private handleOpen(): void {
-    this.runAuthorityReady = false;
-    this.watchedRunKey = "";
     this.setStatus("open");
     this.reconnectAttempts = 0;
     // Re-attach every known chat_id so deliveries continue routing after a drop.
@@ -908,21 +875,6 @@ export class NanobotClient {
 
     if (wsInboundDebugEnabled()) {
       console.log("[nanobot ws inbound]", summarizeInboundWsPayload(parsed));
-    }
-
-    if (parsed.event === "ready") {
-      const instanceId = typeof parsed.run_state_instance_id === "string" && parsed.run_state_instance_id
-        ? parsed.run_state_instance_id : null;
-      this.applyRunEffects(this.runs.pinAuthority(instanceId));
-      this.runAuthorityReady = instanceId !== null;
-      this.watchedRunKey = "";
-      if (parsed.run_state) this.applyRunSnapshot(parsed.chat_id, parsed.run_state, true);
-      this.syncRunWatches();
-    } else if (parsed.event === "run_state") {
-      this.applyRunSnapshot(parsed.chat_id, parsed.run_state, true);
-      return;
-    } else if (parsed.event === "attached" && parsed.run_state) {
-      this.applyRunSnapshot(parsed.chat_id, parsed.run_state, true);
     }
 
     if (parsed.event === "webui_response") {
@@ -961,18 +913,12 @@ export class NanobotClient {
     }
 
     this.receipts.event(parsed);
-    if ((parsed.event === "message_accepted" || parsed.event === "user_message" || parsed.event === "error") && parsed.turn_id) {
-      const timer = this.deliveryTimers.get(parsed.turn_id);
-      if (timer) clearTimeout(timer);
-      this.deliveryTimers.delete(parsed.turn_id);
-    }
     const turnId = "turn_id" in parsed && typeof parsed.turn_id === "string"
       ? parsed.turn_id
       : null;
     const correlatedChatId = "chat_id" in parsed ? parsed.chat_id : undefined;
     const observation = runObservation(parsed);
-    if (parsed.event === "turn_end" && turnId && this.runs.isFenced({ chatId: parsed.chat_id, turnId })) return;
-    if (observation && parsed.event !== "turn_end") {
+    if (observation) {
       const result = this.runs.observe(observation);
       this.applyRunEffects(result.effects);
       if (result.forward === "drop") return;
@@ -1096,10 +1042,6 @@ export class NanobotClient {
         }
       }
       this.dispatch(correlatedChatId, parsed);
-      if (observation && parsed.event === "turn_end") {
-        // Deliver/buffer the final transcript frame before releasing local result ownership.
-        this.applyRunEffects(this.runs.observe(observation).effects);
-      }
     }
   }
 
@@ -1153,9 +1095,6 @@ export class NanobotClient {
 
   private handleClose(event?: { code?: number }): void {
     this.upload = null;
-    this.runAuthorityReady = false;
-    for (const timer of this.deliveryTimers.values()) clearTimeout(timer);
-    this.deliveryTimers.clear();
     this.receipts.close();
     this.socket = null;
     this.clearTemporaryChats();
@@ -1329,21 +1268,12 @@ export class NanobotClient {
         const ref = { chatId: frame.chat_id, turnId: frame.turn_id };
         if (this.runs.hasPendingSend(ref)) {
           this.applyRunEffects(this.runs.transition({ kind: "written", ...ref }));
-          const previous = this.deliveryTimers.get(ref.turnId);
-          if (previous) clearTimeout(previous);
-          this.deliveryTimers.set(ref.turnId, setTimeout(() => {
-            this.deliveryTimers.delete(ref.turnId);
-            this.applyRunEffects(this.runs.transition({ kind: "delivery-unknown", ...ref }));
-          }, 30_000));
           this.lastSocketMessageSend = ref;
         }
       }
     } catch {
-      if (frame.type === "message") {
-        if (frame.turn_id) this.applyRunEffects(this.runs.transition({ kind: "delivery-unknown", chatId: frame.chat_id, turnId: frame.turn_id }));
-      } else {
-        this.sendQueue.push(frame);
-      }
+      // Send failure will materialize as a close; queue the frame for retry.
+      this.sendQueue.push(frame);
     }
   }
 

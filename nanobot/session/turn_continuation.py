@@ -1,8 +1,8 @@
 """Internal turn continuation helpers.
 
 This module keeps budget-boundary continuation policy out of ``AgentLoop``.
-The helpers prepare an internal continuation; the loop admits it through the
-same boundary as other session inputs before committing turn bookkeeping.
+The loop calls a small set of helpers; those helpers decide whether an internal
+continuation is allowed and, when it is, queue the next turn directly.
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any, Mapping, MutableMapping
 
 from loguru import logger
 
-from nanobot.bus.events import InboundMessage
 from nanobot.session.goal_state import (
     goal_state_runtime_lines,
     sustained_goal_active,
@@ -115,19 +114,19 @@ def should_finalize_on_max_iterations(
     )
 
 
-def prepare_continuation(
+async def maybe_continue_turn(
     ctx: TurnContext, *, session_metadata: Mapping[str, Any],
-) -> InboundMessage | None:
-    """Prepare a new root without queuing it or allocating an execution owner."""
+) -> bool:
+    """Queue an internal continuation for *ctx* when policy allows it."""
     if ctx.session is None or ctx.pending_queue is None:
-        return None
+        return False
     if not _continuation_available(
         stop_reason=ctx.stop_reason,
         pending_queue_available=True,
         session_metadata=session_metadata,
         message_metadata=ctx.msg.metadata,
     ):
-        return None
+        return False
 
     metadata = _internal_continuation_metadata(
         ctx.msg.metadata,
@@ -139,26 +138,26 @@ def prepare_continuation(
         "message_id": request.message_id,
         "turn_id": request.turn_id,
     }
-    return dataclasses.replace(
-        ctx.msg,
-        sender_id=_GOAL_CONTINUATION_SENDER,
-        content=_goal_continuation_prompt(session_metadata),
-        media=[],
-        metadata=metadata,
-        session_key_override=ctx.session_key,
-        execution_admission=None,
-    )
-
-
-def commit_continuation(ctx: TurnContext) -> None:
-    """Suppress this slice only after its successor was successfully submitted."""
-    assert ctx.session is not None
+    content = _goal_continuation_prompt(session_metadata)
+    messages = _strip_terminal_assistant(ctx.all_messages, ctx.final_content)
     _increment_goal_continuation_round(ctx.session.metadata)
+
     logger.info("Turn budget reached; scheduling internal continuation")
     ctx.msg.metadata[INTERNAL_CONTINUATION_PENDING_META] = True
-    ctx.all_messages = _strip_terminal_assistant(ctx.all_messages, ctx.final_content)
     ctx.final_content = ""
+    ctx.all_messages = messages
     ctx.suppress_response = True
+    await ctx.pending_queue.put(
+        dataclasses.replace(
+            ctx.msg,
+            sender_id=_GOAL_CONTINUATION_SENDER,
+            content=content,
+            media=[],
+            metadata=metadata,
+            session_key_override=ctx.session_key,
+        )
+    )
+    return True
 
 
 def prepare_save_boundary(ctx: TurnContext) -> None:

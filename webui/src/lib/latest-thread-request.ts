@@ -33,15 +33,13 @@ export function fetchLatestWebuiThread(
   const cached = webuiThreadCache.get(key);
   let request = requests.get(requestKey);
   if (!request || !request.shareable || request.controller.signal.aborted || request.cached !== cached) {
-    const { freshness } = client.getRunState(key.slice("websocket:".length));
     const controller = new AbortController();
     request = {
       cached,
       controller,
       consumers: 0,
       settled: false,
-      // Recovery must not inherit a mounted read from before ready/the chat baseline.
-      shareable: client.status === "open" && (freshness === "fresh" || freshness === "unavailable"),
+      shareable: client.status === "open",
       promise: fetchWebuiThread(token, key, {
         limit: 40,
         direction: "latest",

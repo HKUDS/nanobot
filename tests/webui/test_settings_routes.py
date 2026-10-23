@@ -12,7 +12,6 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from websockets.datastructures import Headers
 
-from nanobot.agent.execution import ExecutionLifecycle
 from nanobot.bus.queue import MessageBus
 from nanobot.config.loader import get_config_path
 from nanobot.config.network import NetworkConfig
@@ -1116,9 +1115,8 @@ async def test_mcp_proxy_mutation_persists_reloads_and_keeps_oauth_credentials(
         return {"ok": True, "connected": ["team-docs"], "requires_restart": False}
 
     reload = AsyncMock(side_effect=reload_mcp)
-    bus = MessageBus()
     gateway = build_gateway_services(
-        config=WebSocketConfig(), bus=bus, executions=ExecutionLifecycle(bus), session_manager=None,
+        config=WebSocketConfig(), bus=MessageBus(), session_manager=None,
         static_dist_path=None, workspace_path=tmp_path, config_path=config_path,
         default_restrict_to_workspace=True, runtime_model_name=None,
         runtime_surface="browser", runtime_capabilities_overrides=None, mcp_reload=reload,

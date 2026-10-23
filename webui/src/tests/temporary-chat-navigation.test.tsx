@@ -4,7 +4,6 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import App from "@/App";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { FilePreviewStore } from "@/hooks/useFilePreviewState";
-import type { ServerRunSnapshot } from "@/lib/server-run-state";
 import type { InboundEvent, Outbound } from "@/lib/types";
 import { fetchBootstrap } from "@/lib/bootstrap";
 import { canonicalThreadPayload } from "./thread-test-payload";
@@ -31,7 +30,6 @@ class TestSocket {
   onmessage: ((event: MessageEvent) => void) | null = null;
   onclose: (() => void) | null = null;
   private nextChat = 0;
-  private snapshots = new Map<string, ServerRunSnapshot>();
 
   constructor() {
     TestSocket.current = this;
@@ -40,10 +38,6 @@ class TestSocket {
   open() {
     this.readyState = 1;
     this.onopen?.();
-    this.receive({
-      event: "ready", chat_id: "default", client_id: "fixture-browser",
-      run_state_instance_id: "navigation-host", run_state: this.snapshot("default"),
-    });
   }
 
   close() {
@@ -55,39 +49,12 @@ class TestSocket {
     this.onmessage?.(new MessageEvent("message", { data: JSON.stringify(event) }));
   }
 
-  snapshot(chatId: string): ServerRunSnapshot {
-    return this.snapshots.get(chatId) ?? { instance_id: "navigation-host", revision: 0, runs: [] };
-  }
-
-  setRunning(chatId: string, turnId: string) {
-    const run_state: ServerRunSnapshot = {
-      ...this.snapshot(chatId), revision: this.snapshot(chatId).revision + 1,
-      runs: [{ run_id: `run:${turnId}`, turn_id: turnId, phase: "running", started_at: null }],
-    };
-    this.snapshots.set(chatId, run_state);
-    this.receive({ event: "run_state", chat_id: chatId, run_state });
-  }
-
-  finishRun(chatId: string, turnId: string | undefined) {
-    const current = this.snapshot(chatId);
-    const run_state: ServerRunSnapshot = {
-      ...current, revision: current.revision + 1,
-      runs: current.runs.filter((run) => run.turn_id !== turnId),
-    };
-    this.snapshots.set(chatId, run_state);
-    this.receive({ event: "run_state", chat_id: chatId, run_state });
-  }
-
   send(data: string) {
     const frame = JSON.parse(data) as Outbound;
     this.sent.push(frame);
     if (frame.type === "new_temporary_chat") {
       const chatId = `00000000-0000-4000-8000-${String(++this.nextChat).padStart(12, "0")}`;
-      queueMicrotask(() => this.receive({ event: "attached", chat_id: chatId, temporary: true, run_state: this.snapshot(chatId) }));
-    } else if (frame.type === "attach") {
-      this.receive({ event: "attached", chat_id: frame.chat_id, run_state: this.snapshot(frame.chat_id) });
-    } else if (frame.type === "watch_runs") {
-      for (const chatId of frame.chat_ids) this.receive({ event: "run_state", chat_id: chatId, run_state: this.snapshot(chatId) });
+      queueMicrotask(() => this.receive({ event: "attached", chat_id: chatId, temporary: true }));
     } else if (frame.type === "set_sidebar_state") {
       queueMicrotask(() => this.receive({ event: "sidebar_state_updated", state: frame.state }));
     } else if (frame.type === "webui_request" && frame.action === "temporary_chat.file_preview") {
@@ -114,15 +81,11 @@ async function startTemporaryChat(text: string) {
     type: "message", chat_id: chatId, content: text,
   })));
   const frame = TestSocket.current.sent.find((frame) => frame.type === "message" && frame.chat_id === chatId);
-  if (frame?.type !== "message" || !frame.turn_id) throw new Error("Missing submitted turn");
-  const turnId = frame.turn_id;
-  act(() => {
-    TestSocket.current.receive({
-      event: "message_accepted", chat_id: chatId, turn_id: turnId,
-      active_turn_id: turnId, starts_turn: true,
-    });
-    TestSocket.current.setRunning(chatId, turnId);
-  });
+  if (frame?.type !== "message") throw new Error("Missing submitted turn");
+  act(() => TestSocket.current.receive({
+    event: "goal_status", chat_id: chatId, turn_id: frame.turn_id,
+    status: "running", started_at: Date.now() / 1000,
+  }));
   return chatId;
 }
 
@@ -441,7 +404,6 @@ describe("temporary chat navigation", () => {
         emit({ event: "delta", chat_id: chatId, turn_id: turnId, text: " two three" });
         emit({ event: "stream_end", chat_id: chatId, turn_id: turnId });
         emit({ event: "turn_end", chat_id: chatId, turn_id: turnId });
-        act(() => socket.finishRun(chatId, turnId));
       };
       emit({ event: "delta", chat_id: chatId, turn_id: turnId, text: "one" });
       await screen.findByText("one");
@@ -514,7 +476,6 @@ describe("temporary chat navigation", () => {
           TestSocket.current.receive({ event: "delta", chat_id: chatId, turn_id: turnId, text: "one two three" });
         }
         TestSocket.current.receive({ event, chat_id: chatId, turn_id: turnId, text: "one two three" });
-        if (event === "turn_end") TestSocket.current.finishRun(chatId, turnId);
         const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
         fireEvent.click(within(sidebar).getByRole("button", { name: "Second pane" }));
       });
@@ -542,7 +503,6 @@ describe("temporary chat navigation", () => {
     act(() => {
       TestSocket.current.receive({ event: "delta", chat_id: firstChatId, turn_id: firstTurnId, text: "one two three" });
       TestSocket.current.receive({ event: "turn_end", chat_id: firstChatId, turn_id: firstTurnId });
-      TestSocket.current.finishRun(firstChatId, firstTurnId);
     });
     expect(screen.queryByText("one two three")).not.toBeInTheDocument();
     await selectTopic("Regular topic");
@@ -614,7 +574,6 @@ describe("temporary chat navigation", () => {
         TestSocket.current.receive({ event: "delta", chat_id: chatId, turn_id: turnId, text });
       }
       TestSocket.current.receive({ event: "turn_end", chat_id: chatId, turn_id: turnId });
-      TestSocket.current.finishRun(chatId, turnId);
     });
     await selectTopic("Count from one to three");
     await waitFor(() => expect(within(screen.getByTestId("thread-message-region"))

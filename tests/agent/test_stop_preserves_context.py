@@ -102,8 +102,8 @@ async def test_dispatch_cancellation_restores_checkpoint():
 
     msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="work")
 
-    # Root cancellation settles its checkpoint; it no longer cancels the FIFO worker.
-    await run_session(loop, msg)
+    with pytest.raises(asyncio.CancelledError):
+        await run_session(loop, msg)
 
     roles = [m.get("role") for m in session.messages]
     assert roles == ["user", "assistant", "tool"], (
@@ -142,9 +142,10 @@ async def test_dispatch_cancellation_keeps_checkpoint_for_gateway_shutdown(tmp_p
 
     from nanobot.bus.events import InboundMessage
 
-    await run_session(loop,
-        InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="work")
-    )
+    with pytest.raises(asyncio.CancelledError):
+        await run_session(loop,
+            InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="work")
+        )
 
     assert session.metadata[checkpoint_key] == checkpoint
     assert session.messages == []

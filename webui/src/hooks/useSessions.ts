@@ -208,7 +208,7 @@ export function useSessions(): {
 /** Read-only history view backed by the conversation owner. */
 export function useSessionHistory(key: string | null) {
   const { messages, history, refreshHistory, loadOlder } = useNanobotStream(
-    null, undefined, undefined, undefined, { key },
+    null, undefined, false, undefined, undefined, undefined, { key },
   );
   return { messages, ...history, refresh: refreshHistory, loadOlder };
 }

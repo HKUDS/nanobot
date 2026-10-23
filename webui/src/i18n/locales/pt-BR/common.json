@@ -1774,19 +1774,6 @@
     "error": "Erro de conexão"
   },
   "thread": {
-    "runStatus": {
-      "syncing": "Verificando o estado da tarefa…",
-      "unknown": "Estado da tarefa desconhecido. Reconecte para verificar.",
-      "unavailable": "Estado da tarefa indisponível. Atualize o nanobot neste host para ativar o estado das tarefas, a interrupção e o envio automático de mensagens em espera.",
-      "queued": "Tarefa na fila",
-      "running": "Tarefa em execução",
-      "stopping": "Interrompendo a tarefa…",
-      "cancelPending": "Interrupção solicitada. Aguardando a tarefa terminar…",
-      "sending": "Enviando mensagem…",
-      "deliveryUnknown": "Recebimento da mensagem não confirmado. Verifique a conversa antes de enviar novamente.",
-      "resultUnknown": "Resposta não confirmada. Reconecte para verificar a conversa.",
-      "stopFailed": "A solicitação de interrupção falhou. Verifique o estado da tarefa e tente novamente."
-    },
     "subagents": {
       "stopFailed": "Não foi possível interromper esta tarefa.",
       "stopTask": "Interromper {{label}}",

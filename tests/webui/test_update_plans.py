@@ -20,7 +20,6 @@ from websockets.http11 import Request
 
 import nanobot
 from nanobot import update_plan, update_service
-from nanobot.agent.execution import ExecutionLifecycle
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import WebSocketConfig
 from nanobot.config.home import get_selected_home_path, set_home_path
@@ -170,9 +169,8 @@ def review_gateway(tmp_path, monkeypatch):
         directory, transport=httpx.MockTransport(release), supported_tags=[Tag("py3", "none", "win_amd64")],
     ))
     def gateway(surface="gateway"):
-        bus = MessageBus()
         return build_gateway_services(
-            config=WebSocketConfig(), bus=bus, executions=ExecutionLifecycle(bus), session_manager=None,
+            config=WebSocketConfig(), bus=MessageBus(), session_manager=None,
             static_dist_path=None, workspace_path=tmp_path / "workspace",
             default_restrict_to_workspace=True, config_path=tmp_path / "config.json",
             runtime_model_name=None, runtime_surface=surface, runtime_capabilities_overrides=None,

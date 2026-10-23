@@ -21,7 +21,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from nanobot.agent.execution import ExecutionLifecycle
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import (
     ProgressEvent,
@@ -94,10 +93,8 @@ def test_websocket_gateway_uses_configured_workspace_restriction(tmp_path, monke
         }
     )
 
-    bus = MessageBus()
     mgr = ChannelManager(
-        config, bus, executions=ExecutionLifecycle(bus),
-        webui_static_dist=False, config_path=tmp_path / "config.json",
+        config, MessageBus(), webui_static_dist=False, config_path=tmp_path / "config.json",
     )
     channel = mgr.channels["websocket"]
 

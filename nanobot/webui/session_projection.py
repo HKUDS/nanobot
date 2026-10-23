@@ -12,8 +12,7 @@ from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.model_selection import model_preset_from_metadata
 from nanobot.session.recovery import recovery_state_from_metadata
 from nanobot.session.state import SessionState
-from nanobot.webui.run_state import RunStateAuthority
-from nanobot.webui.session_identity import webui_session_key
+from nanobot.session.webui_turns import websocket_turn_id, websocket_turn_wall_started_at
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
@@ -34,12 +33,10 @@ class WebUISessionProjection:
         sessions: SessionMetadataReader | None,
         *,
         subagent_manager: SubagentManager | None = None,
-        runs: RunStateAuthority | None = None,
         log: Any = default_logger,
     ) -> None:
         self._sessions = sessions
         self._subagents = subagent_manager
-        self._runs = runs
         self._log = log
 
     def subagent_task(self, session_key: str, task_id: str) -> dict[str, object] | None:
@@ -53,17 +50,13 @@ class WebUISessionProjection:
 
     async def attach_fields(self, session_key: str) -> dict[str, Any]:
         """Return the session runtime facts sent with an attach handshake."""
-        fields: dict[str, Any] = {}
         if self._sessions is None:
-            if self._runs is not None:
-                fields["run_state"] = self._runs.snapshot(session_key)
-            return fields
+            return {}
         snapshot = await self._sessions.state.read_metadata(session_key)
         raw_metadata = snapshot.get("metadata") if snapshot is not None else None
         metadata = cast(dict[str, object], raw_metadata) if isinstance(raw_metadata, dict) else None
 
-        if self._runs is not None:
-            fields["run_state"] = self._runs.snapshot(session_key)
+        fields: dict[str, Any] = {}
         try:
             fields["model_preset"] = model_preset_from_metadata(metadata)
         except ValueError:
@@ -93,7 +86,7 @@ class WebUISessionProjection:
                 }
             )
         active_turn = self.active_turn_status(chat_id)
-        if active_turn is not None and active_turn[0] is not None:
+        if active_turn is not None:
             started_at, turn_id = active_turn
             event: dict[str, Any] = {
                 "event": "goal_status",
@@ -118,10 +111,10 @@ class WebUISessionProjection:
             return None
         return goal_state
 
-    def active_turn_status(self, chat_id: str) -> tuple[float | None, str | None] | None:
-        """Derive protocol-1 timing hints from the execution projection."""
-        runs = self._runs.snapshot(webui_session_key(chat_id))["runs"] if self._runs is not None else []
-        if not runs:
+    @staticmethod
+    def active_turn_status(chat_id: str) -> tuple[float, str | None] | None:
+        """Return same-process running-turn state for reconnect hydration."""
+        started_at = websocket_turn_wall_started_at(chat_id)
+        if started_at is None:
             return None
-        active = next((run for run in reversed(runs) if run["started_at"] is not None), runs[-1])
-        return active["started_at"], active["turn_id"]
+        return started_at, websocket_turn_id(chat_id)

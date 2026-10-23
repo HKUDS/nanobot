@@ -450,9 +450,8 @@ export interface ChatSummary {
   preview: string;
   /** Model preset persisted for this session; null means it still follows the global default. */
   modelPreset?: string | null;
-  /** Legacy transcript turn clock, not a source of execution liveness. */
+  /** Unix epoch seconds when this session currently has a turn in flight. */
   runStartedAt?: number | null;
-  runState?: import("./server-run-state").ServerRunSnapshot;
   /** Durable recovery state that needs attention after an interrupted turn. */
   recoveryState?: RecoveryState | null;
   workspaceScope?: WorkspaceScopePayload | null;
@@ -1476,14 +1475,11 @@ interface InboundTurnMetadata {
 }
 
 export type InboundEvent =
-  | { event: "run_state"; chat_id: string; run_state: import("./server-run-state").ServerRunSnapshot }
   | { event: "subagent_task"; chat_id: string; task: SubagentTaskSnapshot }
-  | { event: "ready"; chat_id: string; client_id: string; upload?: unknown;
-      run_state_instance_id?: string; run_state?: import("./server-run-state").ServerRunSnapshot }
+  | { event: "ready"; chat_id: string; client_id: string; upload?: unknown }
   | {
       event: "attached";
       chat_id: string;
-      run_state?: import("./server-run-state").ServerRunSnapshot;
       temporary?: boolean;
       recovery_state?: RecoveryState;
       usage?: TurnUsage;
@@ -1742,8 +1738,7 @@ export interface WebuiThreadPersistedPayload {
   /** Turn ids backed by an explicit persisted ``turn_end`` event. */
   completed_turn_ids?: string[];
   has_pending_tool_calls?: boolean;
-  run_state?: import("./server-run-state").ServerRunSnapshot;
-  /** Transcript/recovery turn identity, independent of the live execution snapshot. */
+  /** Exact active turn when supplied by a current gateway. */
   active_turn_id?: string | null;
   page?: WebuiThreadPagePayload;
   workspace_scope?: WorkspaceScopePayload;
@@ -1782,7 +1777,6 @@ export type Outbound =
     }
   | { type: "fork_chat"; source_chat_id: string; before_user_index: number; title?: string }
   | { type: "attach"; chat_id: string }
-  | { type: "watch_runs"; chat_ids: string[] }
   | { type: "set_sidebar_state"; state: SidebarStatePayload }
   | { type: "discard_temporary_chat"; chat_id: string }
   | { type: "set_workspace_scope"; chat_id: string; workspace_scope: WorkspaceScopePayload }

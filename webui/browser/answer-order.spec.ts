@@ -21,12 +21,6 @@ async function openThread(page: Page, events: ThreadProjectionEvent[] = []) {
     } });
   });
   let socket!: WebSocketRoute;
-  let revision = 0;
-  const snapshot = (active: boolean) => ({
-    instance_id: "answer-order-host", revision: ++revision,
-    runs: active ? [{ run_id: "answer-owner", turn_id: turnId, phase: "running" as const, started_at: 100 }] : [],
-  });
-  const initiallyActive = !events.some((event) => event.event === "turn_end");
   const attached = new Set<string>();
   await page.routeWebSocket("**/answer-order-socket", (route) => {
     socket = route;
@@ -34,21 +28,14 @@ async function openThread(page: Page, events: ThreadProjectionEvent[] = []) {
       const frame = JSON.parse(String(raw));
       if (frame.type === "attach") {
         attached.add(frame.chat_id);
-        route.send(JSON.stringify({ event: "attached", chat_id: frame.chat_id,
-          run_state: snapshot(frame.chat_id === chatId && initiallyActive) }));
+        route.send(JSON.stringify({ event: "attached", chat_id: frame.chat_id }));
       }
     });
-    route.send(JSON.stringify({ event: "ready", chat_id: chatId, client_id: "answer-order-client",
-      run_state_instance_id: "answer-order-host" }));
   });
   await page.goto("/browser/fixture.html?case=answer-order");
   await expect.poll(() => attached.has(chatId)).toBe(true);
   await expect(page.getByRole("status", { name: "Loading conversation…" })).toHaveCount(0);
-  return {
-    emit: (...frames: InboundEvent[]) => frames.forEach((frame) => socket.send(JSON.stringify(frame))),
-    complete: () => socket.send(JSON.stringify({ event: "run_state", chat_id: chatId, run_state: snapshot(false) })),
-    errors,
-  };
+  return { emit: (...frames: InboundEvent[]) => frames.forEach((frame) => socket.send(JSON.stringify(frame))), errors };
 }
 
 async function expectAnswerOrder(page: Page) {
@@ -63,7 +50,7 @@ for (const width of [1440, 390]) {
   for (const path of ["callback", "cached return"] as const) {
     test(`keeps closed answer order through ${path} and textless streams at ${width}px`, async ({ page }, info) => {
       await page.setViewportSize({ width, height: 1000 });
-      const { emit, complete, errors } = await openThread(page);
+      const { emit, errors } = await openThread(page);
       emit(
         { event: "goal_status", ...base, status: "running", started_at: 100 },
         { event: "delta", ...base, stream_id: "first", turn_seq: 1, text: "Earlier answer" },
@@ -91,7 +78,6 @@ for (const width of [1440, 390]) {
       await expect(page.getByRole("button", { name: "Stop response" })).toBeVisible();
       await page.screenshot({ path: info.outputPath("answer-order.png") });
       emit({ event: "turn_end", ...base, turn_seq: 10 });
-      complete();
       await expect(page.getByRole("button", { name: "Stop response" })).toHaveCount(0);
       emit({ event: "delta", ...base, stream_id: "late", turn_seq: 11, text: "Obsolete answer" });
       // Ordered WebSocket processing: a subsequent new-turn frame is the barrier.
@@ -133,11 +119,7 @@ for (const width of [1440, 390]) {
 
   test(`replays legacy cumulative answers on both sides of a hosted tool at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 });
-    // Completed activity is collapsed by default; inspect its supported expanded view.
-    await page.addInitScript(() => localStorage.setItem("nanobot-webui.settings-preferences",
-      JSON.stringify({ schemaVersion: 1, activityMode: "expanded" })));
     const { errors } = await openThread(page, [
-      { event: "user_message", ...base, turn_seq: 1, text: "Search for this", starts_turn: true },
       { event: "stream_end", ...base, stream_id: "legacy", turn_seq: 2, text: "First ", resuming: true, merge_next: true },
       { event: "message", ...base, turn_seq: 3, kind: "tool_hint", text: "web_search(query)" },
       { event: "stream_end", ...base, stream_id: "legacy", turn_seq: 5, text: "First last" },
@@ -145,22 +127,15 @@ for (const width of [1440, 390]) {
     ]);
     await expect(page.getByText("First", { exact: true })).toHaveCount(1);
     await expect(page.getByText("last", { exact: true })).toHaveCount(1);
-    const first = page.getByText("First", { exact: true });
-    const tool = page.getByText("Searched the web", { exact: true });
-    const last = page.getByText("last", { exact: true });
-    await expect(tool).toBeVisible();
-    // Completed activity shares the following answer's display unit, but must
-    // still appear causally between the two answer slices inside that unit.
-    const toolElement = await tool.elementHandle();
-    const lastElement = await last.elementHandle();
-    expect(await first.evaluate((node, following) => !!(node.compareDocumentPosition(following!) & Node.DOCUMENT_POSITION_FOLLOWING), toolElement)).toBe(true);
-    expect(await tool.evaluate((node, following) => !!(node.compareDocumentPosition(following!) & Node.DOCUMENT_POSITION_FOLLOWING), lastElement)).toBe(true);
+    const texts = await page.locator("[data-thread-display-unit]").allTextContents();
+    expect(texts.findIndex((text) => text.includes("First"))).toBeLessThan(texts.findIndex((text) => text.includes("Searching the web")));
+    expect(texts.findIndex((text) => text.includes("Searching the web"))).toBeLessThan(texts.findIndex((text) => text.includes("last")));
     expect(errors).toEqual([]);
   });
 
   test(`keeps a rewritten image intact before a hosted tool at ${width}px`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 1000 });
-    const { emit, complete, errors } = await openThread(page);
+    const { emit, errors } = await openThread(page);
     await page.route("**/api/media/**", (route) => route.fulfill({ contentType: "image/png", body: Buffer.from(
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j5hUAAAAASUVORK5CYII=", "base64",
     ) }));
@@ -184,7 +159,6 @@ for (const width of [1440, 390]) {
     expect(toolIndex).toBeLessThan(texts.findIndex((text) => text.includes("After tool.")));
     await page.screenshot({ path: info.outputPath("hosted-tool-image.png") });
     emit({ event: "turn_end", ...base, turn_seq: 6 });
-    complete();
     await expect(page.getByRole("button", { name: "Stop response" })).toHaveCount(0);
     await expect(image).toHaveCount(1);
     await expect(page.getByText("After tool.", { exact: true })).toHaveCount(1);

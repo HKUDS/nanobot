@@ -1,4 +1,4 @@
-"""Tests for WebSocket turn timing events and transcript ownership."""
+"""Tests for WebSocket turn timing strip bookkeeping."""
 
 from unittest.mock import AsyncMock, MagicMock
 
@@ -23,7 +23,6 @@ from nanobot.bus.runtime_events import (
 from nanobot.providers.base import GenerationSettings
 from nanobot.providers.fallback_provider import FallbackModelSelection
 from nanobot.session import webui_turns as wth
-from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.manager import SessionManager
 from nanobot.session.session_handles import session_handle_for_name
 from nanobot.session.session_messages import SESSION_MESSAGE_METADATA_KEY
@@ -32,17 +31,20 @@ from nanobot.webui.metadata import WEBSOCKET_TURN_OWNER_METADATA_KEY
 
 
 @pytest.fixture(autouse=True)
-def _clear_pending_transcripts() -> None:
-    with wth._WEBSOCKET_TRANSCRIPT_LOCK:
-        wth._WEBSOCKET_PENDING_TRANSCRIPTS.clear()
+def _clear_turn_wall_clock() -> None:
+    wth._WEBSOCKET_ACTIVE_TURNS.clear()
+    wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+    wth._WEBSOCKET_TURN_IDS.clear()
+    wth._WEBSOCKET_TURN_OWNERS.clear()
     yield
-    with wth._WEBSOCKET_TRANSCRIPT_LOCK:
-        wth._WEBSOCKET_PENDING_TRANSCRIPTS.clear()
+    wth._WEBSOCKET_ACTIVE_TURNS.clear()
+    wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+    wth._WEBSOCKET_TURN_IDS.clear()
+    wth._WEBSOCKET_TURN_OWNERS.clear()
 
 
 @pytest.mark.asyncio
-async def test_publish_turn_run_status_running_sends_wall_clock(monkeypatch) -> None:
-    monkeypatch.setattr(wth.time, "time", lambda: 1234.5)
+async def test_publish_turn_run_status_running_records_wall_clock() -> None:
     bus = MessageBus()
     bus.publish_outbound = AsyncMock()
     msg = InboundMessage(
@@ -55,12 +57,14 @@ async def test_publish_turn_run_status_running_sends_wall_clock(monkeypatch) -> 
 
     await wth.publish_turn_run_status(bus, msg, "running")
 
-    assert wth.has_pending_webui_transcript("chat-a", None) is True
+    assert "chat-a" in wth._WEBSOCKET_TURN_WALL_STARTED_AT
+    t0 = wth.websocket_turn_wall_started_at("chat-a")
+    assert isinstance(t0, float)
+    assert wth.websocket_turn_id("chat-a") == "turn-a"
     call = bus.publish_outbound.await_args[0][0]
     assert call.chat_id == "chat-a"
-    assert call.metadata["webui_turn_id"] == "turn-a"
     assert isinstance(call.event, GoalStatusEvent)
-    assert call.event.started_at == 1234.5
+    assert call.event.started_at == t0
 
 
 @pytest.mark.asyncio
@@ -71,13 +75,14 @@ async def test_publish_turn_run_status_reuses_explicit_wall_clock() -> None:
 
     await wth.publish_turn_run_status(bus, msg, "running", started_at=1234.5)
 
+    assert wth.websocket_turn_wall_started_at("chat-a") == 1234.5
     call = bus.publish_outbound.await_args[0][0]
     assert isinstance(call.event, GoalStatusEvent)
     assert call.event.started_at == 1234.5
 
 
 @pytest.mark.asyncio
-async def test_queued_idle_status_protects_transcript_until_delivery() -> None:
+async def test_publish_turn_run_status_idle_retains_registry_until_delivery() -> None:
     bus = MessageBus()
     bus.publish_outbound = AsyncMock()
     msg = InboundMessage(
@@ -89,11 +94,12 @@ async def test_queued_idle_status_protects_transcript_until_delivery() -> None:
     )
 
     await wth.publish_turn_run_status(bus, msg, "running")
-    assert wth.has_pending_webui_transcript("chat-b", None) is True
+    assert wth.websocket_turn_wall_started_at("chat-b") is not None
+    assert wth.websocket_turn_id("chat-b") == "turn-b"
 
     await wth.publish_turn_run_status(bus, msg, "idle")
-    assert wth.has_pending_webui_transcript("chat-b", None) is True
-    assert bus.publish_outbound.await_args.args[0].event == GoalStatusEvent(status="idle")
+    assert wth.websocket_turn_wall_started_at("chat-b") is not None
+    assert wth.websocket_turn_id("chat-b") == "turn-b"
 
 
 async def test_clear_websocket_turn_only_clears_matching_owner() -> None:
@@ -105,10 +111,12 @@ async def test_clear_websocket_turn_only_clears_matching_owner() -> None:
     await wth.publish_turn_run_status(bus, msg, "running", started_at=1234.5)
 
     assert wth.clear_websocket_turn_if_current("chat-b", "owner-old") is False
-    assert wth.has_pending_webui_transcript("chat-b", None) is True
+    assert wth.websocket_turn_wall_started_at("chat-b") == 1234.5
+    assert wth.websocket_turn_id("chat-b") == "turn-new"
 
     assert wth.clear_websocket_turn_if_current("chat-b", "owner-new") is True
-    assert wth.has_pending_webui_transcript("chat-b", None) is False
+    assert wth.websocket_turn_wall_started_at("chat-b") is None
+    assert wth.websocket_turn_id("chat-b") is None
 
 
 @pytest.mark.asyncio
@@ -135,53 +143,21 @@ async def test_ownerless_turns_receive_distinct_internal_owners() -> None:
 
     assert first_owner != second_owner
     assert wth.clear_websocket_turn_if_current("chat-ownerless", first_owner) is True
-    assert wth.has_pending_webui_transcript("chat-ownerless", None) is True
+    assert wth._WEBSOCKET_TURN_OWNERS["chat-ownerless"] == second_owner
+    assert wth.websocket_turn_wall_started_at("chat-ownerless") is not None
     assert wth.clear_websocket_turn_if_current("chat-ownerless", second_owner) is True
-    assert wth.has_pending_webui_transcript("chat-ownerless", None) is False
 
 
 @pytest.mark.asyncio
-async def test_new_generation_keeps_new_owner_pending_after_obsolete_failure(history) -> None:
-    bus = MessageBus()
-    chat_id = "reset-owner"
-    key = f"websocket:{chat_id}"
-    old_metadata = await history.metadata(chat_id, {
-        WEBSOCKET_TURN_OWNER_METADATA_KEY: "owner-old",
-    })
-    old = InboundMessage(
-        channel="websocket", sender_id="u", chat_id=chat_id, content="old",
-        metadata=old_metadata,
-    )
-    await wth.publish_turn_run_status(bus, old, "running")
-    await history.sessions.state.reset(key)
-    new_metadata = await history.metadata(chat_id, {
-        WEBSOCKET_TURN_OWNER_METADATA_KEY: "owner-new",
-    })
-    new = InboundMessage(
-        channel="websocket", sender_id="u", chat_id=chat_id, content="new",
-        metadata=new_metadata,
-    )
-    await wth.publish_turn_run_status(bus, new, "running")
-    old_generation = old_metadata[HISTORY_GENERATION_METADATA_KEY]
-    new_generation = new_metadata[HISTORY_GENERATION_METADATA_KEY]
-    assert new_generation != old_generation
-
-    # A delayed old completion can fail after reset while the new owner is running.
-    wth.mark_websocket_turn_transcript_persistence_failed(chat_id, "owner-old", old_generation)
-    assert wth.has_pending_webui_transcript(chat_id, new_generation) is True
-    assert wth.clear_websocket_turn_if_current(chat_id, "owner-new") is True
-    assert wth.has_pending_webui_transcript(chat_id, new_generation) is False
-
-
-@pytest.mark.asyncio
-async def test_publish_turn_run_status_non_websocket_is_quiet() -> None:
+async def test_publish_turn_run_status_non_websocket_noop_registry() -> None:
     bus = MessageBus()
     bus.publish_outbound = AsyncMock()
     msg = InboundMessage(channel="telegram", sender_id="u", chat_id="1", content="hi")
 
     await wth.publish_turn_run_status(bus, msg, "running")
 
-    bus.publish_outbound.assert_not_awaited()
+    assert wth._WEBSOCKET_TURN_WALL_STARTED_AT == {}
+    assert wth._WEBSOCKET_TURN_IDS == {}
 
 
 @pytest.mark.asyncio

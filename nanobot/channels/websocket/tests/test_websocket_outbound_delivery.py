@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.execution import ExecutionLifecycle
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.manager import ChannelManager
@@ -75,7 +74,6 @@ def _channel() -> WebSocketChannel:
     gateway = build_gateway_services(
         config=config,
         bus=bus,
-        executions=ExecutionLifecycle(bus),
         session_manager=None,
         static_dist_path=None,
         workspace_path=Path.cwd(),

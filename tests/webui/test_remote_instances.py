@@ -14,8 +14,6 @@ from pydantic import ValidationError
 from websockets.datastructures import Headers
 from websockets.http11 import Request
 
-from nanobot.agent.execution import ExecutionLifecycle
-from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import WebSocketConfig
 from nanobot.webui import remote_instances, remote_ssh
 from nanobot.webui.client_contract import webui_contract
@@ -678,10 +676,8 @@ def test_errors_never_echo_raw_ssh_output(stderr, code):
 
 @pytest.fixture
 def gateway(tmp_path):
-    bus = MessageBus()
     return build_gateway_services(
-        config=WebSocketConfig(host="127.0.0.1"), bus=bus, executions=ExecutionLifecycle(bus),
-        session_manager=None,
+        config=WebSocketConfig(host="127.0.0.1"), bus=MagicMock(), session_manager=None,
         static_dist_path=None, workspace_path=tmp_path, config_path=tmp_path / "config.json",
         default_restrict_to_workspace=False, runtime_model_name=None,
         runtime_surface="browser", runtime_capabilities_overrides=None,

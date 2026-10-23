@@ -17,7 +17,6 @@ from nanobot.webui.gateway_endpoint import WebUIGatewayEndpoint
 from nanobot.webui.gateway_tokens import GatewayTokenStore
 from nanobot.webui.ingress_policy import DEFAULT_WEBUI_INGRESS_POLICY, WebUIIngressPolicy
 from nanobot.webui.media_gateway import WebUIMediaGateway
-from nanobot.webui.run_state import RunStateAuthority
 from nanobot.webui.session_projection import WebUISessionProjection
 from nanobot.webui.settings_services import WebUISettingsServices
 from nanobot.webui.temporary_chats import WebUITemporaryChats
@@ -26,7 +25,6 @@ from nanobot.webui.workspaces import WebUIWorkspaceController
 from nanobot.webui.ws_http import GatewayHTTPHandler
 
 if TYPE_CHECKING:
-    from nanobot.agent.execution import ExecutionControl
     from nanobot.agent.subagent import SubagentManager
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.websocket.runtime import WebSocketConfig
@@ -43,8 +41,6 @@ class GatewayServices:
     endpoint: WebUIGatewayEndpoint
     settings: WebUISettingsServices
     tokens: GatewayTokenStore
-    runs: RunStateAuthority
-    executions: ExecutionControl
     media: WebUIMediaGateway
     uploads: AttachmentHTTP
     ingress: WebUIIngressPolicy
@@ -64,7 +60,6 @@ def build_gateway_services(
     *,
     config: WebSocketConfig,
     bus: MessageBus,
-    executions: ExecutionControl,
     session_manager: SessionManager | None,
     static_dist_path: Path | None,
     workspace_path: Path,
@@ -101,7 +96,6 @@ def build_gateway_services(
         refresh_runtime_config=refresh_runtime_config,
     )
     tokens = GatewayTokenStore()
-    runs = RunStateAuthority(bus, tokens.instance_id)
     ingress = DEFAULT_WEBUI_INGRESS_POLICY
     minimum_frame_bytes = ingress.minimum_full_policy_frame_bytes()
     if config.max_message_bytes < minimum_frame_bytes:
@@ -130,9 +124,7 @@ def build_gateway_services(
         workspaces=workspaces,
         logger=logger,
     )
-    session_projection = WebUISessionProjection(
-        session_manager, subagent_manager=subagent_manager, runs=runs, log=logger,
-    )
+    session_projection = WebUISessionProjection(session_manager, subagent_manager=subagent_manager, log=logger)
     http = GatewayHTTPHandler(
         config=config,
         session_manager=session_manager,
@@ -142,7 +134,6 @@ def build_gateway_services(
         runtime_capabilities_overrides=runtime_capabilities_overrides,
         bus=bus,
         tokens=tokens,
-        runs=runs,
         media=media,
         ingress=ingress,
         workspaces=workspaces,
@@ -170,8 +161,6 @@ def build_gateway_services(
         endpoint=endpoint,
         settings=settings,
         tokens=tokens,
-        runs=runs,
-        executions=executions,
         media=media,
         uploads=uploads,
         ingress=ingress,

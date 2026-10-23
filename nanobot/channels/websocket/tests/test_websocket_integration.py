@@ -14,12 +14,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import websockets
 
-from nanobot.agent.execution import ExecutionLifecycle
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
-from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
-from nanobot.runtime_admission import RuntimeAdmission
 from nanobot.webui.gateway_services import build_gateway_services
 
 from .ws_test_client import WsTestClient, issue_token, issue_token_ok
@@ -39,7 +36,6 @@ def _ch(bus: Any, port: int, **kw: Any) -> WebSocketChannel:
     gateway = build_gateway_services(
         config=parsed,
         bus=bus,
-        executions=ExecutionLifecycle(bus),
         session_manager=None,
         static_dist_path=None,
         workspace_path=Path.cwd(),
@@ -53,8 +49,7 @@ def _ch(bus: Any, port: int, **kw: Any) -> WebSocketChannel:
 
 @pytest.fixture()
 def bus() -> MagicMock:
-    b = MagicMock(spec=MessageBus, wraps=MessageBus())
-    b.admission = RuntimeAdmission()
+    b = MagicMock()
     b.publish_inbound = AsyncMock()
     return b
 
@@ -363,13 +358,8 @@ async def test_same_session_projects_one_turn_to_both_clients(bus: MagicMock) ->
                     }
                 )
 
-                state_a, accepted = await a.recv_n(2)
-                state_b, projected = await b.recv_n(2)
-                assert state_a.event == state_b.event == "run_state"
-                assert state_a.raw == state_b.raw
-                assert state_a.raw["run_state"]["runs"][0]["phase"] == "queued"
-                assert state_a.raw["run_state"]["runs"][0]["started_at"] is None
-                assert state_a.raw["run_state"]["runs"][0]["turn_id"] == "turn-a"
+                accepted = await a.recv()
+                projected = await b.recv()
                 assert accepted.event == "message_accepted"
                 assert accepted.raw["turn_id"] == "turn-a"
                 assert accepted.raw["starts_turn"] is True
@@ -381,6 +371,7 @@ async def test_same_session_projects_one_turn_to_both_clients(bus: MagicMock) ->
                     "starts_turn": True,
                     "turn_id": "turn-a",
                     "active_turn_id": "turn-a",
+                    "started_at": projected.raw["started_at"],
                 }
 
                 await ch.send_delta(chat_id, "shared reply", stream_id="stream-a")

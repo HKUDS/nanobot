@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from nanobot.bus.events import InboundMessage
 from nanobot.events import AgentEvent
@@ -55,16 +55,6 @@ class TurnRunStatusChanged(AgentEvent):
 
     context: RuntimeEventContext
     status: str
-    started_at: float | None = None
-
-
-@dataclass(frozen=True)
-class TurnExecutionChanged(AgentEvent):
-    """One admitted execution owner changed phase, independently of delivery/storage."""
-
-    context: RuntimeEventContext
-    execution_id: str
-    phase: Literal["queued", "running", "stopping", "injected", "rejected", "exited"]
     started_at: float | None = None
 
 
@@ -258,28 +248,6 @@ class RuntimeEventPublisher:
                 started_at=started_at,
             )
         )
-
-    async def execution_changed(
-        self,
-        msg: InboundMessage,
-        session_key: str,
-        execution_id: str,
-        phase: Literal["queued", "running", "stopping", "injected", "rejected", "exited"],
-        *,
-        started_at: float | None = None,
-    ) -> None:
-        await self.bus.publish(TurnExecutionChanged(
-            context=self._context(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                session_key=session_key,
-                metadata=msg.metadata,
-                session_generation=msg.session_generation,
-            ),
-            execution_id=execution_id,
-            phase=phase,
-            started_at=started_at,
-        ))
 
     async def session_turn_persisted(
         self,

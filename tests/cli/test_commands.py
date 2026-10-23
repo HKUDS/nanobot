@@ -14,7 +14,6 @@ from urllib.parse import urlparse
 import pytest
 from typer.testing import CliRunner
 
-from nanobot.agent.execution import ExecutionLifecycle
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.registry import ToolRegistry
@@ -2195,9 +2194,7 @@ def test_heartbeat_empty_response_is_not_evaluated(
     class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
         def from_config(cls, config, bus=None, **extra):
-            agent = cls(**extra)
-            agent.executions = ExecutionLifecycle(bus)
-            return agent
+            return cls(**extra)
 
         def __init__(self, *args, **kwargs) -> None:
             self.model = "test-model"
@@ -3297,9 +3294,7 @@ def test_gateway_unbound_agent_cron_is_skipped(
     class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
         def from_config(cls, config, bus=None, **extra):
-            agent = cls(**extra)
-            agent.executions = ExecutionLifecycle(bus)
-            return agent
+            return cls(**extra)
         def __init__(self, *args, **kwargs) -> None:
             self.model = "test-model"
             self.provider = kwargs.get("provider", object())
@@ -3415,9 +3410,7 @@ def test_gateway_bound_cron_runs_as_session_turn(
     class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
         def from_config(cls, config, bus=None, **extra):
-            agent = cls(**extra)
-            agent.executions = ExecutionLifecycle(bus)
-            return agent
+            return cls(**extra)
 
         def __init__(self, *args, **kwargs) -> None:
             self.model = "test-model"
@@ -3647,9 +3640,7 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
         @classmethod
         def from_config(cls, config, bus=None, **extra):
             seen["agent_from_config_kwargs"] = extra
-            agent = cls(**extra)
-            agent.executions = ExecutionLifecycle(bus)
-            return agent
+            return cls(**extra)
 
         def __init__(self, *args, **kwargs) -> None:
             self.model = "test-model"
@@ -3924,9 +3915,7 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
     class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
         def from_config(cls, config, bus=None, **extra):
-            agent = cls(**extra)
-            agent.executions = ExecutionLifecycle(bus)
-            return agent
+            return cls(**extra)
         def __init__(self, **_kwargs) -> None:
             self.model = "test-model"
             self.provider = object()
@@ -4133,9 +4122,7 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
     class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
         def from_config(cls, config, bus=None, **extra):
-            agent = cls(**extra)
-            agent.executions = ExecutionLifecycle(bus)
-            return agent
+            return cls(**extra)
 
         def __init__(self, **_kwargs) -> None:
             seen["hooks"] = _kwargs.get("hooks")
@@ -4285,9 +4272,7 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
     class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
         def from_config(cls, config, bus=None, **extra):
-            agent = cls(**extra)
-            agent.executions = ExecutionLifecycle(bus)
-            return agent
+            return cls(**extra)
 
         def __init__(self, **_kwargs) -> None:
             self.model = "test-model"

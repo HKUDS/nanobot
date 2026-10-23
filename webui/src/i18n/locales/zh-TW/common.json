@@ -1760,19 +1760,6 @@
     "error": "連線錯誤"
   },
   "thread": {
-    "runStatus": {
-      "syncing": "正在確認任務狀態…",
-      "unknown": "任務狀態未知，請重新連線後確認。",
-      "unavailable": "任務狀態無法使用。請更新此主機的 nanobot，以啟用任務狀態、停止和佇列自動傳送。",
-      "queued": "任務排隊中",
-      "running": "任務執行中",
-      "stopping": "任務停止中…",
-      "cancelPending": "已請求停止，等待任務結束…",
-      "sending": "正在傳送訊息…",
-      "deliveryUnknown": "訊息送達未確認，請查看對話後再決定是否重傳。",
-      "resultUnknown": "回覆尚未確認，請重新連線後查看對話。",
-      "stopFailed": "停止請求失敗，請確認任務狀態後重試。"
-    },
     "subagents": {
       "stopFailed": "無法停止此任務。",
       "stopTask": "停止 {{label}}",

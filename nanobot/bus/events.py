@@ -25,13 +25,6 @@ INBOUND_META_TURN_ID = "webui_turn_id"
 INBOUND_META_LOCAL_MEDIA = "local_media_paths"
 
 
-@dataclass(frozen=True)
-class ExecutionAdmission:
-    """Opaque runtime-issued identity; lifecycle state never leaves its owner."""
-
-    execution_id: str
-
-
 @dataclass
 class InboundMessage:
     """Message received from a chat channel."""
@@ -47,7 +40,6 @@ class InboundMessage:
     require_existing_session: bool = False
     input_role: Literal["user", "system"] | None = None
     session_generation: str | None = None  # Trusted identity assigned at session admission
-    execution_admission: ExecutionAdmission | None = None  # In-process, never persisted
 
     @property
     def session_key(self) -> str:

@@ -23,7 +23,6 @@ from websockets.http11 import Request as WsRequest
 
 from nanobot.bus.events import (
     OUTBOUND_META_AGENT_UI,
-    ExecutionAdmission,
     OutboundMessage,
 )
 from nanobot.bus.queue import MessageBus
@@ -31,7 +30,6 @@ from nanobot.channels.base import BaseChannel
 from nanobot.channels.websocket.binary_http import BinaryHTTPBridge
 from nanobot.config_base import Base
 from nanobot.runtime_admission import RuntimeMaintenanceError
-from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     mark_websocket_turn_transcript_persistence_failed,
@@ -59,8 +57,7 @@ from nanobot.webui.outbound_wire import (
     WebUIWirePersistence,
     project_tool_events,
 )
-from nanobot.webui.run_state import ServerRunSnapshot
-from nanobot.webui.session_identity import is_valid_webui_chat_id, webui_session_key
+from nanobot.webui.session_identity import is_valid_webui_chat_id
 from nanobot.webui.transcript import WEBUI_TRANSCRIPT_INCOMPLETE_KEY
 from nanobot.webui.websocket_logging import websockets_server_logger
 
@@ -385,7 +382,6 @@ class WebSocketChannel(BaseChannel):
         self._subs: dict[str, set[ServerConnection]] = {}
         # connection -> chat_ids it is subscribed to (O(1) cleanup on disconnect).
         self._conn_chats: dict[ServerConnection, set[str]] = {}
-        self._run_watches: dict[ServerConnection, set[str]] = {}
         # connection -> default chat_id for legacy frames that omit routing.
         self._conn_default: dict[ServerConnection, str] = {}
         # Connections authenticated with a one-time token from /webui/bootstrap.
@@ -408,7 +404,6 @@ class WebSocketChannel(BaseChannel):
         self._webui_request_operations = self._commands.request_operations
         self._webui_request_locks = self._commands.request_locks
         self._outbound = WebUIOutboundProjector(self, self._session_projection)
-        self.gateway.runs.subscribe(self._run_state_changed)
 
         self._stream_text_buffers: dict[tuple[str, str], list[str]] = {}
         self._reasoning_text_buffers: dict[tuple[str, str], list[str]] = {}
@@ -424,29 +419,6 @@ class WebSocketChannel(BaseChannel):
 
     def webui_attach(self, connection: ServerConnection, chat_id: str) -> None:
         self._attach(connection, chat_id)
-
-    def webui_watch_runs(self, connection: ServerConnection, chat_ids: set[str]) -> None:
-        if not self._register_connection_outbound(connection):
-            return
-        self._run_watches[connection] = chat_ids
-        for chat_id in sorted(chat_ids):
-            self._enqueue_run_state(connection, chat_id)
-
-    def _enqueue_run_state(self, connection: ServerConnection, chat_id: str) -> None:
-        self._enqueue_raw(connection, json.dumps({
-            "event": "run_state", "chat_id": chat_id,
-            "run_state": self.gateway.runs.snapshot(webui_session_key(chat_id)),
-        }), label=" run_state ")
-
-    def _run_state_changed(self, session_key: str, snapshot: ServerRunSnapshot) -> None:
-        chat_id = session_key.split(":", 1)[1]
-        connections = set(self._subs.get(chat_id, ()))
-        connections.update(connection for connection, watched in self._run_watches.items() if chat_id in watched)
-        if not connections:
-            return
-        raw = json.dumps({"event": "run_state", "chat_id": chat_id, "run_state": snapshot})
-        for connection in connections:
-            self._enqueue_raw(connection, raw, label=" run_state ")
 
     def webui_detach(self, connection: ServerConnection, chat_id: str) -> None:
         self._detach(connection, chat_id)
@@ -489,7 +461,6 @@ class WebSocketChannel(BaseChannel):
         session_key: str | None,
         require_existing_session: bool,
         session_generation: str | None,
-        execution_admission: ExecutionAdmission | None = None,
     ) -> None:
         await self._handle_message(
             sender_id=sender_id,
@@ -501,7 +472,6 @@ class WebSocketChannel(BaseChannel):
             session_key=session_key,
             require_existing_session=require_existing_session,
             session_generation=session_generation,
-            execution_admission=execution_admission,
         )
 
     def _attach(self, connection: ServerConnection, chat_id: str) -> None:
@@ -554,7 +524,6 @@ class WebSocketChannel(BaseChannel):
             for chat_id in tuple(self._conn_chats.get(connection, ())):
                 self._detach(connection, chat_id)
             self._conn_default.pop(connection, None)
-            self._run_watches.pop(connection, None)
             self.gateway.endpoint.discard_connection(connection)
             if self._connection_outbound.get(connection) is state:
                 self._connection_outbound.pop(connection, None)
@@ -882,9 +851,6 @@ class WebSocketChannel(BaseChannel):
                         "event": "ready",
                         "chat_id": default_chat_id,
                         "client_id": client_id,
-                        "run_state_instance_id": self.gateway.tokens.instance_id,
-                        **({"run_state": self.gateway.runs.snapshot(webui_session_key(default_chat_id))}
-                           if self.is_allowed(client_id) else {}),
                         **({"upload": self._uploads.issue(connection)}
                            if self.is_allowed(client_id) else {}),
                         **({"terminal": gateway_identity(self.gateway.tokens.instance_id)}
@@ -1137,14 +1103,6 @@ class WebSocketChannel(BaseChannel):
         label: str = "",
     ) -> None:
         """Queue one frame without letting this connection block other clients."""
-        self._enqueue_raw(connection, raw, label=label)
-        # Give an idle writer a chance to start without waiting for physical I/O.
-        await asyncio.sleep(0)
-
-    def _enqueue_raw(
-        self, connection: ServerConnection, raw: str, *, label: str = "",
-    ) -> None:
-        """Synchronous enqueue boundary shared by authority notifications and snapshots."""
         state = self._connection_outbound.get(connection)
         if state is None or state.closing:
             return
@@ -1163,6 +1121,7 @@ class WebSocketChannel(BaseChannel):
                 close_code=1013,
                 close_reason="outbound queue full",
             )
+            await asyncio.sleep(0)
             return
         try:
             state.queue.put_nowait(_OutboundFrame(raw, utf8_bytes, label))
@@ -1174,9 +1133,12 @@ class WebSocketChannel(BaseChannel):
                 close_code=1013,
                 close_reason="outbound queue full",
             )
+            await asyncio.sleep(0)
             return
         state.buffered_bytes += utf8_bytes
         self._start_connection_writer(connection, state)
+        # Give an idle writer a chance to start without waiting for physical I/O.
+        await asyncio.sleep(0)
 
     async def _persist_turn_transcript_event(
         self,
@@ -1222,10 +1184,9 @@ class WebSocketChannel(BaseChannel):
     ) -> bool:
         if not persisted and phase in {"answer", "complete"} and (metadata or {}).get("webui") is True:
             owner = (metadata or {}).get(WEBSOCKET_TURN_OWNER_METADATA_KEY)
-            generation = (metadata or {}).get(HISTORY_GENERATION_METADATA_KEY)
             mark_websocket_turn_transcript_persistence_failed(
-                chat_id, owner if isinstance(owner, str) else None,
-                generation if isinstance(generation, str) else None,
+                chat_id,
+                owner if isinstance(owner, str) else None,
             )
         return persisted
 

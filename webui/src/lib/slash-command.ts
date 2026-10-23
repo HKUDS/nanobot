@@ -37,17 +37,12 @@ export function slashCommandLifecycle(
   content: string,
   slashCommands: SlashCommand[],
 ): ResolvedSlashCommandLifecycle | null {
-  const normalized = content.trim();
-  const enteredName = slashCommandName(normalized);
-  const name = enteredName.replace(/@[A-Za-z0-9_]+$/, "").toLowerCase();
-  const command = slashCommands.find((item) => item.command === name);
+  const command = matchingSlashCommand(content, slashCommands);
   if (!command) return null;
-  const args = normalized.slice(enteredName.length).trim();
-  // Registered argument errors are immediate command replies, not new agent
-  // requests or the command's valid Stop/New effects. The gateway validates them.
-  if (args && !command.acceptsArgs) return "side_channel";
   if (command.lifecycle === "agent_turn_with_args") {
-    return args ? "agent_turn" : "side_channel";
+    return slashCommandArgs(content, command.command).length > 0
+      ? "agent_turn"
+      : "side_channel";
   }
   return command.lifecycle;
 }
