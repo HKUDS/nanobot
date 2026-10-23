@@ -4,7 +4,7 @@ import asyncio
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import unquote
 
 import pytest
@@ -2902,17 +2902,23 @@ def test_listen_buffer_bounds_and_truncation() -> None:
     assert sum(len(entry) for entry in capped) <= matrix_module._LISTEN_BUFFER_MAX_CHARS
 
 
-def test_listen_context_block_notes_dropped_lines() -> None:
-    channel = MatrixChannel(_make_config(), MessageBus())
+@pytest.mark.asyncio
+async def test_listen_context_block_notes_dropped_lines() -> None:
+    bus = MessageBus()
+    channel = MatrixChannel(_make_config(group_policy="listen"), bus)
     for index in range(34):
         channel._buffer_listen_message("!r:matrix.org", f"@u{index}:matrix.org", f"m{index}")
 
-    blocks = channel._pop_listen_context("!r:matrix.org")
-    assert blocks is not None and len(blocks) == 1
+    room = SimpleNamespace(room_id="!r:matrix.org", member_count=3)
+    await channel._on_message(room, _listen_event("what did we decide?", mentioned=True))
+    question = await bus.consume_inbound()
+    blocks = question.metadata[RUNTIME_CONTEXT_INPUT_META]
+    assert len(blocks) == 1
     assert "[4 earlier messages not shown]" in blocks[0].content
     assert "@u0:matrix.org: m0" not in blocks[0].content
     assert "@u4:matrix.org: m4" in blocks[0].content
-    assert channel._pop_listen_context("!r:matrix.org") is None
+    await channel._on_message(room, _listen_event("anything else?", mentioned=True))
+    assert RUNTIME_CONTEXT_INPUT_META not in (await bus.consume_inbound()).metadata
 
 
 @pytest.mark.asyncio
@@ -3040,3 +3046,153 @@ async def test_on_media_message_listen_policy_buffers_caption() -> None:
     assert channel._listen_buffers["!room:matrix.org"][-1] == (
         "@alice:matrix.org: venue floor plan"
     )
+
+
+def _listen_event(body: str, *, mentioned: bool = False, msgtype: str = "m.text"):
+    content: dict[str, object] = {"msgtype": msgtype, "body": body}
+    if mentioned:
+        content["m.mentions"] = {"user_ids": ["@bot:matrix.org"]}
+    if msgtype != "m.text":
+        content.update(url="mxc://example.org/payload", info={"size": 8})
+    event = matrix_module.RoomMessage.parse_event({
+        "type": "m.room.message",
+        "sender": "@alice:matrix.org",
+        "event_id": "$listen-review",
+        "origin_server_ts": 2_000_000_000_000,
+        "content": content,
+    })
+    assert isinstance(event, matrix_module.RoomMessage)
+    return event
+
+
+@pytest.mark.parametrize("command", ["/status", "/model other", "/help extra", "/goal"])
+@pytest.mark.asyncio
+async def test_listen_control_command_preserves_context_for_next_question(command: str) -> None:
+    bus = MessageBus()
+    channel = MatrixChannel(_make_config(group_policy="listen"), bus)
+    room = SimpleNamespace(room_id="!room:matrix.org", member_count=3)
+    await channel._on_message(room, _listen_event("the picnic is on Sunday"))
+
+    await channel._on_message(room, _listen_event(command, mentioned=True))
+    command_input = await bus.consume_inbound()
+    assert command_input.content == command
+    assert RUNTIME_CONTEXT_INPUT_META not in command_input.metadata
+
+    await channel._on_message(room, _listen_event("what did we decide?", mentioned=True))
+    question = await bus.consume_inbound()
+    blocks = question.metadata[RUNTIME_CONTEXT_INPUT_META]
+    assert "the picnic is on Sunday" in blocks[0].content
+    assert "!room:matrix.org" not in channel._listen_buffers
+
+
+@pytest.mark.asyncio
+async def test_listen_help_round_trip_does_not_consume_discussion(monkeypatch, tmp_path) -> None:
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.providers.base import LLMProvider
+
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
+    bus = MessageBus()
+    channel = MatrixChannel(_make_config(group_policy="listen"), bus)
+    room = SimpleNamespace(room_id="!room:matrix.org", member_count=3)
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = SimpleNamespace(max_tokens=4096, temperature=0.1, reasoning_effort=None)
+    provider.estimate_prompt_tokens = MagicMock(return_value=(1000, "test"))
+    provider.chat_stream_with_retry = AsyncMock()
+    provider.aclose = AsyncMock()
+    loop = AgentLoop(
+        bus=bus, provider=provider, workspace=tmp_path / "workspace",
+        model="test-model", context_window_tokens=128000, session_ttl_minutes=0,
+    )
+    try:
+        await channel._on_message(room, _listen_event("bring lunch to the picnic"))
+        await channel._on_message(room, _listen_event("/help", mentioned=True))
+        command_input = await bus.consume_inbound()
+        response = await loop._process_message(command_input)
+        assert response is not None and "/help" in response.content
+        provider.chat_stream_with_retry.assert_not_awaited()
+        session = await loop.sessions.state.get(command_input.session_key)
+        assert session.get_history() == []
+
+        await channel._on_message(room, _listen_event("what should I bring?", mentioned=True))
+        question = await bus.consume_inbound()
+        blocks = question.metadata[RUNTIME_CONTEXT_INPUT_META]
+        assert "bring lunch to the picnic" in blocks[0].content
+    finally:
+        await loop.aclose()
+
+
+@pytest.mark.parametrize("content", ["/goal prepare a picnic plan", "/tmp/notes.md"])
+@pytest.mark.asyncio
+async def test_listen_agent_input_keeps_context_for_goal_and_slash_prefixed_text(content: str) -> None:
+    bus = MessageBus()
+    channel = MatrixChannel(_make_config(group_policy="listen"), bus)
+    room = SimpleNamespace(room_id="!room:matrix.org", member_count=3)
+    await channel._on_message(room, _listen_event("the picnic is on Sunday"))
+
+    await channel._on_message(room, _listen_event(content, mentioned=True))
+    question = await bus.consume_inbound()
+    assert question.content == content
+    assert "the picnic is on Sunday" in question.metadata[RUNTIME_CONTEXT_INPUT_META][0].content
+    assert "!room:matrix.org" not in channel._listen_buffers
+
+
+@pytest.mark.asyncio
+async def test_listen_new_command_clears_discussion_without_attaching_it() -> None:
+    bus = MessageBus()
+    channel = MatrixChannel(_make_config(group_policy="listen"), bus)
+    room = SimpleNamespace(room_id="!room:matrix.org", member_count=3)
+    await channel._on_message(room, _listen_event("old discussion"))
+
+    await channel._on_message(room, _listen_event("/new", mentioned=True))
+    command_input = await bus.consume_inbound()
+    assert RUNTIME_CONTEXT_INPUT_META not in command_input.metadata
+    await channel._on_message(room, _listen_event("new question", mentioned=True))
+    question = await bus.consume_inbound()
+    assert RUNTIME_CONTEXT_INPUT_META not in question.metadata
+
+
+@pytest.mark.asyncio
+async def test_listen_media_directory_error_preserves_context_for_next_question(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    (media_dir / "matrix").write_text("blocks the media directory", encoding="utf-8")
+    bus = MessageBus()
+    channel = MatrixChannel(_make_config(group_policy="listen"), bus)
+    channel.client = _FakeAsyncClient("", "", "", None)
+    monkeypatch.setattr(channel, "_download_media_bytes", AsyncMock(return_value=b"12345678"))
+    room = SimpleNamespace(room_id="!room:matrix.org", member_count=3)
+    for index in range(34):
+        await channel._on_message(room, _listen_event(f"discussion {index}"))
+
+    with pytest.raises(OSError):
+        await channel._on_media_message(room, _listen_event("picnic.png", mentioned=True, msgtype="m.image"))
+    assert bus.inbound_size == 0
+
+    await channel._on_message(room, _listen_event("what did we decide?", mentioned=True))
+    question = await bus.consume_inbound()
+    block = question.metadata[RUNTIME_CONTEXT_INPUT_META][0]
+    assert "[4 earlier messages not shown]" in block.content
+    assert "@alice:matrix.org: discussion 4\n" in block.content
+    assert "@alice:matrix.org: discussion 33" in block.content
+    assert "!room:matrix.org" not in channel._listen_buffers
+
+
+@pytest.mark.asyncio
+async def test_listen_media_control_command_preserves_discussion(monkeypatch) -> None:
+    bus = MessageBus()
+    channel = MatrixChannel(_make_config(group_policy="listen"), bus)
+    marker = "[attachment: picture.png - download failed]"
+    monkeypatch.setattr(channel, "_fetch_media_attachment", AsyncMock(return_value=(None, marker)))
+    room = SimpleNamespace(room_id="!room:matrix.org", member_count=3)
+    await channel._on_message(room, _listen_event("the picnic is on Sunday"))
+
+    await channel._on_media_message(room, _listen_event("/help", mentioned=True, msgtype="m.image"))
+    command_input = await bus.consume_inbound()
+    assert command_input.content == f"/help\n{marker}"
+    assert RUNTIME_CONTEXT_INPUT_META not in command_input.metadata
+
+    await channel._on_message(room, _listen_event("what did we decide?", mentioned=True))
+    question = await bus.consume_inbound()
+    assert "the picnic is on Sunday" in question.metadata[RUNTIME_CONTEXT_INPUT_META][0].content

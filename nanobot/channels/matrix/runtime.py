@@ -65,6 +65,8 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.command.builtin import BUILTIN_COMMAND_SPECS
+from nanobot.command.router import normalize_command_text
 from nanobot.config.network import NetworkConfig
 from nanobot.config.paths import get_data_dir, get_media_dir
 from nanobot.config_base import Base
@@ -1174,12 +1176,27 @@ class MatrixChannel(BaseChannel):
         if dropped:
             self._listen_dropped[room_id] = dropped
 
-    def _pop_listen_context(self, room_id: str) -> list[RuntimeContextBlock] | None:
-        """Return and clear the bounded listen-mode context for a room."""
-        buffer = self._listen_buffers.pop(room_id, None)
-        dropped = self._listen_dropped.pop(room_id, 0)
+    def _listen_context(self, room_id: str, content: str) -> list[RuntimeContextBlock] | None:
+        """Read pending discussion for agent input, leaving control commands untouched."""
+        buffer = self._listen_buffers.get(room_id)
         if not buffer:
             return None
+        normalized = normalize_command_text(content)
+        parts = normalized.split(maxsplit=1)
+        command = next(
+            (spec for spec in BUILTIN_COMMAND_SPECS if parts and spec.command == parts[0].lower()),
+            None,
+        )
+        if command is not None and not (
+            command.lifecycle == "agent_turn"
+            or (
+                command.lifecycle == "agent_turn_with_args"
+                and normalized.lower().startswith(f"{command.command} ")
+                and bool(normalized[len(command.command):].strip())
+            )
+        ):
+            return None
+        dropped = self._listen_dropped.get(room_id, 0)
         notice = f"[{dropped} earlier messages not shown]\n" if dropped else ""
         return [
             RuntimeContextBlock(
@@ -1190,6 +1207,14 @@ class MatrixChannel(BaseChannel):
                 ),
             ),
         ]
+
+    def _consume_listen_context(
+        self, room_id: str, content: str, context: list[RuntimeContextBlock] | None,
+    ) -> None:
+        """Clear handed-off discussion or an explicit room-session reset."""
+        if context or normalize_command_text(content).lower() == "/new":
+            self._listen_buffers.pop(room_id, None)
+            self._listen_dropped.pop(room_id, None)
 
     def _should_process_message(self, room: MatrixRoom, event: RoomMessage) -> bool:
         """Apply sender and room policy checks."""
@@ -1463,20 +1488,17 @@ class MatrixChannel(BaseChannel):
     async def _on_message(self, room: MatrixRoom, event: RoomMessageText) -> None:
         if event.sender == self.config.user_id or self._is_pre_startup_event(event):
             return
-        listen_context: list[RuntimeContextBlock] | None = None
-        if not self._is_direct_room(room) and self.config.group_policy == "listen":
-            mentioned = self._is_bot_mentioned(event)
-            allowed = self.is_allowed(event.sender)
-            if not mentioned and allowed:
+        listen_mode = not self._is_direct_room(room) and self.config.group_policy == "listen"
+        if listen_mode and not self._is_bot_mentioned(event):
+            if self.is_allowed(event.sender):
                 self._buffer_listen_message(room.room_id, event.sender, event.body)
-                return
-            if mentioned and allowed:
-                listen_context = self._pop_listen_context(room.room_id)
+            return
         if not self._should_process_message(room, event):
             return
         await self._start_typing_keepalive(room.room_id)
         try:
             metadata = self._base_metadata(room, event)
+            listen_context = self._listen_context(room.room_id, event.body) if listen_mode else None
             if listen_context:
                 metadata[RUNTIME_CONTEXT_INPUT_META] = listen_context
             await self._handle_message(
@@ -1485,6 +1507,8 @@ class MatrixChannel(BaseChannel):
                 session_key=self._thread_session_key(room.room_id, event),
                 is_dm=self._is_direct_room(room),
             )
+            if listen_mode:
+                self._consume_listen_context(room.room_id, event.body, listen_context)
         except Exception:
             await self._stop_typing_keepalive(room.room_id, clear_typing=True)
             raise
@@ -1492,23 +1516,19 @@ class MatrixChannel(BaseChannel):
     async def _on_media_message(self, room: MatrixRoom, event: MatrixMediaEvent) -> None:
         if event.sender == self.config.user_id or self._is_pre_startup_event(event):
             return
-        listen_context: list[RuntimeContextBlock] | None = None
-        if not self._is_direct_room(room) and self.config.group_policy == "listen":
-            mentioned = self._is_bot_mentioned(event)
-            allowed = self.is_allowed(event.sender)
-            media_body = getattr(event, "body", None)
-            media_note = (
-                " ".join(media_body.split())
-                if isinstance(media_body, str) and media_body.strip()
-                else ""
-            )
-            if not mentioned and allowed:
+        listen_mode = not self._is_direct_room(room) and self.config.group_policy == "listen"
+        if listen_mode and not self._is_bot_mentioned(event):
+            if self.is_allowed(event.sender):
+                media_body = getattr(event, "body", None)
+                media_note = (
+                    " ".join(media_body.split())
+                    if isinstance(media_body, str) and media_body.strip()
+                    else ""
+                )
                 self._buffer_listen_message(
                     room.room_id, event.sender, media_note or "[attachment]"
                 )
-                return
-            if mentioned and allowed:
-                listen_context = self._pop_listen_context(room.room_id)
+            return
         if not self._should_process_message(room, event):
             return
         attachment, marker = await self._fetch_media_attachment(room, event)
@@ -1525,22 +1545,26 @@ class MatrixChannel(BaseChannel):
         elif marker:
             parts.append(marker)
 
+        content = "\n".join(parts)
         await self._start_typing_keepalive(room.room_id)
         try:
             meta = self._base_metadata(room, event)
             meta["attachments"] = []
             if attachment:
                 meta["attachments"] = [attachment]
+            listen_context = self._listen_context(room.room_id, content) if listen_mode else None
             if listen_context:
                 meta[RUNTIME_CONTEXT_INPUT_META] = listen_context
             await self._handle_message(
                 sender_id=event.sender, chat_id=room.room_id,
-                content="\n".join(parts),
+                content=content,
                 media=[attachment["path"]] if attachment else [],
                 metadata=meta,
                 session_key=self._thread_session_key(room.room_id, event),
                 is_dm=self._is_direct_room(room),
             )
+            if listen_mode:
+                self._consume_listen_context(room.room_id, content, listen_context)
         except Exception:
             await self._stop_typing_keepalive(room.room_id, clear_typing=True)
             raise
