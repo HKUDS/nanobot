@@ -19,9 +19,10 @@ const mocks = vi.hoisted(() => {
   const request = vi.fn();
   const discover = vi.fn();
   const onStatus = vi.fn();
+  const stateChanges = new Set<() => void>();
   const onStateChange = vi.fn();
   const inspect = vi.fn();
-  return { read: vi.fn(), request, discover, inspect, onStatus, onStateChange, webuiCapabilities: [] as string[], client: { status: "open", requestMutation: (action: string, payload: unknown, timeout: number) => {
+  return { read: vi.fn(), request, discover, inspect, onStatus, onStateChange, stateChanges, connected: false, client: { status: "open", requestMutation: (action: string, payload: unknown, timeout: number) => {
     // Quick pairing prepares a local-only invitation when Add server opens;
     // these tests track SSH/config mutations separately from that lifecycle.
     if (action === "remote.pair_start") return Promise.resolve({ id: "pending-pair", command: "nanobot remote pair nbpr1.public", expires: Date.now() / 1000 + 600 });
@@ -29,7 +30,7 @@ const mocks = vi.hoisted(() => {
     return action === "remote.discover" ? discover(payload) : action === "remote.inspect" ? inspect(payload) : request(action, payload, timeout);
   }, onStatus, onStateChange }, token: () => "local-token" };
 });
-vi.mock("@/providers/ClientProvider", () => ({ useClient: () => ({ client: mocks.client, getToken: mocks.token, webuiCapabilities: mocks.webuiCapabilities }) }));
+vi.mock("@/providers/ClientProvider", () => ({ useClient: () => ({ client: mocks.client, getToken: mocks.token }) }));
 vi.mock("@/lib/remote-instances", async (original) => ({
   ...await original<typeof import("@/lib/remote-instances")>(), readRemoteInstances: mocks.read,
 }));
@@ -64,14 +65,19 @@ beforeEach(async () => {
   await i18n.changeLanguage("en");
   window.sessionStorage.clear(); window.localStorage.clear();
   window.history.replaceState(null, "", "#/new");
-  mocks.webuiCapabilities = [];
-  mocks.onStateChange.mockReset().mockReturnValue(() => {});
+  mocks.stateChanges.clear();
+  mocks.onStateChange.mockReset().mockImplementation((_resource: string, handler: () => void) => {
+    mocks.stateChanges.add(handler);
+    return () => { mocks.stateChanges.delete(handler); };
+  });
   mocks.onStatus.mockReset().mockImplementation((handler) => { handler("open"); return () => {}; });
-  mocks.read.mockReset().mockResolvedValue({ available: true, machine_name: "Xubin-Mac", profiles: [profile] });
+  mocks.connected = false;
+  mocks.read.mockReset().mockImplementation(async () => ({ available: true, machine_name: "Xubin-Mac",
+    profiles: [{ ...profile, connected: mocks.connected }] }));
   mocks.discover.mockReset().mockResolvedValue({ hosts: [], files: [], incomplete: false });
   mocks.inspect.mockReset().mockResolvedValue({ hostname: "team-host", candidates: [{ config_path: "~/.nanobot/config.json", runtime_user: "", service: "" }], incomplete: false });
   mocks.request.mockReset().mockImplementation(async (action: string) => {
-    if (action === "remote.connect") return connection;
+    if (action === "remote.connect") { mocks.connected = true; return connection; }
     if (action === "remote.save") return { id: profile.id };
     if (action === "remote.disconnect") return { available: true, profiles: [profile] };
     return {};
@@ -1320,25 +1326,20 @@ describe("remote instance UX", () => {
     expect(mocks.request).toHaveBeenCalledWith("remote.trust", { id: profile.id, challenge: "one-use" }, 65_000);
   });
 
-  it("tolerates transient health failures and covers, rather than reloads, the remote frame", async () => {
+  it("covers a confirmed offline remote without reloading its frame", async () => {
     mocks.read.mockResolvedValue({ available: true, profiles: [{ ...profile, connected: true }] });
-    const timer = vi.spyOn(window, "setTimeout");
-    const tick = () => {
-      const callback = [...timer.mock.calls].reverse().find(([, delay]) => delay === 5_000)?.[0];
-      if (typeof callback === "function") callback();
-    };
     view(); await openDirectory();
     fireEvent.click(screen.getByRole("button", { name: "Team server ubuntu@example.test" }));
     const frame = await readyRemote();
     fireEvent.load(frame);
-    mocks.read.mockResolvedValue({ available: true, profiles: [profile] });
-    await act(async () => { tick?.(); });
     expect(screen.queryByRole("region", { name: "Server connection lost" })).not.toBeInTheDocument();
-    await act(async () => { tick?.(); });
+    mocks.read.mockResolvedValue({ available: true, profiles: [profile] });
+    await act(async () => { for (const handler of mocks.stateChanges) handler(); });
     await screen.findByRole("region", { name: "Server connection lost" });
     expect(screen.getByTitle("nanobot on Team server")).toBeInTheDocument();
     expect(frame.parentElement).toHaveAttribute("inert");
     expect(document.querySelector('[data-host-view="local"]')).toHaveAttribute("inert");
+    mocks.read.mockResolvedValue({ available: true, profiles: [{ ...profile, connected: true }] });
     fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
     await waitFor(() => expect(screen.queryByRole("region", { name: "Server connection lost" })).not.toBeInTheDocument());
     expect(screen.queryByText("Opening your server…")).not.toBeInTheDocument();
@@ -1351,7 +1352,7 @@ describe("remote instance UX", () => {
     const rendered = view(); await openDirectory();
     fireEvent.click(screen.getByRole("button", { name: "Team server ubuntu@example.test" }));
     const frame = await readyRemote();
-    mocks.read.mockClear();
+    mocks.read.mockResolvedValue({ available: true, profiles: [profile] }).mockClear();
     await act(async () => { window.dispatchEvent(new Event("online")); });
     expect(mocks.read).toHaveBeenCalledTimes(1);
     visibility.mockReturnValue("hidden");

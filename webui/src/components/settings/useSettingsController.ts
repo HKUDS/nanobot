@@ -239,7 +239,7 @@ export function useSettingsController({
   useStateRefresh("usage", activeSection === "overview" && hasSettings, async (signal) => {
     const usage = await fetchSettingsUsage(getToken(), "", signal);
     if (!signal.aborted) setSettings((current) => (current ? { ...current, usage } : current));
-  }, 5000);
+  });
   useSystemSettingsEffects({
     state: systemState,
     activeSection,

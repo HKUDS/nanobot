@@ -12,7 +12,7 @@ for (const width of [1440, 390]) {
     let requests: Record<string, unknown>[] = [];
     await page.route("**/webui/bootstrap*", route => route.fulfill({ json: {
       token: "fixture-token", api_token: "fixture-api-token", ws_path: "/state-events-fixture", expires_in: 300,
-      terminal: { webui: { capabilities: ["webui.core.v1", "webui.state-events.v1"] } },
+      terminal: { webui: { capabilities: ["webui.core.v1"] } },
     } }));
     await page.route("**/api/**", route => {
       const path = new URL(route.request().url()).pathname;

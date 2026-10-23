@@ -8,7 +8,7 @@ import type { RemoteConnection, RemoteDirectory } from "@/lib/remote-instances";
 const mocks = vi.hoisted(() => {
   const events = new Set<() => void>();
   const statuses = new Set<(status: string) => void>();
-  const state = { capabilities: ["webui.state-events.v1"], status: "open" };
+  const state = { status: "open" };
   const mutate = vi.fn();
   const client = {
     get status() { return state.status; },
@@ -25,7 +25,7 @@ const mocks = vi.hoisted(() => {
   return { client, state, events, statuses, mutate, read: vi.fn(), token: () => "synthetic-local-token" };
 });
 vi.mock("@/providers/ClientProvider", () => ({ useClient: () => ({
-  client: mocks.client, getToken: mocks.token, webuiCapabilities: mocks.state.capabilities,
+  client: mocks.client, getToken: mocks.token,
 }) }));
 vi.mock("@/lib/remote-instances", async (original) => ({
   ...await original<typeof import("@/lib/remote-instances")>(), readRemoteInstances: mocks.read,
@@ -47,7 +47,7 @@ const status = (value: string) => {
 beforeEach(() => {
   window.sessionStorage.clear(); window.localStorage.clear();
   mocks.events.clear(); mocks.statuses.clear();
-  mocks.state.capabilities = ["webui.state-events.v1"]; mocks.state.status = "open";
+  mocks.state.status = "open";
   mocks.client.onStatus.mockClear(); mocks.client.onStateChange.mockClear();
   mocks.mutate.mockReset().mockResolvedValue(connection);
   mocks.read.mockReset().mockResolvedValue(directory);
@@ -76,7 +76,7 @@ describe("remote directory state refresh", () => {
       connected: false, connection_error: "remote_unreachable" }] });
     await act(async () => invalidate());
     expect(mocks.read).toHaveBeenCalledTimes(1);
-    expect(result.current.frames[0]).toMatchObject({ offline: true, error: "remote_unreachable", failures: 2 });
+    expect(result.current.frames[0]).toMatchObject({ offline: true, error: "remote_unreachable" });
     expect(result.current.frames[0].connection.url).toBe(url);
     expect(result.current.selected?.id).toBe(profile.id);
     expect(mocks.mutate).toHaveBeenCalledTimes(1);
@@ -132,7 +132,7 @@ describe("remote directory state refresh", () => {
     await act(async () => { result.current.loaded(profile.id); await opening; });
     if (timing === "after") await act(async () => finishStale(offline));
     expect(result.current.pending).toBeNull();
-    expect(frame).toMatchObject({ loaded: true, offline: false, failures: 0 });
+    expect(frame).toMatchObject({ loaded: true, offline: false });
     await act(async () => finishFresh(directory));
     expect(result.current.frames[0]).toBe(frame);
     expect(frame.connection).toEqual(connection);
@@ -140,7 +140,7 @@ describe("remote directory state refresh", () => {
     expect(mocks.mutate).toHaveBeenCalledTimes(1);
   });
 
-  it("does not poll supported hosts and fills hidden-return and reconnect snapshots without reconnecting SSH", async () => {
+  it("fills hidden-return and reconnect snapshots without idle reads or reconnecting SSH", async () => {
     vi.useFakeTimers();
     const visibility = vi.spyOn(document, "visibilityState", "get");
     const { result, unmount } = renderHook(() => useHostSessions());
@@ -293,8 +293,8 @@ describe("remote directory state refresh", () => {
     expect(requestSignal?.aborted).toBe(true);
   });
 
-  it("still awaits an explicit legacy directory refresh when no host view needs polling", async () => {
-    vi.useFakeTimers(); mocks.state.capabilities = [];
+  it("awaits an explicit directory refresh when no host view is open", async () => {
+    vi.useFakeTimers();
     const { result } = renderHook(() => useHostSessions());
     await act(async () => {});
     await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
@@ -306,29 +306,4 @@ describe("remote directory state refresh", () => {
     expect(result.current.directory).toEqual(latest);
   });
 
-  it("keeps visible legacy sampling and its browser debounce while stopping hidden reads", async () => {
-    vi.useFakeTimers(); mocks.state.capabilities = [];
-    const visibility = vi.spyOn(document, "visibilityState", "get");
-    const { result } = renderHook(() => useHostSessions());
-    await act(async () => {});
-    await openFrame(result);
-    mocks.read.mockClear().mockResolvedValue({ available: true, profiles: [{ ...profile,
-      connected: false, connection_error: "remote_unreachable" }] });
-    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
-    expect(mocks.read).toHaveBeenCalledTimes(1);
-    expect(result.current.frames[0].offline).toBe(false);
-    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
-    expect(result.current.frames[0].offline).toBe(true);
-    expect(mocks.client.onStateChange).not.toHaveBeenCalled();
-    visibility.mockReturnValue("hidden");
-    act(() => document.dispatchEvent(new Event("visibilitychange")));
-    mocks.read.mockClear();
-    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
-    expect(mocks.read).not.toHaveBeenCalled();
-    visibility.mockReturnValue("visible"); mocks.read.mockResolvedValue(directory);
-    await act(async () => document.dispatchEvent(new Event("visibilitychange")));
-    expect(mocks.read).toHaveBeenCalledTimes(1);
-    expect(result.current.frames[0].offline).toBe(false);
-    expect(mocks.mutate).toHaveBeenCalledTimes(1);
-  });
 });

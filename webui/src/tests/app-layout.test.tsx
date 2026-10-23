@@ -4447,7 +4447,7 @@ describe("App layout", () => {
     vi.useFakeTimers();
     vi.mocked(fetchBootstrap).mockResolvedValue({
       token: "tok", api_token: "api-tok", ws_path: "/", expires_in: 300,
-      terminal: { webui: { capabilities: ["webui.state-events.v1"] } },
+      terminal: { webui: { capabilities: ["webui.core.v1"] } },
     });
     let requests: Record<string, unknown>[] = [];
     mockFetchRoutes({ "/api/settings/pairing": () => ({ requests }) });
@@ -4471,7 +4471,7 @@ describe("App layout", () => {
     vi.useFakeTimers();
     vi.mocked(fetchBootstrap).mockResolvedValue({
       token: "tok", api_token: "api-tok", ws_path: "/", expires_in: 0,
-      terminal: { webui: { capabilities: ["webui.state-events.v1"] } },
+      terminal: { webui: { capabilities: ["webui.core.v1"] } },
     });
     const expiresAt = Date.now() + 600_000;
     mockFetchRoutes({ "/api/settings/pairing": () => ({ requests: [{
@@ -4503,7 +4503,7 @@ describe("App layout", () => {
     vi.useFakeTimers();
     vi.mocked(fetchBootstrap).mockResolvedValue({
       token: "tok", api_token: "api-tok", ws_path: "/", expires_in: 0,
-      terminal: { webui: { capabilities: ["webui.state-events.v1"] } },
+      terminal: { webui: { capabilities: ["webui.core.v1"] } },
     });
     let reads = 0;
     mockFetchRoutes({ "/api/settings/pairing": () => ++reads === 1 ? { requests: [{
@@ -4537,7 +4537,7 @@ describe("App layout", () => {
     vi.useFakeTimers();
     vi.mocked(fetchBootstrap).mockResolvedValue({
       token: "tok", api_token: "api-tok", ws_path: "/", expires_in: 0,
-      terminal: { webui: { capabilities: ["webui.state-events.v1"] } },
+      terminal: { webui: { capabilities: ["webui.core.v1"] } },
     });
     const requests = [
       { code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status: "sent",
@@ -4584,10 +4584,11 @@ describe("App layout", () => {
     expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
   });
 
-  it("counts down seconds-only pairing responses from a legacy host for reads and approvals", async () => {
+  it("keeps pairing countdowns current after approval and removes expired requests on notification", async () => {
     vi.useFakeTimers();
     let requests = [{
       code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", expires_in_seconds: 2,
+      expires_at_ms: Date.now() + 2_000, delivery_status: "sent",
     }];
     mockFetchRoutes({ "/api/settings/pairing": () => ({ requests }) });
     render(<App />);
@@ -4598,6 +4599,7 @@ describe("App layout", () => {
     expect(popup).toHaveTextContent("Code expires 1s.");
     requests = [{
       code: "IJKL-MNOP", channel: "feishu.second", sender_id: "bob", expires_in_seconds: 4,
+      expires_at_ms: Date.now() + 4_000, delivery_status: "sent",
     }];
     requestMutationSpy.mockResolvedValueOnce({ requests });
     fireEvent.change(within(popup).getByRole("textbox", { name: "Pairing code" }), {
@@ -4609,8 +4611,10 @@ describe("App layout", () => {
     expect(popup).toHaveTextContent("Code expires 3s.");
     expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input) === "/api/settings/pairing"))
       .toHaveLength(1);
-    requests = [];
     await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(popup).toHaveTextContent("Code expires expired.");
+    requests = [];
+    await act(async () => { for (const handler of stateChangeHandlers.get("pairing") ?? []) handler(); });
     expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
     expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input) === "/api/settings/pairing"))
       .toHaveLength(2);
@@ -4657,7 +4661,7 @@ describe("App layout", () => {
     expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
 
     delivery_status = "sent";
-    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    await act(async () => { for (const handler of stateChangeHandlers.get("pairing") ?? []) handler(); });
     const popup = screen.getByRole("dialog", { name: "Pair account" });
     expect(within(popup).getByRole("textbox", { name: "Pairing code" })).toBeEnabled();
     expect(within(popup).queryByRole("alert")).not.toBeInTheDocument();

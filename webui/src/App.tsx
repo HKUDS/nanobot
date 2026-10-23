@@ -143,8 +143,6 @@ const SIDEBAR_RAIL_WIDTH = 56;
 const MOBILE_SIDEBAR_WIDTH = `min(${SIDEBAR_WIDTH}px, calc(100vw - 0.75rem))`;
 const TOKEN_REFRESH_MARGIN_MS = 30_000;
 const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
-const PAIRING_POLL_INTERVAL_MS = 5_000;
-const PAIRING_IDLE_POLL_INTERVAL_MS = 15_000;
 const PAIRING_DISMISS_SNOOZE_MS = 30_000;
 type ShellView = "chat" | "settings" | "apps" | "automations" | "skills" | "channels" | "remote";
 type ShellRoute = {
@@ -1504,7 +1502,7 @@ function Shell({
     async (signal) => {
       const payload = await fetchPairingRequests(getToken(), "", signal);
       const requests = pairingRequestsWithDeadlines(Array.isArray(payload.requests) ? payload.requests : []);
-      if (signal.aborted) return requests.length;
+      if (signal.aborted) return;
       setPairingRequests(requests);
       setSnoozedPairingCodes((current) => {
         if (current.size === 0) return current;
@@ -1519,9 +1517,7 @@ function Shell({
         );
         return next.size === current.size ? current : next;
       });
-      return requests.length;
     },
-    (count) => count ? PAIRING_POLL_INTERVAL_MS : PAIRING_IDLE_POLL_INTERVAL_MS,
   );
 
   const activeSession = useMemo<ChatSummary | null>(() => {

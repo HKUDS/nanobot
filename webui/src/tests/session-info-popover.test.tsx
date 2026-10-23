@@ -15,7 +15,7 @@ vi.mock("@/providers/ClientProvider", () => {
       return () => { automationChanges.delete(handler); };
     },
   };
-  return { useClient: () => ({ client: liveClient, webuiCapabilities: ["webui.state-events.v1"] }) };
+  return { useClient: () => ({ client: liveClient }) };
 });
 
 const requestMutation = vi.fn();

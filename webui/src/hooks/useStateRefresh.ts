@@ -5,20 +5,16 @@ import type { WebUIStateResource } from "@/lib/types";
 import { useClient } from "@/providers/ClientProvider";
 
 /** Fixed WebUI invalidations share a lifecycle, not a second business-state store. */
-export function useStateRefresh<T>(
+export function useStateRefresh(
   resource: WebUIStateResource,
   enabled: boolean,
-  load: (signal: AbortSignal, initial: boolean) => Promise<T>,
-  legacyIntervalMs: number | ((result: T | undefined) => number | null) | null,
+  load: (signal: AbortSignal, initial: boolean) => Promise<void>,
   scope: string = resource,
 ): () => Promise<void> {
-  const { client, webuiCapabilities } = useClient();
+  const { client } = useClient();
   const visible = usePageVisibility();
-  const events = webuiCapabilities.includes("webui.state-events.v1");
   const loadRef = useRef(load);
   loadRef.current = load;
-  const intervalRef = useRef(legacyIntervalMs);
-  intervalRef.current = legacyIntervalMs;
   const activeRefresh = useRef<(() => Promise<void>) | null>(null);
   const request = useCallback(() => activeRefresh.current?.() ?? Promise.resolve(), []);
 
@@ -35,12 +31,11 @@ export function useStateRefresh<T>(
     const read = async (): Promise<void> => {
       let failed: boolean;
       let reason: unknown;
-      let result: T | undefined;
       do {
         pending = false;
         failed = false;
         try {
-          result = await loadRef.current(signal, initial);
+          await loadRef.current(signal, initial);
           retries = 0;
         } catch (error) {
           failed = true;
@@ -49,11 +44,7 @@ export function useStateRefresh<T>(
         initial = false;
       } while (pending && !signal.aborted && document.visibilityState !== "hidden");
       signal.throwIfAborted();
-      const interval = intervalRef.current;
-      const delay = failed && retries < 3
-        ? 1000 * 2 ** retries++
-        : events || interval === null ? null : typeof interval === "function" ? interval(result) : interval;
-      if (delay !== null) timer = setTimeout(requestRefresh, delay);
+      if (failed && retries < 3) timer = setTimeout(requestRefresh, 1000 * 2 ** retries++);
       if (failed) throw reason;
     };
     const refresh = (): Promise<void> => {
@@ -67,7 +58,7 @@ export function useStateRefresh<T>(
     // Views own read errors; automatic requests retry without unhandled rejections.
     const requestRefresh = () => { void refresh().catch(() => {}); };
     // Register before the first read so a change during that read gets a follow-up.
-    const unsubscribe = events ? client.onStateChange(resource, requestRefresh) : () => {};
+    const unsubscribe = client.onStateChange(resource, requestRefresh);
     let wasOpen = client.status === "open";
     const unsubscribeStatus = client.onStatus((status) => {
       if (status === "open" && !wasOpen) requestRefresh();
@@ -86,6 +77,6 @@ export function useStateRefresh<T>(
       unsubscribeStatus();
       window.removeEventListener("focus", onFocus);
     };
-  }, [client, enabled, events, resource, scope, visible]);
+  }, [client, enabled, resource, scope, visible]);
   return request;
 }

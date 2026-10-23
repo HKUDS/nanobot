@@ -217,7 +217,7 @@ const usage: Usage = (() => {
       cache_write_observed_input_tokens: 0, total_tokens: scale * 5000, requests: scale * 2 };
   });
   const total = days.reduce((sum, day) => sum + day.total_tokens, 0);
-  return { days, total_tokens: total, total_tokens_30d: total, total_tokens_365d: total,
+  return { timezone: "UTC", days, total_tokens: total, total_tokens_30d: total, total_tokens_365d: total,
     peak_day_tokens: Math.max(...days.map((day) => day.total_tokens)), current_streak_days: 3, longest_streak_days: 6,
     active_days_30d: days.filter((day) => day.total_tokens > 0).length, requests_30d: days.reduce((sum, day) => sum + day.requests, 0),
     model_days_30d: days.flatMap((day) => [
@@ -230,7 +230,7 @@ function UsagePreview() {
   const { t } = useGalleryTranslation();
   const [mode, setMode] = useState<"active" | "empty" | "unavailable">("active");
   return <><StatePicker label={t("controls.usage.state")} value={mode} options={["active", "empty", "unavailable"]} onChange={setMode} />
-    <TokenUsageCard usage={mode === "unavailable" ? undefined : mode === "empty" ? { ...usage, days: [], model_days_30d: [] } : usage} timeZone="UTC" /></>;
+    <TokenUsageCard usage={mode === "unavailable" ? undefined : mode === "empty" ? { ...usage, days: [], model_days_30d: [] } : usage} /></>;
 }
 
 function OverviewPreview() {
@@ -416,7 +416,7 @@ export const settingsExamples: ComponentExample[] = [
     code: '<ProviderAPIControl value={api} onChange={setAPI} />\n<ModelAPIControl provider={provider} automaticAPI="responses" value={modelAPI} onChange={setModelAPI} />' },
   { title: "controls.usage.title", files: ["TokenUsageCard", "TokenUsageDetails", "TokenUsageModelTrend"], Preview: UsagePreview,
     description: "controls.usage.description", options: "controls.usage.options",
-    code: '<TokenUsageCard usage={usage} timeZone="UTC" />' },
+    code: '<TokenUsageCard usage={usage} />' },
   { title: "controls.overview.title", files: ["overview/OverviewSettings"], Preview: OverviewPreview,
     description: "controls.overview.description", options: "controls.overview.options",
     code: '<OverviewSettings settings={settings} showBrandLogos={false} onSelectSection={setSection} />' },

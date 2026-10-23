@@ -11,17 +11,13 @@ export interface HostFrame {
   connection: RemoteConnection;
   loaded: boolean;
   offline: boolean;
-  failures: number;
   error?: string;
 }
 interface PendingSwitch { id: string; name: string }
 interface SwitchFailure { id: string; code: string }
 
 export function useHostSessions() {
-  const { client, getToken, webuiCapabilities } = useClient();
-  const stateEvents = webuiCapabilities.includes("webui.state-events.v1");
-  const stateEventsRef = useRef(stateEvents);
-  stateEventsRef.current = stateEvents;
+  const { client, getToken } = useClient();
   const [directory, setDirectory] = useState<RemoteDirectory | null>(() => window.top === window ? null : { available: false, profiles: [] });
   const [directoryError, setDirectoryError] = useState(false);
   const [selected, setSelected] = useState<SelectedRemote | null>(() => readPairReturn() ? null : readSelectedRemote());
@@ -47,13 +43,9 @@ export function useHostSessions() {
     const changed = (!!profile?.gateway_id && profile.gateway_id !== frame.connection.gateway_id)
       || (!!profile?.view_id && profile.view_id !== frame.connection.view_id);
     const connected = !!profile?.connected && !changed;
-    // New hosts already debounce their shared transport samples. Waiting for
-    // another browser read would strand this frame after the only invalidation.
-    frame.failures = connected ? 0 : stateEventsRef.current ? 2 : frame.failures + 1;
-    if (connected || frame.failures >= 2) {
-      frame.offline = !connected;
-      frame.error = connected ? "" : changed ? "instance_changed" : profile?.connection_error || (!profile ? "profile_not_found" : "");
-    }
+    // The gateway already debounces its shared transport samples.
+    frame.offline = !connected;
+    frame.error = connected ? "" : changed ? "instance_changed" : profile?.connection_error || (!profile ? "profile_not_found" : "");
     if (connected && frame.loaded) setFailure((current) => current?.id === id ? null : current);
   }, []);
   const setPendingSwitch = useCallback((value: PendingSwitch | null) => {
@@ -135,21 +127,13 @@ export function useHostSessions() {
         applyDirectory(next);
         applyHealth(next);
       }
-      return next;
     } catch (reason) {
       if (mounted.current && !signal.aborted && generation === directoryGeneration.current) {
         setDirectoryError(true);
-        if (!stateEventsRef.current) {
-          for (const [id, frame] of cache.current) {
-            if (id === pendingRef.current?.id) continue;
-            if (++frame.failures >= 2) { frame.offline = true; frame.error = "directory_unavailable"; }
-          }
-          publish();
-        }
       }
       throw reason;
     }
-  }, () => cache.current.size ? 5_000 : null);
+  });
 
   const connect = useCallback(async (id: string, stillWanted: () => boolean = () => true) => {
     cancel();
@@ -183,11 +167,11 @@ export function useHostSessions() {
       let frame = cache.current.get(id);
       if (!frame || frame.connection.url !== connection.url || frame.connection.gateway_id !== connection.gateway_id
         || frame.connection.view_id !== connection.view_id) {
-        frame = { connection, loaded: false, offline: false, failures: 0 };
+        frame = { connection, loaded: false, offline: false };
         cache.current.set(id, frame);
       } else {
         frame.connection = connection;
-        frame.offline = false; frame.failures = 0; frame.error = "";
+        frame.offline = false; frame.error = "";
       }
       if (!frame.loaded) openingFrame = frame;
       publish();

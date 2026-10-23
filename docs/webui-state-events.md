@@ -4,7 +4,7 @@ Developer contract for refreshing pairing requests, channel status, automation l
 
 ## Event and access boundaries
 
-Hosts advertise the optional `webui.state-events.v1` capability without changing the WebUI core protocol floor. Notifications reuse the authenticated WebSocket and its existing outbound queues:
+The paired WebUI and gateway use state notifications on the authenticated WebSocket and its existing outbound queues:
 
 ```json
 {"event":"webui_state_changed","resources":["pairing","automations"]}
@@ -14,17 +14,17 @@ Hosts advertise the optional `webui.state-events.v1` capability without changing
 
 Resource subscriptions are client-local; no subscription frame is sent. Notifications are transient. Clients recover missed changes by reading current snapshots, not by replaying events.
 
-## Client refresh and compatibility
+## Client refresh lifecycle
 
 `useStateRefresh` subscribes before its initial read and owns one scheduler for automatic and explicit refreshes. Reads are serialized; requests during an in-flight read coalesce into one follow-up. Explicit callers await the coalesced reads and receive the final error or lifecycle cancellation. Automatic reads use bounded transient retries.
 
 Active pages and expanded panels read on entry, matching notifications, focus, visible return, and reconnect. Hiding, unmounting, or changing scope releases the old listeners and timers and aborts obsolete reads; consumers must reject stale results. Remote-directory manual refresh and online/pageshow recovery use the same scheduler.
 
-Hosts with a confirmed compatible WebUI core contract but without `webui.state-events.v1` retain legacy visible polling. Missing or malformed core metadata remains compatibility-unconfirmed and cannot authorize mutations. Event-driven and legacy timers must not run simultaneously. OAuth, QR authorization, update jobs, token renewal, and local UI timers retain independent lifecycles.
+Resource snapshots are event-driven, without periodic browser polling. OAuth, QR authorization, update jobs, token renewal, and local UI timers retain independent lifecycles.
 
 ## Gateway ownership and lifecycle
 
-Each gateway owns its file watches, deadlines, and shared runtime sampling; domain services retain state ownership. Use domain-owned storage paths and observe persisted changes from any writer, including first creation and atomic replacement, without reloading live automation owners. Mutations, expiration, committed usage, and local-date or timezone changes also invalidate their resources. Usage observation is read-only: it must not create a database or run aggregate queries for each filesystem signal. Usage snapshots include their grouping `timezone`; clients retain the settings timezone when older hosts omit it.
+Each gateway owns its file watches, deadlines, and shared runtime sampling; domain services retain state ownership. Use domain-owned storage paths and observe persisted changes from any writer, including first creation and atomic replacement, without reloading live automation owners. Mutations, expiration, committed usage, and local-date or timezone changes also invalidate their resources. Usage observation is read-only: it must not create a database or run aggregate queries for each filesystem signal. Usage snapshots include their grouping `timezone`; clients use it rather than the potentially older settings snapshot timezone.
 
 Native file watches must register before the WebSocket/WebUI listener opens. Registration failure prevents startup; interrupted watches re-register and invalidate affected resources. Watched storage must support native notifications, including on unusual or network-mounted filesystems. Shutdown joins owned change sources.
 

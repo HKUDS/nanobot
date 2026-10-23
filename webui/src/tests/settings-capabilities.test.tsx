@@ -529,6 +529,7 @@ describe("Settings capabilities", () => {
       parentSnapshot = snapshot;
       refreshParent = setSnapshot;
       return <ClientProvider client={{ requestMutation: requestMutationMock, status: "open",
+        onStateChange: () => () => {},
         onStatus: (handler: (status: "open") => void) => { handler("open"); return () => {}; },
       } as never} token="tok">
         <SettingsView theme="light" initialSection="voice" initialSettings={snapshot}

@@ -7,7 +7,6 @@ import { jsonResponse, settingsPayload } from "@/tests/settings-test-utils";
 
 const mocks = vi.hoisted(() => {
   const events = new Map<string, Set<() => void>>();
-  const state = { capabilities: ["webui.state-events.v1"] };
   const mutate = vi.fn();
   const client = {
     status: "open",
@@ -20,10 +19,10 @@ const mocks = vi.hoisted(() => {
       return () => { handlers.delete(handler); };
     },
   };
-  return { client, state, events, mutate, read: vi.fn(), token: () => "synthetic-token" };
+  return { client, events, mutate, read: vi.fn(), token: () => "synthetic-token" };
 });
 vi.mock("@/providers/ClientProvider", () => ({ useClient: () => ({
-  client: mocks.client, token: "synthetic-token", getToken: mocks.token, webuiCapabilities: mocks.state.capabilities,
+  client: mocks.client, token: "synthetic-token", getToken: mocks.token,
 }) }));
 
 const job: SessionAutomationJob = {
@@ -47,7 +46,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   window.localStorage.clear(); window.sessionStorage.clear();
   Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
-  mocks.events.clear(); mocks.state.capabilities = ["webui.state-events.v1"];
+  mocks.events.clear();
   mocks.mutate.mockReset().mockResolvedValue(pending);
   mocks.read.mockReset().mockResolvedValue(jsonResponse({ jobs: [job] }));
   vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input) === "/api/webui/automations"
@@ -76,28 +75,16 @@ describe("automation settings state refresh", () => {
     expect(mocks.read).toHaveBeenCalledTimes(2);
   });
 
-  it("updates a legacy host's run status through its visible five-second refresh", async () => {
-    mocks.state.capabilities = [];
-    const { result } = renderAutomations();
-    await act(async () => {});
-    await act(async () => result.current.systemActions.handleAutomationAction("run", job));
-    expect(result.current.systemState.automations).toEqual(pending);
-    mocks.read.mockResolvedValue(jsonResponse(completed));
-    await act(async () => { await vi.advanceTimersByTimeAsync(4_999); });
-    expect(mocks.read).toHaveBeenCalledTimes(1);
-    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
-    expect(mocks.read).toHaveBeenCalledTimes(2);
-    expect(result.current.systemState.automations).toEqual(completed);
-  });
-
-  it.each([true, false])("stops run-status reads after leaving automations (state events: %s)", async (events) => {
-    mocks.state.capabilities = events ? ["webui.state-events.v1"] : [];
+  it("stops run-status reads after leaving automations", async () => {
     const { result } = renderAutomations();
     await act(async () => {});
     await act(async () => result.current.systemActions.handleAutomationAction("run", job));
     act(() => result.current.selectSection("skills"));
     mocks.read.mockResolvedValue(jsonResponse(completed));
-    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    await act(async () => {
+      for (const handler of mocks.events.get("automations") || []) handler();
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
     expect(result.current.activeSection).toBe("skills");
     expect(mocks.read).toHaveBeenCalledTimes(1);
     expect(result.current.systemState.automations).toEqual(pending);

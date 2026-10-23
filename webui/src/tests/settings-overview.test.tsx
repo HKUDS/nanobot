@@ -265,6 +265,7 @@ describe("Settings overview and appearance", () => {
     const payload: SettingsPayload = {
       ...settingsPayload(),
       usage: {
+        timezone: "UTC",
         days: [
           {
             date: new Date().toISOString().slice(0, 10),
@@ -314,6 +315,7 @@ describe("Settings overview and appearance", () => {
     const payload: SettingsPayload = {
       ...settingsPayload(),
       usage: {
+        timezone: "UTC",
         days: [],
         total_tokens: 0,
         total_tokens_30d: 0,
@@ -368,6 +370,7 @@ describe("Settings overview and appearance", () => {
         timezone: "Asia/Shanghai",
       },
       usage: {
+        timezone: "Asia/Shanghai",
         days: [
           {
             date: "2026-06-03",

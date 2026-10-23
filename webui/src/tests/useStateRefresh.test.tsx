@@ -21,10 +21,10 @@ const source = vi.hoisted(() => {
       return () => { statuses.delete(callback); };
     },
   };
-  return { client, handlers, statuses, capabilities: ["webui.state-events.v1"] };
+  return { client, handlers, statuses };
 });
 vi.mock("@/providers/ClientProvider", () => ({
-  useClient: () => ({ client: source.client, webuiCapabilities: source.capabilities }),
+  useClient: () => ({ client: source.client }),
 }));
 
 function invalidate(resource: WebUIStateResource) {
@@ -49,7 +49,6 @@ beforeEach(() => {
   source.handlers.clear();
   source.statuses.clear();
   source.client.status = "open";
-  source.capabilities = ["webui.state-events.v1"];
   visibilityDescriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
   visibility("visible");
 });
@@ -62,7 +61,7 @@ afterEach(() => {
 describe("WebUI state refresh", () => {
   it("reads on entry and on the matching event, without idle queries", async () => {
     const read = vi.fn().mockResolvedValue(undefined);
-    const { unmount } = renderHook(() => useStateRefresh("pairing", true, read, 15_000));
+    const { unmount } = renderHook(() => useStateRefresh("pairing", true, read));
     await act(async () => {});
     expect(read).toHaveBeenCalledTimes(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
@@ -80,7 +79,7 @@ describe("WebUI state refresh", () => {
     let finish!: () => void;
     const read = vi.fn().mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }))
       .mockResolvedValue(undefined);
-    const { unmount } = renderHook(() => useStateRefresh("automations", true, read, 3000));
+    const { unmount } = renderHook(() => useStateRefresh("automations", true, read));
     invalidate("automations");
     invalidate("automations");
     expect(read).toHaveBeenCalledTimes(1);
@@ -91,7 +90,7 @@ describe("WebUI state refresh", () => {
 
   it("retires stale reads on scope changes and refreshes on visible return and reconnect", async () => {
     const read = vi.fn().mockResolvedValue(undefined);
-    const { rerender, unmount } = renderHook(({ scope }) => useStateRefresh("automations", true, read, 3000, scope), {
+    const { rerender, unmount } = renderHook(({ scope }) => useStateRefresh("automations", true, read, scope), {
       initialProps: { scope: "chat-a" },
     });
     await act(async () => {});
@@ -114,27 +113,11 @@ describe("WebUI state refresh", () => {
     unmount();
   });
 
-  it("keeps visible polling for an older gateway that cannot send notifications", async () => {
-    source.capabilities = [];
-    const read = vi.fn().mockResolvedValue(undefined);
-    const { unmount } = renderHook(() => useStateRefresh("usage", true, read, 5000));
-    await act(async () => {});
-    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
-    expect(read).toHaveBeenCalledTimes(2);
-    visibility("hidden");
-    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
-    expect(read).toHaveBeenCalledTimes(2);
-    visibility("visible");
-    await act(async () => {});
-    expect(read).toHaveBeenCalledTimes(3);
-    unmount();
-  });
-
   it("routes an explicit retry through the active lifetime and ignores it after leaving", async () => {
     let finish!: () => void;
     const read = vi.fn().mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }))
       .mockResolvedValue(undefined);
-    const { result, unmount } = renderHook(() => useStateRefresh("pairing", true, read, 15_000));
+    const { result, unmount } = renderHook(() => useStateRefresh("pairing", true, read));
     const retry = result.current;
     const cancelled = expect(retry()).rejects.toMatchObject({ name: "AbortError" });
     expect(read).toHaveBeenCalledTimes(1);
@@ -156,7 +139,7 @@ describe("WebUI state refresh", () => {
     const failure = new Error("directory unavailable");
     const read = vi.fn().mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }))
       .mockRejectedValue(failure);
-    const { result, unmount } = renderHook(() => useStateRefresh("remote_instances", true, read, 5000));
+    const { result, unmount } = renderHook(() => useStateRefresh("remote_instances", true, read));
     const rejected = expect(result.current()).rejects.toBe(failure);
     await act(async () => { finish(); await rejected; });
     expect(read).toHaveBeenCalledTimes(2);
@@ -165,7 +148,7 @@ describe("WebUI state refresh", () => {
 
   it("bounds transient retries and lets a later change recover a failed read", async () => {
     const read = vi.fn().mockRejectedValue(new Error("offline"));
-    const { unmount } = renderHook(() => useStateRefresh("channels", true, read, 5000));
+    const { unmount } = renderHook(() => useStateRefresh("channels", true, read));
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
     expect(read).toHaveBeenCalledTimes(4);
     read.mockResolvedValue(undefined);

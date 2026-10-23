@@ -5,8 +5,6 @@ import { useStateRefresh } from "@/hooks/useStateRefresh";
 import { fetchSessionAutomations } from "@/lib/api";
 import type { SessionAutomationJob } from "@/lib/types";
 
-const AUTOMATIONS_REFRESH_MS = 3000;
-
 export function useSessionAutomationJobs(open: boolean, token: string, sessionKey: string) {
   const pageVisible = usePageVisibility();
   const [snapshot, setSnapshot] = useState<{
@@ -30,7 +28,7 @@ export function useSessionAutomationJobs(open: boolean, token: string, sessionKe
         ? current : { sessionKey, jobs: null, loadFailed: true });
       throw error;
     }
-  }, AUTOMATIONS_REFRESH_MS, sessionKey);
+  }, sessionKey);
 
   useEffect(() => {
     if (!open || !pageVisible) return;

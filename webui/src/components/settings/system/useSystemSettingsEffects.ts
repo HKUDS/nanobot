@@ -99,7 +99,7 @@ export function useSystemSettingsEffects({
       } finally {
         if (!signal.aborted && initial) setNanobotFeaturesLoading(false);
       }
-    }, activeSection === "channels" ? 5000 : null, activeSection);
+    }, activeSection);
 
   useEffect(() => {
     if (activeSection !== "runtime") return;
@@ -169,5 +169,5 @@ export function useSystemSettingsEffects({
     } finally {
       if (!signal.aborted && initial) setAutomationsLoading(false);
     }
-  }, 5000);
+  });
 }

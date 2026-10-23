@@ -859,8 +859,8 @@ export interface SettingsPayload {
     unified_session: boolean;
   };
   usage?: {
-    /** Timezone used to group this snapshot; absent on older hosts. */
-    timezone?: string;
+    /** Timezone used to group this snapshot. */
+    timezone: string;
     days: Array<{
       date: string;
       input_tokens: number;
