@@ -199,6 +199,19 @@ vi.mock("@/hooks/useSessions", async (importOriginal) => {
           return chatId;
         },
         forkChat: async () => "fork-chat",
+        renameChat: async (key: string, title: string) => {
+          const current = sessions.find((session) => session.key === key);
+          if (!current?.generation) throw new Error("Session is not ready to rename");
+          await requestMutationSpy("session.rename", {
+            key, title, generation: current.generation, previous_title: current.title ?? "",
+          });
+          mockSessions = mockSessions.map((session) => (
+            session.key === key ? { ...session, title } : session
+          ));
+          setSessions((prev: ChatSummary[]) => prev.map((session) => (
+            session.key === key ? { ...session, title } : session
+          )));
+        },
         getSessionAutomations: getSessionAutomationsSpy,
         deleteChat: async (key: string, options?: { deleteAutomations?: boolean }) => {
           if (options === undefined) await deleteChatSpy(key);
@@ -358,6 +371,7 @@ describe("App layout", () => {
       api_token: "api-tok",
       ws_path: "/",
       expires_in: 300,
+      terminal: { webui: { capabilities: ["webui.core.v1", "webui.session-title-rename.v1"] } },
     });
     vi.mocked(deriveWsUrl).mockReset().mockReturnValue("ws://test");
     mockFetchRoutes({});
@@ -1858,7 +1872,7 @@ describe("App layout", () => {
     const key = "websocket:linked-chat";
     mockSessions = [{
       key, channel: "websocket", chatId: "linked-chat", createdAt: null, updatedAt: null,
-      title: "Stored title", preview: "Original preview",
+      title: "推特大战场", preview: "Original preview", generation: "gen-linked",
     }];
     const sidebarState: SidebarStatePayload = {
       schema_version: 1, pinned_keys: [], archived_keys: [], session_order: [],
@@ -1891,19 +1905,10 @@ describe("App layout", () => {
     expect(screen.getByRole("menuitem", { name: "Open a chat" })).toHaveAttribute(
       "href", "#/chat/websocket%3Alinked-chat",
     );
-    for (const title of ["新会话名称", ""]) {
-      act(() => {
-        sidebarStateUpdateHandlers.forEach((handler) => handler({
-          ...sidebarState, title_overrides: title ? { [key]: title } : {},
-        }));
-      });
-      const expected = title || "Stored title";
-      expect(within(sidebar).getByText(expected)).toBeInTheDocument();
-      expect(within(dialog).queryByText(expected)).not.toBeInTheDocument();
-      expect(screen.getByRole("menuitem", { name: "Open a chat" })).toHaveAttribute(
-        "href", "#/chat/websocket%3Alinked-chat",
-      );
-    }
+    expect(within(sidebar).getByText("推特大战场")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Open a chat" })).toHaveAttribute(
+      "href", "#/chat/websocket%3Alinked-chat",
+    );
     await user.keyboard("{Escape}");
     expect(within(dialog).getByRole("button", { name: "More actions" })).toHaveFocus();
     expect(requestMutationSpy).not.toHaveBeenCalled();
@@ -2571,12 +2576,37 @@ describe("App layout", () => {
     );
   }, 15_000);
 
+  it("keeps topic rename unavailable on a host without the optional capability", async () => {
+    mockSessions = [{
+      key: "websocket:chat-a", channel: "websocket", chatId: "chat-a",
+      createdAt: null, updatedAt: null, title: "Existing chat", preview: "", generation: "gen-chat-a",
+    }];
+    vi.mocked(fetchBootstrap).mockResolvedValue({
+      token: "tok", api_token: "api-tok", ws_path: "/", expires_in: 300,
+      terminal: { webui: { capabilities: ["webui.core.v1"] } },
+    });
+    mockFetchRoutes({ "/api/webui/sidebar-state": {
+      title_overrides: { "websocket:chat-a": "Old custom name" },
+    } });
+    render(<App />);
+    await screen.findByRole("button", { name: "Topic actions for Old custom name" });
+    await userEvent.setup().click(screen.getByRole("button", { name: "Topic actions for Old custom name" }));
+    expect(await screen.findByRole("menuitem", { name: "Rename Update this server" })).toHaveAttribute("data-disabled");
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    await userEvent.setup().click(screen.getByRole("menuitem", { name: "Pin" }));
+    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenCalledWith(expect.objectContaining({
+      pinned_keys: ["websocket:chat-a"],
+      title_overrides: { "websocket:chat-a": "Old custom name" },
+    })));
+    expect(requestMutationSpy).not.toHaveBeenCalled();
+  });
+
   it("renames inline in the mobile drawer without dismissing it and reloads the saved title", async () => {
     restoreBrowserFocus = mockBrowserFocus();
     const user = userEvent.setup();
     mockSessions = [{
       key: "websocket:chat-a", channel: "websocket", chatId: "chat-a",
-      createdAt: null, updatedAt: null, title: "Existing chat", preview: "",
+      createdAt: null, updatedAt: null, title: "Existing chat", preview: "", generation: "gen-chat-a",
     }];
     vi.stubGlobal("matchMedia", vi.fn().mockImplementation((query: string) => ({
       matches: !query.includes("1024px"), media: query, onchange: null,
@@ -2614,14 +2644,17 @@ describe("App layout", () => {
     const input = await startRename();
     await user.clear(input);
     await user.type(input, "Renamed topic");
-    setSidebarStateSpy.mockRejectedValueOnce(new Error("Disk full"));
+    requestMutationSpy.mockRejectedValueOnce(new Error("Disk full"));
     await user.keyboard("{Enter}");
     expect(await within(sheet).findByRole("alert")).toHaveTextContent("Couldn't save the name. Try again.");
     expect(input).toHaveValue("Renamed topic");
-    expect(persisted.state?.title_overrides["websocket:chat-a"]).toBeUndefined();
+    expect(mockSessions[0].title).toBe("Existing chat");
     await user.keyboard("{Enter}");
     expect(await within(sheet).findByRole("button", { name: "Renamed topic" })).toBeInTheDocument();
-    expect(persisted.state?.title_overrides["websocket:chat-a"]).toBe("Renamed topic");
+    expect(mockSessions[0].title).toBe("Renamed topic");
+    expect(requestMutationSpy).toHaveBeenCalledWith("session.rename", {
+      key: "websocket:chat-a", title: "Renamed topic", generation: "gen-chat-a", previous_title: "Existing chat",
+    });
     expect(window.location.hash).toBe(route);
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
     firstRender.unmount();
@@ -2634,7 +2667,7 @@ describe("App layout", () => {
     const user = userEvent.setup();
     const target: ChatSummary = {
       key: "websocket:target", channel: "websocket", chatId: "target",
-      createdAt: null, updatedAt: null, title: "Generated title", preview: "Original question",
+      createdAt: null, updatedAt: null, title: "Generated title", preview: "Original question", generation: "gen-target",
       handle: { id: "handle_0123456789abcdef0123456789abcdef", name: "gane" },
     };
     mockSessions = [
@@ -2673,7 +2706,10 @@ describe("App layout", () => {
     await user.clear(name);
     await user.type(name, "会话编辑{Enter}");
     await within(sidebar).findByText("会话编辑");
-    expect(persisted.title_overrides?.[target.key]).toBe("会话编辑");
+    expect(mockSessions.find((session) => session.key === target.key)?.title).toBe("会话编辑");
+    expect(requestMutationSpy).toHaveBeenCalledWith("session.rename", {
+      key: target.key, title: "会话编辑", generation: "gen-target", previous_title: "Generated title",
+    });
     expect(input).toHaveValue("@gane ");
     expect(screen.getByTestId("composer-session-mention-gane")).toHaveAttribute("title", "Session: 会话编辑");
 
@@ -2730,7 +2766,7 @@ describe("App layout", () => {
         chatId: "chat-b",
         createdAt: "2026-04-16T11:00:00Z",
         updatedAt: "2026-04-16T11:00:00Z",
-        preview: "Second chat",
+        preview: "Second chat", title: "Roadmap",
       },
     ];
     const initialState = {
@@ -2785,7 +2821,7 @@ describe("App layout", () => {
       expect.objectContaining({
         pinned_keys: initialState.pinned_keys,
         archived_keys: initialState.archived_keys,
-        title_overrides: initialState.title_overrides,
+        title_overrides: {},
         view: expect.objectContaining({ show_archived: true }),
       }),
     );
@@ -2798,7 +2834,7 @@ describe("App layout", () => {
     vi.mocked(useSessions).mockImplementation(actual.useSessions);
     const sessions: ChatSummary[] = ["a", "b"].map((id) => ({
       key: `websocket:chat-${id}`, channel: "websocket", chatId: `chat-${id}`,
-      createdAt: null, updatedAt: null, preview: "",
+      createdAt: null, updatedAt: null, preview: "", title: `Saved ${id.toUpperCase()}`,
     }));
     if (cached) {
       activateReloadCache("ws://test");
@@ -2872,7 +2908,7 @@ describe("App layout", () => {
       pinned_keys: ["websocket:chat-b"],
       archived_keys: [],
       session_order: ["websocket:chat-a", "websocket:chat-b"],
-      title_overrides: { "websocket:chat-a": "Saved A", "websocket:chat-b": "Saved B" },
+      title_overrides: {},
       tags_by_key: { "websocket:chat-b": ["important"] },
       workbench: {
         version: 1,

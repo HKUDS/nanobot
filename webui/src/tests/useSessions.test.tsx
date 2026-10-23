@@ -39,6 +39,7 @@ function fakeClient() {
     sendMessage: vi.fn(),
     newChat: vi.fn(),
     forkChat: vi.fn(),
+    requestMutation: vi.fn(),
     attach: vi.fn(),
     connect: vi.fn(),
     close: vi.fn(),
@@ -98,6 +99,29 @@ describe("useSessions", () => {
       unmount();
       clearReloadCache();
     }
+  });
+
+  it("updates the canonical title only after an acknowledged guarded rename", async () => {
+    const client = fakeClient();
+    const original = {
+      key: "websocket:topic", channel: "websocket", chatId: "topic",
+      generation: "generation-1", title: "Generated", preview: "First question",
+      createdAt: null, updatedAt: null,
+    };
+    vi.mocked(api.listSessions).mockResolvedValue([original]);
+    const { result } = renderHook(() => useSessions(), { wrapper: wrap(client) });
+    await waitFor(() => expect(result.current.sessions[0]?.title).toBe("Generated"));
+    let confirm!: (value: { key: string; title: string }) => void;
+    client.requestMutation.mockImplementation(() => new Promise((resolve) => { confirm = resolve; }));
+    let rename!: Promise<void>;
+    act(() => { rename = result.current.renameChat(original.key, "Manual name"); });
+    expect(client.requestMutation).toHaveBeenCalledWith("session.rename", {
+      key: original.key, title: "Manual name", previous_title: "Generated", generation: "generation-1",
+    });
+    expect(result.current.sessions[0]?.title).toBe("Generated");
+    vi.mocked(api.listSessions).mockResolvedValue([{ ...original, title: "Manual name" }]);
+    await act(async () => { confirm({ key: original.key, title: "Manual name" }); await rename; });
+    expect(result.current.sessions[0]?.title).toBe("Manual name");
   });
 
   it("coalesces a burst across tasks and preserves unchanged session identities", async () => {

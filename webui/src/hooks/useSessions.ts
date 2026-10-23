@@ -31,6 +31,7 @@ export function useSessions(): {
     modelPreset?: string | null,
   ) => Promise<string>;
   forkChat: (sourceChatId: string, beforeUserIndex: number, title?: string) => Promise<string>;
+  renameChat: (key: string, title: string) => Promise<void>;
   deleteChat: (
     key: string,
     options?: { deleteAutomations?: boolean },
@@ -44,6 +45,7 @@ export function useSessions(): {
   const [error, setError] = useState<string | null>(null);
   const tokenRef = useRef(token);
   const optimisticKeysRef = useRef<Set<string>>(new Set());
+  const connectionStatusRef = useRef(client.status);
   const refreshPendingRef = useRef(false);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   tokenRef.current = token;
@@ -101,6 +103,11 @@ export function useSessions(): {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => client.onStatus((status) => {
+    if (status === "open" && connectionStatusRef.current !== "open") void refresh();
+    connectionStatusRef.current = status;
+  }), [client, refresh]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -172,6 +179,18 @@ export function useSessions(): {
     return chatId;
   }, [client]);
 
+  const renameChat = useCallback(async (key: string, title: string): Promise<void> => {
+    const current = sessions.find((session) => session.key === key);
+    if (!current?.generation) throw new Error("Session is not ready to rename");
+    const result = await client.requestMutation<{ key: string; title: string }>("session.rename", {
+      key, title, generation: current.generation, previous_title: current.title ?? "",
+    });
+    setSessions((previous) => previous.map((session) => (
+      session.key === result.key ? { ...session, title: result.title } : session
+    )));
+    void refresh();
+  }, [client, refresh, sessions]);
+
   const deleteChat = useCallback(
     async (key: string, options?: { deleteAutomations?: boolean }) => {
       const optimistic = optimisticKeysRef.current.has(key);
@@ -200,6 +219,7 @@ export function useSessions(): {
     refresh,
     createChat,
     forkChat,
+    renameChat,
     deleteChat,
     getSessionAutomations,
   };

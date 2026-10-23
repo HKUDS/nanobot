@@ -1905,6 +1905,7 @@
     "pin": "Pin",
     "unpin": "Unpin",
     "rename": "Rename",
+    "renameAfterFirstMessage": "Send a message first",
     "renamePlaceholder": "Topic name",
     "renameProjectTitle": "Rename project",
     "renameProjectDescription": "Change only this project's name in the WebUI sidebar.",

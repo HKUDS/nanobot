@@ -9,7 +9,7 @@ import { mockBrowserFocus } from "./browser-focus";
 const topic: ChatSummary = {
   key: "websocket:review", chatId: "review", channel: "websocket",
   title: "Review", preview: "", createdAt: "2026-10-04T10:00:00Z",
-  updatedAt: "2026-10-04T10:00:00Z",
+  updatedAt: "2026-10-04T10:00:00Z", generation: "persisted-generation",
 };
 
 function SidebarFocusCase() {

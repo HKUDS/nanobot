@@ -1699,6 +1699,7 @@
     "pin": "Ghim",
     "unpin": "Bỏ ghim",
     "rename": "Đổi tên",
+    "renameAfterFirstMessage": "Hãy gửi tin nhắn trước",
     "renamePlaceholder": "Tên chủ đề",
     "renameProjectTitle": "Đổi tên dự án",
     "renameProjectDescription": "Chỉ đổi tên dự án trong thanh bên WebUI.",

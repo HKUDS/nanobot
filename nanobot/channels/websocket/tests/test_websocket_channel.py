@@ -1640,6 +1640,61 @@ async def test_webui_sidebar_state_update_broadcasts_workbench_to_other_devices(
 
 
 @pytest.mark.asyncio
+async def test_session_rename_notifies_other_webui_clients(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    sessions = SessionManager(tmp_path / "sessions")
+    session = Session(key="websocket:rename")
+    sessions.save(session)
+    channel = _ch(bus, session_manager=sessions)
+    source = AsyncMock()
+    source.request = SimpleNamespace(headers=Headers())
+    other_device = AsyncMock()
+    channel._webui_connections.update({source, other_device})
+    channel._register_connection_outbound(other_device)
+
+    await channel._dispatch_envelope(source, "webui-client", {
+        "type": "webui_request", "request_id": "rename-topic", "action": "session.rename",
+        "payload": {"key": session.key, "title": "Shared title",
+                    "generation": session.generation, "previous_title": ""},
+    })
+    await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+
+    assert json.loads(source.send.await_args.args[0]) == {
+        "event": "webui_response", "request_id": "rename-topic", "ok": True,
+        "result": {"key": session.key, "title": "Shared title"},
+    }
+    assert json.loads(other_device.send.await_args.args[0]) == {
+        "event": "session_updated", "chat_id": "rename", "scope": "metadata",
+    }
+
+
+@pytest.mark.asyncio
+async def test_legacy_sidebar_command_imports_title_before_saving_layout(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.webui.sidebar_state import read_webui_sidebar_state, write_webui_sidebar_state
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    sessions = SessionManager(tmp_path / "sessions")
+    sessions.save(Session(key="websocket:legacy"))
+    write_webui_sidebar_state({"title_overrides": {"websocket:legacy": "Old title"}})
+    channel = _ch(bus, session_manager=sessions)
+    conn = AsyncMock()
+    conn.request = SimpleNamespace(headers=Headers())
+    channel._webui_connections.add(conn)
+
+    await channel._dispatch_envelope(conn, "webui-client", {
+        "type": "set_sidebar_state", "state": {"pinned_keys": ["websocket:legacy"],
+                                               "title_overrides": {}},
+    })
+    assert read_webui_sidebar_state()["title_overrides"] == {}
+    assert read_webui_sidebar_state()["pinned_keys"] == ["websocket:legacy"]
+    assert (await sessions.state.read_metadata("websocket:legacy"))["metadata"]["title"] == "Old title"
+
+
+@pytest.mark.asyncio
 async def test_client_cannot_self_assert_webui_quote_context(bus: MagicMock) -> None:
     channel = _ch(bus)
     conn = MagicMock()

@@ -53,6 +53,7 @@ interface SidebarProps {
   onRequestDeleteMany?: (items: SidebarDeleteItem[]) => void;
   onTogglePin: (key: string) => void;
   onRequestRename: (key: string, title: string) => Promise<void>;
+  canRenameSessions?: boolean;
   onRequestRenameTab?: (key: string, label: string) => void;
   onToggleArchive: (key: string) => void;
   paneGroups?: Record<string, SidebarPaneGroup>;
@@ -285,6 +286,7 @@ export function Sidebar(props: SidebarProps) {
             onRequestDeleteMany={props.onRequestDeleteMany}
             onTogglePin={props.onTogglePin}
             onRequestRename={props.onRequestRename}
+            canRenameSessions={props.canRenameSessions}
             onRequestRenameTab={props.onRequestRenameTab}
             onToggleArchive={props.onToggleArchive}
             paneGroups={props.paneGroups}

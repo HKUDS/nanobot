@@ -2419,7 +2419,7 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
             "pinned_keys": ["websocket:sidebar"],
             "archived_keys": ["websocket:old"],
             "session_order": ["websocket:old", "websocket:sidebar"],
-            "title_overrides": {"websocket:sidebar": "Pinned work"},
+            "title_overrides": {},
             "view": {"density": "compact", "show_archived": True},
         }
         updated = await _webui_mutate(
@@ -2431,7 +2431,7 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
         body = updated.json()
         assert body["pinned_keys"] == ["websocket:sidebar"]
         assert body["session_order"] == ["websocket:old", "websocket:sidebar"]
-        assert body["title_overrides"] == {"websocket:sidebar": "Pinned work"}
+        assert body["title_overrides"] == {}
         assert body["view"]["density"] == "compact"
 
         state_path = tmp_path / "webui" / "sidebar-state.json"
@@ -2442,6 +2442,129 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
     finally:
         await channel.stop()
         await server_task
+
+
+@pytest.mark.asyncio
+async def test_session_title_import_retries_missing_sessions_and_rejects_stale_writes(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.webui.sidebar_state import read_webui_sidebar_state, write_webui_sidebar_state
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    sessions = _seed_many(tmp_path, ["websocket:legacy", "websocket:manual"])
+    await sessions.state.update_metadata(
+        "websocket:manual", {"title": "Newer title", "title_user_edited": True},
+    )
+    write_webui_sidebar_state({"title_overrides": {
+        "websocket:legacy": "Imported title", "websocket:manual": "Old title",
+        "websocket:unavailable": "Pending title",
+    }})
+    channel = _ch(bus, session_manager=sessions, port=_free_port())
+    task = asyncio.create_task(channel.start())
+    try:
+        token = channel.gateway.tokens.issue_api_token(300)
+        auth = {"Authorization": f"Bearer {token}"}
+        url = f"http://127.0.0.1:{channel.config.port}"
+        stale = await _webui_mutate(channel, "sidebar.update", {"state": {
+            "title_overrides": {"websocket:legacy": "Stale title"},
+        }})
+        assert stale.status_code == 409
+        assert read_webui_sidebar_state()["title_overrides"]["websocket:legacy"] == "Imported title"
+        # A new client's layout write can arrive before its session-list read.
+        layout = await _webui_mutate(channel, "sidebar.update", {"state": {
+            "pinned_keys": ["websocket:legacy"], "title_overrides": {},
+        }})
+        assert layout.status_code == 200
+        listed = await _http_get(f"{url}/api/sessions", headers=auth)
+        assert listed.status_code == 200
+        rows = {row["key"]: row for row in listed.json()["sessions"]}
+        assert rows["websocket:legacy"]["title"] == "Imported title"
+        assert rows["websocket:manual"]["title"] == "Newer title"
+        assert read_webui_sidebar_state()["title_overrides"] == {
+            "websocket:unavailable": "Pending title",
+        }
+        assert (await sessions.state.read_metadata("websocket:legacy"))["metadata"]["title_user_edited"] is True
+        # The empty pane did not exist on first read. It may be persisted later
+        # without a restart, so its legacy name must still be imported.
+        await sessions.state.get_header("websocket:unavailable")
+        listed = await _http_get(f"{url}/api/sessions", headers=auth)
+        assert {row["key"]: row for row in listed.json()["sessions"]}["websocket:unavailable"]["title"] == "Pending title"
+        assert read_webui_sidebar_state()["title_overrides"] == {}
+
+        original = rows["websocket:legacy"]
+        payload = {"key": original["key"], "title": "Global title",
+                   "generation": original["generation"], "previous_title": original["title"]}
+        assert (await _webui_mutate(channel, "session.rename", payload)).json() == {
+            "key": original["key"], "title": "Global title",
+        }
+        assert (await _webui_mutate(channel, "session.rename", payload)).status_code == 409
+        assert (await sessions.state.read_metadata("websocket:legacy"))["metadata"]["title"] == "Global title"
+        assert (await _webui_mutate(channel, "sidebar.update", {"state": {
+            "title_overrides": {"websocket:legacy": "Stale title"},
+        }})).status_code == 409
+        current_titles = {row["key"]: row["title"] for row in (
+            await _http_get(f"{url}/api/sessions", headers=auth)
+        ).json()["sessions"]}
+        assert current_titles["websocket:legacy"] == "Global title"
+        assert current_titles["websocket:manual"] == "Newer title"
+        assert (await _webui_mutate(channel, "session.rename", {
+            **payload, "key": "websocket:missing",
+        })).status_code == 409
+        assert sessions.read_session_version("websocket:missing") is None
+        assert (await _webui_mutate(channel, "session.rename", {
+            **payload, "key": "system:private",
+        })).status_code == 404
+        assert (await _webui_mutate(channel, "session.rename", {
+            **payload, "title": "   ",
+        })).status_code == 400
+        assert await sessions.state.delete(original["key"], expected_generation=original["generation"])
+        replacement = await sessions.state.get(original["key"])
+        assert replacement.generation != original["generation"]
+        assert (await _webui_mutate(channel, "session.rename", {
+            **payload, "previous_title": "", "title": "Belongs to old session",
+        })).status_code == 409
+        assert (await sessions.state.read_metadata(original["key"]))["metadata"].get("title") is None
+        direct = await _http_get(f"{url}/api/webui/session-rename", headers=auth)
+        assert direct.status_code == 405
+    finally:
+        await channel.stop()
+        await task
+
+
+@pytest.mark.asyncio
+async def test_sidebar_write_does_not_erase_unreadable_legacy_titles(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.webui import sidebar_state
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    sessions = _seed_session(tmp_path, key="websocket:legacy")
+    sidebar_state.write_webui_sidebar_state({"title_overrides": {
+        "websocket:legacy": "Important name",
+    }})
+    source = sidebar_state.webui_sidebar_state_path()
+    saved = source.read_bytes()
+    channel = _ch(bus, session_manager=sessions, port=_free_port())
+    original_load = sidebar_state.json.load
+
+    def unreadable(_stream):
+        raise OSError("temporarily unavailable")
+
+    monkeypatch.setattr(sidebar_state.json, "load", unreadable)
+    response = await _webui_mutate(channel, "sidebar.update", {"state": {
+        "pinned_keys": ["websocket:legacy"], "title_overrides": {},
+    }})
+    assert response.status_code >= 500
+    assert source.read_bytes() == saved
+    assert (await sessions.state.read_metadata("websocket:legacy"))["metadata"].get("title") is None
+
+    monkeypatch.setattr(sidebar_state.json, "load", original_load)
+    response = await _webui_mutate(channel, "sidebar.update", {"state": {
+        "pinned_keys": ["websocket:legacy"], "title_overrides": {},
+    }})
+    assert response.status_code == 200
+    assert (await sessions.state.read_metadata("websocket:legacy"))["metadata"]["title"] == "Important name"
+    assert sidebar_state.read_webui_sidebar_state()["title_overrides"] == {}
 
 
 @pytest.mark.asyncio

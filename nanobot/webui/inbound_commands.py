@@ -62,7 +62,7 @@ from nanobot.webui.session_access import (
     session_mentions_runtime_context,
 )
 from nanobot.webui.session_identity import is_valid_webui_chat_id, webui_session_key
-from nanobot.webui.sidebar_state import write_webui_sidebar_state
+from nanobot.webui.sidebar_state import write_webui_sidebar_layout
 from nanobot.webui.temporary_chats import TemporaryChatError
 from nanobot.webui.transcription_ws import webui_transcription_event
 
@@ -404,7 +404,7 @@ class WebUICommandRouter:
                 await self._transport.webui_send_event(connection, "error", detail="access_denied")
                 return
             state = envelope.get("state")
-            if not isinstance(state, dict):
+            if not isinstance(state, dict) or state.get("title_overrides"):
                 await self._transport.webui_send_event(
                     connection,
                     "error",
@@ -412,8 +412,9 @@ class WebUICommandRouter:
                 )
                 return
             try:
+                await self._http_router.import_legacy_titles()
                 saved_state = await asyncio.to_thread(
-                    write_webui_sidebar_state,
+                    write_webui_sidebar_layout,
                     cast(dict[str, Any], state),
                 )
             except (OSError, ValueError):
@@ -1166,6 +1167,12 @@ class WebUICommandRouter:
                         await self.broadcast_webui_event(
                             "sidebar_state_updated",
                             state=result,
+                        )
+                    if action == "session.rename" and isinstance(result, dict):
+                        await self.broadcast_webui_event(
+                            "session_updated",
+                            chat_id=result["key"].removeprefix("websocket:"),
+                            scope="metadata",
                         )
                     return WebUIRequestResult(result=result)
                 return WebUIRequestResult(

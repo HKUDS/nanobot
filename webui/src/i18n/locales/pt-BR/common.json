@@ -1713,6 +1713,7 @@
     "pin": "Fixar",
     "unpin": "Desafixar",
     "rename": "Renomear",
+    "renameAfterFirstMessage": "Envie uma mensagem primeiro",
     "renamePlaceholder": "Nome do tópico",
     "renameProjectTitle": "Renomear projeto",
     "renameProjectDescription": "Altere apenas o nome do projeto na barra lateral WebUI.",

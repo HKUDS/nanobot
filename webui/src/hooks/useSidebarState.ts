@@ -72,7 +72,7 @@ function boolMap(value: unknown): Record<string, boolean> {
   return out;
 }
 
-function normalizeSidebarState(raw: unknown): SidebarStatePayload {
+function normalizeSidebarState(raw: unknown, legacyTitles: boolean): SidebarStatePayload {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return { ...DEFAULT_SIDEBAR_STATE, view: { ...DEFAULT_SIDEBAR_STATE.view } };
   }
@@ -89,7 +89,7 @@ function normalizeSidebarState(raw: unknown): SidebarStatePayload {
     pinned_keys: uniqueStrings(value.pinned_keys),
     archived_keys: uniqueStrings(value.archived_keys),
     session_order: uniqueStrings(value.session_order),
-    title_overrides: stringMap(value.title_overrides),
+    title_overrides: legacyTitles ? stringMap(value.title_overrides) : {},
     project_name_overrides: stringMap(value.project_name_overrides),
     tags_by_key: tagsMap(value.tags_by_key),
     collapsed_groups: boolMap(value.collapsed_groups),
@@ -130,24 +130,6 @@ function sameState(a: SidebarStatePayload, b: SidebarStatePayload): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-function withTitleOverride(
-  state: SidebarStatePayload,
-  key: string,
-  title: string | undefined,
-): SidebarStatePayload {
-  const titles = { ...state.title_overrides };
-  if (title === undefined) delete titles[key];
-  else titles[key] = title;
-  return { ...state, title_overrides: titles };
-}
-
-type PendingRename = {
-  key: string;
-  title: string;
-  resolve: () => void;
-  reject: (error: unknown) => void;
-};
-
 export function useSidebarState(
   sessions: ChatSummary[],
   sessionsLoaded: boolean,
@@ -157,15 +139,15 @@ export function useSidebarState(
   update: (
     updater: (state: SidebarStatePayload) => SidebarStatePayload,
   ) => Promise<void>;
-  rename: (key: string, title: string) => Promise<void>;
 } {
-  const { client, token } = useClient();
+  const { client, token, webuiCapabilities } = useClient();
+  const legacyTitles = !webuiCapabilities.includes("webui.session-title-rename.v1");
+  const legacyTitlesRef = useRef(legacyTitles);
   const tokenRef = useRef(token);
   const stateRef = useRef(DEFAULT_SIDEBAR_STATE);
   const loadedRef = useRef(false);
   const connectionOpenRef = useRef(client.status === "open");
   const pendingPersistenceRef = useRef<SidebarStatePayload | null>(null);
-  const pendingRenamesRef = useRef<PendingRename[]>([]);
   const persistenceInFlightRef = useRef(false);
   const flushPersistenceRef = useRef<() => void>(() => {});
   const [state, setState] = useState<SidebarStatePayload>(DEFAULT_SIDEBAR_STATE);
@@ -174,13 +156,27 @@ export function useSidebarState(
   stateRef.current = state;
 
   useEffect(() => {
+    if (legacyTitlesRef.current === legacyTitles) return;
+    legacyTitlesRef.current = legacyTitles;
+    // Bootstrap capabilities can change without remounting Shell. Do not keep
+    // old-host title overrides in the local state or a queued layout write.
+    const projected = normalizeSidebarState(stateRef.current, legacyTitles);
+    stateRef.current = projected;
+    setState(projected);
+    if (pendingPersistenceRef.current) {
+      pendingPersistenceRef.current = normalizeSidebarState(pendingPersistenceRef.current, legacyTitles);
+    }
+  }, [legacyTitles]);
+
+  useEffect(() => {
+    if (loadedRef.current) return;
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     setLoading(true);
     const load = async () => {
       if (cancelled || loadedRef.current) return;
       try {
-        const loaded = normalizeSidebarState(await fetchSidebarState(tokenRef.current));
+        const loaded = normalizeSidebarState(await fetchSidebarState(tokenRef.current), legacyTitles);
         if (cancelled || loadedRef.current) return;
         stateRef.current = loaded;
         loadedRef.current = true;
@@ -198,11 +194,7 @@ export function useSidebarState(
       cancelled = true;
       clearTimeout(retryTimer);
     };
-  }, []);
-
-  const rejectPendingRenames = useCallback((error: unknown) => {
-    for (const request of pendingRenamesRef.current.splice(0)) request.reject(error);
-  }, []);
+  }, [legacyTitles]);
 
   const flushPersistence = useCallback(() => {
     if (
@@ -211,47 +203,27 @@ export function useSidebarState(
       || !connectionOpenRef.current
     ) return;
 
-    const pending = pendingPersistenceRef.current;
-    // Optimistic snapshots must drain before a rename takes its own snapshot.
-    const rename = pending === null ? pendingRenamesRef.current.shift() : undefined;
-    const next = rename
-      ? normalizeSidebarState(withTitleOverride(stateRef.current, rename.key, rename.title))
-      : pending;
+    const next = pendingPersistenceRef.current;
     if (next === null) return;
     pendingPersistenceRef.current = null;
     persistenceInFlightRef.current = true;
     void client.setSidebarState(next)
       .then((saved) => {
         persistenceInFlightRef.current = false;
-        if (rename) {
-          const title = normalizeSidebarState(saved).title_overrides[rename.key];
-          if (pendingPersistenceRef.current !== null) {
-            pendingPersistenceRef.current = withTitleOverride(
-              pendingPersistenceRef.current, rename.key, title,
-            );
-          }
-          const renamed = withTitleOverride(stateRef.current, rename.key, title);
-          stateRef.current = renamed;
-          setState(renamed);
-          rename.resolve();
-        } else if (pendingPersistenceRef.current === null) {
-          const canonical = normalizeSidebarState(saved);
+        if (pendingPersistenceRef.current === null && legacyTitlesRef.current === legacyTitles) {
+          const canonical = normalizeSidebarState(saved, legacyTitles);
           stateRef.current = canonical;
           setState(canonical);
         }
         flushPersistenceRef.current();
       })
-      .catch((error: unknown) => {
+      .catch(() => {
         persistenceInFlightRef.current = false;
-        if (rename) {
-          rename.reject(error);
-          flushPersistenceRef.current();
-        } else {
-          if (pendingPersistenceRef.current === null) pendingPersistenceRef.current = next;
-          rejectPendingRenames(error);
+        if (pendingPersistenceRef.current === null) {
+          pendingPersistenceRef.current = normalizeSidebarState(next, legacyTitlesRef.current);
         }
       });
-  }, [client, rejectPendingRenames]);
+  }, [client, legacyTitles]);
   flushPersistenceRef.current = flushPersistence;
 
   const persist = useCallback((next: SidebarStatePayload) => {
@@ -262,43 +234,31 @@ export function useSidebarState(
   useEffect(() => client.onStatus((status) => {
     connectionOpenRef.current = status === "open";
     if (status === "open") flushPersistence();
-    else rejectPendingRenames(new Error("WebUI connection is not open"));
-  }), [client, flushPersistence, rejectPendingRenames]);
+  }), [client, flushPersistence]);
 
   useEffect(() => client.onSidebarStateUpdate((incoming) => {
     if (
       persistenceInFlightRef.current
       || pendingPersistenceRef.current !== null
     ) return;
-    const loaded = normalizeSidebarState(incoming);
+    const loaded = normalizeSidebarState(incoming, legacyTitles);
     stateRef.current = loaded;
     loadedRef.current = true;
     setState(loaded);
     setLoading(false);
-  }), [client]);
+  }), [client, legacyTitles]);
 
   const update = useCallback(
     async (updater: (current: SidebarStatePayload) => SidebarStatePayload) => {
       if (!loadedRef.current) return;
-      const next = normalizeSidebarState(updater(stateRef.current));
+      const next = normalizeSidebarState(updater(stateRef.current), legacyTitles);
       if (sameState(next, stateRef.current)) return;
       stateRef.current = next;
       setState(next);
       persist(next);
     },
-    [persist],
+    [legacyTitles, persist],
   );
-
-  const rename = useCallback((key: string, title: string): Promise<void> => {
-    if (!loadedRef.current) return Promise.reject(new Error("Sidebar state is not loaded"));
-    if (!connectionOpenRef.current) {
-      return Promise.reject(new Error("WebUI connection is not open"));
-    }
-    return new Promise<void>((resolve, reject) => {
-      pendingRenamesRef.current.push({ key: key.trim(), title, resolve, reject });
-      flushPersistence();
-    });
-  }, [flushPersistence]);
 
   const pruned = useMemo(() => {
     if (!sessionsLoaded || loading) return state;
@@ -310,5 +270,5 @@ export function useSidebarState(
     void update(() => pruned);
   }, [loading, pruned, sessionsLoaded, state, update]);
 
-  return { state, loading, update, rename };
+  return { state, loading, update };
 }

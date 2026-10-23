@@ -1699,6 +1699,7 @@
     "pin": "고정",
     "unpin": "고정 해제",
     "rename": "이름 변경",
+    "renameAfterFirstMessage": "먼저 메시지를 보내세요",
     "renamePlaceholder": "주제 이름",
     "renameProjectTitle": "프로젝트 이름 변경",
     "renameProjectDescription": "WebUI 사이드바의 프로젝트 이름만 변경하세요.",

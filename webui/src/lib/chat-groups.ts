@@ -220,11 +220,9 @@ export function displayTitle(
   titleOverrides: Record<string, string>,
   fallbackTitle: string,
 ): string {
-  return (
-    titleOverrides[session.key]?.trim()
+  return titleOverrides[session.key]?.trim()
     || session.title?.trim()
-    || deriveTitle(session.preview, fallbackTitle)
-  );
+    || deriveTitle(session.preview, fallbackTitle);
 }
 
 function groupSessionsByProject(

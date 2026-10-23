@@ -1905,6 +1905,7 @@
     "pin": "置顶",
     "unpin": "取消置顶",
     "rename": "重命名",
+    "renameAfterFirstMessage": "请先发送消息",
     "renamePlaceholder": "话题名称",
     "renameProjectTitle": "项目改名",
     "renameProjectDescription": "仅修改 WebUI 侧栏中的项目名称",

@@ -1699,6 +1699,7 @@
     "pin": "ピン留め",
     "unpin": "ピン留めを解除",
     "rename": "名前を変更",
+    "renameAfterFirstMessage": "先にメッセージを送信",
     "renamePlaceholder": "トピック名",
     "renameProjectTitle": "プロジェクト名を変更",
     "renameProjectDescription": "WebUI のサイドバーに表示するプロジェクト名だけを変更します。",

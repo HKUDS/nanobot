@@ -1194,7 +1194,7 @@ function Shell({
   }, [reportManagementSurface, theme]);
   const remoteConnectionsRef = useRef(remoteConnections);
   remoteConnectionsRef.current = remoteConnections;
-  const { client, getToken } = useClient();
+  const { client, getToken, webuiCapabilities } = useClient();
   useReconnectRuns(client, getToken);
   const {
     sessions,
@@ -1204,6 +1204,7 @@ function Shell({
     refresh,
     createChat,
     forkChat,
+    renameChat: onRequestRename,
     deleteChat,
     getSessionAutomations,
   } = useSessions();
@@ -1213,7 +1214,6 @@ function Shell({
     state: sidebarState,
     loading: sidebarStateLoading,
     update: updateSidebarState,
-    rename: onRequestRename,
   } =
     useSidebarState(sessions, sessionsLoaded);
   const initialRouteRef = useRef<ShellRoute | null>(null);
@@ -2618,6 +2618,7 @@ function Shell({
           key: session.key,
           chatId: session.chatId,
           title: titleForSession(session),
+          generation: session.generation,
           handle: session.handle,
         }));
       return [presentation.rowKey, {
@@ -2772,6 +2773,7 @@ function Shell({
     onRequestDeleteMany,
     onTogglePin,
     onRequestRename,
+    canRenameSessions: webuiCapabilities.includes("webui.session-title-rename.v1"),
     onToggleArchive,
     onRequestRenameTab,
     paneGroups: sidebarPaneGroups,

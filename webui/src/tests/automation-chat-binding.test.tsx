@@ -239,13 +239,15 @@ function NamedChats({ titles, onSave, task = job }: {
   onSave: React.ComponentProps<typeof AutomationsSettings>["onChangeChat"];
   task?: SessionAutomationJob;
 }) {
-  return <AutomationsSettings payload={{ jobs: [task] }} sessions={namedSessions} titleOverrides={titles}
+  return <AutomationsSettings payload={{ jobs: [task] }} sessions={namedSessions.map((session) => ({
+    ...session, title: titles[session.key] ?? session.title,
+  }))}
     loading={false} filter="all" actionKey={null} error={null} returnToDetailJob={task}
     onFilterChange={vi.fn()} onAction={vi.fn()} onRequestEdit={vi.fn()} onRequestDelete={vi.fn()}
     onChangeChat={onSave} />;
 }
 
-it("uses live sidebar names through loading, review, save and change-back without changing identity", async () => {
+it("uses live canonical session names through loading, review, save and change-back without changing identity", async () => {
   const user = userEvent.setup();
   const save = vi.fn().mockResolvedValue(undefined);
   let resolve!: (value: AutomationChatsPayload) => void;
@@ -283,7 +285,7 @@ it("uses live sidebar names through loading, review, save and change-back withou
   expect(choices.current?.title).toBe("My planning");
 });
 
-it("distinguishes identical renamed chats by handle and uses the original title when the override is removed", async () => {
+it("distinguishes identically named chats by handle and follows later session titles", async () => {
   const user = userEvent.setup();
   const save = vi.fn();
   vi.mocked(fetchAutomationChats).mockResolvedValue({ ...choices, chats: [source, webTarget] });
