@@ -190,7 +190,7 @@ class TestConvertMessages:
         assert items == [
             {
                 "type": "reasoning",
-                "content": [{"type": "output_text", "text": "think first"}],
+                "content": [{"type": "reasoning_text", "text": "think first"}],
             },
             {
                 "type": "message",
@@ -222,7 +222,7 @@ class TestConvertMessages:
 
         assert items[0]["type"] == "reasoning"
         assert items[0]["content"] == [
-            {"type": "output_text", "text": "Michael topped up DeepSeek with $10."},
+            {"type": "reasoning_text", "text": "Michael topped up DeepSeek with $10."},
         ]
         assert items[1]["type"] == "function_call"
 
@@ -1041,9 +1041,11 @@ class TestResponsesConversationState:
         assert replayed is True
         reasoning_items = [item for item in items if item.get("type") == "reasoning"]
         assert len(reasoning_items) == 2  # one replayed, one converted delta
-        for item in reasoning_items:
-            assert isinstance(item["content"], list)
-            assert item["content"][0]["type"] == "output_text"
+        assert isinstance(reasoning_items[0]["content"], list)
+        # Stored replay items keep their original block type.
+        assert reasoning_items[0]["content"][0]["type"] == "output_text"
+        assert isinstance(reasoning_items[1]["content"], list)
+        assert reasoning_items[1]["content"][0]["type"] == "reasoning_text"
 
 
 # ======================================================================

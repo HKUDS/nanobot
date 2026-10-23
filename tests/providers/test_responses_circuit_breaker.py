@@ -94,7 +94,7 @@ def test_responses_behavior_is_declared_by_capabilities(provider):
 
     assert {
         "type": "reasoning",
-        "content": [{"type": "output_text", "text": "think first"}],
+        "content": [{"type": "reasoning_text", "text": "think first"}],
     } in body["input"]
     assert "include" not in body
 
@@ -262,7 +262,7 @@ def test_deepseek_full_history_body_keeps_reasoning_content_as_array(provider):
     reasoning_items = [item for item in body["input"] if item.get("type") == "reasoning"]
     assert len(reasoning_items) == 1
     assert reasoning_items[0]["content"] == [
-        {"type": "output_text", "text": "Michael topped up DeepSeek with $10."},
+        {"type": "reasoning_text", "text": "Michael topped up DeepSeek with $10."},
     ]
 
 
@@ -317,6 +317,8 @@ def test_deepseek_replay_body_keeps_reasoning_content_as_array(provider):
 
     reasoning_items = [item for item in body["input"] if item.get("type") == "reasoning"]
     assert len(reasoning_items) == 2  # one replayed from state, one converted
-    for item in reasoning_items:
-        assert isinstance(item["content"], list)
-        assert item["content"][0]["type"] == "output_text"
+    assert isinstance(reasoning_items[0]["content"], list)
+    # Stored replay items keep their original block type.
+    assert reasoning_items[0]["content"][0]["type"] == "output_text"
+    assert isinstance(reasoning_items[1]["content"], list)
+    assert reasoning_items[1]["content"][0]["type"] == "reasoning_text"
