@@ -1,16 +1,10 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import type { SyntaxHighlighterProps } from "react-syntax-highlighter";
-import createElement from "react-syntax-highlighter/dist/esm/create-element";
-
-type RowsProps = Parameters<NonNullable<SyntaxHighlighterProps["renderer"]>>[0];
-type Row = RowsProps["rows"][number];
+import type { CodeLine } from "@/lib/code-tokens";
+import { CodeTokens } from "./CodeTokens";
 const CHUNK_LINES = 40;
 
-function textOf(node: Row): string {
-  return node.type === "text" ? String(node.value ?? "") : (node.children ?? []).map(textOf).join("");
-}
-
-const CodeChunk = memo(function CodeChunk({ rows, text, start, stylesheet, useInlineStyles, highlighted }: RowsProps & {
+const CodeChunk = memo(function CodeChunk({ lines, text, start, highlighted }: {
+  lines: CodeLine[];
   text: string;
   start: number;
   highlighted: boolean;
@@ -19,33 +13,27 @@ const CodeChunk = memo(function CodeChunk({ rows, text, start, stylesheet, useIn
     <span data-code-chunk={start / CHUNK_LINES} className="flex min-w-max">
       <span aria-hidden className="shrink-0 select-none pr-[1.15rem] text-right text-muted-foreground"
         style={{ minWidth: "4.25em" }}>
-        {rows.map((_, index) => start + index + 1).join("\n")}
+        {lines.map((_, index) => start + index + 1).join("\n")}
       </span>
       <span data-highlighted={highlighted}>
-        {highlighted ? rows.map((node, index) => createElement({
-          node, stylesheet, useInlineStyles, key: start + index,
-        })) : text}
+        {highlighted ? <CodeTokens lines={lines} /> : text}
       </span>
     </span>
   );
 });
 
 /** Keep the complete source searchable/selectable; only offscreen token spans are omitted. */
-export function ViewportCodeRows({ rows, stylesheet, useInlineStyles }: RowsProps) {
+export function ViewportCodeRows({ lines }: { lines: CodeLine[] }) {
   const rootRef = useRef<HTMLSpanElement>(null);
   const [visible, setVisible] = useState(() => new Set([0]));
-  // The inline renderer only matches token class combinations. Passing Prism's
-  // unrelated toolbar/pseudo selectors makes it scan those again for every token.
-  const tokenStyles = useMemo(() => Object.fromEntries(Object.entries(stylesheet)
-    .filter(([selector]) => /^[\w-]+(?:\.[\w-]+)*$/.test(selector))), [stylesheet]);
   const chunks = useMemo(() => {
     const result = [];
-    for (let start = 0; start < rows.length; start += CHUNK_LINES) {
-      const chunk = rows.slice(start, start + CHUNK_LINES);
-      result.push({ start, rows: chunk, text: chunk.map(textOf).join("") });
+    for (let start = 0; start < lines.length; start += CHUNK_LINES) {
+      const chunk = lines.slice(start, start + CHUNK_LINES);
+      result.push({ start, lines: chunk, text: chunk.map(line => line.text).join("") });
     }
     return result;
-  }, [rows]);
+  }, [lines]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -77,8 +65,7 @@ export function ViewportCodeRows({ rows, stylesheet, useInlineStyles }: RowsProp
 
   return (
     <span ref={rootRef} className="block min-w-max" data-testid="viewport-code-rows">
-      {chunks.map((chunk, index) => <CodeChunk key={chunk.start} {...chunk}
-        stylesheet={tokenStyles} useInlineStyles={useInlineStyles} highlighted={visible.has(index)} />)}
+      {chunks.map((chunk, index) => <CodeChunk key={chunk.start} {...chunk} highlighted={visible.has(index)} />)}
     </span>
   );
 }

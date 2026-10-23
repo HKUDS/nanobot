@@ -981,11 +981,6 @@
     overflow-x: auto;
   }
 
-  /* Prism's Markdown table tokens must not pick up Tailwind's table layout. */
-  .not-prose pre .token.table {
-    display: inline;
-  }
-
   /* Markdown tables wrap cell text to fit the conversation column. The
      renderer's overflow-x:auto wrapper remains a fallback for content that
      cannot shrink. */
@@ -1876,35 +1871,35 @@
   to { transform: translateX(100%); }
 }
 
-/* Prism classes are generated at runtime, outside Tailwind's source inventory. */
 .code-content {
+  --code-foreground: hsl(var(--foreground));
+  --code-background: hsl(var(--background));
   color: hsl(var(--foreground));
 }
-/* Flattened JSX tokens retain the ancestor tag class; let inner token types win. */
-.code-content .token.tag {
-  color: var(--code-property);
+
+.nanobot-file-diff {
+  --code-foreground: hsl(var(--foreground));
+  --code-background: hsl(var(--background));
+  display: block;
+  min-width: 0;
+  --diffs-font-size: var(--text-code-dense-size);
+  --diffs-line-height: calc(var(--text-code-dense-size) * 1.6);
+  --diffs-gap-block: 0px;
+  --diffs-bg-context-override: transparent;
+  --diffs-bg-context-gutter-override: transparent;
+  --diffs-bg-addition-override: var(--diff-added);
+  --diffs-bg-addition-number-override: var(--diff-added);
+  --diffs-bg-deletion-override: var(--diff-deleted);
+  --diffs-bg-deletion-number-override: var(--diff-deleted);
+  --diffs-addition-color-override: var(--diff-added-foreground);
+  --diffs-deletion-color-override: var(--diff-deleted-foreground);
+  --diffs-fg-number-override: hsl(var(--muted-foreground));
+  --diffs-bg-addition-emphasis-override: color-mix(in srgb, var(--diff-added-foreground) 15%, transparent);
+  --diffs-bg-deletion-emphasis-override: color-mix(in srgb, var(--diff-deleted-foreground) 15%, transparent);
 }
-.code-content :is(.token.comment, .token.prolog, .token.doctype, .token.cdata, .linenumber) {
-  color: var(--code-comment);
-}
-.code-content .token.comment {
-  font-style: italic;
-}
-.code-content :is(.token.string, .token.char, .token.attr-value, .token.regex, .token.inserted) {
-  color: var(--code-string);
-}
-.code-content :is(.token.keyword, .token.selector, .token.important, .token.atrule) {
-  color: var(--code-keyword);
-}
-.code-content :is(.token.function, .token.operator, .token.entity, .token.url) {
-  color: var(--code-function);
-}
-.code-content :is(.token.number, .token.boolean, .token.constant, .token.symbol, .token.attr-name, .token.class-name, .token.builtin, .token.property, .token.deleted) {
-  color: var(--code-property);
-}
-.code-content :is(.token.bold, .token.important) {
-  font-weight: 600;
-}
-.code-content .token.italic {
-  font-style: italic;
+
+.nanobot-diff-gap {
+  height: 26px;
+  box-sizing: border-box;
+  white-space: nowrap;
 }

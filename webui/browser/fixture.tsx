@@ -35,6 +35,8 @@ import { ActivityLogosFixture } from "./activity-logos-fixture";
 import { HistoryHydrationFixture } from "./history-hydration-fixture";
 import { IdleCompactionFixture, installIdleCompactionApi } from "./idle-compaction-fixture";
 import { FileEditPathFixture } from "./file-edit-path-fixture";
+import { FileDiffFixture } from "./file-diff-fixture";
+import { CodeHighlightingFixture } from "./code-highlighting-fixture";
 import { QueuedGuidanceFixture } from "./queued-guidance-fixture";
 import { WorkspaceAlignmentFixture } from "./workspace-alignment-fixture";
 import { ComposerActionFixture } from "./composer-action-fixture";
@@ -147,7 +149,7 @@ function RailFixture() {
       panes={[{ key: "rail", title: "Rail conversation" }]} activePaneKey="rail" layout="columns" showLayoutControl={false}
       onActivatePane={() => {}} onAddPane={() => {}} onLayoutChange={() => {}} onPaneOrderChange={() => {}}
       renderPane={(_pane, context) => <>
-        {viewport(true, context.navigationFrame)}
+        {viewport(context.composerPortalTarget !== undefined, context.navigationFrame)}
         {context.composerPortalTarget && createPortal(composer, context.composerPortalTarget)}
       </>}
     /> : viewport(false)}
@@ -240,6 +242,10 @@ createRoot(document.getElementById("root")!).render(<TooltipProvider>
     ? <WorkspaceAlignmentFixture parameters={parameters} />
     : parameters.get("case") === "queued-guidance"
     ? <QueuedGuidanceFixture />
+    : parameters.get("case") === "code-highlighting"
+    ? <CodeHighlightingFixture />
+    : parameters.get("case") === "file-diff"
+    ? <FileDiffFixture />
     : parameters.get("case") === "file-edit-path"
     ? <FileEditPathFixture />
     : parameters.get("case") === "answer-order"

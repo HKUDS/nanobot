@@ -1,28 +1,15 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import type { HighlightedCodeProps } from "@/components/HighlightedCode";
 
 import { CodeBlock } from "@/components/CodeBlock";
 import { ThemeProvider } from "@/hooks/useTheme";
 
-vi.mock("react-syntax-highlighter/dist/esm/prism-async-light", () => ({
-  default: ({
-    children,
-    language,
-    customStyle,
-  }: {
-    children: string;
-    language?: string;
-    customStyle?: React.CSSProperties;
-  }) => (
-    <pre
-      data-testid="highlighted-code"
-      data-language={language}
-      style={customStyle}
-    >
-      <code>{children}</code>
-    </pre>
-  ),
+// Test CodeBlock's controls and enhancement boundary here; token/DOM rendering has dedicated real-engine and browser coverage.
+vi.mock("@/components/HighlightedCode", () => ({
+  HighlightedCode: ({ code, language, viewportHighlight }: HighlightedCodeProps) => <pre data-testid="highlighted-code" data-language={language || "text"}
+    style={{ overflow: viewportHighlight ? "visible" : "auto" }}><code data-code-text="">{code}</code></pre>,
 }));
 
 describe("CodeBlock", () => {
@@ -37,7 +24,8 @@ describe("CodeBlock", () => {
 
     try {
       render(<CodeBlock code={source} language="typescript" showLineNumbers />);
-      expect((await screen.findByTestId("highlighted-code")).textContent).toBe(source);
+      const code = await screen.findByTestId("highlighted-code");
+      expect([...code.querySelectorAll("[data-code-text]")].map(node => node.textContent).join("")).toBe(source);
       expect(screen.getAllByRole("button")).toHaveLength(1);
       await user.click(screen.getByRole("button", { name: "Copy code" }));
       expect(writeText).toHaveBeenCalledWith(source);
@@ -172,7 +160,7 @@ describe("CodeBlock", () => {
     expect(screen.getByText("const value = 1;")).toBeInTheDocument();
   });
 
-  it("normalizes file language aliases before loading Prism", async () => {
+  it("normalizes file language aliases before highlighting", async () => {
     render(
       <ThemeProvider theme="light">
         <CodeBlock language="html" code="<main />" />

@@ -7,6 +7,12 @@ import { setAppLanguage } from "@/i18n";
 import { DEFAULT_LOCAL_PREFS, LOCAL_PREFS_STORAGE_KEY, writeLocalPreferences } from "@/lib/local-preferences";
 import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
 
+// These DOM tests exercise disclosure/source contracts; the real shadow renderer runs in browser tests.
+vi.mock("@/components/thread/activity/DiffSyntaxHighlight", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/thread/activity/DiffSyntaxHighlight")>();
+  return { ...actual, DiffSyntaxHighlight: actual.PlainDiffLines };
+});
+
 const BLENDER_CLI_APP: CliAppInfo = {
   name: "blender",
   display_name: "Blender",

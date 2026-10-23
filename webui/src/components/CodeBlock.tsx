@@ -19,77 +19,11 @@ interface CodeBlockProps {
   viewportHighlight?: boolean;
 }
 
-interface HighlightedCodeProps {
-  language?: string;
-  code: string;
-  chrome: "default" | "none";
-  showLineNumbers: boolean;
-  wrapLongLines: boolean;
-  viewportHighlight: boolean;
-}
-
 const ANSI_LANGUAGES = new Set(["ansi", "ansi-output"]);
 
 const LazyHighlightedCode = lazy(async () => {
-  const [
-    { default: SyntaxHighlighter },
-    { ViewportCodeRows },
-  ] = await Promise.all([
-    import("react-syntax-highlighter/dist/esm/prism-async-light"),
-    import("@/components/ViewportCodeRows"),
-  ]);
-
-  return {
-    default({
-      language,
-      code,
-      chrome,
-      showLineNumbers,
-      wrapLongLines,
-      viewportHighlight,
-    }: HighlightedCodeProps) {
-      return (
-        <SyntaxHighlighter
-          language={language || "text"}
-          useInlineStyles={false}
-          style={{}}
-          customStyle={{
-            background: "transparent",
-            margin: 0,
-            padding: chrome === "none" ? "0.75rem 1rem" : "1rem 3.5rem 1rem 1.25rem",
-            fontFamily: "inherit",
-            fontSize: "inherit",
-            lineHeight: "inherit",
-            tabSize: 2,
-            // FilePreviewPanel owns both scroll axes. Replacing this <pre>
-            // during progressive highlighting must not reset horizontal scroll.
-            ...(viewportHighlight ? { overflow: "visible" } : {}),
-          }}
-          codeTagProps={{
-            style: {
-              background: "transparent",
-              fontFamily: "inherit",
-              fontSize: "inherit",
-              ...(viewportHighlight ? { lineHeight: "inherit" } : {}),
-            },
-          }}
-          lineNumberStyle={{
-            minWidth: "2.6em",
-            paddingRight: "1.15rem",
-            color: "var(--code-comment)",
-            fontFamily: "inherit",
-            userSelect: "none",
-          }}
-          PreTag="pre"
-          showLineNumbers={showLineNumbers && !viewportHighlight}
-          wrapLongLines={wrapLongLines}
-          renderer={viewportHighlight ? props => <ViewportCodeRows {...props} /> : undefined}
-        >
-          {code}
-        </SyntaxHighlighter>
-      );
-    },
-  };
+  const { HighlightedCode } = await import("./HighlightedCode");
+  return { default: HighlightedCode };
 });
 
 function renderPlainText(value: string): ReactNode {
@@ -183,7 +117,7 @@ export const CodeBlock = memo(function CodeBlock({
   const hasChrome = chrome === "default";
   const syntaxLanguage = normalizeCodeLanguage(language);
   const useViewportHighlight = viewportHighlight && showLineNumbers && !wrapLongLines;
-  // Minified/very large previews must not monopolize the main thread in Prism.
+  // Minified/very large previews must not monopolize the main thread during highlighting.
   // Plain text still contains the entire preview, with normal selection and find.
   const withinHighlightBudget = useMemo(() => {
     if (!useViewportHighlight) return true;
