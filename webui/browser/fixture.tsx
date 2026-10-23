@@ -34,6 +34,7 @@ import { IdleCompactionFixture, installIdleCompactionApi } from "./idle-compacti
 import { FileEditPathFixture } from "./file-edit-path-fixture";
 import { QueuedGuidanceFixture } from "./queued-guidance-fixture";
 import { WorkspaceAlignmentFixture } from "./workspace-alignment-fixture";
+import { ComposerActionFixture } from "./composer-action-fixture";
 
 const history: UIMessage[] = [
   { id: "question", role: "user", content: "Earlier question", createdAt: 1_700_000_000_000 },
@@ -185,7 +186,9 @@ if (parameters.get("case") === "skeleton-additions") installSkeletonPreviewApi()
 if (parameters.get("case") === "idle-compaction") installIdleCompactionApi();
 await initializeI18n();
 createRoot(document.getElementById("root")!).render(<TooltipProvider>
-  {parameters.get("case") === "workspace-alignment"
+  {parameters.get("case") === "composer-action"
+    ? <ComposerActionFixture parameters={parameters} />
+    : parameters.get("case") === "workspace-alignment"
     ? <WorkspaceAlignmentFixture parameters={parameters} />
     : parameters.get("case") === "queued-guidance"
     ? <QueuedGuidanceFixture />

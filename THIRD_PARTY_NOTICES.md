@@ -179,7 +179,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 ## loading.dev Blocks and Ring — loading animations (MIT)
 
 - **Source**: https://github.com/jakubkrehel/loading/tree/48ff9a1cd5f0446901ff1a8a3d5d5f906d3e36ff
-- **Adapted**: the diagonal Blocks sweep in `webui/src/components/thread/ThreadHistoryStatus.tsx` and `webui/src/globals.css`, and the circular Ring in `webui/src/components/ChatList.tsx` and `webui/src/globals.css`.
+- **Adapted**: the diagonal Blocks sweep in `webui/src/components/thread/ThreadHistoryStatus.tsx` and `webui/src/globals.css`, and the circular Ring in `webui/src/components/ui/loading-ring.tsx` and `webui/src/globals.css`.
 - **Bundled**: `nanobot/web/dist/assets/index-*.{js,css}`
 
 ```

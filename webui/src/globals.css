@@ -1093,16 +1093,51 @@
 }
 
 /* loading.dev Ring, Copyright (c) 2026 Jakub Krehel (MIT); THIRD_PARTY_NOTICES.md. */
-.sidebar-running-ring {
+.loading-ring-arc {
   transform-origin: center;
-  animation: sidebar-running-ring 800ms linear infinite;
+  animation: loading-ring-spin 800ms linear infinite;
 }
-@keyframes sidebar-running-ring {
+@keyframes loading-ring-spin {
   to { transform: rotate(360deg); }
 }
+
+.composer-primary-action {
+  transition: color 160ms ease-out, background-color 160ms ease-out, border-color 160ms ease-out, transform 120ms ease-out;
+}
+.composer-primary-action:active:not(:disabled) {
+  transform: scale(0.94);
+}
+.composer-action-glyph {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transform: scale(0.72);
+  transition: opacity 140ms ease-out, transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.composer-action-glyph[data-active] {
+  opacity: 1;
+  transform: scale(1);
+}
+.composer-action-icons[data-state="stop"] [data-action-icon="send"] {
+  transform: translateY(-3px) scale(0.8);
+}
+.composer-action-glyph:not([data-active]) .loading-ring-arc {
+  animation: none;
+}
 @media (prefers-reduced-motion: reduce) {
-  .sidebar-running-ring {
+  .loading-ring-arc {
     animation: none;
+  }
+  .composer-primary-action,
+  .composer-primary-action:active:not(:disabled) {
+    transition: none;
+    transform: none;
+  }
+  .composer-action-icons[data-state] .composer-action-glyph {
+    transform: none;
+    transition: opacity 80ms linear;
   }
 }
 

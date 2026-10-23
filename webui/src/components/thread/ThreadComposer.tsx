@@ -16,7 +16,6 @@ import {
   HelpIcon,
   HistoryIcon,
   ConversationIcon,
-  VoiceIcon,
   AttachIcon,
   RestartIcon,
   RestrictedAccessIcon,
@@ -53,7 +52,6 @@ import {
 } from "@/lib/composer-mention-text";
 import { INLINE_TOKEN_HIGHLIGHT_COLOR } from "@/components/InlineTokenHighlight";
 import {
-  ArrowUp,
   ChevronDown,
   ChevronUp,
   CornerDownRight,
@@ -69,6 +67,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { ComposerActionIcon, type ComposerActionState } from "@/components/thread/ComposerActionIcon";
 import {
   floatingItemClassName,
   floatingItemFocusClassName,
@@ -2500,6 +2499,9 @@ export function ThreadComposer({
         : t("thread.composer.voice.hint");
   // Touch users need an explicit send action; keep Stop while sending is unavailable.
   const showStopButton = isStreaming && !!onStop && !canSend;
+  const actionState: ComposerActionState = showVoiceButton
+    ? voiceRecorder.state === "transcribing" ? "busy" : voiceRecorder.isRecording ? "recording" : "voice"
+    : showStopButton ? "stop" : modelNeedsSetup ? "setup" : canSend || !isStreaming ? "send" : "busy";
   const relaxedHeroInput = isHero && images.length === 0 && !isStreaming;
   const compactIdle = compactWhenIdle && !compactControls && !isHero && !composerFocused
     && value.length === 0 && images.length === 0 && !inlineError
@@ -2884,31 +2886,18 @@ export function ThreadComposer({
                     }}
                     onClick={showVoiceButton ? voiceRecorder.handleClick : showStopButton ? handleStop : modelNeedsSetup ? onModelBadgeClick : undefined}
                     className={cn(
-                      "thread-composer-action thread-composer-round-action touch-target rounded-full",
-                      showStopButton && !showVoiceButton
-                        ? "border border-border/70 bg-card text-foreground/85 hover:text-foreground disabled:text-muted-foreground/50"
-                        : "border border-foreground bg-foreground text-background disabled:border-foreground disabled:bg-foreground disabled:text-background",
-                      showVoiceButton && voiceRecorder.isRecording && "border-red-500 bg-red-500 text-white hover:bg-red-500 hover:text-white",
+                      "composer-primary-action thread-composer-action thread-composer-round-action touch-target rounded-full bg-clip-padding",
+                      actionState === "stop"
+                        ? "border border-transparent bg-foreground/[0.045] text-foreground/85 hover:bg-foreground/[0.08] hover:text-foreground disabled:text-muted-foreground/50"
+                        : actionState === "voice"
+                          ? "border border-transparent bg-foreground/75 text-background hover:bg-foreground/[0.85] hover:text-background disabled:bg-foreground/[0.12] disabled:text-muted-foreground"
+                          : "border border-transparent bg-foreground text-background hover:bg-foreground/90 hover:text-background disabled:border-foreground disabled:bg-foreground disabled:text-background",
+                      actionState === "send" && "disabled:border-transparent disabled:bg-foreground/[0.12] disabled:text-muted-foreground",
+                      showVoiceButton && voiceRecorder.isRecording && "border-transparent bg-red-500 text-white hover:bg-red-500 hover:text-white",
                       isHero ? "h-8 w-8" : "h-9 w-9",
                     )}
                   >
-                    {showVoiceButton ? (
-                      voiceRecorder.state === "transcribing" ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : voiceRecorder.isRecording ? (
-                        <StopIcon className="h-3.5 w-3.5" fill="currentColor" />
-                      ) : (
-                        <VoiceIcon className="h-4 w-4" />
-                      )
-                    ) : showStopButton ? (
-                      <StopIcon className={cn("fill-current stroke-current", isHero ? "h-3 w-3" : "h-3.5 w-3.5")} />
-                    ) : modelNeedsSetup ? (
-                      <ModelsIcon className="h-4 w-4" />
-                    ) : canSend || !isStreaming ? (
-                      <ArrowUp className="h-4 w-4" />
-                    ) : (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    )}
+                    <ComposerActionIcon state={actionState} />
                   </Button>
                 </TooltipTrigger>
                 {showVoiceButton ? (
