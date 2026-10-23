@@ -979,7 +979,7 @@ function GoalStateStrip({
           id="nanobot-goal-panel-root"
           role="dialog"
           aria-modal="false"
-          aria-labelledby="nanobot-goal-panel-title"
+          aria-label={t("thread.composer.goalStateSheetTitle")}
           tabIndex={-1}
           className={cn(
             "absolute bottom-[calc(100%+8px)] left-3 right-3 z-[50] flex max-w-none flex-col overflow-hidden",
@@ -988,29 +988,9 @@ function GoalStateStrip({
           )}
           style={{ maxHeight: `${Math.round(panelMaxPx)}px` }}
         >
-          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-black/[0.06] px-3 py-2 dark:border-white/[0.08]">
-            <h2
-              id="nanobot-goal-panel-title"
-              className="min-w-0 truncate text-[13px] font-semibold tracking-tight text-foreground"
-            >
-              {t("thread.composer.goalStateSheetTitle")}
-            </h2>
-            <button
-              type="button"
-              className={cn(
-                "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-                "text-muted-foreground transition-colors hover:text-foreground",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              )}
-              aria-label={t("thread.composer.goalStateCloseAria")}
-              onClick={() => setGoalPanelOpen(false)}
-            >
-              <X className="h-4 w-4" aria-hidden />
-            </button>
-          </div>
           <div
             id="nanobot-goal-panel-scroll"
-            className="min-h-0 flex-1 overflow-y-auto scrollbar-thin px-3 pb-3 pt-2"
+            className="min-h-0 flex-1 overflow-y-auto scrollbar-thin p-3"
           >
             <MarkdownText className="max-w-none text-foreground/90">
               {markdownBody}

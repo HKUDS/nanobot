@@ -1800,12 +1800,14 @@ describe("ThreadComposer", () => {
     expect(container.querySelector("[data-composer-status-drawer]")).toBeNull();
   });
 
-  it("opens an upward anchored goal panel with markdown content when expand is clicked", async () => {
+  it("shows full goal content and dismisses it without losing the composer draft", async () => {
+    const user = userEvent.setup();
     const longObjective =
       "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz0123456789GoalTail";
     render(
       <ThreadComposer
         onSend={vi.fn()}
+        persistDraft={false}
         placeholder="Type your message..."
         goalState={{
           active: true,
@@ -1815,12 +1817,30 @@ describe("ThreadComposer", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Show full goal" }));
+    const input = screen.getByRole("textbox", { name: "Message input" });
+    const trigger = screen.getByRole("button", { name: "Show full goal" });
+    await user.type(input, "Keep my draft");
+    await user.click(trigger);
 
     const dialog = await screen.findByRole("dialog", { name: "Goal" });
-    expect(dialog).toBeInTheDocument();
     expect(dialog).toHaveTextContent("Short summary for strip");
     expect(dialog).toHaveTextContent(longObjective);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+
+    await user.click(trigger);
+    expect(screen.queryByRole("dialog", { name: "Goal" })).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(trigger);
+    expect(await screen.findByRole("dialog", { name: "Goal" })).toBeVisible();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Goal" })).not.toBeInTheDocument();
+
+    await user.click(trigger);
+    expect(await screen.findByRole("dialog", { name: "Goal" })).toBeVisible();
+    await user.click(input);
+    expect(screen.queryByRole("dialog", { name: "Goal" })).not.toBeInTheDocument();
+    expect(input).toHaveValue("Keep my draft");
   });
 
   it("opens a slash command palette and inserts the selected command", () => {
