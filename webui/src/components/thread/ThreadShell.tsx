@@ -1066,7 +1066,6 @@ export function ThreadShell({
     const result = await client.requestMutation("attachment.inspect", {
       chat_id: chatId, path, ...(workspaceScope ? { workspace_scope: workspaceScope } : {}),
     });
-    if (result === null) return null;
     if (!isLocalAttachment(result)) throw new Error("Invalid attachment metadata");
     return result;
   }, [chatId, client, workspaceScope]);

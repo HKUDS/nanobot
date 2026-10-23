@@ -248,7 +248,7 @@ interface ThreadComposerProps {
   onStop?: () => void;
   surfaceRef?: Ref<HTMLDivElement>;
   onTranscribeAudio?: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
-  onInspectAttachment?: (path: string) => Promise<LocalAttachment | null>;
+  onInspectAttachment?: (path: string) => Promise<LocalAttachment>;
   /** Sustained objective for this chat (WebSocket ``goal_state``). */
   goalState?: GoalStateWsPayload;
   workspaceScope?: WorkspaceScopePayload | null;
@@ -1579,14 +1579,12 @@ export function ThreadComposer({
     setPathInspection({ generation, scope: scopeIdentity, range: new PastedPathRange(pasted, start, start + raw.length) });
     void onInspectAttachment(path).then((attachment) => {
       if (generation !== pathCheckGeneration.current) return;
-      setPathInspection((current) => {
-        if (current?.generation !== generation) return current;
-        return attachment === null ? null : { ...current, attachment };
-      });
+      setPathInspection((current) => current?.generation === generation ? { ...current, attachment } : current);
     }).catch((error: unknown) => {
       if (generation !== pathCheckGeneration.current || pathCheckScope.current !== scopeIdentity) return;
-      setInlineError(error instanceof Error ? error.message : t("message.attachmentUnavailable"));
       setPathInspection(null);
+      if (error instanceof Error && "status" in error && error.status === 404) return;
+      setInlineError(error instanceof Error ? error.message : t("message.attachmentUnavailable"));
     });
   }, [interactionDisabled, onAttachmentPaste, onInspectAttachment, rawSelection, replaceMentionInput, scopeIdentity, t, value]);
 

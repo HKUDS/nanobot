@@ -249,13 +249,12 @@ export class NanobotClient {
     })
   }
 
-  inspectAttachment(path: string): Promise<import("../../../packages/client-events/attachments").LocalAttachment | null> {
+  inspectAttachment(path: string): Promise<import("../../../packages/client-events/attachments").LocalAttachment> {
     if (!this.chatId) return Promise.reject(new Error("chat is not ready"))
     return this.requestMutation<unknown>("attachment.inspect", {
       chat_id: this.chatId, path,
       ...(this.workspaceScope ? { workspace_scope: this.workspaceScope } : {}),
     }).then((result) => {
-      if (result === null) return null
       if (!isLocalAttachment(result)) throw new Error("Invalid attachment metadata")
       return result
     })

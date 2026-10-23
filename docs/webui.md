@@ -183,7 +183,7 @@ The composer supports text, attachments (images, documents, and videos), slash c
 
 Choose or drop MP4, WebM, or MOV videos into the composer (one per message, up to 20 MiB per upload). You can play them in WebUI; the Agent cannot directly analyze their contents yet.
 
-To attach a file on the connected nanobot host, paste its path on its own. Quoted paths and spaces are supported; relative paths start from the topic's workspace. The topic's access permissions apply. Path references do not upload or copy the file and have no file-size or combined-size limit; supported formats and attachment counts still apply. If the path does not resolve to a file, it stays as text without an error. Other attachment failures also keep the text in your draft.
+To attach a file on the connected nanobot host, paste its path on its own. Quoted paths and spaces are supported; relative paths start from the topic's workspace. The topic's access permissions apply. Path references do not upload or copy the file and have no file-size or combined-size limit; supported formats and attachment counts still apply. If attaching fails, the text stays in your draft.
 
 Files attached by path reflect changes to the original file and become unavailable if it is moved or deleted. Removing an attachment or deleting a topic does not delete the original.
 
