@@ -967,9 +967,13 @@ class WebUICommandRouter:
                     inspect_local_attachment, path, scope=scope, limits=self._uploads.store.limits,
                 )
             except (TemporaryChatError, WorkspaceScopeError, WebUIFilePreviewError) as exc:
-                await self.send_webui_response(
-                    connection, request_id, status=getattr(exc, "status", 404), message=str(exc),
-                )
+                if isinstance(exc, WebUIFilePreviewError) and exc.status == 404:
+                    # Pasting probes for an attachment; unmatched paths remain ordinary text.
+                    await self.send_webui_response(connection, request_id, result=None)
+                else:
+                    await self.send_webui_response(
+                        connection, request_id, status=getattr(exc, "status", 404), message=str(exc),
+                    )
             else:
                 await self.send_webui_response(
                     connection, request_id,

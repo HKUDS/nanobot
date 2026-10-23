@@ -248,7 +248,7 @@ interface ThreadComposerProps {
   onStop?: () => void;
   surfaceRef?: Ref<HTMLDivElement>;
   onTranscribeAudio?: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
-  onInspectAttachment?: (path: string) => Promise<LocalAttachment>;
+  onInspectAttachment?: (path: string) => Promise<LocalAttachment | null>;
   /** Sustained objective for this chat (WebSocket ``goal_state``). */
   goalState?: GoalStateWsPayload;
   workspaceScope?: WorkspaceScopePayload | null;
@@ -1579,7 +1579,10 @@ export function ThreadComposer({
     setPathInspection({ generation, scope: scopeIdentity, range: new PastedPathRange(pasted, start, start + raw.length) });
     void onInspectAttachment(path).then((attachment) => {
       if (generation !== pathCheckGeneration.current) return;
-      setPathInspection((current) => current?.generation === generation ? { ...current, attachment } : current);
+      setPathInspection((current) => {
+        if (current?.generation !== generation) return current;
+        return attachment === null ? null : { ...current, attachment };
+      });
     }).catch((error: unknown) => {
       if (generation !== pathCheckGeneration.current || pathCheckScope.current !== scopeIdentity) return;
       setInlineError(error instanceof Error ? error.message : t("message.attachmentUnavailable"));

@@ -348,9 +348,17 @@ async def test_local_reference_inspection_send_recheck_and_no_staging(tmp_path, 
     assert not list(channel.gateway.uploads.store.media_dir.glob("*"))
     assert channel._webui_request_operations == {}
 
-    for invalid in ("missing.mp4", str(workspace), str(tmp_path / "outside.mp4")):
-        failure = await inspect(invalid)
-        assert failure["ok"] is False
+    for unmatched in ("missing.mp4", str(workspace)):
+        result = await inspect(unmatched)
+        assert result["ok"] is True
+        assert result["result"] is None
+
+    outside = tmp_path / "outside.mp4"
+    outside.write_bytes(b"video")
+    denied = await inspect(str(outside))
+    assert denied["ok"] is False
+    assert denied["error"]["status"] == 403
+    assert (await inspect(source.name))["result"] == local
 
     message = {
         "type": "message", "chat_id": "local-chat", "content": "keep my text",

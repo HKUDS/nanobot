@@ -2000,6 +2000,7 @@ export class NanobotTui {
       void this.client.inspectAttachment(path).then((file) => {
         if (this.quitting || this.composer.isDestroyed || generation !== this.clipboardPasteGeneration
           || chatId !== this.client.activeChatId || this.pathInspection !== range) return
+        if (file === null) return
         if (!range.update(this.composer.plainText)) return
         const insertion = this.draft.localFile(file, this.composer.plainText)
         if (!insertion) throw new Error("Too many attachments; remove one and paste the path again")

@@ -548,18 +548,41 @@ describe("local attachment paths and video ingress", () => {
     ]);
   });
 
-  it("keeps failed path text and attachment draft, and does not consume prose or URLs", async () => {
-    const inspect = vi.fn().mockRejectedValue(new Error("file not found"));
-    render(<ThreadComposer onSend={vi.fn()} onInspectAttachment={inspect} />);
+  it("keeps unmatched paths silent and editable, then accepts another pasted path", async () => {
+    const inspect = vi.fn().mockResolvedValueOnce(null).mockResolvedValue(local);
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} onInspectAttachment={inspect} />);
     const input = screen.getByLabelText(/message input/i);
     fireEvent.paste(input, { clipboardData: { items: [], getData: () => "./missing.mp4" } });
-    await waitFor(() => expect(screen.getByText("file not found")).toBeInTheDocument());
-    expect(input).toHaveValue("./missing.mp4");
+    fireEvent.change(input, { target: { value: "./missing.mp4 这个文案真的需要" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled());
+    expect(input).toHaveValue("./missing.mp4 这个文案真的需要");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("composer-chip")).not.toBeInTheDocument();
     for (const text of ["look at ./missing.mp4 please", "https://host/clip.mp4", "const path = './clip.mp4'", "line one\n./clip.mp4"]) {
       fireEvent.paste(input, { clipboardData: { items: [], getData: () => text } });
     }
     expect(inspect).toHaveBeenCalledTimes(1);
-    expect(screen.queryByTestId("composer-chip")).not.toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: "keep this " } });
+    fireEvent.paste(input, { clipboardData: { items: [], getData: () => local.path } });
+    await screen.findByTestId("composer-chip");
+    expect(input).toHaveValue("keep this ");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith("keep this", [
+      expect.objectContaining({ media: { path: local.path, name: local.name } }),
+    ], undefined);
+  });
+
+  it("keeps permission failures visible without consuming the pasted text", async () => {
+    const inspect = vi.fn().mockRejectedValue(new Error("file is outside the current workspace"));
+    render(<ThreadComposer onSend={vi.fn()} onInspectAttachment={inspect} />);
+    const input = screen.getByLabelText(/message input/i);
+    fireEvent.paste(input, { clipboardData: { items: [], getData: () => "/outside/clip.mp4" } });
+    expect(await screen.findByRole("alert")).toHaveTextContent("file is outside the current workspace");
+    expect(input).toHaveValue("/outside/clip.mp4");
+    expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled();
   });
 
   it("does not charge large local documents against a picked document's upload budget", async () => {

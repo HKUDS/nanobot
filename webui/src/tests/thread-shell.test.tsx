@@ -665,6 +665,21 @@ describe("ThreadShell", () => {
     expect(client.sendMessage).not.toHaveBeenCalled();
   });
 
+  it.each([null, "path-probe"])("keeps an unmatched path silent in chat %s through the gateway callback", async (chatId) => {
+    const requestMutation = vi.fn().mockResolvedValue(null);
+    const client = { ...makeClient(), requestMutation };
+    render(wrap(client, <ThreadShell session={chatId ? session(chatId) : null}
+      title="Path probe" onToggleSidebar={() => {}} />));
+    const input = await screen.findByRole("textbox");
+    fireEvent.paste(input, { clipboardData: { items: [], getData: () => "docs/missing.md" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled());
+    expect(requestMutation).toHaveBeenCalledWith("attachment.inspect", expect.objectContaining({
+      chat_id: chatId, path: "docs/missing.md",
+    }));
+    expect(input).toHaveValue("docs/missing.md");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("restores the landing attachment draft in its created topic after a gateway rejection", async () => {
     const client = { ...makeClient(), sendAttachments: vi.fn().mockRejectedValue(new Error("file not found")) };
     const store = new ComposerDraftStore();

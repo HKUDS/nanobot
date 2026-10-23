@@ -108,7 +108,7 @@ describe("NanobotTui composer", () => {
     setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
     const transport = client()
     transport.inspectAttachment = async (path) => {
-      if (path.includes("missing")) throw new Error("file not found")
+      if (path.includes("missing")) return null
       return { path, name: "my clip.mp4", size: 6, kind: "video", mime: "video/mp4", url: "/api/media/sig/path" }
     }
     const sentOptions: MessageOptions[] = []
@@ -119,7 +119,7 @@ describe("NanobotTui composer", () => {
     }
     const app = NanobotTui.mount(setup.renderer, options, transport, new MockTreeSitterClient({ autoResolveTimeout: 0 }))
     app.accept({ event: "attached", chat_id: "chat" })
-    const ui = app as unknown as { ready: boolean; composer: TextareaRenderable; status: { plainText: string } }
+    const ui = app as unknown as { ready: boolean; composer: TextareaRenderable; pathInspectionPending: boolean; status: { plainText: string } }
     await waitUntil(() => ui.ready)
     await setup.mockInput.pasteBracketedText('"/project/my clip.mp4"')
     await waitUntil(() => ui.composer.plainText.includes("[Video #1: my clip.mp4]"))
@@ -130,8 +130,10 @@ describe("NanobotTui composer", () => {
     ui.composer.submit()
     await waitUntil(() => ui.composer.plainText === "")
     await setup.mockInput.pasteBracketedText("./missing.mp4")
-    await waitUntil(() => ui.status.plainText.includes("file not found"))
+    await waitUntil(() => !ui.pathInspectionPending)
     expect(ui.composer.plainText).toBe("./missing.mp4")
+    expect(ui.status.plainText).not.toContain("file not found")
+    expect(ui.status.plainText).not.toContain("Checking local attachment")
   })
 
   test.each([false, true])("preserves text %s while a native pasted path is checked", async (prepend) => {

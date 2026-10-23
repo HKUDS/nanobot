@@ -121,6 +121,28 @@ describe("Desktop attach-only protocol", () => {
       })
     })
   }
+  test("accepts unmatched attachment probes and confirmed file metadata", async () => {
+    await fixture(async (client, socket) => {
+      socket.emit("message", { data: JSON.stringify({ event: "ready", chat_id: "", client_id: "test", terminal: { protocolVersion: 1, gatewayId } }) })
+      socket.emit("message", { data: JSON.stringify({ event: "attached", chat_id: "desktop-chat" }) })
+      for (const metadata of [null, {
+        path: "/project/clip.mp4", name: "clip.mp4", size: 6,
+        kind: "video", mime: "video/mp4", url: "/api/media/sig/path",
+      }]) {
+        const pending = client.inspectAttachment("/project/clip.mp4")
+        const request = JSON.parse(socket.sent.at(-1)!)
+        expect(request).toMatchObject({
+          type: "webui_request", action: "attachment.inspect",
+          payload: { chat_id: "desktop-chat", path: "/project/clip.mp4" },
+        })
+        socket.emit("message", { data: JSON.stringify({
+          event: "webui_response", request_id: request.request_id, ok: true, result: metadata,
+        }) })
+        expect(await pending).toEqual(metadata)
+      }
+    })
+  })
+
   test("explicit client exit sends no lifecycle command", async () => {
     await fixture(async (client, socket) => {
       client.close()
