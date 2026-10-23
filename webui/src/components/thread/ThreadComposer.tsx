@@ -1543,14 +1543,10 @@ export function ThreadComposer({
     () => sessionMentionOptions(sessions),
     [sessions],
   );
-  const sessionMentionCatalog = useMemo(() => [
-    ...availableSessionMentions,
-    ...boundSessionMentions.map((bound) => availableSessionMentions.find((current) => (
-      current.id === bound.id
-      && current.name === bound.name
-      && current.session_key === bound.session_key
-    )) ?? bound),
-  ], [availableSessionMentions, boundSessionMentions]);
+  const sessionMentionCatalog = useMemo(
+    () => [...availableSessionMentions, ...boundSessionMentions],
+    [availableSessionMentions, boundSessionMentions],
+  );
   const mentionSegments = useMemo(
     () => splitCapabilityMentionSegments(value, cliApps, mcpPresets, sessionMentionCatalog),
     [cliApps, mcpPresets, sessionMentionCatalog, value],

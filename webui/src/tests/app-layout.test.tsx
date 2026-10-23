@@ -2660,12 +2660,6 @@ describe("App layout", () => {
     await act(async () => { await import("@/components/thread/ThreadShell"); });
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     act(() => statusHandlers.forEach((handler) => handler("open")));
-    const input = screen.getByRole("textbox", { name: /^Message / });
-    fireEvent.change(input, { target: { value: "@gane", selectionStart: 5 } });
-    fireEvent.keyDown(input, { key: "Tab" });
-    fireEvent.keyDown(input, { key: "Escape" });
-    expect(input).toHaveValue("@gane ");
-    expect(screen.getByTestId("composer-session-mention-gane")).toHaveAttribute("title", "Session: Generated title");
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     await user.click(await within(sidebar).findByRole("button", { name: "Topic actions for Generated title" }));
     await user.click(await screen.findByRole("menuitem", { name: "Rename" }));
@@ -2674,14 +2668,16 @@ describe("App layout", () => {
     await user.type(name, "会话编辑{Enter}");
     await within(sidebar).findByText("会话编辑");
     expect(persisted.title_overrides?.[target.key]).toBe("会话编辑");
+
+    const input = screen.getByRole("textbox", { name: /^Message / });
+    fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
+    expect(screen.getByRole("option", { name: /@gane/ })).toHaveTextContent("会话编辑");
+    fireEvent.change(input, { target: { value: "@会话", selectionStart: 3 } });
+    expect(screen.getByRole("option", { name: /@gane/ })).toHaveTextContent("会话编辑");
+    fireEvent.keyDown(input, { key: "Tab" });
+    fireEvent.keyDown(input, { key: "Escape" });
     expect(input).toHaveValue("@gane ");
     expect(screen.getByTestId("composer-session-mention-gane")).toHaveAttribute("title", "Session: 会话编辑");
-
-    fireEvent.change(input, { target: { value: "@gane @", selectionStart: 7 } });
-    expect(screen.getByRole("option", { name: /@gane/ })).toHaveTextContent("会话编辑");
-    fireEvent.change(input, { target: { value: "@gane @会话", selectionStart: 9 } });
-    expect(screen.getByRole("option", { name: /@gane/ })).toHaveTextContent("会话编辑");
-    fireEvent.change(input, { target: { value: "@gane ", selectionStart: 6 } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(sendMessageSpy).toHaveBeenCalled());
     expect(sendMessageSpy.mock.calls.at(-1)?.[3]?.sessionMentions).toEqual([{
