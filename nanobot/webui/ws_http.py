@@ -2040,7 +2040,7 @@ class GatewayHTTPHandler:
             return _http_error(400, "missing state")
         if not isinstance(state_value, dict):
             return _http_error(400, "state must be an object")
-        if state_value.get("title_overrides"):
+        if cast(dict[str, Any], state_value).get("title_overrides"):
             return _http_error(409, "reload WebUI to rename topics")
         try:
             await self.import_legacy_titles()

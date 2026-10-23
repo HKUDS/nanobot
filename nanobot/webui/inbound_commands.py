@@ -61,7 +61,7 @@ from nanobot.webui.session_access import (
     WebuiSessionAccess,
     session_mentions_runtime_context,
 )
-from nanobot.webui.session_identity import is_valid_webui_chat_id, webui_session_key
+from nanobot.webui.session_identity import is_valid_webui_chat_id, webui_chat_id, webui_session_key
 from nanobot.webui.sidebar_state import write_webui_sidebar_layout
 from nanobot.webui.temporary_chats import TemporaryChatError
 from nanobot.webui.transcription_ws import webui_transcription_event
@@ -404,7 +404,7 @@ class WebUICommandRouter:
                 await self._transport.webui_send_event(connection, "error", detail="access_denied")
                 return
             state = envelope.get("state")
-            if not isinstance(state, dict) or state.get("title_overrides"):
+            if not isinstance(state, dict) or cast(dict[str, Any], state).get("title_overrides"):
                 await self._transport.webui_send_event(
                     connection,
                     "error",
@@ -1169,11 +1169,12 @@ class WebUICommandRouter:
                             state=result,
                         )
                     if action == "session.rename" and isinstance(result, dict):
-                        await self.broadcast_webui_event(
-                            "session_updated",
-                            chat_id=result["key"].removeprefix("websocket:"),
-                            scope="metadata",
-                        )
+                        key = cast(dict[str, object], result).get("key")
+                        chat_id = webui_chat_id(key) if isinstance(key, str) else None
+                        if chat_id is not None:
+                            await self.broadcast_webui_event(
+                                "session_updated", chat_id=chat_id, scope="metadata",
+                            )
                     return WebUIRequestResult(result=result)
                 return WebUIRequestResult(
                     status=status,
