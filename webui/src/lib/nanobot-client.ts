@@ -204,7 +204,10 @@ function runObservation(event: InboundEvent): RunObservation | null {
     case "retry_status":
       return { ...base, kind: event.state === "recovered" || event.state === "cleared" ? "progress" : "activity" };
     case "recovery_state":
-      return { ...base, kind: "recovery", active: event.status === "resuming" };
+      // Supersession resolves the old recovery, not the new user turn that caused it.
+      return event.status === "recovered" && event.reason === "superseded"
+        ? { ...base, kind: "progress" }
+        : { ...base, kind: "recovery", active: event.status === "resuming" };
     case "attached":
       return event.recovery_state && event.recovery_state.status !== "recovered"
         ? { ...base, kind: "recovery", active: event.recovery_state.status === "resuming" }

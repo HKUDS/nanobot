@@ -5249,6 +5249,24 @@ describe("ThreadShell", () => {
     await waitFor(() => {
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
+    expect(screen.getByRole("button", { name: "停止响应" })).toBeInTheDocument();
+    const nextTurnId = client.getRunTurnId("chat-model-failure")!;
+    act(() => {
+      client._emitChat("chat-model-failure", {
+        event: "goal_status", chat_id: "chat-model-failure", turn_id: nextTurnId,
+        status: "running", started_at: 1_700_000_000,
+      });
+      client._emitChat("chat-model-failure", {
+        event: "delta", chat_id: "chat-model-failure", turn_id: nextTurnId,
+        text: "New request is running",
+      });
+    });
+    expect(await screen.findByText("New request is running")).toBeVisible();
+    expect(client.getRunState("chat-model-failure")).toMatchObject({ active: true, startedAt: 1_700_000_000 });
+    act(() => client._emitChat("chat-model-failure", {
+      event: "turn_end", chat_id: "chat-model-failure", turn_id: nextTurnId,
+    }));
+    expect(screen.queryByRole("button", { name: "停止响应" })).not.toBeInTheDocument();
   });
 
   it("moves a correlated delivery error from the banner into the failed message tooltip", async () => {
