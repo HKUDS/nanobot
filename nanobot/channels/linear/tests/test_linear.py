@@ -580,8 +580,13 @@ async def test_graphql_non_json_server_error_is_retryable(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
-async def test_graphql_rate_limit_error_is_retryable(tmp_path: Path) -> None:
-    reset_at = int((time.time() + 60) * 1000)
+async def test_graphql_rate_limit_error_is_retryable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = 1_800_000_000.0
+    reset_at = int((now + 60) * 1000)
+    monkeypatch.setattr(linear_client, "time", SimpleNamespace(time=lambda: now + 12.5))
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -596,7 +601,7 @@ async def test_graphql_rate_limit_error_is_retryable(tmp_path: Path) -> None:
         )
 
     state = LinearStateStore(tmp_path / "linear.sqlite3")
-    state.save_installation(_installation())
+    state.save_installation(replace(_installation(), expires_at=now + 3600))
     http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     client = LinearClient(_config(), state, http)
     try:
@@ -607,7 +612,7 @@ async def test_graphql_rate_limit_error_is_retryable(tmp_path: Path) -> None:
 
     assert error.value.retryable is True
     assert error.value.retry_after is not None
-    assert 50 <= error.value.retry_after <= 60
+    assert error.value.retry_after == 47.5
 
 
 @pytest.mark.asyncio
