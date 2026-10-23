@@ -53,7 +53,6 @@ import {
   installedMcpPresetsFromPayload,
   isMcpPresetsPayload,
 } from "@/lib/mcp-preset-events";
-import { displayTitle } from "@/lib/chat-groups";
 import type { StreamError } from "@/lib/nanobot-client";
 import { isLocalAttachment } from "../../../../packages/client-events/attachments";
 import type {
@@ -491,11 +490,11 @@ export function ThreadShell({
   const historyKey = temporary ? null : session?.key ?? null;
   const previewSessionKey = session?.key ?? null;
   const mentionSessions = useMemo(
-    () => sessions.filter((candidate) => candidate.key !== historyKey).map((candidate) => ({
-      ...candidate,
-      title: displayTitle(candidate, titleOverrides, t("chat.newChat")),
-    })),
-    [historyKey, sessions, t, titleOverrides],
+    () => sessions.filter((candidate) => candidate.key !== historyKey).map((candidate) => {
+      const renamedTitle = titleOverrides[candidate.key]?.trim();
+      return renamedTitle ? { ...candidate, title: renamedTitle } : candidate;
+    }),
+    [historyKey, sessions, titleOverrides],
   );
   const { client, getToken, ingressLimits, modelName, token, webuiCapabilities } = useClient();
   const favoriteWorkspaceProject = useCallback(
