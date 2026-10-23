@@ -5853,7 +5853,7 @@ describe("ThreadShell", () => {
     rerender(wrap(client, <ThreadShell {...props} session={{ ...session("project-chat"), projectLocked: true }} />));
     expect(screen.queryByRole("button", { name: "Switch directory" })).not.toBeInTheDocument();
     expect(screen.getByTestId("thread-header")).not.toHaveTextContent("alpha");
-    expect(screen.getByRole("slider", { name: "Full Access" })).toHaveValue("0");
+    expect(screen.getByRole("button", { name: "Workspace access mode: Default Permission" })).toBeEnabled();
   });
 
   it("keeps normal running controls when attaching to a resumed task", async () => {

@@ -1293,8 +1293,22 @@
   }
 }
 
-/* Narrow composers separate message actions from permissions and usage instead
- * of shrinking touch targets or hiding the active model and access state. */
+/* Match the directory glyph's start to the attachment glyph, not its hit area. */
+.thread-composer-meta {
+  padding-inline-start: calc(var(--composer-footer-inset) + var(--composer-action-margin) + (var(--composer-action-size) - 0.875rem) / 2 - 0.5rem);
+}
+
+@media (pointer: coarse) {
+  .thread-composer-form { --composer-action-size: 2.75rem; }
+}
+
+/* Narrow composers keep message and permission actions together, with usage below. */
+.thread-composer-form[data-compact-controls] {
+  --composer-action-size: 2.25rem;
+  --composer-action-margin: 0.25rem;
+  --composer-footer-inset: 0.5rem;
+}
+
 [data-compact-controls] .thread-composer-footer {
   column-gap: 0.25rem;
   padding: 0 0.5rem 0.5rem;
@@ -1306,8 +1320,7 @@
 }
 
 [data-compact-controls] .thread-composer-footer-actions {
-  flex: none;
-  max-width: none;
+  max-width: 50%;
 }
 
 [data-compact-controls] .thread-composer-action.touch-target {
@@ -1329,11 +1342,11 @@
  * state; margins reserve its space so adjacent controls never overlap it. */
 [data-compact-controls] .thread-composer-round-action.touch-target {
   position: relative;
-  width: 2.25rem;
-  height: 2.25rem;
-  min-width: 2.25rem;
-  min-height: 2.25rem;
-  margin: 0.25rem;
+  width: var(--composer-action-size);
+  height: var(--composer-action-size);
+  min-width: var(--composer-action-size);
+  min-height: var(--composer-action-size);
+  margin: var(--composer-action-margin);
 }
 
 [data-compact-controls] .thread-composer-round-action::before {

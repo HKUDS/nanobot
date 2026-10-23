@@ -1,4 +1,4 @@
-import { WorkspaceIcon } from "@/components/icons/product-icons";
+import { FullAccessIcon, RestrictedAccessIcon, WorkspaceIcon } from "@/components/icons/product-icons";
 import type { HTMLAttributes, ReactElement } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, FolderSearch, History, Search, Star } from "lucide-react";
@@ -7,6 +7,7 @@ import { ToggleButton } from "@/components/ui/toggle-button";
 import { Button } from "@/components/ui/button";
 import { floatingItemClassName, floatingItemFocusClassName } from "@/components/ui/floating-surface";
 import { HoverHint } from "@/components/ui/tooltip";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input, SearchInput } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { SidebarSelectionHighlight, SIDEBAR_SELECTION_ITEM_CLASS } from "@/components/SidebarSelectionHighlight";
@@ -679,7 +680,7 @@ export function WorkspaceProjectPicker({ disabled, scope, defaultScope, controls
   );
 }
 
-export function WorkspaceFullAccessSlider({
+export function WorkspaceAccessMenu({
   scope,
   disabled,
   onChange,
@@ -690,61 +691,56 @@ export function WorkspaceFullAccessSlider({
 }) {
   const { t } = useTranslation();
   const coarsePointer = useMediaQuery("(pointer: coarse)");
+  const [open, setOpen] = useState(false);
+  const restoreTriggerFocus = useRef(true);
   const descriptionId = useId();
   const isFull = scope.access_mode === "full";
-  const label = t("thread.composer.workspace.full");
-  const defaultLabel = t("thread.composer.workspace.default");
-  const description = t("thread.composer.workspace.fullDescription");
-  const [dragValue, setDragValue] = useState<number | null>(null);
-  const dragging = useRef(false);
-  const value = dragValue ?? Number(isFull);
-  const commit = (position: number) => {
-    dragging.current = false;
-    setDragValue(null);
-    const next = Number(position >= 0.5);
-    if (!disabled && next !== Number(isFull)) onChange?.(scopeWithAccessMode(scope, next ? "full" : "restricted"));
-  };
-  const labelMotion = dragging.current ? "transition-none" : "transition-transform duration-200 ease-out motion-reduce:transition-none";
+  const label = t(isFull ? "thread.composer.workspace.full" : "thread.composer.workspace.default");
+  const description = t(isFull ? "thread.composer.workspace.fullDescription" : "thread.composer.workspace.defaultDescription");
+  const accessAriaLabel = `${t("thread.composer.workspace.accessAria")}: ${label}`;
+  const AccessIcon = isFull ? FullAccessIcon : RestrictedAccessIcon;
+
+  useEffect(() => { if (disabled || !onChange) setOpen(false); }, [disabled, onChange]);
 
   return (
-    <span className={cn(
-      "thread-composer-access relative inline-flex h-8 w-[13rem] shrink-0 items-center overflow-hidden rounded-full bg-foreground/[0.09] text-[12px] font-medium text-foreground has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring dark:bg-white/[0.12]",
-      (disabled || !onChange) && "opacity-55",
-    )}>
-      <span aria-hidden className={cn(
-        "pointer-events-none absolute inset-y-0 left-0 rounded-l-full bg-[#ef8e30]",
-        dragging.current ? "transition-none" : "transition-[width] duration-200 ease-out motion-reduce:transition-none",
-      )} style={{ width: `${value * 100}%` }} />
-      <span aria-hidden className={cn("pointer-events-none absolute inset-y-0 left-9 right-1 flex items-center justify-center truncate whitespace-nowrap", labelMotion)}
-        style={{ transform: `translateX(${Math.min(1, value * 2) * 176}px)` }}>{defaultLabel}</span>
-      <span aria-hidden className={cn("pointer-events-none absolute inset-y-0 left-1 right-9 flex items-center justify-center truncate whitespace-nowrap text-[#2e261f]", labelMotion)}
-        style={{ transform: `translateX(${(value - 1) * 176}px)` }}>{label}</span>
-      <span aria-hidden className={cn(
-        "pointer-events-none absolute top-1 h-6 w-6 rounded-full border border-black/10 bg-white shadow-sm",
-        dragging.current ? "transition-none" : "transition-[left] duration-200 ease-out motion-reduce:transition-none",
-      )} style={{ left: `calc(${value * 100}% + ${4 - value * 32}px)` }} />
-      <HoverHint enabled={!coarsePointer && !dragging.current} content={description}>
-        <input type="range" min={0} max={1} step="any" value={value} disabled={disabled || !onChange}
-          aria-label={label} aria-valuetext={value >= 0.5 ? label : defaultLabel} aria-describedby={descriptionId}
-          onPointerDown={() => { dragging.current = true; setDragValue(Number(isFull)); }}
-          onChange={event => {
-            const next = Number(event.currentTarget.value);
-            if (dragging.current) setDragValue(next);
-            else commit(next);
-          }}
-          onPointerUp={event => {
-            if (dragging.current) commit(Number(event.currentTarget.value));
-          }}
-          onPointerCancel={() => { dragging.current = false; setDragValue(null); }}
-          onKeyDown={event => {
-            if (["ArrowLeft", "ArrowDown", "Home", "ArrowRight", "ArrowUp", "End"].includes(event.key)) {
-              event.preventDefault();
-              commit(["ArrowRight", "ArrowUp", "End"].includes(event.key) ? 1 : 0);
-            }
-          }}
-          className="absolute inset-0 z-10 h-full w-full cursor-ew-resize appearance-none bg-transparent px-1 opacity-0 disabled:cursor-default [&::-webkit-slider-runnable-track]:h-full [&::-webkit-slider-runnable-track]:bg-transparent [&::-webkit-slider-thumb]:h-6 [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:appearance-none [&::-moz-range-track]:h-full [&::-moz-range-track]:bg-transparent [&::-moz-range-thumb]:h-6 [&::-moz-range-thumb]:w-6 [&::-moz-range-thumb]:border-0" />
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <HoverHint enabled={!open && !coarsePointer} content={description}>
+        <DropdownMenuTrigger asChild disabled={disabled || !onChange}>
+          <button type="button" aria-label={accessAriaLabel} aria-describedby={descriptionId}
+            onPointerDown={() => { restoreTriggerFocus.current = false; }}
+            onKeyDown={() => { restoreTriggerFocus.current = true; }}
+            className={cn(
+              "thread-composer-access touch-target inline-flex h-8 min-w-0 shrink items-center gap-1.5 rounded-md px-2 text-[12px] font-medium outline-none transition-colors motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-55",
+              isFull ? "text-orange-600 hover:text-orange-700 dark:text-orange-300 dark:hover:text-orange-200" : "text-muted-foreground hover:text-foreground",
+            )}>
+            <AccessIcon className="h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 truncate">{label}</span>
+            <ChevronDown className="h-3 w-3 shrink-0" aria-hidden />
+            <span id={descriptionId} className="sr-only">{description}</span>
+          </button>
+        </DropdownMenuTrigger>
       </HoverHint>
-      <span id={descriptionId} className="sr-only">{description}</span>
-    </span>
+      <DropdownMenuContent side="top" align="start" sideOffset={8} aria-label={t("thread.composer.workspace.accessAria")}
+        onPointerDownCapture={() => { restoreTriggerFocus.current = false; }}
+        onKeyDownCapture={() => { restoreTriggerFocus.current = true; }}
+        onPointerDownOutside={() => { restoreTriggerFocus.current = false; }}
+        onCloseAutoFocus={event => { if (!restoreTriggerFocus.current) event.preventDefault(); }}
+        className="w-max min-w-[13rem] max-w-[calc(100vw-2rem)]">
+        {(["restricted", "full"] as const).map(mode => {
+          const full = mode === "full";
+          const optionLabel = t(full ? "thread.composer.workspace.full" : "thread.composer.workspace.default");
+          const OptionIcon = full ? FullAccessIcon : RestrictedAccessIcon;
+          return <DropdownMenuItem key={mode} role="menuitemradio" aria-checked={scope.access_mode === mode} aria-label={optionLabel}
+            className="touch-target gap-2.5"
+            onSelect={() => { if (!disabled && scope.access_mode !== mode) onChange?.(scopeWithAccessMode(scope, mode)); }}>
+            <OptionIcon className={full ? "text-orange-600 dark:text-orange-300" : undefined} />
+            <span className="min-w-0 flex-1">{optionLabel}</span>
+            <span aria-hidden className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+              {scope.access_mode === mode && <Check className={cn("h-3.5 w-3.5", full && "text-orange-600 dark:text-orange-300")} />}
+            </span>
+          </DropdownMenuItem>;
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

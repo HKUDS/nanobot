@@ -82,7 +82,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
-  WorkspaceFullAccessSlider,
+  WorkspaceAccessMenu,
   WorkspaceProjectPicker,
 } from "@/components/thread/WorkspaceControls";
 import {
@@ -2525,7 +2525,7 @@ export function ThreadComposer({
     return () => observer?.disconnect();
   }, [compactControls, compactWhenIdle, modelLabel, voiceRecorder.isRecording, workspaceScope]);
   const accessControl = workspaceScope && !workspaceControlsHidden ? (
-    <WorkspaceFullAccessSlider
+    <WorkspaceAccessMenu
       scope={workspaceScope}
       disabled={interactionDisabled || workspaceScopeDisabled}
       onChange={onWorkspaceScopeChange}
@@ -2623,8 +2623,10 @@ export function ThreadComposer({
         if (!handleSessionDrop(event)) onDrop(event);
       }}
       className={cn(
-        "relative w-full",
-        isHero ? "px-0" : "px-1 pb-1.5 pt-1 sm:px-0",
+        "thread-composer-form relative w-full [--composer-action-margin:0px]",
+        isHero
+          ? "px-0 [--composer-action-size:2rem] [--composer-footer-inset:0.75rem] sm:[--composer-footer-inset:1rem]"
+          : "px-1 pb-1.5 pt-1 [--composer-action-size:2.25rem] [--composer-footer-inset:0.625rem] sm:px-0 sm:[--composer-footer-inset:0.75rem]",
         compactWhenIdle && "thread-composer-collapsible-layout",
         paletteBeside && "grid grid-cols-2 items-start gap-2 p-0",
       )}
@@ -2797,13 +2799,13 @@ export function ThreadComposer({
         ) : null}
         <div
           className={cn(
-            "thread-composer-footer flex flex-nowrap items-center motion-safe:transition-[padding-bottom] motion-safe:[transition-duration:220ms] motion-safe:ease-in-out",
+            "thread-composer-footer flex flex-nowrap items-center px-[var(--composer-footer-inset)] motion-safe:transition-[padding-bottom] motion-safe:[transition-duration:220ms] motion-safe:ease-in-out",
             isHero
               ? cn(
-                  "gap-x-1.5 px-3 sm:px-4",
+                  "gap-x-1.5",
                   showProjectPicker && compactControls ? "pb-1.5" : "pb-3.5",
                 )
-              : "gap-x-2 px-2.5 pb-2 sm:px-3",
+              : "gap-x-2 pb-2",
           )}
         >
           <div
@@ -2829,13 +2831,12 @@ export function ThreadComposer({
               onClick={() => fileInputRef.current?.click()}
               className={cn(
                 "thread-composer-action thread-composer-round-action touch-target shrink-0 rounded-xl text-muted-foreground hover:text-foreground",
-                isHero
-                  ? "h-8 w-8"
-                  : "h-9 w-9",
+                "h-[var(--composer-action-size)] w-[var(--composer-action-size)]",
               )}
             >
               <AttachIcon className="h-3.5 w-3.5" />
             </Button>
+            {accessControl}
             {voiceRecorder.isRecording ? (
               <VoiceRecordingMeter
                 ariaLabel={voiceRecordingStatusLabel}
@@ -2844,7 +2845,7 @@ export function ThreadComposer({
                 isHero={isHero}
                 levels={voiceRecorder.levels}
               />
-            ) : compactControls ? modelControl : null}
+            ) : null}
           </div>
           <div
             className={cn(
@@ -2852,7 +2853,7 @@ export function ThreadComposer({
               isHero ? "gap-1.5" : "gap-2",
             )}
           >
-            {!compactControls ? modelControl : null}
+            {modelControl}
             {!compactControls ? usageControl : null}
             <TooltipProvider>
               <Tooltip>
@@ -2927,15 +2928,14 @@ export function ThreadComposer({
           </div>
         </div>
       </div>
-      {accessControl || workspaceControl || compactControls && usageControl ? (
+      {workspaceControl || compactControls && usageControl ? (
         <div className={cn(
-          "thread-composer-meta mx-auto mt-1 flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-2 sm:px-3",
+          "thread-composer-meta mx-auto mt-1 flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pr-2 sm:pr-3",
           isHero ? "max-w-[58rem]" : "max-w-[49.5rem]",
           paletteBeside && "col-start-1 row-start-2",
         )}>
           <div className="thread-composer-workspace-group flex min-w-0 flex-auto items-center gap-1 max-[359px]:flex-wrap">
             {workspaceControl}
-            {accessControl}
           </div>
           {compactControls ? <div className="ml-auto shrink-0">{usageControl}</div> : null}
         </div>

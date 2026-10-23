@@ -37,6 +37,7 @@ export const SendIcon = productIcon("send", <><path d="m4 5 17 7-17 7 3-7-3-7Z" 
 export const VoiceIcon = productIcon("voice", <><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M6 11v1a6 6 0 0 0 12 0v-1M12 18v3m-3 0h6" /></>);
 export const StopIcon = productIcon("stop", <rect x="5" y="5" width="14" height="14" rx="2.5" />);
 export const RestrictedAccessIcon = productIcon("restricted-access", <><rect x="5" y="10" width="14" height="11" rx="2.5" /><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2" /></>);
+export const FullAccessIcon = productIcon("full-access", <><rect x="5" y="10" width="14" height="11" rx="2.5" /><path d="M8 10V7a4 4 0 0 1 7.5-2m-3.5 10v2" /></>);
 export const WorkspaceIcon = productIcon("workspace", <><path d="M3 7a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" /><path d="M8 13h8m-8 4h5" /></>);
 export const PromptNavigationIcon = productIcon("prompt-navigation", <><path d="M5 5v14m4-14h11M9 12h11M9 19h7" /><circle cx="5" cy="5" r="1.5" fill="currentColor" stroke="none" /><circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none" /><circle cx="5" cy="19" r="1.5" fill="currentColor" stroke="none" /></>);
 export const TemporaryChatIcon = productIcon("temporary-chat", <><path d="M7 4h10a4 4 0 0 1 4 4v7a4 4 0 0 1-4 4H8l-5 3V8a4 4 0 0 1 4-4Z" strokeDasharray="3 3" /><path d="M8 10h8m-8 4h4" /></>);

@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { HoverHint, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 function Hints() {
   return <TooltipProvider>{["First", "Second"].map(label => (
@@ -33,4 +33,20 @@ it("shows keyboard focus help immediately", () => {
   render(<Hints />);
   fireEvent.focus(screen.getByRole("button", { name: "First" }));
   expect(screen.getByRole("tooltip")).toHaveTextContent("First help");
+});
+
+it("does not revive a disabled hint without a fresh focus interaction", () => {
+  const hint = (enabled: boolean) => <HoverHint enabled={enabled} content="Permission help"><button>Permission</button></HoverHint>;
+  const { rerender } = render(hint(true));
+  const trigger = screen.getByRole("button", { name: "Permission" });
+  fireEvent.focus(trigger);
+  expect(screen.getByRole("tooltip")).toHaveTextContent("Permission help");
+  rerender(hint(false));
+  expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  rerender(hint(true));
+  expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Permission" })).toBe(trigger);
+  fireEvent.blur(trigger);
+  fireEvent.focus(trigger);
+  expect(screen.getByRole("tooltip")).toHaveTextContent("Permission help");
 });
