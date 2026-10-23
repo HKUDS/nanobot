@@ -1,6 +1,7 @@
 """Unit and lightweight integration tests for the WebSocket channel."""
 
 import asyncio
+import faulthandler
 import json
 import threading
 import time
@@ -4912,15 +4913,20 @@ async def test_image_settings_hot_reload_without_restart(
             f"ws://127.0.0.1:{port}/ws?token={webui_token}&client_id=image-reload-test"
         )
         assert json.loads(await webui_client.recv())["event"] == "ready"
-        response = await _webui_mutate(
-            webui_client,
-            "settings.image_generation.update",
-            {
-                "enabled": True, "provider": provider_name, "model": "openai/gpt-image-1",
-                "extra_headers": {"X-Image": "configured"},
-                "extra_body": {"watermark": False},
-            },
-        )
+        # Capture the server's blocking stack before the unchanged 5-second client deadline.
+        faulthandler.dump_traceback_later(4)
+        try:
+            response = await _webui_mutate(
+                webui_client,
+                "settings.image_generation.update",
+                {
+                    "enabled": True, "provider": provider_name, "model": "openai/gpt-image-1",
+                    "extra_headers": {"X-Image": "configured"},
+                    "extra_body": {"watermark": False},
+                },
+            )
+        finally:
+            faulthandler.cancel_dump_traceback_later()
 
         assert response.status_code == 200
         assert response.json()["requires_restart"] is False
