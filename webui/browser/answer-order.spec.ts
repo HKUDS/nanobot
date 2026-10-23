@@ -125,11 +125,23 @@ for (const width of [1440, 390]) {
       { event: "stream_end", ...base, stream_id: "legacy", turn_seq: 5, text: "First last" },
       { event: "turn_end", ...base, turn_seq: 6 },
     ]);
-    await expect(page.getByText("First", { exact: true })).toHaveCount(1);
-    await expect(page.getByText("last", { exact: true })).toHaveCount(1);
-    const texts = await page.locator("[data-thread-display-unit]").allTextContents();
-    expect(texts.findIndex((text) => text.includes("First"))).toBeLessThan(texts.findIndex((text) => text.includes("Searching the web")));
-    expect(texts.findIndex((text) => text.includes("Searching the web"))).toBeLessThan(texts.findIndex((text) => text.includes("last")));
+    const first = page.getByText("First", { exact: true });
+    const last = page.getByText("last", { exact: true });
+    await expect(first).toHaveCount(1);
+    await expect(last).toHaveCount(1);
+    await expect(page.getByRole("button", { name: "Stop response" })).toHaveCount(0);
+    // Completed activity is folded into the answer block, not lost or still running.
+    const lastBlock = last.locator("xpath=ancestor::*[@data-thread-display-unit]");
+    await lastBlock.hover();
+    await lastBlock.getByRole("button", { name: "Message actions" }).click();
+    await page.locator("[data-message-block-activity-action]").click();
+    const tool = page.getByText(/Searched the web/).first();
+    await expect(tool).toBeVisible();
+    const [firstNode, lastNode] = await Promise.all([first.elementHandle(), last.elementHandle()]);
+    expect(await tool.evaluate((node, [before, after]) => (
+      !!(before.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)
+      && !!(node.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING)
+    ), [firstNode!, lastNode!])).toBe(true);
     expect(errors).toEqual([]);
   });
 
