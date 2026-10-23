@@ -289,7 +289,11 @@ class WebUIStateEvents:
                     if changes:
                         await self._persistent_changes({Path(path) for _change, path in changes})
                 return
-            except (OSError, RuntimeError):
+            except (OSError, RuntimeError, ExceptionGroup) as error:
+                # awatch wraps native read failures in AnyIO's task group. Retry
+                # only supported I/O failures; other grouped errors must surface.
+                if isinstance(error, ExceptionGroup) and error.split((OSError, RuntimeError))[1] is not None:
+                    raise
                 if not registered.is_set():
                     raise
                 logger.exception("WebUI persistence watch interrupted; re-registering {}", root)

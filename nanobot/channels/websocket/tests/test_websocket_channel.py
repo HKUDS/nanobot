@@ -86,6 +86,7 @@ from nanobot.webui.metadata import (
 from nanobot.webui.settings_api import settings_payload, update_provider_settings
 
 from .ws_test_client import http_get as _http_get
+from .ws_test_client import wait_for_listener
 
 # -- Shared helpers (aligned with test_websocket_integration.py) ---------------
 
@@ -187,15 +188,8 @@ async def start_listener():
         assert channel.config.port == 0
         task = asyncio.create_task(channel.start())
         listeners.append((channel, task))
-        async with asyncio.timeout(5):
-            while True:
-                if task.done():
-                    await task
-                    raise AssertionError("listener stopped before becoming ready")
-                server = channel._server
-                if server is not None and server.sockets and server.is_serving():
-                    return server.sockets[0].getsockname()[1], task
-                await asyncio.sleep(0.01)
+        port = await wait_for_listener(channel, task)
+        return port, task
 
     try:
         yield start

@@ -175,7 +175,6 @@ class LLMUsageChangeSource:
                 changed = self._identity is not None
                 self._close_connection()
                 self._identity = None
-                self._version = None
                 return changed
             identity = (stat.st_dev, stat.st_ino)
             replaced = identity != self._identity
@@ -203,12 +202,13 @@ class LLMUsageChangeSource:
         if self._connection is not None:
             self._connection.close()
             self._connection = None
+        # data_version values are only comparable within the same connection.
+        self._version = None
 
     def close(self) -> None:
         with self._lock:
             self._close_connection()
             self._identity = None
-            self._version = None
 
 
 class LLMUsageStore:

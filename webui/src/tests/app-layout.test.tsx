@@ -4467,7 +4467,7 @@ describe("App layout", () => {
     expect(pairingReads()).toBe(2);
   });
 
-  it("keeps pairing countdowns aligned across windows without polling", async () => {
+  it.each([-3_600_000, 0, 3_600_000])("keeps pairing countdowns aligned across windows with host clock offset %ims", async (hostClockOffset) => {
     vi.useFakeTimers();
     vi.mocked(fetchBootstrap).mockResolvedValue({
       token: "tok", api_token: "api-tok", ws_path: "/", expires_in: 0,
@@ -4476,7 +4476,7 @@ describe("App layout", () => {
     const expiresAt = Date.now() + 600_000;
     mockFetchRoutes({ "/api/settings/pairing": () => ({ requests: [{
       code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status: "sent",
-      expires_at_ms: expiresAt, expires_in_seconds: Math.floor((expiresAt - Date.now()) / 1000),
+      expires_at_ms: expiresAt + hostClockOffset, expires_in_seconds: Math.floor((expiresAt - Date.now()) / 1000),
     }] }) });
     const first = render(<App />);
     await act(async () => {});
@@ -4545,7 +4545,9 @@ describe("App layout", () => {
       { code: "IJKL-MNOP", channel: "feishu.second", sender_id: "bob", delivery_status: "sent",
         expires_at_ms: Date.now() + 65_000, expires_in_seconds: 65 },
     ];
-    mockFetchRoutes({ "/api/settings/pairing": { requests } });
+    mockFetchRoutes({ "/api/settings/pairing": () => ({ requests: requests.map((request) => ({
+      ...request, expires_in_seconds: Math.max(0, Math.floor((request.expires_at_ms - Date.now()) / 1000)),
+    })) }) });
     requestMutationSpy.mockRejectedValueOnce(new Error("Approval unavailable"));
     render(<App />);
     await act(async () => {});

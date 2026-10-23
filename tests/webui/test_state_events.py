@@ -379,26 +379,32 @@ async def test_cancelled_start_joins_inflight_source_read_before_releasing_owner
     assert not [task for task in asyncio.all_tasks() if task.get_name().startswith("webui-state-")]
 
 
+@pytest.mark.parametrize("failure", [
+    OSError("transient native watch interruption"),
+    ExceptionGroup("unhandled errors in a TaskGroup", [OSError("transient native watch interruption")]),
+], ids=["direct", "native-task-group"])
 async def test_watch_error_is_re_registered_and_later_changes_are_delivered(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: Exception,
 ) -> None:
     notifier = WebUIStateEvents(_settings(tmp_path))
     real_awatch = state_events.awatch
-    interrupted = False
+    interrupt, interrupted = asyncio.Event(), asyncio.Event()
 
     async def interrupted_watch(*args, **kwargs):
-        nonlocal interrupted
         async for changes in real_awatch(*args, **kwargs):
             yield changes
-            if Path(args[0]) == tmp_path / "data" and not interrupted:
-                interrupted = True
-                raise OSError("transient native watch interruption")
+            if Path(args[0]) == tmp_path / "data" and not interrupted.is_set():
+                await interrupt.wait()
+                interrupted.set()
+                # awatch's AnyIO group wraps errors raised by RustNotify.watch.
+                raise failure
 
     monkeypatch.setattr(state_events, "awatch", interrupted_watch)
     events: asyncio.Queue[tuple[WebUIStateResource, ...]] = asyncio.Queue()
     await notifier.start(events.put)
     try:
-        assert interrupted
+        interrupt.set()
+        await asyncio.wait_for(interrupted.wait(), timeout=2)
         code = pairing.generate_code("telegram", "during-watch-recovery", ttl=2)
         await _resource(events, "pairing")
         assert pairing.list_pending()[0]["code"] == code

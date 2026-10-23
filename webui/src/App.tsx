@@ -934,8 +934,9 @@ function pairingChannelPresentation(channel: string) {
 function pairingRequestsWithDeadlines(requests: PairingRequestInfo[]): PairingRequestInfo[] {
   const receivedAt = Date.now();
   return requests.map((request) => {
-    if (request.expires_at_ms != null || request.expires_in_seconds == null) return request;
-    // Legacy hosts only send a duration. Anchor it at receipt, not when a popup opens or changes matches.
+    if (request.expires_in_seconds == null) return request;
+    // Anchor the host's remaining duration at receipt: browser and host clocks
+    // can differ. Opening a popup or changing matches must not reset it.
     return { ...request, expires_at_ms: receivedAt + request.expires_in_seconds * 1000 };
   });
 }
