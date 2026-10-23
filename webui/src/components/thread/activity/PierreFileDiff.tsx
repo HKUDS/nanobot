@@ -10,6 +10,7 @@ import { CODE_TEXTMATE_THEME, CODE_THEME, CODE_THEME_NAME, codeHighlighterLangua
 import { DiffViewportContext } from "./DiffViewportContext";
 import type { DiffSyntaxHighlightProps } from "./DiffSyntaxHighlight";
 import { DIFF_GAP_HEIGHT, diffRenderWindow, diffRowOffsets } from "./diff-render-window";
+import { selectedDiffRows } from "./diff-selection";
 
 const THEME = CODE_THEME_NAME;
 const CACHE_ENTRIES = 16;
@@ -85,20 +86,22 @@ export function PierreFileDiff({ text, language, diff, lineLimit }: DiffSyntaxHi
   const options = useMemo<FileDiffOptions<undefined, undefined>>(() => ({
     theme: THEME, themeType: theme, preferredHighlighter: "highlights", diffStyle: "unified", diffIndicators: "classic",
     disableFileHeader: true, lineDiffType: "word",
-    hunkSeparators: (hunk) => {
-      if (hunk.hunkIndex === 0 || hunk.lines === 0) return null;
-      const gap = document.createElement("div");
-      gap.className = "nanobot-diff-gap flex items-center gap-2 bg-muted/35 px-2 text-[11px] text-muted-foreground";
-      gap.dataset.testid = "file-edit-diff-hunk-gap";
-      gap.dataset.unchangedLines = String(hunk.lines);
-      gap.textContent = gapLabel(hunk.lines);
-      return gap;
+    // Function separators disable Pierre's incremental row updates and destroy native selections.
+    hunkSeparators: "line-info",
+    onPostRender: (node, _instance, phase) => {
+      if (phase === "unmount") return;
+      for (const gap of node.shadowRoot!.querySelectorAll<HTMLElement>("[data-separator]")) {
+        const nextIndex = Number(gap.nextElementSibling?.getAttribute("data-line-index")?.split(",")[0]);
+        const hunk = metadata.hunks.find(item => item.unifiedLineStart === nextIndex);
+        const label = gap.querySelector<HTMLElement>("[data-unmodified-lines]");
+        if (!hunk || !label) continue;
+        const text = gapLabel(hunk.collapsedBefore);
+        if (label.textContent !== text) label.textContent = text;
+        if (gap.closest("[data-gutter]")) label.dataset.testid = "file-edit-diff-hunk-gap";
+      }
     },
-    onPostRender: (node) => {
-      for (const gap of node.querySelectorAll<HTMLElement>("[data-unchanged-lines]")) gap.textContent = gapLabel(Number(gap.dataset.unchangedLines));
-    },
-    unsafeCSS: `:host, pre, code { font: inherit; } pre { padding-block: 0; } [data-line], [data-column-number] { padding-block: 1px; } [data-separator] { height: ${DIFF_GAP_HEIGHT}px; margin: 0; padding: 0; } [data-separator-first], [data-separator-last] { display: none; }`,
-  }), [theme, gapLabel]);
+    unsafeCSS: `:host, pre, code { font: inherit; } pre { padding-block: 0; } [data-line], [data-column-number] { padding-block: 1px; } [data-separator] { height: ${DIFF_GAP_HEIGHT}px; margin: 0; padding: 0; } [data-separator-wrapper], [data-separator-content] { background: transparent; color: hsl(var(--muted-foreground)); } [data-separator-wrapper] { padding-inline: 8px; background: hsl(var(--muted) / .35); font-size: 11px; } [data-separator-first], [data-separator-last] { display: none; }`,
+  }), [theme, gapLabel, metadata]);
 
   useLayoutEffect(() => {
     const wrapper = wrapperRef.current!;
@@ -124,7 +127,7 @@ export function PierreFileDiff({ text, language, diff, lineLimit }: DiffSyntaxHi
       const wrapperTop = wrapper.getBoundingClientRect().top;
       const top = (rootRect?.top ?? 0) - wrapperTop;
       const height = rootRect?.height ?? window.innerHeight;
-      const range = diffRenderWindow(diff, offsets, top - height, top + height * 2, lineHeight);
+      const range = diffRenderWindow(diff, offsets, top - height, top + height * 2, lineHeight, selectedDiffRows(wrapper, metadata));
       if (!forceRender && previous && Object.keys(range).every(key => range[key as keyof RenderRange] === previous![key as keyof RenderRange])) return;
       previous = range;
       instance.render({ fileDiff: metadata, containerWrapper: wrapper, renderRange: range, forceRender });
@@ -139,6 +142,7 @@ export function PierreFileDiff({ text, language, diff, lineLimit }: DiffSyntaxHi
     const typography = new MutationObserver(schedule);
     typography.observe(document.documentElement, { attributes: true, attributeFilter: ["data-reading-text-size"] });
     eventTarget.addEventListener("scroll", schedule, { passive: true });
+    document.addEventListener("selectionchange", schedule);
     window.addEventListener("resize", schedule);
     render();
     return () => {
@@ -146,6 +150,7 @@ export function PierreFileDiff({ text, language, diff, lineLimit }: DiffSyntaxHi
       resize.disconnect();
       typography.disconnect();
       eventTarget.removeEventListener("scroll", schedule);
+      document.removeEventListener("selectionchange", schedule);
       window.removeEventListener("resize", schedule);
     };
   }, [diff, lineLimit, metadata, options, viewport]);

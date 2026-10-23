@@ -1,19 +1,13 @@
 import { codeToTokens, isSupportedLanguage } from "@pierre/highlights";
 
+import { cacheCodeHighlight, cachedCodeHighlight, type CodeHighlight } from "./code-highlight-cache";
 import { CODE_THEME, codeHighlighterLanguage } from "./code-theme";
 import { codeTokenLines, type CodeLine } from "./code-tokens";
 
-const MAX_CACHED_SOURCE_BYTES = 2 * 1024 * 1024;
-const MAX_CACHE_ENTRIES = 16;
 type HighlightResult =
   | { state: "ready"; lines: CodeLine[] }
   | { state: "pending"; promise: Promise<void> }
   | { state: "failed"; error: unknown };
-export interface CodeHighlight {
-  read(): CodeLine[];
-}
-const cache = new Map<string, CodeHighlight>();
-let sourceBytes = 0;
 let grammars: typeof import("./code-highlighter-grammars") | undefined;
 
 function highlight(source: string, language: string): CodeHighlight {
@@ -43,24 +37,9 @@ function highlight(source: string, language: string): CodeHighlight {
 }
 
 export function codeHighlight(source: string, language: string): CodeHighlight {
-  const lang = codeHighlighterLanguage(language);
-  const key = `${lang}\0${source}`;
-  const cached = cache.get(key);
-  if (cached) {
-    cache.delete(key);
-    cache.set(key, cached);
-    return cached;
-  }
-  const resource = highlight(source, lang);
-  const bytes = key.length * 2;
-  if (bytes <= MAX_CACHED_SOURCE_BYTES) {
-    while (cache.size >= MAX_CACHE_ENTRIES || sourceBytes + bytes > MAX_CACHED_SOURCE_BYTES) {
-      const oldest = cache.keys().next().value!;
-      cache.delete(oldest);
-      sourceBytes -= oldest.length * 2;
-    }
-    cache.set(key, resource);
-    sourceBytes += bytes;
-  }
+  const cached = cachedCodeHighlight(source, language);
+  if (cached) return cached;
+  const resource = highlight(source, codeHighlighterLanguage(language));
+  cacheCodeHighlight(source, language, resource);
   return resource;
 }
