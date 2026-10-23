@@ -166,6 +166,11 @@
     "description": "单张图片的适应、缩放、平移与双指缩放控件。",
     "options": "用 className 限定边界；更换图片身份时重新挂载。图库管理方向键导航时设置 panWithArrows=false。"
   },
+  "loadingRing": {
+    "title": "运行圆环",
+    "description": "可选底环的共享运行指示器。",
+    "options": "className 设置尺寸和颜色。track=false 隐藏底环；strokeWidth 和 strokeDasharray 调整圆弧。遵循减少动态效果设置。"
+  },
   "streaming": {
     "title": "流光文字",
     "description": "思考中与工具标签共用的文字动画。",

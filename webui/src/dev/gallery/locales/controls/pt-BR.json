@@ -166,6 +166,11 @@
     "description": "Controles de ajuste, zoom, deslocamento e pinça locais à imagem.",
     "options": "Forneça uma className com limites e remonte o componente se a identidade da imagem mudar. Use panWithArrows=false quando uma galeria gerenciar as setas."
   },
+  "loadingRing": {
+    "title": "Anel de atividade",
+    "description": "Um indicador de atividade compartilhado com trilha opcional.",
+    "options": "className define o tamanho e a cor. track=false oculta a trilha; strokeWidth e strokeDasharray ajustam o arco. Respeita a preferência por movimento reduzido."
+  },
   "streaming": {
     "title": "Rótulos animados",
     "description": "Uma animação de texto compartilhada para raciocínio ativo e rótulos de ferramentas.",

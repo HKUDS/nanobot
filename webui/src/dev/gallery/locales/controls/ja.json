@@ -166,6 +166,11 @@
     "description": "画像単位のフィット、ズーム、移動、ピンチ操作。",
     "options": "className で領域を制限し、画像の識別情報が変わったら再マウントします。ギャラリーが矢印キー操作を管理する場合は panWithArrows=false にします。"
   },
+  "loadingRing": {
+    "title": "処理リング",
+    "description": "背景リングを省略できる共通の処理インジケーター。",
+    "options": "className でサイズと色を設定します。track=false で背景リングを非表示にし、strokeWidth と strokeDasharray で円弧を調整します。視差効果を減らす設定に従います。"
+  },
   "streaming": {
     "title": "アニメーションラベル",
     "description": "思考中や実行中のツールラベルで共有するテキストアニメーション。",

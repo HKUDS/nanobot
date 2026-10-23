@@ -166,6 +166,11 @@
     "description": "Image-local fit, zoom, pan and pinch controls.",
     "options": "Supply a bounded className and remount for a different image identity. Set panWithArrows=false when a gallery owns arrow navigation."
   },
+  "loadingRing": {
+    "title": "Loading ring",
+    "description": "A shared activity ring with an optional track.",
+    "options": "className sets size and color. track=false hides the track; strokeWidth and strokeDasharray adjust the arc. Respects reduced-motion settings."
+  },
   "streaming": {
     "title": "Animated labels",
     "description": "A shared text animation for active thinking and tool labels.",

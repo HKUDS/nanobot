@@ -2,6 +2,24 @@ import { expect, test } from "@playwright/test";
 
 for (const width of [1280, 390]) {
   for (const variant of ["hero", "thread"]) {
+    test(`composer edge presses send and stop without losing the click (${width}px, ${variant})`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto(`/browser/fixture.html?case=composer-action&composerVariant=${variant}`);
+      await page.getByRole("textbox").fill("An edge press");
+      const action = page.locator(".composer-primary-action");
+      await expect(action).toHaveAccessibleName("Send message");
+      for (const status of ["Working", "Stop requested"]) {
+        const bounds = (await action.boundingBox())!;
+        await page.mouse.move(bounds.x + bounds.width - 0.5, bounds.y + bounds.height / 2);
+        await page.mouse.down();
+        // Let the press animation settle before releasing at the same edge point.
+        await page.waitForTimeout(200);
+        await page.mouse.up();
+        await expect(page.getByLabel("Execution status")).toHaveText(status);
+        expect(await action.boundingBox()).toEqual(bounds);
+      }
+    });
+
     test(`composer actions crossfade without shifting or delaying Stop (${width}px, ${variant})`, async ({ page }) => {
       await page.setViewportSize({ width, height: 844 });
       await page.goto(`/browser/fixture.html?case=composer-action&composerVariant=${variant}`);
@@ -75,6 +93,7 @@ test("composer activity follows both themes and live reduced-motion preferences"
   await action.hover();
   await page.mouse.down();
   expect(await action.evaluate((node) => getComputedStyle(node).transform)).toBe("none");
+  expect(await action.locator(".composer-action-icons").evaluate((node) => getComputedStyle(node).transform)).toBe("none");
   await page.mouse.up();
   await page.getByRole("button", { name: "Finish response" }).click();
   await page.getByRole("textbox").fill("Another draft");

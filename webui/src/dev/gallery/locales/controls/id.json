@@ -166,6 +166,11 @@
     "description": "Kontrol penyesuaian, zoom, geser, dan cubit untuk setiap gambar.",
     "options": "Sediakan className dengan batas area dan pasang ulang untuk identitas gambar yang berbeda. Atur panWithArrows=false jika galeri mengelola navigasi panah."
   },
+  "loadingRing": {
+    "title": "Cincin aktivitas",
+    "description": "Indikator aktivitas bersama dengan jalur opsional.",
+    "options": "className mengatur ukuran dan warna. track=false menyembunyikan jalur; strokeWidth dan strokeDasharray mengatur busur. Mengikuti preferensi pengurangan gerakan."
+  },
   "streaming": {
     "title": "Label beranimasi",
     "description": "Animasi teks bersama untuk proses berpikir aktif dan label alat.",

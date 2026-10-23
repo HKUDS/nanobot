@@ -166,6 +166,11 @@
     "description": "Ajuste, zoom, desplazamiento y pellizco propios de cada imagen.",
     "options": "Proporciona una className con límites y vuelve a montar si cambia la identidad de la imagen. Usa panWithArrows=false cuando una galería gestione las flechas."
   },
+  "loadingRing": {
+    "title": "Anillo de actividad",
+    "description": "Un indicador de actividad compartido con pista opcional.",
+    "options": "className define el tamaño y el color. track=false oculta la pista; strokeWidth y strokeDasharray ajustan el arco. Respeta la preferencia de movimiento reducido."
+  },
   "streaming": {
     "title": "Etiquetas animadas",
     "description": "Una animación de texto compartida para la reflexión activa y las etiquetas de herramientas.",

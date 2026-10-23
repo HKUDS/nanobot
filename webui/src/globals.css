@@ -1102,9 +1102,12 @@
 }
 
 .composer-primary-action {
-  transition: color 160ms ease-out, background-color 160ms ease-out, border-color 160ms ease-out, transform 120ms ease-out;
+  transition: color 160ms ease-out, background-color 160ms ease-out, border-color 160ms ease-out;
 }
-.composer-primary-action:active:not(:disabled) {
+.composer-action-icons {
+  transition: transform 120ms ease-out;
+}
+.composer-primary-action:active:not(:disabled) .composer-action-icons {
   transform: scale(0.94);
 }
 .composer-action-glyph {
@@ -1131,7 +1134,8 @@
     animation: none;
   }
   .composer-primary-action,
-  .composer-primary-action:active:not(:disabled) {
+  .composer-action-icons,
+  .composer-primary-action:active:not(:disabled) .composer-action-icons {
     transition: none;
     transform: none;
   }

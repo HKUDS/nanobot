@@ -166,6 +166,11 @@
     "description": "單張圖片的適應、縮放、平移與雙指縮放。",
     "options": "用 className 限定邊界；更換圖片身分時重新掛載。圖庫管理方向鍵導覽時設定 panWithArrows=false。"
   },
+  "loadingRing": {
+    "title": "執行圓環",
+    "description": "可選底環的共用執行指示器。",
+    "options": "className 設定尺寸和顏色。track=false 隱藏底環；strokeWidth 和 strokeDasharray 調整圓弧。遵循減少動態效果設定。"
+  },
   "streaming": {
     "title": "流光文字",
     "description": "思考中與工具標籤共用的文字動畫。",

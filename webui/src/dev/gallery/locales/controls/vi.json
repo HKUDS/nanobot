@@ -166,6 +166,11 @@
     "description": "Điều khiển vừa khung, thu phóng, di chuyển và chụm ngón cho từng ảnh.",
     "options": "Dùng className để giới hạn vùng và gắn kết lại khi danh tính ảnh thay đổi. Đặt panWithArrows=false nếu thư viện ảnh quản lý điều hướng bằng phím mũi tên."
   },
+  "loadingRing": {
+    "title": "Vòng hoạt động",
+    "description": "Chỉ báo hoạt động dùng chung với vòng nền tùy chọn.",
+    "options": "className đặt kích thước và màu sắc. track=false ẩn vòng nền; strokeWidth và strokeDasharray điều chỉnh cung tròn. Tuân theo tùy chọn giảm chuyển động."
+  },
   "streaming": {
     "title": "Nhãn động",
     "description": "Hiệu ứng văn bản dùng chung cho trạng thái suy nghĩ và nhãn công cụ đang hoạt động.",

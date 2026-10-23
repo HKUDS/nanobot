@@ -166,6 +166,11 @@
     "description": "Commandes d’ajustement, zoom, déplacement et pincement propres à l’image.",
     "options": "Fournissez une className délimitant la zone et remontez le composant si l’identité de l’image change. Définissez panWithArrows=false si une galerie gère les flèches."
   },
+  "loadingRing": {
+    "title": "Anneau d’activité",
+    "description": "Un indicateur d’activité partagé avec une piste facultative.",
+    "options": "className définit la taille et la couleur. track=false masque la piste ; strokeWidth et strokeDasharray ajustent l’arc. Respecte la préférence de réduction des animations."
+  },
   "streaming": {
     "title": "Libellés animés",
     "description": "Une animation de texte partagée pour la réflexion et les libellés d’outils actifs.",
