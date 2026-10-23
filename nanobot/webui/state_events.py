@@ -75,6 +75,16 @@ class WebUIStateEvents:
                 *((local_trigger_store.root,) if local_trigger_store is not None else ()),
             )
         ))
+        self._automation_directories = frozenset(
+            path.resolve(strict=False)
+            for path in (
+                *self._automation_roots,
+                *((cron_service.store_path.parent / "runs",) if cron_service is not None else ()),
+                *((local_trigger_store.inbox_dir, local_trigger_store.processing_dir,
+                   local_trigger_store.failed_dir, local_trigger_store.runs_dir)
+                  if local_trigger_store is not None else ()),
+            )
+        )
         self._recursive_roots = tuple(dict.fromkeys((
             *self._automation_roots,
             *((self._remote_pairing_root,) if self._remote_pairing_root is not None else ()),
@@ -236,8 +246,11 @@ class WebUIStateEvents:
             self._remote_pairing_root is not None and path.is_relative_to(self._remote_pairing_root)
         ):
             return ("remote_instances",)
-        if path.suffix in {".json", ".jsonl"} and any(
-            path.is_relative_to(root) for root in self._automation_roots
+        # A new directory may be the only signal for its first published child.
+        # Only known data directories qualify; locks and atomic staging files do not.
+        if path in self._automation_directories or (
+            path.suffix in {".json", ".jsonl"}
+            and any(path.is_relative_to(root) for root in self._automation_roots)
         ):
             return ("automations",)
         return ()

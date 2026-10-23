@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from watchfiles import Change
 from websockets.datastructures import Headers
 from websockets.http11 import Request
 
@@ -184,6 +185,64 @@ async def test_usage_store_repair_invalidates_without_blocking_gateway_start(tmp
             assert writer.count() == 1
         finally:
             writer.close()
+    finally:
+        await notifier.close()
+
+
+async def test_first_run_record_refreshes_from_its_new_directory_signal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cron = CronService(tmp_path / "cron" / "jobs.json")
+    published = asyncio.Event()
+
+    async def directory_watch(root, **kwargs):
+        yield set()
+        await published.wait()
+        if Path(root) == cron.store_path.parent:
+            # A recursive native watch can observe the new directory but miss
+            # a child atomically published before its child watch is installed.
+            change, path = Change.added, str(cron.store_path.parent / "runs")
+            if kwargs["watch_filter"](change, path):
+                yield {(change, path)}
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(state_events, "awatch", directory_watch)
+    events: asyncio.Queue[tuple[WebUIStateResource, ...]] = asyncio.Queue()
+    notifier = WebUIStateEvents(_settings(tmp_path), cron_service=cron)
+    await notifier.start(events.put)
+    try:
+        await _subprocess('''
+import sys
+from pathlib import Path
+from nanobot.cron.service import CronService
+CronService(Path(sys.argv[1]) / "jobs.json").write_run_record("first-run", {"status": "running"})
+''', cron.store_path.parent)
+        published.set()
+        await _resource(events, "automations")
+        record = json.loads((cron.store_path.parent / "runs" / "first-run.json").read_text())
+        assert record["status"] == "running"
+    finally:
+        await notifier.close()
+
+
+async def test_automation_reads_and_empty_queue_do_not_invalidate(tmp_path: Path) -> None:
+    triggers = LocalTriggerStore(tmp_path / "workspace")
+    trigger = triggers.create(
+        name="fixture", channel="websocket", chat_id="chat", session_key="websocket:chat",
+    )
+    events: asyncio.Queue[tuple[WebUIStateResource, ...]] = asyncio.Queue()
+    notifier = WebUIStateEvents(_settings(tmp_path), local_trigger_store=triggers)
+    await notifier.start(events.put)
+    try:
+        for _ in range(3):
+            payload = all_automations_payload(None, local_trigger_store=triggers)
+            assert payload["jobs"][0]["name"] == "fixture"
+            assert triggers.claim_deliveries() == []
+            await asyncio.sleep(0.1)
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(events.get(), timeout=0.3)
+        triggers.enqueue(trigger.id, "new business state")
+        await _resource(events, "automations")
     finally:
         await notifier.close()
 
