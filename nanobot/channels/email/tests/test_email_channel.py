@@ -758,7 +758,22 @@ async def test_start_returns_immediately_without_consent(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_uses_smtp_and_reply_subject(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    "subject_prefix,original_subject,expected_subject",
+    [
+        ("Re: ", "Invoice #42", "Re: Invoice #42"),
+        ("Re: ", "RE: Invoice #42", "RE: Invoice #42"),
+        ("AW: ", "Invoice #42", "AW: Invoice #42"),
+        ("AW: ", "aw: Invoice #42", "aw: Invoice #42"),
+        ("回复: ", "回复: Invoice #42", "回复: Invoice #42"),
+    ],
+)
+async def test_send_uses_smtp_and_reply_subject(
+    monkeypatch,
+    subject_prefix: str,
+    original_subject: str,
+    expected_subject: str,
+) -> None:
     class FakeSMTP:
         def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
             self.timeout = timeout
@@ -790,8 +805,8 @@ async def test_send_uses_smtp_and_reply_subject(monkeypatch) -> None:
 
     monkeypatch.setattr("nanobot.channels.email.runtime.smtplib.SMTP", _smtp_factory)
 
-    channel = EmailChannel(_make_config(), MessageBus())
-    channel._last_subject_by_chat["alice@example.com"] = "Invoice #42"
+    channel = EmailChannel(_make_config(subject_prefix=subject_prefix), MessageBus())
+    channel._last_subject_by_chat["alice@example.com"] = original_subject
     channel._last_message_id_by_chat["alice@example.com"] = "<m1@example.com>"
 
     await channel.send(
@@ -808,7 +823,7 @@ async def test_send_uses_smtp_and_reply_subject(monkeypatch) -> None:
     assert smtp.logged_in is True
     assert len(smtp.sent_messages) == 1
     sent = smtp.sent_messages[0]
-    assert sent["Subject"] == "Re: Invoice #42"
+    assert sent["Subject"] == expected_subject
     assert sent["To"] == "alice@example.com"
     assert sent["In-Reply-To"] == "<m1@example.com>"
 
