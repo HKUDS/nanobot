@@ -49,6 +49,7 @@ class RequestContext:
     persist_session: bool = True
     # Effective tool scope; injected inputs retain the active run's scope.
     workspace_scope: WorkspaceScope | None = None
+    topic_id: str | int | None = None
 
 
 @runtime_checkable
