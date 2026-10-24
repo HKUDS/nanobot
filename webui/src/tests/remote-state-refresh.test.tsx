@@ -293,6 +293,38 @@ describe("remote directory state refresh", () => {
     expect(requestSignal?.aborted).toBe(true);
   });
 
+  it("settles an explicit refresh on unmount by stopping its shared directory body", async () => {
+    const { readRemoteInstances } = await vi.importActual<typeof import("@/lib/remote-instances")>("@/lib/remote-instances");
+    mocks.read.mockImplementation(readRemoteInstances);
+    let transportSignal!: AbortSignal;
+    let bodyStarted = false;
+    let bodyStopped = false;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      transportSignal = init!.signal!;
+      return { ok: true, status: 200, json: () => new Promise((_resolve, reject) => {
+        bodyStarted = true;
+        transportSignal.addEventListener("abort", () => {
+          bodyStopped = true;
+          reject(new DOMException("Unmounted", "AbortError"));
+        }, { once: true });
+      }) } as Response;
+    });
+    const { result, unmount } = renderHook(() => useHostSessions());
+    await act(async () => {});
+    expect(bodyStarted).toBe(true);
+    let failure: unknown;
+    let settled = false;
+    const refresh = result.current.refresh().catch((error: unknown) => { failure = error; })
+      .finally(() => { settled = true; });
+    await act(async () => unmount());
+    expect(transportSignal.aborted).toBe(true);
+    expect(bodyStopped).toBe(true);
+    expect(settled).toBe(true);
+    await refresh;
+    expect(failure).toMatchObject({ name: "AbortError" });
+    expect(mocks.events.size).toBe(0);
+  });
+
   it("awaits an explicit directory refresh when no host view is open", async () => {
     vi.useFakeTimers();
     const { result } = renderHook(() => useHostSessions());

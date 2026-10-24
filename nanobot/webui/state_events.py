@@ -272,7 +272,7 @@ class WebUIStateEvents:
                 async for changes in awatch(
                     root,
                     recursive=recursive,
-                    watch_filter=lambda _change, path: self._watch_path(Path(path), recursive=recursive),
+                    watch_filter=None,
                     debounce=100,
                     step=25,
                     rust_timeout=250,
@@ -282,8 +282,8 @@ class WebUIStateEvents:
                     force_polling=False,
                     stop_event=self._watch_stop,
                 ):
-                    # First yield is the watchfiles registration handshake, not a
-                    # payload poll. Startup does not expose the listener before it.
+                    # An unfiltered yield confirms native registration. Business
+                    # filtering must not hide readiness in a continuously busy root.
                     registered.set()
                     if recovering:
                         recovering = False
@@ -299,8 +299,10 @@ class WebUIStateEvents:
                                 path for path in (self._settings.path, self._pairing_path, self._usage_path, self._remote_path)
                                 if path is not None and path.parent == root
                             })
-                    if changes:
-                        await self._persistent_changes({Path(path) for _change, path in changes})
+                    paths = {Path(path) for _change, path in changes}
+                    paths = {path for path in paths if self._watch_path(path, recursive=recursive)}
+                    if paths:
+                        await self._persistent_changes(paths)
                 return
             except (OSError, RuntimeError, ExceptionGroup) as error:
                 # awatch wraps native read failures in AnyIO's task group. Retry

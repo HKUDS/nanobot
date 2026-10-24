@@ -656,7 +656,11 @@ class GatewayHTTPHandler:
         ):
             return False
         origin = request.headers.get("Origin", "")
-        return not origin or _is_loopback_host(urlsplit(origin).hostname or "")
+        try:
+            return not origin or _is_loopback_host(urlsplit(origin).hostname or "")
+        except ValueError:
+            # A malformed recipient Origin cannot interrupt the shared fan-out.
+            return False
 
     async def _dispatch_remote_instances(
         self, connection: Any, request: WsRequest, path: str,

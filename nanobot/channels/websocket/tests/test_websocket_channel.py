@@ -5,6 +5,7 @@ import json
 import threading
 import time
 import uuid
+from contextlib import AsyncExitStack
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -84,6 +85,7 @@ from nanobot.webui.metadata import (
     WEBUI_TURN_METADATA_KEY,
 )
 from nanobot.webui.settings_api import settings_payload, update_provider_settings
+from nanobot.webui.state_events import WEBUI_STATE_RESOURCES
 
 from .ws_test_client import http_get as _http_get
 from .ws_test_client import wait_for_listener
@@ -1190,6 +1192,44 @@ def test_only_bootstrap_tokens_mark_webui_connections(bus: MagicMock) -> None:
 
     assert webui_connection in channel._webui_connections
     assert client_connection not in channel._webui_connections
+
+
+@pytest.mark.asyncio
+async def test_malformed_origin_does_not_interrupt_authenticated_state_fanout(
+    bus: MagicMock, start_listener,
+) -> None:
+    channel = _ch(bus, websocketRequiresToken=True)
+    port, _task = await start_listener(channel)
+    async with AsyncExitStack() as stack:
+        clients = []
+        for origin in (
+            f"http://localhost:{port}",
+            "http://[",
+            f"http://127.0.0.1:{port}",
+            "https://elsewhere.example",
+        ):
+            token = channel.gateway.tokens.issue_token(60, audience="webui")
+            client = await stack.enter_async_context(websockets.connect(
+                f"ws://127.0.0.1:{port}/ws?token={token}", origin=origin,
+            ))
+            assert json.loads(await asyncio.wait_for(client.recv(), timeout=2))["event"] == "ready"
+            clients.append(client)
+
+        # Both local peers must receive every allowed resource, regardless of
+        # where the malformed Origin falls in the audience's iteration order.
+        for resources in (WEBUI_STATE_RESOURCES, ("usage", "remote_instances")):
+            channel.gateway.state_events.notify(*resources)
+            messages = await asyncio.gather(*(
+                asyncio.wait_for(client.recv(), timeout=2) for client in clients
+            ))
+            for index, message in enumerate(messages):
+                visible = [
+                    resource for resource in resources
+                    if index in (0, 2) or resource != "remote_instances"
+                ]
+                assert json.loads(message) == {
+                    "event": "webui_state_changed", "resources": visible,
+                }
 
 
 @pytest.mark.asyncio

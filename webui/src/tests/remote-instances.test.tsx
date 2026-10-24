@@ -975,6 +975,58 @@ describe("remote instance UX", () => {
     expect(mocks.request.mock.calls.filter(([action]) => action === "remote.save")[1][1]).toMatchObject({ id: profile.id });
   });
 
+  it("releases save busy when a shared directory body is cancelled, then can save and await a fresh directory", async () => {
+    view(false, true);
+    await act(async () => {});
+    await act(async () => fireEvent.pointerDown(screen.getByRole("button", { name: "Manage Team server" }), { button: 0, ctrlKey: false }));
+    await act(async () => fireEvent.click(screen.getByRole("menuitem", { name: "Edit connection" })));
+    const dialog = await screen.findByRole("dialog");
+    const save = within(dialog).getByRole("button", { name: "Save changes" });
+    const { readRemoteInstances } = await vi.importActual<typeof import("@/lib/remote-instances")>("@/lib/remote-instances");
+    let transportSignal!: AbortSignal;
+    let bodyStopped = false;
+    let finishBody!: () => void;
+    const fresh = { available: true, profiles: [{ ...profile, name: "Saved profile" }] };
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      transportSignal = init!.signal!;
+      return { ok: true, status: 200, json: () => new Promise((resolve, reject) => {
+        const abort = () => { bodyStopped = true; reject(new DOMException("Hidden", "AbortError")); };
+        transportSignal.addEventListener("abort", abort, { once: true });
+        finishBody = () => { transportSignal.removeEventListener("abort", abort); resolve(fresh); };
+      }) } as Response;
+    });
+    vi.stubGlobal("fetch", fetcher);
+    mocks.read.mockImplementation(readRemoteInstances);
+    await act(async () => { for (const handler of mocks.stateChanges) handler(); });
+    expect(finishBody).toBeTypeOf("function");
+    await act(async () => fireEvent.click(save));
+    expect(mocks.request).toHaveBeenCalledWith("remote.save", expect.any(Object), 65_000);
+    expect(save).toBeDisabled();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+    expect(transportSignal.aborted).toBe(true);
+    expect(bodyStopped).toBe(true);
+    expect(save).toBeEnabled();
+    expect(dialog).toBeInTheDocument();
+
+    // Returning visible owns a new request; save joins it and awaits its follow-up.
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+    await act(async () => fireEvent.click(save));
+    expect(save).toBeDisabled();
+    await act(async () => finishBody());
+    expect(save).toBeDisabled();
+    await act(async () => finishBody());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Manage Saved profile" })).toBeVisible();
+    await act(async () => fireEvent.pointerDown(screen.getByRole("button", { name: "Manage Saved profile" }), { button: 0, ctrlKey: false }));
+    await act(async () => fireEvent.click(screen.getByRole("menuitem", { name: "Edit connection" })));
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
+    expect(mocks.request.mock.calls.filter(([action]) => action === "remote.save")).toHaveLength(2);
+    expect(mocks.request.mock.calls.some(([action]) => action === "remote.connect")).toBe(false);
+  });
+
   it("edits in the same dialog but only saves, without connecting or switching", async () => {
     view(); await openDirectory();
     fireEvent.pointerDown(screen.getByRole("button", { name: "Manage Team server" }), { button: 0, ctrlKey: false });

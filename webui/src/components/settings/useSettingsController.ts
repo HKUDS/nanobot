@@ -14,7 +14,6 @@ import { useCapabilitySettingsActions } from "@/components/settings/capabilities
 import { useCapabilitySettingsState } from "@/components/settings/capabilities/useCapabilitySettingsState";
 import { webSearchDraftState, webSearchFormFromPayload } from "@/components/settings/capabilities/WebSettings";
 import type {
-  ApplySettingsPayload,
   PendingRestartSections,
   RestartAwarePayload,
   SettingsSectionKey,
@@ -98,6 +97,8 @@ export function useSettingsController({
   const latestInitialSettingsRef = useRef(initialSettings);
   latestInitialSettingsRef.current = initialSettings;
   const restartRefreshRef = useRef<SettingsPayload | null>(null);
+  const usageSequenceRef = useRef(0);
+  const latestUsageRef = useRef({ sequence: 0, usage: initialSettings?.usage });
   const [localPrefs, setLocalPrefs] = useState<LocalPreferences>(() => readLocalPreferences());
   const modelState = useModelSettingsState(initialSettings);
   const {
@@ -128,11 +129,18 @@ export function useSettingsController({
     },
     [onSectionChange],
   );
-  const applyPayload: ApplySettingsPayload = useCallback(
+  const applyPayload = useCallback(
     (
       payload: SettingsPayload,
       options: { preserveAgentForm?: boolean; preserveCapabilityForms?: boolean } = {},
+      usageSequence = ++usageSequenceRef.current,
     ) => {
+      // Reads order usage at request start; mutation/external payloads become authoritative on apply.
+      if (usageSequence < latestUsageRef.current.sequence) {
+        payload = { ...payload, usage: latestUsageRef.current.usage };
+      } else {
+        latestUsageRef.current = { sequence: usageSequence, usage: payload.usage };
+      }
       setSettings(payload);
       if (!options.preserveAgentForm) {
         const nextForm = agentDraftFromPayload(payload);
@@ -208,6 +216,7 @@ export function useSettingsController({
     const showLoading = settings === null;
     const requestInitialSettings = latestInitialSettingsRef.current;
     const requestDrafts = draftsRef.current;
+    const usageSequence = ++usageSequenceRef.current;
     if (showLoading) setLoading(true);
     fetchSettings(getToken())
       .then((payload) => {
@@ -218,7 +227,7 @@ export function useSettingsController({
             preserveCapabilityForms: current.imageGenerationForm !== requestDrafts.imageGenerationForm ||
               current.networkSafetyForm !== requestDrafts.networkSafetyForm ||
               current.transcriptionForm !== requestDrafts.transcriptionForm || current.webSearchForm !== requestDrafts.webSearchForm,
-          });
+          }, usageSequence);
           setError(null);
         }
       })
@@ -237,8 +246,11 @@ export function useSettingsController({
 
   const hasSettings = settings !== null;
   useStateRefresh("usage", activeSection === "overview" && hasSettings, async (signal) => {
+    const sequence = ++usageSequenceRef.current;
     const usage = await fetchSettingsUsage(getToken(), "", signal);
-    if (!signal.aborted) setSettings((current) => (current ? { ...current, usage } : current));
+    if (signal.aborted || sequence < latestUsageRef.current.sequence) return;
+    latestUsageRef.current = { sequence, usage };
+    setSettings((current) => (current ? { ...current, usage } : current));
   });
   useSystemSettingsEffects({
     state: systemState,
@@ -344,6 +356,7 @@ export function useSettingsController({
       const requestDrafts = draftsRef.current;
       try {
         const nextToken = await onNativeEngineRestart();
+        const usageSequence = ++usageSequenceRef.current;
         const payload = await fetchSettings(nextToken);
         const current = draftsRef.current;
         applyPayload(payload, {
@@ -351,7 +364,7 @@ export function useSettingsController({
           preserveCapabilityForms: current.imageGenerationForm !== requestDrafts.imageGenerationForm ||
             current.networkSafetyForm !== requestDrafts.networkSafetyForm ||
             current.transcriptionForm !== requestDrafts.transcriptionForm || current.webSearchForm !== requestDrafts.webSearchForm,
-        });
+        }, usageSequence);
         setPendingRestartSections(EMPTY_PENDING_RESTART_SECTIONS);
         setError(null);
       } catch (err) {
@@ -380,8 +393,9 @@ export function useSettingsController({
       setHostEngineApplying(true);
       try {
         const nextToken = await onNativeEngineRestart();
+        const usageSequence = ++usageSequenceRef.current;
         const refreshed = await fetchSettings(nextToken);
-        applyPayload(refreshed, { preserveAgentForm: true, preserveCapabilityForms: true });
+        applyPayload(refreshed, { preserveAgentForm: true, preserveCapabilityForms: true }, usageSequence);
         setPendingRestartSections(EMPTY_PENDING_RESTART_SECTIONS);
         setError(null);
       } catch (err) {

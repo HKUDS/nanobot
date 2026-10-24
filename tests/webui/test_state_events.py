@@ -167,6 +167,47 @@ store.close()
         await notifier.close()
 
 
+async def test_continuous_unrelated_writes_allow_registration_without_invalidating(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    events: asyncio.Queue[tuple[WebUIStateResource, ...]] = asyncio.Queue()
+    notifier = WebUIStateEvents(settings)
+    written = asyncio.Event()
+    writes = 0
+
+    async def write_noise() -> None:
+        nonlocal writes
+        with (settings.path.parent / "noise.log").open("ab", buffering=0) as noise:
+            while True:
+                noise.write(b"unrelated log entry\n")
+                writes += 1
+                written.set()
+                await asyncio.sleep(0.05)
+
+    writer = asyncio.create_task(write_noise())
+    starting = asyncio.create_task(notifier.start(events.put))
+    try:
+        await asyncio.wait_for(written.wait(), timeout=2)
+        # Keep writing through readiness and the assertions below. Stopping first
+        # would let a watchfiles timeout hide registration starvation.
+        await asyncio.wait_for(asyncio.shield(starting), timeout=2)
+        writes_at_ready = writes
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(events.get(), timeout=0.4)
+        assert not writer.done()
+        assert writes > writes_at_ready
+
+        config = settings.load()
+        config.agents.defaults.max_tokens += 1
+        save_config(config, settings.path)
+        assert await asyncio.wait_for(events.get(), timeout=5) == ("channels",)
+        assert not writer.done()
+    finally:
+        for task in (starting, writer):
+            task.cancel()
+        await asyncio.gather(starting, writer, return_exceptions=True)
+        await notifier.close()
+
+
 async def test_usage_store_repair_invalidates_without_blocking_gateway_start(tmp_path: Path) -> None:
     path = tmp_path / "data" / "llm_usage.sqlite3"
     path.write_bytes(b"broken database")
@@ -195,15 +236,13 @@ async def test_first_run_record_refreshes_from_its_new_directory_signal(
     cron = CronService(tmp_path / "cron" / "jobs.json")
     published = asyncio.Event()
 
-    async def directory_watch(root, **kwargs):
+    async def directory_watch(root, **_kwargs):
         yield set()
         await published.wait()
         if Path(root) == cron.store_path.parent:
             # A recursive native watch can observe the new directory but miss
             # a child atomically published before its child watch is installed.
-            change, path = Change.added, str(cron.store_path.parent / "runs")
-            if kwargs["watch_filter"](change, path):
-                yield {(change, path)}
+            yield {(Change.added, str(cron.store_path.parent / "runs"))}
         await asyncio.Event().wait()
 
     monkeypatch.setattr(state_events, "awatch", directory_watch)
@@ -445,6 +484,13 @@ async def test_cancelled_start_joins_inflight_source_read_before_releasing_owner
 async def test_watch_error_is_re_registered_and_later_changes_are_delivered(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: Exception,
 ) -> None:
+    # Recovery owns re-reading the missed deadline, not racing a real short TTL.
+    # Cross-process wall-clock expiration is covered separately above.
+    now = [time.time()]
+    clock = SimpleNamespace(time=lambda: now[0])
+    monkeypatch.setattr(state_events, "time", clock)
+    monkeypatch.setattr(pairing, "time", clock)
+    monkeypatch.setattr(state_events, "_CLOCK_RECHECK_INTERVAL_S", 0.02)
     notifier = WebUIStateEvents(_settings(tmp_path))
     real_awatch = state_events.awatch
     interrupt, interrupted = asyncio.Event(), asyncio.Event()
@@ -467,6 +513,7 @@ async def test_watch_error_is_re_registered_and_later_changes_are_delivered(
         code = pairing.generate_code("telegram", "during-watch-recovery", ttl=2)
         await _resource(events, "pairing")
         assert pairing.list_pending()[0]["code"] == code
+        now[0] += 3
         await _resource(events, "pairing")
         assert pairing.list_pending() == []
     finally:

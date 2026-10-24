@@ -746,6 +746,7 @@ async def test_file_picker_does_not_open_multiple_system_dialogs(manager, monkey
     ("203.0.113.1", "127.0.0.1:8765", "http://127.0.0.1:8765"),
     ("127.0.0.1", "bot.example.com", "https://bot.example.com"),
     ("127.0.0.1", "127.0.0.1:8765", "https://evil.example"),
+    ("127.0.0.1", "127.0.0.1:8765", "http://["),
 ])
 async def test_remote_clients_cannot_open_local_file_picker(gateway, monkeypatch, peer, host, origin):
     from nanobot.webui import native_file_picker
@@ -765,6 +766,7 @@ async def test_remote_clients_cannot_open_local_file_picker(gateway, monkeypatch
     ("203.0.113.1", "127.0.0.1:8765", "http://127.0.0.1:8765", 403),
     ("127.0.0.1", "bot.example.com", "https://bot.example.com", 403),
     ("127.0.0.1", "127.0.0.1:8765", "https://evil.example", 403),
+    ("127.0.0.1", "127.0.0.1:8765", "http://[", 403),
 ])
 async def test_ssh_access_is_local_and_authenticated(gateway, peer, host, origin, status):
     token = gateway.tokens.issue_api_token(60)

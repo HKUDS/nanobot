@@ -41,3 +41,35 @@ export async function fetchWithTimeout(
     externalSignal?.removeEventListener("abort", abortFromExternal);
   }
 }
+
+/** Own fetch and response consumption under one abort/timeout lifetime. */
+export async function readResponseWithTimeout<T>(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  read: (response: Response) => Promise<T>,
+  timeoutMs: number = DEFAULT_HTTP_TIMEOUT_MS,
+): Promise<T> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return read(await fetch(input, init));
+  }
+
+  const controller = new AbortController();
+  const externalSignal = init.signal;
+  const abortFromExternal = () => controller.abort();
+  if (externalSignal?.aborted) controller.abort();
+  else externalSignal?.addEventListener("abort", abortFromExternal, { once: true });
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  try {
+    return await read(await fetch(input, { ...init, signal: controller.signal }));
+  } catch (reason) {
+    if (timedOut) throw new Error(`Request timed out after ${timeoutMs}ms`, { cause: reason });
+    throw reason;
+  } finally {
+    clearTimeout(timeoutId);
+    externalSignal?.removeEventListener("abort", abortFromExternal);
+  }
+}

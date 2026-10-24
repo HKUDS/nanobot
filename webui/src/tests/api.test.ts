@@ -678,6 +678,39 @@ describe("webui API helpers", () => {
     );
   });
 
+  it.each(["abort", "timeout"])("keeps cancellation and timeout active while reading a usage body (%s)", async (ending) => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    let transportSignal!: AbortSignal;
+    let bodyStarted = false;
+    let bodyStopped = false;
+    vi.mocked(fetch).mockImplementation(async (_input, init) => {
+      transportSignal = init!.signal!;
+      return { ok: true, json: () => new Promise((_resolve, reject) => {
+        bodyStarted = true;
+        transportSignal.addEventListener("abort", () => {
+          bodyStopped = true;
+          reject(new DOMException("Aborted", "AbortError"));
+        }, { once: true });
+      }) } as Response;
+    });
+    let failure: unknown;
+    let settled = false;
+    const read = fetchSettingsUsage("tok", "", controller.signal).catch((error: unknown) => { failure = error; })
+      .finally(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bodyStarted).toBe(true);
+    if (ending === "abort") controller.abort();
+    else await vi.advanceTimersByTimeAsync(20_000);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(transportSignal.aborted).toBe(true);
+    expect(bodyStopped).toBe(true);
+    expect(settled).toBe(true);
+    await read;
+    if (ending === "abort") expect(failure).toMatchObject({ name: "AbortError" });
+    else expect(failure).toMatchObject({ message: "Request timed out after 20000ms" });
+  });
+
   it("serializes model configuration creation", async () => {
     await createModelConfiguration(mutationTransport, {
       name: "Fast writing",
@@ -807,9 +840,13 @@ describe("webui API helpers", () => {
     });
   });
 
-  it("times out when an API request never responds", async () => {
+  it("times out and stops the transport when an API request never returns headers", async () => {
     vi.useFakeTimers();
-    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    let transportSignal!: AbortSignal;
+    vi.stubGlobal("fetch", vi.fn((_input, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      transportSignal = init.signal!;
+      transportSignal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+    })));
 
     const pending = expect(listSessions("tok")).rejects.toThrow(
       "Request timed out after 20000ms",
@@ -817,6 +854,7 @@ describe("webui API helpers", () => {
     await vi.advanceTimersByTimeAsync(20_000);
 
     await pending;
+    expect(transportSignal.aborted).toBe(true);
   });
 
   it("keeps provider secrets in the WebSocket payload", async () => {
