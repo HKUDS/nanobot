@@ -39,6 +39,7 @@ from nanobot.providers.base import (
     LLMUsage,
     ProviderCallContext,
     ProviderConversationState,
+    ToolCallRequest,
 )
 from nanobot.providers.conversation_state import ProviderConversationStateController
 from nanobot.session.history_visibility import is_hidden_history_message
@@ -559,6 +560,40 @@ class AgentRunner:
 
                 await hook.before_execute_tools(context)
 
+                def _tool_message(tool_call: ToolCallRequest, result: Any) -> dict[str, Any]:
+                    return {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": tool_call.name,
+                        "content": self.context_governor.normalize_tool_result(
+                            governance_config,
+                            tool_call.id,
+                            tool_call.name,
+                            result,
+                        ),
+                    }
+
+                async def _checkpoint_tool_batch(
+                    completed: list[tuple[ToolCallRequest, Any]],
+                    remaining: list[ToolCallRequest],
+                ) -> None:
+                    # Durable boundary between tool batches: finished calls keep their
+                    # real results, the rest stay pending.  Recovery still treats the
+                    # phase as uncertain and never resumes the pending calls itself.
+                    await self._emit_checkpoint(
+                        spec,
+                        {
+                            "phase": "awaiting_tools",
+                            "iteration": iteration,
+                            "model": spec.runtime.model,
+                            "assistant_message": assistant_message,
+                            "completed_tool_results": [
+                                _tool_message(tool_call, result) for tool_call, result in completed
+                            ],
+                            "pending_tool_calls": [tc.to_openai_tool_call() for tc in remaining],
+                        },
+                    )
+
                 results, new_events = await execute_tool_calls(
                     spec.tools,
                     response.tool_calls,
@@ -569,6 +604,7 @@ class AgentRunner:
                     context=context,
                     model_messages=messages_for_model,
                     compacted_tool_results=request_state.compacted_tool_results,
+                    on_batch_complete=_checkpoint_tool_batch,
                 )
                 tool_events.extend(new_events)
                 tools_used.extend(
@@ -580,17 +616,7 @@ class AgentRunner:
                 context.tool_events = list(new_events)
                 completed_tool_results: list[dict[str, Any]] = []
                 for tool_call, result in zip(response.tool_calls, results):
-                    tool_message = {
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "name": tool_call.name,
-                        "content": self.context_governor.normalize_tool_result(
-                            governance_config,
-                            tool_call.id,
-                            tool_call.name,
-                            result,
-                        ),
-                    }
+                    tool_message = _tool_message(tool_call, result)
                     messages.append(tool_message)
                     completed_tool_results.append(tool_message)
                 checkpoint_model_messages = (
