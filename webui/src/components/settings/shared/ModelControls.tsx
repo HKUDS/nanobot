@@ -30,6 +30,7 @@ const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "atomic_chat",
   "byteplus",
   "byteplus_coding_plan",
+  "cheaperinference",
   "huggingface",
   "lm_studio",
   "modelscope",
