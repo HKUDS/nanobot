@@ -12,6 +12,9 @@ const chatId = "dock-preview";
 const turnId = "preview-turn";
 const createdAt = Date.now() / 1000;
 let streamLength = 0;
+let inputNumber = 0;
+const saveTasks = new URLSearchParams(location.search).has("saved");
+const taskStorageKey = "fixture.subagent-dock.tasks";
 const tasks: SubagentTaskSnapshot[] = ["检查项目实现", "核对回归测试", "整理交互建议"].map((label, index) => ({
   task_id: `preview-${index}`, revision: 1, label, task_description: `这是虚构的演示任务：${label}。不会读取项目或调用模型。`,
   origin_turn_id: turnId, origin_message_id: "preview-prompt", created_at: createdAt + index, completed_at: null,
@@ -29,10 +32,20 @@ function updateTask(index: number, patch: Partial<SubagentTaskSnapshot>) {
   const previous = tasks[index];
   const next = { ...previous, ...patch, revision: (previous.revision ?? 0) + 1 };
   tasks[index] = next;
+  if (saveTasks) sessionStorage.setItem(taskStorageKey, JSON.stringify(tasks));
   receive({ event: "subagent_task", chat_id: chatId, task: next });
 }
 
 export function installSubagentDockApi() {
+  const stored = saveTasks ? sessionStorage.getItem(taskStorageKey) : null;
+  if (stored) tasks.splice(0, tasks.length, ...JSON.parse(stored) as SubagentTaskSnapshot[]);
+  else if (new URLSearchParams(location.search).has("past")) {
+    tasks.push(...Array.from({ length: 40 }, (_, index) => ({
+      ...tasks[0], task_id: `past-${index}`, label: `Past check ${index}`, state: "done" as const,
+      origin_message_id: null, origin_turn_id: "past-turn", created_at: createdAt - 100 + index,
+      completed_at: createdAt - 50 + index, tool_events: [], result: "Saved past result",
+    })));
+  }
   const original = window.fetch.bind(window);
   window.fetch = async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input), location.href);
@@ -93,7 +106,12 @@ export function SubagentDockFixture({ parameters }: { parameters: URLSearchParam
           timers.current.push(window.setTimeout(finish, 7000));
         }}>模拟运行</button>
         <button onClick={growReply}>追加长回复</button>
+        <button onClick={() => updateTask(0, { state: "done", phase: "done", tool_events: [], completed_at: Date.now() / 1000, result: "第一项已完成并归档。" })}>完成第一项</button>
         <button onClick={finish}>全部完成</button>
+        <button onClick={() => {
+          inputNumber += 1;
+          receive({ event: "user_message", chat_id: chatId, turn_id: `next-turn-${inputNumber}`, turn_seq: 1, starts_turn: true, text: `下一轮消息 ${inputNumber}` });
+        }}>新一轮消息</button>
         <button onClick={() => updateTask(1, { state: "error", error: "演示：测试执行失败，请打开详情检查。", tool_events: [], completed_at: Date.now() / 1000 })}>模拟失败</button>
         <button onClick={() => {
           for (let index = 3; index < 23; index++) {

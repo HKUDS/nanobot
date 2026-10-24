@@ -135,11 +135,11 @@ After a model request fails and automatic retries stop, the WebUI shows the fail
 
 ### Delegated work
 
-When nanobot delegates work to subagents, **Subtasks** appears above the message input and stays within reach as the conversation scrolls. Open it for a task list with live activity and saved results; on narrow screens it opens from the bottom. The list scrolls independently of the conversation. A work group also remains under the request that started it.
+When nanobot delegates work to subagents, **Subtasks** appears above the message input while tasks are queued, running, or stopping. It stays within reach as the conversation scrolls, even after the main reply finishes or you send another message. Open it for live activity; on narrow screens it opens from the bottom. The task list scrolls independently of the conversation.
 
-Progress continues to update after the main reply finishes. Completed tasks stay available for inspection, and refreshing or reopening the WebUI restores saved progress and results without restarting the work.
+Finished tasks leave the live list when it is closed. If you are already reading the list, they remain until you close it. When all tasks finish with the list closed, a brief completion or failure summary appears and then disappears; focusing or hovering over it keeps it available.
 
-Work groups follow the browser's **Activity details** preference: **Auto** opens running work and folds it when all tasks finish; **Expanded** keeps it open by default. You can also expand or fold a group manually to check individual outcomes, including failures and partial results.
+Saved results appear as compact, expandable records beside the requests that started the work, and scroll with the conversation. Tasks without a matching request in the displayed history remain under **Other tasks**. Refreshing or reopening the WebUI restores active work in the fixed entry and finished work in the conversation, without restarting tasks or bringing all old tasks back into the live list.
 
 Select a task for its read-only conversation and tool activity. Closing the details leaves it running; its stop button cancels only that task. Give follow-up instructions to nanobot in the main conversation.
 

@@ -299,7 +299,7 @@ test("wheel loading hands off to a retained 48px slot; prepend and delayed layou
   expect(history.reads).toHaveLength(1);
 });
 
-test("unlinked task prelude stays with the retained boundary when earlier messages load", async ({ page }) => {
+test("archived task results stay with the retained boundary when earlier messages load", async ({ page }) => {
   const history = await installHistory(page);
   await page.route("**/api/sessions/**/subagents", (route) => route.fulfill({ json: { tasks: [{
     task_id: "legacy", revision: 1, label: "Earlier check", task_description: "Check earlier work",

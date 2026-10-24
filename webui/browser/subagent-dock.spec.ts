@@ -96,9 +96,11 @@ test("keeps the portaled dock scoped to the active conversation and honors reduc
   await page.getByRole("button", { name: "切换会话", exact: true }).click();
   await expect(trigger).toContainText("Active: 3");
   await page.getByRole("button", { name: "模拟失败", exact: true }).click();
-  await expect(trigger).toContainText("Review needed: 1");
-  await trigger.click();
-  await expect(tree.getByText("演示：测试执行失败，请打开详情检查。", { exact: true })).toBeVisible();
+  await expect(trigger).toContainText("Active: 2");
+  const results = page.getByTestId("thread-message-region").getByRole("region", { name: "Subtasks", exact: true });
+  await results.getByRole("button", { name: /Review needed: 1/ }).click();
+  await results.getByRole("button", { name: /核对回归测试 Failed/ }).click();
+  await expect(page.getByRole("dialog", { name: "核对回归测试", exact: true }).getByRole("alert")).toHaveText("演示：测试执行失败，请打开详情检查。");
 });
 
 test("lets an outside click return directly to the composer without stealing its focus", async ({ page }) => {
@@ -152,4 +154,93 @@ test("keeps a bottom task sheet inside a shortened visual viewport", async ({ pa
   await page.keyboard.press("Escape");
   await expect(panel).toHaveCount(0);
   await expect(page.getByRole("textbox").first()).toBeEditable();
+});
+
+for (const width of [1440, 390]) {
+  test(`retires completed live work into the conversation and restores only active tasks at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/browser/fixture.html?case=subagent-dock&saved&past");
+    const trigger = page.getByTestId("subagent-task-dock-trigger");
+    await trigger.click();
+    const tree = page.getByTestId("subagent-task-tree");
+    await expect(tree.locator("[data-subagent-id]")).toHaveCount(3);
+    await expect(tree).toContainText("检查项目实现");
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "完成第一项", exact: true }).click();
+    await expect(trigger).toContainText("Active: 2");
+    await page.getByRole("button", { name: "新一轮消息", exact: true }).click();
+    await expect(trigger).toContainText("Active: 2");
+    await trigger.click();
+    await expect(tree.locator("[data-subagent-id]")).toHaveCount(2);
+    await expect(tree).toContainText("核对回归测试");
+    await expect(tree).toContainText("整理交互建议");
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "全部完成", exact: true }).click();
+    await expect(trigger).toContainText("Completed: 2");
+    await expect(trigger).toHaveCount(0, { timeout: 7000 });
+    const results = page.getByTestId("thread-message-region").getByRole("region", { name: "Subtasks", exact: true });
+    await results.getByRole("button", { name: /Subtasks/ }).click();
+    await expect(results.locator("[data-subagent-id]")).toHaveCount(3);
+    await results.getByRole("button", { name: /检查项目实现 Completed/ }).click();
+    const detail = page.getByRole("dialog", { name: "检查项目实现", exact: true });
+    await expect(detail).toContainText("第一项已完成并归档。");
+    await detail.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(results.getByRole("button", { name: /检查项目实现 Completed/ })).toBeFocused();
+    await page.reload();
+    await expect(page.getByTestId("thread-message-region").getByText("随时查看，不必回翻聊天", { exact: true })).toBeAttached();
+    await expect(trigger).toHaveCount(0);
+    const restoredResults = page.getByTestId("thread-message-region").getByRole("region", { name: "Subtasks", exact: true });
+    await restoredResults.getByRole("button", { name: /Subtasks/ }).click();
+    await expect(restoredResults.getByRole("button", { name: /检查项目实现 Completed/ })).toBeVisible();
+  });
+}
+
+test("does not retire a completed list or detail while it is being read", async ({ page }) => {
+  await page.goto("/browser/fixture.html?case=subagent-dock");
+  await page.getByRole("button", { name: "模拟运行", exact: true }).click();
+  const trigger = page.getByTestId("subagent-task-dock-trigger");
+  await trigger.click();
+  const tree = page.getByTestId("subagent-task-tree");
+  await tree.locator('[data-subagent-id="preview-1"]').click();
+  const detail = page.getByRole("dialog", { name: "核对回归测试", exact: true });
+  await expect(detail).toContainText("保留详情与单任务停止", { timeout: 12000 });
+  await detail.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(tree.locator('[data-subagent-id="preview-1"]')).toBeFocused();
+  await expect(tree.locator('[data-task-state="done"]')).toHaveCount(3);
+  await page.keyboard.press("Escape");
+  await expect(tree).toHaveCount(0);
+  await expect(trigger).toHaveCount(0);
+  await expect(page.getByRole("textbox").first()).toBeFocused();
+});
+
+for (const width of [1440, 390]) {
+  test(`keeps the reading position when results are archived and the live entry retires at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/browser/fixture.html?case=subagent-dock");
+    const body = page.getByTestId("thread-message-region");
+    const anchor = body.getByText("主对话仍然可以正常输出和滚动。任务列表与消息区分别滚动，展开详情也不会取消正在执行的任务。", { exact: true }).nth(6);
+    await body.hover();
+    await page.mouse.wheel(0, -160);
+    await expect.poll(() => body.evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop)).toBeGreaterThan(100);
+    await expect(anchor).toBeInViewport();
+    const before = (await anchor.boundingBox())!.y;
+    await page.getByRole("button", { name: "完成第一项", exact: true }).click();
+    await expect(page.getByTestId("subagent-task-dock-trigger")).toContainText("Active: 2");
+    await expect.poll(async () => Math.abs((await anchor.boundingBox())!.y - before)).toBeLessThan(1);
+    await page.getByRole("button", { name: "全部完成", exact: true }).click();
+    await expect(page.getByTestId("subagent-task-dock-trigger")).toHaveCount(0, { timeout: 7000 });
+    await expect.poll(async () => Math.abs((await anchor.boundingBox())!.y - before)).toBeLessThan(1);
+  });
+}
+
+test("returns to the composer when completed work is dismissed on desktop blank space", async ({ page }) => {
+  await page.goto("/browser/fixture.html?case=subagent-dock");
+  await page.getByRole("button", { name: "模拟运行", exact: true }).click();
+  await page.getByTestId("subagent-task-dock-trigger").click();
+  const tree = page.getByTestId("subagent-task-tree");
+  await expect(tree.locator('[data-task-state="done"]')).toHaveCount(3, { timeout: 12000 });
+  await page.locator("main").click({ position: { x: 4, y: 65 } });
+  await expect(tree).toHaveCount(0);
+  await expect(page.getByTestId("subagent-task-dock-trigger")).toHaveCount(0);
+  await expect(page.getByRole("textbox").first()).toBeFocused();
 });

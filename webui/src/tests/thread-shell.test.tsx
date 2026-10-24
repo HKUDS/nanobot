@@ -568,6 +568,8 @@ describe("ThreadShell", () => {
     act(() => client._emitChat("background-work", { event: "turn_end", chat_id: "background-work", turn_id: "parent-turn" }));
     expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
     expect(trigger).toHaveTextContent("Active: 1");
+    act(() => client._emitChat("background-work", { event: "user_message", chat_id: "background-work", turn_id: "next-turn", turn_seq: 1, starts_turn: true, text: "Continue with the next request" }));
+    expect(trigger).toHaveTextContent("Active: 1");
     fireEvent.click(trigger);
     const list = screen.getByTestId("subagent-task-tree");
     expect(within(list).getByRole("button", { name: /Background inspection Running/ })).toBeVisible();
@@ -598,8 +600,9 @@ describe("ThreadShell", () => {
       onToggleSidebar={() => {}} />, null, "tok", ["webui.core.v1", "webui.subagents.v1"]);
     const view = render(shell());
     await screen.findByText("Delegate inspection");
-    fireEvent.click(await screen.findByRole("button", { name: /Subtasks Finished: 1/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Subtasks Completed: 1/ }));
     const task = await screen.findByRole("button", { name: /Inspect settings Completed/ });
+    expect(screen.queryByTestId("subagent-task-dock")).not.toBeInTheDocument();
     await screen.findByText("Delegate inspection");
     expect(screen.getAllByRole("button", { name: /Inspect settings/ })).toHaveLength(1);
     expect(screen.getByTestId("thread-message-region")).toContainElement(task);
@@ -607,8 +610,9 @@ describe("ThreadShell", () => {
     view.unmount();
     render(shell());
     await screen.findByText("Delegate inspection");
-    fireEvent.click(await screen.findByRole("button", { name: /Subtasks Finished: 1/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Subtasks Completed: 1/ }));
     await screen.findByRole("button", { name: /Inspect settings Completed/ });
+    expect(screen.queryByTestId("subagent-task-dock")).not.toBeInTheDocument();
     expect(client.sendMessage).not.toHaveBeenCalled();
   });
 

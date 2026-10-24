@@ -1,7 +1,21 @@
-import type { SubagentTaskSnapshot } from "./types";
+import type { SubagentTaskSnapshot, UIMessage } from "./types";
 
 export interface ObservedSubagentTask extends SubagentTaskSnapshot {
   observedAtMs: number;
+}
+
+export function isActiveSubagentTask(task: SubagentTaskSnapshot): boolean {
+  return task.state === "queued" || task.state === "running" || task.state === "stopping";
+}
+
+export function latestSubagentInputKey(messages: readonly UIMessage[]): string | null {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (message.role === "user" && !message.sessionMessage) {
+      return message.turnId ? `user:${message.turnId}` : `replay:${message.id}`;
+    }
+  }
+  return null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

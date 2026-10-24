@@ -2,12 +2,14 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { SubagentTasksProvider, SubagentThreadMessages as ThreadMessages } from "@/components/thread/SubagentTasks";
+import { SubagentTasksProvider } from "@/components/thread/SubagentTasks";
 import { SubagentTaskDock } from "@/components/thread/SubagentTaskDock";
+import { SubagentThreadMessages } from "@/components/thread/SubagentTaskResults";
 import { buildDisplayUnits, unitKeysForDisplay } from "@/components/thread/ThreadMessages";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
 import { setAppLanguage } from "@/i18n";
 import { DEFAULT_LOCAL_PREFS, LOCAL_PREFS_STORAGE_KEY, writeLocalPreferences } from "@/lib/local-preferences";
+import { latestSubagentInputKey } from "@/lib/subagent-tasks";
 import type { ConnectionStatus, InboundEvent, SubagentTaskSnapshot, UIMessage } from "@/lib/types";
 
 const requestMutation = vi.fn();
@@ -57,13 +59,36 @@ function childThread(answer: string, active = true): Response {
     ],
   }), { headers: { "content-type": "application/json" } });
 }
-function layout({ enabled = true, liveEvents = true, historyEnabled = false, sessionKey = "websocket:a", visible = true, active = true, dock = false, threadMessages = messages } = {}) {
+interface LayoutOptions {
+  enabled?: boolean;
+  liveEvents?: boolean;
+  historyEnabled?: boolean;
+  sessionKey?: string;
+  visible?: boolean;
+  active?: boolean;
+  inputKey?: string | null;
+  threadMessages?: UIMessage[];
+}
+function layout({ enabled = true, liveEvents = true, historyEnabled = false, sessionKey = "websocket:a", visible = true, active = true, inputKey = null, threadMessages = messages }: LayoutOptions = {}) {
   return <ThreadVisibilityContext.Provider value={visible}>
     <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled={enabled} liveEvents={liveEvents} historyEnabled={historyEnabled} active={active}>
-      <div data-testid="messages"><ThreadMessages messages={threadMessages} /></div>
-      <div data-testid="composer">{dock ? <SubagentTaskDock /> : null}<textarea aria-label="Message" /></div>
+      <div data-testid="messages"><SubagentThreadMessages messages={threadMessages} /></div>
+      <div data-testid="composer" className="thread-composer-stack"><SubagentTaskDock inputKey={inputKey ?? latestSubagentInputKey(threadMessages)} /><textarea aria-label="Message" /></div>
     </SubagentTasksProvider>
   </ThreadVisibilityContext.Provider>;
+}
+async function openTaskList(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByTestId("subagent-task-dock-trigger"));
+  return screen.getByTestId("subagent-task-tree");
+}
+async function openArchive(user: ReturnType<typeof userEvent.setup>, name = "Subtasks") {
+  const archive = await within(screen.getByTestId("messages")).findByRole("region", { name });
+  const summary = within(archive).getByRole("button", { name: new RegExp(name) });
+  if (summary.getAttribute("aria-expanded") !== "true") await user.click(summary);
+  return archive;
+}
+function taskIds(container: HTMLElement) {
+  return [...container.querySelectorAll("[data-subagent-id]")].map(row => row.getAttribute("data-subagent-id"));
 }
 
 describe("session-owned task UI", () => {
@@ -77,11 +102,257 @@ describe("session-owned task UI", () => {
     statusHandlers.clear();
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => response([task()])));
   });
-  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); localStorage.removeItem(LOCAL_PREFS_STORAGE_KEY); });
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.removeItem(LOCAL_PREFS_STORAGE_KEY); });
 
-  it("opens the same task from the fixed dock, keeps the list through completion and returns focus to its row", async () => {
+  it("keeps active work in one composer entry without mixing in a large terminal archive", async () => {
+    const older = Array.from({ length: 40 }, (_, index) => task({
+      task_id: `older-${index}`, label: `Archived check ${index}`, created_at: index + 1,
+      state: "done", completed_at: 90, result: `Saved finding ${index}`,
+    }));
+    vi.mocked(fetch).mockImplementation(async () => response([
+      ...older, task(),
+      task({ task_id: "legacy", label: "Earlier check", created_at: 91, origin_turn_id: null, origin_message_id: "missing-prompt", state: "done", completed_at: 92, result: "Saved result" }),
+    ]));
     const user = userEvent.setup();
-    render(layout({ dock: true }));
+    render(layout());
+    const trigger = await screen.findByTestId("subagent-task-dock-trigger");
+    expect(fetch).toHaveBeenCalledWith("/api/sessions/websocket%3Aa/subagents", expect.any(Object));
+    expect(screen.getAllByTestId("subagent-task-dock-trigger")).toEqual([trigger]);
+    expect(screen.getByTestId("composer")).toContainElement(trigger);
+    expect(trigger).toHaveTextContent("Active: 1");
+    expect(trigger).not.toHaveTextContent("Completed:");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByTestId("subagent-task-tree")).not.toBeInTheDocument();
+    expect(screen.getByTestId("messages")).toHaveTextContent("Inspect config");
+    expect(screen.getByTestId("messages")).toHaveTextContent("Main answer");
+    expect(screen.getByTestId("messages")).not.toHaveTextContent("Config check");
+    expect(screen.getByTestId("messages")).not.toHaveTextContent("Saved result");
+
+    const list = await openTaskList(user);
+    expect(within(list).getByRole("button", { name: /Config check Running/ })).toBeVisible();
+    expect(taskIds(list)).toEqual(["task-1"]);
+    expect(within(list).queryByText(/Archived check|Earlier check|Saved finding|Saved result/)).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("subagent-task-tree")).not.toBeInTheDocument();
+    const archive = await openArchive(user);
+    expect(taskIds(archive)).toEqual(older.map(saved => saved.task_id));
+    expect(within(archive).queryByRole("button", { name: /Config check Running/ })).not.toBeInTheDocument();
+    const other = await openArchive(user, "Other tasks");
+    await user.click(within(other).getByRole("button", { name: /Earlier check Completed/ }));
+    expect(within(screen.getByRole("dialog", { name: "Earlier check" })).getByText("Saved result")).toBeVisible();
+    expect(requestMutation).not.toHaveBeenCalled();
+  });
+
+  it("removes a finished task from the closed dock while a sibling is still active", async () => {
+    vi.mocked(fetch).mockImplementation(async () => response([
+      task(), task({ task_id: "sibling", label: "Waiting check", state: "queued", created_at: 101 }),
+    ]));
+    const user = userEvent.setup();
+    render(layout());
+    const trigger = await screen.findByTestId("subagent-task-dock-trigger");
+    expect(trigger).toHaveTextContent("Active: 2");
+    emitTask(task({ revision: 2, state: "done", completed_at: 102, result: "Verified" }));
+    expect(trigger).toHaveTextContent("Active: 1");
+    expect(trigger).not.toHaveTextContent("Completed:");
+    const list = await openTaskList(user);
+    expect(taskIds(list)).toEqual(["sibling"]);
+    expect(within(list).getByRole("button", { name: /Waiting check Queued/ })).toBeVisible();
+    expect(within(list).queryByRole("button", { name: /Config check Completed/ })).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(trigger).toHaveFocus());
+    const archive = await openArchive(user);
+    expect(within(archive).getByRole("button", { name: /Config check Completed/ })).toBeVisible();
+    expect(taskIds(archive)).toEqual(["task-1"]);
+    expect(requestMutation).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { state: "done", status: "Completed", summary: "Completed: 1", error: null },
+    { state: "error", status: "Failed", summary: "Finished: 1", error: "Cannot read the file" },
+    { state: "cancelled", status: "Cancelled", summary: "Finished: 1", error: null },
+  ] as const)("expires observed $state feedback after four seconds without inventing success", async ({ state, status, summary, error }) => {
+    vi.useFakeTimers();
+    render(layout());
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Active: 1");
+    emitTask(task({ revision: 2, state, error, completed_at: 102, result: state === "done" ? "Verified" : null }));
+    const trigger = screen.getByTestId("subagent-task-dock-trigger");
+    expect(trigger).toHaveTextContent(summary);
+    if (state !== "done") expect(trigger).not.toHaveTextContent("Completed:");
+    if (state === "error") expect(trigger).toHaveTextContent("Review needed: 1");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByTestId("subagent-task-tree")).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3999); });
+    expect(trigger).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(screen.queryByTestId("subagent-task-dock")).not.toBeInTheDocument();
+    const archive = screen.getByRole("region", { name: "Subtasks" });
+    fireEvent.click(within(archive).getByRole("button", { name: /Subtasks/ }));
+    expect(within(archive).getByRole("button", { name: new RegExp(`Config check ${status}`) })).toBeVisible();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(requestMutation).not.toHaveBeenCalled();
+  });
+
+  it.each(["hover", "focus", "detail"] as const)("pauses completion feedback expiry during %s interaction", async interaction => {
+    vi.useFakeTimers();
+    render(layout());
+    await act(async () => { await Promise.resolve(); });
+    emitTask(task({ revision: 2, state: "done", completed_at: 102, result: "Verified" }));
+    const trigger = screen.getByTestId("subagent-task-dock-trigger");
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    if (interaction === "hover") fireEvent.pointerEnter(trigger, { pointerType: "mouse" });
+    else if (interaction === "focus") act(() => { trigger.focus(); });
+    else {
+      const archive = screen.getByRole("region", { name: "Subtasks" });
+      fireEvent.click(within(archive).getByRole("button", { name: /Subtasks/ }));
+      fireEvent.click(within(archive).getByRole("button", { name: /Config check Completed/ }));
+      expect(within(screen.getByRole("dialog", { name: "Config check" })).getByText("Verified")).toBeVisible();
+    }
+    await act(async () => { await vi.advanceTimersByTimeAsync(8000); });
+    expect(trigger).toBeInTheDocument();
+    if (interaction === "hover") fireEvent.pointerLeave(trigger, { pointerType: "mouse" });
+    else if (interaction === "focus") act(() => { screen.getByRole("textbox", { name: "Message" }).focus(); });
+    else fireEvent.keyDown(screen.getByRole("dialog", { name: "Config check" }), { key: "Escape" });
+    await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+    expect(screen.queryByTestId("subagent-task-dock")).not.toBeInTheDocument();
+    expect(requestMutation).not.toHaveBeenCalled();
+  });
+
+  it("retains completed rows while reading and appends newly active work without forcing the list closed", async () => {
+    vi.useFakeTimers();
+    render(layout());
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.click(screen.getByTestId("subagent-task-dock-trigger"));
+    const list = screen.getByTestId("subagent-task-tree");
+    const row = within(list).getByRole("button", { name: /Config check Running/ });
+    emitTask(task({ revision: 2, state: "done", completed_at: 102, result: "Verified" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(list).toBeVisible();
+    expect(within(list).getByRole("button", { name: /Config check Completed/ })).toBe(row);
+    emitTask(task({ task_id: "sibling", label: "Follow-up check", state: "queued", created_at: 103 }));
+    expect(taskIds(list)).toEqual(["task-1", "sibling"]);
+    expect(within(list).getByRole("button", { name: /Follow-up check Queued/ })).toBeVisible();
+    emitTask(task({ task_id: "sibling", revision: 2, label: "Follow-up check", state: "cancelled", created_at: 103, completed_at: 104 }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(within(list).getByRole("button", { name: /Config check Completed/ })).toBe(row);
+    expect(within(list).getByRole("button", { name: /Follow-up check Cancelled/ })).toBeVisible();
+    fireEvent.keyDown(list, { key: "Escape" });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.queryByTestId("subagent-task-tree")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("subagent-task-dock")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus();
+    const archive = screen.getByRole("region", { name: "Subtasks" });
+    fireEvent.click(within(archive).getByRole("button", { name: /Subtasks/ }));
+    expect(taskIds(archive)).toEqual(["task-1", "sibling"]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(requestMutation).not.toHaveBeenCalled();
+  });
+
+  it("appends a reconnect's earlier-created active task without moving an open row", async () => {
+    vi.mocked(fetch).mockImplementation(async () => response([task({ created_at: 102 })]));
+    const user = userEvent.setup();
+    render(layout());
+    const list = await openTaskList(user);
+    const row = within(list).getByRole("button", { name: /Config check Running/ });
+    vi.mocked(fetch).mockImplementation(async () => response([
+      task({ task_id: "earlier", label: "Earlier check", created_at: 100 }), task({ created_at: 102 }),
+    ]));
+    fireEvent(window, new Event("focus"));
+    await within(list).findByRole("button", { name: /Earlier check Running/ });
+    expect(taskIds(list)).toEqual(["task-1", "earlier"]);
+    expect(within(list).getByRole("button", { name: /Config check Running/ })).toBe(row);
+  });
+
+  it("keeps completion feedback when the same input is replayed with a different display id", async () => {
+    const view = render(layout());
+    await screen.findByTestId("subagent-task-dock-trigger");
+    emitTask(task({ revision: 2, state: "done", completed_at: 102, result: "Verified" }));
+    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Completed: 1");
+    view.rerender(layout({ threadMessages: [{ ...messages[0], id: "canonical-input" }, messages[1]] }));
+    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Completed: 1");
+  });
+
+  it("preserves an open reading view across new input, then reopens with only cross-turn active work", async () => {
+    vi.mocked(fetch).mockImplementation(async () => response([
+      task(), task({ task_id: "cross-turn", label: "Cross-turn check", state: "stopping", created_at: 101 }),
+      task({ task_id: "old", label: "Old check", state: "cancelled", created_at: 90, completed_at: 91 }),
+    ]));
+    const user = userEvent.setup();
+    const view = render(layout({ inputKey: "prompt-a" }));
+    const list = await openTaskList(user);
+    const crossTurn = within(list).getByRole("button", { name: /Cross-turn check Stopping/ });
+    expect(taskIds(list)).toEqual(["task-1", "cross-turn"]);
+    emitTask(task({ revision: 2, state: "done", completed_at: 102, result: "Earlier finding" }));
+    expect(within(list).getByRole("button", { name: /Config check Completed/ })).toBeVisible();
+    const nextMessages: UIMessage[] = [...messages, { id: "prompt-b", role: "user", content: "Inspect the next setting", turnId: "turn-b", createdAt: 103_000 }];
+    view.rerender(layout({ inputKey: "prompt-b", threadMessages: nextMessages }));
+    expect(screen.getByTestId("subagent-task-tree")).toBe(list);
+    expect(taskIds(list)).toEqual(["task-1", "cross-turn"]);
+    expect(within(list).getByRole("button", { name: /Cross-turn check Stopping/ })).toBe(crossTurn);
+    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Active: 1");
+    emitTask(task({ task_id: "next", label: "Next check", created_at: 104, origin_turn_id: "turn-b", origin_message_id: "prompt-b" }));
+    expect(taskIds(list)).toEqual(["task-1", "cross-turn", "next"]);
+    await user.keyboard("{Escape}");
+    expect(screen.getByTestId("subagent-task-dock-trigger")).not.toHaveTextContent("Completed:");
+    const reopened = await openTaskList(user);
+    expect(taskIds(reopened)).toEqual(["cross-turn", "next"]);
+    await user.keyboard("{Escape}");
+    const archive = await openArchive(user);
+    expect(taskIds(archive)).toEqual(["old", "task-1"]);
+    expect(within(archive).getByRole("button", { name: /Config check Completed/ })).toBeVisible();
+    expect(within(archive).queryByRole("button", { name: /Cross-turn check|Next check/ })).not.toBeInTheDocument();
+    expect(requestMutation).not.toHaveBeenCalled();
+  });
+
+  it("clears previous-turn completion feedback on new input without deleting its archive", async () => {
+    const user = userEvent.setup();
+    const view = render(layout({ inputKey: "prompt-a" }));
+    await screen.findByTestId("subagent-task-dock-trigger");
+    emitTask(task({ revision: 2, state: "done", completed_at: 102, result: "Earlier finding" }));
+    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Completed: 1");
+    view.rerender(layout({ inputKey: "prompt-b" }));
+    expect(screen.queryByTestId("subagent-task-dock")).not.toBeInTheDocument();
+    const archive = await openArchive(user);
+    expect(within(archive).getByRole("button", { name: /Config check Completed/ })).toBeVisible();
+    emitTask(task({ task_id: "next", label: "Next check", created_at: 103 }));
+    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Active: 1");
+    const list = await openTaskList(user);
+    expect(taskIds(list)).toEqual(["next"]);
+    expect(requestMutation).not.toHaveBeenCalled();
+  });
+
+  it("treats an initial terminal-only snapshot and a cold refresh as history, never completion feedback", async () => {
+    vi.mocked(fetch).mockImplementation(async () => response([
+      task({ state: "done", completed_at: 102, result: "Saved finding" }),
+      task({ task_id: "failed", label: "Failed check", state: "error", created_at: 101, completed_at: 103, error: "Saved failure" }),
+      task({ task_id: "cancelled", label: "Cancelled check", state: "cancelled", created_at: 102, completed_at: 104 }),
+    ]));
+    const user = userEvent.setup();
+    const view = render(layout());
+    const archive = await screen.findByRole("region", { name: "Subtasks" });
+    expect(within(archive).getByRole("button", { name: /Subtasks/ })).toHaveAttribute("aria-expanded", "false");
+    expect(within(archive).queryByRole("button", { name: /Config check Completed/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("subagent-task-dock")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("subagent-task-tree")).not.toBeInTheDocument();
+    await openArchive(user);
+    expect(taskIds(archive)).toEqual(["task-1", "failed", "cancelled"]);
+    await user.click(within(archive).getByRole("button", { name: /Config check Completed/ }));
+    expect(within(screen.getByRole("dialog", { name: "Config check" })).getByText("Saved finding")).toBeVisible();
+    view.unmount();
+    render(layout());
+    const restored = await screen.findByRole("region", { name: "Subtasks" });
+    expect(within(restored).getByRole("button", { name: /Subtasks/ })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByTestId("subagent-task-dock")).not.toBeInTheDocument();
+    vi.useFakeTimers();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(screen.queryByTestId("subagent-task-dock")).not.toBeInTheDocument();
+    expect(restored).toBeVisible();
+    expect(requestMutation).not.toHaveBeenCalled();
+  });
+
+  it("keeps a completed task readable until the list is closed, then focuses the composer and archives it", async () => {
+    const user = userEvent.setup();
+    render(layout());
     const trigger = await screen.findByTestId("subagent-task-dock-trigger");
     expect(screen.getByTestId("composer")).toContainElement(trigger);
     expect(screen.getByTestId("messages")).not.toContainElement(trigger);
@@ -100,18 +371,24 @@ describe("session-owned task UI", () => {
     await waitFor(() => expect(row).toHaveFocus());
     expect(await within(list).findByText("Verified the configuration")).toBeVisible();
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(trigger).toHaveFocus());
-    expect(trigger).toHaveTextContent("Completed: 1");
+    expect(screen.queryByTestId("subagent-task-tree")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("subagent-task-dock-trigger")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus());
+    const archive = await openArchive(user);
+    const archivedRow = within(archive).getByRole("button", { name: /Config check Completed/ });
+    await user.click(archivedRow);
+    expect(within(screen.getByRole("dialog", { name: "Config check" })).getByText("Verified the configuration")).toBeVisible();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(archivedRow).toHaveFocus());
     expect(requestMutation).not.toHaveBeenCalled();
   });
 
   it("uses a bounded non-interactive result excerpt while keeping full Markdown in task details", async () => {
     const result = "## Findings\n\n" + "Verified the configuration. ".repeat(30) + "\n\n[Full evidence](https://example.com/evidence)\n\n```ts\nconst verified = true;\n```";
-    vi.mocked(fetch).mockImplementation(async () => response([task({ state: "done", completed_at: 102, result })]));
     const user = userEvent.setup();
-    render(layout({ dock: true }));
-    await user.click(await screen.findByTestId("subagent-task-dock-trigger"));
-    const tree = screen.getByTestId("subagent-task-tree");
+    render(layout());
+    const tree = await openTaskList(user);
+    emitTask(task({ revision: 2, state: "done", completed_at: 102, result }));
     const excerpt = within(tree).getByText(/^## Findings/);
     expect(excerpt).toBeVisible();
     expect(excerpt.textContent?.trim()).toBe(result.trim().slice(0, 240));
@@ -128,7 +405,7 @@ describe("session-owned task UI", () => {
       task({ tool_events: [{ name: "read_file", status: "running" }] }),
     ]));
     requestMutation.mockResolvedValue(task({ revision: 2, state: "cancelled", completed_at: 102 }));
-    render(layout({ dock: true }));
+    render(layout());
     const trigger = await screen.findByTestId("subagent-task-dock-trigger");
     expect(trigger).toHaveTextContent("Active: 2");
     await user.click(trigger);
@@ -144,33 +421,43 @@ describe("session-owned task UI", () => {
     expect([...list.querySelectorAll("[data-subagent-id]")].map(row => row.getAttribute("data-subagent-id"))).toEqual(["task-1", "queued"]);
     expect(requestMutation).toHaveBeenCalledTimes(1);
     expect(requestMutation).toHaveBeenCalledWith("subagent.cancel", { session_key: "websocket:a", task_id: "task-1" }, 20_000);
+    expect(list).toBeVisible();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("subagent-task-dock")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus());
+    const archive = await openArchive(user);
+    expect(within(archive).getByRole("button", { name: /Config check Cancelled/ })).toBeVisible();
+    expect(within(archive).getByRole("button", { name: /Waiting check Failed/ })).toBeVisible();
   });
 
   it.each(["inactive", "hidden", "session"])("closes the portaled task list when its scope becomes %s", async change => {
     const user = userEvent.setup();
-    const view = render(layout({ dock: true }));
-    await user.click(await screen.findByTestId("subagent-task-dock-trigger"));
-    expect(screen.getByTestId("subagent-task-tree")).toBeVisible();
-    view.rerender(layout({ dock: true, active: change !== "inactive", visible: change !== "hidden", sessionKey: change === "session" ? "websocket:b" : "websocket:a" }));
+    const view = render(layout());
+    expect(await openTaskList(user)).toBeVisible();
+    view.rerender(layout({ active: change !== "inactive", visible: change !== "hidden", sessionKey: change === "session" ? "websocket:b" : "websocket:a" }));
     await waitFor(() => expect(screen.queryByTestId("subagent-task-tree")).not.toBeInTheDocument());
     if (change !== "session") expect(screen.queryByTestId("subagent-task-dock")).not.toBeInTheDocument();
-    view.rerender(layout({ dock: true }));
+    view.rerender(layout());
     expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveAttribute("aria-expanded", "false");
     expect(requestMutation).not.toHaveBeenCalled();
   });
 
-  it("applies the browser activity preference to delegated work and its shared child chat", async () => {
+  it("applies the browser activity preference to the child chat without auto-opening archived results", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/webui-thread")
       ? childThread("Configuration verified", false)
       : response([task({ state: "done", completed_at: 102 })])));
     const user = userEvent.setup();
     const view = render(layout({ historyEnabled: true }));
-    const work = await screen.findByRole("button", { name: /Subtasks/ });
-    expect(work).toHaveAttribute("aria-expanded", "false");
+    const archive = await screen.findByRole("region", { name: "Subtasks" });
+    const summary = within(archive).getByRole("button", { name: /Subtasks/ });
+    expect(summary).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByTestId("subagent-task-dock")).not.toBeInTheDocument();
 
     act(() => { writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, activityMode: "expanded" }); });
-    expect(work).toHaveAttribute("aria-expanded", "true");
-    await user.click(screen.getByRole("button", { name: /Config check Completed/ }));
+    expect(summary).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByTestId("subagent-task-tree")).not.toBeInTheDocument();
+    await openArchive(user);
+    await user.click(within(archive).getByRole("button", { name: /Config check Completed/ }));
     const detail = screen.getByRole("dialog", { name: "Config check" });
     expect(await within(detail).findByText("Configuration verified")).toBeVisible();
     expect(within(detail).getByTestId("agent-activity-content")).toBeVisible();
@@ -178,14 +465,18 @@ describe("session-owned task UI", () => {
     expect(within(detail).queryByTestId("agent-activity-content")).not.toBeInTheDocument();
 
     act(() => { writeLocalPreferences(DEFAULT_LOCAL_PREFS); });
-    expect(work).toHaveAttribute("aria-expanded", "false");
+    expect(summary).toHaveAttribute("aria-expanded", "true");
+    expect(within(detail).queryByTestId("agent-activity-content")).not.toBeInTheDocument();
     act(() => { writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, activityMode: "expanded" }); });
     expect(within(detail).getByTestId("agent-activity-content")).toBeVisible();
     view.unmount();
 
     render(layout({ historyEnabled: true }));
-    expect(await screen.findByRole("button", { name: /Config check Completed/ })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: /Config check Completed/ }));
+    const restoredArchive = await screen.findByRole("region", { name: "Subtasks" });
+    expect(within(restoredArchive).getByRole("button", { name: /Subtasks/ })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByTestId("subagent-task-dock")).not.toBeInTheDocument();
+    await openArchive(user);
+    await user.click(within(restoredArchive).getByRole("button", { name: /Config check Completed/ }));
     expect(await within(screen.getByRole("dialog")).findByTestId("agent-activity-content")).toBeVisible();
   });
 
@@ -197,7 +488,8 @@ describe("session-owned task UI", () => {
     vi.stubGlobal("fetch", fetcher);
     const user = userEvent.setup();
     const view = render(layout({ historyEnabled: true }));
-    await user.click(await screen.findByRole("button", { name: /Config check Running/ }));
+    const list = await openTaskList(user);
+    await user.click(within(list).getByRole("button", { name: /Config check Running/ }));
     const detail = screen.getByRole("dialog", { name: "Config check" });
     expect(await within(detail).findByText("Inspect configuration in the child session")).toBeVisible();
     expect(within(detail).getByText("Checking the configuration")).toBeVisible();
@@ -215,8 +507,9 @@ describe("session-owned task UI", () => {
     fetcher.mockImplementation(async (url) => url.endsWith("/webui-thread") ? childThread("## Findings\n\nVerified the full session", false)
       : response([task({ revision: 2, state: "done", completed_at: 102 })]));
     render(layout({ historyEnabled: true }));
-    await user.click(await screen.findByRole("button", { name: /Subtasks/ }));
-    await user.click(screen.getByRole("button", { name: /Config check Completed/ }));
+    const restoredArchive = await openArchive(user);
+    expect(screen.queryByTestId("subagent-task-dock")).not.toBeInTheDocument();
+    await user.click(within(restoredArchive).getByRole("button", { name: /Config check Completed/ }));
     expect(await within(screen.getByRole("dialog")).findByRole("heading", { name: "Findings" })).toBeVisible();
   });
 
@@ -236,7 +529,8 @@ describe("session-owned task UI", () => {
     vi.stubGlobal("fetch", fetcher);
     const user = userEvent.setup();
     const view = render(layout({ historyEnabled: true }));
-    await user.click(await screen.findByRole("button", { name: /Config check Running/ }));
+    const list = await openTaskList(user);
+    await user.click(within(list).getByRole("button", { name: /Config check Running/ }));
     await waitFor(() => expect(reads).toBe(1));
     emitTask(task({ revision: 2, iteration: 2 }));
     emitTask(task({ revision: 3, iteration: 3 }));
@@ -248,11 +542,15 @@ describe("session-owned task UI", () => {
     await waitFor(() => expect(reads).toBe(3));
     const oldSignal = readSignals.at(-1);
     view.rerender(layout({ historyEnabled: true, sessionKey: "websocket:b" }));
-    await screen.findByRole("button", { name: /Config check Running/ });
+    expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(oldSignal?.aborted).toBe(true);
     await act(async () => { resolveOld(childThread("Old session response")); });
-    await user.click(screen.getByRole("button", { name: /Config check Running/ }));
-    expect(await within(screen.getByRole("dialog")).findByText("Latest child response")).toBeVisible();
+    const nextList = await openTaskList(user);
+    await user.click(within(nextList).getByRole("button", { name: /Config check Running/ }));
+    const nextDetail = screen.getByRole("dialog");
+    expect(await within(nextDetail).findByText("Latest child response")).toBeVisible();
+    expect(within(nextDetail).queryByText("Old session response")).not.toBeInTheDocument();
   });
 
   it("shares history loading, actual failure details and keyboard retry with the main thread", async () => {
@@ -266,7 +564,8 @@ describe("session-owned task UI", () => {
     }));
     const user = userEvent.setup();
     render(layout({ historyEnabled: true }));
-    await user.click(await screen.findByRole("button", { name: /Config check Running/ }));
+    const list = await openTaskList(user);
+    await user.click(within(list).getByRole("button", { name: /Config check Running/ }));
     const detail = screen.getByRole("dialog");
     const loading = within(detail).getByRole("status");
     expect(loading.querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
@@ -285,26 +584,28 @@ describe("session-owned task UI", () => {
     expect(within(detail).queryByRole("status")).not.toBeInTheDocument();
   });
 
-  it("keeps the same work block under its prompt, folds completed work and restores it after refresh", async () => {
+  it("keeps the dock list open through an HTTP completion and restores saved results only in history", async () => {
+    const user = userEvent.setup();
     const view = render(layout());
-    const runningRow = await screen.findByRole("button", { name: /Config check Running/ });
-    const work = runningRow.closest("section");
-    const header = within(work!).getByRole("button", { name: /Subtasks/ });
-    expect(screen.getByTestId("messages")).toContainElement(runningRow);
-    expect(header).toHaveAttribute("aria-expanded", "true");
+    const list = await openTaskList(user);
+    const runningRow = within(list).getByRole("button", { name: /Config check Running/ });
+    const trigger = screen.getByTestId("subagent-task-dock-trigger");
     vi.mocked(fetch).mockImplementation(async () => response([task({ revision: 2, state: "done", result: "Verified", completed_at: 102 })]));
     fireEvent(window, new Event("focus"));
-    await waitFor(() => expect(header).toHaveAttribute("aria-expanded", "false"));
-    fireEvent.click(header);
-    const row = screen.getByRole("button", { name: /Config check Completed/ });
+    const row = await within(list).findByRole("button", { name: /Config check Completed/ });
     expect(row).toBe(runningRow);
-    expect(row.closest("section")).toBe(work);
-    expect(within(screen.getByTestId("composer")).queryByText("Config check")).not.toBeInTheDocument();
-    expect(work).toHaveAccessibleName("Subtasks");
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(within(list).getByText("Verified")).toBeVisible();
+    expect(screen.getByTestId("messages")).not.toContainElement(row);
+    expect(screen.getByTestId("messages")).not.toHaveTextContent("Verified");
     view.unmount();
+
     render(layout());
-    fireEvent.click(await screen.findByRole("button", { name: /Subtasks Finished: 1/ }));
-    expect(screen.getByRole("button", { name: /Config check Completed/ })).toBeVisible();
+    const restoredArchive = await openArchive(user);
+    expect(screen.queryByTestId("subagent-task-dock-trigger")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("subagent-task-tree")).not.toBeInTheDocument();
+    await user.click(within(restoredArchive).getByRole("button", { name: /Config check Completed/ }));
+    expect(within(screen.getByRole("dialog", { name: "Config check" })).getByText("Verified")).toBeVisible();
     expect(requestMutation).not.toHaveBeenCalled();
   });
 
@@ -315,8 +616,9 @@ describe("session-owned task UI", () => {
     })]));
     const user = userEvent.setup();
     render(layout());
-    await user.click(await screen.findByRole("button", { name: /Subtasks/ }));
-    const row = await screen.findByRole("button", { name: /Config check Interrupted/ });
+    const archive = await openArchive(user);
+    expect(screen.queryByTestId("subagent-task-dock")).not.toBeInTheDocument();
+    const row = within(archive).getByRole("button", { name: /Config check Interrupted/ });
     await user.click(row);
     const detail = screen.getByRole("dialog", { name: "Config check" });
     expect(within(detail).getByText(/has not been restarted automatically/)).toBeVisible();
@@ -336,27 +638,39 @@ describe("session-owned task UI", () => {
     requestMutation.mockImplementation(() => new Promise((resolve) => { resolveStop = resolve; }));
     const user = userEvent.setup();
     render(layout());
-    await user.click(await screen.findByRole("button", { name: /Config check Running/ }));
-    await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("button", { name: "Stop Config check" }));
+    const list = await openTaskList(user);
+    const row = within(list).getByRole("button", { name: /Config check Running/ });
+    await user.click(row);
+    const detail = screen.getByRole("dialog", { name: "Config check" });
+    const stop = within(detail).getByRole("button", { name: "Stop Config check" });
+    await user.click(stop);
+    expect(stop).toBeDisabled();
     vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { resolveRefresh = resolve; }));
     fireEvent(window, new Event("focus"));
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
     await act(async () => { resolveStop(task({ revision: 3, state: "cancelled", completed_at: 102 })); });
-    await user.click(screen.getByRole("button", { name: /Subtasks Finished: 1/ }));
-    await screen.findByRole("button", { name: /Config check Cancelled/ });
+    expect(screen.getByRole("dialog", { name: "Config check" })).toBe(detail);
+    expect(detail).toHaveTextContent("Cancelled");
     await act(async () => { resolveRefresh(response([task()])); });
-    expect(screen.queryByRole("button", { name: "Stop Config check" })).not.toBeInTheDocument();
+    expect(detail).toHaveTextContent("Cancelled");
+    expect(within(detail).queryByRole("button", { name: "Stop Config check" })).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(within(list).getByRole("button", { name: /Config check Cancelled/ })).toBe(row);
+    expect(within(list).queryByRole("button", { name: "Stop Config check" })).not.toBeInTheDocument();
+    await waitFor(() => expect(row).toHaveFocus());
+    expect(requestMutation).toHaveBeenCalledTimes(1);
     expect(requestMutation).toHaveBeenCalledWith("subagent.cancel", { session_key: "websocket:a", task_id: "task-1" }, 20_000);
   });
 
   it("does not request an unsupported feature and detaches events in hidden panes", async () => {
+    const user = userEvent.setup();
     const view = render(layout({ enabled: false }));
     expect(fetch).not.toHaveBeenCalled();
     view.rerender(layout({ visible: false }));
     expect(fetch).not.toHaveBeenCalled();
     view.rerender(layout());
-    fireEvent.click(await screen.findByRole("button", { name: /Config check Running/ }));
+    const list = await openTaskList(user);
+    await user.click(within(list).getByRole("button", { name: /Config check Running/ }));
     expect(screen.getByRole("dialog", { name: "Config check" })).toBeVisible();
     view.rerender(layout({ visible: false }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -370,20 +684,22 @@ describe("session-owned task UI", () => {
     const user = userEvent.setup();
     requestMutation.mockRejectedValue(new Error("Cannot stop task"));
     render(layout());
-    await user.click(await screen.findByRole("button", { name: "Stop Config check" }));
-    await screen.findByText("Cannot stop task");
+    const list = await openTaskList(user);
+    await user.click(within(list).getByRole("button", { name: "Stop Config check" }));
+    await within(list).findByText("Cannot stop task");
     fireEvent(window, new Event("focus"));
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
-    expect(screen.getByText("Cannot stop task")).toBeVisible();
+    expect(within(list).getByText("Cannot stop task")).toBeVisible();
     vi.mocked(fetch).mockRejectedValue(new Error("offline"));
     await act(async () => { fireEvent(window, new Event("focus")); });
-    expect(screen.getByRole("button", { name: /Config check Running/ })).toBeVisible();
-    expect(screen.getByText("Cannot stop task")).toBeVisible();
+    expect(within(list).getByRole("button", { name: /Config check Running/ })).toBeVisible();
+    expect(within(list).getByText("Cannot stop task")).toBeVisible();
   });
 
   it("retains the last valid snapshot after malformed reads and recovers on refresh", async () => {
+    const user = userEvent.setup();
     render(layout());
-    await screen.findByRole("button", { name: /Config check Running/ });
+    const list = await openTaskList(user);
     vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({
       tasks: [{ ...task(), label: { unexpected: true } }],
     }), { headers: { "content-type": "application/json" } }));
@@ -395,16 +711,19 @@ describe("session-owned task UI", () => {
     expect(screen.getByRole("button", { name: /Config check Running/ })).toBeVisible();
     vi.mocked(fetch).mockResolvedValue(response([task({ revision: 2, state: "done", completed_at: 102 })]));
     await act(async () => { fireEvent(window, new Event("focus")); });
-    expect(screen.getByRole("button", { name: /Subtasks Finished: 1/ })).toBeVisible();
+    expect(within(list).getByRole("button", { name: /Config check Completed/ })).toBeVisible();
+    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Completed: 1");
   });
 
   it("discards reads from the previous session after switching", async () => {
     let resolveOld!: (value: Response) => void;
     vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
+    const user = userEvent.setup();
     const view = render(layout());
     vi.mocked(fetch).mockResolvedValue(response([task({ task_id: "task-b", label: "Other work" })]));
     view.rerender(layout({ sessionKey: "websocket:b" }));
-    await screen.findByRole("button", { name: /Other work Running/ });
+    const list = await openTaskList(user);
+    expect(within(list).getByRole("button", { name: /Other work Running/ })).toBeVisible();
     await act(async () => { resolveOld(response([task()])); });
     expect(screen.queryByText("Config check")).not.toBeInTheDocument();
   });
@@ -412,7 +731,8 @@ describe("session-owned task UI", () => {
   it("keeps task details open through completion and renders Markdown results", async () => {
     const user = userEvent.setup();
     render(layout());
-    const row = await screen.findByRole("button", { name: /Config check Running/ });
+    const list = await openTaskList(user);
+    const row = within(list).getByRole("button", { name: /Config check Running/ });
     await user.click(row);
     const detail = screen.getByRole("dialog", { name: "Config check" });
     vi.mocked(fetch).mockImplementation(async () => response([task({ revision: 2, state: "done", completed_at: 102,
@@ -427,40 +747,52 @@ describe("session-owned task UI", () => {
     expect(within(detail).getByRole("link", { name: /Evidence/ })).toHaveAttribute("href", "https://example.com/review");
     expect(detail).toBeVisible();
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(screen.getByRole("button", { name: /Subtasks/ })).toHaveFocus());
+    expect(list).toBeVisible();
+    await waitFor(() => expect(row).toHaveFocus());
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("subagent-task-dock")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus());
+    expect(await screen.findByRole("region", { name: "Subtasks" })).toBeVisible();
     expect(requestMutation).not.toHaveBeenCalled();
   });
 
-  it("anchors replay once when multiple prompts share a turn and preserves row order", async () => {
+  it("anchors terminal replay once when multiple prompts share a turn and preserves archive order", async () => {
     const replay = [...messages, { id: "followup", role: "user", content: "Focus on errors", turnId: "turn-a", createdAt: 102_000 } satisfies UIMessage];
     const keys = unitKeysForDisplay(buildDisplayUnits(replay));
     expect(new Set(keys).size).toBe(keys.length);
     vi.mocked(fetch).mockImplementation(async () => response([
       task({ task_id: "second", label: "Second check", created_at: 101, origin_message_id: "old-prompt-id" }),
-      task({ origin_message_id: "old-prompt-id" }),
+      task({ origin_message_id: "old-prompt-id", state: "done", completed_at: 102 }),
     ]));
+    const user = userEvent.setup();
     render(layout({ threadMessages: replay }));
-    await screen.findByRole("button", { name: /Config check Running/ });
+    const archive = await openArchive(user);
     expect(screen.getAllByRole("region", { name: "Subtasks" })).toHaveLength(1);
-    const rows = screen.getAllByRole("button", { name: /check Running/ });
-    expect(rows.map((row) => row.dataset.subagentId)).toEqual(["task-1", "second"]);
+    expect(taskIds(archive)).toEqual(["task-1"]);
+    expect(within(archive).getByRole("button", { name: /Config check Completed/ })).toBeVisible();
+    expect(within(archive).queryByRole("button", { name: /Second check Running/ })).not.toBeInTheDocument();
     vi.mocked(fetch).mockImplementation(async () => response([
-      task({ task_id: "second", revision: 2, label: "Second check", created_at: 101, origin_message_id: "old-prompt-id", state: "error", error: "Unreadable file" }),
-      task({ origin_message_id: "old-prompt-id" }),
+      task({ task_id: "second", revision: 2, label: "Second check", created_at: 101, origin_message_id: "old-prompt-id", state: "error", error: "Unreadable file", completed_at: 103 }),
+      task({ origin_message_id: "old-prompt-id", state: "done", completed_at: 102 }),
     ]));
     fireEvent(window, new Event("focus"));
-    await screen.findByRole("button", { name: /Second check Failed/ });
-    expect(screen.getAllByRole("button", { name: /check (Running|Failed)/ }).map((row) => row.dataset.subagentId)).toEqual(["task-1", "second"]);
-    expect(screen.getByRole("button", { name: /Review needed: 1/ })).toBeVisible();
-    expect(screen.getByText("Main answer").compareDocumentPosition(screen.getByText("Second check")) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    await within(archive).findByRole("button", { name: /Second check Failed/ });
+    expect(taskIds(archive)).toEqual(["task-1", "second"]);
+    expect(screen.getAllByRole("region", { name: "Subtasks" })).toHaveLength(1);
+    expect(within(archive).getByRole("button", { name: /Review needed: 1/ })).toBeVisible();
+    expect(screen.getByText("Main answer").compareDocumentPosition(archive) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    expect(archive.compareDocumentPosition(screen.getByText("Focus on errors")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("prefers the exact initiating follow-up over a turn fallback", async () => {
-    vi.mocked(fetch).mockImplementation(async () => response([task({ origin_message_id: "followup" })]));
+  it("prefers the exact initiating follow-up over a turn fallback for archived results", async () => {
+    vi.mocked(fetch).mockImplementation(async () => response([task({ origin_message_id: "followup", state: "done", completed_at: 102 })]));
+    const user = userEvent.setup();
     render(layout({ threadMessages: [...messages, { id: "followup", role: "user", content: "Check more", turnId: "turn-a", createdAt: 102_000 }] }));
-    await screen.findByRole("button", { name: /Config check Running/ });
-    const group = screen.getByRole("region", { name: "Subtasks" });
-    expect(screen.getByText("Check more").compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const archive = await openArchive(user);
+    expect(within(archive).getByRole("button", { name: /Config check Completed/ })).toBeVisible();
+    expect(screen.getAllByRole("region", { name: "Subtasks" })).toHaveLength(1);
+    expect(screen.getByText("Check more").compareDocumentPosition(archive) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByTestId("subagent-task-dock")).not.toBeInTheDocument();
   });
 
   it("keeps legacy work separate after refresh and preserves its disclosure through local history prepends", async () => {
@@ -471,12 +803,13 @@ describe("session-owned task UI", () => {
     ]));
     const user = userEvent.setup();
     const view = render(layout());
-    await screen.findByRole("button", { name: /Config check Running/ });
+    await screen.findByTestId("subagent-task-dock-trigger");
     const otherWork = screen.getByRole("region", { name: "Other tasks" });
     const header = within(otherWork).getByRole("button", { name: /Other tasks/ });
     expect(header).toHaveAttribute("aria-expanded", "false");
     expect(otherWork.compareDocumentPosition(screen.getByText("Inspect config")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(within(screen.getByRole("region", { name: "Subtasks" })).queryByText("Nanjing weather")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Subtasks" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("messages")).not.toHaveTextContent("Config check");
     await user.click(header);
     expect(within(otherWork).getByText("These tasks have no matching request in the displayed messages.")).toBeVisible();
     await user.click(within(otherWork).getByRole("button", { name: /Nanjing weather Completed/ }));
@@ -499,39 +832,50 @@ describe("session-owned task UI", () => {
     expect(requestMutation).not.toHaveBeenCalled();
   });
 
-  it("reattaches work when its initiating prompt is loaded without duplicating it or closing details", async () => {
+  it("reattaches archived work when its prompt loads without duplicating it, closing details or losing focus", async () => {
     vi.mocked(fetch).mockImplementation(async () => response([
-      task({ task_id: "older", label: "Earlier check", origin_turn_id: "older-turn", origin_message_id: "older-prompt" }),
+      task({ task_id: "older", label: "Earlier check", state: "done", completed_at: 102, result: "Earlier finding", origin_turn_id: "older-turn", origin_message_id: "older-prompt" }),
       task({ created_at: 200 }),
     ]));
     const user = userEvent.setup();
     const view = render(layout());
-    const otherWork = await screen.findByRole("region", { name: "Other tasks" });
-    await user.click(within(otherWork).getByRole("button", { name: /Earlier check Running/ }));
+    const otherWork = await openArchive(user, "Other tasks");
+    await user.click(within(otherWork).getByRole("button", { name: /Earlier check Completed/ }));
     const detail = screen.getByRole("dialog", { name: "Earlier check" });
     view.rerender(layout({ threadMessages: [
       { id: "older-prompt", role: "user", content: "Inspect earlier work", turnId: "older-turn", createdAt: 99_000 },
       ...messages,
     ] }));
     expect(detail).toBeVisible();
+    expect(within(detail).getByText("Earlier finding")).toBeVisible();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("region", { name: "Other tasks" })).not.toBeInTheDocument();
-    const row = screen.getByRole("button", { name: /Earlier check Running/ });
-    expect(screen.getAllByRole("button", { name: /Earlier check Running/ })).toHaveLength(1);
-    expect(screen.getByText("Inspect earlier work").compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByText("Inspect config").compareDocumentPosition(row) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    const archive = screen.getByRole("region", { name: "Subtasks" });
+    const summary = within(archive).getByRole("button", { name: /Subtasks/ });
+    expect(summary).toHaveAttribute("aria-expanded", "true");
+    expect(taskIds(screen.getByTestId("messages"))).toEqual(["older"]);
+    expect(screen.getByText("Inspect earlier work").compareDocumentPosition(archive) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText("Inspect config").compareDocumentPosition(archive) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    const row = within(archive).getByRole("button", { name: /Earlier check Completed/ });
     await waitFor(() => expect(row).toHaveFocus());
+    expect(row).toBeVisible();
   });
 
   it("merges live work before the initial read without polling or rolling back completed work", async () => {
     let resolveRead!: (value: Response) => void;
     vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { resolveRead = resolve; }));
+    const user = userEvent.setup();
     render(layout());
     emitTask(task({ revision: 3, state: "done", result: "Verified", completed_at: 102 }));
     emitTask(task({ task_id: "task-2", label: "Sibling check", created_at: 101 }));
-    await screen.findByRole("button", { name: /Sibling check Running/ });
+    const list = await openTaskList(user);
+    expect(within(list).getByRole("button", { name: /Sibling check Running/ })).toBeVisible();
     await act(async () => { resolveRead(response([task()])); });
-    expect(screen.getByRole("button", { name: /Config check Completed/ })).toBeVisible();
+    expect(taskIds(list)).toEqual(["task-2"]);
+    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Active: 1");
+    expect(screen.getByTestId("subagent-task-dock-trigger")).not.toHaveTextContent("Completed:");
+    const archive = await openArchive(user);
+    expect(within(archive).getByRole("button", { name: /Config check Completed/ })).toBeVisible();
     expect(screen.getAllByRole("region", { name: "Subtasks" })).toHaveLength(1);
     vi.useFakeTimers();
     await act(async () => { vi.advanceTimersByTime(10_000); });
@@ -545,7 +889,8 @@ describe("session-owned task UI", () => {
     render(layout());
     await act(async () => { await Promise.resolve(); });
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
-    const row = screen.getByRole("button", { name: /Config check Running/ });
+    fireEvent.click(screen.getByTestId("subagent-task-dock-trigger"));
+    const row = within(screen.getByTestId("subagent-task-tree")).getByRole("button", { name: /Config check Running/ });
     expect(row).toHaveTextContent("12s");
     fireEvent.click(row);
     expect(screen.getByRole("dialog", { name: "Config check" })).toHaveTextContent("12s");
@@ -555,8 +900,9 @@ describe("session-owned task UI", () => {
 
   it("recovers missed siblings after reconnect even when an older read is still pending", async () => {
     let resolveOld!: (value: Response) => void;
+    const user = userEvent.setup();
     render(layout());
-    await screen.findByRole("button", { name: /Config check Running/ });
+    const list = await openTaskList(user);
     vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
     fireEvent(window, new Event("focus"));
     emitTask(task({ revision: 3, state: "cancelled", completed_at: 102 }));
@@ -565,11 +911,12 @@ describe("session-owned task UI", () => {
     ]));
     act(() => { statusHandlers.forEach((handler) => { handler("closed"); handler("open"); }); });
     await act(async () => { resolveOld(response([task()])); });
-    await screen.findByRole("button", { name: /Recovered check Running/ });
-    expect(screen.getByRole("button", { name: /Config check Cancelled/ })).toBeVisible();
+    await within(list).findByRole("button", { name: /Recovered check Running/ });
+    expect(within(list).getByRole("button", { name: /Config check Cancelled/ })).toBeVisible();
+    expect(taskIds(list)).toEqual(["task-1", "task-2"]);
     expect(fetch).toHaveBeenCalledTimes(3);
     emitTask({ ...task(), revision: -1 });
-    expect(screen.getByRole("button", { name: /Config check Cancelled/ })).toBeVisible();
+    expect(within(list).getByRole("button", { name: /Config check Cancelled/ })).toBeVisible();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -578,13 +925,17 @@ describe("session-owned task UI", () => {
     vi.useFakeTimers();
     const view = render(layout({ liveEvents: false }));
     await act(async () => { await Promise.resolve(); });
-    expect(screen.getByRole("button", { name: /Config check Running/ })).toBeVisible();
+    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Active: 1");
+    fireEvent.click(screen.getByTestId("subagent-task-dock-trigger"));
+    const list = screen.getByTestId("subagent-task-tree");
+    expect(within(list).getByRole("button", { name: /Config check Running/ })).toBeVisible();
     vi.mocked(fetch).mockImplementation(async () => response([task({ revision: undefined, state: "done", completed_at: 102 })]));
     await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: /Config check Running/ })).toBeVisible();
     await act(async () => { fireEvent(window, new Event("focus")); });
-    expect(screen.getByRole("button", { name: /Subtasks Finished: 1/ })).toBeVisible();
+    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Completed: 1");
+    expect(within(list).getByRole("button", { name: /Config check Completed/ })).toBeVisible();
     expect(client.onChat).not.toHaveBeenCalled();
     view.rerender(layout({ liveEvents: false, visible: false }));
     const reads = vi.mocked(fetch).mock.calls.length;
