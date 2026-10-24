@@ -221,6 +221,8 @@ Manage optional runtime support from **System**, **Models**, or **Web**, or use 
 
 Keyless hosted presets include **Firecrawl** for search, scraping, crawling and extraction, and **Parallel Search** for `web_search` and `web_fetch`. They are optional MCP tools and do not change the built-in web search provider.
 
+The Keenable preset connects to Keenable's hosted MCP endpoint and exposes `search_web_pages` and `fetch_page_content`. It works without an API key (rate-limited per IP); an optional Keenable API key raises the limits. It does not replace nanobot's built-in Keenable search provider; mention `@keenable` when a turn should use it.
+
 After a CLI App or MCP server is available, mention it from the composer with `@` to attach that tool to the next message. Plugin-provided skills participate in normal skill discovery and can be invoked with `$skill-name`.
 
 ## Skills
