@@ -27,7 +27,7 @@ from nanobot.agent.tools.schema import (
     tool_parameters_schema,
 )
 from nanobot.agent.tools.shell_config import ExecToolConfig
-from nanobot.agent.tools.shell_output import ShellOutputFilter
+from nanobot.agent.tools.shell_output import ShellOutputFilter, filter_stderr_noise
 
 DEFAULT_YIELD_MS = 1000
 MAX_YIELD_MS = 30_000
@@ -358,6 +358,7 @@ class _ExecSession:
         async with self._lock:
             stdout, stdout_truncated = self._stdout.drain()
             stderr, stderr_truncated = self._stderr.drain()
+            stderr = filter_stderr_noise(stderr)
 
         output_parts = [stdout] if stdout else []
         if stderr:
