@@ -223,6 +223,8 @@ Keyless hosted presets include **Firecrawl** for search, scraping, crawling and 
 
 After a CLI App or MCP server is available, mention it from the composer with `@` to attach that tool to the next message. Plugin-provided skills participate in normal skill discovery and can be invoked with `$skill-name`.
 
+The FXMacroData preset connects to FXMacroData's hosted MCP endpoint for official-source macroeconomic data: central-bank rates, inflation, jobs and GDP releases, release calendars and FX rates. USD data works without an API key (each release is readable 15 minutes after publication, covering the last 90 days); other currencies and FX rates need an FXMacroData key, which you can send as an `Authorization: Bearer` header on a custom MCP server. Mention `@fxmacrodata` when a turn needs macro data.
+
 ## Skills
 
 Open **Skills → Installed** to review built-in and workspace-provided skills. You can search and filter them, inspect their instructions and setup requirements, enable or disable them, and delete workspace skills you no longer want.
