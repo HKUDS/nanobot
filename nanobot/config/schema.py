@@ -330,6 +330,7 @@ class ProvidersConfig(Base):
     siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)
     edenai: ProviderConfig = Field(default_factory=ProviderConfig)
     novita: ProviderConfig = Field(default_factory=ProviderConfig)
+    runcrate: ProviderConfig = Field(default_factory=ProviderConfig)
     volcengine: ProviderConfig = Field(default_factory=ProviderConfig)
     volcengine_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)
     byteplus: ProviderConfig = Field(default_factory=ProviderConfig)
