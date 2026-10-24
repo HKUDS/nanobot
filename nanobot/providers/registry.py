@@ -91,6 +91,16 @@ class ProviderSpec:
     # per-model param overrides, e.g. (("kimi-k2.5", {"temperature": 1.0}),)
     model_overrides: tuple[tuple[str, dict[str, Any]], ...] = ()
 
+    # Model-specific thinking controls layered on top of the provider default.
+    # This is needed when one endpoint serves models with different thinking
+    # semantics (for example, MiniMax M3 versus M3.1-Flash).
+    model_thinking_styles: tuple[tuple[str, str], ...] = ()
+
+    # Models that accept thinking controls but ignore the OpenAI
+    # ``reasoning_effort`` field.  The control is still represented through
+    # the model-specific thinking style above.
+    model_reasoning_effort_ignored: tuple[str, ...] = ()
+
     # OAuth-based providers (e.g., OpenAI Codex) don't use API keys
     is_oauth: bool = False
 
@@ -766,9 +776,18 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
                 context_window=1_000_000,
                 reasoning_efforts=("low", "medium", "high", "xhigh", "max"),
                 default_reasoning_effort="max",
-                input_modalities=("text", "image"),
+                input_modalities=("text", "image", "video"),
+            ),
+            ProviderModelSpec(
+                id="MiniMax-M3",
+                label="MiniMax-M3",
+                aliases=("minimax-m3",),
+                context_window=1_000_000,
+                input_modalities=("text", "image", "video"),
             ),
         ),
+        model_thinking_styles=(("minimax-m3", "thinking_type"),),
+        model_reasoning_effort_ignored=("minimax-m3",),
         reasoning_effort_remap=(
             ("none", "low"), ("minimal", "low"),
             ("low", "low"), ("medium", "medium"), ("high", "high"),

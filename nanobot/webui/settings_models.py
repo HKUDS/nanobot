@@ -1031,7 +1031,7 @@ def reasoning_effort_values_for(provider_name: str, model: str) -> list[str]:
         return [""]
 
     metadata = spec.model_metadata(model)
-    if metadata is not None and metadata.reasoning_efforts:
+    if metadata is not None:
         return ["", *metadata.reasoning_efforts]
 
     remap = getattr(spec, "reasoning_effort_remap", ())

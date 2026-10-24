@@ -1464,11 +1464,22 @@ def test_minimax_off_presets_map_to_low_effort(model, effort) -> None:
     assert kw["extra_body"] == {"reasoning_split": True}
 
 
+@pytest.mark.parametrize("effort", ["none", "minimal"])
+def test_minimax_m3_uses_thinking_toggle_without_reasoning_effort(effort) -> None:
+    kw = _build_kwargs_for("minimax", "MiniMax-M3", reasoning_effort=effort)
+    assert "reasoning_effort" not in kw
+    assert kw["extra_body"] == {
+        "reasoning_split": True,
+        "thinking": {"type": "disabled"},
+    }
+
+
 @pytest.mark.parametrize("model", ["MiniMax-M2.7", "MiniMax-M3"])
 def test_minimax_effort_menu_unchanged_for_models_without_metadata(model) -> None:
     from nanobot.webui.settings_models import reasoning_effort_values_for
 
-    assert reasoning_effort_values_for("minimax", model) == ["", "low", "medium", "high"]
+    expected = [""] if model == "MiniMax-M3" else ["", "low", "medium", "high"]
+    assert reasoning_effort_values_for("minimax", model) == expected
 
 
 def test_minimax_m31_flash_builtin_metadata() -> None:
@@ -1479,7 +1490,47 @@ def test_minimax_m31_flash_builtin_metadata() -> None:
     assert meta.context_window == 1_000_000
     assert meta.reasoning_efforts == ("low", "medium", "high", "xhigh", "max")
     assert meta.default_reasoning_effort == "max"
-    assert meta.input_modalities == ("text", "image")
+    assert meta.input_modalities == ("text", "image", "video")
+
+
+def test_minimax_m3_builtin_metadata_is_second_and_has_no_effort_menu() -> None:
+    from nanobot.providers.registry import find_by_name
+
+    spec = find_by_name("minimax")
+    assert spec is not None
+    assert [model.id for model in spec.builtin_models] == [
+        "MiniMax-M3.1-Flash", "MiniMax-M3",
+    ]
+    meta = spec.model_metadata("MiniMax-M3")
+    assert meta is not None
+    assert meta.context_window == 1_000_000
+    assert meta.reasoning_efforts == ()
+    assert meta.input_modalities == ("text", "image", "video")
+
+
+def test_minimax_tool_history_preserves_reasoning_fields() -> None:
+    provider = OpenAICompatProvider(
+        api_key="k", default_model="MiniMax-M3", spec=find_by_name("minimax"),
+    )
+    messages = [
+        {"role": "user", "content": "Use the tool."},
+        {
+            "role": "assistant",
+            "content": "",
+            "reasoning_content": "I should call the tool.",
+            "reasoning_details": [{"type": "reasoning.text", "text": "I should call the tool."}],
+            "tool_calls": [_tool_call("call_read")],
+        },
+        {"role": "tool", "tool_call_id": "call_read", "content": "done"},
+    ]
+    kwargs = provider._build_kwargs(
+        messages=messages, tools=None, model="MiniMax-M3",
+        max_tokens=256, temperature=0.7, reasoning_effort=None, tool_choice=None,
+    )
+    assistant = kwargs["messages"][1]
+    assert assistant["reasoning_content"] == "I should call the tool."
+    assert assistant["reasoning_details"][0]["type"] == "reasoning.text"
+    assert assistant["tool_calls"][0]["id"] == "call_read"
 
 
 def test_volcengine_thinking_enabled() -> None:

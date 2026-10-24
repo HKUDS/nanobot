@@ -71,7 +71,7 @@ def _is_named_function_tool(tool: object, name: str) -> bool:
 
 _ALLOWED_MSG_KEYS = frozenset({
     "role", "content", "tool_calls", "tool_call_id", "name",
-    "reasoning_content", "extra_content",
+    "reasoning_content", "reasoning_details", "extra_content",
 })
 _ALNUM = string.ascii_letters + string.digits
 
@@ -160,6 +160,12 @@ def _model_thinking_style(model_name: str) -> str:
     return _MODEL_THINKING_STYLES.get(_model_slug(model_name), "")
 
 
+def _model_pattern_matches(pattern: str, slug: str) -> bool:
+    """Match a model family without treating version dots as separators."""
+    normalized = pattern.lower()
+    return slug == normalized or slug.startswith(f"{normalized}-")
+
+
 def _thinking_styles_for(spec: ProviderSpec | None, model_name: str) -> list[str]:
     styles: list[str] = []
     if spec and spec.thinking_style:
@@ -172,6 +178,11 @@ def _thinking_styles_for(spec: ProviderSpec | None, model_name: str) -> list[str
     model_style = _model_thinking_style(model_name)
     if model_style and model_style not in styles:
         styles.append(model_style)
+    if spec:
+        slug = _model_slug(model_name)
+        for pattern, style in spec.model_thinking_styles:
+            if _model_pattern_matches(pattern, slug) and style not in styles:
+                styles.append(style)
     return styles
 
 
@@ -981,11 +992,29 @@ class OpenAICompatProvider(LLMProvider):
                 pat in model_lower for pat in spec.implicit_reasoning_models
             )
 
+        # Some models expose an explicit thinking toggle but do not implement
+        # the OpenAI ``reasoning_effort`` field.  Keep the semantic on/off
+        # choice for the model-specific thinking style while omitting the
+        # unsupported field from the SDK request.
+        model_ignores_effort = bool(
+            spec
+            and getattr(spec, "model_reasoning_effort_ignored", ())
+            and any(
+                _model_pattern_matches(pattern, slug)
+                for pattern in spec.model_reasoning_effort_ignored
+            )
+        )
+        if model_ignores_effort:
+            wire_effort = None
+            if semantic_effort in ("none", "minimal"):
+                semantic_effort = "none"
+
         # Some providers accept a constrained reasoning_effort vocabulary
         # (Mistral: only "high"/"none"). Remap from OpenAI vocab to the
         # provider's accepted set; an empty mapped value means "omit".
         if (
             not strip_effort
+            and not model_ignores_effort
             and spec
             and getattr(spec, "reasoning_effort_remap", ())
             and isinstance(semantic_effort, str)
@@ -1009,6 +1038,10 @@ class OpenAICompatProvider(LLMProvider):
                 if not thinking_enabled and slug in _KIMI_ALWAYS_THINKING_MODELS:
                     continue
                 extra = _thinking_extra_body(thinking_style, thinking_enabled)
+                if model_ignores_effort and thinking_style == "reasoning_split":
+                    # ``reasoning_split`` selects the response shape; it is
+                    # independent from M3's thinking on/off toggle.
+                    extra = {"reasoning_split": True}
                 if extra:
                     kwargs.setdefault("extra_body", {}).update(extra)
             gateway_style = getattr(spec, "gateway_reasoning_style", "") if spec else ""
