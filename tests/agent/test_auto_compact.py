@@ -19,6 +19,7 @@ from nanobot.command import CommandContext
 from nanobot.config.schema import AgentDefaults, Config
 from nanobot.events import NO_EVENTS, ContextCompactionEvent
 from nanobot.providers.base import LLMResponse
+from nanobot.runtime_admission import RuntimeMaintenanceError
 from nanobot.runtime_context import public_history_message
 from nanobot.sdk.clients import RuntimeClient
 from nanobot.session.keys import HEARTBEAT_SESSION_KEY, UNIFIED_SESSION_KEY
@@ -376,6 +377,22 @@ async def test_idle_scan_skips_session_with_inflight_direct_turn(tmp_path, monke
         if turn is not None:
             await asyncio.gather(turn, return_exceptions=True)
         await loop.aclose()
+
+
+async def test_refused_direct_call_releases_active_registration(tmp_path, monkeypatch):
+    """A direct call refused by maintenance must not leak its registration.
+
+    Entering activity() refuses a paused runtime before the turn registers;
+    a leaked refcount would keep the idle scan away from that session forever.
+    """
+    monkeypatch.setattr("nanobot.config.home._home_path", tmp_path / "home")
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
+    loop = _make_loop(tmp_path / "workspace")
+    with loop.bus.admission.pause_before_start():
+        with pytest.raises(RuntimeMaintenanceError):
+            await loop.process_direct("hello", session_key="cli:direct")
+        assert loop._direct_turns == {}
+    await loop.aclose()
 
 
 class TestSessionTTLConfig:

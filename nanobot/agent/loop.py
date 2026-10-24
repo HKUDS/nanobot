@@ -2699,10 +2699,12 @@ class AgentLoop:
         )
         # Share the dispatch lock so direct calls serialize with bus turns.
         lock = self._get_session_lock(session_key)
-        # Register before awaiting the lock so the waiting turn also keeps the
-        # idle scan away; the refcount covers concurrent direct calls.
-        self._direct_turns[session_key] = self._direct_turns.get(session_key, 0) + 1
         with self.bus.admission.activity():
+            # Register before awaiting the lock so the waiting turn also keeps
+            # the idle scan away; the refcount covers concurrent direct calls.
+            # Entering activity() can refuse a paused runtime, so register
+            # only after that check to keep the decrement paired.
+            self._direct_turns[session_key] = self._direct_turns.get(session_key, 0) + 1
             temporary_parent = False
             try:
                 async with lock:
