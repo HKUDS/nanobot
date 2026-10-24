@@ -1787,6 +1787,8 @@
       "progress": "{{completed}} sur {{total}} terminées",
       "running": "En cours : {{count}}",
       "finished": "Terminées : {{count}}",
+      "active": "En cours : {{count}}",
+      "completed": "Réussies : {{count}}",
       "needsReview": "À vérifier : {{count}}",
       "messages": "État des messages"
     },

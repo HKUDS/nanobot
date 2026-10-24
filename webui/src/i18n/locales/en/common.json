@@ -1993,6 +1993,8 @@
       "progress": "{{completed}} of {{total}} completed",
       "running": "Running: {{count}}",
       "finished": "Finished: {{count}}",
+      "active": "Active: {{count}}",
+      "completed": "Completed: {{count}}",
       "needsReview": "Review needed: {{count}}",
       "messages": "Message status"
     },

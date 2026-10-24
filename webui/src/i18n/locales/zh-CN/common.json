@@ -1993,6 +1993,8 @@
       "progress": "已完成 {{completed}} / {{total}} 项",
       "running": "{{count}} 项进行中",
       "finished": "{{count}} 项已结束",
+      "active": "{{count}} 项进行中",
+      "completed": "{{count}} 项已完成",
       "needsReview": "{{count}} 项需检查",
       "messages": "消息状态"
     },
