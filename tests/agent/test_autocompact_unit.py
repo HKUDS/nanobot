@@ -247,6 +247,9 @@ class TestCheckExpired:
         old_dt = datetime.now() - timedelta(minutes=20)
         session = _make_session("cli:old", updated_at=old_dt)
         _add_turns(session, 5)
+        # add_message bumps updated_at; the scan and the archive's eligibility
+        # recheck both read the settled value, so restore the idle timestamp.
+        session.updated_at = old_dt
         ac.sessions.list_sessions.return_value = [
             {"key": "cli:old", "updated_at": old_dt.isoformat()}
         ]
@@ -511,6 +514,91 @@ class TestArchiveDelegates:
         await ac._archive("cli:test", runtime=_runtime())
 
         assert "cli:test" not in ac._archiving
+
+
+# ---------------------------------------------------------------------------
+# _archive eligibility recheck (#6410)
+# ---------------------------------------------------------------------------
+
+
+class TestArchiveRechecksEligibility:
+    """A scheduled idle archive must re-decide eligibility after the lock wait.
+
+    The scan in check_expired decides from the persisted updated_at, but the
+    archive then queues behind the per-session lock. A turn that settles in
+    the meantime refreshes updated_at, so an archive that compacts on its
+    scan-time decision summarizes a session that has not been idle for the
+    configured interval (#6410).
+    """
+
+    def _queued_archive(self, session: Session):
+        sessions = _mock_sessions()
+        sessions.get_or_create.return_value = session
+        consolidator = MagicMock()
+        consolidator.compact_idle_session = AsyncMock(return_value="Summary.")
+        locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        ac = AutoCompact(
+            sessions=sessions,
+            consolidator=consolidator,
+            session_ttl_minutes=15,
+            session_lock=locks.__getitem__,
+        )
+        ac._archiving.add(session.key)
+        return ac, consolidator, locks[session.key]
+
+    @pytest.mark.asyncio
+    async def test_archive_queued_behind_turn_skips_after_fresh_activity(self):
+        session = _make_session(
+            "cli:busy", updated_at=datetime.now() - timedelta(minutes=20),
+        )
+        ac, consolidator, lock = self._queued_archive(session)
+        scanned_updated_at = session.updated_at
+
+        # The turn holds the session lock; the queued archive waits behind it.
+        await lock.acquire()
+        archive_task = asyncio.create_task(
+            ac._archive(
+                "cli:busy", runtime=_runtime(), scanned_updated_at=scanned_updated_at,
+            ),
+        )
+        await asyncio.sleep(0)  # let the archive reach the lock wait
+
+        # The turn settles first: its save refreshes the session's activity.
+        session.updated_at = datetime.now()
+        lock.release()
+        await archive_task
+
+        consolidator.compact_idle_session.assert_not_awaited()
+        assert "cli:busy" not in ac._archiving
+
+    @pytest.mark.asyncio
+    async def test_archive_queued_behind_turn_still_compacts_when_still_idle(self):
+        session = _make_session(
+            "cli:busy", updated_at=datetime.now() - timedelta(minutes=20),
+        )
+        ac, consolidator, lock = self._queued_archive(session)
+        runtime = _runtime()
+        scanned_updated_at = session.updated_at
+
+        await lock.acquire()
+        archive_task = asyncio.create_task(
+            ac._archive(
+                "cli:busy", runtime=runtime, scanned_updated_at=scanned_updated_at,
+            ),
+        )
+        await asyncio.sleep(0)  # let the archive reach the lock wait
+
+        # No fresh activity arrives while the archive waits.
+        lock.release()
+        await archive_task
+
+        consolidator.compact_idle_session.assert_awaited_once_with(
+            "cli:busy",
+            runtime=runtime,
+            events=NO_EVENTS,
+            reason="idle",
+        )
+        assert "cli:busy" not in ac._archiving
 
 
 # ---------------------------------------------------------------------------
