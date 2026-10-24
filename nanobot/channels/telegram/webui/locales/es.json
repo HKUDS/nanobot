@@ -22,6 +22,9 @@
           "allowlist": "Lista de permitidos"
         }
       },
+      "groupPolicyOverrides": {
+        "label": "Anulaciones de comportamiento de grupo (JSON)"
+      },
       "mode": {
         "label": "Modo de conexión",
         "choices": {

@@ -22,6 +22,9 @@
           "allowlist": "許可リスト"
         }
       },
+      "groupPolicyOverrides": {
+        "label": "グループ動作のオーバーライド (JSON)"
+      },
       "mode": {
         "label": "接続モード",
         "choices": {

@@ -22,6 +22,9 @@
           "allowlist": "Daftar izin"
         }
       },
+      "groupPolicyOverrides": {
+        "label": "Penggantian perilaku grup (JSON)"
+      },
       "mode": {
         "label": "Modus koneksi",
         "choices": {
