@@ -1192,8 +1192,6 @@ class WebSearchTool(Tool):
                 asyncio.to_thread(ddgs.text, query, max_results=n),
                 timeout=self.config.timeout,
             )
-            if not raw:
-                return f"No usable search entries returned for: {query}"
             raw_items = cast(list[dict[str, Any]], raw)
             items: list[dict[str, Any]] = [
                 {"title": r.get("title", ""), "url": r.get("href", ""), "content": r.get("body", "")}
