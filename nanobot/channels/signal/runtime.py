@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import mimetypes
 import re
 import shutil
 import unicodedata
@@ -27,6 +28,7 @@ from nanobot.config_base import Base
 from nanobot.events import ContextCompactionEvent
 from nanobot.pairing import is_approved
 from nanobot.utils.helpers import safe_filename, split_message
+from nanobot.utils.media_decode import media_destination
 
 
 @dataclass
@@ -946,7 +948,8 @@ class SignalChannel(BaseChannel):
                 try:
                     source_path = self._signal_attachments_dir() / attachment_id
                     if source_path.exists():
-                        dest_path = media_dir / f"signal_{safe_filename(filename)}"
+                        mime_type = content_type or mimetypes.guess_type(safe_filename(filename))[0] or "application/octet-stream"
+                        dest_path = media_destination(media_dir, mime_type, filename=filename)
                         shutil.copy2(source_path, dest_path)
                         media_paths.append(str(dest_path))
                         media_type = content_type.split("/")[0] if "/" in content_type else "file"
