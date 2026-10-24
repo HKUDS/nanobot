@@ -23,6 +23,7 @@ import {
   fetchMcpPresets,
   fetchMarketplaceSkillTrends,
   fetchNanobotFeatures,
+  fetchPairingRequests,
   fetchProviderModels,
   fetchPromptIndex,
   fetchSessionAutomations,
@@ -805,6 +806,57 @@ describe("webui API helpers", () => {
       status: 400,
       message: "Paste the complete callback URL.",
     });
+  });
+
+  it.each(["abort", "timeout"])("cancels and settles a pairing read during body consumption (%s)", async (ending) => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    let transportSignal!: AbortSignal;
+    let bodyStarted = false;
+    let bodyStopped = false;
+    vi.mocked(fetch).mockImplementation(async (_input, init) => {
+      transportSignal = init!.signal!;
+      return { ok: true, json: () => new Promise((_resolve, reject) => {
+        bodyStarted = true;
+        transportSignal.addEventListener("abort", () => {
+          bodyStopped = true;
+          reject(new DOMException("Aborted", "AbortError"));
+        }, { once: true });
+      }) } as Response;
+    });
+    const read = fetchPairingRequests("tok", "", controller.signal);
+    const failure = ending === "abort"
+      ? expect(read).rejects.toMatchObject({ name: "AbortError" })
+      : expect(read).rejects.toThrow("Request timed out after 20000ms");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bodyStarted).toBe(true);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(transportSignal.aborted).toBe(false);
+    if (ending === "abort") controller.abort();
+    else await vi.advanceTimersByTimeAsync(19_000);
+    await failure;
+    expect(transportSignal.aborted).toBe(true);
+    expect(bodyStopped).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("releases a completed pairing body's cancellation bridge and deadline", async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    let transportSignal!: AbortSignal;
+    let finish!: (value: unknown) => void;
+    vi.mocked(fetch).mockImplementation(async (_input, init) => {
+      transportSignal = init!.signal!;
+      return { ok: true, json: () => new Promise((resolve) => { finish = resolve; }) } as Response;
+    });
+    const read = fetchPairingRequests("tok", "", controller.signal);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(1);
+    finish({ requests: [] });
+    await expect(read).resolves.toEqual({ requests: [] });
+    expect(vi.getTimerCount()).toBe(0);
+    controller.abort();
+    expect(transportSignal.aborted).toBe(false);
   });
 
   it("times out when an API request never responds", async () => {

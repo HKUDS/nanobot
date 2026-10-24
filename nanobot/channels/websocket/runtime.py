@@ -723,8 +723,6 @@ class WebSocketChannel(BaseChannel):
                 except TimeoutError:
                     pass
 
-        prune_task = asyncio.create_task(prune_uploads())
-
         async def runner() -> None:
             socket_path = self.config.unix_socket_path
             failures = 0
@@ -816,13 +814,19 @@ class WebSocketChannel(BaseChannel):
                     if self._server is server:
                         self._server = None
 
-        task = asyncio.create_task(runner())
-        self._server_task = task
+        prune_task: asyncio.Task[None] | None = None
+        task: asyncio.Task[None] | None = None
         try:
+            await self.gateway.pairing_notifications.start(self._commands.broadcast_pairing_change)
+            prune_task = asyncio.create_task(prune_uploads())
+            task = asyncio.create_task(runner())
+            self._server_task = task
             await task
         finally:
-            prune_task.cancel()
-            await asyncio.gather(prune_task, return_exceptions=True)
+            await self.gateway.pairing_notifications.close()
+            if prune_task is not None:
+                prune_task.cancel()
+                await asyncio.gather(prune_task, return_exceptions=True)
             self._uploads.store.clear()
             self._running = False
             if self._server_task is task:
@@ -919,6 +923,7 @@ class WebSocketChannel(BaseChannel):
     # -- Outbound WebSocket events -----------------------------------------
 
     async def stop(self) -> None:
+        await self.gateway.pairing_notifications.close()
         await self.gateway.http.remote_instances.close()
         server_task = self._server_task
         if (

@@ -4,6 +4,8 @@
 
 The WebUI shares its gateway and saved sessions with the native terminal client and is included with `nanobot-ai`.
 
+Channel pairing prompts refresh when requests arrive or change, without waiting for the next polling interval. Returning to the WebUI or reconnecting also refreshes pending requests.
+
 For a visual tour, see the [README feature gallery](../README.md#-webui). This guide follows the current source tree; some features are newer than the published release.
 
 ## Open the WebUI

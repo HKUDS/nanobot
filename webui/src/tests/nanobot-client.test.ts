@@ -71,6 +71,22 @@ afterEach(() => {
 });
 
 describe("NanobotClient", () => {
+  it("delivers payload-free pairing changes, isolates listeners and unsubscribes", () => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    const pairing = vi.fn();
+    client.onPairingChange(() => { throw new Error("view failed"); });
+    const unsubscribe = client.onPairingChange(pairing);
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({ event: "pairing_changed" });
+    expect(pairing).toHaveBeenCalledTimes(1);
+    expect(pairing).toHaveBeenCalledWith();
+    unsubscribe();
+    lastSocket().fakeMessage({ event: "pairing_changed" });
+    expect(pairing).toHaveBeenCalledTimes(1);
+    client.close();
+  });
+
   it("emits live task notices without mounted chats, not when the chat replays", () => {
     const client = new NanobotClient({ url: "ws://test", reconnect: false,
       socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });

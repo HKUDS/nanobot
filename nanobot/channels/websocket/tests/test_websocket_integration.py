@@ -19,7 +19,7 @@ from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
 from nanobot.webui.gateway_services import build_gateway_services
 
-from .ws_test_client import WsTestClient, issue_token, issue_token_ok
+from .ws_test_client import WsTestClient, issue_token, issue_token_ok, wait_for_listener
 
 
 def _ch(bus: Any, port: int, **kw: Any) -> WebSocketChannel:
@@ -438,6 +438,7 @@ async def test_token_issue_full_flow(bus: MagicMock) -> None:
              websocketRequiresToken=True)
     t = asyncio.create_task(ch.start())
     try:
+        await wait_for_listener(ch, t)
         # no secret -> 401
         _, status = await issue_token(port=29917, issue_path="/auth/token")
         assert status == 401

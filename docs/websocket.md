@@ -190,6 +190,8 @@ Reasoning frames only flow when the channel's `showReasoning` is `true` (default
 
 `model_preset` is omitted when no named preset is active. WebUI clients use this event to refresh model settings after default-runtime and config changes. `/model <preset>` is session-scoped; its selection is reflected through `session_updated` and the session row's `model_preset` field instead of this global event.
 
+**`pairing_changed`** — tells authenticated WebUI connections to re-read pending channel pairing requests. The event carries no pairing codes or account data. See the [pairing notification contract](./webui-pairing.md) for ownership and recovery.
+
 **`attached`** — confirmation for `new_chat` / `attach` inbound envelopes (see [Multi-chat multiplexing](#multi-chat-multiplexing)):
 
 ```json

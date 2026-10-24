@@ -47,6 +47,8 @@ def _channel() -> WebSocketChannel:
     gateway.transcripts.initialize = AsyncMock()
     gateway.http.settings_routes.close = AsyncMock()
     gateway.http.remote_instances.close = AsyncMock()
+    gateway.pairing_notifications.start = AsyncMock()
+    gateway.pairing_notifications.close = AsyncMock()
     return WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
         MessageBus(),

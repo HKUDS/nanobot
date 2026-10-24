@@ -1572,6 +1572,7 @@ export type InboundEvent =
       /** Legacy persisted transcripts may carry the final reasoning text here. */
       text?: string;
     } & InboundTurnMetadata)
+  | { event: "pairing_changed" }
   | {
       event: "runtime_model_updated";
       model_name: string;
