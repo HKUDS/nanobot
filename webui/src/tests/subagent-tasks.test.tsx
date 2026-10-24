@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SubagentTasksProvider, SubagentThreadMessages as ThreadMessages } from "@/components/thread/SubagentTasks";
+import { SubagentTaskDock } from "@/components/thread/SubagentTaskDock";
 import { buildDisplayUnits, unitKeysForDisplay } from "@/components/thread/ThreadMessages";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
 import { setAppLanguage } from "@/i18n";
@@ -56,11 +57,11 @@ function childThread(answer: string, active = true): Response {
     ],
   }), { headers: { "content-type": "application/json" } });
 }
-function layout({ enabled = true, liveEvents = true, historyEnabled = false, sessionKey = "websocket:a", visible = true, threadMessages = messages } = {}) {
+function layout({ enabled = true, liveEvents = true, historyEnabled = false, sessionKey = "websocket:a", visible = true, active = true, dock = false, threadMessages = messages } = {}) {
   return <ThreadVisibilityContext.Provider value={visible}>
-    <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled={enabled} liveEvents={liveEvents} historyEnabled={historyEnabled}>
+    <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled={enabled} liveEvents={liveEvents} historyEnabled={historyEnabled} active={active}>
       <div data-testid="messages"><ThreadMessages messages={threadMessages} /></div>
-      <div data-testid="composer"><textarea aria-label="Message" /></div>
+      <div data-testid="composer">{dock ? <SubagentTaskDock /> : null}<textarea aria-label="Message" /></div>
     </SubagentTasksProvider>
   </ThreadVisibilityContext.Provider>;
 }
@@ -77,6 +78,86 @@ describe("session-owned task UI", () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => response([task()])));
   });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); localStorage.removeItem(LOCAL_PREFS_STORAGE_KEY); });
+
+  it("opens the same task from the fixed dock, keeps the list through completion and returns focus to its row", async () => {
+    const user = userEvent.setup();
+    render(layout({ dock: true }));
+    const trigger = await screen.findByTestId("subagent-task-dock-trigger");
+    expect(screen.getByTestId("composer")).toContainElement(trigger);
+    expect(screen.getByTestId("messages")).not.toContainElement(trigger);
+    expect(trigger).toHaveTextContent("Active: 1");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await user.click(trigger);
+    const list = screen.getByTestId("subagent-task-tree");
+    const row = within(list).getByRole("button", { name: /Config check Running/ });
+    await user.click(row);
+    expect(screen.getByRole("dialog", { name: "Config check" })).toBeVisible();
+    emitTask(task({ revision: 2, state: "done", completed_at: 102, result: "Verified the configuration" }));
+    expect(screen.getByRole("dialog", { name: "Config check" })).toBeVisible();
+    await user.keyboard("{Escape}");
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(within(list).getByRole("button", { name: /Config check Completed/ })).toBe(row);
+    await waitFor(() => expect(row).toHaveFocus());
+    expect(await within(list).findByText("Verified the configuration")).toBeVisible();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(trigger).toHaveTextContent("Completed: 1");
+    expect(requestMutation).not.toHaveBeenCalled();
+  });
+
+  it("uses a bounded non-interactive result excerpt while keeping full Markdown in task details", async () => {
+    const result = "## Findings\n\n" + "Verified the configuration. ".repeat(30) + "\n\n[Full evidence](https://example.com/evidence)\n\n```ts\nconst verified = true;\n```";
+    vi.mocked(fetch).mockImplementation(async () => response([task({ state: "done", completed_at: 102, result })]));
+    const user = userEvent.setup();
+    render(layout({ dock: true }));
+    await user.click(await screen.findByTestId("subagent-task-dock-trigger"));
+    const tree = screen.getByTestId("subagent-task-tree");
+    const excerpt = within(tree).getByText(/^## Findings/);
+    expect(excerpt).toBeVisible();
+    expect(excerpt.textContent?.trim()).toBe(result.trim().slice(0, 240));
+    expect(within(tree).queryByRole("link")).not.toBeInTheDocument();
+    expect(within(tree).getAllByRole("button")).toHaveLength(1);
+    await user.click(within(tree).getByRole("button", { name: /Config check Completed/ }));
+    expect(await within(screen.getByRole("dialog", { name: "Config check" })).findByRole("link", { name: /Full evidence/ })).toHaveAttribute("href", "https://example.com/evidence");
+  });
+
+  it("keeps task order, actual tool activity and cancellation outcomes in the dock", async () => {
+    const user = userEvent.setup();
+    vi.mocked(fetch).mockImplementation(async () => response([
+      task({ task_id: "queued", label: "Waiting check", state: "queued", created_at: 101 }),
+      task({ tool_events: [{ name: "read_file", status: "running" }] }),
+    ]));
+    requestMutation.mockResolvedValue(task({ revision: 2, state: "cancelled", completed_at: 102 }));
+    render(layout({ dock: true }));
+    const trigger = await screen.findByTestId("subagent-task-dock-trigger");
+    expect(trigger).toHaveTextContent("Active: 2");
+    await user.click(trigger);
+    const list = screen.getByTestId("subagent-task-tree");
+    expect(within(list).getByText("read_file")).toBeVisible();
+    expect([...list.querySelectorAll("[data-subagent-id]")].map(row => row.getAttribute("data-subagent-id"))).toEqual(["task-1", "queued"]);
+    await user.click(within(list).getByRole("button", { name: "Stop Config check" }));
+    await within(list).findByRole("button", { name: /Config check Cancelled/ });
+    emitTask(task({ task_id: "queued", label: "Waiting check", created_at: 101, revision: 2, state: "error", error: "Cannot read the file", completed_at: 103 }));
+    expect(trigger).toHaveTextContent("Finished: 2");
+    expect(trigger).toHaveTextContent("Review needed: 1");
+    expect(within(list).getByText("Cannot read the file")).toBeVisible();
+    expect([...list.querySelectorAll("[data-subagent-id]")].map(row => row.getAttribute("data-subagent-id"))).toEqual(["task-1", "queued"]);
+    expect(requestMutation).toHaveBeenCalledTimes(1);
+    expect(requestMutation).toHaveBeenCalledWith("subagent.cancel", { session_key: "websocket:a", task_id: "task-1" }, 20_000);
+  });
+
+  it.each(["inactive", "hidden", "session"])("closes the portaled task list when its scope becomes %s", async change => {
+    const user = userEvent.setup();
+    const view = render(layout({ dock: true }));
+    await user.click(await screen.findByTestId("subagent-task-dock-trigger"));
+    expect(screen.getByTestId("subagent-task-tree")).toBeVisible();
+    view.rerender(layout({ dock: true, active: change !== "inactive", visible: change !== "hidden", sessionKey: change === "session" ? "websocket:b" : "websocket:a" }));
+    await waitFor(() => expect(screen.queryByTestId("subagent-task-tree")).not.toBeInTheDocument());
+    if (change !== "session") expect(screen.queryByTestId("subagent-task-dock")).not.toBeInTheDocument();
+    view.rerender(layout({ dock: true }));
+    expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveAttribute("aria-expanded", "false");
+    expect(requestMutation).not.toHaveBeenCalled();
+  });
 
   it("applies the browser activity preference to delegated work and its shared child chat", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/webui-thread")

@@ -135,7 +135,9 @@ After a model request fails and automatic retries stop, the WebUI shows the fail
 
 ### Delegated work
 
-When nanobot delegates work to subagents, a work group appears under the request that started it. Progress continues to update after the main reply finishes. Completed tasks stay available for inspection, and refreshing or reopening the WebUI restores saved progress and results without restarting the work.
+When nanobot delegates work to subagents, **Subtasks** appears above the message input and stays within reach as the conversation scrolls. Open it for a task list with live activity and saved results; on narrow screens it opens from the bottom. The list scrolls independently of the conversation. A work group also remains under the request that started it.
+
+Progress continues to update after the main reply finishes. Completed tasks stay available for inspection, and refreshing or reopening the WebUI restores saved progress and results without restarting the work.
 
 Work groups follow the browser's **Activity details** preference: **Auto** opens running work and folds it when all tasks finish; **Expanded** keeps it open by default. You can also expand or fold a group manually to check individual outcomes, including failures and partial results.
 

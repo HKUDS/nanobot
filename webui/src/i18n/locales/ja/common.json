@@ -1809,6 +1809,8 @@
       "progress": "{{total}} 件中 {{completed}} 件完了",
       "running": "実行中: {{count}}",
       "finished": "終了: {{count}}",
+      "active": "進行中: {{count}}",
+      "completed": "完了: {{count}}",
       "needsReview": "要確認: {{count}}",
       "messages": "メッセージの状態"
     },

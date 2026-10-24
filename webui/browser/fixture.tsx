@@ -44,6 +44,7 @@ import { DisplayMathFixture } from "./display-math-fixture";
 import { AttachmentLayoutFixture } from "./attachment-layout-fixture";
 import { LoadedSessionSearchFixture } from "./loaded-session-search-fixture";
 import { AppearanceFixture } from "./appearance-fixture";
+import { installSubagentDockApi, SubagentDockFixture } from "./subagent-dock-fixture";
 
 const history: UIMessage[] = [
   { id: "question", role: "user", content: "Earlier question", createdAt: 1_700_000_000_000 },
@@ -215,6 +216,7 @@ function AppsFixture() {
 }
 if (parameters.get("case") === "skeleton-additions") installSkeletonPreviewApi();
 if (parameters.get("case") === "idle-compaction") installIdleCompactionApi();
+if (parameters.get("case") === "subagent-dock") installSubagentDockApi();
 await initializeI18n();
 if (parameters.get("case") === "appearance" && parameters.has("lang")) {
   await setAppLanguage(normalizeLocale(parameters.get("lang")));
@@ -224,6 +226,8 @@ createRoot(document.getElementById("root")!).render(<TooltipProvider>
     ? <AppearanceFixture />
     : parameters.get("case") === "loaded-session-search"
     ? <LoadedSessionSearchFixture />
+    : parameters.get("case") === "subagent-dock"
+    ? <SubagentDockFixture parameters={parameters} />
     : parameters.get("case") === "attachments"
     ? <AttachmentLayoutFixture />
     : parameters.get("case") === "theme-toggle"

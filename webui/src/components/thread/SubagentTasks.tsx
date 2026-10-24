@@ -2,7 +2,6 @@ import {
   DelegationIcon,
   StopIcon,
   QueuedTaskIcon,
-  RunningTaskIcon,
   StoppingTaskIcon,
   CompletedTaskIcon,
   CancelledTaskIcon,
@@ -15,6 +14,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { LoadingRing } from "@/components/ui/loading-ring";
 import { SubagentThread } from "@/components/thread/SubagentThread";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
@@ -31,6 +31,9 @@ function isActive(task: SubagentTaskSnapshot): boolean {
 }
 
 interface TaskContext {
+  sessionKey: string | null;
+  available: boolean;
+  detailOpen: boolean;
   tasks: ObservedSubagentTask[];
   stopError: string | null;
   stoppingId: string | null;
@@ -39,6 +42,10 @@ interface TaskContext {
   register: (id: string, button: HTMLButtonElement | null, previous: HTMLButtonElement | null) => void;
 }
 const TasksContext = createContext<TaskContext | null>(null);
+
+export function useSubagentTasks() {
+  return useContext(TasksContext);
+}
 
 interface SubagentTasksProviderProps {
   client: Pick<NanobotClient, "requestMutation" | "onChat" | "onStatus">;
@@ -142,6 +149,7 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
   };
   const selected = enabled && active && paneVisible ? tasks.find((task) => task.task_id === selectedId) : undefined;
   const value: TaskContext = {
+    sessionKey, available: enabled && active && paneVisible, detailOpen: !!selected,
     tasks: enabled ? tasks : [],
     stopError: enabled ? stopError : null, stoppingId,
     open: (task, target) => { trigger.current = target; setSelectedId(task.task_id); }, stop,
@@ -166,7 +174,7 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
           event.preventDefault();
           if (!active || !paneVisible) return;
           const target = trigger.current?.isConnected ? trigger.current
-            : buttons.current.get(trigger.current?.dataset.subagentId ?? "");
+            : buttons.current.get(`${trigger.current?.dataset.subagentSurface}:${trigger.current?.dataset.subagentId}`);
           const focusTarget = target?.closest("[hidden]")
             ? target.closest("[data-subagent-work]")?.querySelector<HTMLButtonElement>("[aria-expanded]") : target;
           focusTarget?.focus({ preventScroll: true });
@@ -207,14 +215,15 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
 
 function TaskStateIcon({ task }: { task: SubagentTaskSnapshot }) {
   const className = "h-3.5 w-3.5 shrink-0";
+  if (task.state === "running") return <LoadingRing className={`${className} text-muted-foreground`} />;
   const Icon = {
-    queued: QueuedTaskIcon, running: RunningTaskIcon, stopping: StoppingTaskIcon,
+    queued: QueuedTaskIcon, stopping: StoppingTaskIcon,
     done: CompletedTaskIcon, cancelled: CancelledTaskIcon, incomplete: IncompleteTaskIcon,
     interrupted: InterruptedTaskIcon, error: ErrorTaskIcon,
   }[task.state];
   const tone = task.state === "done" ? "text-emerald-600 dark:text-emerald-400"
     : task.state === "error" || task.state === "incomplete" ? "text-destructive" : "text-muted-foreground";
-  return <Icon className={`${className} ${tone} ${task.state === "running" ? "animate-spin motion-reduce:animate-none" : ""}`} aria-hidden />;
+  return <Icon key={task.state} className={`${className} ${tone} animate-in fade-in-0 duration-200 motion-reduce:animate-none`} aria-hidden />;
 }
 
 function TaskElapsed({ task }: { task: ObservedSubagentTask }) {
@@ -231,16 +240,16 @@ function TaskElapsed({ task }: { task: ObservedSubagentTask }) {
   return <>{Math.round(task.elapsed_seconds + (running ? Math.max(0, now - task.observedAtMs) / 1000 : 0))}s</>;
 }
 
-function TaskButton({ task }: { task: ObservedSubagentTask }) {
+export function SubagentTaskButton({ task, surface = "history" }: { task: ObservedSubagentTask; surface?: "history" | "dock" }) {
   const context = useContext(TasksContext);
   const { t } = useTranslation("common");
   const button = useRef<HTMLButtonElement | null>(null);
-  return <button type="button" data-subagent-id={task.task_id} ref={(node) => {
-    context?.register(task.task_id, node, button.current);
+  return <button type="button" data-subagent-id={task.task_id} data-subagent-surface={surface} ref={(node) => {
+    context?.register(`${surface}:${task.task_id}`, node, button.current);
     button.current = node;
   }}
     onClick={(event) => context?.open(task, event.currentTarget)}
-    className="flex min-w-0 flex-1 items-center gap-2.5 rounded-control px-3 py-2.5 text-left text-sm hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+    className="flex min-h-11 min-w-0 flex-1 items-center gap-2.5 rounded-control px-3 py-2.5 text-left text-sm hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0">
     <TaskStateIcon task={task} />
     <span className="min-w-0 flex-1 truncate">{task.label}</span>
     <span className="shrink-0 text-xs text-muted-foreground">{t(`thread.subagents.states.${task.state}`)}</span>
@@ -313,7 +322,7 @@ function SubagentWork({ tasks, unlinked = false }: { tasks: ObservedSubagentTask
       <div id={rowsId} hidden={!open} className="border-t border-border/50 py-0.5">
         {unlinked ? <p className="px-3 py-2 text-xs text-muted-foreground">{t("thread.subagents.unlinkedHelp")}</p> : null}
         {tasks.map((task) => <div key={task.task_id} className="flex items-center gap-1 pr-1">
-          <TaskButton task={task} />
+          <SubagentTaskButton task={task} />
           {task.state === "queued" || task.state === "running" ? <Button type="button" variant="ghost" size="icon" className="h-9 w-9 shrink-0"
             aria-label={t("thread.subagents.stopTask", { label: task.label })} disabled={context.stoppingId !== null}
             onClick={() => void context.stop(task)}><StopIcon className="h-3 w-3" aria-hidden /></Button> : null}

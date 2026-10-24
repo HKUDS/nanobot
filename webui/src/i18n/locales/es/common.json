@@ -1810,6 +1810,8 @@
       "progress": "{{completed}} de {{total}} completadas",
       "running": "En curso: {{count}}",
       "finished": "Finalizadas: {{count}}",
+      "active": "En curso: {{count}}",
+      "completed": "Completadas: {{count}}",
       "needsReview": "Revisar: {{count}}",
       "messages": "Estado de mensajes"
     },
