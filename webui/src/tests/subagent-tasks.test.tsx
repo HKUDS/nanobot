@@ -422,7 +422,8 @@ describe("session-owned task UI", () => {
     expect(await within(detail).findByRole("heading", { name: "Findings" })).toBeVisible();
     expect(within(detail).getByRole("list")).toHaveTextContent("Release resources");
     expect(within(detail).getByRole("table")).toHaveTextContent("CancellationPassed");
-    expect(await within(detail).findByText("await connection.close()", { exact: false })).toBeVisible();
+    await waitFor(() => expect(detail.querySelector("code")).toHaveTextContent("await connection.close()"));
+    expect(detail.querySelector("code")).toBeVisible();
     expect(within(detail).getByRole("link", { name: /Evidence/ })).toHaveAttribute("href", "https://example.com/review");
     expect(detail).toBeVisible();
     await user.keyboard("{Escape}");
