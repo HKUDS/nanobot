@@ -2450,6 +2450,7 @@ def test_enable_optional_feature_refreshes_feishu_identity(
     monkeypatch.setattr(loader, "_current_config_path", config_path)
     _stub_channel_packages(monkeypatch, "feishu")
     monkeypatch.setattr("nanobot.optional_features.optional_dependency_groups", lambda: {})
+    monkeypatch.setattr("nanobot.optional_features.extra_installed", lambda _name, _deps: True)
     monkeypatch.setattr(feishu_module, "FEISHU_AVAILABLE", True)
     monkeypatch.setattr(
         feishu_module,
