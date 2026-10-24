@@ -48,7 +48,7 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
   const completed = tasks.filter(task => task.state === "done").length;
   const attention = tasks.filter(needsReview).length;
   const progress = t("thread.subagents.progress", { completed, total: tasks.length });
-  const summary = running ? t("thread.subagents.active", { count: running })
+  const summary = running ? t("thread.subagents.running", { count: running })
     : completed === tasks.length ? t("thread.subagents.completed", { count: completed })
       : t("thread.subagents.finished", { count: tasks.length });
   const iconClass = "h-3.5 w-3.5 shrink-0";

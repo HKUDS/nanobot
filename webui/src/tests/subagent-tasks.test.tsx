@@ -119,7 +119,7 @@ describe("session-owned task UI", () => {
     expect(fetch).toHaveBeenCalledWith("/api/sessions/websocket%3Aa/subagents", expect.any(Object));
     expect(screen.getAllByTestId("subagent-task-dock-trigger")).toEqual([trigger]);
     expect(screen.getByTestId("composer")).toContainElement(trigger);
-    expect(trigger).toHaveTextContent("Active: 1");
+    expect(trigger).toHaveTextContent("Running: 1");
     expect(trigger).not.toHaveTextContent("Completed:");
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByTestId("subagent-task-tree")).not.toBeInTheDocument();
@@ -150,9 +150,9 @@ describe("session-owned task UI", () => {
     const user = userEvent.setup();
     render(layout());
     const trigger = await screen.findByTestId("subagent-task-dock-trigger");
-    expect(trigger).toHaveTextContent("Active: 2");
+    expect(trigger).toHaveTextContent("Running: 2");
     emitTask(task({ revision: 2, state: "done", completed_at: 102, result: "Verified" }));
-    expect(trigger).toHaveTextContent("Active: 1");
+    expect(trigger).toHaveTextContent("Running: 1");
     expect(trigger).not.toHaveTextContent("Completed:");
     const list = await openTaskList(user);
     expect(taskIds(list)).toEqual(["sibling"]);
@@ -174,7 +174,7 @@ describe("session-owned task UI", () => {
     vi.useFakeTimers();
     render(layout());
     await act(async () => { await Promise.resolve(); });
-    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Active: 1");
+    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
     emitTask(task({ revision: 2, state, error, completed_at: 102, result: state === "done" ? "Verified" : null }));
     const trigger = screen.getByTestId("subagent-task-dock-trigger");
     expect(trigger).toHaveTextContent(summary);
@@ -289,7 +289,7 @@ describe("session-owned task UI", () => {
     expect(screen.getByTestId("subagent-task-tree")).toBe(list);
     expect(taskIds(list)).toEqual(["task-1", "cross-turn"]);
     expect(within(list).getByRole("button", { name: /Cross-turn check Stopping/ })).toBe(crossTurn);
-    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Active: 1");
+    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
     emitTask(task({ task_id: "next", label: "Next check", created_at: 104, origin_turn_id: "turn-b", origin_message_id: "prompt-b" }));
     expect(taskIds(list)).toEqual(["task-1", "cross-turn", "next"]);
     await user.keyboard("{Escape}");
@@ -315,7 +315,7 @@ describe("session-owned task UI", () => {
     const archive = await openArchive(user);
     expect(within(archive).getByRole("button", { name: /Config check Completed/ })).toBeVisible();
     emitTask(task({ task_id: "next", label: "Next check", created_at: 103 }));
-    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Active: 1");
+    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
     const list = await openTaskList(user);
     expect(taskIds(list)).toEqual(["next"]);
     expect(requestMutation).not.toHaveBeenCalled();
@@ -356,7 +356,7 @@ describe("session-owned task UI", () => {
     const trigger = await screen.findByTestId("subagent-task-dock-trigger");
     expect(screen.getByTestId("composer")).toContainElement(trigger);
     expect(screen.getByTestId("messages")).not.toContainElement(trigger);
-    expect(trigger).toHaveTextContent("Active: 1");
+    expect(trigger).toHaveTextContent("Running: 1");
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     await user.click(trigger);
     const list = screen.getByTestId("subagent-task-tree");
@@ -407,7 +407,7 @@ describe("session-owned task UI", () => {
     requestMutation.mockResolvedValue(task({ revision: 2, state: "cancelled", completed_at: 102 }));
     render(layout());
     const trigger = await screen.findByTestId("subagent-task-dock-trigger");
-    expect(trigger).toHaveTextContent("Active: 2");
+    expect(trigger).toHaveTextContent("Running: 2");
     await user.click(trigger);
     const list = screen.getByTestId("subagent-task-tree");
     expect(within(list).getByText("read_file")).toBeVisible();
@@ -872,7 +872,7 @@ describe("session-owned task UI", () => {
     expect(within(list).getByRole("button", { name: /Sibling check Running/ })).toBeVisible();
     await act(async () => { resolveRead(response([task()])); });
     expect(taskIds(list)).toEqual(["task-2"]);
-    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Active: 1");
+    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
     expect(screen.getByTestId("subagent-task-dock-trigger")).not.toHaveTextContent("Completed:");
     const archive = await openArchive(user);
     expect(within(archive).getByRole("button", { name: /Config check Completed/ })).toBeVisible();
@@ -925,7 +925,7 @@ describe("session-owned task UI", () => {
     vi.useFakeTimers();
     const view = render(layout({ liveEvents: false }));
     await act(async () => { await Promise.resolve(); });
-    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Active: 1");
+    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
     fireEvent.click(screen.getByTestId("subagent-task-dock-trigger"));
     const list = screen.getByTestId("subagent-task-tree");
     expect(within(list).getByRole("button", { name: /Config check Running/ })).toBeVisible();

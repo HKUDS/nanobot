@@ -1809,7 +1809,6 @@
       "progress": "Hoàn thành {{completed}} / {{total}}",
       "running": "Đang chạy: {{count}}",
       "finished": "Đã kết thúc: {{count}}",
-      "active": "Đang thực hiện: {{count}}",
       "completed": "Đã hoàn thành: {{count}}",
       "needsReview": "Cần kiểm tra: {{count}}",
       "messages": "Trạng thái tin nhắn"

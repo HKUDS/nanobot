@@ -8,7 +8,7 @@ for (const width of [1440, 390]) {
     await page.goto("/browser/fixture.html?case=subagent-dock");
     const trigger = page.getByTestId("subagent-task-dock-trigger");
     const messages = page.getByTestId("thread-message-region");
-    await expect(trigger).toContainText("Active: 3");
+    await expect(trigger).toContainText("Running: 3");
     await page.getByTestId("subagent-task-dock").evaluate(node => Promise.all(node.getAnimations().map(animation => animation.finished)));
     const original = (await trigger.boundingBox())!;
     expect(await messages.locator('[data-testid="subagent-task-dock"]').count()).toBe(0);
@@ -78,7 +78,7 @@ test("keeps the portaled dock scoped to the active conversation and honors reduc
   await page.goto("/browser/fixture.html?case=subagent-dock&portal&dark");
   const portal = page.getByTestId("preview-composer-portal");
   const trigger = portal.getByTestId("subagent-task-dock-trigger");
-  await expect(trigger).toContainText("Active: 3");
+  await expect(trigger).toContainText("Running: 3");
   await trigger.click();
   const tree = page.getByTestId("subagent-task-tree");
   await expect(tree).toBeVisible();
@@ -94,9 +94,9 @@ test("keeps the portaled dock scoped to the active conversation and honors reduc
   await page.getByRole("button", { name: "切换会话", exact: true }).click();
   await expect(portal.getByTestId("subagent-task-dock")).toHaveCount(0);
   await page.getByRole("button", { name: "切换会话", exact: true }).click();
-  await expect(trigger).toContainText("Active: 3");
+  await expect(trigger).toContainText("Running: 3");
   await page.getByRole("button", { name: "模拟失败", exact: true }).click();
-  await expect(trigger).toContainText("Active: 2");
+  await expect(trigger).toContainText("Running: 2");
   const results = page.getByTestId("thread-message-region").getByRole("region", { name: "Subtasks", exact: true });
   await results.getByRole("button", { name: /Review needed: 1/ }).click();
   await results.getByRole("button", { name: /核对回归测试 Failed/ }).click();
@@ -167,9 +167,9 @@ for (const width of [1440, 390]) {
     await expect(tree).toContainText("检查项目实现");
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "完成第一项", exact: true }).click();
-    await expect(trigger).toContainText("Active: 2");
+    await expect(trigger).toContainText("Running: 2");
     await page.getByRole("button", { name: "新一轮消息", exact: true }).click();
-    await expect(trigger).toContainText("Active: 2");
+    await expect(trigger).toContainText("Running: 2");
     await trigger.click();
     await expect(tree.locator("[data-subagent-id]")).toHaveCount(2);
     await expect(tree).toContainText("核对回归测试");
@@ -225,7 +225,7 @@ for (const width of [1440, 390]) {
     await expect(anchor).toBeInViewport();
     const before = (await anchor.boundingBox())!.y;
     await page.getByRole("button", { name: "完成第一项", exact: true }).click();
-    await expect(page.getByTestId("subagent-task-dock-trigger")).toContainText("Active: 2");
+    await expect(page.getByTestId("subagent-task-dock-trigger")).toContainText("Running: 2");
     await expect.poll(async () => Math.abs((await anchor.boundingBox())!.y - before)).toBeLessThan(1);
     await page.getByRole("button", { name: "全部完成", exact: true }).click();
     await expect(page.getByTestId("subagent-task-dock-trigger")).toHaveCount(0, { timeout: 7000 });

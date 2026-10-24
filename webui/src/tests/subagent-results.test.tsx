@@ -95,7 +95,7 @@ describe("subagent result archives", () => {
     ]));
     const user = userEvent.setup();
     render(layout());
-    expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveTextContent("Active: 3");
+    expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 3");
     const transcript = screen.getByTestId("messages");
     expect(transcript.querySelector("[data-subagent-results]")).toBeNull();
     expect(screen.getByTestId("has-results")).toHaveTextContent("no");

@@ -1823,7 +1823,6 @@
       "progress": "{{completed}} de {{total}} concluídas",
       "running": "Em andamento: {{count}}",
       "finished": "Encerradas: {{count}}",
-      "active": "Em andamento: {{count}}",
       "completed": "Concluídas: {{count}}",
       "needsReview": "Revisar: {{count}}",
       "messages": "Status das mensagens"

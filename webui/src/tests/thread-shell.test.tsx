@@ -567,9 +567,9 @@ describe("ThreadShell", () => {
     expect(screen.getByRole("button", { name: "Stop response" })).toBeVisible();
     act(() => client._emitChat("background-work", { event: "turn_end", chat_id: "background-work", turn_id: "parent-turn" }));
     expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
-    expect(trigger).toHaveTextContent("Active: 1");
+    expect(trigger).toHaveTextContent("Running: 1");
     act(() => client._emitChat("background-work", { event: "user_message", chat_id: "background-work", turn_id: "next-turn", turn_seq: 1, starts_turn: true, text: "Continue with the next request" }));
-    expect(trigger).toHaveTextContent("Active: 1");
+    expect(trigger).toHaveTextContent("Running: 1");
     fireEvent.click(trigger);
     const list = screen.getByTestId("subagent-task-tree");
     expect(within(list).getByRole("button", { name: /Background inspection Running/ })).toBeVisible();
