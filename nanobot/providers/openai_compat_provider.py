@@ -998,7 +998,10 @@ class OpenAICompatProvider(LLMProvider):
 
         if strip_effort:
             wire_effort = None
-        elif wire_effort and semantic_effort != "none":
+        elif wire_effort and (
+            semantic_effort != "none"
+            or (spec and spec.name == "openai" and slug in {"gpt-6-sol", "gpt-6-luna"})
+        ):
             kwargs["reasoning_effort"] = wire_effort
 
         # Only send thinking controls when reasoning_effort is explicit so
@@ -1245,7 +1248,11 @@ class OpenAICompatProvider(LLMProvider):
                 )
             )
         supports_reasoning_none = bool(
-            self._spec and self._spec.name in {"deepseek", "xiaomi_mimo"}
+            self._spec and (
+                self._spec.name in {"deepseek", "xiaomi_mimo"}
+                or (self._spec.name == "openai"
+                    and _model_slug(model_name) in {"gpt-6-sol", "gpt-6-luna"})
+            )
         )
         capabilities = self._responses_capabilities()
         preserve_reasoning = (
