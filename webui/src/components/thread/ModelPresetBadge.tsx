@@ -9,8 +9,8 @@ import {
   useState,
   type KeyboardEvent,
   type PointerEvent,
+  type ReactNode,
 } from "react";
-import { Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -23,7 +23,7 @@ import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { inferProviderFromModelName, providerBrand } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
 
-const pickerWidthClassName = "w-[min(18rem,calc(100vw-2rem))]";
+const pickerWidthClassName = "w-max min-w-[min(16.5rem,calc(100vw-2rem))] max-w-[min(24rem,calc(100vw-2rem))]";
 const LONG_PRESS_MS = 400;
 const PRESS_SLOP_PX = 8;
 const PILL_GAP_PX = 4;
@@ -93,6 +93,8 @@ interface ModelPresetBadgeProps {
   modelPresets?: ModelPresetOption[];
   onPresetChange?: (name: string) => void;
   onManageModels?: () => void;
+  reasoningControl?: ReactNode;
+  onPickerOpenChange?: (open: boolean) => void;
   onRequestComposerFocus?: () => void;
   provider?: string | null;
   providerLabel?: string | null;
@@ -109,6 +111,8 @@ export function ModelPresetBadge({
   modelPresets = [],
   onPresetChange,
   onManageModels,
+  reasoningControl,
+  onPickerOpenChange,
   onRequestComposerFocus,
   provider,
   providerLabel,
@@ -148,7 +152,7 @@ export function ModelPresetBadge({
       : modelPresets.map((preset, index) => index === listedIndex ? activePreset : preset);
   const opensSetup = Boolean(onClick);
   const canSwitch = !opensSetup && Boolean(onPresetChange) && activeName !== "" && presets.length > 1;
-  const canOpenPicker = !opensSetup && (canSwitch || Boolean(onManageModels));
+  const canOpenPicker = !opensSetup && (canSwitch || Boolean(onManageModels) || Boolean(onPickerOpenChange));
   const pickerPresets = activeName && onPresetChange ? presets : [activePreset];
   const currentIndex = Math.max(0, presets.findIndex((preset) => preset.name === activeName));
   const pillHeight = isHero ? 32 : 36;
@@ -157,10 +161,11 @@ export function ModelPresetBadge({
     defaultValue: "Switch model for this chat",
   });
 
+  useEffect(() => { onPickerOpenChange?.(open); }, [onPickerOpenChange, open]);
+
   const selectPreset = (name: string) => {
-    setOpen(false);
     if (name !== activeName) onPresetChange?.(name);
-    requestAnimationFrame(() => onRequestComposerFocus?.());
+    if (!open) requestAnimationFrame(() => onRequestComposerFocus?.());
   };
 
   const openModelSettings = () => {
@@ -444,6 +449,7 @@ export function ModelPresetBadge({
             />
           ))}
         </div>
+        {reasoningControl}
         {onManageModels ? (
           <div className="mt-1 border-t border-border/55 pt-1">
             <button
@@ -455,7 +461,9 @@ export function ModelPresetBadge({
                 "flex min-h-9 w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground",
               )}
             >
-              <ModelsIcon className="size-4 shrink-0" strokeWidth={1.75} />
+              <span className="grid h-[18px] w-[18px] shrink-0 place-items-center" aria-hidden>
+                <ModelsIcon className="size-4" strokeWidth={1.75} />
+              </span>
               <span>{t("thread.composer.manageModels")}</span>
             </button>
           </div>
@@ -499,7 +507,7 @@ function PresetOption({
         floatingItemClassName,
         floatingItemFocusClassName,
         "flex min-h-9 w-full cursor-pointer gap-2.5 px-2.5 py-1.5 text-left hover:bg-muted/55 max-sm:min-h-11",
-        selected && "bg-muted/55 text-foreground",
+        selected && "bg-muted/55 text-foreground shadow-[0_1px_2px_hsl(var(--foreground)/0.1)]",
       )}
     >
       <PresetProviderIcon
@@ -514,7 +522,6 @@ function PresetOption({
           <span className="truncate text-[12px] text-muted-foreground">{detail}</span>
         ) : null}
       </span>
-      {selected ? <Check className="h-4 w-4 shrink-0 text-foreground/80" aria-hidden /> : null}
     </button>
   );
 }

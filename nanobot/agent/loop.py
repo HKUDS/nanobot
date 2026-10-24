@@ -92,7 +92,9 @@ from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
 from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, Session, SessionManager, SessionPolicy
 from nanobot.session.model_selection import (
     SESSION_MODEL_PRESET_METADATA_KEY,
+    SESSION_REASONING_EFFORT_METADATA_KEY,
     model_preset_from_metadata,
+    reasoning_effort_for_snapshot,
 )
 from nanobot.session.recovery import (
     PENDING_FOLLOWUP_ID_KEY,
@@ -575,6 +577,7 @@ class AgentLoop:
                 name,
             )
             session.metadata.pop(SESSION_MODEL_PRESET_METADATA_KEY, None)
+            session.metadata.pop(SESSION_REASONING_EFFORT_METADATA_KEY, None)
             return None
 
     async def runtime_for_session(
@@ -585,15 +588,18 @@ class AgentLoop:
     ) -> LLMRuntime:
         """Resolve a session runtime without blocking on recovery persistence."""
         runtime = self._resolve_session_runtime(session, recover_removed=recover_removed)
-        if runtime is not None:
-            return runtime
-        await self.sessions.state.update_metadata(
-            session.key,
-            {},
-            remove=(SESSION_MODEL_PRESET_METADATA_KEY,),
-            expected_generation=session.generation,
+        if runtime is None:
+            await self.sessions.state.update_metadata(
+                session.key,
+                {},
+                remove=(SESSION_MODEL_PRESET_METADATA_KEY, SESSION_REASONING_EFFORT_METADATA_KEY),
+                expected_generation=session.generation,
+            )
+            runtime = self.llm_runtime()
+        effort = reasoning_effort_for_snapshot(
+            session.metadata, preset=runtime.model_preset, signature=runtime.snapshot_signature,
         )
-        return self.llm_runtime()
+        return runtime.with_generation_overrides(reasoning_effort=effort) if effort is not None else runtime
 
     async def set_session_model_preset(
         self,
@@ -605,6 +611,7 @@ class AgentLoop:
         await self.sessions.state.update_metadata(
             session_key,
             {SESSION_MODEL_PRESET_METADATA_KEY: runtime.model_preset},
+            remove=(SESSION_REASONING_EFFORT_METADATA_KEY,),
             create_if_missing=True,
         )
         return runtime

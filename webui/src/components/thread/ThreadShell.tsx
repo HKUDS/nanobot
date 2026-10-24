@@ -12,6 +12,8 @@ import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { usePromptHistory } from "@/hooks/usePromptHistory";
 import { ModelFallbackNotice } from "@/components/thread/ModelFallbackNotice";
+import { ModelReasoningControl } from "@/components/thread/ModelReasoningControl";
+import { useSessionReasoningEffort } from "@/hooks/useSessionReasoningEffort";
 import { RecoveryNotice } from "@/components/thread/RecoveryNotice";
 import { SubagentTasksProvider } from "@/components/thread/SubagentTasks";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
@@ -832,15 +834,34 @@ export function ThreadShell({
       });
     });
   }, [activeModelPreset, chatId, client]);
+  const [modelSwitch, setModelSwitch] = useState<{ chatId: string; request: Promise<void> } | null>(null);
   const handleModelPresetChange = useCallback((name: string) => {
     setLocalModelPreset(name);
     if (chatId) {
-      void client.sendSystemCommand(chatId, `/model ${name}`).catch(() => {});
+      const request = client.sendSystemCommand(chatId, `/model ${name}`);
+      setModelSwitch({ chatId, request });
+      void request.catch(() => {}).finally(() => {
+        setModelSwitch((current) => current?.request === request ? null : current);
+      });
     }
   }, [chatId, client]);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const reasoning = useSessionReasoningEffort({
+    sessionKey: session?.key ?? null,
+    preset: activeModelPreset,
+    settings,
+    open: modelPickerOpen,
+    disabled: temporary || (!session && temporaryChatEnabled) || !settings || modelSwitch?.chatId === chatId,
+  });
+  const modelReasoningControl = <ModelReasoningControl data={reasoning.data}
+    pending={reasoning.pending} error={reasoning.error} onChange={reasoning.select} />;
   const modelPresetOptions = useMemo(
-    () => modelPresetOptionsFromSettings(settings),
-    [settings],
+    () => modelPresetOptionsFromSettings(settings).map((preset) => (
+      reasoning.enabled && preset.name === activeModelPreset
+        ? { ...preset, reasoningEffort: reasoning.data?.value ?? reasoning.data?.preset_value }
+        : preset
+    )),
+    [activeModelPreset, reasoning.data, reasoning.enabled, settings],
   );
   const availableSlashCommands = useMemo(
     () => temporary
@@ -1063,10 +1084,28 @@ export function ThreadShell({
       if (localModelPreset) {
         await client.sendSystemCommand(newId, `/model ${localModelPreset}`).catch(() => {});
       }
+      try {
+        await reasoning.persistDraft(`websocket:${newId}`);
+      } catch {
+        const pending = pendingFirstRef.current;
+        pendingFirstRef.current = null;
+        setBooting(false);
+        if (pending?.draft) {
+          const targetKey = `websocket:${newId}`;
+          const current = draftStore?.get(targetKey, !temporaryChatEnabled);
+          if (!current?.text && !current?.attachments.length
+            && !current?.sessionMentions.length && !current?.quotedContext) {
+            draftStore?.set(targetKey, pending.draft, !temporaryChatEnabled);
+          }
+        }
+        setRestoredFirstDraft((previous) => ({ chatId: newId,
+          revision: (previous?.revision ?? 0) + 1, error: t("thread.composer.reasoningSaveFailed") }));
+        return false;
+      }
       setPendingFirstTargetChatId(newId);
       return delivery;
     },
-    [booting, client, draftKey, draftStore, localModelPreset, onCreateChat, persistDraft, withWorkspaceScope, workspaceScope],
+    [booting, client, draftKey, draftStore, localModelPreset, onCreateChat, persistDraft, reasoning.persistDraft, t, temporaryChatEnabled, withWorkspaceScope, workspaceScope],
   );
 
   const inspectAttachment = useCallback(async (path: string) => {
@@ -1079,20 +1118,24 @@ export function ThreadShell({
 
   const handleThreadSend = useCallback(
     (content: string, images?: SendAttachment[], options?: SendOptions) => {
-      setRestoredFirstDraft((current) => current?.chatId === chatId ? { ...current, error: "" } : current);
-      const submitted = send(content, images, withWorkspaceScope(options));
-      if (
-        chatId
-        && submitted
-        && !submitted.sideChannel
-        && options?.continueActiveTurn !== true
-      ) {
-        activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
-        setSubmittedViewportTurnId(submitted.turnId);
-      }
-      return submitted?.delivery ? submitted.delivery.then(() => true) : submitted !== null;
+      const submit = () => {
+        setRestoredFirstDraft((current) => current?.chatId === chatId ? { ...current, error: "" } : current);
+        const submitted = send(content, images, withWorkspaceScope(options));
+        if (
+          chatId
+          && submitted
+          && !submitted.sideChannel
+          && options?.continueActiveTurn !== true
+        ) {
+          activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
+          setSubmittedViewportTurnId(submitted.turnId);
+        }
+        return submitted?.delivery ? submitted.delivery.then(() => true) : submitted !== null;
+      };
+      const settled = reasoning.settle();
+      return typeof settled === "boolean" ? settled && submit() : settled.then((saved) => saved && submit());
     },
-    [chatId, send, withWorkspaceScope],
+    [chatId, reasoning.settle, send, withWorkspaceScope],
   );
 
   const loadTemporaryFilePreview = useCallback((path: string) =>
@@ -1317,6 +1360,8 @@ export function ThreadShell({
           modelPreset={activeModelPreset}
           modelPresets={modelPresetOptions}
           onModelPresetChange={handleModelPresetChange}
+          modelReasoningControl={modelReasoningControl}
+          onModelPickerOpenChange={webuiCapabilities.includes("webui.reasoning-effort.v1") ? setModelPickerOpen : undefined}
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
           modelNeedsSetup={modelBadge.needsSetup}
@@ -1375,6 +1420,8 @@ export function ThreadShell({
           modelPreset={activeModelPreset}
           modelPresets={modelPresetOptions}
           onModelPresetChange={handleModelPresetChange}
+          modelReasoningControl={modelReasoningControl}
+          onModelPickerOpenChange={webuiCapabilities.includes("webui.reasoning-effort.v1") ? setModelPickerOpen : undefined}
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
           modelNeedsSetup={modelBadge.needsSetup}

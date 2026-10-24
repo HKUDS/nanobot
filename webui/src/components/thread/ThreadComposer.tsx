@@ -230,6 +230,8 @@ interface ThreadComposerProps {
   modelPreset?: string | null;
   modelPresets?: ModelPresetOption[];
   onModelPresetChange?: (name: string) => void;
+  modelReasoningControl?: React.ReactNode;
+  onModelPickerOpenChange?: (open: boolean) => void;
   modelProvider?: string | null;
   modelProviderLabel?: string | null;
   modelNeedsSetup?: boolean;
@@ -1069,6 +1071,8 @@ export function ThreadComposer({
   modelPreset = null,
   modelPresets = [],
   onModelPresetChange,
+  modelReasoningControl,
+  onModelPickerOpenChange,
   modelProvider = null,
   modelProviderLabel = null,
   modelNeedsSetup = false,
@@ -2537,6 +2541,8 @@ export function ThreadComposer({
       modelPreset={modelPreset}
       modelPresets={modelPresets}
       onPresetChange={onModelPresetChange}
+      reasoningControl={modelReasoningControl}
+      onPickerOpenChange={onModelPickerOpenChange}
       onManageModels={onManageModels}
       onRequestComposerFocus={() => textareaRef.current?.focus()}
       provider={modelProvider}

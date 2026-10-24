@@ -1330,17 +1330,16 @@ describe("ThreadShell", () => {
       "preset-order",
       "/model fast",
     );
-    expect(await screen.findByLabelText("fast", { selector: "button" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "fast" }));
+    expect(await screen.findByRole("button", { name: "fast" })).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("option", { name: /^extra\b/i }));
     expect(client.sendSystemCommand).toHaveBeenLastCalledWith(
       "preset-order",
       "/model extra",
     );
-    expect(await screen.findByText("extra")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "extra" })).toBeInTheDocument();
 
     rerender(view("fast"));
-    expect(await screen.findByLabelText("fast", { selector: "button" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "fast" })).toBeInTheDocument();
   });
 
   it("uses the backend-resolved provider for an auto session preset", async () => {
@@ -1993,6 +1992,84 @@ describe("ThreadShell", () => {
     await waitFor(() => expect(onCreateChat).toHaveBeenCalledTimes(1));
     expect(onCreateChat).toHaveBeenCalledWith(null, "start for real", null);
     expect(onNewChat).not.toHaveBeenCalled();
+  });
+
+  it("keeps the picker open to discover and save the new preset effort after model selection settles", async () => {
+    const requestMutation = vi.fn(async (_action: string, payload: Record<string, unknown>) => ({
+      ...payload, options: ["low", "max"], preset_value: "low",
+    }));
+    const client = { ...makeClient(), requestMutation };
+    let finishSwitch!: () => void;
+    client.sendSystemCommand.mockImplementation(() => new Promise<void>((resolve) => { finishSwitch = resolve; }));
+    const presets: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/api/webui/reasoning-effort") {
+        const preset = url.searchParams.get("model_preset")!;
+        presets.push(preset);
+        return httpJson({ preset, scope: preset, options: preset === "fast" ? ["low", "max"] : ["low", "high"], value: null, preset_value: "high" });
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    }));
+    render(wrap(client, <ThreadShell session={session("switch-effort")} title="Effort switch"
+      onToggleSidebar={() => {}} settingsSnapshot={settingsWithFastPreset()} />,
+    null, "tok", ["webui.reasoning-effort.v1"]));
+    fireEvent.click(await screen.findByRole("button", { name: "Default" }));
+    await screen.findByRole("radiogroup", { name: "Reasoning effort" });
+    const menu = screen.getByRole("dialog");
+    fireEvent.click(screen.getByRole("option", { name: /^fast\b/i }));
+    expect(menu).toBeVisible();
+    expect(screen.queryByRole("radiogroup", { name: "Reasoning effort" })).not.toBeInTheDocument();
+    expect(presets).toEqual(["default"]);
+    await act(async () => { finishSwitch(); });
+    await screen.findByRole("radiogroup", { name: "Reasoning effort" });
+    expect(presets).toEqual(["default", "fast"]);
+    expect(screen.getAllByRole("radio").map((radio) => radio.textContent)).toEqual(["low", "max"]);
+    fireEvent.click(screen.getByRole("radio", { name: "max" }));
+    await waitFor(() => expect(screen.getByRole("radio", { name: "max" })).toBeChecked());
+    expect(requestMutation).toHaveBeenCalledWith("session.reasoning-effort", {
+      session_key: "websocket:switch-effort", preset: "fast", scope: "fast", value: "max",
+    }, expect.any(Number));
+    expect(menu).toBeVisible();
+  });
+
+  it.each([true, false])("persists the landing effort before input, restoring its draft on rejection (saved=%s)", async (saved) => {
+    let resolveSave!: (value: unknown) => void;
+    let rejectSave!: (error: Error) => void;
+    const requestMutation = vi.fn(() => new Promise<unknown>((resolve, reject) => { resolveSave = resolve; rejectSave = reject; }));
+    const client = { ...makeClient(), requestMutation };
+    const settings = modelSettings("deepseek-chat", "deepseek");
+    const data = { preset: "default", scope: "scope", options: ["low", "max"], value: null, preset_value: null };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input).includes("/api/webui/reasoning-effort")
+      ? httpJson(data) : { ok: false, status: 404, json: async () => ({}) }));
+    const store = new ComposerDraftStore();
+    const onCreateChat = vi.fn().mockResolvedValue("chat-effort");
+    const view = (id: string | null) => wrap(client, <ThreadShell session={id ? session(id) : null}
+      title="Effort draft" onToggleSidebar={() => {}} onCreateChat={onCreateChat}
+      settingsSnapshot={settings} draftStore={store} />, null, "tok", ["webui.reasoning-effort.v1"]);
+    const mounted = render(view(null));
+    fireEvent.click(await screen.findByRole("button", { name: "Default" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "max" }));
+    await waitFor(() => expect(screen.getByRole("radio", { name: "max" })).toBeChecked());
+    fireEvent.keyDown(screen.getByRole("radio", { name: "max" }), { key: "Escape" });
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "Use my selected effort" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(onCreateChat).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(requestMutation).toHaveBeenCalledWith("session.reasoning-effort", {
+      session_key: "websocket:chat-effort", preset: "default", scope: "scope", value: "max",
+    }, expect.any(Number)));
+    mounted.rerender(view("chat-effort"));
+    expect(client.sendMessage).not.toHaveBeenCalled();
+    await act(async () => {
+      if (saved) resolveSave({ ...data, value: "max" });
+      else rejectSave(new Error("scope changed"));
+    });
+    if (saved) await waitFor(() => expectSendMessageWithTurn(client, "chat-effort", "Use my selected effort"));
+    else {
+      expect(client.sendMessage).not.toHaveBeenCalled();
+      await waitFor(() => expect(screen.getByLabelText("Message input")).toHaveValue("Use my selected effort"));
+      expect(screen.getByRole("alert")).toHaveTextContent("Could not save reasoning effort");
+    }
   });
 
   it("applies the selected landing preset before sending the first prompt", async () => {

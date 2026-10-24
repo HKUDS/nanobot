@@ -426,6 +426,16 @@ class SessionState:
             return self._draft(session)
         return await self._execute(key, read, write=False)
 
+    async def read_header(self, key: str) -> Session | None:
+        """Read metadata and lifecycle identity without creating state or loading history."""
+        def read() -> Session | None:
+            session = self._load(key, history=False)
+            if session is None:
+                return None
+            return replace(session, messages=[], provider_state=None, _baseline=None,
+                           metadata=deepcopy(session.metadata))
+        return await self._execute(key, read, write=False)
+
     async def get(self, key: str) -> Session:
         """Read an existing conversation; create missing state on the writer."""
         return await self._get(key, history=True)
