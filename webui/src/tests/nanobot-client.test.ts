@@ -2189,6 +2189,18 @@ describe("NanobotClient", () => {
     });
   });
 
+  it.each(["max", "none", null, undefined])("sends the final effort in the ordinary message, preserving null and omission (%s)", (reasoningEffort) => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect(); lastSocket().fakeOpen();
+    client.sendMessage("chat-effort", "Use this effort", undefined, { reasoningEffort });
+    expect(JSON.parse(lastSocket().sent.at(-1) as string)).toEqual({
+      type: "message", chat_id: "chat-effort", content: "Use this effort", webui: true,
+      ...(reasoningEffort !== undefined ? { reasoning_effort: reasoningEffort } : {}),
+    });
+    client.close();
+  });
+
   it("sends automation intent separately from the user's text", () => {
     const client = new NanobotClient({
       url: "ws://test",
@@ -2569,10 +2581,10 @@ describe("binary attachment transport", () => {
         upload: { path: "/api/attachments", token: "cap" } });
       const delivery = client.sendAttachments("chat", "look", [
         { data_url: "data:text/plain;base64,eA==", name: "note.txt" },
-      ], { turnId: "slow-upload" });
+      ], { turnId: "slow-upload", reasoningEffort: "max" });
       expect(client.getRunState("chat")).toMatchObject({ active: true, startedAt: null });
       await vi.advanceTimersByTimeAsync(80_000);
-      expect(socket.sent.some((frame) => frame.includes("slow-ref"))).toBe(true);
+      expect(JSON.parse(socket.sent.find((frame) => frame.includes("slow-ref"))!)).toMatchObject({ reasoning_effort: "max" });
       socket.fakeMessage({ event: "message_accepted", chat_id: "chat", turn_id: "slow-upload" });
       await delivery;
     } finally {

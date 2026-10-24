@@ -77,3 +77,7 @@ export function getProviderModelCatalog(revision: object, token: string, provide
   }
   return catalog;
 }
+
+export function reasoningEffortValues(payload: ProviderModelsPayload | null, model: string, savedValues?: string[]): string[] {
+  return [...new Set((payload?.models.find((entry) => entry.id === model)?.reasoning_efforts ?? savedValues ?? []).filter(Boolean))];
+}

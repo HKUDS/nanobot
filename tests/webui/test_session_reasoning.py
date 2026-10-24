@@ -1,13 +1,11 @@
-"""Reasoning controls exercise the authenticated gateway without starting a listener."""
+"""Session effort travels through authenticated messages, not a settings service."""
 
 import asyncio
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from threading import Event
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
-from urllib.parse import urlencode
 
 import httpx
 import pytest
@@ -16,6 +14,7 @@ from websockets.http11 import Request
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.model_presets import configured_model_presets
+from nanobot.bus.events import INBOUND_META_REASONING_EFFORT, INBOUND_META_USER_SHELL
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
 from nanobot.config.loader import load_config, save_config
@@ -23,14 +22,11 @@ from nanobot.config.schema import Config
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.factory import ProviderSnapshot, provider_signature
 from nanobot.providers.fallback_provider import FallbackProvider
-from nanobot.providers.oauth_catalog_cache import OAuthModelCatalogSnapshot
 from nanobot.session.manager import SessionManager
-from nanobot.session.model_selection import (
-    SESSION_REASONING_EFFORT_METADATA_KEY,
-    reasoning_effort_scope,
-)
-from nanobot.webui import session_reasoning, settings_models
+from nanobot.session.model_selection import SESSION_REASONING_EFFORT_METADATA_KEY
+from nanobot.session.webui_turns import clear_websocket_turns
 from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
+from nanobot.webui.session_projection import WebUISessionProjection
 
 
 @dataclass
@@ -41,40 +37,54 @@ class Gateway:
     services: GatewayServices
     channel: WebSocketChannel
     headers: Headers
-    request_id: int = 0
+    sequence: int = 0
+    chats: set[str] = field(default_factory=set)
 
     @property
     def config(self):
         return load_config(self.path)
 
-    async def get(self, *, preset="default", key=None, authenticated=True):
-        query = {"model_preset": preset}
-        if key is not None:
-            query["session_key"] = key
-        return await self.services.http.dispatch(
-            SimpleNamespace(remote_address=("127.0.0.1", 12345)),
-            Request("/api/webui/reasoning-effort?" + urlencode(query),
-                    self.headers if authenticated else Headers()),
-        )
-
-    async def mutate(self, view, *, key="websocket:chat", value="low", audience="webui"):
-        self.request_id += 1
+    def connection(self, audience="webui"):
         connection = MagicMock()
         connection.send = AsyncMock()
         connection.request = Request("/", Headers())
         if audience is not None:
             token = self.services.tokens.issue_token(60, audience=audience)
             assert self.channel._authorize_websocket_handshake(connection, {"token": [token]}) is None
-        await self.channel._dispatch_envelope(connection, "test-client", {
-            "type": "webui_request", "request_id": f"effort-{self.request_id}",
-            "action": "session.reasoning-effort",
-            "payload": {"session_key": key, "preset": view["preset"], "scope": view["scope"], "value": value},
-        })
-        if self.channel._webui_request_tasks:
-            await asyncio.gather(*tuple(self.channel._webui_request_tasks.values()))
-        return json.loads(connection.send.await_args.args[0])
+        return connection
 
-    def loop(self, provider):
+    @staticmethod
+    def events(connection):
+        return [json.loads(call.args[0]) for call in connection.send.await_args_list]
+
+    async def get_sessions(self, *, authenticated=True):
+        return await self.services.http.dispatch(
+            SimpleNamespace(remote_address=("127.0.0.1", 12345)),
+            Request("/api/sessions", self.headers if authenticated else Headers()),
+        )
+
+    async def send(self, *, connection=None, chat_id="chat", content="hello", **fields):
+        connection = connection if connection is not None else self.connection()
+        self.sequence += 1
+        self.chats.add(chat_id)
+        await self.channel._dispatch_envelope(connection, "test-client", {
+            "type": "message", "chat_id": chat_id, "content": content,
+            "webui": True, "turn_id": f"turn-{self.sequence}", **fields,
+        })
+        return connection
+
+    async def incoming(self, **fields):
+        connection = await self.send(**fields)
+        assert not any(event["event"] == "error" for event in self.events(connection))
+        assert self.bus.inbound_size > 0
+        return await asyncio.wait_for(self.bus.consume_inbound(), 3)
+
+    async def run(self, loop, **fields):
+        message = await self.incoming(**fields)
+        await loop._dispatch_one(message, asyncio.Queue())
+        return message
+
+    def loop(self, provider, *, sessions=None):
         def snapshot(preset_name=None):
             config = self.config
             preset = config.resolve_preset(preset_name)
@@ -86,7 +96,8 @@ class Gateway:
 
         config = self.config
         loop = AgentLoop(
-            bus=self.bus, provider=provider, workspace=config.workspace_path, session_manager=self.sessions,
+            bus=self.bus, provider=provider, workspace=config.workspace_path,
+            session_manager=self.sessions if sessions is None else sessions,
             model=config.resolve_preset().model, context_window_tokens=128000,
             provider_signature=snapshot().signature,
             provider_snapshot_loader=snapshot, preset_snapshot_loader=snapshot,
@@ -99,8 +110,11 @@ class Gateway:
 @pytest.fixture
 async def gateway(tmp_path, monkeypatch):
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    monkeypatch.setattr(session_reasoning.httpx, "get", lambda url, **kwargs:
-                        httpx.Response(200, json={"data": []}, request=httpx.Request("GET", url)))
+
+    def no_catalog(*args, **kwargs):
+        raise AssertionError("normal message admission must not fetch model catalogs")
+
+    monkeypatch.setattr(httpx, "get", no_catalog)
     config = Config.model_validate({
         "agents": {"defaults": {
             "workspace": str(tmp_path / "workspace"), "model": "deepseek-flash", "provider": "deepseek",
@@ -124,287 +138,12 @@ async def gateway(tmp_path, monkeypatch):
     )
     channel = WebSocketChannel(ws_config, bus, gateway=services)
     token = services.tokens.issue_api_token(60)
-    yield Gateway(path, sessions, bus, services, channel, Headers({"Authorization": f"Bearer {token}"}))
+    gateway = Gateway(path, sessions, bus, services, channel, Headers({"Authorization": f"Bearer {token}"}))
+    yield gateway
     await channel._commands.close()
     await sessions.state.aclose()
-
-
-async def test_public_get_authentication_capability_and_read_only_draft(gateway):
-    before = gateway.path.read_bytes()
-    denied = await gateway.get(authenticated=False)
-    assert denied.status_code == 401
-    response = await gateway.get()
-    assert response.status_code == 200
-    assert response.headers["Cache-Control"] == "no-store"
-    view = json.loads(response.body)
-    assert view == {
-        "preset": "default", "scope": reasoning_effort_scope(provider_signature(gateway.config)),
-        "options": ["none", "low", "high", "max"], "value": None, "preset_value": "high",
-    }
-    assert gateway.path.read_bytes() == before
-    assert await gateway.sessions.state.list_sessions() == []
-    terminal = await gateway.services.http.dispatch(
-        SimpleNamespace(remote_address=("127.0.0.1", 12345)),
-        Request("/webui/terminal", Headers({"Authorization": "Bearer test-bootstrap"})),
-    )
-    contract = json.loads(terminal.body)["webui"]
-    assert contract["min_protocol"] == contract["max_protocol"] == 1
-    assert "webui.reasoning-effort.v1" in contract["capabilities"]
-
-
-async def test_websocket_only_mutation_and_private_session_boundary(gateway):
-    view = json.loads((await gateway.get()).body)
-    http = await gateway.services.http.dispatch(
-        SimpleNamespace(remote_address=("127.0.0.1", 12345)),
-        Request("/api/webui/reasoning-effort/update", gateway.headers),
-    )
-    assert http.status_code == 405
-    for audience in (None, "client"):
-        denied = await gateway.mutate(view, audience=audience)
-        assert denied["error"]["status"] == 403
-    assert await gateway.sessions.state.list_sessions() == []
-    await gateway.sessions.state.update_metadata("sdk:private", {"private": "not exposed"}, create_if_missing=True)
-    for key in ("sdk:private", "sdk:missing"):
-        assert (await gateway.get(key=key)).status_code == 404
-        denied = await gateway.mutate(view, key=key)
-        assert denied["error"]["status"] == 404
-
-
-async def test_persist_before_first_turn_refresh_isolation_and_follow_preset(gateway):
-    view = json.loads((await gateway.get(key="websocket:chat")).body)
-    before = gateway.path.read_bytes()
-    changed = await gateway.mutate(view, value="none")
-    assert changed["ok"] is True
-    assert changed["result"]["value"] == "none"
-    fresh = SessionManager(gateway.config.workspace_path, sessions_root=gateway.path.parent / "sessions")
-    try:
-        restored = session_reasoning.WebUISessionReasoning(gateway.path, fresh)
-        assert (await restored.get("default", "websocket:chat"))["value"] == "none"
-        assert (await restored.get("default", "websocket:other"))["value"] is None
-        assert await fresh.state.read_header("websocket:other") is None
-    finally:
-        await fresh.state.aclose()
-    bad = await gateway.mutate(view, value="medium")
-    assert bad["error"]["status"] == 400
-    assert json.loads((await gateway.get(key="websocket:chat")).body)["value"] == "none"
-    cleared = await gateway.mutate(view, value=None)
-    assert cleared["result"]["value"] is None
-    header = await gateway.sessions.state.read_header("websocket:chat")
-    assert SESSION_REASONING_EFFORT_METADATA_KEY not in header.metadata
-    assert header.messages == []
-    assert gateway.path.read_bytes() == before
-
-
-async def test_draft_selected_preset_applies_after_model_selection_and_switch_clears(gateway):
-    loop = gateway.loop(RecordingProvider())
-    draft = json.loads((await gateway.get(preset="deep")).body)
-    denied = await gateway.mutate(draft)
-    assert denied["error"]["status"] == 409
-    assert await gateway.sessions.state.read_header("websocket:chat") is None
-    await loop.set_session_model_preset("websocket:chat", "deep")
-    selected = await gateway.mutate(draft, value="max")
-    assert selected["result"]["value"] == "max"
-    connection = MagicMock()
-    connection.send = AsyncMock()
-    token = gateway.services.tokens.issue_token(60, audience="webui")
-    assert gateway.channel._authorize_websocket_handshake(connection, {"token": [token]}) is None
-    await gateway.channel._dispatch_envelope(connection, "webui-client", {
-        "type": "message", "chat_id": "chat", "content": "/model default",
-    })
-    inbound = await asyncio.wait_for(gateway.bus.consume_inbound(), 3)
-    assert inbound.content == "/model default"
-    reply = await loop._process_message(inbound)
-    assert "Switched model preset to `default`" in reply.content
-    assert (await gateway.get(preset="deep", key="websocket:chat")).status_code == 409
-    assert (await gateway.mutate(draft, value="high"))["error"]["status"] == 409
-    await loop.set_session_model_preset("websocket:chat", "deep")
-    refreshed = json.loads((await gateway.get(preset="deep", key="websocket:chat")).body)
-    assert refreshed["value"] is None
-    assert SESSION_REASONING_EFFORT_METADATA_KEY not in (await gateway.sessions.state.read_header("websocket:chat")).metadata
-
-
-async def test_stale_config_scope_is_rejected_and_not_applied_to_new_runtime(gateway):
-    provider = RecordingProvider()
-    loop = gateway.loop(provider)
-    view = json.loads((await gateway.get()).body)
-    assert (await gateway.mutate(view, value="max"))["ok"]
-    captured = await loop.runtime_for_session(await gateway.sessions.state.get("websocket:chat"))
-    assert captured.generation.reasoning_effort == "max"
-    config = gateway.config
-    config.providers.deepseek.extra_headers = {"X-Configured-Header": "new"}
-    save_config(config, gateway.path)
-    rejected = await gateway.mutate(view, value="low")
-    assert rejected["error"]["status"] == 409
-    loop.refresh_runtime_config()
-    refreshed = await loop.runtime_for_session(await gateway.sessions.state.get("websocket:chat"))
-    assert refreshed.generation.reasoning_effort == "high"
-    assert captured.generation.reasoning_effort == "max"
-    assert json.loads((await gateway.get(key="websocket:chat")).body)["value"] is None
-
-
-@pytest.mark.parametrize("change", ["model", "delete", "recreate", "config"])
-async def test_inflight_mutation_rechecks_session_and_configuration(gateway, monkeypatch, change):
-    loop = gateway.loop(RecordingProvider())
-    await gateway.sessions.state.get_header("websocket:chat")
-    view = json.loads((await gateway.get()).body)
-    entered, release = Event(), Event()
-    original = session_reasoning.reasoning_effort_options
-
-    def blocked(config, preset):
-        entered.set()
-        assert release.wait(3)
-        return original(config, preset)
-
-    monkeypatch.setattr(session_reasoning, "reasoning_effort_options", blocked)
-    mutation = asyncio.create_task(gateway.mutate(view, value="max"))
-    try:
-        assert await asyncio.to_thread(entered.wait, 3)
-        if change == "model":
-            await loop.set_session_model_preset("websocket:chat", "deep")
-        elif change == "config":
-            config = gateway.config
-            config.providers.deepseek.extra_body = {"thinking": {"type": "disabled"}}
-            save_config(config, gateway.path)
-        else:
-            await gateway.sessions.state.delete("websocket:chat")
-            if change == "recreate":
-                await gateway.sessions.state.get_header("websocket:chat")
-    finally:
-        release.set()
-    rejected = await mutation
-    assert rejected["error"]["status"] == 409
-    header = await gateway.sessions.state.read_header("websocket:chat")
-    assert header is None or SESSION_REASONING_EFFORT_METADATA_KEY not in header.metadata
-
-
-@pytest.mark.parametrize("provider,model,api_base,body,preset_body", [
-    ("deepseek", "unlisted-reasoner", None, None, None),
-    ("deepseek", "deepseek-flash", "https://example.invalid/v1", None, None),
-    ("deepseek", "deepseek-flash", None, {"reasoning_effort": "high"}, None),
-    ("deepseek", "deepseek-flash", None, None, {"thinking": {"type": "disabled"}}),
-    ("deepseek", "deepseek-flash", None, {"reasoning": {"effort": "max"}}, None),
-    ("anthropic", "claude-sonnet-4-5", None, None, None),
-    ("openai", "future-o-reasoner", None, None, None),
-])
-async def test_session_fallback_matches_preset_recommendations(
-    gateway, provider, model, api_base, body, preset_body,
-):
-    config = gateway.config
-    preset = config.model_presets["deep"]
-    preset.provider, preset.model, preset.extra_body = provider, model, preset_body
-    connection = getattr(config.providers, provider)
-    connection.api_key, connection.api_base, connection.extra_body = "test-key", api_base, body
-    save_config(config, gateway.path)
-    response = await gateway.get(preset="deep")
-    assert response.status_code == 200
-    settings = await gateway.services.http.dispatch(
-        SimpleNamespace(remote_address=("127.0.0.1", 12345)),
-        Request("/api/settings", gateway.headers),
-    )
-    assert settings.status_code == 200
-    saved_preset = next(row for row in json.loads(settings.body)["model_presets"] if row["name"] == "deep")
-    assert json.loads(response.body)["options"] == [value for value in saved_preset["reasoning_effort_values"] if value]
-    assert json.loads(response.body)["value"] is None
-
-
-@pytest.mark.parametrize("provider,efforts,expected", [
-    ("openai_codex", [{"effort": "low"}, {"effort": "ultra"}, {"effort": "none"}], ["low", "ultra", "none"]),
-    ("github_copilot", ["low", "xhigh"], ["low", "xhigh"]),
-    ("github_copilot", True, []),
-])
-async def test_oauth_recommendations_match_preset_catalog(gateway, monkeypatch, provider, efforts, expected):
-    if provider == "openai_codex":
-        from nanobot.providers.openai_codex_provider import _parse_openai_codex_models
-        models = _parse_openai_codex_models({"models": [{"slug": "new-model", "supported_reasoning_levels": efforts}]})
-    else:
-        from nanobot.providers.github_copilot_provider import _parse_github_copilot_models
-        models = _parse_github_copilot_models({"data": [{
-            "id": "new-model", "model_picker_enabled": True, "supported_endpoints": ["/responses"],
-            "capabilities": {"supports": {"reasoning_effort": efforts}},
-        }]})
-    monkeypatch.setattr(settings_models, "get_oauth_model_catalog", lambda *args, **kwargs:
-                        OAuthModelCatalogSnapshot(models=models, source="remote", fetched_at=1))
-    config = gateway.config
-    config.model_presets["deep"].provider = provider
-    config.model_presets["deep"].model = provider.replace("_", "-") + "/new-model"
-    save_config(config, gateway.path)
-    response = await gateway.get(preset="deep")
-    assert response.status_code == 200
-    assert json.loads(response.body)["options"] == expected
-
-
-@pytest.mark.parametrize("provider,base", [
-    ("custom", "http://127.0.0.1:19191/v1"),
-    ("deepseek", "https://example.invalid/v1"),
-    ("openai", None),
-])
-async def test_explicit_online_levels_work_at_custom_and_standard_endpoints(gateway, monkeypatch, provider, base):
-    config = gateway.config
-    config.agents.defaults.provider = provider
-    config.agents.defaults.model = "sample-reasoner"
-    config.agents.defaults.reasoning_effort = None
-    getattr(config.providers, provider).api_key = "test-key"
-    getattr(config.providers, provider).api_base = base
-    save_config(config, gateway.path)
-    calls = []
-
-    def models(url, **kwargs):
-        calls.append(url)
-        return httpx.Response(200, request=httpx.Request("GET", url), json={"data": [{
-            "id": "sample-reasoner", "effort": {"supported_levels": ["low", "xhigh"]},
-        }]})
-
-    monkeypatch.setattr(session_reasoning.httpx, "get", models)
-    view = json.loads((await gateway.get()).body)
-    assert view["options"] == ["low", "xhigh"]
-    assert view["value"] is view["preset_value"] is None
-    changed = await gateway.mutate(view, value="xhigh")
-    assert changed["result"]["value"] == "xhigh"
-    runtime = await gateway.loop(RecordingProvider()).runtime_for_session(
-        await gateway.sessions.state.get("websocket:chat"),
-    )
-    assert runtime.generation.reasoning_effort == "xhigh"
-    assert calls and all(url == (base or "https://api.openai.com/v1") + "/models" for url in calls)
-    config.agents.defaults.model = "unknown"
-    save_config(config, gateway.path)
-    unknown = json.loads((await gateway.get()).body)
-    assert unknown["options"] == ["low", "medium", "high"]
-
-
-@pytest.mark.parametrize("model,declared,expected", [
-    ("kimi-k2.5", ["low", "high"], ["low", "high"]),
-    ("kimi-k3.1-pro", ["low", "medium", "high", "max"], ["low", "medium", "high", "max"]),
-])
-async def test_online_recommendations_match_preset_without_separate_adapter_filter(
-    gateway, monkeypatch, model, declared, expected,
-):
-    config = gateway.config
-    config.agents.defaults.provider = "custom"
-    config.agents.defaults.model = model
-    config.providers.custom.api_base = "http://127.0.0.1:19191/v1"
-    save_config(config, gateway.path)
-    monkeypatch.setattr(session_reasoning.httpx, "get", lambda url, **kwargs:
-                        httpx.Response(200, request=httpx.Request("GET", url), json={"data": [{
-                            "id": model, "effort": {"supported_levels": declared},
-                        }]}))
-    view = json.loads((await gateway.get()).body)
-    assert view["options"] == expected
-    if expected:
-        assert (await gateway.mutate(view, value=expected[0]))["result"]["value"] == expected[0]
-
-
-@pytest.mark.parametrize("model,expected", [("deepseek-flash", ["none"]), ("unlisted-reasoner", [])])
-async def test_catalog_empty_levels_and_metadata_match_preset_picker(gateway, monkeypatch, model, expected):
-    config = gateway.config
-    config.agents.defaults.model = model
-    save_config(config, gateway.path)
-    monkeypatch.setattr(session_reasoning.httpx, "get", lambda url, **kwargs:
-                        httpx.Response(200, request=httpx.Request("GET", url), json={"data": [{
-                            "id": model, "effort": {"supported_levels": []},
-                        }]}))
-    view = json.loads((await gateway.get()).body)
-    assert view["options"] == expected
-    assert (await gateway.mutate(view, value="high"))["error"]["status"] == 400
+    for chat_id in gateway.chats:
+        clear_websocket_turns(chat_id)
 
 
 class RecordingProvider(LLMProvider):
@@ -433,30 +172,213 @@ class RecordingProvider(LLMProvider):
                 ToolCallRequest(id="read", name="read_file", arguments={"path": "answer.py"}),
             ])
         if self.error:
-            return LLMResponse(content="busy", finish_reason="error", error_kind="server_error")
+            return LLMResponse(content=None, finish_reason="error", error_kind="server_error")
         return LLMResponse(content="done", finish_reason="stop")
 
 
-async def test_next_execution_uses_snapshot_not_later_session_or_global_changes(gateway):
+async def test_draft_reads_do_not_save_until_normal_message_and_project_last_used_value(gateway):
+    before = gateway.path.read_bytes()
+    assert (await gateway.get_sessions(authenticated=False)).status_code == 401
+    assert json.loads((await gateway.get_sessions()).body) == {"sessions": []}
+    terminal = await gateway.services.http.dispatch(
+        SimpleNamespace(remote_address=("127.0.0.1", 12345)),
+        Request("/webui/terminal", Headers({"Authorization": "Bearer test-bootstrap"})),
+    )
+    assert "webui.reasoning-effort.v1" in json.loads(terminal.body)["webui"]["capabilities"]
+    connection = gateway.connection()
+    await gateway.channel._dispatch_envelope(connection, "test-client", {"type": "new_chat"})
+    attached = next(event for event in gateway.events(connection) if event["event"] == "attached")
+    chat_id = attached["chat_id"]
+    assert attached["reasoning_effort"] is None
+    assert await gateway.sessions.state.read_metadata(f"websocket:{chat_id}") is None
+    assert json.loads((await gateway.get_sessions()).body) == {"sessions": []}
+
+    provider = RecordingProvider()
+    await gateway.run(gateway.loop(provider), connection=connection, chat_id=chat_id, reasoning_effort="none")
+    saved = await gateway.sessions.state.read(f"websocket:{chat_id}")
+    assert saved.metadata[SESSION_REASONING_EFFORT_METADATA_KEY] == "none"
+    assert [message["role"] for message in saved.messages] == ["user", "assistant"]
+    assert provider.calls == ["none"]
+    rows = json.loads((await gateway.get_sessions()).body)["sessions"]
+    assert [(row["key"], row["reasoning_effort"]) for row in rows] == [(saved.key, "none")]
+    await gateway.channel._dispatch_envelope(connection, "test-client", {"type": "attach", "chat_id": chat_id})
+    attached = next(event for event in reversed(gateway.events(connection)) if event["event"] == "attached")
+    assert attached["reasoning_effort"] == "none"
+    assert gateway.path.read_bytes() == before
+    assert provider.generation.reasoning_effort == "high"
+
+
+@pytest.mark.parametrize("value", [False, 0, {}, [], "", " ", " high", "high ", "high\nlow"])
+async def test_invalid_effort_rejects_normal_message_without_session_input(gateway, value):
+    connection = await gateway.send(reasoning_effort=value)
+    assert gateway.events(connection)[-1]["event"] == "error"
+    assert "reasoning_effort" in gateway.events(connection)[-1]["detail"]
+    assert gateway.bus.inbound_size == 0
+    assert await gateway.sessions.state.read_metadata("websocket:chat") is None
+
+
+@pytest.mark.parametrize("audience,fields", [
+    (None, {}), ("client", {}), ("webui", {"webui": False}),
+])
+async def test_only_trusted_webui_can_select_effort(gateway, audience, fields):
+    connection = await gateway.send(connection=gateway.connection(audience), reasoning_effort="low", **fields)
+    assert gateway.events(connection)[-1]["event"] == "error"
+    assert gateway.bus.inbound_size == 0
+    assert await gateway.sessions.state.read_metadata("websocket:chat") is None
+
+
+@pytest.mark.parametrize("content,fields,effort,dispatched", [
+    ("!echo harmless", {"user_shell": True}, None, "/__shell echo harmless"),
+    ("/restart", {}, "low", "/restart"),
+    ("/restart", {"turn_id": "webui-system:restart-effort"}, None, "/restart"),
+    ("/status", {}, "low", "/status"),
+])
+async def test_trusted_shell_and_side_channels_ignore_composer_effort(
+    gateway, content, fields, effort, dispatched,
+):
+    await gateway.run(gateway.loop(RecordingProvider()), reasoning_effort="max")
+    message = await gateway.incoming(content=content, reasoning_effort=effort, **fields)
+    assert message.content == dispatched
+    assert INBOUND_META_REASONING_EFFORT not in message.metadata
+    assert (message.metadata.get(INBOUND_META_USER_SHELL) is True) == ("user_shell" in fields)
+    assert (await gateway.sessions.state.read("websocket:chat")).metadata[SESSION_REASONING_EFFORT_METADATA_KEY] == "max"
+
+
+async def test_non_webui_metadata_cannot_spoof_selection_and_legacy_input_still_works(gateway):
+    provider = RecordingProvider()
+    message = await gateway.run(
+        gateway.loop(provider), connection=gateway.connection("client"), webui=False,
+        metadata={INBOUND_META_REASONING_EFFORT: "low"}, _reasoning_effort="low",
+    )
+    assert INBOUND_META_REASONING_EFFORT not in message.metadata
+    assert provider.calls == ["high"]
+    assert SESSION_REASONING_EFFORT_METADATA_KEY not in (await gateway.sessions.state.read("websocket:chat")).metadata
+
+
+async def test_missing_inherits_null_follows_preset_unknown_string_is_not_catalog_validated(gateway):
+    provider = RecordingProvider()
+    loop = gateway.loop(provider)
+    await gateway.run(loop, reasoning_effort="future-effort")
+    await gateway.run(loop)
+    await gateway.run(loop, chat_id="other")
+    await gateway.run(loop, reasoning_effort=None)
+    await gateway.run(loop)
+    assert provider.calls == ["future-effort", "future-effort", "high", "high", "high"]
+    assert (await gateway.sessions.state.read("websocket:chat")).metadata.get(SESSION_REASONING_EFFORT_METADATA_KEY) is None
+    assert (await gateway.services.session_projection.attach_fields("websocket:chat"))["reasoning_effort"] is None
+
+
+async def test_reload_recovers_last_used_effort_without_changing_another_host_or_session(gateway, tmp_path):
+    await gateway.run(gateway.loop(RecordingProvider()), reasoning_effort="low")
+    fresh = SessionManager(gateway.config.workspace_path, sessions_root=gateway.path.parent / "sessions")
+    other_host = SessionManager(tmp_path / "other-workspace", sessions_root=tmp_path / "other-sessions")
+    try:
+        assert (await WebUISessionProjection(fresh).attach_fields("websocket:chat"))["reasoning_effort"] == "low"
+        assert (await WebUISessionProjection(fresh).attach_fields("websocket:other"))["reasoning_effort"] is None
+        assert (await WebUISessionProjection(other_host).attach_fields("websocket:chat"))["reasoning_effort"] is None
+        provider = RecordingProvider()
+        await gateway.loop(provider, sessions=fresh).process_direct("after restart", session_key="websocket:chat")
+        assert provider.calls == ["low"]
+        assert await other_host.state.list_sessions() == []
+    finally:
+        await fresh.state.aclose()
+        await other_host.state.aclose()
+
+
+async def test_normal_model_command_clears_override_before_next_preset_execution(gateway):
+    provider = RecordingProvider()
+    loop = gateway.loop(provider)
+    await gateway.run(loop, reasoning_effort="max")
+    await gateway.run(loop, content="/model deep", reasoning_effort="none")
+    assert SESSION_REASONING_EFFORT_METADATA_KEY not in (await gateway.sessions.state.read("websocket:chat")).metadata
+    await gateway.run(loop)
+    await gateway.run(loop, reasoning_effort="max")
+    await gateway.run(loop, content="/model default")
+    await gateway.run(loop)
+    assert provider.calls == ["max", "low", "max", "high"]
+    assert gateway.config.model_presets["deep"].reasoning_effort == "low"
+
+
+async def test_running_followup_saves_next_effort_without_mutating_active_snapshot(gateway):
     provider = RecordingProvider(tool_first=True)
     loop = gateway.loop(provider)
     (gateway.config.workspace_path / "answer.py").write_text("answer = 42", encoding="utf-8")
-    view = json.loads((await gateway.get()).body)
-    await gateway.mutate(view, value="low")
+    before = gateway.path.read_bytes()
     provider.entered, provider.release = asyncio.Event(), asyncio.Event()
-    running = asyncio.create_task(loop.process_direct("hello", session_key="websocket:chat"))
+    await loop._dispatch_inbound(await gateway.incoming(reasoning_effort="low"))
     try:
         await asyncio.wait_for(provider.entered.wait(), 3)
         assert provider.calls == ["low"]
-        await gateway.mutate(view, value="max")
+        assert (await gateway.sessions.state.read("websocket:chat")).metadata[SESSION_REASONING_EFFORT_METADATA_KEY] == "low"
+        await loop._dispatch_inbound(await gateway.incoming(reasoning_effort="max", content="follow up"))
+        assert (await gateway.sessions.state.read("websocket:chat")).metadata[SESSION_REASONING_EFFORT_METADATA_KEY] == "max"
         assert provider.generation.reasoning_effort == "high"
     finally:
         provider.release.set()
-    assert (await running).content == "done"
-    await loop.process_direct("next", session_key="websocket:chat")
-    await loop.process_direct("other", session_key="websocket:other")
+        await asyncio.gather(*tuple(loop._active_tasks.get("websocket:chat", ())))
+    await gateway.run(loop)
+    await gateway.run(loop, chat_id="other")
     assert provider.calls == ["low", "low", "max", "high"]
-    assert provider.generation.reasoning_effort == gateway.config.agents.defaults.reasoning_effort == "high"
+    assert gateway.path.read_bytes() == before
+    assert provider.generation.reasoning_effort == "high"
+
+
+@pytest.mark.parametrize("first,expected", [("low", "low"), (None, "high")])
+async def test_later_admission_before_root_save_keeps_own_snapshot_and_latest_metadata(
+    gateway, monkeypatch, first, expected,
+):
+    provider = RecordingProvider(tool_first=True)
+    loop = gateway.loop(provider)
+    (gateway.config.workspace_path / "answer.py").write_text("answer = 42", encoding="utf-8")
+    root = await gateway.incoming(reasoning_effort=first)
+    following = await gateway.incoming(reasoning_effort="max", content="follow up")
+    entered, release = asyncio.Event(), asyncio.Event()
+    prepare_prompt = loop.runner.prepare_prompt
+
+    async def paused_prepare(*args, **kwargs):
+        if not entered.is_set():
+            entered.set()
+            await release.wait()
+        return await prepare_prompt(*args, **kwargs)
+
+    monkeypatch.setattr(loop.runner, "prepare_prompt", paused_prepare)
+    await loop._dispatch_inbound(root)
+    try:
+        await asyncio.wait_for(entered.wait(), 3)
+        await loop._dispatch_inbound(following)
+    finally:
+        release.set()
+        await asyncio.gather(*tuple(loop._active_tasks.get("websocket:chat", ())))
+    assert provider.calls == [expected, expected]
+    assert (await gateway.sessions.state.read("websocket:chat")).metadata[SESSION_REASONING_EFFORT_METADATA_KEY] == "max"
+    await gateway.run(loop)
+    assert provider.calls == [expected, expected, "max"]
+
+
+async def test_temporary_selection_stays_in_owner_memory_and_never_recreates_after_discard(gateway):
+    owner, intruder = gateway.connection(), gateway.connection()
+    await gateway.channel._dispatch_envelope(owner, "test-client", {"type": "new_temporary_chat"})
+    chat_id = next(event["chat_id"] for event in gateway.events(owner) if event["event"] == "attached")
+    key = f"websocket:{chat_id}"
+    denied = await gateway.send(connection=intruder, chat_id=chat_id, reasoning_effort="max")
+    assert gateway.events(denied)[-1]["detail"] == "temporary_chat_unavailable"
+    assert gateway.bus.inbound_size == 0
+    provider = RecordingProvider()
+    loop = gateway.loop(provider)
+    await gateway.run(loop, connection=owner, chat_id=chat_id, reasoning_effort="low")
+    await gateway.run(loop, connection=owner, chat_id=chat_id)
+    transient = await gateway.sessions.state.read(key)
+    assert transient.policy.persist is False
+    assert transient.metadata[SESSION_REASONING_EFFORT_METADATA_KEY] == "low"
+    assert provider.calls == ["low", "low"]
+    assert await gateway.sessions.state.list_sessions() == []
+    assert gateway.sessions.read_session_file(key) is None
+    late = await gateway.incoming(connection=owner, chat_id=chat_id, reasoning_effort="max")
+    await gateway.channel._dispatch_envelope(owner, "test-client", {"type": "discard_temporary_chat", "chat_id": chat_id})
+    with pytest.raises(RuntimeError, match="required session is not active"):
+        await loop._process_message(late)
+    assert await gateway.sessions.state.read(key) is None
+    assert await gateway.sessions.state.list_sessions() == []
 
 
 async def test_primary_override_does_not_replace_fallback_effort(gateway):
@@ -464,13 +386,8 @@ async def test_primary_override_does_not_replace_fallback_effort(gateway):
     config = gateway.config
     config.agents.defaults.fallback_models = ["deep"]
     save_config(config, gateway.path)
-    fallback_preset = config.model_presets["deep"]
-    wrapped = FallbackProvider(primary, [fallback_preset], lambda _: fallback)
-    loop = gateway.loop(wrapped)
-    view = json.loads((await gateway.get()).body)
-    await gateway.mutate(view, value="max")
-    result = await loop.process_direct("hello", session_key="websocket:chat")
-    assert result.content == "done"
+    wrapped = FallbackProvider(primary, [config.model_presets["deep"]], lambda _: fallback)
+    await gateway.run(gateway.loop(wrapped), reasoning_effort="max")
     assert primary.calls == ["max"]
     assert fallback.calls == ["low"]
     assert primary.generation.reasoning_effort == "high"

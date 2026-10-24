@@ -789,9 +789,10 @@ export function ThreadShell({
     || (session?.projectLocked === undefined && displayMessages.some((message) => message.role === "user" && message.deliveryStatus !== "failed"));
   const wasShowingHeroComposerRef = useRef(showHeroComposer);
   const sessionModelPreset = session?.modelPreset?.trim() || null;
-  const [localModelPreset, setLocalModelPreset] = useState<string | null>(null);
+  const [localModelChoice, setLocalModelChoice] = useState<{ sessionKey: string | null; preset: string } | null>(null);
+  const localModelPreset = localModelChoice?.sessionKey === (session?.key ?? null) ? localModelChoice.preset : null;
   useEffect(() => {
-    setLocalModelPreset(null);
+    setLocalModelChoice(null);
   }, [session?.key, sessionModelPreset]);
   const configuredPresetNames = useMemo(
     () => new Set(settings?.model_presets.map((preset) => preset.name) ?? []),
@@ -834,31 +835,25 @@ export function ThreadShell({
       });
     });
   }, [activeModelPreset, chatId, client]);
-  const [modelSwitch, setModelSwitch] = useState<{ chatId: string; request: Promise<void> } | null>(null);
-  const handleModelPresetChange = useCallback((name: string) => {
-    setLocalModelPreset(name);
-    if (chatId) {
-      const request = client.sendSystemCommand(chatId, `/model ${name}`);
-      setModelSwitch({ chatId, request });
-      void request.catch(() => {}).finally(() => {
-        setModelSwitch((current) => current?.request === request ? null : current);
-      });
-    }
-  }, [chatId, client]);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const reasoning = useSessionReasoningEffort({
     sessionKey: session?.key ?? null,
     preset: activeModelPreset,
     settings,
     open: modelPickerOpen,
-    disabled: temporary || (!session && temporaryChatEnabled) || !settings || modelSwitch?.chatId === chatId,
+    disabled: temporary || (!session && temporaryChatEnabled) || !settings,
+    storedValue: !localModelPreset || localModelPreset === sessionModelPreset ? session?.reasoningEffort : null,
   });
-  const modelReasoningControl = <ModelReasoningControl data={reasoning.data}
-    pending={reasoning.pending} error={reasoning.error} onChange={reasoning.select} />;
+  const handleModelPresetChange = useCallback((name: string) => {
+    reasoning.reset(name);
+    setLocalModelChoice({ sessionKey: session?.key ?? null, preset: name });
+    if (chatId) void client.sendSystemCommand(chatId, `/model ${name}`).catch(() => {});
+  }, [chatId, client, reasoning.reset, session?.key]);
+  const modelReasoningControl = <ModelReasoningControl data={reasoning.data} onChange={reasoning.select} />;
   const modelPresetOptions = useMemo(
     () => modelPresetOptionsFromSettings(settings).map((preset) => (
       reasoning.enabled && preset.name === activeModelPreset
-        ? { ...preset, reasoningEffort: reasoning.data?.value ?? reasoning.data?.preset_value }
+        ? { ...preset, reasoningEffort: reasoning.data?.value ?? reasoning.data?.presetValue }
         : preset
     )),
     [activeModelPreset, reasoning.data, reasoning.enabled, settings],
@@ -1069,8 +1064,9 @@ export function ThreadShell({
       setBooting(true);
       let finish!: (accepted: boolean) => void;
       const delivery = new Promise<boolean>((resolve) => { finish = resolve; });
+      const reasoningEffort = reasoning.sendValue();
       pendingFirstRef.current = {
-        content, images, options: withWorkspaceScope(options), finish,
+        content, images, options: withWorkspaceScope({ ...options, reasoningEffort }), finish,
         draftKey, draft: draftStore?.get(draftKey, persistDraft),
       };
       setPendingFirstTargetChatId(null);
@@ -1081,31 +1077,14 @@ export function ThreadShell({
         setBooting(false);
         return false;
       }
+      reasoning.moveToSession(`websocket:${newId}`, reasoningEffort);
       if (localModelPreset) {
         await client.sendSystemCommand(newId, `/model ${localModelPreset}`).catch(() => {});
-      }
-      try {
-        await reasoning.persistDraft(`websocket:${newId}`);
-      } catch {
-        const pending = pendingFirstRef.current;
-        pendingFirstRef.current = null;
-        setBooting(false);
-        if (pending?.draft) {
-          const targetKey = `websocket:${newId}`;
-          const current = draftStore?.get(targetKey, !temporaryChatEnabled);
-          if (!current?.text && !current?.attachments.length
-            && !current?.sessionMentions.length && !current?.quotedContext) {
-            draftStore?.set(targetKey, pending.draft, !temporaryChatEnabled);
-          }
-        }
-        setRestoredFirstDraft((previous) => ({ chatId: newId,
-          revision: (previous?.revision ?? 0) + 1, error: t("thread.composer.reasoningSaveFailed") }));
-        return false;
       }
       setPendingFirstTargetChatId(newId);
       return delivery;
     },
-    [booting, client, draftKey, draftStore, localModelPreset, onCreateChat, persistDraft, reasoning.persistDraft, t, temporaryChatEnabled, withWorkspaceScope, workspaceScope],
+    [booting, client, draftKey, draftStore, localModelPreset, onCreateChat, persistDraft, reasoning, withWorkspaceScope, workspaceScope],
   );
 
   const inspectAttachment = useCallback(async (path: string) => {
@@ -1118,9 +1097,10 @@ export function ThreadShell({
 
   const handleThreadSend = useCallback(
     (content: string, images?: SendAttachment[], options?: SendOptions) => {
+      if (booting) return false;
       const submit = () => {
         setRestoredFirstDraft((current) => current?.chatId === chatId ? { ...current, error: "" } : current);
-        const submitted = send(content, images, withWorkspaceScope(options));
+        const submitted = send(content, images, withWorkspaceScope({ ...options, reasoningEffort: reasoning.sendValue() }));
         if (
           chatId
           && submitted
@@ -1132,10 +1112,9 @@ export function ThreadShell({
         }
         return submitted?.delivery ? submitted.delivery.then(() => true) : submitted !== null;
       };
-      const settled = reasoning.settle();
-      return typeof settled === "boolean" ? settled && submit() : settled.then((saved) => saved && submit());
+      return submit();
     },
-    [chatId, reasoning.settle, send, withWorkspaceScope],
+    [booting, chatId, reasoning, send, withWorkspaceScope],
   );
 
   const loadTemporaryFilePreview = useCallback((path: string) =>
@@ -1344,7 +1323,7 @@ export function ThreadShell({
           draftStore={draftStore}
           persistDraft={persistDraft}
           onSend={handleThreadSend}
-          disabled={!chatId}
+          disabled={!chatId || booting}
           inputAriaLabel={composerInputAriaLabel}
           isStreaming={turnActive}
           activeTurnId={turnActive && chatId ? client.getRunTurnId(chatId) ?? historyActiveTurnId : null}

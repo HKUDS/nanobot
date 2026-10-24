@@ -5,9 +5,8 @@ import { expect, it, vi } from "vitest";
 
 import { ModelPresetBadge } from "@/components/thread/ModelPresetBadge";
 import { ModelReasoningControl } from "@/components/thread/ModelReasoningControl";
-import type { SessionReasoningEffort } from "@/lib/types";
 
-const data: SessionReasoningEffort = { preset: "default", scope: "scope", options: ["none", "low", "max"], value: null, preset_value: "low" };
+const data = { options: ["none", "low", "max"], value: null, presetValue: "low" };
 
 it("shows the effective preset effort and allows direct session choices in the open model picker", async () => {
   const onChange = vi.fn();
@@ -16,7 +15,7 @@ it("shows the effective preset effort and allows direct session choices in the o
   function Example() {
     const [value, setValue] = useState<string | null>(null);
     return <ModelPresetBadge label="Default" modelPreset="default" isHero onPickerOpenChange={onOpen}
-      reasoningControl={<ModelReasoningControl data={{ ...data, value }} pending={false} error={false}
+      reasoningControl={<ModelReasoningControl data={{ ...data, value }}
         onChange={(next) => { onChange(next); setValue(next); }} />} />;
   }
   render(<Example />);
@@ -39,16 +38,12 @@ it("shows the effective preset effort and allows direct session choices in the o
   expect(screen.getByRole("dialog")).toContainElement(control);
 });
 
-it("hides unknown capabilities, disables a pending save and makes failure visible", async () => {
-  const props = { pending: false, error: false, onChange: vi.fn() };
-  const view = render(<ModelReasoningControl {...props} data={{ ...data, options: [] }} />);
+it("only offers the available recommendations and stays out of the way when none exist", () => {
+  const onChange = vi.fn();
+  const view = render(<ModelReasoningControl onChange={onChange} data={{ ...data, options: [] }} />);
   expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
-  view.rerender(<ModelReasoningControl {...props} data={data} pending />);
-  for (const radio of screen.getAllByRole("radio")) expect(radio).toHaveAttribute("aria-disabled", "true");
-  const user = userEvent.setup();
-  await user.click(screen.getByRole("radio", { name: "max" }));
-  fireEvent.keyDown(screen.getByRole("radio", { name: "low" }), { key: "ArrowRight" });
-  expect(props.onChange).not.toHaveBeenCalled();
-  view.rerender(<ModelReasoningControl {...props} data={data} error />);
-  expect(screen.getByRole("alert")).toHaveTextContent("Could not save reasoning effort");
+  view.rerender(<ModelReasoningControl onChange={onChange} data={data} />);
+  expect(screen.getAllByRole("radio").map((radio) => radio.textContent)).toEqual(data.options);
+  fireEvent.click(screen.getByRole("radio", { name: "max" }));
+  expect(onChange).toHaveBeenCalledWith("max");
 });

@@ -1937,7 +1937,6 @@
       "manageModels": "Kelola preset",
       "reasoningEffort": "Upaya penalaran",
       "reasoningScope": "Hanya chat ini, mulai proses berikutnya.",
-      "reasoningSaveFailed": "Gagal menyimpan upaya penalaran. Coba lagi.",
       "fallbackNotice": "Respons ini menggunakan model cadangan: {{model}}.",
       "checkModelSettings": "Periksa pengaturan model",
       "reauthNotice": "Otorisasi {{provider}} kedaluwarsa. Silakan masuk kembali.",

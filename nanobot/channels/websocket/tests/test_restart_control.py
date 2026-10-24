@@ -61,6 +61,7 @@ async def test_settings_restart_does_not_create_or_change_chat_history(history, 
         envelope = {
             "type": "message", "chat_id": chat_id, "content": "/restart", "webui": True,
             "turn_id": f"webui-system:restart-{chat_id}",
+            "reasoning_effort": None,
         }
         await channel._dispatch_envelope(connection, "browser", envelope)
         message = bus.publish_inbound.await_args.args[0]

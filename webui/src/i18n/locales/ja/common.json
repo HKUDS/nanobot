@@ -1937,7 +1937,6 @@
       "manageModels": "プリセット管理",
       "reasoningEffort": "推論強度",
       "reasoningScope": "この会話のみ、次の実行から適用。",
-      "reasoningSaveFailed": "推論強度を保存できませんでした。再試行してください。",
       "fallbackNotice": "この応答では代替モデルを使用しました：{{model}}。",
       "checkModelSettings": "モデル設定を確認",
       "reauthNotice": "{{provider}} の認証が失効しました。再ログインしてください。",

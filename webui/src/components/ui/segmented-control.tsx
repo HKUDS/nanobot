@@ -26,7 +26,6 @@ interface SegmentedControlProps<T extends string> {
   itemClassName?: string;
   indicatorClassName?: string;
   animateIndicator?: boolean;
-  disabled?: boolean;
 }
 
 interface IndicatorGeometry {
@@ -58,7 +57,6 @@ export function SegmentedControl<T extends string>({
   itemClassName,
   indicatorClassName,
   animateIndicator = true,
-  disabled = false,
 }: SegmentedControlProps<T>) {
   const tabs = mode === "tabs";
   const radio = mode === "radio";
@@ -129,7 +127,6 @@ export function SegmentedControl<T extends string>({
     if (nextIndex === null) return;
 
     event.preventDefault();
-    if (disabled) return;
     const next = options[nextIndex];
     if (!next) return;
     onChange(next.value);
@@ -141,9 +138,8 @@ export function SegmentedControl<T extends string>({
       ref={rootRef}
       role={tabs ? "tablist" : radio ? "radiogroup" : ariaLabel ? "group" : undefined}
       aria-label={ariaLabel}
-      aria-disabled={disabled || undefined}
       className={cn(
-        "segmented-control relative isolate inline-flex min-h-8 max-w-full flex-nowrap items-center gap-1 rounded-full bg-muted/65 p-1 text-ui-label text-muted-foreground aria-disabled:opacity-60",
+        "segmented-control relative isolate inline-flex min-h-8 max-w-full flex-nowrap items-center gap-1 rounded-full bg-muted/65 p-1 text-ui-label text-muted-foreground",
         className,
       )}
     >
@@ -181,8 +177,7 @@ export function SegmentedControl<T extends string>({
             aria-checked={radio ? selected : undefined}
             aria-pressed={rovingFocus ? undefined : selected}
             tabIndex={rovingFocus ? (selected || (selectedIndex < 0 && index === 0) ? 0 : -1) : undefined}
-            aria-disabled={disabled || undefined}
-            onClick={() => { if (!disabled) onChange(option.value); }}
+            onClick={() => onChange(option.value)}
             onKeyDown={(event) => handleKeyDown(event, index)}
             className={cn(
               "relative z-[1] min-w-0 truncate whitespace-nowrap rounded-full px-2 py-1 text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",

@@ -63,6 +63,7 @@ export interface SendAttachment {
 
 export interface SendOptions {
   intent?: "create_automation";
+  reasoningEffort?: string | null;
   cliApps?: OutboundCliAppMention[];
   mcpPresets?: OutboundMcpPresetMention[];
   sessionMentions?: SessionMention[];

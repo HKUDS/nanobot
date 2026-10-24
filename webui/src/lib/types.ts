@@ -450,6 +450,8 @@ export interface ChatSummary {
   preview: string;
   /** Model preset persisted for this session; null means it still follows the global default. */
   modelPreset?: string | null;
+  /** Last effort submitted with a normal message; null follows the preset. */
+  reasoningEffort?: string | null;
   /** Unix epoch seconds when this session currently has a turn in flight. */
   runStartedAt?: number | null;
   /** Durable recovery state that needs attention after an interrupted turn. */
@@ -612,14 +614,6 @@ export type ProviderRequestAPI =
 export interface AutomaticModelAPIPayload {
   provider: string;
   api: ProviderRequestAPI;
-}
-
-export interface SessionReasoningEffort {
-  preset: string;
-  scope: string;
-  options: string[];
-  value: string | null;
-  preset_value: string | null;
 }
 
 interface ProviderModelInfo {
@@ -1795,6 +1789,7 @@ export type Outbound =
       type: "message";
       chat_id: string;
       content: string;
+      reasoning_effort?: string | null;
       media?: import("../../../packages/client-events/attachments").AttachmentReference[];
       cli_apps?: OutboundCliAppMention[];
       mcp_presets?: OutboundMcpPresetMention[];

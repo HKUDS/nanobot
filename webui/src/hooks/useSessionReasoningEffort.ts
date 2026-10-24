@@ -1,88 +1,99 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { fetchSessionReasoningEffort, setSessionReasoningEffort } from "@/lib/api";
-import type { SessionReasoningEffort, SettingsPayload } from "@/lib/types";
+import { useProviderModelCatalog } from "@/hooks/useProviderModelCatalog";
+import { reasoningEffortValues } from "@/lib/provider-model-catalog";
+import type { SettingsPayload } from "@/lib/types";
 import { useClient } from "@/providers/ClientProvider";
 
-export function useSessionReasoningEffort({ sessionKey, preset, settings, open, disabled }: {
+const NO_PROVIDER = {};
+const PREFIX = "nanobot.reasoning-effort.v1.";
+type Preference = { preset: string; value: string | null };
+function readPreference(key: string): Preference | null {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) ?? "null");
+    return value && typeof value.preset === "string" && (value.value === null || typeof value.value === "string") ? value : null;
+  } catch { return null; }
+}
+function storePreference(key: string, value: Preference | null) {
+  try {
+    if (value) localStorage.setItem(key, JSON.stringify(value));
+    else localStorage.removeItem(key);
+  } catch { /* Browser preferences must not block sending. */ }
+}
+
+export function useSessionReasoningEffort({ sessionKey, preset, settings, open, disabled, storedValue }: {
   sessionKey: string | null;
   preset: string;
   settings: SettingsPayload | null;
   open: boolean;
   disabled: boolean;
+  storedValue?: string | null;
 }) {
-  const { client, getToken, token, webuiCapabilities } = useClient();
+  const { client, token, webuiCapabilities } = useClient();
   const enabled = !disabled && webuiCapabilities.includes("webui.reasoning-effort.v1");
-  const owner = useMemo(() => ({ client, sessionKey, preset, settings, token, enabled }),
-    [client, sessionKey, preset, settings, token, enabled]);
-  const currentOwner = useRef(owner);
-  currentOwner.current = owner;
-  const [snapshot, setSnapshot] = useState<{ owner: typeof owner; data: SessionReasoningEffort } | null>(null);
-  const [operation, setOperation] = useState<{ owner: typeof owner; error: boolean; pending: boolean } | null>(null);
-  const draft = useRef<{ owner: typeof owner; value: string | null; scope: string } | null>(null);
-  const write = useRef<{ owner: typeof owner; settled: Promise<boolean> } | null>(null);
-  const discovery = useRef<AbortController | null>(null);
-
+  const key = `${PREFIX}${JSON.stringify([client.preferenceScope, sessionKey ?? "new"])}`;
+  const scope = JSON.stringify([key, preset]);
+  const saved = readPreference(key);
+  const [choice, setChoice] = useState<{ scope: string; value: string | null } | null>(null);
+  const value = choice?.scope === scope ? choice.value : saved?.preset === preset ? saved.value : storedValue;
+  const latest = useRef(value);
+  latest.current = value;
+  const pending = useRef<{ key: string; value: Preference; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const flush = useCallback(() => {
+    if (!pending.current) return;
+    clearTimeout(pending.current.timer);
+    storePreference(pending.current.key, pending.current.value);
+    pending.current = null;
+  }, []);
   useEffect(() => {
-    if (!enabled || !open) return;
-    const controller = new AbortController();
-    discovery.current = controller;
-    void fetchSessionReasoningEffort(getToken(), preset, sessionKey, controller.signal).then((data) => {
-      if (controller.signal.aborted || write.current?.owner === owner) return;
-      const choice = draft.current;
-      setSnapshot({ owner, data: !sessionKey && choice?.owner === owner && choice.scope === data.scope
-        ? { ...data, value: choice.value } : data });
-    }).catch(() => {
-      // Discovery is advisory: no reliable options means no quick control.
-    });
-    return () => controller.abort();
-  }, [enabled, getToken, open, owner, preset, sessionKey]);
+    if (!enabled) return;
+    const previous = readPreference(key);
+    if (previous && previous.preset !== preset) storePreference(key, null);
+  }, [enabled, key, preset]);
+  useEffect(() => {
+    window.addEventListener("pagehide", flush);
+    return () => { window.removeEventListener("pagehide", flush); flush(); };
+  }, [flush, scope]);
 
-  const data = enabled && snapshot?.owner === owner ? snapshot.data : null;
-  const select = useCallback(async (value: string | null) => {
-    if (!data || currentOwner.current !== owner || write.current?.owner === owner) return;
-    discovery.current?.abort();
-    if (!sessionKey) {
-      draft.current = { owner, value, scope: data.scope };
-      setSnapshot({ owner, data: { ...data, value } });
-      return;
+  const configuration = settings?.model_presets.find((entry) => entry.name === preset);
+  const providerName = configuration?.resolved_provider ?? configuration?.provider ?? settings?.agent.resolved_provider ?? settings?.agent.provider;
+  const provider = settings?.providers.find((entry) => entry.name === providerName);
+  const model = configuration?.model ?? settings?.agent.model ?? "";
+  const { payload } = useProviderModelCatalog({
+    revision: provider ?? NO_PROVIDER, token, provider: provider?.name ?? "",
+    enabled: enabled && open && !!model && !!provider?.configured && provider.model_catalog !== "unsupported",
+  });
+  const options = reasoningEffortValues(payload, model, configuration?.reasoning_effort_values);
+  const presetValue = (configuration ? configuration.reasoning_effort : settings?.agent.reasoning_effort) ?? null;
+  const select = useCallback((next: string) => {
+    if (!enabled || !options.includes(next)) return;
+    latest.current = next;
+    setChoice({ scope, value: next });
+    if (pending.current) clearTimeout(pending.current.timer);
+    pending.current = { key, value: { preset, value: next }, timer: setTimeout(flush, 250) };
+  }, [enabled, flush, key, options, preset, scope]);
+  const reset = useCallback((nextPreset: string) => {
+    flush();
+    storePreference(key, { preset: nextPreset, value: null });
+    setChoice({ scope: JSON.stringify([key, nextPreset]), value: null });
+    latest.current = null;
+  }, [flush, key]);
+  const moveToSession = useCallback((target: string, sentValue: string | null | undefined) => {
+    if (!enabled || sessionKey) return;
+    if (pending.current?.key === key) {
+      clearTimeout(pending.current.timer);
+      pending.current = null;
     }
-    const save = setSessionReasoningEffort(client, sessionKey, data, value);
-    const request = { owner, settled: save.then(() => true, () => false) };
-    write.current = request;
-    setOperation({ owner, error: false, pending: true });
-    try {
-      const updated = await save;
-      if (currentOwner.current === owner) {
-        setSnapshot({ owner, data: updated });
-        setOperation({ owner, error: false, pending: false });
-      }
-    } catch {
-      if (currentOwner.current === owner) setOperation({ owner, error: true, pending: false });
-    } finally {
-      if (write.current === request) write.current = null;
-    }
-  }, [client, data, owner, sessionKey]);
-
-  const persistDraft = useCallback(async (key: string) => {
-    const choice = draft.current;
-    if (!enabled || !data || choice?.owner !== owner || choice.value === null) return;
-    await setSessionReasoningEffort(client, key, data, choice.value);
-  }, [client, data, enabled, owner]);
-
-  const settle = useCallback(() => {
-    const request = write.current;
-    if (request?.owner !== owner) return currentOwner.current === owner;
-    return request.settled.then((saved) => saved && currentOwner.current === owner);
-  }, [owner]);
+    const targetKey = `${PREFIX}${JSON.stringify([client.preferenceScope, target])}`;
+    if (!readPreference(targetKey)) storePreference(targetKey, { preset, value: sentValue ?? null });
+    storePreference(key, null);
+    setChoice((current) => current?.scope === scope ? null : current);
+  }, [client, enabled, key, preset, scope, sessionKey]);
 
   return {
-    data,
-    pending: operation?.owner === owner && operation.pending,
-    error: operation?.owner === owner && operation.error,
-    select,
-    persistDraft,
-    settle,
     enabled,
+    data: enabled ? { options, value: value ?? null, presetValue } : null,
+    select, reset, moveToSession,
+    sendValue: () => enabled ? latest.current : undefined,
   };
 }

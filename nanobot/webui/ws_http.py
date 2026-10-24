@@ -111,7 +111,6 @@ from nanobot.webui.session_list_index import (
     indexed_workspace_scope,
     list_webui_sessions,
 )
-from nanobot.webui.session_reasoning import SessionReasoningError, WebUISessionReasoning
 from nanobot.webui.sidebar_state import (
     read_webui_sidebar_state,
     write_webui_sidebar_state,
@@ -195,7 +194,6 @@ _WEBUI_MUTATION_PATHS = {
     "star_prompt.claim": "/api/webui/star-prompt/claim",
     "star_prompt.dismiss": "/api/webui/star-prompt/dismiss",
     "sidebar.update": "/api/webui/sidebar-state/update",
-    "session.reasoning-effort": "/api/webui/reasoning-effort/update",
     "workspace.favorite": "/api/workspaces/favorite",
     "workspace.resolve_project": "/api/workspaces/resolve-project",
     "recovery.continue": "/api/webui/recovery/continue",
@@ -410,10 +408,6 @@ class GatewayHTTPHandler:
         self.ingress = ingress
         self.workspaces = workspaces
         self.settings = settings
-        self.session_reasoning = (
-            WebUISessionReasoning(settings.config.path, session_manager)
-            if session_manager is not None else None
-        )
         from nanobot.webui.remote_instances import RemoteInstances
 
         self.remote_instances = RemoteInstances(
@@ -560,7 +554,6 @@ class GatewayHTTPHandler:
             "/api/workspaces/resolve-project",
             "/api/workspaces/favorite",
             "/api/webui/subagents/cancel",
-            "/api/webui/reasoning-effort/update",
         }
 
     @staticmethod
@@ -836,8 +829,6 @@ class GatewayHTTPHandler:
     # -- Session routes -----------------------------------------------------
 
     async def _dispatch_session_routes(self, request: WsRequest, got: str) -> Response | None:
-        if got in {"/api/webui/reasoning-effort", "/api/webui/reasoning-effort/update"}:
-            return await self._handle_session_reasoning(request, update=got.endswith("/update"))
         m = re.fullmatch(r"/api/sessions/([^/]+)/webui-thread/prompts", got)
         if m:
             return await self._project_session_history(request, m.group(1), self._handle_prompt_index_get)
@@ -875,31 +866,6 @@ class GatewayHTTPHandler:
             return await self._handle_session_delete(request, m.group(1))
 
         return None
-
-    async def _handle_session_reasoning(self, request: WsRequest, *, update: bool) -> Response:
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        if update and not getattr(request, _WEBUI_MUTATION_REQUEST_ATTR, False):
-            return _http_error(405, "Reasoning effort changes require an authenticated WebSocket")
-        if self.session_reasoning is None:
-            return _http_error(503, "session manager unavailable")
-        try:
-            if update:
-                payload = _mutation_payload(request)
-                if payload is None:
-                    return _http_error(400, "invalid reasoning effort payload")
-                result = await self.session_reasoning.update(payload)
-            else:
-                query = _parse_query(request.path)
-                result = await self.session_reasoning.get(
-                    (_query_first(query, "model_preset") or "").strip(),
-                    _query_first(query, "session_key"),
-                )
-        except SessionReasoningError as exc:
-            return _http_error(exc.status, str(exc))
-        except (OSError, ValueError):
-            return _http_error(503, "reasoning effort settings unavailable")
-        return _http_json_response(dict(result), extra_headers=_NO_STORE_HEADERS)
 
     async def _dispatch_recovery_route(
         self,

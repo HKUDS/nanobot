@@ -3,7 +3,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.providers.base import LLMUsage
-from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
+from nanobot.session.model_selection import (
+    SESSION_MODEL_PRESET_METADATA_KEY,
+    SESSION_REASONING_EFFORT_METADATA_KEY,
+)
 from nanobot.session.recovery import RECOVERY_METADATA_KEY
 from nanobot.webui.session_projection import WebUISessionProjection
 
@@ -15,6 +18,7 @@ async def test_attach_fields_restore_session_runtime_metadata() -> None:
     sessions.read_session_metadata.return_value = {
         "metadata": {
             SESSION_MODEL_PRESET_METADATA_KEY: "Deep Research",
+            SESSION_REASONING_EFFORT_METADATA_KEY: "max",
             RECOVERY_METADATA_KEY: {
                 "status": "recovered",
                 "recovery_id": "recovery-1",
@@ -28,6 +32,7 @@ async def test_attach_fields_restore_session_runtime_metadata() -> None:
 
     assert await projection.attach_fields("websocket:chat-1") == {
         "model_preset": "Deep Research",
+        "reasoning_effort": "max",
         "recovery_state": {
             "status": "recovered",
             "recovery_id": "recovery-1",
@@ -47,7 +52,9 @@ async def test_attach_fields_tolerate_missing_or_invalid_session_metadata() -> N
     log = MagicMock()
     projection = WebUISessionProjection(sessions, log=log)
 
-    assert await projection.attach_fields("websocket:invalid") == {"model_preset": None}
+    assert await projection.attach_fields("websocket:invalid") == {
+        "model_preset": None, "reasoning_effort": None,
+    }
     log.warning.assert_called_once()
     assert await WebUISessionProjection(None).attach_fields("websocket:missing") == {}
 

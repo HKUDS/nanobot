@@ -47,6 +47,7 @@ from nanobot.agent.turn_delivery import TurnRoute as TurnRoute
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
 from nanobot.bus.events import (
     INBOUND_META_LOCAL_MEDIA,
+    INBOUND_META_REASONING_EFFORT,
     INBOUND_META_RUNTIME_CONTROL,
     INBOUND_META_TURN_ID,
     INBOUND_META_USER_SHELL,
@@ -94,7 +95,7 @@ from nanobot.session.model_selection import (
     SESSION_MODEL_PRESET_METADATA_KEY,
     SESSION_REASONING_EFFORT_METADATA_KEY,
     model_preset_from_metadata,
-    reasoning_effort_for_snapshot,
+    reasoning_effort_from_metadata,
 )
 from nanobot.session.recovery import (
     PENDING_FOLLOWUP_ID_KEY,
@@ -585,8 +586,9 @@ class AgentLoop:
         session: Session,
         *,
         recover_removed: bool = True,
+        input_metadata: Mapping[str, Any] | None = None,
     ) -> LLMRuntime:
-        """Resolve a session runtime without blocking on recovery persistence."""
+        """Capture session generation settings, honoring this admitted input's selection."""
         runtime = self._resolve_session_runtime(session, recover_removed=recover_removed)
         if runtime is None:
             await self.sessions.state.update_metadata(
@@ -596,8 +598,12 @@ class AgentLoop:
                 expected_generation=session.generation,
             )
             runtime = self.llm_runtime()
-        effort = reasoning_effort_for_snapshot(
-            session.metadata, preset=runtime.model_preset, signature=runtime.snapshot_signature,
+        # A later input may already have updated metadata before this BUILD.
+        # Derive this input's runtime without writing its selector back to the draft.
+        effort = (
+            input_metadata[INBOUND_META_REASONING_EFFORT]
+            if input_metadata is not None and INBOUND_META_REASONING_EFFORT in input_metadata
+            else reasoning_effort_from_metadata(session.metadata)
         )
         return runtime.with_generation_overrides(reasoning_effort=effort) if effort is not None else runtime
 
@@ -2216,7 +2222,9 @@ class AgentLoop:
         session = ctx.require_session()
         runtime = ctx.runtime
         if runtime is None:
-            runtime = await self.runtime_for_session(session)
+            runtime = await self.runtime_for_session(
+                session, input_metadata=ctx.msg.metadata if ctx.kind is TurnKind.USER else None,
+            )
             ctx.runtime = runtime
         if ctx.session_key.startswith("dream:"):
             logger.info(

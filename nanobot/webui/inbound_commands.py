@@ -15,7 +15,11 @@ from typing import Any, Protocol, cast
 from loguru import logger
 from websockets.asyncio.server import ServerConnection
 
-from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA, INBOUND_META_USER_SHELL
+from nanobot.bus.events import (
+    INBOUND_META_LOCAL_MEDIA,
+    INBOUND_META_REASONING_EFFORT,
+    INBOUND_META_USER_SHELL,
+)
 from nanobot.channels.websocket.attachment_policy import validate_attachment_batch
 from nanobot.channels.websocket.attachment_store import AttachmentUploadError
 from nanobot.command.builtin import USER_SHELL_COMMAND, builtin_command_starts_agent_turn
@@ -31,6 +35,7 @@ from nanobot.security.workspace_access import (
 )
 from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.keys import session_key_for_channel
+from nanobot.session.model_selection import SESSION_REASONING_EFFORT_METADATA_KEY
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     clear_websocket_turns,
@@ -679,6 +684,27 @@ class WebUICommandRouter:
         )
         if is_user_shell:
             metadata[INBOUND_META_USER_SHELL] = True
+        if "reasoning_effort" in envelope:
+            if not trusted_webui:
+                await self._transport.webui_send_event(
+                    connection, "error", detail="reasoning_effort requires a trusted WebUI message",
+                    **rejection_fields,
+                )
+                return
+            # The composer also sends its selection with shell/control commands.
+            # Only generation input consumes it; existing command semantics win.
+            if not is_user_shell and builtin_command_starts_agent_turn(content):
+                effort = envelope["reasoning_effort"]
+                if effort is not None and (
+                    not isinstance(effort, str) or not effort or effort.strip() != effort
+                    or any(ord(char) < 32 or ord(char) == 127 for char in effort)
+                ):
+                    await self._transport.webui_send_event(
+                        connection, "error", detail="reasoning_effort must be a non-empty string or null",
+                        **rejection_fields,
+                    )
+                    return
+                metadata[INBOUND_META_REASONING_EFFORT] = effort
         dispatch_content = (
             f"{USER_SHELL_COMMAND} {content[1:].lstrip()}" if is_user_shell else content
         )
@@ -753,6 +779,10 @@ class WebUICommandRouter:
                 "websocket", chat_id, unified_session=self.gateway.unified_session,
             )
         )
+        session_updates = (
+            {SESSION_REASONING_EFFORT_METADATA_KEY: metadata[INBOUND_META_REASONING_EFFORT]}
+            if INBOUND_META_REASONING_EFFORT in metadata else {}
+        )
         session_generation: str | None = None
         session_created = False
         execution_generation: str | None = None
@@ -763,6 +793,7 @@ class WebUICommandRouter:
                     chat_id,
                     scope,
                     session_key=admission_session_key,
+                    metadata_updates=session_updates,
                     expected_generation=(
                         temporary_policy.session_generation
                         if temporary_policy is not None
@@ -776,7 +807,7 @@ class WebUICommandRouter:
                 ):
                     execution_generation, execution_created = (
                         await self.gateway.session_manager.state.open_with_metadata(
-                            execution_session_key, {},
+                            execution_session_key, session_updates,
                         )
                     )
             if session_generation is not None:

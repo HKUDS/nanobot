@@ -281,6 +281,7 @@ class TestRestartCommand:
     async def test_status_counts_running_dispatch_and_subagent_tasks(self):
         loop, _bus = _make_loop()
         session = MagicMock()
+        session.metadata = {}
         session.get_history.return_value = [{"role": "user"}]
         loop.sessions.state.get = AsyncMock(return_value=session)
         loop.consolidator.estimate_session_prompt_tokens = MagicMock(
@@ -443,6 +444,7 @@ class TestRestartCommand:
     async def test_process_direct_preserves_render_metadata(self):
         loop, _bus = _make_loop()
         session = MagicMock()
+        session.metadata = {}
         session.get_history.return_value = []
         loop.sessions.state.get = AsyncMock(return_value=session)
         loop.subagents.get_running_count.return_value = 0

@@ -1937,7 +1937,6 @@
       "manageModels": "Gérer les préréglages",
       "reasoningEffort": "Effort de raisonnement",
       "reasoningScope": "Cette conversation uniquement, à la prochaine exécution.",
-      "reasoningSaveFailed": "Effort non enregistré. Réessayez.",
       "fallbackNotice": "Cette réponse a utilisé un modèle de secours : {{model}}.",
       "checkModelSettings": "Vérifier les paramètres du modèle",
       "reauthNotice": "L’autorisation de {{provider}} a expiré. Veuillez vous reconnecter.",

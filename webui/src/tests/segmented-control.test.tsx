@@ -127,28 +127,6 @@ describe("SegmentedControl", () => {
     expect(summary).toHaveFocus();
   });
 
-  it("keeps keyboard focus while a pending save blocks pointer and arrow-key changes", () => {
-    const onChange = vi.fn();
-    const view = (disabled: boolean) => <SegmentedControl mode="radio" value="summary" disabled={disabled}
-      ariaLabel="Views" options={[{ value: "summary", label: "Summary" }, { value: "diff", label: "Diff" }]}
-      onChange={onChange} />;
-    const mounted = render(view(false));
-    const summary = screen.getByRole("radio", { name: "Summary" });
-    const diff = screen.getByRole("radio", { name: "Diff" });
-    summary.focus();
-    mounted.rerender(view(true));
-    expect(summary).toHaveFocus();
-    expect(summary).toHaveAttribute("aria-disabled", "true");
-    fireEvent.click(diff);
-    fireEvent.keyDown(summary, { key: "ArrowRight" });
-    expect(onChange).not.toHaveBeenCalled();
-    expect(summary).toHaveFocus();
-    mounted.rerender(view(false));
-    fireEvent.keyDown(summary, { key: "ArrowRight" });
-    expect(onChange).toHaveBeenCalledWith("diff");
-    expect(diff).toHaveFocus();
-  });
-
   it("can disable motion when the set of segments is dynamic", () => {
     const { container } = render(<Example animateIndicator={false} />);
     const summary = screen.getByRole("button", { name: "Summary" });

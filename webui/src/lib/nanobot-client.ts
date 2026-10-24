@@ -287,6 +287,12 @@ export class NanobotClient {
     return this.readyChatId;
   }
 
+  /** Stable browser preference namespace; excludes authentication query parameters. */
+  get preferenceScope(): string {
+    const url = new URL(this.currentUrl, window.location.href);
+    return `${url.origin}${url.pathname}`;
+  }
+
   /** Swap the URL (e.g. after fetching a fresh token) then reconnect. */
   updateUrl(url: string, socketFactory?: (url: string) => WebSocket): void {
     this.currentUrl = url;
@@ -763,6 +769,7 @@ export class NanobotClient {
       sessionMentions?: SessionMention[];
       quotedContext?: string;
       intent?: "create_automation";
+      reasoningEffort?: string | null;
       workspaceScope?: WorkspaceScopePayload | null;
       turnId?: string;
       /** False for side-channel or injected messages that do not own a lifecycle. */
@@ -784,6 +791,7 @@ export class NanobotClient {
       ...(options?.quotedContext?.trim() ? { quoted_context: options.quotedContext.trim() } : {}),
       ...(options?.intent === "create_automation" ? { intent: options.intent } : {}),
       ...(options?.workspaceScope ? { workspace_scope: options.workspaceScope } : {}),
+      ...(options?.reasoningEffort !== undefined ? { reasoning_effort: options.reasoningEffort } : {}),
       ...(options?.turnId ? { turn_id: options.turnId } : {}),
       webui: true,
     };

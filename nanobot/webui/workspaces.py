@@ -8,6 +8,7 @@ import platform
 import socket
 import time
 from collections import OrderedDict
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -454,14 +455,16 @@ class WebUIWorkspaceController:
         *,
         session_key: str | None = None,
         expected_generation: str | None = None,
+        metadata_updates: Mapping[str, object] | None = None,
     ) -> tuple[str | None, bool]:
+        """Admit the scope and validated input metadata in one session transaction."""
         session_key = session_key or webui_session_key(chat_id)
         generation = expected_generation
         created = False
         if self._sessions is not None:
             generation, created = await self._sessions.state.open_with_metadata(
                 session_key,
-                {"webui": True, WORKSPACE_SCOPE_METADATA_KEY: scope.metadata()},
+                {**(metadata_updates or {}), "webui": True, WORKSPACE_SCOPE_METADATA_KEY: scope.metadata()},
                 expected_generation=generation,
             )
         self._draft_scopes.pop(session_key, None)

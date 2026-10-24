@@ -30,7 +30,6 @@ import type {
   ProviderSettingsUpdate,
   RecoveryState,
   SessionDeleteResult,
-  SessionReasoningEffort,
   SessionHandle,
   SessionAutomationsPayload,
   SettingsPayload,
@@ -204,6 +203,7 @@ export async function listSessions(
     title?: string;
     preview?: string;
     model_preset?: string | null;
+    reasoning_effort?: string | null;
     run_started_at?: number | null;
     recovery_state?: RecoveryState | null;
     workspace_scope?: WorkspaceScopePayload | null;
@@ -226,6 +226,7 @@ export async function listSessions(
       title: s.title ?? "",
       preview: s.preview ?? "",
       modelPreset: s.model_preset ?? null,
+      reasoningEffort: s.reasoning_effort ?? null,
       runStartedAt: s.run_started_at ?? null,
       recoveryState: s.recovery_state ?? null,
       workspaceScope: s.workspace_scope ?? null,
@@ -1196,28 +1197,6 @@ export async function fetchAutomaticModelAPI(
     && api !== "bedrock_converse" && api !== "transcription"
   )) throw new Error("Invalid model API resolution");
   return { provider: result.provider, api };
-}
-
-export async function fetchSessionReasoningEffort(
-  token: string,
-  preset: string,
-  sessionKey: string | null,
-  signal?: AbortSignal,
-): Promise<SessionReasoningEffort> {
-  const query = new URLSearchParams({ model_preset: preset });
-  if (sessionKey) query.set("session_key", sessionKey);
-  return request(`/api/webui/reasoning-effort?${query}`, token, { signal }, API_READ_TIMEOUT_MS);
-}
-
-export async function setSessionReasoningEffort(
-  transport: WebUIMutationTransport,
-  sessionKey: string,
-  selection: SessionReasoningEffort,
-  value: string | null,
-): Promise<SessionReasoningEffort> {
-  return mutation(transport, "session.reasoning-effort", {
-    session_key: sessionKey, preset: selection.preset, scope: selection.scope, value,
-  });
 }
 
 export async function fetchProviderModels(

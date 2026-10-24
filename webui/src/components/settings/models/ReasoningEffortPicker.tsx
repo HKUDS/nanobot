@@ -6,6 +6,7 @@ import { ComboboxOption, useComboboxNavigation } from "@/components/ui/combobox"
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { useProviderModelCatalog } from "@/hooks/useProviderModelCatalog";
+import { reasoningEffortValues } from "@/lib/provider-model-catalog";
 import type { SettingsPayload } from "@/lib/types";
 
 const NO_PROVIDER = {};
@@ -31,8 +32,7 @@ export function ReasoningEffortPicker({ token, provider, model, savedValues, val
     provider: provider?.name ?? "",
     enabled: open && !!model && !!provider?.configured && provider.model_catalog !== "unsupported",
   });
-  const efforts = payload?.models.find((entry) => entry.id === model)?.reasoning_efforts ?? savedValues ?? [];
-  const values = [DEFAULT_VALUE, ...new Set(efforts.filter(Boolean))];
+  const values = [DEFAULT_VALUE, ...reasoningEffortValues(payload, model, savedValues)];
   const close = () => { restoreFocus.current = true; setOpen(false); };
   const navigation = useComboboxNavigation({
     open,

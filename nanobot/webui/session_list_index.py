@@ -8,7 +8,10 @@ from typing import Any, cast
 
 from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session.manager import SessionManager
-from nanobot.session.model_selection import model_preset_from_metadata
+from nanobot.session.model_selection import (
+    model_preset_from_metadata,
+    reasoning_effort_from_metadata,
+)
 from nanobot.session.recovery import recovery_state_from_metadata
 
 _WORKSPACE_SCOPE_PRESENT_FIELD = "_workspace_scope_present"
@@ -38,6 +41,7 @@ def list_webui_sessions(
             "updated_at": _visible_activity_updated_at(row["updated_at"], row["visible_updated_at"], activity),
             "title": row["title"], "preview": row["preview"] or row["history_preview"],
             "model_preset": model_preset_from_metadata(metadata),
+            "reasoning_effort": reasoning_effort_from_metadata(metadata),
             "recovery_state": recovery_state_from_metadata(metadata),
             **_indexed_workspace_scope_fields(metadata), "path": row["path"],
         })
