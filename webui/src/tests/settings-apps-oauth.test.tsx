@@ -276,7 +276,7 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "Complete sign-in in the browser window.",
     );
-    expect(screen.getByRole("button", { name: "Connecting Xmind" })).toHaveTextContent(
+    expect(screen.getByRole("button", { name: "Xmind" })).toHaveAccessibleDescription(
       "Connecting…",
     );
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
@@ -426,8 +426,8 @@ describe("SettingsView Apps catalog", () => {
     renderSettingsView({ initialSection: "apps" });
     fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
 
-    expect(await screen.findByRole("button", { name: "Xmind: Connecting…" }))
-      .toHaveTextContent("Connecting…");
+    expect(await screen.findByRole("button", { name: "Xmind" }))
+      .toHaveAccessibleDescription("Connecting…");
     expect(await screen.findByRole(
       "button",
       { name: "Manage Xmind" },
@@ -738,7 +738,7 @@ describe("SettingsView Apps catalog", () => {
     await connectXmind();
 
     const cancelButton = await screen.findByRole("button", { name: "Cancel" });
-    expect(screen.getByRole("button", { name: "Connecting Xmind" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Xmind" })).toHaveAccessibleDescription("Connecting…");
     popup.closed = true;
     fireEvent.click(cancelButton);
 
