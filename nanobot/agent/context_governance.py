@@ -196,7 +196,7 @@ class ContextCompactionState:
         consolidate_provider_compaction: ProviderCompactionConsolidator | None,
     ) -> ContextCompactionState:
         """Create compaction state for a standalone runner transcript."""
-        raw_messages = list(messages)
+        raw_messages = messages
         instruction_prefix: list[dict[str, Any]] = []
         for message in raw_messages:
             if message.get("role") not in {"system", "developer"}:
@@ -455,6 +455,54 @@ class ContextGovernor:
             source=source,
         )
 
+    def _fit_pending_file_reads(
+        self,
+        config: ContextGovernanceConfig,
+        messages: list[dict[str, Any]],
+        delta_messages: list[dict[str, Any]],
+        *,
+        tool_definitions: list[dict[str, Any]] | None,
+    ) -> tuple[list[dict[str, Any]], dict[str, str]]:
+        """Make oversized, unread file results recoverable after history compaction."""
+        notice = (
+            "Error: read_file result was not sent because the combined request exceeds "
+            "the context budget. No file was modified by this recovery. Read one file at a time "
+            "with a smaller offset/limit range; for large single-line JSON, use exec "
+            "to select only the needed records or fields."
+        )
+        pending_ids = {
+            message.get("tool_call_id") for message in delta_messages
+            if message.get("role") == "tool" and message.get("name") == "read_file"
+            and isinstance(message.get("tool_call_id"), str)
+        }
+        candidates = iter(sorted(
+            (
+                index for index, message in enumerate(messages)
+                if message.get("role") == "tool"
+                and message.get("tool_call_id") in pending_ids
+                and isinstance(message.get("content"), str)
+                and len(message["content"].encode("utf-8")) > len(notice)
+            ),
+            key=lambda index: len(messages[index]["content"].encode("utf-8")),
+            reverse=True,
+        ))
+        prepared = list(messages)
+        replacements: dict[str, str] = {}
+        while True:
+            try:
+                fitted = self.ensure_request_fits(
+                    config, prepared, tool_definitions=tool_definitions,
+                )
+                return fitted, replacements
+            except ContextWindowExceededError:
+                index = next(candidates, None)
+                if index is None:
+                    raise
+                # Only unread results can change. Record the same text for replay,
+                # so a later turn does not restore content the model never received.
+                replacements[prepared[index]["tool_call_id"]] = notice
+                prepared[index] = {**prepared[index], "content": notice}
+
     def request_pressure(
         self,
         config: ContextGovernanceConfig,
@@ -626,16 +674,23 @@ class ContextGovernor:
                     *delta_messages,
                 ],
             )
+            prepared, replacements = await self.prepare_in_background(
+                self._fit_pending_file_reads, state.config,
+                prepared,
+                delta_messages,
+                tool_definitions=tool_definitions,
+            )
+            # Commit only after the complete request fits, on the owning loop.
+            # Source files remain available for a narrower read. Previously
+            # accepted results and all tool call/result pairs remain unchanged.
+            for message in compaction.raw_messages[compaction.raw_accepted_boundary:]:
+                if message.get("role") == "tool" and message.get("tool_call_id") in replacements:
+                    message["content"] = replacements[message["tool_call_id"]]
             # Responses-style state is append-only. Replacing H with a
             # checkpoint requires a fresh request; a successful response may
             # establish a new provider-owned state at the rewritten boundary.
             state.conversation.replace_transcript(compaction.raw_messages)
             state.usage = None
-            prepared = await self.prepare_in_background(
-                self.ensure_request_fits, state.config,
-                prepared,
-                tool_definitions=tool_definitions,
-            )
             compaction.summary_checkpoint = SessionSummaryCheckpoint(
                 summary=summary,
                 transcript_boundary=compaction.raw_accepted_boundary,
