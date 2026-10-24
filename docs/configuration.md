@@ -321,6 +321,7 @@ A Base URL is the service address nanobot sends model requests to. Change it onl
 | `custom` | Any OpenAI-compatible endpoint | — |
 | `openrouter` | LLM gateway for hosted model families + Voice transcription (STT models) | [openrouter.ai](https://openrouter.ai) |
 | `edenai` | LLM gateway for Eden AI's OpenAI-compatible model catalog | [app.edenai.run](https://app.edenai.run/) |
+| `opper` | LLM gateway (Opper, EU-hosted OpenAI-compatible gateway) | [platform.opper.ai](https://platform.opper.ai) |
 | `opencode` | LLM gateway (OpenCode Zen coding-agent models) | [opencode.ai/docs/zen](https://opencode.ai/docs/zen/) |
 | `opencode_zen` | LLM gateway (legacy alias for OpenCode Zen) | [opencode.ai/docs/zen](https://opencode.ai/docs/zen/) |
 | `opencode_go` | LLM gateway (OpenCode Go low-cost coding models) | [opencode.ai/docs/go](https://opencode.ai/docs/go/) |
