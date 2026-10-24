@@ -830,7 +830,7 @@ export function PaneWorkbench({
         </div>
 
         {chrome ? (
-          <footer className="workbench-composer-footer shrink-0 bg-background px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-4">
+          <footer className="workbench-composer-footer shrink-0 bg-background px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:px-4 sm:pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
             <div
               ref={setComposerPortalTarget}
               data-testid="workbench-composer-host"

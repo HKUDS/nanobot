@@ -1359,7 +1359,10 @@ describe("ThreadComposer", () => {
     expect(container.querySelector(".thread-composer-surface")!.nextElementSibling).toBe(meta);
     expect(meta.querySelector(".thread-composer-workspace-group")).toContainElement(workspace);
     expect(meta).toContainElement(access);
-    expect(meta).toContainElement(screen.getByTestId("composer-context-usage"));
+    const usage = screen.getByTestId("composer-context-usage");
+    expect(meta).toContainElement(usage);
+    expect(usage).toHaveTextContent(/^50%$/);
+    expect(usage).toHaveAccessibleName("Context 50%. Open context usage");
     expect(access.closest(".thread-composer-footer-primary")).toBeNull();
     const user = userEvent.setup();
     await user.click(access);

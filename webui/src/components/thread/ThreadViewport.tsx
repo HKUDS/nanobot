@@ -1213,7 +1213,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
               <div
                 className={cn(
                   hasThreadLayout
-                    ? "px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-4"
+                    ? "px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:px-4 sm:pb-[calc(0.75rem+env(safe-area-inset-bottom))]"
                     : "",
                 )}
               >

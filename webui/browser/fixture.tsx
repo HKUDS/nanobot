@@ -35,6 +35,7 @@ import { FileEditPathFixture } from "./file-edit-path-fixture";
 import { QueuedGuidanceFixture } from "./queued-guidance-fixture";
 import { WorkspaceAlignmentFixture } from "./workspace-alignment-fixture";
 import { ComposerActionFixture } from "./composer-action-fixture";
+import { MobileChatLayoutFixture } from "./mobile-chat-layout-fixture";
 
 const history: UIMessage[] = [
   { id: "question", role: "user", content: "Earlier question", createdAt: 1_700_000_000_000 },
@@ -186,7 +187,9 @@ if (parameters.get("case") === "skeleton-additions") installSkeletonPreviewApi()
 if (parameters.get("case") === "idle-compaction") installIdleCompactionApi();
 await initializeI18n();
 createRoot(document.getElementById("root")!).render(<TooltipProvider>
-  {parameters.get("case") === "composer-action"
+  {parameters.get("case") === "mobile-chat-layout"
+    ? <ClientProvider client={railClient} token="fixture"><MobileChatLayoutFixture parameters={parameters} /></ClientProvider>
+    : parameters.get("case") === "composer-action"
     ? <ComposerActionFixture parameters={parameters} />
     : parameters.get("case") === "workspace-alignment"
     ? <WorkspaceAlignmentFixture parameters={parameters} />

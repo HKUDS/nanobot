@@ -2547,8 +2547,9 @@ export function ThreadComposer({
       onClick={modelNeedsSetup ? onModelBadgeClick : undefined}
     />
   ) : null;
+  const usageInMeta = mobileWorkspaceControls || compactControls;
   const usageControl = !voiceRecorder.isRecording && (contextUsage || recentRoundUsage.length) ? (
-    <ComposerUsagePopover context={contextUsage} rounds={recentRoundUsage} showLabel={compactControls} bottomSheet={compactControls} />
+    <ComposerUsagePopover context={contextUsage} rounds={recentRoundUsage} showLabel={usageInMeta} compactLabel={mobileWorkspaceControls} bottomSheet={usageInMeta} />
   ) : null;
   const inputTextClasses = cn(
     // Keep the overlay's CJK/Latin spacing aligned with the native textarea caret.
@@ -2610,7 +2611,7 @@ export function ThreadComposer({
         "thread-composer-form relative w-full [--composer-action-margin:0px]",
         isHero
           ? "px-0 [--composer-action-size:2rem] [--composer-footer-inset:0.75rem] sm:[--composer-footer-inset:1rem]"
-          : "px-1 pb-1.5 pt-1 [--composer-action-size:2.25rem] [--composer-footer-inset:0.625rem] sm:px-0 sm:[--composer-footer-inset:0.75rem]",
+          : "px-1 pb-0 pt-1 [--composer-action-size:2.25rem] [--composer-footer-inset:0.625rem] sm:px-0 sm:pb-1.5 sm:[--composer-footer-inset:0.75rem]",
         compactWhenIdle && "thread-composer-collapsible-layout",
         paletteBeside && "grid grid-cols-2 items-start gap-2 p-0",
       )}
@@ -2838,7 +2839,7 @@ export function ThreadComposer({
             )}
           >
             {modelControl}
-            {!compactControls ? usageControl : null}
+            {!usageInMeta ? usageControl : null}
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -2899,18 +2900,22 @@ export function ThreadComposer({
           </div>
         </div>
       </div>
-      {workspaceControl || mobileWorkspaceControls && accessControl || compactControls && usageControl ? (
+      {workspaceControl || mobileWorkspaceControls && accessControl || usageInMeta && usageControl ? (
         <div className={cn(
-          "thread-composer-meta mx-auto mt-1 flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pr-2 sm:pr-3",
+          "thread-composer-meta mx-auto mt-1 flex w-full min-w-0 items-center gap-x-2 pr-2 sm:pr-3",
+          mobileWorkspaceControls ? "flex-nowrap gap-x-1 pr-0" : "flex-wrap gap-y-1",
           isHero ? "max-w-[58rem]" : "max-w-[49.5rem]",
           paletteBeside && "col-start-1 row-start-2",
         )}>
-          {mobileWorkspaceControls && compactControls && usageControl ? <div className="flex w-full justify-end">{usageControl}</div> : null}
           <div className={cn("thread-composer-workspace-group flex min-w-0 items-center gap-1", mobileWorkspaceControls ? "flex-1" : "flex-auto max-[359px]:flex-wrap")}>
             {workspaceControl}
           </div>
-          {!mobileWorkspaceControls && compactControls && usageControl ? <div className="ml-auto shrink-0">{usageControl}</div> : null}
-          {mobileWorkspaceControls && accessControl ? <div className="ml-auto min-w-0 max-w-[55%] shrink">{accessControl}</div> : null}
+          {usageInMeta && usageControl || mobileWorkspaceControls && accessControl ? (
+            <div className={cn("ml-auto flex shrink-0 items-center gap-1", mobileWorkspaceControls && "h-11 max-w-[calc(100%-3rem)]")}>
+              {usageInMeta ? usageControl : null}
+              {mobileWorkspaceControls ? accessControl : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </form>
