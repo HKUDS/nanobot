@@ -130,6 +130,28 @@ class _FakeProvider(LLMProvider):
         return self.compact
 
 
+# -- error-classification tests --
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        ("Error: server is busy, please retry later", True),
+        ("500 queue is full", True),
+        ("too many requests in queue, try again", True),
+        ("some genuinely unrelated error", False),
+    ],
+    ids=["server-busy", "queue-full", "too-many-in-queue", "unrelated"],
+)
+def test_should_fallback_on_local_backend_congestion(content: str, expected: bool) -> None:
+    """A local/self-hosted backend's own request-queue congestion (e.g.
+    Ollama) should fail over to the next chain entry rather than retry the
+    same already-overloaded backend."""
+    response = LLMResponse(content=content, finish_reason="error")
+
+    assert FallbackProvider._should_fallback(response) is expected
+
+
 # -- config-level tests --
 
 

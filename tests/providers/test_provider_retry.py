@@ -80,6 +80,31 @@ async def test_chat_with_retry_retries_transient_error_then_succeeds(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_chat_with_retry_uses_cold_start_delays_for_ollama_loading_error(monkeypatch) -> None:
+    """A local backend paging a model back into memory (Ollama's malformed
+    empty-body response) should wait longer than a regular transient error,
+    not retry at the default 1/2/4s pace."""
+    provider = ScriptedProvider([
+        LLMResponse(content="Expecting value: line 1 column 1 (char 0)", finish_reason="error"),
+        LLMResponse(content="ok"),
+    ])
+    delays: list[float] = []
+
+    async def _fake_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+
+    response = await provider.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
+
+    assert response.finish_reason == "stop"
+    assert response.content == "ok"
+    assert provider.calls == 2
+    assert delays == [LLMProvider._COLD_START_RETRY_DELAYS[0]]
+    assert delays != [LLMProvider._CHAT_RETRY_DELAYS[0]]
+
+
+@pytest.mark.asyncio
 async def test_chat_with_retry_emits_structured_retry_lifecycle(monkeypatch) -> None:
     provider = ScriptedProvider([
         LLMResponse(
