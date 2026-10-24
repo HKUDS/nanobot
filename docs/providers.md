@@ -211,6 +211,39 @@ Eden AI exposes an OpenAI-compatible chat-completions endpoint at `https://api.e
 
 Nanobot sends the model ID unchanged, including its provider prefix. Use Eden AI's [model listing](https://www.edenai.co/docs/v3/llms/listing-models) to choose a currently available model. The WebUI can also load that catalog after the Eden AI API key is saved under **Settings → Models**.
 
+### Standard Compute Gateway
+
+[Standard Compute](https://standardcompute.com) is an OpenAI- and Anthropic-compatible gateway with monthly plans that each include a fixed compute budget. Configure the built-in `standardcompute` provider. The model `standardcompute` routes each request to one of the models enabled in your Standard Compute dashboard:
+
+<details>
+<summary>Manual configuration</summary>
+
+```json
+{
+  "providers": {
+    "standardcompute": {
+      "apiKey": "${STANDARDCOMPUTE_API_KEY}"
+    }
+  },
+  "modelPresets": {
+    "primary": {
+      "provider": "standardcompute",
+      "model": "standardcompute",
+      "maxTokens": 8192
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "primary"
+    }
+  }
+}
+```
+
+</details>
+
+To use a single model, set an exact ID such as `anthropic/claude-sonnet-5.5`. Nanobot sends it unchanged. `GET https://api.stdcmpt.com/v1/models` lists the current IDs and needs no key, and the WebUI can load the same list after the API key is saved under **Settings → Models**. See the [Standard Compute docs](https://docs.standardcompute.com/models) for routing details.
+
 ### OpenCode Zen and Go
 
 OpenCode Zen and OpenCode Go are OpenCode-managed gateways for coding-agent models. They share `OPENCODE_API_KEY`, but use separate provider config keys and default base URLs in nanobot.
