@@ -216,6 +216,7 @@ class CronService:
         self._timer_task: asyncio.Task[None] | None = None
         self._running = False
         self._active_executions = 0
+        self._executing_job_ids: set[str] = set()
         self._store_dirty = False
         self.max_sleep_ms = max_sleep_ms
 
@@ -613,7 +614,18 @@ class CronService:
             # single bad tick cannot silently stop all future jobs.
             self._arm_timer()
 
-    async def _execute_job(self, job: CronJob) -> None:
+    async def _execute_job(self, job: CronJob) -> bool:
+        """Claim a job across timer and manual entry points until completion."""
+        if job.id in self._executing_job_ids:
+            return False
+        self._executing_job_ids.add(job.id)
+        try:
+            await self._execute_claimed_job(job)
+            return True
+        finally:
+            self._executing_job_ids.remove(job.id)
+
+    async def _execute_claimed_job(self, job: CronJob) -> None:
         """Execute a single job."""
         schedule = job.schedule
         start_ms = _now_ms()
@@ -944,7 +956,7 @@ class CronService:
         return job
 
     async def run_job(self, job_id: str, force: bool = False) -> bool:
-        """Manually run a job without disturbing the service's running state."""
+        """Manually run a job; return False if it is already executing, even with force."""
         with self.admission.activity():
             return await self._run_job(job_id, force)
 
@@ -966,7 +978,8 @@ class CronService:
                         return False
                     if not force and not job.enabled:
                         return False
-                    await self._execute_job(job)
+                    if not await self._execute_job(job):
+                        return False
                     self._save_store()
                     return True
             return False
