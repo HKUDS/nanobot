@@ -462,6 +462,7 @@ class TestAutoCompact:
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         _add_turns(session, 6)
+        session.updated_at = datetime.now() - timedelta(minutes=20)
         loop.sessions.save(session)
 
         archived_messages = []
@@ -488,6 +489,7 @@ class TestAutoCompact:
         for i in range(8):
             _add_tool_turn(session, "recent", i)
         session.add_message("assistant", "done")
+        session.updated_at = datetime.now() - timedelta(minutes=20)
         loop.sessions.save(session)
 
         await loop.auto_compact._archive("cli:test", runtime=loop.llm_runtime())
@@ -548,6 +550,7 @@ class TestAutoCompact:
         session = loop.sessions.get_or_create("cli:test")
         _add_turns(session, 14)
         session.last_archived = 18
+        session.updated_at = datetime.now() - timedelta(minutes=20)
         loop.sessions.save(session)
 
         archived_messages = []
@@ -1248,7 +1251,7 @@ class TestProactiveAutoCompact:
         await loop.aclose()
 
     @pytest.mark.asyncio
-    async def test_session_can_be_compacted_again_after_new_messages(self, tmp_path):
+    async def test_session_can_be_compacted_again_after_new_messages(self, tmp_path, monkeypatch):
         """After successful compact + user sends new messages + idle again, should compact again."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
@@ -1267,8 +1270,11 @@ class TestProactiveAutoCompact:
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="second topic")
         await loop._process_message(msg)
 
-        # Explicit archival does not require another TTL scan.
-        # Second compact cycle should succeed
+        # New messages have now been idle for a fresh TTL interval.
+        monkeypatch.setattr("nanobot.agent.autocompact.datetime", SimpleNamespace(
+            now=lambda: datetime.now() + timedelta(minutes=20),
+            fromisoformat=datetime.fromisoformat,
+        ))
         await loop.auto_compact._archive("cli:test", runtime=loop.llm_runtime())
         assert _fake_compact.state["count"] == 2
         await loop.aclose()
@@ -1365,7 +1371,7 @@ class TestSummaryPersistence:
         await loop.aclose()
 
     @pytest.mark.asyncio
-    async def test_new_summary_overrides_old(self, tmp_path):
+    async def test_new_summary_overrides_old(self, tmp_path, monkeypatch):
         """A fresh archive writes a new summary that replaces the old one."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
@@ -1394,6 +1400,11 @@ class TestSummaryPersistence:
         loop.consolidator.compact_idle_session = _make_fake_compact(
             loop, summary="Second summary.",
         )
+        # New messages have now been idle for a fresh TTL interval.
+        monkeypatch.setattr("nanobot.agent.autocompact.datetime", SimpleNamespace(
+            now=lambda: datetime.now() + timedelta(minutes=20),
+            fromisoformat=datetime.fromisoformat,
+        ))
         await loop.auto_compact._archive("cli:test", runtime=loop.llm_runtime())
 
         # The second archive writes a new summary
@@ -1431,3 +1442,93 @@ class TestSummaryPersistence:
         fresh = loop.sessions.get_or_create("cli:test")
         assert "_last_summary" not in fresh.metadata
         await loop.aclose()
+
+
+@pytest.mark.parametrize("ordering", ["scan_during_turn", "archive_queued_before_turn"])
+async def test_idle_compaction_rechecks_settled_activity(tmp_path, monkeypatch, ordering):
+    monkeypatch.setattr("nanobot.config.home._home_path", tmp_path / "home")
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
+    now = [datetime.now()]
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now[0] if tz is None else now[0].replace(tzinfo=tz)
+
+    # The scanner and settled-turn/summary writers must share the same clock.
+    for module in ("nanobot.agent.autocompact", "nanobot.agent.loop", "nanobot.session.manager"):
+        monkeypatch.setattr(f"{module}.datetime", Clock)
+    loop = _make_loop(tmp_path / "workspace")
+    key = HEARTBEAT_SESSION_KEY
+    session = loop.sessions.get_or_create(key)
+    _add_turns(session, 2)
+    session.updated_at = now[0] - timedelta(minutes=20)
+    loop.sessions.save(session)
+    entered, release = asyncio.Event(), asyncio.Event()
+    archived = []
+    other_responses = []
+
+    async def respond(**_kwargs):
+        request = current_request_context()
+        if request is not None and request.session_key == key:
+            entered.set()
+            await release.wait()
+        return LLMResponse(content="completed reply", tool_calls=[])
+
+    async def archive(captured, **_kwargs):
+        if captured.key == key:
+            archived.append([message.get("content") for message in captured.messages])
+        return "Idle summary."
+
+    async def finish_turn():
+        try:
+            await asyncio.wait_for(entered.wait(), 5)
+            now[0] += timedelta(minutes=20)
+            if ordering == "scan_during_turn":
+                loop._next_idle_compact_check_at = 0
+                await loop._check_expired_sessions_if_due()
+            other_responses.append(await asyncio.wait_for(
+                loop.process_direct("other input", session_key="cli:other"), 5,
+            ))
+            assert archived == []  # The real turn still holds its session lock.
+        finally:
+            release.set()
+
+    loop.provider.chat_stream_with_retry.side_effect = respond
+    loop.consolidator.archive_session = archive
+    finishing = None
+    try:
+        if ordering == "archive_queued_before_turn":
+            loop._next_idle_compact_check_at = 0
+            await loop._check_expired_sessions_if_due()
+            assert key in loop.auto_compact._archiving
+        finishing = asyncio.create_task(finish_turn())
+        # Await inline: the direct call takes the free lock before the already
+        # scheduled archive task runs. No scheduler or lock is replaced.
+        async with asyncio.timeout(5):
+            response = await loop.process_direct("new input", session_key=key)
+        await asyncio.wait_for(finishing, 5)
+        await asyncio.wait_for(_drain_background_tasks(loop), 5)
+        assert len(archived) == 0
+        saved = await loop.sessions.state.get(key)
+        assert response is not None and response.content == "completed reply"
+        assert saved.messages[-1]["content"] == "completed reply"
+        assert saved.updated_at == now[0]
+        assert "_last_summary" not in saved.metadata
+        assert key not in loop.auto_compact._archiving
+        assert other_responses[0].content == "completed reply"
+
+        now[0] += timedelta(minutes=20)
+        loop._next_idle_compact_check_at = 0
+        await loop._check_expired_sessions_if_due()
+        await asyncio.wait_for(_drain_background_tasks(loop), 5)
+        assert len(archived) == 1
+        assert "completed reply" in archived[0]
+        saved = await loop.sessions.state.get(key)
+        assert saved.metadata["_last_summary"]["text"] == "Idle summary."
+        assert key not in loop.auto_compact._archiving
+    finally:
+        release.set()
+        if finishing is not None:
+            await asyncio.wait_for(asyncio.gather(finishing, return_exceptions=True), 5)
+        await asyncio.wait_for(loop.aclose(), 10)
