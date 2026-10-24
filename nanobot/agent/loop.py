@@ -88,7 +88,7 @@ from nanobot.session import turn_continuation
 from nanobot.session.automation_turns import automation_history_overrides
 from nanobot.session.goal_state import goal_state_runtime_lines, sustained_goal_active
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
-from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
+from nanobot.session.keys import UNIFIED_SESSION_KEY, is_dream_session, remember_last_channel
 from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, Session, SessionManager, SessionPolicy
 from nanobot.session.model_selection import (
     SESSION_MODEL_PRESET_METADATA_KEY,
@@ -317,6 +317,7 @@ class AgentLoop:
         local_trigger_store: LocalTriggerStore | None = None,
         idle_compact_check_interval_seconds: int = 0,
         recovery_admission: RecoveryAdmission | None = None,
+        memory_max_file_chars: int | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -384,7 +385,12 @@ class AgentLoop:
         self._extra_hooks: list[AgentHook] = hooks or []
         self._hook_factories: list[AgentTurnHookFactory] = hook_factories or []
 
-        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
+        self.context = ContextBuilder(
+            workspace,
+            timezone=timezone,
+            disabled_skills=disabled_skills,
+            memory_max_file_chars=memory_max_file_chars,
+        )
         self.sessions = session_manager or SessionManager(workspace)
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.
@@ -523,6 +529,7 @@ class AgentLoop:
             disabled_skills=defaults.disabled_skills,
             session_ttl_minutes=defaults.session_ttl_minutes,
             idle_compact_check_interval_seconds=defaults.idle_compact_check_interval_seconds,
+            memory_max_file_chars=defaults.memory.max_file_chars,
             tools_config=config.tools,
             network_config=config.network,
             model_presets=preset_helpers.configured_model_presets(config),
@@ -1263,6 +1270,7 @@ class AgentLoop:
             channel=request_ctx.channel,
             workspace=effective_scope.project_path,
             include_memory=session.policy.persist if session is not None else True,
+            is_dream=bool(active_session_key and is_dream_session(active_session_key)),
         )
         if request_context is None:
             request_ctx = dataclasses.replace(
