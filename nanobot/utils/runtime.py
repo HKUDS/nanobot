@@ -99,7 +99,12 @@ def external_lookup_signature(tool_name: str, arguments: Any) -> str | None:
         url = str(arguments.get("url") or "").strip()
         if url:
             # URL paths and query values can identify different resources by case.
-            return f"web_fetch:{url}"
+            # Continuation pages are distinct; changing page size is still a retry.
+            try:
+                offset = int(arguments.get("offset", 0))
+            except (TypeError, ValueError, OverflowError):
+                offset = 0
+            return f"web_fetch:{url}:offset={offset}"
     if tool_name == "web_search":
         query = str(arguments.get("query") or arguments.get("search_term") or "").strip()
         if query:
