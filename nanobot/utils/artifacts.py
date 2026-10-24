@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import binascii
 import json
 import re
 import uuid
@@ -35,7 +34,7 @@ def decode_image_data_url(data_url: str) -> tuple[bytes, str]:
     declared_mime, encoded = match.groups()
     try:
         raw = base64.b64decode(encoded, validate=True)
-    except binascii.Error as exc:
+    except ValueError as exc:
         raise ArtifactError("invalid base64 image payload") from exc
 
     detected_mime = detect_image_mime(raw)
