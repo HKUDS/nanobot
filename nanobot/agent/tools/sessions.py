@@ -38,9 +38,17 @@ def _excerpt(text: str, needle: str, limit: int) -> str:
     compact = " ".join(text.split())
     if len(compact) <= limit:
         return compact
-    index = compact.casefold().find(needle)
+    folded = compact.casefold()
+    index = folded.find(needle)
     if index < 0:
         return compact[: limit - 1].rstrip() + "…"
+    if len(folded) != len(compact):
+        folded_offset = 0
+        for original_index, character in enumerate(compact):
+            folded_offset += len(character.casefold())
+            if folded_offset > index:
+                index = original_index
+                break
     start = max(0, index - limit // 3)
     end = min(len(compact), start + limit)
     start = max(0, end - limit)
