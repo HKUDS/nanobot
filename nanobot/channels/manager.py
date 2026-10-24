@@ -39,6 +39,7 @@ from nanobot.channels.registry import channel_default_enabled
 from nanobot.config.schema import Config
 from nanobot.security.workspace_access import WorkspaceScopeResolver
 from nanobot.security.workspace_policy import resolve_allowed_path
+from nanobot.session.history_edit import HistoryEditSubmit
 from nanobot.utils.restart import (
     RestartNotice,
     consume_restart_notice_from_env,
@@ -120,6 +121,7 @@ class ChannelManager:
         ) = None,
         webui_subagent_manager: SubagentManager | None = None,
         webui_discard_session: Callable[[str], Awaitable[None]] | None = None,
+        webui_replace_user_input: HistoryEditSubmit | None = None,
         config_path: Path | None = None,
     ):
         if config_path is None:
@@ -146,6 +148,7 @@ class ChannelManager:
         self._webui_recovery_action = webui_recovery_action
         self._webui_subagent_manager = webui_subagent_manager
         self._webui_discard_session = webui_discard_session
+        self._webui_replace_user_input = webui_replace_user_input
         self.channels: dict[str, BaseChannel] = {}
         self._channel_owners: dict[str, str] = {}
         self._channel_runtime_specs: dict[str, tuple[str, str]] = {}
@@ -238,6 +241,7 @@ class ChannelManager:
                 recovery_action=self._webui_recovery_action,
                 subagent_manager=self._webui_subagent_manager,
                 discard_session=self._webui_discard_session,
+                replace_user_input=self._webui_replace_user_input,
                 logger=logger,
             )
             kwargs["gateway"] = gateway

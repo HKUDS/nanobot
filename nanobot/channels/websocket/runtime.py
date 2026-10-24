@@ -10,6 +10,7 @@ import socket
 import ssl
 import uuid
 from contextlib import suppress
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self, TypeGuard, cast
@@ -30,6 +31,7 @@ from nanobot.channels.base import BaseChannel
 from nanobot.channels.websocket.binary_http import BinaryHTTPBridge
 from nanobot.config_base import Base
 from nanobot.runtime_admission import RuntimeMaintenanceError
+from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     mark_websocket_turn_transcript_persistence_failed,
@@ -1151,6 +1153,8 @@ class WebSocketChannel(BaseChannel):
         transcript_overrides: dict[str, Any] | None = None,
     ) -> bool:
         """Persist one canonical turn event and retain unsafe owners on failure."""
+        if generation := (metadata or {}).get(HISTORY_GENERATION_METADATA_KEY) or self._outbound_generation.get():
+            event["history_generation"] = generation
         if (
             (metadata or {}).get(WEBUI_RESTART_CONTROL_METADATA_KEY) is True
             or not self._temporary_chats.should_persist_transcript(chat_id)
@@ -1201,6 +1205,8 @@ class WebSocketChannel(BaseChannel):
         include_source: bool = False,
     ) -> bool:
         """Persist the canonical end of a live stream, never its wire chunks."""
+        if generation := (metadata or {}).get(HISTORY_GENERATION_METADATA_KEY):
+            event["history_generation"] = generation
         if not self._temporary_chats.should_persist_transcript(chat_id):
             self._transcripts.prepare_event(
                 chat_id, event, metadata=metadata, phase=phase, include_source=include_source,
@@ -1221,8 +1227,26 @@ class WebSocketChannel(BaseChannel):
             phase=phase,
         )
 
+    _outbound_generation: ContextVar[str | None] = ContextVar("webui_outbound_generation", default=None)
+
     async def send(self, msg: OutboundMessage) -> None:
-        await self._outbound.send(msg)
+        delivery = msg.delivery
+        manager = self.gateway.session_manager
+        if delivery is not None and delivery.session_generation is not None and manager is not None:
+            current = manager.state.peek_identity(delivery.session_key)
+            if current is None:
+                session = await manager.state.read(delivery.session_key)
+                if session is None:
+                    return
+                current = manager.state.peek_identity(delivery.session_key)
+            if current is None or current.generation != delivery.session_generation:
+                return
+        generation = msg.metadata.get(HISTORY_GENERATION_METADATA_KEY)
+        token = self._outbound_generation.set(generation if isinstance(generation, str) else None)
+        try:
+            await self._outbound.send(msg)
+        finally:
+            self._outbound_generation.reset(token)
 
     async def send_projected_message(
         self,
@@ -1444,6 +1468,8 @@ class WebSocketChannel(BaseChannel):
         """Persist as requested, frame, and fan out one encoded WebUI payload."""
         conns = list(self._subs.get(chat_id, ()))
         body: dict[str, Any] = dict(payload)
+        if generation := (metadata or {}).get(HISTORY_GENERATION_METADATA_KEY) or self._outbound_generation.get():
+            body["history_generation"] = generation
         if persistence == "turn_activity":
             await self._persist_turn_transcript_event(
                 chat_id,
@@ -1486,6 +1512,8 @@ class WebSocketChannel(BaseChannel):
         if not conns:
             return
         body = {"event": "goal_state", "chat_id": chat_id, "goal_state": blob}
+        if generation := self._outbound_generation.get():
+            body["history_generation"] = generation
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" goal_state ")
@@ -1507,6 +1535,8 @@ class WebSocketChannel(BaseChannel):
             "chat_id": chat_id,
             "status": status,
         }
+        if generation := self._outbound_generation.get():
+            body["history_generation"] = generation
         if status == "running" and started_at is not None:
             body["started_at"] = started_at
         if turn_id:
@@ -1548,6 +1578,8 @@ class WebSocketChannel(BaseChannel):
         }
         if provenance:
             body["provenance"] = provenance
+        if generation := self._outbound_generation.get():
+            body["history_generation"] = generation
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" user_message ")
@@ -1597,6 +1629,8 @@ class WebSocketChannel(BaseChannel):
         }
         if isinstance(model_preset, str) and model_preset.strip():
             body["model_preset"] = model_preset.strip()
+        if generation := self._outbound_generation.get():
+            body["history_generation"] = generation
         if isinstance(context_window_tokens, int) and context_window_tokens > 0:
             body["context_window_tokens"] = context_window_tokens
         if fallback:

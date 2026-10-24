@@ -23,6 +23,7 @@ import { StreamingLabelSheen } from "@/components/ui/streaming-label-sheen";
 import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
 import { UserMessageText } from "@/components/UserMessageText";
 import { HoverHint } from "@/components/ui/tooltip";
+import { EditIcon } from "@/components/icons/product-icons";
 import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatMessageEndTime } from "@/lib/format-time";
@@ -52,6 +53,8 @@ interface MessageBubbleProps {
   onOpenFilePreview?: (path: string) => void;
   /** Context-menu trigger positioned against this message's visual block. */
   contextMenu?: ReactNode;
+  /** Edit ordinary user text in its existing bubble surface. */
+  textEditor?: ReactNode;
 }
 
 function ForkArrowIcon({ className }: { className?: string }) {
@@ -144,6 +147,8 @@ interface MessageBlockMenuActionsProps {
   message: UIMessage;
   isTurnStreaming?: boolean;
   onForkFromHere?: () => void;
+  onEdit?: () => void;
+  editDisabledReason?: string | null;
   activity?: MessageBlockMenuActivity;
   sheet?: boolean;
 }
@@ -153,6 +158,8 @@ export function MessageBlockMenuActions({
   message,
   isTurnStreaming = false,
   onForkFromHere,
+  onEdit,
+  editDisabledReason,
   activity,
   sheet = false,
 }: MessageBlockMenuActionsProps) {
@@ -182,14 +189,30 @@ export function MessageBlockMenuActions({
         data-message-block-menu-actions
         className={cn("flex max-w-full flex-col items-start gap-1", sheet ? "w-full" : "w-max")}
       >
-        {(!sheet && hasText) || showFork || activity ? (
+        {(!sheet && hasText) || showFork || onEdit || activity ? (
           <div
             data-message-block-toolbar
             className={cn("flex w-full flex-wrap gap-x-1 gap-y-1", sheet ? "flex-col items-stretch" : "items-center")}
           >
-            {(!sheet && hasText) || showFork ? (
+            {(!sheet && hasText) || showFork || onEdit ? (
               <div className="flex min-h-[var(--message-block-control-size)] items-center gap-0.5">
                 {!sheet && hasText ? <MessageCopyButton message={message} /> : null}
+                {onEdit ? <HoverHint content={editDisabledReason || t("message.editMessage")} side="top" align="center">
+                  <span className={sheet ? "w-full" : "inline-flex"} tabIndex={editDisabledReason ? 0 : undefined}>
+                    <button type="button" data-message-block-edit-action onClick={onEdit}
+                      disabled={!!editDisabledReason} aria-label={t("message.editMessage")}
+                      className={cn(
+                        "inline-flex h-[var(--message-block-control-size)] w-[var(--message-block-action-width)] items-center justify-center rounded-control",
+                        "text-muted-foreground transition-[color] hover:text-foreground disabled:opacity-50",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transform-none",
+                        sheet && "w-full justify-start gap-2 px-2 text-sm",
+                      )}>
+                      <EditIcon className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
+                      {sheet ? <span>{t("message.editMessage")}</span> : null}
+                    </button>
+                    {sheet && editDisabledReason ? <span className="block px-2 pb-2 text-xs text-muted-foreground">{editDisabledReason}</span> : null}
+                  </span>
+                </HoverHint> : null}
                 {showFork ? (
                   <HoverHint content={t("message.forkFromHere")} side="top" align="center">
                       <button
@@ -411,6 +434,7 @@ export function MessageBubble({
   slashCommands = [],
   onOpenFilePreview,
   contextMenu,
+  textEditor,
 }: MessageBubbleProps) {
   const { t } = useTranslation();
   const mentionCliApps = useMemo(
@@ -488,7 +512,8 @@ export function MessageBubble({
         {hasText ? (
           <div data-user-text-bubble className="relative ml-auto w-fit max-w-full min-w-0">
             {contextMenu}
-            <p
+            <div
+              data-user-message-body
               data-temporary-message={temporary ? "true" : undefined}
               className={cn(
                 "ml-auto w-fit max-w-full min-w-0 rounded-floating px-4 py-2",
@@ -498,8 +523,8 @@ export function MessageBubble({
                   : "bg-secondary/70",
               )}
             >
-              {messageText}
-            </p>
+              {textEditor ?? messageText}
+            </div>
           </div>
         ) : null}
         {showDeliveryStatus ? (

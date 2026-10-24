@@ -64,6 +64,9 @@ _TUI_RELEASE_LIMITS = {
     "nanobot-tui-source.tar.gz": 20 * 1024 * 1024,
     "MANIFEST.sha256": 64 * 1024,
 }
+# The pinned Windows baseline build reaches 150 MiB; allow bounded application growth.
+# Even at every per-file maximum, the bundle remains below the 200 MiB download budget.
+_TUI_BINARY_MAX_BYTES = 160 * 1024 * 1024
 # Keep in sync with TUI_DETACH_EXIT_CODE in tui/src/index.ts.
 _TUI_DETACH_EXIT_CODE = 90
 _GATEWAY_READY_TIMEOUT_S = 20.0
@@ -353,12 +356,13 @@ def _verified_release_archive(raw: bytes, asset: str) -> dict[str, bytes]:
             if set(names) != expected_names:
                 raise TuiUnavailableError("TUI release archive is incomplete")
             for entry in entries:
-                limit = 150 * 1024 * 1024 if entry.filename == asset else _TUI_RELEASE_LIMITS[
+                limit = _TUI_BINARY_MAX_BYTES if entry.filename == asset else _TUI_RELEASE_LIMITS[
                     entry.filename
                 ]
                 if entry.file_size == 0 or entry.file_size > limit:
                     raise TuiUnavailableError(
-                        f"TUI release file has an invalid size: {entry.filename}"
+                        f"TUI release file has an invalid size: {entry.filename} "
+                        f"({entry.file_size} bytes; limit {limit} bytes)"
                     )
                 files[entry.filename] = archive.read(entry)
     except zipfile.BadZipFile as exc:

@@ -18,7 +18,7 @@ for (const theme of ["light", "dark"] as const) {
 
       const layout = await page.getByRole("main", { name: "Session messages" }).evaluate((main) => {
         const rows = [...main.querySelectorAll<HTMLElement>("[data-session-message]")];
-        const own = main.querySelector<HTMLElement>("[data-user-text-bubble] > p")!;
+        const own = main.querySelector<HTMLElement>("[data-user-text-bubble] > [data-user-message-body]")!;
         const ownStyle = getComputedStyle(own);
         const ownRect = own.getBoundingClientRect();
         const threadRow = own.closest<HTMLElement>("[data-thread-display-unit]")!;

@@ -411,6 +411,55 @@ test("touch reveals a static partial ready header, arms only on release, and ret
   } finally { await context.close(); }
 });
 
+for (const ending of ["touchEnd", "touchCancel"] as const) {
+  test(`touch pull survives lazy Markdown replacing its target until ${ending}`, async ({ browser, baseURL }) => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, baseURL });
+    const page = await context.newPage();
+    let releaseRenderer: () => void = () => {};
+    const rendererReady = new Promise<void>((resolve) => { releaseRenderer = resolve; });
+    await page.route("**/src/components/MarkdownTextRenderer.tsx*", async (route) => {
+      await rendererReady;
+      await route.continue();
+    });
+    const history = await installHistory(page);
+    try {
+      const { body, header } = await openSettledHistory(page);
+      await positionAtTop(body);
+      const fallback = body.locator('[data-thread-display-unit="a40"] .whitespace-pre-wrap');
+      await expect(fallback).toBeVisible();
+      const point = await fallback.evaluate((node) => {
+        const box = node.getBoundingClientRect();
+        return { x: box.x + box.width / 2, y: box.y + 20 };
+      });
+      const cdp = await context.newCDPSession(page);
+      const touch = (type: "touchStart" | "touchMove" | "touchEnd" | "touchCancel", y = point.y) => cdp.send("Input.dispatchTouchEvent", {
+        type, touchPoints: type === "touchEnd" || type === "touchCancel" ? [] : [{ x: point.x, y, id: 1 }],
+      });
+      await touch("touchStart");
+      await touch("touchMove", point.y + 40);
+      const pulled = await displacement(body);
+      expect(pulled).toBeGreaterThan(0);
+      expect(pulled).toBeLessThan(56);
+      releaseRenderer();
+      await expect(body.getByText("Historical answer.", { exact: true }).first()).toBeVisible();
+      await expect(fallback).toHaveCount(0);
+
+      // Native touch events keep targeting the removed fallback for this input round.
+      await touch("touchMove", point.y + (ending === "touchCancel" ? 200 : 60));
+      await expect.poll(() => displacement(body)).toBeGreaterThan(pulled);
+      if (ending === "touchCancel") expect(await displacement(body)).toBeGreaterThanOrEqual(56);
+      else expect(await displacement(body)).toBeLessThan(56);
+      await touch(ending);
+      await expect.poll(() => displacement(body)).toBe(0);
+      await expect(header).not.toBeInViewport();
+      expect(history.reads).toHaveLength(0);
+    } finally {
+      releaseRenderer();
+      await context.close();
+    }
+  });
+}
+
 test("reduced-motion failure keeps its functional 48px slot and retry until naturally scrolled away", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce", colorScheme: "dark" });
   const history = await installHistory(page);

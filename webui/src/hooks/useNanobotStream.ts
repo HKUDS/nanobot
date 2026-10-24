@@ -547,6 +547,7 @@ export function useNanobotStream(
     let publishing = false;
     const install = (body: Awaited<ReturnType<typeof fetchWebuiThread>>, ownRead: boolean, seed = false) => {
       if (disposed || (ownRead && superseded) || transcriptRef.current !== owner) return;
+      if (chatId && body?.history_generation && client.isRetiredHistorySnapshot(chatId, body)) return;
       flushPendingStreamEvents();
       const decision = ownRead ? read : owner.begin(seed ? "initial" : "latest");
       const canonical = body ? persistedCanonicalRunState(body) : null;
@@ -616,16 +617,20 @@ export function useNanobotStream(
   const loadTraceDetails = useCallback(async (refs: string[]) => {
     const owner = transcriptRef.current;
     if (!historyKey) return [];
+    const generation = owner.paging.historyGeneration;
     const details = await Promise.all(refs.map((ref) => {
-      const id = `${historyKey}:${ref}`;
+      const id = `${historyKey}:${generation ?? ""}:${ref}`;
       const existing = detailRequestsRef.current.get(id);
       if (existing) return existing;
       const request = fetchWebuiThreadTraceDetail(getToken(), historyKey, ref).then((detail) => {
-        if (transcriptRef.current !== owner) return null;
+        if (transcriptRef.current !== owner || owner.paging.historyGeneration !== generation) return null;
         flushPendingStreamEvents();
         owner.expandDetail(ref, detail.events);
         setMessages(owner.messages);
         return { ref, events: detail.events };
+      }).catch((error: unknown) => {
+        if (transcriptRef.current !== owner || owner.paging.historyGeneration !== generation) return null;
+        throw error;
       }).finally(() => detailRequestsRef.current.delete(id));
       detailRequestsRef.current.set(id, request);
       return request;
@@ -637,6 +642,22 @@ export function useNanobotStream(
     if (!chatId) return;
 
     const handle = (ev: InboundEvent) => {
+      if (ev.event === "history_replaced") {
+        clearPendingStreamWork();
+        cancelOlderRead();
+        const owner = transcriptRef.current;
+        owner.replace(ev.thread);
+        setMessages(owner.messages);
+        messageCache?.set(chatId, owner.save());
+        if (historyKey) webuiThreadCache.set(historyKey, ev.thread);
+        setRetryStatus(null);
+        setRecoveryState(null);
+        setGoalState(undefined);
+        setStreamError(null);
+        setIsStreaming(ev.thread.has_pending_tool_calls === true);
+        setRunStartedAt(client.getRunStartedAt(chatId));
+        return;
+      }
       if (ev.event === "error") {
         if (ev.detail === "message_too_big") {
           applyStreamError({
@@ -937,7 +958,9 @@ export function useNanobotStream(
     applyProjectionEvent,
     applyPendingStreamEvents,
     applyStreamError,
+    cancelOlderRead,
     chatId,
+    historyKey,
     closeActiveAssistantStream,
     client,
     clearActivitySegment,

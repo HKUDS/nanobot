@@ -138,6 +138,7 @@ class SubagentTool(Tool):
             origin_channel=origin_channel,
             origin_chat_id=origin_chat_id,
             session_key=session_key,
+            session_generation=request_ctx.session_generation,
             origin_message_id=request_ctx.message_id,
             origin_turn_id=request_ctx.turn_id,
             temperature=temperature,

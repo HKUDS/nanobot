@@ -320,6 +320,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const historySlotRef = useRef<HTMLDivElement | null>(null);
   const historyInputRef = useRef<"touch" | "other">("other");
   const historyTouchRef = useRef<{
+    target: EventTarget | null;
     lastY: number; startX: number; startY: number; pulling: boolean; horizontal: boolean;
   } | null>(null);
   const historyDistanceRef = useRef(0);
@@ -984,21 +985,26 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       }
     };
     const handleTouchCancel = () => {
+      bindTouchTarget(null);
       historyTouchRef.current = null;
       historySpringRef.current?.endTouch(true);
     };
     const handleTouchStart = (event: TouchEvent) => {
       historyInputRef.current = "touch";
       const touch = event.touches[0];
-      historyTouchRef.current = event.touches.length === 1 && touch
-        ? {
-            lastY: touch.clientY,
-            startX: touch.clientX,
-            startY: touch.clientY,
-            pulling: false,
-            horizontal: false,
-          }
-        : null;
+      if (event.touches.length !== 1 || !touch) {
+        handleTouchCancel();
+        return;
+      }
+      historyTouchRef.current = {
+        target: event.target,
+        lastY: touch.clientY,
+        startX: touch.clientX,
+        startY: touch.clientY,
+        pulling: false,
+        horizontal: false,
+      };
+      bindTouchTarget(event.target);
     };
     const handleTouchMove = (event: TouchEvent) => {
       const gesture = historyTouchRef.current;
@@ -1034,8 +1040,22 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     };
     const handleTouchEnd = () => {
       const pulling = historyTouchRef.current?.pulling;
+      bindTouchTarget(null);
       historyTouchRef.current = null;
       if (historySpringRef.current?.endTouch() && pulling && canLoadAtTop()) loadEarlierMessages();
+    };
+    // Native touch events retain their start target even after lazy content replaces it.
+    // Own the whole input round there, rather than relying on its old ancestor chain.
+    const ownedTouchMove = (event: Event) => handleTouchMove(event as TouchEvent);
+    let touchTarget: EventTarget | null = null;
+    const bindTouchTarget = (target: EventTarget | null) => {
+      touchTarget?.removeEventListener("touchmove", ownedTouchMove);
+      touchTarget?.removeEventListener("touchend", handleTouchEnd);
+      touchTarget?.removeEventListener("touchcancel", handleTouchCancel);
+      touchTarget = target;
+      touchTarget?.addEventListener("touchmove", ownedTouchMove, { passive: false });
+      touchTarget?.addEventListener("touchend", handleTouchEnd, { passive: true });
+      touchTarget?.addEventListener("touchcancel", handleTouchCancel, { passive: true });
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
@@ -1061,18 +1081,14 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     el.addEventListener("scroll", handleScroll, { passive: true });
     el.addEventListener("wheel", handleWheel, { passive: true });
     el.addEventListener("touchstart", handleTouchStart, { passive: true });
-    el.addEventListener("touchmove", handleTouchMove, { passive: false });
-    el.addEventListener("touchend", handleTouchEnd, { passive: true });
-    el.addEventListener("touchcancel", handleTouchCancel, { passive: true });
+    bindTouchTarget(historyTouchRef.current?.target ?? null);
     el.addEventListener("pointerdown", handlePointerDown);
     el.addEventListener("keydown", handleKeyDown);
     return () => {
       el.removeEventListener("scroll", handleScroll);
       el.removeEventListener("wheel", handleWheel);
       el.removeEventListener("touchstart", handleTouchStart);
-      el.removeEventListener("touchmove", handleTouchMove);
-      el.removeEventListener("touchend", handleTouchEnd);
-      el.removeEventListener("touchcancel", handleTouchCancel);
+      bindTouchTarget(null);
       el.removeEventListener("pointerdown", handlePointerDown);
       el.removeEventListener("keydown", handleKeyDown);
     };

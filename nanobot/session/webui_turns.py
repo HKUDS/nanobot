@@ -327,7 +327,8 @@ async def maybe_generate_webui_title_after_turn(
     provider: LLMProvider,
     model: str,
 ) -> bool:
-    if channel != "websocket" or metadata.get(WEBUI_SESSION_METADATA_KEY) is not True:
+    if (channel != "websocket" or metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
+            or metadata.get("_webui_history_replacement") is True):
         return False
     origin_session_key = f"{channel}:{chat_id}"
     return await maybe_generate_webui_title(
