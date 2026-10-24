@@ -156,61 +156,6 @@ def _sum_rows(rows: Iterable[dict[str, Any]]) -> dict[str, int]:
     return totals
 
 
-class LLMUsageChangeSource:
-    """Observe committed revisions without querying usage records or owning a writer."""
-
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        self._lock = threading.Lock()
-        self._connection: sqlite3.Connection | None = None
-        self._identity: tuple[int, int] | None = None
-        self._version: int | None = None
-
-    def changed(self) -> bool:
-        """Check after a filesystem signal; data_version ignores uncommitted WAL writes."""
-        with self._lock:
-            try:
-                stat = self.path.stat()
-            except FileNotFoundError:
-                changed = self._identity is not None
-                self._close_connection()
-                self._identity = None
-                return changed
-            identity = (stat.st_dev, stat.st_ino)
-            replaced = identity != self._identity
-            try:
-                if self._connection is None or replaced:
-                    self._close_connection()
-                    self._connection = sqlite3.connect(
-                        self.path.resolve().as_uri() + "?mode=ro",
-                        uri=True,
-                        timeout=0.25,
-                        isolation_level=None,
-                        check_same_thread=False,
-                    )
-                    self._connection.execute("PRAGMA query_only = ON")
-                version = int(self._connection.execute("PRAGMA data_version").fetchone()[0])
-            except sqlite3.Error:
-                self._close_connection()
-                raise
-            changed = replaced or version != self._version
-            self._identity = identity
-            self._version = version
-            return changed
-
-    def _close_connection(self) -> None:
-        if self._connection is not None:
-            self._connection.close()
-            self._connection = None
-        # data_version values are only comparable within the same connection.
-        self._version = None
-
-    def close(self) -> None:
-        with self._lock:
-            self._close_connection()
-            self._identity = None
-
-
 class LLMUsageStore:
     """A small synchronous WAL database shared by gateway threads/processes."""
 

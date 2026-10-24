@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useClient } from "@/providers/ClientProvider";
-import { useStateRefresh } from "@/hooks/useStateRefresh";
 import { readPairReturn } from "@/lib/remote-pair-return";
 import { readRemoteInstances, readSelectedRemote, readRecentRemotes, rememberSelectedRemote, rememberRecentRemote, remoteAction, validateRemoteConnection, type RemoteConnection, type RemoteDirectory, type SelectedRemote } from "@/lib/remote-instances";
 
@@ -11,6 +10,7 @@ export interface HostFrame {
   connection: RemoteConnection;
   loaded: boolean;
   offline: boolean;
+  failures: number;
   error?: string;
 }
 interface PendingSwitch { id: string; name: string }
@@ -18,7 +18,7 @@ interface SwitchFailure { id: string; code: string }
 
 export function useHostSessions() {
   const { client, getToken } = useClient();
-  const [directory, setDirectory] = useState<RemoteDirectory | null>(() => window.top === window ? null : { available: false, profiles: [] });
+  const [directory, setDirectory] = useState<RemoteDirectory | null>(null);
   const [directoryError, setDirectoryError] = useState(false);
   const [selected, setSelected] = useState<SelectedRemote | null>(() => readPairReturn() ? null : readSelectedRemote());
   const [recentIds, setRecentIds] = useState(readRecentRemotes);
@@ -29,7 +29,6 @@ export function useHostSessions() {
   const [frames, setFrames] = useState<HostFrame[]>([]);
   const [pending, setPending] = useState<PendingSwitch | null>(() => selected ? { id: selected.id, name: selected.name } : null);
   const pendingRef = useRef<PendingSwitch | null>(pending);
-  const pendingHealth = useRef<RemoteDirectory | null>(null);
   const [failure, setFailure] = useState<SwitchFailure | null>(null);
   const clearError = useCallback(() => setFailure(null), []);
   const directoryGeneration = useRef(0);
@@ -37,29 +36,10 @@ export function useHostSessions() {
   const epoch = useRef(0);
   const waiter = useRef<{ id: string; finish: (ready: boolean) => void } | null>(null);
   const publish = useCallback(() => { if (mounted.current) setFrames([...cache.current.values()]); }, []);
-  const applyFrameHealth = useCallback((frame: HostFrame, next: RemoteDirectory) => {
-    const id = frame.connection.id;
-    const profile = next.profiles.find((profile) => profile.id === id);
-    const changed = (!!profile?.gateway_id && profile.gateway_id !== frame.connection.gateway_id)
-      || (!!profile?.view_id && profile.view_id !== frame.connection.view_id);
-    const connected = !!profile?.connected && !changed;
-    // The gateway already debounces its shared transport samples.
-    frame.offline = !connected;
-    frame.error = connected ? "" : changed ? "instance_changed" : profile?.connection_error || (!profile ? "profile_not_found" : "");
-    if (connected && frame.loaded) setFailure((current) => current?.id === id ? null : current);
-  }, []);
   const setPendingSwitch = useCallback((value: PendingSwitch | null) => {
-    const previousId = pendingRef.current?.id;
-    const health = pendingHealth.current;
     pendingRef.current = value;
-    if (previousId !== value?.id) pendingHealth.current = null;
-    if (!mounted.current) return;
-    setPending(value);
-    if (previousId && previousId !== value?.id && health) {
-      const frame = cache.current.get(previousId);
-      if (frame) { applyFrameHealth(frame, health); publish(); }
-    }
-  }, [applyFrameHealth, publish]);
+    if (mounted.current) setPending(value);
+  }, []);
   const cancel = useCallback(() => {
     epoch.current += 1;
     waiter.current?.finish(false);
@@ -112,28 +92,17 @@ export function useHostSessions() {
     directoryGeneration.current += 1;
     if (mounted.current) applyDirectory(next);
   }, [applyDirectory, client]);
-  const applyHealth = useCallback((next: RemoteDirectory) => {
-    for (const [id, frame] of cache.current) {
-      if (id === pendingRef.current?.id) { pendingHealth.current = next; continue; }
-      applyFrameHealth(frame, next);
-    }
-    publish();
-  }, [applyFrameHealth, publish]);
-  const refresh = useStateRefresh("remote_instances", window.top === window, async (signal) => {
+  const refresh = useCallback(async () => {
     const generation = ++directoryGeneration.current;
     try {
-      const next = await readRemoteInstances(getToken(), signal);
-      if (mounted.current && !signal.aborted && generation === directoryGeneration.current) {
-        applyDirectory(next);
-        applyHealth(next);
-      }
+      const next = window.top === window ? await readRemoteInstances(getToken()) : { available: false, profiles: [] };
+      if (mounted.current && generation === directoryGeneration.current) applyDirectory(next);
+      return next;
     } catch (reason) {
-      if (mounted.current && !signal.aborted && generation === directoryGeneration.current) {
-        setDirectoryError(true);
-      }
+      if (mounted.current && generation === directoryGeneration.current) setDirectoryError(true);
       throw reason;
     }
-  });
+  }, [applyDirectory, getToken]);
 
   const connect = useCallback(async (id: string, stillWanted: () => boolean = () => true) => {
     cancel();
@@ -161,17 +130,14 @@ export function useHostSessions() {
         // latest choice or close its tunnel, which another tab may already use.
         return;
       }
-      // Reads begun before connect completed still describe the previous tunnel.
-      directoryGeneration.current += 1;
-      pendingHealth.current = null;
       let frame = cache.current.get(id);
       if (!frame || frame.connection.url !== connection.url || frame.connection.gateway_id !== connection.gateway_id
         || frame.connection.view_id !== connection.view_id) {
-        frame = { connection, loaded: false, offline: false };
+        frame = { connection, loaded: false, offline: false, failures: 0 };
         cache.current.set(id, frame);
       } else {
         frame.connection = connection;
-        frame.offline = false; frame.error = "";
+        frame.offline = false; frame.failures = 0; frame.error = "";
       }
       if (!frame.loaded) openingFrame = frame;
       publish();
@@ -231,19 +197,9 @@ export function useHostSessions() {
 
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; directoryGeneration.current += 1; cancel(); };
-  }, [cancel]);
-  useEffect(() => {
-    const wake = () => {
-      void refresh().catch(() => {});
-    };
-    window.addEventListener("online", wake);
-    window.addEventListener("pageshow", wake);
-    return () => {
-      window.removeEventListener("online", wake);
-      window.removeEventListener("pageshow", wake);
-    };
-  }, [refresh]);
+    void refresh().catch(() => {});
+    return () => { mounted.current = false; cancel(); };
+  }, [cancel, refresh]);
   useEffect(() => {
     const saved = initial.current;
     if (!saved || window.top !== window) return;
@@ -265,6 +221,54 @@ export function useHostSessions() {
     });
     return () => { window.clearTimeout(timer); unsubscribe(); };
   }, [client, setPendingSwitch]);
+  useEffect(() => {
+    let checking = false;
+    let cancelled = false;
+    const tick = async () => {
+      if (checking || !cache.current.size) return;
+      checking = true;
+      const generation = ++directoryGeneration.current;
+      try {
+        const next = await readRemoteInstances(getToken());
+        if (cancelled || generation !== directoryGeneration.current) return;
+        applyDirectory(next);
+        for (const [id, frame] of cache.current) {
+          if (id === pendingRef.current?.id) continue;
+          const profile = next.profiles.find((profile) => profile.id === id);
+          const changed = (!!profile?.gateway_id && profile.gateway_id !== frame.connection.gateway_id)
+            || (!!profile?.view_id && profile.view_id !== frame.connection.view_id);
+          const connected = !!profile?.connected && !changed;
+          frame.failures = connected ? 0 : frame.failures + 1;
+          if (connected || frame.failures >= 2) {
+            frame.offline = !connected;
+            frame.error = connected ? "" : changed ? "instance_changed" : profile?.connection_error || (!profile ? "profile_not_found" : "");
+          }
+          if (connected && frame.loaded) setFailure((current) => current?.id === id ? null : current);
+        }
+      } catch {
+        if (!cancelled && generation === directoryGeneration.current) for (const [id, frame] of cache.current) {
+          if (id === pendingRef.current?.id) continue;
+          if (++frame.failures >= 2) { frame.offline = true; frame.error = "directory_unavailable"; }
+        }
+      } finally {
+        checking = false;
+        if (!cancelled) publish();
+      }
+    };
+    const timer = window.setInterval(() => { void tick(); }, 5_000);
+    // Background tabs throttle timers. Recheck promptly after waking or a
+    // network change, without reloading a frame or changing the selected host.
+    const wake = () => { if (document.visibilityState === "visible") void tick(); };
+    window.addEventListener("online", wake);
+    window.addEventListener("pageshow", wake);
+    document.addEventListener("visibilitychange", wake);
+    return () => {
+      cancelled = true; window.clearInterval(timer);
+      window.removeEventListener("online", wake);
+      window.removeEventListener("pageshow", wake);
+      document.removeEventListener("visibilitychange", wake);
+    };
+  }, [applyDirectory, client, getToken, publish]);
   return { directory, directoryError, refresh, rename, selected, recentIds, frames, pending,
     error: failure?.code || "", errorId: failure?.id, clearError, connect, cancel, local, reveal, disconnect, remove, loaded };
 }

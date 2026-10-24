@@ -14,6 +14,7 @@ import { useCapabilitySettingsActions } from "@/components/settings/capabilities
 import { useCapabilitySettingsState } from "@/components/settings/capabilities/useCapabilitySettingsState";
 import { webSearchDraftState, webSearchFormFromPayload } from "@/components/settings/capabilities/WebSettings";
 import type {
+  ApplySettingsPayload,
   PendingRestartSections,
   RestartAwarePayload,
   SettingsSectionKey,
@@ -33,7 +34,6 @@ import { createSystemSettingsActions } from "@/components/settings/system/create
 import { useSystemSettingsEffects } from "@/components/settings/system/useSystemSettingsEffects";
 import { useSystemSettingsState } from "@/components/settings/system/useSystemSettingsState";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
-import { useStateRefresh } from "@/hooks/useStateRefresh";
 import { useEditCompletion } from "@/components/settings/shared/useEditCompletion";
 import { cancelProviderOAuth, fetchSettings, fetchSettingsUsage } from "@/lib/api";
 import {
@@ -97,8 +97,6 @@ export function useSettingsController({
   const latestInitialSettingsRef = useRef(initialSettings);
   latestInitialSettingsRef.current = initialSettings;
   const restartRefreshRef = useRef<SettingsPayload | null>(null);
-  const usageSequenceRef = useRef(0);
-  const latestUsageRef = useRef({ sequence: 0, usage: initialSettings?.usage });
   const [localPrefs, setLocalPrefs] = useState<LocalPreferences>(() => readLocalPreferences());
   const modelState = useModelSettingsState(initialSettings);
   const {
@@ -129,18 +127,11 @@ export function useSettingsController({
     },
     [onSectionChange],
   );
-  const applyPayload = useCallback(
+  const applyPayload: ApplySettingsPayload = useCallback(
     (
       payload: SettingsPayload,
       options: { preserveAgentForm?: boolean; preserveCapabilityForms?: boolean } = {},
-      usageSequence = ++usageSequenceRef.current,
     ) => {
-      // Reads order usage at request start; mutation/external payloads become authoritative on apply.
-      if (usageSequence < latestUsageRef.current.sequence) {
-        payload = { ...payload, usage: latestUsageRef.current.usage };
-      } else {
-        latestUsageRef.current = { sequence: usageSequence, usage: payload.usage };
-      }
       setSettings(payload);
       if (!options.preserveAgentForm) {
         const nextForm = agentDraftFromPayload(payload);
@@ -216,7 +207,6 @@ export function useSettingsController({
     const showLoading = settings === null;
     const requestInitialSettings = latestInitialSettingsRef.current;
     const requestDrafts = draftsRef.current;
-    const usageSequence = ++usageSequenceRef.current;
     if (showLoading) setLoading(true);
     fetchSettings(getToken())
       .then((payload) => {
@@ -227,7 +217,7 @@ export function useSettingsController({
             preserveCapabilityForms: current.imageGenerationForm !== requestDrafts.imageGenerationForm ||
               current.networkSafetyForm !== requestDrafts.networkSafetyForm ||
               current.transcriptionForm !== requestDrafts.transcriptionForm || current.webSearchForm !== requestDrafts.webSearchForm,
-          }, usageSequence);
+          });
           setError(null);
         }
       })
@@ -245,14 +235,35 @@ export function useSettingsController({
   }, [applyPayload, getToken]);
 
   const hasSettings = settings !== null;
-  useStateRefresh("usage", activeSection === "overview" && hasSettings, async (signal) => {
-    const sequence = ++usageSequenceRef.current;
-    const usage = await fetchSettingsUsage(getToken(), "", signal);
-    if (signal.aborted || sequence < latestUsageRef.current.sequence) return;
-    latestUsageRef.current = { sequence, usage };
-    setSettings((current) => (current ? { ...current, usage } : current));
-  });
-  useSystemSettingsEffects({
+  useEffect(() => {
+    if (activeSection !== "overview" || !hasSettings || !pageVisible) return;
+    let cancelled = false;
+    let refreshing = false;
+    const refresh = async () => {
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        const usage = await fetchSettingsUsage(getToken());
+        if (!cancelled) {
+          setSettings((current) => (current ? { ...current, usage } : current));
+        }
+      } catch {
+        // Usage is best-effort telemetry; the settings snapshot remains usable.
+      } finally {
+        refreshing = false;
+      }
+    };
+    void refresh();
+    const interval = window.setInterval(() => void refresh(), 5000);
+    const onFocus = () => void refresh();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [activeSection, getToken, hasSettings, pageVisible]);
+  const { refreshAutomations } = useSystemSettingsEffects({
     state: systemState,
     activeSection,
     getToken,
@@ -356,7 +367,6 @@ export function useSettingsController({
       const requestDrafts = draftsRef.current;
       try {
         const nextToken = await onNativeEngineRestart();
-        const usageSequence = ++usageSequenceRef.current;
         const payload = await fetchSettings(nextToken);
         const current = draftsRef.current;
         applyPayload(payload, {
@@ -364,7 +374,7 @@ export function useSettingsController({
           preserveCapabilityForms: current.imageGenerationForm !== requestDrafts.imageGenerationForm ||
             current.networkSafetyForm !== requestDrafts.networkSafetyForm ||
             current.transcriptionForm !== requestDrafts.transcriptionForm || current.webSearchForm !== requestDrafts.webSearchForm,
-        }, usageSequence);
+        });
         setPendingRestartSections(EMPTY_PENDING_RESTART_SECTIONS);
         setError(null);
       } catch (err) {
@@ -393,9 +403,8 @@ export function useSettingsController({
       setHostEngineApplying(true);
       try {
         const nextToken = await onNativeEngineRestart();
-        const usageSequence = ++usageSequenceRef.current;
         const refreshed = await fetchSettings(nextToken);
-        applyPayload(refreshed, { preserveAgentForm: true, preserveCapabilityForms: true }, usageSequence);
+        applyPayload(refreshed, { preserveAgentForm: true, preserveCapabilityForms: true });
         setPendingRestartSections(EMPTY_PENDING_RESTART_SECTIONS);
         setError(null);
       } catch (err) {
@@ -416,6 +425,7 @@ export function useSettingsController({
     applyPayload,
     maybeRestartHostEngine,
     setPendingRestartSections,
+    refreshAutomations,
   });
   const { installCapabilities } = systemActions;
   const modelActions = useModelSettingsActions({

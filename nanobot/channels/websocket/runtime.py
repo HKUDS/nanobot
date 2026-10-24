@@ -685,6 +685,7 @@ class WebSocketChannel(BaseChannel):
 
     async def start(self) -> None:
         await self._transcripts.initialize()
+        self.gateway.http.remote_instances.resume()
         from nanobot.utils.logging_bridge import redirect_lib_logging
 
         redirect_lib_logging("websockets", level="WARNING")
@@ -816,15 +817,13 @@ class WebSocketChannel(BaseChannel):
         prune_task: asyncio.Task[None] | None = None
         task: asyncio.Task[None] | None = None
         try:
-            await self.gateway.state_events.start(self._commands.broadcast_state_change)
-            self.gateway.http.remote_instances.resume()
+            await self.gateway.pairing_notifications.start(self._commands.broadcast_pairing_change)
             prune_task = asyncio.create_task(prune_uploads())
             task = asyncio.create_task(runner())
             self._server_task = task
             await task
         finally:
-            await self.gateway.state_events.close()
-            await self.gateway.http.remote_instances.close()
+            await self.gateway.pairing_notifications.close()
             if prune_task is not None:
                 prune_task.cancel()
                 await asyncio.gather(prune_task, return_exceptions=True)
@@ -924,7 +923,7 @@ class WebSocketChannel(BaseChannel):
     # -- Outbound WebSocket events -----------------------------------------
 
     async def stop(self) -> None:
-        await self.gateway.state_events.close()
+        await self.gateway.pairing_notifications.close()
         await self.gateway.http.remote_instances.close()
         server_task = self._server_task
         if (

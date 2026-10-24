@@ -71,22 +71,19 @@ afterEach(() => {
 });
 
 describe("NanobotClient", () => {
-  it("routes state invalidations by resource and isolates a failing view", () => {
+  it("delivers payload-free pairing changes, isolates listeners and unsubscribes", () => {
     const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
     const pairing = vi.fn();
-    const usage = vi.fn();
-    client.onStateChange("pairing", () => { throw new Error("view failed"); });
-    const unsubscribe = client.onStateChange("pairing", pairing);
-    client.onStateChange("usage", usage);
+    client.onPairingChange(() => { throw new Error("view failed"); });
+    const unsubscribe = client.onPairingChange(pairing);
     client.connect();
     lastSocket().fakeOpen();
-    lastSocket().fakeMessage({ event: "webui_state_changed", resources: ["pairing", "pairing", "unknown"] });
+    lastSocket().fakeMessage({ event: "pairing_changed" });
     expect(pairing).toHaveBeenCalledTimes(1);
-    expect(usage).not.toHaveBeenCalled();
+    expect(pairing).toHaveBeenCalledWith();
     unsubscribe();
-    lastSocket().fakeMessage({ event: "webui_state_changed", resources: ["pairing", "usage"] });
+    lastSocket().fakeMessage({ event: "pairing_changed" });
     expect(pairing).toHaveBeenCalledTimes(1);
-    expect(usage).toHaveBeenCalledTimes(1);
     client.close();
   });
 

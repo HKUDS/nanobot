@@ -11,7 +11,7 @@ function day(date: string, tokens: number): Usage["days"][number] {
     cache_write_observed_input_tokens: 0, requests: 1 };
 }
 function usage(days: Usage["days"]): Usage {
-  return { timezone: "UTC", days, total_tokens: 999999, total_tokens_30d: 999999, total_tokens_365d: 999999,
+  return { days, total_tokens: 999999, total_tokens_30d: 999999, total_tokens_365d: 999999,
     peak_day_tokens: 999999, current_streak_days: 0, longest_streak_days: 0,
     active_days_30d: 0, requests_30d: 0, updated_at: "2026-09-09T00:00:00Z" };
 }
@@ -48,7 +48,7 @@ describe("Token usage card", () => {
   it("uses one 30-day window for the total, chart and source percentages", () => {
     const today = { ...day("2026-09-09", 300), input_tokens: 240, output_tokens: 60, cache_read_tokens: 120, cache_read_observed_input_tokens: 180, estimated_tokens: 100,
       sources: { user: day("2026-09-09", 200) } };
-    render(<TokenUsageCard usage={usage([
+    render(<TokenUsageCard timeZone="UTC" usage={usage([
       day("2026-08-10", 9000), day("2026-08-11", 100), today, day("2026-09-10", 9000),
     ])} />);
     expect(screen.getByLabelText("400 tokens")).toBeInTheDocument();
@@ -66,24 +66,6 @@ describe("Token usage card", () => {
     expect(bars[0]).toHaveAccessibleName(/Cache miss: 0, Unknown status: 100/);
     expect(screen.getAllByText("50%")).toHaveLength(2);
     expect(screen.getByText("Unclassified")).toBeInTheDocument();
-  });
-
-  it("keeps refreshed usage in the timezone that grouped its dates", () => {
-    const initial = { ...usage([day("2026-09-09", 192)]), timezone: "UTC" };
-    const refreshed = { ...usage([day("2026-09-10", 192)]), timezone: "Pacific/Kiritimati" };
-    const { rerender } = render(<TokenUsageCard usage={initial} />);
-    expect(screen.getByLabelText("192 tokens")).toBeInTheDocument();
-
-    rerender(<TokenUsageCard usage={refreshed} />);
-
-    expect(screen.getByLabelText("192 tokens")).toBeInTheDocument();
-    const bars = within(screen.getByRole("group", { name: "Daily tokens" })).getAllByRole("img");
-    expect(bars[29]).toHaveAccessibleName(/2026-09-10: 192 tokens/);
-
-    rerender(<TokenUsageCard usage={initial} />);
-    expect(screen.getByLabelText("192 tokens")).toBeInTheDocument();
-    expect(within(screen.getByRole("group", { name: "Daily tokens" })).getAllByRole("img")[29])
-      .toHaveAccessibleName(/2026-09-09: 192 tokens/);
   });
 
   it("shows an empty state for zero usage", () => {

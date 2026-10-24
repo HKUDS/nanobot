@@ -12,7 +12,6 @@ import type {
   SidebarStatePayload,
   GoalStateWsPayload,
   WorkspaceScopePayload,
-  WebUIStateResource,
 } from "./types";
 import { createHostWebSocket } from "./runtime";
 import { ClientRunLedger } from "./client-run-ledger";
@@ -88,7 +87,7 @@ type SessionUpdateHandler = (
   workspaceScope?: WorkspaceScopePayload,
 ) => void;
 type SidebarStateUpdateHandler = (state: SidebarStatePayload) => void;
-type StateChangeHandler = () => void;
+type PairingChangeHandler = () => void;
 type RunStatusHandler = (chatId: string, state: RunState) => void;
 
 /** Structured errors surfaced to the UI.
@@ -240,7 +239,7 @@ export class NanobotClient {
   private runCompletionHandlers = new Set<RunCompletionHandler>();
   private errorHandlers = new Set<ErrorHandler>();
   private taskNoticeHandlers = new Set<(notice: TaskNotice) => void>();
-  private stateChangeHandlers = new Map<WebUIStateResource, Set<StateChangeHandler>>();
+  private pairingChangeHandlers = new Set<PairingChangeHandler>();
   private chatHandlers = new Map<string, Set<EventHandler>>();
   private transcriptHandlers = new Map<string, { handler: EventHandler }>();
   /** Inbound frames received while the transcript owner is absent, regardless of observers. */
@@ -320,17 +319,9 @@ export class NanobotClient {
     };
   }
 
-  onStateChange(resource: WebUIStateResource, handler: StateChangeHandler): Unsubscribe {
-    let handlers = this.stateChangeHandlers.get(resource);
-    if (!handlers) {
-      handlers = new Set();
-      this.stateChangeHandlers.set(resource, handlers);
-    }
-    handlers.add(handler);
-    return () => {
-      handlers.delete(handler);
-      if (handlers.size === 0) this.stateChangeHandlers.delete(resource);
-    };
+  onPairingChange(handler: PairingChangeHandler): Unsubscribe {
+    this.pairingChangeHandlers.add(handler);
+    return () => { this.pairingChangeHandlers.delete(handler); };
   }
 
   onSidebarStateUpdate(handler: SidebarStateUpdateHandler): Unsubscribe {
@@ -1003,12 +994,9 @@ export class NanobotClient {
       return;
     }
 
-    if (parsed.event === "webui_state_changed") {
-      if (!Array.isArray(parsed.resources)) return;
-      for (const resource of new Set(parsed.resources)) {
-        for (const handler of this.stateChangeHandlers.get(resource) ?? []) {
-          try { handler(); } catch { /* One view must not block another view's refresh. */ }
-        }
+    if (parsed.event === "pairing_changed") {
+      for (const handler of this.pairingChangeHandlers) {
+        try { handler(); } catch { /* One listener must not block another pairing refresh. */ }
       }
       return;
     }

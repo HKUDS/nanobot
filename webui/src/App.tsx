@@ -55,7 +55,7 @@ import { useSidebarState } from "@/hooks/useSidebarState";
 import { useSkills } from "@/hooks/useSkills";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
-import { useStateRefresh } from "@/hooks/useStateRefresh";
+import { usePairingRefresh } from "@/hooks/usePairingRefresh";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useAppViewport } from "@/hooks/useAppViewport";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
@@ -95,7 +95,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Disclosure } from "@/components/ui/disclosure";
 import {
-  fetchPairingRequests,
   fetchSettings,
   fetchWorkspaces,
   runPairingAction,
@@ -1496,13 +1495,9 @@ function Shell({
     writeSessionUpdateChatIds(updatedChatIds);
   }, [updatedChatIds]);
 
-  const requestPairingRefresh = useStateRefresh(
-    "pairing",
-    true,
-    async (signal) => {
-      const payload = await fetchPairingRequests(getToken(), "", signal);
-      const requests = pairingRequestsWithDeadlines(Array.isArray(payload.requests) ? payload.requests : []);
-      if (signal.aborted) return;
+  const requestPairingRefresh = usePairingRefresh(
+    (snapshot) => {
+      const requests = pairingRequestsWithDeadlines(snapshot);
       setPairingRequests(requests);
       setSnoozedPairingCodes((current) => {
         if (current.size === 0) return current;
@@ -2468,9 +2463,11 @@ function Shell({
         });
       } catch (e) {
         setPairingError((e as Error).message);
-        void requestPairingRefresh().catch(() => {});
       } finally {
         setPairingBusyCode(null);
+        // A notification GET can precede an older mutation reply. Reconcile
+        // after either outcome so that reply cannot leave a newer request lost.
+        void requestPairingRefresh().catch(() => {});
       }
     },
     [client, requestPairingRefresh],

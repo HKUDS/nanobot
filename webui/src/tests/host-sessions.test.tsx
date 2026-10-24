@@ -3,17 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useHostSessions, MAX_HOST_VIEWS } from "@/components/remote/useHostSessions";
 import type { RemoteConnection } from "@/lib/remote-instances";
 
-const mocks = vi.hoisted(() => {
-  const events = new Set<() => void>();
-  return { read: vi.fn(), request: vi.fn(), token: () => "token", events,
-    client: { status: "open", requestMutation: (...args: unknown[]) => mocks.request(...args), onStatus: () => () => {},
-      onStateChange: (_resource: string, handler: () => void) => {
-        events.add(handler);
-        return () => { events.delete(handler); };
-      },
-    },
-  };
-});
+const mocks = vi.hoisted(() => ({ read: vi.fn(), request: vi.fn(), token: () => "token",
+  client: { requestMutation: (...args: unknown[]) => mocks.request(...args), onStatus: () => () => {} } }));
 vi.mock("@/providers/ClientProvider", () => ({ useClient: () => ({ client: mocks.client, getToken: mocks.token }) }));
 vi.mock("@/lib/remote-instances", async (original) => ({
   ...await original<typeof import("@/lib/remote-instances")>(), readRemoteInstances: mocks.read,
@@ -28,7 +19,6 @@ const deferred = <T,>() => {
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 };
-const invalidate = () => { for (const handler of mocks.events) handler(); };
 type Session = ReturnType<typeof useHostSessions>;
 async function start(result: { current: Session }, index: number) {
   let completion!: Promise<void>;
@@ -43,7 +33,6 @@ async function ready(result: { current: Session }, index: number) {
 beforeEach(() => {
   vi.useFakeTimers();
   window.sessionStorage.clear();
-  mocks.events.clear();
   mocks.read.mockReset().mockResolvedValue(directory);
   mocks.request.mockReset().mockImplementation(async (action: string, payload: { id: string }) =>
     action === "remote.connect" ? connections.find((item) => item.id === payload.id) : {
@@ -63,7 +52,7 @@ describe("host session lifecycle", () => {
     expect(result.current.selected?.id).toBe(ids[0]);
     act(() => { expect(result.current.reveal(ids[3])).toBe(false); });
     mocks.read.mockResolvedValue({ ...directory, profiles: directory.profiles.map((p) => ({ ...p, connected: false })) });
-    await act(async () => invalidate());
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
     act(() => { expect(result.current.reveal(ids[1])).toBe(false); });
     expect(mocks.request).not.toHaveBeenCalled();
   });
@@ -71,12 +60,12 @@ describe("host session lifecycle", () => {
     const { result } = renderHook(useHostSessions);
     await ready(result, 0);
     mocks.read.mockResolvedValue({ ...directory, profiles: directory.profiles.map((p) => ({ ...p, connected: false })) });
-    await act(async () => invalidate());
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
     mocks.request.mockRejectedValueOnce(new Error("ssh_unreachable"));
     await act(async () => { await expect(result.current.connect(ids[0])).rejects.toThrow("ssh_unreachable"); });
     expect(result.current.error).toBe("ssh_unreachable");
     mocks.read.mockResolvedValue(directory);
-    await act(async () => invalidate());
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
     expect(result.current.frames[0].offline).toBe(false);
     expect(result.current.error).toBe("");
   });
@@ -86,7 +75,7 @@ describe("host session lifecycle", () => {
     await ready(result, 0);
     mocks.request.mockRejectedValueOnce(new Error("ssh_unreachable"));
     await act(async () => { await expect(result.current.connect(ids[1])).rejects.toThrow("ssh_unreachable"); });
-    await act(async () => invalidate());
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
     expect(result.current.error).toBe("ssh_unreachable");
     expect(result.current.selected?.id).toBe(ids[0]);
   });
@@ -95,14 +84,14 @@ describe("host session lifecycle", () => {
     const { result } = renderHook(useHostSessions);
     await ready(result, 0);
     mocks.read.mockResolvedValue({ ...directory, profiles: [] });
-    await act(async () => invalidate());
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
     const stale = deferred<typeof directory>();
     mocks.read.mockReturnValueOnce(stale.promise);
-    await act(async () => invalidate());
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
     mocks.read.mockResolvedValue(directory);
     await act(async () => { await result.current.connect(ids[0]); });
     await act(async () => { stale.resolve({ ...directory, profiles: [] }); });
-    expect(result.current.frames[0].offline).toBe(false);
+    expect(result.current.frames[0].failures).toBe(0);
     expect(result.current.directory?.profiles).toHaveLength(4);
   });
 
@@ -111,7 +100,7 @@ describe("host session lifecycle", () => {
     await ready(result, 0);
     mocks.read.mockResolvedValue({ ...directory, profiles: directory.profiles.map((p) =>
       p.id === ids[0] ? { ...p, gateway_id: "restarted-gateway" } : p) });
-    await act(async () => invalidate());
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
     expect(result.current.frames[0].offline).toBe(true);
     expect(result.current.selected?.id).toBe(ids[0]);
   });
@@ -121,7 +110,7 @@ describe("host session lifecycle", () => {
     await ready(result, 0);
     mocks.read.mockResolvedValue({ ...directory, profiles: directory.profiles.map((p) =>
       p.id === ids[0] ? { ...p, view_id: "new-local-proxy-session" } : p) });
-    await act(async () => invalidate());
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
     expect(result.current.frames[0].offline).toBe(true);
     expect(result.current.frames[0].error).toBe("instance_changed");
   });
@@ -206,8 +195,7 @@ describe("host session lifecycle", () => {
     act(() => result.current.loaded(ids[0]));
     expect(result.current.selected).toBeNull();
     expect(result.current.frames).toHaveLength(0);
-    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
-    expect(result.current.error).toBe("");
+    expect(vi.getTimerCount()).toBe(1); // health interval only
   });
 
   it("a timed-out cold page leaves the old host intact and can be retried", async () => {

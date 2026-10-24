@@ -1,32 +1,28 @@
-import { useCallback, useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 import { usePageVisibility } from "@/hooks/usePageVisibility";
-import type { WebUIStateResource } from "@/lib/types";
+import { fetchPairingRequests } from "@/lib/api";
+import type { PairingRequestInfo } from "@/lib/types";
 import { useClient } from "@/providers/ClientProvider";
 
-/** Fixed WebUI invalidations share a lifecycle, not a second business-state store. */
-export function useStateRefresh(
-  resource: WebUIStateResource,
-  enabled: boolean,
-  load: (signal: AbortSignal, initial: boolean) => Promise<void>,
-  scope: string = resource,
+/** Re-read the authoritative pairing snapshot when its payload-free notice arrives. */
+export function usePairingRefresh(
+  onSnapshot: (requests: PairingRequestInfo[]) => void,
 ): () => Promise<void> {
-  const { client } = useClient();
+  const { client, getToken } = useClient();
   const visible = usePageVisibility();
-  const loadRef = useRef(load);
-  loadRef.current = load;
+  const onSnapshotRef = useRef(onSnapshot);
+  onSnapshotRef.current = onSnapshot;
   const activeRefresh = useRef<(() => Promise<void>) | null>(null);
   const request = useCallback(() => activeRefresh.current?.() ?? Promise.resolve(), []);
 
-  // Own the lifetime before child views can request a read from their effects.
-  useLayoutEffect(() => {
-    if (!enabled || !visible) return;
+  useEffect(() => {
+    if (!visible) return;
     const controller = new AbortController();
     const { signal } = controller;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let inFlight: Promise<void> | undefined;
     let pending = false;
-    let initial = true;
     let retries = 0;
     const read = async (): Promise<void> => {
       let failed: boolean;
@@ -35,13 +31,15 @@ export function useStateRefresh(
         pending = false;
         failed = false;
         try {
-          await loadRef.current(signal, initial);
+          const payload = await fetchPairingRequests(getToken(), "", signal);
+          signal.throwIfAborted();
+          if (document.visibilityState === "hidden") return;
+          onSnapshotRef.current(Array.isArray(payload.requests) ? payload.requests : []);
           retries = 0;
         } catch (error) {
           failed = true;
           reason = error;
         }
-        initial = false;
       } while (pending && !signal.aborted && document.visibilityState !== "hidden");
       signal.throwIfAborted();
       if (failed && retries < 3) timer = setTimeout(requestRefresh, 1000 * 2 ** retries++);
@@ -50,15 +48,16 @@ export function useStateRefresh(
     const refresh = (): Promise<void> => {
       if (signal.aborted || document.visibilityState === "hidden") return Promise.resolve();
       clearTimeout(timer);
+      // Changes during a read need one follow-up, never a parallel request.
       if (inFlight) pending = true;
       else inFlight = read().finally(() => { inFlight = undefined; });
       return inFlight;
     };
     activeRefresh.current = refresh;
-    // Views own read errors; automatic requests retry without unhandled rejections.
+    // Pairing is opportunistic; leave the last snapshot intact on read failures.
     const requestRefresh = () => { void refresh().catch(() => {}); };
-    // Register before the first read so a change during that read gets a follow-up.
-    const unsubscribe = client.onStateChange(resource, requestRefresh);
+    // Subscribe first so an event during the initial read cannot be lost.
+    const unsubscribe = client.onPairingChange(requestRefresh);
     let wasOpen = client.status === "open";
     const unsubscribeStatus = client.onStatus((status) => {
       if (status === "open" && !wasOpen) requestRefresh();
@@ -77,6 +76,6 @@ export function useStateRefresh(
       unsubscribeStatus();
       window.removeEventListener("focus", onFocus);
     };
-  }, [client, enabled, resource, scope, visible]);
+  }, [client, getToken, visible]);
   return request;
 }

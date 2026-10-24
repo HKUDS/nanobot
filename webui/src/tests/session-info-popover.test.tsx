@@ -6,18 +6,6 @@ import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import { setAppLanguage } from "@/i18n";
 import type { WebUIMutationTransport } from "@/lib/api";
 
-const automationChanges = vi.hoisted(() => new Set<() => void>());
-vi.mock("@/providers/ClientProvider", () => {
-  const liveClient = {
-    status: "open", onStatus: () => () => {},
-    onStateChange: (_resource: string, handler: () => void) => {
-      automationChanges.add(handler);
-      return () => { automationChanges.delete(handler); };
-    },
-  };
-  return { useClient: () => ({ client: liveClient }) };
-});
-
 const requestMutation = vi.fn();
 const client: WebUIMutationTransport = { requestMutation };
 
@@ -280,7 +268,7 @@ describe("SessionInfoPopover", () => {
     expect(within(detail).getByText('nanobot trigger trg_123 "message"')).toBeInTheDocument();
   });
 
-  it("refreshes on a change notification so completed one-shot automations disappear", async () => {
+  it("refreshes while open so completed one-shot automations disappear", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn()
@@ -300,8 +288,13 @@ describe("SessionInfoPopover", () => {
 
     await user.click(screen.getByRole("button", { name: "Session details" }));
     expect(await screen.findByText("Morning check")).toBeInTheDocument();
-    act(() => { for (const handler of automationChanges) handler(); });
-    await waitFor(() => expect(screen.queryByText("Morning check")).not.toBeInTheDocument());
+
+    await waitFor(
+      () => {
+        expect(screen.queryByText("Morning check")).not.toBeInTheDocument();
+      },
+      { timeout: 4500 },
+    );
     expect(screen.getByText("No automations in this session yet.")).toBeInTheDocument();
   }, 8000);
 

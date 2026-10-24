@@ -13,14 +13,13 @@ from nanobot.channels.websocket.attachment_http import AttachmentHTTP
 from nanobot.channels.websocket.attachment_store import AttachmentStore
 from nanobot.config.loader import get_config_path
 from nanobot.config.paths import get_media_dir
+from nanobot.pairing.notifications import PairingNotifications
 from nanobot.webui.gateway_endpoint import WebUIGatewayEndpoint
 from nanobot.webui.gateway_tokens import GatewayTokenStore
 from nanobot.webui.ingress_policy import DEFAULT_WEBUI_INGRESS_POLICY, WebUIIngressPolicy
 from nanobot.webui.media_gateway import WebUIMediaGateway
-from nanobot.webui.remote_instances import RemoteInstances
 from nanobot.webui.session_projection import WebUISessionProjection
 from nanobot.webui.settings_services import WebUISettingsServices
-from nanobot.webui.state_events import WebUIStateEvents
 from nanobot.webui.temporary_chats import WebUITemporaryChats
 from nanobot.webui.transcript import WebUITranscriptRecorder
 from nanobot.webui.workspaces import WebUIWorkspaceController
@@ -42,7 +41,7 @@ class GatewayServices:
     http: GatewayHTTPHandler
     endpoint: WebUIGatewayEndpoint
     settings: WebUISettingsServices
-    state_events: WebUIStateEvents
+    pairing_notifications: PairingNotifications
     tokens: GatewayTokenStore
     media: WebUIMediaGateway
     uploads: AttachmentHTTP
@@ -128,17 +127,6 @@ def build_gateway_services(
         logger=logger,
     )
     session_projection = WebUISessionProjection(session_manager, subagent_manager=subagent_manager, log=logger)
-    remote_instances = RemoteInstances(
-        settings.config.path.parent / "webui", local_gateway_id=tokens.instance_id,
-        on_change=lambda: state_events.notify("remote_instances"),
-    )
-    state_events = WebUIStateEvents(
-        settings.config,
-        remote_instances=remote_instances,
-        cron_service=cron_service,
-        local_trigger_store=local_trigger_store,
-        channel_runtime_status=channel_runtime_status,
-    )
     http = GatewayHTTPHandler(
         config=config,
         session_manager=session_manager,
@@ -152,7 +140,6 @@ def build_gateway_services(
         ingress=ingress,
         workspaces=workspaces,
         settings=settings,
-        remote_instances=remote_instances,
         skills_workspace_path=workspace_path,
         disabled_skills=disabled_skills,
         cron_service=cron_service,
@@ -175,7 +162,7 @@ def build_gateway_services(
         http=http,
         endpoint=endpoint,
         settings=settings,
-        state_events=state_events,
+        pairing_notifications=PairingNotifications(),
         tokens=tokens,
         media=media,
         uploads=uploads,

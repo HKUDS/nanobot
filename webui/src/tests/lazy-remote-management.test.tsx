@@ -23,7 +23,6 @@ const connection = {
   ...profile, hostname: "team-host", gateway_id: "gateway-1",
   url: "http://127.0.0.1:23456/#/?bootstrapSecret=test-only",
 };
-let remoteConnected = false;
 
 class TestSocket {
   static current: TestSocket;
@@ -43,7 +42,6 @@ class TestSocket {
     const frame = JSON.parse(data) as Outbound;
     this.sent.push(frame);
     if (frame.type !== "webui_request") return;
-    if (frame.action === "remote.connect") remoteConnected = true;
     const result = frame.action === "remote.connect" ? connection
       : frame.action === "remote.pair_start" ? { id: "test-pair", command: "nanobot remote pair nbpr1.test", expires: Date.now() / 1000 + 600 }
       : frame.action === "remote.discover" ? { hosts: [], files: [], incomplete: false } : {};
@@ -101,14 +99,13 @@ function managementSkeleton() {
 
 beforeEach(() => {
   vi.resetModules();
-  remoteConnected = false;
   localStorage.clear();
   sessionStorage.clear();
   window.history.replaceState(null, "", "/#/new");
   vi.stubGlobal("WebSocket", TestSocket);
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
     const path = String(input);
-    if (path === "/api/remote-instances") return Response.json({ available: true, machine_name: "Local machine", profiles: [{ ...profile, connected: remoteConnected }] });
+    if (path === "/api/remote-instances") return Response.json({ available: true, machine_name: "Local machine", profiles: [profile] });
     if (path === "/api/sessions") return Response.json({ sessions: [] });
     if (path === "/api/webui/sidebar-state") return Response.json({});
     return new Response(null, { status: 404 });

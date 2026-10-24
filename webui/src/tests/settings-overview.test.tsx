@@ -1,6 +1,4 @@
-import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
-import { useState, type ReactNode } from "react";
-import { useSettingsController } from "@/components/settings/useSettingsController";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { HostNavigationContext } from "@/components/remote/HostSwitcher";
 import { AboutSettings } from "@/components/settings/overview/OverviewSettings";
@@ -267,7 +265,6 @@ describe("Settings overview and appearance", () => {
     const payload: SettingsPayload = {
       ...settingsPayload(),
       usage: {
-        timezone: "UTC",
         days: [
           {
             date: new Date().toISOString().slice(0, 10),
@@ -313,87 +310,10 @@ describe("Settings overview and appearance", () => {
     expect(screen.getByText("Token usage")).toBeInTheDocument();
   });
 
-  it("retains invalidated usage when an older full settings read finishes, without losing drafts or restart updates", async () => {
-    const usage = { timezone: "UTC", days: [], total_tokens: 100, total_tokens_30d: 100,
-      total_tokens_365d: 100, peak_day_tokens: 0, current_streak_days: 0, longest_streak_days: 0,
-      active_days_30d: 0, requests_30d: 1, updated_at: null };
-    const initial = { ...settingsPayload(), usage };
-    const freshUsage = { ...usage, total_tokens: 292 };
-    const full = { ...initial, version: { current: "new-version" }, requires_restart: true,
-      restart_required_sections: ["runtime"] };
-    let finishSettings!: (response: Response) => void;
-    let invalidateUsage!: () => void;
-    let usageReads = 0;
-    const client = new NanobotClient({ url: "ws://localhost:8765" });
-    vi.spyOn(client, "onStateChange").mockImplementation((resource, handler) => {
-      if (resource === "usage") invalidateUsage = handler;
-      return () => {};
-    });
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === "/api/settings") return new Promise<Response>((resolve) => { finishSettings = resolve; });
-      if (String(input) === "/api/settings/usage") return jsonResponse(++usageReads === 1 ? usage : freshUsage);
-      return jsonResponse({});
-    }));
-    const { result } = renderHook(() => {
-      const [snapshot, setSnapshot] = useState<SettingsPayload>(initial);
-      const controller = useSettingsController({ initialSection: "overview", initialSettings: snapshot,
-        onSettingsChange: setSnapshot, onModelNameChange: () => {} });
-      return { controller, snapshot, setSnapshot };
-    }, { wrapper: ({ children }: { children: ReactNode }) => (
-      <ClientProvider client={client} token="tok">{children}</ClientProvider>
-    ) });
-    await act(async () => {});
-    await act(async () => invalidateUsage());
-    expect(result.current.controller.settings?.usage?.total_tokens).toBe(292);
-    act(() => {
-      result.current.controller.selectSection("models");
-      result.current.controller.modelState.setForm((current) => ({ ...current, model: "unsaved-model" }));
-    });
-    await act(async () => finishSettings(jsonResponse(full)));
-    expect(result.current.controller.settings).toMatchObject({ usage: freshUsage, version: full.version, requires_restart: true });
-    expect(result.current.snapshot.usage).toEqual(freshUsage);
-    expect(result.current.controller.modelState.form.model).toBe("unsaved-model");
-    expect(result.current.controller.pendingRestartSections.runtime).toBe(true);
-    expect(usageReads).toBe(2);
-
-    // A newly authoritative external restart snapshot must still replace usage.
-    const restarted = { ...full, usage: { ...freshUsage, total_tokens: 350 }, requires_restart: false,
-      restart_required_sections: [] };
-    await act(async () => result.current.setSnapshot(restarted));
-    expect(result.current.controller.settings?.usage?.total_tokens).toBe(350);
-    expect(result.current.controller.settings?.requires_restart).toBe(false);
-    expect(result.current.controller.pendingRestartSections.runtime).toBe(false);
-    expect(result.current.controller.modelState.form.model).toBe("unsaved-model");
-  });
-
-  it("keeps a later full settings snapshot authoritative over a usage read started before it", async () => {
-    const usage = { timezone: "UTC", days: [], total_tokens: 100, total_tokens_30d: 100,
-      total_tokens_365d: 100, peak_day_tokens: 0, current_streak_days: 0, longest_streak_days: 0,
-      active_days_30d: 0, requests_30d: 1, updated_at: null };
-    const initial = { ...settingsPayload(), usage };
-    const full = { ...initial, usage: { ...usage, total_tokens: 292 } };
-    let finishUsage!: (response: Response) => void;
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === "/api/settings") return jsonResponse(full);
-      if (String(input) === "/api/settings/usage") return new Promise<Response>((resolve) => { finishUsage = resolve; });
-      return jsonResponse({});
-    }));
-    const client = new NanobotClient({ url: "ws://localhost:8765" });
-    const { result } = renderHook(() => useSettingsController({ initialSection: "overview", initialSettings: initial,
-      onModelNameChange: () => {} }), { wrapper: ({ children }: { children: ReactNode }) => (
-      <ClientProvider client={client} token="tok">{children}</ClientProvider>
-    ) });
-    await act(async () => {});
-    expect(result.current.settings?.usage?.total_tokens).toBe(292);
-    await act(async () => finishUsage(jsonResponse(usage)));
-    expect(result.current.settings?.usage?.total_tokens).toBe(292);
-  });
-
   it("coalesces focus refreshes while usage is already loading", async () => {
     const payload: SettingsPayload = {
       ...settingsPayload(),
       usage: {
-        timezone: "UTC",
         days: [],
         total_tokens: 0,
         total_tokens_30d: 0,
@@ -448,7 +368,6 @@ describe("Settings overview and appearance", () => {
         timezone: "Asia/Shanghai",
       },
       usage: {
-        timezone: "Asia/Shanghai",
         days: [
           {
             date: "2026-06-03",

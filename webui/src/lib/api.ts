@@ -97,7 +97,7 @@ async function request<T>(
   init?: RequestInit,
   timeoutMs: number = 0,
 ): Promise<T> {
-  return readResponseWithTimeout(
+  const res = await fetchWithTimeout(
     url,
     {
       ...(init ?? {}),
@@ -107,38 +107,40 @@ async function request<T>(
       },
       credentials: "same-origin",
     },
-    async (res) => {
-      if (!res.ok) {
-        const text = typeof res.text === "function" ? (await res.text()).trim() : "";
-        let message = text;
-        if (text.startsWith("{")) {
-          try {
-            const payload: unknown = JSON.parse(text);
-            if (payload && typeof payload === "object") {
-              const error = (payload as { error?: unknown }).error;
-              if (typeof error === "string" && error.trim()) message = error.trim();
-            }
-          } catch {
-            // Preserve non-JSON error bodies exactly as returned by the gateway.
-          }
-        }
-        throw new ApiError(res.status, message || `HTTP ${res.status}`);
-      }
-      const contentType = res.headers?.get?.("content-type") ?? "";
-      if (contentType && !contentType.toLowerCase().includes("application/json")) {
-        const text = typeof res.text === "function" ? await res.text() : "";
-        const isHtml = text.trimStart().toLowerCase().startsWith("<!doctype");
-        throw new ApiError(
-          res.status,
-          isHtml
-            ? "Gateway returned WebUI HTML instead of JSON. Restart nanobot gateway and try again."
-            : "Gateway returned a non-JSON response.",
-        );
-      }
-      return (await res.json()) as T;
-    },
     timeoutMs,
   );
+  return readJsonResponse<T>(res);
+}
+
+async function readJsonResponse<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    const text = typeof res.text === "function" ? (await res.text()).trim() : "";
+    let message = text;
+    if (text.startsWith("{")) {
+      try {
+        const payload: unknown = JSON.parse(text);
+        if (payload && typeof payload === "object") {
+          const error = (payload as { error?: unknown }).error;
+          if (typeof error === "string" && error.trim()) message = error.trim();
+        }
+      } catch {
+        // Preserve non-JSON error bodies exactly as returned by the gateway.
+      }
+    }
+    throw new ApiError(res.status, message || `HTTP ${res.status}`);
+  }
+  const contentType = res.headers?.get?.("content-type") ?? "";
+  if (contentType && !contentType.toLowerCase().includes("application/json")) {
+    const text = typeof res.text === "function" ? await res.text() : "";
+    const isHtml = text.trimStart().toLowerCase().startsWith("<!doctype");
+    throw new ApiError(
+      res.status,
+      isHtml
+        ? "Gateway returned WebUI HTML instead of JSON. Restart nanobot gateway and try again."
+        : "Gateway returned a non-JSON response.",
+    );
+  }
+  return (await res.json()) as T;
 }
 
 async function mutation<T>(
@@ -552,12 +554,11 @@ export async function fetchSessionAutomations(
   token: string,
   key: string,
   base: string = "",
-  signal?: AbortSignal,
 ): Promise<SessionAutomationsPayload> {
   return request<SessionAutomationsPayload>(
     `${base}/api/sessions/${encodeURIComponent(key)}/automations`,
     token,
-    { signal },
+    undefined,
     API_READ_TIMEOUT_MS,
   );
 }
@@ -565,12 +566,11 @@ export async function fetchSessionAutomations(
 export async function fetchAutomations(
   token: string,
   base: string = "",
-  signal?: AbortSignal,
 ): Promise<AutomationsPayload> {
   return request<AutomationsPayload>(
     `${base}/api/webui/automations`,
     token,
-    { signal },
+    undefined,
     API_READ_TIMEOUT_MS,
   );
 }
@@ -773,12 +773,11 @@ export async function fetchSettings(
 export async function fetchSettingsUsage(
   token: string,
   base: string = "",
-  signal?: AbortSignal,
 ): Promise<NonNullable<SettingsPayload["usage"]>> {
   return request<NonNullable<SettingsPayload["usage"]>>(
     `${base}/api/settings/usage`,
     token,
-    { signal },
+    undefined,
     API_READ_TIMEOUT_MS,
   );
 }
@@ -941,12 +940,11 @@ export async function fetchInstalledCliApps(
 export async function fetchNanobotFeatures(
   token: string,
   base: string = "",
-  signal?: AbortSignal,
 ): Promise<NanobotFeaturesPayload> {
   return request<NanobotFeaturesPayload>(
     `${base}/api/settings/nanobot-features`,
     token,
-    { signal },
+    undefined,
     API_READ_TIMEOUT_MS,
   );
 }
@@ -1012,10 +1010,12 @@ export async function fetchPairingRequests(
   base: string = "",
   signal?: AbortSignal,
 ): Promise<PairingPayload> {
-  return request<PairingPayload>(
+  // Pairing's serial refresh must be cancellable through JSON consumption, not
+  // just until headers arrive. Other API reads retain their existing lifetime.
+  return readResponseWithTimeout(
     `${base}/api/settings/pairing`,
-    token,
-    { signal },
+    { signal, headers: { Authorization: `Bearer ${token}` }, credentials: "same-origin" },
+    readJsonResponse<PairingPayload>,
     API_READ_TIMEOUT_MS,
   );
 }

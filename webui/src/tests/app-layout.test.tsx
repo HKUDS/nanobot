@@ -44,7 +44,7 @@ const sessionUpdateHandlers = new Set<(
   workspaceScope?: WorkspaceScopePayload,
 ) => void>();
 const sidebarStateUpdateHandlers = new Set<(state: SidebarStatePayload) => void>();
-const stateChangeHandlers = new Map<string, Set<() => void>>();
+const pairingChangeHandlers = new Set<() => void>();
 let mockSessions: ChatSummary[] = [];
 const HERO_GREETING_PATTERN =
   /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
@@ -262,11 +262,9 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
       return () => statusHandlers.delete(handler);
     };
     onRuntimeModelUpdate = () => () => {};
-    onStateChange = (resource: string, handler: () => void) => {
-      const handlers = stateChangeHandlers.get(resource) ?? new Set();
-      stateChangeHandlers.set(resource, handlers);
-      handlers.add(handler);
-      return () => handlers.delete(handler);
+    onPairingChange = (handler: () => void) => {
+      pairingChangeHandlers.add(handler);
+      return () => pairingChangeHandlers.delete(handler);
     };
     onError = () => () => {};
     onChat = () => () => {};
@@ -355,7 +353,7 @@ describe("App layout", () => {
     runStatusHandlers.clear();
     sessionUpdateHandlers.clear();
     sidebarStateUpdateHandlers.clear();
-    stateChangeHandlers.clear();
+    pairingChangeHandlers.clear();
     window.history.replaceState(null, "", "/");
     sessionStorage.removeItem("nanobot.remote-instance");
     Reflect.deleteProperty(window, "nanobotHost");
@@ -4453,11 +4451,12 @@ describe("App layout", () => {
     mockFetchRoutes({ "/api/settings/pairing": () => ({ requests }) });
     render(<App />);
     await act(async () => {});
-    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
     const pairingReads = () => vi.mocked(fetch).mock.calls.filter(([input]) => String(input) === "/api/settings/pairing").length;
     expect(pairingReads()).toBe(1);
+    expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
     requests = [{ code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status: "sent" }];
-    await act(async () => { for (const handler of stateChangeHandlers.get("pairing") ?? []) handler(); });
+    await act(async () => { for (const handler of pairingChangeHandlers) handler(); });
     expect(screen.getByRole("dialog", { name: "Pair account" })).toBeVisible();
     expect(pairingReads()).toBe(2);
     fireEvent.click(within(screen.getByRole("dialog", { name: "Pair account" })).getByRole("button", { name: "Close" }));
@@ -4584,6 +4583,36 @@ describe("App layout", () => {
     expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
   });
 
+  it("reconciles a late approval reply after a notification has already shown a newer request", async () => {
+    vi.useFakeTimers();
+    let requests = [{
+      code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status: "sent", expires_in_seconds: 120,
+    }];
+    mockFetchRoutes({ "/api/settings/pairing": () => ({ requests }) });
+    let reply!: (payload: unknown) => void;
+    requestMutationSpy.mockImplementationOnce(() => new Promise((resolve) => { reply = resolve; }));
+    render(<App />);
+    await act(async () => {});
+    const pairingReads = () => vi.mocked(fetch).mock.calls.filter(([input]) => String(input) === "/api/settings/pairing").length;
+    const popup = screen.getByRole("dialog", { name: "Pair account" });
+    fireEvent.change(within(popup).getByRole("textbox", { name: "Pairing code" }), {
+      target: { value: "ABCD-EFGH" },
+    });
+    expect(requestMutationSpy).toHaveBeenCalledTimes(1);
+    // The host approved Alice and produced an empty reply snapshot. A new
+    // request arrives and its notification GET completes before that WS reply.
+    requests = [{
+      code: "IJKL-MNOP", channel: "feishu.second", sender_id: "bob", delivery_status: "sent", expires_in_seconds: 240,
+    }];
+    await act(async () => { for (const handler of pairingChangeHandlers) handler(); });
+    expect(popup).toHaveTextContent("Code expires 4 min.");
+    expect(pairingReads()).toBe(2);
+    await act(async () => { reply({ requests: [] }); });
+    expect(screen.getByRole("dialog", { name: "Pair account" })).toHaveTextContent("Code expires 4 min.");
+    expect(pairingReads()).toBe(3);
+    expect(requestMutationSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps pairing countdowns current after approval and removes expired requests on notification", async () => {
     vi.useFakeTimers();
     let requests = [{
@@ -4610,14 +4639,14 @@ describe("App layout", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
     expect(popup).toHaveTextContent("Code expires 3s.");
     expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input) === "/api/settings/pairing"))
-      .toHaveLength(1);
+      .toHaveLength(2);
     await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
     expect(popup).toHaveTextContent("Code expires expired.");
     requests = [];
-    await act(async () => { for (const handler of stateChangeHandlers.get("pairing") ?? []) handler(); });
+    await act(async () => { for (const handler of pairingChangeHandlers) handler(); });
     expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
     expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input) === "/api/settings/pairing"))
-      .toHaveLength(2);
+      .toHaveLength(3);
   });
 
   it.each(["sending", "failed"])("explains an undelivered pairing reply (%s) without empty code slots", async (delivery_status) => {
@@ -4661,7 +4690,7 @@ describe("App layout", () => {
     expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
 
     delivery_status = "sent";
-    await act(async () => { for (const handler of stateChangeHandlers.get("pairing") ?? []) handler(); });
+    await act(async () => { for (const handler of pairingChangeHandlers) handler(); });
     const popup = screen.getByRole("dialog", { name: "Pair account" });
     expect(within(popup).getByRole("textbox", { name: "Pairing code" })).toBeEnabled();
     expect(within(popup).queryByRole("alert")).not.toBeInTheDocument();
