@@ -14,6 +14,7 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
+from nanobot.utils.document import decode_saved_text
 from nanobot.utils.file_edit_events import FileDiff, FileEditResult, display_file_edit_path
 
 
@@ -28,6 +29,21 @@ def _validate_patch_path(path: str) -> str:
     if "\0" in normalized:
         raise _PatchError(f"patch path contains a null byte: {path!r}")
     return normalized
+
+
+def _read_existing_text(
+    display_path: str,
+    source: Path,
+    raw: bytes,
+    encodings: dict[Path, str],
+) -> str:
+    """Decode an existing file, remembering a BOM codec for the later save."""
+    try:
+        text, encoding = decode_saved_text(raw)
+    except UnicodeDecodeError:
+        raise _PatchError(f"file is not UTF-8 text: {display_path}") from None
+    encodings.setdefault(source, encoding)
+    return text
 
 
 def _append_text(content: str, addition: str) -> str:
@@ -104,6 +120,7 @@ class ApplyPatchTool(_FsTool):
             writes: dict[Path, str] = {}
             originals: dict[Path, str] = {}
             actions: dict[Path, str] = {}
+            encodings: dict[Path, str] = {}
 
             for edit_value in edits:
                 if not isinstance(edit_value, dict):
@@ -129,11 +146,9 @@ class ApplyPatchTool(_FsTool):
                         content = pending
                         exists = True
                     elif source.exists():
-                        raw = source.read_bytes()
-                        try:
-                            content = raw.decode("utf-8")
-                        except UnicodeDecodeError:
-                            raise _PatchError(f"file is not UTF-8 text: {path}")
+                        content = _read_existing_text(
+                            path, source, source.read_bytes(), encodings,
+                        )
                         exists = True
                     else:
                         content = ""
@@ -167,11 +182,9 @@ class ApplyPatchTool(_FsTool):
                     if pending is not None:
                         content = pending
                     elif source.exists():
-                        raw = source.read_bytes()
-                        try:
-                            content = raw.decode("utf-8")
-                        except UnicodeDecodeError:
-                            raise _PatchError(f"file is not UTF-8 text: {path}")
+                        content = _read_existing_text(
+                            path, source, source.read_bytes(), encodings,
+                        )
                     else:
                         raise _PatchError(f"file to update does not exist: {path}")
 
@@ -229,7 +242,11 @@ class ApplyPatchTool(_FsTool):
             try:
                 for path, content in writes.items():
                     path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_text(content, encoding="utf-8", newline="")
+                    path.write_text(
+                        content,
+                        encoding=encodings.get(path, "utf-8"),
+                        newline="",
+                    )
             except Exception:
                 for path, data in backups.items():
                     if data is None:

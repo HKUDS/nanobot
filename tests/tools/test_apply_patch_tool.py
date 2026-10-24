@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import codecs
 from pathlib import Path
 
 import pytest
@@ -490,3 +491,34 @@ def test_apply_patch_edits_rolls_back_when_later_write_fails(tmp_path, monkeypat
     else:
         assert not first.exists()
     assert second.read_bytes() == second_original
+
+
+_UNICODE_BOMS = {
+    "utf-16": (codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE),
+    "utf-32": (codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE),
+}
+
+
+@pytest.mark.parametrize("encoding", ["utf-16", "utf-32"])
+def test_apply_patch_updates_bom_marked_unicode_text(tmp_path: Path, encoding: str) -> None:
+    target = tmp_path / "note.txt"
+    target.write_bytes("alpha\nneedle\nomega\n".encode(encoding))
+    tool = ApplyPatchTool(workspace=tmp_path)
+
+    result = asyncio.run(
+        tool.execute(
+            edits=[
+                {
+                    "path": "note.txt",
+                    "action": "replace",
+                    "old_text": "needle",
+                    "new_text": "found",
+                }
+            ]
+        )
+    )
+
+    saved = target.read_bytes()
+    assert "Error" not in result
+    assert saved.decode(encoding) == "alpha\nfound\nomega\n"
+    assert saved.startswith(_UNICODE_BOMS[encoding])

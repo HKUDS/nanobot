@@ -1,5 +1,7 @@
 """Tests for enhanced filesystem tools: ReadFileTool, EditFileTool, ListDirTool."""
 
+import codecs
+
 import pytest
 
 from nanobot.agent.tools.file_state import file_read_context
@@ -9,6 +11,11 @@ from nanobot.agent.tools.filesystem import (
     ReadFileTool,
     WriteFileTool,
 )
+
+_UNICODE_BOMS = {
+    "utf-16": (codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE),
+    "utf-32": (codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE),
+}
 
 
 @pytest.mark.asyncio
@@ -217,6 +224,19 @@ class TestEditFileTool:
         result = await tool.execute(path=str(f), old_text="world", new_text="earth")
         assert "Patch applied:" in result
         assert f.read_text() == "hello earth"
+
+    @pytest.mark.parametrize("encoding", ["utf-16", "utf-32"])
+    @pytest.mark.asyncio
+    async def test_bom_marked_unicode_text_keeps_its_encoding(self, tool, tmp_path, encoding):
+        target = tmp_path / "note.txt"
+        target.write_bytes("alpha\nneedle\nomega\n".encode(encoding))
+
+        result = await tool.execute(path="note.txt", old_text="needle", new_text="found")
+
+        saved = target.read_bytes()
+        assert "Error" not in result
+        assert saved.decode(encoding) == "alpha\nfound\nomega\n"
+        assert saved.startswith(_UNICODE_BOMS[encoding])
 
     @pytest.mark.asyncio
     async def test_identical_replacement_returns_clear_error(self, tool, tmp_path):
