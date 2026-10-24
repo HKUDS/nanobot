@@ -501,6 +501,7 @@ function renderMcpActions() {
       applyPayload: vi.fn(),
       maybeRestartHostEngine: vi.fn(),
       setPendingRestartSections: vi.fn(),
+      refreshAutomations: vi.fn(),
     });
     return { state, actions };
   });

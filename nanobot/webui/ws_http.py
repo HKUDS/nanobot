@@ -284,7 +284,6 @@ if TYPE_CHECKING:
     from nanobot.channels.websocket.runtime import WebSocketConfig
     from nanobot.cron.service import CronService
     from nanobot.triggers.local_store import LocalTriggerStore
-    from nanobot.webui.remote_instances import RemoteInstances
     from nanobot.webui.settings_services import WebUISettingsServices
 
 def _decode_api_key(raw_key: str) -> str | None:
@@ -380,7 +379,6 @@ class GatewayHTTPHandler:
         ingress: WebUIIngressPolicy,
         workspaces: WebUIWorkspaceController,
         settings: WebUISettingsServices,
-        remote_instances: RemoteInstances,
         skills_workspace_path: Path,
         disabled_skills: set[str] | None = None,
         cron_service: CronService | None = None,
@@ -410,7 +408,11 @@ class GatewayHTTPHandler:
         self.ingress = ingress
         self.workspaces = workspaces
         self.settings = settings
-        self.remote_instances = remote_instances
+        from nanobot.webui.remote_instances import RemoteInstances
+
+        self.remote_instances = RemoteInstances(
+            settings.config.path.parent / "webui", local_gateway_id=tokens.instance_id,
+        )
         self.skills_workspace_path = skills_workspace_path
         self.disabled_skills: set[str] = (
             disabled_skills if disabled_skills is not None else set()
@@ -646,22 +648,6 @@ class GatewayHTTPHandler:
 
         return connection.respond(404, "Not Found")
 
-    def remote_state_events_allowed(self, connection: Any, request: WsRequest | None = None) -> bool:
-        """Keep local connection metadata behind the same boundary on HTTP and WS."""
-        if request is None:
-            request = getattr(connection, "request", None)
-        if request is None or not (
-            _is_loopback_host(self.config.host)
-            and _is_local_browser_request(connection, request.headers)
-        ):
-            return False
-        origin = request.headers.get("Origin", "")
-        try:
-            return not origin or _is_loopback_host(urlsplit(origin).hostname or "")
-        except ValueError:
-            # A malformed recipient Origin cannot interrupt the shared fan-out.
-            return False
-
     async def _dispatch_remote_instances(
         self, connection: Any, request: WsRequest, path: str,
     ) -> Response:
@@ -673,7 +659,11 @@ class GatewayHTTPHandler:
             return _http_error(401, "Unauthorized")
         # A public/reverse-proxied WebUI must never gain access to this machine's
         # SSH agent, private keys or network.
-        if not self.remote_state_events_allowed(connection, request):
+        if not (_is_loopback_host(self.config.host)
+                and _is_local_browser_request(connection, request.headers)):
+            return _http_error(403, "remote_connections_local_only")
+        origin = request.headers.get("Origin", "")
+        if origin and not _is_loopback_host(urlsplit(origin).hostname or ""):
             return _http_error(403, "remote_connections_local_only")
         try:
             if path == "/api/remote-instances":

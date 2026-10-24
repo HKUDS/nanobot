@@ -42,9 +42,9 @@ function todayInTimeZone(timeZone?: string): string {
   return now.toISOString().slice(0, 10);
 }
 
-export function TokenUsageCard({ usage }: { usage?: Usage }) {
+export function TokenUsageCard({ usage, timeZone }: { usage?: Usage; timeZone?: string }) {
   const { t, i18n } = useTranslation();
-  const today = todayInTimeZone(usage?.timezone);
+  const today = todayInTimeZone(timeZone);
   const byDate = new Map(usage?.days.map(day => [day.date, day]));
   const days = Array.from({ length: 30 }, (_, index) => {
     const date = new Date(`${today}T00:00:00Z`);

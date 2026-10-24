@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import sqlite3
 import threading
-from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -13,7 +12,7 @@ import pytest
 
 from nanobot.llm_usage.context import LLMUsageSource
 from nanobot.llm_usage.models import LLMCallRecord
-from nanobot.llm_usage.store import SCHEMA_VERSION, LLMUsageChangeSource, LLMUsageStore
+from nanobot.llm_usage.store import SCHEMA_VERSION, LLMUsageStore
 from nanobot.providers.base import LLMUsage
 
 
@@ -74,31 +73,6 @@ def test_store_keeps_only_content_free_call_metadata(tmp_path: Path) -> None:
         mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
     assert version == SCHEMA_VERSION
     assert str(mode).lower() == "wal"
-
-
-def test_change_source_reconciles_after_an_external_writer_releases_a_busy_database(tmp_path: Path) -> None:
-    path = tmp_path / "llm_usage.sqlite3"
-    store = LLMUsageStore(path)
-    store.record(_call(datetime.now(timezone.utc).isoformat()))
-    store.close()
-    source = LLMUsageChangeSource(path)
-    try:
-        with closing(sqlite3.connect(path)) as writer:
-            # A restored database or maintenance tool may use SQLite's default
-            # rollback journal. Its exclusive transaction blocks the observer.
-            writer.execute("PRAGMA journal_mode = DELETE")
-            assert source.changed()
-            assert not source.changed()
-            writer.execute("BEGIN EXCLUSIVE")
-            writer.execute("UPDATE llm_calls SET duration_ms = 500")
-            with pytest.raises(sqlite3.OperationalError, match="locked"):
-                source.changed()
-            writer.commit()
-            assert writer.execute("SELECT duration_ms FROM llm_calls").fetchone()[0] == 500
-            assert source.changed()
-            assert not source.changed()
-    finally:
-        source.close()
 
 
 def test_usage_payload_aggregates_cache_coverage_sources_and_failures(tmp_path: Path) -> None:

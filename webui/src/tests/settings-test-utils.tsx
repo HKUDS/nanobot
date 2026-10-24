@@ -144,7 +144,6 @@ export function renderSettingsView(options: SettingsViewTestOptions = {}) {
   render(
     <ClientProvider client={options.client ?? {
       requestMutation: requestMutationMock,
-      onStateChange: () => () => {},
       status: "open",
       onStatus: (handler: (status: "open") => void) => {
         handler("open");

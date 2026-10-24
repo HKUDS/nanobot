@@ -1,17 +1,17 @@
 import { expect, test, type WebSocketRoute } from "@playwright/test";
 
 for (const width of [1440, 390]) {
-  test(`a delivered pairing request reaches the real app through the existing socket at ${width}px`, async ({ page }) => {
+  test(`pairing appears on the real client's event 1s after an empty read at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await page.addInitScript(() => localStorage.setItem("nanobot.locale", "en"));
     await page.clock.install();
     const errors: string[] = [];
     page.on("pageerror", error => errors.push(error.message));
-    let socket: WebSocketRoute | undefined;
+    const sockets: WebSocketRoute[] = [];
     let reads = 0;
     let requests: Record<string, unknown>[] = [];
     await page.route("**/webui/bootstrap*", route => route.fulfill({ json: {
-      token: "fixture-token", api_token: "fixture-api-token", ws_path: "/state-events-fixture", expires_in: 300,
+      token: "fixture-token", api_token: "fixture-api-token", ws_path: "/pairing-events-fixture", expires_in: 300,
       terminal: { webui: { capabilities: ["webui.core.v1"] } },
     } }));
     await page.route("**/api/**", route => {
@@ -26,19 +26,21 @@ for (const width of [1440, 390]) {
       if (path === "/api/remote-instances") return route.fulfill({ status: 403, json: {} });
       return route.fulfill({ status: 404, json: {} });
     });
-    await page.routeWebSocket("**/state-events-fixture*", ws => {
-      socket = ws;
+    await page.routeWebSocket("**/pairing-events-fixture*", ws => {
+      sockets.push(ws);
       ws.send(JSON.stringify({ event: "ready", chat_id: "fixture-chat" }));
     });
     await page.goto("/");
-    // Entry loads a snapshot; the first socket open closes the pre-connection gap.
+    // Entry reads a snapshot; socket open closes the pre-connection gap.
     await expect.poll(() => reads).toBe(2);
-    await expect(page.getByRole("textbox", { name: "Message input" })).toBeVisible();
-    await page.clock.fastForward(60_000);
+    const composer = page.getByRole("textbox", { name: "Message input" });
+    await expect(composer).toBeVisible();
+    await composer.fill("Keep this draft during pairing and reconnect");
+    await page.clock.fastForward(1_000);
     expect(reads).toBe(2);
     requests = [{ code: "ABCD-EFGH", channel: "feishu", sender_id: "fixture-user", delivery_status: "sent" }];
-    expect(socket).toBeDefined();
-    socket!.send(JSON.stringify({ event: "webui_state_changed", resources: ["pairing"] }));
+    expect(sockets).toHaveLength(1);
+    sockets[0].send(JSON.stringify({ event: "pairing_changed" }));
     const popup = page.getByRole("dialog", { name: "Pair account" });
     await expect(popup).toBeVisible();
     await expect(popup.getByRole("textbox", { name: "Pairing code" })).toBeEnabled();
@@ -48,6 +50,15 @@ for (const width of [1440, 390]) {
     await page.clock.fastForward(30_000);
     await expect(popup).toBeVisible();
     expect(reads).toBe(3);
+    requests = [];
+    sockets[0].close({ code: 1012, reason: "pairing fixture reconnect" });
+    await page.clock.fastForward(1_000);
+    await expect.poll(() => sockets.length).toBe(2);
+    await expect.poll(() => reads).toBe(4);
+    await expect(popup).toBeHidden();
+    await expect(composer).toHaveValue("Keep this draft during pairing and reconnect");
+    await page.clock.fastForward(60_000);
+    expect(reads).toBe(4);
     expect(errors).toEqual([]);
   });
 }

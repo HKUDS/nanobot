@@ -31,7 +31,7 @@ _IN_PROCESS_HTTP_CHANNELS: dict[int, InProcessHttpChannel] = {}
 
 
 async def wait_for_listener(channel: WebSocketChannel, task: asyncio.Task[None]) -> int:
-    """Await startup separately from the test client's connection/retry budget."""
+    """Await source registration and binding before making a non-retrying HTTP call."""
     async with asyncio.timeout(5):
         while True:
             if task.done():

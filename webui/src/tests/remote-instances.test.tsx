@@ -13,22 +13,19 @@ import { clearPairReturn, initializePairReturn } from "@/lib/remote-pair-return"
 import type { Window as HappyWindow } from "happy-dom";
 
 (window as unknown as HappyWindow).happyDOM.settings.disableIframePageLoading = true;
-const originalVisibility = Object.getOwnPropertyDescriptor(document, "visibilityState");
 
 const mocks = vi.hoisted(() => {
   const request = vi.fn();
   const discover = vi.fn();
   const onStatus = vi.fn();
-  const stateChanges = new Set<() => void>();
-  const onStateChange = vi.fn();
   const inspect = vi.fn();
-  return { read: vi.fn(), request, discover, inspect, onStatus, onStateChange, stateChanges, connected: false, client: { status: "open", requestMutation: (action: string, payload: unknown, timeout: number) => {
+  return { read: vi.fn(), request, discover, inspect, onStatus, client: { status: "open", requestMutation: (action: string, payload: unknown, timeout: number) => {
     // Quick pairing prepares a local-only invitation when Add server opens;
     // these tests track SSH/config mutations separately from that lifecycle.
     if (action === "remote.pair_start") return Promise.resolve({ id: "pending-pair", command: "nanobot remote pair nbpr1.public", expires: Date.now() / 1000 + 600 });
     if (action === "remote.pair_cancel") return Promise.resolve({ cancelled: true });
     return action === "remote.discover" ? discover(payload) : action === "remote.inspect" ? inspect(payload) : request(action, payload, timeout);
-  }, onStatus, onStateChange }, token: () => "local-token" };
+  }, onStatus }, token: () => "local-token" };
 });
 vi.mock("@/providers/ClientProvider", () => ({ useClient: () => ({ client: mocks.client, getToken: mocks.token }) }));
 vi.mock("@/lib/remote-instances", async (original) => ({
@@ -61,33 +58,21 @@ function LocalShell({ collapsed = false, initialRemote = false }) {
 const view = (collapsed = false, initialRemote = false) => render(<RemoteInstances><LocalShell collapsed={collapsed} initialRemote={initialRemote} /></RemoteInstances>);
 
 beforeEach(async () => {
-  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
   await i18n.changeLanguage("en");
   window.sessionStorage.clear(); window.localStorage.clear();
   window.history.replaceState(null, "", "#/new");
-  mocks.stateChanges.clear();
-  mocks.onStateChange.mockReset().mockImplementation((_resource: string, handler: () => void) => {
-    mocks.stateChanges.add(handler);
-    return () => { mocks.stateChanges.delete(handler); };
-  });
   mocks.onStatus.mockReset().mockImplementation((handler) => { handler("open"); return () => {}; });
-  mocks.connected = false;
-  mocks.read.mockReset().mockImplementation(async () => ({ available: true, machine_name: "Xubin-Mac",
-    profiles: [{ ...profile, connected: mocks.connected }] }));
+  mocks.read.mockReset().mockResolvedValue({ available: true, machine_name: "Xubin-Mac", profiles: [profile] });
   mocks.discover.mockReset().mockResolvedValue({ hosts: [], files: [], incomplete: false });
   mocks.inspect.mockReset().mockResolvedValue({ hostname: "team-host", candidates: [{ config_path: "~/.nanobot/config.json", runtime_user: "", service: "" }], incomplete: false });
   mocks.request.mockReset().mockImplementation(async (action: string) => {
-    if (action === "remote.connect") { mocks.connected = true; return connection; }
+    if (action === "remote.connect") return connection;
     if (action === "remote.save") return { id: profile.id };
     if (action === "remote.disconnect") return { available: true, profiles: [profile] };
     return {};
   });
 });
-afterEach(() => {
-  cleanup(); clearPairReturn(); vi.restoreAllMocks(); vi.unstubAllGlobals();
-  if (originalVisibility) Object.defineProperty(document, "visibilityState", originalVisibility);
-  else Reflect.deleteProperty(document, "visibilityState");
-});
+afterEach(() => { cleanup(); clearPairReturn(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 async function readyRemote() {
   const frame = await screen.findByTitle("nanobot on Team server");
@@ -317,7 +302,6 @@ describe("remote instance UX", () => {
     expect(mocks.request).not.toHaveBeenCalled();
   });
   it("manages connections without changing the remote host, route, frame or authorization", async () => {
-    mocks.read.mockResolvedValue({ available: true, machine_name: "Xubin-Mac", profiles: [{ ...profile, connected: true }] });
     view();
     await chooseHost("Team server ubuntu@example.test");
     const frame = await readyRemote();
@@ -975,58 +959,6 @@ describe("remote instance UX", () => {
     expect(mocks.request.mock.calls.filter(([action]) => action === "remote.save")[1][1]).toMatchObject({ id: profile.id });
   });
 
-  it("releases save busy when a shared directory body is cancelled, then can save and await a fresh directory", async () => {
-    view(false, true);
-    await act(async () => {});
-    await act(async () => fireEvent.pointerDown(screen.getByRole("button", { name: "Manage Team server" }), { button: 0, ctrlKey: false }));
-    await act(async () => fireEvent.click(screen.getByRole("menuitem", { name: "Edit connection" })));
-    const dialog = await screen.findByRole("dialog");
-    const save = within(dialog).getByRole("button", { name: "Save changes" });
-    const { readRemoteInstances } = await vi.importActual<typeof import("@/lib/remote-instances")>("@/lib/remote-instances");
-    let transportSignal!: AbortSignal;
-    let bodyStopped = false;
-    let finishBody!: () => void;
-    const fresh = { available: true, profiles: [{ ...profile, name: "Saved profile" }] };
-    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      transportSignal = init!.signal!;
-      return { ok: true, status: 200, json: () => new Promise((resolve, reject) => {
-        const abort = () => { bodyStopped = true; reject(new DOMException("Hidden", "AbortError")); };
-        transportSignal.addEventListener("abort", abort, { once: true });
-        finishBody = () => { transportSignal.removeEventListener("abort", abort); resolve(fresh); };
-      }) } as Response;
-    });
-    vi.stubGlobal("fetch", fetcher);
-    mocks.read.mockImplementation(readRemoteInstances);
-    await act(async () => { for (const handler of mocks.stateChanges) handler(); });
-    expect(finishBody).toBeTypeOf("function");
-    await act(async () => fireEvent.click(save));
-    expect(mocks.request).toHaveBeenCalledWith("remote.save", expect.any(Object), 65_000);
-    expect(save).toBeDisabled();
-    expect(fetcher).toHaveBeenCalledTimes(1);
-    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
-    await act(async () => document.dispatchEvent(new Event("visibilitychange")));
-    expect(transportSignal.aborted).toBe(true);
-    expect(bodyStopped).toBe(true);
-    expect(save).toBeEnabled();
-    expect(dialog).toBeInTheDocument();
-
-    // Returning visible owns a new request; save joins it and awaits its follow-up.
-    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
-    await act(async () => document.dispatchEvent(new Event("visibilitychange")));
-    await act(async () => fireEvent.click(save));
-    expect(save).toBeDisabled();
-    await act(async () => finishBody());
-    expect(save).toBeDisabled();
-    await act(async () => finishBody());
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Manage Saved profile" })).toBeVisible();
-    await act(async () => fireEvent.pointerDown(screen.getByRole("button", { name: "Manage Saved profile" }), { button: 0, ctrlKey: false }));
-    await act(async () => fireEvent.click(screen.getByRole("menuitem", { name: "Edit connection" })));
-    expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
-    expect(mocks.request.mock.calls.filter(([action]) => action === "remote.save")).toHaveLength(2);
-    expect(mocks.request.mock.calls.some(([action]) => action === "remote.connect")).toBe(false);
-  });
-
   it("edits in the same dialog but only saves, without connecting or switching", async () => {
     view(); await openDirectory();
     fireEvent.pointerDown(screen.getByRole("button", { name: "Manage Team server" }), { button: 0, ctrlKey: false });
@@ -1378,20 +1310,26 @@ describe("remote instance UX", () => {
     expect(mocks.request).toHaveBeenCalledWith("remote.trust", { id: profile.id, challenge: "one-use" }, 65_000);
   });
 
-  it("covers a confirmed offline remote without reloading its frame", async () => {
-    mocks.read.mockResolvedValue({ available: true, profiles: [{ ...profile, connected: true }] });
+  it("tolerates transient health failures and covers, rather than reloads, the remote frame", async () => {
+    let tick: (() => void) | undefined;
+    const setInterval = globalThis.setInterval;
+    vi.spyOn(window, "setInterval").mockImplementation((callback, delay) => {
+      if (delay === 5_000) tick = callback;
+      const timer = setInterval(callback, delay);
+      globalThis.clearInterval(timer);
+      return timer;
+    });
     view(); await openDirectory();
     fireEvent.click(screen.getByRole("button", { name: "Team server ubuntu@example.test" }));
     const frame = await readyRemote();
     fireEvent.load(frame);
+    await act(async () => { tick?.(); });
     expect(screen.queryByRole("region", { name: "Server connection lost" })).not.toBeInTheDocument();
-    mocks.read.mockResolvedValue({ available: true, profiles: [profile] });
-    await act(async () => { for (const handler of mocks.stateChanges) handler(); });
+    await act(async () => { tick?.(); });
     await screen.findByRole("region", { name: "Server connection lost" });
     expect(screen.getByTitle("nanobot on Team server")).toBeInTheDocument();
     expect(frame.parentElement).toHaveAttribute("inert");
     expect(document.querySelector('[data-host-view="local"]')).toHaveAttribute("inert");
-    mocks.read.mockResolvedValue({ available: true, profiles: [{ ...profile, connected: true }] });
     fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
     await waitFor(() => expect(screen.queryByRole("region", { name: "Server connection lost" })).not.toBeInTheDocument());
     expect(screen.queryByText("Opening your server…")).not.toBeInTheDocument();
@@ -1400,16 +1338,13 @@ describe("remote instance UX", () => {
   });
 
   it("rechecks on wake and network recovery without reloading or switching hosts", async () => {
-    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
     const rendered = view(); await openDirectory();
     fireEvent.click(screen.getByRole("button", { name: "Team server ubuntu@example.test" }));
     const frame = await readyRemote();
-    mocks.read.mockResolvedValue({ available: true, profiles: [profile] }).mockClear();
+    mocks.read.mockClear();
     await act(async () => { window.dispatchEvent(new Event("online")); });
     expect(mocks.read).toHaveBeenCalledTimes(1);
-    visibility.mockReturnValue("hidden");
-    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
-    visibility.mockReturnValue("visible");
     await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
     expect(mocks.read).toHaveBeenCalledTimes(2);
     await screen.findByRole("region", { name: "Server connection lost" });

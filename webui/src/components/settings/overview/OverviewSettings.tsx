@@ -75,7 +75,7 @@ export function OverviewSettings({
   return (
     <div className="settings-stack">
       <section className="rounded-panel bg-settings-surface p-6">
-        <TokenUsageCard usage={settings.usage} />
+        <TokenUsageCard usage={settings.usage} timeZone={settings.agent.timezone} />
       </section>
 
       <section>

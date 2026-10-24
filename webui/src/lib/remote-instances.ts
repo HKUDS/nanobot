@@ -1,5 +1,5 @@
 import type { WebUIMutationTransport } from "./api";
-import { readResponseWithTimeout } from "./http";
+import { fetchWithTimeout } from "./http";
 
 export interface HostCompatibility {
   status: "compatible" | "unknown" | "update_host" | "update_client";
@@ -97,14 +97,13 @@ export interface RemoteInspection {
   incomplete: boolean;
 }
 
-export async function readRemoteInstances(token: string, signal?: AbortSignal): Promise<RemoteDirectory> {
-  return readResponseWithTimeout("/api/remote-instances", {
-    headers: { Authorization: `Bearer ${token}` }, signal,
-  }, async (response) => {
-    if (response.status === 403 || response.status === 404) return { available: false, profiles: [] };
-    if (!response.ok) throw new Error("directory_unavailable");
-    return response.json() as Promise<RemoteDirectory>;
+export async function readRemoteInstances(token: string): Promise<RemoteDirectory> {
+  const response = await fetchWithTimeout("/api/remote-instances", {
+    headers: { Authorization: `Bearer ${token}` },
   });
+  if (response.status === 403 || response.status === 404) return { available: false, profiles: [] };
+  if (!response.ok) throw new Error("directory_unavailable");
+  return response.json() as Promise<RemoteDirectory>;
 }
 
 export function remoteAction<T>(

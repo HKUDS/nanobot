@@ -2,7 +2,7 @@
 
 This page collects contributor-facing notes for extending nanobot. User-facing setup and runtime options live in [`configuration.md`](./configuration.md).
 
-For browser interface changes, start with [WebUI development](../webui/README.md). The [WebUI state refresh contract](./webui-state-events.md) defines notification access, client recovery, and gateway lifecycle. For Python setup and contribution checks, see [CONTRIBUTING.md](../CONTRIBUTING.md). The sections below cover provider extensions.
+For browser interface changes, start with [WebUI development](../webui/README.md). For Python setup and contribution checks, see [CONTRIBUTING.md](../CONTRIBUTING.md). The sections below cover provider extensions.
 
 ## Adding an LLM Provider
 

@@ -1771,7 +1771,6 @@ def test_settings_payload_includes_token_usage_summary(
     assert payload["usage"]["longest_streak_days"] == 1
     assert payload["usage"]["active_days_30d"] == 1
     assert payload["usage"]["requests_30d"] == 1
-    assert payload["usage"]["timezone"] == config.agents.defaults.timezone
 
 
 def test_settings_usage_payload_returns_lightweight_token_usage(
@@ -1799,15 +1798,7 @@ def test_settings_usage_payload_returns_lightweight_token_usage(
 
     assert payload["total_tokens"] == 22
     assert payload["requests_30d"] == 1
-    assert payload["timezone"] == config.agents.defaults.timezone
     assert "agent" not in payload
-
-    config.agents.defaults.timezone_mode = "manual"
-    config.agents.defaults.timezone = "Pacific/Kiritimati"
-    save_config(config, config_path)
-    refreshed = settings_usage_payload()
-    assert refreshed["total_tokens"] == 22
-    assert refreshed["timezone"] == "Pacific/Kiritimati"
 
 
 def test_update_network_safety_settings_writes_local_service_flag(

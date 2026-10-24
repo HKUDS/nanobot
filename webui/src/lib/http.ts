@@ -42,7 +42,7 @@ export async function fetchWithTimeout(
   }
 }
 
-/** Own fetch and response consumption under one abort/timeout lifetime. */
+/** Pairing reads own fetch and body consumption under one cancellation lifetime. */
 export async function readResponseWithTimeout<T>(
   input: RequestInfo | URL,
   init: RequestInit,
@@ -55,8 +55,8 @@ export async function readResponseWithTimeout<T>(
 
   const controller = new AbortController();
   const externalSignal = init.signal;
-  const abortFromExternal = () => controller.abort();
-  if (externalSignal?.aborted) controller.abort();
+  const abortFromExternal = () => controller.abort(externalSignal?.reason);
+  if (externalSignal?.aborted) abortFromExternal();
   else externalSignal?.addEventListener("abort", abortFromExternal, { once: true });
   let timedOut = false;
   const timeoutId = setTimeout(() => {

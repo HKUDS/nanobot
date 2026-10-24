@@ -6,7 +6,7 @@ import type { HostFrame } from "@/components/remote/useHostSessions";
 const origin = "http://127.0.0.1:23456";
 const makeFrame = (id = "host-a"): HostFrame => ({
   connection: { id, name: "Team server", host: "private-ssh-alias", hostname: "team-host", config_path: "/private/config.json", gateway_id: "gateway-1", url: `${origin}/#/?bootstrapSecret=never-share-this` },
-  loaded: true, offline: false,
+  loaded: true, offline: false, failures: 0,
 });
 const rect = { left: 60, top: 600, width: 120, height: 32 };
 function addFrame() {
