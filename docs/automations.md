@@ -56,6 +56,12 @@ Repetition alone does not select heartbeat. "Every day at 8am, remind me to drin
 
 An upgrade does not overwrite your workspace's `AGENTS.md` or convert existing heartbeat entries into cron jobs. The current scheduling rules are included in the system prompt. If an old workspace rule directs all recurring tasks to heartbeat, update that rule too. To correct an existing reminder, remove its old heartbeat entry and create the cron task once. Check the task list to avoid duplicates.
 
+### Inspect Recent Runs
+
+Ask nanobot, "Show the last five runs of my daily report." The agent can use `cron(action="history", job_id="...", limit=5)` to read the retained execution time, status, duration, and error for that task. Results are newest first, using the task's timezone or the runtime default. The default is five records; `limit` accepts 1–20.
+
+This also works for disabled tasks and does not change their schedule or state. Only retained execution records are available: deleted jobs and automatically deleted one-time tasks cannot be queried. Run history does not include the generated reply or confirm message delivery.
+
 ### Scheduled Result Delivery
 
 The gateway saves final scheduled messages before it accepts them into the outgoing queue. This includes explicit `message` calls in existing tasks. Each recipient has a separate delivery record. Progress, reasoning, and streaming events do not enter this queue. WebUI streaming and saved chat history keep their existing behavior. External channels receive a complete scheduled reply instead of a streamed reply. Ordinary chat streaming is unchanged.
