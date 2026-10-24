@@ -958,6 +958,12 @@ class ChannelManager:
                         continue
 
                 if isinstance(event, RetryWaitEvent):
+                    # Opt-in surface, like reasoning: the base hook is a
+                    # no-op, so channels without an in-place affordance stay
+                    # silent. Do not fall through to send() or send_progress.
+                    channel = self.channels.get(msg.channel)
+                    if channel is not None:
+                        await self._queue_outbound(channel, msg)
                     continue
 
                 if (
@@ -1078,6 +1084,8 @@ class ChannelManager:
             await ChannelManager._send_stream_event(channel, msg, event)
         elif isinstance(event, StreamEndEvent):
             await ChannelManager._send_stream_event(channel, msg, event)
+        elif isinstance(event, RetryWaitEvent):
+            await channel.send_retry_wait(msg)
         elif not isinstance(event, StreamedResponseEvent):
             await channel.send(msg)
 

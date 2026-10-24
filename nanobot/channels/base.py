@@ -221,6 +221,15 @@ class BaseChannel(ABC):
         """
         return
 
+    async def send_retry_wait(self, msg: OutboundMessage) -> None:
+        """Deliver a provider backoff notice.
+
+        Default is no-op. Override on a channel that can show the wait
+        without posting a permanent chat message. ``send_progress`` does
+        not control this hook.
+        """
+        return
+
     async def send_reasoning(self, msg: OutboundMessage) -> None:
         """Deliver a complete reasoning block.
 

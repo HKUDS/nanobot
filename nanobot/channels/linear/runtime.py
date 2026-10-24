@@ -160,13 +160,7 @@ class LinearChannel(BaseChannel):
                 )
             return
         if isinstance(event, RetryWaitEvent):
-            await self._create_activity(
-                msg.chat_id,
-                msg.metadata,
-                {"type": "thought", "body": msg.content},
-                key=f"retry:{hash(msg.content)}",
-                ephemeral=True,
-            )
+            await self.send_retry_wait(msg)
             return
         if self._client is None:
             raise ChannelNotReadyError("Linear HTTP client is not initialized")
@@ -227,6 +221,15 @@ class LinearChannel(BaseChannel):
                 self.logger.exception("Failed to attach {} to Linear response", media_ref)
                 rendered.append(f"[Unable to attach {_markdown_label(Path(media_ref).name)}]")
         return rendered
+
+    async def send_retry_wait(self, msg: OutboundMessage) -> None:
+        await self._create_activity(
+            msg.chat_id,
+            msg.metadata,
+            {"type": "thought", "body": msg.content},
+            key=f"retry:{hash(msg.content)}",
+            ephemeral=True,
+        )
 
     async def send_reasoning_delta(
         self,
