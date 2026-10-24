@@ -9,6 +9,7 @@ import mimetypes
 import re
 import sys
 import time
+from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,7 @@ from urllib.parse import quote, unquote, urlparse
 
 from pydantic import Field
 
+from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META, RuntimeContextBlock
 from nanobot.security.workspace_policy import is_path_within
 
 try:
@@ -63,6 +65,8 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.command.builtin import BUILTIN_COMMAND_SPECS
+from nanobot.command.router import normalize_command_text
 from nanobot.config.network import NetworkConfig
 from nanobot.config.paths import get_data_dir, get_media_dir
 from nanobot.config_base import Base
@@ -218,6 +222,14 @@ class _SasVerificationRequest:
     device_id: str
     timestamp_ms: int
 
+
+# Listen-mode transcript bounds: hard caps on the per-room buffer of unheard
+# messages (RuntimeContextBlock content must be bounded and delimited).
+_LISTEN_BUFFER_MAX_MESSAGES = 30
+_LISTEN_BUFFER_MAX_CHARS = 6000
+_LISTEN_LINE_MAX_CHARS = 500
+
+
 def _render_markdown_html(text: str) -> str | None:
     """Render markdown to sanitized HTML; returns None for plain text."""
     try:
@@ -285,6 +297,9 @@ def _matrix_stream_key(chat_id: str, stream_id: str | None) -> str:
     return chat_id if stream_id is None else f"{chat_id}\0{stream_id}"
 
 
+MatrixGroupPolicy = Literal["open", "mention", "allowlist", "listen"]
+
+
 class MatrixConfig(Base):
     """Matrix (Element) channel configuration."""
 
@@ -300,7 +315,7 @@ class MatrixConfig(Base):
     max_media_bytes: int = 20 * 1024 * 1024
     max_concurrent_media_downloads: int = 2
     allow_from: list[str] = Field(default_factory=list)
-    group_policy: Literal["open", "mention", "allowlist"] = "open"
+    group_policy: MatrixGroupPolicy = "open"
     group_allow_from: list[str] = Field(default_factory=list)
     allow_room_mentions: bool = False
     streaming: bool = False
@@ -346,6 +361,8 @@ class MatrixChannel(BaseChannel):
         self._stream_bufs: dict[str, _StreamBuf] = {}
         self._sas_verification_requests: dict[str, _SasVerificationRequest] = {}
         self._started_at_ms: int = 0
+        self._listen_buffers: dict[str, deque[str]] = {}
+        self._listen_dropped: dict[str, int] = {}
         self._media_download_semaphore = asyncio.Semaphore(
             max(1, int(self.config.max_concurrent_media_downloads))
         )
@@ -1142,6 +1159,63 @@ class MatrixChannel(BaseChannel):
         ts = getattr(event, "server_timestamp", None)
         return isinstance(ts, int) and ts < self._started_at_ms
 
+    def _buffer_listen_message(self, room_id: str, sender: str, content: str) -> None:
+        """Record an unanswered room message for listen-mode context."""
+        text = " ".join(str(content).split())[:_LISTEN_LINE_MAX_CHARS]
+        line = f"{sender}: {text}" if text else f"{sender}: [attachment]"
+        buffer = self._listen_buffers.setdefault(room_id, deque())
+        buffer.append(line)
+        total = sum(len(entry) for entry in buffer)
+        dropped = self._listen_dropped.get(room_id, 0)
+        while buffer and (
+            len(buffer) > _LISTEN_BUFFER_MAX_MESSAGES or total > _LISTEN_BUFFER_MAX_CHARS
+        ):
+            expired = buffer.popleft()
+            total -= len(expired)
+            dropped += 1
+        if dropped:
+            self._listen_dropped[room_id] = dropped
+
+    def _listen_context(self, room_id: str, content: str) -> list[RuntimeContextBlock] | None:
+        """Read pending discussion for agent input, leaving control commands untouched."""
+        buffer = self._listen_buffers.get(room_id)
+        if not buffer:
+            return None
+        normalized = normalize_command_text(content)
+        parts = normalized.split(maxsplit=1)
+        command = next(
+            (spec for spec in BUILTIN_COMMAND_SPECS if parts and spec.command == parts[0].lower()),
+            None,
+        )
+        if command is not None and not (
+            command.lifecycle == "agent_turn"
+            or (
+                command.lifecycle == "agent_turn_with_args"
+                and normalized.lower().startswith(f"{command.command} ")
+                and bool(normalized[len(command.command):].strip())
+            )
+        ):
+            return None
+        dropped = self._listen_dropped.get(room_id, 0)
+        notice = f"[{dropped} earlier messages not shown]\n" if dropped else ""
+        return [
+            RuntimeContextBlock(
+                source="matrix_room_transcript",
+                content=(
+                    "Recent messages in this room not addressed to the bot "
+                    "(context; do not respond to these):\n" + notice + "\n".join(buffer)
+                ),
+            ),
+        ]
+
+    def _consume_listen_context(
+        self, room_id: str, content: str, context: list[RuntimeContextBlock] | None,
+    ) -> None:
+        """Clear handed-off discussion or an explicit room-session reset."""
+        if context or normalize_command_text(content).lower() == "/new":
+            self._listen_buffers.pop(room_id, None)
+            self._listen_dropped.pop(room_id, None)
+
     def _should_process_message(self, room: MatrixRoom, event: RoomMessage) -> bool:
         """Apply sender and room policy checks."""
         if not self.is_allowed(event.sender):
@@ -1153,7 +1227,7 @@ class MatrixChannel(BaseChannel):
             return True
         if policy == "allowlist":
             return room.room_id in (self.config.group_allow_from or [])
-        if policy == "mention":
+        if policy == "mention" or policy == "listen":
             return self._is_bot_mentioned(event)
         return False
 
@@ -1412,30 +1486,50 @@ class MatrixChannel(BaseChannel):
         return meta
 
     async def _on_message(self, room: MatrixRoom, event: RoomMessageText) -> None:
-        if (
-            event.sender == self.config.user_id
-            or self._is_pre_startup_event(event)
-            or not self._should_process_message(room, event)
-        ):
+        if event.sender == self.config.user_id or self._is_pre_startup_event(event):
+            return
+        listen_mode = not self._is_direct_room(room) and self.config.group_policy == "listen"
+        if listen_mode and not self._is_bot_mentioned(event):
+            if self.is_allowed(event.sender):
+                self._buffer_listen_message(room.room_id, event.sender, event.body)
+            return
+        if not self._should_process_message(room, event):
             return
         await self._start_typing_keepalive(room.room_id)
         try:
+            metadata = self._base_metadata(room, event)
+            listen_context = self._listen_context(room.room_id, event.body) if listen_mode else None
+            if listen_context:
+                metadata[RUNTIME_CONTEXT_INPUT_META] = listen_context
             await self._handle_message(
                 sender_id=event.sender, chat_id=room.room_id,
-                content=event.body, metadata=self._base_metadata(room, event),
+                content=event.body, metadata=metadata,
                 session_key=self._thread_session_key(room.room_id, event),
                 is_dm=self._is_direct_room(room),
             )
+            if listen_mode:
+                self._consume_listen_context(room.room_id, event.body, listen_context)
         except Exception:
             await self._stop_typing_keepalive(room.room_id, clear_typing=True)
             raise
 
     async def _on_media_message(self, room: MatrixRoom, event: MatrixMediaEvent) -> None:
-        if (
-            event.sender == self.config.user_id
-            or self._is_pre_startup_event(event)
-            or not self._should_process_message(room, event)
-        ):
+        if event.sender == self.config.user_id or self._is_pre_startup_event(event):
+            return
+        listen_mode = not self._is_direct_room(room) and self.config.group_policy == "listen"
+        if listen_mode and not self._is_bot_mentioned(event):
+            if self.is_allowed(event.sender):
+                media_body = getattr(event, "body", None)
+                media_note = (
+                    " ".join(media_body.split())
+                    if isinstance(media_body, str) and media_body.strip()
+                    else ""
+                )
+                self._buffer_listen_message(
+                    room.room_id, event.sender, media_note or "[attachment]"
+                )
+            return
+        if not self._should_process_message(room, event):
             return
         attachment, marker = await self._fetch_media_attachment(room, event)
         parts: list[str] = []
@@ -1451,20 +1545,26 @@ class MatrixChannel(BaseChannel):
         elif marker:
             parts.append(marker)
 
+        content = "\n".join(parts)
         await self._start_typing_keepalive(room.room_id)
         try:
             meta = self._base_metadata(room, event)
             meta["attachments"] = []
             if attachment:
                 meta["attachments"] = [attachment]
+            listen_context = self._listen_context(room.room_id, content) if listen_mode else None
+            if listen_context:
+                meta[RUNTIME_CONTEXT_INPUT_META] = listen_context
             await self._handle_message(
                 sender_id=event.sender, chat_id=room.room_id,
-                content="\n".join(parts),
+                content=content,
                 media=[attachment["path"]] if attachment else [],
                 metadata=meta,
                 session_key=self._thread_session_key(room.room_id, event),
                 is_dm=self._is_direct_room(room),
             )
+            if listen_mode:
+                self._consume_listen_context(room.room_id, content, listen_context)
         except Exception:
             await self._stop_typing_keepalive(room.room_id, clear_typing=True)
             raise

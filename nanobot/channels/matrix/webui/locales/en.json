@@ -28,7 +28,8 @@
         "choices": {
           "mention": "Mentions only",
           "open": "All messages",
-          "allowlist": "Allowlist"
+          "allowlist": "Allowlist",
+          "listen": "Listen (reply on mention)"
         }
       },
       "allowFrom": {
