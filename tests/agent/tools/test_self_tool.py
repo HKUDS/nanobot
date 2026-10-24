@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 from types import MappingProxyType
@@ -838,15 +839,36 @@ class TestSecurityAttributeProtection:
         assert presets == {"fast": ModelPresetConfig(model="fast-model")}
 
     @pytest.mark.asyncio
-    async def test_inspect_read_only_model_preset_dotpath(self):
+    async def test_inspect_model_preset_catalog_includes_usage_descriptions(self):
+        presets = {
+            f"coding.{index}": ModelPresetConfig(
+                model=f"model-{index}", description=f"用途 {index}\nCode review",
+            )
+            for index in range(16)
+        }
+        presets["legacy"] = ModelPresetConfig(model="legacy-model")
+        tool = _make_tool(loop=_make_mock_loop(model_presets=MappingProxyType(presets)))
+
+        result = await tool.execute(action="check", key="model_presets")
+
+        catalog = json.loads(result.removeprefix("model_presets: "))
+        assert list(catalog) == list(presets)
+        for name, preset in presets.items():
+            assert catalog[name]["description"] == preset.description
+            assert catalog[name]["model"] == preset.model
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("field, value", [("model", "fast-model"), ("description", "Everyday coding")])
+    async def test_inspect_read_only_model_preset_dotpath(self, field, value):
         presets = MappingProxyType({
-            "fast": ModelPresetConfig(model="fast-model"),
+            "fast": ModelPresetConfig(model="fast-model", description="Everyday coding"),
         })
         tool = _make_tool(loop=_make_mock_loop(model_presets=presets))
 
-        result = await tool.execute(action="check", key="model_presets.fast.model")
+        key = f"model_presets.fast.{field}"
+        result = await tool.execute(action="check", key=key)
 
-        assert result == "model_presets.fast.model: 'fast-model'"
+        assert result == f"{key}: {value!r}"
 
 
 # ---------------------------------------------------------------------------

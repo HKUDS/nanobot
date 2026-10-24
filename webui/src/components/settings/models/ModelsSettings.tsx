@@ -46,6 +46,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { ModelAPIConfig, SettingsPayload } from "@/lib/types";
 import { ProviderParameterFields, type RequestParameterDraft } from "@/components/settings/models/ProviderParameterFields";
@@ -55,6 +56,7 @@ export interface AgentSettingsDraft {
   model: string;
   provider: string;
   modelPreset: string;
+  description: string;
   maxTokens: number;
   contextWindowTokens: number;
   temperature: number;
@@ -99,6 +101,7 @@ export const DEFAULT_AGENT_SETTINGS_DRAFT: AgentSettingsDraft = {
   model: "",
   provider: "",
   modelPreset: "",
+  description: "",
   maxTokens: 8192,
   contextWindowTokens: 200_000,
   temperature: 0.1,
@@ -124,6 +127,7 @@ export function agentDraftFromPayload(
     model: activePreset?.model ?? payload.agent.model,
     provider: activePreset?.provider ?? payload.agent.provider ?? payload.agent.resolved_provider ?? "",
     modelPreset: activePresetName,
+    description: activePreset?.description ?? "",
     maxTokens: activePreset?.max_tokens ?? payload.agent.max_tokens,
     contextWindowTokens: normalizeContextWindowTokens(
       activePreset?.context_window_tokens ?? payload.agent.context_window_tokens,
@@ -397,6 +401,7 @@ export function ModelsSettings({
     setForm((prev) => ({
       ...prev,
       modelPreset: preset.name,
+      description: preset.description ?? "",
       model: preset.model,
       provider: preset.provider,
       maxTokens: preset.max_tokens,
@@ -475,6 +480,24 @@ export function ModelsSettings({
           ) : null}
         </div>
       </SettingsRow>
+      {settings.model_preset_descriptions_supported === true ? (
+        <SettingsRow
+          title={t("settings.models.presetDescription")}
+          description={t("settings.models.presetDescriptionHelp")}
+        >
+          <Textarea
+            aria-label={t("settings.models.presetDescription")}
+            aria-describedby="model-preset-description-help"
+            value={form.description}
+            rows={2}
+            onChange={(event) => setForm((prev) => ({ ...prev, description: event.target.value }))}
+            className="text-[13px]"
+          />
+          <span id="model-preset-description-help" className="sr-only">
+            {t("settings.models.presetDescriptionHelp")}
+          </span>
+        </SettingsRow>
+      ) : null}
       <SettingsRow title={t("settings.rows.provider")}>
         <ProviderPicker
           providers={providerOptions}
@@ -831,6 +854,11 @@ export function ModelsSettings({
                                   </span>
                                 ) : null}
                               </span>
+                              {preset?.description?.trim() ? (
+                                <TruncatedTextTooltip
+                                  text={preset.description}
+                                  className="mt-1 block text-[12px] text-muted-foreground" />
+                              ) : null}
                               {preset ? (
                                 <TruncatedTextTooltip
                                   text={primary

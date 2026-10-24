@@ -1342,6 +1342,7 @@ export async function createModelConfiguration(
     "settings.model_configuration.create",
     {
       name: configuration.name,
+      ...(configuration.description !== undefined ? { description: configuration.description } : {}),
       provider: configuration.provider,
       model: configuration.model,
       ...modelGenerationSettingsPayload(configuration),
@@ -1359,6 +1360,7 @@ export async function updateModelConfiguration(
     {
       name: configuration.name,
       ...(configuration.newName !== undefined ? { new_name: configuration.newName } : {}),
+      ...(configuration.description !== undefined ? { description: configuration.description } : {}),
       ...(configuration.provider !== undefined ? { provider: configuration.provider } : {}),
       ...(configuration.model !== undefined ? { model: configuration.model } : {}),
       ...modelGenerationSettingsPayload(configuration),

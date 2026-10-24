@@ -146,9 +146,10 @@ FallbackCandidate = str | InlineFallbackConfig
 
 
 class ModelPresetConfig(RequestOverrides):
-    """A named set of model + generation parameters for quick switching."""
+    """A named model configuration with optional usage metadata."""
 
     model: str
+    description: str = ""
     provider: str = "auto"
     max_tokens: int = 8192
     context_window_tokens: int = 200_000

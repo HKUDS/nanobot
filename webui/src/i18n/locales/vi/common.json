@@ -990,6 +990,8 @@
       "presets": "Cấu hình mô hình đặt trước",
       "editPreset": "Sửa cấu hình đặt trước",
       "presetName": "Tên cấu hình đặt trước",
+      "presetDescription": "Mô tả",
+      "presetDescriptionHelp": "Ghi chú tùy chọn về thời điểm nên dùng cấu hình đặt trước này.",
       "presetNameHelp": "Tên phải duy nhất; cũng dùng trong /model.",
       "presetNameDuplicate": "Đã có cấu hình đặt trước mang tên này.",
       "presetNamePlaceholder": "ví dụ: Viết nhanh",
