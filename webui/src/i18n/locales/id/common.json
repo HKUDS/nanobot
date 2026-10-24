@@ -372,7 +372,8 @@
     "brand": "nanobot",
     "loading": {
       "connecting": "Menghubungkan ke nanobot…",
-      "boot": "Memuat nanobot…"
+      "boot": "Memuat nanobot…",
+      "failed": "Tampilan ini tidak dapat dimuat. Kembali atau muat ulang halaman untuk mencoba lagi."
     },
     "error": {
       "title": "Tidak dapat menjangkau nanobot",

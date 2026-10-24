@@ -372,7 +372,8 @@
     "brand": "nanobot",
     "loading": {
       "connecting": "nanobot에 연결 중…",
-      "boot": "nanobot 불러오는 중…"
+      "boot": "nanobot 불러오는 중…",
+      "failed": "이 화면을 불러오지 못했습니다. 뒤로 가거나 페이지를 새로고침하여 다시 시도하세요."
     },
     "error": {
       "title": "nanobot에 연결할 수 없습니다",

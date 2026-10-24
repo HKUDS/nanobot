@@ -77,6 +77,7 @@ describe("SessionInfoPopover", () => {
     expect(screen.queryByText("Check the project status")).not.toBeInTheDocument();
 
     await user.click(row);
+    await screen.findByText("Check the project status");
     const detail = screen.getByRole("dialog", { name: "Morning check" });
     expect(detail).toHaveClass("max-w-[520px]", "rounded-modal");
     expect(within(detail).queryByText("Task instructions")).not.toBeInTheDocument();
@@ -131,6 +132,7 @@ describe("SessionInfoPopover", () => {
 
     await user.click(screen.getByRole("button", { name: "Session details" }));
     await user.click(await screen.findByRole("button", { name: /Morning check/ }));
+    await screen.findByText("Check the project status");
     const detail = screen.getByRole("dialog", { name: "Morning check" });
     await user.click(within(detail).getByRole("button", { name: "More actions" }));
     await user.click(screen.getByRole("menuitem", { name: "Disable" }));
@@ -167,7 +169,7 @@ describe("SessionInfoPopover", () => {
 
     await user.click(screen.getByRole("button", { name: "Session details" }));
     await user.click(await screen.findByRole("button", { name: /Morning check/ }));
-    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
     const editor = await screen.findByRole("dialog", { name: "Edit task" });
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
     await user.click(within(editor).getByRole("button", { name: "Cancel" }));
@@ -260,6 +262,7 @@ describe("SessionInfoPopover", () => {
     const row = await screen.findByRole("button", { name: /PR monitor/ });
     expect(screen.queryByText("Review PR #4591")).not.toBeInTheDocument();
     await user.click(row);
+    await screen.findByText("Command");
     const detail = screen.getByRole("dialog", { name: "PR monitor" });
     expect(within(detail).getByText("Command")).toBeInTheDocument();
     expect(within(detail).getByText('nanobot trigger trg_123 "message"')).toBeInTheDocument();

@@ -372,7 +372,8 @@
     "brand": "nanobot",
     "loading": {
       "connecting": "Đang kết nối tới nanobot…",
-      "boot": "Đang tải nanobot…"
+      "boot": "Đang tải nanobot…",
+      "failed": "Không thể tải giao diện này. Hãy quay lại hoặc tải lại trang để thử lại."
     },
     "error": {
       "title": "Không thể kết nối tới nanobot",

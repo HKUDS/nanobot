@@ -372,7 +372,8 @@
     "brand": "nanobot",
     "loading": {
       "connecting": "Connexion à nanobot…",
-      "boot": "Chargement de nanobot…"
+      "boot": "Chargement de nanobot…",
+      "failed": "Impossible de charger cette vue. Revenez en arrière ou rechargez la page pour réessayer."
     },
     "error": {
       "title": "Impossible de joindre nanobot",

@@ -372,7 +372,8 @@
     "brand": "nanobot",
     "loading": {
       "connecting": "nanobot に接続中…",
-      "boot": "nanobot を読み込み中…"
+      "boot": "nanobot を読み込み中…",
+      "failed": "この画面を読み込めませんでした。戻るか、ページを再読み込みしてお試しください。"
     },
     "error": {
       "title": "nanobot に接続できませんでした",

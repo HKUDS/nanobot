@@ -15,7 +15,7 @@ import { StarPrompt } from "@/components/StarPrompt";
 import { Sidebar } from "@/components/Sidebar";
 import { RemoteInstances } from "@/components/remote/RemoteInstances";
 import { useRemoteConnections } from "@/components/remote/remote-context";
-import { RemoteConnectionsPage } from "@/components/remote/RemoteConnectionsPage";
+import { LazyRemoteConnectionsPage } from "@/components/remote/LazyRemoteConnectionsPage";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SidebarResizeHandle, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "@/components/SidebarResizeHandle";
 import { matchSidebarShortcut } from "@/lib/sidebar-shortcuts";
@@ -3112,7 +3112,7 @@ function Shell({
             </div>}
             {view !== "chat" && (
               <div className="absolute inset-0 flex flex-col">
-                {view === "remote" ? <RemoteConnectionsPage
+                {view === "remote" ? <LazyRemoteConnectionsPage
                   mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
                   hostChromeInset={showHostChrome}
                   onBackToChat={onBackToChat}
@@ -3146,7 +3146,7 @@ function Shell({
             )}
           </div>
           {managingConnections && !remoteConnections?.embeddedManagement && <div className="absolute inset-0 flex flex-col">
-            <RemoteConnectionsPage
+            <LazyRemoteConnectionsPage
               mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
               hostChromeInset={showHostChrome}
               onBackToChat={() => remoteConnections?.closeManagement()}

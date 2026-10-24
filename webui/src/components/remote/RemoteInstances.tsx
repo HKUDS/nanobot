@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { groupRemoteProfiles, isCompatibilityError, needsRemoteSetup } from "@/lib/remote-instances";
 import { HostCompatibilityDialog } from "./HostCompatibilityDialog";
-import { RemoteConnectionsPage } from "./RemoteConnectionsPage";
+import { LazyRemoteConnectionsPage } from "./LazyRemoteConnectionsPage";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { useHostSessions } from "./useHostSessions";
 import { HostNavigationContext, HostSwitcher, RemoteHostMenu, type HostPicker } from "./HostSwitcher";
@@ -174,7 +174,7 @@ export function RemoteInstances({ children }: { children: ReactNode }) {
             className="absolute bottom-0 right-0 flex min-h-0 flex-col bg-background"
             style={{ left: offline ? 0 : Math.min(bridge.surface?.left || 0, Math.max(0, window.innerWidth - 280)), top: offline ? 0 : Math.min(bridge.surface?.top || 0, Math.max(0, window.innerHeight - 280)) }}>
             <ThemeProvider theme={bridge.surface?.theme || "light"}>
-              <RemoteConnectionsPage onBackToChat={() => changeManagement(false)} mainNavigationExpanded={!!bridge.surface?.left} />
+              <LazyRemoteConnectionsPage onBackToChat={() => changeManagement(false)} mainNavigationExpanded={!!bridge.surface?.left} />
             </ThemeProvider>
           </main>}
           {!managing && selected && (offline || !activeFrame?.loaded) && <div role="region" aria-label={t(offline ? recoveryTitle : "remote.opening")} className="absolute inset-0 overflow-y-auto bg-background p-6 text-center"><div className="flex min-h-full flex-col items-center justify-center gap-3">

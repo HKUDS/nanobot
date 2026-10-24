@@ -372,7 +372,8 @@
     "brand": "nanobot",
     "loading": {
       "connecting": "正在連線到 nanobot…",
-      "boot": "正在載入 nanobot…"
+      "boot": "正在載入 nanobot…",
+      "failed": "無法載入此頁面。請返回，或重新整理頁面再試。"
     },
     "error": {
       "title": "無法連線到 nanobot",
