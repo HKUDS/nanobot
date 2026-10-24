@@ -31,6 +31,9 @@
           "allowlist": "Allowlist"
         }
       },
+      "groupPolicyOverrides": {
+        "label": "Room policy overrides (JSON)"
+      },
       "allowFrom": {
         "label": "Allowed users"
       },

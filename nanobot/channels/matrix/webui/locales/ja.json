@@ -31,6 +31,9 @@
           "allowlist": "許可リスト"
         }
       },
+      "groupPolicyOverrides": {
+        "label": "部屋ごとのルール例外（JSON）"
+      },
       "allowFrom": {
         "label": "許可ユーザー"
       },

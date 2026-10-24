@@ -376,6 +376,7 @@ nanobot plugins enable matrix
       "allowFrom": ["@your_user:matrix.org"],
       "groupPolicy": "open",
       "groupAllowFrom": [],
+      "groupPolicyOverrides": {},
       "allowRoomMentions": false,
       "maxMediaBytes": 20971520
     }
@@ -390,6 +391,7 @@ nanobot plugins enable matrix
 | `allowFrom` | User IDs allowed to interact. Empty denies all; use `["*"]` to allow everyone. |
 | `groupPolicy` | `open` (default), `mention`, or `allowlist`. |
 | `groupAllowFrom` | Room allowlist (used when policy is `allowlist`). |
+| `groupPolicyOverrides` | Optional per-room overrides for `groupPolicy`, keyed by Matrix room ID (for example, `"!abc123:matrix.org"`). Values mirror `groupPolicy`: `"open"`, `"mention"`, or `"allowlist"` (an `allowlist` override is checked against `groupAllowFrom`). Rooms not listed fall back to `groupPolicy`. |
 | `allowRoomMentions` | Accept `@room` mentions in mention mode. |
 | `e2eeEnabled` | E2EE support (default `true`). Set `false` for plaintext-only. |
 | `sasVerification` | Complete Element-initiated SAS device verification for allowed users (default `false`). This does not add cross-signing, clear Element's cross-signing trust warning, or let the bot initiate verification. |

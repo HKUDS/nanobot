@@ -31,6 +31,9 @@
           "allowlist": "允許清單"
         }
       },
+      "groupPolicyOverrides": {
+        "label": "按房間的規則例外（JSON）"
+      },
       "allowFrom": {
         "label": "允許使用者"
       },
