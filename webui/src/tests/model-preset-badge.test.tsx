@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ModelPresetBadge } from "@/components/thread/ModelPresetBadge";
@@ -88,7 +89,7 @@ describe("ModelPresetBadge selected preset tooltip", () => {
     expect(screen.getAllByRole("option")).toHaveLength(1);
     await user.click(selected);
     expect(onPresetChange).not.toHaveBeenCalled();
-    await user.click(trigger);
+    expect(screen.getByRole("dialog")).toBeVisible();
     await user.tab();
     expect(screen.getByRole("button", { name: "Manage presets" })).toHaveFocus();
     await user.keyboard("{Enter}");
@@ -121,9 +122,42 @@ describe("ModelPresetBadge selected preset tooltip", () => {
     expect(current).toHaveAttribute("aria-selected", "true");
     fireEvent.click(current);
     expect(onPresetChange).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "deepseek-chat" }));
+    expect(screen.getByRole("dialog")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Manage presets" }));
     expect(onManageModels).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([true, false])("keeps the menu and focus available after a preset change until dismissal (hero: %s)", async (isHero) => {
+    const user = userEvent.setup();
+    const onPresetChange = vi.fn();
+    function Example() {
+      const [preset, setPreset] = useState("zhipu");
+      return <><input aria-label="Message input" /><ModelPresetBadge label={preset} modelPreset={preset}
+        modelPresets={presets} isHero={isHero} onPresetChange={(name) => { onPresetChange(name); setPreset(name); }}
+        onRequestComposerFocus={() => screen.getByRole("textbox").focus()} /></>;
+    }
+    render(<Example />);
+    await user.click(screen.getByRole("button", { name: "zhipu" }));
+    const menu = screen.getByRole("dialog");
+    const zhipu = screen.getByRole("option", { name: "zhipu" });
+    const codex = screen.getByRole("option", { name: "codex" });
+    expect(zhipu).toHaveClass("bg-muted/55", "shadow-[0_1px_2px_hsl(var(--foreground)/0.1)]");
+    expect(codex).toHaveAttribute("aria-selected", "false");
+    await user.click(codex);
+    expect(onPresetChange).toHaveBeenCalledWith("codex");
+    expect(menu).toBeVisible();
+    expect(codex).toHaveAttribute("aria-selected", "true");
+    expect(codex).toHaveClass("bg-muted/55", "shadow-[0_1px_2px_hsl(var(--foreground)/0.1)]");
+    expect(zhipu).toHaveAttribute("aria-selected", "false");
+    expect(codex).toHaveFocus();
+    await user.click(codex);
+    expect(onPresetChange).toHaveBeenCalledTimes(1);
+    expect(menu).toBeVisible();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(menu).not.toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "codex" }));
+    await user.click(screen.getByRole("textbox"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("moves focus within an open picker without changing the model until selection", async () => {

@@ -614,6 +614,14 @@ export interface AutomaticModelAPIPayload {
   api: ProviderRequestAPI;
 }
 
+export interface SessionReasoningEffort {
+  preset: string;
+  scope: string;
+  options: string[];
+  value: string | null;
+  preset_value: string | null;
+}
+
 interface ProviderModelInfo {
   id: string;
   label?: string | null;

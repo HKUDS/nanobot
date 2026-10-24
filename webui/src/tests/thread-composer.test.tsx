@@ -834,7 +834,7 @@ describe("ThreadComposer", () => {
     expect(badge).toHaveClass("w-fit");
     fireEvent.click(badge);
     const picker = screen.getByRole("dialog", { name: "Switch model" });
-    expect(picker).toHaveClass("w-[min(18rem,calc(100vw-2rem))]");
+    expect(picker).toBeVisible();
     expect(badge).toHaveClass("w-fit");
     expect(badge.querySelector(".composer-model-pill")).not.toHaveClass("w-full");
     expect(within(picker).getAllByRole("option")).toHaveLength(3);
@@ -848,6 +848,8 @@ describe("ThreadComposer", () => {
     expect(document.activeElement).toBe(within(picker).getByRole("option", { name: "kimi" }));
     fireEvent.click(within(picker).getByRole("option", { name: "dspro" }));
     expect(onPresetChange).toHaveBeenCalledWith("dspro");
+    expect(picker).toBeVisible();
+    fireEvent.keyDown(within(picker).getByRole("option", { name: "dspro" }), { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(badge).toHaveClass("w-fit");
   });

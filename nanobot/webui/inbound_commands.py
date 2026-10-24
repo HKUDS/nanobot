@@ -920,7 +920,7 @@ class WebUICommandRouter:
         action = envelope.get("action")
         payload = envelope.get("payload")
         if not isinstance(action, str) or re.fullmatch(
-            r"[a-z][a-z0-9_.]{0,127}",
+            r"[a-z][a-z0-9_.-]{0,127}",
             action,
         ) is None:
             await self.send_webui_response(
