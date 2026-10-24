@@ -1,8 +1,10 @@
 """Base class for agent tools."""
 from __future__ import annotations
 
+import json
 import math
 import typing
+import urllib.parse
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from copy import deepcopy
@@ -25,6 +27,8 @@ _JSON_TYPE_MAP: dict[str, type | tuple[type, ...]] = {
     "array": list,
     "object": dict,
 }
+_CONTAINER_JSON_TYPES = frozenset(("object", "array"))
+_SCHEMA_COMBINATORS = ("oneOf", "anyOf", "allOf")
 
 
 def _is_json_integer(value: object) -> bool:
@@ -223,6 +227,278 @@ class Tool(ABC):
         """Pick first non-null type from JSON Schema unions like ``['string','null']``."""
         return Schema.resolve_json_schema_type(t)
 
+    @staticmethod
+    def _resolve_local_schema_pointer(root: dict[str, Any], ref: str) -> dict[str, Any] | None:
+        """Resolve a local ``#/`` pointer. Remote and broken refs return None."""
+        if not ref.startswith("#/"):
+            return None
+        try:
+            pointer = urllib.parse.unquote(ref[1:], errors="strict")
+        except (UnicodeDecodeError, ValueError):
+            return None
+        if not pointer.startswith("/"):
+            return None
+        current: Any = root
+        try:
+            for raw_part in pointer[1:].split("/"):
+                part = raw_part.replace("~1", "/").replace("~0", "~")
+                if isinstance(current, dict):
+                    current = cast(dict[str, Any], current)[part]
+                elif isinstance(current, list):
+                    current = cast(list[Any], current)[int(part)]
+                else:
+                    return None
+        except (KeyError, IndexError, TypeError, ValueError):
+            return None
+        if not isinstance(current, dict):
+            return None
+        return cast(dict[str, Any], current)
+
+    @staticmethod
+    def _is_null_schema(schema: dict[str, Any]) -> bool:
+        raw_type = schema.get("type")
+        return raw_type == "null" or raw_type == ["null"]
+
+    @staticmethod
+    def _type_names(schema: dict[str, Any]) -> frozenset[str] | None:
+        """Non-null ``type`` names, or None when the keyword is absent."""
+        raw_type = schema.get("type")
+        if isinstance(raw_type, str):
+            if raw_type == "null":
+                return frozenset()
+            return frozenset((raw_type,))
+        if isinstance(raw_type, list):
+            return frozenset(
+                item
+                for item in cast(list[Any], raw_type)
+                if isinstance(item, str) and item != "null"
+            )
+        return None
+
+    @staticmethod
+    def _schema_allows_string(
+        schema: dict[str, Any],
+        root: dict[str, Any] | None,
+        seen: frozenset[str],
+    ) -> bool:
+        """True when a branch explicitly accepts a string, not merely a typeless schema."""
+        ref = schema.get("$ref")
+        if isinstance(ref, str):
+            if root is None or ref in seen or not ref.startswith("#/"):
+                return False
+            resolved = Tool._resolve_local_schema_pointer(root, ref)
+            if resolved is None:
+                return False
+            next_seen = seen | {ref}
+            if Tool._schema_allows_string(resolved, root, next_seen):
+                return True
+            if any(key in schema for key in ("type", *_SCHEMA_COMBINATORS)):
+                sibling = {key: value for key, value in schema.items() if key != "$ref"}
+                return Tool._schema_allows_string(sibling, root, next_seen)
+            return False
+        names = Tool._type_names(schema)
+        if names is not None and "string" in names:
+            return True
+        for key in _SCHEMA_COMBINATORS:
+            branches = schema.get(key)
+            if not isinstance(branches, list):
+                continue
+            for item in cast(list[Any], branches):
+                if isinstance(item, dict) and Tool._schema_allows_string(
+                    cast(dict[str, Any], item), root, seen,
+                ):
+                    return True
+        return False
+
+    @staticmethod
+    def _declared_type_names(
+        schema: dict[str, Any],
+        root: dict[str, Any] | None,
+        seen: frozenset[str],
+    ) -> frozenset[str] | None:
+        """Declared types after local ref resolution. Empty means the ref is unusable."""
+        own = Tool._type_names(schema)
+        ref = schema.get("$ref")
+        if not isinstance(ref, str):
+            return own
+        if root is None or ref in seen or not ref.startswith("#/"):
+            return frozenset() if own is None else own
+        resolved = Tool._resolve_local_schema_pointer(root, ref)
+        if resolved is None:
+            return frozenset() if own is None else own
+        resolved_names = Tool._declared_type_names(resolved, root, seen | {ref})
+        if own is None:
+            return resolved_names
+        if resolved_names is None:
+            return own
+        return own & resolved_names
+
+    @staticmethod
+    def _container_type_names(schema: dict[str, Any]) -> frozenset[str] | None:
+        """Container types from ``type``. None when the keyword is absent.
+
+        Empty when ``type`` is present but is not only ``object`` and/or ``array``.
+        """
+        names = Tool._type_names(schema)
+        if names is None:
+            return None
+        if not names or not names <= _CONTAINER_JSON_TYPES:
+            return frozenset()
+        return names
+
+    @staticmethod
+    def _union_container_targets(
+        branches: list[Any],
+        root: dict[str, Any] | None,
+        seen: frozenset[str],
+    ) -> frozenset[str] | None:
+        """Union of container types when every non-null branch is a container."""
+        targets: set[str] = set()
+        saw_branch = False
+        for item in branches:
+            if not isinstance(item, dict):
+                return None
+            branch = cast(dict[str, Any], item)
+            if Tool._is_null_schema(branch):
+                continue
+            saw_branch = True
+            branch_targets = Tool._structured_json_targets(branch, root, seen)
+            if not branch_targets:
+                return None
+            targets.update(branch_targets)
+        if not saw_branch:
+            return None
+        return frozenset(targets)
+
+    @staticmethod
+    def _branches_allow_string(
+        branches: list[Any],
+        root: dict[str, Any] | None,
+        seen: frozenset[str],
+    ) -> bool:
+        for item in branches:
+            if not isinstance(item, dict):
+                return True
+            if Tool._schema_allows_string(cast(dict[str, Any], item), root, seen):
+                return True
+        return False
+
+    @staticmethod
+    def _intersection_container_targets(
+        branches: list[Any],
+        root: dict[str, Any] | None,
+        seen: frozenset[str],
+    ) -> frozenset[str] | None:
+        """Containers required by an ``allOf`` intersection.
+
+        None when no branch requires a container. Empty when decoding is unsafe:
+        a branch allows a string, excludes containers, or the intersection is empty.
+        """
+        collected: list[frozenset[str]] = []
+        for item in branches:
+            if not isinstance(item, dict):
+                return frozenset()
+            branch = cast(dict[str, Any], item)
+            if Tool._schema_allows_string(branch, root, seen):
+                return frozenset()
+            declared = Tool._declared_type_names(branch, root, seen)
+            if declared is not None and declared.isdisjoint(_CONTAINER_JSON_TYPES):
+                return frozenset()
+            branch_targets = Tool._structured_json_targets(branch, root, seen)
+            if branch_targets:
+                collected.append(branch_targets)
+        if not collected:
+            return None
+        result = collected[0]
+        for item_targets in collected[1:]:
+            result &= item_targets
+        return result
+
+    @staticmethod
+    def _structured_json_targets(
+        schema: dict[str, Any],
+        root: dict[str, Any] | None = None,
+        seen: frozenset[str] | None = None,
+    ) -> frozenset[str]:
+        """Object or array types a JSON string may be decoded into.
+
+        Empty when a string is allowed, the schema does not require a container,
+        or a local ref cannot be resolved. ``allOf`` intersects container
+        constraints instead of unioning them like ``oneOf`` and ``anyOf``.
+        """
+        if seen is None:
+            seen = frozenset()
+        ref = schema.get("$ref")
+        if isinstance(ref, str):
+            if root is None or ref in seen or not ref.startswith("#/"):
+                return frozenset()
+            resolved = Tool._resolve_local_schema_pointer(root, ref)
+            if resolved is None:
+                return frozenset()
+            next_seen = seen | {ref}
+            if not any(key in schema for key in ("type", *_SCHEMA_COMBINATORS)):
+                return Tool._structured_json_targets(resolved, root, next_seen)
+            sibling = {key: value for key, value in schema.items() if key != "$ref"}
+            return Tool._structured_json_targets(
+                {"allOf": [resolved, sibling]}, root, next_seen,
+            )
+
+        pieces: list[frozenset[str]] = []
+        type_targets = Tool._container_type_names(schema)
+        if type_targets is not None:
+            if not type_targets:
+                return frozenset()
+            pieces.append(type_targets)
+
+        all_of = schema.get("allOf")
+        if isinstance(all_of, list) and all_of:
+            intersected = Tool._intersection_container_targets(
+                cast(list[Any], all_of), root, seen,
+            )
+            if intersected is not None:
+                if not intersected:
+                    return frozenset()
+                pieces.append(intersected)
+
+        for key in ("oneOf", "anyOf"):
+            raw_branches = schema.get(key)
+            if not isinstance(raw_branches, list) or not raw_branches:
+                continue
+            branches = cast(list[Any], raw_branches)
+            union = Tool._union_container_targets(branches, root, seen)
+            if union:
+                pieces.append(union)
+                continue
+            # Not every branch is a container. A sibling container type still
+            # applies when no branch explicitly allows a string.
+            if Tool._branches_allow_string(branches, root, seen):
+                return frozenset()
+
+        if not pieces:
+            return frozenset()
+        result = pieces[0]
+        for piece in pieces[1:]:
+            result &= piece
+        return result
+
+    def _decode_structured_json(self, val: str, schema: dict[str, Any]) -> Any:
+        """Parse a JSON object/array string when the schema expects that container."""
+        targets = self._structured_json_targets(schema, self.parameters, frozenset())
+        if not targets:
+            return val
+        stripped = val.strip()
+        if not stripped.startswith(("{", "[")):
+            return val
+        try:
+            parsed: object = json.loads(stripped)
+        except Exception:
+            return val
+        if isinstance(parsed, dict) and "object" in targets:
+            return cast(dict[str, Any], parsed)
+        if isinstance(parsed, list) and "array" in targets:
+            return cast(list[Any], parsed)
+        return val
+
     @property
     @abstractmethod
     def name(self) -> str:
@@ -313,6 +589,8 @@ class Tool(ABC):
     def _cast_value(self, val: Any, schema: dict[str, Any] | bool) -> Any:
         if isinstance(schema, bool):
             return val
+        if isinstance(val, str):
+            val = self._decode_structured_json(val, schema)
         raw_type = schema.get("type")
         t = self._resolve_type(raw_type)
         if isinstance(raw_type, list):

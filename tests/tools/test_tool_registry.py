@@ -134,6 +134,347 @@ def test_prepare_call_parses_json_string_arguments() -> None:
     assert error is None
 
 
+_NESTED_OBJECT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "format": {"type": "string"},
+        "target": {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "type": {"type": "string"},
+                        "path": {"type": "string"},
+                    },
+                    "required": ["type", "path"],
+                },
+                {
+                    "type": "object",
+                    "properties": {
+                        "type": {"type": "string"},
+                        "file": {"type": "string"},
+                    },
+                    "required": ["type", "file"],
+                },
+            ]
+        },
+    },
+    "required": ["target"],
+}
+
+
+async def test_execute_decodes_json_string_nested_object_arguments() -> None:
+    """JSON-text nested objects must be objects before validation and dispatch.
+
+    Some providers emit a schema object as a JSON string. Flat string parameters
+    and values that are already objects stay unchanged.
+    """
+    registry = ToolRegistry()
+    registry.register(_FakeTool("mcp_obsidian_obsidian_get_note", _NESTED_OBJECT_SCHEMA))
+    encoded_target = '{"type": "path", "path": "Projects/nanobot.md"}'
+
+    decoded = await registry.execute(
+        "mcp_obsidian_obsidian_get_note",
+        {"format": "content", "target": encoded_target},
+    )
+    already_object = await registry.execute(
+        "mcp_obsidian_obsidian_get_note",
+        {"format": "content", "target": {"type": "path", "path": "Projects/nanobot.md"}},
+    )
+
+    assert decoded == {
+        "format": "content",
+        "target": {"type": "path", "path": "Projects/nanobot.md"},
+    }
+    assert already_object == decoded
+
+
+async def test_execute_decodes_json_string_object_and_array_but_not_string_params() -> None:
+    registry = ToolRegistry()
+    registry.register(_FakeTool(
+        "sample",
+        {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": "object",
+                    "properties": {
+                        "port": {"type": "integer"},
+                        "debug": {"type": "boolean"},
+                    },
+                },
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "note": {"type": "string"},
+            },
+        },
+    ))
+
+    result = await registry.execute(
+        "sample",
+        {
+            "config": '{"port": "8080", "debug": "true"}',
+            "tags": '["a", "b"]',
+            "note": '{"keep": "text"}',
+        },
+    )
+
+    assert result == {
+        "config": {"port": 8080, "debug": True},
+        "tags": ["a", "b"],
+        "note": '{"keep": "text"}',
+    }
+
+async def test_execute_decodes_allof_object_string_with_required_constraint() -> None:
+    """allOf of an object plus a typeless constraint is still an object."""
+    registry = ToolRegistry()
+    registry.register(_FakeTool(
+        "sample",
+        {
+            "type": "object",
+            "properties": {
+                "target": {
+                    "allOf": [
+                        {
+                            "type": "object",
+                            "properties": {
+                                "type": {"type": "string"},
+                                "path": {"type": "string"},
+                            },
+                        },
+                        {"required": ["path"]},
+                    ]
+                }
+            },
+            "required": ["target"],
+        },
+    ))
+    encoded = '{"type": "path", "path": "Projects/nanobot.md"}'
+
+    result = await registry.execute("sample", {"target": encoded})
+
+    assert result == {"target": {"type": "path", "path": "Projects/nanobot.md"}}
+
+
+async def test_execute_allof_object_intersection_does_not_decode_array_string() -> None:
+    """allOf intersects container branches; an array string is not an object."""
+    registry = ToolRegistry()
+    registry.register(_FakeTool(
+        "sample",
+        {
+            "type": "object",
+            "properties": {
+                "value": {
+                    "allOf": [
+                        {"anyOf": [{"type": "object"}, {"type": "array"}]},
+                        {"type": "object"},
+                    ]
+                }
+            },
+        },
+    ))
+    encoded_object = '{"path": "Projects/nanobot.md"}'
+    encoded_array = "[1]"
+
+    as_object = await registry.execute("sample", {"value": encoded_object})
+    as_array = await registry.execute("sample", {"value": encoded_array})
+
+    assert as_object == {"value": {"path": "Projects/nanobot.md"}}
+    assert as_array == {"value": encoded_array}
+
+
+async def test_execute_decodes_object_string_when_anyof_is_only_a_constraint() -> None:
+    """A sibling object type still decodes when anyOf branches name no container."""
+    registry = ToolRegistry()
+    registry.register(_FakeTool(
+        "sample",
+        {
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "object",
+                    "anyOf": [{"required": ["path"]}],
+                    "properties": {"path": {"type": "string"}},
+                }
+            },
+            "required": ["target"],
+        },
+    ))
+    encoded = '{"path": "Projects/nanobot.md"}'
+
+    result = await registry.execute("sample", {"target": encoded})
+
+    assert result == {"target": {"path": "Projects/nanobot.md"}}
+
+
+async def test_execute_decodes_local_ref_object_string() -> None:
+    """Local ``#/$defs`` and ``#/definitions`` object refs decode JSON strings."""
+    encoded = '{"type": "path", "path": "Projects/nanobot.md"}'
+    target = {
+        "type": "object",
+        "properties": {
+            "type": {"type": "string"},
+            "path": {"type": "string"},
+        },
+        "required": ["type", "path"],
+    }
+    cases = (
+        (
+            "defs_sample",
+            {
+                "type": "object",
+                "properties": {"target": {"$ref": "#/$defs/Target"}},
+                "required": ["target"],
+                "$defs": {"Target": target},
+            },
+        ),
+        (
+            "definitions_sample",
+            {
+                "type": "object",
+                "properties": {"target": {"$ref": "#/definitions/Target"}},
+                "required": ["target"],
+                "definitions": {"Target": target},
+            },
+        ),
+        (
+            "ref_union_sample",
+            {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "anyOf": [
+                            {"$ref": "#/$defs/PathTarget"},
+                            {"$ref": "#/$defs/FileTarget"},
+                        ]
+                    }
+                },
+                "required": ["target"],
+                "$defs": {
+                    "PathTarget": target,
+                    "FileTarget": {
+                        "type": "object",
+                        "properties": {
+                            "type": {"type": "string"},
+                            "file": {"type": "string"},
+                        },
+                        "required": ["type", "file"],
+                    },
+                },
+            },
+        ),
+    )
+    for name, schema in cases:
+        registry = ToolRegistry()
+        registry.register(_FakeTool(name, schema))
+        result = await registry.execute(name, {"target": encoded})
+        assert result == {"target": {"type": "path", "path": "Projects/nanobot.md"}}
+
+
+def test_prepare_call_leaves_invalid_nested_json_unchanged() -> None:
+    invalid = "{not json"
+    schemas = (
+        (
+            "object_sample",
+            {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}},
+                        "required": ["path"],
+                    }
+                },
+                "required": ["target"],
+            },
+            True,
+        ),
+        (
+            "allof_sample",
+            {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "allOf": [
+                            {
+                                "type": "object",
+                                "properties": {"path": {"type": "string"}},
+                            },
+                            {"required": ["path"]},
+                        ]
+                    }
+                },
+            },
+            False,
+        ),
+    )
+    for name, schema, expects_error in schemas:
+        registry = ToolRegistry()
+        registry.register(_FakeTool(name, schema))
+        _tool, params, error = registry.prepare_call(name, {"target": invalid})
+        assert params["target"] == invalid
+        assert (error is not None) is expects_error
+
+
+async def test_execute_does_not_parse_unions_that_allow_string() -> None:
+    registry = ToolRegistry()
+    registry.register(_FakeTool(
+        "sample",
+        {
+            "type": "object",
+            "properties": {
+                "either": {
+                    "anyOf": [
+                        {"type": "object", "properties": {"path": {"type": "string"}}},
+                        {"type": "string"},
+                    ]
+                },
+                "typed": {"type": ["object", "string"]},
+            },
+        },
+    ))
+    raw = '{"path": "Projects/nanobot.md"}'
+
+    result = await registry.execute("sample", {"either": raw, "typed": raw})
+
+    assert result == {"either": raw, "typed": raw}
+
+def test_prepare_call_leaves_unresolved_or_string_refs_undecoded() -> None:
+    """Remote, broken, and cyclic refs stay strings, as do refs to string schemas."""
+    raw = '{"path": "Projects/nanobot.md"}'
+    object_def = {"type": "object", "properties": {"path": {"type": "string"}}}
+    schemas = (
+        {
+            "type": "object",
+            "properties": {"target": {"$ref": "https://example.com/schema.json"}},
+            "$defs": {"Target": object_def},
+        },
+        {
+            "type": "object",
+            "properties": {"target": {"$ref": "#/$defs/Missing"}},
+            "$defs": {"Target": object_def},
+        },
+        {
+            "type": "object",
+            "properties": {"target": {"$ref": "#/$defs/A"}},
+            "$defs": {
+                "A": {"$ref": "#/$defs/B"},
+                "B": {"$ref": "#/$defs/A"},
+            },
+        },
+        {
+            "type": "object",
+            "properties": {"target": {"$ref": "#/$defs/Note"}},
+            "$defs": {"Note": {"type": "string"}},
+        },
+    )
+    for index, schema in enumerate(schemas):
+        registry = ToolRegistry()
+        name = f"sample_{index}"
+        registry.register(_FakeTool(name, schema))
+        _tool, params, _error = registry.prepare_call(name, {"target": raw})
+        assert params["target"] == raw
+
+
 def test_prepare_call_rejects_malformed_json_string_arguments() -> None:
     registry = ToolRegistry()
     registry.register(_FakeTool("read_file"))
