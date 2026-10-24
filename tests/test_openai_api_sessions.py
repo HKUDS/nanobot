@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import json
 from contextlib import asynccontextmanager
 from copy import deepcopy
@@ -13,7 +14,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import current_request_context
-from nanobot.api.server import API_CHAT_ID, API_SESSION_KEY, create_app
+from nanobot.api.server import _SESSION_LOCKS_KEY, API_CHAT_ID, API_SESSION_KEY, create_app
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
@@ -106,6 +107,14 @@ async def post(client, session_id, text, stream=False):
     assert chunks[-1]["choices"][0]["finish_reason"] == "stop"
     assert len({chunk["id"] for chunk in chunks}) == 1
     return json.loads("".join(chunk["choices"][0]["delta"].get("content", "") for chunk in chunks))
+
+
+async def test_session_locks_do_not_accumulate_for_completed_sessions(tmp_path):
+    provider = RouteProvider()
+    async with runtime(tmp_path, provider) as (_agent, client):
+        await post(client, "one-shot-session", "hello")
+        gc.collect()
+        assert len(client.server.app[_SESSION_LOCKS_KEY]) == 0
 
 
 def assert_route(result, chat_id):
