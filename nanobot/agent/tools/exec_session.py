@@ -39,7 +39,13 @@ MAX_OUTPUT_CHARS = 50_000
 
 
 FinishReason = Literal[
-    "exit", "max_runtime", "idle_timeout", "cancelled", "owner_closed", "shutdown", "execution_error",
+    "exit",
+    "max_runtime",
+    "idle_timeout",
+    "cancelled",
+    "owner_closed",
+    "shutdown",
+    "execution_error",
 ]
 
 
@@ -193,7 +199,8 @@ class _ExecSession:
         self._completion_task.add_done_callback(self._on_supervisor_done)
         self._timeout_task = (
             asyncio.create_task(self._watch_timeout())
-            if timeout or (idle_timeout and idle_action == "terminate") else None
+            if timeout or (idle_timeout and idle_action == "terminate")
+            else None
         )
         if self._timeout_task is not None:
             self._timeout_task.add_done_callback(self._on_supervisor_done)
@@ -215,7 +222,8 @@ class _ExecSession:
                 self.cleanup_error = str(error)
                 self._state_changed.set()
             logger.opt(exception=error if tool_log_content_allowed() else False).error(
-                "Exec session supervision failed for {}", self.session_id,
+                "Exec session supervision failed for {}",
+                self.session_id,
             )
 
     async def _complete(self) -> None:
@@ -252,7 +260,9 @@ class _ExecSession:
     async def wait_exit(self) -> None:
         while self.finished_at is None:
             if self.cleanup_error is not None:
-                raise RuntimeError(f"session {self.session_id} cleanup failed: {self.cleanup_error}")
+                raise RuntimeError(
+                    f"session {self.session_id} cleanup failed: {self.cleanup_error}"
+                )
             self._state_changed.clear()
             await self._state_changed.wait()
 
@@ -262,10 +272,12 @@ class _ExecSession:
         cleanup = self._kill_task
         return (
             self.finished_at is None
-            or not self._stdout_task.done() or not self._stderr_task.done()
-            or (cleanup is not None and (
-                not cleanup.done() or cleanup.cancelled() or cleanup.exception() is not None
-            ))
+            or not self._stdout_task.done()
+            or not self._stderr_task.done()
+            or (
+                cleanup is not None
+                and (not cleanup.done() or cleanup.cancelled() or cleanup.exception() is not None)
+            )
         )
 
     async def _watch_timeout(self) -> None:
@@ -277,7 +289,8 @@ class _ExecSession:
                 anchor = self.started_at if self.last_output_at is None else self.last_output_at
                 deadline = min(deadline, anchor + self.idle_timeout)
             done, _ = await asyncio.wait(
-                {self._completion_task}, timeout=max(0.0, deadline - now),
+                {self._completion_task},
+                timeout=max(0.0, deadline - now),
             )
             if done:
                 return
@@ -348,7 +361,8 @@ class _ExecSession:
     ) -> _SessionPoll:
         if yield_time_ms > 0 and not self._completion_task.done():
             await asyncio.wait(
-                {self._completion_task}, timeout=min(yield_time_ms, MAX_YIELD_MS) / 1000,
+                {self._completion_task},
+                timeout=min(yield_time_ms, MAX_YIELD_MS) / 1000,
             )
         if self._completion_task.done():
             await asyncio.shield(self._completion_task)
@@ -407,7 +421,8 @@ class _ExecSession:
             self.cleanup_error = str(error)
             self._state_changed.set()
             logger.opt(exception=error if tool_log_content_allowed() else False).error(
-                "Failed to terminate exec session {}", self.session_id,
+                "Failed to terminate exec session {}",
+                self.session_id,
             )
         # Retain failed cleanup as unsettled work, even if the parent exited.
         # kill() replaces it on an explicit retry.
@@ -436,7 +451,9 @@ class ExecSessionManager:
     def has_pending_work(self) -> bool:
         """Inspect owned work without polling, terminating or removing sessions."""
         return bool(
-            self._lock.locked() or self._starting or self._stopping_launches
+            self._lock.locked()
+            or self._starting
+            or self._stopping_launches
             or any(s.has_pending_work for s in self._sessions.values())
         )
 
@@ -471,12 +488,21 @@ class ExecSessionManager:
                     raise RuntimeError(f"maximum exec sessions reached ({self.max_sessions})")
                 self._sessions.pop(min(finished)[1])
             session_id = uuid.uuid4().hex[:12]
-            launch = asyncio.create_task(self._launch(
-                session_id=session_id, command=command, cwd=cwd, env=env,
-                timeout=timeout, shell_program=shell_program, login=login,
-                owner_session_key=owner_session_key, idle_timeout=idle_timeout,
-                idle_action=idle_action, stdin=stdin,
-            ))
+            launch = asyncio.create_task(
+                self._launch(
+                    session_id=session_id,
+                    command=command,
+                    cwd=cwd,
+                    env=env,
+                    timeout=timeout,
+                    shell_program=shell_program,
+                    login=login,
+                    owner_session_key=owner_session_key,
+                    idle_timeout=idle_timeout,
+                    idle_action=idle_action,
+                    stdin=stdin,
+                )
+            )
             self._starting[session_id] = (owner_session_key, launch)
         try:
             session = await launch
@@ -498,20 +524,34 @@ class ExecSessionManager:
         return session_id, poll
 
     async def _launch(
-        self, *, session_id: str, command: str | list[str], cwd: str,
-        env: dict[str, str], timeout: int | None, shell_program: str | None,
-        login: bool, owner_session_key: str | None, idle_timeout: int,
-        idle_action: Literal["report", "terminate"], stdin: int,
+        self,
+        *,
+        session_id: str,
+        command: str | list[str],
+        cwd: str,
+        env: dict[str, str],
+        timeout: int | None,
+        shell_program: str | None,
+        login: bool,
+        owner_session_key: str | None,
+        idle_timeout: int,
+        idle_action: Literal["report", "terminate"],
+        stdin: int,
     ) -> _ExecSession:
         session: _ExecSession | None = None
         try:
             started_at = time.monotonic()
             process = await self._spawn(command, cwd, env, shell_program, login, stdin=stdin)
             session = _ExecSession(
-                session_id=session_id, process=process,
+                session_id=session_id,
+                process=process,
                 command=shlex.join(command) if isinstance(command, list) else command,
-                cwd=cwd, timeout=timeout, owner_session_key=owner_session_key,
-                process_tree=True, idle_timeout=idle_timeout, idle_action=idle_action,
+                cwd=cwd,
+                timeout=timeout,
+                owner_session_key=owner_session_key,
+                process_tree=True,
+                idle_timeout=idle_timeout,
+                idle_action=idle_action,
                 started_at=started_at,
             )
             async with self._lock:
@@ -621,18 +661,22 @@ class ExecSessionManager:
         return await self._stop_owned(victims, launches, "owner_closed")
 
     async def _stop_owned(
-        self, sessions: list[_ExecSession], launches: list[asyncio.Task[_ExecSession]],
+        self,
+        sessions: list[_ExecSession],
+        launches: list[asyncio.Task[_ExecSession]],
         reason: FinishReason,
     ) -> int:
         # Removed startup reservations must stay visible until cancellation drains.
         self._stopping_launches.update(launches)
         for task in launches:
             task.add_done_callback(self._stopping_launches.discard)
-        results: list[None | BaseException] = list(await asyncio.gather(
-            *(session.kill(reason) for session in sessions),
-            self._cancel_launches(launches),
-            return_exceptions=True,
-        ))
+        results: list[None | BaseException] = list(
+            await asyncio.gather(
+                *(session.kill(reason) for session in sessions),
+                self._cancel_launches(launches),
+                return_exceptions=True,
+            )
+        )
         startup_error = results.pop()
         failures = [
             (session, result)
@@ -666,8 +710,7 @@ class ExecSessionManager:
         stale = [
             session_id
             for session_id, session in self._sessions.items()
-            if session.finished_at is not None
-            and now - session.finished_at > self.result_retention
+            if session.finished_at is not None and now - session.finished_at > self.result_retention
         ]
         for session_id in stale:
             self._sessions.pop(session_id)
@@ -685,7 +728,11 @@ class ExecSessionManager:
         from nanobot.agent.tools.shell import ExecTool
 
         return await ExecTool._spawn(  # pyright: ignore[reportPrivateUsage]
-            command, cwd, env, shell_program, login,
+            command,
+            cwd,
+            env,
+            shell_program,
+            login,
             stdin=stdin,
             process_tree=True,
         )
@@ -716,11 +763,15 @@ def format_session_poll(session_id: str, poll: _SessionPoll) -> str:
     if poll.finish_reason == "max_runtime":
         parts.append("Error: Command timed out; session was terminated. Reason: max_runtime.")
     elif poll.finish_reason == "idle_timeout":
-        parts.append("Error: Output silence limit reached; session was terminated. Reason: idle_timeout.")
+        parts.append(
+            "Error: Output silence limit reached; session was terminated. Reason: idle_timeout."
+        )
     elif poll.terminated:
         parts.append(f"Session terminated. Reason: {poll.finish_reason}.")
     elif poll.finish_reason == "execution_error":
-        parts.append(f"Error: Command output failed: {poll.execution_error}. Reason: execution_error.")
+        parts.append(
+            f"Error: Command output failed: {poll.execution_error}. Reason: execution_error."
+        )
     if poll.output_incomplete:
         parts.append("Output collection ended before EOF; output may be incomplete.")
     if poll.stdin_closed:
@@ -826,9 +877,7 @@ class ExecSessionTool(Tool):
             if wait_for == "":
                 return ToolResult.error("Error: wait_for must not be empty.")
             if wait_for is not None and until_exit:
-                return ToolResult.error(
-                    "Error: wait_for and until_exit are mutually exclusive."
-                )
+                return ToolResult.error("Error: wait_for and until_exit are mutually exclusive.")
             if terminate:
                 if any(
                     (
@@ -893,6 +942,11 @@ class ExecSessionTool(Tool):
         search_overlap = ""
         first = True
         matched = False
+        # stdin_closed is per manager.write call (set only on the poll that
+        # carried the close), but the returned poll is the LAST one — carry
+        # the flag forward so "Stdin closed." is not silently dropped when
+        # the wait target matches (or times out) on a later iteration.
+        stdin_closed_seen = False
 
         while True:
             remaining_ms = max(0, int((deadline - time.monotonic()) * 1000))
@@ -908,6 +962,7 @@ class ExecSessionTool(Tool):
             )
             first = False
             upstream_truncated += poll.truncated_chars
+            stdin_closed_seen = stdin_closed_seen or poll.stdin_closed
             if poll.output:
                 aggregate.append(poll.output)
                 if wait_for is not None:
@@ -921,13 +976,13 @@ class ExecSessionTool(Tool):
             if poll.done or matched or has_activity or expired:
                 poll.output, aggregate_truncated = aggregate.drain()
                 poll.truncated_chars = upstream_truncated + aggregate_truncated
+                poll.stdin_closed = poll.stdin_closed or stdin_closed_seen
                 result = format_session_poll(session_id, poll)
                 if wait_for is not None and not matched:
                     result += f"\nWait target not observed: {wait_for!r}"
                 if expired and not poll.done and not matched:
                     result += (
-                        f"\nWait timed out after {timeout_ms / 1000:g}s; "
-                        "session remains active."
+                        f"\nWait timed out after {timeout_ms / 1000:g}s; session remains active."
                     )
                 return ToolResult.error(result) if poll.failed else result
 
@@ -982,8 +1037,10 @@ class ListExecSessionsTool(Tool):
                 command = " ".join(info.command.split())
                 if len(command) > 120:
                     command = command[:119] + "..."
-                status = "finished" if info.finish_reason is not None else (
-                    "stopping" if info.stopping else "running"
+                status = (
+                    "finished"
+                    if info.finish_reason is not None
+                    else ("stopping" if info.stopping else "running")
                 )
                 remaining = "unlimited" if info.remaining_s is None else f"{info.remaining_s:.1f}s"
                 silent = bool(info.idle_timeout and info.idle_s >= info.idle_timeout)
