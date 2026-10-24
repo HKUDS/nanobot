@@ -797,7 +797,7 @@ class ContextGovernor:
         original_result: object = result
         try:
             if isinstance(result, str):
-                return persist_text(result, tool_call_id)
+                return persist_text(str(result), tool_call_id)
             if isinstance(result, list):
                 result = cast(list[object], result)
                 blocks: list[dict[str, Any]] = []

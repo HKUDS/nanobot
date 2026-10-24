@@ -74,6 +74,7 @@ import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { providerDisplayLabel } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
+import { McpAppHostProvider } from "@/components/thread/activity/McpApp";
 
 function latestComposerContextUsage(messages: UIMessage[]): ComposerContextUsage | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -1487,6 +1488,7 @@ export function ThreadShell({
           resolve={previewSessionKey ? resolveFilePreviewAvailability : undefined}
         >
           <FileActionsProvider value={previewSessionKey ? fileActions : undefined}>
+          <McpAppHostProvider host={!temporary && historyKey && webuiCapabilities.includes("webui.mcp-apps.v1") ? { transport: client, sessionKey: historyKey } : null}>
           <ThreadViewport
             ref={viewportRef}
             messages={displayMessages}
@@ -1519,6 +1521,7 @@ export function ThreadShell({
             onForkFromMessage={onForkChat ? handleForkFromMessage : undefined}
             onQuoteSelection={session ? handleQuoteSelection : undefined}
           />
+          </McpAppHostProvider>
           </FileActionsProvider>
         </FilePreviewAvailabilityProvider>
       </div>

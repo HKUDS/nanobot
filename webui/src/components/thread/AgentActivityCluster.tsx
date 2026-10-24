@@ -28,6 +28,7 @@ import {
 } from "@/components/thread/activity/activity-text";
 import { FileEditGroup, type FileEditSummary } from "@/components/thread/activity/FileEditRow";
 import { GenericToolRun } from "@/components/thread/activity/GenericToolRun";
+import { McpAppAttachments } from "@/components/thread/activity/McpApp";
 import {
   canGroupGenericToolRuns,
   type GenericToolRunItem,
@@ -177,7 +178,7 @@ export function AgentActivityCluster(props: AgentActivityClusterProps) {
     [messages, props.isTurnStreaming],
   );
   if (displayMode === "summary" || !editsByMessage.size) {
-    return <FoldedAgentActivity {...props} />;
+    return <><FoldedAgentActivity {...props} /><McpAppAttachments messages={messages} /></>;
   }
 
   // Diff rows break the fold so they stay visible in their original timeline position.
@@ -225,6 +226,7 @@ export function AgentActivityCluster(props: AgentActivityClusterProps) {
   return (
     <div id={props.detailsId} className={cn("flex w-full flex-col gap-0.5", props.hasBodyBelow && "mb-2")}>
       {items}
+      <McpAppAttachments messages={messages} />
     </div>
   );
 }

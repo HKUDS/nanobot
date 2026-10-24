@@ -167,6 +167,9 @@ class _WebUIThreadDiagnostics:
     event_loop_lag_ms: float = 0.0
 
 _WEBUI_MUTATION_PATHS = {
+    "mcp_apps.open": "/api/webui/mcp-apps/open",
+    "mcp_apps.prepare": "/api/webui/mcp-apps/prepare",
+    "mcp_apps.confirm": "/api/webui/mcp-apps/confirm",
     "remote.discover": "/api/remote-instances/discover",
     "remote.pair_start": "/api/remote-instances/pair_start",
     "remote.pair_preview": "/api/remote-instances/pair_preview",
@@ -389,6 +392,7 @@ class GatewayHTTPHandler:
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
         mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
         mcp_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        mcp_apps_action: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None = None,
         image_generation_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         skill_state_action: Callable[[set[str]], None] | None = None,
         recovery_action: (
@@ -419,6 +423,7 @@ class GatewayHTTPHandler:
         )
         self.skill_state_action = skill_state_action
         self.recovery_action = recovery_action
+        self.mcp_apps_action = mcp_apps_action
         self.subagent_manager = subagent_manager
         self.discard_session = discard_session
         self._skill_install_lock = asyncio.Lock()
@@ -534,6 +539,8 @@ class GatewayHTTPHandler:
         return _http_error(404, "WebUI mutation action not found")
 
     def _is_webui_mutation_path(self, path: str) -> bool:
+        if path.startswith("/api/webui/mcp-apps/"):
+            return True
         if path.startswith("/api/remote-instances/"):
             return True
         if self.settings_routes.is_mutation_path(path):
@@ -612,6 +619,25 @@ class GatewayHTTPHandler:
 
         if got == "/api/webui/subagents/cancel":
             return await self._handle_subagent_cancel(request)
+
+        if got.startswith("/api/webui/mcp-apps/"):
+            if not self.check_api_token(request):
+                return _http_error(401, "Unauthorized")
+            if not getattr(request, _WEBUI_MUTATION_REQUEST_ATTR, False):
+                return _http_error(405, "WebSocket required")
+            if not self.config.mcp_apps_enabled or self.mcp_apps_action is None:
+                return _http_error(404, "MCP Apps are disabled on this host")
+            try:
+                result = await self.mcp_apps_action(got.rsplit("/", 1)[-1], _mutation_payload(request) or {})
+                return _http_json_response(result, extra_headers=_NO_STORE_HEADERS)
+            except PermissionError as exc:
+                return _http_error(403, str(exc))
+            except LookupError as exc:
+                return _http_error(404, str(exc))
+            except (ValueError, RuntimeError) as exc:
+                return _http_error(400, str(exc))
+            except TimeoutError:
+                return _http_error(504, "The MCP App request timed out; do not automatically retry an action")
 
         # Session routes
         response = await self._dispatch_session_routes(request, got)
@@ -745,7 +771,7 @@ class GatewayHTTPHandler:
 
         from nanobot.webui.client_contract import gateway_identity
 
-        terminal = gateway_identity(self.tokens.instance_id)
+        terminal = gateway_identity(self.tokens.instance_id, mcp_apps=self.config.mcp_apps_enabled)
         if terminal_probe:
             # Capability probing does not allocate credentials or acquire client leases.
             return _http_json_response(terminal, extra_headers=_NO_STORE_HEADERS)

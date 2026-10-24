@@ -113,6 +113,7 @@ class ChannelManager:
         webui_runtime_capabilities: dict[str, Any] | None = None,
         webui_mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
         webui_mcp_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        webui_mcp_apps_action: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None = None,
         webui_image_generation_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         webui_skill_state_action: Callable[[set[str]], None] | None = None,
         webui_recovery_action: (
@@ -141,6 +142,7 @@ class ChannelManager:
         self._webui_runtime_capabilities = dict(webui_runtime_capabilities or {})
         self._webui_mcp_runtime_status = webui_mcp_runtime_status
         self._webui_mcp_reload = webui_mcp_reload
+        self._webui_mcp_apps_action = webui_mcp_apps_action
         self._webui_image_generation_reload = webui_image_generation_reload
         self._webui_skill_state_action = webui_skill_state_action
         self._webui_recovery_action = webui_recovery_action
@@ -233,6 +235,7 @@ class ChannelManager:
                 channel_runtime_status=self.get_status,
                 mcp_runtime_status=self._webui_mcp_runtime_status,
                 mcp_reload=self._webui_mcp_reload,
+                mcp_apps_action=self._webui_mcp_apps_action,
                 image_generation_reload=self._webui_image_generation_reload,
                 skill_state_action=self._webui_skill_state_action,
                 recovery_action=self._webui_recovery_action,

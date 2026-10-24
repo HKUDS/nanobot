@@ -1,4 +1,16 @@
 {
+  "mcpApp": {
+    "open": "Abrir app",
+    "close": "Fechar app",
+    "loading": "Carregando…",
+    "subtitle": "Resultado interativo da ferramenta",
+    "approval": "Permitir esta chamada de ferramenta?",
+    "approve": "Permitir uma vez",
+    "reject": "Recusar",
+    "failed": "Não foi possível conectar. Feche o app e execute a ferramenta novamente.",
+    "unavailable": "Este app está indisponível ou expirou. Execute a ferramenta novamente.",
+    "label": "App {{title}}"
+  },
   "updates": {
     "guide": {
       "entry": "Atualizar via {{method}}",

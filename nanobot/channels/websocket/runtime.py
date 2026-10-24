@@ -210,6 +210,7 @@ class WebSocketConfig(Base):
     websocket_requires_token: bool = True
     allow_from: list[str] = Field(default_factory=lambda: ["*"])
     streaming: bool = True
+    mcp_apps_enabled: bool = False
     # Keep the existing configurable guard (also used for non-attachment
     # frames and older clients). HTTP attachments are outside this limit.
     max_message_bytes: int = Field(default=37_748_736, ge=1024, le=41_943_040)
@@ -853,7 +854,9 @@ class WebSocketChannel(BaseChannel):
                         "client_id": client_id,
                         **({"upload": self._uploads.issue(connection)}
                            if self.is_allowed(client_id) else {}),
-                        **({"terminal": gateway_identity(self.gateway.tokens.instance_id)}
+                        **({"terminal": gateway_identity(
+                            self.gateway.tokens.instance_id, mcp_apps=self.config.mcp_apps_enabled,
+                        )}
                            if _query_first(query, "terminal_protocol") == "1" else {}),
                     },
                     ensure_ascii=False,

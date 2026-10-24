@@ -18,6 +18,7 @@
     "lint": "cd .. && eslint --config webui/eslint.config.js webui/src webui/browser \"nanobot/channels/*/webui/**/*.{ts,tsx}\" \"nanobot/channels/*/tests/webui/**/*.{ts,tsx}\" \"scripts/check_client_import_boundaries*.mjs\" --max-warnings 0"
   },
   "dependencies": {
+    "@modelcontextprotocol/ext-apps": "^2.0.3",
     "@radix-ui/react-alert-dialog": "^1.1.4",
     "@radix-ui/react-dialog": "^1.1.4",
     "@radix-ui/react-dropdown-menu": "^2.1.4",

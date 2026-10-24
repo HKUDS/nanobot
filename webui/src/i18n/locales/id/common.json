@@ -1,4 +1,16 @@
 {
+  "mcpApp": {
+    "open": "Buka aplikasi",
+    "close": "Tutup aplikasi",
+    "loading": "Memuat…",
+    "subtitle": "Hasil alat interaktif",
+    "approval": "Izinkan pemanggilan alat ini?",
+    "approve": "Izinkan sekali",
+    "reject": "Tolak",
+    "failed": "Aplikasi gagal terhubung. Tutup aplikasi dan jalankan alat lagi.",
+    "unavailable": "Aplikasi tidak tersedia atau kedaluwarsa. Jalankan alat lagi.",
+    "label": "Aplikasi {{title}}"
+  },
   "updates": {
     "guide": {
       "entry": "Perbarui melalui {{method}}",
