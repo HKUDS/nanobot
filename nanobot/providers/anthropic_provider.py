@@ -51,6 +51,9 @@ _THINKING_DISABLE_MIN_VERSIONS = {
     "sonnet": (5, 0),
 }
 _SAMPLING_DEPRECATED_MODELS = {"claude-mythos-preview"}
+# Wording Anthropic uses when a model refuses a sampling parameter, e.g.
+# "`temperature` is deprecated for this model."
+_REJECTED_PARAM_MARKERS = ("deprecated", "not supported", "unsupported")
 
 
 def _model_version_at_least(
@@ -107,6 +110,9 @@ class AnthropicProvider(LLMProvider):
         self.extra_headers = extra_headers or {}
         self._extra_body = dict(extra_body or {})
         self._spec = spec
+        # Models whose API answered 400 to ``temperature``. Filled at runtime so
+        # releases newer than the version tables above keep working.
+        self._temperature_rejected: set[str] = set()
 
         from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
 
@@ -618,7 +624,9 @@ class AnthropicProvider(LLMProvider):
         # Mythos Preview rejects sampling parameters but still accepts manual
         # thinking budgets, so it is not part of the adaptive-only capability.
         omit_temperature = (
-            adaptive_only or model_name.lower() in _SAMPLING_DEPRECATED_MODELS
+            adaptive_only
+            or model_name.lower() in _SAMPLING_DEPRECATED_MODELS
+            or model_name.lower() in self._temperature_rejected
         )
 
         kwargs: dict[str, Any] = {
@@ -750,6 +758,25 @@ class AnthropicProvider(LLMProvider):
         on substring so a future SDK message tweak doesn't break detection."""
         return isinstance(e, ValueError) and "streaming is required" in str(e).lower()
 
+    def _remember_rejected_temperature(self, kwargs: dict[str, Any], e: Exception) -> bool:
+        """Return True when the API refused the ``temperature`` we sent.
+
+        The model is remembered so the retry, and every later request, leaves
+        the parameter out. Only a 400 that names ``temperature`` counts; the
+        request is retried at most once because the retry no longer sends it.
+        """
+        if "temperature" not in kwargs or getattr(e, "status_code", None) != 400:
+            return False
+        text = f"{e} {getattr(e, 'body', '') or ''}".lower()
+        if "temperature" not in text or not any(m in text for m in _REJECTED_PARAM_MARKERS):
+            return False
+        model_name = str(kwargs["model"]).lower()
+        self._temperature_rejected.add(model_name)
+        logger.warning(
+            "Anthropic rejected temperature for {}; retrying without it", model_name,
+        )
+        return True
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -768,6 +795,16 @@ class AnthropicProvider(LLMProvider):
             response = cast(Any, await self._client.messages.create(**kwargs))
             return self._parse_response(response)
         except Exception as e:
+            if self._remember_rejected_temperature(kwargs, e):
+                return await self.chat(
+                    messages=messages,
+                    tools=tools,
+                    model=model,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    reasoning_effort=reasoning_effort,
+                    tool_choice=tool_choice,
+                )
             if self._is_streaming_required_error(e):
                 # Anthropic SDK refuses non-stream calls when max_tokens (plus
                 # extended thinking budget) could push the request past the
@@ -881,6 +918,20 @@ class AnthropicProvider(LLMProvider):
                 error_kind="timeout",
             )
         except Exception as e:
+            # The 400 arrives before any chunk, so the callbacks have not fired yet.
+            if self._remember_rejected_temperature(kwargs, e):
+                return await self.chat_stream(
+                    messages=messages,
+                    tools=tools,
+                    model=model,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    reasoning_effort=reasoning_effort,
+                    tool_choice=tool_choice,
+                    on_content_delta=on_content_delta,
+                    on_thinking_delta=on_thinking_delta,
+                    on_tool_call_delta=on_tool_call_delta,
+                )
             return self._handle_error(e)
 
     def get_default_model(self) -> str:
