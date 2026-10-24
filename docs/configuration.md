@@ -339,7 +339,7 @@ The optional structured decision client sends all typed questions in one System 
 
 `enabled` defaults to `false`; it is an opt-in setting for a future caller and does not send a request by itself. `provider` defaults to `openrouter`, `protocol` is currently `system_one`, `model` defaults to `~typesafe/jev-latest`, and `timeoutS` defaults to 15 seconds (allowed range: greater than 0 and at most 120 seconds).
 
-OpenRouter is the only registered structured-decision provider initially. Its API key and optional `proxy` come from `providers.openrouter`; an unset key falls back to `OPENROUTER_API_KEY`. The decision URL is fixed at `https://openrouter.ai/api/alpha/decisions` and does not use `providers.openrouter.apiBase`. Custom or local decision endpoints and `baseUrl` overrides are not supported. Additional providers must be explicitly registered and support the System One decision API. Confidence thresholds belong to the calling policy, not this provider configuration.
+OpenRouter is the only registered structured-decision provider initially. Its API key comes from `providers.openrouter`, with `OPENROUTER_API_KEY` as the environment fallback. Proxy traffic uses the shared `network.proxy` only when `providers.openrouter.useProxy` is true. The decision URL is fixed at `https://openrouter.ai/api/alpha/decisions` and does not use `providers.openrouter.apiBase`. Custom or local decision endpoints and `baseUrl` overrides are not supported. Additional providers must be explicitly registered and support the System One decision API. Confidence thresholds belong to the calling policy, not this provider configuration.
 
 Image input is available to callers using the structured decision client with these OpenRouter models:
 

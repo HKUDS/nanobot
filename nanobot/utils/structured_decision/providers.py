@@ -167,7 +167,7 @@ def resolve_provider_settings_from_config(
         )
 
     api_key = resolve_env_refs(provider_config.api_key or "").strip() or None
-    proxy = resolve_env_refs(provider_config.proxy or "").strip() or None
+    proxy = config.network.resolve_proxy(provider_config.use_proxy)
     return resolve_provider_settings(
         provider=provider,
         protocol=protocol,

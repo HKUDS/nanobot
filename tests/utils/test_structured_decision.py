@@ -73,14 +73,15 @@ def _make_client(
     proxy: str | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> StructuredDecisionClient:
-    provider_config: dict[str, str] = {}
+    provider_config: dict[str, Any] = {}
     if api_key is not None:
         provider_config["apiKey"] = api_key
     if proxy is not None:
-        provider_config["proxy"] = proxy
+        provider_config["useProxy"] = True
     config = Config.model_validate(
         {
             "structuredDecision": {"model": model, "timeoutS": timeout},
+            "network": {"proxy": proxy},
             "providers": {"openrouter": provider_config},
         }
     )
@@ -314,10 +315,11 @@ def test_client_from_config_uses_named_provider_settings_and_injected_transport(
                 "openrouter": {
                     "apiKey": "selected-key",
                     "apiBase": "https://chat.example/v1",
-                    "proxy": "http://proxy.example:8080",
+                    "useProxy": True,
                 },
                 "openai": {"apiKey": "different-key"},
             },
+            "network": {"proxy": "http://proxy.example:8080"},
         }
     )
 
@@ -342,9 +344,10 @@ def test_config_environment_references_resolve_before_provider_fallback(monkeypa
             "providers": {
                 "openrouter": {
                     "apiKey": "${STRUCTURED_DECISION_KEY}",
-                    "proxy": "${STRUCTURED_DECISION_PROXY}",
+                    "useProxy": True,
                 }
-            }
+            },
+            "network": {"proxy": "${STRUCTURED_DECISION_PROXY}"},
         }
     )
 
@@ -798,8 +801,9 @@ async def test_test_only_registered_profile_supplies_endpoint_and_credentials(mo
                 "model": "test-model",
             },
             "providers": {
-                "test_decider": {"proxy": "http://test-proxy:8080"}
+                "test_decider": {"useProxy": True}
             },
+            "network": {"proxy": "http://test-proxy:8080"},
         }
     )
     client = StructuredDecisionClient.from_config(config, transport=_Transport(handler))
