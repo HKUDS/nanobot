@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 
 class ShellOutputFilter:
     """Strip terminal escapes, preserving visible text and whitespace.
@@ -49,3 +51,30 @@ class ShellOutputFilter:
             else:
                 output.append(char)
         return "".join(output)
+
+
+_BENIGN_XCRUN_CACHE_NOISE = re.compile(
+    r"^\S+: error: couldn't (?:create|open|replace) cache file '[^']*xcrun_db[^']*'"
+    r" \(errno=Operation not permitted\)$"
+)
+
+
+def filter_stderr_noise(stderr: str) -> str:
+    """Drop xcrun shim cache-denial noise that the sandbox cannot allow.
+
+    On stock macOS the ``/usr/bin`` toolchain shims (``git``, ``swift``, ...)
+    must open/replace their shared ``xcrun_db`` cache under the host
+    DARWIN_USER temp dir, which the seatbelt profile intentionally does not
+    share (host scratch directories must stay private). The denial does not
+    affect the command's outcome, but every invocation injects two
+    ``couldn't <verb> cache file ... (errno=Operation not permitted)`` lines
+    into stderr — surfacing to the agent as a spurious STDERR section that
+    reads like a failure. Only lines matching that exact xcrun cache shape
+    are dropped; any other stderr content is preserved.
+    """
+    if "xcrun_db" not in stderr:
+        return stderr
+    kept = [line for line in stderr.splitlines() if not _BENIGN_XCRUN_CACHE_NOISE.match(line)]
+    if not kept:
+        return ""
+    return "\n".join(kept) + ("\n" if stderr.endswith("\n") else "")
