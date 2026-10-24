@@ -631,11 +631,33 @@ class ContextGovernor:
             # establish a new provider-owned state at the rewritten boundary.
             state.conversation.replace_transcript(compaction.raw_messages)
             state.usage = None
-            prepared = await self.prepare_in_background(
-                self.ensure_request_fits, state.config,
-                prepared,
-                tool_definitions=tool_definitions,
-            )
+            try:
+                prepared = await self.prepare_in_background(
+                    self.ensure_request_fits, state.config,
+                    prepared,
+                    tool_definitions=tool_definitions,
+                )
+            except ContextWindowExceededError:
+                # Summarizing H cannot shrink the preserved delta, and an
+                # oversized delta alone can still exceed the budget (#5879) —
+                # most often read_file results, which are exempt from the
+                # ingest-time budget to avoid persist->read->persist loops
+                # (#4155). As a last resort before failing the turn, admit
+                # the delta's tool results under the standard budget on this
+                # model-facing copy: workspace sessions persist the complete
+                # text and reference it (so the model can read it back in
+                # slices), and the raw transcript is untouched. If the
+                # request still does not fit, the guard raises as before.
+                prepared = await self.prepare_in_background(
+                    self.apply_tool_result_budget, state.config,
+                    prepared,
+                    include_exempt=True,
+                )
+                prepared = await self.prepare_in_background(
+                    self.ensure_request_fits, state.config,
+                    prepared,
+                    tool_definitions=tool_definitions,
+                )
             compaction.summary_checkpoint = SessionSummaryCheckpoint(
                 summary=summary,
                 transcript_boundary=compaction.raw_accepted_boundary,
@@ -778,9 +800,11 @@ class ContextGovernor:
         tool_call_id: str,
         tool_name: str,
         result: Any,
+        *,
+        include_exempt: bool = False,
     ) -> Any:
         result = ensure_nonempty_tool_result(tool_name, result)
-        if tool_name in TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS:
+        if not include_exempt and tool_name in TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS:
             return result
 
         def persist_text(text: str, call_id: str) -> str:
@@ -998,6 +1022,8 @@ class ContextGovernor:
         self,
         config: ContextGovernanceConfig,
         messages: list[dict[str, Any]],
+        *,
+        include_exempt: bool = False,
     ) -> list[dict[str, Any]]:
         updated = messages
         for idx, message in enumerate(messages):
@@ -1008,6 +1034,7 @@ class ContextGovernor:
                 str(message.get("tool_call_id") or f"tool_{idx}"),
                 str(message.get("name") or "tool"),
                 message.get("content"),
+                include_exempt=include_exempt,
             )
             if normalized != message.get("content"):
                 if updated is messages:

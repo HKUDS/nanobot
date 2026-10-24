@@ -262,6 +262,123 @@ async def test_runner_rejects_oversized_delta_without_summarizable_history(monke
     provider.chat_stream_with_retry.assert_not_awaited()
 
 
+async def test_oversized_read_file_delta_is_budgeted_after_summarization(monkeypatch):
+    """#5879: read_file results are exempt from the ingest-time budget (to
+    avoid persist->read->persist loops, #4155), so a tool round of large
+    reads forms a delta that summarization cannot shrink — the request
+    still exceeded the budget afterwards and the turn aborted. Once
+    compaction has run, the delta's results must be admitted under the
+    standard budget on the model-facing copy instead.
+    """
+    provider = MagicMock(spec=LLMProvider)
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    history = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "analyze data"},
+        {"role": "assistant", "content": "working"},
+    ]
+    calls = [
+        {"id": f"call-{i}", "type": "function", "function": {
+            "name": "read_file", "arguments": "{}",
+        }} for i in range(3)
+    ]
+    messages = history + [{"role": "assistant", "content": None, "tool_calls": calls}]
+    messages += [
+        {"role": "tool", "tool_call_id": f"call-{i}", "name": "read_file",
+         "content": "record, " * 10000} for i in range(3)
+    ]
+    spec = make_run_spec(
+        provider,
+        initial_messages=history,
+        consolidate_history=AsyncMock(return_value="short summary"),
+        tools=tools,
+        model="test-model",
+        context_window_tokens=200_000,
+        max_tokens=8_192,
+        max_iterations=1,
+        max_tool_result_chars=16_000,
+    )
+    # Force the UTF-8-byte fallback estimator so the sizes are deterministic.
+    monkeypatch.setattr(
+        "nanobot.utils.helpers._get_token_encoding",
+        MagicMock(side_effect=RuntimeError("unavailable")),
+    )
+    phases: list[str] = []
+
+    async def observe(event):
+        phases.append(event.phase)
+
+    state = ModelRequestState(
+        config=_governance_config(provider, tools, spec),
+        conversation=ProviderConversationStateController(
+            provider=provider, model="test-model", messages=messages,
+        ),
+        compaction=_compaction_state(spec),
+        events=EventSink(observe),
+    )
+    prepared, _context = await ContextGovernor().prepare_request(
+        state, messages, tool_definitions=[],
+    )
+    assert phases == ["started", "succeeded"]
+    tool_contents = [m["content"] for m in prepared if m["role"] == "tool"]
+    assert len(tool_contents) == 3
+    assert all(len(content) < 80_000 for content in tool_contents)
+    # The raw transcript is untouched: only the model-facing copy shrank.
+    assert [len(m["content"]) for m in messages if m["role"] == "tool"] == [80_000] * 3
+
+
+async def test_oversized_delta_still_rejected_when_budgeted_delta_cannot_fit(monkeypatch):
+    """The last-resort budgeting above must not weaken the context guard:
+    a delta that exceeds the budget even after every tool result is shrunk
+    to the per-result budget is still refused.
+    """
+    provider = MagicMock(spec=LLMProvider)
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    history = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "analyze data"},
+        {"role": "assistant", "content": "working"},
+    ]
+    calls = [
+        {"id": f"call-{i}", "type": "function", "function": {
+            "name": "read_file", "arguments": "{}",
+        }} for i in range(30)
+    ]
+    messages = history + [{"role": "assistant", "content": None, "tool_calls": calls}]
+    messages += [
+        {"role": "tool", "tool_call_id": f"call-{i}", "name": "read_file",
+         "content": "record, " * 10000} for i in range(30)
+    ]
+    spec = make_run_spec(
+        provider,
+        initial_messages=history,
+        consolidate_history=AsyncMock(return_value="short summary"),
+        tools=tools,
+        model="test-model",
+        context_window_tokens=200_000,
+        max_tokens=8_192,
+        max_iterations=1,
+        max_tool_result_chars=16_000,
+    )
+    monkeypatch.setattr(
+        "nanobot.utils.helpers._get_token_encoding",
+        MagicMock(side_effect=RuntimeError("unavailable")),
+    )
+    state = ModelRequestState(
+        config=_governance_config(provider, tools, spec),
+        conversation=ProviderConversationStateController(
+            provider=provider, model="test-model", messages=messages,
+        ),
+        compaction=_compaction_state(spec),
+    )
+    with pytest.raises(ContextWindowExceededError):
+        await ContextGovernor().prepare_request(
+            state, messages, tool_definitions=[],
+        )
+
+
 async def test_runner_governs_history_before_summarizing_it(monkeypatch):
     provider = MagicMock(spec=LLMProvider)
     provider.can_resume_conversation_state.return_value = False
