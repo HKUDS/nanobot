@@ -1787,6 +1787,8 @@
       "progress": "已完成 {{completed}} / {{total}} 項",
       "running": "{{count}} 項進行中",
       "finished": "{{count}} 項已結束",
+      "active": "{{count}} 項進行中",
+      "completed": "{{count}} 項已完成",
       "needsReview": "{{count}} 項需檢查",
       "messages": "訊息狀態"
     },

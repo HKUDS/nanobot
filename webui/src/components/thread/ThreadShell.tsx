@@ -14,6 +14,7 @@ import { usePromptHistory } from "@/hooks/usePromptHistory";
 import { ModelFallbackNotice } from "@/components/thread/ModelFallbackNotice";
 import { RecoveryNotice } from "@/components/thread/RecoveryNotice";
 import { SubagentTasksProvider } from "@/components/thread/SubagentTasks";
+import { SubagentTaskDock } from "@/components/thread/SubagentTaskDock";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import type { ComposerDraft, ComposerDraftStore } from "@/lib/composer-draft";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
@@ -1294,6 +1295,7 @@ export function ThreadShell({
       {restoredFirstDraft?.chatId === chatId && restoredFirstDraft.error ? (
         <p role="alert" className="px-3 text-sm text-destructive">{restoredFirstDraft.error}</p>
       ) : null}
+      <SubagentTaskDock />
       {session ? (
         <ThreadComposer
           key={`${draftKey}:${restoredFirstDraft?.chatId === chatId ? restoredFirstDraft.revision : 0}`}
