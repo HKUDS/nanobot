@@ -9,6 +9,8 @@ from mcp import types as mcp_types
 from mcp.shared.exceptions import McpError
 from mcp.types import ErrorData
 
+from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.tools.execution import execute_tool_calls
 from nanobot.agent.tools.mcp import (
     MCPPromptWrapper,
     MCPResourceWrapper,
@@ -16,7 +18,8 @@ from nanobot.agent.tools.mcp import (
     _is_session_terminated,
     _is_transient,
 )
-from nanobot.agent.tools.registry import is_tool_error_result
+from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
+from nanobot.providers.base import ToolCallRequest
 
 # ---------------------------------------------------------------------------
 # _is_transient helper
@@ -299,6 +302,7 @@ async def test_resource_retries_on_transient_error():
         output = await wrapper.execute()
 
     assert output == "data"
+    assert not is_tool_error_result(output)
     assert session.read_resource.call_count == 2
 
 
@@ -315,6 +319,7 @@ async def test_resource_fails_after_retry_exhausted():
         output = await wrapper.execute()
 
     assert "failed after retry" in output
+    assert is_tool_error_result(output)
     assert session.read_resource.call_count == 2
 
 
@@ -328,6 +333,7 @@ async def test_resource_no_retry_on_non_transient():
     output = await wrapper.execute()
 
     assert "RuntimeError" in output
+    assert is_tool_error_result(output)
     assert session.read_resource.call_count == 1
 
 
@@ -353,6 +359,7 @@ async def test_resource_reconnects_on_session_terminated():
     output = await wrapper.execute()
 
     assert output == "fresh"
+    assert not is_tool_error_result(output)
     assert old_session.read_resource.call_count == 1
     assert new_session.read_resource.call_count == 1
 
@@ -381,6 +388,57 @@ def _make_prompt_result(text):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["resource", "prompt"])
+@pytest.mark.parametrize("fails", [True, False], ids=["protocol-error", "success"])
+async def test_resource_and_prompt_execution_lifecycle(monkeypatch, kind, fails):
+    text = "Error: example text in a successful MCP response"
+    session = AsyncMock()
+    if kind == "resource":
+        call = session.read_resource
+        call.return_value = _make_resource_result(text)
+        wrapper = MCPResourceWrapper(session, "test_server", _make_resource_def())
+    else:
+        call = session.get_prompt
+        call.return_value = _make_prompt_result(text)
+        wrapper = MCPPromptWrapper(session, "test_server", _make_prompt_def())
+    if fails:
+        call.side_effect = McpError(ErrorData(code=-32602, message="Not found"))
+    tools = ToolRegistry()
+    tools.register(wrapper)
+    hook = AgentHook()
+    error_hook, success_hook = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(hook, "on_execute_tool_error", error_hook)
+    monkeypatch.setattr(hook, "after_execute_tool", success_hook)
+
+    results, events = await execute_tool_calls(
+        tools,
+        [ToolCallRequest(id="mcp_1", name=wrapper.name, arguments={})],
+        concurrent=False,
+        external_lookup_counts={},
+        workspace_violation_counts={},
+        hook=hook,
+        context=AgentHookContext(iteration=0, messages=[]),
+    )
+
+    call.assert_awaited_once()
+    assert events[0]["status"] == ("error" if fails else "ok")
+    if fails:
+        error_hook.assert_awaited_once()
+        success_hook.assert_not_awaited()
+        raw_error = error_hook.await_args.args[-1]
+        assert is_tool_error_result(raw_error)
+        error_hint = (
+            "[Consider this result in the context of the user's goal "
+            "and decide whether and how to proceed.]"
+        )
+        assert results == [f"{raw_error}\n\n{error_hint}"]
+    else:
+        success_hook.assert_awaited_once()
+        error_hook.assert_not_awaited()
+        assert results == [text]
+
+
+@pytest.mark.asyncio
 async def test_prompt_retries_on_transient_error():
     """Prompt should retry once on transient connection error."""
     session = AsyncMock()
@@ -394,6 +452,7 @@ async def test_prompt_retries_on_transient_error():
         output = await wrapper.execute()
 
     assert output == "prompt text"
+    assert not is_tool_error_result(output)
     assert session.get_prompt.call_count == 2
 
 
@@ -410,6 +469,7 @@ async def test_prompt_fails_after_retry_exhausted():
         output = await wrapper.execute()
 
     assert "failed after retry" in output
+    assert is_tool_error_result(output)
     assert session.get_prompt.call_count == 2
 
 
@@ -425,6 +485,7 @@ async def test_prompt_no_retry_on_mcp_error():
     output = await wrapper.execute()
 
     assert "not found" in output
+    assert is_tool_error_result(output)
     assert session.get_prompt.call_count == 1
 
 
@@ -438,6 +499,7 @@ async def test_prompt_no_retry_on_non_transient():
     output = await wrapper.execute()
 
     assert "RuntimeError" in output
+    assert is_tool_error_result(output)
     assert session.get_prompt.call_count == 1
 
 
@@ -463,6 +525,7 @@ async def test_prompt_reconnects_on_session_terminated():
     output = await wrapper.execute()
 
     assert output == "fresh prompt"
+    assert not is_tool_error_result(output)
     assert old_session.get_prompt.call_count == 1
     assert new_session.get_prompt.call_count == 1
 
