@@ -1,6 +1,7 @@
 """Runtime context for tool construction."""
 from __future__ import annotations
 
+import hashlib
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
@@ -88,6 +89,60 @@ def tool_log_content_allowed() -> bool:
 def current_request_session_key() -> str | None:
     ctx = current_request_context()
     return ctx.session_key if ctx else None
+
+
+_CURRENT_TOOL_INVOCATION: ContextVar["ToolInvocationContext | None"] = ContextVar(
+    "nanobot_tool_invocation_context",
+    default=None,
+)
+
+
+@dataclass(frozen=True)
+class ToolInvocationContext:
+    """Identity of the logical tool invocation currently being executed.
+
+    ``tool_call_id`` is the provider's stable id for the call, the same id the
+    runtime checkpoints use to tell completed work from pending work.
+    ``invocation_key`` is derived from the session key and the tool call id, so
+    it is stable across a retry of the same call and distinct across sessions;
+    it is ``None`` when the request has no session (ephemeral/SDK use).
+    """
+
+    tool_call_id: str
+    invocation_key: str | None = None
+
+
+def tool_invocation_key(session_key: str | None, tool_call_id: str) -> str | None:
+    """Deterministic key for one logical tool invocation, or ``None`` without a session."""
+    if not session_key or not tool_call_id:
+        return None
+    digest = hashlib.sha256(f"{session_key}{tool_call_id}".encode("utf-8"))
+    return digest.hexdigest()
+
+
+def bind_tool_invocation_context(
+    ctx: ToolInvocationContext,
+) -> Token[ToolInvocationContext | None]:
+    return _CURRENT_TOOL_INVOCATION.set(ctx)
+
+
+def reset_tool_invocation_context(token: Token[ToolInvocationContext | None]) -> None:
+    _CURRENT_TOOL_INVOCATION.reset(token)
+
+
+@contextmanager
+def tool_invocation_context(ctx: ToolInvocationContext):
+    """Bind the invocation identity for one tool execution and restore the previous value."""
+    token = bind_tool_invocation_context(ctx)
+    try:
+        yield ctx
+    finally:
+        reset_tool_invocation_context(token)
+
+
+def current_tool_invocation_context() -> ToolInvocationContext | None:
+    """The invocation being executed on this task, or ``None`` outside tool execution."""
+    return _CURRENT_TOOL_INVOCATION.get()
 
 
 @dataclass
