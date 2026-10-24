@@ -1,12 +1,76 @@
 """Tests for OpenAICompatProvider handling custom/direct endpoints."""
 
+import json
 from unittest.mock import patch
 
+import httpx
 import pytest
+from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.providers.registry import find_by_name
+
+
+@pytest.mark.parametrize("stream", [False, True], ids=["json", "sse"])
+@pytest.mark.parametrize("field", ["refusal", "content"])
+async def test_chat_completion_preserves_refusal_text(stream: bool, field: str) -> None:
+    parts = ["I cannot help ", "with that request."] if field == "refusal" else ["Hello ", "world."]
+    usage = {"prompt_tokens": 5, "completion_tokens": 7, "total_tokens": 12}
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.url.path == "/v1/chat/completions"
+        assert json.loads(request.content).get("stream", False) is stream
+        envelope = {"id": "chatcmpl-test", "created": 0, "model": "gpt-4o"}
+        if not stream:
+            return httpx.Response(200, json={
+                **envelope, "object": "chat.completion", "usage": usage,
+                "choices": [{"index": 0, "finish_reason": "stop", "message": {
+                    "role": "assistant", "content": None, "refusal": None,
+                    field: "".join(parts),
+                }}],
+            })
+        chunks = [
+            {"choices": [{"index": 0, "finish_reason": None, "delta": {field: part}}]}
+            for part in parts
+        ] + [
+            {"choices": [{"index": 0, "finish_reason": "stop", "delta": {}}]},
+            {"choices": [], "usage": usage},
+        ]
+        body = "".join(
+            f"data: {json.dumps({**envelope, 'object': 'chat.completion.chunk', **chunk})}\n\n"
+            for chunk in chunks
+        ) + "data: [DONE]\n\n"
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, text=body)
+
+    provider = OpenAICompatProvider(api_key="test", default_model="gpt-4o")
+    provider._client = AsyncOpenAI(
+        api_key="test", base_url="https://example.com/v1", max_retries=0,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    deltas: list[str] = []
+
+    async def on_delta(text: str) -> None:
+        deltas.append(text)
+
+    try:
+        messages = [{"role": "user", "content": "A request"}]
+        if stream:
+            result = await provider.chat_stream(messages, on_content_delta=on_delta)
+        else:
+            result = await provider.chat(messages)
+    finally:
+        await provider.aclose()
+
+    assert len(requests) == 1
+    assert result.content == "".join(parts)
+    assert result.finish_reason == ("refusal" if field == "refusal" else "stop")
+    assert not result.tool_calls
+    assert not result.should_execute_tools
+    assert result.usage is not None and result.usage.total_tokens == 12
+    assert deltas == (parts if stream else [])
 
 
 def test_custom_provider_parse_handles_empty_choices() -> None:
