@@ -4,6 +4,7 @@ Linux/Windows CI retain the portable generation tests in test_sandbox.py.
 These native tests use only isolated fixtures and a loopback HTTP service.
 """
 
+import re
 import shlex
 import shutil
 import sys
@@ -48,6 +49,16 @@ def layout(tmp_path, monkeypatch):
         yield paths
 
 
+def parse_exec_result(value: str) -> tuple[str, int]:
+    match = re.fullmatch(
+        r"(?:(.*)\n)?Exit code: (-?\d+)\nElapsed: \d+\.\ds",
+        value,
+        re.DOTALL,
+    )
+    assert match is not None, value
+    return match[1] or "", int(match[2])
+
+
 async def run_script(paths, script):
     workspace = paths["workspace"]
     (workspace / "probe.sh").write_text(script)
@@ -56,28 +67,32 @@ async def run_script(paths, script):
         sandbox_ro_binds=[str(paths["ro"])], sandbox_rw_binds=[str(paths["rw"])],
     )
     # Scripts are legitimate exec input; the kernel must enforce their effects.
-    return str(await tool.execute(command="sh probe.sh", timeout=5))
+    result = await tool.execute(command="sh probe.sh", timeout=5)
+    return parse_exec_result(str(result))
 
 
 @pytest.mark.parametrize("target", ["workspace", "media", "ro", "rw"])
 async def test_native_allowed_reads(layout, target):
-    result = await run_script(layout, f"cat {shlex.quote(str(layout[target] / 'sentinel'))}")
-    assert result == "synthetic-data\n\nExit code: 0"
+    output, exit_code = await run_script(layout, f"cat {shlex.quote(str(layout[target] / 'sentinel'))}")
+    assert output == "synthetic-data"
+    assert exit_code == 0
 
 
 @pytest.mark.parametrize("target", ["config", "peer", "link"])
 async def test_native_outside_reads_denied(layout, target):
     path = layout[target] if target == "config" else layout[target] / "sentinel"
-    result = await run_script(layout, f"cat {shlex.quote(str(path))}")
-    assert "Operation not permitted" in result
-    assert "synthetic-" not in result
+    output, exit_code = await run_script(layout, f"cat {shlex.quote(str(path))}")
+    assert "Operation not permitted" in output
+    assert exit_code != 0
+    assert "synthetic-" not in output
 
 
 @pytest.mark.parametrize("target", ["workspace", "rw"])
 async def test_native_explicit_writes_allowed(layout, target):
     path = layout[target] / "sentinel"
-    result = await run_script(layout, f"printf changed > {shlex.quote(str(path))}")
-    assert result == "\nExit code: 0"
+    output, exit_code = await run_script(layout, f"printf changed > {shlex.quote(str(path))}")
+    assert output == ""
+    assert exit_code == 0
     assert path.read_text() == "changed"
 
 
@@ -85,26 +100,27 @@ async def test_native_explicit_writes_allowed(layout, target):
 async def test_native_other_writes_denied(layout, target):
     path = layout[target] if target == "config" else layout[target] / "sentinel"
     before = path.read_text()
-    result = await run_script(layout, f"printf changed > {shlex.quote(str(path))}")
-    assert "Operation not permitted" in result
+    output, exit_code = await run_script(layout, f"printf changed > {shlex.quote(str(path))}")
+    assert "Operation not permitted" in output
+    assert exit_code != 0
     assert path.read_text() == before
 
 
 async def test_native_scratch_and_home_stay_in_workspace(layout):
     # Apple mktemp with no template prefers confstr's host temp directory even
     # when TMPDIR is set. Use an explicit template; do not expose host scratch.
-    result = await run_script(
+    output, exit_code = await run_script(
         layout, 'printf "%s\\n" "$HOME"; mktemp "$TMPDIR/probe.XXXXXX" && printf ok > /dev/null',
     )
-    assert "STDERR" not in result
-    assert result.endswith("Exit code: 0")
-    assert all(line.startswith(str(layout["workspace"])) for line in result.splitlines()[:2])
+    assert "STDERR" not in output
+    assert exit_code == 0
+    assert all(line.startswith(str(layout["workspace"])) for line in output.splitlines()[:2])
 
 
 async def test_native_system_git_starts(layout):
-    result = await run_script(layout, "git --version")
-    assert "git version " in result
-    assert result.endswith("Exit code: 0")
+    output, exit_code = await run_script(layout, "git --version")
+    assert "git version " in output
+    assert exit_code == 0
 
 
 async def test_native_launcher_cannot_be_shadowed_by_project_path(layout):
@@ -115,8 +131,10 @@ async def test_native_launcher_cannot_be_shadowed_by_project_path(layout):
     tool = ExecTool(
         working_dir=str(workspace), sandbox="seatbelt", path_prepend=str(workspace),
     )
-    result = str(await tool.execute(command="printf real-sandbox", timeout=5))
-    assert result == "real-sandbox\n\nExit code: 0"
+    result = await tool.execute(command="printf real-sandbox", timeout=5)
+    output, exit_code = parse_exec_result(str(result))
+    assert output == "real-sandbox"
+    assert exit_code == 0
 
 
 async def test_native_network_remains_available(layout):
@@ -133,10 +151,11 @@ async def test_native_network_remains_available(layout):
         thread = Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            result = await run_script(
+            output, exit_code = await run_script(
                 layout, f"curl --noproxy '*' --max-time 2 -sS http://127.0.0.1:{server.server_port}",
             )
-            assert result == "network-ok\n\nExit code: 0"
+            assert output == "network-ok"
+            assert exit_code == 0
         finally:
             server.shutdown()
             thread.join(timeout=3)
@@ -153,12 +172,13 @@ async def test_native_readonly_ancestor_cannot_be_renamed(layout, target, ancest
     layout[target] = protected
     moved_sentinel = Path("shifted") / protected.relative_to(workspace / ancestor) / "sentinel"
 
-    result = await run_script(
+    output, exit_code = await run_script(
         layout,
         f"mv {ancestor} shifted && printf changed > {shlex.quote(str(moved_sentinel))}",
     )
 
-    assert "Operation not permitted" in result
+    assert "Operation not permitted" in output
+    assert exit_code != 0
     assert sentinel.read_text() == "synthetic-readonly"
     assert not (workspace / "shifted").exists()
 
@@ -169,13 +189,14 @@ async def test_native_readonly_ancestor_keeps_other_children_writable(layout):
     protected.mkdir(parents=True)
     layout["ro"] = protected
 
-    result = await run_script(
+    output, exit_code = await run_script(
         layout,
         "mkdir tree/sibling && printf writable > tree/sibling/file && "
         "mv tree/sibling tree/renamed && rm tree/renamed/file && rmdir tree/renamed",
     )
 
-    assert result == "\nExit code: 0"
+    assert output == ""
+    assert exit_code == 0
     assert protected.is_dir()
     assert not (workspace / "tree" / "renamed").exists()
 
@@ -189,16 +210,19 @@ async def test_native_rw_override_preserves_readonly_ancestor_policy(layout, ove
     layout["ro"] = protected
     layout["rw"] = {"root": protected, "parent": protected.parent, "child": writable}[override]
 
-    result = await run_script(layout, "printf writable > tree/readonly/cache/file")
-    assert result == "\nExit code: 0"
+    output, exit_code = await run_script(layout, "printf writable > tree/readonly/cache/file")
+    assert output == ""
+    assert exit_code == 0
     assert (writable / "file").read_text() == "writable"
 
-    result = await run_script(layout, "mv tree shifted")
+    output, exit_code = await run_script(layout, "mv tree shifted")
     if override == "child":
-        assert "Operation not permitted" in result
+        assert "Operation not permitted" in output
+        assert exit_code != 0
         assert protected.is_dir()
     else:
-        assert result == "\nExit code: 0"
+        assert output == ""
+        assert exit_code == 0
         assert (workspace / "shifted" / "readonly" / "cache" / "file").read_text() == "writable"
 
 
@@ -211,13 +235,14 @@ async def test_native_failed_cwd_does_not_execute_shell_list(layout, cwd_kind, s
         cwd.write_text("not-a-directory")
     tool = ExecTool(working_dir=str(workspace), sandbox="seatbelt")
 
-    result = str(await tool.execute(
+    result = await tool.execute(
         command=f"printf first > first{separator}printf second > second",
         working_dir=str(cwd), timeout=5,
-    ))
+    )
+    output, exit_code = parse_exec_result(str(result))
 
-    assert "cd:" in result
-    assert not result.endswith("Exit code: 0")
+    assert "cd:" in output
+    assert exit_code != 0
     assert not (workspace / "first").exists()
     assert not (workspace / "second").exists()
 
@@ -228,12 +253,14 @@ async def test_native_nested_cwd_runs_complete_shell_list(layout):
     cwd.mkdir()
     tool = ExecTool(working_dir=str(workspace), sandbox="seatbelt")
 
-    result = str(await tool.execute(
+    result = await tool.execute(
         command="printf first > first; printf second > second",
         working_dir=str(cwd), timeout=5,
-    ))
+    )
+    output, exit_code = parse_exec_result(str(result))
 
-    assert result == "\nExit code: 0"
+    assert output == ""
+    assert exit_code == 0
     assert (cwd / "first").read_text() == "first"
     assert (cwd / "second").read_text() == "second"
     assert not (workspace / "second").exists()
@@ -252,15 +279,18 @@ async def test_native_rw_override_respects_volume_case_sensitivity(layout, overr
     layout["ro"] = protected
     layout["rw"] = alias if override == "root" else alias.parent
 
-    result = await run_script(layout, "printf writable > tree/readonly/other")
-    assert result == "\nExit code: 0"
-    result = await run_script(layout, "mv Tree shifted")
+    output, exit_code = await run_script(layout, "printf writable > tree/readonly/other")
+    assert output == ""
+    assert exit_code == 0
+    output, exit_code = await run_script(layout, "mv Tree shifted")
 
     if same_directory:
-        assert result == "\nExit code: 0"
+        assert output == ""
+        assert exit_code == 0
         assert (workspace / "shifted" / "ReadOnly" / "other").read_text() == "writable"
     else:
         # On a case-sensitive volume the distinct RW directory must not remove
         # protection from Tree/ReadOnly, even though its spelling differs only by case.
-        assert "Operation not permitted" in result
+        assert "Operation not permitted" in output
+        assert exit_code != 0
         assert sentinel.read_text() == "synthetic-readonly"
