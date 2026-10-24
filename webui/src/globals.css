@@ -1167,8 +1167,25 @@
 
 /* Composer controls adapt to their actual container, not just the viewport. */
 .thread-composer-surface {
+  --composer-shadow-color: 240 10% 16%;
+  --tw-shadow: inset 0 0 0 1px hsl(var(--border) / 0.75), 0 4px 18px -8px hsl(var(--composer-shadow-color) / 0.12);
+  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+  transition: background-color 160ms ease-out, box-shadow 160ms ease-out, opacity 160ms ease-out;
   container-name: thread-composer;
   container-type: inline-size;
+}
+
+.dark .thread-composer-surface {
+  --composer-shadow-color: 240 12% 3%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-composer-surface { transition: none; }
+}
+
+@media (forced-colors: active) {
+  .thread-composer-surface { outline: 1px solid CanvasText; }
+  .thread-composer-surface:focus-within { outline: 2px solid Highlight; }
 }
 
 .thread-composer-footer-actions {

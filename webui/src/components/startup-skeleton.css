@@ -103,8 +103,8 @@ html.dark .startup-shell { --startup-fill: hsl(0 0% 72% / .2); --startup-surface
 .startup-welcome-line { display: flex; width: 100%; max-width: 704px; height: 36.72px; align-items: center; justify-content: center; }
 .startup-welcome-line .startup-block { width: 60%; height: 24px; }
 .startup-composer { container: startup-composer / inline-size; width: 100%; max-width: 928px; margin: 0 auto; --composer-footer-inset: 0.75rem; --composer-action-size: 2rem; --composer-action-margin: 0px; }
-.startup-composer-surface { overflow: hidden; border-radius: 28px; background: hsl(0 0% 96.1% / .8); }
-html.dark .startup-composer-surface { background: hsl(0 0% 22%); }
+.startup-composer-surface { overflow: hidden; border-radius: 28px; background: hsl(0 0% 100%); box-shadow: inset 0 0 0 1px hsl(40 8% 90.5% / .75), 0 4px 18px -8px hsl(240 10% 16% / .12); }
+html.dark .startup-composer-surface { background: hsl(0 0% 22%); box-shadow: inset 0 0 0 1px hsl(0 0% 28% / .75), 0 4px 18px -8px hsl(240 12% 3% / .12); }
 .startup-composer-input { display: flex; align-items: start; height: 78px; padding: 27px 16px 8px; }
 .startup-composer-input .startup-block { width: 45%; height: 14px; margin-top: 5px; }
 .startup-composer-footer { display: flex; align-items: center; gap: 6px; padding: 0 12px 14px; }
