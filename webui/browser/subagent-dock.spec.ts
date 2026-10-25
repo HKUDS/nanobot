@@ -102,7 +102,9 @@ test("keeps the portaled dock scoped to the active conversation and honors reduc
   await expect(trigger).toContainText("Running: 2");
   const results = page.getByTestId("thread-message-region").getByRole("region", { name: "Subtasks", exact: true });
   await results.getByRole("button", { name: /Review needed: 1/ }).click();
-  await results.getByRole("button", { name: /核对回归测试 Failed/ }).click();
+  const failedRow = results.getByRole("button", { name: /核对回归测试 Failed/ });
+  expect((await failedRow.getByText("Failed", { exact: true }).boundingBox())!.width).toBeGreaterThan(16);
+  await failedRow.click();
   await expect(page.getByRole("dialog", { name: "核对回归测试", exact: true }).getByRole("alert")).toHaveText("演示：测试执行失败，请打开详情检查。");
 });
 
@@ -296,18 +298,15 @@ for (const width of [1440, 390, 320]) {
         overflow: node.scrollWidth > node.clientWidth,
         header: [header.children[0], header.children[1]].map(element => bounds(element).x),
         trailingEdge: bounds(header.lastElementChild!).right,
-        summary: bounds(header.children[2].children[0]).x,
         rows: [...node.querySelectorAll('[data-subagent-surface="archive"]')].map(row => ({
           columns: [row.children[0], row.children[1]].map(element => bounds(element).x),
-          status: bounds(row.children[2].children[0]).x,
-          elapsedRight: bounds(row.children[2].children[1]).right,
+          elapsedRight: bounds(row.children[3]).right,
         })),
       };
     });
     expect(geometry.overflow).toBe(false);
     for (const row of geometry.rows) {
       row.columns.forEach((position, index) => expect(Math.abs(position - geometry.header[index])).toBeLessThan(0.5));
-      expect(Math.abs(row.status - geometry.summary)).toBeLessThan(0.5);
       expect(Math.abs(row.elapsedRight - geometry.trailingEdge)).toBeLessThan(0.5);
     }
     await rows.first().click();

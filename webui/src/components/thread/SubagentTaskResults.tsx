@@ -96,7 +96,7 @@ function SubagentResults({ tasks, unlinked = false, expanded, onToggle }: {
     : t("thread.subagents.finished", { count: tasks.length });
 
   return <section data-subagent-results aria-label={title}
-    className={`thread-message-row mt-2 grid grid-cols-[1rem_minmax(0,1fr)_1rem] items-center gap-x-2.5 sm:grid-cols-[1rem_minmax(0,1fr)_minmax(6rem,max-content)_3rem] ${unlinked ? "mb-5" : ""}`}>
+    className={`thread-message-row mt-2 grid grid-cols-[1rem_minmax(0,1fr)_3rem] items-center gap-x-2.5 sm:grid-cols-[1rem_minmax(0,1fr)_minmax(6rem,max-content)_3rem] ${unlinked ? "mb-5" : ""}`}>
     <button type="button" data-thread-disclosure data-subagent-results-summary aria-expanded={expanded} aria-controls={rowsId}
       onClick={onToggle}
       className="col-span-full grid min-h-11 w-full min-w-0 grid-cols-subgrid items-center gap-y-0.5 rounded-control py-2 text-left text-[13px] leading-5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none sm:min-h-9 sm:py-1.5">

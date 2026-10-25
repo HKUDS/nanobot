@@ -237,19 +237,18 @@ export function SubagentTaskButton({ task, surface = "archive" }: { task: Observ
   const { t } = useTranslation("common");
   const button = useRef<HTMLButtonElement | null>(null);
   const activity = surface === "activity";
+  const completed = task.state === "done";
   return <button type="button" data-subagent-id={task.task_id} data-subagent-surface={surface} ref={node => {
     context?.register(`${surface}:${task.task_id}`, node, button.current);
     button.current = node;
   }}
     onClick={(event) => context?.open(task, event.currentTarget)}
     className={activity
-      ? "grid min-h-11 min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2.5 gap-y-0.5 rounded-lg px-2 py-2 text-left text-[13px] leading-5 transition-colors duration-150 hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none sm:min-h-9 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:py-1.5"
+      ? "grid min-h-11 min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-0.5 rounded-lg px-2 py-2 text-left text-[13px] leading-5 transition-colors duration-150 hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none sm:min-h-9 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:py-1.5"
       : "col-span-full grid min-h-11 min-w-0 grid-cols-subgrid items-center gap-y-0.5 rounded-control py-2 text-left text-[13px] leading-5 hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-9 sm:py-1.5"}>
-    <span className="row-span-2 self-start pt-0.5 sm:row-span-1 sm:self-center sm:pt-0"><TaskStateIcon task={task} /></span>
-    <span className={`min-w-0 line-clamp-2 break-words font-medium sm:line-clamp-none sm:truncate ${activity ? "" : "col-span-2 sm:col-span-1"}`}>{task.label}</span>
-    <span className={activity ? "col-start-2 row-start-2 flex items-center gap-2 text-[11px] leading-4 text-muted-foreground sm:col-start-3 sm:row-start-1 sm:gap-2.5 sm:text-xs" : "col-start-2 row-start-2 col-span-2 flex items-center gap-2 sm:contents"}>
-      <span className="shrink-0 text-xs text-muted-foreground">{t(`thread.subagents.states.${task.state}`)}</span>
-      <span className={`shrink-0 text-xs tabular-nums text-muted-foreground sm:min-w-[5ch] sm:text-right ${activity ? "" : "ml-auto sm:ml-0"}`}><TaskElapsed task={task} /></span>
-    </span>
+    <span className="col-start-1 row-start-1 self-center"><TaskStateIcon task={task} /></span>
+    <span className="col-start-2 row-start-1 min-w-0 line-clamp-2 break-words font-medium sm:line-clamp-none sm:truncate">{task.label}</span>
+    <span className={completed ? "sr-only" : "col-start-2 row-start-2 text-xs leading-4 text-muted-foreground sm:col-start-3 sm:row-start-1"}>{t(`thread.subagents.states.${task.state}`)}</span>
+    <span className={`col-start-3 text-right text-xs tabular-nums text-muted-foreground sm:col-start-4 sm:row-start-1 sm:min-w-[5ch] ${completed ? "row-start-1" : "row-start-2"}`}><TaskElapsed task={task} /></span>
   </button>;
 }
