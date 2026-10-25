@@ -514,7 +514,7 @@ describe("MessageBubble", () => {
       "duration-150",
     );
     expect(skill.getAttribute("style")).not.toContain("text-shadow");
-    expect(skill.getAttribute("style")).toContain("var(--skill-reference-foreground)");
+    expect(skill.getAttribute("style")).toContain("var(--inline-reference-highlight)");
     expect(skill.className).not.toMatch(/(?:^|\s)(?:bg-|border|ring|rounded)/);
     expect(skill).not.toHaveAttribute("title");
     expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@Zoom");

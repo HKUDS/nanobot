@@ -54,7 +54,7 @@
     --input: 40 8% 90.5%;
     --ring: 0 0% 3.9%;
     --inline-token-highlight: #ad450b;
-    --skill-reference-foreground: rgb(244 169 73);
+    --inline-reference-highlight: rgb(244 169 73);
     --code-comment: #62626b;
     --code-string: #166534;
     --code-keyword: #7e22ce;
@@ -140,7 +140,7 @@
     --input: var(--border);
     --ring: 0 0% 83.1%;
     --inline-token-highlight: #ef8e30;
-    --skill-reference-foreground: rgb(244 169 73);
+    --inline-reference-highlight: rgb(244 169 73);
     --code-comment: #c8c8d0;
     --code-string: #b5d99c;
     --code-keyword: #e3a5f7;
@@ -1447,7 +1447,7 @@
   .automation-create-composer .thread-composer-surface {
     max-inline-size: none;
   }
-  .automation-create-composer .thread-composer-input textarea {
+  .automation-create-composer .thread-composer-input > :is(textarea, [aria-hidden]) {
     padding-inline: var(--settings-inset);
   }
   .automation-view-switch .segmented-control button {
@@ -1491,7 +1491,7 @@
     white-space: nowrap;
     text-overflow: ellipsis;
   }
-  .thread-composer-collapsible[data-compact] .thread-composer-input textarea {
+  .thread-composer-collapsible[data-compact] .thread-composer-input > :is(textarea, [aria-hidden]) {
     display: block;
     block-size: 3.125rem !important;
   }
@@ -1499,7 +1499,7 @@
     .thread-composer-collapsible .thread-composer-input {
       inline-size: 100%;
     }
-    .thread-composer-collapsible .thread-composer-input textarea {
+    .thread-composer-collapsible .thread-composer-input > :is(textarea, [aria-hidden]) {
       display: block;
       min-block-size: 3.5rem;
       padding-block: 1.125rem;
@@ -1507,7 +1507,7 @@
     .thread-composer-collapsible[data-compact] .thread-composer-input {
       inline-size: max(0px, calc(100% - var(--composer-compact-controls-width, 15rem) - 1.5rem));
     }
-    .thread-composer-collapsible[data-compact] .thread-composer-input textarea {
+    .thread-composer-collapsible[data-compact] .thread-composer-input > :is(textarea, [aria-hidden]) {
       display: block;
       block-size: 3.5rem !important;
       min-block-size: 3.5rem;

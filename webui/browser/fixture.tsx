@@ -23,6 +23,7 @@ import { NewChatSkeletonFixture } from "./new-chat-skeleton-fixture";
 import "../src/globals.css";
 import { DiagramFixture } from "./diagram-fixture";
 import { TypographyFixture } from "./typography-fixture";
+import { InlineReferencesFixture } from "./inline-references-fixture";
 import { MarkdownEmphasisFixture } from "./markdown-emphasis-fixture";
 import { HistoryBoundaryFixture } from "./history-boundary-fixture";
 import { ChatFailureFixture } from "./chat-failure-fixture";
@@ -241,6 +242,8 @@ createRoot(document.getElementById("root")!).render(<TooltipProvider>
     ? <MarkdownEmphasisFixture />
     : parameters.get("case") === "typography"
     ? <ClientProvider client={railClient} token="fixture"><TypographyFixture /></ClientProvider>
+    : parameters.get("case") === "inline-references"
+    ? <ClientProvider client={railClient} token="fixture"><InlineReferencesFixture /></ClientProvider>
     : parameters.get("case") === "idle-compaction"
     ? <IdleCompactionFixture />
     : parameters.get("case") === "history-hydration"

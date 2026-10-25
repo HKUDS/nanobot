@@ -24,7 +24,7 @@ import { MarkdownCodeBlock } from "@/components/markdown-diagrams/MarkdownCodeBl
 import { MarkdownCodeContext } from "@/components/markdown-diagrams/context";
 import { WebLink } from "@/components/WebLink";
 import {
-  INLINE_TOKEN_HIGHLIGHT_COLOR,
+  INLINE_REFERENCE_HIGHLIGHT_COLOR,
   InlineTokenHighlight,
 } from "@/components/InlineTokenHighlight";
 import {
@@ -629,9 +629,9 @@ export default function MarkdownTextRenderer({
             <a
               href={sessionHref}
               className="rounded-sm underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-              style={{ textDecorationColor: INLINE_TOKEN_HIGHLIGHT_COLOR }}
+              style={{ textDecorationColor: INLINE_REFERENCE_HIGHLIGHT_COLOR }}
             >
-              <InlineTokenHighlight color={INLINE_TOKEN_HIGHLIGHT_COLOR}>
+              <InlineTokenHighlight color={INLINE_REFERENCE_HIGHLIGHT_COLOR}>
                 {markdownChildren}
               </InlineTokenHighlight>
             </a>
