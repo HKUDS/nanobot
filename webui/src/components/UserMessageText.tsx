@@ -1,14 +1,10 @@
 import { Fragment } from "react";
-import { useTranslation } from "react-i18next";
 
 import {
   CapabilityMentionToken,
   splitCapabilityMentionSegments,
 } from "@/components/CliAppMentionText";
-import {
-  INLINE_TOKEN_HIGHLIGHT_COLOR,
-  InlineTokenHighlight,
-} from "@/components/InlineTokenHighlight";
+import { InlineTokenHighlight } from "@/components/InlineTokenHighlight";
 import type { CliAppInfo, McpPresetInfo, SessionMention } from "@/lib/types";
 import type { CapabilityMentionSegment } from "@/lib/composer-mention-text";
 
@@ -77,7 +73,6 @@ export function UserMessageText({
   mcpPresets: McpPresetInfo[];
   sessionMentions?: SessionMention[];
 }) {
-  const { t } = useTranslation();
   const segments = splitUserMessageSegments(text, cliApps, mcpPresets, sessionMentions);
   return (
     <>
@@ -89,10 +84,10 @@ export function UserMessageText({
           <InlineTokenHighlight
             key={`skill-${segment.name}-${index}`}
             testId={`message-skill-reference-${segment.name.toLowerCase()}`}
-            title={t("message.skill", { name: segment.name })}
-            color={INLINE_TOKEN_HIGHLIGHT_COLOR}
+            className="font-normal"
+            color="var(--skill-reference-foreground)"
           >
-            {segment.text}
+            <span className="opacity-90">$</span>{segment.name}
           </InlineTokenHighlight>
         );
         return (
