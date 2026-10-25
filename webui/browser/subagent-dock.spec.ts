@@ -1,4 +1,13 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
+
+async function settledMotion(target: Locator) {
+  await target.evaluate(() => document.fonts.ready);
+  await expect.poll(() => target.evaluate(async node => {
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return node.getAnimations({ subtree: true }).filter(animation =>
+      animation.effect?.getTiming().iterations !== Infinity && (animation.pending || animation.playState === "running")).length;
+  })).toBe(0);
+}
 
 for (const width of [1440, 390]) {
   test(`keeps subtasks reachable through long replies, independent list scrolling and detail handoff at ${width}px`, async ({ page }, info) => {
@@ -9,7 +18,7 @@ for (const width of [1440, 390]) {
     const trigger = page.getByTestId("subagent-task-dock-trigger");
     const messages = page.getByTestId("thread-message-region");
     await expect(trigger).toContainText("Running: 3");
-    await page.getByTestId("subagent-task-dock").evaluate(node => Promise.all(node.getAnimations().map(animation => animation.finished)));
+    await settledMotion(page.getByTestId("subagent-task-dock"));
     const original = (await trigger.boundingBox())!;
     const composer = page.locator(".thread-composer-surface");
     const composerBounds = (await composer.boundingBox())!;
@@ -29,8 +38,7 @@ for (const width of [1440, 390]) {
     await expect(tree).toBeVisible();
     const dock = page.getByTestId("subagent-task-dock");
     const panel = dock.getByRole("region", { name: "Subtasks", exact: true });
-    await panel.evaluate(node => Promise.all(node.getAnimations({ subtree: true })
-      .filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished)));
+    await settledMotion(panel);
     const bounds = (await panel.boundingBox())!;
     const anchor = (await dock.boundingBox())!;
     expect(bounds.y).toBeGreaterThanOrEqual(0);
@@ -109,8 +117,7 @@ for (const width of [1440, 390]) {
     expect(completedSlot.width).toBeCloseTo(statusSlot.width, 1);
     expect(completedSlot.height).toBeCloseTo(statusSlot.height, 1);
     await expect(tree.locator("strong").filter({ hasText: "10°C" })).toBeVisible();
-    await page.getByTestId("subagent-task-dock").evaluate(node => Promise.all(node.getAnimations({ subtree: true })
-      .filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished)));
+    await settledMotion(page.getByTestId("subagent-task-dock"));
     const dimensions = await tree.evaluate(node => ({ clientWidth: node.clientWidth, scrollWidth: node.scrollWidth, clientHeight: node.clientHeight, scrollHeight: node.scrollHeight }));
     expect(dimensions.scrollWidth).toBe(dimensions.clientWidth);
     expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight);
@@ -131,8 +138,12 @@ for (const width of [1440, 390]) {
     await expect(detail.getByRole("heading", { level: 2, name: "天气结果" })).toBeVisible();
     await expect(detail).toHaveAccessibleDescription("Completed");
     const title = detail.getByRole("heading", { name: "检查项目实现", exact: true });
-    const titleBounds = (await title.boundingBox())!;
-    const closeBounds = (await detail.getByRole("button", { name: "Close", exact: true }).boundingBox())!;
+    await settledMotion(detail);
+    const closeButton = await detail.getByRole("button", { name: "Close", exact: true }).elementHandle();
+    const { titleBounds, closeBounds } = await title.evaluate((node, close) => ({
+      titleBounds: node.getBoundingClientRect().toJSON(),
+      closeBounds: close!.getBoundingClientRect().toJSON(),
+    }), closeButton);
     expect(Math.abs(titleBounds.y + titleBounds.height / 2 - closeBounds.y - closeBounds.height / 2)).toBeLessThanOrEqual(1);
     expect(titleBounds.x + titleBounds.width).toBeLessThanOrEqual(closeBounds.x);
     await expect(title.locator("..")).not.toContainText(/\d+s/);
@@ -299,11 +310,17 @@ for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/browser/fixture.html?case=subagent-dock");
     const body = page.getByTestId("thread-message-region");
-    const anchor = body.getByText("主对话仍然可以正常输出和滚动。任务列表与消息区分别滚动，展开详情也不会取消正在执行的任务。", { exact: true }).nth(6);
+    const paragraphs = body.getByText("主对话仍然可以正常输出和滚动。任务列表与消息区分别滚动，展开详情也不会取消正在执行的任务。", { exact: true });
+    await expect(paragraphs).toHaveCount(12);
+    await settledMotion(body);
+    const anchor = paragraphs.nth(6);
+    await anchor.scrollIntoViewIfNeeded();
     await body.hover();
     await page.mouse.wheel(0, -160);
     await expect.poll(() => body.evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop)).toBeGreaterThan(100);
     await expect(anchor).toBeInViewport();
+    await settledMotion(body);
+    await expect.poll(() => body.evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop)).toBeGreaterThan(100);
     const before = (await anchor.boundingBox())!.y;
     await page.getByRole("button", { name: "完成第一项", exact: true }).click();
     await expect(page.getByTestId("subagent-task-dock-trigger")).toContainText("Running: 2");
@@ -345,6 +362,7 @@ test("keeps long task names, stop controls and detail handoff usable on a narrow
   await row.click();
   const detail = page.getByRole("dialog", { name: label, exact: true });
   await expect(detail).toBeFocused();
+  await settledMotion(detail);
   const close = detail.getByRole("button", { name: "Close", exact: true });
   const closeBounds = (await close.boundingBox())!;
   expect(closeBounds.width).toBeGreaterThanOrEqual(44);
@@ -395,8 +413,7 @@ test("follows the mouse before release and snaps without double toggling", async
   await expect(trigger).toHaveAttribute("aria-expanded", "false");
   await swipe(0, -60);
   await expect(tree).toBeVisible();
-  await page.getByTestId("subagent-task-dock").evaluate(node => Promise.all(node.getAnimations({ subtree: true })
-    .filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished)));
+  await settledMotion(page.getByTestId("subagent-task-dock"));
   await swipe(0, 60);
   await expect(tree).toHaveCount(0);
   await expect(trigger).toBeFocused();
@@ -422,6 +439,7 @@ test.describe("touch task drawer", () => {
     const tree = page.getByTestId("subagent-task-tree");
     const cdp = await page.context().newCDPSession(page);
     const swipe = async (target: typeof trigger, dy: number, cancel = false) => {
+      await settledMotion(page.getByTestId("subagent-task-dock"));
       const bounds = (await target.boundingBox())!;
       const x = bounds.x + bounds.width / 2;
       const y = bounds.y + bounds.height / 2;
@@ -439,19 +457,16 @@ test.describe("touch task drawer", () => {
     await expect(trigger).toHaveAttribute("aria-expanded", "false");
     await swipe(trigger, -60);
     await expect(tree).toBeVisible();
-    await page.getByTestId("subagent-task-dock").evaluate(node => Promise.all(node.getAnimations({ subtree: true })
-      .filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished)));
+    await settledMotion(page.getByTestId("subagent-task-dock"));
     await swipe(trigger, 60, true);
     await expect(trigger).toHaveAttribute("aria-expanded", "true");
-    await page.getByTestId("subagent-task-dock").evaluate(node => Promise.all(node.getAnimations({ subtree: true })
-      .filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished)));
+    await settledMotion(page.getByTestId("subagent-task-dock"));
     await swipe(trigger, 60);
     await expect(tree).toHaveCount(0);
     await page.getByRole("button", { name: "增加任务", exact: true }).click();
     await trigger.tap();
     await expect(tree.locator("[data-subagent-id]")).toHaveCount(23);
-    await page.getByTestId("subagent-task-dock").evaluate(node => Promise.all(node.getAnimations({ subtree: true })
-      .filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished)));
+    await settledMotion(page.getByTestId("subagent-task-dock"));
     await swipe(tree, -100);
     await expect.poll(() => tree.evaluate(node => node.scrollTop)).toBeGreaterThan(0);
     await expect(trigger).toHaveAttribute("aria-expanded", "true");
@@ -492,8 +507,7 @@ for (const width of [1440, 390, 320]) {
     await header.click();
     await expect(rows).toHaveCount(3);
     await expect(rows.first()).toBeVisible();
-    await archive.evaluate(node => Promise.all(node.getAnimations({ subtree: true })
-      .filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished)));
+    await settledMotion(archive);
     const geometry = await archive.evaluate(node => {
       const header = node.querySelector<HTMLElement>("[data-subagent-results-summary]")!;
       const bounds = (element: Element) => element.getBoundingClientRect();

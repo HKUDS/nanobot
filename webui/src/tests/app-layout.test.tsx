@@ -427,8 +427,12 @@ describe("App layout", () => {
     // capability contract exercised by the timed DOM assertions below.
     await act(async () => { await import("@/components/thread/ThreadShell"); });
     await screen.findByRole("textbox", {}, { timeout: 5_000 });
-    if (supported) await screen.findByRole("button", { name: /Config check Running/ });
-    else expect(screen.queryByText("Config check")).not.toBeInTheDocument();
+    if (supported) {
+      const trigger = await screen.findByRole("button", { name: "Subtasks · Running: 1" });
+      expect(trigger).toHaveAttribute("aria-expanded", "false");
+      await userEvent.setup().click(trigger);
+      expect(await screen.findByRole("button", { name: /Config check Running/ })).toBeVisible();
+    } else expect(screen.queryByRole("button", { name: /Subtasks/ })).not.toBeInTheDocument();
     const reads = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith("/subagents"));
     expect(reads).toHaveLength(supported ? 1 : 0);
     expect(requestMutationSpy).not.toHaveBeenCalled();
