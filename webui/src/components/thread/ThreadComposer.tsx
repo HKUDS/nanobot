@@ -28,6 +28,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -78,6 +79,7 @@ import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
+  TooltipRegion,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
@@ -1160,6 +1162,8 @@ export function ThreadComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionOverlayRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const composerSurfaceRef = useRef<HTMLDivElement>(null);
+  useImperativeHandle(surfaceRef, () => composerSurfaceRef.current!, []);
   const [compactControls, setCompactControls] = useState(false);
 
   useLayoutEffect(() => {
@@ -2549,6 +2553,7 @@ export function ThreadComposer({
   const paletteBeside = showAnyPalette && slashPaletteLayout.placement === "beside";
 
   return (
+    <TooltipRegion scopeRef={formRef} surfaceRef={composerSurfaceRef} editorRef={textareaRef}>
     <form
       ref={formRef}
       data-compact-controls={compactControls ? "true" : undefined}
@@ -2620,7 +2625,7 @@ export function ThreadComposer({
         />
       ) : null}
       <div
-        ref={surfaceRef}
+        ref={composerSurfaceRef}
         data-compact={compactIdle || undefined}
         style={paletteBeside ? { maxHeight: slashPaletteLayout.maxHeight, overflowY: "auto" } : undefined}
         className={cn(
@@ -2899,6 +2904,7 @@ export function ThreadComposer({
         </div>
       ) : null}
     </form>
+    </TooltipRegion>
   );
 }
 
