@@ -1237,18 +1237,15 @@ describe("MessageBubble", () => {
 
     const { container } = render(<MessageBubble message={message} />);
 
+    const image = container.querySelector("img")!;
+    Object.defineProperties(image, { naturalWidth: { value: 1600 }, naturalHeight: { value: 900 } });
+    fireEvent.load(image);
     const imageButton = screen.getByRole("button", { name: /view image/i });
-    expect(imageButton).toHaveClass("w-[min(100%,28rem)]", "rounded-control");
-    expect(imageButton).toHaveClass(
-      "border",
-      "border-border/60",
-      "focus-visible:ring-2",
-    );
-    expect(imageButton).not.toHaveClass("hover:scale-[1.01]");
-    expect(imageButton).not.toHaveClass("hover:ring-2");
-    expect(imageButton).not.toHaveClass("hover:ring-primary/25");
+    expect(imageButton).toHaveClass("rounded-control", "focus-visible:ring-2");
+    expect(imageButton.style.width).toBe("448px");
+    expect(imageButton.style.height).toBe("252px");
     expect(imageButton).not.toHaveAttribute("title");
-    expect(container.querySelector("img")).toHaveClass("h-auto", "w-full", "object-contain");
+    expect(image).toHaveClass("object-contain");
   });
 
   it("renders mislabeled html assistant media as a file attachment", () => {
@@ -1268,7 +1265,8 @@ describe("MessageBubble", () => {
 
     const { container } = render(<MessageBubble message={message} />);
 
-    expect(screen.getByRole("link", { name: "Download index.html" })).toHaveTextContent("index.html");
+    expect(screen.getByRole("link", { name: "Download index.html" })).toHaveAttribute("download", "index.html");
+    expect(screen.getByRole("button", { name: "index.html" })).toBeVisible();
     expect(container.querySelector("img")).not.toBeInTheDocument();
   });
 

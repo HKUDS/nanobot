@@ -96,9 +96,14 @@ class WebUIMediaGateway:
         media: list[dict[str, Any]] = []
         for raw in paths:
             path = Path(raw)
-            if raw in local:
-                url = self.local_attachment_url(raw, session_key=session_key) if path.is_file() else ""
-            else:
-                url = sign_media_path(path, secret=self.secret, media_dir=self._media_dir) or ""
+            try:
+                if not path.is_file():
+                    url = ""
+                elif raw in local:
+                    url = self.local_attachment_url(raw, session_key=session_key)
+                else:
+                    url = sign_media_path(path, secret=self.secret, media_dir=self._media_dir) or ""
+            except OSError:
+                url = ""
             media.append({"kind": media_attachment_kind(path.name), "name": path.name, "url": url})
         return media

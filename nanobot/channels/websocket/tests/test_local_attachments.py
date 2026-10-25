@@ -149,3 +149,35 @@ async def test_mixed_media_replay_keeps_uploaded_cache_and_borrowed_freshness(tm
         assert bytes(served.body) == expected
         assert served.headers["Cache-Control"] == cache
     assert sorted(path.name for path in media.iterdir()) == ["borrowed.png", "upload.png"]
+
+
+@pytest.mark.parametrize("role", ["assistant", "user"])
+def test_replayed_media_keeps_missing_files_in_order_without_download_urls(tmp_path, monkeypatch, role):
+    media = tmp_path / "media"
+    media.mkdir()
+    first = media / "first.json"
+    missing = media / "missing.txt"
+    last = media / "last.pdf"
+    first.write_bytes(b'{"synthetic":true}')
+    last.write_bytes(b"synthetic pdf")
+    paths = [str(path) for path in (first, missing, last)]
+    gateway = WebUIMediaGateway(workspace_path=tmp_path, logger=Mock(), media_dir=lambda _: media)
+
+    def project():
+        if role == "assistant":
+            return gateway.augment_transcript_media(paths)
+        return gateway.augment_transcript_user_media(paths, [], session_key="websocket:files")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(type(first), "read_bytes", lambda *_: pytest.fail("projection read file contents"))
+        attachments = project()
+    assert [item["name"] for item in attachments] == ["first.json", "missing.txt", "last.pdf"]
+    assert attachments[1] == {"kind": "file", "name": "missing.txt", "url": ""}
+    sig, payload = attachments[0]["url"].split("/")[-2:]
+    assert bytes(gateway.serve_signed_media(sig, payload).body) == b'{"synthetic":true}'
+    assert attachments[2]["url"]
+
+    last.unlink()
+    refreshed = project()
+    assert [item["name"] for item in refreshed] == [item["name"] for item in attachments]
+    assert refreshed[2]["url"] == ""

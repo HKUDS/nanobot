@@ -55,9 +55,6 @@ import {
   ChevronDown,
   ChevronUp,
   CornerDownRight,
-  FileText,
-  Video,
-  ImageIcon,
   Loader2,
   Quote,
   Trash2,
@@ -67,6 +64,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { AttachmentCard, AttachmentTypeFace, attachmentCardActionClassName } from "@/components/AttachmentCard";
 import { ComposerActionIcon, type ComposerActionState } from "@/components/thread/ComposerActionIcon";
 import {
   floatingItemClassName,
@@ -3404,85 +3402,25 @@ function AttachmentChip({
       ? normalizedHint(image.file.size, image.encodedBytes)
       : formatBytes(image.file.size);
   const isThumbnail = image.kind === "image" && image.status !== "error";
-  const tone =
-    image.status === "error"
-      ? "border-destructive/40 bg-destructive/5 text-destructive"
-      : "border-border/70 bg-muted/60";
+  const error = image.status === "error" && image.error ? formatError(image.error) : null;
 
   return (
-    <div
-      className={cn(
-        "group relative flex max-w-full shrink-0 items-center rounded-control border",
-        "transition-colors motion-reduce:transition-none",
-        isThumbnail ? "h-24 w-24" : "gap-2 px-2 py-1.5",
-        tone,
-      )}
-      title={isThumbnail ? `${image.file.name}\n${sizeLabel}` : undefined}
-      data-testid="composer-chip"
-    >
-      <div className={cn(
-        "relative shrink-0 overflow-hidden bg-background",
-        isThumbnail ? "h-full w-full rounded-[inherit]" : "h-10 w-10 rounded-md",
-      )}>
-        {image.kind === "image" && image.previewUrl ? (
-          <img
-            src={image.previewUrl}
-            alt={isThumbnail ? image.file.name : ""}
-            loading="eager"
-            draggable={false}
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center">
-            {image.kind === "image" ? (
-              <ImageIcon className="h-4 w-4 text-muted-foreground" aria-hidden />
-            ) : image.kind === "video" ? (
-              <Video className="h-4 w-4 text-muted-foreground" aria-hidden />
-            ) : (
-              <FileText className="h-4 w-4 text-muted-foreground" aria-hidden />
-            )}
-          </div>
-        )}
-        {image.status === "encoding" ? (
-          <div
-            className="absolute inset-0 flex items-center justify-center bg-background/60"
-            aria-label={labelEncoding}
-          >
-            <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
-          </div>
-        ) : null}
-      </div>
-      {!isThumbnail ? (
-        <div className="flex min-w-0 flex-col text-[11.5px] leading-4">
-          <span className="max-w-[min(14rem,calc(100vw-8rem))] truncate font-medium" title={image.file.name}>
-            {image.file.name}
+    <div className="flex w-24 max-w-full shrink-0 flex-col gap-1" data-testid="composer-chip">
+      <AttachmentCard name={image.file.name} description={sizeLabel} invalid={!!error}
+        action={<button type="button" ref={registerRef} onClick={onRemove} onKeyDown={onKeyDown}
+          aria-label={labelRemove} aria-description={image.file.name} title={labelRemove}
+          className={cn(attachmentCardActionClassName, "group/remove focus-visible:bg-black/50 focus-visible:ring-white")}>
+          <span className="grid h-5 w-5 place-items-center rounded-full bg-black/65 text-white group-hover/remove:bg-black/80">
+            <X className="h-3 w-3" aria-hidden />
           </span>
-          <span className="truncate text-muted-foreground">
-            {image.status === "error" && image.error
-              ? formatError(image.error)
-              : sizeLabel}
-          </span>
-        </div>
-      ) : null}
-      <button
-        type="button"
-        ref={registerRef}
-        onClick={onRemove}
-        onKeyDown={onKeyDown}
-        aria-label={labelRemove}
-        aria-description={image.file.name}
-        title={labelRemove}
-        className={cn(
-          "grid flex-none place-items-center rounded-full focus-visible:outline-none focus-visible:ring-2",
-          isThumbnail
-            ? "group/remove absolute right-0 top-0 h-11 w-11 focus-visible:bg-black/50 focus-visible:ring-inset focus-visible:ring-white"
-            : "ml-1 h-5 w-5 text-muted-foreground/80 hover:text-foreground focus-visible:ring-foreground/30",
-        )}
-      >
-        <span className={cn(isThumbnail && "grid h-5 w-5 place-items-center rounded-full bg-black/65 text-white group-hover/remove:bg-black/80")}>
-          <X className={isThumbnail ? "h-3 w-3" : "h-3.5 w-3.5"} aria-hidden />
-        </span>
-      </button>
+        </button>}>
+        {isThumbnail && image.previewUrl ? <img src={image.previewUrl} alt={image.file.name} loading="eager" draggable={false}
+          className="h-full w-full object-cover" /> : <AttachmentTypeFace name={image.file.name} kind={image.kind} />}
+        {image.status === "encoding" ? <span className="absolute inset-0 flex items-center justify-center bg-background/60" aria-label={labelEncoding}>
+          <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
+        </span> : null}
+      </AttachmentCard>
+      {error ? <span className="break-words text-center text-[11px] leading-4 text-destructive">{error}</span> : null}
     </div>
   );
 }

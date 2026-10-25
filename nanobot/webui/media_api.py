@@ -184,17 +184,16 @@ def signed_media_attachments(
     *,
     sign_path: SignedMediaPath,
 ) -> list[dict[str, Any]]:
-    """Map persisted media paths to WebUI attachment dicts with fresh signed URLs."""
+    """Keep every attachment in order, signing only files available at projection time."""
     out: list[dict[str, Any]] = []
     for pstr in paths:
         path = Path(pstr)
-        att = sign_path(path)
-        if att is None:
-            continue
-        url = att.get("url")
-        if not url:
-            continue
-        name = att.get("name") or path.name
+        try:
+            att = sign_path(path) if path.is_file() else None
+        except OSError:
+            att = None
+        name = (att.get("name") if att else None) or path.name
+        url = (att.get("url") if att else None) or ""
         out.append({"kind": media_attachment_kind(name), "url": url, "name": name})
     return out
 
