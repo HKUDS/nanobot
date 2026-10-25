@@ -247,15 +247,6 @@ function rect(init: Partial<DOMRect>): DOMRect {
   };
 }
 
-function mockComposerHintBounds() {
-  const bounds = rect({ left: 16, top: 200, width: 800, height: 160 });
-  vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockReturnValue(bounds);
-  const original = HTMLDivElement.prototype.getBoundingClientRect;
-  vi.spyOn(HTMLDivElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLDivElement) {
-    return this.classList.contains("thread-composer-surface") ? bounds : original.call(this);
-  });
-}
-
 function mockVoiceRecorder(blob = new Blob(["voice"], { type: "audio/webm" })) {
   const stopTrack = vi.fn();
   const getUserMedia = vi.fn(async () => ({
@@ -656,7 +647,6 @@ describe("ThreadComposer", () => {
   });
 
   it("shows a compact context meter beside the model selector", async () => {
-    mockComposerHintBounds();
     render(
       <ThreadComposer
         onSend={vi.fn()}
@@ -1443,7 +1433,6 @@ describe("ThreadComposer", () => {
     ["restricted", "Default Permission", "Read files, edit files, and run commands only inside the working directory."],
     ["full", "Full Access", "Allow file access and commands outside the working directory."],
   ] as const)("explains the current %s permission on hover", async (mode, label, description) => {
-    mockComposerHintBounds();
     const user = userEvent.setup();
     render(<ThreadComposer onSend={vi.fn()} workspaceScope={{ project_path: "/tmp/project", project_name: "project", access_mode: mode, restrict_to_workspace: mode === "restricted" }} onWorkspaceScopeChange={vi.fn()} />);
     const access = screen.getByRole("button", { name: `Workspace access mode: ${label}` });

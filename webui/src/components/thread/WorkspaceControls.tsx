@@ -704,7 +704,7 @@ export function WorkspaceAccessMenu({
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
-      <HoverHint enabled={!open && !coarsePointer} content={description}>
+      <HoverHint enabled={!open && !coarsePointer} content={description} side="bottom" sideOffset={8}>
         <DropdownMenuTrigger asChild disabled={disabled || !onChange}>
           <button type="button" aria-label={accessAriaLabel} aria-describedby={descriptionId}
             onPointerDown={() => { restoreTriggerFocus.current = false; }}

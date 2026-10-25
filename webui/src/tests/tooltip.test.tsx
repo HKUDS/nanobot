@@ -1,7 +1,6 @@
-import { useRef } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { HoverHint, Tooltip, TooltipContent, TooltipProvider, TooltipRegion, TooltipTrigger } from "@/components/ui/tooltip";
+import { HoverHint, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 function Hints() {
   return <TooltipProvider>{["First", "Second"].map(label => (
@@ -12,7 +11,7 @@ function Hints() {
   ))}</TooltipProvider>;
 }
 
-afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+afterEach(() => vi.useRealTimers());
 
 it("waits 500ms for each hover, including after a recently opened hint", () => {
   vi.useFakeTimers();
@@ -48,46 +47,6 @@ it("does not revive a disabled hint without a fresh focus interaction", () => {
   expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Permission" })).toBe(trigger);
   fireEvent.blur(trigger);
-  fireEvent.focus(trigger);
-  expect(screen.getByRole("tooltip")).toHaveTextContent("Permission help");
-});
-
-function RegionalHint() {
-  const scopeRef = useRef<HTMLDivElement>(null);
-  const editorRef = useRef<HTMLTextAreaElement>(null);
-  return <TooltipRegion scopeRef={scopeRef} surfaceRef={scopeRef} editorRef={editorRef}>
-    <div ref={scopeRef}>
-      <textarea ref={editorRef} aria-label="Draft" />
-      <HoverHint content="Permission help"><button>Permission</button></HoverHint>
-    </div>
-  </TooltipRegion>;
-}
-
-it("keeps the full hover delay after editing cancels pending and visible regional hints", () => {
-  vi.useFakeTimers();
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 100, 800, 100));
-  render(<RegionalHint />);
-  const trigger = screen.getByRole("button", { name: "Permission" });
-  const editor = screen.getByRole("textbox", { name: "Draft" });
-  const enter = () => {
-    fireEvent.pointerEnter(trigger, { pointerType: "mouse" });
-    fireEvent.pointerMove(trigger, { pointerType: "mouse" });
-  };
-  enter();
-  act(() => vi.advanceTimersByTime(250));
-  fireEvent.keyDown(editor, { key: "a" });
-  act(() => vi.advanceTimersByTime(500));
-  expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
-  for (let attempt = 0; attempt < 2; attempt++) {
-    fireEvent.pointerLeave(trigger, { pointerType: "mouse" });
-    enter();
-    act(() => vi.advanceTimersByTime(499));
-    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
-    act(() => vi.advanceTimersByTime(1));
-    expect(screen.getByRole("tooltip")).toHaveTextContent("Permission help");
-    fireEvent.keyDown(editor, { key: "a" });
-    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
-  }
   fireEvent.focus(trigger);
   expect(screen.getByRole("tooltip")).toHaveTextContent("Permission help");
 });

@@ -5,7 +5,7 @@ import type { WorkspaceScopePayload, WorkspacesPayload } from "@/lib/types";
 const initialScope: WorkspaceScopePayload = { project_path: "/workspace", access_mode: "full" };
 const catalog: WorkspacesPayload = {
   schema_version: 1, default_access_mode: "full", default_scope: initialScope,
-  recent_projects: [], controls: { can_change_project: true, can_browse_directories: true },
+  recent_projects: [], controls: { can_change_project: true },
 };
 
 export function WorkspaceAlignmentFixture({ parameters }: { parameters: URLSearchParams }) {
