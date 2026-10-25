@@ -9,6 +9,18 @@
 .thread-composer-stack.is-hero {
   --composer-content-width: 58rem;
 }
+.subagent-task-dock {
+  --subagent-handle-inset: var(--radius-panel);
+  width: calc(100% - 0.5rem - 2 * var(--subagent-handle-inset));
+  max-width: calc(var(--composer-content-width, 49.5rem) - 2 * var(--subagent-handle-inset));
+}
+.thread-composer-stack.is-hero .subagent-task-dock {
+  --subagent-handle-inset: var(--radius-prominent);
+  width: calc(100% - 2 * var(--subagent-handle-inset));
+}
+.subagent-task-dock + .thread-composer-form {
+  padding-top: 0;
+}
 .thread-composer-notice {
   width: calc(100% - 0.5rem);
   max-width: var(--composer-content-width, 49.5rem);
@@ -20,6 +32,9 @@
 @media (min-width: 640px) {
   .thread-composer-notice {
     width: 100%;
+  }
+  .subagent-task-dock {
+    width: calc(100% - 2 * var(--subagent-handle-inset));
   }
 }
 

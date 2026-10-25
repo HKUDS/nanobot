@@ -11,13 +11,20 @@ for (const width of [1440, 390]) {
     await expect(trigger).toContainText("Running: 3");
     await page.getByTestId("subagent-task-dock").evaluate(node => Promise.all(node.getAnimations().map(animation => animation.finished)));
     const original = (await trigger.boundingBox())!;
+    const composer = page.locator(".thread-composer-surface");
+    const composerBounds = (await composer.boundingBox())!;
+    const corner = await composer.evaluate(node => Number.parseFloat(getComputedStyle(node).borderTopLeftRadius));
+    expect(original.x - composerBounds.x).toBeGreaterThanOrEqual(corner);
+    expect(composerBounds.x + composerBounds.width - original.x - original.width).toBeGreaterThanOrEqual(corner);
+    expect(original.y + original.height).toBeCloseTo(composerBounds.y, 0);
+    await page.screenshot({ path: info.outputPath("attached-handle-closed.png") });
     expect(await messages.locator('[data-testid="subagent-task-dock"]').count()).toBe(0);
     await page.getByRole("button", { name: "追加长回复", exact: true }).click();
     await expect(messages.getByText(/主助手继续输出较长的说明/).first()).toBeAttached();
     await messages.evaluate(node => { node.scrollTop = 0; });
     await expect.poll(async () => Math.abs((await trigger.boundingBox())!.y - original.y)).toBeLessThan(1);
     await expect(trigger).toBeInViewport();
-    await trigger.click();
+    await trigger.click({ position: { x: original.width - 8, y: original.height / 2 } });
     const tree = page.getByTestId("subagent-task-tree");
     await expect(tree).toBeVisible();
     const dock = page.getByTestId("subagent-task-dock");
@@ -27,10 +34,12 @@ for (const width of [1440, 390]) {
     const bounds = (await panel.boundingBox())!;
     const anchor = (await dock.boundingBox())!;
     expect(bounds.y).toBeGreaterThanOrEqual(0);
-    expect(bounds.y + bounds.height).toBeCloseTo(anchor.y + anchor.height - 1, 0);
-    expect(bounds.width).toBeGreaterThan(original.width);
+    expect(bounds.y + bounds.height).toBeCloseTo(anchor.y + anchor.height, 0);
+    expect(bounds.y + bounds.height).toBeCloseTo((await composer.boundingBox())!.y, 0);
+    expect(bounds.width).toBeCloseTo(original.width, 0);
     expect(bounds.height).toBeLessThanOrEqual(448);
     await expect(panel).toHaveAccessibleDescription("0 of 3 completed");
+    await page.mouse.move(1, 1);
     await page.screenshot({ path: info.outputPath("subtask-tree.png") });
     const row = tree.locator('[data-subagent-id="preview-0"]');
     await row.click();
@@ -335,7 +344,7 @@ test("exposes only the handle until requested and supports mouse drags without d
   await expect(page.getByRole("textbox").first()).toBeFocused();
   const swipe = async (dx: number, dy: number) => {
     const bounds = (await trigger.boundingBox())!;
-    const x = bounds.x + bounds.width / 2;
+    const x = bounds.x + 8;
     const y = bounds.y + bounds.height / 2;
     await page.mouse.move(x, y);
     await page.mouse.down();

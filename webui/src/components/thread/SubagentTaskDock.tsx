@@ -109,10 +109,8 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
   const title = t("thread.subagents.workTitle");
 
   if (!tasks.length) return null;
-  return <div ref={root} data-testid="subagent-task-dock" className="relative mx-auto h-11 w-full max-w-[var(--composer-content-width,49.5rem)] sm:h-7">
-    <div className={`absolute inset-x-1 bottom-0 z-40 overflow-hidden rounded-t-2xl rounded-b-lg border sm:inset-x-0 ${open || treeMounted
-      ? "border-border/70 bg-background shadow-[0_-4px_20px_rgba(15,23,42,0.06)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.24)]"
-      : "border-transparent"}`}>
+  return <div ref={root} data-testid="subagent-task-dock" className="subagent-task-dock relative mx-auto h-11 sm:h-7">
+    <div className="absolute inset-x-0 bottom-0 z-40 overflow-hidden rounded-t-2xl border border-b-0 border-border/70 bg-card shadow-[0_-4px_20px_rgba(15,23,42,0.06)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.24)]">
       <HoverHint enabled={!open} content={`${title} · ${summary}`}>
         <button ref={trigger} type="button" data-testid="subagent-task-dock-trigger"
           aria-expanded={open} aria-controls={panelId}
@@ -144,7 +142,7 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
             if (suppressClick.current && event.detail !== 0) { suppressClick.current = false; return; }
             changeOpen(!open, open);
           }}
-          className="group mx-auto flex h-11 w-24 touch-none select-none items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring active:cursor-grabbing motion-reduce:transition-none sm:h-7 sm:cursor-grab">
+          className="group flex h-11 w-full touch-none select-none items-center justify-center text-muted-foreground outline-none transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring active:cursor-grabbing motion-reduce:transition-none sm:h-7 sm:cursor-grab">
           <span aria-hidden className="h-1 w-8 rounded-full bg-current opacity-30 transition-opacity group-hover:opacity-60 motion-reduce:transition-none" />
           <span className="sr-only">{title} · {summary}
             {attention ? ` · ${t("thread.subagents.needsReview", { count: attention })}` : ""}
