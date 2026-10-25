@@ -625,7 +625,7 @@ async def test_on_message_unauthorized_dm_sends_pairing_code(monkeypatch) -> Non
     channel._running = True
     monkeypatch.setattr("nanobot.channels.base.is_approved", lambda _ch, _sid: False)
     monkeypatch.setattr(
-        "nanobot.channels.base.generate_code", lambda _ch, _sid: "ABCD-EFGH"
+        "nanobot.channels.base.generate_code", lambda _ch, _sid, *, on_change=None: "ABCD-EFGH"
     )
 
     await channel._on_message(message)
