@@ -170,12 +170,13 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
             ? target.closest("[data-subagent-results]")?.querySelector<HTMLButtonElement>("[aria-expanded]") : target;
           focusTarget?.focus({ preventScroll: true });
         }}>
-          <div className="shrink-0 space-y-2 border-b px-5 py-5 pr-14">
-            <SheetTitle className="break-words text-base">{selected?.label}</SheetTitle>
-            <SheetDescription className="flex items-center gap-2">
-              {selected ? <><TaskStateIcon task={selected} />
-                <span className={selected.state === "done" ? "sr-only" : undefined}>{t(`thread.subagents.states.${selected.state}`)}</span>
-                <span className="tabular-nums"><TaskElapsed task={selected} /></span></> : null}
+          <div className="flex min-h-[60px] shrink-0 items-center gap-3 border-b py-2 pl-5 pr-14">
+            <SheetTitle className="min-w-0 flex-1 truncate text-base" title={selected?.label}>{selected?.label}</SheetTitle>
+            <SheetDescription className={selected?.state === "done" ? "sr-only" : "flex shrink-0 items-center gap-2 whitespace-nowrap"}>
+              {selected ? <>
+                {selected.state !== "done" ? <TaskStateIcon task={selected} /> : null}
+                <span>{t(`thread.subagents.states.${selected.state}`)}</span>
+              </> : null}
             </SheetDescription>
           </div>
           {selected && sessionKey ? <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-5">

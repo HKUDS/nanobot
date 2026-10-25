@@ -129,6 +129,14 @@ for (const width of [1440, 390]) {
     await row.click();
     const detail = page.getByRole("dialog", { name: "检查项目实现", exact: true });
     await expect(detail.getByRole("heading", { level: 2, name: "天气结果" })).toBeVisible();
+    await expect(detail).toHaveAccessibleDescription("Completed");
+    const title = detail.getByRole("heading", { name: "检查项目实现", exact: true });
+    const titleBounds = (await title.boundingBox())!;
+    const closeBounds = (await detail.getByRole("button", { name: "Close", exact: true }).boundingBox())!;
+    expect(Math.abs(titleBounds.y + titleBounds.height / 2 - closeBounds.y - closeBounds.height / 2)).toBeLessThanOrEqual(1);
+    expect(titleBounds.x + titleBounds.width).toBeLessThanOrEqual(closeBounds.x);
+    await expect(title.locator("..")).not.toContainText(/\d+s/);
+    await title.locator("..").screenshot({ path: info.outputPath("completed-detail-header.png") });
     await page.keyboard.press("Escape");
     await expect(row).toBeFocused();
   });
@@ -319,7 +327,7 @@ test("returns to the composer when completed work is dismissed on desktop blank 
 });
 
 
-test("keeps long task names, stop controls and detail handoff usable on a narrow screen", async ({ page }) => {
+test("keeps long task names, stop controls and detail handoff usable on a narrow screen", async ({ page }, info) => {
   await page.setViewportSize({ width: 320, height: 844 });
   await page.goto("/browser/fixture.html?case=subagent-dock&long-labels");
   await page.getByTestId("subagent-task-dock-trigger").click();
@@ -341,6 +349,14 @@ test("keeps long task names, stop controls and detail handoff usable on a narrow
   const closeBounds = (await close.boundingBox())!;
   expect(closeBounds.width).toBeGreaterThanOrEqual(44);
   expect(closeBounds.height).toBeGreaterThanOrEqual(44);
+  const title = detail.getByRole("heading", { name: label, exact: true });
+  await expect(title).toHaveAttribute("title", label);
+  await expect(detail).toHaveAccessibleDescription("Running");
+  const titleBounds = (await title.boundingBox())!;
+  expect(titleBounds.height).toBeLessThan(30);
+  expect(Math.abs(titleBounds.y + titleBounds.height / 2 - closeBounds.y - closeBounds.height / 2)).toBeLessThanOrEqual(1);
+  expect(titleBounds.x + titleBounds.width).toBeLessThanOrEqual(closeBounds.x);
+  await title.locator("..").screenshot({ path: info.outputPath("long-running-detail-header.png") });
   await close.click();
   await expect(row).toBeFocused();
 });

@@ -927,7 +927,7 @@ describe("session-owned task UI", () => {
     expect(requestMutation).not.toHaveBeenCalled();
   });
 
-  it("keeps elapsed time consistent when inspecting a task long after its last event", async () => {
+  it("keeps elapsed time in task rows without repeating it in details", async () => {
     vi.useFakeTimers();
     vi.spyOn(performance, "now").mockImplementation(() => Date.now());
     render(layout());
@@ -937,7 +937,11 @@ describe("session-owned task UI", () => {
     const row = within(screen.getByTestId("subagent-task-tree")).getByRole("button", { name: /Config check Running/ });
     expect(row).toHaveTextContent("12s");
     fireEvent.click(row);
-    expect(screen.getByRole("dialog", { name: "Config check" })).toHaveTextContent("12s");
+    const detail = screen.getByRole("dialog", { name: "Config check" });
+    expect(detail).toHaveAccessibleDescription("Running");
+    expect(detail).not.toHaveTextContent("12s");
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(row).toHaveTextContent("13s");
     expect(fetch).toHaveBeenCalledTimes(1);
     vi.mocked(performance.now).mockRestore();
   });
