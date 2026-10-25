@@ -88,10 +88,26 @@ for (const width of [1440, 390]) {
     const tree = page.getByTestId("subagent-task-tree");
     const messages = page.getByTestId("thread-message-region");
     await trigger.click();
+    const row = tree.locator('[data-subagent-id="preview-0"]');
+    const panel = page.getByTestId("subagent-task-dock").getByRole("region", { name: "Subtasks", exact: true });
+    await expect(tree).toBeVisible();
+    await expect.poll(async () => Math.abs((await panel.boundingBox())!.height - (await tree.boundingBox())!.height)).toBeLessThan(1);
+    const task = row.locator("xpath=ancestor::li[1]");
+    await expect(task.locator(".loading-ring-arc")).toHaveCount(1);
+    const labelX = (await row.locator(":scope > span").nth(1).boundingBox())!.x;
+    const statusSlot = (await row.locator(":scope > span").first().boundingBox())!;
+    await page.mouse.move(1, 1);
+    await page.screenshot({ path: info.outputPath("one-task-ring-running.png") });
     // Finish through the existing control without dismissing the reading view.
     await page.getByRole("button", { name: "全部完成", exact: true }).evaluate(node => (node as HTMLButtonElement).click());
     const heading = tree.getByRole("heading", { level: 2, name: "天气结果" });
     await expect(heading).toBeVisible();
+    await expect(row).toHaveAccessibleName(/检查项目实现 Completed/);
+    await expect(row.locator("svg")).toHaveCount(0);
+    expect((await row.locator(":scope > span").nth(1).boundingBox())!.x).toBeCloseTo(labelX, 1);
+    const completedSlot = (await row.locator(":scope > span").first().boundingBox())!;
+    expect(completedSlot.width).toBeCloseTo(statusSlot.width, 1);
+    expect(completedSlot.height).toBeCloseTo(statusSlot.height, 1);
     await expect(tree.locator("strong").filter({ hasText: "10°C" })).toBeVisible();
     await page.getByTestId("subagent-task-dock").evaluate(node => Promise.all(node.getAnimations({ subtree: true })
       .filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished)));
@@ -110,7 +126,6 @@ for (const width of [1440, 390]) {
     const input = page.getByRole("textbox").first();
     await input.fill("继续阅读完整结果，同时输入下一条消息");
     await expect(trigger).toHaveAttribute("aria-expanded", "true");
-    const row = tree.locator('[data-subagent-id="preview-0"]');
     await row.click();
     const detail = page.getByRole("dialog", { name: "检查项目实现", exact: true });
     await expect(detail.getByRole("heading", { level: 2, name: "天气结果" })).toBeVisible();

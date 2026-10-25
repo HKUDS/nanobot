@@ -222,9 +222,8 @@ function TaskTree({ tasks, maxHeight }: { tasks: ObservedSubagentTask[]; maxHeig
         </div>
         {isActiveSubagentTask(task) && task.tool_events.length ? <ul className="ml-[21px] mr-2 space-y-1 border-l border-border/60 pb-2 pl-4 text-[11px] leading-4 text-muted-foreground">
           {task.tool_events.map((tool, index) => <li key={`${index}:${tool.name}`} className="flex min-h-5 min-w-0 items-center gap-2">
-            {tool.status === "running" ? <LoadingRing className="h-3 w-3 shrink-0" />
-              : tool.status === "error" ? <ErrorTaskIcon className="h-3 w-3 shrink-0 text-destructive" aria-hidden />
-                : <span className="h-1 w-1 shrink-0 rounded-full bg-current opacity-50" aria-hidden />}
+            {tool.status === "error" ? <ErrorTaskIcon className="h-3 w-3 shrink-0 text-destructive" aria-hidden />
+              : <span className="h-1 w-1 shrink-0 rounded-full bg-current opacity-50" aria-hidden />}
             <span className="truncate font-mono">{tool.name}</span>
           </li>)}
         </ul> : null}

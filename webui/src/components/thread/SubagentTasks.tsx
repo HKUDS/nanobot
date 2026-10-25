@@ -2,7 +2,6 @@ import {
   StopIcon,
   QueuedTaskIcon,
   StoppingTaskIcon,
-  CompletedTaskIcon,
   CancelledTaskIcon,
   IncompleteTaskIcon,
   InterruptedTaskIcon,
@@ -208,13 +207,13 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
 function TaskStateIcon({ task }: { task: SubagentTaskSnapshot }) {
   const className = "h-3.5 w-3.5 shrink-0";
   if (task.state === "running") return <LoadingRing className={`${className} text-muted-foreground`} />;
+  if (task.state === "done") return <span className={`${className} block`} aria-hidden />;
   const Icon = {
     queued: QueuedTaskIcon, stopping: StoppingTaskIcon,
-    done: CompletedTaskIcon, cancelled: CancelledTaskIcon, incomplete: IncompleteTaskIcon,
+    cancelled: CancelledTaskIcon, incomplete: IncompleteTaskIcon,
     interrupted: InterruptedTaskIcon, error: ErrorTaskIcon,
   }[task.state];
-  const tone = task.state === "done" ? "text-emerald-600 dark:text-emerald-400"
-    : task.state === "error" || task.state === "incomplete" ? "text-destructive" : "text-muted-foreground";
+  const tone = task.state === "error" || task.state === "incomplete" ? "text-destructive" : "text-muted-foreground";
   return <Icon key={task.state} className={`${className} ${tone} animate-in fade-in-0 duration-200 motion-reduce:animate-none`} aria-hidden />;
 }
 

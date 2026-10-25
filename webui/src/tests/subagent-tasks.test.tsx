@@ -391,6 +391,7 @@ describe("session-owned task UI", () => {
     await user.click(trigger);
     const list = screen.getByTestId("subagent-task-tree");
     const row = within(list).getByRole("button", { name: /Config check Running/ });
+    expect(row.querySelectorAll(".loading-ring-arc")).toHaveLength(1);
     await user.click(row);
     expect(screen.getByRole("dialog", { name: "Config check" })).toBeVisible();
     emitTask(task({ revision: 2, state: "done", completed_at: 102, result: "Verified the configuration" }));
@@ -398,6 +399,8 @@ describe("session-owned task UI", () => {
     await user.keyboard("{Escape}");
     expect(trigger).toHaveAttribute("aria-expanded", "true");
     expect(within(list).getByRole("button", { name: /Config check Completed/ })).toBe(row);
+    expect(row.querySelectorAll("svg")).toHaveLength(0);
+    expect(row.firstElementChild?.firstElementChild).toHaveAttribute("aria-hidden", "true");
     await waitFor(() => expect(row).toHaveFocus());
     expect(await within(list).findByText("Verified the configuration")).toBeVisible();
     await user.keyboard("{Escape}");
@@ -436,7 +439,7 @@ describe("session-owned task UI", () => {
     const user = userEvent.setup();
     vi.mocked(fetch).mockImplementation(async () => response([
       task({ task_id: "queued", label: "Waiting check", state: "queued", created_at: 101 }),
-      task({ tool_events: [{ name: "read_file", status: "running" }] }),
+      task({ tool_events: [{ name: "read_file", status: "running" }, { name: "exec", status: "running" }, { name: "web_fetch", status: "error" }] }),
     ]));
     requestMutation.mockResolvedValue(task({ revision: 2, state: "cancelled", completed_at: 102 }));
     render(layout());
@@ -445,6 +448,10 @@ describe("session-owned task UI", () => {
     await user.click(trigger);
     const list = screen.getByTestId("subagent-task-tree");
     expect(within(list).getByText("read_file")).toBeVisible();
+    expect(within(list).getByText("exec")).toBeVisible();
+    const runningTask = within(list).getByRole("button", { name: /Config check Running/ }).closest("li")!;
+    expect(runningTask.querySelectorAll(".loading-ring-arc")).toHaveLength(1);
+    expect(runningTask.querySelector('[data-product-icon="task-error"]')).toHaveClass("text-destructive");
     expect([...list.querySelectorAll("[data-subagent-id]")].map(row => row.getAttribute("data-subagent-id"))).toEqual(["task-1", "queued"]);
     await user.click(within(list).getByRole("button", { name: "Stop Config check" }));
     await within(list).findByRole("button", { name: /Config check Cancelled/ });
