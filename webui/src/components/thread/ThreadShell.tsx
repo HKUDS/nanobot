@@ -229,8 +229,6 @@ interface ThreadShellProps {
   temporaryChatEnabled?: boolean;
   onTemporaryChatEnabledChange?: (enabled: boolean) => void;
   onToggleSidebar: () => void;
-  onGoHome?: () => void;
-  onNewChat?: () => void;
   onCreateChat?: (
     workspaceScope?: WorkspaceScopePayload | null,
     initialMessage?: string,

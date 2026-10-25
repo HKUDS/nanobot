@@ -235,9 +235,6 @@ class DisplayHistoryFixture:
     def prompt_response(self, key, previous_revision, **kwargs):
         return self._project("prompt_index_response", key, previous_revision, **kwargs)
 
-    def unfinished(self, key):
-        return self._project("has_unfinished_transcript_tail", key)
-
 
 @pytest.fixture
 async def history(tmp_path: Path):

@@ -127,7 +127,7 @@ async def test_manager_keeps_shared_proxy_instance_scoped(monkeypatch) -> None:
         manager = object.__new__(ChannelManager)
         manager.config = Config(network=NetworkConfig(proxy=address))
         manager.bus = MessageBus()
-        channel = manager._build_channel("whatsapp", WhatsAppChannel, {"useProxy": True})
+        channel = manager._build_channel(WhatsAppChannel, {"useProxy": True})
         assert channel.network is manager.config.network
         channels.append(channel)
 

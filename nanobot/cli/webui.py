@@ -282,7 +282,6 @@ def webui(
             try:
                 with run_webui_dev_server(
                     target_url=webui_dev_proxy_target(webui_url),
-                    browser_url=dev_browser_url,
                     output=lambda message: console.print(message, style="dim", markup=False),
                 ) as dev_server:
                     managed = not existing_gateway or runtime.status().running

@@ -27,10 +27,8 @@ from nanobot.bus.queue import MessageBus
 from nanobot.command.builtin import cmd_new, register_builtin_commands
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.config.schema import AgentDefaults, Config
-from nanobot.providers.base import GenerationSettings
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import SessionManager
-from nanobot.utils.llm_runtime import LLMRuntime
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -52,15 +50,6 @@ def _make_loop(tmp_path: Path, unified_session: bool = False) -> AgentLoop:
             unified_session=unified_session,
         )
     return loop
-
-
-def _runtime(provider) -> LLMRuntime:
-    provider.generation = GenerationSettings(max_tokens=100)
-    return LLMRuntime.capture(
-        provider,
-        "test-model",
-        context_window_tokens=1000,
-    )
 
 
 def _make_msg(channel: str = "telegram", chat_id: str = "111",

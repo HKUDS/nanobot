@@ -662,10 +662,6 @@ class SignalChannel(BaseChannel):
                             # SSE spec: strip one optional leading space after "data:".
                             event_buffer.append(line[6:] if line[5:6] == " " else line[5:])
 
-                        # "event:" line - just log it (we only care about data)
-                        elif line.startswith("event:"):
-                            pass  # Ignore event type for now
-
                 if self._running:
                     raise ConnectionError("Signal SSE stream closed by remote endpoint")
 
@@ -723,7 +719,6 @@ class SignalChannel(BaseChannel):
             # Check different message types
             data_message = _as_json_object(envelope.get("dataMessage"))
             sync_message = _as_json_object(envelope.get("syncMessage"))
-            typing_message = _as_json_object(envelope.get("typingMessage"))
             receipt_message = _as_json_object(envelope.get("receiptMessage"))
 
             # Ignore receipt messages (delivery/read receipts)
@@ -741,10 +736,6 @@ class SignalChannel(BaseChannel):
                     self.logger.debug(
                         "Sync message sent to {}: {}", destination, sent_msg.get("message", "")[:50]
                     )
-
-            # Handle typing indicators (silently ignore)
-            elif typing_message:
-                pass  # Ignore typing indicators
 
     async def _handle_data_message(
         self,

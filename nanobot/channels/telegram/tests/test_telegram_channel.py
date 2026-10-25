@@ -794,7 +794,7 @@ async def test_running_message_handler_reorders_same_session_updates() -> None:
     seen: list[int] = []
     processed = asyncio.Event()
 
-    async def fake_process(update, context) -> None:
+    async def fake_process(update) -> None:
         seen.append(update.message.message_id)
         if len(seen) == 2:
             processed.set()

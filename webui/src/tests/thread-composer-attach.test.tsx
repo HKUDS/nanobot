@@ -41,9 +41,7 @@ function resolveReady(file: File): Extract<EncodeResponse, { ok: true }> {
     id: "stub",
     ok: true,
     dataUrl: `data:image/png;base64,${btoa(file.name)}`,
-    mime: "image/png",
     bytes: file.size,
-    origBytes: file.size,
     normalized: false,
   };
 }

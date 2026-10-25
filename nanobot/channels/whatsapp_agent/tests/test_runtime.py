@@ -94,10 +94,6 @@ def _text_message(wamid: str, body: str = "hi", sender: str = "user:55") -> dict
     }
 
 
-def _json_response(status: int, payload: Any) -> httpx.Response:
-    return httpx.Response(status, json=payload)
-
-
 # ----------------------------------------------------------------------
 # Retry policy
 # ----------------------------------------------------------------------

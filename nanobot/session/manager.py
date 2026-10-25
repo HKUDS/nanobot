@@ -40,8 +40,6 @@ _MESSAGE_TIME_PREFIX_RE = re.compile(r"^\[Message Time: [^\]]+\]\n?")
 _LOCAL_IMAGE_BREADCRUMB_RE = re.compile(r"^\[image: (?:/|~)[^\]]+\]\s*$")
 _TOOL_CALL_ECHO_RE = re.compile(r'^\s*(?:generate_image|message)\([^)]*\)\s*$')
 _SESSION_PREVIEW_MAX_CHARS = 120
-_SESSION_LIST_PREVIEW_MAX_RECORDS = 200
-_SESSION_LIST_PREVIEW_MAX_CHARS = 1_000_000
 _FORK_VOLATILE_METADATA_KEYS = {
     "_stopped_at_iteration_limit",
     PARENT_SESSION_KEY,
@@ -483,11 +481,6 @@ class SessionManager:
     def decode_storage_key(stem: str) -> str | None:
         """Public decoder for components that inspect canonical session filenames."""
         return SessionManager._decode_storage_key(stem)
-
-    @classmethod
-    def _session_key_from_path(cls, path: Path) -> str | None:
-        """Decode a session key only from a canonical collision-resistant filename."""
-        return SessionLocation.session_key_from_path(path)
 
     def _require_offline_mutation(self) -> None:
         if self._state is not None and self._state.is_bound:

@@ -2416,10 +2416,7 @@ def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path) 
     def fake_dev_server(**kwargs):
         seen["dev_kwargs"] = kwargs
         seen["dev_running"] = True
-        dev_server = SimpleNamespace(
-            url=kwargs["browser_url"],
-            ensure_running=lambda: None,
-        )
+        dev_server = SimpleNamespace(ensure_running=lambda: None)
         seen["dev_server"] = dev_server
         try:
             yield dev_server
@@ -2464,11 +2461,9 @@ def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path) 
     dev_kwargs = seen["dev_kwargs"]
     assert isinstance(dev_kwargs, dict)
     assert dev_kwargs["target_url"] == "http://127.0.0.1:8899"
-    browser_url = dev_kwargs["browser_url"]
-    assert isinstance(browser_url, str)
     saved = json.loads(config_file.read_text(encoding="utf-8"))
     secret = saved["channels"]["websocket"]["tokenIssueSecret"]
-    assert browser_url == f"http://127.0.0.1:5173/#/?bootstrapSecret={secret}"
+    browser_url = f"http://127.0.0.1:5173/#/?bootstrapSecret={secret}"
     assert seen["start_options"].port == 18888
     assert seen["attached_while_dev_running"] is True
     assert seen["attach_kwargs"]["poll_hook"] == seen["dev_server"].ensure_running

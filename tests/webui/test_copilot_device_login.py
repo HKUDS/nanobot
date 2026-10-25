@@ -30,7 +30,7 @@ def test_copilot_prompt_poll_and_owned_cancellation(monkeypatch):
     registry = WebUIOAuthFlowRegistry()
     payload = login_oauth_provider(
         Config(), {"provider": ["github_copilot"]}, oauth_flows=registry,
-        config_path=None, settings_payload=lambda **_: {},
+        config_path=None,
     )
     assert set(payload) == {
         "status", "provider", "flow_id", "authorization_url", "user_code",
@@ -73,14 +73,14 @@ def test_cancels_copilot_login_while_device_prompt_is_loading(monkeypatch, tmp_p
         get_token_path=lambda: tmp_path / "copilot.json", save=saved.append,
     ))
     registry = WebUIOAuthFlowRegistry()
-    kwargs = dict(oauth_flows=registry, config_path=None, settings_payload=lambda **_: {})
+    kwargs = dict(oauth_flows=registry, config_path=None)
     query = {"provider": ["github_copilot"]}
     with ThreadPoolExecutor(max_workers=1) as pool:
         started = pool.submit(login_oauth_provider, Config(), query, **kwargs)
         try:
             assert entered.wait(2)
             if action == "logout":
-                logout_oauth_provider(query, **kwargs)
+                logout_oauth_provider(query, **kwargs, settings_payload=lambda **_: {})
             else:
                 replacement = login_oauth_provider(Config(), query, **kwargs)
                 assert registry.get("github_copilot", replacement["flow_id"]) is not None
@@ -114,7 +114,7 @@ def test_failed_copilot_start_removes_registered_flow(monkeypatch):
     with pytest.raises(WebUISettingsError, match="GitHub sign-in failed"):
         login_oauth_provider(
             Config(), {"provider": ["github_copilot"]}, oauth_flows=registry,
-            config_path=None, settings_payload=lambda **_: {},
+            config_path=None,
         )
     assert len(registered) == 1
     provider, flow_id, flow = registered[0]

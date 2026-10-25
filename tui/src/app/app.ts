@@ -1688,8 +1688,6 @@ export class NanobotTui {
       mode,
       this.renderer.width,
       footerHintTheme(this.palette),
-      process.platform,
-      Boolean(this.renderer.capabilities?.kitty_keyboard),
     )
   }
 

@@ -630,7 +630,7 @@ def _build_codex_http_error(status_code: int, headers: httpx.Headers, raw: str) 
         for marker in ("context_management", "compact_threshold", "compaction_trigger")
     )
     return _CodexHTTPError(
-        _friendly_error(status_code, raw), status_code=status_code,
+        _friendly_error(status_code), status_code=status_code,
         retry_after=retry_after, error_type=error_type, error_code=error_code,
         should_retry=_should_retry_status(status_code, error_type, error_code, raw),
         compaction_unsupported=compaction_unsupported,
@@ -643,8 +643,7 @@ def _prompt_cache_key(session_id: str) -> str:
     return hashlib.sha256(session_id.encode("utf-8")).hexdigest()
 
 
-def _friendly_error(status_code: int, raw: str) -> str:
-    _ = raw
+def _friendly_error(status_code: int) -> str:
     if status_code == 429:
         return "ChatGPT usage quota exceeded or rate limit triggered. Please try again later."
     return f"HTTP {status_code}: Codex API request failed"

@@ -539,7 +539,6 @@ class SlackChannel(BaseChannel):
         content = text if is_slash else await self._with_thread_context(
             text,
             chat_id=chat_id,
-            channel_type=channel_type,
             thread_ts=thread_ts,
             raw_thread_ts=raw_thread_ts,
             current_ts=event_ts,
@@ -674,13 +673,11 @@ class SlackChannel(BaseChannel):
         text: str,
         *,
         chat_id: str,
-        channel_type: str,
         thread_ts: str | None,
         raw_thread_ts: str | None,
         current_ts: str | None,
     ) -> str:
         """Include thread history the first time the bot is pulled into a Slack thread."""
-        del channel_type  # DM and channel threads are both fetched via conversations.replies
         if (
             not self.config.include_thread_context
             or not self._web_client

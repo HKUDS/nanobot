@@ -434,10 +434,7 @@ def _display_workspace(tool: Any, fallback: Path | None) -> Path | None:
     return fallback
 
 
-def build_file_edit_start_event(
-    tracker: FileEditTracker,
-    params: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+def build_file_edit_start_event(tracker: FileEditTracker) -> dict[str, Any]:
     return _event_payload(
         tracker,
         phase="start",
@@ -450,7 +447,6 @@ def build_file_edit_start_event(
 
 def build_file_edit_end_event(
     tracker: FileEditTracker,
-    params: dict[str, Any] | None = None,
     *,
     diff: FileDiff | None = None,
 ) -> dict[str, Any]:

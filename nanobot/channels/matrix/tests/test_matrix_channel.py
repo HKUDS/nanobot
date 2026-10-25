@@ -2781,7 +2781,6 @@ async def test_fetch_media_rejects_missing_declared_size(monkeypatch, tmp_path) 
     )
 
     attachment, marker = await channel._fetch_media_attachment(
-        SimpleNamespace(room_id="!room:matrix.org"),
         event,
     )
 
@@ -2809,7 +2808,6 @@ async def test_fetch_media_rejects_bool_declared_size(monkeypatch, tmp_path) -> 
     )
 
     attachment, marker = await channel._fetch_media_attachment(
-        SimpleNamespace(room_id="!room:matrix.org"),
         event,
     )
 
@@ -2837,7 +2835,6 @@ async def test_fetch_media_rejects_declared_oversized_before_download(monkeypatc
     )
 
     attachment, marker = await channel._fetch_media_attachment(
-        SimpleNamespace(room_id="!room:matrix.org"),
         event,
     )
 
@@ -2865,7 +2862,6 @@ async def test_fetch_media_maps_streaming_cap_to_too_large(monkeypatch, tmp_path
     )
 
     attachment, marker = await channel._fetch_media_attachment(
-        SimpleNamespace(room_id="!room:matrix.org"),
         event,
     )
 

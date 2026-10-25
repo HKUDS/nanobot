@@ -44,11 +44,6 @@ def mock_agent():
     return _make_mock_agent()
 
 
-@pytest.fixture
-def app(mock_agent):
-    return create_app(mock_agent, model_name="test-model", request_timeout=10.0, api_key=API_KEY)
-
-
 @pytest_asyncio.fixture
 async def aiohttp_client():
     clients: list[TestClient] = []

@@ -37,11 +37,9 @@
 .gallery-code { overflow: auto; border-radius: var(--radius-control); padding: 1rem; background: hsl(var(--muted)); font-size: 12px; line-height: 1.6; tab-size: 2; }
 
 .gallery-startup-preview .startup-shell { position: relative; height: 100%; }
-.gallery-startup-preview .startup-header { display: flex; justify-content: space-between; padding: 5px 13px; }
-.gallery-startup-preview .startup-control-shadow { width: 28px; height: 28px; border-radius: 8px; background: rgba(0, 0, 0, .025); }
 .gallery-startup-preview .startup-composer { position: absolute; inset-inline: 16px; bottom: max(24px, env(safe-area-inset-bottom)); box-sizing: border-box; max-width: 768px; margin-inline: auto; height: 96px; border-radius: 24px; background: rgba(0, 0, 0, .025); }
 .gallery-startup-preview .startup-status { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-html.dark .gallery-startup-preview :is(.startup-control-shadow, .startup-composer) { background: rgba(255, 255, 255, .035); }
+html.dark .gallery-startup-preview .startup-composer { background: rgba(255, 255, 255, .035); }
 
 @media (max-width: 700px) {
   .gallery-header { padding: 0.75rem 1rem; }

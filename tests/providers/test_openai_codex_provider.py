@@ -16,13 +16,12 @@ from nanobot.events import ContextCompactionEvent, EventSink
 from nanobot.providers.factory import make_provider
 from nanobot.providers.openai_codex_provider import (
     OpenAICodexProvider,
+    _build_codex_http_error,
     _build_reasoning_options,
     _codex_error_details,
     _codex_error_response,
     _CodexHTTPError,
-    _friendly_error,
     _request_codex,
-    _should_retry_status,
 )
 from nanobot.providers.openai_responses import (
     build_responses_state,
@@ -107,7 +106,7 @@ def codex_warning_log(monkeypatch):
 def test_codex_http_friendly_error_omits_raw_body() -> None:
     raw = "raw upstream body with PRIVATE PROMPT MUST NOT APPEAR"
 
-    message = _friendly_error(500, raw)
+    message = str(_build_codex_http_error(500, httpx.Headers(), raw))
 
     assert message == "HTTP 500: Codex API request failed"
     assert "PRIVATE PROMPT MUST NOT APPEAR" not in message
@@ -825,7 +824,10 @@ async def test_codex_429_preserves_retry_semantics(
 
 def test_codex_429_friendly_message_fallback_does_not_override_unknown_retry() -> None:
     response = _codex_error_response(
-        _CodexHTTPError(_friendly_error(429, ""), status_code=429)
+        _CodexHTTPError(
+            "ChatGPT usage quota exceeded or rate limit triggered. Please try again later.",
+            status_code=429,
+        )
     )
 
     assert response.error_status_code == 429
@@ -843,9 +845,9 @@ def test_codex_429_classification_uses_raw_error_semantics(
     raw: str,
     expected_retry: bool,
 ) -> None:
-    error_type, error_code = provider_base.LLMProvider._extract_error_type_code(raw)
+    error = _build_codex_http_error(429, httpx.Headers(), raw)
 
-    assert _should_retry_status(429, error_type, error_code, raw) is expected_retry
+    assert error.should_retry is expected_retry
 
 
 def test_codex_reasoning_options_request_summary_without_forcing_effort() -> None:

@@ -111,9 +111,6 @@ class HistoryReader:
         ):
             yield HistoryTurn(*row)
 
-    def read_turn(self, ordinal: int) -> list[HistoryFact]:
-        return [fact for _, fact in self.read_entries(ordinal)]
-
     def read_entries(
         self, ordinal: int, *, max_records: int | None = None, max_bytes: int | None = None,
     ) -> list[tuple[int, HistoryFact]]:

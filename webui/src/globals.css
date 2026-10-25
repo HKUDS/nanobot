@@ -608,9 +608,6 @@
       animation: none;
       content: "";
     }
-    .streaming-text-fallback::after {
-      animation: none;
-    }
   }
 
   /**
@@ -753,27 +750,12 @@
       transform: translateY(0) scale(1);
     }
   }
-  @keyframes composer-status-strip-exit {
-    0% {
-      max-height: var(--composer-strip-max-height, 46px);
-      opacity: 1;
-      transform: translateY(0) scale(1);
-    }
-    100% {
-      max-height: 0;
-      opacity: 0;
-      transform: translateY(8px) scale(0.99);
-    }
-  }
   .composer-status-strip {
     transform-origin: bottom center;
     will-change: max-height, opacity, transform;
   }
   .composer-status-strip[data-state="enter"] {
     animation: composer-status-strip-enter 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
-  }
-  .composer-status-strip[data-state="exit"] {
-    animation: composer-status-strip-exit 180ms ease-in both;
   }
   .composer-status-drawer {
     --composer-status-drawer-duration: 220ms;
@@ -847,19 +829,6 @@
       transform: translateY(0);
     }
   }
-  @keyframes queued-prompt-row-enter {
-    0% {
-      opacity: 0;
-      transform: translateY(6px);
-    }
-    100% {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-  .queued-prompt-row {
-    animation: queued-prompt-row-enter 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
-  }
   @media (prefers-reduced-motion: reduce) {
     .composer-status-strip {
       will-change: auto;
@@ -876,9 +845,6 @@
     }
     .thread-layout {
       transition-duration: 0.01ms;
-    }
-    .queued-prompt-row {
-      animation: none;
     }
   }
 
@@ -999,13 +965,6 @@
   .thread-viewport {
     container-name: thread-viewport;
     container-type: inline-size;
-  }
-
-  @supports (content-visibility: auto) {
-    .thread-render-unit {
-      content-visibility: auto;
-      contain-intrinsic-size: auto 12rem;
-    }
   }
 
   .thread-prompt-rail {

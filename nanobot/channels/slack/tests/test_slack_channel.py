@@ -464,7 +464,6 @@ async def test_with_thread_context_fetches_root_once() -> None:
     content = await channel._with_thread_context(
         "what did you see?",
         chat_id="C123",
-        channel_type="channel",
         thread_ts="111.000",
         raw_thread_ts="111.000",
         current_ts="113.000",
@@ -483,7 +482,6 @@ async def test_with_thread_context_fetches_root_once() -> None:
     second = await channel._with_thread_context(
         "again",
         chat_id="C123",
-        channel_type="channel",
         thread_ts="111.000",
         raw_thread_ts="111.000",
         current_ts="114.000",
@@ -509,7 +507,6 @@ async def test_with_thread_context_fetches_replies_in_dm_thread() -> None:
     content = await channel._with_thread_context(
         "what did you see?",
         chat_id="D123",
-        channel_type="im",
         thread_ts="211.000",
         raw_thread_ts="211.000",
         current_ts="213.000",

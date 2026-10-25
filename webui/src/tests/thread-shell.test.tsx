@@ -1221,22 +1221,19 @@ describe("ThreadShell", () => {
 
   it("does not navigate away when clicking the chat title", async () => {
     const client = makeClient();
-    const onGoHome = vi.fn();
     render(wrap(
       client,
       <ThreadShell
         session={session("chat-title")}
         title="Important conversation"
         onToggleSidebar={() => {}}
-        onGoHome={onGoHome}
-        onNewChat={() => {}}
       />,
     ));
 
     await waitFor(() => expect(screen.getByText("Important conversation")).toBeInTheDocument());
     fireEvent.click(screen.getByText("Important conversation"));
 
-    expect(onGoHome).not.toHaveBeenCalled();
+    expect(screen.getByText("Important conversation")).toBeVisible();
   });
 
   it.each([true, false])("waits for parent settings and retries only on failure (success: %s)", async (success) => {
@@ -1768,7 +1765,6 @@ describe("ThreadShell", () => {
 
   it("restores in-memory messages when switching away and back to a session", async () => {
     const client = makeClient();
-    const onNewChat = vi.fn().mockResolvedValue("chat-a");
 
     const { rerender } = render(
       wrap(
@@ -1777,8 +1773,6 @@ describe("ThreadShell", () => {
           session={session("chat-a")}
           title="Chat chat-a"
           onToggleSidebar={() => {}}
-          onGoHome={() => {}}
-          onNewChat={onNewChat}
         />,
       ),
     );
@@ -1801,8 +1795,6 @@ describe("ThreadShell", () => {
             session={session("chat-b")}
             title="Chat chat-b"
             onToggleSidebar={() => {}}
-            onGoHome={() => {}}
-            onNewChat={onNewChat}
           />,
         ),
       );
@@ -1816,8 +1808,6 @@ describe("ThreadShell", () => {
             session={session("chat-a")}
             title="Chat chat-a"
             onToggleSidebar={() => {}}
-            onGoHome={() => {}}
-            onNewChat={onNewChat}
           />,
         ),
       );
@@ -1988,7 +1978,6 @@ describe("ThreadShell", () => {
 
   it("clears the old thread when the active session is removed", async () => {
     const client = makeClient();
-    const onNewChat = vi.fn().mockResolvedValue("chat-a");
 
     const { rerender } = render(
       wrap(
@@ -1997,8 +1986,6 @@ describe("ThreadShell", () => {
           session={session("chat-a")}
           title="Chat chat-a"
           onToggleSidebar={() => {}}
-          onGoHome={() => {}}
-          onNewChat={onNewChat}
         />,
       ),
     );
@@ -2021,8 +2008,6 @@ describe("ThreadShell", () => {
             session={null}
             title="nanobot"
             onToggleSidebar={() => {}}
-            onGoHome={() => {}}
-            onNewChat={onNewChat}
           />,
         ),
       );
@@ -2036,7 +2021,6 @@ describe("ThreadShell", () => {
 
   it("creates a chat only when the blank landing sends a first message", async () => {
     const client = makeClient();
-    const onNewChat = vi.fn();
     const onCreateChat = vi.fn().mockResolvedValue("chat-new");
 
     render(
@@ -2046,8 +2030,6 @@ describe("ThreadShell", () => {
           session={null}
           title="nanobot"
           onToggleSidebar={() => {}}
-          onGoHome={() => {}}
-          onNewChat={onNewChat}
           onCreateChat={onCreateChat}
         />,
       ),
@@ -2060,7 +2042,6 @@ describe("ThreadShell", () => {
 
     await waitFor(() => expect(onCreateChat).toHaveBeenCalledTimes(1));
     expect(onCreateChat).toHaveBeenCalledWith(null, "start for real", null);
-    expect(onNewChat).not.toHaveBeenCalled();
   });
 
   it("applies the selected landing preset before sending the first prompt", async () => {
@@ -2377,8 +2358,6 @@ describe("ThreadShell", () => {
           session={null}
           title="nanobot"
           onToggleSidebar={() => {}}
-          onGoHome={() => {}}
-          onNewChat={() => {}}
         />,
       ),
     );
@@ -2394,7 +2373,6 @@ describe("ThreadShell", () => {
 
   it("does not leak the previous thread when opening a brand-new chat", async () => {
     const client = makeClient();
-    const onNewChat = vi.fn().mockResolvedValue("chat-new");
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -2422,8 +2400,6 @@ describe("ThreadShell", () => {
           session={session("chat-a")}
           title="Chat chat-a"
           onToggleSidebar={() => {}}
-          onGoHome={() => {}}
-          onNewChat={onNewChat}
         />,
       ),
     );
@@ -2438,8 +2414,6 @@ describe("ThreadShell", () => {
             session={session("chat-new")}
             title="Chat chat-new"
             onToggleSidebar={() => {}}
-            onGoHome={() => {}}
-            onNewChat={onNewChat}
           />,
         ),
       );
@@ -2507,7 +2481,6 @@ describe("ThreadShell", () => {
 
   it("does not cache optimistic messages under the next chat during a session switch", async () => {
     const client = makeClient();
-    const onNewChat = vi.fn().mockResolvedValue("chat-b");
 
     const { rerender } = render(
       wrap(
@@ -2516,8 +2489,6 @@ describe("ThreadShell", () => {
           session={session("chat-a")}
           title="Chat chat-a"
           onToggleSidebar={() => {}}
-          onGoHome={() => {}}
-          onNewChat={onNewChat}
         />,
       ),
     );
@@ -2540,8 +2511,6 @@ describe("ThreadShell", () => {
             session={session("chat-b")}
             title="Chat chat-b"
             onToggleSidebar={() => {}}
-            onGoHome={() => {}}
-            onNewChat={onNewChat}
           />,
         ),
       );
@@ -2559,8 +2528,6 @@ describe("ThreadShell", () => {
             session={session("chat-a")}
             title="Chat chat-a"
             onToggleSidebar={() => {}}
-            onGoHome={() => {}}
-            onNewChat={onNewChat}
           />,
         ),
       );
@@ -2576,8 +2543,6 @@ describe("ThreadShell", () => {
             session={session("chat-b")}
             title="Chat chat-b"
             onToggleSidebar={() => {}}
-            onGoHome={() => {}}
-            onNewChat={onNewChat}
           />,
         ),
       );
@@ -2612,7 +2577,6 @@ describe("ThreadShell", () => {
           session={session("chat-a")}
           title="Chat chat-a"
           onToggleSidebar={() => {}}
-          onNewChat={() => {}}
         />,
       ),
     );
@@ -2635,7 +2599,6 @@ describe("ThreadShell", () => {
             session={null}
             title="nanobot"
             onToggleSidebar={() => {}}
-            onNewChat={() => {}}
           />,
         ),
       );
@@ -2652,7 +2615,6 @@ describe("ThreadShell", () => {
             session={session("chat-a")}
             title="Chat chat-a"
             onToggleSidebar={() => {}}
-            onNewChat={() => {}}
           />,
         ),
       );
@@ -2669,7 +2631,6 @@ describe("ThreadShell", () => {
         session={session(chatId)}
         title={`Chat ${chatId}`}
         onToggleSidebar={() => {}}
-        onNewChat={() => {}}
       />,
     );
     const { rerender } = render(view("chat-a"));
@@ -2731,7 +2692,6 @@ describe("ThreadShell", () => {
           session={session("chat-fork")}
           title="Chat chat-fork"
           onToggleSidebar={() => {}}
-          onNewChat={() => {}}
         />,
       ),
     );
@@ -2808,7 +2768,6 @@ describe("ThreadShell", () => {
           session={session("resume-chat")}
           title="Resume chat"
           onToggleSidebar={() => {}}
-          onNewChat={() => {}}
         />,
       ),
     );
@@ -2861,7 +2820,7 @@ describe("ThreadShell", () => {
     }));
     render(wrap(client, <ThreadShell
       session={session(chatId)} title="Cached completion"
-      onToggleSidebar={() => {}} onNewChat={() => {}}
+      onToggleSidebar={() => {}}
     />));
     await screen.findByText("question");
     act(() => {
@@ -2913,7 +2872,7 @@ describe("ThreadShell", () => {
     }));
     render(wrap(client, <ThreadShell
       session={session(chatId)} title="Published completion"
-      onToggleSidebar={() => {}} onNewChat={() => {}}
+      onToggleSidebar={() => {}}
     />));
     await screen.findByText("question");
     act(() => {
@@ -2989,7 +2948,6 @@ describe("ThreadShell", () => {
           session={session("mount-during-reconnect")}
           title="Mount during reconnect"
           onToggleSidebar={() => {}}
-          onNewChat={() => {}}
         />,
       ),
     );
@@ -3055,7 +3013,6 @@ describe("ThreadShell", () => {
           session={session("window-reset-chat")}
           title="Window reset"
           onToggleSidebar={() => {}}
-          onNewChat={() => {}}
         />,
       ),
     );
@@ -3119,7 +3076,6 @@ describe("ThreadShell", () => {
         session={session(chatId)}
         title={`Chat ${chatId}`}
         onToggleSidebar={() => {}}
-        onNewChat={() => {}}
       />,
     );
     const { rerender } = render(view("lineage-chat-a"));
@@ -3175,7 +3131,6 @@ describe("ThreadShell", () => {
           session={session("reset-tail-race")}
           title="Reset tail race"
           onToggleSidebar={() => {}}
-          onNewChat={() => {}}
         />,
       ),
     );
@@ -3237,7 +3192,6 @@ describe("ThreadShell", () => {
           session={session("empty-reset-chat")}
           title="Empty reset"
           onToggleSidebar={() => {}}
-          onNewChat={() => {}}
         />,
       ),
     );
@@ -3316,7 +3270,6 @@ describe("ThreadShell", () => {
             session={session("strict-canonical")}
             title="Strict canonical"
             onToggleSidebar={() => {}}
-            onNewChat={() => {}}
           />
         </StrictMode>,
       ),
@@ -3383,7 +3336,7 @@ describe("ThreadShell", () => {
       return Promise.resolve(httpJson(completedBody(true)));
     }));
     render(wrap(client, <ThreadShell session={session(chatId)} title="Layout recheck"
-      onToggleSidebar={() => {}} onNewChat={() => {}} />));
+      onToggleSidebar={() => {}} />));
     await screen.findByText("layout question");
     act(() => {
       client._emitChat(chatId, {
@@ -3473,7 +3426,6 @@ describe("ThreadShell", () => {
         session={session(chatId)}
         title={`Chat ${chatId}`}
         onToggleSidebar={() => {}}
-        onNewChat={() => {}}
       />,
     );
     const { rerender } = render(view("chat-version-a"));
@@ -3559,7 +3511,6 @@ describe("ThreadShell", () => {
           session={session("run-generation-chat")}
           title="Run generation chat"
           onToggleSidebar={() => {}}
-          onNewChat={() => {}}
         />,
       ),
     );
@@ -3623,7 +3574,7 @@ describe("ThreadShell", () => {
     }));
     render(wrap(client, <ThreadShell
       session={session(chatId)} title="Guided turn"
-      onToggleSidebar={() => {}} onNewChat={() => {}}
+      onToggleSidebar={() => {}}
     />));
     await screen.findByText("guided question");
     act(() => {
@@ -3752,7 +3703,7 @@ describe("ThreadShell", () => {
     }));
     render(wrap(client, <ThreadShell
       session={session(chatId)} title="Completed latest window" messageCache={messageCache}
-      onToggleSidebar={() => {}} onNewChat={() => {}}
+      onToggleSidebar={() => {}}
     />));
     const completed = await screen.findByText("completed reply");
     const older = screen.getByText("older paginated answer");
@@ -3817,7 +3768,7 @@ describe("ThreadShell", () => {
     }));
     render(wrap(client, <ThreadShell
       session={session(chatId)} title="Completed paged guidance" messageCache={messageCache}
-      onToggleSidebar={() => {}} onNewChat={() => {}}
+      onToggleSidebar={() => {}}
     />));
     await screen.findByText("completed last");
     const messages = [
@@ -3859,7 +3810,6 @@ describe("ThreadShell", () => {
       session={session("initial-completion")}
       title="Initial completion"
       onToggleSidebar={() => {}}
-      onNewChat={() => {}}
     />));
     await screen.findByText("previous question");
     act(() => client._emitChat("initial-completion", {
@@ -3912,7 +3862,6 @@ describe("ThreadShell", () => {
           session={session("late-frame-chat")}
           title="Late frame chat"
           onToggleSidebar={() => {}}
-          onNewChat={() => {}}
         />,
       ),
     );
@@ -4003,7 +3952,6 @@ describe("ThreadShell", () => {
         session={session(chatId)}
         title={`Chat ${chatId}`}
         onToggleSidebar={() => {}}
-        onNewChat={() => {}}
       />,
     );
     const { rerender } = render(view("visibility-complete-a"));
@@ -4063,7 +4011,6 @@ describe("ThreadShell", () => {
           session={session("empty-answer")}
           title="Empty answer"
           onToggleSidebar={() => {}}
-          onNewChat={() => {}}
         />,
       ),
     );
@@ -4123,7 +4070,7 @@ describe("ThreadShell", () => {
 
       render(wrap(client, <ThreadShell
         session={session(chatId)} title="Running history"
-        onToggleSidebar={() => {}} onNewChat={() => {}}
+        onToggleSidebar={() => {}}
       />));
 
       await screen.findByText("previous answer");
@@ -4277,7 +4224,7 @@ describe("ThreadShell", () => {
     }));
     const { container } = render(wrap(client, <ThreadShell
       session={session(chatId)} title="Running paged history"
-      onToggleSidebar={() => {}} onNewChat={() => {}}
+      onToggleSidebar={() => {}}
     />));
     await screen.findByText("current question");
     act(() => client._emitChat(chatId, {
@@ -4345,8 +4292,6 @@ describe("ThreadShell", () => {
           session={session("before-delta-chat")}
           title="Before delta chat"
           onToggleSidebar={() => {}}
-          onGoHome={() => {}}
-          onNewChat={() => {}}
         />,
       ),
     );
@@ -4445,7 +4390,6 @@ describe("ThreadShell", () => {
           session={session("active-resume-chat")}
           title="Active resume chat"
           onToggleSidebar={() => {}}
-          onNewChat={() => {}}
         />,
       ),
     );
@@ -4532,7 +4476,6 @@ describe("ThreadShell", () => {
           session={session("timing-chat")}
           title="Timing chat"
           onToggleSidebar={() => {}}
-          onNewChat={() => {}}
         />,
       ),
     );
@@ -4618,7 +4561,6 @@ describe("ThreadShell", () => {
             session={session("visible-chat")}
             title="Visible chat"
             onToggleSidebar={() => {}}
-            onNewChat={() => {}}
           />,
         ),
       );
@@ -4682,7 +4624,6 @@ describe("ThreadShell", () => {
             session={session("idle-visible-chat")}
             title="Idle visible chat"
             onToggleSidebar={() => {}}
-            onNewChat={() => {}}
           />,
         ),
       );
@@ -4739,7 +4680,6 @@ describe("ThreadShell", () => {
             session={session("retry-visible-chat")}
             title="Retry visible chat"
             onToggleSidebar={() => {}}
-            onNewChat={() => {}}
           />,
         ),
       );
@@ -4795,7 +4735,6 @@ describe("ThreadShell", () => {
           session={session("chat-a")}
           title="Chat chat-a"
           onToggleSidebar={() => {}}
-          onNewChat={() => {}}
         />,
       ),
     );
@@ -4855,7 +4794,6 @@ describe("ThreadShell", () => {
           session={session("chat-a")}
           title="Chat chat-a"
           onToggleSidebar={() => {}}
-          onNewChat={() => {}}
         />,
       ),
     );
@@ -4906,7 +4844,6 @@ describe("ThreadShell", () => {
         session={session("token-media")}
         title="Token media"
         onToggleSidebar={() => {}}
-        onNewChat={() => {}}
       />,
       null,
       token,
@@ -4960,7 +4897,6 @@ describe("ThreadShell", () => {
             session={session("chat-a")}
             title="Chat chat-a"
             onToggleSidebar={() => {}}
-            onNewChat={() => {}}
           />,
         ),
       );
@@ -5023,7 +4959,6 @@ describe("ThreadShell", () => {
             session={session("chat-follow")}
             title="Chat follow"
             onToggleSidebar={() => {}}
-            onNewChat={() => {}}
           />,
         ),
       );
@@ -5119,7 +5054,6 @@ describe("ThreadShell", () => {
           session={null}
           title="nanobot"
           onToggleSidebar={() => {}}
-          onNewChat={() => {}}
         />,
       ),
     );
@@ -5142,7 +5076,6 @@ describe("ThreadShell", () => {
             session={session("chat-a")}
             title="Chat chat-a"
             onToggleSidebar={() => {}}
-            onNewChat={() => {}}
           />,
         ),
       );
@@ -5188,7 +5121,6 @@ describe("ThreadShell", () => {
           session={null}
           title="nanobot"
           onToggleSidebar={() => {}}
-          onNewChat={() => {}}
         />,
       ),
     );
@@ -5210,7 +5142,6 @@ describe("ThreadShell", () => {
 
   it("surfaces a dismissible banner for an uncorrelated message_too_big error", async () => {
     const client = makeClient();
-    const onNewChat = vi.fn().mockResolvedValue("chat-a");
 
     render(
       wrap(
@@ -5219,8 +5150,6 @@ describe("ThreadShell", () => {
           session={session("chat-a")}
           title="Chat chat-a"
           onToggleSidebar={() => {}}
-          onGoHome={() => {}}
-          onNewChat={onNewChat}
         />,
       ),
     );
@@ -5256,8 +5185,6 @@ describe("ThreadShell", () => {
           session={session("chat-model-failure")}
           title="Chat model failure"
           onToggleSidebar={() => {}}
-          onGoHome={() => {}}
-          onNewChat={() => {}}
         />,
       ),
     );
@@ -5347,8 +5274,6 @@ describe("ThreadShell", () => {
           session={session("chat-inline-error")}
           title="Chat inline error"
           onToggleSidebar={() => {}}
-          onGoHome={() => {}}
-          onNewChat={() => {}}
         />,
       ),
     );
@@ -5385,7 +5310,6 @@ describe("ThreadShell", () => {
 
   it("clears the stream error banner when the user switches to another chat", async () => {
     const client = makeClient();
-    const onNewChat = vi.fn().mockResolvedValue("chat-a");
 
     const { rerender } = render(
       wrap(
@@ -5394,8 +5318,6 @@ describe("ThreadShell", () => {
           session={session("chat-a")}
           title="Chat chat-a"
           onToggleSidebar={() => {}}
-          onGoHome={() => {}}
-          onNewChat={onNewChat}
         />,
       ),
     );
@@ -5416,8 +5338,6 @@ describe("ThreadShell", () => {
             session={session("chat-b")}
             title="Chat chat-b"
             onToggleSidebar={() => {}}
-            onGoHome={() => {}}
-            onNewChat={onNewChat}
           />,
         ),
       );
@@ -5430,7 +5350,6 @@ describe("ThreadShell", () => {
 
   it("clears the previous thread immediately while the next session loads", async () => {
     const client = makeClient();
-    const onNewChat = vi.fn().mockResolvedValue("chat-b");
     let resolveChatB:
       | ((value: { ok: boolean; status: number; json: () => Promise<unknown> }) => void)
       | null = null;
@@ -5465,8 +5384,6 @@ describe("ThreadShell", () => {
           session={session("chat-a")}
           title="Chat chat-a"
           onToggleSidebar={() => {}}
-          onGoHome={() => {}}
-          onNewChat={onNewChat}
         />,
       ),
     );
@@ -5481,8 +5398,6 @@ describe("ThreadShell", () => {
             session={session("chat-b")}
             title="Chat chat-b"
             onToggleSidebar={() => {}}
-            onGoHome={() => {}}
-            onNewChat={onNewChat}
           />,
         ),
       );
@@ -5556,8 +5471,6 @@ describe("ThreadShell", () => {
       session={session("lazy-mentions")}
       title="Lazy mentions"
       onToggleSidebar={() => {}}
-      onGoHome={() => {}}
-      onNewChat={() => {}}
     />));
     const input = await screen.findByLabelText("Message input");
     const catalogCalls = () => vi.mocked(fetch).mock.calls.filter(([url]) =>
@@ -5580,8 +5493,6 @@ describe("ThreadShell", () => {
       session={session("retry-mentions")}
       title="Retry mentions"
       onToggleSidebar={() => {}}
-      onGoHome={() => {}}
-      onNewChat={() => {}}
     />));
     const input = await screen.findByLabelText("Message input");
     const catalogCalls = () => vi.mocked(fetch).mock.calls.filter(([url]) =>
@@ -5605,8 +5516,6 @@ describe("ThreadShell", () => {
         session={session("chat-cli-apps")}
         title="Chat chat-cli-apps"
         onToggleSidebar={() => {}}
-        onGoHome={() => {}}
-        onNewChat={() => {}}
       />,
     ));
 
@@ -5665,8 +5574,6 @@ describe("ThreadShell", () => {
         session={session("chat-cli-race")}
         title="Chat chat-cli-race"
         onToggleSidebar={() => {}}
-        onGoHome={() => {}}
-        onNewChat={() => {}}
       />,
     ));
 
@@ -5745,8 +5652,6 @@ describe("ThreadShell", () => {
         session={session("chat-cli-refresh")}
         title="Chat chat-cli-refresh"
         onToggleSidebar={() => {}}
-        onGoHome={() => {}}
-        onNewChat={() => {}}
       />,
     ));
 

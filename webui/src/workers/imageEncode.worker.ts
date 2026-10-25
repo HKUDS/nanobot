@@ -8,7 +8,7 @@
  * full decode/resize/re-encode cycle never blocks the UI thread.
  *
  * Output contract:
- *   ``{ok: true, dataUrl, mime, bytes, origBytes, normalized}`` on success, or
+ *   ``{ok: true, dataUrl, bytes, normalized}`` on success, or
  *   ``{ok: false, reason}`` for every recoverable failure — magic-bytes
  *   mismatch, unsupported MIME, decode error, or a post-normalization payload
  *   that *still* exceeds the budget (extreme aspect ratios).
@@ -27,9 +27,7 @@ type EncodeSuccess = {
   id: string;
   ok: true;
   dataUrl: string;
-  mime: string;
   bytes: number;
-  origBytes: number;
   /** True iff the Worker re-encoded the image to hit the size budget. */
   normalized: boolean;
 };
@@ -151,7 +149,7 @@ function computeScaledDims(
 async function normalize(
   file: File,
   sourceMime: string,
-): Promise<{ dataUrl: string; mime: string; bytes: number } | { error: EncodeFailure["reason"] }> {
+): Promise<{ dataUrl: string; bytes: number } | { error: EncodeFailure["reason"] }> {
   // Re-encode paths: JPEG/WebP → WebP q=0.85; PNG/GIF → PNG (keep crisp).
   const targetMime = NORMALIZE_LOSSY_MIMES.has(sourceMime)
     ? "image/webp"
@@ -181,7 +179,7 @@ async function normalize(
     }
     const buf = await blob.arrayBuffer();
     const dataUrl = `data:${targetMime};base64,${bufferToBase64(buf)}`;
-    return { dataUrl, mime: targetMime, bytes: blob.size };
+    return { dataUrl, bytes: blob.size };
   } catch {
     try {
       bitmap.close();
@@ -211,10 +209,6 @@ export async function encodeImageInWorker(
   if (!SUPPORTED_MIMES.has(sniffed)) {
     return { id, ok: false, reason: "invalid_mime" };
   }
-  // Defend against MIME spoofing: the declared ``file.type`` can lie.
-  if (file.type && SUPPORTED_MIMES.has(file.type) && file.type !== sniffed) {
-    // Trust the magic bytes; proceed with the sniffed MIME.
-  }
 
   if (origBytes <= TARGET_MAX_BYTES) {
     const dataUrl = `data:${sniffed};base64,${bufferToBase64(buffer)}`;
@@ -222,9 +216,7 @@ export async function encodeImageInWorker(
       id,
       ok: true,
       dataUrl,
-      mime: sniffed,
       bytes: origBytes,
-      origBytes,
       normalized: false,
     };
   }
@@ -237,9 +229,7 @@ export async function encodeImageInWorker(
     id,
     ok: true,
     dataUrl: result.dataUrl,
-    mime: result.mime,
     bytes: result.bytes,
-    origBytes,
     normalized: true,
   };
 }

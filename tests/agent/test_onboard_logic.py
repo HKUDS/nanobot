@@ -196,9 +196,6 @@ class TestGetFieldTypeInfo:
 
     def test_handles_none_annotation(self):
         """Field with None annotation defaults to str."""
-        class Model(BaseModel):
-            field: Any = None
-
         # Create a mock field_info with None annotation
         field_info = SimpleNamespace(annotation=None)
         type_name, inner = _get_field_type_info(field_info)

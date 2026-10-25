@@ -2,13 +2,11 @@
   "setup": {
     "docsLabel": "에이전트 설정 가이드 열기",
     "officialLabel": "WhatsApp 에이전트 도움말 열기",
-    "summary": "WhatsApp Agent Platform API를 통해 nanobot을 연결합니다. 나만 대화할 수 있으며 다른 WhatsApp 채팅에는 접근할 수 없습니다.",
     "privacyNotice": "에이전트와의 채팅에는 종단간 암호화가 적용되지 않습니다. 메시지는 nanobot과 설정한 모델 제공업체가 처리합니다.",
     "fields": {
       "token": {
         "label": "API 토큰",
-        "placeholder": "WhatsApp에서 설정 → 에이전트를 열고 에이전트를 만든 뒤 에이전트 채팅 → 채팅 정보 → API 키에서 키를 복사하세요.",
-        "help": "WhatsApp에서 설정 → 에이전트를 열고 에이전트를 만든 뒤 에이전트 채팅 → 채팅 정보 → API 키에서 키를 복사하세요."
+        "placeholder": "WhatsApp에서 설정 → 에이전트를 열고 에이전트를 만든 뒤 에이전트 채팅 → 채팅 정보 → API 키에서 키를 복사하세요."
       },
       "allowFrom": {
         "label": "허용된 발신자",

@@ -195,7 +195,6 @@ class ChannelManager:
 
     def _build_channel(
         self,
-        name: str,
         cls: type[BaseChannel],
         section: Any,
         *,
@@ -324,7 +323,6 @@ class ChannelManager:
                     (
                         runtime_name,
                         self._build_channel(
-                            name,
                             cls,
                             spec.config,
                             runtime_name=runtime_name,
@@ -578,7 +576,6 @@ class ChannelManager:
                 (
                     runtime_name,
                     self._build_channel(
-                        name,
                         cls,
                         spec.config,
                         runtime_name=runtime_name,

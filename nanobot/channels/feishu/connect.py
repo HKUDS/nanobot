@@ -31,7 +31,6 @@ class FeishuConnectSession:
     expire_in: int
     created_wall: float
     deadline: float
-    last_error: str | None = None
 
 
 class FeishuConnectStore:
@@ -141,8 +140,7 @@ class FeishuConnectStore:
                 device_code=session.device_code,
                 domain=session.domain,
             )
-        except (RuntimeError, OSError, json.JSONDecodeError, httpx.HTTPError) as exc:
-            session.last_error = str(exc)
+        except (RuntimeError, OSError, json.JSONDecodeError, httpx.HTTPError):
             return _pending_payload(session)
 
         status = result.get("status")

@@ -2,13 +2,11 @@
   "setup": {
     "docsLabel": "Mở hướng dẫn thiết lập tác nhân",
     "officialLabel": "Mở trợ giúp tác nhân WhatsApp",
-    "summary": "Kết nối nanobot qua API WhatsApp Agent Platform. Chỉ bạn có thể trò chuyện với tác nhân và tác nhân không thể truy cập các cuộc trò chuyện WhatsApp khác của bạn.",
     "privacyNotice": "Cuộc trò chuyện với tác nhân không được mã hóa đầu cuối. Tin nhắn được xử lý bởi nanobot và nhà cung cấp mô hình bạn đã cấu hình.",
     "fields": {
       "token": {
         "label": "Mã thông báo API",
-        "placeholder": "Trong WhatsApp, mở Cài đặt → Tác nhân, tạo tác nhân, rồi sao chép khóa từ trò chuyện của tác nhân → Thông tin trò chuyện → Khóa API.",
-        "help": "Trong WhatsApp, mở Cài đặt → Tác nhân, tạo tác nhân, rồi sao chép khóa từ trò chuyện của tác nhân → Thông tin trò chuyện → Khóa API."
+        "placeholder": "Trong WhatsApp, mở Cài đặt → Tác nhân, tạo tác nhân, rồi sao chép khóa từ trò chuyện của tác nhân → Thông tin trò chuyện → Khóa API."
       },
       "allowFrom": {
         "label": "Người gửi được phép",

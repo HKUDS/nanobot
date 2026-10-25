@@ -389,13 +389,13 @@ def _coerce_page_limit(limit: int | None) -> int:
 
 
 def _transcript_turn_at_ordinal(
-    session_key: str, ordinal: int, *, history: HistoryReader,
+    ordinal: int, *, history: HistoryReader,
 ) -> list[dict[str, Any]] | None:
     return turn_records(history, ordinal) or None
 
 
 def _select_transcript_page(
-    session_key: str, *, history: HistoryReader, limit: int | None,
+    *, history: HistoryReader, limit: int | None,
     before: str | None, after: str | None = None, stats: TranscriptReplayStats | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     stats = stats or TranscriptReplayStats()
@@ -1302,7 +1302,7 @@ def build_webui_trace_detail_response(
         return None
     ordinal = int(match.group("turn"))
     message_id = match.group("message")
-    turn = _transcript_turn_at_ordinal(session_key, ordinal, history=history)
+    turn = _transcript_turn_at_ordinal(ordinal, history=history)
     if turn is None:
         return None
     turn, _ = _compact_completed_stream_deltas(turn, include_projection_receipts=True)
@@ -1762,7 +1762,6 @@ def build_webui_thread_response(
     """Return canonical transcript events for the WebUI projector."""
     replay_stats = stats or TranscriptReplayStats()
     lines, page = _select_transcript_page(
-        session_key,
         history=history,
         limit=limit,
         before=before,
@@ -1919,7 +1918,6 @@ def _history_prompt_summaries(history: HistoryReader) -> _ChunkPromptView:
 
 
 def _build_prompt_view(
-    session_key: str,
     *,
     history: HistoryReader,
     session_turns_loader: Callable[[], list[_SessionBackfillTurn]] | None = None,
@@ -2009,7 +2007,7 @@ def _prompt_view_snapshot(
             if cached is not None and (not cached.needs_canonical or session_version_loader is not None):
                 _PROMPT_SNAPSHOTS.move_to_end(cache_key)
                 return cached, revision
-    view = _build_prompt_view(session_key, history=history, session_turns_loader=session_turns_loader)
+    view = _build_prompt_view(history=history, session_turns_loader=session_turns_loader)
     # A caller supplying only messages cannot validate canonical changes, so a
     # recovered view needs a version loader before it can be reused.
     if (view.needs_canonical and session_version_loader is None) or revision != read_revision():
