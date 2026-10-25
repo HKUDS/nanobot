@@ -627,6 +627,15 @@ export function ThreadShell({
     !hideHeader && !session && !loading && !!onTemporaryChatEnabledChange;
   const promptNavigation = usePromptHistory(historyKey, historyVersion, displayMessages);
   const updateNavigationMessages = promptNavigation.updateMessages;
+  useEffect(() => {
+    if (!chatId || !messagesReady) return;
+    messageCacheRef.current.setLoadedMessages(chatId, promptNavigation.window
+      ? [displayMessages, promptNavigation.window.messages] : [displayMessages]);
+  }, [chatId, messagesReady, displayMessages, promptNavigation.window]);
+  useEffect(() => {
+    const cache = messageCacheRef.current;
+    return () => { if (chatId) cache.deleteLoadedMessages(chatId); };
+  }, [chatId]);
 
   const loadTraceDetails = useCallback(async (refs: string[]) => {
     const details = await loadBodyTraceDetails(refs);

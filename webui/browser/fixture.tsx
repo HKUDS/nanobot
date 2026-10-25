@@ -40,6 +40,7 @@ import { MobileChatLayoutFixture } from "./mobile-chat-layout-fixture";
 import { ThemeToggleFixture } from "./theme-toggle-fixture";
 import { DisplayMathFixture } from "./display-math-fixture";
 import { AttachmentLayoutFixture } from "./attachment-layout-fixture";
+import { LoadedSessionSearchFixture } from "./loaded-session-search-fixture";
 
 const history: UIMessage[] = [
   { id: "question", role: "user", content: "Earlier question", createdAt: 1_700_000_000_000 },
@@ -213,7 +214,9 @@ if (parameters.get("case") === "skeleton-additions") installSkeletonPreviewApi()
 if (parameters.get("case") === "idle-compaction") installIdleCompactionApi();
 await initializeI18n();
 createRoot(document.getElementById("root")!).render(<TooltipProvider>
-  {parameters.get("case") === "attachments"
+  {parameters.get("case") === "loaded-session-search"
+    ? <LoadedSessionSearchFixture />
+    : parameters.get("case") === "attachments"
     ? <AttachmentLayoutFixture />
     : parameters.get("case") === "theme-toggle"
     ? <ClientProvider client={railClient} token="fixture"><ThemeToggleFixture /></ClientProvider>

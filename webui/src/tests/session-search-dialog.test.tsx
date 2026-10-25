@@ -4,7 +4,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionSearchDialog } from "@/components/SessionSearchDialog";
 import { useAppViewport } from "@/hooks/useAppViewport";
-import type { ChatSummary } from "@/lib/types";
+import { ThreadMessageCache } from "@/lib/thread-message-cache";
+import { ThreadTranscript } from "@/lib/thread-transcript";
+import type { ChatSummary, UIMessage } from "@/lib/types";
 
 function session(index: number): ChatSummary {
   return {
@@ -115,6 +117,52 @@ describe("SessionSearchDialog", () => {
       target: { value: "model fast" },
     });
     expect(screen.queryByText("Model chat")).not.toBeInTheDocument();
+  });
+
+  it("finds cached body substrings with a bounded preview and no data requests", () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const cache = new ThreadMessageCache(() => false);
+    const body: UIMessage = {
+      id: "answer", role: "assistant", createdAt: 1,
+      content: `${"Earlier content. ".repeat(1000)}权限配置 Full Access 25% session_history.py`,
+    };
+    cache.set("chat-1", new ThreadTranscript([body]).save());
+    const onSelect = vi.fn();
+    render(<SessionSearchDialog open sessions={[session(1), session(2)]}
+      activeKey={null} loading={false} messageCache={cache}
+      onOpenChange={() => {}} onSelect={onSelect} />);
+    expect(screen.getByPlaceholderText("Search loaded content")).toBeInTheDocument();
+    const input = screen.getByRole("textbox", { name: "Search" });
+    for (const query of ["权限", "full access", "25%", "session_history.py"]) {
+      fireEvent.change(input, { target: { value: query } });
+      expect(screen.getByText("Chat 1")).toBeInTheDocument();
+      expect(screen.queryByText("Chat 2")).not.toBeInTheDocument();
+      expect(screen.getByText(/权限配置 Full Access/).textContent!.length).toBeLessThanOrEqual(162);
+    }
+    fireEvent.change(input, { target: { value: "uncached server content" } });
+    expect(screen.getByText("No matching topics.")).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "权限" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSelect).toHaveBeenCalledWith("websocket:chat-1");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("updates an open query for streamed messages and cache eviction without duplicate sessions", () => {
+    const cache = new ThreadMessageCache(() => false, 100_000, 1);
+    const body = (content: string): UIMessage => ({ id: "answer", role: "assistant", content, createdAt: 1 });
+    cache.set("chat-1", new ThreadTranscript([body("Cached needle")]).save());
+    render(<SessionSearchDialog open sessions={[session(1), session(2)]}
+      activeKey={null} loading={false} messageCache={cache}
+      onOpenChange={() => {}} onSelect={() => {}} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Search" }), { target: { value: "needle" } });
+    expect(screen.getByText("Chat 1")).toBeInTheDocument();
+    act(() => cache.setLoadedMessages("chat-2", [[body("Streaming needle"), body("Another needle")]]));
+    expect(screen.getAllByText("Chat 2")).toHaveLength(1);
+    act(() => cache.set("chat-2", new ThreadTranscript([body("Streaming needle")]).save()));
+    expect(screen.queryByText("Chat 1")).not.toBeInTheDocument();
+    act(() => cache.setLoadedMessages("chat-2", [[body("Replacement answer")]]));
+    expect(screen.queryByText("Chat 2")).not.toBeInTheDocument();
   });
 
   it("keeps keyboard navigation scrollable through long result lists", () => {

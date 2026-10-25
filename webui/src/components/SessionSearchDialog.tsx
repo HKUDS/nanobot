@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, useDeferredValue, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -9,6 +9,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { deriveTitle, visibleSessionPreview } from "@/lib/format";
+import { findLoadedMessagePreview } from "@/lib/loaded-message-search";
+import type { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { cn } from "@/lib/utils";
 import type { ChatSummary } from "@/lib/types";
 
@@ -18,11 +20,19 @@ interface SessionSearchDialogProps {
   activeKey: string | null;
   loading: boolean;
   titleOverrides?: Record<string, string>;
+  messageCache?: ThreadMessageCache;
   onOpenChange: (open: boolean) => void;
   onSelect: (key: string) => void;
 }
 
+interface SessionSearchResult {
+  session: ChatSummary;
+  preview?: string;
+}
+
 const EMPTY_TITLE_OVERRIDES: Record<string, string> = {};
+const noSubscription = () => () => {};
+const noRevision = () => 0;
 
 export function SessionSearchDialog({
   open,
@@ -30,6 +40,7 @@ export function SessionSearchDialog({
   activeKey,
   loading,
   titleOverrides = EMPTY_TITLE_OVERRIDES,
+  messageCache,
   onOpenChange,
   onSelect,
 }: SessionSearchDialogProps) {
@@ -41,19 +52,31 @@ export function SessionSearchDialog({
   const [query, setQuery] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(0);
 
+  const messageRevision = useSyncExternalStore(
+    open && messageCache ? messageCache.subscribe : noSubscription,
+    messageCache?.getRevision ?? noRevision,
+  );
   const normalizedQuery = query.trim().toLowerCase();
+  const searchQuery = useDeferredValue(normalizedQuery);
+  const searchRevision = useDeferredValue(messageRevision);
+  const searchPending = searchQuery !== normalizedQuery || searchRevision !== messageRevision;
   const searchableSessions = useMemo(() => sessions.map((session) => ({
     session,
     text: [titleOverrides[session.key], session.title, visibleSessionPreview(session.preview)]
       .filter(Boolean).join(" ").toLowerCase(),
   })), [sessions, titleOverrides]);
-  const sessionResults = useMemo(() => {
+  const sessionResults = useMemo<SessionSearchResult[]>(() => {
     if (!open) return [];
-    if (!normalizedQuery) return sessions;
-    const terms = normalizedQuery.split(/\s+/).filter(Boolean);
-    return searchableSessions.filter(({ text }) => terms.every((term) => text.includes(term)))
-      .map(({ session }) => session);
-  }, [normalizedQuery, open, sessions, searchableSessions]);
+    if (!searchQuery) return sessions.map((session) => ({ session }));
+    const terms = searchQuery.split(/\s+/).filter(Boolean);
+    return searchableSessions.flatMap(({ session, text }) => {
+      if (terms.every((term) => text.includes(term))) return [{ session }];
+      const preview = messageCache && findLoadedMessagePreview(
+        messageCache.readLoadedMessages(session.chatId), searchQuery,
+      );
+      return preview === undefined ? [] : [{ session, preview }];
+    });
+  }, [searchQuery, open, sessions, searchableSessions, messageCache, searchRevision]);
   const itemCount = sessionResults.length;
   const rowHeight = 64;
   const windowStart = Math.max(0, Math.min(itemCount - 1, Math.floor(scrollTop / rowHeight) - 4));
@@ -99,6 +122,7 @@ export function SessionSearchDialog({
   }, [highlightedIndex, open]);
 
   const handleSelect = (key: string) => {
+    if (searchPending) return;
     onOpenChange(false);
     onSelect(key);
   };
@@ -119,10 +143,11 @@ export function SessionSearchDialog({
       return;
     }
     if (event.key === "Enter") {
+      event.preventDefault();
+      if (searchPending) return;
       const highlighted = sessionResults[highlightedIndex];
       if (!highlighted) return;
-      event.preventDefault();
-      handleSelect(highlighted.key);
+      handleSelect(highlighted.session.key);
     }
   };
 
@@ -167,6 +192,7 @@ export function SessionSearchDialog({
           ref={scrollRef}
           onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
           data-testid="session-search-scroll"
+          aria-busy={searchPending}
           className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2.5 scrollbar-thin scrollbar-track-transparent"
         >
           <section>
@@ -185,12 +211,12 @@ export function SessionSearchDialog({
             ) : (
               <ul>
                 <li aria-hidden style={{ height: windowStart * rowHeight }} />
-                {sessionResults.slice(windowStart, windowEnd).map((session, offset) => {
+                {sessionResults.slice(windowStart, windowEnd).map(({ session, preview: matchPreview }, offset) => {
                   const index = windowStart + offset;
                   const title = titleOverrides[session.key]?.trim() ||
                     session.title?.trim() ||
                     deriveTitle(session.preview, t("chat.newChat"));
-                  const preview = visibleSessionPreview(session.preview);
+                  const preview = matchPreview ?? visibleSessionPreview(session.preview);
                   const showPreview =
                     preview.length > 0 &&
                     preview.toLowerCase() !== title.trim().toLowerCase();
@@ -203,6 +229,7 @@ export function SessionSearchDialog({
                           itemRefs.current[index] = node;
                         }}
                         type="button"
+                        disabled={searchPending}
                         onClick={() => handleSelect(session.key)}
                         onMouseEnter={() => setHighlightedIndex(index)}
                         aria-current={active ? "page" : undefined}
