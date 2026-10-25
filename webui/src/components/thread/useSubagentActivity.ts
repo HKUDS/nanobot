@@ -39,11 +39,12 @@ export function useSubagentActivity(tasks: ObservedSubagentTask[], inputKey: str
   return {
     open: view.open,
     tasks: visibleIds.map(id => byId.get(id)!),
-    setOpen: (open: boolean) => setView(current => {
+    setOpen: (open: boolean, { preserveFeedback = false }: { preserveFeedback?: boolean } = {}) => setView(current => {
       const currentActive = current.observed.filter(isActiveSubagentTask).map(task => task.task_id);
       return {
         ...current, open,
-        cycleIds: open ? current.cycleIds : currentActive,
+        // Cancelling a partial drag is not a dismissal of the completion receipt.
+        cycleIds: open || preserveFeedback ? current.cycleIds : currentActive,
         retainedIds: open ? currentActive.length ? currentActive : current.cycleIds : [],
       };
     }),

@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { MarkdownText } from "@/components/MarkdownText";
 import { ErrorTaskIcon, StopIcon } from "@/components/icons/product-icons";
 import { SubagentTaskButton, useSubagentTasks } from "@/components/thread/SubagentTasks";
 import { Button } from "@/components/ui/button";
-import { DisclosureContent } from "@/components/ui/disclosure";
 import { HoverHint } from "@/components/ui/hover-hint";
 import { LoadingRing } from "@/components/ui/loading-ring";
 import { isActiveSubagentTask, type ObservedSubagentTask } from "@/lib/subagent-tasks";
@@ -28,23 +27,38 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
   const progressId = useId();
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLDivElement>(null);
+  const gesture = useRef<{ pointerId: number; x: number; y: number; height: number; wasOpen: boolean; dragged: boolean } | null>(null);
+  const suppressClick = useRef(false);
   const [focused, setFocused] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [treeMounted, setTreeMounted] = useState(false);
   const [listMaxHeight, setListMaxHeight] = useState(400);
-  const { open, setOpen, tasks } = useSubagentActivity(allTasks, inputKey, context.detailOpen || focused || hovered);
+  const [expandedHeight, setExpandedHeight] = useState(0);
+  const [dragHeight, setDragHeight] = useState<number | null>(null);
+  const { open, setOpen, tasks } = useSubagentActivity(allTasks, inputKey, context.detailOpen || focused || hovered || dragHeight !== null);
   const running = allTasks.filter(isActiveSubagentTask).length;
   const composerInput = () => root.current?.closest(".thread-composer-stack")?.querySelector("textarea");
-  const changeOpen = (next: boolean, returnFocus = false) => {
+  const changeOpen = (next: boolean, returnFocus = false, preserveFeedback = false) => {
     if (next === open) return;
     if (next) setTreeMounted(true);
-    setOpen(next);
+    setOpen(next, { preserveFeedback });
     if (!next && returnFocus) (running ? trigger.current : composerInput())?.focus({ preventScroll: true });
   };
   const finishExit = useCallback(() => setTreeMounted(false), []);
+  const cancelGesture = () => {
+    const start = gesture.current;
+    if (!start) return;
+    gesture.current = null;
+    suppressClick.current = true;
+    if (trigger.current?.hasPointerCapture(start.pointerId)) trigger.current.releasePointerCapture(start.pointerId);
+    setDragHeight(null);
+    changeOpen(start.wasOpen, false, true);
+  };
 
   useLayoutEffect(() => {
-    if (!open || !root.current) return;
+    if (!treeMounted || !root.current) return;
     const anchor = root.current;
     const composer = anchor.closest(".thread-composer-stack")!;
     const pane = anchor.closest(".thread-conversation");
@@ -67,13 +81,34 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
       viewport?.removeEventListener("scroll", measure);
       window.removeEventListener("resize", measure);
     };
-  }, [open]);
+  }, [treeMounted]);
+
+  useLayoutEffect(() => {
+    if (!treeMounted || !content.current) return;
+    const node = content.current;
+    const measure = () => setExpandedHeight(node.getBoundingClientRect().height);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [treeMounted]);
 
   useEffect(() => {
-    if (!open || context.detailOpen) return;
+    if (open || dragHeight !== null || !treeMounted) return;
+    const animations = panel.current?.getAnimations?.() ?? [];
+    if (!animations.length) { finishExit(); return; }
+    let cancelled = false;
+    void Promise.allSettled(animations.map(animation => animation.finished)).then(() => {
+      if (!cancelled) finishExit();
+    });
+    return () => { cancelled = true; };
+  }, [open, dragHeight, treeMounted, finishExit]);
+
+  useEffect(() => {
+    if ((!open && dragHeight === null) || context.detailOpen) return;
     const outside = (event: MouseEvent) => {
       const target = event.target;
-      if (!(target instanceof Element) || root.current?.closest(".thread-composer-stack")?.contains(target)) return;
+      if (gesture.current || !(target instanceof Element) || root.current?.closest(".thread-composer-stack")?.contains(target)) return;
       // Dismissing on blank space must not strand focus after the last task.
       const focusable = target.closest("button, a[href], input, textarea, select, [tabindex], [contenteditable=true]");
       const returnFocus = !running && !focusable;
@@ -83,7 +118,8 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
     const escape = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.isComposing || event.defaultPrevented) return;
       event.preventDefault();
-      changeOpen(false, !!root.current?.contains(document.activeElement) || (!running && document.activeElement === document.body));
+      if (gesture.current) cancelGesture();
+      else changeOpen(false, !!root.current?.contains(document.activeElement) || (!running && document.activeElement === document.body));
     };
     document.addEventListener("pointerdown", outside);
     window.addEventListener("keydown", escape);
@@ -93,13 +129,6 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
     };
   });
 
-  const gesture = useRef<{ pointerId: number; x: number; y: number } | null>(null);
-  const suppressClick = useRef(false);
-  const cancelGesture = (event: PointerEvent<HTMLButtonElement>) => {
-    if (gesture.current?.pointerId !== event.pointerId) return;
-    gesture.current = null;
-    suppressClick.current = true;
-  };
   const completed = tasks.filter(task => task.state === "done").length;
   const attention = tasks.filter(needsReview).length;
   const progress = t("thread.subagents.progress", { completed, total: tasks.length });
@@ -111,7 +140,7 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
   if (!tasks.length) return null;
   return <div ref={root} data-testid="subagent-task-dock" className="subagent-task-dock relative mx-auto h-11 sm:h-7">
     <div className="absolute inset-x-0 bottom-0 z-40 overflow-hidden rounded-t-2xl border border-b-0 border-border/70 bg-card shadow-[0_-4px_20px_rgba(15,23,42,0.06)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.24)]">
-      <HoverHint enabled={!open} content={`${title} · ${summary}`}>
+      <HoverHint enabled={!open && dragHeight === null} content={`${title} · ${summary}`}>
         <button ref={trigger} type="button" data-testid="subagent-task-dock-trigger"
           aria-expanded={open} aria-controls={panelId}
           onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
@@ -119,13 +148,23 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
           onPointerDown={event => {
             if (event.button !== 0 || !event.isPrimary || gesture.current) return;
             event.currentTarget.setPointerCapture(event.pointerId);
-            gesture.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+            const height = panel.current?.getBoundingClientRect().height ?? 0;
+            gesture.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, height, wasOpen: open, dragged: false };
             suppressClick.current = false;
+            setTreeMounted(true);
+            setDragHeight(height);
           }}
           onPointerMove={event => {
             const start = gesture.current;
-            if (start && start.pointerId === event.pointerId
-              && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 6) suppressClick.current = true;
+            if (!start || start.pointerId !== event.pointerId) return;
+            const dy = event.clientY - start.y;
+            const dx = Math.abs(event.clientX - start.x);
+            suppressClick.current ||= Math.hypot(dx, dy) > 6;
+            if (!start.dragged && (Math.abs(dy) <= 6 || Math.abs(dy) <= dx)) return;
+            start.dragged = true;
+            const height = Math.max(0, Math.min(content.current!.getBoundingClientRect().height, start.height - dy));
+            if (height > 0) changeOpen(true);
+            setDragHeight(height);
           }}
           onPointerUp={event => {
             const start = gesture.current;
@@ -135,9 +174,12 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
             const dx = Math.abs(event.clientX - start.x);
             suppressClick.current ||= Math.hypot(dx, dy) > 6;
             event.currentTarget.releasePointerCapture(event.pointerId);
-            if (Math.abs(dy) >= 24 && Math.abs(dy) > dx) changeOpen(dy < 0, dy > 0);
+            setDragHeight(null);
+            const next = start.dragged && Math.abs(dy) >= 24 ? dy < 0 : start.wasOpen;
+            changeOpen(next, start.dragged && !next, !start.wasOpen && !next);
           }}
-          onPointerCancel={cancelGesture} onLostPointerCapture={cancelGesture}
+          onPointerCancel={event => { if (gesture.current?.pointerId === event.pointerId) cancelGesture(); }}
+          onLostPointerCapture={event => { if (gesture.current?.pointerId === event.pointerId) cancelGesture(); }}
           onClick={event => {
             if (suppressClick.current && event.detail !== 0) { suppressClick.current = false; return; }
             changeOpen(!open, open);
@@ -149,11 +191,12 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
           </span>
         </button>
       </HoverHint>
-      <div id={panelId} role="region" aria-label={title} aria-describedby={progressId} hidden={!open && !treeMounted}>
+      <div ref={panel} id={panelId} role="region" aria-label={title} aria-describedby={progressId}
+        hidden={!treeMounted} aria-hidden={open ? undefined : true} {...(!open ? { inert: "" } : {})}
+        className="overflow-hidden transition-[height] duration-200 ease-out motion-reduce:transition-none"
+        style={{ height: dragHeight === null ? open ? expandedHeight : 0 : Math.min(dragHeight, expandedHeight), transition: dragHeight === null ? undefined : "none" }}>
         <p id={progressId} className="sr-only">{progress}</p>
-        <DisclosureContent open={open} onExitComplete={finishExit}>
-          {open || treeMounted ? <TaskTree tasks={tasks} maxHeight={listMaxHeight} /> : null}
-        </DisclosureContent>
+        <div ref={content}>{treeMounted ? <TaskTree tasks={tasks} maxHeight={listMaxHeight} /> : null}</div>
       </div>
     </div>
   </div>;

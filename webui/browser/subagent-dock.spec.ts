@@ -129,7 +129,7 @@ test("keeps the portaled dock scoped to the active conversation and honors reduc
   const tree = page.getByTestId("subagent-task-tree");
   await expect(tree).toBeVisible();
   await expect(tree.locator(".loading-ring-arc").first()).toHaveCSS("animation-name", "none");
-  await expect(portal.locator(".inline-disclosure")).toHaveCSS("transition-duration", "0s");
+  await expect(portal.getByRole("region", { name: "Subtasks", exact: true })).toHaveCSS("transition-property", "none");
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "切换活动面板", exact: true }).click();
   await expect(portal.getByTestId("subagent-task-dock")).toHaveCount(0);
@@ -330,7 +330,7 @@ test("keeps long task names, stop controls and detail handoff usable on a narrow
   await expect(row).toBeFocused();
 });
 
-test("exposes only the handle until requested and supports mouse drags without double toggling", async ({ page }) => {
+test("follows the mouse before release and snaps without double toggling", async ({ page }, info) => {
   await page.goto("/browser/fixture.html?case=subagent-dock");
   const trigger = page.getByTestId("subagent-task-dock-trigger");
   const tree = page.getByTestId("subagent-task-tree");
@@ -348,7 +348,16 @@ test("exposes only the handle until requested and supports mouse drags without d
     const y = bounds.y + bounds.height / 2;
     await page.mouse.move(x, y);
     await page.mouse.down();
-    await page.mouse.move(x + dx, y + dy, { steps: 8 });
+    await page.mouse.move(x + dx / 2, y + dy / 2, { steps: 4 });
+    if (Math.abs(dy) > Math.abs(dx)) {
+      await expect.poll(async () => (await trigger.boundingBox())!.y).toBeCloseTo(bounds.y + dy / 2, 0);
+      const panel = page.getByTestId("subagent-task-dock").getByRole("region", { name: "Subtasks", exact: true });
+      const panelBounds = (await panel.boundingBox())!;
+      const composerBounds = (await page.locator(".thread-composer-surface").boundingBox())!;
+      expect(panelBounds.y + panelBounds.height).toBeCloseTo(composerBounds.y, 0);
+      await page.screenshot({ path: info.outputPath(dy < 0 ? "mouse-drag-opening.png" : "mouse-drag-closing.png") });
+    }
+    await page.mouse.move(x + dx, y + dy, { steps: 4 });
     await page.mouse.up();
   };
   await swipe(40, 2);
@@ -360,13 +369,23 @@ test("exposes only the handle until requested and supports mouse drags without d
   await swipe(0, 60);
   await expect(tree).toHaveCount(0);
   await expect(trigger).toBeFocused();
+  const bounds = (await trigger.boundingBox())!;
+  const x = bounds.x + 8;
+  const y = bounds.y + bounds.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x, y + 30, { steps: 4 });
+  await page.keyboard.press("Escape");
+  await page.mouse.move(x, y - 60, { steps: 6 });
+  await page.mouse.up();
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
   await page.keyboard.press("Space");
   await expect(tree).toBeVisible();
 });
 
 test.describe("touch task drawer", () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
-  test("opens upward, cancels a gesture, and scrolls tasks without closing the drawer", async ({ page }) => {
+  test("follows touch movement, restores a cancelled drag, and keeps list scrolling independent", async ({ page }, info) => {
     await page.goto("/browser/fixture.html?case=subagent-dock");
     const trigger = page.getByTestId("subagent-task-dock-trigger");
     const tree = page.getByTestId("subagent-task-tree");
@@ -378,6 +397,10 @@ test.describe("touch task drawer", () => {
       await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
       for (let step = 1; step <= 6; step++) {
         await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y + dy * step / 6 }] });
+        if (step === 3 && target === trigger) {
+          await expect.poll(async () => (await trigger.boundingBox())!.y).toBeCloseTo(bounds.y + dy / 2, 0);
+          await page.screenshot({ path: info.outputPath(cancel ? "touch-drag-before-cancel.png" : dy < 0 ? "touch-drag-opening.png" : "touch-drag-closing.png") });
+        }
       }
       await cdp.send("Input.dispatchTouchEvent", { type: cancel ? "touchCancel" : "touchEnd", touchPoints: [] });
     };
@@ -385,6 +408,10 @@ test.describe("touch task drawer", () => {
     await expect(trigger).toHaveAttribute("aria-expanded", "false");
     await swipe(trigger, -60);
     await expect(tree).toBeVisible();
+    await page.getByTestId("subagent-task-dock").evaluate(node => Promise.all(node.getAnimations({ subtree: true })
+      .filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished)));
+    await swipe(trigger, 60, true);
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
     await page.getByTestId("subagent-task-dock").evaluate(node => Promise.all(node.getAnimations({ subtree: true })
       .filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished)));
     await swipe(trigger, 60);
@@ -397,6 +424,27 @@ test.describe("touch task drawer", () => {
     await swipe(tree, -100);
     await expect.poll(() => tree.evaluate(node => node.scrollTop)).toBeGreaterThan(0);
     await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await cdp.detach();
+  });
+
+  test("preserves completion feedback when an opening drag is cancelled", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce", colorScheme: "dark" });
+    await page.goto("/browser/fixture.html?case=subagent-dock&dark");
+    const trigger = page.getByTestId("subagent-task-dock-trigger");
+    await trigger.focus();
+    const bounds = (await trigger.boundingBox())!;
+    const x = bounds.x + 12;
+    const y = bounds.y + bounds.height / 2;
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y - 40 }] });
+    await expect.poll(async () => (await trigger.boundingBox())!.y).toBeCloseTo(bounds.y - 40, 0);
+    await page.getByRole("button", { name: "全部完成", exact: true }).evaluate(node => (node as HTMLButtonElement).click());
+    await expect(page.getByTestId("subagent-task-tree").locator('[data-task-state="done"]')).toHaveCount(3);
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+    await expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await expect(trigger).toContainText("Completed: 3");
+    await expect(page.getByTestId("subagent-task-tree")).toHaveCount(0);
     await cdp.detach();
   });
 });
