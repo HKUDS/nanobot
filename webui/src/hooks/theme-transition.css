@@ -1,0 +1,30 @@
+:root[data-theme-transition="dark"] {
+  --theme-ink-delay: 180ms;
+}
+
+:root[data-theme-transition="light"] {
+  --theme-ink-delay: 100ms;
+}
+
+/* Keep text from dissolving into a matching gray while the canvas changes. */
+:root[data-theme-transition] :is(
+  body,
+  .thread-workspace,
+  .workbench-body,
+  .workbench-pane,
+  main.bg-background,
+  .bg-sidebar,
+  .text-sidebar-muted-foreground,
+  [data-testid="thread-header"] > div,
+  [data-testid="hero-greeting"]
+) {
+  transition: background-color 280ms linear, border-color 280ms linear, color 0s linear var(--theme-ink-delay);
+}
+
+:root[data-theme-transition] .thread-composer-surface {
+  transition: background-color 280ms linear, box-shadow 280ms linear, opacity 160ms ease-out;
+}
+
+:root[data-theme-transition] .thread-composer-surface textarea::placeholder {
+  transition: color 0s linear var(--theme-ink-delay);
+}

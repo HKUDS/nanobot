@@ -1,7 +1,8 @@
 import {
   TemporaryChatIcon,
 } from "@/components/icons/product-icons";
-import { Menu, Moon, Sun } from "lucide-react";
+import { Menu } from "lucide-react";
+import { ThemeToggleIcon } from "@/components/icons/ThemeToggleIcon";
 import { type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -195,11 +196,7 @@ function ThemeButton({
         className,
       )}
     >
-      {theme === "dark" ? (
-        <Sun className="h-4 w-4" />
-      ) : (
-        <Moon className="h-4 w-4" />
-      )}
+      <ThemeToggleIcon theme={theme} />
     </Button>
   );
 }

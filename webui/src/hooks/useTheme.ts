@@ -4,9 +4,11 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
+import "./theme-transition.css";
 
 type Theme = "light" | "dark";
 const STORAGE_KEY = "nanobot-webui.theme";
@@ -50,6 +52,15 @@ export function useTheme(): {
     return "light";
   });
 
+  const switchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (switchTimer.current !== null) {
+      clearTimeout(switchTimer.current);
+      switchTimer.current = null;
+      delete document.documentElement.dataset.themeTransition;
+    }
+  }, []);
+
   useEffect(() => {
     applyTheme(theme);
     try {
@@ -59,10 +70,18 @@ export function useTheme(): {
     }
   }, [theme]);
 
-  const setTheme = useCallback((t: Theme) => setThemeState(t), []);
+  const setTheme = useCallback((next: Theme) => {
+    if (next === theme || switchTimer.current !== null) return;
+    document.documentElement.dataset.themeTransition = next;
+    setThemeState(next);
+    switchTimer.current = setTimeout(() => {
+      delete document.documentElement.dataset.themeTransition;
+      switchTimer.current = null;
+    }, 600);
+  }, [theme]);
   const toggle = useCallback(
-    () => setThemeState((t) => (t === "dark" ? "light" : "dark")),
-    [],
+    () => setTheme(theme === "dark" ? "light" : "dark"),
+    [setTheme, theme],
   );
   return { theme, toggle, setTheme };
 }

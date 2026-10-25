@@ -4373,7 +4373,7 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
 
-    fireEvent.click(screen.getByRole("button", { name: "Toggle theme from header" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Toggle theme from header" }));
     expect(toggleThemeSpy).toHaveBeenCalledTimes(1);
 
     fireEvent.keyDown(screen.getByRole("separator", { name: "Resize sidebar" }), { key: "Enter" });
