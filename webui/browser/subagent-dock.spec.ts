@@ -294,10 +294,11 @@ for (const width of [1440, 390, 320]) {
       const bounds = (element: Element) => element.getBoundingClientRect();
       return {
         overflow: node.scrollWidth > node.clientWidth,
-        header: [header.children[0], header.children[1], header.lastElementChild!].map(element => bounds(element).x),
+        header: [header.children[0], header.children[1]].map(element => bounds(element).x),
+        trailingEdge: bounds(header.lastElementChild!).right,
         summary: bounds(header.children[2].children[0]).x,
         rows: [...node.querySelectorAll('[data-subagent-surface="archive"]')].map(row => ({
-          columns: [row.children[0], row.children[1], row.lastElementChild!].map(element => bounds(element).x),
+          columns: [row.children[0], row.children[1]].map(element => bounds(element).x),
           status: bounds(row.children[2].children[0]).x,
           elapsedRight: bounds(row.children[2].children[1]).right,
         })),
@@ -307,8 +308,12 @@ for (const width of [1440, 390, 320]) {
     for (const row of geometry.rows) {
       row.columns.forEach((position, index) => expect(Math.abs(position - geometry.header[index])).toBeLessThan(0.5));
       expect(Math.abs(row.status - geometry.summary)).toBeLessThan(0.5);
-      if (width > 639) expect(Math.abs(row.elapsedRight - geometry.rows[0].elapsedRight)).toBeLessThan(0.5);
+      expect(Math.abs(row.elapsedRight - geometry.trailingEdge)).toBeLessThan(0.5);
     }
+    await rows.first().click();
+    await expect(page.getByRole("dialog")).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(rows.first()).toBeFocused();
     await header.click();
     await expect(rows.first()).toBeHidden();
   });
