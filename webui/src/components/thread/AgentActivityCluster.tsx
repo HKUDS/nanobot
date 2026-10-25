@@ -1268,14 +1268,10 @@ function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; 
         <span
           data-testid={`activity-cli-logo-${run.name.toLowerCase()}`}
           className={cn(
-            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-mark border text-[6.5px] font-semibold text-white",
+            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-mark text-[6.5px] font-semibold text-white",
             rowActive && "animate-pulse",
           )}
-          style={{
-            borderColor: alphaColor(color, 22),
-            backgroundColor: logoUrl ? "hsl(var(--background))" : color,
-            boxShadow: rowActive ? `0 0 0 3px ${alphaColor(color, 9)}` : undefined,
-          }}
+          style={{ backgroundColor: logoUrl ? "transparent" : color }}
           aria-hidden
         >
           {logoUrl ? (
@@ -1284,7 +1280,7 @@ function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; 
               alt=""
               decoding="async"
               loading="lazy"
-              className="h-[78%] w-[78%] object-contain"
+              className="h-full w-full object-contain"
               onLoad={onLogoLoad}
               onError={onLogoError}
             />
@@ -1349,14 +1345,10 @@ function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolea
         <span
           data-testid={`activity-mcp-logo-${run.presetName.toLowerCase()}`}
           className={cn(
-            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-mark border text-[6.5px] font-semibold text-white",
+            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-mark text-[6.5px] font-semibold text-white",
             rowActive && "animate-pulse",
           )}
-          style={{
-            borderColor: alphaColor(color, 22),
-            backgroundColor: logoUrl ? "hsl(var(--background))" : color,
-            boxShadow: rowActive ? `0 0 0 3px ${alphaColor(color, 9)}` : undefined,
-          }}
+          style={{ backgroundColor: logoUrl ? "transparent" : color }}
           aria-hidden
         >
           {logoUrl ? (
@@ -1365,7 +1357,7 @@ function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolea
               alt=""
               decoding="async"
               loading="lazy"
-              className="h-[78%] w-[78%] object-contain"
+              className="h-full w-full object-contain"
               onLoad={onLogoLoad}
               onError={onLogoError}
             />
@@ -1378,14 +1370,4 @@ function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolea
       )}
     />
   );
-}
-
-function alphaColor(color: string, percent: number): string {
-  if (/^#[0-9a-f]{6}$/i.test(color)) {
-    const alpha = Math.round((percent / 100) * 255)
-      .toString(16)
-      .padStart(2, "0");
-    return `${color}${alpha}`;
-  }
-  return `color-mix(in srgb, ${color} ${percent}%, transparent)`;
 }
