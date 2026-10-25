@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import json
 from unittest.mock import AsyncMock, MagicMock
 
@@ -12,6 +13,7 @@ from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentRunHookContext
 from nanobot.api.server import (
+    _SESSION_LOCKS_KEY,
     API_CHAT_ID,
     API_SESSION_KEY,
     _chat_completion_response,
@@ -617,6 +619,54 @@ async def test_empty_response_falls_back_without_retry(aiohttp_client) -> None:
     body = await resp.json()
     assert body["choices"][0]["message"]["content"] == EMPTY_FINAL_RESPONSE_MESSAGE
     assert call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_completed_api_session_lock_is_released(aiohttp_client, mock_agent):
+    """A finished request must drop its session lock so completed ids can be reclaimed."""
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+
+    async def process_direct(**kwargs):
+        nonlocal calls
+        calls += 1
+        entered.set()
+        await release.wait()
+        return "ok"
+
+    mock_agent.process_direct = process_direct
+    app = create_app(mock_agent, model_name="test-model", request_timeout=10.0)
+    client = await aiohttp_client(app)
+    session_id = "temporary-session"
+    payload = {
+        "messages": [{"role": "user", "content": "hello"}],
+        "session_id": session_id,
+    }
+
+    first = asyncio.create_task(client.post("/v1/chat/completions", json=payload))
+    await entered.wait()
+    locks = app[_SESSION_LOCKS_KEY]
+    held = locks[f"api:{session_id}"]
+    assert held.locked()
+
+    entered.clear()
+    second = asyncio.create_task(client.post("/v1/chat/completions", json=payload))
+    await asyncio.sleep(0)
+    assert calls == 1
+    assert locks[f"api:{session_id}"] is held
+
+    release.set()
+    first_response, second_response = await asyncio.gather(first, second)
+    assert first_response.status == 200
+    assert second_response.status == 200
+    await first_response.read()
+    await second_response.read()
+    del first_response, second_response, first, second, held
+    gc.collect()
+
+    assert calls == 2
+    assert f"api:{session_id}" not in locks
 
 
 @pytest.mark.asyncio
