@@ -57,12 +57,16 @@ async def seed_history(bot, key):
     ])
 
 
-async def schedule_idle_archive(bot):
+async def schedule_idle_archive(bot, *, exclude=()):
     scheduled = []
     with patch("nanobot.agent.autocompact.datetime") as clock:
         clock.now.return_value = datetime.now() + timedelta(minutes=30)
         clock.fromisoformat.side_effect = datetime.fromisoformat
-        await bot._loop.auto_compact.check_expired(scheduled.append, bot._loop.runtime_for_session)
+        await bot._loop.auto_compact.check_expired(
+            scheduled.append,
+            bot._loop.runtime_for_session,
+            active_session_keys=set(exclude),
+        )
     assert len(scheduled) == 1
     return scheduled[0]
 
@@ -109,6 +113,35 @@ async def test_compaction_waits_for_active_sdk_turn_and_preserves_reply(
         provider.release_turn.set()
         result = await asyncio.wait_for(turn, timeout=5)
         assert result.content == "new reply"
+        if trigger == "scheduled_idle":
+            # The queued idle archive re-decides eligibility once it holds
+            # the lock (#6410): the turn just settled fresh activity, so it
+            # must not summarize yet — and the reply stays untouched.
+            await asyncio.wait_for(compaction, timeout=5)
+            assert provider.summary_started.is_set() is False
+            snapshot = await bot.sessions.export(key)
+            assert snapshot is not None
+            assert ("assistant", "new reply") in [
+                (message["role"], message["content"]) for message in snapshot.messages
+            ]
+            assert "_last_summary" not in snapshot.metadata
+
+            # After a full idle interval with no new activity, a later scan
+            # archives the session normally, settled reply included.
+            followup = asyncio.create_task(
+                await schedule_idle_archive(bot, exclude={"sdk:other"}),
+            )
+            tasks.append(followup)
+            await asyncio.wait_for(provider.summary_started.wait(), timeout=5)
+            assert {"role": "assistant", "content": "new reply"} in provider.summary_messages
+            provider.release_summary.set()
+            await asyncio.wait_for(followup, timeout=5)
+            await assert_reply_and_summary(bot, key)
+
+            await bot.aclose()
+            async with Nanobot(loop_factory(provider=ControlledProvider())) as restarted:
+                await assert_reply_and_summary(restarted, key)
+            return
         await asyncio.wait_for(provider.summary_started.wait(), timeout=5)
         provider.release_summary.set()
         compacted = await asyncio.wait_for(compaction, timeout=5)

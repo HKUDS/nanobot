@@ -60,6 +60,27 @@ class AutoCompact:
             return False
         return idle_seconds >= self._ttl * 60
 
+    @staticmethod
+    def _activity_advanced(
+        latest: datetime | str | None,
+        scanned: datetime | str | None,
+    ) -> bool:
+        """True when settled activity is newer than the scan's observation.
+
+        Both values come from persisted session state; an unusable value
+        cannot prove advancement, so the scan's decision stands.
+        """
+        if latest is None or scanned is None:
+            return False
+        try:
+            if isinstance(latest, str):
+                latest = datetime.fromisoformat(latest)
+            if isinstance(scanned, str):
+                scanned = datetime.fromisoformat(scanned)
+            return latest > scanned
+        except (TypeError, ValueError):
+            return False
+
     async def check_expired(
         self,
         schedule_background: Callable[[Coroutine[Any, Any, None]], None],
@@ -88,14 +109,43 @@ class AutoCompact:
             except (KeyError, ValueError):
                 continue
             self._archiving.add(key)
-            schedule_background(self._archive(key, runtime=runtime))
+            schedule_background(self._archive(
+                key,
+                runtime=runtime,
+                scanned_updated_at=info.get("updated_at"),
+            ))
 
-    async def _archive(self, key: str, *, runtime: LLMRuntime) -> None:
+    async def _archive(
+        self,
+        key: str,
+        *,
+        runtime: LLMRuntime,
+        scanned_updated_at: datetime | str | None = None,
+    ) -> None:
         if is_dream_session(key):
             self._archiving.discard(key)
             return
         try:
             async with self._session_lock(key):
+                if scanned_updated_at is not None:
+                    # Eligibility was decided at scan time from the persisted
+                    # timestamp, but this archive may have queued behind a
+                    # turn holding the session lock (#6410). If activity
+                    # settled after the scan and the session is not idle-
+                    # expired by that latest activity, do not summarize it
+                    # yet: it must first be idle for the full interval again.
+                    # Explicit archival passes no scan observation and is
+                    # not TTL-gated.
+                    session = await self.sessions.state.get(key)
+                    if (
+                        self._activity_advanced(session.updated_at, scanned_updated_at)
+                        and not self._is_expired(session.updated_at)
+                    ):
+                        logger.debug(
+                            "Auto-compact: skipping {} — active since the idle scan",
+                            key,
+                        )
+                        return
                 # Idle compaction and turns share one transcript boundary.
                 summary = await self.consolidator.compact_idle_session(
                     key,
