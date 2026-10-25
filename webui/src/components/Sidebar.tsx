@@ -155,6 +155,8 @@ export function Sidebar(props: SidebarProps) {
 
   return (
     <nav
+      data-theme-surface
+      data-theme-ink
       ref={props.containActionMenus ? setMenuPortalContainer : undefined}
       aria-label={t("sidebar.navigation")}
       className={cn(
@@ -323,8 +325,10 @@ export function Sidebar(props: SidebarProps) {
           onRequestUpdate={props.availableUpdate.onRequestUpdate} installationMethod={props.availableUpdate.installationMethod} />
       )}
       <div
+        data-theme-surface
         className={cn(
-          "flex items-center justify-between gap-1 bg-sidebar/55 px-2.5 py-3 text-xs",
+          "flex items-center justify-between gap-1 px-2.5 py-3 text-xs",
+          props.hostChromeInset && "bg-sidebar/55",
           collapsed && "w-14 flex-col px-0",
         )}
       >

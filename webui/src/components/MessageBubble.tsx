@@ -387,7 +387,7 @@ function IncomingSessionMessage({
       <div className="mb-1.5 flex items-center px-4 text-[12px] text-muted-foreground">
         <SessionHandleLabel id={handle.id}>{handleName}</SessionHandleLabel>
       </div>
-      <div className="relative min-w-0 rounded-floating bg-secondary/70 px-4 py-2">
+      <div data-theme-surface className="relative min-w-0 rounded-floating bg-secondary/70 px-4 py-2">
         {contextMenu}
         <div data-assistant-selectable="true" className="min-w-0">
           <MarkdownText
@@ -489,6 +489,7 @@ export function MessageBubble({
           <div data-user-text-bubble className="relative ml-auto w-fit max-w-full min-w-0">
             {contextMenu}
             <p
+              data-theme-surface
               data-temporary-message={temporary ? "true" : undefined}
               className={cn(
                 "ml-auto w-fit max-w-full min-w-0 rounded-floating px-4 py-2",
@@ -561,6 +562,8 @@ export function MessageBubble({
 function UserQuotedContext({ text, label }: { text: string; label: string }) {
   return (
     <blockquote
+      data-theme-surface
+      data-theme-ink
       className={cn(
         "ml-auto flex w-fit max-w-full min-w-0 items-start gap-2 rounded-control",
         "border border-border/60 bg-muted/35 px-3 py-2 text-left text-muted-foreground",

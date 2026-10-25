@@ -30,6 +30,28 @@
   }
 }
 
+/* Only gradient owners need interpolable colors; palette tokens remain unchanged. */
+@property --thread-history-background {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --host-glass-spot {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --host-glass-start {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --host-glass-end {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+
 /* Design tokens — HSL form, sourced from shadcn/ui's "neutral" palette. */
 @layer base {
   :root {
@@ -383,6 +405,12 @@
     backdrop-filter: saturate(185%) blur(34px);
   }
 
+  .host-window-shell {
+    transition: --host-glass-spot var(--theme-paint-duration, 0s) linear,
+      --host-glass-start var(--theme-paint-duration, 0s) linear,
+      --host-glass-end var(--theme-paint-duration, 0s) linear;
+  }
+
   .host-sidebar-glass {
     background: hsl(var(--sidebar) / 0.94);
     -webkit-backdrop-filter: saturate(145%) blur(18px);
@@ -434,6 +462,7 @@
     --tw-prose-headings: hsl(var(--foreground));
     --tw-prose-bold: hsl(var(--foreground));
     --tw-prose-lead: hsl(var(--foreground));
+    transition: var(--theme-ink-transition, color 0s);
     @apply text-reading;
   }
 
@@ -621,9 +650,12 @@
   }
 
   .thread-history-status {
+    --thread-history-background: hsl(var(--background));
     height: 48px;
-    background: linear-gradient(hsl(var(--background)) 35%, hsl(var(--background) / 0));
+    background: linear-gradient(var(--thread-history-background) 35%, transparent);
     color: hsl(var(--muted-foreground));
+    transition: --thread-history-background var(--theme-paint-duration, 0s) linear,
+      var(--theme-ink-transition, color 0s);
   }
   .thread-history-reveal {
     transform: translateY(calc(var(--history-pull, 0px) - 100%));
@@ -1165,12 +1197,23 @@
   }
 }
 
+.sidebar-selection-highlight {
+  transition: transform 300ms ease-out, width 300ms ease-out, height 300ms ease-out,
+    var(--theme-paint-transition, background-color 0s);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-selection-highlight {
+    transition: var(--theme-paint-transition, none);
+  }
+}
+
 /* Composer controls adapt to their actual container, not just the viewport. */
 .thread-composer-surface {
   --composer-shadow-color: 240 10% 16%;
   --tw-shadow: inset 0 0 0 1px hsl(var(--border) / 0.75), 0 4px 18px -8px hsl(var(--composer-shadow-color) / 0.12);
   box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
-  transition: background-color 160ms ease-out, box-shadow 160ms ease-out, opacity 160ms ease-out;
+  transition: var(--theme-paint-transition, background-color 160ms ease-out, box-shadow 160ms ease-out), opacity 160ms ease-out;
   container-name: thread-composer;
   container-type: inline-size;
 }
@@ -1180,7 +1223,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .thread-composer-surface { transition: none; }
+  .thread-composer-surface { transition: var(--theme-paint-transition, none); }
 }
 
 @media (forced-colors: active) {

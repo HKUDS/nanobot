@@ -75,6 +75,7 @@ export function ThreadHeader({
       )}
     >
       <div
+        data-theme-surface
         className={cn(
           controlsClassName,
           "relative min-w-0",
@@ -111,7 +112,7 @@ export function ThreadHeader({
         ) : null}
       </div>
 
-      <div className={cn(controlsClassName, "ml-auto shrink-0")}>
+      <div data-theme-surface className={cn(controlsClassName, "ml-auto shrink-0")}>
         {sessionInfoAction}
         {promptNavigatorAction}
         {actions}

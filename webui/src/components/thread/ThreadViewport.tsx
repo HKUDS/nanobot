@@ -1203,6 +1203,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
             <div
               ref={composerDockRef}
               data-testid="thread-composer-dock"
+              data-theme-surface
               onInputCapture={(event) => {
                 if (event.target instanceof HTMLTextAreaElement) {
                   threadMotionRef.current?.handleComposerInput();

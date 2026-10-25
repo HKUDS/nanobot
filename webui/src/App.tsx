@@ -2889,6 +2889,7 @@ function Shell({
               }}
             >
               <div
+                data-theme-surface
                 className={cn(
                   "absolute inset-y-0 left-0 h-full w-full overflow-hidden",
                   showHostChrome
@@ -2963,6 +2964,7 @@ function Shell({
             </Suspense>
           ) : null}
         <main ref={managementMain}
+          data-theme-surface
           aria-hidden={managingConnections && remoteConnections?.embeddedManagement || undefined}
           {...(managingConnections && remoteConnections?.embeddedManagement ? { inert: "" } : {})}
           className={cn(
