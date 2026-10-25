@@ -34,12 +34,13 @@ def docker_boundary(tmp_path):
         "if stage == 'status':\n"
         "    print('nanobot Status\\nConfig: configured\\nWorkspace: ready\\nModel: test\\n'\n"
         "          'OpenRouter API: unset\\nAnthropic API: unset\\nOpenAI API: unset')\n"
+        "    print('x' * int(os.environ.get('DOCKER_STATUS_PADDING', '0')))\n"
         "if stage == os.environ.get('DOCKER_FAIL_STAGE'): sys.exit(23)\n",
         encoding="utf-8",
     )
     executable.chmod(0o755)
 
-    def run(name, *, fail_stage=""):
+    def run(name, *, fail_stage="", status_padding=0):
         log = tmp_path / f"{name}.jsonl"
         result = subprocess.run(
             ["bash", str(SCRIPT)],
@@ -48,6 +49,7 @@ def docker_boundary(tmp_path):
                 "PATH": f"{executable.parent}{os.pathsep}{os.environ.get('PATH', '')}",
                 "DOCKER_CALLS": str(log),
                 "DOCKER_FAIL_STAGE": fail_stage,
+                "DOCKER_STATUS_PADDING": str(status_padding),
             },
             capture_output=True,
             text=True,
@@ -97,3 +99,10 @@ def test_concurrent_smoke_runs_use_distinct_resources_and_cleanup(docker_boundar
         assert "All checks passed" in result.stdout
         resources.append(_assert_owned_cleanup(calls))
     assert resources[0].isdisjoint(resources[1])
+
+
+def test_smoke_accepts_verbose_status_output(docker_boundary):
+    result, calls = docker_boundary("verbose", status_padding=256 * 1024)
+    assert result.returncode == 0, result.stdout[-2000:] + result.stderr
+    assert "All checks passed" in result.stdout
+    _assert_owned_cleanup(calls)
