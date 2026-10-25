@@ -49,6 +49,7 @@ export class SessionMenu {
       key: (session) => session.chatId,
       searchText: (session) => [
         sessionLabel(session),
+        session.handle ? `@${session.handle.name}` : "",
         session.modelPreset || "",
         session.preview,
         session.chatId,
@@ -60,6 +61,7 @@ export class SessionMenu {
       render: (session, selected) => {
         const age = updatedLabel(session.updatedAt)
         const detail = [
+          session.handle ? `@${session.handle.name}` : "",
           this.showWorkspaces ? this.workspaceLabel(session) : "",
           this.modelOverride(session),
         ]

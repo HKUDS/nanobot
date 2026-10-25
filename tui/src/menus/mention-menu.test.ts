@@ -8,19 +8,20 @@ const candidates: MentionCandidate[] = [
   { kind: "mcp", name: "linear", displayName: "Linear", description: "MCP" },
   {
     kind: "session",
-    name: "release-plan",
+    name: "luma",
     displayName: "Release plan",
     description: "Session",
-    session: { name: "release-plan", session_key: "websocket:release", title: "Release plan" },
+    session: { id: "handle_release", name: "luma", session_key: "websocket:release", title: "Release plan" },
   },
 ]
 
 describe("mention projection", () => {
   test("finds and replaces only the mention under the cursor", () => {
-    const value = "ask @rel about this"
-    const query = mentionQuery(value, 8)
-    expect(query).toEqual({ query: "rel", start: 4, end: 8 })
-    expect(insertMention(value, candidates[2]!, query!).value).toBe("ask @release-plan about this")
+    const value = "ask @lu about this"
+    const query = mentionQuery(value, 7)
+    expect(query).toEqual({ query: "lu", start: 4, end: 7 })
+    const completed = insertMention(value, candidates[2]!, query!).value
+    expect(completed).toBe("ask @luma about this")
   })
 
   test("keeps namespaced completion aliases separate from gateway capability ids", () => {
@@ -35,12 +36,31 @@ describe("mention projection", () => {
     expect(options.mcpPresets).toEqual([{ name: "github" }])
   })
 
+  test("does not mix a canonical session with colliding tool completion aliases", () => {
+    const colliding: MentionCandidate[] = [
+      candidates[2]!,
+      { kind: "cli", name: "luma-2", targetName: "luma", displayName: "Luma CLI", description: "CLI" },
+      { kind: "mcp", name: "luma-3", targetName: "luma", displayName: "Luma MCP", description: "MCP" },
+    ]
+    expect(mentionOptions("ask @LUMA", colliding)).toEqual({
+      cliApps: [],
+      mcpPresets: [],
+      sessionMentions: [candidates[2]!.session!],
+    })
+    expect(mentionOptions("use @luma-2 and @luma-3", colliding)).toEqual({
+      cliApps: [{ name: "luma" }],
+      mcpPresets: [{ name: "luma" }],
+      sessionMentions: [],
+    })
+  })
+
   test("maps visible mentions onto the gateway metadata lanes", () => {
-    expect(mentionOptions("Use @github with @linear and @release-plan", candidates)).toEqual({
+    expect(mentionOptions("Use @github with @linear and @luma", candidates)).toEqual({
       cliApps: [{ name: "github" }],
       mcpPresets: [{ name: "linear" }],
       sessionMentions: [{
-        name: "release-plan",
+        id: "handle_release",
+        name: "luma",
         session_key: "websocket:release",
         title: "Release plan",
       }],

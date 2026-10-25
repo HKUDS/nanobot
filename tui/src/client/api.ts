@@ -25,6 +25,7 @@ import {
 } from "./validation"
 
 const SKILL_REFERENCE_NAME = /^[A-Za-z0-9_-]+$/u
+const SESSION_HANDLE_NAME = /^[a-z]{4,16}$/u
 const SLASH_COMMAND_LIFECYCLES = new Set([
   "side_channel",
   "finalize_active_turn",
@@ -415,8 +416,13 @@ export async function fetchSessions(
     const chatId = value.key.slice("websocket:".length)
     if (!chatId) return []
     const titleOverride = titles[value.key]
+    const handle = value.handle
     return [{
+      key: value.key,
       chatId,
+      ...(isRecord(handle) && typeof handle.id === "string" && handle.id
+        && typeof handle.name === "string" && SESSION_HANDLE_NAME.test(handle.name)
+        ? { handle: { id: handle.id, name: handle.name } } : {}),
       title: typeof titleOverride === "string"
         ? titleOverride
         : typeof value.title === "string" ? value.title : "",
@@ -437,16 +443,6 @@ export async function fetchSessions(
   })
 }
 
-function sessionMentionName(session: SessionSummary): string {
-  const label = (session.title || session.preview || "session")
-    .normalize("NFKC")
-    .replace(/\s+/gu, "-")
-    .replace(/[^\p{L}\p{N}_-]+/gu, "")
-    .replace(/-+/gu, "-")
-    .replace(/^-|-$/gu, "")
-  return Array.from(label || "session").slice(0, 40).join("")
-}
-
 /** Installed capabilities and saved chats share one mention namespace. */
 export async function fetchMentionCandidates(
   apiUrl: string,
@@ -464,7 +460,18 @@ export async function fetchMentionCandidates(
     ).catch(() => null),
     fetchApi(apiUrl, apiToken, "/api/settings/mcp-presets", reauthenticate).catch(() => null),
   ])
-  const used = new Set<string>()
+  const sessionCandidates = sessions.flatMap<MentionCandidate>((session) => session.handle ? [{
+    kind: "session",
+    name: session.handle.name,
+    displayName: sessionLabelForMention(session),
+    description: session.preview || "Saved session",
+    session: {
+      ...session.handle,
+      session_key: session.key,
+      title: session.title || undefined,
+    },
+  }] : [])
+  const used = new Set(sessionCandidates.map((candidate) => candidate.name.toLocaleLowerCase()))
   const uniqueName = (raw: string) => {
     const base = raw || "session"
     let name = base
@@ -507,21 +514,7 @@ export async function fetchMentionCandidates(
       })
     }
   }
-  for (const session of sessions) {
-    const name = uniqueName(sessionMentionName(session))
-    candidates.push({
-      kind: "session",
-      name,
-      displayName: sessionLabelForMention(session),
-      description: session.preview || "Saved session",
-      session: {
-        name,
-        session_key: `websocket:${session.chatId}`,
-        title: session.title || undefined,
-      },
-    })
-  }
-  return candidates
+  return [...candidates, ...sessionCandidates]
 }
 
 function sessionLabelForMention(session: SessionSummary): string {
