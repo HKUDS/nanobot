@@ -270,7 +270,7 @@ def test_template_memory_md_is_skipped(tmp_path) -> None:
     builder = ContextBuilder(workspace)
     prompt = builder.build_system_prompt()
 
-    assert "## Long-term Memory" not in prompt
+    assert "# Long-term Memory" not in prompt
     assert "History log: memory/history.jsonl" in prompt
     assert "This file is automatically updated by nanobot" not in prompt
 
@@ -297,6 +297,6 @@ def test_customized_memory_md_is_injected(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(builder.memory, "read_memory", tracked_read_memory)
     prompt = builder.build_system_prompt()
 
-    assert "# Memory\n\n## Long-term Memory" in prompt
+    assert prompt.count("# Long-term Memory") == 1
     assert "User prefers dark mode" in prompt
     assert calls == 1

@@ -13,6 +13,7 @@ export function HoverHint({ content, children, enabled = true, side = "top", ali
   contentClassName?: string;
 }) {
   const [open, setOpen] = React.useState(false);
+  React.useEffect(() => { if (!enabled) setOpen(false); }, [enabled]);
   return (
     <TooltipProvider>
       <Tooltip open={enabled && open} onOpenChange={(next) => setOpen(enabled && next)}>

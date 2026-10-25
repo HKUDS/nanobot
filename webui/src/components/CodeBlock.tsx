@@ -22,37 +22,20 @@ interface CodeBlockProps {
 interface HighlightedCodeProps {
   language?: string;
   code: string;
-  isDark: boolean;
   chrome: "default" | "none";
   showLineNumbers: boolean;
   wrapLongLines: boolean;
   viewportHighlight: boolean;
 }
 
-const CODE_FONT_STACK = [
-  '"JetBrains Mono"',
-  '"SFMono-Regular"',
-  '"SF Mono"',
-  '"Fira Code"',
-  '"Cascadia Code"',
-  '"Source Code Pro"',
-  "Menlo",
-  "Consolas",
-  "monospace",
-].join(", ");
-
 const ANSI_LANGUAGES = new Set(["ansi", "ansi-output"]);
 
 const LazyHighlightedCode = lazy(async () => {
   const [
     { default: SyntaxHighlighter },
-    { default: oneDark },
-    { default: oneLight },
     { ViewportCodeRows },
   ] = await Promise.all([
     import("react-syntax-highlighter/dist/esm/prism-async-light"),
-    import("react-syntax-highlighter/dist/esm/styles/prism/one-dark"),
-    import("react-syntax-highlighter/dist/esm/styles/prism/one-light"),
     import("@/components/ViewportCodeRows"),
   ]);
 
@@ -60,36 +43,23 @@ const LazyHighlightedCode = lazy(async () => {
     default({
       language,
       code,
-      isDark,
       chrome,
       showLineNumbers,
       wrapLongLines,
       viewportHighlight,
     }: HighlightedCodeProps) {
-      const theme = isDark ? oneDark : oneLight;
-      const transparentTheme = chrome === "none" ? {
-        ...theme,
-        'pre[class*="language-"]': {
-          ...theme['pre[class*="language-"]'],
-          background: "transparent",
-        },
-        'code[class*="language-"]': {
-          ...theme['code[class*="language-"]'],
-          background: "transparent",
-        },
-      } : theme;
-
       return (
         <SyntaxHighlighter
           language={language || "text"}
-          style={transparentTheme}
+          useInlineStyles={false}
+          style={{}}
           customStyle={{
             background: "transparent",
             margin: 0,
             padding: chrome === "none" ? "0.75rem 1rem" : "1rem 3.5rem 1rem 1.25rem",
-            fontFamily: CODE_FONT_STACK,
-            fontSize: "13px",
-            lineHeight: chrome === "none" ? 1.55 : 1.6,
+            fontFamily: "inherit",
+            fontSize: "inherit",
+            lineHeight: "inherit",
             tabSize: 2,
             // FilePreviewPanel owns both scroll axes. Replacing this <pre>
             // during progressive highlighting must not reset horizontal scroll.
@@ -98,15 +68,16 @@ const LazyHighlightedCode = lazy(async () => {
           codeTagProps={{
             style: {
               background: "transparent",
-              fontFamily: CODE_FONT_STACK,
+              fontFamily: "inherit",
+              fontSize: "inherit",
               ...(viewportHighlight ? { lineHeight: "inherit" } : {}),
             },
           }}
           lineNumberStyle={{
             minWidth: "2.6em",
             paddingRight: "1.15rem",
-            color: isDark ? "rgba(212, 212, 216, 0.45)" : "rgba(63, 63, 70, 0.68)",
-            fontFamily: CODE_FONT_STACK,
+            color: "var(--code-comment)",
+            fontFamily: "inherit",
             userSelect: "none",
           }}
           PreTag="pre"
@@ -125,8 +96,8 @@ function renderPlainText(value: string): ReactNode {
   return value;
 }
 
-function renderAnsiText(value: string): ReactNode {
-  return parseAnsiSegments(value).map((segment, index) => (
+function renderAnsiText(value: string, theme: "light" | "dark"): ReactNode {
+  return parseAnsiSegments(value, theme).map((segment, index) => (
     <span key={index} style={segment.style}>
       {segment.text}
     </span>
@@ -154,28 +125,27 @@ function CodeTextBlock({
   return (
     <pre
       className={cn(
-        "m-0 bg-transparent font-mono text-[13px] text-foreground/90",
+        "m-0 bg-transparent font-mono text-code text-foreground/90",
         compact ? "overflow-visible" : "overflow-x-auto",
         showLineNumbers ? "whitespace-pre" : "whitespace-pre-wrap",
         chrome === "default"
-          ? "py-4 pl-5 pr-14 leading-[1.6]"
-          : compact ? "px-4 py-3 leading-[1.55]" : "p-3 leading-[1.55]",
+          ? "py-4 pl-5 pr-14"
+          : compact ? "px-4 py-3" : "p-3",
         className,
       )}
       data-testid={testId}
-      style={compact ? { fontFamily: CODE_FONT_STACK } : undefined}
     >
       <code className="text-inherit">
         {showLineNumbers && compact ? (
           <span className="flex min-w-max">
-            <span aria-hidden className="shrink-0 select-none pr-[1.15rem] text-right text-muted-foreground/60"
+            <span aria-hidden className="shrink-0 select-none pr-[1.15rem] text-right text-muted-foreground"
               style={{ minWidth: "4.25em" }}>{lines.map((_, index) => index + 1).join("\n")}</span>
             <span>{renderText(code)}</span>
           </span>
         ) : showLineNumbers ? (
           lines.map((line, index) => (
             <span key={index} className="flex min-w-max">
-              <span className="w-10 shrink-0 select-none pr-4 text-right text-muted-foreground/60">
+              <span className="w-10 shrink-0 select-none pr-4 text-right text-muted-foreground">
                 {index + 1}
               </span>
               <span className="whitespace-pre">{renderText(line || " ")}</span>
@@ -264,7 +234,7 @@ export const CodeBlock = memo(function CodeBlock({
     <div
       ref={rootRef}
       className={cn(
-        "not-prose relative",
+        "not-prose relative code-content font-mono text-code",
         useViewportHighlight ? "overflow-visible" : "overflow-hidden",
         hasChrome && "rounded-floating bg-secondary/70",
         className,
@@ -277,7 +247,7 @@ export const CodeBlock = memo(function CodeBlock({
           chrome={chrome}
           showLineNumbers={showLineNumbers}
           testId="ansi-code"
-          renderText={renderAnsiText}
+          renderText={(value) => renderAnsiText(value, isDark ? "dark" : "light")}
           compact={useViewportHighlight}
         />
       ) : highlight && withinHighlightBudget && (!deferHighlight || highlightedSource === code) ? (
@@ -295,7 +265,6 @@ export const CodeBlock = memo(function CodeBlock({
           <LazyHighlightedCode
             language={syntaxLanguage}
             code={code}
-            isDark={isDark}
             chrome={chrome}
             showLineNumbers={showLineNumbers}
             wrapLongLines={wrapLongLines}
@@ -317,7 +286,7 @@ export const CodeBlock = memo(function CodeBlock({
           onClick={onCopy}
           className={cn(
             "absolute right-2.5 top-2.5 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full",
-            "text-muted-foreground/75 transition-colors hover:text-foreground",
+            "text-muted-foreground transition-colors hover:text-foreground",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
           )}
           aria-label={copyLabel}

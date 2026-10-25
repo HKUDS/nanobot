@@ -37,6 +37,7 @@ import aiohttp
 from loguru import logger
 from pydantic import Field
 
+from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ContextCompactionEvent
 from nanobot.bus.queue import MessageBus
@@ -364,6 +365,18 @@ class QQChannel(BaseChannel):
         self.logger.info("media directory: {}", str(root))
         return root
 
+    async def login(self, force: bool = False) -> bool:
+        """Scan a QQ Bot QR code and save the AppID/secret it returns."""
+        from nanobot.channels.qq.connect import QQConnectStore
+
+        if not force and self.config.app_id and self.config.secret:
+            return True
+        credentials = await QQConnectStore().login()
+        if credentials is None:
+            return False
+        self.config.app_id, self.config.secret = credentials
+        return True
+
     async def start(self) -> None:
         """Start the QQ bot with auto-reconnect loop."""
         redirect_lib_logging("botpy", level="WARNING")
@@ -437,7 +450,7 @@ class QQChannel(BaseChannel):
 
         try:
             if not self._client:
-                raise RuntimeError("QQ client not initialized")
+                raise ChannelNotReadyError("QQ client not initialized")
 
             msg_id = msg.metadata.get("message_id")
             chat_type = self._chat_type_cache.get(msg.chat_id, "c2c")

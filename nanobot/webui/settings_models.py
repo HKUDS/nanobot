@@ -19,8 +19,9 @@ import secrets
 import time
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, NotRequired, TypedDict, cast
 
 import httpx
 
@@ -39,9 +40,17 @@ from nanobot.providers.oauth_model_catalog import (
     get_oauth_model_catalog,
     invalidate_oauth_model_catalog,
 )
-from nanobot.providers.registry import PROVIDERS, ProviderSpec, create_dynamic_spec, find_by_name
+from nanobot.providers.registry import (
+    KIMI_K3_MODELS,
+    PROVIDERS,
+    ProviderModelSpec,
+    ProviderSpec,
+    create_dynamic_spec,
+    find_by_name,
+)
 from nanobot.providers.request_overrides import isolate_request_overrides
 from nanobot.providers.routing import resolve_automatic_model_api, resolve_model_api
+from nanobot.runtime_admission import RuntimeAdmission
 from nanobot.webui import request_settings
 from nanobot.webui.settings_contracts import (
     QueryParams,
@@ -99,6 +108,22 @@ class ModelSettingsPayload(TypedDict):
     providers: list[dict[str, Any]]
 
 
+class ProviderModelMetadataPayload(TypedDict, total=False):
+    max_output_tokens: int
+    input_modalities: list[str]
+    output_modalities: list[str]
+    reasoning_efforts: list[str]
+    default_reasoning_effort: str
+
+
+class ProviderModelRowPayload(ProviderModelMetadataPayload):
+    id: str
+    label: str | None
+    owned_by: str | None
+    context_window: int | None
+    description: NotRequired[str]
+
+
 _OAUTH_PROXY_PROVIDERS = {"openai_codex", "xai_grok"}
 _WEBUI_OAUTH_TIMEOUT_S = 600
 _MODEL_CONFIGURATION_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
@@ -111,7 +136,6 @@ def _provider_config_updates(query: QueryParams) -> dict[str, Any]:
     string_fields = (
         ("api_key", "apiKey"),
         ("api_base", "apiBase"),
-        ("proxy", "proxy"),
         ("thinking_style", "thinkingStyle"),
         ("region", "region"),
         ("profile", "profile"),
@@ -121,6 +145,9 @@ def _provider_config_updates(query: QueryParams) -> dict[str, Any]:
         if query_has_alias(query, snake, camel):
             value = (query_first_alias(query, snake, camel) or "").strip()
             updates[snake] = value or None
+
+    if query_has_alias(query, "use_proxy", "useProxy"):
+        updates["use_proxy"] = parse_bool(query_first_alias(query, "use_proxy", "useProxy") or "", "use_proxy")
 
     for snake, camel in (
         ("extra_headers", "extraHeaders"),
@@ -324,9 +351,9 @@ def _provider_advanced_field_names(name: str, spec: Any) -> list[str]:
     if spec.backend in {"openai_compat", "anthropic", "bedrock", "openai_codex", "xai_grok"}:
         fields.append("extra_body")
     if spec.backend in {"openai_compat", "anthropic"}:
-        fields.extend(("extra_query", "proxy"))
-    if spec.name in _OAUTH_PROXY_PROVIDERS and "proxy" not in fields:
-        fields.append("proxy")
+        fields.extend(("extra_query", "use_proxy"))
+    if spec.name in _OAUTH_PROXY_PROVIDERS and "use_proxy" not in fields:
+        fields.append("use_proxy")
     if spec.backend == "bedrock":
         fields.extend(("region", "profile"))
     if find_by_name(name) is None:
@@ -374,7 +401,7 @@ def _provider_settings_row(
         "thinking_style": provider_config.thinking_style,
         "region": getattr(provider_config, "region", None),
         "profile": getattr(provider_config, "profile", None),
-        "proxy": provider_config.proxy,
+        "use_proxy": provider_config.use_proxy,
     }
     if oauth_status is not None:
         row["oauth_account"] = oauth_status["account"]
@@ -436,12 +463,12 @@ def model_catalog_kind(spec: Any) -> str:
     return "official"
 
 
-def _model_id_from_row(row: Any) -> str | None:
+def _model_id_from_row(row: object) -> str | None:
     if isinstance(row, str):
         return row.strip() or None
     if not isinstance(row, dict):
         return None
-    row_mapping = cast(dict[str, Any], row)
+    row_mapping = cast(dict[str, object], row)
     for key in ("id", "name", "model"):
         value = row_mapping.get(key)
         if isinstance(value, str) and value.strip():
@@ -449,10 +476,31 @@ def _model_id_from_row(row: Any) -> str | None:
     return None
 
 
-def _model_context_window(row: Any) -> int | None:
+def _model_positive_int(value: object) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return None
+
+
+def _model_string_values(value: object) -> list[str] | None:
+    if not isinstance(value, list):
+        return None
+    values: list[str] = []
+    seen: set[str] = set()
+    for item in cast(list[object], value):
+        if not isinstance(item, str):
+            return None
+        normalized = item.strip()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            values.append(normalized)
+    return values
+
+
+def _model_context_window(row: object) -> int | None:
     if not isinstance(row, dict):
         return None
-    row_mapping = cast(dict[str, Any], row)
+    row_mapping = cast(dict[str, object], row)
     for key in (
         "context_window",
         "context_length",
@@ -461,22 +509,103 @@ def _model_context_window(row: Any) -> int | None:
         "max_input_tokens",
     ):
         value = row_mapping.get(key)
-        if isinstance(value, int) and value > 0:
-            return value
-        if isinstance(value, float) and value > 0:
-            return int(value)
+        parsed = _model_positive_int(value)
+        if parsed is not None:
+            return parsed
+        if isinstance(value, float) and math.isfinite(value) and value > 0:
+            parsed = _model_positive_int(int(value))
+            if parsed is not None:
+                return parsed
     return None
 
 
-def _model_row_payload(row: Any) -> dict[str, Any] | None:
+def _model_shutdown_date(row: object) -> date | None:
+    if not isinstance(row, dict):
+        return None
+    row_mapping = cast(dict[str, object], row)
+    raw = row_mapping.get("shutdown_date")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        return date.fromisoformat(raw.strip())
+    except ValueError:
+        return None
+
+
+def _model_catalog_row_active(row: object, *, on: date | None = None) -> bool:
+    """True when a provider catalog row should stay in the advisory model list."""
+    shutdown = _model_shutdown_date(row)
+    if shutdown is None:
+        return True
+    reference = on if on is not None else datetime.now(timezone.utc).date()
+    return shutdown > reference
+
+
+def _model_metadata_payload(
+    row: object,
+    metadata: ProviderModelSpec | None,
+) -> ProviderModelMetadataPayload:
+    row_mapping = cast(dict[str, object], row) if isinstance(row, dict) else {}
+    effort = row_mapping.get("effort")
+    effort_mapping = cast(dict[str, object], effort) if isinstance(effort, dict) else {}
+    max_output_tokens = _model_positive_int(row_mapping.get("max_output_tokens"))
+    input_modalities = _model_string_values(row_mapping.get("input_modalities"))
+    output_modalities = _model_string_values(row_mapping.get("output_modalities"))
+    reasoning_efforts = _model_string_values(effort_mapping.get("supported_levels"))
+    raw_default = effort_mapping.get("default_level")
+    default_effort = raw_default.strip() if isinstance(raw_default, str) else None
+
+    if metadata is not None:
+        if max_output_tokens is None:
+            max_output_tokens = metadata.max_output_tokens
+        if input_modalities is None and metadata.input_modalities:
+            input_modalities = list(metadata.input_modalities)
+        if output_modalities is None and metadata.output_modalities:
+            output_modalities = list(metadata.output_modalities)
+        if reasoning_efforts is None and metadata.reasoning_efforts:
+            reasoning_efforts = list(metadata.reasoning_efforts)
+        elif (
+            reasoning_efforts is not None
+            and "none" in metadata.reasoning_efforts
+            and "none" not in reasoning_efforts
+        ):
+            # Catalogs may list only enabled thinking levels, not the explicit off control.
+            reasoning_efforts = ["none", *reasoning_efforts]
+        if default_effort not in (reasoning_efforts or []):
+            default_effort = metadata.default_reasoning_effort
+
+    payload: ProviderModelMetadataPayload = {}
+    if max_output_tokens is not None:
+        payload["max_output_tokens"] = max_output_tokens
+    if input_modalities is not None:
+        payload["input_modalities"] = input_modalities
+    if output_modalities is not None:
+        payload["output_modalities"] = output_modalities
+    if reasoning_efforts is not None:
+        payload["reasoning_efforts"] = reasoning_efforts
+        if default_effort and default_effort in reasoning_efforts:
+            payload["default_reasoning_effort"] = default_effort
+    return payload
+
+
+def _model_row_payload(
+    row: object,
+    *,
+    spec: ProviderSpec | None = None,
+) -> ProviderModelRowPayload | None:
     model_id = _model_id_from_row(row)
     if not model_id:
         return None
+    metadata = spec.model_metadata(model_id) if spec is not None else None
+    context_window = _model_context_window(row)
+    if context_window is None and metadata is not None:
+        context_window = metadata.context_window
+    metadata_payload = _model_metadata_payload(row, metadata)
     label: str | None = None
     description: str | None = None
     owned_by: str | None = None
     if isinstance(row, dict):
-        row_mapping = cast(dict[str, Any], row)
+        row_mapping = cast(dict[str, object], row)
         raw_label = row_mapping.get("display_name") or row_mapping.get("label") or row_mapping.get("name")
         if isinstance(raw_label, str) and raw_label.strip() and raw_label.strip() != model_id:
             label = raw_label.strip()
@@ -486,25 +615,32 @@ def _model_row_payload(row: Any) -> dict[str, Any] | None:
         raw_owner = row_mapping.get("owned_by") or row_mapping.get("owner") or row_mapping.get("organization")
         if isinstance(raw_owner, str) and raw_owner.strip():
             owned_by = raw_owner.strip()
-    payload = {
+    payload: ProviderModelRowPayload = {
         "id": model_id,
         "label": label,
         "owned_by": owned_by,
-        "context_window": _model_context_window(row),
+        "context_window": context_window,
+        **metadata_payload,
     }
     if description:
         payload["description"] = description
     return payload
 
 
-def _extract_model_rows(body: Any) -> list[dict[str, Any]]:
-    raw_rows = cast(dict[str, Any], body).get("data") if isinstance(body, dict) else body
+def _extract_model_rows(
+    body: object,
+    *,
+    spec: ProviderSpec | None = None,
+) -> list[ProviderModelRowPayload]:
+    raw_rows = cast(dict[str, object], body).get("data") if isinstance(body, dict) else body
     if not isinstance(raw_rows, list):
         return []
-    rows: list[dict[str, Any]] = []
+    rows: list[ProviderModelRowPayload] = []
     seen: set[str] = set()
     for raw_row in cast(list[object], raw_rows):
-        row = _model_row_payload(raw_row)
+        if not _model_catalog_row_active(raw_row):
+            continue
+        row = _model_row_payload(raw_row, spec=spec)
         if row is None or row["id"] in seen:
             continue
         seen.add(row["id"])
@@ -562,7 +698,7 @@ def provider_models_payload(
             "model_count": len(rows),
         }
     if catalog_kind == "hybrid":
-        proxy = _resolve_env_placeholders(provider_config.proxy)
+        proxy = config.network.resolve_proxy(provider_config.use_proxy)
         catalog = get_oauth_model_catalog(
             spec.name, proxy=proxy, refresh=query_first(query, "refresh") == "1",
         )
@@ -625,14 +761,16 @@ def provider_models_payload(
         models_url = f"{api_base.rstrip('/')}/v1/models"
 
     try:
+        proxy = config.network.resolve_proxy(provider_config.use_proxy)
         response = http_get(
             models_url,
             headers=headers,
             timeout=10.0,
             follow_redirects=False,
+            **({"proxy": proxy, "trust_env": False} if proxy else {}),
         )
         response.raise_for_status()
-        rows = _extract_model_rows(response.json())
+        rows = _extract_model_rows(response.json(), spec=spec)
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
         if status in {401, 403}:
@@ -885,12 +1023,16 @@ def reasoning_effort_values_for(provider_name: str, model: str) -> list[str]:
         return list(_DEFAULT_REASONING_EFFORT_VALUES)
 
     model_lower = (model or "").lower()
-    if model_lower.rsplit("/", 1)[-1] == "kimi-k3":
-        return ["", "max"]
+    if model_lower.rsplit("/", 1)[-1] in KIMI_K3_MODELS:
+        return ["", "low", "high", "max"]
 
     implicit = getattr(spec, "implicit_reasoning_models", ())
     if implicit and any(pattern in model_lower for pattern in implicit):
         return [""]
+
+    metadata = spec.model_metadata(model)
+    if metadata is not None and metadata.reasoning_efforts:
+        return ["", *metadata.reasoning_efforts]
 
     remap = getattr(spec, "reasoning_effort_remap", ())
     if remap:
@@ -1465,10 +1607,15 @@ def create_provider_settings(config: Config, query: QueryParams) -> str:
     if len(display_name) > 80:
         raise WebUISettingsError("provider name must be 80 characters or fewer")
     updates = _provider_config_updates(query)
+    if updates.get("use_proxy"):
+        try:
+            config.network.resolve_proxy(True)
+        except ValueError as exc:
+            raise WebUISettingsError(str(exc)) from None
     allowed = {
         "api_key",
         "api_base",
-        "proxy",
+        "use_proxy",
         "extra_headers",
         "extra_body",
         "extra_query",
@@ -1506,6 +1653,11 @@ def update_provider_settings(
         raise WebUISettingsError("unknown provider")
     spec, provider_key, provider_config = resolved_provider
     updates = _provider_config_updates(query)
+    if updates.get("use_proxy"):
+        try:
+            config.network.resolve_proxy(True)
+        except ValueError as exc:
+            raise WebUISettingsError(str(exc)) from None
     if not spec.is_oauth and spec.name != "openai":
         updates.pop("api_type", None)
     try:
@@ -1515,10 +1667,10 @@ def update_provider_settings(
     if spec.is_oauth:
         if spec.name not in _OAUTH_PROXY_PROVIDERS:
             raise WebUISettingsError("unknown provider")
-        unsupported = set(updates) - {"proxy", "extra_body"}
+        unsupported = set(updates) - {"use_proxy", "extra_body"}
         if unsupported:
             raise WebUISettingsError(
-                "OAuth provider only supports proxy and extra_body settings"
+                "OAuth provider only supports use_proxy and extra_body settings"
             )
     else:
         allowed = {
@@ -1588,15 +1740,13 @@ def login_oauth_provider(
 
     if spec.name == "openai_codex":
         try:
-            from nanobot.providers.openai_codex_oauth import start_openai_codex_oauth_login
+            from nanobot.providers.openai_codex_oauth import OpenAICodexOAuthLoginFlow
         except ImportError:
             raise WebUISettingsError(OAUTH_CLI_KIT_MISSING_MESSAGE, status=500) from None
 
         try:
-            proxy = resolve_config_env_vars(
-                config,
-                config_path=config_path,
-            ).providers.openai_codex.proxy or None
+            resolved_config = resolve_config_env_vars(config, config_path=config_path)
+            proxy = resolved_config.network.resolve_proxy(resolved_config.providers.openai_codex.use_proxy)
         except ValueError as exc:
             raise WebUISettingsError(str(exc), status=400) from exc
         remote_browser_value = query_first(query, "remote_browser")
@@ -1605,19 +1755,21 @@ def login_oauth_provider(
             if remote_browser_value is not None
             else False
         )
+        flow = OpenAICodexOAuthLoginFlow(
+            proxy=proxy,
+            timeout_s=_WEBUI_OAUTH_TIMEOUT_S,
+            open_browser=not remote_browser,
+        )
+        flow_id = secrets.token_urlsafe(24)
         try:
-            flow = start_openai_codex_oauth_login(
-                proxy=proxy,
-                timeout_s=_WEBUI_OAUTH_TIMEOUT_S,
-                open_browser=not remote_browser,
-            )
+            oauth_flows.register(spec.name, flow_id, flow)
+            flow.start()
         except Exception as exc:
+            oauth_flows.remove(spec.name, flow_id, flow)
             raise WebUISettingsError(
                 f"OpenAI Codex OAuth login failed: {exc}",
                 status=502,
             ) from exc
-        flow_id = secrets.token_urlsafe(24)
-        oauth_flows.register(spec.name, flow_id, flow)
         return {
             "status": "authorization_required",
             "provider": spec.name,
@@ -1640,8 +1792,8 @@ def login_oauth_provider(
         flow_id = secrets.token_urlsafe(24)
         # Own the flow before network I/O, so logout/replacement also cancels a
         # login that is still waiting for GitHub to return its device prompt.
-        oauth_flows.register(spec.name, flow_id, copilot_flow)
         try:
+            oauth_flows.register(spec.name, flow_id, copilot_flow)
             copilot_flow.start()
         except Exception:
             oauth_flows.remove(spec.name, flow_id, copilot_flow)
@@ -1657,24 +1809,27 @@ def login_oauth_provider(
         }
 
     if spec.name == "xai_grok":
-        from nanobot.providers.xai_oauth import start_xai_oauth_login
+        from nanobot.providers.xai_oauth import create_xai_oauth_login
 
         try:
-            proxy = resolve_config_env_vars(
-                config,
-                config_path=config_path,
-            ).providers.xai_grok.proxy or None
+            resolved_config = resolve_config_env_vars(config, config_path=config_path)
+            proxy = resolved_config.network.resolve_proxy(resolved_config.providers.xai_grok.use_proxy)
         except ValueError as exc:
             raise WebUISettingsError(str(exc), status=400) from exc
         try:
-            flow = start_xai_oauth_login(
+            flow = create_xai_oauth_login(
                 proxy=proxy,
                 timeout_s=_WEBUI_OAUTH_TIMEOUT_S,
             )
         except Exception as exc:
             raise WebUISettingsError(f"xAI OAuth login failed: {exc}", status=502) from exc
         flow_id = secrets.token_urlsafe(24)
-        oauth_flows.register(spec.name, flow_id, flow)
+        try:
+            oauth_flows.register(spec.name, flow_id, flow)
+            flow.start()
+        except Exception as exc:
+            oauth_flows.remove(spec.name, flow_id, flow)
+            raise WebUISettingsError(f"xAI OAuth login failed: {exc}", status=502) from exc
         return {
             "status": "authorization_required",
             "provider": spec.name,
@@ -1714,25 +1869,14 @@ def complete_oauth_provider(
 
     try:
         if spec.name == "openai_codex":
-            from nanobot.providers.openai_codex_oauth import (
-                OpenAICodexOAuthInputError,
-                complete_openai_codex_oauth_login,
-            )
+            from nanobot.providers.openai_codex_oauth import OpenAICodexOAuthInputError
 
             try:
-                token = complete_openai_codex_oauth_login(flow, authorization_response)
+                token = flow.complete(authorization_response)
             except OpenAICodexOAuthInputError as exc:
                 raise WebUISettingsError(str(exc), status=400) from exc
-        elif spec.name == "github_copilot":
-            from nanobot.providers.github_copilot_oauth import GitHubCopilotOAuthFlow
-
-            if not isinstance(flow, GitHubCopilotOAuthFlow):
-                raise WebUISettingsError("Invalid GitHub sign-in session. Start again.")
-            token = flow.complete()
         else:
-            from nanobot.providers.xai_oauth import complete_xai_oauth_login
-
-            token = complete_xai_oauth_login(flow, authorization_response)
+            token = flow.complete(authorization_response)
     except WebUISettingsError:
         raise
     except Exception as exc:
@@ -1805,9 +1949,26 @@ def logout_oauth_provider(
 class ModelSettingsHandler:
     """Handle model/provider commands after transport authentication and decoding."""
 
-    def __init__(self, settings: WebUISettingsServices, logger: Any) -> None:
+    def __init__(
+        self, settings: WebUISettingsServices, logger: Any, admission: RuntimeAdmission,
+    ) -> None:
         self.settings = settings
         self.logger = logger
+        self._admission = admission
+        self._remove_pending_work: Callable[[], None] | None = None
+        self._close_task: asyncio.Task[None] | None = None
+
+    async def close(self) -> None:
+        """Keep the registry owned even if its shutdown awaiter is cancelled."""
+        if self._close_task is None or self._close_task.done():
+            self._close_task = asyncio.create_task(asyncio.to_thread(self.settings.oauth_flows.close))
+            self._close_task.add_done_callback(
+                lambda task: task.exception() if not task.cancelled() else None,
+            )
+        await asyncio.shield(self._close_task)
+        if self._remove_pending_work is not None:
+            self._remove_pending_work()
+            self._remove_pending_work = None
 
     def _refresh_runtime_config(self) -> None:
         """Make a successful model-settings mutation visible to live clients now."""
@@ -1820,9 +1981,19 @@ class ModelSettingsHandler:
         request: SettingsRequest,
         operations: ModelSettingsOperations,
     ) -> SettingsRouteResult:
+        if action in {"oauth-login", "oauth-complete", "oauth-logout"}:
+            self._admission.check()
+            if self._remove_pending_work is None:
+                self._remove_pending_work = self._admission.register_pending_work(
+                    lambda: self.settings.oauth_flows.has_pending_work,
+                )
         try:
             if action == "agent-update":
-                payload = self.settings.mutate(operations.update_agent, request.query)
+                payload = await asyncio.to_thread(
+                    self.settings.mutate,
+                    operations.update_agent,
+                    request.query,
+                )
                 self._refresh_runtime_config()
                 return SettingsRouteResult.success(
                     payload,
@@ -1831,7 +2002,8 @@ class ModelSettingsHandler:
                 )
 
             if action == "model-update":
-                payload = self.settings.mutate(
+                payload = await asyncio.to_thread(
+                    self.settings.mutate,
                     operations.update_model,
                     request.query,
                     rename_model_preset=self.settings.rename_model_preset,
@@ -1847,12 +2019,17 @@ class ModelSettingsHandler:
                 "provider-create": operations.create_provider,
             }.get(action)
             if mutation is not None:
-                payload = self.settings.mutate(mutation, request.query)
+                payload = await asyncio.to_thread(
+                    self.settings.mutate,
+                    mutation,
+                    request.query,
+                )
                 self._refresh_runtime_config()
                 return SettingsRouteResult.success(payload, decorate_restart=True)
 
             if action == "provider-update":
-                payload = self.settings.mutate(
+                payload = await asyncio.to_thread(
+                    self.settings.mutate,
                     operations.update_provider,
                     request.query,
                 )

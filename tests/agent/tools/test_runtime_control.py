@@ -93,7 +93,8 @@ def test_agent_loop_assembles_my_tool_with_runtime_control(tmp_path: Path) -> No
 def test_runtime_snapshot_has_exact_allowlist_and_redacts_secrets(tmp_path: Path) -> None:
     loop = _make_loop(tmp_path)
     loop.web_config.search.api_key = "search-secret"
-    loop.web_config.proxy = "http://proxy-user:proxy-secret@proxy.example"
+    loop.network_config.proxy = "http://proxy-user:proxy-secret@proxy.example"
+    loop.web_config.use_proxy = True
     loop.unlisted_secret = "loop-secret"
 
     snapshot = _my_tool(loop)._runtime_control.snapshot()
@@ -132,7 +133,7 @@ def test_runtime_snapshot_has_exact_allowlist_and_redacts_secrets(tmp_path: Path
     assert "search-secret" not in rendered
     assert "proxy-secret" not in rendered
     assert "loop-secret" not in rendered
-    assert snapshot.web_config["proxy"] == "<configured>"
+    assert snapshot.web_config["use_proxy"] is True
 
 
 def test_runtime_snapshot_is_detached_from_mutable_config(tmp_path: Path) -> None:
@@ -200,17 +201,13 @@ async def test_default_allow_set_and_public_parameter_schema_are_unchanged(
             "key": {
                 "type": "string",
                 "description": (
-                    "Dot-path for check/set. Examples: 'max_iterations', 'workspace', "
-                    "'provider_retry_mode'. Use 'request.channel', 'request.chat_id', or "
-                    "'request.sender_id' for current routing metadata. Use 'model_preset' "
-                    "to switch named model presets. For check without key, shows all "
-                    "config values."
+                    "Dot-path for check; top-level runtime or scratchpad key for set. "
+                    "Read-only routing metadata: request.channel, request.chat_id, request.sender_id."
                 ),
             },
             "value": {
                 "description": (
-                    "New value (for set). Type must match target (int for "
-                    "max_iterations/context_window_tokens, str for model/model_preset)."
+                    "New value for set; match the setting's type. Scratchpad accepts JSON values."
                 ),
             },
         },
@@ -387,10 +384,10 @@ async def test_workspace_inspection_reaches_model_from_selected_chat(tmp_path: P
         ]),
         LLMResponse(content="done", tool_calls=[]),
     ])
-    session = loop.sessions.get_or_create("websocket:inspection")
-    session.metadata["workspace_scope"] = {
+    session = await loop.sessions.state.get("websocket:inspection")
+    await loop.sessions.state.update_metadata(session.key, {"workspace_scope": {
         "project_path": str(project), "access_mode": "restricted",
-    }
+    }})
 
     response = await loop.process_direct(
         "Check the current directory and read marker.txt",
@@ -479,9 +476,11 @@ async def test_access_changes_refresh_only_new_message_and_preserve_prefix(tmp_p
     provider = loop.provider
     provider.generation = GenerationSettings()
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
-    session = loop.sessions.get_or_create("websocket:scope-changes")
+    session = await loop.sessions.state.get("websocket:scope-changes")
     for root, mode in [(project, "restricted"), (project, "full"), (other, "restricted")]:
-        session.metadata["workspace_scope"] = {"project_path": str(root), "access_mode": mode}
+        await loop.sessions.state.update_metadata(session.key, {"workspace_scope": {
+            "project_path": str(root), "access_mode": mode,
+        }})
         await loop.process_direct(
             "Check access", channel="websocket", chat_id="scope-changes", session_key=session.key,
         )
@@ -501,9 +500,10 @@ async def test_access_changes_refresh_only_new_message_and_preserve_prefix(tmp_p
     assert {key: value for key, value in before.items() if key != "messages"} == {
         key: value for key, value in after.items() if key != "messages"
     }
-    assert all(message["content"] == "Check access" for message in session.get_history(
+    session = await loop.sessions.state.get(session.key)
+    assert [message["content"] for message in session.get_history(
         include_runtime_context=False,
-    ) if message["role"] == "user")
+    ) if message["role"] == "user"] == ["Check access"] * 3
 
 
 @pytest.mark.asyncio
@@ -519,12 +519,14 @@ async def test_injected_channel_input_reports_active_tool_scope(tmp_path: Path) 
         ]),
         LLMResponse(content="done"),
     ])
-    session = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
+    session = await loop.sessions.state.get(UNIFIED_SESSION_KEY)
     session.metadata["workspace_scope"] = {"project_path": str(project), "access_mode": "restricted"}
+    session.add_message("user", "Start")
+    await loop.sessions.state.prepare_input(session)
     pending = asyncio.Queue()
     await pending.put(InboundMessage("telegram", "user", "chat", "Read marker.txt"))
     await loop._run_agent_loop(
-        TranscriptInput(history=[{"role": "user", "content": "Start"}], current_message=None),
+        TranscriptInput(history=session.get_history(), current_message=None),
         runtime=loop.llm_runtime(), session=session, pending_queue=pending,
         request_context=RequestContext("websocket", "chat", session_key=session.key),
     )
@@ -652,6 +654,8 @@ async def test_subagent_check_is_session_scoped(tmp_path, single_task, runtime):
     loop = _make_loop(tmp_path)
     manager = loop.subagents
     # Queued tasks must be scoped before their runner starts.
+    for _ in range(manager.max_concurrent_subagents):
+        await manager._run_slots.acquire()
     await manager.spawn("ALPHA_PRIVATE_TASK", label="ALPHA_LABEL", session_key="owner:a", runtime=runtime)
     await manager.spawn("BETA_PRIVATE_TASK", label="BETA_LABEL", session_key="owner:b", runtime=runtime)
     try:

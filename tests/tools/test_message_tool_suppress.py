@@ -204,10 +204,10 @@ class TestMessageToolSchema:
     def test_schema_discourages_current_chat_replies(self) -> None:
         tool = MessageTool()
 
-        assert "For a normal reply, including a scheduled reminder or report, answer naturally instead" in tool.description
-        assert "nanobot delivers the final reply to the current chat" in tool.description
-        assert "generate_image creates images in the current chat" in tool.description
+        assert "For normal replies, including scheduled reminders and reports, answer directly" in tool.description
+        assert "the final reply is delivered to the current chat automatically" in tool.description
+        assert "deliver generated images via media" in tool.description
         assert (
-            "Do not use this for a normal reply in the current chat"
-            in tool.parameters["properties"]["content"]["description"]
+            "Use artifact paths returned by generate_image"
+            in tool.parameters["properties"]["media"]["description"]
         )

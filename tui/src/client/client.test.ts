@@ -478,8 +478,21 @@ describe("gateway protocol", () => {
     client.close()
   })
 
-  test("represents lifecycle frames without browser state", () => {
-    const events: InboundEvent[] = [
+  test("delivers lifecycle frames with media metadata through the gateway socket", () => {
+    const original = globalThis.WebSocket
+    let socket: FakeSocket | undefined
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: class extends FakeSocket {
+        constructor() {
+          super()
+          socket = this
+        }
+      },
+    })
+    const frames: InboundEvent[] = [
+      { event: "ready", chat_id: "", client_id: "client" },
+      { event: "attached", chat_id: "one" },
       {
         event: "user_message",
         chat_id: "one",
@@ -493,12 +506,26 @@ describe("gateway protocol", () => {
       { event: "stream_end", chat_id: "one", resuming: false },
       { event: "turn_end", chat_id: "one", latency_ms: 12 },
     ]
-    expect(events.map((event) => event.event)).toEqual([
-      "user_message",
-      "delta",
-      "stream_end",
-      "turn_end",
-    ])
+    const delivered: InboundEvent[] = []
+    const client = new NanobotClient({
+      url: "ws://nanobot.test/ws",
+      chatId: "one",
+      onEvent: (event) => delivered.push(event),
+      onStatus: () => undefined,
+    })
+
+    try {
+      client.connect()
+      if (!socket) throw new Error("socket was not created")
+      socket.emit("open")
+      for (const frame of frames) {
+        socket.emit("message", { data: JSON.stringify(frame) })
+      }
+      expect(delivered).toEqual(frames)
+    } finally {
+      client.close()
+      Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
+    }
   })
 
   test("attaches and sends turns through the gateway envelope", () => {

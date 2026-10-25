@@ -1,0 +1,259 @@
+name: Verify Release Candidate
+
+# Preparation only: no cron, tags, GitHub Releases, PyPI or channel-feed writes.
+on:
+  workflow_dispatch:
+    inputs:
+      next_stable:
+        description: Next stable base (for example 0.3.6); must not have a stable tag
+        required: true
+        type: string
+      retain_installable:
+        description: Retain this exact installable candidate and source for 1 day (~400 MB); not publication
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-candidate
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      candidate_commit: ${{ steps.identity.outputs.candidate_commit }}
+      manifest_sha256: ${{ steps.identity.outputs.manifest_sha256 }}
+      linux_artifact_id: ${{ steps.linux_input.outputs.artifact-id }}
+      windows_artifact_id: ${{ steps.windows_input.outputs.artifact-id }}
+      prepared_artifact_id: ${{ steps.prepared.outputs.artifact-id }}
+    env:
+      SOURCE_COMMIT: ${{ github.sha }}
+      NEXT_STABLE: ${{ inputs.next_stable }}
+      PREVIEW_SEQUENCE: ${{ github.run_number }}
+
+    steps:
+      - name: Set candidate directory
+        run: echo "CANDIDATE_DIR=$RUNNER_TEMP/candidate" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - uses: astral-sh/setup-uv@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+
+      - name: Install isolated build and verification tools
+        run: |
+          uv venv "$RUNNER_TEMP/release-tools"
+          uv pip install --python "$RUNNER_TEMP/release-tools/bin/python" -e '.[dev]' build twine
+          echo "$RUNNER_TEMP/release-tools/bin" >> "$GITHUB_PATH"
+
+      - name: Prepare an exact, separate candidate
+        run: |
+          python -m scripts.release_candidate prepare \
+            --source-commit "$SOURCE_COMMIT" --base "$NEXT_STABLE" \
+            --sequence "$PREVIEW_SEQUENCE" --output "$CANDIDATE_DIR" \
+            > "$RUNNER_TEMP/candidate.json"
+
+      - name: Verify packaging and selection contracts
+        working-directory: ${{ env.CANDIDATE_DIR }}
+        run: |
+          python -m pytest tests/test_release_candidate.py tests/test_releases.py \
+            tests/test_release_install_guide.py tests/test_installed_release_probe.py tests/cli/test_tui_wheels.py \
+            tests/cli/test_tui_release_packaging.py -q
+
+      - name: Check WebUI and build Python distributions
+        working-directory: ${{ env.CANDIDATE_DIR }}
+        run: |
+          cd webui
+          bun install --frozen-lockfile
+          bun run lint
+          bun run test
+          cd ..
+          uv build --out-dir "$RUNNER_TEMP/python-dist"
+
+      - name: Check and cross-build the five native targets
+        working-directory: ${{ env.CANDIDATE_DIR }}/tui
+        run: |
+          bun install --frozen-lockfile
+          bun run check
+          bun run test
+          for target in darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-x64; do
+            bun scripts/prepare-target.ts "$target"
+            bun run build -- "$target"
+          done
+
+      - name: Ad-hoc sign macOS arm64
+        uses: indygreg/apple-code-sign-action@44d0985b7f4363198e80b6fea63ac3e9dd3e9957
+        with:
+          input_path: ${{ env.CANDIDATE_DIR }}/tui/dist/nanobot-tui-darwin-arm64
+          rcodesign_version: 0.29.0
+
+      - name: Ad-hoc sign macOS x64
+        uses: indygreg/apple-code-sign-action@44d0985b7f4363198e80b6fea63ac3e9dd3e9957
+        with:
+          input_path: ${{ env.CANDIDATE_DIR }}/tui/dist/nanobot-tui-darwin-x64
+          rcodesign_version: 0.29.0
+
+      - name: Package licensed native archives
+        working-directory: ${{ env.CANDIDATE_DIR }}/tui
+        run: |
+          for target in darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-x64; do
+            bun scripts/prepare-target.ts "$target"
+            bun scripts/release-notices.ts "$target"
+            python scripts/package-release.py "$target"
+          done
+
+      - name: Assemble and verify the complete candidate
+        working-directory: ${{ env.CANDIDATE_DIR }}
+        run: |
+          version="${NEXT_STABLE}.dev${PREVIEW_SEQUENCE}"
+          python -m scripts.release_candidate assemble --source-commit "$SOURCE_COMMIT" \
+            --wheel "$RUNNER_TEMP/python-dist/nanobot_ai-${version}-py3-none-any.whl" \
+            --sdist "$RUNNER_TEMP/python-dist/nanobot_ai-${version}.tar.gz" \
+            --tui-dir tui/dist --output "$RUNNER_TEMP/release-artifacts"
+          python -m twine check "$RUNNER_TEMP/release-artifacts/"*.whl \
+            "$RUNNER_TEMP/release-artifacts/"*.tar.gz
+
+      - name: Record exact acceptance identity
+        id: identity
+        env:
+          MANIFEST: ${{ runner.temp }}/release-artifacts/release-manifest.json
+        run: |
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          payload = Path(os.environ['MANIFEST']).read_bytes()
+          manifest = json.loads(payload)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f"candidate_commit={manifest['candidate_commit']}\n")
+              output.write(f"manifest_sha256={hashlib.sha256(payload).hexdigest()}\n")
+          PY
+
+      # Temporary same-run inputs, not approved release handoffs. Do not rebuild on consumers.
+      - name: Transfer exact Linux acceptance input
+        id: linux_input
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-native-linux-x64-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/release-artifacts/*-manylinux_2_17_x86_64.whl
+            ${{ runner.temp }}/release-artifacts/release-manifest.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+      - name: Transfer exact Windows acceptance input
+        id: windows_input
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-native-win32-x64-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/release-artifacts/*-win_amd64.whl
+            ${{ runner.temp }}/release-artifacts/release-manifest.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+      - name: Generate the exact candidate installation handoff
+        working-directory: ${{ env.CANDIDATE_DIR }}
+        run: |
+          python -m scripts.release_candidate instructions --source-commit "$SOURCE_COMMIT" \
+            --artifacts "$RUNNER_TEMP/release-artifacts" \
+            --output "$RUNNER_TEMP/install-candidate.md"
+
+      # These reports are neither native acceptance nor publication approval.
+      - name: Retain candidate identity and structural reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-report-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/candidate.json
+            ${{ runner.temp }}/release-artifacts/release-manifest.json
+            ${{ runner.temp }}/install-candidate.md
+          if-no-files-found: error
+          retention-days: 3
+
+      # Explicit, short-lived release handoff only. This is the documented
+      # exception to report-only preflight; never enable it on a daily schedule.
+      - name: Preserve the verified bytes and independent candidate source
+        if: ${{ inputs.retain_installable }}
+        working-directory: ${{ env.CANDIDATE_DIR }}
+        run: |
+          python -m scripts.release_candidate retain --source-commit "$SOURCE_COMMIT" \
+            --artifacts "$RUNNER_TEMP/release-artifacts" \
+            --output "$RUNNER_TEMP/retained-candidate"
+
+      - name: Transfer prepared candidate pending native acceptance
+        id: prepared
+        if: ${{ inputs.retain_installable }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: prepared-candidate-${{ github.run_number }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/retained-candidate
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  native:
+    name: Candidate native acceptance
+    needs: candidate
+    uses: ./.github/workflows/native-acceptance.yml
+    with:
+      candidate: true
+      candidate_commit: ${{ needs.candidate.outputs.candidate_commit }}
+      manifest_sha256: ${{ needs.candidate.outputs.manifest_sha256 }}
+      linux_artifact_id: ${{ needs.candidate.outputs.linux_artifact_id }}
+      windows_artifact_id: ${{ needs.candidate.outputs.windows_artifact_id }}
+
+  verified:
+    name: Candidate required
+    needs: [candidate, native]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require build and both native acceptance jobs
+        env:
+          BUILD_RESULT: ${{ needs.candidate.result }}
+          NATIVE_RESULT: ${{ needs.native.result }}
+        run: test "$BUILD_RESULT" = success && test "$NATIVE_RESULT" = success
+
+      - name: Restore the exact retained candidate after acceptance
+        if: inputs.retain_installable
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.candidate.outputs.prepared_artifact_id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/retained-candidate
+
+      - name: Retain accepted installable candidate for separate approval
+        if: inputs.retain_installable
+        uses: actions/upload-artifact@v4
+        with:
+          name: installable-candidate-${{ github.run_number }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/retained-candidate
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+      - name: Record accepted identity
+        env:
+          CANDIDATE_COMMIT: ${{ needs.candidate.outputs.candidate_commit }}
+          MANIFEST_SHA256: ${{ needs.candidate.outputs.manifest_sha256 }}
+        run: |
+          printf 'Candidate: `%s`\n\nManifest SHA-256: `%s`\n\nLinux and Windows native acceptance passed. Publication requires separate approval.\n' \
+            "$CANDIDATE_COMMIT" "$MANIFEST_SHA256" >> "$GITHUB_STEP_SUMMARY"

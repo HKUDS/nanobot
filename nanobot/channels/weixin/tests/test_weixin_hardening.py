@@ -253,7 +253,10 @@ async def test_qr_fetch_does_not_retry_invalid_request_without_local_tokens(tmp_
 @pytest.mark.asyncio
 async def test_lifecycle_notifications_are_best_effort() -> None:
     channel = _ready_channel()
-    channel._api_post = AsyncMock(return_value={"ret": 0})
+    channel._api_post = AsyncMock(side_effect=[
+        httpx.ReadTimeout("upstream unavailable"),
+        {"ret": -100, "errmsg": "upstream rejected notification"},
+    ])
 
     await channel._notify_lifecycle("start")
     await channel._notify_lifecycle("stop")

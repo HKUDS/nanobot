@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -506,7 +507,7 @@ class CliAppManager:
         *,
         force_refresh: bool = False,
     ) -> dict[str, Any]:
-        data, cached_at = self._cached_registry(cache_path)
+        data, cached_at = await asyncio.to_thread(self._cached_registry, cache_path)
         if (
             not force_refresh
             and data is not None
@@ -526,7 +527,7 @@ class CliAppManager:
                 return data
             raise
 
-        _write_json(cache_path, {"_cached_at": _now(), "data": fetched})
+        await asyncio.to_thread(_write_json, cache_path, {"_cached_at": _now(), "data": fetched})
         return fetched
 
     async def refresh_catalog_cache(self, *, force_refresh: bool = False) -> None:

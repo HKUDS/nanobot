@@ -3,8 +3,9 @@ import json
 import re
 import shutil
 import signal
+import sys
 import urllib.error
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager, nullcontext, suppress
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -48,6 +49,8 @@ runner = CliRunner()
 def mock_webui_bundle(monkeypatch) -> MagicMock:
     prepare_bundle = MagicMock()
     monkeypatch.setattr(cli_webui, "_prepare_webui_bundle_for_gateway", prepare_bundle)
+    monkeypatch.setattr(cli_webui, "dock_icon", lambda *_args, **_kwargs: nullcontext())
+    monkeypatch.setattr(cli_webui, "request_gateway_icon", lambda *_args, **_kwargs: None)
     return prepare_bundle
 
 
@@ -93,6 +96,10 @@ class _GatewayAgentContractStub:
     tools = ToolRegistry()
     subagents = MagicMock(spec=SubagentManager)
 
+    @contextmanager
+    def maintenance(self):
+        yield
+
     async def discard_session(self, _session_key: str) -> None:
         pass
 
@@ -124,8 +131,17 @@ class _EmptyGatewaySessionManager:
     def list_sessions(self) -> list[dict[str, object]]:
         return []
 
-    def flush_all(self) -> int:
-        return 0
+    def list_session_metadata(self) -> list[dict[str, object]]:
+        return []
+
+    @property
+    def state(self):
+        return SimpleNamespace(
+            list_sessions=AsyncMock(return_value=[]),
+            migrate_history=AsyncMock(),
+            record_delivery=AsyncMock(),
+            aclose=AsyncMock(),
+        )
 
 
 def test_gateway_signal_handler_first_signal_stops_and_second_forces() -> None:
@@ -149,9 +165,11 @@ def test_gateway_signal_handler_first_signal_stops_and_second_forces() -> None:
         task = asyncio.create_task(never.wait())
         output: list[str] = []
 
+        tasks: list[asyncio.Task[object]] = []
         restore = cli_gateway_runtime._install_gateway_shutdown_handlers(
-            loop, shutdown_event, [task], output.append,
+            loop, shutdown_event, tasks, output.append,
         )
+        tasks.append(task)
         try:
             callback, args = loop.handlers[int(signal.SIGINT)]
             assert callable(callback)
@@ -174,6 +192,46 @@ def test_gateway_signal_handler_first_signal_stops_and_second_forces() -> None:
         assert int(signal.SIGTERM) in loop.removed
 
     asyncio.run(_run())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("signal_name", ["SIGINT", "SIGBREAK"])
+async def test_gateway_signal_fallback_requests_shutdown_then_forces_and_restores(
+    monkeypatch, signal_name: str,
+) -> None:
+    sigbreak = getattr(signal, "SIGBREAK", 21)
+    monkeypatch.setattr(signal, "SIGBREAK", sigbreak, raising=False)
+    previous = object()
+    handlers = {}
+    monkeypatch.setattr(signal, "getsignal", lambda _signum: previous)
+    monkeypatch.setattr(signal, "signal", lambda signum, handler: handlers.update({signum: handler}))
+    loop = MagicMock()
+    loop.add_signal_handler.side_effect = NotImplementedError
+    shutdown_event = asyncio.Event()
+    task = asyncio.create_task(asyncio.Event().wait())
+    await asyncio.sleep(0)
+    tasks: list[asyncio.Task[object]] = []
+    output: list[str] = []
+    restore = cli_gateway_runtime._install_gateway_shutdown_handlers(
+        loop, shutdown_event, tasks, output.append,
+    )
+    tasks.append(task)
+    signum = getattr(signal, signal_name)
+    try:
+        handlers[signum](signum, None)
+        assert shutdown_event.is_set()
+        assert output == ["\nShutting down... Press Ctrl+C again to force."]
+        assert not task.done()
+        handlers[signum](signum, None)
+        await asyncio.sleep(0)
+        assert task.cancelled()
+    finally:
+        restore()
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+    assert handlers == dict.fromkeys((signal.SIGINT, signal.SIGTERM, sigbreak), previous)
 
 
 def test_interactive_tty_mode_restores_line_input(monkeypatch) -> None:
@@ -853,7 +911,7 @@ def test_provider_login_openai_codex_passes_configured_proxy(monkeypatch):
     proxy = "http://127.0.0.1:23458"
     monkeypatch.setattr(
         "nanobot.config.loader.load_config",
-        lambda: Config.model_validate({"providers": {"openaiCodex": {"proxy": proxy}}}),
+        lambda: Config.model_validate({"network": {"proxy": proxy}, "providers": {"openaiCodex": {"useProxy": True}}}),
     )
 
     import oauth_cli_kit
@@ -896,7 +954,7 @@ def test_provider_login_openai_codex_uses_explicit_config_proxy(tmp_path, monkey
         path = config_path or active_path.get("path")
         if path is None:
             return Config.model_validate(
-                {"providers": {"openaiCodex": {"proxy": "http://default-proxy:8080"}}}
+                {"network": {"proxy": "http://default-proxy:8080"}, "providers": {"openaiCodex": {"useProxy": True}}}
             )
         return real_load_config(path)
 
@@ -929,7 +987,7 @@ def test_provider_login_openai_codex_resolves_proxy_env_ref(monkeypatch):
     monkeypatch.setattr(
         "nanobot.config.loader.load_config",
         lambda: Config.model_validate(
-            {"providers": {"openaiCodex": {"proxy": "${CODEX_PROXY_FOR_TEST}"}}}
+            {"network": {"proxy": "${CODEX_PROXY_FOR_TEST}"}, "providers": {"openaiCodex": {"useProxy": True}}}
         ),
     )
 
@@ -953,7 +1011,7 @@ def test_provider_login_xai_grok_runs_browser_flow_with_configured_proxy(monkeyp
     proxy = "http://127.0.0.1:23458"
     monkeypatch.setattr(
         "nanobot.config.loader.load_config",
-        lambda: Config.model_validate({"providers": {"xaiGrok": {"proxy": proxy}}}),
+        lambda: Config.model_validate({"network": {"proxy": proxy}, "providers": {"xaiGrok": {"useProxy": True}}}),
     )
     monkeypatch.setattr(
         "nanobot.providers.xai_oauth.get_xai_oauth_token",
@@ -1268,7 +1326,8 @@ def test_openai_codex_proxy_config_affects_provider_and_signature():
                         "model": "openai-codex/gpt-5.5",
                     }
                 },
-                "providers": {"openaiCodex": {"proxy": proxy}},
+                "network": {"proxy": proxy},
+                "providers": {"openaiCodex": {"useProxy": True}},
             }
         )
 
@@ -1297,13 +1356,13 @@ def test_provider_proxy_rejects_unsupported_backend():
                 "azureOpenai": {
                     "apiKey": "sk-test",
                     "apiBase": "https://azure.example/openai/v1",
-                    "proxy": "http://127.0.0.1:23458",
+                    "useProxy": True,
                 }
             },
         }
     )
 
-    with pytest.raises(ValueError, match=r"providers\.azure_openai\.proxy"):
+    with pytest.raises(ValueError, match=r"providers\.azure_openai\.use_proxy"):
         make_provider(config)
 
 
@@ -1666,7 +1725,7 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
 
     class _FakeCron:
-        def __init__(self, store_path: Path) -> None:
+        def __init__(self, store_path: Path, *, admission=None) -> None:
             seen["cron_store"] = store_path
 
     class _FakeAgentLoop:
@@ -1716,7 +1775,7 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
     monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: legacy_dir)
 
     class _FakeCron:
-        def __init__(self, store_path: Path) -> None:
+        def __init__(self, store_path: Path, *, admission=None) -> None:
             seen["cron_store"] = store_path
 
     class _FakeAgentLoop:
@@ -1772,7 +1831,7 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
     monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: legacy_dir)
 
     class _FakeCron:
-        def __init__(self, store_path: Path) -> None:
+        def __init__(self, store_path: Path, *, admission=None) -> None:
             seen["cron_store"] = store_path
 
     class _FakeAgentLoop:
@@ -1802,9 +1861,8 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
     assert not (custom_workspace / "cron" / "jobs.json").exists()
 
 
-def test_agent_overrides_workspace_path(mock_agent_runtime):
-    workspace_path = Path("/tmp/agent-workspace")
-
+@pytest.mark.parametrize("workspace_path", [Path("/tmp/agent-workspace"), Path("relative-agent-workspace")])
+def test_agent_overrides_workspace_path(mock_agent_runtime, workspace_path):
     result = runner.invoke(app, ["agent", "-m", "hello", "-w", str(workspace_path)])
 
     assert result.exit_code == 0
@@ -2115,7 +2173,7 @@ def test_heartbeat_empty_response_is_not_evaluated(
     bus.publish_outbound = AsyncMock()
     seen: dict[str, object] = {}
 
-    class _FakeSessionManager:
+    class _FakeSessionManager(_EmptyGatewaySessionManager):
         def __init__(self, _workspace: Path) -> None:
             pass
 
@@ -2123,7 +2181,7 @@ def test_heartbeat_empty_response_is_not_evaluated(
             return [{"key": "telegram:u1"}]
 
     class _FakeCron:
-        def __init__(self, _store_path: Path) -> None:
+        def __init__(self, _store_path: Path, *, admission=None) -> None:
             self.on_job = None
             seen["cron"] = self
 
@@ -2314,6 +2372,36 @@ def test_webui_background_points_to_the_single_persistent_gateway_command(
     assert "nanobot gateway --background --config" in compact_output
     assert "--workspace" in compact_output
     assert not config_file.exists()
+
+
+@pytest.mark.parametrize("managed", [False, True], ids=["explicit-detach", "fresh-installer"])
+@pytest.mark.parametrize("no_dock", [False, True])
+def test_webui_detached_gateway_does_not_retain_launcher_lease(monkeypatch, tmp_path, managed, no_dock):
+    config = tmp_path / "config.json"
+    _patch_webui_provider_ready(monkeypatch)
+    _patch_gateway_ports_free(monkeypatch)
+    seen = _patch_webui_managed_gateway(monkeypatch)
+    requested = []
+    monkeypatch.setattr(cli_webui, "request_gateway_icon",
+                        lambda instance, *, enabled: requested.append((instance, enabled)))
+    if managed:
+        prefix = tmp_path / "managed"
+        prefix.mkdir()
+        (prefix / "nanobot-install.json").write_text(json.dumps({
+            "schema_version": 1, "owner": "nanobot-installer", "environment": str(prefix), "extras": [],
+        }))
+        monkeypatch.setattr(sys, "prefix", str(prefix))
+    result = runner.invoke(app, ["webui", "--config", str(config), "--yes", "--no-open",
+                                 *([] if managed else ["--detach"]),
+                                 *(["--no-dock"] if no_dock else [])])
+    assert result.exit_code == 0, result.output
+    assert "start_options" in seen
+    assert "attached_runtime" not in seen
+    assert "lease_release_wait_for_stop" not in seen
+    assert "Stop nanobot" in result.stdout
+    assert len(requested) == 1
+    assert requested[0][0].parent == tmp_path / "run"
+    assert requested[0][1] is not no_dock
 
 
 def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path) -> None:
@@ -2543,7 +2631,7 @@ def test_webui_missing_runtime_env_fails_before_starting_gateway(
     assert result.exit_code == 1
     assert missing_env in result.stdout
     assert "nanobot status --config" in result.stdout
-    assert config_file.name in result.stdout
+    assert config_file.name in _without_rendered_line_breaks(result.stdout)
     assert "Traceback" not in result.stdout
     assert f"${{{missing_env}}}" in config_file.read_text(encoding="utf-8")
 
@@ -2672,6 +2760,35 @@ def test_launch_browser_uses_unix_launcher_on_linux(monkeypatch) -> None:
 
     assert cli_webui_support._launch_browser("http://127.0.0.1:8765/") is True
     assert opened == ["http://127.0.0.1:8765/"]
+
+
+@pytest.mark.parametrize("no_dock", [False, True])
+def test_webui_dock_lifetime_wraps_the_attached_client(monkeypatch, tmp_path, no_dock):
+    config_file = tmp_path / "config.json"
+    config_file.write_text("{}")
+    _patch_gateway_ports_free(monkeypatch)
+    _patch_webui_provider_ready(monkeypatch)
+    _patch_webui_managed_gateway(monkeypatch)
+    events = []
+
+    @contextmanager
+    def desktop(url, *, instance, enabled):
+        assert url.startswith("http://127.0.0.1:")
+        assert instance.parent == tmp_path / "run"
+        assert enabled is not no_dock
+        events.append("icon attached")
+        try:
+            yield
+        finally:
+            events.append("icon detached")
+
+    monkeypatch.setattr(cli_webui, "dock_icon", desktop)
+    monkeypatch.setattr(cli_webui, "_attach_to_background_gateway",
+                        lambda *_args, **_kwargs: events.append("gateway attached"))
+    result = runner.invoke(app, ["webui", "--config", str(config_file), "--no-open", "--yes",
+                                 *(["--no-dock"] if no_dock else [])])
+    assert result.exit_code == 0, result.output
+    assert events == ["icon attached", "gateway attached", "icon detached"]
 
 
 def test_webui_foreground_attaches_to_existing_managed_gateway(monkeypatch, tmp_path: Path) -> None:
@@ -3100,7 +3217,7 @@ def test_gateway_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: 
     seen: dict[str, Path] = {}
 
     class _StopCron:
-        def __init__(self, store_path: Path) -> None:
+        def __init__(self, store_path: Path, *, admission=None) -> None:
             seen["cron_store"] = store_path
             raise _StopGatewayError("stop")
 
@@ -3155,7 +3272,7 @@ def test_gateway_unbound_agent_cron_is_skipped(
         def add_message(self, role: str, content: str, **kwargs) -> None:
             self.messages.append({"role": role, "content": content, **kwargs})
 
-    class _FakeSessionManager:
+    class _FakeSessionManager(_EmptyGatewaySessionManager):
         def __init__(self, _workspace: Path) -> None:
             self.session = _FakeSession()
             seen["session_manager"] = self
@@ -3170,7 +3287,7 @@ def test_gateway_unbound_agent_cron_is_skipped(
     monkeypatch.setattr("nanobot.session.manager.SessionManager", _FakeSessionManager)
 
     class _FakeCron:
-        def __init__(self, _store_path: Path) -> None:
+        def __init__(self, _store_path: Path, *, admission=None) -> None:
             self.on_job = None
             seen["cron"] = self
 
@@ -3276,14 +3393,14 @@ def test_gateway_bound_cron_runs_as_session_turn(
     )
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: bus)
 
-    class _FakeSessionManager:
+    class _FakeSessionManager(_EmptyGatewaySessionManager):
         def __init__(self, _workspace: Path) -> None:
             pass
 
     monkeypatch.setattr("nanobot.session.manager.SessionManager", _FakeSessionManager)
 
     class _FakeCron:
-        def __init__(self, _store_path: Path) -> None:
+        def __init__(self, _store_path: Path, *, admission=None) -> None:
             self.on_job = None
             seen["cron"] = self
 
@@ -3475,7 +3592,7 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
         config,
         message_bus=lambda: bus,
         session_manager=lambda _workspace: _FakeSessionManager(),
-        cron_service=lambda _store_path: _FakeCronService(),
+        cron_service=lambda _store_path, **_kwargs: _FakeCronService(),
     )
 
     class _FakeMemory:
@@ -3491,7 +3608,7 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
     class _FakeContext:
         memory = _FakeMemory()
 
-    class _FakeSessionManager:
+    class _FakeSessionManager(_EmptyGatewaySessionManager):
         def flush_all(self) -> int:
             return 0
 
@@ -3636,7 +3753,7 @@ def test_gateway_workspace_override_does_not_migrate_legacy_cron(
     seen: dict[str, Path] = {}
 
     class _StopCron:
-        def __init__(self, store_path: Path) -> None:
+        def __init__(self, store_path: Path, *, admission=None) -> None:
             seen["cron_store"] = store_path
             raise _StopGatewayError("stop")
 
@@ -3675,7 +3792,7 @@ def test_gateway_custom_config_workspace_does_not_migrate_legacy_cron(
     seen: dict[str, Path] = {}
 
     class _StopCron:
-        def __init__(self, store_path: Path) -> None:
+        def __init__(self, store_path: Path, *, admission=None) -> None:
             seen["cron_store"] = store_path
             raise _StopGatewayError("stop")
 
@@ -3791,7 +3908,7 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
     config.gateway.port = 18791
     captured: dict[str, object] = {}
 
-    class _FakeSessionManager:
+    class _FakeSessionManager(_EmptyGatewaySessionManager):
         def flush_all(self) -> int:
             return 0
 
@@ -3828,7 +3945,7 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
             return None
 
     class _FakeCronService:
-        def __init__(self, _store_path: Path) -> None:
+        def __init__(self, _store_path: Path, *, admission=None) -> None:
             self.on_job = None
 
         async def start(self) -> None:
@@ -3920,6 +4037,10 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
     assert health_writer.closed is True
     assert "HTTP/1.0 200 OK" in health_response
     health_body = json.loads(health_response.split("\r\n\r\n", 1)[1])
+    assert health_body.pop("maintenance") is False
+    identity = health_body.pop("runtime")
+    assert identity["version"] == cli_commands.__version__
+    assert identity["instance_id"] and identity["run_id"]
     assert health_body == {
         "status": "ok",
         "process": "alive",
@@ -3994,7 +4115,7 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
     config.gateway.port = 18791
     seen: dict[str, object] = {}
 
-    class _FakeSessionManager:
+    class _FakeSessionManager(_EmptyGatewaySessionManager):
         def flush_all(self) -> int:
             return 0
 
@@ -4063,7 +4184,7 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
             seen["channels_stopped"] = True
 
     class _FakeCronService:
-        def __init__(self, _store_path: Path) -> None:
+        def __init__(self, _store_path: Path, *, admission=None) -> None:
             self.on_job = None
 
         async def start(self) -> None:
@@ -4124,19 +4245,29 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
     assert isinstance(hook, cli_gateway_runtime._MCPReadinessHook)
 
 
+@pytest.mark.parametrize("shutdown_signal", [
+    None,
+    pytest.param(signal.SIGINT, id="SIGINT"),
+    pytest.param(
+        getattr(signal, "SIGBREAK", None),
+        marks=pytest.mark.skipif(not hasattr(signal, "SIGBREAK"), reason="Windows SIGBREAK only"),
+        id="SIGBREAK",
+    ),
+])
 def test_gateway_shutdown_event_exits_forever_runtime_tasks(
     monkeypatch,
     tmp_path: Path,
+    shutdown_signal: int | None,
 ) -> None:
     config_file = _write_instance_config(tmp_path)
     config = Config()
     config.gateway.port = 18791
     seen: dict[str, object] = {}
     shutdown_order: list[str] = []
-
-    class _FakeSessionManager:
-        def flush_all(self) -> int:
-            return 0
+    channel_started = asyncio.Event()
+    channel_draining = asyncio.Event()
+    channel_finished = asyncio.Event()
+    channels_stopping = asyncio.Event()
 
     class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
@@ -4146,7 +4277,7 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
         def __init__(self, **_kwargs) -> None:
             self.model = "test-model"
             self.provider = object()
-            self.sessions = _FakeSessionManager()
+            self.sessions = _EmptyGatewaySessionManager()
             self.runtime_resolver = MagicMock()
 
         def llm_runtime(self) -> None:
@@ -4169,18 +4300,28 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
             self.enabled_channels = ["websocket"]
 
         async def start_all(self) -> None:
+            channel_started.set()
             try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                if shutdown_signal is None:
+                    raise
+                channel_draining.set()
                 await asyncio.Event().wait()
             finally:
                 seen["channel_task_cleaned_up"] = True
+                channel_finished.set()
                 shutdown_order.append("channel_task_cleaned_up")
 
         async def stop_all(self) -> None:
             seen["channels_stopped"] = True
             shutdown_order.append("channels_stopped")
+            channels_stopping.set()
+            if shutdown_signal is not None:
+                await asyncio.wait_for(channel_finished.wait(), timeout=1)
 
     class _FakeCronService:
-        def __init__(self, _store_path: Path) -> None:
+        def __init__(self, _store_path: Path, *, admission=None) -> None:
             self.on_job = None
 
         async def start(self) -> None:
@@ -4208,14 +4349,29 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
     async def _fake_start_server(_handler, _host: str, _port: int):
         return _FakeServer()
 
-    def _fake_install_shutdown_handlers(_loop, event, _tasks, _print_status):
+    install_shutdown_handlers = cli_gateway_runtime._install_gateway_shutdown_handlers
+
+    def _install_shutdown_handlers(loop, event, tasks, print_status):
+        restore = install_shutdown_handlers(loop, event, tasks, print_status)
+
         async def _trigger_shutdown() -> None:
-            await asyncio.sleep(0)
-            event.set()
+            await channel_started.wait()
+            if shutdown_signal is None:
+                event.set()
+                return
+            signal.raise_signal(shutdown_signal)
+            await channel_draining.wait()
+            await channels_stopping.wait()
+            assert event.is_set()
+            assert seen["agent_stopped"] is True
+            assert not channel_finished.is_set()
+            seen["graceful_shutdown_requested"] = True
+            signal.raise_signal(shutdown_signal)
 
         asyncio.create_task(_trigger_shutdown())
 
         def _restore() -> None:
+            restore()
             seen["shutdown_handlers_restored"] = True
 
         return _restore
@@ -4232,7 +4388,7 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
     monkeypatch.setattr("asyncio.start_server", _fake_start_server)
     monkeypatch.setattr(
         "nanobot.cli.gateway_runtime._install_gateway_shutdown_handlers",
-        _fake_install_shutdown_handlers,
+        _install_shutdown_handlers,
     )
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
@@ -4245,6 +4401,8 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
     assert seen["channels_stopped"] is True
     assert seen["cron_stopped"] is True
     assert seen["shutdown_handlers_restored"] is True
+    if shutdown_signal is not None:
+        assert seen["graceful_shutdown_requested"] is True
     # Channel cleanup must run before cancellation drains the manager task.
     # DingTalk's stream SDK can otherwise swallow cancellation and reconnect.
     assert shutdown_order == ["channels_stopped", "channel_task_cleaned_up"]

@@ -6,7 +6,7 @@ import asyncio
 import json
 from collections.abc import Iterable, Mapping
 from datetime import datetime
-from typing import Any, Protocol, cast
+from typing import Any, Protocol, TypedDict, cast
 from uuid import uuid4
 
 from loguru import logger
@@ -16,6 +16,7 @@ from nanobot.session.manager import Session
 
 RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
 PENDING_USER_TURN_KEY = "pending_user_turn"
+REQUEST_ORIGIN_METADATA_KEY = "request_origin"
 RECOVERY_METADATA_KEY = "webui_recovery"
 RECOVERY_INBOUND_METADATA_KEY = "_webui_recovery_id"
 PENDING_FOLLOWUPS_KEY = "pending_user_followups"
@@ -28,6 +29,26 @@ UNCERTAIN_TOOL_PHASES = frozenset({"awaiting_tools"})
 KNOWN_CHECKPOINT_PHASES = frozenset(
     {"final_response", "tools_completed", "awaiting_tools", "error"}
 )
+
+
+class RequestOrigin(TypedDict):
+    message_id: str | None
+    turn_id: str
+
+
+def request_origin_from_metadata(metadata: Mapping[str, Any]) -> RequestOrigin | None:
+    """Read the request identity carried by continuation or recovery metadata."""
+    value = metadata.get(REQUEST_ORIGIN_METADATA_KEY)
+    if not isinstance(value, dict):
+        return None
+    origin = cast(dict[str, object], value)
+    message_id = origin.get("message_id")
+    turn_id = origin.get("turn_id")
+    if message_id is not None and not isinstance(message_id, str):
+        return None
+    if not isinstance(turn_id, str) or not turn_id:
+        return None
+    return {"message_id": message_id, "turn_id": turn_id}
 
 
 class RecoveryAdmission(Protocol):
@@ -67,6 +88,7 @@ def record_pending_followup(session: Session, message: InboundMessage) -> str | 
             "sender_id": message.sender_id,
             "chat_id": message.chat_id,
             "content": message.content,
+            "timestamp": message.timestamp.isoformat(),
             "media": list(message.media or []),
             "metadata": metadata,
         }
@@ -108,12 +130,16 @@ def pending_followups(session: Session) -> list[InboundMessage]:
             if isinstance(media_value, list)
             else []
         )
+        timestamp = record.get("timestamp")
+        # Older journals did not retain admission time; retain their existing recovery policy.
+        received_at = datetime.fromisoformat(timestamp) if isinstance(timestamp, str) else datetime.now()
         messages.append(
             InboundMessage(
                 channel="websocket",
                 sender_id=sender_id,
                 chat_id=chat_id,
                 content=content,
+                timestamp=received_at,
                 media=media,
                 metadata={**cast(dict[str, Any], metadata), PENDING_FOLLOWUP_ID_KEY: followup_id},
                 session_key_override=session.key,
@@ -421,4 +447,9 @@ def recovery_state_from_metadata(metadata: Mapping[str, Any] | None) -> dict[str
     can_continue = state.get("can_continue")
     if isinstance(can_continue, bool):
         payload["can_continue"] = can_continue
+    failure_error_kind = state.get("failure_error_kind")
+    if isinstance(failure_error_kind, str) and failure_error_kind in {
+        "authentication", "billing", "connection", "timeout", "rate_limit", "server", "unknown",
+    }:
+        payload["failure_error_kind"] = failure_error_kind
     return payload

@@ -27,12 +27,14 @@ from nanobot.session.recovery import (
     PENDING_USER_TURN_KEY,
     RECOVERY_INBOUND_METADATA_KEY,
     RECOVERY_METADATA_KEY,
+    REQUEST_ORIGIN_METADATA_KEY,
     RUNTIME_CHECKPOINT_KEY,
     UNCERTAIN_TOOL_PHASES,
     append_recovery_interruption,
     discard_runtime_checkpoint,
     pending_followups,
     recovery_state_from_metadata,
+    request_origin_from_metadata,
     restore_pending_interruption,
     restore_runtime_checkpoint,
     runtime_checkpoint_is_well_formed,
@@ -84,17 +86,20 @@ class RecoveryCoordinator:
 
     async def scan(self) -> None:
         """Recover every interrupted WebUI session once at gateway startup."""
-        for key in self._recovery_candidates():
-            metadata_payload = self.sessions.read_session_metadata(key)
+        from nanobot.webui.history import initialize_history
+
+        await initialize_history(self.sessions)
+        for key in await self._recovery_candidates():
+            metadata_payload = await self.sessions.state.read_metadata(key)
             raw_metadata = metadata_payload.get("metadata") if metadata_payload else None
             metadata = cast(dict[str, Any], raw_metadata) if isinstance(raw_metadata, dict) else {}
             route = self._websocket_route_for(key, metadata)
             if route is None:
                 continue
-            unfinished = self._has_unfinished_webui_transcript(key)
+            unfinished = await self._has_unfinished_webui_transcript(key)
             if not self._needs_recovery(metadata) and not unfinished:
                 continue
-            session = self.sessions.get_or_create(key)
+            session = await self.sessions.state.get(key)
             try:
                 await self._recover_session(session, route[1])
                 await self._requeue_pending_followups(session)
@@ -109,31 +114,12 @@ class RecoveryCoordinator:
                     reason="recovery_failed",
                     can_continue=False,
                 )
-                self.sessions.save(session)
+                await self.sessions.state.restore_interruption(session)
                 await self._publish(route[1], failed)
 
-    def _recovery_candidates(self) -> list[str]:
-        """Discover canonical and transcript-only WebUI sessions cheaply."""
-        candidates = dict.fromkeys(
-            key
-            for item in self.sessions.list_sessions()
-            if isinstance((key := item.get("key")), str)
-        )
-        try:
-            # Imported lazily because the sidebar index also projects recovery
-            # metadata.  The index is the owner of transcript-only discovery;
-            # duplicating its filename and migration rules here would drift.
-            from nanobot.webui.session_list_index import list_webui_sessions
-
-            for item in list_webui_sessions(self.sessions):
-                key = item.get("key")
-                if isinstance(key, str):
-                    candidates.setdefault(key, None)
-        except Exception:
-            # Canonical checkpoint recovery remains available even if the
-            # optional display-history index is corrupt or unavailable.
-            logger.exception("failed to discover transcript-only WebUI sessions")
-        return list(candidates)
+    async def _recovery_candidates(self) -> list[str]:
+        """Legacy display-only sessions have canonical headers after import."""
+        return [item["key"] for item in await self.sessions.state.list_sessions()]
 
     @staticmethod
     def _needs_recovery(metadata: Mapping[str, Any]) -> bool:
@@ -151,7 +137,7 @@ class RecoveryCoordinator:
         """Reject stale queued recoveries and let new user input supersede them."""
         recovery_id = message.metadata.get(RECOVERY_INBOUND_METADATA_KEY)
         if isinstance(recovery_id, str):
-            session = self.sessions.get_or_create(message.session_key)
+            session = await self.sessions.state.get(message.session_key)
             state = recovery_state_from_metadata(session.metadata)
             return bool(
                 state
@@ -160,13 +146,14 @@ class RecoveryCoordinator:
             )
         if message.channel != "websocket":
             return True
-        session = self.sessions.get_or_create(message.session_key)
+        session = await self.sessions.state.get(message.session_key)
         state = recovery_state_from_metadata(session.metadata)
         if state and state["status"] in {"resuming", "awaiting_user", "failed"}:
             await self._cancel_active_recovery(message.session_key)
-            restore_runtime_checkpoint(session)
-            if not restore_pending_interruption(session, superseded=True):
-                append_recovery_interruption(session, superseded=True)
+            if state.get("reason") != "model_request_failed":
+                restore_runtime_checkpoint(session)
+                if not restore_pending_interruption(session, superseded=True):
+                    append_recovery_interruption(session, superseded=True)
             recovered = self._set_state(
                 session,
                 status="recovered",
@@ -174,18 +161,36 @@ class RecoveryCoordinator:
                 attempts=cast(int, state.get("attempts", 0)),
                 reason="superseded",
             )
-            self.sessions.save(session)
+            await self.sessions.state.restore_interruption(session)
             await self._publish(message.chat_id, recovered)
         return True
 
-    async def turn_completed(self, session_key: str) -> None:
-        """Resolve a resuming state after the recovered turn commits."""
-        session = self.sessions.get_or_create(session_key)
+    async def turn_completed(
+        self, session_key: str, *, failure_kind: str | None = None,
+        failure_error_kind: str | None = None,
+    ) -> None:
+        """Offer explicit continuation of committed model failures or resolve recovery."""
+        session = await self.sessions.state.get(session_key)
         state = recovery_state_from_metadata(session.metadata)
-        if not state or state["status"] != "resuming":
-            return
         route = self._websocket_route(session)
         if route is None:
+            return
+        if failure_kind == "model":
+            # The turn has already saved its transcript and tool results. Use
+            # that context, never resend the user's message or replay tools.
+            waiting = self._set_state(
+                session,
+                status="awaiting_user",
+                recovery_id=uuid4().hex,
+                attempts=cast(int, state.get("attempts", 0)) if state else 0,
+                reason="model_request_failed",
+                can_continue=any(message.get("role") == "user" for message in session.messages),
+            )
+            waiting["failure_error_kind"] = failure_error_kind or "unknown"
+            await self.sessions.state.restore_interruption(session)
+            await self._publish(route[1], waiting)
+            return
+        if not state or state["status"] != "resuming":
             return
         recovered = self._set_state(
             session,
@@ -194,7 +199,7 @@ class RecoveryCoordinator:
             attempts=cast(int, state.get("attempts", 0)),
             reason="continued",
         )
-        self.sessions.save(session)
+        await self.sessions.state.restore_interruption(session)
         await self._publish(route[1], recovered)
 
     async def handle_action(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -205,7 +210,7 @@ class RecoveryCoordinator:
             raise RecoveryActionError("missing chat_id")
         if not isinstance(recovery_id, str) or not recovery_id:
             raise RecoveryActionError("missing recovery_id")
-        session = self.sessions.get_or_create(self._session_key(chat_id))
+        session = await self.sessions.state.get(self._session_key(chat_id))
         state = recovery_state_from_metadata(session.metadata)
         if not state or state["recovery_id"] != recovery_id:
             raise RecoveryActionError("recovery state is stale", status=409)
@@ -220,7 +225,7 @@ class RecoveryCoordinator:
                 attempts=cast(int, state.get("attempts", 0)),
                 reason="dismissed",
             )
-            self.sessions.save(session)
+            await self.sessions.state.restore_interruption(session)
             await self._publish(chat_id, next_state)
             return next_state
         if action != "continue":
@@ -237,7 +242,7 @@ class RecoveryCoordinator:
             reason="user_confirmed",
             resume_message_count=len(session.messages),
         )
-        self.sessions.save(session)
+        await self.sessions.state.restore_interruption(session)
         await self._publish(chat_id, next_state)
         await self._queue_continuation(session, chat_id, next_state)
         return next_state
@@ -270,9 +275,9 @@ class RecoveryCoordinator:
                         attempts=cast(int, state.get("attempts", 1)),
                         reason="loop_guard",
                     )
-                self.sessions.save(session)
+                await self.sessions.state.restore_interruption(session)
                 await self._publish(chat_id, next_state)
-            elif self._has_unfinished_webui_transcript(session.key):
+            elif await self._has_unfinished_webui_transcript(session.key):
                 # A normal last-client shutdown can materialize the checkpoint
                 # before the process exits.  In that path there is no pending
                 # marker left to classify, but the append-only transcript still
@@ -292,7 +297,7 @@ class RecoveryCoordinator:
                     ),
                     can_continue=can_continue,
                 )
-                self.sessions.save(session)
+                await self.sessions.state.restore_interruption(session)
                 await self._publish(chat_id, waiting)
             return
         if state and state["status"] in {"awaiting_user", "failed"}:
@@ -308,7 +313,7 @@ class RecoveryCoordinator:
                 attempts=cast(int, state.get("attempts", 1)),
                 reason="loop_guard",
             )
-            self.sessions.save(session)
+            await self.sessions.state.restore_interruption(session)
             await self._publish(chat_id, waiting)
             return
 
@@ -326,7 +331,7 @@ class RecoveryCoordinator:
                 reason="checkpoint_unknown",
                 can_continue=False,
             )
-            self.sessions.save(session)
+            await self.sessions.state.restore_interruption(session)
             await self._publish(chat_id, waiting)
             return
         if checkpoint is not None and not runtime_checkpoint_is_well_formed(checkpoint):
@@ -340,7 +345,7 @@ class RecoveryCoordinator:
                 reason="checkpoint_invalid",
                 can_continue=False,
             )
-            self.sessions.save(session)
+            await self.sessions.state.restore_interruption(session)
             await self._publish(chat_id, waiting)
             return
         if phase == "final_response":
@@ -352,7 +357,7 @@ class RecoveryCoordinator:
                 attempts=0,
                 reason="answer_restored",
             )
-            self.sessions.save(session)
+            await self.sessions.state.restore_interruption(session)
             await self._publish(chat_id, recovered)
             return
         if phase in UNCERTAIN_TOOL_PHASES or pending_calls:
@@ -364,7 +369,7 @@ class RecoveryCoordinator:
                 attempts=0,
                 reason="tool_state_unknown",
             )
-            self.sessions.save(session)
+            await self.sessions.state.restore_interruption(session)
             await self._publish(chat_id, waiting)
             return
         # A gateway restart is a lifecycle boundary.  Never enqueue model work
@@ -379,7 +384,7 @@ class RecoveryCoordinator:
             attempts=0,
             reason="restart_requires_confirmation",
         )
-        self.sessions.save(session)
+        await self.sessions.state.restore_interruption(session)
         await self._publish(chat_id, waiting)
 
     async def _queue_continuation(
@@ -389,6 +394,7 @@ class RecoveryCoordinator:
         state: Mapping[str, Any],
     ) -> None:
         recovery_id = cast(str, state["recovery_id"])
+        origin = request_origin_from_metadata(session.metadata)
         await self.bus.publish_inbound(
             InboundMessage(
                 channel="websocket",
@@ -405,6 +411,7 @@ class RecoveryCoordinator:
                     RECOVERY_INBOUND_METADATA_KEY: recovery_id,
                     turn_continuation.INTERNAL_CONTINUATION_META: True,
                     turn_continuation.SKIP_USER_PERSIST_META: True,
+                    **({REQUEST_ORIGIN_METADATA_KEY: origin} if origin is not None else {}),
                 },
                 session_key_override=session.key,
                 require_existing_session=True,
@@ -441,6 +448,7 @@ class RecoveryCoordinator:
                     reason=cast(str | None, state.get("reason")),
                     attempts=cast(int, state.get("attempts", 0)),
                     can_continue=cast(bool | None, state.get("can_continue")),
+                    failure_error_kind=cast(str | None, state.get("failure_error_kind")),
                 ),
             )
         )
@@ -481,23 +489,12 @@ class RecoveryCoordinator:
     def _session_key(self, chat_id: str) -> str:
         return UNIFIED_SESSION_KEY if self.unified_session else webui_session_key(chat_id)
 
-    @staticmethod
-    def _has_unfinished_webui_transcript(session_key: str) -> bool:
-        """Detect a stale WebUI activity tail after an unclean gateway stop.
+    async def _has_unfinished_webui_transcript(self, session_key: str) -> bool:
+        from nanobot.webui.transcript import has_unfinished_transcript_tail
 
-        The transcript is intentionally consulted only as a last-resort signal:
-        a durable pending turn or runtime checkpoint always takes precedence.
-        This keeps browser disconnects harmless while preventing a materialized
-        partial turn from being presented as active forever after a restart.
-        """
-        try:
-            from nanobot.webui.transcript import has_unfinished_transcript_tail
-
-            return has_unfinished_transcript_tail(session_key)
-        except (OSError, ValueError, TypeError):
-            # Recovery must fail closed if the optional display transcript is
-            # corrupt or unavailable; the normal checkpoint path still applies.
-            return False
+        return await self.sessions.state.project_history(
+            session_key, lambda history: has_unfinished_transcript_tail(session_key, history=history),
+        )
 
     @staticmethod
     def _has_saved_continuation_context(session: Session) -> bool:

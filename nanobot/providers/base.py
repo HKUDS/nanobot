@@ -29,6 +29,7 @@ from nanobot.events import (
 )
 from nanobot.llm_usage.types import LLMUsage as LLMUsage
 from nanobot.providers.generation import GenerationSettings as GenerationSettings
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import sanitize_surrogates_deep
 
 if TYPE_CHECKING:
@@ -300,6 +301,8 @@ class LLMResponse:
     # True only when this response installed a new provider-native compaction
     # boundary. Replaying an older compaction item does not set this flag.
     provider_compaction_applied: bool = field(default=False, repr=False)
+    # Identity of the native lifecycle already reported by its operation owner.
+    provider_compaction_event_id: str | None = field(default=None, repr=False)
     # State immediately after native compaction, before the normal response
     # continues. An archive prompt can resume this state without replaying H.
     provider_compaction_state: ProviderConversationState | None = field(
@@ -323,6 +326,10 @@ class LLMResponse:
     error_code: str | None = None  # Provider/code semantic, e.g. rate_limit_exceeded.
     error_retry_after_s: float | None = None
     error_should_retry: bool | None = None
+    # A failed fallback must not replace the selected model's public diagnosis.
+    # Keep this separate from the last response's retry policy.
+    primary_error_kind: str | None = field(default=None, repr=False)
+    is_fallback: bool = field(default=False, repr=False)
 
     @property
     def has_tool_calls(self) -> bool:
@@ -433,6 +440,7 @@ class LLMProvider(ABC):
         self.provider_name = provider_name
         self.generation: GenerationSettings = GenerationSettings()
         self._llm_call_observer: LLMCallObserver | None = None
+        self._usage_estimation_slots = asyncio.Semaphore(2)
 
     def set_llm_call_observer(self, observer: LLMCallObserver | None) -> None:
         """Attach a fail-open observer for each physical retry-managed call."""
@@ -497,7 +505,59 @@ class LLMProvider(ABC):
         observer = self._llm_call_observer
         if observer is None:
             return response
+        finished_at_ns = time.monotonic_ns()
         usage = self._usage_for_call(response, kwargs)
+        return self._record_llm_call(
+            response, kwargs, observer=observer, usage=usage,
+            started_at_ms=started_at_ms, started_at_ns=started_at_ns,
+            finished_at_ns=finished_at_ns, stream=stream,
+        )
+
+    async def _observe_llm_call_async(
+        self,
+        response: LLMResponse,
+        kwargs: dict[str, Any],
+        *,
+        started_at_ms: int,
+        started_at_ns: int,
+        stream: bool,
+    ) -> LLMResponse:
+        observer = self._llm_call_observer
+        if (
+            observer is None
+            or response.finish_reason in {"error", "cancelled"}
+            or (response.usage is not None and response.usage.total_tokens > 0)
+        ):
+            return self._observe_llm_call(
+                response, kwargs, started_at_ms=started_at_ms,
+                started_at_ns=started_at_ns, stream=stream,
+            )
+        finished_at_ns = time.monotonic_ns()
+
+        async def observe() -> LLMResponse:
+            async with self._usage_estimation_slots:
+                usage = await asyncio.to_thread(self._usage_for_call, response, kwargs)
+            return self._record_llm_call(
+                response, kwargs, observer=observer, usage=usage,
+                started_at_ms=started_at_ms, started_at_ns=started_at_ns,
+                finished_at_ns=finished_at_ns, stream=stream,
+            )
+
+        # Once the request completes, settle its usage and observer before cancellation.
+        return await shield_and_drain(observe())
+
+    def _record_llm_call(
+        self,
+        response: LLMResponse,
+        kwargs: dict[str, Any],
+        *,
+        observer: LLMCallObserver,
+        usage: LLMUsage | None,
+        started_at_ms: int,
+        started_at_ns: int,
+        finished_at_ns: int,
+        stream: bool,
+    ) -> LLMResponse:
         if usage is not None:
             response.usage = usage
         model_value = kwargs.get("model")
@@ -508,7 +568,7 @@ class LLMProvider(ABC):
 
             observer(LLMCallRecord(
                 started_at_ms=started_at_ms,
-                duration_ms=max(0, (time.monotonic_ns() - started_at_ns) // 1_000_000),
+                duration_ms=max(0, (finished_at_ns - started_at_ns) // 1_000_000),
                 provider=self.provider_name,
                 model=model,
                 source=current_llm_usage_source(),
@@ -1014,7 +1074,7 @@ class LLMProvider(ABC):
             raise
         except Exception as exc:
             response = self._error_response_from_exception(exc)
-        return self._observe_llm_call(
+        return await self._observe_llm_call_async(
             response,
             kwargs,
             started_at_ms=started_at_ms,
@@ -1159,7 +1219,7 @@ class LLMProvider(ABC):
             raise
         except Exception as exc:
             response = self._error_response_from_exception(exc)
-        return self._observe_llm_call(
+        return await self._observe_llm_call_async(
             _attach_stream_timing(response),
             kwargs,
             started_at_ms=started_at_ms,
@@ -1501,9 +1561,14 @@ class LLMProvider(ABC):
     @classmethod
     def public_error_kind(cls, response: LLMResponse) -> str:
         """Return a stable public category without exposing provider details."""
+        if response.primary_error_kind is not None:
+            return response.primary_error_kind
         if cls.is_arrearage_response(response):
             return "billing"
         kind = (response.error_kind or "").strip().lower()
+        # A plain 403 can be a policy or permission rejection, not bad credentials.
+        if kind in {"authentication", "oauth_auth_required"} or response.error_status_code == 401:
+            return "authentication"
         if kind in {"connection", "timeout"}:
             return kind
         if response.error_status_code == 429:
@@ -1586,6 +1651,15 @@ class LLMProvider(ABC):
                 identical_error_count = 1 if error_key else 0
 
             if not self.is_transient_response(response):
+                # Removing the user's images cannot repair account access.
+                # Do not rebuild native provider state for an unrelated failure.
+                if (
+                    (response.error_kind or "").lower() in {"authentication", "oauth_auth_required"}
+                    or response.error_status_code in {401, 403}
+                    or self.is_arrearage_response(response)
+                ):
+                    await _finish_retry_status("cleared", response)
+                    return response
                 stripped = self._strip_image_content(kw["messages"])
                 provider_context = kw.get("provider_context")
                 stripped_context: ProviderCallContext | None = None

@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Any, ClassVar, Literal, cast
 
 from pydantic import AliasChoices, ConfigDict, Field, PrivateAttr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic.fields import FieldInfo
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 from nanobot.agent.tools.cli_apps_config import CliAppsToolConfig
 from nanobot.agent.tools.filesystem_config import FileToolsConfig
@@ -20,6 +21,7 @@ from nanobot.agent.tools.web_config import (
 )
 from nanobot.agent.tools.web_config import WebToolsConfig
 from nanobot.config.home import get_default_workspace
+from nanobot.config.network import NetworkConfig, migrate_legacy_proxy_config
 from nanobot.config.provider_api_migration import migrate_legacy_provider_api
 from nanobot.config.timezone import detect_system_timezone
 from nanobot.config_base import Base
@@ -254,7 +256,7 @@ class ProviderConfig(Base):
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
     extra_body: dict[str, Any] | None = None  # Extra provider request fields; shape depends on provider/API surface
     extra_query: dict[str, str] | None = None  # Extra query params (e.g. api-version for Azure-style gateways)
-    proxy: str | None = None  # Explicit HTTP proxy; image downloads trust its DNS and egress
+    use_proxy: bool = False
     thinking_style: str | None = None  # Thinking/reasoning style for custom providers
 
     # Valid values mirror the keys of _THINKING_STYLE_MAP in
@@ -420,6 +422,7 @@ class MCPServerConfig(Base):
     cwd: str = ""  # Stdio: working directory for MCP server runtime artifacts
     url: str = ""  # HTTP/SSE: endpoint URL
     headers: dict[str, str] = Field(default_factory=dict)  # HTTP/SSE: custom headers
+    use_proxy: bool = False
     tool_timeout: int = 30  # seconds before a tool call is cancelled
     enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all capabilities (tools, resources, prompts); any restriction = only listed tools, no resources/prompts
 
@@ -457,6 +460,44 @@ class ToolsConfig(Base):
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
 
 
+class _ExecRuntimeConfigSource(PydanticBaseSettingsSource):
+    """Merge shell runtime aliases using the normal settings-source precedence."""
+
+    def __init__(self, source: PydanticBaseSettingsSource) -> None:
+        super().__init__(source.settings_cls)
+        self._source = source
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        return self._source.get_field_value(field, field_name)
+
+    def __call__(self) -> dict[str, Any]:
+        data = self._source()
+        tools: object = data.get("tools")
+        if not isinstance(tools, dict):
+            return data
+        tools = cast(dict[str, Any], tools)
+        execution: object = tools.get("exec")
+        if not isinstance(execution, dict):
+            return data
+        execution = cast(dict[str, Any], execution)
+        if "timeout" in execution and ("maxRuntime" in execution or "max_runtime" in execution):
+            # Preserve same-source conflicts for the configuration model to reject.
+            return data
+        aliases = ("maxRuntime", "max_runtime", "timeout")
+        previous_tools: object = self.current_state.get("tools")
+        if not any(name in execution for name in aliases) or not isinstance(previous_tools, dict):
+            return data
+        previous_tools = cast(dict[str, Any], previous_tools)
+        previous_execution: object = previous_tools.get("exec")
+        if not isinstance(previous_execution, dict):
+            return data
+        previous_execution = cast(dict[str, Any], previous_execution)
+        if not any(name in previous_execution for name in aliases):
+            return data
+        execution = {name: value for name, value in execution.items() if name not in aliases}
+        return {**data, "tools": {**tools, "exec": execution}}
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
@@ -466,6 +507,7 @@ class Config(BaseSettings):
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
+    network: NetworkConfig = Field(default_factory=NetworkConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
@@ -474,6 +516,24 @@ class Config(BaseSettings):
         validation_alias=AliasChoices("modelPresets", "model_presets"),
         serialization_alias="modelPresets",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_proxy_config(cls, value: Any) -> Any:
+        return migrate_legacy_proxy_config(value)
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return tuple(_ExecRuntimeConfigSource(source) for source in (
+            init_settings, env_settings, dotenv_settings, file_secret_settings,
+        ))
 
     def bind_source_path(self, path: Path) -> None:
         """Record the config file that owns instance-level runtime data."""

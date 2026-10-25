@@ -9,6 +9,7 @@ Connect nanobot to Telegram, Discord, Slack, WeChat, Email, Mattermost, Linear, 
 | Slack | [Build a Slack AI Agent with nanobot](./guides/slack-ai-agent.md) |
 | Feishu | [Build a Feishu AI Agent with nanobot](./guides/feishu-ai-agent.md) |
 | WhatsApp | [Build a WhatsApp AI Agent with nanobot](./guides/whatsapp-ai-agent.md) |
+| WhatsApp Agent Platform | [Connect nanobot to WhatsApp Agent Platform](./guides/whatsapp-agent-platform.md) |
 | WeChat | [Build a WeChat AI Agent with nanobot](./guides/wechat-ai-agent.md) |
 | QQ | [Build a QQ AI Agent with nanobot](./guides/qq-ai-agent.md) |
 | Email | [Build an Email AI Agent with nanobot](./guides/email-ai-agent.md) |
@@ -50,7 +51,7 @@ The sections below explain what each chat platform requires and provide manual c
 > nanobot plugins enable <channel>
 > ```
 >
-> Replace `<channel>` with names such as `telegram`, `slack`, `feishu`, `dingtalk`, `matrix`, `qq`, `napcat`, `weixin`, `wecom`, or `msteams`. To turn a channel off later, run `nanobot plugins disable <channel>`. nanobot keeps the saved settings, but stops loading that channel after the next restart.
+> Replace `<channel>` with names such as `telegram`, `slack`, `feishu`, `dingtalk`, `matrix`, `qq`, `napcat`, `weixin`, `wecom`, `msteams`, or `whatsapp_agent`. To turn a channel off later, run `nanobot plugins disable <channel>`. nanobot keeps the saved settings, but stops loading that channel after the next restart.
 
 ## Manual Setup Pattern
 
@@ -89,13 +90,14 @@ If `nanobot channels status` does not show the channel as enabled, the config sn
 | **Telegram** | Bot token from @BotFather |
 | **Discord** | Bot token + Message Content intent |
 | **WhatsApp** | QR code scan (`nanobot channels login whatsapp`) |
+| **WhatsApp Agent Platform** | Agent API token from WhatsApp → Settings → Agents |
 | **WeChat (Weixin)** | QR code scan (`nanobot channels login weixin`) |
 | **Feishu** | QR code scan (`nanobot channels login feishu`) or App ID + App Secret |
 | **DingTalk** | App Key + App Secret |
 | **Slack** | Bot token + App-Level token |
 | **Matrix** | Homeserver URL + Access token |
 | **Email** | IMAP/SMTP credentials |
-| **QQ** | App ID + App Secret |
+| **QQ** | QR code scan (`nanobot channels login qq`) or App ID + App Secret |
 | **Napcat (QQ)** | Napcat Forward WebSocket URL + access token |
 | **Wecom** | Bot ID + Bot Secret |
 | **Microsoft Teams** | App ID + App Password + public HTTPS endpoint |
@@ -125,7 +127,7 @@ See the [native Linear agent guide](./guides/linear-agent.md) for the complete s
 
 1. Create a bot with `@BotFather` and copy its token.
 2. Run `nanobot webui`, then open **Channels → Telegram**.
-3. Paste the token. If the gateway cannot reach Telegram directly, expand **Advanced** and add an HTTP or SOCKS proxy.
+3. Paste the token. If the gateway cannot reach Telegram directly, set the address in **Settings → Advanced → Shared proxy**, then enable **Use proxy** in Telegram's advanced options.
 4. Save and enable Telegram, then send the bot a direct message.
 
 The configuration badge means nanobot found a saved token. The live connection check is separate, so a temporary Telegram or proxy outage does not make an existing configuration disappear. Saved tokens and proxy URLs remain masked.
@@ -159,13 +161,14 @@ nanobot plugins enable telegram
 }
 ```
 
-If the gateway cannot reach Telegram directly, add a proxy to the same section:
+If the gateway cannot reach Telegram directly, set the shared address and enable it for Telegram:
 
 ```json
 {
+  "network": { "proxy": "http://127.0.0.1:7890" },
   "channels": {
     "telegram": {
-      "proxy": "http://127.0.0.1:7890"
+      "useProxy": true
     }
   }
 }
@@ -313,9 +316,11 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
 ```
 
 > `groupPolicy` controls how the bot responds in group channels:
-> - `"mention"` (default) — Only respond when @mentioned
-> - `"open"` — Respond to all messages DMs always respond when the sender is in `allowFrom`.
-> - If you set group policy to open create new threads as private threads and then @ the bot into it. Otherwise the thread itself and the channel in which you spawned it will spawn a bot session. `allowChannels` restricts the bot to specific Discord channel IDs. Empty (default) means respond in every channel the bot can see. Example: `["1234567890", "0987654321"]`. The filter applies after `allowFrom`, so both must pass. Discord threads under an allowed parent channel are also allowed; for Forum channels, allowing the parent Forum channel allows all threads/posts in that forum. `streaming` defaults to `true`. Disable it only if you explicitly want non-streaming replies. `replyToMessage` defaults to `false`. Enable it to use Discord's native reply UI for responses.
+> - `"mention"` (default) — Reply only when someone @mentions the bot.
+> - `"open"` — Reply to all messages in group channels.
+> - In direct messages, the bot replies only when the sender is listed in `allowFrom`.
+>
+> For open group policy, create a private thread and @mention the bot to start a session there. Otherwise, the bot starts a session in both the thread and the channel where you created it. `allowChannels` restricts the bot to specific Discord channel IDs. The default empty list allows every channel the bot can see. Example: `["1234567890", "0987654321"]`. The `allowFrom` and `allowChannels` filters both apply. Threads under an allowed channel are also allowed; for Forum channels, allowing the parent Forum channel allows all its threads and posts. `streaming` defaults to `true`; disable it only if you want non-streaming replies. `replyToMessage` defaults to `false`; enable it to use Discord's native reply UI for responses.
 
 **5. Invite the bot**
 - OAuth2 → URL Generator
@@ -475,6 +480,47 @@ Modern WhatsApp can deliver a sender's LID instead of their phone number. nanobo
 </details>
 
 <details>
+<summary><b>WhatsApp Agent Platform</b></summary>
+
+Connects nanobot through the **official** WhatsApp Agent Platform API. The agent appears as its own chat in WhatsApp and can only talk to you, its creator. No QR pairing, no linked device, and no optional Python dependencies.
+
+This is a different channel from `whatsapp`. nanobot is an independent third-party project, not a WhatsApp product. See the [WhatsApp Agent Platform guide](./guides/whatsapp-agent-platform.md) for the full comparison and walkthrough.
+
+**1. Create the agent in WhatsApp**
+
+Open WhatsApp → **Settings → Agents → Create an agent**, then copy the key from the agent's chat → **Chat info → API key**. This feature is available only in limited countries and might not be in your account yet.
+
+**2. Configure**
+
+```json
+{
+  "channels": {
+    "whatsapp_agent": {
+      "enabled": true,
+      "token": "${WA_AGENT_TOKEN}"
+    }
+  }
+}
+```
+
+`allowFrom` is optional. The platform already restricts the chat to the agent's creator; leave `allowFrom` empty to require pairing approval instead of a static list.
+
+**3. Run**
+
+```bash
+nanobot gateway
+```
+
+**Notes**
+
+- At most one gateway may poll a given agent token. A second one causes `409` and is logged as a duplicate-poller error.
+- Agent conversations are not end-to-end encrypted. nanobot and your configured model provider process these messages; your other WhatsApp chats are unaffected. Review the [third-party agent terms](https://www.whatsapp.com/legal/third-party-agents-terms) before connecting.
+- Replies are split at 4096 characters. Progress and tool-hint messages are off by default because every send spends the same 12-per-minute budget.
+- Ambiguous send outcomes (HTTP `500`, read timeouts) are not retried by default, because a duplicate is worse than a miss. Set `retryAmbiguousSends: true` to opt in.
+
+</details>
+
+<details>
 <summary><b>Feishu</b></summary>
 
 Uses **WebSocket** long connection — no public IP required.
@@ -563,6 +609,14 @@ nanobot plugins enable qq
 - Once added, scan the bot's QR code with mobile QQ → open the bot profile → tap "发消息" to start chatting
 
 **3. Configure**
+
+Run the QR login and scan with mobile QQ to save the AppID and AppSecret automatically. Scanning again replaces the App Secret and stops the previous secret from working:
+
+```bash
+nanobot channels login qq
+```
+
+To enter them yourself, copy **AppID** and **AppSecret** from **开发设置 (Developer Settings)** into `channels.qq`:
 
 > - `allowFrom`: Add your openid (find it in nanobot logs when you message the bot). Use `["*"]` for public access.
 > - `msgFormat`: Optional. Use `"plain"` (default) for maximum compatibility with legacy QQ clients, or `"markdown"` for richer formatting on newer clients.

@@ -14,10 +14,12 @@ from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.web.async_client import AsyncWebClient
 from slackify_markdown import slackify_markdown  # pyright: ignore[reportMissingTypeStubs]
 
+from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.config.network import NetworkConfig
 from nanobot.config.paths import get_media_dir
 from nanobot.config_base import Base
 from nanobot.events import ContextCompactionEvent
@@ -83,7 +85,7 @@ class SlackConfig(Base):
     # instead of every message). No effect for "mention"/"open" policies.
     group_require_mention: bool = False
     dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
-    proxy: str | None = None
+    use_proxy: bool = False
 
 
 SLACK_MAX_MESSAGE_LEN = 39_000  # Slack API allows ~40k; leave margin
@@ -108,6 +110,7 @@ class SlackChannel(BaseChannel):
 
     name = "slack"
     display_name = "Slack"
+    uses_shared_proxy = True
     _SLACK_ID_RE = re.compile(r"^[CDGUW][A-Z0-9]{2,}$")
     _SLACK_CHANNEL_REF_RE = re.compile(r"^<#([A-Z0-9]+)(?:\|[^>]+)?>$")
     _SLACK_USER_REF_RE = re.compile(r"^<@([A-Z0-9]+)(?:\|[^>]+)?>$")
@@ -118,11 +121,14 @@ class SlackChannel(BaseChannel):
 
     _THREAD_CONTEXT_CACHE_LIMIT = 10_000
 
-    def __init__(self, config: Any, bus: MessageBus):
+    def __init__(
+        self, config: Any, bus: MessageBus, *, network: NetworkConfig | None = None,
+    ):
         if isinstance(config, dict):
             config = SlackConfig.model_validate(config)
-        super().__init__(config, bus)
+        super().__init__(config, bus, network=network)
         self.config: SlackConfig = config
+        self._proxy = self.network.resolve_proxy(self.config.use_proxy)
         self._web_client: AsyncWebClient | None = None
         self._socket_client: SocketModeClient | None = None
         self._bot_user_id: str | None = None
@@ -147,10 +153,7 @@ class SlackChannel(BaseChannel):
 
         self._running = True
 
-        proxy = self.config.proxy.strip() if self.config.proxy else ""
-        if proxy and "://" not in proxy:
-            proxy = f"http://{proxy}"
-        proxy = proxy or None
+        proxy = self._proxy
         self._web_client = AsyncWebClient(token=self.config.bot_token, proxy=proxy)
         self._socket_client = SocketModeClient(
             app_token=self.config.app_token,
@@ -208,8 +211,7 @@ class SlackChannel(BaseChannel):
         ):
             return
         if not self._web_client:
-            self.logger.warning("client not running")
-            return
+            raise ChannelNotReadyError("Slack client not running")
         try:
             web_api = self._require_web_api()
             target_chat_id = await self._resolve_target_chat_id(msg.chat_id)
@@ -592,14 +594,10 @@ class SlackChannel(BaseChannel):
                 mounts=(
                     {
                         "all://": httpx.AsyncHTTPTransport(
-                            proxy=httpx.Proxy(
-                                self.config.proxy
-                                if "://" in self.config.proxy
-                                else f"http://{self.config.proxy}"
-                            )
+                            proxy=httpx.Proxy(self._proxy)
                         )
                     }
-                    if self.config.proxy
+                    if self._proxy
                     else httpx_env_proxy_mounts()
                 ),
                 event_hooks={"request": [_validate_slack_download_request]},

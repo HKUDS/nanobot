@@ -60,4 +60,10 @@ cron(action="remove", job_id="abc123")
 
 ## Timezone
 
-Use `tz` with `cron_expr` to schedule in a specific IANA timezone. Without `tz`, the server's local timezone is used.
+Use `tz` with `cron_expr` to schedule in a specific IANA timezone. New tasks use the runtime default timezone when `tz` is omitted. Updates retain the task's existing cron timezone.
+
+## Update a Task
+
+Use `cron(action="update", job_id="...", cron_expr="0 10 * * *")` to change an existing task. Supply only the fields to change: `name`, `message`, or exactly one of `every_seconds`, `cron_expr`, and `at`. Omitted fields keep their values; empty names and instructions are rejected. A cron edit retains the existing timezone unless `tz` is supplied with `cron_expr`. Naive `at` values use the runtime default timezone.
+
+Updates preserve the task ID, linked chat, history, enabled state, and automatic-deletion setting. Changing only the name or instruction does not move the next run. System-managed tasks cannot be edited.

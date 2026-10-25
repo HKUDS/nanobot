@@ -12,13 +12,11 @@ export function AppearanceSettingsView({
   onToggleTheme,
   localPrefs,
   onChangeLocalPrefs,
-  onChangeBrowserNotifications,
 }: {
   theme: "light" | "dark";
   onToggleTheme: () => void;
   localPrefs: LocalPreferences;
   onChangeLocalPrefs: Dispatch<SetStateAction<LocalPreferences>>;
-  onChangeBrowserNotifications: (enabled: boolean) => void;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -52,6 +50,28 @@ export function AppearanceSettingsView({
       <section>
         <SettingsSectionTitle>{tx("settings.sections.localPreferences", "Local preferences")}</SettingsSectionTitle>
         <SettingsGroup>
+          <SettingsRow title={t("settings.rows.readingTextSize")}>
+            <SegmentedControl
+              value={localPrefs.readingTextSize}
+              mode="radio"
+              ariaLabel={t("settings.rows.readingTextSize")}
+              className="w-36 [@media(pointer:coarse)]:w-40"
+              itemClassName="flex flex-1 basis-0 items-center justify-center !overflow-visible px-0 after:absolute after:inset-x-0 after:top-1/2 after:h-11 after:-translate-y-1/2 after:content-['']"
+              options={([
+                ["small", "text-[12px]"],
+                ["standard", "text-[16px]"],
+                ["large", "text-[20px]"],
+              ] as const).map(([value, size]) => ({
+                value,
+                label: <span aria-hidden className={size}>A</span>,
+                ariaLabel: t(`settings.readingTextSize.${value}`),
+                tooltip: t(`settings.readingTextSize.${value}`),
+              }))}
+              onChange={(readingTextSize) =>
+                onChangeLocalPrefs((prev) => ({ ...prev, readingTextSize }))
+              }
+            />
+          </SettingsRow>
           <SettingsRow title={tx("settings.rows.activityMode", "Activity detail")}>
             <SegmentedControl
               value={localPrefs.activityMode}
@@ -100,39 +120,6 @@ export function AppearanceSettingsView({
               onChange={(brandLogos) => onChangeLocalPrefs((prev) => ({ ...prev, brandLogos }))}
               ariaLabel={tx("settings.rows.brandLogos", "Brand logos")}
               label={localPrefs.brandLogos ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
-            />
-          </SettingsRow>
-          <SettingsRow
-            title={tx("settings.rows.browserNotifications", "Task notifications")}
-            description={tx(
-              "settings.help.browserNotifications",
-              "Notify only when this page is in the background. Off by default.",
-            )}
-          >
-            <ToggleButton
-              checked={localPrefs.browserNotifications}
-              onChange={onChangeBrowserNotifications}
-              ariaLabel={tx("settings.rows.browserNotifications", "Task notifications")}
-              label={localPrefs.browserNotifications
-                ? tx("settings.values.on", "On")
-                : tx("settings.values.off", "Off")}
-            />
-          </SettingsRow>
-          <SettingsRow
-            title={tx("settings.rows.notificationSound", "Completion sound")}
-            description={tx(
-              "settings.help.notificationSound",
-              "Play a short chime when a turn finishes, even when this page is in the background. Off by default.",
-            )}
-          >
-            <ToggleButton
-              checked={localPrefs.notificationSound}
-              onChange={(notificationSound) =>
-                onChangeLocalPrefs((prev) => ({ ...prev, notificationSound }))}
-              ariaLabel={tx("settings.rows.notificationSound", "Completion sound")}
-              label={localPrefs.notificationSound
-                ? tx("settings.values.on", "On")
-                : tx("settings.values.off", "Off")}
             />
           </SettingsRow>
         </SettingsGroup>

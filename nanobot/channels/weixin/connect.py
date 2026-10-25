@@ -34,6 +34,15 @@ class WeixinConnectStore:
     def __init__(self) -> None:
         self._sessions: dict[str, WeixinConnectSession] = {}
 
+    @property
+    def has_pending_work(self) -> bool:
+        # Poll/commit are awaited by the settings request owner, not detached.
+        return any(session.deadline > time.monotonic() for session in self._sessions.values())
+
+    async def close(self) -> None:
+        for session_id in tuple(self._sessions):
+            await self.cancel(session_id)
+
     async def handle(self, action: str, query: QueryParams) -> dict[str, Any]:
         """Handle one generic settings connection action."""
         if action == "start":

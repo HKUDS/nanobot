@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
+import httpx
 import pytest
 
 from nanobot.config.schema import Config
+from nanobot.providers.registry import find_by_name
 from nanobot.webui.settings_models import (
     WebUISettingsError,
     create_model_configuration,
@@ -201,3 +204,166 @@ def test_provider_model_refresh_reaches_oauth_catalog(monkeypatch, provider, ref
     provider_models_payload(config, query, http_get=Mock())
 
     catalog.assert_called_once_with(provider, proxy=None, refresh=refresh)
+
+
+def _catalog_http_get(body: object) -> Callable[..., httpx.Response]:
+    def get(url: str, **_kwargs: object) -> httpx.Response:
+        return httpx.Response(200, json=body, request=httpx.Request("GET", url))
+
+    return get
+
+
+def test_provider_catalog_normalizes_official_model_metadata_without_changing_budgets() -> None:
+    config = Config()
+    config.providers.deepseek.api_key = "fixture"
+    before = config.model_dump()
+    payload = provider_models_payload(config, {"provider": ["deepseek"]}, http_get=_catalog_http_get({
+        "data": [{
+            "id": "deepseek-flash",
+            "name": "DeepSeek Flash",
+            "owned_by": "deepseek",
+            "context_window": 1_048_576,
+            "max_output_tokens": 131_072,
+            "input_modalities": [" text ", "image", "text", "future-signal"],
+            "output_modalities": ["text", " text "],
+            "effort": {
+                "supported_levels": [" low ", "high", "max", "adaptive", "max"],
+                "default_level": " adaptive ",
+            },
+            "api_capabilities": {"anthropic_messages": {"system_prompt_update": True}},
+            "vendor_details": {"arbitrary": "not part of the DTO"},
+        }],
+    }))
+
+    assert payload["status"] == "available"
+    assert payload["model_count"] == 1
+    assert payload["models"] == [{
+        "id": "deepseek-flash",
+        "label": "DeepSeek Flash",
+        "owned_by": "deepseek",
+        "context_window": 1_048_576,
+        "max_output_tokens": 131_072,
+        "input_modalities": ["text", "image", "future-signal"],
+        "output_modalities": ["text"],
+        "reasoning_efforts": ["none", "low", "high", "max", "adaptive"],
+        "default_reasoning_effort": "adaptive",
+    }]
+    assert config.model_dump() == before
+
+
+def test_provider_catalog_enriches_legacy_known_ids_but_not_unknown_or_custom_models() -> None:
+    spec = find_by_name("deepseek")
+    assert spec is not None
+    known_ids = [model_id for model in spec.builtin_models for model_id in (model.id, *model.aliases)]
+    config = Config.model_validate({"providers": {
+        "deepseek": {"apiKey": "fixture"},
+        "tenant": {"apiKey": "fixture", "apiBase": "https://catalog.test/v1"},
+    }})
+    raw_rows = [{"id": model_id} for model_id in [*known_ids, "deepseek-unlisted"]]
+    payload = provider_models_payload(
+        config, {"provider": ["deepseek"]}, http_get=_catalog_http_get({"data": raw_rows}),
+    )
+
+    assert [row["id"] for row in payload["models"]] == [*known_ids, "deepseek-unlisted"]
+    for row in payload["models"][:-1]:
+        metadata = spec.model_metadata(row["id"])
+        assert metadata is not None
+        assert row["context_window"] == metadata.context_window
+        assert row["max_output_tokens"] == metadata.max_output_tokens
+        assert row["input_modalities"] == list(metadata.input_modalities)
+        assert row["output_modalities"] == list(metadata.output_modalities)
+        assert row["reasoning_efforts"] == list(metadata.reasoning_efforts)
+        assert row["default_reasoning_effort"] == metadata.default_reasoning_effort
+    assert payload["models"][-1] == {
+        "id": "deepseek-unlisted", "label": None, "owned_by": None, "context_window": None,
+    }
+
+    custom = provider_models_payload(
+        config, {"provider": ["tenant"]}, http_get=_catalog_http_get([{"id": known_ids[0]}]),
+    )
+    assert custom["models"] == [{
+        "id": known_ids[0], "label": None, "owned_by": None, "context_window": None,
+    }]
+
+
+def test_provider_catalog_discards_malformed_optional_fields_not_model_rows() -> None:
+    config = Config()
+    config.providers.deepseek.api_key = "fixture"
+    payload = provider_models_payload(config, {"provider": ["deepseek"]}, http_get=_catalog_http_get({
+        "data": [
+            {
+                "id": "invalid-types", "context_window": True, "max_output_tokens": True,
+                "input_modalities": ["text", {"type": "image"}], "output_modalities": "text",
+                "effort": {"supported_levels": ["low", 7], "default_level": {"level": "low"}},
+                "api_capabilities": {"anthropic_messages": {}},
+            },
+            {
+                "id": "future-model", "max_output_tokens": -1,
+                "input_modalities": ["", " "], "output_modalities": {"text": True},
+                "effort": {"supported_levels": [" none ", "adaptive", "none"], "default_level": "low"},
+            },
+            {
+                "id": "legacy-context", "context_length": 8192.5, "max_output_tokens": 4096.5,
+                "input_modalities": None, "output_modalities": [False], "effort": "high",
+            },
+        ],
+    }))
+
+    assert payload["status"] == "available"
+    assert payload["model_count"] == 3
+    assert payload["models"] == [
+        {"id": "invalid-types", "label": None, "owned_by": None, "context_window": None},
+        {
+            "id": "future-model", "label": None, "owned_by": None, "context_window": None,
+            "input_modalities": [], "reasoning_efforts": ["none", "adaptive"],
+        },
+        {"id": "legacy-context", "label": None, "owned_by": None, "context_window": 8192},
+    ]
+
+
+def test_provider_catalog_combines_valid_online_fields_with_known_fallback() -> None:
+    config = Config()
+    config.providers.deepseek.api_key = "fixture"
+    payload = provider_models_payload(config, {"provider": ["deepseek"]}, http_get=_catalog_http_get({
+        "data": [{
+            "id": "deepseek-flash", "max_output_tokens": True, "input_modalities": [],
+            "effort": {"supported_levels": ["none", "adaptive"], "default_level": "high"},
+        }],
+    }))
+
+    assert payload["models"] == [{
+        "id": "deepseek-flash", "label": None, "owned_by": None, "context_window": 1_000_000,
+        "max_output_tokens": 393_216, "input_modalities": [], "output_modalities": ["text"],
+        "reasoning_efforts": ["none", "adaptive"],
+    }]
+
+
+def test_known_reasoning_efforts_preserve_default_none_and_custom_roundtrips() -> None:
+    config = Config()
+    config.providers.deepseek.api_key = "fixture"
+    name = create_model_configuration(config, {
+        "name": ["Reasoning"], "provider": ["deepseek"], "model": ["deepseek-v4-flash"],
+        "reasoning_effort": [""],
+    }, oauth_status=_oauth_status)
+
+    def saved_row() -> dict[str, Any]:
+        roundtripped = Config.model_validate(config.model_dump())
+        payload = model_settings_payload(roundtripped, oauth_status=_oauth_status)
+        return next(row for row in payload["model_presets"] if row["name"] == name)
+
+    assert saved_row()["reasoning_effort"] is None
+    assert saved_row()["reasoning_effort_values"] == ["", "none", "low", "high", "max"]
+    for effort in ("none", "provider-native-mode", ""):
+        assert update_model_configuration(config, {
+            "name": [name], "reasoning_effort": [effort],
+        }, oauth_status=_oauth_status)
+        assert saved_row()["reasoning_effort"] == (effort or None)
+
+    unknown = create_model_configuration(config, {
+        "name": ["Future"], "provider": ["deepseek"], "model": ["deepseek-unlisted"],
+        "reasoning_effort": ["future-effort"],
+    }, oauth_status=_oauth_status)
+    row = next(row for row in model_settings_payload(config, oauth_status=_oauth_status)["model_presets"]
+               if row["name"] == unknown)
+    assert row["reasoning_effort"] == "future-effort"
+    assert row["reasoning_effort_values"] == ["", "low", "medium", "high"]

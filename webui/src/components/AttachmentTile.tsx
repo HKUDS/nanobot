@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { Download } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { UIMediaAttachment } from "@/lib/types";
@@ -13,12 +14,14 @@ interface AttachmentTileProps {
   className?: string;
   inline?: boolean;
   variant?: "default" | "compact";
+  pending?: boolean;
 }
 
-export function AttachmentTile({ attachment, className, inline = false, variant = "default" }: AttachmentTileProps) {
+export function AttachmentTile({ attachment, className, inline = false, variant = "default", pending = false }: AttachmentTileProps) {
   const { t } = useTranslation();
+  const videoUrl = attachment.url;
   const [failedUrl, setFailedUrl] = useState<string | undefined>(undefined);
-  const failed = !!attachment.url && failedUrl === attachment.url;
+  const failed = !!videoUrl && failedUrl === videoUrl;
   const [imageOpen, setImageOpen] = useState(false);
   const hasUrl = typeof attachment.url === "string" && attachment.url.length > 0;
   const label = attachmentLabel(attachment, t);
@@ -36,7 +39,7 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
     );
   }
 
-  if (attachment.kind === "video" && hasUrl) {
+  if (attachment.kind === "video" && hasUrl && !failed) {
     return (
       <AttachmentFrame
         attachment={attachment}
@@ -45,9 +48,10 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
         variant={variant}
       >
         <video
-          src={attachment.url}
+          src={videoUrl}
           controls
           preload="metadata"
+          onError={() => setFailedUrl(videoUrl)}
           className={cn(
             "block w-full bg-black",
             variant === "compact" ? "max-h-40" : "max-h-[26rem]",
@@ -58,52 +62,61 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
     );
   }
 
-  const fileKind = attachment.kind === "file"
-    ? fileKindForPath(attachment.name || attachment.url || "")
-    : attachment.kind;
+  const filePath = attachment.name || attachment.url?.split(/[?#]/, 1)[0] || "";
+  const fileKind = attachment.kind === "file" ? fileKindForPath(filePath) : attachment.kind;
+  const name = attachment.name || label;
+  const available = hasUrl && !failed;
+  const extension = attachment.name?.match(/\.(tar\.(?:gz|bz2|xz)|[a-z0-9]{1,12})$/i)?.[1];
+  const details = available ? extension?.toUpperCase() || label
+    : pending ? t("message.delivery.sending") : t("message.attachmentUnavailable", { defaultValue: "Attachment unavailable" });
+  const cardClassName = cn(
+    "not-prose flex w-72 min-w-0 max-w-full items-center gap-3 rounded-control",
+    "border border-border/60 bg-muted/40 px-3 py-2.5 text-sm text-muted-foreground",
+    variant === "compact" && "w-56 gap-2 px-2.5 py-2 text-xs",
+    className,
+  );
   const body = (
     <>
-      <FileReferenceIcon kind={fileKind} className="size-4" />
-      <span className="min-w-0 truncate">{attachment.name ?? label}</span>
+      <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-compact bg-background/70", variant === "compact" && "size-8")}>
+        <FileReferenceIcon kind={fileKind} className={variant === "compact" ? "size-4" : "size-5"} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium text-foreground">{name}</span>
+        <span className="block break-words text-xs leading-4">{details}</span>
+      </span>
     </>
   );
 
-  if (hasUrl && !failed) {
+  if (available) {
     return (
       <a
         href={attachment.url}
-        download={attachment.name ?? label}
-        title={attachment.name ?? undefined}
-        aria-label={label}
+        download={name}
+        title={name}
+        aria-label={t("message.downloadAttachment", { name })}
         className={cn(
-          "flex max-w-[18rem] items-center gap-2 rounded-control",
-          "border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground",
+          cardClassName,
           "transition-colors hover:bg-muted/55 hover:text-foreground",
-          variant === "compact" && "max-w-[14rem] rounded-xl px-2.5 py-1.5 text-[11.5px]",
-          className,
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         )}
       >
         {body}
+        <Download aria-hidden strokeWidth={1.75} className="size-4 shrink-0" />
       </a>
     );
   }
 
+  const Frame = inline ? "span" : "div";
   return (
-    <div
-      className={cn(
-        "flex max-w-[18rem] items-center gap-2 rounded-control",
-        "border border-border/60 bg-muted/35 px-3 py-2 text-xs text-muted-foreground",
-        variant === "compact" && "max-w-[14rem] rounded-xl px-2.5 py-1.5 text-[11.5px]",
-        className,
-      )}
-      title={attachment.name ?? undefined}
-      aria-label={label}
-    >
+    <Frame className={cardClassName} title={name} aria-label={attachment.name ? `${label}: ${name}` : label}>
       {body}
-      <span className="sr-only">
-        {t("message.attachmentUnavailable", { defaultValue: "Attachment unavailable" })}
-      </span>
-    </div>
+      {attachment.kind === "video" && failed && !pending ? (
+        <button type="button" onClick={() => setFailedUrl(undefined)}
+          className="shrink-0 rounded-sm px-1 text-foreground underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2">
+          {t("common.retry")}
+        </button>
+      ) : null}
+    </Frame>
   );
 }
 

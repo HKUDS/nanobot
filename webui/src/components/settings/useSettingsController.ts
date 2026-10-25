@@ -34,9 +34,10 @@ import { createSystemSettingsActions } from "@/components/settings/system/create
 import { useSystemSettingsEffects } from "@/components/settings/system/useSystemSettingsEffects";
 import { useSystemSettingsState } from "@/components/settings/system/useSystemSettingsState";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
-import { useAutoSave } from "@/components/settings/shared/useAutoSave";
+import { useEditCompletion } from "@/components/settings/shared/useEditCompletion";
 import { cancelProviderOAuth, fetchSettings, fetchSettingsUsage } from "@/lib/api";
 import {
+  LOCAL_PREFS_CHANGED_EVENT,
   readLocalPreferences,
   writeLocalPreferences,
   type LocalPreferences,
@@ -99,44 +100,21 @@ export function useSettingsController({
   const [localPrefs, setLocalPrefs] = useState<LocalPreferences>(() => readLocalPreferences());
   const modelState = useModelSettingsState(initialSettings);
   const {
-    editingProviderKeys, form, modelCallOrder, modelCallOrderSaving,
-    modelConfigurationSaving, modelMigrationSaving, modelPresetBeforeCreateRef,
-    modelPresetCreating, modelPresetEditingName, modelPresetNameError, modelPresetPendingDelete,
-    providerForms, providerOAuthCompleting,
-    providerOAuthDialogError, providerOAuthFlow, providerOAuthFlowRef, providerOAuthResponse,
-    providerSaving, providerOperation, saving, setForm,
-    setModelCallOrder, setModelPresetCreating, setModelPresetEditingName, setModelPresetNameError,
-    setModelPresetPendingDelete,
-    setProviderForms, setProviderOAuthCompleting, setProviderOAuthDialogError,
-    setProviderOAuthFlow, setProviderOAuthResponse, visibleProviderKeys,
+    form, modelPresetEditingName, providerOAuthFlowRef, setForm,
+    setModelCallOrder, setModelPresetCreating, setModelPresetEditingName,
+    setProviderOAuthCompleting, setProviderOAuthDialogError,
+    setProviderOAuthFlow, setProviderOAuthResponse,
   } = modelState;
   const capabilityState = useCapabilitySettingsState(initialSettings);
   const {
-    imageGenerationForm, imageGenerationSaving, networkSafetyForm, networkSafetySaving,
+    imageGenerationForm, networkSafetyForm,
     setImageGenerationForm, setNetworkSafetyForm, setTranscriptionForm, setWebSearchForm,
-    setWebSearchKeyEditing, setWebSearchKeyVisible, transcriptionForm,
-    transcriptionSaving, webSearchForm, webSearchKeyEditing, webSearchKeyVisible,
-    webSearchSaving,
+    transcriptionForm, webSearchForm,
   } = capabilityState;
+  const draftsRef = useRef({ form, imageGenerationForm, networkSafetyForm, transcriptionForm, webSearchForm });
+  draftsRef.current = { form, imageGenerationForm, networkSafetyForm, transcriptionForm, webSearchForm };
   const systemState = useSystemSettingsState();
-  const {
-    apiService, apiServiceAction, apiServiceError, apiServiceLoading, appsKindFilter, appsQuery,
-    automationAction, automationPendingDelete, automationPendingEdit, automations,
-    automationsError, automationsFilter, automationsLoading,
-    cliApps, cliAppsAction, cliAppsError, cliAppsFocusName, cliAppsLoading,
-    cliAppsMessage, customMcpForm, mcpConfigImport, mcpError, mcpFieldValues, mcpMessage,
-    mcpOAuthCallbackError, mcpOAuthCallbackUrl, mcpOAuthCompleting, mcpOAuthFlow,
-    mcpOAuthPopupBlocked, mcpPresetAction, mcpPresets, mcpPresetsLoading, nanobotFeatureAction,
-    nanobotFeatureConfirm, nanobotFeatures, nanobotFeaturesError, nanobotFeaturesLoading,
-    setAppsKindFilter, setAppsQuery, setAutomationPendingDelete,
-    setAutomationPendingEdit, setAutomationsFilter,
-    setCliAppsError,
-    setCliAppsMessage, setCustomMcpForm, setMcpConfigImport, setMcpError, setMcpFieldValues,
-    setMcpMessage, setMcpOAuthCallbackError, setMcpOAuthCallbackUrl,
-    setNanobotFeatureConfirm, setNanobotFeatures,
-    setNanobotFeaturesError,
-  } = systemState;
-  const featureCatalog = nanobotFeatures?.features ?? [];
+  const featureCatalog = systemState.nanobotFeatures?.features ?? [];
 
   useEffect(() => {
     setActiveSection(initialSection);
@@ -160,8 +138,6 @@ export function useSettingsController({
         setForm(nextForm);
         setModelPresetEditingName(nextForm.modelPreset);
         setModelPresetCreating(false);
-      } else {
-        setForm((current) => ({ ...current, timezone: payload.agent.timezone }));
       }
       setModelCallOrder(payload.model_call_order ?? []);
       if (!options.preserveCapabilityForms) {
@@ -179,6 +155,11 @@ export function useSettingsController({
   );
 
   const runtimeConfigState = useRuntimeConfigSettings(settings, client, applyPayload);
+
+  const markUpdateInstalled = useCallback(() => {
+    setPendingRestartSections((current) => ({ ...current, runtime: true }));
+    setSettings((current) => current ? { ...current, requires_restart: true } : current);
+  }, []);
 
   const closeProviderOAuthFlow = useCallback((cancelPending = true) => {
     const flow = providerOAuthFlowRef.current;
@@ -218,18 +199,25 @@ export function useSettingsController({
     if (!shouldApplyRestartedSettings || !initialSettings) {
       return;
     }
-    applyPayload(initialSettings);
+    applyPayload(initialSettings, { preserveAgentForm: true, preserveCapabilityForms: true });
   }, [applyPayload, initialSettings, settings]);
 
   useEffect(() => {
     let cancelled = false;
     const showLoading = settings === null;
     const requestInitialSettings = latestInitialSettingsRef.current;
+    const requestDrafts = draftsRef.current;
     if (showLoading) setLoading(true);
     fetchSettings(getToken())
       .then((payload) => {
         if (!cancelled && latestInitialSettingsRef.current === requestInitialSettings) {
-          applyPayload(payload);
+          const current = draftsRef.current;
+          applyPayload(payload, {
+            preserveAgentForm: current.form !== requestDrafts.form,
+            preserveCapabilityForms: current.imageGenerationForm !== requestDrafts.imageGenerationForm ||
+              current.networkSafetyForm !== requestDrafts.networkSafetyForm ||
+              current.transcriptionForm !== requestDrafts.transcriptionForm || current.webSearchForm !== requestDrafts.webSearchForm,
+          });
           setError(null);
         }
       })
@@ -282,6 +270,18 @@ export function useSettingsController({
     pageVisible,
   });
 
+  useEffect(() => {
+    const synchronize = (event: Event) => setLocalPrefs((event as CustomEvent<LocalPreferences>).detail);
+    const reload = () => setLocalPrefs(readLocalPreferences());
+    window.addEventListener(LOCAL_PREFS_CHANGED_EVENT, synchronize);
+    window.addEventListener("storage", reload);
+    window.addEventListener("focus", reload);
+    return () => {
+      window.removeEventListener(LOCAL_PREFS_CHANGED_EVENT, synchronize);
+      window.removeEventListener("storage", reload);
+      window.removeEventListener("focus", reload);
+    };
+  }, []);
   useEffect(() => {
     writeLocalPreferences(localPrefs);
   }, [localPrefs]);
@@ -364,10 +364,17 @@ export function useSettingsController({
       onNativeEngineRestart
     ) {
       setHostEngineApplying(true);
+      const requestDrafts = draftsRef.current;
       try {
         const nextToken = await onNativeEngineRestart();
         const payload = await fetchSettings(nextToken);
-        applyPayload(payload);
+        const current = draftsRef.current;
+        applyPayload(payload, {
+          preserveAgentForm: current.form !== requestDrafts.form,
+          preserveCapabilityForms: current.imageGenerationForm !== requestDrafts.imageGenerationForm ||
+            current.networkSafetyForm !== requestDrafts.networkSafetyForm ||
+            current.transcriptionForm !== requestDrafts.transcriptionForm || current.webSearchForm !== requestDrafts.webSearchForm,
+        });
         setPendingRestartSections(EMPTY_PENDING_RESTART_SECTIONS);
         setError(null);
       } catch (err) {
@@ -397,7 +404,7 @@ export function useSettingsController({
       try {
         const nextToken = await onNativeEngineRestart();
         const refreshed = await fetchSettings(nextToken);
-        applyPayload(refreshed);
+        applyPayload(refreshed, { preserveAgentForm: true, preserveCapabilityForms: true });
         setPendingRestartSections(EMPTY_PENDING_RESTART_SECTIONS);
         setError(null);
       } catch (err) {
@@ -434,7 +441,6 @@ export function useSettingsController({
     remoteBrowserAccess,
     closeProviderOAuthFlow,
     installCapabilities,
-    modelDirty,
     configuredModelProviderOptions,
   });
   const capabilityActions = useCapabilitySettingsActions({
@@ -446,215 +452,53 @@ export function useSettingsController({
     maybeRestartHostEngine,
     setPendingRestartSections,
     installCapabilities,
-    imageGenerationDirty,
-    transcriptionDirty,
-    networkSafetyDirty,
   });
-  const {
-    beginModelPresetCreation,
-    cancelModelPresetCreation,
-    changeModelCallOrder,
-    completeProviderOAuthResponse,
-    createCustomProvider,
-    handleDeleteModelConfiguration,
-    handleMigrateModelConfigurations,
-    resetProviderDraft,
-    runProviderOAuth,
-    saveModelSettings,
-    saveProvider,
-    toggleProviderKeyEditing,
-    toggleProviderKeyVisibility,
-  } = modelActions;
-  const {
-    handleWebSearchProviderChange,
-    resetWebSearchDraft,
-    saveImageGenerationSettings,
-    saveNetworkSafetySettings,
-    saveTranscriptionSettings,
-    saveWebSearch,
-  } = capabilityActions;
-  useAutoSave(imageGenerationForm, imageGenerationDirty, imageGenerationSaving, saveImageGenerationSettings,
+  const modelEdits = useEditCompletion(form, modelDirty, modelActions.saveModelSettings,
+    !modelState.modelPresetCreating && !!form.model.trim(), modelActions.modelEditIdentity);
+  const safetyEdits = useEditCompletion(networkSafetyForm, networkSafetyDirty, capabilityActions.saveNetworkSafetySettings);
+  const imageEdits = useEditCompletion(imageGenerationForm, imageGenerationDirty, capabilityActions.saveImageGenerationSettings,
     !imageGenerationForm.enabled || Boolean(settings?.image_generation.providers.find(
       (provider) => provider.name === imageGenerationForm.provider,
     )?.configured));
-  useAutoSave(transcriptionForm, transcriptionDirty, transcriptionSaving, saveTranscriptionSettings);
+  const transcriptionEdits = useEditCompletion(transcriptionForm, transcriptionDirty, capabilityActions.saveTranscriptionSettings);
   const webDraft = settings ? webSearchDraftState(settings, webSearchForm) : null;
-  useAutoSave(webSearchForm, webDraft?.dirty ?? false, webSearchSaving, saveWebSearch,
+  const webEdits = useEditCompletion(webSearchForm, webDraft?.dirty ?? false, capabilityActions.saveWebSearch,
     !webDraft?.missingCredential && (webSearchForm.provider !== "olostep" ||
       featureCatalog.some((feature) => feature.name === "olostep" && feature.installed)));
-  const {
-    handleApiServiceAction,
-    handleAutomationAction,
-    handleAutomationEdit,
-    handleAutomationChat,
-    handleCliAppAction,
-    handleImportMcpConfig,
-    handleMcpOAuthCancel,
-    handleMcpOAuthComplete,
-    handleMcpOAuthConnect,
-    handleMcpOAuthOpen,
-    handleMcpPresetAction,
-    handleMcpToolsChange,
-    handleNanobotFeatureAction,
-    handleSaveCustomMcp,
-  } = systemActions;
 
   return {
+    modelState,
+    modelActions,
+    capabilityState,
+    capabilityActions,
+    modelEdits,
+    safetyEdits,
+    imageEdits,
+    transcriptionEdits,
+    webEdits,
+    systemState,
+    systemActions,
     activeSection,
-    capabilityErrors: capabilityState.capabilityErrors,
+    markUpdateInstalled,
     runtimeConfigState,
-    apiService,
-    apiServiceAction,
-    apiServiceError,
-    apiServiceLoading,
-    appsKindFilter,
-    appsQuery,
-    automationAction,
-    automationPendingDelete,
-    automationPendingEdit,
-    automations,
-    automationsError,
-    automationsFilter,
-    automationsLoading,
-    beginModelPresetCreation,
-    cancelModelPresetCreation,
-    changeModelCallOrder,
-    cliApps,
-    cliAppsAction,
-    cliAppsError,
-    cliAppsFocusName,
-    cliAppsLoading,
-    cliAppsMessage,
     closeProviderOAuthFlow,
-    completeProviderOAuthResponse,
-    createCustomProvider,
-    customMcpForm,
-    editingProviderKeys,
     error,
     featureCatalog,
-    form,
-    handleApiServiceAction,
-    handleAutomationAction,
-    handleAutomationEdit,
-    handleAutomationChat,
-    handleCliAppAction,
-    handleDeleteModelConfiguration,
-    handleImportMcpConfig,
-    handleMcpOAuthCancel,
-    handleMcpOAuthComplete,
-    handleMcpOAuthConnect,
-    handleMcpOAuthOpen,
-    handleMcpPresetAction,
-    handleMcpToolsChange,
-    handleMigrateModelConfigurations,
-    handleNanobotFeatureAction,
-    handleSaveCustomMcp,
-    resetProviderDraft,
-    handleWebSearchProviderChange,
     hostEngineApplying,
     imageGenerationDirty,
-    imageGenerationForm,
-    imageGenerationSaving,
-    installCapabilities,
     loading,
     localPrefs,
-    mcpConfigImport,
-    mcpError,
-    mcpFieldValues,
-    mcpMessage,
-    mcpOAuthCallbackError,
-    mcpOAuthCallbackUrl,
-    mcpOAuthCompleting,
-    mcpOAuthFlow,
-    mcpOAuthPopupBlocked,
-    mcpPresetAction,
-    mcpPresets,
-    mcpPresetsLoading,
-    modelCallOrder,
-    modelCallOrderSaving,
-    modelConfigurationSaving,
     modelDirty,
-    modelMigrationSaving,
-    modelPresetBeforeCreateRef,
-    modelPresetCreating,
-    modelPresetEditingName,
-    modelPresetNameError,
-    modelPresetPendingDelete,
-    nanobotFeatureAction,
-    nanobotFeatureConfirm,
-    nanobotFeatures,
-    nanobotFeaturesError,
-    nanobotFeaturesLoading,
     networkSafetyDirty,
-    networkSafetyForm,
-    networkSafetySaving,
     pendingRestartSections,
-    providerForms,
-    providerOAuthCompleting,
-    providerOAuthDialogError,
-    providerOAuthFlow,
-    providerOAuthResponse,
-    providerSaving,
-    providerOperation,
     remoteBrowserAccess,
-    resetWebSearchDraft,
     restartViaSettingsSurface,
-    runProviderOAuth,
-    saveImageGenerationSettings,
-    saveModelSettings,
-    saveImageRequestSettings: capabilityActions.saveImageRequestSettings,
-    saveNetworkSafetySettings,
-    saveModelRequestSettings: modelActions.saveModelRequestSettings,
-    saveProvider,
-    saveTranscriptionSettings,
-    saveWebSearch,
-    saving,
     selectSection,
-    setAppsKindFilter,
-    setAppsQuery,
-    setAutomationPendingDelete,
-    setAutomationPendingEdit,
-    setAutomationsFilter,
-    setCliAppsError,
-    setCliAppsMessage,
-    setCustomMcpForm,
-    setForm,
-    setImageGenerationForm,
     setLocalPrefs,
-    setMcpConfigImport,
-    setMcpError,
-    setMcpFieldValues,
-    setMcpMessage,
-    setMcpOAuthCallbackError,
-    setMcpOAuthCallbackUrl,
-    setModelPresetCreating,
-    setModelPresetEditingName,
-    setModelPresetNameError,
-    setModelPresetPendingDelete,
-    setNanobotFeatureConfirm,
-    setNanobotFeatures,
-    setNanobotFeaturesError,
-    setNetworkSafetyForm,
-    setProviderForms,
-    setProviderOAuthDialogError,
-    setProviderOAuthResponse,
-    setTranscriptionForm,
-    setWebSearchForm,
-    setWebSearchKeyEditing,
-    setWebSearchKeyVisible,
     settings,
     t,
-    toggleProviderKeyEditing,
-    toggleProviderKeyVisibility,
     token,
     transcriptionDirty,
-    transcriptionForm,
-    transcriptionSaving,
-    visibleProviderKeys,
-    webSearchForm,
-    webSearchKeyEditing,
-    webSearchKeyVisible,
-    webSearchSaving,
   };
 }
 

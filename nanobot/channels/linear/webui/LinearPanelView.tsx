@@ -120,7 +120,10 @@ export function LinearPanelView({ feature, showBrandLogos, fields, advancedField
           <button type="button"
             className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded px-1 text-[12px] leading-none text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-offset-2"
             aria-expanded={advancedOpen} aria-controls={advancedPanelId}
-            onClick={() => setAdvancedOpen((current) => !current)}>
+            onClick={async () => {
+              if (advancedOpen && dirty && !(await saveSettings())) return;
+              setAdvancedOpen((current) => !current);
+            }}>
             {t("settings.channels.advanced", { defaultValue: "Advanced" })}
             <ChevronDown className={cn(
               "h-3.5 w-3.5 transition-transform motion-reduce:transition-none",

@@ -1,12 +1,13 @@
-import { FullAccessIcon, WorkspaceIcon, RestrictedAccessIcon } from "@/components/icons/product-icons";
+import { FullAccessIcon, RestrictedAccessIcon, WorkspaceIcon } from "@/components/icons/product-icons";
 import type { HTMLAttributes, ReactElement } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, ChevronRight, FolderSearch, History, Search, Star } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, FolderSearch, History, Search, Star } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ToggleButton } from "@/components/ui/toggle-button";
 import { Button } from "@/components/ui/button";
 import { floatingItemClassName, floatingItemFocusClassName } from "@/components/ui/floating-surface";
 import { HoverHint } from "@/components/ui/tooltip";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input, SearchInput } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { SidebarSelectionHighlight, SIDEBAR_SELECTION_ITEM_CLASS } from "@/components/SidebarSelectionHighlight";
@@ -121,7 +122,7 @@ function WorkspaceDirectorySkeleton() {
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
-    const measure = () => setRows(Math.max(1, Math.ceil(viewport.clientHeight / DIRECTORY_ROW_HEIGHT)));
+    const measure = () => setRows(Math.max(1, Math.floor(viewport.clientHeight / DIRECTORY_ROW_HEIGHT)));
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(viewport);
@@ -129,7 +130,7 @@ function WorkspaceDirectorySkeleton() {
   }, []);
   const widths = ["64%", "78%", "52%", "70%", "60%", "74%"];
   return (
-    <div ref={viewportRef} role="status" aria-label={t("workspace.picker.loading")} className="workspace-directory-loading h-full">
+    <div ref={viewportRef} role="status" aria-label={t("workspace.picker.loading")} className="workspace-directory-loading flex h-full flex-col justify-center">
       <span className="sr-only">{t("workspace.picker.loading")}</span>
       <div aria-hidden="true">
         {Array.from({ length: rows }, (_, index) => (
@@ -152,9 +153,8 @@ function WorkspacePickerPath({ path }: { path: string }) {
   );
 }
 
-export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, controls, error, onLoadProjects, onResolveProject, onFavoriteProject, onBrowseDirectories, layoutAnchor, onChange }: {
+export function WorkspaceProjectPicker({ disabled, scope, defaultScope, controls, error, onLoadProjects, onResolveProject, onFavoriteProject, onBrowseDirectories, layoutAnchor, onChange }: {
   layoutAnchor?: HTMLElement | null;
-  isHero: boolean;
   disabled?: boolean;
   scope: WorkspaceScopePayload | null;
   defaultScope: WorkspaceScopePayload | null;
@@ -217,7 +217,7 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
   const currentProjectScope = selectedProjectScope(scope, defaultScope);
   const displayedScope = scope ?? defaultScope;
   const projectLabel = displayedScope ? displayedScope.project_name || projectNameFromPath(displayedScope.project_path) : "";
-  const visible = isHero && !!defaultScope && !!onChange && controls?.can_change_project !== false;
+  const visible = !!defaultScope && !!onChange && controls?.can_change_project !== false;
   const canBrowse = controls?.can_browse_directories === true && !!onBrowseDirectories;
   const directoryCache = useMemo(() => onBrowseDirectories ? createWorkspaceDirectoryCache(onBrowseDirectories) : null, [onBrowseDirectories]);
   const previousColumns = useMemo<PickerColumn[]>(() => currentVisit.ancestors.map(ancestor => {
@@ -551,13 +551,14 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
 
   if (!visible || !defaultScope || !onChange) return null;
   return (
-    <div className="inline-flex min-w-0 max-w-[11rem] shrink items-center">
+    <div className="inline-flex min-w-0 max-w-[17.5rem] shrink items-center">
       <Dialog open={open} onOpenChange={setOpen}>
         <HoverHint content={`${t("workspace.picker.switchDirectory")}\n${displayedScope?.project_path ?? ""}`}>
           <DialogTrigger asChild>
-            <button ref={triggerRef} onClick={event => { openedWithKeyboard.current = event.detail === 0; }} onPointerDown={() => setKeyboardInteraction(false)} onKeyDown={() => setKeyboardInteraction(true)} type="button" disabled={disabled} aria-label={t("workspace.picker.switchDirectory")} className="thread-composer-workspace touch-target inline-flex h-8 min-w-0 max-w-full items-center gap-1.5 rounded-control px-2 text-[12px] font-medium text-muted-foreground outline-none transition-colors hover:bg-foreground/[0.055] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-55">
+            <button ref={triggerRef} onClick={event => { openedWithKeyboard.current = event.detail === 0; }} onPointerDown={() => setKeyboardInteraction(false)} onKeyDown={() => setKeyboardInteraction(true)} type="button" disabled={disabled} aria-label={t("workspace.picker.switchDirectory")} className="settings-hover thread-composer-workspace touch-target inline-flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-muted-foreground outline-none transition-colors motion-reduce:transition-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-55">
               <WorkspaceIcon className="h-3.5 w-3.5 shrink-0" />
               <span className="min-w-0 truncate">{projectLabel}</span>
+              <ChevronDown className="h-3 w-3 shrink-0" aria-hidden />
             </button>
           </DialogTrigger>
         </HoverHint>
@@ -636,7 +637,7 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
             <div className={cn("mr-[var(--picker-toolbar-inset)] flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[var(--picker-field-radius)] bg-[#fcfcfc] dark:bg-muted", compact && showLocations && canBrowse && "hidden")}>
             <div ref={attachColumns} data-workspace-columns className="sidebar-scrollbar flex flex-1 min-h-0 min-w-0 overflow-x-auto overscroll-x-contain">
               {columns.map((column, columnIndex) => (!compact || columnIndex === currentColumnIndex) && <WorkspaceDirectoryColumn key={columnIndex} options={column.options} selectedPath={column.selectedPath} initialScrollTop={previewingPath ? 0 : currentVisit.scrollTops[columnIndex] ?? 0} visitRevision={history.revision} activeIndex={highlightActive && columnIndex === activeColumn ? activeOption : null}
-                id={`${optionsId}-${columnIndex}`} data-workspace-column={columnIndex} data-current-directory={columnIndex === currentColumnIndex ? "" : undefined} role="listbox" tabIndex={0} aria-activedescendant={highlightActive && columnIndex === activeColumn && column.options.length ? `${optionsId}-${columnIndex}-${activeOption}` : undefined} aria-label={column.path || t("thread.composer.workspace.projectAria")} aria-busy={columnIndex === currentColumnIndex && loading} style={{ width: `${compact ? 100 : 100 / columnCount}%` }} className="sidebar-scrollbar relative min-w-0 shrink-0 overflow-x-hidden overflow-y-auto px-2 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50"
+                id={`${optionsId}-${columnIndex}`} data-workspace-column={columnIndex} data-current-directory={columnIndex === currentColumnIndex ? "" : undefined} role="listbox" tabIndex={0} aria-activedescendant={highlightActive && columnIndex === activeColumn && column.options.length ? `${optionsId}-${columnIndex}-${activeOption}` : undefined} aria-label={column.path || t("thread.composer.workspace.projectAria")} aria-busy={columnIndex === currentColumnIndex && loading} style={{ width: `${compact ? 100 : 100 / columnCount}%` }} className="sidebar-scrollbar relative min-w-0 shrink-0 overflow-x-hidden overflow-y-auto px-2 outline-none [scrollbar-gutter:stable] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50"
                 onFocus={event => { if (event.target === event.currentTarget) { setActiveColumn(columnIndex); setActiveIndex(0); } }}
                 onKeyDown={event => {
                   if (event.target !== event.currentTarget || event.altKey || event.metaKey || event.ctrlKey || pickingFolder) return;
@@ -679,58 +680,67 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
   );
 }
 
-export function WorkspaceAccessToggle({
+export function WorkspaceAccessMenu({
   scope,
   disabled,
-  isHero,
   onChange,
 }: {
   scope: WorkspaceScopePayload;
   disabled?: boolean;
-  isHero: boolean;
   onChange?: (scope: WorkspaceScopePayload) => void;
 }) {
   const { t } = useTranslation();
-  const mode = scope.access_mode;
-  const isFull = mode === "full";
-  const accessLabel = t(
-    isFull ? "thread.composer.workspace.full" : "thread.composer.workspace.default",
-  );
-  const shortAccessLabel = t(
-    isFull ? "thread.composer.workspace.fullShort" : "thread.composer.workspace.defaultShort",
-  );
-  const accessAriaLabel = `${t("thread.composer.workspace.accessAria")}: ${accessLabel}`;
+  const coarsePointer = useMediaQuery("(pointer: coarse)");
+  const [open, setOpen] = useState(false);
+  const restoreTriggerFocus = useRef(true);
+  const descriptionId = useId();
+  const isFull = scope.access_mode === "full";
+  const label = t(isFull ? "thread.composer.workspace.full" : "thread.composer.workspace.default");
+  const description = t(isFull ? "thread.composer.workspace.fullDescription" : "thread.composer.workspace.defaultDescription");
+  const accessAriaLabel = `${t("thread.composer.workspace.accessAria")}: ${label}`;
+  const AccessIcon = isFull ? FullAccessIcon : RestrictedAccessIcon;
+
+  useEffect(() => { if (disabled || !onChange) setOpen(false); }, [disabled, onChange]);
 
   return (
-    <HoverHint side="top" contentClassName="w-max max-w-[calc(100vw-2rem)] text-left leading-relaxed"
-      content={t(isFull ? "thread.composer.workspace.fullDescription" : "thread.composer.workspace.defaultDescription")}>
-          <Button
-            type="button"
-            variant={null}
-            aria-label={accessAriaLabel}
-            aria-pressed={isFull}
-            disabled={disabled || !onChange}
-            onClick={() => onChange?.(scopeWithAccessMode(scope, isFull ? "restricted" : "full"))}
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <HoverHint enabled={!open && !coarsePointer} content={description}>
+        <DropdownMenuTrigger asChild disabled={disabled || !onChange}>
+          <button type="button" aria-label={accessAriaLabel} aria-describedby={descriptionId}
+            onPointerDown={() => { restoreTriggerFocus.current = false; }}
+            onKeyDown={() => { restoreTriggerFocus.current = true; }}
             className={cn(
-              "settings-hover thread-composer-access touch-target min-w-0 max-w-[min(12.5rem,42vw)] whitespace-nowrap rounded-control border border-transparent font-semibold shadow-none",
-              isHero ? "h-8 px-2.5 text-[12px]" : "h-9 px-3 text-[12.5px]",
-              isFull
-                ? "bg-transparent text-orange-600 hover:text-orange-600 dark:text-orange-300 dark:hover:text-orange-300"
-                : "bg-transparent text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {isFull ? (
-              <FullAccessIcon className={cn("thread-composer-access-icon mr-1.5 shrink-0", isHero ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} />
-            ) : (
-              <RestrictedAccessIcon className={cn("thread-composer-access-icon mr-1.5 shrink-0", isHero ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} />
-            )}
-            <span aria-hidden className="thread-composer-access-label-full min-w-0 truncate">
-              {accessLabel}
+              "thread-composer-access touch-target inline-flex h-8 min-w-0 max-w-full shrink items-center gap-1.5 rounded-md px-2 text-[12px] font-medium outline-none transition-colors motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-55",
+              isFull ? "text-orange-600 hover:text-orange-700 dark:text-orange-300 dark:hover:text-orange-200" : "text-muted-foreground hover:text-foreground",
+            )}>
+            <AccessIcon className="h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 truncate">{label}</span>
+            <ChevronDown className="h-3 w-3 shrink-0" aria-hidden />
+            <span id={descriptionId} className="sr-only">{description}</span>
+          </button>
+        </DropdownMenuTrigger>
+      </HoverHint>
+      <DropdownMenuContent side="top" align="start" sideOffset={8} aria-label={t("thread.composer.workspace.accessAria")}
+        onPointerDownCapture={() => { restoreTriggerFocus.current = false; }}
+        onKeyDownCapture={() => { restoreTriggerFocus.current = true; }}
+        onPointerDownOutside={() => { restoreTriggerFocus.current = false; }}
+        onCloseAutoFocus={event => { if (!restoreTriggerFocus.current) event.preventDefault(); }}
+        className="w-max min-w-[13rem] max-w-[calc(100vw-2rem)]">
+        {(["restricted", "full"] as const).map(mode => {
+          const full = mode === "full";
+          const optionLabel = t(full ? "thread.composer.workspace.full" : "thread.composer.workspace.default");
+          const OptionIcon = full ? FullAccessIcon : RestrictedAccessIcon;
+          return <DropdownMenuItem key={mode} role="menuitemradio" aria-checked={scope.access_mode === mode} aria-label={optionLabel}
+            className="touch-target gap-2.5"
+            onSelect={() => { if (!disabled && scope.access_mode !== mode) onChange?.(scopeWithAccessMode(scope, mode)); }}>
+            <OptionIcon className={full ? "text-orange-600 dark:text-orange-300" : undefined} />
+            <span className="min-w-0 flex-1">{optionLabel}</span>
+            <span aria-hidden className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+              {scope.access_mode === mode && <Check className={cn("h-3.5 w-3.5", full && "text-orange-600 dark:text-orange-300")} />}
             </span>
-            <span aria-hidden className="thread-composer-access-label-short hidden min-w-0 truncate">
-              {shortAccessLabel}
-            </span>
-          </Button>
-    </HoverHint>
+          </DropdownMenuItem>;
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

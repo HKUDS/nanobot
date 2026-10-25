@@ -1,7 +1,7 @@
 import {
   PromptNavigationIcon,
 } from "@/components/icons/product-icons";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -22,17 +22,23 @@ import { cn } from "@/lib/utils";
 
 interface PromptNavigatorProps {
   messages: UIMessage[];
+  prompts?: PromptAnchor[];
   onJumpToPrompt: (promptId: string) => void;
 }
 
+const ROW_HEIGHT = 88;
+
 export function PromptNavigator({
   messages,
+  prompts: suppliedPrompts,
   onJumpToPrompt,
 }: PromptNavigatorProps) {
   const { i18n, t } = useTranslation();
-  const prompts = useMemo(() => userPromptAnchors(messages), [messages]);
+  const prompts = useMemo(() => suppliedPrompts ?? userPromptAnchors(messages), [suppliedPrompts, messages]);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
+  const [listTop, setListTop] = useState(0);
 
   const filteredPrompts = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
@@ -41,6 +47,8 @@ export function PromptNavigator({
       `${prompt.label}\n${prompt.preview}`.toLocaleLowerCase().includes(needle),
     );
   }, [prompts, query]);
+  const firstRow = Math.max(0, Math.floor(listTop / ROW_HEIGHT) - 2);
+  const lastRow = firstRow + Math.ceil(window.innerHeight / ROW_HEIGHT) + 5;
 
   if (prompts.length === 0) return null;
 
@@ -60,7 +68,7 @@ export function PromptNavigator({
           "hover:text-foreground",
         )}
         aria-label={t("thread.promptNavigator.open")}
-        onClick={() => setOpen(true)}
+        onClick={() => { setListTop(0); setOpen(true); }}
       >
         <PromptNavigationIcon className="h-4 w-4" />
       </Button>
@@ -82,7 +90,11 @@ export function PromptNavigator({
               />
               <SearchInput
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setListTop(0);
+                  if (listRef.current) listRef.current.scrollTop = 0;
+                }}
                 aria-label={t("thread.promptNavigator.search")}
                 placeholder={t("thread.promptNavigator.search")}
                 className="h-10 rounded-full border-border bg-background pl-9 pr-3 text-sm transition-colors"
@@ -90,12 +102,29 @@ export function PromptNavigator({
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+          <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-2 py-2"
+            onScroll={(event) => setListTop(event.currentTarget.scrollTop)}
+            onKeyDown={(event) => {
+              const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-prompt-row]");
+              if (!button || !listRef.current) return;
+              const index = Number(button.dataset.promptRow);
+              let next = { ArrowDown: index + 1, ArrowUp: index - 1, Home: 0, End: filteredPrompts.length - 1 }[event.key];
+              if (event.key === "Tab") {
+                if (!event.shiftKey && index === lastRow - 1) next = index + 1;
+                if (event.shiftKey && index === firstRow && firstRow > 0) next = index - 1;
+              }
+              if (next === undefined || next < 0 || next >= filteredPrompts.length) return;
+              event.preventDefault();
+              listRef.current.scrollTop = next * ROW_HEIGHT;
+              setListTop(listRef.current.scrollTop);
+              requestAnimationFrame(() => listRef.current?.querySelector<HTMLButtonElement>(`[data-prompt-row="${next}"]`)?.focus());
+            }}>
             {filteredPrompts.length > 0 ? (
-              <div className="space-y-1">
-                {filteredPrompts.map((prompt) => (
+              <div style={{ paddingTop: firstRow * ROW_HEIGHT, paddingBottom: Math.max(0, filteredPrompts.length - lastRow) * ROW_HEIGHT }}>
+                {filteredPrompts.slice(firstRow, lastRow).map((prompt, offset) => (
                   <PromptNavigatorRow
                     key={prompt.id}
+                    row={firstRow + offset}
                     locale={i18n.resolvedLanguage || i18n.language}
                     prompt={prompt}
                     onJump={jump}
@@ -115,12 +144,14 @@ export function PromptNavigator({
 }
 
 interface PromptNavigatorRowProps {
+  row: number;
   locale: string;
   onJump: (promptId: string) => void;
   prompt: PromptAnchor;
 }
 
 function PromptNavigatorRow({
+  row,
   locale,
   onJump,
   prompt,
@@ -130,14 +161,15 @@ function PromptNavigatorRow({
   return (
     <button
       type="button"
+      data-prompt-row={row}
       className={cn(
-        "w-full rounded-control px-3 py-3 text-left transition",
+        "h-[88px] w-full overflow-hidden rounded-control px-3 py-3 text-left transition",
         "hover:bg-accent focus-visible:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
       )}
       aria-label={t("thread.promptNavigator.jumpTo", { label: prompt.label })}
       onClick={() => onJump(prompt.id)}
     >
-      <div className="max-h-20 overflow-hidden whitespace-pre-wrap break-words text-sm leading-5 text-foreground">
+      <div className="line-clamp-2 whitespace-pre-wrap break-words text-sm leading-5 text-foreground">
         {prompt.preview}
       </div>
       {timestamp ? (

@@ -243,7 +243,7 @@ The upload path accepts the existing image, document, and video MIME whitelist. 
 
 Update WebUI and TUI together with the gateway. Existing messages and attachments remain available without a history migration. Clients must use HTTP uploads; `media.data_url` message uploads are no longer accepted. Local previews and the separate audio transcription protocol are unchanged.
 
-Reverse proxies must forward `POST /api/attachments` (including its authorization header) to the gateway and permit the configured file sizes. Do not enable public CORS for this capability endpoint.
+Reverse proxies must forward `POST /api/attachments` (including its authorization header) to the gateway and permit the configured file sizes. Same-origin browser uploads include origin cookies for edge authentication; cross-origin uploads do not send cookies. Do not enable public CORS for this capability endpoint.
 
 For a remote host opened through the local WebUI, update the local installation and the remote gateway together to use binary attachments. An older host's text chats and HTTP reads remain available.
 

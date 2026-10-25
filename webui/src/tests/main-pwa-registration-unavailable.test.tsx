@@ -1,3 +1,4 @@
+import { waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const render = vi.fn();
@@ -12,28 +13,28 @@ vi.mock("@/App", () => ({
 }));
 
 describe("service worker registration when unsupported", () => {
-  const register = vi.fn(() => Promise.resolve());
-
   beforeEach(() => {
     vi.resetModules();
     createRoot.mockClear();
     render.mockClear();
-    register.mockClear();
     document.body.innerHTML = '<div id="root"></div>';
-    // happy-dom's Navigator has no serviceWorker member, so this file runs
-    // without defining one — the entry's `"serviceWorker" in navigator` guard
-    // must keep registration from being attempted.
+    Reflect.deleteProperty(navigator, "serviceWorker");
   });
 
   afterEach(() => {
     document.body.innerHTML = "";
-    delete (navigator as Navigator & { serviceWorker?: unknown }).serviceWorker;
+    Reflect.deleteProperty(navigator, "serviceWorker");
   });
 
-  it("does not attempt registration when the service worker API is missing", async () => {
+  it("renders the app when the service worker API is missing", async () => {
+    expect("serviceWorker" in navigator).toBe(false);
+
     await import("../main");
     window.dispatchEvent(new Event("load"));
 
-    expect(register).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(createRoot).toHaveBeenCalledWith(document.getElementById("root"));
+      expect(render).toHaveBeenCalledTimes(1);
+    });
   });
 });

@@ -38,7 +38,7 @@ def _tool_turn(prefix: str, idx: int) -> list[dict]:
     ]
 
 
-def test_list_sessions_includes_metadata_title(tmp_path):
+def test_list_sessions_includesmetadata_title(tmp_path):
     manager = SessionManager(tmp_path)
     session = manager.get_or_create("websocket:chat-title")
     session.metadata["title"] = "自动生成标题"

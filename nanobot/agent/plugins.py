@@ -26,6 +26,16 @@ _MAX_LOGO_BYTES = 256 * 1024
 
 
 @dataclass(frozen=True, slots=True)
+class AgentPluginSkill:
+    """A skill document captured from the approved package fingerprint."""
+
+    name: str
+    path: Path
+    content: str
+    metadata: dict[str, object]
+
+
+@dataclass(frozen=True, slots=True)
 class _PackageSnapshot:
     root: Path
     fingerprint: str
@@ -81,25 +91,45 @@ def _installed_plugins(workspace: Path) -> list[AgentPlugin]:
 
 def enabled_agent_plugin_skills(workspace: Path) -> list[tuple[str, Path]]:
     """Verify and return skills from plugins the user has explicitly enabled."""
-    skills: list[tuple[str, Path]] = []
+    return [(skill.name, skill.path) for skill in enabled_agent_plugin_skill_documents(workspace)]
+
+
+def enabled_agent_plugin_skill_documents(workspace: Path) -> list[AgentPluginSkill]:
+    """Return documents using the same bytes that passed package activation."""
+    skills: list[AgentPluginSkill] = []
     packages: list[_PackageSnapshot] = []
     for plugin in _installed_plugins(workspace):
-        plugin_skills = _discover_plugin_skills(plugin.name, plugin.root)
-        fingerprint = _enabled_package_fingerprint(workspace, plugin)
+        skill_files = _plugin_skill_files(plugin.name, plugin.root)
+        documents: dict[Path, bytes | None] = {path: None for _name, path in skill_files}
+        fingerprint = _enabled_package_fingerprint(workspace, plugin, documents=documents)
         if fingerprint is None:
             continue
+        plugin_skills: list[AgentPluginSkill] = []
+        for name, path in skill_files:
+            raw = documents[path]
+            try:
+                content = raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n") if raw is not None else ""
+            except UnicodeError:
+                content = ""
+            metadata = parse_skill_metadata(content)
+            if metadata is None or not valid_skill_metadata(metadata, name):
+                logger.warning("Ignoring Agent Plugin '{}' skill '{}': invalid metadata", plugin.name, name)
+                continue
+            plugin_skills.append(AgentPluginSkill(name, path, content, metadata))
         skills.extend(plugin_skills)
         if plugin_skills:
             packages.append(
                 _PackageSnapshot(
                     root=plugin.root,
                     fingerprint=fingerprint,
-                    skill_dirs=tuple(path.parent for _name, path in plugin_skills),
+                    skill_dirs=tuple(skill.path.parent for skill in plugin_skills),
                 )
             )
 
     key = _skill_cache_key(workspace)
-    _SKILL_CACHE[key] = _SkillCacheEntry(tuple(skills), tuple(packages))
+    _SKILL_CACHE[key] = _SkillCacheEntry(
+        tuple((skill.name, skill.path) for skill in skills), tuple(packages)
+    )
     return skills
 
 
@@ -156,7 +186,9 @@ def _invalidate_skill_cache(workspace: Path) -> None:
     _SKILL_CACHE.pop(_skill_cache_key(workspace), None)
 
 
-def _package_fingerprint(root: Path) -> str | None:
+def _package_fingerprint(
+    root: Path, *, documents: dict[Path, bytes | None] | None = None,
+) -> str | None:
     """Hash package paths, link targets, and file contents."""
     digest = sha256()
     try:
@@ -167,8 +199,11 @@ def _package_fingerprint(root: Path) -> str | None:
                 digest.update(b"\0link\0")
                 digest.update(candidate.readlink().as_posix().encode())
             elif candidate.is_file():
+                content = candidate.read_bytes()
                 digest.update(b"\0file\0")
-                digest.update(candidate.read_bytes())
+                digest.update(content)
+                if documents is not None and candidate in documents:
+                    documents[candidate] = content
             elif candidate.is_dir():
                 digest.update(b"\0dir\0")
             else:
@@ -413,14 +448,16 @@ def _plugin_data_dir(workspace: Path, name: str, *, create: bool) -> Path:
     return current
 
 
-def _enabled_package_fingerprint(workspace: Path, plugin: AgentPlugin) -> str | None:
+def _enabled_package_fingerprint(
+    workspace: Path, plugin: AgentPlugin, *, documents: dict[Path, bytes | None] | None = None,
+) -> str | None:
     """Return the content fingerprint when this exact package is enabled."""
     marker = _plugin_data_dir(workspace, plugin.name, create=False) / "enabled"
     try:
         if not marker.is_file():
             return None
         current = marker.read_text(encoding="utf-8")
-        activation = _activation_marker(plugin)
+        activation = _activation_marker(plugin, documents=documents)
         if activation is None:
             marker.unlink(missing_ok=True)
             _invalidate_skill_cache(workspace)
@@ -447,9 +484,11 @@ def _enabled(workspace: Path, plugin: AgentPlugin) -> bool:
     return _enabled_package_fingerprint(workspace, plugin) is not None
 
 
-def _activation_marker(plugin: AgentPlugin) -> str | None:
+def _activation_marker(
+    plugin: AgentPlugin, *, documents: dict[Path, bytes | None] | None = None,
+) -> str | None:
     """Bind activation to one immutable package snapshot."""
-    fingerprint = _package_fingerprint(plugin.root)
+    fingerprint = _package_fingerprint(plugin.root, documents=documents)
     if fingerprint is None:
         return None
     return json.dumps(
@@ -459,7 +498,7 @@ def _activation_marker(plugin: AgentPlugin) -> str | None:
     )
 
 
-def _discover_plugin_skills(plugin_name: str, plugin_root: Path) -> list[tuple[str, Path]]:
+def _plugin_skill_files(plugin_name: str, plugin_root: Path) -> list[tuple[str, Path]]:
     skills_root = _contained(plugin_root / "skills", plugin_root, directory=True)
     if skills_root is None:
         return []
@@ -471,13 +510,6 @@ def _discover_plugin_skills(plugin_name: str, plugin_root: Path) -> list[tuple[s
             continue
         skill_file = _contained(skill_root / "SKILL.md", plugin_root)
         if skill_file is None:
-            continue
-        try:
-            metadata = parse_skill_metadata(skill_file.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError):
-            metadata = None
-        if metadata is None or not valid_skill_metadata(metadata, candidate.name):
-            logger.warning("Ignoring Agent Plugin '{}' skill '{}': invalid metadata", plugin_name, candidate.name)
             continue
         skills.append((candidate.name, skill_file))
     return skills

@@ -1,0 +1,508 @@
+{
+  "common": {
+    "unavailable": "利用不可",
+    "selected": "選択中：{{value}}",
+    "savingPreview": "プレビューの値を保存中…",
+    "savedPreview": "プレビューの値を保存しました",
+    "providerAction": "プロバイダーの設定操作を選択しました",
+    "reset": "プレビューをリセット"
+  },
+  "button": {
+    "title": "ボタン",
+    "description": "同じボタンの見た目やサイズをオプションで変更します。",
+    "options": "variant は見た目、size は寸法を変更します。disabled は操作を無効にし、onClick は呼び出し側が提供します。",
+    "variants": "バリエーション — 同じボタンの異なるスタイル",
+    "sizes": "サイズ",
+    "add": "サンプルを追加",
+    "clicks": "ボタンのクリック数：{{count}}"
+  },
+  "input": {
+    "title": "入力欄",
+    "description": "テキスト入力と共通の検索用バリエーション。",
+    "options": "通常の入力には Input、検索には SearchInput を使います。ラベルを付け、無効な入力の理由を説明してください。",
+    "name": "サンプルの名前",
+    "projectName": "プロジェクト名",
+    "search": "検索",
+    "searchName": "サンプル検索",
+    "searchProjects": "プロジェクトを検索",
+    "invalid": "無効な入力",
+    "invalidName": "無効な名前",
+    "required": "プロジェクト名を入力してください。",
+    "disabledName": "無効化された名前の入力欄"
+  },
+  "textarea": {
+    "title": "複数行入力",
+    "description": "共通のフォーカス表示を使う複数行テキスト。",
+    "options": "textarea の標準プロパティである value、onChange、rows、disabled を受け取ります。",
+    "notes": "サンプルのメモ",
+    "disabledNotes": "無効化されたメモ欄",
+    "readOnly": "読み取り専用プレビュー"
+  },
+  "toggle": {
+    "title": "スイッチ",
+    "description": "設定、ワークスペース、チャンネルで共有する制御されたオン・オフスイッチ。",
+    "options": "checked と onChange は呼び出し側が管理します。label はアクセシブルな名前を指定します。",
+    "enable": "サンプルを有効にする",
+    "unavailableOn": "操作できないオンのスイッチ",
+    "unavailableOff": "操作できないオフのスイッチ"
+  },
+  "select": {
+    "title": "選択コントロール",
+    "description": "キーボード操作と無効な選択肢に対応した単一選択。",
+    "options": "Select、SelectTrigger、SelectValue、SelectContent、SelectItem を組み合わせます。ルートが value/onValueChange を管理します。",
+    "fast": "高速",
+    "model": "サンプルのモデル",
+    "disabledModel": "無効化されたモデル選択"
+  },
+  "segmented": {
+    "title": "セグメント選択",
+    "description": "少数の選択肢を常に表示します。",
+    "options": "value、options、onChange は制御された値です。mode=\"tabs\" で矢印キーによるタブ移動を追加します。",
+    "day": "日",
+    "week": "週",
+    "month": "月",
+    "period": "サンプルの期間",
+    "selected": "選択した期間：{{value}}"
+  },
+  "combobox": {
+    "title": "検索付き選択",
+    "description": "共通のキーボード・ポインター操作を備えた検索可能な選択肢。",
+    "options": "useComboboxNavigation は入力欄、リスト、選択肢のプロパティを提供します。値の絞り込みと選択状態は呼び出し側が管理します。",
+    "search": "サンプルの選択肢を検索",
+    "placeholder": "入力するか矢印キーを使用",
+    "choices": "サンプルの選択肢",
+    "empty": "一致する選択肢はありません",
+    "selected": "選択した項目：{{value}}"
+  },
+  "chevron": {
+    "title": "コントロールの矢印",
+    "description": "選択コントロールで共有する山形の矢印。",
+    "options": "className で配置を調整できます。アイコンは装飾用で、アクセシブルな名前は所属するコントロールが提供します。"
+  },
+  "dialog": {
+    "title": "ダイアログ",
+    "description": "下書き編集、入れ子の選択、フォーカス復帰を備えたモーダルエディター。",
+    "options": "open/onOpenChange と下書き・保存の動作は呼び出し側が管理します。DialogTitle は必須で、必要に応じて説明も付けます。",
+    "open": "ダイアログを開く",
+    "edit": "サンプルのラベルを編集",
+    "help": "変更はこのプレビューだけに適用されます。",
+    "label": "サンプルのラベル",
+    "save": "ラベルを保存",
+    "saved": "保存したラベル：{{name}}"
+  },
+  "alert": {
+    "title": "確認ダイアログ",
+    "description": "キャンセルと実行を分けて明示的な確認を求めます。",
+    "options": "タイトル、説明、フッターを組み合わせ、AlertDialogAction のハンドラーで操作を実行します。",
+    "remove": "サンプルを削除",
+    "confirmTitle": "このサンプルを削除しますか？",
+    "help": "変更されるのはプレビューの状態だけです。",
+    "confirm": "削除を確定",
+    "removed": "サンプルを削除しました。",
+    "available": "サンプルは利用可能です。"
+  },
+  "sheet": {
+    "title": "サイドパネル",
+    "description": "表示領域の端に配置するモーダルパネル。",
+    "options": "SheetContent は side に対応します。SheetTitle と SheetDescription を含めてください。",
+    "open": "サイドパネルを開く",
+    "panelTitle": "サンプルのサイドパネル",
+    "help": "現在のページの横に補助コントロールを表示します。",
+    "notes": "パネルのメモ",
+    "placeholder": "ここで編集を試してください"
+  },
+  "popover": {
+    "title": "ポップオーバー",
+    "description": "トリガーに固定された小さな操作領域。",
+    "options": "トリガーと内容を組み合わせます。open/onOpenChange は制御可能です。内容は所属するダイアログのポータルに従います。",
+    "open": "ポップオーバーを開く",
+    "note": "クイックメモ"
+  },
+  "menu": {
+    "title": "ドロップダウンメニュー",
+    "description": "操作、単一選択、入れ子のメニュー、無効な項目。",
+    "options": "操作には onSelect、選択を保持する場合はラジオグループを使います。",
+    "view": "表示オプション",
+    "layout": "レイアウト",
+    "comfortable": "ゆったり",
+    "compact": "コンパクト",
+    "rename": "名前を変更",
+    "more": "その他の操作",
+    "duplicate": "複製",
+    "none": "なし",
+    "status": "表示密度：{{density}}。操作：{{action}}。"
+  },
+  "tooltip": {
+    "title": "ツールチップとヒント",
+    "description": "HoverHint は共通のツールチップ基本要素を組み合わせます。公開インポート先は tooltip.tsx です。",
+    "options": "通常のヒントには HoverHint を使います。重要なエラーは常に表示してください。ホバーとキーボードフォーカスは製品共通の表示タイミングに従います。",
+    "primitive": "基本ツールチップ",
+    "primitiveHelp": "ポインターには共通の遅延を適用し、キーボードフォーカスではすぐ表示します。",
+    "hint": "ホバーヒント",
+    "hintHelp": "同じフォーカス・ポインター動作を備えた組み合わせ式のヒントです。"
+  },
+  "truncated": {
+    "title": "省略テキストのヒント",
+    "description": "計測したテキストが省略されている場合だけヒントを表示します。",
+    "options": "text と制限した幅を指定します。テキスト自体にキーボードフォーカスを当てる場合は tabIndex を追加します。"
+  },
+  "disclosure": {
+    "title": "折りたたみ領域",
+    "description": "閉じている間も子要素の状態を保持する展開領域。",
+    "options": "Disclosure が展開を管理します。カスタムトリガーには DisclosureContent の制御された open プロパティを使えます。",
+    "show": "詳細オプションを表示",
+    "help": "閉じて開き直しても、この下書きは残ります。",
+    "draft": "折りたたみ領域の下書き"
+  },
+  "expandable": {
+    "title": "展開できるテキスト",
+    "description": "同じテキストをマウントしたまま行数を制限して表示します。",
+    "options": "expanded は呼び出し側が管理します。lines は折りたたみ時の行数です。アクセシブルな切り替え操作を用意してください。",
+    "less": "折りたたむ",
+    "more": "もっと見る"
+  },
+  "imageViewport": {
+    "title": "画像表示領域",
+    "description": "画像単位のフィット、ズーム、移動、ピンチ操作。",
+    "options": "className で領域を制限し、画像の識別情報が変わったら再マウントします。ギャラリーが矢印キー操作を管理する場合は panWithArrows=false にします。"
+  },
+  "loadingRing": {
+    "title": "処理リング",
+    "description": "背景リングを省略できる共通の処理インジケーター。",
+    "options": "className でサイズと色を設定します。track=false で背景リングを非表示にし、strokeWidth と strokeDasharray で円弧を調整します。視差効果を減らす設定に従います。"
+  },
+  "streaming": {
+    "title": "アニメーションラベル",
+    "description": "思考中や実行中のツールラベルで共有するテキストアニメーション。",
+    "options": "active がアニメーションを制御します。文字列または数値の子要素がグリフの重ね合わせに使われ、動きを減らす設定も尊重します。",
+    "animate": "ラベルをアニメーション表示",
+    "working": "次のステップを処理中…"
+  },
+  "markdown": {
+    "title": "Markdown の返信",
+    "description": "表、コード、数式に対応した本番用ストリーミングレンダラー。",
+    "options": "children は Markdown テキストです。streaming は未完了の内容を制御し、onOpenFilePreview は画面側が提供します。",
+    "state": "Markdown の状態"
+  },
+  "code": {
+    "title": "コード表示",
+    "description": "構文強調、行番号、コピー、ANSI 出力、表示領域に応じた行描画。",
+    "options": "code と language は内容を指定し、showLineNumbers、wrapLongLines、chrome は表示を制御します。表示領域の強調には行番号と折り返しなしの行が必要です。",
+    "format": "コード形式"
+  },
+  "math": {
+    "title": "数式",
+    "description": "Markdown のブロック数式の幅を調整する共通ラッパー。",
+    "options": "TeX ソースには MarkdownText を使います。DisplayMath は描画済みの数式ノードを受け取り、利用できる幅に合わせて縮尺を調整します。"
+  },
+  "message": {
+    "title": "メッセージ",
+    "description": "思考や送信の状態を含むユーザーとアシスタントのメッセージ。",
+    "options": "message はチャット実行環境が投影する UIMessage です。データ操作とネットワーク処理はレンダラーの外側で行います。",
+    "state": "メッセージの状態"
+  },
+  "activity": {
+    "title": "エージェントの活動",
+    "description": "活動の基本要素を、処理中・完了・失敗のシーケンスに組み合わせます。",
+    "options": "テキスト、状態、制御された展開値を渡します。ツールの実行は gateway が管理し、これらのコンポーネントはその投影状態を描画します。",
+    "state": "活動の状態",
+    "working": "処理中",
+    "details": "活動の詳細",
+    "collapse": "折りたたむ",
+    "readError": "ファイルを読み取れませんでした",
+    "read": "ソースを読む"
+  },
+  "files": {
+    "title": "ファイルの変更",
+    "description": "ファイル参照、変更行数、展開可能な差分。",
+    "options": "edits は表示用の概要を持ち、displayMode は summary/diff/collapsed_diff を選びます。onOpenFilePreview は画面側が提供します。",
+    "error": "サンプルの変更を適用できませんでした。",
+    "state": "ファイル変更の状態",
+    "operation": "ファイル操作",
+    "display": "差分表示",
+    "selected": "選択したファイル：{{path}}",
+    "hint": "ファイル参照を選択してコールバックを試してください。"
+  },
+  "media": { "study": "色彩練習 {{count}}" },
+  "imageGallery": {
+    "title": "画像サムネイル",
+    "description": "複数画像の配置、サムネイルの選択、追加画像の表示。",
+    "options": "images は URL と名前、size は大きいサムネイルかコンパクト表示、align は配置を指定します。サムネイルは最大4枚で、内蔵の ImageLightbox には表示可能な全画像が含まれます。",
+    "sixImages": "6枚の画像",
+    "compact": "コンパクトなサムネイル",
+    "hint": "サムネイルまたは +2 を選ぶと、6枚すべてを表示できます。"
+  },
+  "imageLightbox": {
+    "title": "全画面画像ビューアー",
+    "description": "制御された全画面表示と画像切り替え。",
+    "options": "閉じているとき index は null です。index と開閉コールバックは呼び出し側が管理します。ImageLightbox は ZoomableImage を内蔵し、画像の変更時に表示をリセットします。",
+    "open": "全画面ビューアーを開く",
+    "hint": "前後のボタン、←/→、Home/End で切り替え、× または Escape で閉じます。"
+  },
+  "zoomableImage": {
+    "title": "画像ズーム",
+    "description": "単一画像のズーム、範囲内の移動、ジェスチャー操作。",
+    "options": "src と alt は1枚の画像を指定します。配置と高さを定めたコンテナに入れ、画像変更時に再マウントします。表示領域にフォーカスすると +、−、0 キーを使えます。",
+    "hint": "+/−、ダブルクリック、Ctrl+ホイール、ピンチでズームします。拡大後はドラッグやスクロールで移動し、倍率をクリックするか 0 キーでリセットします。"
+  },
+  "attachment": {
+    "title": "添付ファイル",
+    "description": "画像プレビュー、動画再生、ダウンロード、利用不可の添付ファイル。",
+    "options": "attachment.kind は image、video、file を選びます。画像は ImageLightbox、動画は標準コントロール、ファイルはダウンロードリンクを使います。URL がない場合や画像読み込みに失敗した場合は利用不可のタイルを表示します。",
+    "image": "画像",
+    "video": "再生可能な動画",
+    "file": "ファイルをダウンロード",
+    "unavailable": "利用できない添付ファイル（URL なし）"
+  },
+  "fileReference": {
+    "title": "ファイル参照",
+    "description": "開く操作を呼び出し側が管理するファイル参照。",
+    "options": "path はラベル、onOpen は操作を提供します。コンポーネントはワークスペースの権限を決定しません。",
+    "select": "ファイル参照を選択してください。"
+  },
+  "settingsComposition": {
+    "title": "設定の組み合わせ",
+    "description": "実際の設定行・グループ・機能コンポーネントと共通コントロールの組み合わせ。",
+    "options": "値と永続化は外側の設定コントローラーが管理します。ギャラリーのコールバックはローカルのプレビュー状態だけを更新します。",
+    "preferences": "サンプルの設定",
+    "keepDrafts": "下書きを保持",
+    "switchHint": "制御されたスイッチを備えた共通の設定行。",
+    "projectLabel": "プロジェクトラベル",
+    "projectName": "設定のプロジェクトラベル",
+    "capability": "サンプル機能",
+    "notes": "メモ",
+    "capabilityNotes": "機能のメモ",
+    "localOnly": "ローカルプレビューのみ"
+  },
+  "modelPickers": {
+    "title": "モデル選択",
+    "description": "プロバイダーを選び、モデル ID を検索・入力し、推論の強度を調整します。",
+    "options": "ProviderPicker の値と操作は呼び出し側が提供します。ModelIdPicker の models は固定カタログ、ReasoningEffortPicker の savedValues は既存の選択肢を提供できます。",
+    "chooseProvider": "プロバイダーを選択",
+    "configure": "{{provider}} を設定"
+  },
+  "providerIcons": {
+    "title": "プロバイダーアイコン",
+    "description": "通常・コンパクト・全体表示のサイズと、選択欄の未設定状態を比較します。",
+    "options": "provider は既存のアイコンを選び、compact と fill はサイズを制御します。showBrandLogos=false は組み込みアイコンを使います。",
+    "size": "アイコンのサイズ"
+  },
+  "timezone": {
+    "title": "タイムゾーン選択",
+    "description": "タイムゾーン名、中国語名、UTC オフセットで検索し、同じ時刻の現地時間を確認します。",
+    "options": "value は IANA タイムゾーンです。onChange が呼び出し側の値を更新します。検索とキーボード操作はコンポーネントが提供します。"
+  },
+  "textEditor": {
+    "title": "テキスト編集とヒント",
+    "description": "エディターを開いて変更・保存・キャンセルします。内容を空にして保存するとエラーを確認できます。",
+    "options": "SettingsTextEditor は onSave の成功後に閉じ、失敗時はエラーを表示します。SettingsHint はホバー、フォーカス、クリックで開きます。",
+    "state": "編集状態",
+    "hint": "エディターを開いて変更・保存・キャンセルできます。内容を空にするとエラー状態を確認できます。",
+    "instructions": "サンプルの指示",
+    "edit": "サンプルの指示を編集",
+    "help": "保存すると、変更した内容が下に表示されます。",
+    "required": "内容を入力してください。"
+  },
+  "removePreset": {
+    "title": "プリセットの削除",
+    "description": "未使用のモデルプリセットを削除し、既定モデルが使用中のプリセットの無効状態を確認します。",
+    "options": "ModelsSettings で使う削除ボタンです。disabled と削除操作は呼び出し側が提供します。プロバイダー管理には ProvidersSettings ダイアログを使います。",
+    "defaultModel": "既定のモデル",
+    "codeAssistant": "コーディングアシスタント",
+    "remove": "{{name}} を削除",
+    "primaryHint": "既定のモデルが使用中のプリセットは削除できません。",
+    "count": "プレビューのプリセット数：{{count}}"
+  },
+  "loading": {
+    "title": "読み込み表示",
+    "description": "アプリ、チャンネル、スキルの読み込みレイアウトを切り替え、共通の状態コンテナを確認します。",
+    "options": "CatalogSkeleton の layout はレイアウトを選びます。SkeletonStatus は label で読み上げ用の状態を伝え、装飾内容を aria-hidden にします。",
+    "layout": "カタログのレイアウト",
+    "catalog": "プレビューのカタログを読み込み中"
+  },
+  "sidebar": {
+    "title": "設定ナビゲーション",
+    "description": "項目の選択、再起動待ちの処理、ブラウザー幅を狭めたモバイルメニューを試します。",
+    "options": "activeSection と onSelectSection が選択を制御します。戻る、ログアウト、再起動は呼び出し側のコールバックです。",
+    "back": "チャットに戻る",
+    "logout": "ログアウト",
+    "restart": "プレビューの再起動操作を処理しました",
+    "hint": "設定項目を選ぶか、ブラウザー幅を狭めてモバイル用ナビゲーションを確認してください。",
+    "toggleRestart": "再起動待ちを切り替え"
+  },
+  "providerSearch": {
+    "title": "プロバイダー検索",
+    "description": "OAuth、API キー、ローカル別に検索し、項目またはカスタムプロバイダーを選択します。",
+    "options": "providers は既存のカタログです。query は制御された検索値で、onSelect と onCustom は選択を親に渡します。",
+    "closed": "検索を閉じました",
+    "custom": "カスタムプロバイダーを選択しました",
+    "hint": "プロバイダーを検索するか、矢印キーで選択してください。"
+  },
+  "requestParameters": {
+    "title": "リクエストパラメーター",
+    "description": "ヘッダー、クエリ、本文を編集します。無効な JSON を入力すると実際の検証結果を確認できます。",
+    "options": "fields は表示項目、form は JSON テキストを保持します。ヘッダーとクエリの値は文字列のみ、本文は任意の JSON オブジェクト値に対応します。"
+  },
+  "requestAPI": {
+    "title": "リクエスト API",
+    "description": "プロバイダーの対応 API、既定 API、モデル別の上書きとフォールバックを選びます。",
+    "options": "ProviderAPIControl は API を最低1つ保持します。ModelAPIControl は null で自動選択を示し、プロバイダーの能力に応じて利用可能な API を表示します。",
+    "providerAPI": "プロバイダー API",
+    "modelOverride": "モデルの上書き"
+  },
+  "usage": {
+    "title": "トークン使用量",
+    "description": "データあり・空・利用不可の状態を切り替えます。棒にホバーして日別使用量、詳細でモデル別推移を確認します。",
+    "options": "usage は呼び出し側の統計情報です。timeZone は日付の境界を定義します。詳細ダイアログとグラフは渡されたデータだけを表示します。",
+    "state": "使用量の状態"
+  },
+  "overview": {
+    "title": "設定の概要",
+    "description": "現在のモデル、機能状態、使用量を確認し、機能行で設定項目への移動を試します。",
+    "options": "settings が概要データを提供し、onSelectSection が選択した設定項目を受け取ります。",
+    "selected": "選択した項目：{{section}}"
+  },
+  "web": {
+    "title": "ウェブ検索設定",
+    "description": "認証不要・API キー・サーバー URL のプロバイダーを切り替え、検索オプションと自動保存を試します。",
+    "options": "settings は現在の設定、form は編集値を保持します。保存、認証情報の表示、プロバイダー切り替えは親が提供します。",
+    "unsaved": "プレビューの下書きは未保存です"
+  },
+  "image": {
+    "title": "画像生成設定",
+    "description": "画像生成を切り替え、固定カタログからモデル、縦横比、サイズを選び、詳細設定で枚数を調整します。",
+    "options": "form は制御された設定、dirty は変更の印です。プロバイダーの認証情報を再利用し、保存は親が実装します。"
+  },
+  "voice": {
+    "title": "文字起こし設定",
+    "description": "文字起こしを切り替え、モデル、言語、時間、アップロード容量の制限を編集して自動保存を試します。",
+    "options": "settings がプロバイダー情報を提供し、form と保存コールバックは親が管理します。"
+  },
+  "safety": {
+    "title": "アクセス設定",
+    "description": "ローカルサービスへのアクセスと既定の権限を切り替え、設定行、ヒント、自動保存の通知を確認します。",
+    "options": "form は表示値を提供し、onSave は保存要求を処理します。実行時の権限制御は引き続き gateway が担当します。"
+  },
+  "channelCatalog": {
+    "title": "チャンネル一覧と識別表示",
+    "description": "実行中・起動中・失敗・未インストールを切り替え、スイッチ、インストール、ヘルプを試します。",
+    "options": "feature はインストール状態と実行状態を提供します。onAction と onSelect は親が処理し、識別表示、エラー、ヘルプは同じチャンネルデータを使います。",
+    "exampleChannel": "サンプルチャンネル",
+    "state": "チャンネルの状態",
+    "error": "サンプルの接続に失敗しました。",
+    "stopped": "停止中",
+    "running": "実行中",
+    "starting": "起動中",
+    "failed": "失敗",
+    "selected": "チャンネル設定を選択しました",
+    "hint": "スイッチやインストールボタンで状態の変化を確認してください。"
+  },
+  "credentials": {
+    "title": "チャンネル認証情報",
+    "description": "認証情報の入力、機密値の表示・非表示、接続プリセット、必須項目の確認、補助コマンドのコピーを試します。",
+    "options": "fields はグループとコントロールを定義し、values と visibleSecrets は制御された値です。requirements は認証情報の組み合わせを定義します。プリセットと保存のコールバックはこのサンプルだけを更新します。",
+    "botToken": "ボットトークン",
+    "tokenPlaceholder": "サンプルのトークン",
+    "serverURL": "サーバー URL",
+    "replyMode": "返信モード",
+    "mentions": "メンション",
+    "allMessages": "すべてのメッセージ",
+    "allowFrom": "許可する送信者",
+    "local": "ローカルサーバー",
+    "hosted": "ホスト型サーバー",
+    "required": "ボットトークンを入力してください。",
+    "checkSave": "確認して保存",
+    "command": "サンプルコマンド",
+    "applied": "{{name}} を適用しました",
+    "incomplete": "認証情報を入力してください。",
+    "saved": "プレビューの認証情報を保存しました。",
+    "hint": "認証情報を入力し、機密値の表示を切り替えるか、接続プリセットを適用してください。"
+  },
+  "channelValidation": {
+    "title": "接続チェック",
+    "description": "確認中・成功・失敗を切り替え、順番に表示されるチェックと識別情報を確認します。",
+    "options": "validation はチェック記録を提供し、validating は読み込みを制御します。コンポーネントは表示のみを行います。",
+    "expired": "サンプルのトークンは期限切れです。",
+    "result": "チェック結果"
+  },
+  "runAt": {
+    "title": "実行日時の選択",
+    "description": "日時を入力するか、カレンダーを開いてマウス、矢印キー、ページキーで日付を選びます。",
+    "options": "value は YYYY-MM-DDTHH:mm 形式のローカル日時です。onChange は編集値を返します。無効な入力は既存のフォームコントロールに表示します。"
+  },
+  "automationCalendar": {
+    "title": "自動化カレンダー",
+    "description": "月、予定、履歴を切り替え、成功・失敗の記録から結果を開きます。幅が狭い場合は予定リストを表示します。",
+    "options": "jobs と month が内容を決めます。onInspect は予定タスクを処理し、renderRunDialog による結果表示は呼び出し側が提供します。カレンダーはサービスを読み取りません。",
+    "providerError": "サンプルのプロバイダーは利用できませんでした。",
+    "state": "予定の状態",
+    "previousMonth": "前の月",
+    "nextMonth": "次の月",
+    "planned": "予定",
+    "recorded": "実行履歴",
+    "running": "実行中",
+    "failed": "失敗",
+    "completed": "完了",
+    "skipped": "スキップ",
+    "system": "システムタスク",
+    "noEntries": "今月の予定はありません",
+    "more": "ほか {{count}} 件",
+    "selected": "選択したタスク：{{name}}",
+    "hint": "実行記録を選んで結果を見るか、予定タスクを選択してください。"
+  },
+  "providers": {
+    "title": "プロバイダー管理",
+    "description": "実際のプロバイダー管理ダイアログと追加の流れを確認します。",
+    "options": "設定の ProvidersSettings を再利用します。カタログ、フォーム、保存コールバックは呼び出し側が管理します。ローカルのサンプルデータを変更し、設定・検索・作成・キャンセルを試せます。",
+    "invalidParameters": "有効なリクエストパラメーターの JSON を入力してください。ヘッダーとクエリの値は文字列で指定します。",
+    "saved": "{{name}} のプレビュー設定を保存しました",
+    "added": "{{name}} を追加しました",
+    "signedIn": "プレビューの認証をログイン済みにしました",
+    "signedOut": "プレビューの認証を未ログインにしました",
+    "builtInIcons": "組み込みアイコンを使う",
+    "brandIcons": "ブランドアイコンを使う",
+    "configured": "設定済みプロバイダー数：{{count}}",
+    "providerAdded": "プロバイダーを追加しました"
+  },
+  "runResult": {
+    "title": "自動実行の結果",
+    "description": "結果を開き、Markdown 返信、読み込み、再試行、空の返信、履歴なしを比較します。",
+    "options": "result は読み込み状態と取得済みの返信を提供します。onRetry は呼び出し側が処理します。このビューは実行状態の読み取りや結果の取得要求を行いません。",
+    "state": "実行結果",
+    "view": "実行結果を表示"
+  },
+  "chatBinding": {
+    "title": "実行先チャット",
+    "description": "実行先チャットを選び、指示を編集・確定・元に戻す・キャンセルします。使用中、読み込みエラー、競合も比較できます。",
+    "options": "data と job は利用可能なチャットと関連付けのバージョンを提供します。ビューは確認用の下書きを管理し、機能の入口が onSave、onSaved、onReload をデータ操作に接続します。",
+    "state": "チャット関連付けの状態",
+    "setChat": "実行先チャットを設定",
+    "saved": "次の実行は {{title}} で行われます",
+    "hint": "実行先チャットを選び、タスクの指示を確認または編集してください。"
+  },
+  "about": {
+    "title": "製品情報とバージョン",
+    "description": "バージョン確認、コミットリンク、更新、製品情報を比較します。ボタンはサンプル結果で表示を更新します。",
+    "options": "AboutSettingsView はバージョンとサポートリンクの組み合わせを受け取ります。VersionCheckRowView は checking/result を表示し、onCheck で確認を要求します。実際の確認と診断リンクのデータは機能の入口が管理します。",
+    "error": "バージョン情報を取得できませんでした。再試行してください。",
+    "state": "バージョンの状態",
+    "selectedLink": "GitHub リンクを選択しました",
+    "preferenceSaved": "サンプル設定を保存しました。インストールや再起動は行いません。",
+    "updateRequested": "更新の確認を選択しました。このプレビューではインストールや再起動は行いません。",
+    "dismissed": "更新通知を閉じました"
+  },
+  "appearance": {
+    "title": "表示設定",
+    "description": "外観、活動表示、ファイル差分、通知を切り替えます。サンプルの値は下に表示されます。",
+    "options": "テーマと設定は呼び出し側が管理します。onChangeBrowserNotifications は権限要求を機能の入口に委ね、プレビューのコールバックはサンプルのスイッチだけを変更します。"
+  },
+  "starInvitation": {
+    "title": "応援のお願い",
+    "description": "実際のダイアログを開き、保存・エラー状態、後で通知、GitHub リンク、今後表示しない操作を試します。",
+    "options": "open、saving、error は表示状態です。招待の取得と設定の永続化は既存の StarPrompt 入口が管理し、ビューは渡された操作だけを呼び出します。",
+    "state": "招待の状態",
+    "view": "招待を表示",
+    "dismissed": "プレビューで今後表示しないを選択しました",
+    "starred": "プレビューで GitHub リンクを選択しました"
+  }
+}

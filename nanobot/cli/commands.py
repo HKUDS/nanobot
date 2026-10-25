@@ -57,6 +57,7 @@ from nanobot.cli.runtime_config import (  # noqa: E402
     _print_model_setup_steps,
     _provider_setup_error,
 )
+from nanobot.cli.update import update  # noqa: E402
 from nanobot.cli.webui import webui  # noqa: E402
 from nanobot.cli.webui_support import (  # noqa: E402
     _prepare_webui_bundle_for_gateway,
@@ -96,6 +97,7 @@ app = typer.Typer(
 )
 
 console = Console()
+app.command()(update)
 
 # Server-console pairing stays outside the agent/gateway lifecycle.
 from nanobot.cli.remote import app as remote_app  # noqa: E402
@@ -393,9 +395,17 @@ def serve(
     tools = ToolRegistry()
     register_image_generation_tool(runtime_config, tools, workspace=runtime_config.workspace_path)
     mcp_provider = MCPProvider.from_config(runtime_config, tools)
+    from nanobot.providers.factory import build_unconfigured_provider_snapshot
+
+    setup_error = _provider_setup_error(runtime_config)
+    unconfigured_provider = (
+        build_unconfigured_provider_snapshot(runtime_config, setup_error).provider
+        if setup_error else None
+    )
     try:
         agent_loop = AgentLoop.from_config(
             runtime_config, bus,
+            provider=unconfigured_provider,
             session_manager=session_manager,
             hook_factories=[create_file_edit_activity_hook],
             tool_registry=tools,
@@ -475,44 +485,6 @@ app.add_typer(
 
 
 app.command(name="agent")(agent)
-
-
-# ============================================================================
-# Session Commands
-# ============================================================================
-
-
-sessions_app = typer.Typer(help="Manage persisted session history")
-app.add_typer(sessions_app, name="sessions")
-
-
-@sessions_app.command("restore-workspace")
-def sessions_restore_workspace(
-    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
-    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-) -> None:
-    """Copy sessions back into the workspace before downgrading nanobot."""
-    from nanobot.session.manager import SessionManager
-
-    runtime_config = _load_runtime_config(config, workspace)
-    data_dir = runtime_config.runtime_data_dir
-    manager = SessionManager(
-        runtime_config.workspace_path,
-        sessions_root=data_dir / "sessions" if data_dir is not None else None,
-    )
-    result = manager.restore_sessions_to_workspace()
-    console.print(
-        f"Restored {result.restored} session file(s) to "
-        f"{escape(str(runtime_config.workspace_path / 'sessions'))}; "
-        f"{result.unchanged} already matched."
-    )
-    if result.conflicts:
-        console.print(
-            "[red]Rollback is incomplete: existing or invalid files require manual review.[/red]"
-        )
-        for path in result.conflicts:
-            console.print(Text(f"- {path}", style="red"))
-        raise typer.Exit(1)
 
 
 # ============================================================================

@@ -48,6 +48,8 @@ def _source_archive(root: Path) -> bytes:
         "tsconfig.json",
         "src",
         "scripts/build.ts",
+        "scripts/targets.ts",
+        "scripts/target-bindings.ts",
         "scripts/prepare-target.ts",
         "scripts/release-notices.ts",
         "scripts/package-release.py",

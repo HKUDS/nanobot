@@ -17,7 +17,7 @@ const CodeChunk = memo(function CodeChunk({ rows, text, start, stylesheet, useIn
 }) {
   return (
     <span data-code-chunk={start / CHUNK_LINES} className="flex min-w-max">
-      <span aria-hidden className="shrink-0 select-none pr-[1.15rem] text-right text-muted-foreground/60"
+      <span aria-hidden className="shrink-0 select-none pr-[1.15rem] text-right text-muted-foreground"
         style={{ minWidth: "4.25em" }}>
         {rows.map((_, index) => start + index + 1).join("\n")}
       </span>

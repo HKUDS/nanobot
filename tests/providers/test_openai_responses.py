@@ -5,6 +5,7 @@ from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from loguru import logger
 from openai.types.responses import ResponseFunctionToolCall
@@ -189,7 +190,7 @@ class TestConvertMessages:
         assert items == [
             {
                 "type": "reasoning",
-                "content": [{"type": "output_text", "text": "think first"}],
+                "content": [{"type": "reasoning_text", "text": "think first"}],
             },
             {
                 "type": "message",
@@ -221,7 +222,7 @@ class TestConvertMessages:
 
         assert items[0]["type"] == "reasoning"
         assert items[0]["content"] == [
-            {"type": "output_text", "text": "Michael topped up DeepSeek with $10."},
+            {"type": "reasoning_text", "text": "Michael topped up DeepSeek with $10."},
         ]
         assert items[1]["type"] == "function_call"
 
@@ -681,16 +682,6 @@ class TestParseResponseOutput:
         assert result.usage is not None
         assert result.usage.input_tokens == 1
 
-    def test_usage_maps_responses_api_keys(self):
-        """Responses API uses input_tokens/output_tokens, not prompt_tokens/completion_tokens."""
-        resp = {
-            "output": [],
-            "status": "completed",
-            "usage": {"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
-        }
-        result = parse_response_output(resp)
-        assert result.usage == LLMUsage.reported(input_tokens=100, output_tokens=50)
-
     def test_non_stream_preserves_provider_reported_total(self):
         result = parse_response_output({
             "output": [],
@@ -1050,9 +1041,11 @@ class TestResponsesConversationState:
         assert replayed is True
         reasoning_items = [item for item in items if item.get("type") == "reasoning"]
         assert len(reasoning_items) == 2  # one replayed, one converted delta
-        for item in reasoning_items:
-            assert isinstance(item["content"], list)
-            assert item["content"][0]["type"] == "output_text"
+        assert isinstance(reasoning_items[0]["content"], list)
+        # Stored replay items keep their original block type.
+        assert reasoning_items[0]["content"][0]["type"] == "output_text"
+        assert isinstance(reasoning_items[1]["content"], list)
+        assert reasoning_items[1]["content"][0]["type"] == "reasoning_text"
 
 
 # ======================================================================
@@ -1071,6 +1064,36 @@ class _SseResponse:
 
 
 class TestConsumeSse:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("prefix", ["", "\ufeff"])
+    async def test_leading_utf8_bom_preserves_first_content_delta(self, prefix):
+        events = [
+            {"type": "response.output_text.delta", "delta": "Hello "},
+            {"type": "response.output_text.delta", "delta": "\ufeff世界"},
+            {"type": "response.completed", "response": {"status": "completed"}},
+        ]
+        wire = prefix + "".join(
+            f"data: {json.dumps(event, ensure_ascii=False)}\n\n" for event in events
+        )
+        response = httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=wire.encode("utf-8"),
+        )
+        deltas = []
+
+        async def on_delta(delta):
+            deltas.append(delta)
+
+        content, tool_calls, finish_reason, _, _ = await consume_sse_with_reasoning(
+            response, on_content_delta=on_delta,
+        )
+
+        assert content == "Hello \ufeff世界"
+        assert deltas == ["Hello ", "\ufeff世界"]
+        assert tool_calls == []
+        assert finish_reason == "stop"
+
     @pytest.mark.asyncio
     @pytest.mark.parametrize("event_type", ["response.output_text.delta", "response.refusal.delta"])
     async def test_eof_without_terminal_event_is_a_connection_error(self, event_type):

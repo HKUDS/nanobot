@@ -162,7 +162,7 @@ describe("AgentActivityCluster", () => {
     expect(screen.getByText(`Reading file ${path}`)).toBeInTheDocument();
     expect(screen.getByLabelText("Using Blender, --json --background scene.blend")).toBeInTheDocument();
     expect(screen.getByLabelText("Opening example.com, Browserbase")).toBeInTheDocument();
-    expect(screen.getByText("Edited")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Edited" })).toBeInTheDocument();
     expect(screen.getByTestId("activity-file-reference")).toHaveTextContent(path);
 
     await act(async () => setAppLanguage("zh-CN"));
@@ -171,7 +171,7 @@ describe("AgentActivityCluster", () => {
     expect(screen.getByText(`正在读取文件 ${path}`)).toBeInTheDocument();
     expect(screen.getByLabelText("正在使用 Blender, --json --background scene.blend")).toBeInTheDocument();
     expect(screen.getByLabelText("正在打开 example.com, Browserbase")).toBeInTheDocument();
-    expect(screen.getByText("编辑")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "编辑" })).toBeInTheDocument();
     expect(screen.getByTestId("activity-file-reference")).toHaveTextContent(path);
 
     await act(async () => setAppLanguage("ja"));
@@ -180,8 +180,9 @@ describe("AgentActivityCluster", () => {
     expect(screen.getByText(`${path} ファイルを読み取り中`)).toBeInTheDocument();
     expect(screen.getByLabelText("Blender を使用中, --json --background scene.blend")).toBeInTheDocument();
     expect(screen.getByLabelText("example.com 開いています, Browserbase")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "編集" })).toBeInTheDocument();
     expect(screen.getByTestId("activity-file-reference").closest('[data-testid="activity-step"]'))
-      .toHaveTextContent(`${path} 編集`);
+      .toHaveAttribute("aria-label", `${path} 編集`);
   });
 
   it("loads deferred trace details only after completed activity is expanded", async () => {
@@ -283,8 +284,6 @@ describe("AgentActivityCluster", () => {
     expect(content).toHaveClass("ps-6");
     expect(content).not.toHaveClass("max-h-[180px]");
     expect(content).not.toHaveClass("overflow-y-auto");
-    expect(screen.queryByTestId("activity-scroll-fade-top")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("activity-scroll-fade-bottom")).not.toBeInTheDocument();
 
     view.rerender(<AgentActivityCluster {...props} messages={activityMessages(" updated", {
       id: "next-tool", role: "tool", kind: "trace", content: "open_browser()", createdAt: 3,
@@ -470,8 +469,7 @@ describe("AgentActivityCluster", () => {
       expect(screen.queryByText("Edited files")).not.toBeInTheDocument();
       const fileRef = screen.getByTestId("activity-file-reference");
       expect(fileRef).toHaveTextContent("src/app.tsx");
-      expect(fileRef).toHaveAttribute("aria-label", "src/app.tsx");
-      expect(screen.queryByTestId("activity-header-file-reference")).not.toBeInTheDocument();
+      expect(fileRef).toHaveAttribute("aria-label", "/Users/renxubin/project/src/app.tsx");
       expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
       for (const diffPair of screen.getAllByTestId("activity-diff-pair")) {
         expect(diffPair).toHaveClass("items-baseline");
@@ -535,7 +533,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    assertBetween(screen.getByText("Editing"));
+    assertBetween(screen.getByRole("img", { name: "Editing" }));
 
     rerender(
       <AgentActivityCluster
@@ -545,7 +543,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    assertBetween(screen.getByText("Edited"));
+    assertBetween(screen.getByRole("img", { name: "Edited" }));
   });
 
   it.each(["diff", "collapsed_diff"] as const)(
@@ -676,7 +674,7 @@ describe("AgentActivityCluster", () => {
       expect(screen.getByTestId("file-edit-diff")).toBeInTheDocument();
       expect(screen.getByText("return <Old />;")).toBeInTheDocument();
       expect(screen.getByText("return <New />;")).toBeInTheDocument();
-      expect(screen.getByText("Edited")).toBeInTheDocument();
+      expect(screen.getByRole("img", { name: "Edited" })).toBeInTheDocument();
       expect(screen.getByTestId("activity-file-reference")).toHaveTextContent("src/app.tsx");
       expect(screen.getAllByTestId("activity-diff-pair")).toHaveLength(1);
 
@@ -684,7 +682,7 @@ describe("AgentActivityCluster", () => {
         writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, fileEditDisplayMode: "summary" });
       });
       expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
-      expect(screen.getByText("Edited")).toBeInTheDocument();
+      expect(screen.getByRole("img", { name: "Edited" })).toBeInTheDocument();
 
       act(() => {
         writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, fileEditDisplayMode: "diff" });
@@ -793,8 +791,7 @@ describe("AgentActivityCluster", () => {
 
       const toggle = screen.getByTestId("file-edit-diff-toggle");
       expect(toggle).toHaveAttribute("aria-expanded", "false");
-      expect(toggle).toHaveTextContent("Expand changes");
-      expect(toggle).toHaveTextContent("165 lines");
+      expect(toggle).toHaveTextContent(/^Expand changes$/);
       expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
       expect(screen.queryByText("line-1")).not.toBeInTheDocument();
 
@@ -882,8 +879,7 @@ describe("AgentActivityCluster", () => {
 
       const toggle = screen.getByTestId("file-edit-diff-toggle");
       expect(toggle).toHaveAttribute("aria-expanded", "false");
-      expect(toggle).toHaveTextContent("View changes");
-      expect(toggle).toHaveTextContent("3 lines");
+      expect(toggle).toHaveTextContent(/^View changes$/);
       expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
       expect(screen.queryByText("return <New />;")).not.toBeInTheDocument();
 
@@ -977,9 +973,10 @@ describe("AgentActivityCluster", () => {
           hasBodyBelow={false}
         />,
       );
-      expect(screen.getByText("Created")).toBeInTheDocument();
+      expect(screen.getByRole("img", { name: "Created" }).querySelector("svg"))
+        .toHaveClass("lucide-file-text");
       expect(screen.getByLabelText("Created tmp.txt")).toBeInTheDocument();
-      expect(screen.queryByText("Edited")).not.toBeInTheDocument();
+      expect(screen.queryByRole("img", { name: "Edited" })).not.toBeInTheDocument();
       expect(screen.getByTestId("activity-file-reference")).toHaveTextContent("tmp.txt");
       expect(!!screen.queryByTestId("file-edit-diff")).toBe(hasDiff);
     } finally {
@@ -1015,8 +1012,9 @@ describe("AgentActivityCluster", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
-    expect(screen.getByText("Deleted")).toBeInTheDocument();
-    expect(screen.queryByText("Edited")).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Deleted" }).querySelector("svg"))
+      .toHaveClass("lucide-file-code2");
+    expect(screen.queryByRole("img", { name: "Edited" })).not.toBeInTheDocument();
   });
 
   it("renders file-only edits without a redundant disclosure", () => {
@@ -1048,8 +1046,10 @@ describe("AgentActivityCluster", () => {
 
     expect(screen.queryByRole("button", { name: /edited app\.tsx/i })).not.toBeInTheDocument();
     expect(screen.queryByTestId("agent-activity-content")).not.toBeInTheDocument();
-    expect(screen.getByText("Edited")).toBeInTheDocument();
-    expect(screen.queryByTestId("activity-header-file-reference")).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Edited" })).toBeInTheDocument();
+    const marker = screen.getByRole("img", { name: "Edited" });
+    expect(marker.querySelector("svg")).toHaveClass("lucide-file-code2");
+    expect(marker.closest('[data-testid="activity-step"]')?.querySelectorAll("svg")).toHaveLength(1);
     expect(screen.getByTestId("activity-file-reference")).toHaveTextContent("src/app.tsx");
     expect(screen.getByText("+12")).toBeInTheDocument();
     expect(screen.getByText("-3")).toBeInTheDocument();
@@ -1580,6 +1580,41 @@ describe("AgentActivityCluster", () => {
     expect(document.querySelector("details")).not.toBeInTheDocument();
   });
 
+  it("keeps the working header animated while waiting after a tool completes", () => {
+    const args = { path: "skills/weather/SKILL.md" };
+    const line = `read_file(${JSON.stringify(args)})`;
+    const messages: UIMessage[] = [{
+      id: "t-read-weather-skill",
+      role: "tool",
+      kind: "trace",
+      content: line,
+      traces: [line],
+      toolEvents: [{
+        phase: "end",
+        call_id: "call-read-weather-skill",
+        name: "read_file",
+        arguments: args,
+        result: "Weather skill instructions",
+      }],
+      createdAt: Date.now(),
+    }];
+    const view = render(
+      <AgentActivityCluster messages={messages} isTurnStreaming hasBodyBelow={false} />,
+    );
+    const header = screen.getByText(/^Working for /);
+    expect(header).toHaveAttribute("data-sheen-text", header.textContent);
+    const tool = screen.getByText("Read file skills/weather/SKILL.md");
+    expect(tool).toHaveClass("text-muted-foreground");
+    expect(tool).not.toHaveAttribute("data-sheen-text");
+
+    view.rerender(
+      <AgentActivityCluster messages={messages} isTurnStreaming={false} hasBodyBelow={false} />,
+    );
+    expect(screen.getByText(/^Worked/)).toBe(header);
+    expect(header).toHaveClass("text-muted-foreground");
+    expect(header).not.toHaveAttribute("data-sheen-text");
+  });
+
   it("groups repeated searches over internal tool results without exposing raw paths", () => {
     const pattern = "Jul (1[0-7]), 2026|July (1[0-7]), 2026|2026-07-(1[0-7])";
     const secondPattern = "Anthropic|OpenAI|DeepMind";
@@ -1763,7 +1798,7 @@ describe("AgentActivityCluster", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
-    expect(screen.getByText("Edited")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Edited" })).toBeInTheDocument();
     expect(screen.queryByText("+0")).not.toBeInTheDocument();
     expect(screen.queryByText("-0")).not.toBeInTheDocument();
   });
@@ -1858,7 +1893,7 @@ describe("AgentActivityCluster", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
-    const row = screen.getByText("Could not edit").closest('[data-testid="activity-step"]');
+    const row = screen.getByRole("img", { name: "Could not edit" }).closest('[data-testid="activity-step"]');
     expect(row).toBeInTheDocument();
     expect(row).not.toHaveAttribute("title");
     expect(screen.queryByText("Target text was not found in angry-birds.html.")).not.toBeInTheDocument();
@@ -1892,7 +1927,7 @@ describe("AgentActivityCluster", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
-    const row = screen.getByText("Could not edit").closest('[data-testid="activity-step"]');
+    const row = screen.getByRole("img", { name: "Could not edit" }).closest('[data-testid="activity-step"]');
     expect(row).toBeInTheDocument();
     expect(row).not.toHaveAttribute("title");
     expect(screen.queryByText("No permission to change this location.")).not.toBeInTheDocument();
@@ -1973,7 +2008,7 @@ describe("AgentActivityCluster", () => {
       const fileRefs = screen.getAllByTestId("activity-file-reference");
       expect(fileRefs).toHaveLength(3);
       expect(fileRefs.every((ref) => ref.textContent?.includes("minecraft-fps/index.html"))).toBe(true);
-      const failedRow = screen.getByText("Could not edit").closest(
+      const failedRow = screen.getByRole("img", { name: "Could not edit" }).closest(
         '[data-testid="activity-step"]',
       );
       expect(failedRow).toBeInTheDocument();
@@ -2031,8 +2066,8 @@ describe("AgentActivityCluster", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
 
-    expect(screen.getByText("Edited")).toBeInTheDocument();
-    expect(screen.getByText("Could not edit")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Edited" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Could not edit" })).toBeInTheDocument();
     expect(screen.getAllByTestId("activity-file-reference")).toHaveLength(2);
   });
 
@@ -2066,7 +2101,6 @@ describe("AgentActivityCluster", () => {
     expect(screen.queryByText("Web")).not.toBeInTheDocument();
     const row = screen.getByText("example.com").closest('[data-testid="activity-step"]');
     expect(row).toHaveTextContent("Read");
-    expect(screen.queryByTestId("activity-evidence-preview")).not.toBeInTheDocument();
     expect(screen.queryByText(/Found image/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("img", { name: "Homepage screenshot" })).not.toBeInTheDocument();
   });
@@ -2173,7 +2207,6 @@ describe("AgentActivityCluster", () => {
 
     expect(screen.queryByText("Vision")).not.toBeInTheDocument();
     expect(screen.getByText("Captured screenshot")).toBeInTheDocument();
-    expect(screen.queryByTestId("activity-evidence-preview")).not.toBeInTheDocument();
     expect(screen.queryByText("missing.png")).not.toBeInTheDocument();
   });
 
@@ -2220,7 +2253,6 @@ describe("AgentActivityCluster", () => {
       expect(line).toHaveClass("overflow-hidden");
       expect(line).toHaveClass("whitespace-nowrap");
       expect(step.querySelector("br")).not.toBeInTheDocument();
-      expect(step.querySelector('[data-testid="activity-evidence-preview"]')).not.toBeInTheDocument();
     }
     expect(document.querySelector("details")).not.toBeInTheDocument();
     expect(document.querySelector("ul, li, section")).not.toBeInTheDocument();

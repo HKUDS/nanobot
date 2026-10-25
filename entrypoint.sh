@@ -1,28 +1,6 @@
 #!/bin/sh
 dir="$HOME/.nanobot"
 
-# Render deploy path (see render.yaml + render-config.json). Gated on Render's
-# automatic RENDER=true env var so local Docker/podman usage is unaffected.
-# Initializes the on-disk config from the committed template (wiring secrets via
-# ${VAR} env vars, keeping runtime data on the persistent disk) and appends the
-# --config flag. Logs each decision so a failed start is diagnosable in Render's
-# logs. Privilege dropping is handled below, for every root start (not just here).
-if [ "$RENDER" = "true" ]; then
-    echo "[entrypoint] Render deploy — starting as $(id)"
-    mkdir -p "$dir" || echo "[entrypoint] warning: mkdir $dir failed"
-    config="$dir/config.json"
-    # Initialize config only when it does not already exist, so WebUI/provider
-    # settings edited at runtime survive restarts. The disk persists config.json
-    # across deploys; overwriting it every boot would discard those changes.
-    if [ ! -f "$config" ]; then
-        echo "[entrypoint] initializing $config from render-config.json"
-        cp /app/render-config.json "$config" || echo "[entrypoint] warning: cp config failed"
-    else
-        echo "[entrypoint] existing $config found — leaving it in place"
-    fi
-    set -- "$@" --config "$config"
-fi
-
 # Drop privileges whenever the container starts as root. Render mounts the
 # persistent disk root-owned, and a plain `docker run` also defaults to root now,
 # so this covers both. Chown the data dir so the non-root user can write it, then
@@ -32,7 +10,7 @@ if [ "$(id -u)" = "0" ]; then
     chown -R nanobot:nanobot "$dir" 2>/dev/null || echo "[entrypoint] warning: chown $dir failed"
     if setpriv --reuid=nanobot --regid=nanobot --init-groups true 2>/dev/null; then
         echo "[entrypoint] dropping privileges to nanobot via setpriv"
-        exec setpriv --reuid=nanobot --regid=nanobot --init-groups nanobot "$@"
+        exec setpriv --reuid=nanobot --regid=nanobot --init-groups "$0" "$@"
     fi
     echo "[entrypoint] error: started as root but setpriv privilege drop failed — refusing to run as root" >&2
     exit 1
@@ -50,6 +28,33 @@ Fix (pick one):
   Podman: podman run --userns=keep-id ...
 EOF
     exit 1
+fi
+
+# Render keeps environment references in its deployment template. Local
+# Compose generates and validates its initial config through Python instead.
+if [ "$RENDER" = "true" ]; then
+    config="$dir/config.json"
+    mkdir -p "$dir" || exit 1
+    if [ ! -f "$config" ]; then
+        echo "[entrypoint] initializing $config from render-config.json"
+        cp /app/render-config.json "$config" || exit 1
+    else
+        echo "[entrypoint] existing $config found — leaving it in place"
+    fi
+    set -- "$@" --config "$config"
+elif [ "$NANOBOT_DOCKER_BOOTSTRAP" = "1" ] && { [ "$1" = "gateway" ] || [ "$1" = "serve" ]; }; then
+    # Explicit config selectors belong to the CLI; bootstrap only the default instance.
+    initialize_default=1
+    for argument in "$@"; do
+        case "$argument" in
+            --config|--config=*|-c*) initialize_default=0; break ;;
+        esac
+    done
+    if [ "$initialize_default" = "1" ]; then
+        config="$dir/config.json"
+        python -m nanobot.cli.docker_bootstrap "$config" || exit 1
+        set -- "$@" --config "$config"
+    fi
 fi
 
 exec nanobot "$@"

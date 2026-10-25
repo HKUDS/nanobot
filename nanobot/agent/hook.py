@@ -73,6 +73,13 @@ class AgentHook:
     def wants_streaming(self) -> bool:
         return False
 
+    def has_run_hooks(self) -> bool:
+        """Whether run-level callbacks consume a detached context snapshot."""
+        return any(
+            getattr(getattr(self, name), "__func__", None) is not getattr(AgentHook, name)
+            for name in ("before_run", "after_run", "on_error", "on_finally")
+        )
+
     async def before_run(self, context: AgentRunHookContext) -> None:
         pass
 
@@ -171,6 +178,14 @@ class CompositeHook(AgentHook):
 
     def wants_streaming(self) -> bool:
         return any(h.wants_streaming() for h in self._hooks)
+
+    def has_run_hooks(self) -> bool:
+        if any(
+            getattr(getattr(self, name), "__func__", None) is not getattr(CompositeHook, name)
+            for name in ("before_run", "after_run", "on_error", "on_finally")
+        ):
+            return True
+        return any(h.has_run_hooks() for h in self._hooks)
 
     async def _for_each_hook_safe(self, method_name: str, *args: Any, **kwargs: Any) -> None:
         for h in self._hooks:

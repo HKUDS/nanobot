@@ -74,9 +74,8 @@
           "false": "Désactivé"
         }
       },
-      "proxy": {
-        "label": "Proxy réseau",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "Utiliser le proxy"
       }
     }
   }

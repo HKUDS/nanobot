@@ -1,7 +1,9 @@
 """Tests for OpenAICompatProvider handling custom/direct endpoints."""
 
-from types import SimpleNamespace
 from unittest.mock import patch
+
+import pytest
+from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.providers.registry import find_by_name
@@ -10,7 +12,9 @@ from nanobot.providers.registry import find_by_name
 def test_custom_provider_parse_handles_empty_choices() -> None:
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
-    response = SimpleNamespace(choices=[])
+    response = ChatCompletion(
+        id="chatcmpl-empty", choices=[], created=0, model="test-model", object="chat.completion",
+    )
 
     result = provider._parse(response)
 
@@ -118,20 +122,28 @@ def test_custom_provider_parse_chunks_normalizes_split_text_tool_call() -> None:
     assert result.tool_calls[0].arguments == {"path": "."}
 
 
-def test_custom_provider_parse_chunks_deduplicates_parallel_tool_call_ids() -> None:
+@pytest.mark.parametrize("as_sdk", [False, True], ids=["dict", "sdk"])
+def test_custom_provider_parse_chunks_deduplicates_parallel_tool_call_ids(as_sdk: bool) -> None:
     chunks = [{
+        "id": "chatcmpl-parallel",
+        "object": "chat.completion.chunk",
+        "created": 0,
+        "model": "test-model",
         "choices": [{
+            "index": 0,
             "finish_reason": "tool_calls",
             "delta": {
                 "tool_calls": [
                     {
                         "index": 0,
                         "id": "call_dup",
+                        "type": "function",
                         "function": {"name": "read_file", "arguments": '{"path":"a.txt"}'},
                     },
                     {
                         "index": 1,
                         "id": "call_dup",
+                        "type": "function",
                         "function": {"name": "read_file", "arguments": '{"path":"b.txt"}'},
                     },
                 ],
@@ -139,12 +151,15 @@ def test_custom_provider_parse_chunks_deduplicates_parallel_tool_call_ids() -> N
         }],
     }]
 
+    if as_sdk:
+        chunks = [ChatCompletionChunk.model_validate(chunk) for chunk in chunks]
     result = OpenAICompatProvider._parse_chunks(chunks)
     ids = [tool_call.id for tool_call in result.tool_calls or []]
 
     assert ids[0] == "call_dup"
     assert len(ids) == 2
     assert len(set(ids)) == 2
+    assert [tc.arguments for tc in result.tool_calls] == [{"path": "a.txt"}, {"path": "b.txt"}]
 
 
 def test_local_provider_502_error_includes_reachability_hint() -> None:

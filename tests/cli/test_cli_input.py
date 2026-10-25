@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import nullcontext
 from io import StringIO
 from unittest.mock import AsyncMock, MagicMock, call, patch
@@ -7,6 +8,14 @@ from prompt_toolkit.formatted_text import HTML
 
 from nanobot.cli import stream as stream_mod
 from nanobot.cli import terminal
+
+
+@pytest.fixture(autouse=True)
+def isolate_prompt_session(tmp_path, monkeypatch):
+    """Keep real parser tests out of user history and other prompt sessions."""
+    monkeypatch.setattr("nanobot.config.paths.get_cli_history_path", lambda: tmp_path / "history")
+    monkeypatch.setattr(terminal, "_prompt_session", None)
+    monkeypatch.setattr(terminal, "_saved_term_attrs", None)
 
 
 @pytest.fixture
@@ -105,7 +114,10 @@ async def test_raw_lf_enter_still_submits_like_wsl_terminals():
             terminal._init_prompt_session()
             session = terminal._prompt_session
             pipe_input.send_text("hello\x0aworld\r")
-            result = await session.prompt_async("> ")
+            # CI has no user to acknowledge prompt_toolkit's exception prompt.
+            result = await asyncio.wait_for(
+                session.prompt_async("> ", set_exception_handler=False), timeout=10,
+            )
 
     assert result == "hello"
 
@@ -122,7 +134,9 @@ async def test_alt_enter_inserts_newline_on_lf_terminals():
             terminal._init_prompt_session()
             session = terminal._prompt_session
             pipe_input.send_text("foo\x1b\x0abar\r")
-            result = await session.prompt_async("> ")
+            result = await asyncio.wait_for(
+                session.prompt_async("> ", set_exception_handler=False), timeout=10,
+            )
 
     assert result == "foo\nbar"
 
@@ -139,7 +153,9 @@ async def test_csi_u_shift_enter_inserts_newline_not_raw_escape():
             terminal._init_prompt_session()
             session = terminal._prompt_session
             pipe_input.send_text("foo\x1b[13;2ubar\r")
-            result = await session.prompt_async("> ")
+            result = await asyncio.wait_for(
+                session.prompt_async("> ", set_exception_handler=False), timeout=10,
+            )
 
     # A newline is inserted and no raw escape bytes leak into the result.
     assert result == "foo\nbar"

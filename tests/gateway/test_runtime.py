@@ -21,7 +21,7 @@ from nanobot.gateway import (
     RuntimeResult,
 )
 from nanobot.gateway.runtime import monitor_gateway_clients
-from nanobot.process_runtime import process_is_running
+from nanobot.process_runtime import ManagedProcessRuntime, process_is_running
 from nanobot.utils.rotating_output import (
     BACKGROUND_LOG_BACKUP_COUNT_ENV,
     BACKGROUND_LOG_MAX_BYTES_ENV,
@@ -49,6 +49,41 @@ def _paths(tmp_path: Path) -> GatewayRuntimePaths:
     return GatewayRuntimePaths.for_instance(data_dir=tmp_path)
 
 
+def test_runtime_state_publish_keeps_existing_snapshot_readable(tmp_path):
+    """Status polling must not prevent a gateway from publishing readiness."""
+    from nanobot.utils.atomic_file import _open_snapshot
+
+    runtime = GatewayRuntime(paths=_paths(tmp_path / "网关 home"))
+    previous = {"pid": os.getpid(), "identity": "fixture", "command": ["nanobot", "gateway"]}
+    current = {**previous, "health_host": "127.0.0.1"}
+    runtime._write_state(previous)
+    with _open_snapshot(runtime.paths.state_path) as snapshot:
+        runtime._write_state(current)
+        assert json.loads(snapshot.read()) == previous
+        assert runtime._read_state() == current
+    assert list(runtime.paths.run_dir.glob("*.tmp")) == []
+    if os.name != "nt":
+        assert runtime.paths.state_path.stat().st_mode & 0o777 == 0o600
+
+
+def test_runtime_state_reader_does_not_block_publish_while_decoding(tmp_path, monkeypatch):
+    """Pause a real status read while a readiness update replaces its record."""
+    runtime = GatewayRuntime(paths=_paths(tmp_path))
+    previous = {"pid": os.getpid(), "identity": "fixture"}
+    current = {**previous, "health_host": "127.0.0.1"}
+    runtime._write_state(previous)
+    decode = json.loads
+
+    def publish_during_decode(value, **kwargs):
+        runtime._write_state(current)
+        return decode(value, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr("nanobot.process_runtime.json.loads", publish_during_decode)
+        assert runtime._read_state() == previous
+    assert runtime._read_state() == current
+
+
 _FOREGROUND_CHILD = r"""
 import os
 import signal
@@ -68,6 +103,11 @@ duration = float(sys.argv[2])
 marker = Path(sys.argv[3])
 runtime = GatewayRuntime(paths=GatewayRuntimePaths.for_instance(data_dir=root))
 
+def publish_marker(detail):
+    pending = marker.with_suffix(".tmp")
+    pending.write_text(detail, encoding="utf-8")
+    pending.replace(marker)
+
 def stop(*_args):
     raise SystemExit(0)
 
@@ -75,13 +115,13 @@ try:
     if os.name != "nt":
         signal.signal(signal.SIGTERM, stop)
     with runtime.foreground_instance(GatewayStartOptions(port=18790)):
-        marker.write_text(f"claimed:{os.getpid()}", encoding="utf-8")
+        publish_marker(f"claimed:{os.getpid()}")
         time.sleep(duration)
 except GatewayAlreadyRunningError:
-    marker.write_text("occupied", encoding="utf-8")
+    publish_marker("occupied")
     raise SystemExit(17)
 except BaseException as exc:
-    marker.write_text(f"error:{type(exc).__name__}:{exc}", encoding="utf-8")
+    publish_marker(f"error:{type(exc).__name__}:{exc}")
     raise
 """
 
@@ -1258,7 +1298,7 @@ def test_terminate_windows_targets_only_the_recorded_process_tree(tmp_path, monk
     def fake_run(command, **kwargs):
         taskkill_calls.append({"command": command, "kwargs": kwargs})
 
-    runtime = GatewayRuntime(
+    runtime = ManagedProcessRuntime(
         paths=_paths(tmp_path),
         platform_name="Windows",
         subprocess_run=fake_run,
@@ -1272,23 +1312,61 @@ def test_terminate_windows_targets_only_the_recorded_process_tree(tmp_path, monk
 
     def fake_wait_for_exit(_pid, _timeout_s):
         wait_timeouts.append(_timeout_s)
-        # Simulate a process that only exits after the taskkill fallback runs.
+        # Simulate a process that exits only after its tree is forcibly terminated.
         return bool(taskkill_calls)
 
     monkeypatch.setattr(runtime, "_wait_for_exit", fake_wait_for_exit)
 
     assert runtime._terminate_windows(12345, timeout_s=20) is True
-    assert wait_timeouts == [20]
+    assert wait_timeouts == [2]
     assert taskkill_calls == [
         {
-            "command": ["taskkill", "/PID", "12345", "/T"],
+            "command": ["taskkill", "/PID", "12345", "/T", "/F"],
             "kwargs": {
                 "check": False,
                 "stdout": subprocess.DEVNULL,
                 "stderr": subprocess.DEVNULL,
+                "timeout": 2,
             },
         }
     ]
+
+
+def test_orphan_shutdown_yields_to_an_explicit_lifecycle_transition(tmp_path):
+    runtime = GatewayRuntime(paths=_paths(tmp_path))
+    lease = GatewayClientLease(runtime, kind="gateway-monitor")
+    lease.mark_ephemeral()
+
+    with runtime._transition_lock():
+        assert lease.begin_orphan_shutdown() is False
+        assert "stopping" not in json.loads(lease.state_path.read_text(encoding="utf-8"))
+
+    assert lease.begin_orphan_shutdown() is True
+
+
+def test_windows_stop_does_not_force_a_pid_reused_during_grace(tmp_path, monkeypatch):
+    killed = []
+    runtime = GatewayRuntime(
+        paths=_paths(tmp_path), platform_name="Windows",
+        subprocess_run=lambda *args, **kwargs: killed.append(args),
+    )
+    identity = "original-process"
+    runtime._write_state({"pid": 12345, "identity": identity, "shutdown_token": "a" * 32})
+    monkeypatch.setattr(runtime, "_process_identity", lambda _pid: identity)
+    monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
+    monkeypatch.setattr("nanobot.gateway.runtime.request_windows_shutdown", lambda *_args: True)
+
+    def exit_and_reuse_pid(_pid, _timeout):
+        nonlocal identity
+        identity = "replacement-process"
+        return False
+
+    monkeypatch.setattr(runtime, "_wait_for_exit", exit_and_reuse_pid)
+
+    result = runtime.stop(timeout_s=1)
+
+    assert result.status.running is False
+    assert killed == []
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups are unavailable")

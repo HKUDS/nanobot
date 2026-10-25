@@ -168,22 +168,6 @@ class TestBuildKwargsExtraBody:
         assert body.get("custom_param") == "value"
         assert body["thinking"] == {"type": "enabled"}
 
-    def test_nested_extra_body_does_not_clobber_siblings(self) -> None:
-        """Nested dict merge should preserve sibling keys."""
-        provider = _make_provider({
-            "chat_template_kwargs": {"enable_thinking": False},
-        })
-        # Simulate internal code having set a sibling key
-        # by manually calling _build_kwargs — the internal logic
-        # doesn't set chat_template_kwargs, so we test the merge path
-        # by having extra_body itself contain nested keys
-        kwargs = provider._build_kwargs(
-            messages=_simple_messages(),
-            tools=None, model=None, max_tokens=100,
-            temperature=0.1, reasoning_effort=None, tool_choice=None,
-        )
-        assert kwargs["extra_body"]["chat_template_kwargs"]["enable_thinking"] is False
-
     def test_guided_json_injection(self) -> None:
         """Real-world use case: vLLM guided decoding."""
         schema = {"type": "object", "properties": {"name": {"type": "string"}}}

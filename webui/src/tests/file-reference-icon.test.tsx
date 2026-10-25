@@ -14,6 +14,7 @@ describe("shared file icons", () => {
     ["styles.css", "file-code2"],
     ["app.js", "file-code2"],
     ["app.ts", "file-code2"],
+    ["app#draft.ts", "file-code2"],
     ["app.tsx", "file-code2"],
     ["script.py", "file-code2"],
     ["analysis.ipynb", "file-code2"],
@@ -22,7 +23,18 @@ describe("shared file icons", () => {
     ["notes.txt", "file-text"],
     ["build.log", "file-text"],
     ["demo.mp4", "file-video2"],
-    ["archive.zip", "file"],
+    ["https://files.example.com/demo.mp4?signature=abc#download.zip", "file-video2"],
+    ["archive.zip", "file-archive"],
+    ["backup.tar.gz", "file-archive"],
+    ["voice.mp3", "file-audio"],
+    ["recording.flac", "file-audio"],
+    ["REPORT#2.PDF", "file-text"],
+    ["proposal.docx", "file-text"],
+    ["budget.xlsx", "file-spreadsheet"],
+    ["results.csv", "file-spreadsheet"],
+    ["slides.pptx", "file-chart-column"],
+    ["slides.odp", "file-chart-column"],
+    ["payload.bin", "file"],
   ])("uses a consistent monochrome file-family icon for %s", (path, icon) => {
     const { container } = render(<FileReferenceIcon kind={fileKindForPath(path)} />);
     const svg = container.querySelector("svg")!;
@@ -36,24 +48,24 @@ describe("shared file icons", () => {
     expect(svg.querySelector("text, [fill], [stroke]")).toBeNull();
   });
 
-  it.each(["chart.png", "index.html", "data.json", "script.py", "notes.md"])(
+  it.each(["chart.png", "index.html", "data.json", "script.py", "notes.md", "archive.zip", "report.pdf", "budget.xlsx", "slides.pptx", "song.mp3"])(
     "reuses the same glyph for %s in replies, tabs and attachments without changing actions", (path) => {
       const open = vi.fn();
       render(<>
         <FileReferenceChip path={path} onOpen={open} />
-        <PreviewPane tabs={[{ id: path, kind: "file", value: path }]} activeId={path}
+        <PreviewPane tabs={[{ id: path, value: path }]} activeId={path}
           width={544} isClosing={false} onSelect={() => {}} onCloseTab={() => {}}
           onClose={() => {}} onResizeStart={() => {}}><p>Preview</p></PreviewPane>
         <AttachmentTile attachment={{ kind: "file", name: path, url: `/download/${path}` }} />
       </>);
       const reference = screen.getByRole("button", { name: path });
       const tab = screen.getByRole("tab", { name: path });
-      const attachment = screen.getByRole("link", { name: "File attachment" });
+      const attachment = screen.getByRole("link", { name: `Download ${path}` });
       const glyph = reference.querySelector("svg")!.innerHTML;
       expect(tab.querySelector("svg")!.innerHTML).toBe(glyph);
       expect(attachment.querySelector("svg")!.innerHTML).toBe(glyph);
       expect(tab.querySelector("svg")).toHaveClass("size-3.5");
-      expect(attachment.querySelector("svg")).toHaveClass("size-4");
+      expect(attachment.querySelector("svg")).toHaveClass("size-5");
       expect(tab.querySelector("svg")).not.toHaveClass("translate-y-[0.12em]");
       expect(attachment.querySelector("svg")).not.toHaveClass("translate-y-[0.12em]");
       expect(attachment).toHaveAttribute("href", `/download/${path}`);
@@ -62,6 +74,19 @@ describe("shared file icons", () => {
       expect(open).toHaveBeenCalledWith(path);
     },
   );
+
+  it("keeps iconless activity references named and keyboard-operable", () => {
+    const open = vi.fn();
+    render(<FileReferenceChip path="src/app.tsx" previewPath="/repo/src/app.tsx"
+      display="path" showIcon={false} onOpen={open} />);
+
+    const reference = screen.getByRole("button", { name: "src/app.tsx" });
+    expect(reference).toHaveTextContent("src/app.tsx");
+    expect(reference.querySelector("svg")).toBeNull();
+    expect(reference).toHaveAttribute("tabindex", "0");
+    fireEvent.keyDown(reference, { key: "Enter" });
+    expect(open).toHaveBeenCalledWith("/repo/src/app.tsx");
+  });
 
   it.each(["image", "video"] as const)("retains %s identity when its attachment is unavailable", (kind) => {
     const { container } = render(<AttachmentTile attachment={{ kind, name: "Unavailable" }} />);

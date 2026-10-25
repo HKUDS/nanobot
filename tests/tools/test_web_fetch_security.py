@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import socket
 from unittest.mock import AsyncMock, patch
@@ -462,6 +463,53 @@ async def test_web_fetch_blocks_private_redirect_before_readability_request(monk
     assert "error" in data
     assert "redirect blocked" in data["error"].lower()
     assert requested == ["https://attacker.example/start"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("preflight_fails", [False, True], ids=["stream", "fallback"])
+@pytest.mark.parametrize("content_type,expected_mime", [
+    ("image/png", "image/png"),
+    ("Image/PNG", "image/png"),
+    ("Image/PNG; profile=MiXeD", "image/png; profile=MiXeD"),
+])
+async def test_web_fetch_image_media_type_is_case_insensitive(
+    monkeypatch, preflight_fails, content_type, expected_mime,
+):
+    tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/"
+        "iZk9HQAAAABJRU5ErkJggg=="
+    )
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if preflight_fails and len(requests) == 1:
+            raise httpx.ConnectError("Image preflight unavailable", request=request)
+        return httpx.Response(
+            200, headers={"Content-Type": content_type}, content=png, request=request,
+        )
+
+    transport = httpx.MockTransport(handler)
+    real_async_client = httpx.AsyncClient
+
+    class TransportAsyncClient(real_async_client):
+        def __init__(self, *args, **kwargs):
+            kwargs.pop("proxy", None)
+            kwargs.pop("transport", None)
+            super().__init__(*args, transport=transport, **kwargs)
+
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", TransportAsyncClient)
+    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: object())
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
+        result = await tool.execute(url="https://example.com/image.png")
+
+    assert isinstance(result, list), f"Expected native image blocks, requests={len(requests)}"
+    image = next(block for block in result if block["type"] == "image_url")
+    prefix, encoded = image["image_url"]["url"].split(";base64,", 1)
+    assert prefix == f"data:{expected_mime}"
+    assert base64.b64decode(encoded, validate=True) == png
+    assert len(requests) == (2 if preflight_fails else 1)
 
 
 @pytest.mark.asyncio

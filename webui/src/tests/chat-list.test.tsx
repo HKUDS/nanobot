@@ -115,8 +115,11 @@ describe("ChatList", () => {
     expect(trigger).toHaveClass("sidebar-action-trigger", "touch-target", "opacity-0");
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
-    expect(onRequestRename).toHaveBeenCalledWith("websocket:review", "Review the patch");
+    const input = screen.getByRole("textbox", { name: "Topic name" });
+    expect(input).toHaveValue("Review the patch");
+    expect(onRequestRename).not.toHaveBeenCalled();
     expect(onSelect).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: "Escape" });
     fireEvent.click(screen.getByRole("button", { name: "Review the patch" }));
     expect(onSelect).toHaveBeenCalledWith("websocket:review");
   });
@@ -286,7 +289,10 @@ describe("ChatList", () => {
       .closest("[data-sidebar-pane]")!;
     fireEvent.contextMenu(paneRow);
     fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
-    expect(onRequestRename).toHaveBeenCalledWith("websocket:child", "Research pane");
+    const input = screen.getByRole("textbox", { name: "Topic name" });
+    expect(input).toHaveValue("Research pane");
+    expect(onRequestRename).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: "Escape" });
 
     const tabRow = screen.getByRole("button", { name: "Group: Root topic" })
       .closest("[data-workbench-tab]")!;
@@ -694,7 +700,7 @@ describe("ChatList", () => {
     );
 
     const tabButton = screen.getByRole("button", { name: "Group: Root topic" });
-    const tabGroup = tabButton.closest("[data-sidebar-tab-group]")!;
+    const tabGroup = tabButton.closest<HTMLElement>("[data-sidebar-tab-group]")!;
     const tabHeader = tabButton.closest("[data-workbench-tab]")!;
     const tabSurface = tabButton.closest("[data-workbench-tab-surface]")!;
     expect(tabGroup).toHaveAttribute("data-sidebar-tab-group", "true");
@@ -946,16 +952,19 @@ describe("ChatList", () => {
         onTogglePin={vi.fn()}
         onRequestRename={vi.fn()}
         onToggleArchive={vi.fn()}
-        showPreviews
       />,
     );
 
     const chatsSection = screen.getAllByRole("region")[0];
-    const text = chatsSection.textContent ?? "";
+    const chats = within(chatsSection).getAllByRole("button", {
+      name: /^(Newest|Middle|Older) chat$/,
+    });
 
-    expect(text.indexOf("Newest chat")).toBeLessThan(text.indexOf("Middle chat"));
-    expect(text.indexOf("Middle chat")).toBeLessThan(text.indexOf("Older chat"));
-    expect(screen.queryByText("/model fast")).not.toBeInTheDocument();
+    expect(chats.map((chat) => chat.textContent)).toEqual([
+      "Newest chat",
+      "Middle chat",
+      "Older chat",
+    ]);
   });
 
   it("shows a pin indicator for pinned chats", () => {
@@ -1032,7 +1041,6 @@ describe("ChatList", () => {
         onRequestRename={vi.fn()}
         onToggleArchive={vi.fn()}
         sort="title_asc"
-        showTimestamps
         runningChatIds={["zeta"]}
       />,
     );
@@ -1092,7 +1100,6 @@ describe("ChatList", () => {
         onRequestRename={vi.fn()}
         onToggleArchive={vi.fn()}
         defaultWorkspacePath="/Users/me/.nanobot/workspace"
-        showTimestamps
       />,
     );
 
@@ -1444,7 +1451,6 @@ describe("ChatList", () => {
         onTogglePin={vi.fn()}
         onRequestRename={vi.fn()}
         onToggleArchive={vi.fn()}
-        showTimestamps
       />,
     );
 
@@ -1500,7 +1506,6 @@ describe("ChatList", () => {
         onTogglePin={vi.fn()}
         onRequestRename={vi.fn()}
         onToggleArchive={vi.fn()}
-        showTimestamps
       />,
     );
 
@@ -1550,7 +1555,6 @@ describe("ChatList", () => {
         onTogglePin={vi.fn()}
         onRequestRename={vi.fn()}
         onToggleArchive={vi.fn()}
-        showTimestamps
       />,
     );
 

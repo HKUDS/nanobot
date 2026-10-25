@@ -1,0 +1,431 @@
+{
+  "rename": {
+    "title": "RenameDialog · グループとプロジェクトの名前変更",
+    "description": "グループとプロジェクトの名前変更を試せます。トピック名はチャット一覧内で変更します。",
+    "options": "呼び出し元が dialogTitle、description、placeholder を渡します。title が初期値になり、onConfirm は前後の空白を除いた名前を受け取ります。空の名前は保存できません。",
+    "hint": "保存すると上の名前が更新されます。"
+  },
+  "delete": {
+    "title": "DeleteConfirm · 削除の確認",
+    "description": "単一、複数、自動化タスク付きチャットの削除確認を比較できます。",
+    "options": "count が一括削除の文言を制御します。automations は関連タスク、スケジュール、次回実行日時を表示します。確認すると onConfirm を呼び出します。",
+    "scenario": "削除のシナリオ",
+    "open": "削除確認を開く",
+    "confirmed": "サンプルの削除を確認しました。",
+    "hint": "単一、複数、または自動化タスク付きのチャットを選択してください。"
+  },
+  "inlineTokens": {
+    "title": "Inline tokens · コマンドとセッション識別子",
+    "description": "コマンドや識別子を編集して、強調表示とセッション固有の色を確認できます。",
+    "options": "SlashCommandText は command、InlineTokenHighlight は color と内容を受け取ります。SessionHandleLabel は id から色を決定します。",
+    "command": "コマンドのテキスト",
+    "run": "<command/> を実行して状態を確認します。",
+    "handle": "セッション識別子",
+    "continue": "<session/> で作業を続けます。",
+    "highlight": "共通の強調表示",
+    "review": "<skill/> で変更を確認します。",
+    "skill": "スキル：{{name}}"
+  },
+  "sessionLinks": {
+    "selected": "選択したセッション：{{name}}。",
+    "hint": "セッションへのメンションを選択すると結果が表示されます。"
+  },
+  "userText": {
+    "title": "UserMessageText · メッセージ内のメンション",
+    "description": "スキル、アプリ、MCP、セッションへのメンションを含むメッセージを編集できます。",
+    "options": "text は元のメッセージです。cliApps、mcpPresets、sessionMentions でメンションを解決します。スキルは $name、その他は @name を使います。",
+    "message": "メッセージのテキスト"
+  },
+  "capabilityTokens": {
+    "title": "CapabilityMentionToken · アプリのメンション",
+    "description": "入力欄とメッセージでアプリ、MCP、セッションのメンション表示を比較できます。",
+    "options": "segment は cli、mcp、session とそのメタデータを指定します。variant で composer または message を選びます。サンプルはローカルのブランド画像を使います。",
+    "position": "メンションの表示場所"
+  },
+  "productIcons": {
+    "title": "Product icons · 製品アイコン",
+    "description": "アイコンを閲覧し、サイズを変えたり選択したりできます。",
+    "options": "アイコンは size、strokeWidth、className などの LucideProps を受け取ります。色は currentColor を継承し、ボタンにはアクセシブルな操作名があります。",
+    "size": "アイコンのサイズ",
+    "selected": "選択中：{{name}}"
+  },
+  "startup": {
+    "title": "StartupShell · 起動時のプレースホルダー",
+    "description": "アプリの接続中に表示する控えめなレイアウトを確認できます。",
+    "options": "embedded では section、それ以外では main を使います。aria-busy と読み込み状態を常に提供します。スタイルはアプリのエントリーから読み込みます。"
+  },
+  "fileActions": {
+    "title": "FileActions · ファイルメニュー",
+    "description": "右クリックして絶対パス、相対パス、参照テキストをコピーできます。",
+    "options": "path は参照テキストです。metadata が絶対パスと任意の相対パスを提供します。ギャラリーはファイルを読み込まずにメタデータを渡します。",
+    "scope": "ファイルの範囲",
+    "hint": "右クリックでコピーメニューを開くか、ファイルにフォーカスして Shift+F10 を押してください。"
+  },
+  "workbench": {
+    "title": "PaneWorkbench · 複数ペイン",
+    "description": "レイアウトの切り替え、ペインの選択・追加、移動やサイズ変更を試せます。",
+    "options": "呼び出し元が panes、activePaneKey、layout、splitRatios を制御します。renderPane が内容を提供し、コールバックがローカル状態を更新します。狭い画面では選択中のペインを表示します。",
+    "layout": "ペインのレイアウト",
+    "limit": "ペインは最大4つです",
+    "notes": "{{title}}のメモ",
+    "active": "選択中のペイン",
+    "activate": "このペインを選択して有効にする",
+    "hint": "選択中：{{title}}。下部のハンドルをドラッグして移動し、境界をドラッグしてサイズを変更します。"
+  },
+  "hostConnection": {
+    "title": "HostConnectionStatus · 接続状態",
+    "description": "接続済み、切断、接続中、エラーの状態を比較できます。",
+    "options": "state がアイコンとテキストを制御します。compact は表示テキストを隠し、アクセシブルな状態とツールチップを残します。",
+    "state": "接続状態",
+    "withText": "テキスト付きの状態",
+    "compact": "コンパクト表示"
+  },
+  "compatibility": {
+    "title": "HostCompatibilityDialog · バージョン互換性",
+    "description": "各互換性結果のバージョン、事前準備、更新ガイドを確認できます。",
+    "options": "profile を渡すとダイアログが開き、compatibility が結果とバージョンを提供します。onClose で閉じます。このコンポーネントは情報の表示のみを行います。",
+    "state": "バージョンの互換性",
+    "open": "互換性の詳細を見る"
+  },
+  "composer": {
+    "title": "ThreadComposer · メッセージ入力",
+    "description": "送信、添付、コマンド、引用と、処理中・無効の状態を試せます。",
+    "options": "onSend が成功すると入力を消去します。isStreaming が停止と待機列、variant がチャットとホームのスタイルを制御します。送信内容はこのプレビュー内に保持します。",
+    "statusCommand": "セッションの状態",
+    "statusDescription": "現在のセッション状態を表示",
+    "compactCommand": "コンテキストを圧縮",
+    "compactDescription": "現在のセッションのコンテキストを圧縮",
+    "helpCommand": "コマンドのヘルプ",
+    "helpDescription": "使用可能なコマンドを表示",
+    "state": "入力状態",
+    "addQuote": "引用を追加",
+    "input": "サンプルメッセージ",
+    "placeholder": "メッセージを入力、または / でコマンドを表示",
+    "stopped": "サンプルタスクを停止しました。",
+    "sent": "送信内容：{{content}}{{attachments}}",
+    "attachments": " · 添付数：{{amount}}",
+    "hint": "メッセージの送信、添付の選択、モデルの切り替え、コマンドメニューを試してください。"
+  },
+  "modelPreset": {
+    "title": "ModelPresetBadge · モデルプリセット",
+    "description": "モデルメニュー、キーボード操作、未設定の状態を試せます。",
+    "options": "modelPresets がプリセットを提供し、modelPreset と onPresetChange が選択を制御します。needsSetup は設定への入口を表示します。",
+    "state": "モデルコントロールの状態",
+    "manage": "モデル管理を開きました。",
+    "settings": "モデル設定を開きました。",
+    "hint": "現在のプリセット：{{preset}}。メニューを開くか矢印キーで切り替えてください。"
+  },
+  "usage": {
+    "title": "ComposerUsagePopover · コンテキスト使用量",
+    "description": "コンテキスト、キャッシュ、生成時間を警告状態やボトムシートで確認できます。",
+    "options": "context が容量、rounds が各ターンの統計を提供します。bottomSheet はモバイル用パネルを選択します。",
+    "state": "使用量の状態",
+    "hint": "使用量の詳細を開くと、コンテキスト、キャッシュ、各ターンの生成時間を確認できます。"
+  },
+  "workspace": {
+    "title": "WorkspaceControls · 作業ディレクトリ",
+    "description": "サンプルプロジェクトとアクセスモードを選択できます。",
+    "options": "scope と onChange が選択を制御し、onLoadProjects がサンプルディレクトリを提供します。実際のパス解決と権限制御はゲートウェイが行います。",
+    "state": "作業ディレクトリの状態"
+  },
+  "navigator": {
+    "title": "PromptNavigator · 質問ナビゲーション",
+    "description": "過去の質問を検索し、移動コールバックを確認できます。",
+    "options": "messages が全メッセージを提供し、コンポーネントがユーザーの質問を抽出します。onJumpToPrompt は対象メッセージの ID を受け取ります。",
+    "hint": "質問ナビゲーションを開き、質問を検索して選択してください。",
+    "empty": "質問はまだ選択されていません"
+  },
+  "header": {
+    "title": "ThreadHeader · チャットヘッダー",
+    "description": "サイドバー、テーマ、一時チャット、質問ナビゲーションを試せます。",
+    "options": "title、handle、theme、temporaryChatEnabled が表示状態を提供します。操作はコールバックで呼び出し元に渡します。",
+    "jump": "{{id}} に移動しました",
+    "sidebar": "サイドバーを切り替えました",
+    "hint": "ヘッダーの操作を試してください",
+    "temporary": "一時チャット",
+    "regular": "通常のチャット"
+  },
+  "messages": {
+    "title": "ThreadMessages · メッセージ一覧",
+    "description": "複数ターンの会話、メニュー、分岐、選択テキストの引用を試せます。",
+    "options": "messages は投影済みメッセージです。onForkFromMessage は質問のインデックス、onQuoteSelection は選択した回答テキストを受け取ります。",
+    "quoted": "引用：{{text}}",
+    "forked": "質問 {{index}} から分岐を作成しました",
+    "hint": "メッセージメニューを開くか、回答のテキストを選択して引用してください。"
+  },
+  "viewport": {
+    "title": "ThreadViewport · チャットのスクロール",
+    "description": "長い会話をスクロールし、質問マーカーや移動、最下部への復帰を試せます。",
+    "options": "プレビューの高さは固定です。messages が履歴を提供し、ref.jumpToUserPrompt が質問に移動します。emptyState が空のチャット内容を提供します。",
+    "state": "チャット表示",
+    "empty": "メッセージを入力してチャットを開始",
+    "hint": "スクロールで質問マーカーを確認するか、ナビゲーションで移動して最下部に戻ってください。"
+  },
+  "history": {
+    "title": "ThreadHistoryStatus · 履歴の状態",
+    "description": "読み込み中、履歴の先頭、エラーと再試行の状態を表示します。",
+    "options": "loading はリクエスト中、exhausted はそれ以前のメッセージがない状態を示し、error はエラー情報を渡します。onRetry で読み込みを再試行します。",
+    "state": "履歴の状態",
+    "error": "サンプル履歴を利用できません。",
+    "retries": "再試行回数：{{amount}}"
+  },
+  "recovery": {
+    "title": "RecoveryNotice · タスクの復旧",
+    "description": "中断、再開中、失敗、続行不可の状態と、続行・閉じる操作を試せます。",
+    "options": "state が復旧状態を提供します。onContinue と onDismiss は Promise を返します。サンプルのコールバックはプレビューのみ更新します。",
+    "state": "復旧状態",
+    "continued": "サンプルタスクを続行しました。",
+    "dismissed": "復旧の通知を閉じました。",
+    "reset": "プレビューをリセット",
+    "hint": "復旧状態を選び、続行または閉じる操作を試してください。"
+  },
+  "fallback": {
+    "title": "ModelFallbackNotice · 代替モデル",
+    "description": "代替モデルや認証期限切れの通知、設定と閉じる操作を確認できます。",
+    "options": "model は代替モデルを指定し、reauthProviderLabel は認証期限切れの対象を表示します。onOpenSettings と onDismiss は呼び出し元が提供します。",
+    "state": "代替モデルの状態",
+    "showAgain": "再表示",
+    "hint": "モデル設定へのリンクと閉じるボタンを試してください。"
+  },
+  "compaction": {
+    "title": "ContextCompactionNotice · コンテキスト圧縮",
+    "description": "圧縮の開始、成功、失敗、キャンセルの表示を比較できます。",
+    "options": "compaction.phase が通知を決定し、announce がスクリーンリーダーの読み上げを制御します。",
+    "phase": "コンテキスト圧縮の段階"
+  },
+  "streamError": {
+    "title": "StreamErrorNotice · メッセージエラー",
+    "description": "サイズ、ディレクトリ権限、ターン拒否、モデルリクエストのエラーを比較できます。",
+    "options": "error.kind がエラー文言を決定し、onDismiss が通知を閉じます。",
+    "kind": "メッセージエラーの種類"
+  },
+  "cluster": {
+    "title": "AgentActivityCluster · アクティビティ全体",
+    "description": "推論とツールの記録を実行中、完了、失敗の状態で確認できます。",
+    "options": "messages は reasoning と trace の投影を含みます。isTurnStreaming が活動状態を制御し、expanded は呼び出し元で制御できます。",
+    "state": "アクティビティの状態",
+    "error": "ファイルを読み取れませんでした。"
+  },
+  "search": {
+    "title": "WebSearchRun · 検索アクティビティ",
+    "description": "ウェブ検索と X 検索の進行状況や情報源を確認できます。",
+    "options": "run が query、target、status、sources を提供し、turnActive が実行中の効果を制御します。情報源のアイコンは共通コンポーネントが読み込みます。",
+    "state": "検索状態",
+    "source": "検索元"
+  },
+  "responseSources": {
+    "title": "FallbackResponseSources · 応答の情報源",
+    "description": "過去の応答で使った代替プリセット、モデル、プロバイダーを確認できます。",
+    "options": "sources は応答時点のモデル情報を保持します。fallback が true の情報源だけにバッジを表示します。",
+    "hint": "代替モデルのバッジを選択すると、その応答のプリセット、モデル、プロバイダーを確認できます。"
+  },
+  "filePreview": {
+    "title": "FilePreviewPanelView · ファイル内容",
+    "description": "テキスト、画像、省略、読み込み、エラーを比較できます。画像を選択すると拡大します。",
+    "options": "state は表示状態を提供し、path はファイルの種類と名前を決定します。画像の表示・エラーコールバックがプレビューを更新します。",
+    "state": "ファイルプレビューの状態"
+  },
+  "session": {
+    "title": "SessionInfoPopoverView · セッションの自動化",
+    "description": "タスクの表示、編集、無効化、削除と読み込み・エラー状態を試せます。",
+    "options": "呼び出し元が jobs、loading、loadFailed、now を提供します。onAction と onEdit は更新済みタスクを返し、ビューがダイアログ、フォーカス、結果表示を管理します。",
+    "state": "セッション自動化の状態",
+    "saveError": "サンプルの保存に失敗しました。再試行してください。",
+    "providerError": "サンプルプロバイダーを利用できません。",
+    "saved": "自動化タスクを保存しました。",
+    "openedChat": "サンプルチャットを開きました。",
+    "openedCalendar": "自動化カレンダーを開きました。",
+    "actionError": "サンプルの操作に失敗しました。再試行してください。",
+    "delete": "削除しました：{{name}}",
+    "run": "実行を要求しました：{{name}}",
+    "enable": "有効にしました：{{name}}",
+    "disable": "無効にしました：{{name}}",
+    "hint": "セッションの詳細を開き、自動化タスクの表示、切り替え、編集、削除を試してください。"
+  },
+  "subagent": {
+    "title": "SubagentThreadView · サブエージェントのメッセージ",
+    "description": "メッセージ、推論、読み込み、失敗の表示と再試行を確認できます。",
+    "options": "messages はランタイムが投影します。loading と error は共通の履歴状態表示を使用し、isStreaming と activeTurnId が活動を指定します。ビューは履歴を取得しません。",
+    "state": "サブエージェントのチャット状態"
+  },
+  "pairRoute": {
+    "title": "PairRouteSettingsView · ペアリング経路",
+    "description": "経路を選択してローカル保存し、保存中や更新失敗などを比較できます。",
+    "options": "呼び出し元が route と original を管理し、routes が SSH 経路を提供します。保存成功とディレクトリ更新失敗を別々に表示します。ギャラリーと設定は同じビューを使います。",
+    "state": "経路の状態"
+  },
+  "quickPair": {
+    "title": "QuickPairSetupView · クイックペアリング",
+    "description": "招待のコピー、応答コード入力、アクセス確認、既存ホストと再試行を試せます。",
+    "options": "state がペアリングと表示状態を提供し、コールバックが操作を実行します。routeSettings は経路設定を組み込みます。ギャラリーはサンプルとローカル処理を使い、実際のペアリングは QuickPairSetup が管理します。",
+    "state": "ペアリングの段階",
+    "open": "クイックペアリングを開く",
+    "connected": "選択した接続：{{name}}。",
+    "ssh": "SSH 接続を選択しました。",
+    "hint": "サンプルの招待と応答コードは表示専用です。確認操作はローカルの結果表示を更新します。"
+  },
+  "sshHost": {
+    "title": "SSHHostPickerView · SSH アドレス",
+    "description": "SSH エイリアスの絞り込み、矢印キー選択、取り込みや読み込み状態を試せます。",
+    "options": "discovery が現在の設定からホストを提供します。呼び出し元が value、busy、error、コールバックを制御します。customConfig はカスタム設定のエイリアス検出を維持し、inputRef は選択後のフォーカスに使います。",
+    "state": "SSH アドレスの状態",
+    "refreshed": "サンプルアドレスを更新しました。",
+    "entered": "入力内容：{{value}}",
+    "hint": "入力してアドレスを絞り込み、矢印キーで SSH エイリアスを選択してください。"
+  },
+  "connectionBadge": {
+    "title": "ConnectionBadge · 接続インジケーター",
+    "description": "接続状態ごとの色、アニメーション、アクセシブルなテキストを確認できます。",
+    "options": "呼び出し元が status を渡します。接続の購読はページコンテナが管理します。",
+    "state": "接続状態",
+    "idle": "待機中",
+    "connecting": "接続中",
+    "open": "接続済み",
+    "reconnecting": "再接続中",
+    "closed": "切断済み",
+    "error": "接続エラー"
+  },
+  "hostPicker": {
+    "title": "HostSwitcherView · ホストメニュー",
+    "description": "ローカルやサンプルホストを選び、接続待ち、オフライン、折りたたみを比較できます。",
+    "options": "picker がホスト情報とコールバック、status が現在の接続状態を提供します。本番の HostSwitcher がクライアントを購読します。",
+    "state": "ホストメニューの状態",
+    "offline": "サンプルホストは切断されています。",
+    "manage": "接続管理を開きました。",
+    "cancelled": "サンプルホストの切り替えをキャンセルしました。",
+    "selected": "プレビューのホスト：{{name}}"
+  },
+  "chats": {
+    "title": "ChatList · チャット一覧",
+    "description": "チャットを選び、メニューから固定、アーカイブ、削除を試せます。",
+    "options": "呼び出し元が sessions、activeKey、固定・アーカイブのキーを提供します。操作コールバックがサンプル一覧を更新します。",
+    "state": "チャット一覧の状態",
+    "renamed": "名前を変更しました：{{name}}",
+    "selected": "選択したチャット：{{name}}",
+    "none": "なし"
+  },
+  "sidebarResize": {
+    "title": "SidebarResizeHandle · サイドバーのサイズ",
+    "description": "マウスやキーボードでサイドバーのサイズ変更、折りたたみ、展開を試せます。",
+    "options": "width と open は制御状態です。onResize がサイズと展開状態を更新し、onDraggingChange がドラッグ状態を通知します。",
+    "content": "サイドバーの内容",
+    "hint": "境界をドラッグするか、フォーカスして矢印キー、Home、End、Enter を使ってください。",
+    "collapsed": "折りたたみ済み",
+    "dragging": "ドラッグ中"
+  },
+  "language": {
+    "title": "LanguageSwitcher · 表示言語",
+    "description": "ギャラリーと本番コンポーネントの表示言語を切り替えます。",
+    "options": "アプリの i18n とブラウザーの言語設定を使い、ゲートウェイは不要です。上部の言語選択も同じコンポーネントです。"
+  },
+  "channelMarks": {
+    "title": "Channel marks · チャンネル識別",
+    "description": "画像がない場合のアバター、ワークスペースアイコン、WebSocket マークを確認できます。",
+    "options": "LinearAvatar は name、url、workspace を受け取ります。有効な画像がない場合は代替テキストやアイコンを表示します。",
+    "name": "アバター名",
+    "member": "メンバーアバター",
+    "workspace": "ワークスペースアイコン"
+  },
+  "secret": {
+    "title": "LinearSecretField · シークレット編集",
+    "description": "編集、表示、保存、置換と、保存失敗時の下書き保持を確認できます。",
+    "options": "configured が保存済み状態を示し、onSave が永続化します。ギャラリーのコールバックはローカル状態のみ更新します。",
+    "state": "シークレットの状態",
+    "error": "サンプルの保存に失敗しました。",
+    "hint": "サンプルを入力して保存するか、エラー状態に切り替えて下書きの保持を確認してください。"
+  },
+  "channelHelp": {
+    "title": "LinearHelpContent · チャンネルヘルプ",
+    "description": "実際のドロップダウン内でチャンネルのヘルプを表示します。",
+    "options": "内容はチャンネルの既存翻訳を使い、呼び出し元がメニューのコンテナを提供します。",
+    "open": "チャンネルヘルプを開く"
+  },
+  "channel": {
+    "title": "{{channel}} · チャンネル設定",
+    "description": "実際のチャンネル設定フォームと各状態を確認できます。",
+    "options": "チャンネル登録、Python 設定契約のスナップショット、本番の ChannelSetupSurfaceView を使います。入力、認証情報の表示、プリセット、確認、切り替えはこのプレビューだけを変更します。",
+    "state": "チャンネル設定の状態",
+    "credentialsError": "サンプル認証情報が拒否されました。プレビューの値を更新して再試行してください。",
+    "validation": "プレビュー設定"
+  },
+  "channelConnect": {
+    "state": "{{channel}} の接続状態",
+    "error": "認証を一時的に利用できません。再試行してください。"
+  },
+  "qqConnect": {
+    "title": "QQConnectFlowView · QQ QR 接続",
+    "description": "QQ の QR ログイン、再試行、App Secret の置き換え警告を確認します。",
+    "options": "ビューは接続状態とコールバックを受け取ります。プレビューの操作はローカル状態のみを変更し、セッション作成と QQ のポーリングはランタイム側で行います。"
+  },
+  "feishuConnect": {
+    "title": "FeishuConnectFlowView · Feishu QR 認証",
+    "description": "実際の QR 認証画面で待機、成功、期限切れ、キャンセル、エラーを試せます。",
+    "options": "connect、busy、error が表示状態を提供し、QR コードはローカル生成します。開始、キャンセル、ポーリングは機能の入口が担当し、サンプルは現在の表示のみ変更します。"
+  },
+  "feishuAssistants": {
+    "title": "FeishuAssistantsPanelView · Feishu アシスタント",
+    "description": "アシスタントカード、動作・認証状態、詳細設定、追加を試せます。",
+    "options": "feature と instances が状態を提供します。ビューが下書きと保存結果を管理し、onToggleInstance、onSaveInstance、renderConnectFlow がランタイム操作につなぎます。",
+    "state": "アシスタントの動作状態",
+    "error": "アシスタントが停止しました。認証情報を確認してから再起動してください。",
+    "on": "{{name}}：オン",
+    "off": "{{name}}：オフ",
+    "saved": "{{name}}：プレビューの {{amount}} 項目を保存しました"
+  },
+  "whatsappConnect": {
+    "title": "WhatsAppConnectFlowView · WhatsApp デバイス連携",
+    "description": "簡潔な QR 画面で自動接続、成功、期限切れ、エラーと別アカウントの連携を試せます。",
+    "options": "ビューは自動開始と最小レイアウトの表示規則を維持します。状態と再試行は呼び出し元が制御し、実際の自動開始、強制再試行、ポーリングは接続機能の入口が担当します。"
+  },
+  "linearPanel": {
+    "title": "LinearPanelView · Linear 設定",
+    "description": "アプリ情報、シークレット、詳細設定、ワークスペース、メンバー権限、ブラウザー認証を確認できます。",
+    "options": "state と workspaces が状態を提供し、コールバックがワークスペース、保存、MCP 操作を接続します。3つのスロットで本番のメンバー、認証、リセットのビューを組み合わせます。",
+    "state": "Linear 設定の状態",
+    "runtimeError": "Linear webhook を開始できませんでした。",
+    "saveError": "設定を保存できませんでした。下書きは保持されています。",
+    "inspectionError": "接続済みワークスペースを確認できませんでした。",
+    "refreshed": "サンプルワークスペースを更新しました。",
+    "removed": "サンプルワークスペースを削除しました：{{name}}",
+    "mcp": "Linear MCP の設定を選択しました。"
+  },
+  "linearMembers": {
+    "title": "LinearMemberAccessView · メンバーのアクセス",
+    "description": "メンバーの検索、権限変更、読み込み、空、保存、未確認の状態を比較できます。",
+    "options": "snapshot は確認済みのメンバー状態です。onLoad と onSetAllowed はチャンネルの入口に渡し、権限の検証は引き続きゲートウェイが担当します。",
+    "state": "メンバーの状態",
+    "loadError": "メンバー一覧を利用できません。",
+    "saveError": "アクセス権を確認できませんでした。"
+  },
+  "linearConnect": {
+    "title": "LinearConnectFlowView · Linear 認証",
+    "description": "ブラウザー認証の開始、待機、キャンセル、成功、失敗を試せます。",
+    "options": "ChannelQrConnectFlowView を再利用します。Linear が認証表示、ラベル、フォーカス処理を提供し、セッション作成とポーリングはランタイムの入口が担当します。",
+    "state": "認証の段階",
+    "error": "認証を完了できませんでした。",
+    "hint": "認証リンクとワークスペースはサンプルです。開始とキャンセルはプレビューの段階のみ変更します。"
+  },
+  "linearReset": {
+    "title": "LinearResetConnectionView · 接続のリセット",
+    "description": "削除・保持する内容、処理中、部分完了後の再試行を確認できます。",
+    "options": "onReset が失効とクリーンアップの全処理を実行します。ビューは確認、エラー、閉じる操作の制限、フォーカスの復元を管理します。",
+    "state": "リセット結果",
+    "error": "チャンネルを停止できませんでした。アプリ設定は保持されています。",
+    "completed": "プレビューのワークスペースとアプリ設定を消去しました。"
+  },
+  "weixinPanel": {
+    "title": "WeixinPanelView · Weixin 設定",
+    "description": "設定、詳細項目、保存結果、ログイン期限切れからの復旧を確認できます。",
+    "options": "項目はチャンネルの設定契約から取得します。ビューは展開とシークレット表示を管理し、ランタイムは自動保存、下書きの統合、ログイン復旧を担当します。",
+    "state": "Weixin パネルの状態"
+  },
+  "weixinConnect": {
+    "title": "WeixinConnectFlowView · Weixin QR と確認コード",
+    "description": "QR スキャン、確認コード、成功、期限切れ、キャンセル、接続エラーを比較できます。",
+    "options": "ビューは接続状態とコールバックを受け取り、確認コードの下書きを保持します。QR コードはブラウザーで生成します。実際の認証、ポーリング停止、更新、キャンセルは機能の入口が担当します。",
+    "state": "Weixin の接続状態",
+    "error": "接続が中断されました。再試行してください。",
+    "refreshed": "新しいプレビュー用 QR コードを表示しました。",
+    "hint": "確認コードのプレビューに 123456 を入力すると接続が完了します。それ以外では下書きを保持してエラーを表示します。"
+  }
+}

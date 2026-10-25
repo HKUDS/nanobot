@@ -53,6 +53,7 @@ interface PaneRenderContext {
   active: boolean;
   headerPortalTarget: HTMLElement | null | undefined;
   composerPortalTarget: HTMLElement | null | undefined;
+  navigationFrame: HTMLElement | null | undefined;
   headerActions: ReactNode;
 }
 
@@ -208,6 +209,7 @@ export function PaneWorkbench({
   const effectiveLayout = layout;
   const [headerPortalTarget, setHeaderPortalTarget] = useState<HTMLElement | null>(null);
   const [composerPortalTarget, setComposerPortalTarget] = useState<HTMLElement | null>(null);
+  const [navigationFrame, setNavigationFrame] = useState<HTMLElement | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const paneRefs = useRef(new Map<string, HTMLElement>());
   const lastRectsRef = useRef(new Map<string, DOMRect>());
@@ -675,6 +677,7 @@ export function PaneWorkbench({
 
   return (
     <section
+      ref={setNavigationFrame}
       aria-label={t("workbench.aria", { defaultValue: "Conversation workbench" })}
       className={cn(
         "thread-workspace relative flex h-full min-h-0 flex-col overflow-hidden bg-background",
@@ -726,6 +729,9 @@ export function PaneWorkbench({
                     // Multiple conversation panes still share the workbench toolbar.
                     headerPortalTarget: chrome && displayedPanes.length > 1 ? headerPortalTarget : undefined,
                     composerPortalTarget: chrome ? composerPortalTarget : undefined,
+                    // A single chat includes the shared composer in its visual frame.
+                    // Split chats keep navigation centered within their own pane.
+                    navigationFrame: displayedPanes.length === 1 ? navigationFrame : undefined,
                     headerActions,
                   })}
                   {chrome && panes.length > 1 && !compact ? (
@@ -824,7 +830,7 @@ export function PaneWorkbench({
         </div>
 
         {chrome ? (
-          <footer className="workbench-composer-footer shrink-0 bg-background px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-4">
+          <footer className="workbench-composer-footer shrink-0 bg-background px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:px-4 sm:pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
             <div
               ref={setComposerPortalTarget}
               data-testid="workbench-composer-host"

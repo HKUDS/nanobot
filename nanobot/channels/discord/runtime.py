@@ -13,11 +13,13 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import Field
 
+from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ContextCompactionEvent, ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import build_help_text
+from nanobot.config.network import NetworkConfig
 from nanobot.config.paths import get_media_dir
 from nanobot.config_base import Base
 from nanobot.utils.helpers import safe_filename, split_message
@@ -63,9 +65,7 @@ class DiscordConfig(Base):
     working_emoji_delay: float = 2.0
     streaming: bool = True
     reply_to_message: bool = False
-    proxy: str | None = None
-    proxy_username: str | None = None
-    proxy_password: str | None = None
+    use_proxy: bool = False
 
 
 if DISCORD_AVAILABLE:
@@ -377,6 +377,7 @@ class DiscordChannel(BaseChannel):
 
     name = "discord"
     display_name = "Discord"
+    uses_shared_proxy = True
     _STREAM_EDIT_INTERVAL = 0.8
 
     @classmethod
@@ -442,11 +443,14 @@ class DiscordChannel(BaseChannel):
         partial = cast(Any, channel).get_partial_message(message_id)
         return partial.to_reference(fail_if_not_exists=fail_if_not_exists), mention_settings
 
-    def __init__(self, config: Any, bus: MessageBus):
+    def __init__(
+        self, config: Any, bus: MessageBus, *, network: NetworkConfig | None = None,
+    ):
         if isinstance(config, dict):
             config = DiscordConfig.model_validate(config)
-        super().__init__(config, bus)
+        super().__init__(config, bus, network=network)
         self.config: DiscordConfig = config
+        self._proxy = self.network.resolve_proxy(self.config.use_proxy)
         self._client: DiscordBotClient | None = None
         self._typing_tasks: dict[str, asyncio.Task[None]] = {}
         self._bot_user_id: str | None = None
@@ -477,30 +481,10 @@ class DiscordChannel(BaseChannel):
             intents = discord.Intents.none()
             intents.value = self.config.intents
 
-            proxy_auth = None
-            has_user = bool(self.config.proxy_username)
-            has_pass = bool(self.config.proxy_password)
-            if has_user and has_pass:
-                import aiohttp
-
-                proxy_auth = aiohttp.BasicAuth(
-                    login=cast(str, self.config.proxy_username),
-                    password=cast(str, self.config.proxy_password),
-                )
-            elif has_user != has_pass:
-                self.logger.warning(
-                    "proxy auth incomplete: both proxy_username and "
-                    "proxy_password must be set; ignoring partial credentials",
-                )
-
-            proxy = self.config.proxy
-            if proxy and "://" not in proxy:
-                proxy = f"http://{proxy}"
             self._client = DiscordBotClient(
                 self,
                 intents=intents,
-                proxy=proxy,
-                proxy_auth=proxy_auth,
+                proxy=self._proxy,
             )
         except Exception:
             self.logger.exception("Failed to initialize client")
@@ -539,7 +523,7 @@ class DiscordChannel(BaseChannel):
         """Send a message through Discord using discord.py."""
         client = self._client
         if client is None or not client.is_ready():
-            raise RuntimeError("Discord client is not ready")
+            raise ChannelNotReadyError("Discord client is not ready")
 
         is_progress = isinstance(msg.event, ProgressEvent)
 

@@ -1,35 +1,15 @@
 # Troubleshooting
 
-Use this page to isolate where a failure lives. Start with the smallest surface that proves the most: local CLI first, then gateway, then WebUI or chat apps.
+Use the first check that matches what you see, then follow its next step. This avoids investigating the browser or a chat app before confirming nanobot can start and contact its model.
 
 ## Fast Diagnosis Order
 
-Run these in order:
+- **The `nanobot` command is not found, or nanobot will not start:** check [Installation Problems](#installation-problems). Run `nanobot --version` to confirm the command is available.
+- **nanobot starts, but does not answer:** run `nanobot status`. Check that it points to the config and workspace you expect and that the active model is ready. This command does not contact the model; if setup is incomplete, follow its WebUI **Settings → Models** or CLI wizard instructions.
+- **Status looks ready, but a test question fails:** run `nanobot agent -m "Hello!"`. If it fails, troubleshoot [Provider and Model Problems](#provider-and-model-problems) before testing the gateway or a chat app.
+- **The test question works, but the browser or chat app does not:** start `nanobot gateway` and follow [Gateway Problems](#gateway-problems), [WebUI Problems](#webui-problems), or [Chat App Problems](#chat-app-problems), depending on what is failing.
 
-```bash
-nanobot --version
-nanobot status
-nanobot agent -m "Hello!"
-```
-
-Then, only if the CLI works:
-
-```bash
-nanobot gateway
-```
-
-This separates failures into layers:
-
-| Layer | What it proves |
-|---|---|
-| `nanobot --version` | Install and shell command discovery |
-| `nanobot status` | Config path, workspace, environment references, and active provider/model configuration |
-| `nanobot agent -m "Hello!"` | Config loading, provider/model access, workspace writes, and agent loop |
-| `nanobot gateway` | Channel startup, cron system jobs, heartbeat, WebUI/WebSocket, and health endpoint |
-
-If `nanobot agent -m "Hello!"` fails, fix that before debugging WebUI, Telegram, Discord, Docker, systemd, or any chat app.
-
-`nanobot status` does not call the model. If provider/model setup is incomplete, it points to WebUI **Settings → Models** or the CLI setup wizard, then prints the command to check again.
+`nanobot status` checks local configuration and provider readiness without making a model request. A successful `nanobot agent -m "Hello!"` confirms the local agent can get a reply; it does not prove that a gateway, browser, or chat app is working.
 
 ## Empty topics after a WebUI restart
 
@@ -168,12 +148,12 @@ If you need a known-good snippet instead of diagnosis, use [`provider-cookbook.m
 | Local model connection refused | Ollama, vLLM, LM Studio, or another local server is not running, or `apiBase` points to the wrong port. |
 | Bedrock validation error | Check AWS region, credentials, model access, model ID, and whether the model supports Converse. |
 | OAuth provider fails | Run the matching login command: `openai-codex`, `xai-grok`, or `github-copilot`, normally with `--set-main`. |
-| Codex OAuth needs a proxy | Set `providers.openaiCodex.proxy` before running the login command. The proxy applies to login, token refresh, and Codex API requests. |
+| Codex OAuth needs a proxy | Set the address in **Settings → Advanced → Shared proxy** and enable **Use proxy** for OpenAI Codex before login. In `config.json`, use `network.proxy` and `providers.openaiCodex.useProxy: true`. This applies to login, token refresh, and Codex API requests. |
 | Codex login runs on a remote/headless machine | In the WebUI, open ChatGPT in your local browser; when the localhost callback page cannot load, copy the full `http://localhost:1455/auth/callback?...` URL from the address bar and paste it into the WebUI dialog. From the CLI, open the printed URL locally and paste the same callback URL back into the terminal. |
 | Codex login runs in Docker | Start the container with `docker run -it` so the OAuth flow has an interactive terminal. |
 | Codex says a model is not supported with a ChatGPT account | Use provider `openai_codex` with a Codex model such as `openai-codex/gpt-5.6-sol`. Do not use the direct-API `openai/...` prefix with Codex OAuth. |
 | Config says `providers.openai_codex` conflicts with the built-in provider | Under `providers`, keep only the canonical `openaiCodex` settings key and remove a duplicate `openai_codex` key. A model preset's `provider` value remains `openai_codex`. |
-| xAI OAuth needs a proxy | Set `providers.xaiGrok.proxy` before login. It applies to OAuth discovery, token exchange/refresh, and Grok subscription requests. |
+| xAI OAuth needs a proxy | Set `network.proxy` and `providers.xaiGrok.useProxy: true` before login, or use the shared address and provider switch in Settings. This applies to OAuth discovery, token exchange/refresh, and Grok subscription requests. |
 | xAI login runs on a remote/headless machine | In the WebUI, finish sign-in in your local browser; if the loopback redirect cannot reach the server, copy the final URL from the address bar into the WebUI dialog. From the CLI, run `nanobot provider login xai-grok` interactively, open the printed URL elsewhere, and paste the final callback URL or authorization code when prompted. |
 | xAI returns 403 or subscription access denied | Confirm the signed-in account has an eligible X Premium / Grok subscription, then run `nanobot provider login xai-grok` again. This provider does not use an xAI API key or X Developer OAuth. |
 | xAI returns 400 `invalid-argument` | Read the bounded `Response body` appended to the provider error. Hosted `x_search` is sent only when xAI's model catalog advertises `supportsBackendSearch`; the model ID `grok-4.5` itself is valid. |
@@ -192,7 +172,7 @@ Langfuse tracing is optional and controlled by environment variables.
 | `LANGFUSE_SECRET_KEY is set but langfuse is not installed` | Install `langfuse` in the same Python environment that runs nanobot, then restart the process. |
 | No traces appear | Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_BASE_URL` before starting nanobot. |
 | Wrong Langfuse project or region | Check that the key pair and `LANGFUSE_BASE_URL` come from the same Langfuse project/region. |
-| Only some providers trace | Langfuse tracing applies to OpenAI-compatible provider calls; native providers may not use that client path. |
+| Only some providers trace | Langfuse tracing applies to OpenAI-compatible provider calls and the Codex OAuth provider; other native providers may not use either client path. |
 
 See [`configuration.md#langfuse-observability`](./configuration.md#langfuse-observability) for setup commands.
 

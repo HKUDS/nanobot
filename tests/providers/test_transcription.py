@@ -419,38 +419,6 @@ def test_resolver_keeps_enabled_and_limits_on_effective_config() -> None:
 
 
 @pytest.mark.asyncio
-async def test_openai_retries_on_5xx_then_succeeds(audio_file: Path) -> None:
-    """Transient 503 is retried; a subsequent 200 yields the text."""
-    provider = OpenAITranscriptionProvider(api_key="sk-test")
-    post = AsyncMock(side_effect=[_response(503), _response(200, {"text": "hello"})])
-    with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", AsyncMock()):
-        result = await provider.transcribe(audio_file)
-    assert result == "hello"
-    assert post.await_count == 2
-
-
-@pytest.mark.asyncio
-async def test_openai_retries_on_429_then_succeeds(audio_file: Path) -> None:
-    provider = OpenAITranscriptionProvider(api_key="sk-test")
-    post = AsyncMock(side_effect=[_response(429), _response(200, {"text": "rate ok"})])
-    with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", AsyncMock()):
-        result = await provider.transcribe(audio_file)
-    assert result == "rate ok"
-    assert post.await_count == 2
-
-
-@pytest.mark.asyncio
-async def test_openai_retries_on_connect_error(audio_file: Path) -> None:
-    """Network-level transient errors are retried."""
-    provider = OpenAITranscriptionProvider(api_key="sk-test")
-    post = AsyncMock(side_effect=[httpx.ConnectError("boom"), _response(200, {"text": "ok"})])
-    with patch("httpx.AsyncClient.post", post), patch("asyncio.sleep", AsyncMock()):
-        result = await provider.transcribe(audio_file)
-    assert result == "ok"
-    assert post.await_count == 2
-
-
-@pytest.mark.asyncio
 async def test_openai_does_not_retry_on_auth_error(audio_file: Path) -> None:
     """401 is the user's misconfiguration — retrying wastes time and rate-limit quota."""
     provider = OpenAITranscriptionProvider(api_key="sk-test")
@@ -877,6 +845,35 @@ async def test_assemblyai_uploads_creates_and_polls(audio_file: Path) -> None:
         "language_code": "en",
     }
     assert get.await_args.args == ("https://assembly.example/v2/transcript/tr_123",)
+
+
+@pytest.mark.asyncio
+async def test_assemblyai_retries_transient_upload_and_poll_errors(audio_file: Path) -> None:
+    provider = AssemblyAITranscriptionProvider(api_key="aai-test")
+    post = AsyncMock(side_effect=[
+        _json_response(503, {}, url=provider.upload_url),
+        _json_response(200, {"upload_url": "https://cdn.example/audio"}, url=provider.upload_url),
+        _json_response(200, {"id": "tr_retry"}, url=provider.transcript_url),
+    ])
+    poll_url = f"{provider.transcript_url}/tr_retry"
+    get = AsyncMock(side_effect=[
+        httpx.ReadError("connection lost"),
+        _json_response(200, {"status": "completed", "text": "recovered"}, method="GET", url=poll_url),
+    ])
+    sleep = AsyncMock()
+
+    with patch("httpx.AsyncClient.post", post), patch("httpx.AsyncClient.get", get), patch(
+        "asyncio.sleep", sleep
+    ):
+        assert await provider.transcribe(audio_file) == "recovered"
+
+    assert post.await_count == 3
+    assert get.await_count == 2
+    for upload_call in post.await_args_list[:2]:
+        assert upload_call.args == (provider.upload_url,)
+        assert upload_call.kwargs["content"] == audio_file.read_bytes()
+    assert get.await_args.args == (poll_url,)
+    assert [call.args for call in sleep.await_args_list] == [(1.0,), (1.0,)]
 
 
 @pytest.mark.asyncio

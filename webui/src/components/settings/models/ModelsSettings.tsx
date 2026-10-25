@@ -5,7 +5,7 @@ import { useModelPresetDrag } from "@/components/settings/models/useModelPresetD
 import { ReasoningEffortPicker } from "@/components/settings/models/ReasoningEffortPicker";
 import { RemoveActionButton } from "@/components/settings/shared/RemoveActionButton";
 import { ToggleButton } from "@/components/ui/toggle-button";
-import { useAutoSave } from "@/components/settings/shared/useAutoSave";
+import type { EditCompletion } from "@/components/settings/shared/useEditCompletion";
 import { useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
   GripVertical,
@@ -197,11 +197,13 @@ export function ModelPresetDeleteDialog({
 }
 
 export function ModelsSettings({
+  editCompletion: edits,
   token,
   form,
   setForm,
   editingPresetName,
   presetNameError,
+  error,
   settings,
   dirty,
   creating,
@@ -226,11 +228,13 @@ export function ModelsSettings({
   onSelectConfiguration,
   onDeleteConfiguration,
 }: {
+  editCompletion: EditCompletion;
   token: string;
   form: AgentSettingsDraft;
   setForm: Dispatch<SetStateAction<AgentSettingsDraft>>;
   editingPresetName: string;
   presetNameError: string | null;
+  error?: string | null;
   settings: SettingsPayload;
   dirty: boolean;
   creating: boolean;
@@ -256,7 +260,6 @@ export function ModelsSettings({
   onDeleteConfiguration: (preset: SettingsPayload["model_presets"][number], onDeleted: () => void) => void;
 }) {
   const { t } = useTranslation();
-  useAutoSave(form, dirty, saving, onSave, !creating && !!form.model.trim());
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   const [editorOpen, setEditorOpen] = useState(false);
@@ -315,7 +318,7 @@ export function ModelsSettings({
     null;
   useEffect(() => {
     setAdvancedOpen(false);
-  }, [editorOpen, selectedPreset?.name]);
+  }, [editorOpen, edits.identity]);
 
   const configuredProviders = settings.providers.filter((provider) => provider.configured);
   const selectedProvider = settings.providers.find((provider) => provider.name === form.provider);
@@ -331,6 +334,7 @@ export function ModelsSettings({
     ? form.provider
     : "";
   const selectProvider = (provider: string) => {
+    edits.complete();
     const clearSuggestedName =
       creating &&
       provider !== form.provider &&
@@ -364,6 +368,7 @@ export function ModelsSettings({
     form.maxTokens <= 0 ||
     !Number.isSafeInteger(form.contextWindowTokens) ||
     form.contextWindowTokens <= 0 ||
+    !Number.isFinite(form.temperature) ||
     form.temperature < 0 ||
     form.temperature > 2;
   const selectedPresetReferenced = Boolean(
@@ -375,7 +380,7 @@ export function ModelsSettings({
     disabled: callOrderBusy,
     onReorder: (keys) => onChangeCallOrder(keys.map((key) => presetRows.find((row) => row.key === key)!.name)),
   });
-  const selectPreset = (
+  const selectPreset = async (
     preset: SettingsPayload["model_presets"][number],
     rowKey: string,
   ) => {
@@ -383,6 +388,7 @@ export function ModelsSettings({
     editorTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const toggleCurrentPreset =
       !creating && selectedPreset?.name === preset.name && activeEditorRowKey === rowKey;
+    if (edits.needsCompletion() && !(await edits.commit())) return;
     onSelectConfiguration(preset.name);
     if (toggleCurrentPreset) {
       setEditorOpen((open) => !open);
@@ -514,6 +520,7 @@ export function ModelsSettings({
           onProviderOAuthLogin={onProviderOAuthLogin}
           providerSigningIn={selectedProviderSigningIn}
           onChange={(model, info) => {
+            edits.complete();
             const contextWindow = info?.context_window;
             const initializeContext = creating && !presetContextInitializedRef.current
               && typeof contextWindow === "number" && Number.isSafeInteger(contextWindow) && contextWindow > 0;
@@ -537,6 +544,7 @@ export function ModelsSettings({
       </SettingsRow>
       <SettingsRow title={tx("settings.models.reasoningEffort", "Reasoning effort")}>
         <ReasoningEffortPicker
+          onSelect={edits.complete}
           token={token}
           provider={selectedProvider ?? settings.providers.find((provider) => provider.name === selectedPreset?.resolved_provider)}
           model={form.model}
@@ -546,7 +554,11 @@ export function ModelsSettings({
           onChange={(reasoningEffort) => setForm((prev) => ({ ...prev, reasoningEffort }))}
         />
       </SettingsRow>
-      <Dialog open={advancedOpen} onOpenChange={setAdvancedOpen}>
+      <Dialog open={advancedOpen} onOpenChange={(open) => {
+        if (!open && !creating && edits.needsCompletion()) {
+          void edits.commit().then((saved) => { if (saved) setAdvancedOpen(false); });
+        } else setAdvancedOpen(open);
+      }}>
         <DialogTrigger asChild>
           <button
             type="button"
@@ -612,6 +624,7 @@ export function ModelsSettings({
               </div>
             )}
           </div>
+          {error ? <p role="alert" className="settings-list-inset pb-4 text-[13px] text-destructive">{error}</p> : null}
         </DialogContent>
       </Dialog>
       <div className="settings-list-inset flex min-h-[58px] flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -911,10 +924,16 @@ export function ModelsSettings({
         </div>
       </section>
       <Dialog open={editorOpen && (creating || selectedPreset !== null)} onOpenChange={(open) => {
-        setEditorOpen(open);
-        if (!open && creating) onCancelCreate();
+        if (!open && !creating && edits.needsCompletion()) {
+          void edits.commit().then((saved) => { if (saved) setEditorOpen(false); });
+        } else {
+          setEditorOpen(open);
+          if (!open && creating) onCancelCreate();
+        }
       }}>
         <DialogContent aria-describedby={undefined}
+          onChangeCapture={edits.onChangeCapture} onFocusCapture={edits.onFocusCapture}
+          onBlurCapture={edits.onBlurCapture}
           onEscapeKeyDown={() => setHideEditorReturnFocus(true)}
           className="relative max-h-[85dvh] w-[min(calc(100vw-2rem),40rem)] max-w-none gap-0 overflow-y-auto p-0"
           onCloseAutoFocus={(event) => {
@@ -925,6 +944,7 @@ export function ModelsSettings({
             {creating ? tx("settings.models.newPreset", "New model preset") : selectedPreset?.name}
           </DialogTitle>
           <div className="settings-grid !px-0 pt-8">{renderPresetEditor()}</div>
+          {error && !advancedOpen ? <p role="alert" className="settings-list-inset pb-4 text-[13px] text-destructive">{error}</p> : null}
         </DialogContent>
       </Dialog>
     </div>
@@ -951,6 +971,7 @@ function ModelAdvancedFields({
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const [temperatureDraft, setTemperatureDraft] = useState<{ text: string; value: number } | null>(null);
   return (
     <>
       <ModelTokenBudgetRow
@@ -965,10 +986,13 @@ function ModelAdvancedFields({
           min={0}
           max={2}
           step={0.1}
-          value={temperature}
+          value={temperatureDraft && Object.is(temperatureDraft.value, temperature) ? temperatureDraft.text : temperature}
+          aria-invalid={!Number.isFinite(temperature) || temperature < 0 || temperature > 2}
           onChange={(event) => {
-            const value = Number(event.target.value);
-            if (Number.isFinite(value)) onChange({ temperature: value });
+            const text = event.target.value;
+            const value = text.trim() ? Number(text) : Number.NaN;
+            setTemperatureDraft({ text, value });
+            onChange({ temperature: value });
           }}
           className="h-9 text-[13px]"
         />

@@ -22,6 +22,7 @@ from nanobot.api.server import (
     handle_chat_completions,
 )
 from nanobot.providers.base import LLMUsage
+from nanobot.providers.unconfigured_provider import UnconfiguredProvider
 
 try:
     from aiohttp import web
@@ -77,6 +78,29 @@ def test_error_json() -> None:
     body = json.loads(resp.body)
     assert body["error"]["message"] == "bad request"
     assert body["error"]["code"] == 400
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.asyncio
+async def test_unconfigured_model_returns_503_before_execution(aiohttp_client, mock_agent, stream):
+    mock_agent.provider = UnconfiguredProvider("not-configured")
+    prepare = AsyncMock()
+    app = create_app(mock_agent, api_key=API_KEY, prepare_agent=prepare)
+    client = await aiohttp_client(app)
+
+    assert (await client.get("/health")).status == 200
+    denied = await client.post("/v1/chat/completions", json={"messages": []})
+    assert denied.status == 401
+    response = await client.post(
+        "/v1/chat/completions", headers=AUTH_HEADERS,
+        json={"messages": [{"role": "user", "content": "hello"}], "stream": stream},
+    )
+    assert response.status == 503
+    error = (await response.json())["error"]
+    assert error["type"] == "configuration_error"
+    assert "Model is not configured" in error["message"]
+    mock_agent.process_direct.assert_not_called()
+    prepare.assert_not_called()
 
 
 def test_chat_completion_response() -> None:
@@ -243,19 +267,6 @@ async def test_no_user_message_returns_400(aiohttp_client, app) -> None:
     assert resp.status == 400
 
 
-@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
-@pytest.mark.asyncio
-async def test_stream_true_returns_sse(aiohttp_client, app) -> None:
-    client = await aiohttp_client(app)
-    resp = await client.post(
-        "/v1/chat/completions",
-        headers=AUTH_HEADERS,
-        json={"messages": [{"role": "user", "content": "hello"}], "stream": True},
-    )
-    assert resp.status == 200
-    assert resp.content_type == "text/event-stream"
-
-
 @pytest.mark.asyncio
 async def test_model_mismatch_returns_400() -> None:
     request = MagicMock()
@@ -377,6 +388,46 @@ async def test_followup_requests_share_same_session_key(aiohttp_client) -> None:
     assert r1.status == 200
     assert r2.status == 200
     assert call_log == [API_SESSION_KEY, API_SESSION_KEY]
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize(("session_id", "chat_id"), [
+    ("chat-a", "chat-a"),
+    (" chat-a ", " chat-a "),
+    ("  ", "  "),
+    ("api:chat-a", "api:chat-a"),
+    ("会话:a", "会话:a"),
+    ("default", "default"),
+    (None, "default"),
+    ("", "default"),
+    (0, "default"),
+    (42, "42"),
+    ({"id": 1}, "{'id': 1}"),
+])
+async def test_session_route_preserves_existing_json_identity(
+    aiohttp_client, mock_agent, session_id, chat_id, stream,
+) -> None:
+    """Routing must not normalize or reject previously accepted session IDs."""
+    app = create_app(mock_agent, model_name="m", api_key=API_KEY)
+    client = await aiohttp_client(app)
+
+    resp = await client.post(
+        "/v1/chat/completions",
+        headers=AUTH_HEADERS,
+        json={
+            "messages": [{"role": "user", "content": "hi"}],
+            "session_id": session_id, "stream": stream,
+        },
+    )
+
+    assert resp.status == 200
+    await resp.read()
+    call_kwargs = mock_agent.process_direct.call_args.kwargs
+    assert call_kwargs["session_key"] == f"api:{chat_id}"
+    assert call_kwargs["channel"] == "api"
+    assert call_kwargs["chat_id"] == chat_id
 
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
@@ -624,7 +675,8 @@ async def test_process_direct_accepts_media() -> None:
 
     loop = AgentLoop.__new__(AgentLoop)
     loop._session_locks = {}
-    loop.runtime_event_publisher = RuntimeEventPublisher(MessageBus())
+    loop.bus = MessageBus()
+    loop.runtime_event_publisher = RuntimeEventPublisher(loop.bus)
 
     captured_msg = None
 

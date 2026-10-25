@@ -9,6 +9,8 @@ interface FilePreviewPanelProps {
   token: string;
   loadPreview?: (path: string) => Promise<FilePreviewPayload>;
   initialPreview?: FilePreviewPayload;
+  onOpenFilePreview?: (path: string) => void;
+  onResolvePath?: (path: string, canonicalPath: string) => void;
 }
 
 export function FilePreviewPanel({
@@ -17,6 +19,8 @@ export function FilePreviewPanel({
   token,
   loadPreview,
   initialPreview,
+  onOpenFilePreview,
+  onResolvePath,
 }: FilePreviewPanelProps) {
   const [state, setState] = useState<FilePreviewPanelState>(() => initialPreview
     ? { status: "ready", payload: initialPreview } : { status: "loading" });
@@ -28,6 +32,8 @@ export function FilePreviewPanel({
   // when a session/path/loader change actually starts another request.
   const tokenRef = useRef(token);
   tokenRef.current = token;
+  const onResolvePathRef = useRef(onResolvePath);
+  onResolvePathRef.current = onResolvePath;
 
   useEffect(() => {
     let cancelled = false;
@@ -38,8 +44,10 @@ export function FilePreviewPanel({
       : (previous.status === "loading" ? previous : { status: "loading" }));
     (loadPreview?.(path) ?? fetchFilePreview(tokenRef.current, sessionKey, path))
       .then((payload) => {
-        if (!cancelled) setState(previous => previous.status === "ready" && previous.payload === payload
+        if (cancelled) return;
+        setState(previous => previous.status === "ready" && previous.payload === payload
           ? previous : { status: "ready", payload });
+        onResolvePathRef.current?.(path, payload.path);
       })
       .catch((error: unknown) => {
         if (!cancelled) setState({ status: "error",
@@ -55,6 +63,7 @@ export function FilePreviewPanel({
   }, [path, sessionKey, loadPreview]);
 
   const reportImageError = useCallback(() => setState({ status: "error" }), []);
-  return <FilePreviewPanelView path={path} state={state} imageOpen={imageOpen}
+  return <FilePreviewPanelView key={`${sessionKey}:${path}`} path={path} state={state} imageOpen={imageOpen}
+    onOpenFilePreview={onOpenFilePreview}
     onImageOpenChange={setImageOpen} onImageError={reportImageError} />;
 }

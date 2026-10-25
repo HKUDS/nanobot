@@ -4,8 +4,9 @@ Covers non-streaming (_parse) and streaming (_parse_chunks) paths for
 providers that return a reasoning_content field (e.g. MiMo, DeepSeek-R1).
 """
 
-from types import SimpleNamespace
 from unittest.mock import patch
+
+from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.utils.helpers import build_assistant_message
@@ -83,9 +84,17 @@ def test_parse_sdk_reasoning_content_empty_string_preserved() -> None:
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
-    message = SimpleNamespace(content="answer", reasoning_content="", tool_calls=None)
-    choice = SimpleNamespace(message=message, finish_reason="stop")
-    response = SimpleNamespace(choices=[choice], usage=None)
+    response = ChatCompletion.model_validate({
+        "id": "chatcmpl-reasoning",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "test-model",
+        "choices": [{
+            "index": 0,
+            "message": {"role": "assistant", "content": "answer", "reasoning_content": ""},
+            "finish_reason": "stop",
+        }],
+    })
 
     result = provider._parse(response)
 
@@ -172,13 +181,23 @@ def test_parse_chunks_dict_reasoning_content_none_when_absent() -> None:
     assert result.reasoning_content is None
 
 
-# ── _parse_chunks: streaming SDK-object branch ────────────────────────────
+# ── _parse_chunks: streaming SDK objects ──────────────────────────────────
 
 
-def _make_reasoning_chunk(reasoning: str | None, content: str | None, finish: str | None):
-    delta = SimpleNamespace(content=content, reasoning_content=reasoning, tool_calls=None)
-    choice = SimpleNamespace(finish_reason=finish, delta=delta)
-    return SimpleNamespace(choices=[choice], usage=None)
+def _make_reasoning_chunk(
+    reasoning: str | None, content: str | None, finish: str | None,
+) -> ChatCompletionChunk:
+    return ChatCompletionChunk.model_validate({
+        "id": "chatcmpl-reasoning",
+        "object": "chat.completion.chunk",
+        "created": 0,
+        "model": "test-model",
+        "choices": [{
+            "index": 0,
+            "finish_reason": finish,
+            "delta": {"content": content, "reasoning_content": reasoning},
+        }],
+    })
 
 
 def test_parse_chunks_sdk_accumulates_reasoning_content() -> None:

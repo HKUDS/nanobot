@@ -7,6 +7,7 @@ Use this page when you know what you want to run and need the command shape. For
 | Goal | Command | Notes |
 |---|---|---|
 | Check the install | `nanobot --version` | If this fails, try `python -m nanobot --version` |
+| Update an ordinary Python venv | `nanobot update` | Latest stable PyPI release; use the [installation-specific route](./updating.md#installation-owners) for other methods |
 | Create or refresh config | `nanobot onboard` | Creates `~/.nanobot/config.json` and `~/.nanobot/workspace/` |
 | Refresh config non-interactively | `nanobot onboard --refresh` | Preserves existing values and adds missing default fields without prompting |
 | Use guided setup | `nanobot onboard --wizard` | Best when you prefer prompts over hand-editing JSON |
@@ -51,6 +52,27 @@ Desktop terminal credentials are short-lived WebSocket/API tokens obtained throu
 Desktop-only distributions use the narrow `nanobot-desktop-tui` entrypoint inside their existing private runtime; it is not a replacement for the full Python CLI. They must ship this engine entrypoint and a matching terminal client together. The client cache can be kept inside Desktop's data root without reading or writing the separate Python installation's config. No additional system Python is needed.
 
 ## Common Patterns
+
+### Updating
+
+```bash
+nanobot update --check       # Check the latest stable PyPI release; do not install
+nanobot update               # Install it in an ordinary Python venv
+nanobot update --dev         # Update source and prepare its matching interfaces
+nanobot update --plan        # Save an exact review; do not install or restart
+```
+
+The first two commands target stable PyPI releases, not the saved Preview subscription. `--dev` (`--update-dev`) selects source, not Preview. `--plan --channel stable` or `--plan --channel preview` inspects that channel without changing the subscription; `--channel` requires `--plan`. Saved plans are not executed by `nanobot update`.
+
+Before an in-place update, back up configuration, workspace files and chat history, then stop all processes sharing that Python environment. New versions may migrate stored data. Use the original [installation-specific route](./updating.md#installation-owners) for uv, pipx, containers, system packages and Desktop; do not overwrite a manager-owned environment with pip. Already-satisfying dependencies remain installed.
+
+Source updates require Git. Existing editable checkouts fast-forward their current branch to its upstream; resolve local changes, detached HEADs and divergence manually. Updating a package with `--dev` creates an editable checkout under `~/.nanobot/src/` on the official `main` branch. nanobot downloads its pinned Bun when needed; Node is not required. To return to a release, install it in a separate environment and launch outside the checkout; in-place source-to-release switching is refused.
+
+After installation, restart nanobot and verify the **running** gateway's version and behavior. The CLI checks the installation, not the live process. Downgrading requires `--allow-downgrade` and compatible data; back up before using it.
+
+In-place CLI updates have no automatic rollback. A failed or interrupted installation leaves an incomplete-update marker under `~/.nanobot/run/`. Stop nanobot and retry the same update from that environment. On Windows, stop processes holding installation files and retry with that environment's `python -m nanobot update` (add `--dev` for source).
+
+The WebUI's **Settings → About** uses a separate reviewed update-and-restart flow for supported installations and shows owner-specific instructions for others. See [Updating nanobot](./updating.md) for Preview selection, recovery and permission limits. Source updates remain CLI-only. To inspect a saved WebUI job, use `nanobot update --job <plan-id>`; [explicit handoff retry](./updating.md#explicit-recovery-before-package-mutation) requires additional consent and an intact installation, not a post-install repair.
 
 Most day-to-day commands use the default config and workspace. Advanced or multi-instance runs usually pass both paths explicitly:
 
@@ -111,17 +133,17 @@ Status does not send a model request. On success, run the printed `nanobot agent
 
 Inside the native TUI, `/sessions` switches saved conversations, `/new-chat` starts another saved conversation, and `/context` explains the compacted summary and raw session suffix available to the next agent turn. `/branch` forks a saved conversation from a completed reply, and `/diff` opens the latest turn's file changes as a full-screen unified diff. `PageUp` loads older transcript pages when you reach the top. By default, each launch starts a new session using the launch directory as its workspace. `--session` selects a specific existing session, and `--workspace` overrides the launch directory. When the TUI exits, it prints a ready-to-run `nanobot agent --session ...` command for the current session.
 
-## Session Storage and Rollback
+## Session Storage
 
-Session JSONL files live under `<config-dir>/sessions/<workspace-id>/`, outside the agent-readable workspace. On the first upgraded start, nanobot safely migrates existing `<workspace>/sessions/*.jsonl` files after verifying an atomic copy. Stop every old nanobot process that uses the workspace before upgrading; old and new binaries must not write the same session concurrently.
+Session state lives in `<config-dir>/sessions/<workspace-id>/sessions.sqlite3`, outside the agent-readable workspace. Existing JSONL conversations are imported on the first startup. JSONL migration is available from 0.3.6 through 0.4.x and is removed in **0.5.0**; installations with only JSONL data must upgrade through that window before using 0.5.0.
 
-To prepare a downgrade, stop nanobot and copy the current sessions back to the path understood by older releases:
+After a successful import, JSONL files and their checkpoints from `<workspace>/sessions/` move to `<config-dir>/sessions/<workspace-id>/jsonl-backup/`, preserving their contents outside the agent-readable workspace. JSONL files already in the private session directory remain there. An interrupted migration resumes on startup before nanobot serves conversations; failed imports leave their source files unchanged.
 
-```bash
-nanobot sessions restore-workspace --config ./bot-a/config.json --workspace ./bot-a/workspace
-```
+WebUI chat history is saved in the same session database. The gateway automatically imports old `<config-dir>/webui/*.jsonl` files and numbered JSONL files inside `<config-dir>/webui/*.segments/` directories. If old history is damaged or cannot be matched to one conversation, startup stops with an error; resolve the reported problem before restarting.
 
-The command never deletes the external store and refuses to overwrite a different existing workspace file. Back up both the config directory and workspace before changing versions.
+The old WebUI history files remain unchanged as backups. Imported chats deleted after the upgrade stay deleted on restart. Keep the `webui` directory: it still contains sidebar preferences and other saved WebUI state.
+
+Before changing versions, stop all nanobot instances using the same config directory and back up that entire directory and the workspace together. Copying only `sessions.sqlite3` while nanobot is running can miss recent messages. To downgrade, restore a complete pre-upgrade backup compatible with the older release. Older releases cannot read newly saved WebUI history; do not combine the current session database with old WebUI history files.
 
 Interactive mode uses nanobot's native TypeScript terminal UI. It talks to the same local gateway as the WebUI, so streaming, tool progress, and WebSocket sessions share one protocol instead of maintaining a second agent loop. If no gateway is running, either client starts it on demand. The TUI paints immediately while the local gateway starts, then obtains fresh bootstrap credentials and connects in the background. Exiting one TUI or WebUI launcher releases only that client; the last interactive launcher stops the on-demand gateway. A small gateway watchdog also reclaims an on-demand process if its last client crashes. `/detach` promotes the shared gateway to persistent background mode before closing the TUI, so active agent work continues without a connected client. An explicit `nanobot gateway --background` starts or promotes the gateway the same way before opening a client. `nanobot gateway restart` restarts a detached gateway without changing that lifetime; restart an attached foreground gateway in its owning terminal. `nanobot gateway stop` ends either mode.
 
@@ -141,17 +163,19 @@ Interactive mode exits with `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
 | Command | Description |
 |---|---|
-| `nanobot webui` | Create config/workspace if needed, enable the local WebUI channel after confirmation, start the gateway, open `http://127.0.0.1:8765`, and follow new gateway logs |
+| `nanobot webui` | Prepare local WebUI settings and open the browser; installer-managed environments launch persistently, other installations remain attached and follow gateway logs |
+| `nanobot webui --detach` | Explicitly start or join a persistent gateway, open the browser and return control to the terminal |
 | `nanobot webui --background` | Deprecated; prints the equivalent explicit `nanobot gateway --background` command and exits |
 | `nanobot webui --dev` | Start the gateway and Vite together at `http://127.0.0.1:5173`, with live frontend updates |
 | `nanobot webui --no-open` | Prepare and start the WebUI without opening a browser |
+| `nanobot webui --no-dock` | Suppress the macOS Dock icon; detached mode remembers this choice until the next WebUI launch |
 | `nanobot webui --port <port>` | Set the WebUI/WebSocket port |
 | `nanobot webui --gateway-port <port>` | Override the gateway health port |
 | `nanobot webui --yes` | Apply safe localhost WebUI defaults without confirmation; configure provider credentials in **Settings → Models** |
 
 First-run WebUI setup binds to `127.0.0.1` by default. Use manual configuration and a WebUI password before exposing the WebSocket channel beyond localhost.
 
-`--dev` is a foreground source-checkout workflow. For shell-based lifecycle management, use `nanobot gateway --background` (or `/detach` from an interactive TUI); `nanobot webui --background` prints migration guidance instead of silently changing process ownership. It installs frontend dependencies when `webui/node_modules` is missing, proxies to the configured WebSocket channel port, and stops Vite when the launcher exits. The shared on-demand gateway stops only when no other interactive client still holds it.
+`--dev` is a foreground source-checkout workflow and cannot be combined with `--detach`. It installs frontend dependencies when `webui/node_modules` is missing, proxies to the configured WebSocket channel port, and stops Vite when the launcher exits. The shared on-demand gateway stops only when no other interactive client still holds it. Installer-managed normal WebUI launches and explicit `--detach` use the gateway's persistent lifecycle; manage that same instance with the `gateway` commands below. The old `webui --background` spelling remains deprecated and prints migration guidance.
 
 ## Gateway
 
@@ -174,7 +198,9 @@ First-run WebUI setup binds to `127.0.0.1` by default. Use manual configuration 
 | `nanobot gateway install-service --dry-run` | Preview the generated service file and system commands |
 | `nanobot gateway uninstall-service` | Remove the installed system service |
 
-For custom instances, pass the same selector flags to management commands:
+On Windows, `gateway stop` waits up to `--timeout` seconds (default: 20) for the gateway to stop normally. If a forced stop is needed, the command displays a warning. Forced stops can interrupt active work.
+
+For custom instances, pass the same selector flags after the management subcommand, as shown below. `--config` and `--workspace` before a management subcommand are rejected with a usage error; they are not inherited.
 
 ```bash
 nanobot gateway --background --config ./bot-a/config.json --workspace ./bot-a/workspace
@@ -294,7 +320,7 @@ The `plugins` command name is retained for compatibility, but these entries are 
 | `api` | Dependencies required by the OpenAI-compatible `nanobot serve` process |
 | `azure` | Azure identity support for Azure-hosted models |
 | `bedrock` | AWS Bedrock model provider support |
-| `langfuse` | Langfuse tracing support for OpenAI-compatible providers |
+| `langfuse` | Langfuse tracing support for OpenAI-compatible providers and the Codex OAuth provider |
 | `olostep` | Olostep web search provider support |
 | A channel name such as `telegram` or `slack` | The connector package and saved channel enablement |
 

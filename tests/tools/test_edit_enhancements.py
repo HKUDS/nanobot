@@ -136,7 +136,7 @@ class TestEditIpynbFiles:
             new_text='"cells": [{"cell_type": "markdown", "source": "hi"}]',
         )
         assert "Patch applied:" in result
-        assert '"source": "hi"' in f.read_text(encoding="utf-8")
+        assert f.read_text(encoding="utf-8") == '{"cells": [{"cell_type": "markdown", "source": "hi"}]}'
 
 
 # ---------------------------------------------------------------------------

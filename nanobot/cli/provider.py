@@ -224,7 +224,8 @@ def _login_openai_codex() -> None:
         get_token, login_oauth_interactive = _load_openai_oauth_client()
         proxy = None
         try:
-            proxy = resolve_config_env_vars(load_config()).providers.openai_codex.proxy or None
+            config = resolve_config_env_vars(load_config())
+            proxy = config.network.resolve_proxy(config.providers.openai_codex.use_proxy)
         except ValueError as e:
             console.print(f"[red]{e}[/red]")
             raise typer.Exit(1) from e
@@ -267,7 +268,8 @@ def _login_xai_grok() -> None:
     from nanobot.providers.xai_oauth import get_xai_oauth_token, login_xai_oauth
 
     try:
-        proxy = resolve_config_env_vars(load_config()).providers.xai_grok.proxy or None
+        config = resolve_config_env_vars(load_config())
+        proxy = config.network.resolve_proxy(config.providers.xai_grok.use_proxy)
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc

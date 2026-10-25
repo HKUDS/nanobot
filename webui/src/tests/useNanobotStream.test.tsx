@@ -5,15 +5,17 @@ import { describe, expect, it, vi } from "vitest";
 import { useNanobotStream } from "@/hooks/useNanobotStream";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
 import { normalizeActivityTimeline } from "@/lib/activity-timeline";
-import type { StreamError } from "@/lib/nanobot-client";
+import { ThreadMessageCache } from "@/lib/thread-message-cache";
+import type { NanobotClient, StreamError } from "@/lib/nanobot-client";
 import type {
   ConnectionStatus,
-  GoalStateWsPayload,
   InboundEvent,
+  UIMediaAttachment,
   UIMessage,
 } from "@/lib/types";
 import { ClientProvider } from "@/providers/ClientProvider";
 import projectionFixture from "./fixtures/live-replay-event-projection.json";
+import { createStreamClient } from "./stream-client";
 
 const EMPTY_MESSAGES: UIMessage[] = [];
 
@@ -70,112 +72,64 @@ function normalizeProjection(messages: UIMessage[]): Array<Record<string, unknow
 }
 
 function fakeClient() {
-  const handlers = new Map<string, Set<(ev: InboundEvent) => void>>();
+  const { client: lifecycle, receive } = createStreamClient();
   const statusHandlers = new Set<(status: ConnectionStatus) => void>();
-  const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
   const errorHandlers = new Set<(error: StreamError) => void>();
-  const runStartedAtByChatId = new Map<string, number>();
-  const unsettledRunByChatId = new Map<string, boolean>();
-  const goalStateByChatId = new Map<string, GoalStateWsPayload>();
   const requestMutation = vi.fn().mockResolvedValue({});
   let status: ConnectionStatus = "open";
 
-  function recordGoalStatusForRunStrip(chatId: string, ev: InboundEvent) {
-    if (ev.event === "turn_end") {
-      runStartedAtByChatId.delete(chatId);
-      return;
-    }
-    if (ev.event !== "goal_status") return;
-    if (ev.status === "running" && typeof ev.started_at === "number") {
-      runStartedAtByChatId.set(chatId, ev.started_at);
-    } else {
-      runStartedAtByChatId.delete(chatId);
-    }
-  }
-
-  function recordGoalStateSnapshot(chatId: string, ev: InboundEvent) {
-    if (ev.event === "goal_state") {
-      goalStateByChatId.set(chatId, ev.goal_state);
-      return;
-    }
-    if (ev.event === "turn_end" && ev.goal_state != null && typeof ev.goal_state === "object") {
-      goalStateByChatId.set(chatId, ev.goal_state);
-    }
-  }
-
   return {
     client: {
-      get status() {
-        return status;
-      },
+      get status() { return status; },
       defaultChatId: null as string | null,
       onStatus(handler: (nextStatus: ConnectionStatus) => void) {
         statusHandlers.add(handler);
         handler(status);
         return () => statusHandlers.delete(handler);
       },
-      onRunStatus(handler: (chatId: string, startedAt: number | null) => void) {
-        runStatusHandlers.add(handler);
-        for (const [chatId, startedAt] of runStartedAtByChatId) handler(chatId, startedAt);
-        return () => runStatusHandlers.delete(handler);
-      },
+      onRunStatus: lifecycle.onRunStatus.bind(lifecycle),
+      getRunState: lifecycle.getRunState.bind(lifecycle),
+      getRunGeneration: lifecycle.getRunGeneration.bind(lifecycle),
+      restorePendingRun: lifecycle.restorePendingRun.bind(lifecycle),
+      getRunStartedAt: lifecycle.getRunStartedAt.bind(lifecycle),
+      getRunTurnId: lifecycle.getRunTurnId.bind(lifecycle),
+      getGoalState: lifecycle.getGoalState.bind(lifecycle),
+      hasUnsettledRun: lifecycle.hasUnsettledRun.bind(lifecycle),
+      onTranscript: lifecycle.onTranscript.bind(lifecycle),
       onError(handler: (error: StreamError) => void) {
         errorHandlers.add(handler);
         return () => errorHandlers.delete(handler);
       },
-      getRunStartedAt(chatId: string) {
-        const v = runStartedAtByChatId.get(chatId);
-        return v === undefined ? null : v;
-      },
-      getRunTurnId() {
-        return null;
-      },
-      getGoalState(chatId: string) {
-        return goalStateByChatId.get(chatId);
-      },
-      hasUnsettledRun(chatId: string) {
-        return unsettledRunByChatId.get(chatId) === true;
-      },
-      onChat(chatId: string, h: (ev: InboundEvent) => void) {
-        let set = handlers.get(chatId);
-        if (!set) {
-          set = new Set();
-          handlers.set(chatId, set);
-        }
-        set.add(h);
-        return () => set!.delete(h);
-      },
-      sendMessage: vi.fn(),
-      sendAttachments: vi.fn().mockResolvedValue(undefined),
+      sendMessage: vi.fn(lifecycle.sendMessage.bind(lifecycle)),
+      sendAttachments: vi.fn(async (...args: Parameters<NanobotClient["sendAttachments"]>) => {
+        lifecycle.sendMessage(args[0], args[1], undefined, args[3]);
+      }),
       requestMutation,
-      finishRunLocally: vi.fn(),
-      newChat: vi.fn(),
-      forkChat: vi.fn(),
-      attach: vi.fn(),
-      connect: vi.fn(),
-      close: vi.fn(),
-      updateUrl: vi.fn(),
+      finishRunLocally: vi.fn(lifecycle.finishRunLocally.bind(lifecycle)),
+      newChat: vi.fn(), forkChat: vi.fn(), attach: vi.fn(),
+      connect: vi.fn(), close: vi.fn(), updateUrl: vi.fn(),
     },
-    emit(chatId: string, ev: InboundEvent) {
-      recordGoalStatusForRunStrip(chatId, ev);
-      recordGoalStateSnapshot(chatId, ev);
-      const set = handlers.get(chatId);
-      set?.forEach((h) => h(ev));
-    },
+    emit(_chatId: string, event: InboundEvent) { receive(event); },
     emitStatus(nextStatus: ConnectionStatus) {
       status = nextStatus;
       statusHandlers.forEach((handler) => handler(status));
     },
     emitRunStatus(chatId: string, startedAt: number | null) {
-      if (startedAt === null) runStartedAtByChatId.delete(chatId);
-      else runStartedAtByChatId.set(chatId, startedAt);
-      runStatusHandlers.forEach((handler) => handler(chatId, startedAt));
+      receive({ event: "goal_status", chat_id: chatId,
+        status: startedAt === null ? "idle" : "running",
+        ...(startedAt !== null ? { started_at: startedAt } : {}),
+      });
     },
     emitError(error: StreamError) {
+      if (error.chatId && error.turnId) receive({
+        event: "error", chat_id: error.chatId, turn_id: error.turnId,
+        detail: error.kind,
+      });
       errorHandlers.forEach((handler) => handler(error));
     },
     setUnsettled(chatId: string, unsettled: boolean) {
-      unsettledRunByChatId.set(chatId, unsettled);
+      if (unsettled) lifecycle.sendMessage(chatId, "pending", undefined, { turnId: "pending-fixture" });
+      else lifecycle.finishRunLocally(chatId);
     },
     requestMutation,
   };
@@ -203,6 +157,114 @@ async function flushStreamFrame() {
 }
 
 describe("useNanobotStream", () => {
+  it("resumes a merge_next cached snapshot including reasoning queued before detach", () => {
+    const fake = fakeClient();
+    const cache = new ThreadMessageCache(() => false);
+    const first = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES, false,
+      undefined, undefined, [], { key: null, cache }), { wrapper: wrap(fake.client) });
+    act(() => {
+      fake.emit("checkpoint", { event: "delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 1, text: "First " });
+      fake.emit("checkpoint", { event: "stream_end", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 2, text: "First ", resuming: true, merge_next: true });
+      fake.emit("checkpoint", { event: "reasoning_delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 3, text: "Queued " });
+    });
+    first.unmount();
+    const snapshot = cache.get("checkpoint")!;
+    expect(snapshot.projection.messages[0].reasoning).toBe("Queued ");
+    const restored = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES, false,
+      undefined, undefined, [], { key: null, cache }), { wrapper: wrap(fake.client) });
+    act(() => {
+      fake.emit("checkpoint", { event: "reasoning_delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 4, text: "Continue reasoning" });
+      fake.emit("checkpoint", { event: "reasoning_end", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 5 });
+      fake.emit("checkpoint", { event: "delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 6, text: "last" });
+      fake.emit("checkpoint", { event: "stream_end", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 7, text: "First last" });
+    });
+    expect(restored.result.current.messages).toHaveLength(1);
+    expect(restored.result.current.messages[0]).toMatchObject({
+      content: "First last", reasoning: "Queued Continue reasoning", streamId: "answer", reasoningStreamId: "answer",
+      projectionStartSeq: 1, turnSeq: 7,
+    });
+    expect(snapshot.projection.messages[0].content).toBe("First ");
+    expect(snapshot.projection.messages[0].reasoning).toBe("Queued ");
+  });
+
+  it.each([true, false])("keeps answer segments across a provider-tool boundary (snapshot: %s)", (snapshot) => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("hosted-tool", EMPTY_MESSAGES), { wrapper: wrap(fake.client) });
+    act(() => {
+      fake.emit("hosted-tool", { event: "delta", chat_id: "hosted-tool", turn_id: "turn", stream_id: "answer", turn_seq: 1, text: "First " });
+      fake.emit("hosted-tool", { event: "stream_end", chat_id: "hosted-tool", turn_id: "turn", stream_id: "answer", turn_seq: 2, ...(snapshot ? { text: "First " } : {}), resuming: true });
+      fake.emit("hosted-tool", { event: "message", chat_id: "hosted-tool", turn_id: "turn", turn_seq: 3, kind: "tool_hint", text: "web_search(query)" });
+      fake.emit("hosted-tool", { event: "delta", chat_id: "hosted-tool", turn_id: "turn", stream_id: "after-tool", turn_seq: 4, text: "second" });
+      fake.emit("hosted-tool", { event: "stream_end", chat_id: "hosted-tool", turn_id: "turn", stream_id: "after-tool", turn_seq: 5, ...(snapshot ? { text: "second" } : {}), resuming: true, merge_next: true });
+    });
+    expect(result.current.messages.map((message) => message.content)).toEqual(["First ", "web_search(query)", "second"]);
+    act(() => {
+      fake.emit("hosted-tool", { event: "delta", chat_id: "hosted-tool", turn_id: "turn", stream_id: "after-tool", turn_seq: 6, text: " last" });
+      fake.emit("hosted-tool", { event: "stream_end", chat_id: "hosted-tool", turn_id: "turn", stream_id: "after-tool", turn_seq: 7, ...(snapshot ? { text: "second last" } : {}), response_sources: [] });
+    });
+    expect(result.current.messages.map((message) => message.content)).toEqual(["First ", "web_search(query)", "second last"]);
+    expect(result.current.messages[0].projectionStartSeq).toBe(1);
+    expect(result.current.messages[2].projectionStartSeq).toBe(4);
+  });
+
+  it("captures the first sequence of coalesced chunks before a paint", () => {
+    const fake = fakeClient();
+    const cache = new ThreadMessageCache(() => false);
+    const first = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES, false,
+      undefined, undefined, [], { key: null, cache }), { wrapper: wrap(fake.client) });
+    act(() => {
+      fake.emit("checkpoint", { event: "delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 1, text: "First " });
+      fake.emit("checkpoint", { event: "delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 2, text: "last" });
+    });
+    expect(first.result.current.messages).toHaveLength(0);
+    first.unmount();
+    const snapshot = cache.get("checkpoint")!;
+    expect(snapshot.projection.messages).toHaveLength(1);
+    expect(snapshot.projection.messages[0]).toMatchObject({
+      content: "First last", streamId: "answer", projectionStartSeq: 1, turnSeq: 2,
+    });
+    const restored = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES, false,
+      undefined, undefined, [], { key: null, cache }), { wrapper: wrap(fake.client) });
+    act(() => {
+      fake.emit("checkpoint", { event: "stream_end", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 3, response_sources: [] });
+    });
+    expect(restored.result.current.messages[0]).toMatchObject({ projectionStartSeq: 1, turnSeq: 3 });
+    expect(snapshot.projection.closedAssistantIds.size).toBe(0);
+    expect(snapshot.projection.closedAnswerStreamIds.size).toBe(0);
+    restored.unmount();
+    const closed = cache.get("checkpoint")!.projection;
+    expect(closed.closedAssistantIds.size).toBe(1);
+    expect(closed.closedAnswerStreamIds.size).toBe(1);
+  });
+
+  it("retains side-channel ownership when restoring an active answer from cache", async () => {
+    const fake = fakeClient();
+    const cache = new ThreadMessageCache(() => false);
+    const first = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES, false,
+      undefined, undefined, [], { key: null, cache }), { wrapper: wrap(fake.client) });
+    act(() => {
+      fake.emit("checkpoint", { event: "delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", text: "Active answer" });
+    });
+    await flushStreamFrame();
+    act(() => { first.result.current.send("/model", undefined, { sideChannel: true }); });
+    const commandTurn = fake.client.sendMessage.mock.calls.at(-1)![3]!.turnId!;
+    first.unmount();
+    const snapshot = cache.get("checkpoint")!;
+    expect(snapshot.sideChannelTurnIds.has(commandTurn)).toBe(true);
+    const restored = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES, false,
+      undefined, undefined, [], { key: null, cache }), { wrapper: wrap(fake.client) });
+    act(() => {
+      fake.emit("checkpoint", { event: "message", chat_id: "checkpoint", turn_id: commandTurn, text: "Current model" });
+      fake.emit("checkpoint", { event: "delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", text: " continued" });
+      fake.emit("checkpoint", { event: "stream_end", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer" });
+    });
+    expect(restored.result.current.messages.filter((message) => message.role === "assistant").map((message) => message.content))
+      .toEqual(["Active answer continued", "Current model"]);
+    expect(snapshot.sideChannelTurnIds.has(commandTurn)).toBe(true);
+    restored.unmount();
+    expect(cache.get("checkpoint")!.sideChannelTurnIds.has(commandTurn)).toBe(false);
+  });
+
   it("keeps invocation snapshots across streaming, recovery segments, completion and reload", async () => {
     const fake = fakeClient();
     const a = { provider: "openai_codex", model: "gpt", preset: "writer", fallback: false };
@@ -239,7 +301,7 @@ describe("useNanobotStream", () => {
     act(() => fake.emit("sources", { event: "stream_end", chat_id: "sources", response_sources: [] }));
     expect(result.current.messages[1].responseSources).toEqual([]);
   });
-  it.each(["succeeded", "cancelled"] as const)("updates one stable compaction row to %s", (phase) => {
+  it.each(["succeeded", "failed", "cancelled"] as const)("updates one stable compaction row to %s", (phase) => {
     const fake = fakeClient();
     const { result } = renderHook(
       () => useNanobotStream("chat-compaction", EMPTY_MESSAGES),
@@ -252,6 +314,7 @@ describe("useNanobotStream", () => {
         chat_id: "chat-compaction",
         compaction_id: "compact-1",
         phase: "started",
+        reason: "idle",
       });
     });
 
@@ -263,6 +326,7 @@ describe("useNanobotStream", () => {
       compaction: {
         id: "compact-1",
         phase: "started",
+        reason: "idle",
         announce: true,
       },
     });
@@ -273,6 +337,7 @@ describe("useNanobotStream", () => {
         chat_id: "chat-compaction",
         compaction_id: "compact-1",
         phase,
+        reason: "idle",
       });
     });
 
@@ -282,6 +347,7 @@ describe("useNanobotStream", () => {
       createdAt,
       compaction: {
         phase,
+        reason: "idle",
         announce: true,
       },
     });
@@ -418,7 +484,7 @@ describe("useNanobotStream", () => {
       requestFrame.mockRestore();
       now.mockRestore();
       if (descriptor) Object.defineProperty(document, "visibilityState", descriptor);
-      else delete (document as Document & { visibilityState?: string }).visibilityState;
+      else Reflect.deleteProperty(document, "visibilityState");
       vi.useRealTimers();
     }
   });
@@ -466,7 +532,7 @@ describe("useNanobotStream", () => {
       if (visibilityDescriptor) {
         Object.defineProperty(document, "visibilityState", visibilityDescriptor);
       } else {
-        delete (document as Document & { visibilityState?: DocumentVisibilityState }).visibilityState;
+        Reflect.deleteProperty(document, "visibilityState");
       }
       vi.useRealTimers();
     }
@@ -694,7 +760,7 @@ describe("useNanobotStream", () => {
     });
     expect(result.current.isStreaming).toBe(false);
     expect(result.current.runStartedAt).toBeNull();
-    expect(fake.client.finishRunLocally).toHaveBeenCalledWith("chat-recovery");
+    expect(fake.client.getRunState("chat-recovery").active).toBe(false);
 
     act(() => {
       fake.emit("chat-recovery", {
@@ -722,8 +788,38 @@ describe("useNanobotStream", () => {
       });
     });
     expect(result.current.isStreaming).toBe(false);
-    expect(fake.client.finishRunLocally).toHaveBeenCalledWith("chat-recovery");
+    expect(fake.client.getRunState("chat-recovery").active).toBe(false);
   });
+
+  it.each(["awaiting_user", "resuming"] as const)(
+    "reconciles a missed model recovery event after reconnecting to %s",
+    (status) => {
+      const fake = fakeClient();
+      const { result } = renderHook(() => useNanobotStream("chat-recovery", EMPTY_MESSAGES), {
+        wrapper: wrap(fake.client),
+      });
+      act(() => {
+        fake.emit("chat-recovery", {
+          event: "turn_end", chat_id: "chat-recovery",
+          outcome: "failed", failure_kind: "model", failure_error_kind: "connection",
+        });
+      });
+      expect(result.current.streamError?.kind).toBe("model_request_failed");
+      act(() => {
+        fake.emit("chat-recovery", {
+          event: "attached", chat_id: "chat-recovery",
+          recovery_state: {
+            recovery_id: "recovery-1", status,
+            reason: status === "resuming" ? "user_confirmed" : "model_request_failed",
+            failure_error_kind: "connection",
+          },
+        });
+      });
+      expect(result.current.streamError).toBeNull();
+      expect(result.current.recoveryState?.status).toBe(status);
+      expect(result.current.isStreaming).toBe(status === "resuming");
+    },
+  );
 
   it("does not let historical recovered state clear a later active turn", () => {
     const fake = fakeClient();
@@ -860,6 +956,31 @@ describe("useNanobotStream", () => {
     );
 
     expect(result.current.messages.at(-1)?.kind).toBe("trace");
+    expect(result.current.isStreaming).toBe(false);
+  });
+
+  it("restores cached tool activity according to each conversation's completed turns", () => {
+    const fake = fakeClient();
+    const initialMessages: UIMessage[] = [{
+      id: "cached-tool-activity", role: "tool", kind: "trace", content: "exec(…)",
+      traces: ["exec(…)"], turnId: "completed-tool-turn", isStreaming: true, createdAt: 1,
+    }];
+    const initialProps = {
+      chatId: "completed-tools",
+      initialMessages,
+      completedTurnIds: ["completed-tool-turn"],
+    };
+    const { result, rerender } = renderHook((props: typeof initialProps) => useNanobotStream(
+      props.chatId, props.initialMessages, false, undefined, undefined, props.completedTurnIds,
+    ), { wrapper: wrap(fake.client), initialProps });
+    expect(result.current.isStreaming).toBe(false);
+    rerender({
+      chatId: "active-tools",
+      initialMessages: [{ ...initialMessages[0], turnId: "active-tool-turn" }],
+      completedTurnIds: [],
+    });
+    expect(result.current.isStreaming).toBe(true);
+    rerender(initialProps);
     expect(result.current.isStreaming).toBe(false);
   });
 
@@ -2315,23 +2436,23 @@ describe("useNanobotStream", () => {
       { wrapper: wrap(fake.client) },
     );
 
-    let submitted: ReturnType<typeof result.current.send> = null;
+    const submitted: { current: ReturnType<typeof result.current.send> } = { current: null };
     act(() => {
-      submitted = result.current.send("bind the camera");
+      submitted.current = result.current.send("bind the camera");
     });
 
-    expect(submitted).not.toBeNull();
-    expect(submitted?.sideChannel).toBe(false);
+    expect(submitted.current).not.toBeNull();
+    expect(submitted.current?.sideChannel).toBe(false);
     expect(result.current.messages[0]).toMatchObject({
-      id: submitted?.userMessageId,
-      turnId: submitted?.turnId,
+      id: submitted.current?.userMessageId,
+      turnId: submitted.current?.turnId,
       role: "user",
     });
     expect(fake.client.sendMessage).toHaveBeenCalledWith(
       "chat-submitted-turn",
       "bind the camera",
       undefined,
-      expect.objectContaining({ turnId: submitted?.turnId }),
+      expect.objectContaining({ turnId: submitted.current?.turnId }),
     );
   });
 
@@ -2730,6 +2851,49 @@ describe("useNanobotStream", () => {
     );
   });
 
+  it("uses the accepted upload URL instead of retaining an encoded video in message state", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("uploaded-video", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    act(() => {
+      result.current.send("watch", [{
+        media: { data_url: "data:video/webm;base64,AAAA", name: "clip.webm" },
+        preview: { kind: "video", url: "data:video/webm;base64,AAAA", name: "clip.webm" },
+      }]);
+    });
+    const optimistic = result.current.messages[0];
+    expect(optimistic.media).toEqual([{ kind: "video", name: "clip.webm" }]);
+    const media = [{ kind: "video" as const, url: "/api/media/sig/upload", name: "clip.webm" }];
+    act(() => fake.emit("uploaded-video", {
+      event: "message_accepted", chat_id: "uploaded-video",
+      turn_id: optimistic.turnId!, starts_turn: true, media_urls: media,
+    }));
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0]).toMatchObject({ id: optimistic.id, media, deliveryStatus: "accepted" });
+  });
+
+  it("replaces a local reference's optimistic preview with the gateway's session URL", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("local-video", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    act(() => {
+      result.current.send("watch", [{
+        media: { path: "/project/video.mp4", name: "video.mp4" },
+        preview: { kind: "video", url: "", name: "video.mp4" },
+      }]);
+    });
+    const optimistic = result.current.messages[0];
+    const media = [{ kind: "video" as const, url: "/api/media/sig/local-video", name: "video.mp4" }];
+    act(() => fake.emit("local-video", {
+      event: "user_message", chat_id: "local-video", text: "watch",
+      turn_id: optimistic.turnId!, starts_turn: true, media_urls: media,
+    }));
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0]).toMatchObject({ id: optimistic.id, media, deliveryStatus: "accepted" });
+  });
+
   it("inlines quoted context into the optimistic and outbound user message", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-quote", EMPTY_MESSAGES), {
@@ -2815,12 +2979,16 @@ describe("useNanobotStream", () => {
       wrapper: wrap(fake.client),
     });
 
+    // Some peers include a kind hint in addition to the message envelope's URL.
+    const media = {
+      kind: "image", url: "/api/media/sig/html", name: "index.html",
+    } satisfies UIMediaAttachment;
     act(() => {
       fake.emit("chat-mislabelled-html", {
         event: "message",
         chat_id: "chat-mislabelled-html",
         text: "file ready",
-        media_urls: [{ kind: "image", url: "/api/media/sig/html", name: "index.html" }],
+        media_urls: [media],
       });
     });
 
@@ -3571,6 +3739,14 @@ describe("live canonical event projection", () => {
 
       for (const event of fixtureCase.live_events) {
         act(() => {
+          // Projection fixtures omit lifecycle admission between their turns.
+          if ("turn_id" in event && event.turn_id
+            && fake.client.getRunTurnId(fixtureCase.chat_id) !== event.turn_id) {
+            fake.emit(fixtureCase.chat_id, {
+              event: "goal_status", chat_id: fixtureCase.chat_id,
+              turn_id: event.turn_id, status: "running", started_at: 0,
+            });
+          }
           fake.emit(fixtureCase.chat_id, event);
         });
       }

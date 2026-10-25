@@ -2,6 +2,27 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Notices and the input share one width, including the compact screen inset. */
+.thread-composer-stack {
+  --composer-content-width: 49.5rem;
+}
+.thread-composer-stack.is-hero {
+  --composer-content-width: 58rem;
+}
+.thread-composer-notice {
+  width: calc(100% - 0.5rem);
+  max-width: var(--composer-content-width, 49.5rem);
+  margin-inline: auto;
+}
+.thread-composer-stack.is-hero .thread-composer-notice {
+  width: 100%;
+}
+@media (min-width: 640px) {
+  .thread-composer-notice {
+    width: 100%;
+  }
+}
+
 @supports (content-visibility: auto) {
   .apps-catalog-row {
     content-visibility: auto;
@@ -24,15 +45,24 @@
     --secondary: 0 0% 96.1%;
     --secondary-foreground: 0 0% 9%;
     --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
+    --muted-foreground: 240 4% 40%;
     --accent: 0 0% 96.1%;
     --accent-foreground: 0 0% 9%;
-    --destructive: 0 84.2% 60.2%;
+    --destructive: 0 73.7% 41.8%;
     --destructive-foreground: 0 0% 98%;
     --border: 40 8% 90.5%;
     --input: 40 8% 90.5%;
     --ring: 0 0% 3.9%;
-    --inline-token-highlight: #ef8e30;
+    --inline-token-highlight: #ad450b;
+    --code-comment: #62626b;
+    --code-string: #166534;
+    --code-keyword: #7e22ce;
+    --code-function: #1d4ed8;
+    --code-property: #854d0e;
+    --diff-added: rgb(16 185 129 / 0.09);
+    --diff-added-foreground: #047857;
+    --diff-deleted: rgb(244 63 94 / 0.09);
+    --diff-deleted-foreground: #be123c;
     --usage-token: 29 86% 56%;
     --session-handle-lightness: 0.5;
     --session-handle-chroma: 0.12;
@@ -50,6 +80,11 @@
     --radius-pill: 9999px;
     --corner-shape: superellipse(1.5);
     --content-column-width: 49.5rem;
+    --reading-size-wide: 18px;
+    --reading-size-narrow: 16px;
+    --text-reading-size: var(--reading-size-wide);
+    --text-code-size: calc(var(--text-reading-size) * 0.875);
+    --text-code-dense-size: calc(var(--text-reading-size) * 0.75);
     --sidebar: 40 8% 96.8%;
     --sidebar-foreground: 0 0% 3.9%;
     --sidebar-content: 240 3% 30%;
@@ -65,6 +100,22 @@
     --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.42);
   }
 
+  :root[data-reading-text-size="small"] {
+    --reading-size-wide: 16px;
+    --reading-size-narrow: 15px;
+  }
+
+  :root[data-reading-text-size="large"] {
+    --reading-size-wide: 20px;
+    --reading-size-narrow: 18px;
+  }
+
+  @media (max-width: 639px) {
+    :root {
+      --text-reading-size: var(--reading-size-narrow);
+    }
+  }
+
   .dark {
     color-scheme: dark;
     --background: 0 0% 19%;
@@ -78,7 +129,7 @@
     --secondary: var(--card);
     --secondary-foreground: 0 0% 98%;
     --muted: var(--card);
-    --muted-foreground: 0 0% 65%;
+    --muted-foreground: 0 0% 72%;
     --accent: 0 0% 25%;
     --accent-foreground: 0 0% 98%;
     /* Destructive text needs contrast on dark surfaces; filled controls use a dark label. */
@@ -88,6 +139,15 @@
     --input: var(--border);
     --ring: 0 0% 83.1%;
     --inline-token-highlight: #ef8e30;
+    --code-comment: #c8c8d0;
+    --code-string: #b5d99c;
+    --code-keyword: #e3a5f7;
+    --code-function: #93c5fd;
+    --code-property: #f6c177;
+    --diff-added: rgb(110 231 183 / 0.11);
+    --diff-added-foreground: #6ee7b7;
+    --diff-deleted: rgb(253 164 175 / 0.11);
+    --diff-deleted-foreground: #fda4af;
     --session-handle-lightness: 0.75;
     --session-handle-chroma: 0.11;
     --temporary-control-active: #ef8e30;
@@ -374,7 +434,35 @@
     --tw-prose-headings: hsl(var(--foreground));
     --tw-prose-bold: hsl(var(--foreground));
     --tw-prose-lead: hsl(var(--foreground));
-    line-height: var(--cjk-line-height);
+    @apply text-reading;
+  }
+
+  .markdown-content :is(h1, h2, h3, h4, h5, h6) {
+    font-weight: 600;
+    line-height: 1.4;
+  }
+  .markdown-content h1 { font-size: 1.5em; }
+  .markdown-content h2 { font-size: 1.25em; }
+  .markdown-content h3 { font-size: 1.125em; }
+  .markdown-content :is(h4, h5, h6) { font-size: 1em; }
+  .markdown-content strong { font-weight: 600; }
+  .markdown-content :is(th, td) {
+    font-size: inherit;
+    line-height: inherit;
+  }
+  .markdown-content blockquote {
+    font-size: 1em;
+    line-height: inherit;
+  }
+  .markdown-content summary {
+    font-size: 1em;
+    font-weight: 600;
+    line-height: inherit;
+  }
+
+  .markdown-inline-code {
+    font-size: 0.875em;
+    font-weight: 400;
   }
 
   .markdown-content .contains-task-list {
@@ -402,6 +490,11 @@
     text-wrap: balance;
   }
 
+  .activity-current,
+  .streaming-text-sheen {
+    --activity-animation: 2.8s ease-in-out infinite;
+  }
+
   /* L→R sheen clipped to live activity labels. The highlight lives inside
      the glyphs, not in the row background, so dark mode stays quiet. */
   @keyframes streaming-text-sheen-ltr {
@@ -420,7 +513,7 @@
     color: inherit;
   }
   .streaming-text-sheen::after {
-    content: attr(data-sheen-text);
+    content: attr(data-sheen-text) / "";
     position: absolute;
     inset: 0;
     display: block;
@@ -428,6 +521,7 @@
     white-space: nowrap;
     text-overflow: ellipsis;
     pointer-events: none;
+    padding-right: inherit;
     color: transparent;
     background: linear-gradient(
       90deg,
@@ -443,7 +537,7 @@
     background-clip: text;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
-    animation: streaming-text-sheen-ltr 2.8s ease-in-out infinite;
+    animation: streaming-text-sheen-ltr var(--activity-animation);
   }
   .dark .streaming-text-sheen::after {
     background-image: linear-gradient(
@@ -473,6 +567,7 @@
    */
   .thread-layout {
     --thread-composer-fade-height: 2.25rem;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(min-content, 1fr) auto 0fr;
     transition: grid-template-rows 220ms ease-out;
   }
@@ -491,25 +586,94 @@
   /**
    * Keep the transcript and composer visually continuous. The scrollport owns
    * the fade because overflow clips its contents before an adjacent overlay
-   * can soften the edge. The matching in-flow gap keeps the last line fully
-   * visible once the user reaches the bottom.
+   * can soften the edge. On phones, the same mask keeps a clear top edge even
+   * after the initial inset scrolls away. The matching bottom in-flow gap keeps
+   * the last line fully visible once the user reaches the bottom.
    */
   .thread-message-viewport {
+    --thread-top-clearance: 0px;
+    --thread-top-fade-height: 0px;
     -webkit-mask-image: linear-gradient(
       to bottom,
-      #000 0,
+      transparent 0,
+      transparent var(--thread-top-clearance),
+      #000 var(--thread-top-fade-height),
       #000 calc(100% - var(--thread-composer-fade-height)),
       transparent 100%
     );
     mask-image: linear-gradient(
       to bottom,
-      #000 0,
+      transparent 0,
+      transparent var(--thread-top-clearance),
+      #000 var(--thread-top-fade-height),
       #000 calc(100% - var(--thread-composer-fade-height)),
       transparent 100%
     );
   }
+  @media (max-width: 639px) {
+    .thread-message-viewport {
+      --thread-top-clearance: 6px;
+      --thread-top-fade-height: 22px;
+    }
+  }
   .thread-message-end-gap {
     height: var(--thread-composer-fade-height);
+  }
+
+  .thread-history-status {
+    height: 48px;
+    background: linear-gradient(hsl(var(--background)) 35%, hsl(var(--background) / 0));
+    color: hsl(var(--muted-foreground));
+  }
+  .thread-history-reveal {
+    transform: translateY(calc(var(--history-pull, 0px) - 100%));
+  }
+  .thread-history-reveal:focus-within {
+    transform: none;
+  }
+  .thread-history-control {
+    display: flex;
+    width: 120px;
+    height: 44px;
+    align-items: center;
+    justify-content: center;
+  }
+  /* loading.dev Blocks, Copyright (c) 2026 Jakub Krehel (MIT); THIRD_PARTY_NOTICES.md. */
+  .thread-history-blocks {
+    color: hsl(var(--muted-foreground));
+    display: grid;
+    width: 20px;
+    height: 20px;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(3, 1fr);
+    gap: 2px;
+  }
+  .thread-history-blocks > span {
+    background: currentColor;
+    border-radius: 1.25px;
+    animation: thread-history-blocks 1300ms ease-in-out infinite;
+  }
+  .thread-history-status[data-state="error"] .thread-history-blocks {
+    width: 24px;
+    height: 24px;
+    color: hsl(var(--destructive));
+  }
+  .thread-history-status:not([data-state="loading"]):not([data-state="error"]) .thread-history-blocks > span {
+    animation: none;
+    transform: none;
+  }
+  @keyframes thread-history-blocks {
+    0%, 70%, 100% { transform: scale(1); }
+    35% { transform: scale(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .thread-history-feedback {
+      transform: none;
+    }
+    .thread-history-blocks > span {
+      animation: none;
+      transform: scale(0.8);
+    }
   }
   .thread-composer-dock {
     background: hsl(var(--background));
@@ -692,7 +856,7 @@
     }
   }
   /* Split content leaves no margin for floating conversation controls. */
-  .thread-workspace:has([data-file-preview-panel]) > * {
+  .thread-preview-layout[data-preview-open] > .thread-conversation {
     --thread-header-position: relative;
   }
   /* Keep room for the 49.5rem message column and controls in the side margin. */
@@ -704,45 +868,6 @@
 
   .workbench-pane {
     transform-origin: top left;
-  }
-
-  /** Goal halo: pale sky blue (not ``--primary``, which often reads as neutral gray). */
-  @keyframes goal-shell-glow-breathe {
-    0%,
-    100% {
-      filter: drop-shadow(0 0 10px hsl(204 72% 52% / 0.22))
-        drop-shadow(0 0 24px hsl(199 80% 58% / 0.14));
-    }
-    50% {
-      filter: drop-shadow(0 0 17px hsl(204 78% 48% / 0.32))
-        drop-shadow(0 0 38px hsl(199 85% 55% / 0.2));
-    }
-  }
-  .goal-shell-glow {
-    animation: goal-shell-glow-breathe 4.8s ease-in-out infinite;
-  }
-  @keyframes goal-shell-glow-breathe-dark {
-    0%,
-    100% {
-      filter: drop-shadow(0 0 12px hsl(198 90% 72% / 0.28))
-        drop-shadow(0 0 28px hsl(195 95% 65% / 0.16));
-    }
-    50% {
-      filter: drop-shadow(0 0 20px hsl(198 95% 78% / 0.42))
-        drop-shadow(0 0 42px hsl(195 100% 70% / 0.24));
-    }
-  }
-  .dark .goal-shell-glow {
-    animation-name: goal-shell-glow-breathe-dark;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .goal-shell-glow {
-      animation: none;
-      filter: drop-shadow(0 0 14px hsl(204 70% 50% / 0.24));
-    }
-    .dark .goal-shell-glow {
-      filter: drop-shadow(0 0 14px hsl(198 88% 70% / 0.32));
-    }
   }
 
   /* Subtle scrollbar that doesn't fight the dark background. */
@@ -831,6 +956,16 @@
     left: 1.75rem;
   }
 
+  .thread-prompt-rail-scroll {
+    scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 16px, #000 calc(100% - 16px), transparent);
+    mask-image: linear-gradient(to bottom, transparent, #000 16px, #000 calc(100% - 16px), transparent);
+  }
+
+  .thread-prompt-rail-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
   @media (min-width: 768px) {
     .thread-prompt-rail {
       display: block;
@@ -867,12 +1002,11 @@
 }
 
 [data-user-text-bubble] > .message-block-menu-trigger {
-  /* The first text line is 28px tall, with py-2 around the bubble. */
-  top: calc((1rem + 28px - var(--message-block-control-size)) / 2);
+  top: calc((1rem + var(--text-reading-size) * var(--cjk-line-height) - var(--message-block-control-size)) / 2);
 }
 
 [data-user-text-bubble] > .message-block-hover-time {
-  top: calc((1rem + 28px + var(--message-block-control-size)) / 2);
+  top: calc((1rem + var(--text-reading-size) * var(--cjk-line-height) + var(--message-block-control-size)) / 2);
 }
 
 [data-context-block-active] .message-block-menu-trigger,
@@ -933,6 +1067,59 @@
   }
 }
 
+/* loading.dev Ring, Copyright (c) 2026 Jakub Krehel (MIT); THIRD_PARTY_NOTICES.md. */
+.loading-ring-arc {
+  transform-origin: center;
+  animation: loading-ring-spin 800ms linear infinite;
+}
+@keyframes loading-ring-spin {
+  to { transform: rotate(360deg); }
+}
+
+.composer-primary-action {
+  transition: color 160ms ease-out, background-color 160ms ease-out, border-color 160ms ease-out;
+}
+.composer-action-icons {
+  transition: transform 120ms ease-out;
+}
+.composer-primary-action:active:not(:disabled) .composer-action-icons {
+  transform: scale(0.94);
+}
+.composer-action-glyph {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transform: scale(0.72);
+  transition: opacity 140ms ease-out, transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.composer-action-glyph[data-active] {
+  opacity: 1;
+  transform: scale(1);
+}
+.composer-action-icons[data-state="stop"] [data-action-icon="send"] {
+  transform: translateY(-3px) scale(0.8);
+}
+.composer-action-glyph:not([data-active]) .loading-ring-arc {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .loading-ring-arc {
+    animation: none;
+  }
+  .composer-primary-action,
+  .composer-action-icons,
+  .composer-primary-action:active:not(:disabled) .composer-action-icons {
+    transition: none;
+    transform: none;
+  }
+  .composer-action-icons[data-state] .composer-action-glyph {
+    transform: none;
+    transition: opacity 80ms linear;
+  }
+}
+
 @media (pointer: coarse) {
   /* Readable form text avoids Safari's focus zoom without disabling the user's
      pinch zoom. Keep this after utilities so compact desktop overrides cannot
@@ -978,10 +1165,7 @@
   }
 }
 
-/*
- * Composer controls adapt to their actual container, not just the viewport.
- * Narrow layouts move access and usage into a separate metadata row.
- */
+/* Composer controls adapt to their actual container, not just the viewport. */
 .thread-composer-surface {
   container-name: thread-composer;
   container-type: inline-size;
@@ -1123,8 +1307,22 @@
   }
 }
 
-/* Narrow composers separate message actions from permissions and usage instead
- * of shrinking touch targets or hiding the active model and access state. */
+/* Match the directory glyph's start to the attachment glyph, not its hit area. */
+.thread-composer-meta {
+  padding-inline-start: calc(var(--composer-footer-inset) + var(--composer-action-margin) + (var(--composer-action-size) - 0.875rem) / 2 - 0.5rem);
+}
+
+@media (pointer: coarse) {
+  .thread-composer-form { --composer-action-size: 2.75rem; }
+}
+
+/* Compact composers keep their primary actions on a stable 44px touch grid. */
+.thread-composer-form[data-compact-controls] {
+  --composer-action-size: 2.25rem;
+  --composer-action-margin: 0.25rem;
+  --composer-footer-inset: 0.5rem;
+}
+
 [data-compact-controls] .thread-composer-footer {
   column-gap: 0.25rem;
   padding: 0 0.5rem 0.5rem;
@@ -1136,8 +1334,7 @@
 }
 
 [data-compact-controls] .thread-composer-footer-actions {
-  flex: none;
-  max-width: none;
+  max-width: 50%;
 }
 
 [data-compact-controls] .thread-composer-action.touch-target {
@@ -1159,11 +1356,11 @@
  * state; margins reserve its space so adjacent controls never overlap it. */
 [data-compact-controls] .thread-composer-round-action.touch-target {
   position: relative;
-  width: 2.25rem;
-  height: 2.25rem;
-  min-width: 2.25rem;
-  min-height: 2.25rem;
-  margin: 0.25rem;
+  width: var(--composer-action-size);
+  height: var(--composer-action-size);
+  min-width: var(--composer-action-size);
+  min-height: var(--composer-action-size);
+  margin: var(--composer-action-margin);
 }
 
 [data-compact-controls] .thread-composer-round-action::before {
@@ -1177,31 +1374,11 @@
   height: 2.25rem;
 }
 
-.thread-composer-meta .touch-target {
-  min-height: 2.75rem;
-  min-width: 2.75rem;
-}
-
-.thread-composer-meta .thread-composer-access {
-  max-width: 100%;
-  padding-inline: 0.625rem 0.5rem;
-}
-
-.thread-composer-workspace-row {
-  padding-inline: 0.75rem;
-}
-
-.thread-composer-workspace-row .touch-target {
-  min-height: 2.75rem;
-  min-width: 2.75rem;
-}
-
-.thread-composer-workspace-row .thread-composer-access {
-  padding-inline-end: 0;
-}
-
-.thread-composer-workspace-row .thread-composer-workspace {
-  padding-inline-start: 0.6875rem;
+@media (pointer: coarse) {
+  .thread-composer-meta .touch-target {
+    min-height: 2.75rem;
+    min-width: 2.75rem;
+  }
 }
 
 @media (forced-colors: active) {
@@ -1214,7 +1391,7 @@
 @layer components {
   @media (prefers-reduced-motion: no-preference) {
     .segmented-control-indicator[data-animate="true"] {
-      transition-property: transform, width;
+      transition-property: translate, scale;
       transition-duration: 220ms, 160ms;
       transition-timing-function:
         cubic-bezier(0.2, 0.95, 0.25, 1.08),
@@ -1425,34 +1602,15 @@
   .settings-footer-auto { min-block-size: 40px; padding-block: 8px; row-gap: 0; }
   .settings-footer-auto > :first-child { grid-column: 1 / -1; font-size: 12px; }
   .settings-footer-auto > :nth-child(2):empty { display: none; }
-  .settings-row:has(> .settings-control > [role="switch"]) {
+  .settings-row:has(> .settings-control > :is([role="switch"], [data-skeleton-switch])) {
     grid-template-columns: minmax(0, 1fr) auto;
     column-gap: 24px;
   }
-  .settings-row:has(> .settings-control > [role="switch"]) > :first-child { grid-column: 1; }
-  .settings-row:has(> .settings-control > [role="switch"]) > :nth-child(2) { grid-column: 2; }
-  .settings-disclosure > summary {
-    cursor: pointer;
-    padding: 12px var(--settings-inset, 16px);
-    border-radius: var(--radius-control, 12px);
-    font-size: 13px;
-    font-weight: 500;
-    line-height: 20px;
-    color: hsl(var(--muted-foreground));
-  }
-  .settings-disclosure > summary:hover { color: hsl(var(--foreground)); }
-  .settings-disclosure > summary:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
-  .settings-disclosure[open] > summary { margin-block-end: 8px; }
-
+  .settings-row:has(> .settings-control > :is([role="switch"], [data-skeleton-switch])) > :first-child { grid-column: 1; }
+  .settings-row:has(> .settings-control > :is([role="switch"], [data-skeleton-switch])) > :nth-child(2) { grid-column: 2; }
   .settings-list-row, .settings-list-inset { padding-inline: var(--settings-inset, 16px); }
   .settings-list-row { min-block-size: 60px; border-radius: var(--radius-control); }
   .settings-list-row:focus-visible { outline: none; }
-  .sidebar-action-label:lang(zh) {
-    display: inline-block;
-    min-inline-size: var(--sidebar-label-width, 3em);
-    text-align: justify;
-    text-align-last: justify;
-  }
   .icon-action[aria-pressed="true"], .icon-action[data-state="open"] {
     color: hsl(var(--foreground));
   }
@@ -1472,11 +1630,13 @@
     transform-origin: center;
   }
   @media (hover: hover) and (prefers-reduced-motion: no-preference) {
-    .icon-action [data-product-icon="settings"] {
+    .icon-action [data-product-icon="settings"] > path {
+      transform-box: view-box;
+      transform-origin: center;
       transform: rotate(0deg);
       transition: transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
     }
-    .icon-action:not(:disabled):hover [data-product-icon="settings"] {
+    .icon-action:not(:disabled):hover [data-product-icon="settings"] > path {
       transform: rotate(90deg);
     }
   }
@@ -1486,14 +1646,13 @@
     .activity-current-trace {
       display: block;
       stroke-dasharray: 16 84;
-      animation: activity-current-flow 1800ms linear infinite;
+      animation: activity-current-flow var(--activity-animation);
     }
   }
   @keyframes activity-current-flow {
     0% { stroke-dashoffset: 16; opacity: 0; }
-    10% { opacity: 1; }
-    65% { stroke-dashoffset: 116; opacity: 1; }
-    75%, 100% { stroke-dashoffset: 116; opacity: 0; }
+    50% { opacity: 1; }
+    100% { stroke-dashoffset: 116; opacity: 0; }
   }
   .quiet-control, .settings-hover {
     --control-hover-fill: hsl(var(--foreground) / 0.045);
@@ -1528,8 +1687,8 @@
     .settings-grid .settings-row > :nth-child(2),
     .settings-grid .settings-footer > :nth-child(2) { grid-column: 8 / -1; }
     .settings-grid .settings-footer-auto > :first-child { grid-column: 1 / -1; }
-    .settings-grid .settings-row:has(.segmented-control) > :first-child { grid-column: 1 / 7; }
-    .settings-grid .settings-row:has(.segmented-control) > :nth-child(2) { grid-column: 7 / -1; }
+    .settings-grid .settings-row:has(:is(.segmented-control, .settings-version-actions)) > :first-child { grid-column: 1 / 7; }
+    .settings-grid .settings-row:has(:is(.segmented-control, .settings-version-actions)) > :nth-child(2) { grid-column: 7 / -1; }
   }
   @media (min-width: 768px) {
     .settings-grid { --settings-inset: 24px; }
@@ -1630,4 +1789,37 @@
 
 @keyframes workspace-directory-shimmer {
   to { transform: translateX(100%); }
+}
+
+/* Prism classes are generated at runtime, outside Tailwind's source inventory. */
+.code-content {
+  color: hsl(var(--foreground));
+}
+/* Flattened JSX tokens retain the ancestor tag class; let inner token types win. */
+.code-content .token.tag {
+  color: var(--code-property);
+}
+.code-content :is(.token.comment, .token.prolog, .token.doctype, .token.cdata, .linenumber) {
+  color: var(--code-comment);
+}
+.code-content .token.comment {
+  font-style: italic;
+}
+.code-content :is(.token.string, .token.char, .token.attr-value, .token.regex, .token.inserted) {
+  color: var(--code-string);
+}
+.code-content :is(.token.keyword, .token.selector, .token.important, .token.atrule) {
+  color: var(--code-keyword);
+}
+.code-content :is(.token.function, .token.operator, .token.entity, .token.url) {
+  color: var(--code-function);
+}
+.code-content :is(.token.number, .token.boolean, .token.constant, .token.symbol, .token.attr-name, .token.class-name, .token.builtin, .token.property, .token.deleted) {
+  color: var(--code-property);
+}
+.code-content :is(.token.bold, .token.important) {
+  font-weight: 600;
+}
+.code-content .token.italic {
+  font-style: italic;
 }

@@ -16,6 +16,7 @@ from nanobot.channels.manager import ChannelManager
 from nanobot.channels.websocket import runtime
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
 from nanobot.config.schema import Config
+from nanobot.runtime_admission import RuntimeBusyError
 from nanobot.webui.gateway_services import build_gateway_services
 
 
@@ -64,7 +65,7 @@ class _RecordingConnection:
 
 
 def _channel() -> WebSocketChannel:
-    bus = MagicMock(spec=MessageBus)
+    bus = MessageBus()
     config = WebSocketConfig(
         enabled=True,
         allow_from=["*"],
@@ -83,7 +84,7 @@ def _channel() -> WebSocketChannel:
     )
     channel = WebSocketChannel(config, bus, gateway=gateway)
     # Keep disk latency out of every connection delivery synchronization check.
-    channel._persist_turn_transcript_event = MagicMock(return_value=True)
+    channel._persist_turn_transcript_event = AsyncMock(return_value=True)
     return channel
 
 
@@ -129,9 +130,24 @@ async def test_message_bus_delivers_to_ten_tuis_with_one_blocked_connection() ->
             assert await _next_text(connection) == "first"
             assert await _next_text(connection) == "last"
         assert connections[0].sent.empty()
+        async with asyncio.timeout(2):
+            while manager._outbound_tasks or bus.outbound_size:
+                await asyncio.sleep(0)
+        # The manager's send has finished; the physical transport still owns
+        # its final frames. A shutdown idle check must include that second queue.
+        assert channel.has_pending_delivery
+        with pytest.raises(RuntimeBusyError):
+            with bus.admission.pause_if_idle(lambda: False):
+                pytest.fail("The blocked WebSocket transport was missed")
+        assert not bus.admission.paused
         connections[0].release_send.set()
         assert await _next_text(connections[0]) == "first"
         assert await _next_text(connections[0]) == "last"
+        async with asyncio.timeout(2):
+            while manager.has_pending_delivery:
+                await asyncio.sleep(0)
+        with bus.admission.pause_if_idle(lambda: False):
+            assert bus.admission.paused
     finally:
         dispatcher.cancel()
         await asyncio.gather(dispatcher, return_exceptions=True)
@@ -140,6 +156,26 @@ async def test_message_bus_delivers_to_ten_tuis_with_one_blocked_connection() ->
     assert not manager._outbound_tasks
     assert not manager._outbound_tails
     assert not channel._connection_outbound
+
+
+@pytest.mark.asyncio
+async def test_delivery_remains_busy_until_timed_out_transport_is_retired(monkeypatch) -> None:
+    monkeypatch.setattr(runtime, "_OUTBOUND_SEND_TIMEOUT_S", 0.02)
+    channel = _channel()
+    connection = _RecordingConnection(block_first_send=True, block_close=True)
+    channel._attach(cast(Any, connection), "chat-retiring")
+    try:
+        await channel.send(_message("chat-retiring", "reply"))
+        await asyncio.wait_for(connection.closed.wait(), 2)
+        assert connection.send_cancelled.is_set()
+        assert channel.has_pending_delivery
+        connection.release_close.set()
+        await asyncio.wait_for(_wait_for_retire_tasks(channel), 2)
+        assert not channel.has_pending_delivery
+    finally:
+        connection.release_send.set()
+        connection.release_close.set()
+        await channel._cleanup_connection(cast(Any, connection))
 
 
 @pytest.mark.asyncio

@@ -13,55 +13,79 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
 from nanobot.providers.base import ProviderCallContext
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.providers.registry import ModelAPICapabilities, find_by_name
 
 
-def _fake_chat_response(content: str = "ok") -> SimpleNamespace:
+def _fake_chat_response(content: str = "ok") -> ChatCompletion:
     """Build a minimal OpenAI chat completion response."""
-    message = SimpleNamespace(
-        content=content,
-        tool_calls=None,
-        reasoning_content=None,
-    )
-    choice = SimpleNamespace(message=message, finish_reason="stop")
-    usage = SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15)
-    return SimpleNamespace(choices=[choice], usage=usage)
+    return ChatCompletion.model_validate({
+        "id": "chatcmpl-test",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "test-model",
+        "choices": [{
+            "index": 0,
+            "finish_reason": "stop",
+            "message": {"role": "assistant", "content": content},
+        }],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+    })
 
 
-def _fake_tool_call_response() -> SimpleNamespace:
+def _fake_tool_call_response() -> ChatCompletion:
     """Build a minimal chat response that includes Gemini-style extra_content."""
-    function = SimpleNamespace(
-        name="exec",
-        arguments='{"cmd":"ls"}',
-        provider_specific_fields={"inner": "value"},
-    )
-    tool_call = SimpleNamespace(
-        id="call_123",
-        index=0,
-        type="function",
-        function=function,
-        extra_content={"google": {"thought_signature": "signed-token"}},
-    )
-    message = SimpleNamespace(
-        content=None,
-        tool_calls=[tool_call],
-        reasoning_content=None,
-    )
-    choice = SimpleNamespace(message=message, finish_reason="tool_calls")
-    usage = SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15)
-    return SimpleNamespace(choices=[choice], usage=usage)
+    return ChatCompletion.model_validate({
+        "id": "chatcmpl-tools",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "test-model",
+        "choices": [{
+            "index": 0,
+            "finish_reason": "tool_calls",
+            "message": {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": "call_123",
+                    "type": "function",
+                    "function": {
+                        "name": "exec",
+                        "arguments": '{"cmd":"ls"}',
+                        "inner": "value",
+                    },
+                    "extra_content": {"google": {"thought_signature": "signed-token"}},
+                }],
+            },
+        }],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+    })
 
 
-def _fake_tool_call_response_with_arguments(arguments) -> SimpleNamespace:
+def _fake_tool_call_response_with_arguments(arguments: str) -> ChatCompletion:
     """Build a minimal chat response with caller-supplied tool arguments."""
-    function = SimpleNamespace(name="optional_tool", arguments=arguments)
-    tool_call = SimpleNamespace(id="call_123", type="function", function=function)
-    message = SimpleNamespace(content=None, tool_calls=[tool_call], reasoning_content=None)
-    choice = SimpleNamespace(message=message, finish_reason="tool_calls")
-    return SimpleNamespace(choices=[choice], usage=SimpleNamespace())
+    return ChatCompletion.model_validate({
+        "id": "chatcmpl-arguments",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "test-model",
+        "choices": [{
+            "index": 0,
+            "finish_reason": "tool_calls",
+            "message": {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": "call_123",
+                    "type": "function",
+                    "function": {"name": "optional_tool", "arguments": arguments},
+                }],
+            },
+        }],
+    })
 
 
 def _fake_responses_response(content: str = "ok") -> MagicMock:
@@ -94,16 +118,23 @@ def _fake_responses_stream(text: str = "ok"):
     return _stream()
 
 
+def _chat_chunk(delta, finish=None, usage=None) -> ChatCompletionChunk:
+    return ChatCompletionChunk.model_validate({
+        "id": "chatcmpl-stream",
+        "object": "chat.completion.chunk",
+        "created": 0,
+        "model": "test-model",
+        "choices": [{"index": 0, "finish_reason": finish, "delta": delta}],
+        "usage": usage,
+    })
+
+
 def _fake_chat_stream(text: str = "ok"):
     async def _stream():
-        yield SimpleNamespace(
-            choices=[SimpleNamespace(finish_reason=None, delta=SimpleNamespace(content=text, reasoning_content=None, tool_calls=None))],
-            usage=None,
-        )
-        yield SimpleNamespace(
-            choices=[SimpleNamespace(finish_reason="stop", delta=SimpleNamespace(content=None, reasoning_content=None, tool_calls=None))],
-            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15),
-        )
+        yield _chat_chunk({"content": text})
+        yield _chat_chunk({}, finish="stop", usage={
+            "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+        })
 
     return _stream()
 
@@ -112,64 +143,12 @@ def _fake_chat_stream_reasoning_chunks():
     """Mimic DeepSeek-style ``chat.completions`` stream: ``reasoning_content`` then ``content``."""
 
     async def _stream():
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    finish_reason=None,
-                    delta=SimpleNamespace(
-                        content=None,
-                        reasoning_content="step1",
-                        reasoning=None,
-                        tool_calls=None,
-                    ),
-                ),
-            ],
-            usage=None,
-        )
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    finish_reason=None,
-                    delta=SimpleNamespace(
-                        content=None,
-                        reasoning_content="step2",
-                        reasoning=None,
-                        tool_calls=None,
-                    ),
-                ),
-            ],
-            usage=None,
-        )
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    finish_reason=None,
-                    delta=SimpleNamespace(
-                        content="answer",
-                        reasoning_content=None,
-                        tool_calls=None,
-                    ),
-                ),
-            ],
-            usage=None,
-        )
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    finish_reason="stop",
-                    delta=SimpleNamespace(
-                        content=None,
-                        reasoning_content=None,
-                        tool_calls=None,
-                    ),
-                ),
-            ],
-            usage=SimpleNamespace(
-                prompt_tokens=10,
-                completion_tokens=5,
-                total_tokens=15,
-            ),
-        )
+        yield _chat_chunk({"reasoning_content": "step1"})
+        yield _chat_chunk({"reasoning_content": "step2"})
+        yield _chat_chunk({"content": "answer"})
+        yield _chat_chunk({}, finish="stop", usage={
+            "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+        })
 
     return _stream()
 
@@ -178,63 +157,19 @@ def _fake_chat_stream_tool_call_chunks():
     """Mimic OpenAI-compatible streaming tool-call argument deltas."""
 
     async def _stream():
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    finish_reason=None,
-                    delta=SimpleNamespace(
-                        content=None,
-                        reasoning_content=None,
-                        reasoning=None,
-                        tool_calls=[
-                            SimpleNamespace(
-                                index=0,
-                                id="call_write",
-                                function=SimpleNamespace(
-                                    name="write_file",
-                                    arguments='{"path":"notes.md","content":"',
-                                ),
-                            )
-                        ],
-                    ),
-                ),
-            ],
-            usage=None,
-        )
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    finish_reason=None,
-                    delta=SimpleNamespace(
-                        content=None,
-                        reasoning_content=None,
-                        reasoning=None,
-                        tool_calls=[
-                            SimpleNamespace(
-                                index=0,
-                                id=None,
-                                function=SimpleNamespace(name=None, arguments='line\\n"}'),
-                            )
-                        ],
-                    ),
-                ),
-            ],
-            usage=None,
-        )
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    finish_reason="tool_calls",
-                    delta=SimpleNamespace(
-                        content=None,
-                        reasoning_content=None,
-                        reasoning=None,
-                        tool_calls=None,
-                    ),
-                ),
-            ],
-            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15),
-        )
+        yield _chat_chunk({"tool_calls": [{
+            "index": 0,
+            "id": "call_write",
+            "type": "function",
+            "function": {"name": "write_file", "arguments": '{"path":"notes.md","content":"'},
+        }]})
+        yield _chat_chunk({"tool_calls": [{
+            "index": 0,
+            "function": {"arguments": 'line\\n"}'},
+        }]})
+        yield _chat_chunk({}, finish="tool_calls", usage={
+            "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+        })
 
     return _stream()
 
@@ -243,57 +178,13 @@ def _fake_chat_stream_legacy_function_call_chunks():
     """Mimic older OpenAI-compatible ``delta.function_call`` chunks."""
 
     async def _stream():
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    finish_reason=None,
-                    delta=SimpleNamespace(
-                        content=None,
-                        reasoning_content=None,
-                        reasoning=None,
-                        tool_calls=None,
-                        function_call=SimpleNamespace(
-                            name="write_file",
-                            arguments='{"path":"notes.md","content":"',
-                        ),
-                    ),
-                ),
-            ],
-            usage=None,
-        )
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    finish_reason=None,
-                    delta=SimpleNamespace(
-                        content=None,
-                        reasoning_content=None,
-                        reasoning=None,
-                        tool_calls=None,
-                        function_call=SimpleNamespace(
-                            name=None,
-                            arguments='line\\n"}',
-                        ),
-                    ),
-                ),
-            ],
-            usage=None,
-        )
-        yield SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    finish_reason="function_call",
-                    delta=SimpleNamespace(
-                        content=None,
-                        reasoning_content=None,
-                        reasoning=None,
-                        tool_calls=None,
-                        function_call=None,
-                    ),
-                ),
-            ],
-            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15),
-        )
+        yield _chat_chunk({"function_call": {
+            "name": "write_file", "arguments": '{"path":"notes.md","content":"',
+        }})
+        yield _chat_chunk({"function_call": {"arguments": 'line\\n"}'}})
+        yield _chat_chunk({}, finish="function_call", usage={
+            "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+        })
 
     return _stream()
 
@@ -1564,9 +1455,31 @@ def test_minimax_reasoning_split_enabled_with_reasoning_effort() -> None:
     assert kw["extra_body"] == {"reasoning_split": True}
 
 
-def test_minimax_reasoning_split_disabled_for_minimal() -> None:
-    kw = _build_kwargs_for("minimax", "MiniMax-M2.7", reasoning_effort="minimal")
-    assert kw["extra_body"] == {"reasoning_split": False}
+@pytest.mark.parametrize("model", ["MiniMax-M2.7", "MiniMax-M3.1-Flash"])
+@pytest.mark.parametrize("effort", ["none", "minimal"])
+def test_minimax_off_presets_map_to_low_effort(model, effort) -> None:
+    # MiniMax-M3.1-Flash returns HTTP 400 for reasoning_split=false.
+    kw = _build_kwargs_for("minimax", model, reasoning_effort=effort)
+    assert kw["reasoning_effort"] == "low"
+    assert kw["extra_body"] == {"reasoning_split": True}
+
+
+@pytest.mark.parametrize("model", ["MiniMax-M2.7", "MiniMax-M3"])
+def test_minimax_effort_menu_unchanged_for_models_without_metadata(model) -> None:
+    from nanobot.webui.settings_models import reasoning_effort_values_for
+
+    assert reasoning_effort_values_for("minimax", model) == ["", "low", "medium", "high"]
+
+
+def test_minimax_m31_flash_builtin_metadata() -> None:
+    from nanobot.providers.registry import find_by_name
+
+    meta = find_by_name("minimax").model_metadata("MiniMax-M3.1-Flash")
+    assert meta is not None
+    assert meta.context_window == 1_000_000
+    assert meta.reasoning_efforts == ("low", "medium", "high", "xhigh", "max")
+    assert meta.default_reasoning_effort == "max"
+    assert meta.input_modalities == ("text", "image")
 
 
 def test_volcengine_thinking_enabled() -> None:
@@ -1809,6 +1722,7 @@ def test_deepseek_coerces_list_content_to_string() -> None:
 
 @pytest.mark.parametrize("model", [
     "deepseek-flash",
+    "deepseek-v4-flash",
     "deepseek-v4-flash-vision-exp",
 ])
 @pytest.mark.parametrize("prefixed", [False, True])
@@ -1850,6 +1764,28 @@ def test_deepseek_vision_preserves_multimodal_content(
         assert kw["input"] == [{"role": "user", "content": expected}]
     else:
         assert kw["messages"][0]["content"] == content
+
+
+@pytest.mark.parametrize("responses", [False, True])
+def test_deepseek_pro_remains_text_only(responses: bool) -> None:
+    provider = OpenAICompatProvider(
+        api_key="k", default_model="deepseek-v4-pro", spec=find_by_name("deepseek"),
+    )
+    build_request = provider._build_responses_body if responses else provider._build_kwargs
+    body = build_request(
+        messages=[{"role": "user", "content": [
+            {"type": "text", "text": "describe the image"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA=="}},
+        ]}],
+        tools=None, model="deepseek-v4-pro", max_tokens=1024,
+        temperature=0.7, reasoning_effort=None, tool_choice=None,
+    )
+    if responses:
+        assert body["input"] == [{
+            "role": "user", "content": [{"type": "input_text", "text": "describe the image"}],
+        }]
+    else:
+        assert body["messages"] == [{"role": "user", "content": "describe the image"}]
 
 
 def test_non_deepseek_keeps_list_content() -> None:
@@ -1925,9 +1861,14 @@ def test_provider_thinking_type_mapping(provider_name, model, effort, thinking_t
     assert "reasoning_effort" not in kw
 
 
-def test_kimi_k3_uses_native_defaults() -> None:
+@pytest.fixture(params=["kimi-k3", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"])
+def kimi_k3_model(request: pytest.FixtureRequest) -> str:
+    return request.param
+
+
+def test_kimi_k3_uses_native_defaults(kimi_k3_model: str) -> None:
     """K3 omits fixed sampling params and uses the non-deprecated token limit field."""
-    kw = _build_kwargs_for("moonshot", "kimi-k3", reasoning_effort=None)
+    kw = _build_kwargs_for("moonshot", kimi_k3_model, reasoning_effort=None)
 
     assert "temperature" not in kw
     assert "max_tokens" not in kw
@@ -1936,26 +1877,28 @@ def test_kimi_k3_uses_native_defaults() -> None:
     assert "extra_body" not in kw
 
 
-def test_kimi_k3_uses_top_level_max_reasoning_effort() -> None:
-    """K3 uses top-level reasoning_effort=max, never the K2.x thinking body."""
-    kw = _build_kwargs_for("moonshot", "kimi-k3", reasoning_effort="max")
+@pytest.mark.parametrize("effort", ["low", "high", "max"])
+def test_kimi_k3_preserves_supported_reasoning_effort(kimi_k3_model: str, effort: str) -> None:
+    """K3 uses top-level reasoning_effort, never the K2.x thinking body."""
+    kw = _build_kwargs_for("moonshot", kimi_k3_model, reasoning_effort=effort)
 
-    assert kw["reasoning_effort"] == "max"
+    assert kw["reasoning_effort"] == effort
     assert "temperature" not in kw
     assert "extra_body" not in kw
 
 
-def test_kimi_k3_normalizes_legacy_enabled_reasoning_effort() -> None:
+def test_kimi_k3_normalizes_legacy_enabled_reasoning_effort(kimi_k3_model: str) -> None:
     """Switching a K2.x preset to K3 must not send unsupported effort values."""
-    kw = _build_kwargs_for("moonshot", "kimi-k3", reasoning_effort="high")
+    kw = _build_kwargs_for("moonshot", kimi_k3_model, reasoning_effort="medium")
 
     assert kw["reasoning_effort"] == "max"
     assert "extra_body" not in kw
 
 
-def test_kimi_k3_omits_disabled_reasoning_effort() -> None:
+@pytest.mark.parametrize("effort", ["none", "minimal"])
+def test_kimi_k3_omits_disabled_reasoning_effort(kimi_k3_model: str, effort: str) -> None:
     """K3 cannot disable reasoning, so disabled effort falls back to its default."""
-    kw = _build_kwargs_for("moonshot", "kimi-k3", reasoning_effort="none")
+    kw = _build_kwargs_for("moonshot", kimi_k3_model, reasoning_effort=effort)
 
     assert "reasoning_effort" not in kw
     assert "temperature" not in kw

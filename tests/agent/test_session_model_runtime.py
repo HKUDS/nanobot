@@ -4,6 +4,7 @@ import pytest
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import RuntimeModelChanged
 from nanobot.config.schema import ModelPresetConfig
 from nanobot.nanobot import Nanobot
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse
@@ -69,8 +70,8 @@ async def test_sessions_run_concurrently_with_isolated_model_presets(tmp_path) -
         preset_snapshot_loader=load_preset,
     )
     loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
-    loop.set_session_model_preset("sdk:fast", "fast")
-    loop.set_session_model_preset("sdk:deep", "deep")
+    (await loop.set_session_model_preset("sdk:fast", "fast"))
+    (await loop.set_session_model_preset("sdk:deep", "deep"))
 
     fast_reply, deep_reply = await asyncio.gather(
         loop.process_direct("hello", session_key="sdk:fast"),
@@ -135,6 +136,31 @@ async def test_removed_session_model_preset_falls_back_and_clears_metadata(tmp_p
     assert model_preset_from_metadata(restored.metadata) is None
 
 
+async def test_async_runtime_resolution_publishes_model_refresh_on_event_loop(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    provider = RecordingProvider("base-model")
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="base-model")
+    session = loop.sessions.get_or_create("sdk:runtime-refresh")
+    refreshed = LLMRuntime.capture(provider, "updated-model", context_window_tokens=16_000)
+    monkeypatch.setattr(loop.runtime_resolver, "admit", lambda: refreshed)
+    published = asyncio.Event()
+    events: list[RuntimeModelChanged] = []
+
+    def on_changed(event: RuntimeModelChanged) -> None:
+        events.append(event)
+        published.set()
+
+    unsubscribe = loop.bus.subscribe(on_changed, RuntimeModelChanged)
+    try:
+        assert await loop.runtime_for_session(session) is refreshed
+        await asyncio.wait_for(published.wait(), timeout=1)
+    finally:
+        unsubscribe()
+    assert events[0].model == "updated-model"
+
+
 @pytest.mark.asyncio
 async def test_streamed_sdk_resolves_session_runtime_after_lock_admission(tmp_path) -> None:
     base = RecordingProvider("base-model")
@@ -166,13 +192,13 @@ async def test_streamed_sdk_resolves_session_runtime_after_lock_admission(tmp_pa
     )
     loop.schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
     session_key = "sdk:queued"
-    loop.set_session_model_preset(session_key, "fast")
+    (await loop.set_session_model_preset(session_key, "fast"))
 
     lock = loop._session_locks.setdefault(session_key, asyncio.Lock())
     await lock.acquire()
     try:
         run = await Nanobot(loop).run_streamed("hello", session_key=session_key)
-        loop.set_session_model_preset(session_key, "deep")
+        (await loop.set_session_model_preset(session_key, "deep"))
     finally:
         lock.release()
 
@@ -210,7 +236,7 @@ async def test_sdk_custom_model_preset_metadata_does_not_select_runtime(
         metadata={"model_preset": custom_value},
     )
     ingested_result = await bot.run("hello", session_key="sdk:custom-metadata")
-    exported = bot.sessions.export("sdk:custom-metadata")
+    exported = (await bot.sessions.export("sdk:custom-metadata"))
     restored = await bot.sessions.restore(
         SessionSnapshot(
             key="sdk:restored-metadata",

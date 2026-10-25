@@ -17,6 +17,7 @@ from typing import Any, TypedDict, cast
 import httpx
 from pydantic import Field, computed_field, field_validator
 
+from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
@@ -432,6 +433,7 @@ class SignalChannel(BaseChannel):
         is_dm: bool = False,
         authorization_id: str | None = None,
         require_existing_session: bool = False,
+        session_generation: str | None = None,
     ) -> None:
         """Handle an inbound message whose policy has already been checked.
 
@@ -454,6 +456,7 @@ class SignalChannel(BaseChannel):
                 media=media or [],
                 metadata=meta,
                 session_key_override=session_key,
+                session_generation=session_generation,
                 require_existing_session=require_existing_session,
             )
         )
@@ -569,6 +572,8 @@ class SignalChannel(BaseChannel):
             msg.event.notify or self.show_compaction_notices
         ):
             return
+        if not self._http:
+            raise ChannelNotReadyError("Signal client not connected")
         is_progress_message = isinstance(msg.event, ProgressEvent)
         try:
             plain_text, text_styles = _markdown_to_signal(msg.content)

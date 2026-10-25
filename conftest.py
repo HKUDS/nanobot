@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import ssl
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from threading import Thread
 from uuid import uuid4
@@ -23,6 +23,12 @@ def _isolate_tokenizer_warmup(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_tool_entry_points(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only load external tool plugins explicitly provided by the test."""
+    monkeypatch.setattr("nanobot.agent.tools.loader.entry_points", lambda **_kwargs: ())
+
+
+@pytest.fixture(autouse=True)
 def _isolate_nanobot_log_activation() -> Iterator[None]:
     """Keep CLI log settings from leaking into later tests in the same process."""
     logger.enable("nanobot")
@@ -33,38 +39,33 @@ def _isolate_nanobot_log_activation() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_sessions_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Redirect session storage away from the real active config data directory.
+def _isolate_runtime_stores(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[None]:
+    """Isolate writable stores without making a directory for pure tests."""
+    import nanobot.llm_usage.service as llm_usage
+    import nanobot.pairing.store as pairing_store
+    import nanobot.session.location as session_location
+    from nanobot.webui import star_prompt
 
-    Session storage lives under the active runtime data root (outside the workspace,
-    per ADR-0001), so without redirection tests would write into the real home.
-    """
-    data_root = tmp_path.parent / "session-data" / uuid4().hex
-    runtime_root = data_root / "runtime"
-    legacy_root = data_root / "legacy-sessions"
+    # A sibling of tmp_path stays outside any test's agent workspace. mkdir is
+    # deferred until a store is used and remains safe for concurrent callers.
+    data_root = tmp_path_factory.getbasetemp() / "runtime-data" / uuid4().hex
+
+    def data_dir() -> Path:
+        data_root.mkdir(parents=True, exist_ok=True)
+        return data_root
 
     def runtime_subdir(name: str) -> Path:
-        path = runtime_root / name
+        path = data_root / name
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    monkeypatch.setattr(
-        "nanobot.session.manager.get_runtime_subdir",
-        runtime_subdir,
-    )
-    monkeypatch.setattr(
-        "nanobot.session.manager.get_legacy_sessions_dir",
-        lambda: legacy_root,
-    )
-    yield
-
-
-@pytest.fixture(autouse=True)
-def _isolate_llm_usage_stores(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> Iterator[None]:
-    import nanobot.llm_usage.service as llm_usage
-
+    monkeypatch.setattr(session_location, "get_runtime_subdir", runtime_subdir)
+    monkeypatch.setattr("nanobot.webui.history.get_webui_dir", lambda: runtime_subdir("webui"))
+    monkeypatch.setattr(star_prompt, "get_webui_dir", lambda: runtime_subdir("webui"))
+    monkeypatch.setattr(pairing_store, "_store_path", lambda: data_dir() / "pairing.json")
+    monkeypatch.setattr(llm_usage, "get_data_dir", data_dir)
     stores: dict[Path, llm_usage.LLMUsageStore] = {}
     monkeypatch.setattr(llm_usage, "_STORES", stores)
     try:
@@ -72,30 +73,6 @@ def _isolate_llm_usage_stores(
     finally:
         for store in stores.values():
             store.close()
-
-
-@pytest.fixture(autouse=True)
-def _isolate_star_prompt_store(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Keep WebUI completion events out of the user's invitation state and lock."""
-    webui_dir = tmp_path.parent / "star-prompt-webui" / uuid4().hex
-
-    def get_webui_dir() -> Path:
-        webui_dir.mkdir(parents=True, exist_ok=True)
-        return webui_dir
-
-    monkeypatch.setattr("nanobot.webui.star_prompt.get_webui_dir", get_webui_dir)
-
-
-@pytest.fixture(autouse=True)
-def _isolate_pairing_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep channel pairing tests out of the user's active pairing store."""
-    pairing_path = tmp_path / "pairing.json"
-    monkeypatch.setattr(
-        "nanobot.pairing.store._store_path",
-        lambda: pairing_path,
-    )
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -136,3 +113,135 @@ def _use_windows_system_ca_for_default_http_clients() -> Iterator[None]:
         yield
     finally:
         ssl.create_default_context = original
+
+
+@pytest.fixture(scope="session")
+def create_integration_env(tmp_path_factory: pytest.TempPathFactory) -> Callable[[Path], Path]:
+    """Seed each stdlib-created prefix from private, offline pip images."""
+    import ensurepip
+    import venv
+    from importlib.resources import files
+
+    from virtualenv import session_via_cli
+
+    seed = tmp_path_factory.mktemp("integration-env-seed")
+    wheels = seed / "wheels"
+    wheels.mkdir()
+    versions = {}
+    # Keep the stdlib seed versions, including setuptools on Python 3.11,
+    # rather than silently selecting virtualenv's newer bundled pip.
+    for wheel in files("ensurepip").joinpath("_bundled").iterdir():
+        if wheel.name.endswith(".whl"):
+            name, version, _ = wheel.name.split("-", 2)
+            versions[name] = version
+            (wheels / wheel.name).write_bytes(wheel.read_bytes())
+    assert versions["pip"] == ensurepip.version()
+
+    env = {key: value for key, value in os.environ.items() if not key.startswith(("VIRTUALENV_", "PIP_"))}
+    env.update({
+        "VIRTUALENV_CONFIG_FILE": os.devnull,
+        "VIRTUALENV_OVERRIDE_APP_DATA": str(seed / "app-data"),
+        "PIP_CONFIG_FILE": os.devnull,
+        "PIP_NO_INDEX": "1",
+    })
+    options = [
+        "--python", sys.executable,
+        "--creator", "venv",
+        "--seeder", "app-data",
+        "--copies",
+        "--no-download",
+        "--no-periodic-update",
+        "--pip", versions["pip"],
+        "--setuptools", versions.get("setuptools", "none"),
+        "--extra-search-dir", str(wheels),
+    ]
+
+    def create(environment: Path) -> Path:
+        # Keep stdlib creation semantics; use virtualenv only for copied seed
+        # packages and prefix-specific launchers, not its runtime import hooks.
+        venv.EnvBuilder(with_pip=False).create(environment)
+        with session_via_cli([str(environment), *options], setup_logging=False, env=env) as session:
+            session.seeder.run(session.creator)
+        return environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+    return create
+
+
+@pytest.fixture
+def create_symlink():
+    """Create real symlinks, skipping only Windows' missing-privilege error."""
+    def create(link: Path, target: Path, *, target_is_directory: bool = False) -> None:
+        try:
+            link.symlink_to(target, target_is_directory=target_is_directory)
+        except OSError as exc:
+            if sys.platform == "win32" and getattr(exc, "winerror", None) == 1314:
+                pytest.skip("Windows symlink creation requires Developer Mode or privilege")
+            raise
+
+    return create
+
+
+class DisplayHistoryFixture:
+    """Explicit offline setup plus snapshot reads for history projection tests."""
+
+    def __init__(self, workspace: Path) -> None:
+        from nanobot.session.manager import SessionManager
+
+        self.sessions = SessionManager(workspace)
+
+    async def metadata(self, chat_id, metadata=None):
+        from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
+
+        session = await self.sessions.state.get_header(f"websocket:{chat_id}")
+        return {**(metadata or {}), HISTORY_GENERATION_METADATA_KEY: session.generation}
+
+    async def message(self, **kwargs):
+        from nanobot.bus.events import OutboundMessage
+
+        kwargs["metadata"] = await self.metadata(kwargs["chat_id"], kwargs.get("metadata"))
+        return OutboundMessage(**kwargs)
+
+    async def stream(self, channel, method, chat_id, *args, **kwargs):
+        kwargs["metadata"] = await self.metadata(chat_id, kwargs.get("metadata"))
+        await getattr(channel, method)(chat_id, *args, **kwargs)
+
+    def append(self, key, record):
+        from nanobot.webui.transcript import append_transcript_object
+
+        append_transcript_object(key, record, sessions=self.sessions)
+
+    def _project(self, name, key, *args, **kwargs):
+        from nanobot.webui import transcript
+
+        return self.sessions.project_history(key, lambda snapshot: getattr(transcript, name)(
+            key, *args, history=snapshot, **kwargs,
+        ))
+
+    def read(self, key):
+        return self._project("read_transcript_lines", key)
+
+    def build(self, key, **kwargs):
+        return self._project("build_webui_thread_response", key, **kwargs)
+
+    def trace(self, key, detail_ref):
+        return self._project("build_webui_trace_detail_response", key, detail_ref)
+
+    def revision(self, key, **kwargs):
+        return self._project("webui_transcript_revision", key, **kwargs)
+
+    def prompts(self, key, **kwargs):
+        return self._project("build_prompt_index", key, **kwargs)
+
+    def prompt_response(self, key, previous_revision, **kwargs):
+        return self._project("prompt_index_response", key, previous_revision, **kwargs)
+
+    def unfinished(self, key):
+        return self._project("has_unfinished_transcript_tail", key)
+
+
+@pytest.fixture
+async def history(tmp_path: Path):
+    fixture = DisplayHistoryFixture(tmp_path)
+    yield fixture
+    if fixture.sessions._state is not None:
+        await fixture.sessions.state.aclose()

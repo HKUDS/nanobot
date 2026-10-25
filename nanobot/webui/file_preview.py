@@ -40,7 +40,7 @@ class WebUIFilePreviewError(ValueError):
 
 def file_reference_payload(raw_path: str | None, *, scope: WorkspaceScope) -> dict[str, str | None]:
     """Resolve copyable paths through the preview policy without reading file contents."""
-    resolved = _resolve_preview_path(raw_path, scope=scope)
+    resolved = resolve_file_path(raw_path, scope=scope)
     try:
         relative = resolved.relative_to(scope.project_path).as_posix()
     except ValueError:
@@ -56,7 +56,7 @@ def file_preview_payload(
 ) -> dict[str, Any]:
     """Return a bounded source or raster preview within the session workspace scope."""
 
-    resolved = _resolve_preview_path(raw_path, scope=scope)
+    resolved = resolve_file_path(raw_path, scope=scope)
 
     try:
         with open(resolved, "rb") as f:
@@ -110,7 +110,7 @@ def file_preview_availability_payload(
 ) -> dict[str, bool]:
     """Probe a readable source or raster candidate without loading it fully."""
 
-    resolved = _resolve_preview_path(raw_path, scope=scope)
+    resolved = resolve_file_path(raw_path, scope=scope)
     try:
         with open(resolved, "rb") as f:
             prefix = f.read(4096)
@@ -125,8 +125,10 @@ def file_preview_availability_payload(
     return {"available": True}
 
 
-def _resolve_preview_path(raw_path: str | None, *, scope: WorkspaceScope) -> Path:
-    path = _clean_preview_path(raw_path)
+def resolve_file_path(
+    raw_path: str | None, *, scope: WorkspaceScope, literal: bool = False,
+) -> Path:
+    path = (raw_path or "").strip() if literal else _clean_preview_path(raw_path)
     if not path:
         raise WebUIFilePreviewError(400, "missing path")
     if len(path) > 4096:
@@ -145,6 +147,8 @@ def _resolve_preview_path(raw_path: str | None, *, scope: WorkspaceScope) -> Pat
         raise WebUIFilePreviewError(404, "file not found") from e
     except WorkspaceBoundaryError as e:
         raise WebUIFilePreviewError(403, "file is outside the current workspace") from e
+    except PermissionError as e:
+        raise WebUIFilePreviewError(403, "file is not readable") from e
     except OSError as e:
         raise WebUIFilePreviewError(400, "invalid path") from e
 

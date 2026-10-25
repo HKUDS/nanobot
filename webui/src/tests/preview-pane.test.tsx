@@ -4,14 +4,35 @@ import { PreviewPane } from "@/components/PreviewPane";
 import { FilePreviewStore, useFilePreviewState } from "@/hooks/useFilePreviewState";
 
 describe("preview tabs", () => {
+  it("reuses a gateway-resolved file without merging same-named files or sessions", () => {
+    const store = new FilePreviewStore();
+    store.open("a", "reports/REPORT.md");
+    store.resolveFile("a", "reports/REPORT.md", "/workspace/reports/REPORT.md");
+    store.open("a", "/workspace/reports/./details.md");
+    store.resolveFile("a", "/workspace/reports/./details.md", "/workspace/reports/details.md");
+    store.update("a", { width: 620 });
+    store.open("a", "/workspace/reports/./REPORT.md");
+    store.resolveFile("a", "/workspace/reports/./REPORT.md", "/workspace/reports/REPORT.md");
+    expect(store.get("a").tabs.map(tab => tab.value)).toEqual([
+      "reports/REPORT.md", "/workspace/reports/./details.md",
+    ]);
+    expect(store.get("a")).toMatchObject({ activeId: "file:reports/REPORT.md", width: 620 });
+    store.open("a", "archive/REPORT.md");
+    store.resolveFile("a", "archive/REPORT.md", "/workspace/archive/REPORT.md");
+    store.open("b", "reports/REPORT.md");
+    store.resolveFile("b", "reports/REPORT.md", "/workspace/reports/REPORT.md");
+    expect(store.get("a").tabs).toHaveLength(3);
+    expect(store.get("b").tabs).toHaveLength(1);
+  });
+
   it("deduplicates targets, keeps selection and width per session, and closes neighboring tabs", () => {
     const store = new FilePreviewStore();
     const storage = vi.spyOn(Storage.prototype, "setItem");
-    store.open("a", "file", "chart.png");
-    store.open("a", "file", "index.html");
-    store.open("a", "file", "data.json");
+    store.open("a", "chart.png");
+    store.open("a", "index.html");
+    store.open("a", "data.json");
     store.update("a", { width: 620 });
-    store.open("a", "file", "index.html");
+    store.open("a", "index.html");
     expect(store.get("a").tabs).toHaveLength(3);
     expect(store.get("a").activeId).toBe("file:index.html");
     store.closeTab("a", "file:chart.png");
@@ -21,12 +42,12 @@ describe("preview tabs", () => {
     store.select("a", "missing");
     store.closeTab("a", "missing");
     expect(store.get("a").activeId).toBe("file:data.json");
-    store.open("b", "web", "https://example.com");
+    store.open("b", "other.txt");
     expect(store.get("a").width).toBe(620);
     store.closeTab("a", "file:data.json");
     expect(store.get("a")).toMatchObject({ tabs: [], activeId: null, width: 620 });
     expect(store.get("b").tabs).toHaveLength(1);
-    store.open("a", "file", "chart.png");
+    store.open("a", "chart.png");
     store.close("a");
     expect(store.get("a")).toMatchObject({ tabs: [], activeId: null, width: 620 });
     store.delete("b");
@@ -39,9 +60,9 @@ describe("preview tabs", () => {
 
   it("keeps one shell, supports keyboard tabs and close buttons, and never reloads the same tab", async () => {
     const store = new FilePreviewStore();
-    store.open("a", "file", "chart.png");
-    store.open("a", "file", "index.html");
-    store.open("a", "file", "data.json");
+    store.open("a", "chart.png");
+    store.open("a", "index.html");
+    store.open("a", "data.json");
     function View() {
       const { state, selectTab, closeTab, close } = useFilePreviewState("a", store);
       return state.activeId ? <PreviewPane tabs={state.tabs} activeId={state.activeId} width={544}
@@ -65,7 +86,7 @@ describe("preview tabs", () => {
     fireEvent.keyDown(screen.getByRole("tab", { name: "chart.png" }), { key: "ArrowRight" });
     expect(screen.getByRole("tab", { name: "index.html" })).toHaveFocus();
     expect(screen.getByRole("tab", { name: "index.html" })).toHaveAttribute("aria-selected", "true");
-    act(() => store.open("a", "file", "index.html"));
+    act(() => store.open("a", "index.html"));
     expect(screen.getAllByRole("tab")).toHaveLength(3);
     fireEvent.keyDown(screen.getByRole("tab", { name: "index.html" }), { key: "Delete" });
     expect(screen.queryByRole("tab", { name: "index.html" })).not.toBeInTheDocument();
@@ -87,7 +108,7 @@ describe("preview tabs", () => {
       disconnect = disconnect;
     });
     try {
-      const tab = { id: "file:chart.png", kind: "file" as const, value: "chart.png" };
+      const tab = { id: "file:chart.png", value: "chart.png" };
       const view = render(<PreviewPane tabs={[tab]} activeId={tab.id} width={544} isClosing={false}
         onSelect={() => {}} onCloseTab={() => {}} onClose={() => {}} onResizeStart={() => {}}>
         <p>Preview</p>

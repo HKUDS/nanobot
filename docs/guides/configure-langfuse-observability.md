@@ -1,6 +1,6 @@
 # How to Configure Langfuse Observability for nanobot
 
-nanobot can trace supported OpenAI-compatible provider calls through Langfuse's OpenAI SDK wrapper.
+nanobot can trace supported OpenAI-compatible provider calls through Langfuse's OpenAI SDK wrapper, and Codex OAuth provider calls through Langfuse's native Python SDK.
 
 ## What you will build
 
@@ -21,6 +21,8 @@ Install Langfuse:
 ```bash
 nanobot plugins enable langfuse
 ```
+
+nanobot uses Langfuse Python SDK 4.7 or later in the 4.x series. Tracing supports Langfuse Cloud and self-hosted Langfuse 3.63.0 or later. The SDK enables real-time ingestion on Langfuse v4 automatically; see [Langfuse compatibility](https://langfuse.com/docs/compatibility).
 
 ## Minimal working example
 
@@ -47,7 +49,7 @@ nanobot agent -m "Hello!"
 - Langfuse is configured with environment variables, not `config.json`.
 - Start services from an environment that exports the same variables.
 - Add tracing after the provider works; it should not be the first setup step.
-- Native providers that do not use the OpenAI-compatible client path may not produce Langfuse OpenAI-wrapper traces.
+- Native providers other than Codex OAuth that do not use the OpenAI-compatible client path may not produce Langfuse traces.
 
 ## Security notes
 
@@ -58,7 +60,7 @@ nanobot agent -m "Hello!"
 ## Troubleshooting
 
 - If no traces appear, confirm the service process sees the environment variables.
-- Confirm the provider path is OpenAI-compatible.
+- Confirm the provider path is OpenAI-compatible or the Codex OAuth provider.
 - Run one local `nanobot agent -m "Hello!"` call before debugging service logs.
 
 ## Related nanobot docs

@@ -19,6 +19,10 @@ The TUI uses OpenTUI's retained full-screen layout: the transcript reflows with 
 
 Assistant math written with `$...$`, `$$...$$`, `\\(...\\)`, or `\\[...\\]` is presented as Unicode plain text so formulas remain readable in terminals without a math renderer. Currency and LaTeX inside inline or fenced code remain literal.
 
+Mermaid diagrams appear after a reply finishes. Press `Ctrl+G` or run `/diagrams` to open the viewer, where you can zoom, pan, switch diagrams, and view or copy the source. Keyboard shortcuts are shown at the bottom. Press `q` or `Esc` to return without losing your draft or reading position. If a diagram cannot be displayed, its source remains available.
+
+On macOS, diagrams use the installed PingFang fonts. The system resolves their location automatically; no font-path configuration is needed. If the font lookup fails, check that PingFang is available in Font Book. Diagram source remains available while fonts are unavailable.
+
 Automatic theme selection follows the terminal's OSC 10/11 responses. Until a response arrives, the TUI uses the terminal's default foreground and background without semantic colors or color animations. Terminals that do not answer keep this readable fallback. Use `nanobot --theme light` or `nanobot --theme dark` to select a color palette explicitly.
 
 ## Herdr pane titles

@@ -11,6 +11,7 @@ from loguru import logger
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import outbound_message_for_event
 from nanobot.events import AgentEvent
+from nanobot.runtime_admission import RuntimeAdmission
 
 _EventT = TypeVar("_EventT", bound=AgentEvent)
 EventHandler = Callable[[AgentEvent], Awaitable[None] | None]
@@ -28,15 +29,19 @@ class MessageBus:
     ``publish_event``. Local state transitions never wait for network sends.
     """
 
-    def __init__(self):
+    def __init__(self, *, admission: RuntimeAdmission | None = None):
+        self.admission = admission if admission is not None else RuntimeAdmission()
         self.inbound: asyncio.Queue[InboundMessage] = asyncio.Queue()
         self.outbound: asyncio.Queue[OutboundMessage] = asyncio.Queue()
         self._handlers: list[EventHandler] = []
         self._pending: set[asyncio.Task[None]] = set()
+        self.outbound_recorder: Callable[[OutboundMessage], None] | None = None
 
     async def publish_inbound(self, msg: InboundMessage) -> None:
         """Publish a message from a channel to the agent."""
-        await self.inbound.put(msg)
+        self.admission.check()
+        # This queue is unbounded. Admission and enqueue must not yield apart.
+        self.inbound.put_nowait(msg)
 
     async def consume_inbound(self) -> InboundMessage:
         """Consume the next inbound message (blocks until available)."""
@@ -44,6 +49,8 @@ class MessageBus:
 
     async def publish_outbound(self, msg: OutboundMessage) -> None:
         """Queue a routed message or event for its channel."""
+        if self.outbound_recorder is not None:
+            self.outbound_recorder(msg)
         await self.outbound.put(msg)
 
     async def publish_event(
@@ -77,6 +84,11 @@ class MessageBus:
     def outbound_size(self) -> int:
         """Number of pending outbound messages."""
         return self.outbound.qsize()
+
+    @property
+    def has_pending_events(self) -> bool:
+        """Scheduled local subscribers may still start agent background work."""
+        return bool(self._pending)
 
     @overload
     def subscribe(

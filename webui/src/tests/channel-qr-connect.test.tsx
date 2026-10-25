@@ -5,6 +5,7 @@ import QRCode from "qrcode";
 import { ChannelQrConnectFlow } from "@/components/settings/channels/ChannelQrConnectFlow";
 import { FeishuConnectFlow } from "../../../nanobot/channels/feishu/webui/FeishuConnectFlow";
 import { FeishuAssistantsPanel } from "../../../nanobot/channels/feishu/webui/FeishuAssistantsPanel";
+import type { ChannelPluginPanelProps } from "@/channel-plugins/types";
 import type { NanobotFeatureInfo } from "@/lib/types";
 
 const { requestMutation } = vi.hoisted(() => ({ requestMutation: vi.fn() }));
@@ -46,8 +47,11 @@ describe("channel QR connect parameters", () => {
         runtime_status: "running", config_values: {}, configured_fields: [],
       }],
     };
-    const onFeaturesUpdate = vi.fn();
-    const props = { token: "tok", feature, showBrandLogos: false, onFeaturesUpdate };
+    const onFeaturesUpdate = vi.fn<ChannelPluginPanelProps["onFeaturesUpdate"]>();
+    const props = {
+      token: "tok", feature, actionKey: null, showBrandLogos: false,
+      onAction: vi.fn<ChannelPluginPanelProps["onAction"]>(), onFeaturesUpdate,
+    } satisfies ChannelPluginPanelProps;
     const view = render(<FeishuAssistantsPanel {...props} />);
     requestMutation.mockResolvedValueOnce({
       session_id: "add-1", status: "pending", qr_url: "https://example.com/authorize",
@@ -59,7 +63,7 @@ describe("channel QR connect parameters", () => {
     }, 150_000);
     expect(screen.getByText("First assistant")).toBeVisible();
     requestMutation.mockResolvedValueOnce({ session_id: "add-1", status: "cancelled" });
-    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await screen.findByRole("button", { name: "Add another assistant" });
     expect(requestMutation).toHaveBeenLastCalledWith("settings.channel.connect.cancel", {
       channel: "feishu", session_id: "add-1",
@@ -84,13 +88,13 @@ describe("channel QR connect parameters", () => {
   });
 
   it.each([false, true])("keeps QR generation enabled by default (minimal=%s)", async (minimalPending) => {
-    const generateQr = vi.spyOn(QRCode, "toDataURL").mockResolvedValue("data:image/png;base64,preview");
+    const generateQr = vi.spyOn(QRCode, "toDataURL").mockImplementation(async () => "data:image/png;base64,preview");
     requestMutation.mockResolvedValueOnce({
       session_id: "qr-session", status: "pending", qr_url: "https://example.com/connect",
     });
     render(<ChannelQrConnectFlow token="tok" channelName="plugin-chat" labels={labels}
       minimalPending={minimalPending} onFeaturesUpdate={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Connect", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
     expect(await screen.findByRole("img", { name: "Connection QR code" })).toHaveAttribute("src", "data:image/png;base64,preview");
     expect(generateQr).toHaveBeenCalledOnce();
   });
@@ -103,14 +107,14 @@ describe("channel QR connect parameters", () => {
     render(<ChannelQrConnectFlow token="tok" channelName="plugin-chat" showQrCode={false}
       labels={{ ...labels, scanTitle: "Authorize in browser", scanDescription: "Continue in the browser." }}
       onFeaturesUpdate={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Connect", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
     expect(await screen.findByText("Continue in the browser.")).toBeVisible();
     expect(screen.getByText("Waiting")).toBeVisible();
     expect(generateQr).not.toHaveBeenCalled();
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
     expect(screen.getByText("Authorize in browser").parentElement?.parentElement)
       .not.toHaveClass("sm:grid-cols-[auto_minmax(0,1fr)]");
-    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(await screen.findByText("Stopped")).toBeVisible();
     expect(requestMutation).toHaveBeenLastCalledWith("settings.channel.connect.cancel", {
       channel: "plugin-chat", session_id: "browser-session",
@@ -118,7 +122,7 @@ describe("channel QR connect parameters", () => {
   });
 
   it("polls browser-only authorization to completion without generating QR", async () => {
-    const generateQr = vi.spyOn(QRCode, "toDataURL").mockResolvedValue("data:image/png;base64,unused");
+    const generateQr = vi.spyOn(QRCode, "toDataURL").mockImplementation(async () => "data:image/png;base64,unused");
     const onFeaturesUpdate = vi.fn();
     const features = { features: [], enabled_count: 0 };
     requestMutation
@@ -126,7 +130,7 @@ describe("channel QR connect parameters", () => {
       .mockResolvedValueOnce({ session_id: "browser-session", status: "succeeded", nanobot_features: features });
     render(<ChannelQrConnectFlow token="tok" channelName="plugin-chat" showQrCode={false}
       labels={labels} onFeaturesUpdate={onFeaturesUpdate} />);
-    fireEvent.click(screen.getByRole("button", { name: "Connect", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
     expect(await screen.findByText("Connected", {}, { timeout: 2000 })).toBeVisible();
     expect(onFeaturesUpdate).toHaveBeenCalledWith(features);
     expect(requestMutation).toHaveBeenLastCalledWith("settings.channel.connect.poll", {

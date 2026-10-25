@@ -1,20 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
   CalendarClock,
   ChevronRight,
   CircleAlert,
-  RefreshCcw,
 } from "lucide-react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
-import {
-  AutomationDeleteDialog,
-  AutomationDetailDialog,
-  AutomationEditDialog,
-} from "@/components/settings/system/AutomationsSettings";
 import type { AutomationAction } from "@/components/settings/system/AutomationsSettings";
+import { SurfaceErrorBoundary } from "@/components/SurfaceErrorBoundary";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { SkeletonStatus } from "@/components/settings/shared/SkeletonStatus";
 import { formControlFocusClassName } from "@/components/ui/form-control";
 import {
   Popover,
@@ -28,6 +25,19 @@ import type {
   SessionAutomationJob,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+const AutomationDetailDialog = lazy(async () => {
+  const module = await import("@/components/settings/system/AutomationsSettings");
+  return { default: module.AutomationDetailDialog };
+});
+const AutomationEditDialog = lazy(async () => {
+  const module = await import("@/components/settings/system/AutomationsSettings");
+  return { default: module.AutomationEditDialog };
+});
+const AutomationDeleteDialog = lazy(async () => {
+  const module = await import("@/components/settings/system/AutomationsSettings");
+  return { default: module.AutomationDeleteDialog };
+});
 
 const RELATIVE_THRESHOLDS: [number, Intl.RelativeTimeFormatUnit][] = [
   [60, "second"],
@@ -55,6 +65,8 @@ export function SessionInfoPopoverView({ title, jobs, loading, loadFailed, now, 
   const { t } = useTranslation("common");
   const [open, setOpen] = useState(false);
   const [inspectedJob, setInspectedJob] = useState<SessionAutomationJob | null>(null);
+  // Keep requested dialogs mounted through their close and focus-restoration lifecycle.
+  const [dialogsRequested, setDialogsRequested] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [actionKey, setActionKey] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -67,6 +79,7 @@ export function SessionInfoPopoverView({ title, jobs, loading, loadFailed, now, 
   const selectedJob = inspectedJob;
 
   const inspectJob = (job: SessionAutomationJob) => {
+    setDialogsRequested(true);
     setActionError(null);
     setInspectedJob(job);
     setOpen(false);
@@ -75,6 +88,15 @@ export function SessionInfoPopoverView({ title, jobs, loading, loadFailed, now, 
   const handOffDetail = (next: () => void) => {
     afterDetailClose.current = next;
     setDetailOpen(false);
+  };
+  const handleDetailCloseAutoFocus = (event: Event) => {
+    event.preventDefault();
+    if (detailOpen) return;
+    setInspectedJob(null);
+    triggerRef.current?.focus({ preventScroll: true });
+    const next = afterDetailClose.current;
+    afterDetailClose.current = null;
+    next?.();
   };
   const updateInspectedJob = (nextJobs: SessionAutomationJob[], id: string) => {
     const nextJob = nextJobs.find((job) => job.id === id);
@@ -112,12 +134,30 @@ export function SessionInfoPopoverView({ title, jobs, loading, loadFailed, now, 
       setActionKey(null);
     }
   };
-  const automationContent = loading ? (
-    <div className="mx-2 flex items-center gap-2 rounded-floating bg-muted/45 px-3 py-3 text-[12.5px] text-muted-foreground">
-      <RefreshCcw className="h-3.5 w-3.5 animate-spin" />
-      {t("thread.sessionInfo.loading")}
-    </div>
-  ) : loadFailed ? (
+  const detailPlaceholder = (failed: boolean) => (
+    <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+      <DialogContent aria-describedby={undefined} className="max-w-[520px]" onCloseAutoFocus={handleDetailCloseAutoFocus}>
+        <DialogHeader><DialogTitle>{selectedJob?.name || selectedJob?.id}</DialogTitle></DialogHeader>
+        {failed ? <p role="alert" className="text-sm text-destructive">{t("thread.sessionInfo.loadFailed")}</p> : (
+          <SkeletonStatus label={t("thread.sessionInfo.loading")} className="space-y-3">
+            <div className="h-24 rounded-control bg-muted/35" />
+          </SkeletonStatus>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+  const automationContent = loading && jobs.length === 0 ? (
+    <SkeletonStatus label={t("thread.sessionInfo.loading")} className="space-y-1 px-2">
+      {[0, 1, 2].map((index) => <div key={index} data-session-job-skeleton className="grid min-h-12 grid-cols-[0.375rem_minmax(0,1fr)_1rem] items-center gap-2.5 px-3 py-2">
+        <div className="h-1.5 w-1.5 rounded-full bg-muted-foreground/20" />
+        <div className="min-w-0">
+          <div className="flex h-5 items-center"><div className="h-3 w-2/3 rounded bg-muted-foreground/20" /></div>
+          <div className="flex h-4 items-center"><div className="h-2.5 w-1/2 rounded bg-muted-foreground/15" /></div>
+        </div>
+        <div className="h-4 w-4" />
+      </div>)}
+    </SkeletonStatus>
+  ) : loadFailed && jobs.length === 0 ? (
     <div className="mx-2 flex items-center gap-2 rounded-floating bg-destructive/10 px-3 py-3 text-[12.5px] text-destructive">
       <CircleAlert className="h-3.5 w-3.5" />
       {t("thread.sessionInfo.loadFailed")}
@@ -175,7 +215,7 @@ export function SessionInfoPopoverView({ title, jobs, loading, loadFailed, now, 
                   {t("thread.sessionInfo.automations")}
                 </span>
                 <span className="rounded-full bg-muted/70 px-2 py-0.5 text-[11px] tabular-nums text-muted-foreground">
-                  {t("thread.sessionInfo.count", { count: jobs.length })}
+                  {loading && jobs.length === 0 ? "—" : t("thread.sessionInfo.count", { count: jobs.length })}
                 </span>
               </div>
             </div>
@@ -197,46 +237,42 @@ export function SessionInfoPopoverView({ title, jobs, loading, loadFailed, now, 
         </PopoverContent>
       </Popover>
 
-      <AutomationDetailDialog
-        job={selectedJob}
-        open={detailOpen}
-        locale={currentLocale()}
-        actionKey={actionKey}
-        error={actionError}
-        onOpenChange={setDetailOpen}
-        onAction={handleAction}
-        onRequestEdit={(job) => handOffDetail(() => setPendingEdit(job))}
-        onRequestDelete={(job) => handOffDetail(() => setPendingDelete(job))}
-        onCloseAutoFocus={(event) => {
-          event.preventDefault();
-          if (detailOpen) return;
-          setInspectedJob(null);
-          triggerRef.current?.focus({ preventScroll: true });
-          const next = afterDetailClose.current;
-          afterDetailClose.current = null;
-          next?.();
-        }}
-      />
-      <AutomationEditDialog
-        job={pendingEdit}
-        saving={actionKey === `update:${pendingEdit?.id ?? ""}`}
-        onOpenChange={(nextOpen) => {
-          if (!nextOpen) setPendingEdit(null);
-        }}
-        onCancel={(job) => {
-          setInspectedJob(job);
-          setDetailOpen(true);
-        }}
-        onSave={handleEdit}
-      />
-      <AutomationDeleteDialog
-        job={pendingDelete}
-        deleting={actionKey === `delete:${pendingDelete?.id ?? ""}`}
-        onOpenChange={(nextOpen) => {
-          if (!nextOpen) setPendingDelete(null);
-        }}
-        onConfirm={(job) => handleAction("delete", job)}
-      />
+      {dialogsRequested ? <SurfaceErrorBoundary fallback={detailPlaceholder(true)}>
+        <Suspense fallback={detailPlaceholder(false)}>
+          <AutomationDetailDialog
+            job={selectedJob}
+            open={detailOpen}
+            locale={currentLocale()}
+            actionKey={actionKey}
+            error={actionError}
+            onOpenChange={setDetailOpen}
+            onAction={handleAction}
+            onRequestEdit={(job) => handOffDetail(() => setPendingEdit(job))}
+            onRequestDelete={(job) => handOffDetail(() => setPendingDelete(job))}
+            onCloseAutoFocus={handleDetailCloseAutoFocus}
+          />
+          <AutomationEditDialog
+            job={pendingEdit}
+            saving={actionKey === `update:${pendingEdit?.id ?? ""}`}
+            onOpenChange={(nextOpen) => {
+              if (!nextOpen) setPendingEdit(null);
+            }}
+            onCancel={(job) => {
+              setInspectedJob(job);
+              setDetailOpen(true);
+            }}
+            onSave={handleEdit}
+          />
+          <AutomationDeleteDialog
+            job={pendingDelete}
+            deleting={actionKey === `delete:${pendingDelete?.id ?? ""}`}
+            onOpenChange={(nextOpen) => {
+              if (!nextOpen) setPendingDelete(null);
+            }}
+            onConfirm={(job) => handleAction("delete", job)}
+          />
+        </Suspense>
+      </SurfaceErrorBoundary> : null}
     </>
   );
 }

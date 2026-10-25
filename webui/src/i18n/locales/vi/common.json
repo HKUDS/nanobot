@@ -1,4 +1,106 @@
 {
+  "updates": {
+    "guide": {
+      "entry": "Cập nhật qua {{method}}",
+      "methods": {
+        "managed": "trình cài đặt nanobot",
+        "uv": "uv",
+        "pipx": "pipx",
+        "pip": "pip",
+        "source": "mã nguồn",
+        "container": "triển khai container",
+        "system": "trình quản lý gói hệ thống"
+      },
+      "host": "Gateway: {{host}}",
+      "where": "Dùng terminal trên máy này với tài khoản đã cài đặt ban đầu. Với gateway từ xa, dùng SSH hoặc bảng điều khiển máy chủ, không phải máy đang mở trình duyệt. Lệnh chỉ để sao chép, trang này không thực thi.",
+      "containerHost": "Đây là tên và đường dẫn bên trong container, không phải máy triển khai. Dùng máy chủ hoặc bảng quản trị container; không cập nhật bên trong container đang chạy.",
+      "beforeTitle": "Chuẩn bị và dừng dịch vụ",
+      "before": "Hoàn tất tác vụ, sao lưu cấu hình, hội thoại và dữ liệu workspace. Dừng mọi gateway dùng chung bản cài đặt qua trình khởi chạy hoặc quản lý dịch vụ ban đầu. Giữ đường dẫn hồ sơ và tham số khởi chạy.",
+      "installTitle": "Cập nhật trong {{shell}}",
+      "inspectCommand": "Kiểm tra bản cài đặt",
+      "updateCommand": "Lệnh cập nhật",
+      "versionCommand": "Phiên bản đã cài",
+      "reasons": {
+        "restart": "Gói đích đã được cài. Không cài lại. Dừng gateway cũ, khởi động bằng trình khởi chạy và hồ sơ ban đầu, rồi kiểm tra phiên bản đang chạy.",
+        "registry": "Dùng nguồn gói và thông tin xác thực ban đầu. Trình quản lý giữ extras và giới hạn phiên bản, nên có thể chọn bản ổn định khác với thông báo. Kiểm tra đầu ra; không ép cập nhật khi lỗi.",
+        "preview": "Preview được phát hành trên GitHub, có thể chưa có trên nguồn gói. Chọn wheel phù hợp Python và nền tảng của gateway, kiểm tra checksum rồi cài bằng công cụ ban đầu và cùng extras. Lệnh upgrade chung không đảm bảo cài đúng Preview này.",
+        "policy": "Có ghim phiên bản, tệp khóa, nguồn cố định, giới hạn hoặc tùy chọn chưa nhận diện. Kiểm tra và theo quy trình ban đầu, giữ extras và gói được thêm vào. Không tự bỏ giới hạn.",
+        "extras": "Môi trường pip này không ghi lại extras ban đầu. Kiểm tra gói rồi dùng lại lệnh pip gốc với --upgrade và phiên bản mong muốn, giữ extras và tùy chọn nguồn. Không cung cấp lệnh cài đặt phỏng đoán.",
+        "manager": "Không xác nhận được chương trình quản lý hoặc cấu trúc môi trường. Dùng tài khoản và thiết lập ban đầu để trỏ tới đường dẫn trên; không dùng pip hay nanobot khác trong PATH.",
+        "source": "Kiểm tra kho mã, giữ thay đổi cục bộ và xác nhận nhánh hoặc phiên bản. Theo quy trình của kho để cập nhật mã, phụ thuộc và build WebUI/TUI. Không thay bản cài editable bằng gói PyPI.",
+        "container": "Trong dự án Compose hoặc bảng quản trị gốc, chọn tag/digest, tải hoặc build ảnh rồi chỉ tạo lại dịch vụ nanobot với mount, bí mật và cổng cũ. Sao lưu volume dữ liệu; tuyệt đối không xóa chúng.",
+        "system": "Dùng trình quản lý gói của hệ điều hành hoặc liên hệ quản trị viên. Không dùng sudo pip hay vượt qua giới hạn Python do hệ thống quản lý.",
+        "review": "Bản cài đặt hoặc kết quả kiểm tra đã thay đổi. Đóng và kiểm tra lại trước khi sao chép lệnh."
+      },
+      "verifyTitle": "Khởi động lại và xác minh",
+      "verify": "Dùng cùng trình khởi chạy và hồ sơ. Lệnh chỉ kiểm tra tệp đã cài. Kết nối lại đúng gateway, so sánh phiên bản đang chạy với v{{version}} và kiểm tra hội thoại, cấu hình còn nguyên.",
+      "check": "Kiểm tra gateway đang chạy",
+      "verified": "Đã xác nhận: gateway đang chạy v{{version}}.",
+      "observed": "Gateway báo v{{version}}, không phải v{{target}}. Kiểm tra đầu ra cài đặt và khởi động lại cùng môi trường; cập nhật gói không thay đổi tiến trình đang chạy.",
+      "checkFailed": "Không đọc được phiên bản đang chạy. Kết nối lại đúng gateway và thử lại; chưa xác nhận cập nhật thành công."
+    },
+    "automaticRecovery": "Nếu cập nhật thất bại, nanobot sẽ thử khôi phục dịch vụ bằng chương trình trước đó khi an toàn. Dữ liệu trò chuyện sẽ không bị hoàn nguyên.",
+    "restored": "Đã khôi phục phiên bản trước",
+    "restoredDescription": "Cập nhật chưa hoàn tất. v{{version}} đã chạy lại. Cấu hình và cuộc trò chuyện không bị hoàn nguyên về dữ liệu cũ.",
+    "recoveryBeforeInstall": "Bản cập nhật đã dừng trước khi cài đặt. Chưa có tệp gói nào bị thay đổi. Khôi phục bản cập nhật đã lưu để tiếp tục.",
+    "channel": {
+      "settings": "Cài đặt cập nhật",
+      "receivePreview": "Nhận bản cập nhật xem trước",
+      "previewWarning": "Đây là bản xem trước và có thể có lỗi.",
+      "preview": "Xem trước",
+      "hint": "Trải nghiệm tính năng mới sớm.",
+      "saving": "Đang lưu…",
+      "saved": "Đã lưu tùy chọn cập nhật",
+      "ahead": "Phiên bản này mới hơn kênh đã chọn. Sẽ không cài đặt phiên bản cũ hơn.",
+      "waiting_stable": "Đã tắt cập nhật xem trước. Tiếp tục dùng phiên bản này cho đến khi có bản ổn định mới hơn.",
+      "withdrawn": "Bản xem trước này đã bị thu hồi. Hãy cập nhật khi có phiên bản mới hơn; không hạ cấp đè lên dữ liệu hiện tại.",
+      "unavailable": "Không thể kiểm tra bản cập nhật của kênh này.",
+      "publishing": "Phiên bản đang được phát hành. Vui lòng kiểm tra lại sau.",
+      "unsupported": "Không có bản cập nhật tương thích với phiên bản Python và nền tảng này.",
+      "releaseNotes": "Ghi chú phát hành"
+    },
+    "reviewAgain": "Xem lại bản cập nhật",
+    "reviewAgainDescription": "Chưa có tệp gói nào bị thay đổi. Hãy xem lại bản cập nhật trước khi xác nhận cài đặt và khởi động lại.",
+    "settleFailed": "Chưa thể kết thúc an toàn lần cập nhật trước. Hãy kiểm tra lại trạng thái hoặc làm theo hướng dẫn khôi phục.",
+    "ownerGuide": "Hướng dẫn cập nhật cho cách cài đặt của bạn",
+    "recoveryTitle": "Khôi phục trên máy tính gateway",
+    "recoveryDescription": "Chạy lệnh này trong terminal trên máy tính đang chạy nanobot. Lệnh sẽ hiển thị bản cập nhật đã lưu trước khi yêu cầu xác nhận sửa chữa. Giữ lại bản sao lưu gốc.",
+    "confirm": "Cập nhật nanobot ngay?",
+    "reviewingTitle": "Đang kiểm tra bản cập nhật…",
+    "preparing": "Đang tải bản cập nhật…",
+    "installing": "Đang cài bản cập nhật…",
+    "working": "Đang cập nhật nanobot…",
+    "reconnecting": "Đang kết nối lại…",
+    "done": "Cập nhật hoàn tất",
+    "failed": "Cập nhật chưa hoàn tất",
+    "confirmDescription": "Cập nhật lên v{{version}} sẽ khởi động lại nanobot trên {{host}}. Hãy hoàn thành các tác vụ đang chạy trước khi tiếp tục.",
+    "reviewing": "Đang kiểm tra bản cài và phiên bản đích chính xác. Không thay đổi tệp.",
+    "workingDescription": "Đang chuẩn bị và xác minh tệp, sau đó sao lưu và khởi động lại gateway đã chọn.",
+    "reconnectingDescription": "Đang chờ kết nối lại gateway đã cập nhật. Đừng bắt đầu cập nhật khác.",
+    "delayed": "Kết nối lại mất nhiều thời gian. Tiến trình đã lưu; bạn có thể đóng và kiểm tra sau.",
+    "doneDescription": "Hiện đang chạy v{{version}}.",
+    "preparationFailed": "Chuẩn bị hoặc dừng gateway thất bại. Chưa thay đổi gói. Hãy kết thúc tác vụ rồi kiểm tra lại.",
+    "repairRequired": "Cài đặt hoặc khởi động lại thất bại. Bản sao lưu và nhật ký được giữ lại. Hãy làm theo quy trình khôi phục, đừng bắt đầu cài đặt khác.",
+    "reviewFailed": "Không thể xác minh bản cập nhật. Hãy kiểm tra kết nối và cách khởi chạy nền được bản cài gốc hỗ trợ.",
+    "confirmationUnknown": "Yêu cầu có thể đã được nhận. Đang kiểm tra tiến trình đã lưu trước thao tác tiếp theo.",
+    "statusFailed": "Không đọc được nhật ký. Hãy kết nối lại cùng gateway rồi kiểm tra.",
+    "sharedInstallation": "Sẽ khởi động lại {{count}} gateway đang chạy dùng chung bản cài này.",
+    "cancel": "Hủy",
+    "close": "Đóng",
+    "hide": "Thu gọn",
+    "return": "Xong",
+    "wait": "Vui lòng chờ",
+    "checkAgain": "Kiểm tra lại",
+    "apply": "Cập nhật và khởi động lại",
+    "blocked": {
+      "review_changed": "Thông tin đã đổi hoặc hết hạn. Đóng rồi kiểm tra lại.",
+      "not_upgrade": "Phiên bản đích không phải nâng cấp. Không thay đổi tệp.",
+      "installation_owner": "Hãy cập nhật bằng trình quản lý gói hoặc công cụ triển khai ban đầu.",
+      "installation_policy": "Nguồn cài đặt, phần bổ sung hoặc ràng buộc phiên bản yêu cầu cập nhật bằng phương thức cài đặt ban đầu.",
+      "external_restart": "Không thể khởi động lại gateway này tại đây. Hãy dùng công cụ khởi chạy hoặc triển khai ban đầu để dừng, cập nhật và khởi động lại.",
+      "permission": "Mở localhost trên gateway hoặc cho phép cài gói từ xa."
+    }
+  },
   "remote": {
     "compatibility": {
       "title": "Kiểm tra phiên bản",
@@ -253,32 +355,7 @@
   "previewTabs": {
     "title": "Xem trước",
     "closeTab": "Đóng {{name}}",
-    "closeAll": "Đóng khung xem trước",
-    "websiteInfo": "Giới thiệu về xem trước trang web"
-  },
-  "webPreview": {
-    "viewLinks": "Xem liên kết",
-    "back": "Quay lại",
-    "original": "Liên kết gốc",
-    "actions": "Thao tác liên kết",
-    "open": "Xem trước trang web",
-    "external": "Mở trong trình duyệt",
-    "copy": "Sao chép liên kết",
-    "copied": "Đã sao chép liên kết",
-    "copyFailed": "Không thể sao chép liên kết",
-    "title": "Xem trước trang web",
-    "resize": "Đổi chiều rộng bản xem trước",
-    "refresh": "Tải lại trang web",
-    "close": "Đóng bản xem trước",
-    "isolated": "Bản xem trước cách ly và hạn chế. Đăng nhập và một số tương tác có thể không hoạt động.",
-    "blockedHint": "Một số trang chặn nhúng. Nếu nội dung trống hoặc bị lỗi, hãy mở trong trình duyệt.",
-    "loopback": "Localhost trỏ đến thiết bị của trình duyệt này, không phải gateway từ xa. Không có chuyển tiếp cổng.",
-    "native": "Ứng dụng gốc không hỗ trợ xem trước nhúng. Hãy mở liên kết trong trình duyệt.",
-    "unsupported": "Trình duyệt này không hỗ trợ xem trước cách ly thông tin xác thực. Hãy mở trong tab mới.",
-    "sameOrigin": "Không thể nhúng chính ứng dụng nanobot tại đây. Hãy mở trong tab mới.",
-    "mixedContent": "Trang HTTPS không thể xem trước trang HTTP tại đây. Hãy mở trong tab mới.",
-    "invalid": "Không thể xem trước địa chỉ này.",
-    "frame": "Xem trước trang web: {{host}}"
+    "closeAll": "Đóng khung xem trước"
   },
   "starPrompt": {
     "footerAction": "Tặng nanobot một sao",
@@ -295,7 +372,8 @@
     "brand": "nanobot",
     "loading": {
       "connecting": "Đang kết nối tới nanobot…",
-      "boot": "Đang tải nanobot…"
+      "boot": "Đang tải nanobot…",
+      "failed": "Không thể tải giao diện này. Hãy quay lại hoặc tải lại trang để thử lại."
     },
     "error": {
       "title": "Không thể kết nối tới nanobot",
@@ -389,8 +467,25 @@
       "description": "Thay đổi đã được lưu. Khởi động lại để áp dụng.",
       "later": "Khởi động lại sau"
     },
+    "network": {
+      "useProxy": "Dùng proxy",
+      "useProxyHelp": "Dùng proxy chung trong phần Nâng cao.",
+      "configureProxy": "Cấu hình proxy",
+      "sharedProxyScope": "Dùng chung cho mọi tính năng đã bật proxy.",
+      "authentication": "Xác thực (tùy chọn)",
+      "username": "Tên người dùng",
+      "password": "Mật khẩu",
+      "proxyReferenceAuth": "Thiết lập xác thực trong URL proxy được tham chiếu."
+    },
     "runtimeConfig": {
       "apiSaved": "Đã lưu. Khởi động lại dịch vụ API để áp dụng thay đổi.",
+      "commandRuntime": {
+        "custom": "Tùy chỉnh (giây)",
+        "customLabel": "Thời gian chạy tùy chỉnh (giây)",
+        "noLimit": "Không giới hạn thời gian",
+        "limit": "Có giới hạn: tối đa {{duration}}",
+        "rangeError": "Nhập số giây nguyên từ 1 đến {{max}}, hoặc chọn Không giới hạn thời gian."
+      },
       "fields": {
         "agents_defaults_timezone_mode": {"label": "Múi giờ hệ thống", "help": "Tắt để chọn múi giờ.\n\nTắt để chọn múi giờ thủ công."},
         "agents_defaults_timezone": {"label": "Múi giờ", "help": "Độ lệch UTC theo ngày hiện tại.\n\nChọn múi giờ. Độ lệch UTC được tính theo ngày hiện tại."},
@@ -410,7 +505,7 @@
         "tools_cli_apps_enable": {"label": "Ứng dụng CLI", "help": "Cho phép cài đặt, quản lý và chạy ứng dụng CLI.\n\nCho phép tác nhân quản lý và chạy ứng dụng dòng lệnh."},
         "tools_my_enable": {"label": "Xem cấu hình", "help": "Cho phép agent xem cấu hình của mình.\n\nCho phép tác nhân xem cấu hình của mình."},
         "tools_my_allow_set": {"label": "Sửa cấu hình", "help": "Cho phép agent thay đổi cấu hình của mình.\n\nCho phép công cụ tự quản lý cập nhật cấu hình."},
-        "tools_exec_timeout": {"label": "Thời hạn lệnh", "help": "Dừng lệnh sau số giây này; 0 là không giới hạn.\n\nThời gian chạy tối đa của lệnh shell. 0 nghĩa là không giới hạn."},
+        "tools_exec_timeout": {"label": "Thời gian chạy lệnh", "help": "Giới hạn thời gian chạy mặc định cho lệnh shell.\n\nĐầu ra và việc chờ đợi không kéo dài giới hạn này. Chọn Không giới hạn thời gian để bỏ giới hạn thời gian chạy."},
         "tools_exec_path_prepend": {"label": "Ưu tiên PATH", "help": "Tìm trong các thư mục này trước.\n\nCác thư mục thêm vào đầu PATH. Phân cách bằng dấu chấm phẩy trên Windows hoặc dấu hai chấm trên macOS và Linux."},
         "tools_exec_path_append": {"label": "Bổ sung PATH", "help": "Tìm trong các thư mục này sau cùng.\n\nCác thư mục thêm vào cuối PATH. Phân cách bằng dấu chấm phẩy trên Windows hoặc dấu hai chấm trên macOS và Linux."},
         "tools_exec_sandbox": {"label": "Hộp cát lệnh", "help": "Cô lập tiến trình lệnh; cần hệ thống hỗ trợ.\n\nDùng bwrap trên Linux hoặc Seatbelt trên macOS. Chỉ kiểm tra không gian làm việc không thể cô lập tiến trình."},
@@ -419,7 +514,8 @@
         "tools_exec_allowed_env_keys": {"label": "Biến môi trường", "help": "Thêm biến truyền cho lệnh, mỗi dòng một tên.\n\nCác biến môi trường bổ sung được truyền cho lệnh, mỗi dòng một tên. Các biến cơ bản cần cho hoạt động vẫn được truyền."},
         "tools_exec_allow_patterns": {"label": "Lệnh được phép", "help": "Chỉ chạy lệnh khớp hoàn toàn với quy tắc cho phép.\n\nMỗi dòng một biểu thức chính quy. Khi có quy tắc, từng phần của lệnh phải khớp hoàn toàn với ít nhất một quy tắc. Lệnh được phép sẽ bỏ qua quy tắc chặn tích hợp và bổ sung, nhưng vẫn chịu giới hạn mạng và không gian làm việc."},
         "tools_exec_deny_patterns": {"label": "Lệnh bị chặn", "help": "Chặn lệnh khớp với các quy tắc này.\n\nQuy tắc chặn bổ sung dưới dạng biểu thức chính quy, mỗi dòng một quy tắc. Quy tắc cho phép được ưu tiên hơn cả quy tắc chặn tích hợp và bổ sung."},
-        "tools_web_proxy": {"label": "Proxy web", "help": "Dùng cho tìm kiếm web và đọc trang của tác nhân. Để trống để dùng mạng mặc định, bao gồm các biến môi trường proxy.\n\n127.0.0.1 là máy chạy nanobot. Cài đặt này không thay đổi kết nối mô hình, MCP hoặc trình duyệt."},
+        "network_proxy": {"label": "Proxy chung", "help": "Địa chỉ dùng cho các tính năng đã bật proxy. 127.0.0.1 là máy chạy nanobot."},
+        "tools_web_use_proxy": {"label": "Dùng proxy", "help": "Dùng proxy chung để tìm kiếm web và đọc trang."},
         "tools_web_user_agent": {"label": "Header User-Agent", "help": "User-Agent cho yêu cầu web; để trống để dùng mặc định.\n\nHeader User-Agent tùy chỉnh cho yêu cầu web. Để trống để dùng giá trị mặc định."},
         "tools_restrict_to_workspace": {"label": "Giới hạn vùng làm việc", "help": "Giới hạn vùng làm việc chung; quyền trò chuyện WebUI được đặt riêng.\n\nChính sách công cụ toàn cục. Quyền của từng cuộc trò chuyện WebUI được đặt riêng."},
         "tools_ssrf_whitelist": {"label": "IP được phép", "help": "IP hoặc dải CIDR được phép, mỗi dòng một mục.\n\nIP hoặc dải CIDR được miễn bảo vệ yêu cầu ra ngoài, mỗi dòng một mục."},
@@ -443,7 +539,8 @@
         "sessions": {"title": "Cuộc trò chuyện", "help": "Đặt chia sẻ trò chuyện giữa các nền tảng."},
         "tools": {"title": "Công cụ tích hợp", "help": "Chọn công cụ agent được phép dùng."},
         "shell": {"title": "Shell và sandbox", "help": "Đặt thời hạn lệnh, môi trường và quy tắc truy cập."},
-        "network": {"title": "Kết nối web", "help": "Đặt proxy và User-Agent.\n\nProxy và thông tin nhận dạng yêu cầu web."},
+        "proxy": {"title": "Proxy chung", "help": "Đặt một địa chỉ cho các tính năng dùng proxy."},
+        "network": {"title": "Kết nối web", "help": "Đặt tùy chọn proxy và User-Agent cho yêu cầu web."},
         "safety": {"title": "Quyền chung", "help": "Đặt giới hạn vùng làm việc, ngoại lệ mạng và cài đặt từ xa.\n\nGiới hạn không gian làm việc, mạng riêng và cài đặt từ xa."},
         "cli": {"title": "Giới hạn CLI", "help": "Đặt thời hạn cài đặt, chạy và thời gian cache danh sách.\n\nGiới hạn thời gian cài đặt, thực thi và lưu đệm danh mục."},
         "gateway": {"title": "Gateway", "help": "Đặt cách triển khai và khởi động lại."},
@@ -456,6 +553,13 @@
       "save": "Lưu thay đổi", "saving": "Đang lưu…", "discard": "Hủy thay đổi", "saved": "Đã lưu.",
       "restart": "Khởi động lại nanobot", "restartHelp": "Khởi động lại để áp dụng thay đổi. Tham số dòng lệnh và biến môi trường có thể được ưu tiên.",
       "search": "Tìm cài đặt nâng cao", "noResults": "Không có cài đặt phù hợp.", "pending": "Thay đổi chưa lưu",
+      "idleCompaction": {
+        "label": "Tự động nén khi không hoạt động",
+        "help": "Tự động nén ngữ cảnh khi hết thời gian chờ để giảm lượng token dùng cho các yêu cầu tiếp theo.",
+        "wait": "Giới hạn thời gian không hoạt động",
+        "minutes": "phút",
+        "numberError": "Nhập số phút là số nguyên không âm."
+      },
       "numberError": "Nhập số hợp lệ trong phạm vi cho phép.", "activeModel": "Dùng mô hình hiện tại", "none": "Không có",
       "auto": "Tự động", "manual": "Thủ công", "standard": "Tiêu chuẩn", "persistent": "Liên tục",
       "unavailable": "Cập nhật gateway để chỉnh sửa các cài đặt này.", "advancedOptions": "Tùy chọn nâng cao"
@@ -472,6 +576,7 @@
       "byok": "BYOK",
       "overview": "Tổng quan",
       "appearance": "Giao diện",
+      "notifications": "Thông báo",
       "models": "Mô hình",
       "providers": "Nhà cung cấp",
       "image": "Hình ảnh",
@@ -509,6 +614,41 @@
       "hostSafety": "An toàn ứng dụng",
       "voiceInput": "Chép lời"
     },
+    "notifications": {
+      "scope": "Trình duyệt này",
+      "intro": "Chọn cách nhận thông báo khi tác vụ kết thúc.",
+      "pageRequired": "Không nhận được thông báo mới khi trang này bị đóng, tạm ngưng hoặc mất kết nối.",
+      "revoked": "Quyền thông báo đã bị thu hồi. Thông báo hiện đã tắt. Hãy cho phép thông báo trong cài đặt trang web của trình duyệt này, rồi bật tại đây.",
+      "retry": "Kiểm tra lại",
+      "statusOff": "Đã tắt",
+      "statusPermission": "Cần cấp quyền",
+      "statusOn": "Đã bật",
+      "statusBlocked": "Bị chặn",
+      "statusRevoked": "Quyền đã bị thu hồi",
+      "statusUnavailable": "Không khả dụng",
+      "statusWorker": "Chưa sẵn sàng",
+      "statusBusy": "Đang kiểm tra…",
+      "statusError": "Không thể gửi",
+      "test": "Thử thông báo",
+      "testBody": "Đây là thông báo thử.",
+      "waiting": "Đang chờ trình duyệt…",
+      "insecure": "Mở nanobot qua HTTPS hoặc localhost để dùng thông báo.",
+      "unsupported": "Trình duyệt này không hỗ trợ thông báo. Hãy thử trình duyệt khác; trên iPhone hoặc iPad, mở nanobot từ Màn hình chính.",
+      "denied": "Thông báo đã bị chặn. Hãy cho phép thông báo trong cài đặt trang web của trình duyệt này, rồi bật tại đây.",
+      "dismissed": "Chưa được cấp quyền. Bật thông báo và chọn Cho phép.",
+      "permissionFailed": "Không thể yêu cầu quyền. Hãy thử lại trên trình duyệt có hỗ trợ.",
+      "workerUnavailable": "Dịch vụ thông báo chưa sẵn sàng. Hãy kiểm tra lại hoặc tải lại trang này.",
+      "displayFailed": "Trình duyệt không thể gửi thông báo. Kiểm tra quyền của trang web rồi thử lại.",
+      "submitted": "Đã gửi đến trình duyệt. Nếu không thấy, hãy kiểm tra thông báo hệ thống và chế độ Không làm phiền.",
+      "completed": "Tác vụ đã hoàn tất. Nhấp để xem kết quả.",
+      "failed": "Tác vụ thất bại. Nhấp để xem chi tiết.",
+      "interrupted": "Tác vụ cần chú ý. Nhấp để tiếp tục."
+    },
+    "readingTextSize": {
+      "small": "Cỡ chữ đọc nhỏ",
+      "standard": "Cỡ chữ đọc tiêu chuẩn",
+      "large": "Cỡ chữ đọc lớn"
+    },
     "rows": {
       "theme": "Chủ đề",
       "language": "Ngôn ngữ",
@@ -522,6 +662,7 @@
       "pendingChanges": "Thay đổi chờ áp dụng",
       "selectedPreset": "Bộ thiết lập đã chọn",
       "presetModel": "Mô hình của cấu hình đặt trước",
+      "readingTextSize": "Cỡ chữ đọc",
       "activityMode": "Chi tiết xử lý",
       "fileEditDisplay": "Xem trước thay đổi",
       "codeWrap": "Xuống dòng mã",
@@ -543,7 +684,7 @@
       "webuiDefaultAccess": "Quyền mặc định",
       "currentModel": "Cấu hình hiện tại",
       "brandLogos": "Logo thương hiệu",
-      "browserNotifications": "Thông báo tác vụ",
+      "browserNotifications": "Thông báo trình duyệt",
       "notificationSound": "Âm báo hoàn thành",
       "cliAppsCatalog": "Danh mục",
       "cliAppsFilter": "Bộ lọc",
@@ -587,8 +728,8 @@
       "selectedModelProvider": "Được đặt bởi mô hình đã chọn.",
       "selectedModelValue": "Được đặt bởi mô hình đã chọn.",
       "brandLogos": "Hiện logo nhà cung cấp và ứng dụng trong Thiết lập.\n\nHiển thị logo nhà cung cấp bên thứ ba và CLI trong Cài đặt.",
-      "browserNotifications": "Thông báo khi trang ở nền. Mặc định tắt.",
-      "notificationSound": "Phát âm báo khi trả lời xong. Mặc định tắt.\n\nPhát một tiếng chuông ngắn khi lượt kết thúc, ngay cả khi trang này đang ở nền. Tắt theo mặc định.",
+      "browserNotifications": "Nhận thông báo trạng thái tác vụ khi trang này ở nền.",
+      "notificationSound": "Phát âm báo khi phản hồi kết thúc, kể cả khi trang ở nền.",
       "cliAppsCatalog": "Cài công cụ CLI cho nanobot; giữ nguyên ứng dụng máy tính.\n\nCài các công cụ dòng lệnh mà nanobot có thể dùng trên máy này. Các ứng dụng trên máy tính không bị thay đổi.",
       "cliAppsFilter": "Tìm theo tên, danh mục hoặc chức năng.",
       "logs": "Mở thư mục nhật ký engine của ứng dụng máy tính.",
@@ -796,7 +937,6 @@
       "defaultAPIDescription": "Cấu hình sẵn đặt ở Tự động sẽ dùng API này. Mỗi cấu hình sẵn có thể chọn API khác trong danh sách được hỗ trợ.",
       "declareAPIs": "Đặt API được hỗ trợ",
       "openaiDefaultAPIDescription": "Đặt API mặc định cho cấu hình sẵn dùng Tự động. Chọn Tự động tại đây sẽ áp dụng quy tắc đã biết của mô hình. Mỗi cấu hình sẵn có thể thay đổi lựa chọn này.",
-      "proxy": "Proxy mạng",
       "thinkingStyle": "Định dạng suy luận",
       "region": "Khu vực",
       "profile": "Hồ sơ AWS",
@@ -939,10 +1079,16 @@
       "noDescription": "Không có mô tả."
     },
     "about": {
+      "updateNotice": "Có bản cập nhật",
+      "viewUpdateDetails": "Xem chi tiết",
+      "updateNow": "Cập nhật",
+      "dismissUpdate": "Ẩn thông báo cập nhật",
+      "updateInstructions": "Hãy cập nhật trên máy tính đang chạy nanobot bằng phương thức cài đặt ban đầu. Trang này không tự cài đặt hoặc khởi động lại.",
+      "installationGuide": "Hướng dẫn cài đặt",
       "documentation": "Tài liệu",
       "sourceCode": "Mã nguồn",
       "reportIssue": "Báo cáo sự cố",
-      "version": "Phiên bản",
+      "version": "Phiên bản & cập nhật",
       "checking": "Đang kiểm tra...",
       "checkForUpdates": "Kiểm tra bản cập nhật",
       "upToDate": "Bạn đang dùng phiên bản mới nhất",
@@ -1117,6 +1263,7 @@
       "loading": "Đang tải kênh...",
       "empty": "Không có kênh nào phù hợp.",
       "restartRequired": "Khởi động lại nanobot để áp dụng hỗ trợ kênh đã cập nhật.",
+      "restartBeforeInstall": "Khởi động lại nanobot trước khi cài đặt kênh khác.",
       "requires": "Yêu cầu: {{requirements}}",
       "setUp": "Thiết lập",
       "setupGuide": "Hướng dẫn thiết lập",
@@ -1429,19 +1576,16 @@
       "signInBeforeSaving": "Hãy đăng nhập nhà cung cấp này trước khi lưu cấu hình đặt trước.",
       "signedIn": "Đã đăng nhập",
       "notSignedIn": "Chưa đăng nhập",
-      "proxyLabel": "Proxy mạng",
-      "proxySaveBeforeSignIn": "Hãy lưu thay đổi proxy trước khi đăng nhập.",
-      "saveProxy": "Lưu proxy",
       "localCodeHelp": "Hoàn tất đăng nhập trong trình duyệt. nanobot thường tự động hoàn tất; nếu không, hãy dán mã ủy quyền bên dưới.",
       "remoteCodeHelp": "Chọn Đăng nhập để mở xAI trên máy tính của bạn. Sau khi đăng nhập, hãy dán mã ủy quyền do xAI hiển thị bên dưới.",
-      "localCallbackHelp": "Hoàn tất đăng nhập trong trình duyệt. nanobot thường tự động hoàn tất; nếu không, hãy sao chép URL callback localhost đầy đủ từ thanh địa chỉ và dán vào bên dưới.",
-      "remoteCallbackHelp": "Mở ChatGPT trong trình duyệt này và hoàn tất đăng nhập. Khi trang localhost không tải được, hãy sao chép URL đầy đủ từ thanh địa chỉ và dán vào bên dưới.",
+      "localCallbackHelp": "Hoàn tất đăng nhập trong trình duyệt. Nếu nanobot không tự động kết nối, hãy sao chép URL đầy đủ từ thanh địa chỉ của trang localhost, ngay cả khi trang không tải được, dán vào bên dưới rồi chọn “Hoàn tất đăng nhập”.",
+      "remoteCallbackHelp": "Mở ChatGPT trong trình duyệt này và hoàn tất đăng nhập. Khi chuyển đến trang localhost, hãy sao chép URL đầy đủ từ thanh địa chỉ, ngay cả khi trang không tải được, dán vào bên dưới rồi chọn “Hoàn tất đăng nhập”.",
       "authorizationCode": "Mã ủy quyền",
       "callbackUrl": "URL callback",
-      "callbackUrlPlaceholder": "http://localhost:1455/auth/callback?code=…&state=…",
+      "callbackUrlPlaceholder": "Dán URL callback đầy đủ vào đây",
       "openChatGPT": "Mở ChatGPT",
       "pasteCallbackToContinue": "Dán URL callback để tiếp tục.",
-      "waitingForCallback": "Đang chờ callback từ trình duyệt…",
+      "waitingForCallback": "Đang chờ hoàn tất đăng nhập…",
       "finishSignIn": "Hoàn tất đăng nhập"
     },
     "skills": {
@@ -1556,13 +1700,12 @@
     "pin": "Ghim",
     "unpin": "Bỏ ghim",
     "rename": "Đổi tên",
-    "renameTitle": "Đổi tên chủ đề",
-    "renameDescription": "Đổi tên chủ đề hiển thị trong WebUI.",
     "renamePlaceholder": "Tên chủ đề",
     "renameProjectTitle": "Đổi tên dự án",
     "renameProjectDescription": "Chỉ đổi tên dự án trong thanh bên WebUI.",
     "renameProjectPlaceholder": "Tên dự án",
     "renameSave": "Lưu",
+    "renameFailed": "Không thể lưu tên. Vui lòng thử lại.",
     "archive": "Lưu trữ",
     "unarchive": "Bỏ lưu trữ",
     "showArchived": "Hiện mục đã lưu trữ",
@@ -1619,7 +1762,6 @@
   },
   "thread": {
     "subagents": {
-      "loadFailed": "Không thể tải tác vụ con.",
       "stopFailed": "Không thể dừng tác vụ này.",
       "stopTask": "Dừng {{label}}",
       "receiptHelp": "Đã chuyển nghĩa là tin nhắn đã được đưa vào yêu cầu mô hình tiếp theo của tác nhân con, không xác nhận công việc đã hoàn tất.",
@@ -1649,6 +1791,32 @@
       "messages": "Trạng thái tin nhắn"
     },
     "compaction": {
+      "reasons": {
+        "idle": {
+          "started": "Đang tự động nén ngữ cảnh khi không có tin nhắn mới",
+          "succeeded": "Đã tự động nén ngữ cảnh khi không có tin nhắn mới",
+          "failed": "Không thể tự động nén ngữ cảnh khi không có tin nhắn mới",
+          "cancelled": "Quá trình tự động nén ngữ cảnh khi không có tin nhắn mới không hoàn tất"
+        },
+        "context_pressure": {
+          "started": "Đang nén vì ngữ cảnh đã dài",
+          "succeeded": "Đã nén ngữ cảnh dài",
+          "failed": "Nén ngữ cảnh dài không thành công",
+          "cancelled": "Đã hủy nén ngữ cảnh dài"
+        },
+        "manual": {
+          "started": "Đang nén ngữ cảnh theo yêu cầu của bạn",
+          "succeeded": "Đã nén ngữ cảnh theo yêu cầu của bạn",
+          "failed": "Không thể nén ngữ cảnh theo yêu cầu của bạn",
+          "cancelled": "Đã hủy lần nén ngữ cảnh bạn yêu cầu"
+        },
+        "provider_native": {
+          "started": "Nhà cung cấp mô hình đang nén ngữ cảnh",
+          "succeeded": "Nhà cung cấp mô hình đã nén ngữ cảnh",
+          "failed": "Nén ngữ cảnh trên máy chủ nhà cung cấp không thành công",
+          "cancelled": "Đã hủy nén ngữ cảnh trên máy chủ nhà cung cấp"
+        }
+      },
       "cancelled": "Đã hủy nén ngữ cảnh",
       "empty": "Không có ngữ cảnh cần nén.",
       "started": "Đang nén ngữ cảnh",
@@ -1753,7 +1921,6 @@
       "placeholderThread": "Nhập tin nhắn…",
       "placeholderHero": "Mô tả điều bạn muốn làm",
       "placeholderOpening": "Đang mở chủ đề mới…",
-      "placeholderStreaming": "Mô hình đang trả lời…",
       "inputAria": "Ô nhập tin nhắn",
       "goalStateStrip": "Mục tiêu: {{label}}",
       "goalStateFallback": "Mục tiêu",
@@ -1791,7 +1958,7 @@
         "guide": "Gửi ngay",
         "delete": "Xóa tin nhắn",
         "edit": "Sửa tin nhắn",
-        "drag": "Kéo để sắp xếp"
+        "tooManyMentions": "Mỗi tin nhắn có thể nhắc đến tối đa {{max}} cuộc trò chuyện"
       },
       "attachImage": "Đính kèm tệp",
       "imageMode": {
@@ -1919,10 +2086,11 @@
         "unsupported_type": "Loại tệp không được hỗ trợ",
         "empty_file": "Không thể đính kèm tệp trống",
         "too_many_attachments": "Tối đa {{max}} tệp đính kèm mỗi tin nhắn",
+        "too_many_videos": "Tối đa 1 video mỗi tin nhắn",
         "too_many_images": "Tối đa {{max}} ảnh mỗi tin nhắn",
         "magic_mismatch": "Tệp này không phải là một ảnh thực",
         "decode_failed": "Không thể giải mã ảnh này",
-        "too_large": "Tệp quá lớn — hãy thử tệp nhỏ hơn",
+        "too_large": "Tệp có dung lượng {{size}}, vượt giới hạn tải lên {{max}}",
         "total_too_large": "Tổng dung lượng tệp đính kèm quá lớn — hãy xóa bớt hoặc dùng tệp nhỏ hơn",
         "io": "Không thể đọc tệp này"
       },
@@ -1956,8 +2124,8 @@
     "loadEarlier": "Tải tin nhắn trước đó",
     "history": {
       "loading": "Đang tải tin nhắn trước đó…",
-      "error": "Tải thất bại.",
-      "retry": "Thử lại"
+      "exhausted": "Không có tin nhắn trước đó",
+      "retryLabel": "Tải thất bại. Thử lại"
     },
     "forkedFromHistory": "Tách nhánh từ lịch sử",
     "promptNavigator": {
@@ -1988,6 +2156,7 @@
     "imageAttachment": "Tệp hình ảnh đính kèm",
     "videoAttachment": "Tệp video đính kèm",
     "fileAttachment": "Tệp đính kèm",
+    "downloadAttachment": "Tải xuống {{name}}",
     "attachmentUnavailable": "Tệp đính kèm không khả dụng",
     "dataTable": "Bảng dữ liệu",
     "fileEditPreparing": "Đang chuẩn bị sửa tệp…",
@@ -2002,7 +2171,6 @@
     "turnLatencyTitle": "Thời gian phản hồi (end-to-end)",
       "fileEditViewDiff": "Xem thay đổi",
       "fileEditViewLargeDiff": "Mở rộng thay đổi",
-    "fileEditDiffLineCount": "{{count}} dòng",
     "fileEditUnchangedLinesHidden": "Đã ẩn {{count}} dòng không đổi",
     "fileEditShowMoreLines": "Hiển thị thêm {{count}} dòng",
     "fileEditShowFewerLines": "Hiển thị ít dòng hơn",
@@ -2205,6 +2373,24 @@
     "dismiss": "Bỏ qua",
     "continue": "Tiếp tục"
   },
+  "diagram": {
+    "graph": "Sơ đồ",
+    "source": "Mã nguồn",
+    "copy": "Sao chép mã nguồn",
+    "enlarge": "Phóng to sơ đồ",
+    "title": "Sơ đồ Mermaid",
+    "errors": {
+      "syntax": "Hãy kiểm tra cú pháp sơ đồ trong mã nguồn.",
+      "unsupported": "Chưa hỗ trợ loại sơ đồ này. Hãy xem mã nguồn.",
+      "policy": "Sơ đồ dùng kiểu hoặc tài nguyên không được hỗ trợ. Hãy xem mã nguồn.",
+      "limit": "Sơ đồ vượt quá giới hạn kết xuất. Hãy xem mã nguồn.",
+      "load": "Không thể tải bộ kết xuất sơ đồ. Hãy thử lại.",
+      "deadline": "Kết xuất sơ đồ quá thời gian. Hãy đơn giản hóa mã nguồn hoặc thử lại.",
+      "worker": "Không thể kết xuất sơ đồ. Hãy thử lại.",
+      "image": "Không thể hiển thị sơ đồ. Hãy thử lại.",
+      "capability": "Trình duyệt này không thể kết xuất sơ đồ. Hãy xem mã nguồn."
+    }
+  },
   "lightbox": {
     "viewAll": "Xem tất cả {{count}} ảnh",
     "zoomIn": "Phóng to",
@@ -2231,6 +2417,9 @@
     "gatewayPath": "Đường dẫn thuộc máy chạy gateway."
   },
   "filePreview": {
+    "displayMode": "Chế độ hiển thị",
+    "preview": "Xem trước",
+    "source": "Mã nguồn",
     "aria": "Xem trước tệp",
     "breadcrumb": "Đường dẫn tệp",
     "close": "Đóng xem trước tệp",
@@ -2300,6 +2489,8 @@
       "body": "Gateway đã từ chối tin nhắn này. Hãy kiểm tra nội dung hoặc tệp đính kèm rồi thử lại."
     },
     "modelRequestFailed": {
+      "authenticationTitle": "Xác thực nhà cung cấp mô hình thất bại",
+      "authenticationBody": "Đăng nhập lại hoặc kiểm tra khóa API trong cài đặt mô hình.",
       "billingTitle": "Hạn mức của nhà cung cấp mô hình không khả dụng",
       "billingBody": "Hãy nạp thêm tín dụng hoặc kiểm tra thanh toán của tài khoản nhà cung cấp rồi thử lại.",
       "connectionTitle": "Không thể kết nối với nhà cung cấp mô hình",
@@ -2307,8 +2498,8 @@
       "rateLimitTitle": "Đã đạt giới hạn yêu cầu của nhà cung cấp mô hình",
       "serverTitle": "Lỗi dịch vụ nhà cung cấp mô hình",
       "unknownTitle": "Yêu cầu tới nhà cung cấp mô hình không thành công",
-      "bodyWithAttempt": "Yêu cầu vẫn thất bại ở lần thử {{attempts}}, nên hệ thống đã dừng thử lại. Hãy kiểm tra cấu hình hoặc trạng thái dịch vụ của nhà cung cấp rồi thử lại.",
-      "body": "Hãy kiểm tra cấu hình hoặc trạng thái dịch vụ của nhà cung cấp rồi thử lại."
+      "bodyWithAttempt": "Đã dừng sau {{attempts}} lần thử. Hãy thử lại sau hoặc chọn mô hình khác.",
+      "body": "Hãy thử lại sau hoặc chọn mô hình khác."
     }
   },
   "workspace": {

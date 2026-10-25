@@ -7,9 +7,8 @@
         "label": "機器人權杖",
         "placeholder": "123456:ABC..."
       },
-      "proxy": {
-        "label": "網路代理",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "使用代理"
       },
       "allowFrom": {
         "label": "允許使用者",

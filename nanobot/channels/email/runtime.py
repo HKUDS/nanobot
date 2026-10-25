@@ -23,6 +23,7 @@ from typing import Any, Literal, cast
 from loguru import logger
 from pydantic import Field, field_validator
 
+from nanobot.bus.delivery import DeliveryRejectedError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
@@ -245,12 +246,10 @@ class EmailChannel(BaseChannel):
         ):
             return
         if not self.config.consent_granted:
-            self.logger.warning("Skip email send: consent_granted is false")
-            return
+            raise DeliveryRejectedError("Email consent_granted is false")
 
         if not self.config.smtp_host:
-            self.logger.warning("SMTP host not configured")
-            return
+            raise DeliveryRejectedError("SMTP host not configured")
 
         # Skip progress messages to prevent sending an empty email after each tool call
         if isinstance(msg.event, ProgressEvent):
@@ -259,8 +258,7 @@ class EmailChannel(BaseChannel):
 
         to_addr = msg.chat_id.strip()
         if not to_addr:
-            self.logger.warning("Missing recipient address")
-            return
+            raise DeliveryRejectedError("Missing email recipient address")
 
         # Determine if this is a reply (recipient has sent us an email before)
         is_reply = to_addr in self._last_subject_by_chat
@@ -268,8 +266,7 @@ class EmailChannel(BaseChannel):
 
         # autoReplyEnabled only controls automatic replies, not proactive sends
         if is_reply and not self.config.auto_reply_enabled and not force_send:
-            self.logger.info("Skip automatic reply to {}: auto_reply_enabled is false", to_addr)
-            return
+            raise DeliveryRejectedError("Email auto_reply_enabled is false")
 
         base_subject = self._last_subject_by_chat.get(to_addr, "nanobot reply")
         subject = self._reply_subject(base_subject)
@@ -848,8 +845,13 @@ class EmailChannel(BaseChannel):
         if msg.is_multipart():
             plain_parts: list[str] = []
             html_parts: list[str] = []
-            for part in msg.walk():
+            parts = [msg]
+            while parts:
+                part = parts.pop()
                 if part.get_content_disposition() == "attachment":
+                    continue
+                if part.is_multipart():
+                    parts.extend(reversed(part.get_payload()))
                     continue
                 content_type = part.get_content_type()
                 try:
@@ -1194,6 +1196,7 @@ class EmailChannel(BaseChannel):
             return []
 
         saved: list[Path] = []
+        saved_names: set[str] = set()
         media_dir = get_media_dir("email")
 
         for part in msg.walk():
@@ -1220,11 +1223,17 @@ class EmailChannel(BaseChannel):
 
             raw_name = part.get_filename() or "attachment"
             sanitized = safe_filename(raw_name) or "attachment"
-            dest = media_dir / f"{uid}_{sanitized}"
+            filename = Path(f"{uid}_{sanitized}")
+            dest = media_dir / filename
+            index = 1
+            while dest.name.casefold() in saved_names:
+                dest = media_dir / f"{filename.stem}_{index}{filename.suffix}"
+                index += 1
 
             try:
                 dest.write_bytes(payload)
                 saved.append(dest)
+                saved_names.add(dest.name.casefold())
                 logger.info("Attachment saved: {}", dest)
             except Exception as exc:
                 logger.warning("Failed to save attachment {}: {}", dest, exc)

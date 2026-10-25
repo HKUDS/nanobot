@@ -2,42 +2,34 @@
 
 <!-- Meta description: Run nanobot from a browser WebUI with persistent and temporary chats, visible tool activity, workspace controls, Apps, skill discovery, settings, and Automations. -->
 
-The WebUI is nanobot's browser workbench for persistent topics, grouped conversation panes, temporary chats, visible agent activity, workspace controls, Apps, skill discovery, settings, and Automations in one place. It shares the gateway and saved sessions with the native terminal client.
+The WebUI shares its gateway and saved sessions with the native terminal client and is included with `nanobot-ai`.
 
 For a visual tour, see the [README feature gallery](../README.md#-webui). This guide follows the current source tree; some features are newer than the published release.
 
-The published `nanobot-ai` wheel already includes the WebUI bundle. You only need the `webui/` source directory when you are changing the frontend itself.
-
 ## Open the WebUI
-
-Use the launcher:
 
 ```bash
 nanobot webui
 ```
 
-`nanobot webui` asks for one confirmation on a new installation, creates the config/workspace, enables the local WebSocket channel, and generates a WebUI bootstrap secret when one is missing. It starts or joins the same on-demand gateway used by the native TUI and opens the browser. With a fresh config, it can open before a model is configured so you can finish setup in **Settings → Models**. The first-run path binds the WebUI to `127.0.0.1` by default, so it is not available from other devices on your LAN. The startup summary groups the login link, model setup guidance, config, and exit controls with blank lines. While attached, the launcher displays new gateway warnings and errors; use the printed logs command for full output.
+On a new installation, the launcher asks for confirmation to create the config and workspace, enables the local WebUI, and opens a signed-in browser. Configure a provider and model in **Settings → Models** before sending your first message; see [Configure Your Model](./quick-start.md#2-configure-your-model). The default address is `http://127.0.0.1:8765`, accessible only from the same machine.
 
-After model setup, explicitly promote the shared gateway when you do not want to keep a client open:
+Official-installer environments start a persistent gateway by default. Other installations keep it attached to the launchers: closing the last WebUI or TUI launcher stops an on-demand gateway. Use `nanobot webui --detach` to keep it running after the terminal closes, or start it explicitly:
 
 ```bash
 nanobot gateway --background
 ```
 
-`nanobot webui --background` is retained only to print migration guidance. This keeps one unambiguous owner for persistent process lifecycle.
+Manage a persistent gateway with `nanobot gateway status`, `nanobot gateway logs`, `nanobot gateway restart`, and `nanobot gateway stop`. Use the printed instance-specific commands for a custom config or workspace. The old `nanobot webui --background` flag is deprecated; `--detach` cannot be combined with `--dev`.
 
-Each foreground WebUI or TUI launcher releases only its own client. The last interactive launcher stops an on-demand gateway. `nanobot gateway --background` makes the gateway persistent; manage it with `nanobot gateway status`, `nanobot gateway logs`, `nanobot gateway restart`, and `nanobot gateway stop`.
+To sign in another browser, use the complete printed login link, including the fragment after `#`. Treat it as a credential. `nanobot webui --no-open` prints the link without opening a browser. In WSL, the launcher uses the Windows default browser unless `BROWSER` is set; if automatic opening fails, use the printed link.
 
-The browser signs in automatically using the generated credential in the launch URL. The terminal also prints the complete login link: if automatic opening fails, copy that link into your browser, including the fragment after `#`. In WSL, the launcher opens your Windows default browser through Windows PowerShell; an explicit `BROWSER` setting takes precedence. If Windows integration is unavailable, open the printed link in your Windows browser. The plain page address does not sign in a new browser. Treat the login link as a credential and do not share it.
-
-`nanobot webui --no-open` prints the same login link without opening a browser. Development mode uses the Vite address, normally `http://127.0.0.1:5173`, with the same gateway authentication.
-
-If no provider is configured, follow the **Next step** prompt to open **Settings → Models**. Errors for a configured provider appear with that prompt.
+The launcher displays gateway warnings and errors; use the printed logs command for full output.
 
 <details>
 <summary>Manual configuration for the local WebUI</summary>
 
-Manual config still works. Same-machine localhost WebUI access can run without a browser password. Set `tokenIssueSecret` when you intentionally expose the WebUI beyond localhost or want a browser password. These listener and authentication fields have no graphical editor:
+Listener and authentication fields are configured in `config.json`. Localhost access can run without a browser password; set `tokenIssueSecret` for access beyond localhost or to require a password:
 
 ```json
 {
@@ -54,25 +46,23 @@ Manual config still works. Same-machine localhost WebUI access can run without a
 
 </details>
 
-The WebUI is served by the WebSocket channel on port `8765` by default. The gateway health endpoint, `18790` by default, is not the browser UI.
+### macOS Dock icon
+
+On a local macOS desktop, `nanobot webui` provides a Dock shortcut to the running WebUI. `--no-open` keeps the shortcut without opening a page; `--no-dock` disables it. It is unavailable in SSH/headless sessions or for non-loopback browser addresses.
+
+Attached launchers share the shortcut until the last matching WebUI launcher exits. With `--detach` or official-installer background launch, it remains until the gateway stops and returns after restart or update. It is a shortcut to a running instance, not a standalone app.
+
+**Hide Dock Icon** or quitting the icon hides the shortcut without stopping the gateway or its tasks, until the next explicit launch or service restart. In detached mode, `--no-dock` also disables it for later restarts; launching without that flag enables it again.
+
+## Navigate a long conversation
+
+The message rail on wide screens and prompt-summary search in the header jump to saved prompts, loading the surrounding messages as needed. Loading errors leave the current content available for retry. Older compatible hosts may only support navigation among already-loaded messages.
 
 ## Sharing access
 
-The WebUI is an administration interface for one nanobot instance. Signed-in WebUI users can work with its saved topics and manage models, channels, Apps, automations, and settings within the gateway's supported capabilities. There are no per-user roles or private topic ownership boundaries. Remote package installation has an additional restriction described under [LAN Access](#lan-access); that restriction does not turn other WebUI users into read-only users.
+The WebUI administers one nanobot instance. Signed-in users share saved topics and administrative controls; there are no per-user roles or private topic ownership boundaries. The [remote installation restriction](#lan-access) limits package installation, not other administrative access.
 
 Share WebUI access only with people you trust to administer the same agent. To give someone chat access without the administration interface, connect a [chat platform](./chat-apps.md) and configure its access policy. Channel approval still does not create a separate agent or memory store. For separate clients or users whose data must not mix, use [separate instances](./multiple-instances.md).
-
-## First 10 Minutes
-
-Use the WebUI as the primary setup surface:
-
-1. Open **Settings → Models** and configure a provider, credential, and active model preset.
-2. Send `Hello!` in a new topic to prove the selected model works.
-3. Start a separate topic before project work, then choose the intended workspace and access mode.
-4. Add only one capability next: a chat channel in **Channels**, a web/voice/image provider in **Settings**, or an App/MCP integration in **Apps**.
-5. Restart when the WebUI shows a restart requirement, then test that capability with the smallest possible request.
-
-This path avoids hand-editing `config.json` for normal setup. Use the reference docs when you need an option the WebUI does not expose or when you manage config as code.
 
 ## What It Is For
 
@@ -91,55 +81,57 @@ This path avoids hand-editing `config.json` for normal setup. Use the reference 
 | Automations | Review, search, run, pause, edit, and delete scheduled and local-trigger agent turns |
 | Settings | Adjust models, providers, image generation, voice, web tools, runtime, and safety options |
 
-### Optional GitHub invitation
+## Check for updates
 
-Returning users may see an illustrated invitation to star nanobot on GitHub. It follows the WebUI language and theme; the button's star animation also supports keyboard focus and respects reduced-motion preferences. **Maybe later**, the close button, or Escape dismisses it for now. **Don't ask again** or opening GitHub from the invitation stops future reminders for the gateway instance, including in other browsers. Starring is optional and never required to use nanobot.
+Open **Settings → About** to check for updates automatically. Startup, reconnecting, and normal chatting do not trigger background version checks. Use **Check again** or **Retry** to check manually; changing the update channel also refreshes its status. Checking does not install updates or restart nanobot.
 
 ## Topic Workspace
 
 The sidebar is the topic switcher. Each topic keeps its own history, title, workspace selection, and linked automations. Use a new topic when you want a separate context; use fork when you want to continue from an existing point without changing the original thread.
 
-On touch devices, sidebar action buttons stay visible with larger touch areas for topics, conversation groups, panes, and projects. Tap a title to select it or the adjacent action button for its menu. Desktop actions still appear on hover or keyboard focus. Press Escape in an action menu to return focus to its button and continue with Tab, including from the **Move to** submenu. ArrowLeft leaves the submenu and returns to **Move to** without closing the parent menu. Choosing Rename instead moves focus into the dialog; clicking outside a menu keeps focus at the clicked destination.
-
-Drag a topic within its current sidebar group to keep frequently used work in your preferred order. Drag a topic from the sidebar into the composer when you want to reference it in the next message instead of switching to it.
+Drag topics within a sidebar group to reorder them. **Rename** edits a topic title in place; a failed save keeps the draft for retry.
 
 ### Conversation groups and panes
 
 Open a topic's sidebar action menu and choose **Create group** to turn it into a conversation group. Use **Add pane** in the workbench header to start another topic alongside it. A group holds up to four panes. To bring in an existing topic, drag it onto the group or use **Move to** in its action menu.
 
-Use **Pane layout** to choose columns, rows, a grid, BSP, or a main pane with a stack. Drag a divider to resize panes. Each pane has its own conversation; select one to direct the shared composer to that topic. Group membership and layout persist across refreshes. Grouping topics does not merge their histories.
+**Pane layout** controls the arrangement of resizable panes. Selecting a pane directs the shared composer to that topic. Group membership and layout persist across refreshes; grouping does not merge topic histories.
 
-To bring another topic's work into a conversation, select it from the `@` menu or drag it from the sidebar into the composer. The agent can read the selected session and exchange messages with other saved sessions. See [Composer](#composer) for the distinction between an attached reference and plain text.
+To use work from another topic, mention it with `@` and tell nanobot what you need. See [Composer](#composer) for how to add a topic reference.
 
 ### Activity and context usage
 
 The message timeline shows replies and agent activity. Expand the **Worked for** section to inspect the reasoning and tool activity for a completed turn.
 
-When the agent writes or edits files, the activity item shows the target path, status, and changed line counts. Choose **Settings → Appearance → File edit display** to control the detail: **Summary** shows the change summary, **Diff** shows available unified patches inline, and **Collapsed diff** lets you expand them with **View diff**. Large diffs may hide unchanged lines or truncate the inline preview. Select the filename in the activity row to open the read-only file preview panel.
+Scroll past the oldest loaded message, or pull down and release on touch devices, to load earlier history. A red indicator offers error details and retry; **No earlier messages** marks the history boundary.
 
-Files open as tabs in one preview pane. Select another file to add or switch a tab without reopening the pane; close a tab with its **×**, or close the pane with **Escape**. Tabs and width follow each session while the WebUI remains open. They are kept only in memory and cleared when that session is deleted or the connection ends. The pane overlays the conversation on narrow screens.
+Tasks in persistent topics can continue while the connection is lost. Status and completed replies update after reconnecting; some missed text may appear only when the task finishes. [Temporary chats](#temporary-chats) end on connection loss.
 
-Text previews include up to 384 KiB, with a notice when the file is truncated. Large previews show readable text before adding syntax colors; very large or minified source stays plain text. All previewed text remains available for selection and browser search, and the code pane scrolls in both directions.
+The context indicator beside the model badge shows context-window usage. **Recent rounds** includes token usage, generation time and KV cache hits when reported. Provider figures may be estimated or unavailable and are not a billing statement.
 
-PNG, JPEG, GIF and WebP files up to 8 MiB can be previewed as images. Hover or focus an image file reference for a compact quick look, or select it to open the pane. Select the preview image for the full-size viewer, which supports zoom controls, pinch-to-zoom and panning. HTML and SVG files remain read-only source previews rather than executable pages.
+During compaction, the model switches to a summary plus subsequent messages; the original messages remain in chat history. Use `/compact` to compact the current topic manually. See [Memory](./memory.md) for compaction and Dream consolidation.
 
-A plain image file link does not automatically insert a large image into the reply. Explicit Markdown images appear inline; image attachments use a compact gallery, showing at most four thumbnails before a count of the remaining images. An image already displayed inline is not duplicated in the attachment gallery.
+### File and diagram previews
 
-Select a file reference to preview it. Right-click the reference or its preview tab to copy its absolute or project-relative path. Keyboard users can focus a reference and press **Shift+F10**. Paths are resolved on the gateway machine, which may not be the computer running your browser. Files outside the project do not have a project-relative path. If a reference cannot be resolved, you can still copy the original reference; the menu does not invent an absolute path. Finder, external editor and terminal launching are not available from this browser menu.
+File activity shows the path, status and changed line counts. **Settings → Appearance → File edit display** offers **Summary**, inline **Diff**, or **Collapsed diff** with **View diff**. Large patches may omit unchanged lines or be truncated. Select a filename to open its read-only preview.
+
+Files share a tabbed preview pane. Tabs and pane width are remembered per topic until the session is deleted or the WebUI connection ends.
+
+Selecting a Markdown file opens **Preview**; **Source** shows the original text. Relative file links resolve from the document's folder and follow the same access checks. Images are not loaded automatically, section-only links remain text, and HTML/MDX components do not execute.
+
+Text previews are limited to 384 KiB and indicate truncation. Very large or minified source may remain plain text. Image previews support PNG, JPEG, GIF and WebP up to 8 MiB. HTML and SVG files display as read-only source.
+
+Explicit Markdown images appear inline; image attachments use a gallery. Other files appear as compact download cards below the image and video previews, with a file-type icon, filename and download action. File-type icons do not indicate preview support. Ordinary image file links open the preview instead.
+
+Mermaid diagrams render after the reply finishes. The source remains available if rendering fails. Links, external images and executable HTML inside diagrams are disabled.
+
+Right-click a file reference or preview tab to copy its absolute or project-relative path on the connected host. Files outside the project have no project-relative path; unresolved references can only be copied as written.
 
 File previews follow the active topic's access mode. Restricted workspace access previews only files under the selected workspace. Full Access can preview files outside the workspace when that access mode is allowed by the gateway.
 
-Website links normally open in a new browser tab. Right-click a link (or press **Shift+F10** while it is focused) for link actions. On mobile, use the reply's **Message actions → View links** menu. **Preview website** appears only when the current browser and URL allow credential-isolated embedding; otherwise the menu explains the restriction and keeps **Open in browser** and **Copy link** available. Sites can still refuse embedding through their own security headers. nanobot does not proxy pages or bypass those restrictions; use **Open in browser** instead.
+### Model failures
 
-On touch devices with Visual Viewport support, the app follows the visible area when the on-screen keyboard opens or pans the page. Navigation and the composer stay in view while messages scroll independently. Session search also follows the visible area: the search field stays above the keyboard and results scroll inside the dialog. In short landscape viewports, its input and results sit side by side so a result remains reachable. Taller dialogs scroll from their top instead of centering content outside the visible area. The `@` mention and `/` command menus use the visible app area above or below the composer, including when the keyboard pans the page. Scroll within a menu to reach more results. Mention rows use the app's larger touch targets on phones while retaining desktop density. In very short, wide viewports (such as landscape with the keyboard open), menus sit beside the input instead of overflowing the scrollable composer. Scroll the menu for more candidates and the input area for its controls. If the browser bars and keyboard leave no usable page area, dismiss the keyboard or return to portrait. Pinch zoom keeps the existing layout instead of resizing it to the magnified area; normal fitting resumes when you return to the default zoom. Non-touch desktop and native-host layout remain unchanged.
-
-On touch devices, compact text fields use a readable 16px minimum baseline to avoid Safari automatically zooming the page on focus. Desktop field density and manual page zoom remain unchanged.
-
-On touch devices, preview tab controls and the full-screen image viewer's close button use larger touch areas without enlarging the icons. Preview tabs remain horizontally scrollable when space is limited.
-
-Open the context indicator beside the composer model badge to see how much of the model's context window is in use. The **Recent rounds** chart shows input tokens for each logical model round, including tool-call rounds. Hover or focus a bar for input tokens, output tokens, generation time, and the KV cache hit rate when reported. Provider usage may be estimated or unavailable; these figures are not a billing statement.
-
-When nanobot compacts context, the timeline shows its progress and outcome. The model continues with a summary and any messages after it; messages covered by the summary remain in your chat history but are no longer sent to the model verbatim. Use `/compact` to compact the current topic's context manually. See [Memory](./memory.md) for compaction and Dream consolidation.
+After a model request fails and automatic retries stop, the WebUI shows the failure category. Use **Continue** to resume from the saved conversation, or open model settings to change the model or correct its authorization. Review completed work before continuing: saved tool results are retained, but the model can choose to call tools again. Continuing does not resend the original message. Sending a new message or dismissing the notice clears the pending decision. Saved recovery decisions remain available after a refresh or gateway restart; temporary chats still follow their normal lifetime.
 
 ### Delegated work
 
@@ -147,17 +139,13 @@ When nanobot delegates work to subagents, a work group appears under the request
 
 Work groups follow the browser's **Activity details** preference: **Auto** opens running work and folds it when all tasks finish; **Expanded** keeps it open by default. You can also expand or fold a group manually to check individual outcomes, including failures and partial results.
 
-Select a task to open its read-only conversation on the right, or across the screen on mobile. Read its messages, tool activity, file edits, and results, including formatted Markdown. Closing the details leaves the task running; its stop button cancels only that task. Give follow-up instructions to nanobot in the main conversation.
+Select a task for its read-only conversation and tool activity. Closing the details leaves it running; its stop button cancels only that task. Give follow-up instructions to nanobot in the main conversation.
 
 These controls appear when the connected host supports subagent tasks. See [Subagents](./concepts.md#subagents) for cancellation, saved history, and gateway restart behavior.
 
 ## Temporary Chats
 
-Use a temporary chat for a conversation that should not be added to nanobot's topic history or long-term memory:
-
-1. Select **New topic**.
-2. Select the **Temporary chat** control in the page header.
-3. Send the first message.
+Start **New topic → Temporary chat** for a conversation that should not be added to topic history or long-term memory.
 
 You can keep more than one temporary chat open and switch between them under **Temporary chats** in the sidebar while the current WebUI connection remains open. Reloading or closing the page, restarting the gateway, or losing the WebSocket connection ends all of them. They cannot be recovered afterward.
 
@@ -169,9 +157,9 @@ Temporary does not mean consequence-free. Requests still go to the configured mo
 
 Use the workspace picker to browse folders on the connected nanobot host, enter an absolute path, or return to recent and starred projects; favorites persist across gateway restarts. The host name appears above saved locations. Project paths refer to that machine, not the browser's filesystem.
 
-Use the breadcrumb nodes or Back and Forward controls to navigate. **Last visited folder** returns directly to the folder you most recently left, restoring its directory columns, selected rows, filter, and scroll positions. **Filter this folder** only filters the current directory. Click the empty area in the path bar or press **Cmd/Ctrl+Shift+G** to enter a host path; Tab completes it and Enter opens it. Click outside the input or press Escape to cancel path editing; **Confirm** confirms the edited path. Browsing does not change the workspace until you choose **Confirm**. **Cancel** leaves the current workspace unchanged. Desktop uses directory columns with Shift+wheel horizontal scrolling; narrow screens show one folder at a time, with favorites and recent projects under **Saved locations**. Directory columns settle on complete rows after scrolling.
+Browsing does not change the topic's workspace until you choose **Confirm**. **Filter this folder** searches only the current directory. **Cmd/Ctrl+Shift+G** opens host-path entry, with Tab completion; **Last visited folder** returns to the previous location.
 
-On a compatible host without the optional directory-browser capabilities, manual path entry remains available. Browse and favorite requests are not sent to that host. The gateway still validates the selected workspace and owns its access policy.
+Manual path entry remains available when the connected host does not support directory browsing. The host validates the selected path and access policy.
 
 Selecting a project does not replace the configured agent workspace. The two paths have different responsibilities:
 
@@ -191,27 +179,31 @@ In Restricted mode, ordinary file and shell work stays inside the selected proje
 
 ## Composer
 
-With voice transcription configured, the idle composer uses one button for voice input when empty and Send when text or attachments are present; speech is transcribed into the draft before sending.
+The composer supports text, attachments (images, documents, and videos), slash commands and `@` mentions. With voice transcription configured, the empty composer offers voice input; transcription is added to the draft before sending.
 
-The composer supports plain messages, image attachments, voice input when transcription is configured, slash commands, and `@` mentions for installed Apps, MCP presets, or persisted topics. Topics have short, pronounceable handles such as `@luma`; titles are display text rather than addresses. Select a topic from the menu, or drag it from the sidebar, to attach its structured reference. Typing the same text without selecting it remains plain text.
+Images appear as thumbnails above the draft. Hover over a thumbnail for its filename and size; use its top-right × to remove it before sending. Documents and videos keep their file cards, and attachment errors remain visible.
+
+Choose or drop MP4, WebM, or MOV videos into the composer (one per message, up to 20 MiB per upload). You can play them in WebUI; the Agent cannot directly analyze their contents yet.
+
+To attach a file on the connected nanobot host, paste its path on its own. Quoted paths and spaces are supported; relative paths start from the topic's workspace. The topic's access permissions apply. Path references do not upload or copy the file and have no file-size or combined-size limit; supported formats and attachment counts still apply. If attaching fails, the text stays in your draft.
+
+Files attached by path reflect changes to the original file and become unavailable if it is moved or deleted. Removing an attachment or deleting a topic does not delete the original.
+
+To reference another topic, type or paste its complete handle (such as `@luma`), choose it from the `@` menu, or drag it from the sidebar into the composer. Recognized handles are highlighted; unknown handles remain plain text. You can reference up to eight different topics in one message.
+
+Ask nanobot to find, read, or send messages to other saved topics, including those in other projects. For example, “Summarize @luma” or “Send this update to @luma.” Mentioning a topic alone does not send a message to it.
 
 On touch-primary phones and tablets, **Enter** inserts a newline; tap the send arrow to submit. This also applies when a coarse-pointer tablet has a hardware keyboard attached. On desktop, **Enter** sends and **Shift+Enter** adds a newline. An open slash-command or mention menu takes precedence: Enter selects its item.
 
-While a response is running, the send arrow delivers a ready draft as guidance for the active turn; it does not issue a stop command. Other messages already waiting in the queue stay there. On desktop, Enter queues guidance and a second Enter with an empty input sends that queued message immediately. Queued messages also have a **Send now** action. The primary button shows **Stop** when there is no sendable draft; clear the draft or use `/stop` to stop instead of sending it.
+During a response, desktop Enter appends input to one waiting message, preserving order, attachments and references. It sends when the response finishes. **Send now** or Enter on an empty input sends it immediately as guidance; the send arrow submits the waiting content together with any draft. **Edit message** and **Delete message** act on the whole waiting message. Additions that exceed limits stay in the input. Stopping a turn or a failed send preserves the waiting message for manual sending.
 
-The agent can inspect an attached topic with `read_session`. It can discover other persisted topics with `list_sessions` and send asynchronous messages with `send_session_message`; topic messaging is not limited by workspace scope. The model badge shows the current model or preset and links to model settings when setup is incomplete.
+Automatic sending continues across topic switches and short reconnects while the page stays live. Reloading, reopening, leaving the page, or the browser freezing it restores waiting content for manual sending; choose **Send now** or edit and send it when ready.
 
 For image generation, configure an image provider first and then use the WebUI image mode from the composer. See [`image-generation.md`](./image-generation.md) for provider setup and output behavior.
 
 ## Channels
 
-Open **Channels** to connect chat apps without assembling JSON by hand. Search for a platform, open its setup panel, and follow the fields or QR flow shown for that channel. The guided setup can:
-
-- install missing optional channel support when the WebUI is running locally;
-- collect platform credentials while preserving previously saved values;
-- handle supported QR-based login flows;
-- validate the connection and show actionable setup errors;
-- tell you when the gateway needs to restart.
+**Channels** provides credential or QR-based setup, connection validation, and restart guidance. Missing channel support can be installed from a local WebUI. When newly installed support needs a restart, select the restart icon in that channel's row before continuing setup.
 
 The platform itself may still require you to create a bot, enable event permissions, copy a token, or configure a webhook. Use [`chat-apps.md`](./chat-apps.md) for those platform-side prerequisites and for manual JSON/reference options.
 
@@ -219,19 +211,17 @@ Test a new channel with a private DM. When a supported channel sends a pairing c
 
 ## Apps
 
-Open Apps from the sidebar to review and manage installable capabilities. The default **Ready** view shows only capabilities that can be used immediately:
+**Apps → Ready** lists capabilities available for use:
 
 - **Agent Plugins** are local packages that can bundle skills, MCP servers, or both. A package under `<workspace>/plugins/` is installed but remains inactive until you enable it in Apps.
-- **CLI Apps** are local command-line adapters that nanobot runs on your machine. Their installer manages the executable and exposes its adapter through the same plugin activation model. Installing an adapter does not modify the native desktop or web app it connects to.
+- **CLI Apps** are command-line tool adapters on the nanobot host. Install and enable an adapter before attaching it to a turn.
 - **MCP** lists Model Context Protocol servers. Presets provide known configurations, and the **Add MCP server** panel accepts stdio, HTTP, and SSE servers. Custom HTTP/SSE servers can use no authentication, OAuth, or request headers. After saving an OAuth server, choose **Connect** to open its sign-in page. Presets such as Xmind, Notion, and Linear already use OAuth. HTTPS and localhost WebUIs return automatically; a remote plain-HTTP WebUI shows one field for pasting the complete localhost callback URL.
 
 CLI Apps run with a limited environment that excludes provider API keys. On Unix, they inherit `XDG_RUNTIME_DIR` when it is set in the gateway's environment, so desktop CLIs such as Obsidian can locate the running application. Start the gateway in the same desktop session as the app to inherit that runtime directory.
 
-Apps intentionally does not list nanobot runtime support packages such as `api` or `bedrock`. Those packages enable providers, servers, or channels; they are not tools that can be attached to a turn with `@`. Manage them from **System**, **Models**, or **Web**. PDF and common Office document readers are included in nanobot and activate automatically when a file is attached. The equivalent CLI for optional integrations remains `nanobot plugins`. See [`cli-reference.md`](./cli-reference.md#optional-features). That command manages nanobot runtime extras, not Agent Plugin packages.
+Manage optional runtime support from **System**, **Models**, or **Web**, or use [`nanobot plugins`](./cli-reference.md#optional-features). That command manages runtime extras, not Agent Plugin packages. PDF and common Office attachment readers require no setup.
 
-Some MCP presets connect to hosted keyless endpoints. For example, the Firecrawl preset uses Firecrawl's hosted MCP endpoint for search, scrape, crawl, and extraction tools without requiring an API key. This does not replace nanobot's built-in web search provider; mention the Firecrawl MCP preset with `@` when a turn needs Firecrawl's richer web data tools.
-
-The Parallel Search preset connects to the free, anonymous Parallel Search MCP endpoint and exposes `web_search` and `web_fetch` without requiring an API key. It is an optional integration and does not replace nanobot's built-in web search provider; mention `@parallel-search` when a turn should use it.
+Keyless hosted presets include **Firecrawl** for search, scraping, crawling and extraction, and **Parallel Search** for `web_search` and `web_fetch`. They are optional MCP tools and do not change the built-in web search provider.
 
 After a CLI App or MCP server is available, mention it from the composer with `@` to attach that tool to the next message. Plugin-provided skills participate in normal skill discovery and can be invoked with `$skill-name`.
 
@@ -256,15 +246,7 @@ There are two user-facing automation types:
 
 For recurring background checks that should stay quiet unless there is something useful to report, use the protected heartbeat job by editing `HEARTBEAT.md` instead of creating a chat automation.
 
-Use the Automations view to:
-
-- Filter by all, active, paused, needs-attention, or system jobs.
-- Search by task name, message, trigger command, linked topic, schedule, or status.
-- Sort by next run, last run, updated time, or name.
-- Run scheduled automations now.
-- Pause or resume, rename, or delete user-created automations.
-- Copy the CLI command for local triggers.
-- Inspect protected system automations without changing them.
+The Automations view manages user-created jobs and can run scheduled jobs immediately. Protected system jobs are read-only.
 
 Search accepts plain text and field filters such as `name:backup`, `chat:WeChat`, `schedule:09:30`, `cron:"0 23 * * *"`, `trigger`, and `status:paused`.
 
@@ -274,13 +256,9 @@ Local triggers do not have a WebUI "Run now" action because each run needs a mes
 
 ## Settings
 
-Settings is the control surface for browser-local and gateway-backed runtime configuration. Use it to review or adjust model presets, providers, image generation, voice transcription, web tools, chat channels, Apps, Automations, Skills, runtime identity, and advanced safety controls.
+Runtime settings may require a gateway restart; the WebUI marks those controls.
 
-Some settings take effect immediately. Runtime settings that affect the gateway or agent process may require a restart; the WebUI shows that requirement next to the relevant control.
-
-Browser-only display preferences, such as file edit display mode, take effect immediately for the current browser and do not change gateway configuration.
-
-To add a model, follow [Configure Your Model](./quick-start.md#2-configure-your-model).
+**Appearance → Local preferences** applies immediately to the current browser without changing gateway configuration. **Reading text size** adjusts conversation text, Markdown, code and the input, but not navigation or toolbars; standard is the default.
 
 ## LAN Access
 
@@ -317,25 +295,11 @@ Remote WebUI clients with a valid token can view and use Apps and installed skil
 
 </details>
 
-Use this only for a private deployment where every authenticated WebUI user is trusted to change nanobot's Python environment and install workspace skill instructions or scripts. If you publish the WebUI through Nginx, Caddy, Cloudflare Tunnel, or a similar service, treat it as remote access and leave package and skill installs disabled unless that is intentional.
+Enable remote installation only for a private deployment whose users are trusted to change the Python environment and install skill instructions or scripts. Reverse-proxy and tunnel deployments count as remote access.
 
 Optional feature installs use pip's configured package index, including `PIP_INDEX_URL`. skills.sh marketplace installs use `npx` instead.
 
-Leave remote package installs disabled when the WebUI is exposed beyond a private, trusted network.
-
 ## Troubleshooting
-
-### Links and website previews
-
-HTTP(S) links in replies have a **Link actions** menu: right-click the link or press Shift+F10 while it is focused. Touch and hold keeps the browser's native link menu. For in-app actions on touch devices, open the message's existing **Message actions → View links** entry. It lists only the web links rendered in that message, not URLs inside code blocks or file references. Choose a link to copy it, open it externally, or preview it beside the current conversation. On phone-sized screens, Copy and Message actions sit below the message, leaving the full text width available. Message actions opens a bottom sheet; close it with its close button, by tapping outside, or with Escape. Desktop keeps the hover-triggered message popover. On desktop, hovering or focusing a message also reveals a short timestamp below its actions: a 24-hour clock for today, or month/day for every other date. Hover or focus that label for the full local date and time, including the year. Replies use their completion timestamp when available, otherwise their creation timestamp. There is no persistent action button beside each link and no custom long-press gesture to interfere with scrolling or text selection. Ordinary clicks still open links in a browser tab. File and session links keep their own behavior.
-
-The sidebar shares space with file previews and has refresh, external-open and close controls. Escape closes it when focus is in the nanobot page, unless a menu or dialog handles Escape first. Once focus is inside a third-party page, use the sidebar's close button. The opened address and width are remembered per session for this app connection, not written to browser storage. Returning to a session reloads the original address; it does not preserve the website's DOM, navigation history or forms. The header shows the **original link**, not a live address bar for navigation inside the embedded page.
-
-This is a restricted preview, not a full browser. It requires browser support for credentialless iframes and is disabled in the native host until a separate untrusted-content boundary is available. Unsupported browsers can still copy links and open new tabs. Previews use an opaque-origin sandbox with scripts but without same-origin access, forms, popups, downloads or top navigation. No gateway token, host bridge or parent storage is passed into the frame.
-
-Sites may refuse embedding via CSP or X-Frame-Options, and sign-in or some interactive features may not work. Use **Open in browser** if the frame is blank or reports a failure. The browser does not reliably expose an embedding failure to nanobot, so a frame load event is not presented as a success signal. Nanobot does not proxy pages or bypass their headers. Same-origin nanobot URLs and HTTP pages embedded from an HTTPS WebUI are not previewed.
-
-`localhost` and loopback addresses refer to the device running your browser, not a remote nanobot gateway. This feature does not forward remote ports.
 
 ### Connection checks
 
@@ -344,9 +308,7 @@ If the page does not open, check these in order:
 1. `nanobot agent -m "Hello!"` works in the same Python environment.
 2. `~/.nanobot/config.json` does not explicitly set `channels.websocket.enabled` to `false`.
 3. `nanobot gateway` is still running.
-4. You are opening port `8765`, not the gateway health port.
+4. You are using the WebUI port (`8765` by default), not the health port (`18790` by default).
 5. LAN access uses `host: "0.0.0.0"` and a token or token issue secret.
-
-If voice input asks for a secure connection, use HTTPS with a certificate the device trusts. Browsers do not expose microphone capture to `http://<your-ip>` origins.
 
 For detailed diagnostics, see [`troubleshooting.md#webui-problems`](./troubleshooting.md#webui-problems). For frontend development, see [`../webui/README.md`](../webui/README.md).

@@ -1,4 +1,4 @@
-import { uploadAttachments, uploadCapability, type AttachmentReference, type UploadCapability } from "../../../packages/client-events/attachments"
+import { uploadAttachments, uploadCapability, isLocalAttachment, type AttachmentReference, type UploadCapability } from "../../../packages/client-events/attachments"
 import { DeliveryReceipts } from "../../../packages/client-events/delivery"
 import { isRecoveryState } from "../../../packages/client-events/notifications"
 
@@ -245,6 +245,17 @@ export class NanobotClient {
       recovery_id: recoveryId,
     }).then((result) => {
       if (!isRecoveryState(result)) throw new Error("gateway returned an invalid recovery state")
+      return result
+    })
+  }
+
+  inspectAttachment(path: string): Promise<import("../../../packages/client-events/attachments").LocalAttachment> {
+    if (!this.chatId) return Promise.reject(new Error("chat is not ready"))
+    return this.requestMutation<unknown>("attachment.inspect", {
+      chat_id: this.chatId, path,
+      ...(this.workspaceScope ? { workspace_scope: this.workspaceScope } : {}),
+    }).then((result) => {
+      if (!isLocalAttachment(result)) throw new Error("Invalid attachment metadata")
       return result
     })
   }
