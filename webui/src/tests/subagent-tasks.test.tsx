@@ -143,6 +143,36 @@ describe("session-owned task UI", () => {
     expect(requestMutation).not.toHaveBeenCalled();
   });
 
+  it("keeps collapsed task controls out of Tab order and allows typing without closing the drawer", async () => {
+    const user = userEvent.setup();
+    render(layout());
+    const trigger = await screen.findByTestId("subagent-task-dock-trigger");
+    const input = screen.getByRole("textbox", { name: "Message" });
+    expect(trigger).toHaveAccessibleName("Subtasks · Running: 1");
+    act(() => { trigger.focus(); });
+    await user.tab();
+    expect(input).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(trigger).toHaveFocus();
+    await user.keyboard("{Enter}");
+    const list = screen.getByTestId("subagent-task-tree");
+    await user.tab();
+    expect(within(list).getByRole("button", { name: /Config check Running/ })).toHaveFocus();
+    await user.click(input);
+    await user.type(input, "Keep working in the conversation");
+    expect(input).toHaveValue("Keep working in the conversation");
+    const cancelComposition = new KeyboardEvent("keydown", { key: "Escape", isComposing: true, bubbles: true, cancelable: true });
+    fireEvent(input, cancelComposition);
+    expect(cancelComposition.defaultPrevented).toBe(false);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await user.click(trigger);
+    expect(trigger).toHaveFocus();
+    expect(screen.queryByTestId("subagent-task-tree")).not.toBeInTheDocument();
+    await user.tab();
+    expect(input).toHaveFocus();
+    expect(requestMutation).not.toHaveBeenCalled();
+  });
+
   it("removes a finished task from the closed dock while a sibling is still active", async () => {
     vi.mocked(fetch).mockImplementation(async () => response([
       task(), task({ task_id: "sibling", label: "Waiting check", state: "queued", created_at: 101 }),
@@ -430,7 +460,7 @@ describe("session-owned task UI", () => {
     expect(within(archive).getByRole("button", { name: /Waiting check Failed/ })).toBeVisible();
   });
 
-  it.each(["inactive", "hidden", "session"])("closes the portaled task list when its scope becomes %s", async change => {
+  it.each(["inactive", "hidden", "session"])("closes the task drawer when its scope becomes %s", async change => {
     const user = userEvent.setup();
     const view = render(layout());
     expect(await openTaskList(user)).toBeVisible();

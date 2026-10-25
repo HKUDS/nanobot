@@ -20,22 +20,17 @@ for (const width of [1440, 390]) {
     await trigger.click();
     const tree = page.getByTestId("subagent-task-tree");
     await expect(tree).toBeVisible();
-    const panel = page.getByRole("dialog", { name: "Subtasks", exact: true });
-    if (width > 639) {
-      const bounds = (await panel.boundingBox())!;
-      expect(bounds.y + bounds.height).toBeLessThanOrEqual(original.y);
-      expect(bounds.x).toBeCloseTo(original.x, 0);
-      expect(bounds.width).toBeCloseTo(original.width, 0);
-      await expect(panel).toHaveAccessibleDescription("0 of 3 completed");
-    } else {
-      await expect.poll(async () => {
-        const bounds = (await panel.boundingBox())!;
-        return Math.round(bounds.y + bounds.height);
-      }).toBe(900);
-      const bounds = (await panel.boundingBox())!;
-      expect(bounds.y + bounds.height).toBeCloseTo(900, 0);
-      expect(bounds.height).toBeLessThanOrEqual(630);
-    }
+    const dock = page.getByTestId("subagent-task-dock");
+    const panel = dock.getByRole("region", { name: "Subtasks", exact: true });
+    await panel.evaluate(node => Promise.all(node.getAnimations({ subtree: true })
+      .filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished)));
+    const bounds = (await panel.boundingBox())!;
+    const anchor = (await dock.boundingBox())!;
+    expect(bounds.y).toBeGreaterThanOrEqual(0);
+    expect(bounds.y + bounds.height).toBeCloseTo(anchor.y + anchor.height - 1, 0);
+    expect(bounds.width).toBeGreaterThan(original.width);
+    expect(bounds.height).toBeLessThanOrEqual(448);
+    await expect(panel).toHaveAccessibleDescription("0 of 3 completed");
     await page.screenshot({ path: info.outputPath("subtask-tree.png") });
     const row = tree.locator('[data-subagent-id="preview-0"]');
     await row.click();
@@ -86,7 +81,7 @@ test("keeps the portaled dock scoped to the active conversation and honors reduc
   const tree = page.getByTestId("subagent-task-tree");
   await expect(tree).toBeVisible();
   await expect(tree.locator(".loading-ring-arc").first()).toHaveCSS("animation-name", "none");
-  await expect(page.getByRole("dialog", { name: "Subtasks", exact: true })).toHaveCSS("animation-name", "none");
+  await expect(portal.locator(".inline-disclosure")).toHaveCSS("transition-duration", "0s");
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "切换活动面板", exact: true }).click();
   await expect(portal.getByTestId("subagent-task-dock")).toHaveCount(0);
@@ -108,16 +103,21 @@ test("keeps the portaled dock scoped to the active conversation and honors reduc
   await expect(page.getByRole("dialog", { name: "核对回归测试", exact: true }).getByRole("alert")).toHaveText("演示：测试执行失败，请打开详情检查。");
 });
 
-test("lets an outside click return directly to the composer without stealing its focus", async ({ page }) => {
+test("keeps the composer editable while the task drawer stays open", async ({ page }) => {
   await page.goto("/browser/fixture.html?case=subagent-dock");
   await page.getByTestId("subagent-task-dock-trigger").click();
   await expect(page.getByTestId("subagent-task-tree")).toBeVisible();
   const input = page.getByRole("textbox").first();
   await input.click();
-  await expect(page.getByTestId("subagent-task-tree")).toHaveCount(0);
+  await expect(page.getByTestId("subagent-task-tree")).toBeVisible();
   await expect(input).toBeFocused();
   await page.keyboard.type("Continue the conversation");
   await expect(input).toHaveValue("Continue the conversation");
+  const imeEscapeAllowed = await input.evaluate(node => node.dispatchEvent(new KeyboardEvent("keydown", {
+    key: "Escape", isComposing: true, bubbles: true, cancelable: true,
+  })));
+  expect(imeEscapeAllowed).toBe(true);
+  await expect(page.getByTestId("subagent-task-dock-trigger")).toHaveAttribute("aria-expanded", "true");
 });
 
 for (const width of [1440, 390]) {
@@ -143,7 +143,7 @@ for (const width of [1440, 390]) {
   });
 }
 
-test("keeps a bottom task sheet inside a shortened visual viewport", async ({ page }) => {
+test("keeps the task drawer above the composer inside a shortened visual viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/browser/fixture.html?case=subagent-dock");
@@ -152,13 +152,18 @@ test("keeps a bottom task sheet inside a shortened visual viewport", async ({ pa
     document.documentElement.style.setProperty("--app-viewport-height", "500px");
   });
   await page.getByTestId("subagent-task-dock-trigger").click();
-  const panel = page.getByRole("dialog", { name: "Subtasks", exact: true });
+  const panel = page.getByTestId("subagent-task-dock").getByRole("region", { name: "Subtasks", exact: true });
   const bounds = (await panel.boundingBox())!;
+  const input = page.getByRole("textbox").first();
+  const inputBounds = (await input.boundingBox())!;
   expect(bounds.y).toBeGreaterThanOrEqual(0);
-  expect(bounds.y + bounds.height).toBeCloseTo(500, 0);
+  expect(bounds.y + bounds.height).toBeLessThanOrEqual(inputBounds.y);
+  expect(inputBounds.y + inputBounds.height).toBeLessThanOrEqual(500);
+  await input.fill("Keyboard viewport remains usable");
+  await expect(panel).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(panel).toHaveCount(0);
-  await expect(page.getByRole("textbox").first()).toBeEditable();
+  await expect(panel).toBeHidden();
+  await expect(input).toBeFocused();
 });
 
 for (const width of [1440, 390]) {
@@ -255,7 +260,7 @@ test("keeps long task names, stop controls and detail handoff usable on a narrow
   await page.setViewportSize({ width: 320, height: 844 });
   await page.goto("/browser/fixture.html?case=subagent-dock&long-labels");
   await page.getByTestId("subagent-task-dock-trigger").click();
-  const panel = page.getByRole("dialog", { name: "Subtasks", exact: true });
+  const panel = page.getByTestId("subagent-task-dock").getByRole("region", { name: "Subtasks", exact: true });
   const tree = page.getByTestId("subagent-task-tree");
   await expect(tree).toBeVisible();
   expect(await tree.evaluate(node => node.scrollWidth)).toBe(await tree.evaluate(node => node.clientWidth));
@@ -275,6 +280,77 @@ test("keeps long task names, stop controls and detail handoff usable on a narrow
   expect(closeBounds.height).toBeGreaterThanOrEqual(44);
   await close.click();
   await expect(row).toBeFocused();
+});
+
+test("exposes only the handle until requested and supports mouse drags without double toggling", async ({ page }) => {
+  await page.goto("/browser/fixture.html?case=subagent-dock");
+  const trigger = page.getByTestId("subagent-task-dock-trigger");
+  const tree = page.getByTestId("subagent-task-tree");
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+  await page.getByRole("button", { name: "增加任务", exact: true }).click();
+  await expect(trigger).toContainText("Running: 23");
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+  await expect(tree).toHaveCount(0);
+  await trigger.focus();
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("textbox").first()).toBeFocused();
+  const swipe = async (dx: number, dy: number) => {
+    const bounds = (await trigger.boundingBox())!;
+    const x = bounds.x + bounds.width / 2;
+    const y = bounds.y + bounds.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + dx, y + dy, { steps: 8 });
+    await page.mouse.up();
+  };
+  await swipe(40, 2);
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+  await swipe(0, -60);
+  await expect(tree).toBeVisible();
+  await page.getByTestId("subagent-task-dock").evaluate(node => Promise.all(node.getAnimations({ subtree: true })
+    .filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished)));
+  await swipe(0, 60);
+  await expect(tree).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(tree).toBeVisible();
+});
+
+test.describe("touch task drawer", () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+  test("opens upward, cancels a gesture, and scrolls tasks without closing the drawer", async ({ page }) => {
+    await page.goto("/browser/fixture.html?case=subagent-dock");
+    const trigger = page.getByTestId("subagent-task-dock-trigger");
+    const tree = page.getByTestId("subagent-task-tree");
+    const cdp = await page.context().newCDPSession(page);
+    const swipe = async (target: typeof trigger, dy: number, cancel = false) => {
+      const bounds = (await target.boundingBox())!;
+      const x = bounds.x + bounds.width / 2;
+      const y = bounds.y + bounds.height / 2;
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+      for (let step = 1; step <= 6; step++) {
+        await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y + dy * step / 6 }] });
+      }
+      await cdp.send("Input.dispatchTouchEvent", { type: cancel ? "touchCancel" : "touchEnd", touchPoints: [] });
+    };
+    await swipe(trigger, -60, true);
+    await expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await swipe(trigger, -60);
+    await expect(tree).toBeVisible();
+    await page.getByTestId("subagent-task-dock").evaluate(node => Promise.all(node.getAnimations({ subtree: true })
+      .filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished)));
+    await swipe(trigger, 60);
+    await expect(tree).toHaveCount(0);
+    await page.getByRole("button", { name: "增加任务", exact: true }).click();
+    await trigger.tap();
+    await expect(tree.locator("[data-subagent-id]")).toHaveCount(23);
+    await page.getByTestId("subagent-task-dock").evaluate(node => Promise.all(node.getAnimations({ subtree: true })
+      .filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished)));
+    await swipe(tree, -100);
+    await expect.poll(() => tree.evaluate(node => node.scrollTop)).toBeGreaterThan(0);
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await cdp.detach();
+  });
 });
 
 for (const width of [1440, 390, 320]) {

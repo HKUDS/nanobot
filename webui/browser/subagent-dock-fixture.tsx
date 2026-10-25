@@ -103,7 +103,7 @@ export function SubagentDockFixture({ parameters }: { parameters: URLSearchParam
     receive({ event: "turn_end", chat_id: chatId, turn_id: replyTurn });
   };
   return <ClientProvider client={client} token="fixture" webuiCapabilities={["webui.core.v1", "webui.subagents.v1", "webui.subagents.events.v1", "webui.subagents.history.v1"]}>
-    <main className="thread-workspace flex min-w-0 flex-col overflow-hidden bg-background text-foreground" style={{ height: "100dvh" }}>
+    <main className="thread-workspace flex min-w-0 flex-col overflow-hidden bg-background text-foreground" style={{ height: "var(--app-viewport-height, 100dvh)" }}>
       <nav aria-label="Preview controls" className="flex shrink-0 items-center gap-4 overflow-x-auto whitespace-nowrap border-b px-4 py-2 text-xs text-muted-foreground">
         <span>虚构任务预览</span>
         <button onClick={() => {
