@@ -71,6 +71,45 @@ for (const width of [1440, 390]) {
   });
 }
 
+for (const width of [1440, 390]) {
+  test(`renders complete result Markdown without clipping inside the task drawer at ${width}px`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto(`/browser/fixture.html?case=subagent-dock&markdown-result${width === 390 ? "&dark" : ""}`);
+    const trigger = page.getByTestId("subagent-task-dock-trigger");
+    const tree = page.getByTestId("subagent-task-tree");
+    const messages = page.getByTestId("thread-message-region");
+    await trigger.click();
+    // Finish through the existing control without dismissing the reading view.
+    await page.getByRole("button", { name: "全部完成", exact: true }).evaluate(node => (node as HTMLButtonElement).click());
+    const heading = tree.getByRole("heading", { level: 2, name: "天气结果" });
+    await expect(heading).toBeVisible();
+    await expect(tree.locator("strong").filter({ hasText: "10°C" })).toBeVisible();
+    await page.getByTestId("subagent-task-dock").evaluate(node => Promise.all(node.getAnimations({ subtree: true })
+      .filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished)));
+    const dimensions = await tree.evaluate(node => ({ clientWidth: node.clientWidth, scrollWidth: node.scrollWidth, clientHeight: node.clientHeight, scrollHeight: node.scrollHeight }));
+    expect(dimensions.scrollWidth).toBe(dimensions.clientWidth);
+    expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight);
+    await page.screenshot({ path: info.outputPath("result-markdown-start.png") });
+    const beforeScroll = await messages.evaluate(node => node.scrollTop);
+    const tail = tree.getByText("最后一条完整结论：以上结果均可继续核对。", { exact: true });
+    await tail.scrollIntoViewIfNeeded();
+    await expect(tail).toBeInViewport();
+    await expect(tree.getByRole("link", { name: "天气来源", exact: true })).toHaveAttribute("href", "https://example.com/weather");
+    await expect(tree.locator("pre")).toContainText("checked_at: 2026-10-25T20:52:00+08:00");
+    expect(await messages.evaluate(node => node.scrollTop)).toBe(beforeScroll);
+    await page.screenshot({ path: info.outputPath("result-markdown-end.png") });
+    const input = page.getByRole("textbox").first();
+    await input.fill("继续阅读完整结果，同时输入下一条消息");
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    const row = tree.locator('[data-subagent-id="preview-0"]');
+    await row.click();
+    const detail = page.getByRole("dialog", { name: "检查项目实现", exact: true });
+    await expect(detail.getByRole("heading", { level: 2, name: "天气结果" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(row).toBeFocused();
+  });
+}
+
 test("keeps the portaled dock scoped to the active conversation and honors reduced motion", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce", colorScheme: "dark" });
   await page.goto("/browser/fixture.html?case=subagent-dock&portal&dark");

@@ -91,7 +91,10 @@ export function SubagentDockFixture({ parameters }: { parameters: URLSearchParam
   const finish = () => tasks.forEach((task, index) => {
     if (task.state === "running" || task.state === "queued") updateTask(index, {
       state: "done", phase: "done", tool_events: [], completed_at: Date.now() / 1000,
-      result: ["已核对面板的位置与滚动边界。", "定向检查已完成，保留详情与单任务停止。", "建议让任务入口始终留在输入区附近。"][index % 3],
+      result: index === 0 && parameters.has("markdown-result")
+        ? "## 天气结果\n\n**北京**：约 **10°C**，有小雨。\n\n" + "这是完整的多行查询结果，保留原始段落、文字样式和详细说明，阅读时可以滚动任务列表。".repeat(30)
+          + "\n\n- **南京**：约 18°C，有雾。\n- **天津**：约 12°C，多云。\n\n[天气来源](https://example.com/weather)\n\n```text\nchecked_at: 2026-10-25T20:52:00+08:00\n```\n\n最后一条完整结论：以上结果均可继续核对。"
+        : ["已核对面板的位置与滚动边界。", "定向检查已完成，保留详情与单任务停止。", "建议让任务入口始终留在输入区附近。"][index % 3],
     });
   });
   const growReply = () => {

@@ -413,17 +413,21 @@ describe("session-owned task UI", () => {
     expect(requestMutation).not.toHaveBeenCalled();
   });
 
-  it("uses a bounded non-interactive result excerpt while keeping full Markdown in task details", async () => {
-    const result = "## Findings\n\n" + "Verified the configuration. ".repeat(30) + "\n\n[Full evidence](https://example.com/evidence)\n\n```ts\nconst verified = true;\n```";
+  it("renders the full result as Markdown in the drawer and keeps task details available", async () => {
+    const result = "## Findings\n\n**Verified** the configuration.\n\n" + "Verified the configuration. ".repeat(30)
+      + "\n\n[Full evidence](https://example.com/evidence)\n\n[Unsafe link](javascript:alert(1))\n\n```ts\nconst verified = true;\n```\n\nFinal finding after the long result.";
     const user = userEvent.setup();
     render(layout());
     const tree = await openTaskList(user);
     emitTask(task({ revision: 2, state: "done", completed_at: 102, result }));
-    const excerpt = within(tree).getByText(/^## Findings/);
-    expect(excerpt).toBeVisible();
-    expect(excerpt.textContent?.trim()).toBe(result.trim().slice(0, 240));
-    expect(within(tree).queryByRole("link")).not.toBeInTheDocument();
-    expect(within(tree).getAllByRole("button")).toHaveLength(1);
+    expect(await within(tree).findByRole("heading", { name: "Findings", level: 2 })).toBeVisible();
+    expect(within(tree).getByText("Verified", { selector: "strong" })).toBeVisible();
+    expect(within(tree).getByText("Final finding after the long result.")).toBeVisible();
+    const evidence = within(tree).getByRole("link", { name: "Full evidence" });
+    expect(evidence).toHaveAttribute("href", "https://example.com/evidence");
+    expect(evidence).toHaveAttribute("rel", "noreferrer noopener");
+    expect(within(tree).queryByRole("link", { name: "Unsafe link" })).not.toBeInTheDocument();
+    expect(tree.querySelector("pre")?.textContent).toContain("const verified = true;");
     await user.click(within(tree).getByRole("button", { name: /Config check Completed/ }));
     expect(await within(screen.getByRole("dialog", { name: "Config check" })).findByRole("link", { name: /Full evidence/ })).toHaveAttribute("href", "https://example.com/evidence");
   });

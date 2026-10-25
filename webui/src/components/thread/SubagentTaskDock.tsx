@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type PointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 
+import { MarkdownText } from "@/components/MarkdownText";
 import { CompletedTaskIcon, DelegationIcon, ErrorTaskIcon, StopIcon } from "@/components/icons/product-icons";
 import { SubagentTaskButton, useSubagentTasks } from "@/components/thread/SubagentTasks";
 import { Button } from "@/components/ui/button";
@@ -191,9 +192,9 @@ function TaskTree({ tasks, maxHeight }: { tasks: ObservedSubagentTask[]; maxHeig
           </li>)}
         </ul> : null}
         {task.error ? <p className="ml-[38px] line-clamp-2 break-words pb-2 pr-3 text-xs leading-5 text-destructive">{task.error}</p>
-          : task.state === "done" && task.result ? <p className="ml-[38px] line-clamp-2 break-words pb-2 pr-3 text-xs leading-5 text-muted-foreground">
-            {task.result.trim().slice(0, 240)}
-          </p> : null}
+          : task.state === "done" && task.result ? <div className="ml-[38px] min-w-0 pb-2 pr-3">
+            <MarkdownText className="text-muted-foreground [--text-reading-size:0.75rem]">{task.result}</MarkdownText>
+          </div> : null}
       </li>)}
     </ol>
     {context.stopError ? <p role="alert" className="px-3 pt-2 text-xs text-destructive">{context.stopError}</p> : null}
