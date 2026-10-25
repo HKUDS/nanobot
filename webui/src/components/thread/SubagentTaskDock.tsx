@@ -146,10 +146,9 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
           }}
           className="group mx-auto flex h-11 w-24 touch-none select-none items-center justify-center gap-2 rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring active:cursor-grabbing motion-reduce:transition-none sm:h-7 sm:cursor-grab">
           <span aria-hidden className="h-1 w-8 rounded-full bg-current opacity-30 transition-opacity group-hover:opacity-60 motion-reduce:transition-none" />
-          {running ? <LoadingRing className={iconClass} />
-            : attention ? <ErrorTaskIcon className={`${iconClass} text-destructive`} aria-hidden />
-              : completed === tasks.length ? <CompletedTaskIcon className={`${iconClass} text-emerald-600 dark:text-emerald-400`} aria-hidden />
-                : <DelegationIcon className={iconClass} aria-hidden />}
+          {!running && (attention ? <ErrorTaskIcon className={`${iconClass} text-destructive`} aria-hidden />
+            : completed === tasks.length ? <CompletedTaskIcon className={`${iconClass} text-emerald-600 dark:text-emerald-400`} aria-hidden />
+              : <DelegationIcon className={iconClass} aria-hidden />)}
           <span className="sr-only">{title} · {summary}
             {attention ? ` · ${t("thread.subagents.needsReview", { count: attention })}` : ""}
           </span>
