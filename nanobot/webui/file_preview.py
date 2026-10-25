@@ -165,12 +165,14 @@ def _clean_preview_path(raw_path: str | None) -> str:
         return ""
     if value.startswith("file://"):
         parsed = urlparse(value)
+        # urlparse already separates ?query and #fragment. A decoded hash is
+        # part of the path, as in file:///workspace/C%23/Program.cs.
         value = unquote(parsed.path)
         if re.match(r"^/[A-Za-z]:[\\/]", value):
             value = value[1:]
     else:
         value = unquote(value)
-    value = value.split("?", 1)[0].split("#", 1)[0].strip()
+    value = value.strip()
     if not re.match(r"^[A-Za-z]:[\\/]", value):
         value = re.sub(r":\d+(?::\d+)?$", "", value)
     return value
