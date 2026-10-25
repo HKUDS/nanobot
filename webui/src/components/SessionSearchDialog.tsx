@@ -62,7 +62,8 @@ export function SessionSearchDialog({
   const searchPending = searchQuery !== normalizedQuery || searchRevision !== messageRevision;
   const searchableSessions = useMemo(() => sessions.map((session) => ({
     session,
-    text: [titleOverrides[session.key], session.title, visibleSessionPreview(session.preview)]
+    text: [titleOverrides[session.key], session.title, visibleSessionPreview(session.preview),
+      session.handle ? `@${session.handle.name}` : undefined]
       .filter(Boolean).join(" ").toLowerCase(),
   })), [sessions, titleOverrides]);
   const sessionResults = useMemo<SessionSearchResult[]>(() => {

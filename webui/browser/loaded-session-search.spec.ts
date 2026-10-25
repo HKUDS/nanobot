@@ -13,6 +13,12 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     const dialog = page.getByRole("dialog", { name: "Search", exact: true });
     const input = dialog.getByRole("textbox", { name: "Search", exact: true });
     await expect(dialog.getByRole("button")).toHaveCount(24);
+    for (const query of ["@betu", "betu", "@BETU", "@be"]) {
+      await input.fill(query);
+      await expect(dialog.getByRole("button")).toHaveCount(1);
+      await expect(dialog.getByText("Topic 1", { exact: true })).toBeVisible();
+      await expect(dialog.getByText("Preview 1", { exact: true })).toBeVisible();
+    }
     for (const query of ["权限", "full access", "25%", "session_history.py"]) {
       await input.fill(query);
       await expect(dialog.getByRole("button")).toHaveCount(1);

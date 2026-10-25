@@ -119,6 +119,29 @@ describe("SessionSearchDialog", () => {
     expect(screen.queryByText("Model chat")).not.toBeInTheDocument();
   });
 
+  it("finds loaded session handles with or without @ and selects the matching session without requests", () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const onSelect = vi.fn();
+    render(<SessionSearchDialog open sessions={[
+      { ...session(1), handle: { id: "handle_00000000000000000000000000000001", name: "betu" } },
+      { ...session(2), handle: { id: "handle_00000000000000000000000000000002", name: "mira" } },
+      session(3),
+    ]} activeKey={null} loading={false} onOpenChange={() => {}} onSelect={onSelect} />);
+    const input = screen.getByRole("textbox", { name: "Search" });
+    for (const query of ["@betu", "betu", "@BETU", "@be", "etu"]) {
+      fireEvent.change(input, { target: { value: query } });
+      expect(screen.getAllByRole("button")).toHaveLength(1);
+      expect(screen.getByText("Chat 1")).toBeInTheDocument();
+    }
+    fireEvent.change(input, { target: { value: "@mira" } });
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    expect(screen.getByText("Chat 2")).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSelect).toHaveBeenCalledWith("websocket:chat-2");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("finds cached body substrings with a bounded preview and no data requests", () => {
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);

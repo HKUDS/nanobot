@@ -8,6 +8,7 @@ import type { ChatSummary } from "@/lib/types";
 const sessions: ChatSummary[] = Array.from({ length: 1000 }, (_, index) => ({
   key: `websocket:topic-${index}`, chatId: `topic-${index}`, channel: "websocket",
   title: `Topic ${index}`, preview: `Preview ${index}`, createdAt: null, updatedAt: null,
+  ...(index === 1 ? { handle: { id: "handle_00000000000000000000000000000001", name: "betu" } } : {}),
 }));
 
 export function LoadedSessionSearchFixture() {
