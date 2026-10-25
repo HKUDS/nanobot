@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type 
 import { useTranslation } from "react-i18next";
 
 import { MarkdownText } from "@/components/MarkdownText";
-import { CompletedTaskIcon, DelegationIcon, ErrorTaskIcon, StopIcon } from "@/components/icons/product-icons";
+import { ErrorTaskIcon, StopIcon } from "@/components/icons/product-icons";
 import { SubagentTaskButton, useSubagentTasks } from "@/components/thread/SubagentTasks";
 import { Button } from "@/components/ui/button";
 import { DisclosureContent } from "@/components/ui/disclosure";
@@ -107,7 +107,6 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
     : completed === tasks.length ? t("thread.subagents.completed", { count: completed })
       : t("thread.subagents.finished", { count: tasks.length });
   const title = t("thread.subagents.workTitle");
-  const iconClass = "h-3 w-3 shrink-0";
 
   if (!tasks.length) return null;
   return <div ref={root} data-testid="subagent-task-dock" className="relative mx-auto h-11 w-full max-w-[var(--composer-content-width,49.5rem)] sm:h-7">
@@ -145,11 +144,8 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
             if (suppressClick.current && event.detail !== 0) { suppressClick.current = false; return; }
             changeOpen(!open, open);
           }}
-          className="group mx-auto flex h-11 w-24 touch-none select-none items-center justify-center gap-2 rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring active:cursor-grabbing motion-reduce:transition-none sm:h-7 sm:cursor-grab">
+          className="group mx-auto flex h-11 w-24 touch-none select-none items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring active:cursor-grabbing motion-reduce:transition-none sm:h-7 sm:cursor-grab">
           <span aria-hidden className="h-1 w-8 rounded-full bg-current opacity-30 transition-opacity group-hover:opacity-60 motion-reduce:transition-none" />
-          {!running && (attention ? <ErrorTaskIcon className={`${iconClass} text-destructive`} aria-hidden />
-            : completed === tasks.length ? <CompletedTaskIcon className={`${iconClass} text-emerald-600 dark:text-emerald-400`} aria-hidden />
-              : <DelegationIcon className={iconClass} aria-hidden />)}
           <span className="sr-only">{title} · {summary}
             {attention ? ` · ${t("thread.subagents.needsReview", { count: attention })}` : ""}
           </span>
