@@ -54,7 +54,7 @@ import type {
   WebuiThreadTraceDetailPayload,
   WorkspaceScopePayload,
 } from "./types";
-import { fetchWithTimeout, readResponseWithTimeout } from "./http";
+import { fetchWithTimeout } from "./http";
 import { isSubagentTask } from "./subagent-tasks";
 
 const API_READ_TIMEOUT_MS = 20_000;
@@ -109,10 +109,6 @@ async function request<T>(
     },
     timeoutMs,
   );
-  return readJsonResponse<T>(res);
-}
-
-async function readJsonResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const text = typeof res.text === "function" ? (await res.text()).trim() : "";
     let message = text;
@@ -1008,14 +1004,11 @@ export async function disableNanobotFeature(
 export async function fetchPairingRequests(
   token: string,
   base: string = "",
-  signal?: AbortSignal,
 ): Promise<PairingPayload> {
-  // Pairing's serial refresh must be cancellable through JSON consumption, not
-  // just until headers arrive. Other API reads retain their existing lifetime.
-  return readResponseWithTimeout(
+  return request<PairingPayload>(
     `${base}/api/settings/pairing`,
-    { signal, headers: { Authorization: `Bearer ${token}` }, credentials: "same-origin" },
-    readJsonResponse<PairingPayload>,
+    token,
+    undefined,
     API_READ_TIMEOUT_MS,
   );
 }

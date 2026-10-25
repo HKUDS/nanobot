@@ -70,7 +70,7 @@ def test_is_allowed_pairing_fallback(monkeypatch) -> None:
 async def test_handle_message_dm_sends_pairing_code(monkeypatch) -> None:
     channel = _DummyChannel({"allowFrom": []}, MessageBus())
     monkeypatch.setattr(
-        "nanobot.channels.base.generate_code", lambda _ch, sid: "ABCD-EFGH"
+        "nanobot.channels.base.generate_code", lambda _ch, sid, **_kwargs: "ABCD-EFGH"
     )
 
     await channel._handle_message(
@@ -168,3 +168,20 @@ async def test_handle_message_rejects_when_authorization_id_is_not_allowed() -> 
 
     assert bus.inbound_size == 0
 
+
+
+@pytest.mark.asyncio
+async def test_dm_publishes_pairing_changes_without_a_file_watcher(monkeypatch, tmp_path) -> None:
+    from nanobot.pairing import store
+    from nanobot.pairing.events import PairingChanged
+
+    monkeypatch.setattr(store, "_store_path", lambda: tmp_path / "pairing.json")
+    bus = MessageBus()
+    observed = []
+    bus.subscribe(lambda _event: observed.append(store.list_pending()), PairingChanged)
+    channel = _DummyChannel({"allowFrom": []}, bus)
+    await channel._handle_message("alice", "dm", "hello", is_dm=True)
+    await bus.drain()
+    assert observed and observed[-1][0]["delivery_status"] == "sent"
+    assert observed[-1][0]["code"] in channel._sent[0].content
+    assert not store.is_approved("dummy", "alice")

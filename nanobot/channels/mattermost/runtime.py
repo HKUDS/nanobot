@@ -250,7 +250,7 @@ class MattermostChannel(BaseChannel):
 
         if not await self._is_allowed(sender_id, channel_id, channel_type):
             if is_dm and self.config.dm.enabled:
-                code = generate_code(self.name, str(sender_id))
+                code = generate_code(self.name, str(sender_id), on_change=self._pairing_changed)
                 await self.send(
                     OutboundMessage(
                         channel=self.name,

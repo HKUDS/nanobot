@@ -50,6 +50,7 @@ from nanobot.channels.websocket.runtime import (
 )
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config, ModelAPIConfig, ModelPresetConfig
+from nanobot.pairing.events import PairingChanged
 from nanobot.providers.base import LLMUsage
 from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META, WEBUI_QUOTE_SOURCE
 from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
@@ -2369,6 +2370,21 @@ async def test_send_delivers_json_message_with_media_and_reply() -> None:
     assert payload["text"] == "hello"
     assert payload["reply_to"] == "m1"
     assert payload["media"] == ["/tmp/a.png"]
+
+
+@pytest.mark.asyncio
+async def test_pairing_invalidation_reaches_only_authenticated_webui_connections() -> None:
+    bus = MessageBus()
+    channel = _ch(bus)
+    webui, ordinary = AsyncMock(), AsyncMock()
+    channel._attach(webui, "chat-1")
+    channel._attach(ordinary, "chat-1")
+    channel._webui_connections.add(webui)
+    await channel.send(OutboundMessage(
+        channel="websocket", chat_id="*", content="", event=PairingChanged(),
+    ))
+    assert json.loads(webui.send.call_args[0][0]) == {"event": "pairing_changed"}
+    ordinary.send.assert_not_awaited()
 
 
 @pytest.mark.asyncio

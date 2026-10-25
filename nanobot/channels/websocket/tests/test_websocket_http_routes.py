@@ -1230,11 +1230,11 @@ async def test_pairing_routes_require_token_and_approve_or_deny(
     monkeypatch.setattr("nanobot.webui.settings_routes.list_pending", lambda: list(pending))
     monkeypatch.setattr(
         "nanobot.webui.settings_routes.approve_code",
-        lambda code: approved.append(code) or ("feishu", "ou_123") if code == "ABCD-EFGH" else None,
+        lambda code, **_kwargs: approved.append(code) or ("feishu", "ou_123") if code == "ABCD-EFGH" else None,
     )
     monkeypatch.setattr(
         "nanobot.webui.settings_routes.deny_code",
-        lambda code: denied.append(code) or code == "ABCD-EFGH",
+        lambda code, **_kwargs: denied.append(code) or code == "ABCD-EFGH",
     )
 
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
@@ -1289,6 +1289,28 @@ async def test_pairing_routes_require_token_and_approve_or_deny(
     )
     assert missing_code.status_code == 400
     assert "Missing pairing code" in missing_code.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["approve", "deny"])
+async def test_pairing_mutation_publishes_committed_snapshot(action, tmp_path, monkeypatch):
+    from nanobot.bus.queue import MessageBus
+    from nanobot.pairing import store
+    from nanobot.pairing.events import PairingChanged
+
+    monkeypatch.setattr(store, "_store_path", lambda: tmp_path / "pairing.json")
+    code = store.generate_code("telegram", "alice")
+    bus = MessageBus()
+    snapshots = []
+    bus.subscribe(lambda _event: snapshots.append(store.list_pending()), PairingChanged)
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
+    result = await _webui_mutate(channel, f"settings.pairing.{action}", {"code": code})
+    await bus.drain()
+    assert result.status_code == 200 and snapshots == [[]]
+    assert store.is_approved("telegram", "alice") == (action == "approve")
+    missing = await _webui_mutate(channel, f"settings.pairing.{action}", {"code": code})
+    await bus.drain()
+    assert missing.status_code == 404 and snapshots == [[]]
 
 
 @pytest.mark.asyncio

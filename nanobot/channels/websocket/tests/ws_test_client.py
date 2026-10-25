@@ -30,19 +30,6 @@ from nanobot.webui.http_utils import http_response
 _IN_PROCESS_HTTP_CHANNELS: dict[int, InProcessHttpChannel] = {}
 
 
-async def wait_for_listener(channel: WebSocketChannel, task: asyncio.Task[None]) -> int:
-    """Await source registration and binding before making a non-retrying HTTP call."""
-    async with asyncio.timeout(5):
-        while True:
-            if task.done():
-                await task
-                raise AssertionError("listener stopped before becoming ready")
-            server = channel._server
-            if server is not None and server.sockets and server.is_serving():
-                return int(server.sockets[0].getsockname()[1])
-            await asyncio.sleep(0.01)
-
-
 class _HttpConnection:
     remote_address = ("127.0.0.1", 12345)
 

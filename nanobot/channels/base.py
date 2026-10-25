@@ -18,6 +18,7 @@ from nanobot.pairing import (
     is_approved,
     record_delivery,
 )
+from nanobot.pairing.events import PairingChanged
 
 
 class BaseChannel(ABC):
@@ -275,6 +276,9 @@ class BaseChannel(ABC):
             return True
         return False
 
+    def _pairing_changed(self) -> None:
+        self.bus.publish_nowait(PairingChanged())
+
     async def _handle_message(
         self,
         sender_id: str,
@@ -299,7 +303,7 @@ class BaseChannel(ABC):
         if not self.is_allowed(permission_id):
             if is_dm:
                 try:
-                    code = generate_code(self.name, str(sender_id))
+                    code = generate_code(self.name, str(sender_id), on_change=self._pairing_changed)
                 except OSError:
                     # Transient pairing-store I/O failure: skip the pairing
                     # reply for this message rather than crash the handler.
@@ -307,7 +311,7 @@ class BaseChannel(ABC):
                         "Pairing store unavailable; dropping DM from {}", sender_id
                     )
                     return
-                record_delivery(code, "sending")
+                record_delivery(code, "sending", on_change=self._pairing_changed)
                 try:
                     await self.send(
                         OutboundMessage(
@@ -318,9 +322,9 @@ class BaseChannel(ABC):
                         )
                     )
                 except Exception:
-                    record_delivery(code, "failed")
+                    record_delivery(code, "failed", on_change=self._pairing_changed)
                     raise
-                record_delivery(code, "sent")
+                record_delivery(code, "sent", on_change=self._pairing_changed)
                 self.logger.info(
                     "Sent pairing code {} to sender {} in chat {}",
                     code, sender_id, chat_id,

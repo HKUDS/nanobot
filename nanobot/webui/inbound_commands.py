@@ -232,10 +232,6 @@ class WebUICommandRouter:
         for connection in tuple(self._webui_connections):
             await self._transport.webui_send_event(connection, event, **fields)
 
-    async def broadcast_pairing_change(self) -> None:
-        """Tell only authenticated WebUI clients to re-read the pairing snapshot."""
-        await self.broadcast_webui_event("pairing_changed")
-
     async def broadcast_user_message(
         self,
         origin: ServerConnection,

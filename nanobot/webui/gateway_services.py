@@ -13,7 +13,6 @@ from nanobot.channels.websocket.attachment_http import AttachmentHTTP
 from nanobot.channels.websocket.attachment_store import AttachmentStore
 from nanobot.config.loader import get_config_path
 from nanobot.config.paths import get_media_dir
-from nanobot.pairing.notifications import PairingNotifications
 from nanobot.webui.gateway_endpoint import WebUIGatewayEndpoint
 from nanobot.webui.gateway_tokens import GatewayTokenStore
 from nanobot.webui.ingress_policy import DEFAULT_WEBUI_INGRESS_POLICY, WebUIIngressPolicy
@@ -41,7 +40,6 @@ class GatewayServices:
     http: GatewayHTTPHandler
     endpoint: WebUIGatewayEndpoint
     settings: WebUISettingsServices
-    pairing_notifications: PairingNotifications
     tokens: GatewayTokenStore
     media: WebUIMediaGateway
     uploads: AttachmentHTTP
@@ -162,7 +160,6 @@ def build_gateway_services(
         http=http,
         endpoint=endpoint,
         settings=settings,
-        pairing_notifications=PairingNotifications(),
         tokens=tokens,
         media=media,
         uploads=uploads,

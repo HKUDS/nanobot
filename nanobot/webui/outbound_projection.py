@@ -21,6 +21,7 @@ from nanobot.bus.outbound_events import (
     UserInputEvent,
 )
 from nanobot.bus.runtime_events import SubagentTaskChanged
+from nanobot.pairing.events import PairingChanged
 from nanobot.session.webui_turns import clear_websocket_turn_if_current
 from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
@@ -44,6 +45,8 @@ class WebUIOutboundTransport(Protocol):
     """Wire operations required by the outbound application projector."""
 
     def webui_subscribers(self, chat_id: str) -> tuple[ServerConnection, ...]: ...
+
+    async def send_pairing_changed(self) -> None: ...
 
     async def send_runtime_model_updated(
         self,
@@ -138,6 +141,9 @@ class WebUIOutboundProjector:
 
     async def send(self, msg: OutboundMessage) -> None:
         event = msg.event
+        if isinstance(event, PairingChanged):
+            await self._transport.send_pairing_changed()
+            return
         if isinstance(event, RetryWaitEvent):
             return
         progress_event = event if isinstance(event, ProgressEvent) else None

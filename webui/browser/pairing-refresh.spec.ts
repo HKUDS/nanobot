@@ -17,6 +17,7 @@ for (const width of [1440, 390]) {
     await page.route("**/api/**", route => {
       const path = new URL(route.request().url()).pathname;
       if (path === "/api/settings/pairing") {
+        expect(route.request().headers().authorization).toBe("Bearer fixture-api-token");
         reads += 1;
         return route.fulfill({ json: { requests } });
       }
@@ -27,14 +28,17 @@ for (const width of [1440, 390]) {
       return route.fulfill({ status: 404, json: {} });
     });
     await page.routeWebSocket("**/pairing-events-fixture*", ws => {
+      expect(new URL(ws.url()).searchParams.get("token")).toBe("fixture-token");
       sockets.push(ws);
-      ws.send(JSON.stringify({ event: "ready", chat_id: "fixture-chat" }));
     });
     await page.goto("/");
-    // Entry reads a snapshot; socket open closes the pre-connection gap.
-    await expect.poll(() => reads).toBe(2);
     const composer = page.getByRole("textbox", { name: "Message input" });
     await expect(composer).toBeVisible();
+    await expect.poll(() => reads).toBe(1);
+    await expect.poll(() => sockets.length).toBe(1);
+    // The first ready snapshot closes the pre-connection gap without replacing polling.
+    sockets[0].send(JSON.stringify({ event: "ready", chat_id: "fixture-chat" }));
+    await expect.poll(() => reads).toBe(2);
     await composer.fill("Keep this draft during pairing and reconnect");
     await page.clock.fastForward(1_000);
     expect(reads).toBe(2);
@@ -45,20 +49,23 @@ for (const width of [1440, 390]) {
     await expect(popup).toBeVisible();
     await expect(popup.getByRole("textbox", { name: "Pairing code" })).toBeEnabled();
     await expect.poll(() => reads).toBe(3);
-    await popup.getByRole("button", { name: "Close", exact: true }).click();
-    await expect(popup).toBeHidden();
-    await page.clock.fastForward(30_000);
-    await expect(popup).toBeVisible();
-    expect(reads).toBe(3);
     requests = [];
     sockets[0].close({ code: 1012, reason: "pairing fixture reconnect" });
     await page.clock.fastForward(1_000);
     await expect.poll(() => sockets.length).toBe(2);
+    sockets[1].send(JSON.stringify({ event: "ready", chat_id: "fixture-chat" }));
     await expect.poll(() => reads).toBe(4);
     await expect(popup).toBeHidden();
+    // Changes from another process and expiry need no same-gateway notification.
+    requests = [{ code: "IJKL-MNOP", channel: "feishu", sender_id: "fixture-user", delivery_status: "sent" }];
+    await page.clock.runFor(15_000);
+    await expect(popup).toBeVisible();
+    await expect.poll(() => reads).toBe(5);
+    requests = [];
+    await page.clock.runFor(5_000);
+    await expect(popup).toBeHidden();
+    await expect.poll(() => reads).toBe(6);
     await expect(composer).toHaveValue("Keep this draft during pairing and reconnect");
-    await page.clock.fastForward(60_000);
-    expect(reads).toBe(4);
     expect(errors).toEqual([]);
   });
 }

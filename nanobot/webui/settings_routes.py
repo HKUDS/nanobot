@@ -6,6 +6,7 @@ import asyncio
 import html
 import json
 from collections.abc import Awaitable, Callable, Mapping
+from functools import partial
 from typing import Any, cast
 
 from websockets.http11 import Request as WsRequest
@@ -17,6 +18,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.registry import load_channel_plugin
 from nanobot.channels.validation import validate_channel_config
 from nanobot.pairing import approve_code, deny_code, list_pending
+from nanobot.pairing.events import PairingChanged
 from nanobot.webui import settings_capabilities as capability_domain
 from nanobot.webui import settings_contracts as contracts
 from nanobot.webui import settings_models as model_domain
@@ -541,6 +543,9 @@ class WebUISettingsRouter:
             reload_image=self._reload_image_generation_runtime,
         )
 
+    def _pairing_changed(self) -> None:
+        self.bus.publish_nowait(PairingChanged())
+
     def _system_operations(self) -> system_domain.SystemSettingsOperations:
         return system_domain.SystemSettingsOperations(
             update_runtime_config=update_runtime_config_settings,
@@ -552,8 +557,8 @@ class WebUISettingsRouter:
             validate_channel_config=validate_channel_config,
             load_channel_plugin=load_channel_plugin,
             list_pending=list_pending,
-            approve_code=approve_code,
-            deny_code=deny_code,
+            approve_code=partial(approve_code, on_change=self._pairing_changed),
+            deny_code=partial(deny_code, on_change=self._pairing_changed),
             mcp_presets_action=mcp_presets_settings_action,
             reload_mcp=self._reload_mcp_runtime,
             mcp_runtime_status=self._mcp_runtime_status,
