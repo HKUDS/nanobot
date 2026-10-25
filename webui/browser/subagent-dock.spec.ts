@@ -24,6 +24,9 @@ for (const width of [1440, 390]) {
     if (width > 639) {
       const bounds = (await panel.boundingBox())!;
       expect(bounds.y + bounds.height).toBeLessThanOrEqual(original.y);
+      expect(bounds.x).toBeCloseTo(original.x, 0);
+      expect(bounds.width).toBeCloseTo(original.width, 0);
+      await expect(panel).toHaveAccessibleDescription("0 of 3 completed");
     } else {
       await expect.poll(async () => {
         const bounds = (await panel.boundingBox())!;
@@ -243,4 +246,31 @@ test("returns to the composer when completed work is dismissed on desktop blank 
   await expect(tree).toHaveCount(0);
   await expect(page.getByTestId("subagent-task-dock-trigger")).toHaveCount(0);
   await expect(page.getByRole("textbox").first()).toBeFocused();
+});
+
+
+test("keeps long task names, stop controls and detail handoff usable on a narrow screen", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 844 });
+  await page.goto("/browser/fixture.html?case=subagent-dock&long-labels");
+  await page.getByTestId("subagent-task-dock-trigger").click();
+  const panel = page.getByRole("dialog", { name: "Subtasks", exact: true });
+  const tree = page.getByTestId("subagent-task-tree");
+  await expect(tree).toBeVisible();
+  expect(await tree.evaluate(node => node.scrollWidth)).toBe(await tree.evaluate(node => node.clientWidth));
+  const label = "核对多轮任务完成后的归档位置、长标题换行与独立详情入口";
+  const row = tree.locator('[data-subagent-id="preview-0"]');
+  await expect(row).toHaveAccessibleName(new RegExp(label));
+  const stop = panel.getByRole("button", { name: `Stop ${label}`, exact: true });
+  const stopBounds = (await stop.boundingBox())!;
+  expect(stopBounds.width).toBeGreaterThanOrEqual(44);
+  expect(stopBounds.height).toBeGreaterThanOrEqual(44);
+  await row.click();
+  const detail = page.getByRole("dialog", { name: label, exact: true });
+  await expect(detail).toBeFocused();
+  const close = detail.getByRole("button", { name: "Close", exact: true });
+  const closeBounds = (await close.boundingBox())!;
+  expect(closeBounds.width).toBeGreaterThanOrEqual(44);
+  expect(closeBounds.height).toBeGreaterThanOrEqual(44);
+  await close.click();
+  await expect(row).toBeFocused();
 });

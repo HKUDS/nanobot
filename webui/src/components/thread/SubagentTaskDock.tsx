@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ChevronUp } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { CompletedTaskIcon, DelegationIcon, ErrorTaskIcon, StopIcon } from "@/components/icons/product-icons";
 import { SubagentTaskButton, useSubagentTasks } from "@/components/thread/SubagentTasks";
 import { Button } from "@/components/ui/button";
+import { HoverHint } from "@/components/ui/hover-hint";
 import { LoadingRing } from "@/components/ui/loading-ring";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -25,6 +26,7 @@ export function SubagentTaskDock({ inputKey = null }: { inputKey?: string | null
 function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; inputKey: string | null }) {
   const { t } = useTranslation("common");
   const context = useSubagentTasks()!;
+  const progressId = useId();
   const mobileViewport = useMediaQuery("(max-width: 639px)");
   const [mobile, setMobile] = useState(mobileViewport);
   const [focused, setFocused] = useState(false);
@@ -56,7 +58,7 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
     onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
     onPointerEnter={event => { if (event.pointerType === "mouse") setHovered(true); }} onPointerLeave={() => setHovered(false)}
     onClick={() => { if (open) returnFocusOnClose.current = true; }}
-    className="flex min-h-11 w-full items-center gap-2.5 rounded-control border border-border/60 bg-background/90 px-3 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-9">
+    className="flex min-h-11 w-full items-center gap-2.5 rounded-control border border-border/70 bg-background px-3 text-left text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-muted/70 data-[state=open]:text-foreground motion-reduce:transition-none sm:min-h-9">
     {running ? <LoadingRing className={iconClass} />
       : attention ? <ErrorTaskIcon className={`${iconClass} text-destructive`} aria-hidden />
         : completed === tasks.length ? <CompletedTaskIcon className={`${iconClass} text-emerald-600 dark:text-emerald-400`} aria-hidden />
@@ -80,7 +82,7 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
         onInteractOutside={event => { if (context.detailOpen) event.preventDefault(); }}
         onOpenAutoFocus={event => { if (context.detailOpen) event.preventDefault(); }}
         onCloseAutoFocus={event => { event.preventDefault(); if (!context.detailOpen) restoreFocus(); }}>
-        <div className="shrink-0 space-y-1 border-b px-5 py-4 pr-14">
+        <div className="shrink-0 space-y-1 border-b border-border/70 px-4 py-3 pr-14">
           <SheetTitle className="text-sm">{t("thread.subagents.workTitle")}</SheetTitle>
           <SheetDescription className="text-xs">{progress}</SheetDescription>
         </div>
@@ -89,8 +91,8 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
     </Sheet> : <Popover open={open} onOpenChange={changeOpen}>
       <PopoverTrigger asChild>{button}</PopoverTrigger>
       <PopoverContent side="top" align="start" sideOffset={8} avoidCollisions
-        aria-label={t("thread.subagents.workTitle")}
-        className="flex max-h-[min(28rem,55dvh,var(--radix-popover-content-available-height))] w-[var(--radix-popover-trigger-width)] flex-col overflow-hidden p-0 duration-200 data-[state=open]:slide-in-from-bottom-1 data-[state=closed]:slide-out-to-bottom-1 motion-reduce:data-[state=open]:animate-none motion-reduce:data-[state=closed]:animate-none"
+        aria-label={t("thread.subagents.workTitle")} aria-describedby={progressId}
+        className="flex max-h-[min(28rem,55dvh,var(--radix-popover-content-available-height))] w-[var(--radix-popover-trigger-width)] flex-col overflow-hidden rounded-control border border-border/70 bg-background p-0 shadow-[0_4px_16px_rgba(15,23,42,0.07)] duration-150 dark:shadow-[0_6px_20px_rgba(0,0,0,0.24)] data-[state=open]:slide-in-from-bottom-1 data-[state=closed]:slide-out-to-bottom-1 motion-reduce:data-[state=open]:animate-none motion-reduce:data-[state=closed]:animate-none"
         onInteractOutside={event => { if (context.detailOpen) event.preventDefault(); }}
         onOpenAutoFocus={event => { if (context.detailOpen) event.preventDefault(); }}
         onEscapeKeyDown={() => { returnFocusOnClose.current = true; }}
@@ -100,10 +102,7 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
             if (!context.detailOpen) restoreFocus();
           }
         }}>
-        <div className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3 text-xs">
-          <h2 className="font-medium">{t("thread.subagents.workTitle")}</h2>
-          <span className="text-muted-foreground">{progress}</span>
-        </div>
+        <p id={progressId} className="sr-only">{progress}</p>
         {tree}
       </PopoverContent>
     </Popover>}
@@ -113,29 +112,31 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
 function TaskTree({ tasks }: { tasks: ObservedSubagentTask[] }) {
   const { t } = useTranslation("common");
   const context = useSubagentTasks()!;
-  return <div data-testid="subagent-task-tree" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-3 scrollbar-thin">
-    <ol className="pr-1">
+  return <div data-testid="subagent-task-tree" className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5 scrollbar-thin">
+    <ol className="space-y-0.5">
       {tasks.map(task => <li key={task.task_id} data-task-state={task.state}
-        className="relative ml-3 border-l border-border/70 pb-2 pl-2 animate-in fade-in-0 slide-in-from-bottom-1 duration-200 motion-reduce:animate-none last:border-transparent last:pb-0">
-        <span aria-hidden className={`absolute -left-px top-0 h-[23px] w-3 rounded-bl-[6px] border-b border-l ${task.state === "done" ? "border-emerald-500/45" : "border-border"}`} />
-        <div className="relative flex min-w-0 items-center gap-1">
+        className="rounded-lg transition-colors duration-150 hover:bg-muted/50 focus-within:bg-muted/50 motion-reduce:transition-none">
+        <div className="flex min-w-0 items-center gap-0.5">
           <SubagentTaskButton task={task} surface="activity" />
-          {task.state === "queued" || task.state === "running" ? <Button type="button" variant="ghost" size="icon"
-            className="h-11 w-11 shrink-0 sm:h-9 sm:w-9" aria-label={t("thread.subagents.stopTask", { label: task.label })}
-            disabled={context.stoppingId !== null} onClick={() => void context.stop(task)}>
-            <StopIcon className="h-3 w-3" aria-hidden />
-          </Button> : null}
+          {task.state === "queued" || task.state === "running" ? <HoverHint content={t("thread.subagents.stopTask", { label: task.label })}>
+            <Button type="button" variant="ghost" size="icon"
+              className="h-11 w-11 shrink-0 rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive motion-reduce:transition-none sm:h-9 sm:w-9"
+              aria-label={t("thread.subagents.stopTask", { label: task.label })} aria-busy={context.stoppingId === task.task_id}
+              disabled={context.stoppingId !== null} onClick={() => void context.stop(task)}>
+              {context.stoppingId === task.task_id ? <LoadingRing className="h-3.5 w-3.5" /> : <StopIcon className="h-3.5 w-3.5" fill="currentColor" aria-hidden />}
+            </Button>
+          </HoverHint> : null}
         </div>
-        {isActiveSubagentTask(task) && task.tool_events.length ? <ul className="ml-[19px] space-y-1 border-l border-border/60 pb-1 pl-3 text-xs text-muted-foreground">
+        {isActiveSubagentTask(task) && task.tool_events.length ? <ul className="ml-[21px] mr-2 space-y-1 border-l border-border/60 pb-2 pl-4 text-[11px] leading-4 text-muted-foreground">
           {task.tool_events.map((tool, index) => <li key={`${index}:${tool.name}`} className="flex min-h-5 min-w-0 items-center gap-2">
             {tool.status === "running" ? <LoadingRing className="h-3 w-3 shrink-0" />
               : tool.status === "error" ? <ErrorTaskIcon className="h-3 w-3 shrink-0 text-destructive" aria-hidden />
                 : <span className="h-1 w-1 shrink-0 rounded-full bg-current opacity-50" aria-hidden />}
-            <span className="truncate">{tool.name}</span>
+            <span className="truncate font-mono">{tool.name}</span>
           </li>)}
         </ul> : null}
-        {task.error ? <p className="ml-[29px] line-clamp-2 break-words px-1 text-xs text-destructive">{task.error}</p>
-          : task.state === "done" && task.result ? <p className="ml-[29px] line-clamp-2 break-words px-1 text-xs text-muted-foreground">
+        {task.error ? <p className="ml-[38px] line-clamp-2 break-words pb-2 pr-3 text-xs leading-5 text-destructive">{task.error}</p>
+          : task.state === "done" && task.result ? <p className="ml-[38px] line-clamp-2 break-words pb-2 pr-3 text-xs leading-5 text-muted-foreground">
             {task.result.trim().slice(0, 240)}
           </p> : null}
       </li>)}

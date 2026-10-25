@@ -158,7 +158,7 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
         <SheetContent ref={detailPanel} tabIndex={-1}
           className="w-full gap-0 overflow-hidden border-l p-0 outline-none sm:w-[min(32rem,calc(100vw-1rem))] sm:max-w-none"
           overlayClassName="bg-black/20 backdrop-blur-[8px]"
-          closeButtonClassName="right-3 top-3 grid h-9 w-9 place-items-center rounded-full"
+          closeButtonClassName="right-2 top-2 grid h-11 w-11 place-items-center rounded-full sm:right-3 sm:top-3 sm:h-9 sm:w-9"
           onOpenAutoFocus={(event) => {
             event.preventDefault();
             detailPanel.current?.focus({ preventScroll: true });
@@ -237,16 +237,21 @@ export function SubagentTaskButton({ task, surface = "archive" }: { task: Observ
   const context = useContext(TasksContext);
   const { t } = useTranslation("common");
   const button = useRef<HTMLButtonElement | null>(null);
+  const activity = surface === "activity";
   return <button type="button" data-subagent-id={task.task_id} data-subagent-surface={surface} ref={node => {
     context?.register(`${surface}:${task.task_id}`, node, button.current);
     button.current = node;
   }}
     onClick={(event) => context?.open(task, event.currentTarget)}
-    className="flex min-h-11 min-w-0 flex-1 items-center gap-2.5 rounded-control px-3 py-2.5 text-left text-sm hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0">
-    <TaskStateIcon task={task} />
-    <span className="min-w-0 flex-1 truncate">{task.label}</span>
-    <span className="shrink-0 text-xs text-muted-foreground">{t(`thread.subagents.states.${task.state}`)}</span>
-    <span className="shrink-0 text-xs tabular-nums text-muted-foreground"><TaskElapsed task={task} /></span>
-    <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
+    className={activity
+      ? "group/task-link grid min-h-11 min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-0.5 rounded-lg px-2 py-2 text-left text-[13px] leading-5 transition-colors duration-150 hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none sm:min-h-9 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:py-1.5"
+      : "flex min-h-11 min-w-0 flex-1 items-center gap-2.5 rounded-control px-3 py-2.5 text-left text-sm hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0"}>
+    <span className={activity ? "row-span-2 self-start pt-0.5 sm:row-span-1 sm:self-center sm:pt-0" : "shrink-0"}><TaskStateIcon task={task} /></span>
+    <span className={activity ? "min-w-0 line-clamp-2 break-words font-medium sm:line-clamp-none sm:truncate" : "min-w-0 flex-1 truncate"}>{task.label}</span>
+    <span className={activity ? "col-start-2 row-start-2 flex items-center gap-2 text-[11px] leading-4 text-muted-foreground sm:col-start-3 sm:row-start-1 sm:gap-2.5 sm:text-xs" : "contents"}>
+      <span className="shrink-0 text-xs text-muted-foreground">{t(`thread.subagents.states.${task.state}`)}</span>
+      <span className={`shrink-0 text-xs tabular-nums text-muted-foreground ${activity ? "sm:min-w-[5ch] sm:text-right" : ""}`}><TaskElapsed task={task} /></span>
+    </span>
+    <ChevronRight className={`h-3 w-3 shrink-0 text-muted-foreground ${activity ? "col-start-3 row-start-1 row-span-2 opacity-50 transition-opacity duration-150 group-hover/task-link:opacity-100 group-focus-visible/task-link:opacity-100 motion-reduce:transition-none sm:col-start-4 sm:row-span-1" : ""}`} aria-hidden />
   </button>;
 }

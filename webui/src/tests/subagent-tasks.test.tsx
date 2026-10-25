@@ -639,12 +639,15 @@ describe("session-owned task UI", () => {
     const user = userEvent.setup();
     render(layout());
     const list = await openTaskList(user);
+    const activityStop = within(list).getByRole("button", { name: "Stop Config check" });
     const row = within(list).getByRole("button", { name: /Config check Running/ });
     await user.click(row);
     const detail = screen.getByRole("dialog", { name: "Config check" });
     const stop = within(detail).getByRole("button", { name: "Stop Config check" });
     await user.click(stop);
     expect(stop).toBeDisabled();
+    expect(activityStop).toBeDisabled();
+    expect(activityStop).toHaveAttribute("aria-busy", "true");
     vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { resolveRefresh = resolve; }));
     fireEvent(window, new Event("focus"));
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));

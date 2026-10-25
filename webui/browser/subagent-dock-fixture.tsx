@@ -15,7 +15,10 @@ let streamLength = 0;
 let inputNumber = 0;
 const saveTasks = new URLSearchParams(location.search).has("saved");
 const taskStorageKey = "fixture.subagent-dock.tasks";
-const tasks: SubagentTaskSnapshot[] = ["检查项目实现", "核对回归测试", "整理交互建议"].map((label, index) => ({
+const taskLabels = new URLSearchParams(location.search).has("long-labels")
+  ? ["核对多轮任务完成后的归档位置、长标题换行与独立详情入口", "Review_the_responsive_subtask_panel_and_keyboard_focus_without_interrupting_running_work", "整理交互建议"]
+  : ["检查项目实现", "核对回归测试", "整理交互建议"];
+const tasks: SubagentTaskSnapshot[] = taskLabels.map((label, index) => ({
   task_id: `preview-${index}`, revision: 1, label, task_description: `这是虚构的演示任务：${label}。不会读取项目或调用模型。`,
   origin_turn_id: turnId, origin_message_id: "preview-prompt", created_at: createdAt + index, completed_at: null,
   state: index === 2 ? "queued" : "running", phase: "awaiting_model", elapsed_seconds: 20 + index * 3, iteration: 1,
