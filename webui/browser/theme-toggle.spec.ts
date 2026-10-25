@@ -278,3 +278,31 @@ test("a browser-skipped transition still applies the theme and releases the togg
   await toggle.click();
   await expect(page.locator("html")).not.toHaveClass(/dark/);
 });
+
+test("selection highlights keep geometry easing and only fade paint with reduced motion", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 844 });
+  await page.addInitScript(() => {
+    localStorage.setItem("nanobot.locale", "en");
+    localStorage.setItem("nanobot-webui.theme", "light");
+  });
+  await page.goto("/browser/fixture.html?case=theme-toggle&chat");
+  const highlight = page.getByTestId("chats-selection-highlight");
+  await expect(highlight).toHaveCSS("transition-property", "transform, width, height, background-color");
+  await expect(highlight).toHaveCSS("transition-duration", "0.3s, 0.3s, 0.3s, 0s");
+  await expect(highlight).toHaveCSS("transition-timing-function", "ease-out, ease-out, ease-out, ease");
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(highlight).toHaveCSS("transition-property", "none");
+  const paint = await highlight.evaluate(node => {
+    document.querySelector<HTMLButtonElement>("button[aria-label='Toggle theme from header']")!.click();
+    const style = getComputedStyle(node);
+    return { property: style.transitionProperty, duration: style.transitionDuration };
+  });
+  expect(paint).toEqual({
+    property: "background-color, border-color, box-shadow",
+    duration: "0.28s, 0.28s, 0.28s",
+  });
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await expect.poll(() => page.locator("html").getAttribute("data-theme-transition")).toBeNull();
+  await expect(highlight).toHaveCSS("transition-property", "none");
+});

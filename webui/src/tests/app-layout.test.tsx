@@ -2215,12 +2215,7 @@ describe("App layout", () => {
       expect(highlight).not.toHaveClass(
         "group-data-[resizing=true]/sidebar:transition-none",
       );
-      expect(highlight).toHaveClass(
-        "transition-[transform,width,height]",
-        "duration-300",
-        "ease-out",
-        "motion-reduce:transition-none",
-      );
+      expect(highlight).toHaveClass("sidebar-selection-highlight");
     }
     fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientX: 272 });
     fireEvent.pointerMove(handle, { pointerId: 1, clientX: 400 });
