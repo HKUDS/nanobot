@@ -117,6 +117,30 @@ async def test_session_locks_do_not_accumulate_for_completed_sessions(tmp_path):
         assert len(client.server.app[_SESSION_LOCKS_KEY]) == 0
 
 
+@pytest.mark.parametrize("first_stream", [False, True])
+async def test_waiting_request_keeps_shared_session_lock_alive(tmp_path, first_stream):
+    provider = RouteProvider(hold_first=True)
+    async with runtime(tmp_path / "workspace", provider) as (_, client):
+        first = asyncio.create_task(post(client, "shared", "FIRST_TURN", first_stream))
+        try:
+            await asyncio.wait_for(provider.started.wait(), 10)
+            second = asyncio.create_task(post(client, "shared", "SECOND_TURN", not first_stream))
+            await asyncio.sleep(0)
+            gc.collect()
+
+            assert len(client.server.app[_SESSION_LOCKS_KEY]) == 1
+            assert len(provider.calls) == 1
+            assert not second.done()
+
+            provider.release.set()
+            await asyncio.wait_for(asyncio.gather(first, second), 10)
+            assert len(provider.calls) == 4
+            assert all(call["session_key"] == "api:shared" for call in provider.calls)
+        finally:
+            provider.release.set()
+            await asyncio.gather(first, locals().get("second"), return_exceptions=True)
+
+
 def assert_route(result, chat_id):
     assert result["session_key"] == f"api:{chat_id}"
     assert result["chat_id"] == chat_id
