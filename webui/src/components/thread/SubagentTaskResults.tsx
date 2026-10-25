@@ -96,20 +96,22 @@ function SubagentResults({ tasks, unlinked = false, expanded, onToggle }: {
     : t("thread.subagents.finished", { count: tasks.length });
 
   return <section data-subagent-results aria-label={title}
-    className={`thread-message-row mt-2 ${unlinked ? "mb-5" : ""}`}>
+    className={`thread-message-row mt-2 grid grid-cols-[1rem_minmax(0,1fr)_1rem] items-center gap-x-2.5 sm:grid-cols-[1rem_minmax(0,1fr)_minmax(6rem,max-content)_3rem_1rem] ${unlinked ? "mb-5" : ""}`}>
     <button type="button" data-thread-disclosure data-subagent-results-summary aria-expanded={expanded} aria-controls={rowsId}
       onClick={onToggle}
-      className="flex min-h-11 w-full min-w-0 items-center gap-2 rounded-control py-1 text-left text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-8">
-      <DelegationIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-      <span className="shrink-0 font-medium">{title}</span>
-      <span className="ml-auto min-w-0 truncate">{summary}</span>
-      {attention ? <span className="shrink-0 text-destructive">{t("thread.subagents.needsReview", { count: attention })}</span> : null}
-      <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform motion-reduce:transition-none ${expanded ? "rotate-90" : ""}`} aria-hidden />
+      className="col-span-full grid min-h-11 w-full min-w-0 grid-cols-subgrid items-center gap-y-0.5 rounded-control py-2 text-left text-[13px] leading-5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none sm:min-h-9 sm:py-1.5">
+      <DelegationIcon className="row-span-2 h-3.5 w-3.5 shrink-0 self-start mt-0.5 sm:row-span-1 sm:mt-0 sm:self-center" aria-hidden />
+      <span className="min-w-0 truncate font-medium">{title}</span>
+      <span className="col-start-2 row-start-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs leading-4 sm:col-start-3 sm:row-start-1 sm:col-span-2">
+        <span>{summary}</span>
+        {attention ? <span className="text-destructive">{t("thread.subagents.needsReview", { count: attention })}</span> : null}
+      </span>
+      <ChevronRight className={`col-start-3 row-start-1 row-span-2 h-3.5 w-3.5 shrink-0 transition-transform motion-reduce:transition-none sm:col-start-5 sm:row-span-1 ${expanded ? "rotate-90" : ""}`} aria-hidden />
     </button>
-    <div id={rowsId} hidden={!expanded} className="pb-1">
-      {unlinked ? <p className="py-2 text-xs text-muted-foreground">{t("thread.subagents.unlinkedHelp")}</p> : null}
-      <ol>
-        {tasks.map((task) => <li key={task.task_id} className="flex min-w-0">
+    <div id={rowsId} hidden={!expanded} className={`col-span-full grid-cols-subgrid pb-1 ${expanded ? "grid" : "hidden"}`}>
+      {unlinked ? <p className="col-span-full py-2 text-xs text-muted-foreground">{t("thread.subagents.unlinkedHelp")}</p> : null}
+      <ol className="col-span-full grid grid-cols-subgrid">
+        {tasks.map((task) => <li key={task.task_id} className="col-span-full grid min-w-0 grid-cols-subgrid">
           <SubagentTaskButton task={task} surface="archive" />
         </li>)}
       </ol>

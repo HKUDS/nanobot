@@ -274,3 +274,42 @@ test("keeps long task names, stop controls and detail handoff usable on a narrow
   await close.click();
   await expect(row).toBeFocused();
 });
+
+for (const width of [1440, 390, 320]) {
+  test(`aligns archived task columns with their disclosure at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(`/browser/fixture.html?case=subagent-dock&archived${width === 320 ? "&long-labels" : ""}`);
+    if (width === 1440) await page.evaluate(() => { document.documentElement.style.zoom = "1.25"; });
+    const archive = page.locator("[data-subagent-results]").first();
+    const header = archive.locator("[data-subagent-results-summary]");
+    const rows = archive.locator('[data-subagent-surface="archive"]');
+    await expect(rows.first()).toBeHidden();
+    await header.click();
+    await expect(rows).toHaveCount(3);
+    await expect(rows.first()).toBeVisible();
+    await archive.evaluate(node => Promise.all(node.getAnimations({ subtree: true })
+      .filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished)));
+    const geometry = await archive.evaluate(node => {
+      const header = node.querySelector<HTMLElement>("[data-subagent-results-summary]")!;
+      const bounds = (element: Element) => element.getBoundingClientRect();
+      return {
+        overflow: node.scrollWidth > node.clientWidth,
+        header: [header.children[0], header.children[1], header.lastElementChild!].map(element => bounds(element).x),
+        summary: bounds(header.children[2].children[0]).x,
+        rows: [...node.querySelectorAll('[data-subagent-surface="archive"]')].map(row => ({
+          columns: [row.children[0], row.children[1], row.lastElementChild!].map(element => bounds(element).x),
+          status: bounds(row.children[2].children[0]).x,
+          elapsedRight: bounds(row.children[2].children[1]).right,
+        })),
+      };
+    });
+    expect(geometry.overflow).toBe(false);
+    for (const row of geometry.rows) {
+      row.columns.forEach((position, index) => expect(Math.abs(position - geometry.header[index])).toBeLessThan(0.5));
+      expect(Math.abs(row.status - geometry.summary)).toBeLessThan(0.5);
+      if (width > 639) expect(Math.abs(row.elapsedRight - geometry.rows[0].elapsedRight)).toBeLessThan(0.5);
+    }
+    await header.click();
+    await expect(rows.first()).toBeHidden();
+  });
+}

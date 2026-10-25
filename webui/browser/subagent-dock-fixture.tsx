@@ -42,7 +42,11 @@ function updateTask(index: number, patch: Partial<SubagentTaskSnapshot>) {
 export function installSubagentDockApi() {
   const stored = saveTasks ? sessionStorage.getItem(taskStorageKey) : null;
   if (stored) tasks.splice(0, tasks.length, ...JSON.parse(stored) as SubagentTaskSnapshot[]);
-  else if (new URLSearchParams(location.search).has("past")) {
+  else if (new URLSearchParams(location.search).has("archived")) {
+    tasks.forEach((task, index) => {
+      tasks[index] = { ...task, state: "done", phase: "done", elapsed_seconds: [9, 89, 1234][index], completed_at: createdAt + 30, tool_events: [] };
+    });
+  } else if (new URLSearchParams(location.search).has("past")) {
     tasks.push(...Array.from({ length: 40 }, (_, index) => ({
       ...tasks[0], task_id: `past-${index}`, label: `Past check ${index}`, state: "done" as const,
       origin_message_id: null, origin_turn_id: "past-turn", created_at: createdAt - 100 + index,
