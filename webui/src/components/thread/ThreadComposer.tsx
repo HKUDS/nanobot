@@ -1186,8 +1186,6 @@ export function ThreadComposer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
   const queuedPromptCounterRef = useRef(0);
-  // A fresh queue submission arms Enter for the complete pending message.
-  const secondEnterPromptIdRef = useRef<string | null>(null);
   const previousPendingQueueKeyRef = useRef(pendingQueueKey);
   const previousQueueRunRef = useRef({ key: pendingQueueKey, isStreaming });
   const voiceShortcutDownRef = useRef(false);
@@ -1204,10 +1202,6 @@ export function ThreadComposer({
     && !!onFavoriteWorkspaceProject
     && workspaceControls?.can_change_project !== false;
   const showProjectPicker = projectPickerAvailable && !workspaceControlsHidden;
-
-  useEffect(() => {
-    secondEnterPromptIdRef.current = null;
-  }, [pendingQueueKey, queuedPromptStorageKey]);
 
   useEffect(() => {
     if (!isStreaming || !activeTurnId) return;
@@ -1274,7 +1268,6 @@ export function ThreadComposer({
   const addFiles = useCallback(
     (files: File[]) => {
       if (interactionDisabled || files.length === 0) return;
-      secondEnterPromptIdRef.current = null;
       const { rejected } = enqueue(files);
       if (rejected.length > 0) {
         const { reason, file } = rejected[0];
@@ -1532,7 +1525,6 @@ export function ThreadComposer({
     [cliApps, mcpPresets, sessionMentionCatalog, value],
   );
   const editMentionInput = useCallback((next: string, cursor: number) => {
-    secondEnterPromptIdRef.current = null;
     setValue(next);
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
@@ -1854,7 +1846,6 @@ export function ThreadComposer({
   useLayoutEffect(() => {
     if (previousPendingQueueKeyRef.current === pendingQueueKey) return;
     previousPendingQueueKeyRef.current = pendingQueueKey;
-    secondEnterPromptIdRef.current = null;
     setValue("");
     setInlineError(null);
     setSlashMenuDismissed(false);
@@ -1866,7 +1857,6 @@ export function ThreadComposer({
   const appendTranscription = useCallback((text: string) => {
     const transcript = text.trim();
     if (!transcript) return;
-    secondEnterPromptIdRef.current = null;
     setValue((current) => {
       if (!current.trim()) return transcript;
       const separator = /[\s\n]$/.test(current) ? "" : " ";
@@ -1917,7 +1907,6 @@ export function ThreadComposer({
     function onKeyDown(event: KeyboardEvent): void {
       if (!isVoiceShortcutDown(event) || event.repeat || voiceShortcutDownRef.current) return;
       event.preventDefault();
-      secondEnterPromptIdRef.current = null;
       voiceShortcutDownRef.current = true;
       voiceRecorder.beginShortcutHold();
     }
@@ -1946,7 +1935,6 @@ export function ThreadComposer({
   }, [onTranscribeAudio, voiceRecorder.beginShortcutHold, voiceRecorder.endShortcutHold]);
 
   const handleStop = useCallback(() => {
-    secondEnterPromptIdRef.current = null;
     setQueuedPrompt((prompt) => prompt ? pauseQueuedPrompt(prompt) : null);
     onStop?.();
   }, [onStop, setQueuedPrompt]);
@@ -2116,7 +2104,6 @@ export function ThreadComposer({
       setInlineError(error);
       return;
     }
-    secondEnterPromptIdRef.current = prompt.id;
     setQueuedPrompt(prompt);
     clear();
     clearComposerText();
@@ -2124,14 +2111,12 @@ export function ThreadComposer({
   }, [canQueueGuidance, clear, clearComposerText, collectGuidancePrompt, onQuotedContextChange, queuedPromptError, setQueuedPrompt]);
 
   const removeQueuedPrompt = useCallback(() => {
-    secondEnterPromptIdRef.current = null;
     setQueuedPrompt(null);
     requestAnimationFrame(() => textareaRef.current?.focus());
   }, [setQueuedPrompt]);
 
   const editQueuedPrompt = useCallback((pending: QueuedPrompt) => {
     const prompt = hasComposerContent || normalizedQuotedContext ? collectGuidancePrompt() : pending;
-    secondEnterPromptIdRef.current = null;
     setQueuedPrompt(null);
     replaceMentionInput(prompt.text, prompt.text.length);
     setBoundSessionMentions(prompt.sessionMentions ?? []);
@@ -2150,7 +2135,6 @@ export function ThreadComposer({
   const sendQueuedPrompt = useCallback(
     (prompt: QueuedPrompt, extraOptions?: SendOptions) => {
       if (interactionDisabled) return;
-      secondEnterPromptIdRef.current = null;
       const error = queuedPromptError(prompt);
       if (error) {
         setQueuedPrompt(pauseQueuedPrompt(prompt));
@@ -2182,7 +2166,6 @@ export function ThreadComposer({
   useEffect(() => {
     const previous = previousQueueRunRef.current;
     previousQueueRunRef.current = { key: pendingQueueKey, isStreaming };
-    if (!isStreaming) secondEnterPromptIdRef.current = null;
     // Switching to an idle session is not completion of the previous session's run.
     if (previous.key !== pendingQueueKey) return;
     if (isStreaming || interactionDisabled || !queuedPrompt || !canAutoSendQueuedPrompt(queuedPrompt)) return;
@@ -2401,20 +2384,20 @@ export function ThreadComposer({
         if (!e.repeat) queueGuidancePrompt();
         return;
       }
-      const secondEnterPrompt = queuedPrompt?.id === secondEnterPromptIdRef.current ? queuedPrompt : null;
+      // Empty Enter explicitly sends the visible pending message, including restored drafts.
       if (
-        isStreaming
+        queuedPrompt
         && value.length === 0
         && images.length === 0
         && !e.altKey
         && !e.ctrlKey
         && !e.metaKey
-        && secondEnterPrompt
       ) {
-        if (!e.repeat) sendQueuedPrompt(secondEnterPrompt);
+        if (!e.repeat && voiceRecorder.state === "idle" && !voiceShortcutDownRef.current) {
+          sendQueuedPrompt(queuedPrompt);
+        }
         return;
       }
-      secondEnterPromptIdRef.current = null;
       submit();
     }
   };
@@ -2743,9 +2726,6 @@ export function ThreadComposer({
             onChange={mentionInput.onChange}
             onCompositionStart={mentionInput.onCompositionStart}
             onCompositionEnd={mentionInput.onCompositionEnd}
-            onBlur={() => {
-              secondEnterPromptIdRef.current = null;
-            }}
             onKeyDown={onKeyDown}
             onKeyUp={() => setCursorPosition(rawSelection().start)}
             onSelect={() => setCursorPosition(rawSelection().start)}

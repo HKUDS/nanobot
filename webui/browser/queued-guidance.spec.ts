@@ -18,11 +18,81 @@ for (const width of [1440, 390]) {
     await page.goto(`${fixture}&complete`);
     await expect(page.getByRole("group", { name: "Waiting to send" })).toContainText("Confirm this instruction");
     await expect(page.getByLabel("Submitted messages")).toHaveText("[]");
-    await page.getByRole("button", { name: "Send now", exact: true }).click();
+    await page.getByRole("textbox", { name: "Message input", exact: true }).press("Enter");
     await expect(page.getByLabel("Submitted messages")).toHaveText('[{"text":"Confirm this instruction"}]');
     await expect(page.getByRole("group", { name: "Waiting to send" })).toHaveCount(0);
   });
+
+  for (const interaction of ["refocus", "clear edits"] as const) {
+    test(`empty Enter sends waiting content after ${interaction} (${width}px)`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(fixture);
+      await queue(page);
+      const input = page.getByRole("textbox", { name: "Message input", exact: true });
+      if (interaction === "refocus") {
+        await input.press("Shift+Tab");
+        await expect(input).not.toBeFocused();
+        await page.keyboard.press("Tab");
+      } else {
+        await input.press("x");
+        await input.press("Backspace");
+      }
+      await expect(input).toBeFocused();
+      await expect(input).toHaveValue("");
+      await expect(page.getByLabel("Submitted messages")).toHaveText("[]");
+      await input.press("Enter");
+      await expect(page.getByLabel("Submitted messages")).toHaveText('[{"text":"Confirm this instruction","options":{"continueActiveTurn":true}}]');
+      await expect(page.getByRole("group", { name: "Waiting to send" })).toHaveCount(0);
+    });
+  }
 }
+
+test("desktop Shift+Enter keeps waiting content until the editor is empty again", async ({ page }) => {
+  await page.goto(fixture);
+  await queue(page);
+  const input = page.getByRole("textbox", { name: "Message input", exact: true });
+  await input.press("Shift+Enter");
+  await expect(input).toHaveValue("\n");
+  await input.press("Enter");
+  await expect(page.getByLabel("Submitted messages")).toHaveText("[]");
+  await expect(page.getByRole("group", { name: "Waiting to send" })).toContainText("Confirm this instruction");
+  await input.press("Backspace");
+  await expect(input).toHaveValue("");
+  await input.press("Enter");
+  await expect(page.getByLabel("Submitted messages")).toHaveText('[{"text":"Confirm this instruction","options":{"continueActiveTurn":true}}]');
+});
+
+test("empty Enter sends waiting content after switching away and back", async ({ page }) => {
+  await page.goto(fixture);
+  await queue(page);
+  await page.getByRole("button", { name: "Switch topic" }).click();
+  await page.getByRole("button", { name: "Switch topic" }).click();
+  await expect(page.getByLabel("Submitted messages")).toHaveText("[]");
+  await page.getByRole("textbox", { name: "Message input", exact: true }).press("Enter");
+  await expect(page.getByLabel("Submitted messages")).toHaveText('[{"text":"Confirm this instruction","options":{"continueActiveTurn":true}}]');
+  await expect(page.getByRole("group", { name: "Waiting to send" })).toHaveCount(0);
+});
+
+test("touch Enter keeps a restored message waiting until Send now is clicked", async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ baseURL, viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  try {
+    const page = await context.newPage();
+    await page.goto(fixture);
+    await page.evaluate((key) => localStorage.setItem(key, JSON.stringify([
+      { id: "touch-draft", text: "Confirm this instruction", autoPaused: true },
+    ])), storageKey);
+    await page.reload();
+    const input = page.getByRole("textbox", { name: "Message input", exact: true });
+    await input.press("Enter");
+    await expect(input).toHaveValue("\n");
+    await expect(page.getByLabel("Submitted messages")).toHaveText("[]");
+    await expect(page.getByRole("group", { name: "Waiting to send" })).toContainText("Confirm this instruction");
+    await page.getByRole("button", { name: "Send now", exact: true }).click();
+    await expect(page.getByLabel("Submitted messages")).toHaveText('[{"text":"Confirm this instruction","options":{"continueActiveTurn":true}}]');
+  } finally {
+    await context.close();
+  }
+});
 
 test("switching topics in the live page retains one automatic send", async ({ page }) => {
   await page.goto(fixture);
