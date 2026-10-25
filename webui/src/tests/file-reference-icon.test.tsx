@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
@@ -48,30 +48,45 @@ describe("shared file icons", () => {
     expect(svg.querySelector("text, [fill], [stroke]")).toBeNull();
   });
 
-  it.each(["chart.png", "index.html", "data.json", "script.py", "notes.md", "archive.zip", "report.pdf", "budget.xlsx", "slides.pptx", "song.mp3"])(
-    "reuses the same glyph for %s in replies, tabs and attachments without changing actions", (path) => {
+  it.each([
+    ["chart.png", "PNG"],
+    ["index.html", "HTML"],
+    ["data.json", "JSON"],
+    ["script.py", "PY"],
+    ["notes.md", "MD"],
+    ["archive.zip", "ZIP"],
+    ["report.pdf", "PDF"],
+    ["budget.xlsx", "XLSX"],
+    ["slides.pptx", "PPTX"],
+    ["song.mp3", "MP3"],
+  ])(
+    "shares reply and tab glyphs for %s while keeping attachment type cards and actions distinct", (path, type) => {
       const open = vi.fn();
-      render(<>
+      const references = render(<>
         <FileReferenceChip path={path} onOpen={open} />
         <PreviewPane tabs={[{ id: path, value: path }]} activeId={path}
           width={544} isClosing={false} onSelect={() => {}} onCloseTab={() => {}}
           onClose={() => {}} onResizeStart={() => {}}><p>Preview</p></PreviewPane>
-        <AttachmentTile attachment={{ kind: "file", name: path, url: `/download/${path}` }} />
       </>);
-      const reference = screen.getByRole("button", { name: path });
-      const tab = screen.getByRole("tab", { name: path });
-      const attachment = screen.getByRole("link", { name: `Download ${path}` });
+      const attachments = render(<AttachmentTile attachment={{ kind: "file", name: path, url: `/download/${path}` }} />);
+      const reference = within(references.container).getByRole("button", { name: path });
+      const tab = within(references.container).getByRole("tab", { name: path });
+      const information = within(attachments.container).getByRole("button", { name: path });
+      const download = within(attachments.container).getByRole("link", { name: `Download ${path}` });
       const glyph = reference.querySelector("svg")!.innerHTML;
       expect(tab.querySelector("svg")!.innerHTML).toBe(glyph);
-      expect(attachment.querySelector("svg")!.innerHTML).toBe(glyph);
       expect(tab.querySelector("svg")).toHaveClass("size-3.5");
-      expect(attachment.querySelector("svg")).toHaveClass("size-5");
       expect(tab.querySelector("svg")).not.toHaveClass("translate-y-[0.12em]");
-      expect(attachment.querySelector("svg")).not.toHaveClass("translate-y-[0.12em]");
-      expect(attachment).toHaveAttribute("href", `/download/${path}`);
-      expect(attachment).toHaveAttribute("download", path);
+      expect(within(information).getByText(type)).toBeVisible();
+      expect(information.querySelector("svg")).toHaveClass("lucide-file-text");
+      expect(download.querySelector("svg")).toHaveClass("lucide-download", "size-4");
+      expect(download).toHaveAttribute("href", `/download/${path}`);
+      expect(download).toHaveAttribute("download", path);
       fireEvent.click(reference);
       expect(open).toHaveBeenCalledWith(path);
+      fireEvent.click(information);
+      expect(screen.getByRole("dialog", { name: path })).toHaveTextContent(path);
+      expect(open).toHaveBeenCalledTimes(1);
     },
   );
 
@@ -88,10 +103,15 @@ describe("shared file icons", () => {
     expect(open).toHaveBeenCalledWith("/repo/src/app.tsx");
   });
 
-  it.each(["image", "video"] as const)("retains %s identity when its attachment is unavailable", (kind) => {
-    const { container } = render(<AttachmentTile attachment={{ kind, name: "Unavailable" }} />);
-    expect(container.querySelector("svg")).toHaveClass(kind === "image" ? "lucide-file-image" : "lucide-file-video2");
+  it.each([
+    ["image", "Image attachment"],
+    ["video", "Video attachment"],
+  ] as const)("retains %s identity when its attachment is unavailable", (kind, label) => {
+    render(<AttachmentTile attachment={{ kind, name: "Unavailable" }} />);
+    const information = screen.getByRole("button", { name: "Unavailable" });
+    expect(within(information).getByText(label)).toBeVisible();
+    expect(information).toHaveAccessibleDescription("Attachment unavailable");
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
-    expect(screen.getByText("Attachment unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Attachment unavailable")).toBeVisible();
   });
 });

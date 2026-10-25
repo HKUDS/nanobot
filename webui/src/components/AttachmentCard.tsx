@@ -19,6 +19,7 @@ export function AttachmentCard({ name, description, children, action, invalid = 
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [hintOpen, setHintOpen] = useState(false);
+  const changeDetailsOpen = (open: boolean) => { setDetailsOpen(open); setHintOpen(false); };
   const details = <>
     <span className="block font-medium">{name}</span>
     {description ? <span className="block text-muted-foreground">{description}</span> : null}
@@ -30,10 +31,18 @@ export function AttachmentCard({ name, description, children, action, invalid = 
   )}>
     <TooltipProvider>
       <Tooltip open={hintOpen && !detailsOpen} onOpenChange={setHintOpen}>
-        <Popover open={detailsOpen} onOpenChange={(open) => { setDetailsOpen(open); setHintOpen(false); }}>
+        <Popover open={detailsOpen} onOpenChange={changeDetailsOpen}>
           <PopoverTrigger asChild>
             <TooltipTrigger asChild>
               <button type="button" aria-label={name} aria-description={description}
+                onKeyDown={(event) => {
+                  // The trigger retains focus while details are open, including during the layer handoff.
+                  if (event.key === "Escape" && detailsOpen) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    changeDetailsOpen(false);
+                  }
+                }}
                 className="absolute inset-0 overflow-hidden rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
                 {children}
               </button>

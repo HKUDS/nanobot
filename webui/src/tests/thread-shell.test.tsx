@@ -567,9 +567,12 @@ describe("ThreadShell", () => {
     await waitFor(() => expect(onCreateChat).toHaveBeenCalledTimes(1));
     view.rerender(shell("created"));
     await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue("keep the first draft"));
-    expect(await screen.findByTestId("composer-chip")).toHaveTextContent("video.mp4");
+    expect(within(await screen.findByTestId("composer-chip")).getByRole("button", { name: "video.mp4" })).toBeVisible();
     expect(screen.getByRole("alert")).toHaveTextContent("file not found");
-    expect(store.get("websocket:created")?.attachments).toHaveLength(1);
+    expect(store.get("websocket:created")).toMatchObject({
+      text: "keep the first draft",
+      attachments: [{ path: "/project/video.mp4", name: "video.mp4", kind: "video" }],
+    });
     expect(store.has("new:chat")).toBe(false);
     client.sendAttachments.mockResolvedValue(undefined);
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));

@@ -2022,9 +2022,14 @@ describe("ThreadMessages", () => {
     });
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
-    expect(screen.getByText("result.csv")).toBeInTheDocument();
-    const ownerRow = screen.getByText("result.csv")
-      .closest<HTMLElement>("[data-thread-display-unit]")!;
+    const information = screen.getByRole("button", { name: "result.csv" });
+    const download = screen.getByRole("link", { name: "Download result.csv" });
+    expect(information).toBeVisible();
+    expect(download).toHaveAttribute("href", "/api/media/result.csv");
+    expect(download).toHaveAttribute("download", "result.csv");
+    expect(download.closest("[data-testid='activity-model-message'], [data-testid='agent-activity-content']")).toBeNull();
+    const ownerRow = information.closest<HTMLElement>("[data-thread-display-unit]")!;
+    expect(ownerRow).toContainElement(download);
     openAssistantBlockMenu(ownerRow);
     expect(screen.getByRole("button", { name: "Worked" })).toBeInTheDocument();
   });

@@ -26,6 +26,26 @@ async function bounds(locator: Locator) {
   return box!;
 }
 
+async function expectFileDetails(page: Page, card: Locator, filename: string, width: number, description?: string) {
+  const info = card.getByRole("button", { name: filename, exact: true });
+  await info.hover();
+  await expect(page.getByRole("tooltip")).toContainText(filename);
+  await info.click();
+  const details = page.getByRole("dialog", { name: filename, exact: true });
+  const name = details.getByText(filename, { exact: true });
+  await expect(name).toBeVisible();
+  if (description) await expect(details.getByText(description, { exact: true })).toBeVisible();
+  const box = await bounds(details);
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(width);
+  expect(await name.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  expect(await details.evaluate((element) => element.scrollHeight <= element.clientHeight)).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(details).toHaveCount(0);
+  await expect(info).toBeFocused();
+  await page.mouse.move(0, 0);
+}
+
 for (const width of [1024, 360]) {
   for (const theme of ["light", "dark"]) {
     test(`mixed attachments stay compact, aligned and readable at ${width}px in ${theme}`, async ({ page }, testInfo) => {
@@ -44,16 +64,19 @@ for (const width of [1024, 360]) {
 
       for (const role of ["Assistant", "User"]) {
         const region = page.getByRole("region", { name: `${role} mixed attachments`, exact: true });
-        const card = region.locator("a[download]");
+        const card = region.locator("[data-file-attachment]");
         await expect(card).toHaveCount(1);
         const file = await bounds(card);
         const regionBox = await bounds(region);
         const imageBoxes = await region.locator("img").evaluateAll((images) => images.map((image) => {
           const rect = image.getBoundingClientRect();
-          return { bottom: rect.bottom, left: rect.left, right: rect.right };
+          const { naturalWidth, naturalHeight } = image as HTMLImageElement;
+          return { bottom: rect.bottom, left: rect.left, right: rect.right, naturalWidth, naturalHeight };
         }));
         await testInfo.attach(`${role} geometry`, { body: JSON.stringify({ file, region: regionBox, images: imageBoxes }, null, 2), contentType: "application/json" });
-        expect(file.height, `${role} file must not stretch to the image row height`).toBeLessThanOrEqual(80);
+        expect(file.width, `${role} file card keeps its compact width`).toBe(96);
+        expect(file.height, `${role} file card must not stretch to the image row height`).toBe(96);
+        for (const image of imageBoxes) expect(image).toMatchObject({ naturalWidth: 320, naturalHeight: 200 });
         expect(file.y, `${role} file belongs below all images`).toBeGreaterThanOrEqual(Math.max(...imageBoxes.map((image) => image.bottom)));
         if (role === "Assistant") {
           expect(Math.abs(file.x - regionBox.x)).toBeLessThanOrEqual(1);
@@ -63,15 +86,15 @@ for (const width of [1024, 360]) {
           expect(Math.abs(file.x + file.width - right)).toBeLessThanOrEqual(1);
           expect(Math.abs(Math.max(...imageBoxes.map((image) => image.right)) - right)).toBeLessThanOrEqual(2);
         }
-        await expect(card).toHaveAccessibleName(`${chinese ? "下载" : "Download"} archive.zip`);
+        await expect(card.getByRole("link")).toHaveAccessibleName(`${chinese ? "下载" : "Download"} archive.zip`);
         await expect(card.getByText("ZIP", { exact: true })).toBeVisible();
       }
 
-      const files = page.getByRole("region", { name: "Multiple files and long names" }).locator("a[download]");
+      const files = page.getByRole("region", { name: "Multiple files and long names" }).locator("[data-file-attachment]");
       await expect(files).toHaveCount(3);
       const userFiles = page.getByRole("region", { name: "User multiple files", exact: true });
       const userBubble = await bounds(userFiles.locator(":scope > div"));
-      const userCards = userFiles.locator("a[download]");
+      const userCards = userFiles.locator("[data-file-attachment]");
       await expect(userCards).toHaveCount(3);
       const userCardBoxes = await Promise.all((await userCards.all()).map(bounds));
       await testInfo.attach("User multiple files geometry", { body: JSON.stringify({ bubble: userBubble, files: userCardBoxes }, null, 2), contentType: "application/json" });
@@ -79,36 +102,47 @@ for (const width of [1024, 360]) {
         expect(box.x, "user file stays inside its message bubble").toBeGreaterThanOrEqual(userBubble.x);
         expect(box.x + box.width, "user file stays inside its message bubble").toBeLessThanOrEqual(userBubble.x + userBubble.width + 1);
       }
-      for (const card of await page.locator("a[download]").all()) {
+      const availableCards = page.locator("[data-file-attachment]").filter({ has: page.locator("a[download]") });
+      for (const card of await availableCards.all()) {
         const box = await bounds(card);
-        expect(box.height).toBeLessThanOrEqual(80);
+        expect(box.width).toBe(96);
+        expect(box.height).toBe(96);
         expect(box.x).toBeGreaterThanOrEqual(0);
         expect(box.x + box.width).toBeLessThanOrEqual(width);
-        const icon = card.locator("svg.lucide-download");
+        const download = card.locator("a[download]");
+        const target = await bounds(download);
+        expect(target.width).toBe(44);
+        expect(target.height).toBe(44);
+        expect(target.x).toBeGreaterThanOrEqual(box.x);
+        expect(target.x + target.width).toBeLessThanOrEqual(box.x + box.width);
+        expect(target.y).toBeGreaterThanOrEqual(box.y);
+        expect(target.y + target.height).toBeLessThanOrEqual(box.y + box.height);
+        const icon = download.locator("svg.lucide-download");
         await expect(icon).toBeVisible();
         const iconBox = await bounds(icon);
         expect(iconBox.width).toBeGreaterThanOrEqual(12);
-        expect(iconBox.x).toBeGreaterThanOrEqual(box.x);
-        expect(iconBox.x + iconBox.width).toBeLessThanOrEqual(box.x + box.width);
-        expect(iconBox.y).toBeGreaterThanOrEqual(box.y);
-        expect(iconBox.y + iconBox.height).toBeLessThanOrEqual(box.y + box.height);
+        expect(iconBox.x).toBeGreaterThanOrEqual(target.x);
+        expect(iconBox.x + iconBox.width).toBeLessThanOrEqual(target.x + target.width);
+        expect(iconBox.y).toBeGreaterThanOrEqual(target.y);
+        expect(iconBox.y + iconBox.height).toBeLessThanOrEqual(target.y + target.height);
       }
-      for (const card of [files.nth(0), files.nth(1)]) {
-        const name = card.getByText(/release-deliverables|项目交付资料/);
-        await expect(name).toHaveCSS("text-overflow", "ellipsis");
-        expect(await name.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
-        const nameBox = await bounds(name);
-        expect(nameBox.x + nameBox.width).toBeLessThanOrEqual((await bounds(card.locator("svg.lucide-download"))).x);
+      for (const [index, filename, type] of [
+        [0, "release-deliverables-with-a-very-long-English-filename-for-layout-regression.zip", "ZIP"],
+        [1, "项目交付资料与详细验收记录包含中英文的超长文件名称-final-review.pdf", "PDF"],
+      ] as const) {
+        const card = files.nth(index);
+        await expect(card.getByRole("button", { name: filename, exact: true })).toHaveText(type);
+        await expectFileDetails(page, card, filename, width);
       }
-      await expect(files.nth(1).getByText("PDF", { exact: true })).toBeVisible();
-      await expect(files.nth(2)).toHaveAccessibleName(chinese ? "下载 文件附件" : "Download File attachment");
+      await expect(files.nth(2).getByRole("link")).toHaveAccessibleName(chinese ? "下载 文件附件" : "Download File attachment");
       for (const [label, filename, status] of [
         ["Pending attachment", "pending.zip", chinese ? "发送中…" : "Sending…"],
         ["Unavailable attachment", "unavailable.pdf", chinese ? "附件不可用" : "Attachment unavailable"],
       ]) {
         const region = page.getByRole("region", { name: label, exact: true });
-        await expect(region.getByText(filename, { exact: true })).toBeVisible();
-        await expect(region.getByText(status, { exact: true }).first()).toBeVisible();
+        const card = region.locator("[data-file-attachment]");
+        await expect(card.getByText(status, { exact: true })).toBeVisible();
+        await expectFileDetails(page, card, filename, width, status);
         // A replay placeholder has no download capability until it has a URL.
         await expect(region.getByRole("link")).toHaveCount(0);
       }
@@ -135,7 +169,22 @@ test("image lightbox and file download remain keyboard accessible", async ({ pag
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(firstImage).toBeFocused();
-  for (let step = 0; step < 3; step++) await page.keyboard.press("Tab");
+  for (const name of ["Blue study.svg", "Green study.svg"]) {
+    await page.keyboard.press("Tab");
+    await expect(region.getByRole("button", { name: `View image: ${name}`, exact: true })).toBeFocused();
+  }
+  await page.keyboard.press("Tab");
+  const fileInfo = region.getByRole("button", { name: "archive.zip", exact: true });
+  await expect(fileInfo).toBeFocused();
+  expect(await fileInfo.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+  await expect(page.getByRole("tooltip")).toContainText("archive.zip");
+  await page.keyboard.press("Enter");
+  const details = page.getByRole("dialog", { name: "archive.zip", exact: true });
+  await expect(details.getByText("archive.zip", { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(details).toHaveCount(0);
+  await expect(fileInfo).toBeFocused();
+  await page.keyboard.press("Tab");
   const downloadLink = region.getByRole("link", { name: "Download archive.zip", exact: true });
   await expect(downloadLink).toBeFocused();
   expect(await downloadLink.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
