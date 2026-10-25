@@ -509,13 +509,14 @@ describe("MessageBubble", () => {
     const skill = screen.getByTestId("message-skill-reference-github");
     expect(skill).toHaveTextContent(/^\$github$/);
     expect(skill).toHaveClass(
-      "font-[550]",
+      "font-normal",
       "transition-colors",
       "duration-150",
     );
     expect(skill.getAttribute("style")).not.toContain("text-shadow");
-    expect(skill.getAttribute("style")).toContain("var(--inline-token-highlight)");
+    expect(skill.getAttribute("style")).toContain("var(--inline-reference-highlight)");
     expect(skill.className).not.toMatch(/(?:^|\s)(?:bg-|border|ring|rounded)/);
+    expect(skill).not.toHaveAttribute("title");
     expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@Zoom");
     expect(skill.parentElement).toHaveTextContent("Ask $github to review this with @Zoom");
   });

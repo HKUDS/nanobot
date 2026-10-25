@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { preloadMarkdownText } from "@/components/MarkdownText";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
 import { ThreadShell } from "@/components/thread/ThreadShell";
+import { SessionSearchDialog } from "@/components/SessionSearchDialog";
 import i18n from "@/i18n";
 import { ComposerDraftStore, clearStoredComposerDrafts } from "@/lib/composer-draft";
 import { CLI_APPS_CHANGED_EVENT } from "@/lib/cli-app-events";
@@ -480,6 +481,31 @@ describe("ThreadShell", () => {
         json: async () => ({}),
       }),
     );
+  });
+
+  it("publishes received and live body text to local search without search-driven reads", async () => {
+    const client = makeClient();
+    const cache = new ThreadMessageCache(() => false);
+    const chatId = "loaded-search";
+    const fetch = vi.fn(async (input: RequestInfo | URL) => String(input).includes("/webui-thread")
+      ? httpJson(transcriptFromSimpleMessages([{ role: "assistant", content: "Seeded history" }]))
+      : new Response(null, { status: 404 }));
+    vi.stubGlobal("fetch", fetch);
+    render(wrap(client, <>
+      <ThreadShell session={session(chatId)} title="Loaded topic" messageCache={cache} onToggleSidebar={() => {}} />
+      <SessionSearchDialog open sessions={[session(chatId)]} activeKey={null} loading={false}
+        messageCache={cache} onOpenChange={() => {}} onSelect={() => {}} />
+    </>));
+    const dialog = await screen.findByRole("dialog", { name: "Search" });
+    const input = within(dialog).getByRole("textbox", { name: "Search" });
+    fireEvent.change(input, { target: { value: "seeded history" } });
+    await within(dialog).findByText("Seeded history");
+    const readsBeforeSearch = fetch.mock.calls.length;
+    fireEvent.change(input, { target: { value: "fresh needle" } });
+    expect(within(dialog).getByText("No matching topics.")).toBeInTheDocument();
+    act(() => client._emitChat(chatId, { event: "message", chat_id: chatId, text: "Fresh needle from the live stream" }));
+    await within(dialog).findByText("Fresh needle from the live stream");
+    expect(fetch).toHaveBeenCalledTimes(readsBeforeSearch);
   });
 
   it.each(["callback", "cached return"] as const)("keeps closed answer segments in order after %s", async (path) => {

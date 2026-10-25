@@ -2562,6 +2562,54 @@ describe("ThreadComposer", () => {
     }]);
   });
 
+  it("highlights literal skill references while preserving partial edits, clipboard text and sending", () => {
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} />);
+    const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
+    const text = "like $workflow 与 $skill-creator，$";
+    fireEvent.change(input, { target: { value: text, selectionStart: text.length } });
+
+    expect(screen.getByTestId("composer-skill-reference-workflow")).toHaveTextContent(/^\$workflow$/);
+    expect(screen.getByTestId("composer-skill-reference-skill-creator")).toHaveTextContent(/^\$skill-creator$/);
+    expect(input).toHaveValue(text);
+    expect(input.previousElementSibling).toHaveAttribute("aria-hidden", "true");
+    expect(input.previousElementSibling?.textContent).toBe(text);
+
+    const start = text.indexOf("workflow") + 1;
+    const end = start + 4;
+    input.setSelectionRange(start, end);
+    const setData = vi.fn();
+    fireEvent.copy(input, { clipboardData: { setData } });
+    expect(setData).toHaveBeenCalledWith("text/plain", text.slice(start, end));
+    fireEvent.cut(input, { clipboardData: { setData } });
+    expect(input).toHaveValue(text.slice(0, start) + text.slice(end));
+    fireEvent.keyDown(input, { key: "z", ctrlKey: true });
+    expect(input).toHaveValue(text);
+    expect(input.selectionStart).toBe(start);
+    expect(input.selectionEnd).toBe(end);
+
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).toHaveBeenCalledWith(text, undefined, undefined);
+  });
+
+  it("mirrors skill references during composition without submitting the IME confirmation", () => {
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} />);
+    const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "$workflow " } });
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: "$workflow zhong" } });
+    expect(screen.getByTestId("composer-skill-reference-workflow")).toHaveTextContent(/^\$workflow$/);
+    expect(input.previousElementSibling?.textContent).toBe(input.value);
+    expect(input.previousElementSibling).toHaveClass("z-20");
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: "$workflow 中" } });
+    fireEvent.compositionEnd(input, { data: "中" });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).toHaveBeenCalledWith("$workflow 中", undefined, undefined);
+  });
+
   it("opens skills only from a $ reference and prioritizes the skill name", () => {
     const skillName = "arxiv-intelligence-filter";
     render(
@@ -2613,6 +2661,8 @@ describe("ThreadComposer", () => {
     fireEvent.keyDown(input, { key: "Tab" });
 
     expect(input).toHaveValue(`please use $${skillName} `);
+    expect(screen.getByTestId(`composer-skill-reference-${skillName}`))
+      .toHaveTextContent(`$${skillName}`);
   });
 
   it("ranks skill name matches ahead of earlier description matches", () => {
@@ -2737,16 +2787,17 @@ describe("ThreadComposer", () => {
   it("keeps literal mixed-script spacing in both composer input layers", () => {
     render(<ThreadComposer onSend={vi.fn()} cliApps={CLI_APPS} />);
     const input = screen.getByLabelText("Message input");
-    const value = "定位原因, 提 @gimp issue, i并提";
+    const value = "定位原因, 提 @gimp issue, i并提 $workflow";
     fireEvent.change(input, { target: { value, selectionStart: value.length } });
 
-    const display = "定位原因, 提 @\u00a0GIMP issue, i并提";
+    const display = "定位原因, 提 @\u00a0GIMP issue, i并提 $workflow";
     const overlay = input.previousElementSibling;
     expect(input).toHaveValue(display);
     expect(overlay).toHaveAttribute("aria-hidden", "true");
     expect(overlay?.textContent).toBe(display);
     expect(input).toHaveClass("[text-autospace:no-autospace]");
     expect(overlay).toHaveClass("[text-autospace:no-autospace]");
+    expect(screen.getByTestId("composer-skill-reference-workflow")).toHaveTextContent("$workflow");
   });
 
   it("renders a CLI app mention logo inline without moving the text cursor slot", () => {

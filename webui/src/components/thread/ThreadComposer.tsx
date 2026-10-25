@@ -46,9 +46,13 @@ import {
   splitCapabilityMentionSegments,
 } from "@/components/CliAppMentionText";
 import {
+  SkillReferenceToken,
+  withSkillReferences,
+  type InlineReferenceSegment,
+} from "@/components/SkillReferenceText";
+import {
   composerMentionText,
   isCapabilityMentionStart,
-  type CapabilityMentionSegment,
 } from "@/lib/composer-mention-text";
 import { INLINE_TOKEN_HIGHLIGHT_COLOR } from "@/components/InlineTokenHighlight";
 import {
@@ -1156,7 +1160,7 @@ export function ThreadComposer({
   // keyboard still get the newline-on-Enter behavior.
   const hasCoarsePointer = useMediaQuery("(pointer: coarse)");
   const mobileWorkspaceControls = useMediaQuery("(max-width: 639px)");
-  const { readingTextSize } = useLocalPreferences();
+  const { readingTextSize, customReadingTextSize } = useLocalPreferences();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionOverlayRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -1715,9 +1719,11 @@ export function ThreadComposer({
 
   const showCliAppMenu = filteredMentionCandidates.length > 0;
   const showAnyPalette = showSlashMenu || showCliAppMenu;
-  const hasMentionDecorations = displayMentionSegments.some(
-    (segment) => segment.kind !== "text",
+  const inlineSegments = useMemo(
+    () => withSkillReferences(displayMentionSegments),
+    [displayMentionSegments],
   );
+  const hasInlineDecorations = inlineSegments.some((segment) => segment.kind !== "text");
   const activeCliMentionApps = useMemo(() => {
     const seen = new Set<string>();
     return mentionSegments.flatMap((segment) => {
@@ -1840,7 +1846,7 @@ export function ThreadComposer({
     // The parent projects typography tokens in its layout effect; measure after it.
     const input = textareaRef.current;
     if (input) autosizeTextarea(input);
-  }, [readingTextSize]);
+  }, [readingTextSize, customReadingTextSize]);
 
   // Runs before paint so switching sessions never flashes stale draft text.
   useLayoutEffect(() => {
@@ -2705,10 +2711,10 @@ export function ThreadComposer({
         ) : null}
         <GoalStateStrip goalState={goalState} />
         <div className="thread-composer-input relative min-w-0">
-          {hasMentionDecorations ? (
-            <ComposerCliMentionOverlay
+          {hasInlineDecorations ? (
+            <ComposerInlineReferenceOverlay
               overlayRef={mentionOverlayRef}
-              segments={displayMentionSegments}
+              segments={inlineSegments}
               isHero={isHero}
               isComposing={mentionInput.isComposing}
               className={inputTextClasses}
@@ -2746,7 +2752,7 @@ export function ThreadComposer({
               "relative z-10 block caret-foreground placeholder:text-muted-foreground",
               "focus:outline-none focus-visible:outline-none",
               "disabled:cursor-not-allowed",
-              hasMentionDecorations && "text-transparent selection:bg-primary/20",
+              hasInlineDecorations && "text-transparent selection:bg-primary/20",
             )}
           />
         </div>
@@ -2989,7 +2995,7 @@ function QueuedPromptPreview({
   );
 }
 
-function ComposerCliMentionOverlay({
+function ComposerInlineReferenceOverlay({
   overlayRef,
   segments,
   isHero,
@@ -2998,7 +3004,7 @@ function ComposerCliMentionOverlay({
   ghostRange,
 }: {
   overlayRef: Ref<HTMLDivElement>;
-  segments: CapabilityMentionSegment[];
+  segments: InlineReferenceSegment[];
   isHero: boolean;
   isComposing: boolean;
   className: string;
@@ -3022,6 +3028,13 @@ function ComposerCliMentionOverlay({
         offset += segment.text.length;
         if (segment.kind === "text") {
           return <span key={`text-${index}`}>{segment.text}</span>;
+        }
+        if (segment.kind === "skill") {
+          return <SkillReferenceToken
+            key={`skill-${segment.name}-${index}`}
+            name={segment.name}
+            testId={`composer-skill-reference-${segment.name.toLowerCase()}`}
+          />;
         }
         const isGhost = ghostRange?.start === start && ghostRange.end === offset;
         const identity = `${segment.kind}-${segment.kind === "cli"

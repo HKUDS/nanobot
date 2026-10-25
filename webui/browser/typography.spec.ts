@@ -32,18 +32,7 @@ for (const narrow of [false, true]) {
       await page.goto("/browser/fixture.html?case=typography");
       const group = page.getByRole("radiogroup", { name: "阅读字号", exact: true });
       await expect(group.getByRole("radio", { name: "阅读字号：标准", exact: true })).toBeChecked();
-      const heights = await group.evaluate((control) => {
-        const row = control.closest(".settings-row")!;
-        const nextRow = row.nextElementSibling!;
-        return {
-          readingRow: row.getBoundingClientRect().height,
-          otherRow: nextRow.getBoundingClientRect().height,
-          readingControl: control.getBoundingClientRect().height,
-          otherControl: nextRow.querySelector(".segmented-control")!.getBoundingClientRect().height,
-        };
-      });
-      expect(heights.readingRow).toBe(heights.otherRow);
-      expect(heights.readingControl).toBe(heights.otherControl);
+      await expect(group.getByRole("radio")).toHaveCount(3);
       const stable = await metrics(page.locator(".settings-row").first().locator(".text-control-label"));
       const observations = [];
       for (const [size, label, bodySize] of [
@@ -53,7 +42,7 @@ for (const narrow of [false, true]) {
       ] as const) {
         await group.getByRole("radio", { name: label, exact: true }).click();
         await expect(page.locator("html")).toHaveAttribute("data-reading-text-size", size);
-        const paragraph = page.locator(".markdown-content p").first();
+        const paragraph = page.locator('section[aria-label="Reading preview"] .markdown-content p').first();
         await expect(paragraph).toHaveCSS("font-size", `${bodySize}px`);
         const body = await metrics(paragraph);
         expect(body.size).toBe(bodySize);
@@ -75,10 +64,17 @@ for (const narrow of [false, true]) {
         expect((await metrics(page.locator(".markdown-inline-code"))).size).toBeCloseTo(bodySize * 0.875);
         expect((await metrics(page.locator("textarea"))).size).toBe(Math.max(16, bodySize));
         expect(await metrics(page.locator(".settings-row").first().locator(".text-control-label"))).toEqual(stable);
-        const widths = await group.getByRole("radio").evaluateAll((nodes) => nodes.map(node => node.getBoundingClientRect().width));
-        expect(Math.max(...widths) - Math.min(...widths)).toBeLessThan(1);
+        const targets = await group.getByRole("radio").evaluateAll((nodes) => nodes.map((node) => {
+          const { width, height } = node.getBoundingClientRect();
+          return { width, height };
+        }));
+        // Fine-pointer presets are circular; the separate touch test protects 44px hit targets.
+        for (const target of targets) {
+          expect(target.width).toBeGreaterThanOrEqual(36);
+          expect(target.width).toBe(target.height);
+        }
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-        observations.push({ size, body, widths });
+        observations.push({ size, body, targets });
         await page.locator(".markdown-content h1").evaluate(node => node.scrollIntoView({ block: "start" }));
         await page.screenshot({ path: info.outputPath(`${size}.png`) });
       }
@@ -125,19 +121,13 @@ test("touch composer keeps literal mention metrics and a safe editable minimum",
     await page.goto("/browser/fixture.html?case=typography");
     const readingGroup = page.getByRole("radiogroup", { name: "Reading text size", exact: true });
     await expect(readingGroup.getByRole("radio")).toHaveCount(3);
-    const heights = await readingGroup.evaluate((control) => {
-      const row = control.closest(".settings-row")!;
-      const nextRow = row.nextElementSibling!;
-      return [row.getBoundingClientRect().height, nextRow.getBoundingClientRect().height];
-    });
-    expect(heights[0]).toBe(heights[1]);
     const radios = await readingGroup.getByRole("radio").all();
     for (const [index, radio] of radios.entries()) {
       await radio.scrollIntoViewIfNeeded();
       const target = await radio.boundingBox();
       expect(target!.width).toBeGreaterThanOrEqual(44);
-      // The shared switch pattern extends the hit area without growing the pill.
-      for (const edge of [-21, 21]) {
+      expect(target!.height).toBeGreaterThanOrEqual(44);
+      for (const edge of [-20, 20]) {
         await radios[(index + 1) % radios.length].tap();
         await page.touchscreen.tap(target!.x + target!.width / 2, target!.y + target!.height / 2 + edge);
         await expect(radio).toBeChecked();

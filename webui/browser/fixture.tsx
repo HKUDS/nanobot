@@ -15,7 +15,8 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, Dia
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { SettingsIcon } from "@/components/icons/product-icons";
-import { initializeI18n } from "@/i18n";
+import { initializeI18n, setAppLanguage } from "@/i18n";
+import { normalizeLocale } from "@/i18n/config";
 import type { McpPresetInfo, UIMessage } from "@/lib/types";
 import { SkeletonFixture } from "./skeleton-fixture";
 import { installSkeletonPreviewApi, SkeletonAdditionsFixture } from "./skeleton-additions-fixture";
@@ -23,6 +24,7 @@ import { NewChatSkeletonFixture } from "./new-chat-skeleton-fixture";
 import "../src/globals.css";
 import { DiagramFixture } from "./diagram-fixture";
 import { TypographyFixture } from "./typography-fixture";
+import { InlineReferencesFixture } from "./inline-references-fixture";
 import { MarkdownEmphasisFixture } from "./markdown-emphasis-fixture";
 import { HistoryBoundaryFixture } from "./history-boundary-fixture";
 import { ChatFailureFixture } from "./chat-failure-fixture";
@@ -40,6 +42,8 @@ import { MobileChatLayoutFixture } from "./mobile-chat-layout-fixture";
 import { ThemeToggleFixture } from "./theme-toggle-fixture";
 import { DisplayMathFixture } from "./display-math-fixture";
 import { AttachmentLayoutFixture } from "./attachment-layout-fixture";
+import { LoadedSessionSearchFixture } from "./loaded-session-search-fixture";
+import { AppearanceFixture } from "./appearance-fixture";
 
 const history: UIMessage[] = [
   { id: "question", role: "user", content: "Earlier question", createdAt: 1_700_000_000_000 },
@@ -212,8 +216,15 @@ function AppsFixture() {
 if (parameters.get("case") === "skeleton-additions") installSkeletonPreviewApi();
 if (parameters.get("case") === "idle-compaction") installIdleCompactionApi();
 await initializeI18n();
+if (parameters.get("case") === "appearance" && parameters.has("lang")) {
+  await setAppLanguage(normalizeLocale(parameters.get("lang")));
+}
 createRoot(document.getElementById("root")!).render(<TooltipProvider>
-  {parameters.get("case") === "attachments"
+  {parameters.get("case") === "appearance"
+    ? <AppearanceFixture />
+    : parameters.get("case") === "loaded-session-search"
+    ? <LoadedSessionSearchFixture />
+    : parameters.get("case") === "attachments"
     ? <AttachmentLayoutFixture />
     : parameters.get("case") === "theme-toggle"
     ? <ClientProvider client={railClient} token="fixture"><ThemeToggleFixture /></ClientProvider>
@@ -241,6 +252,8 @@ createRoot(document.getElementById("root")!).render(<TooltipProvider>
     ? <MarkdownEmphasisFixture />
     : parameters.get("case") === "typography"
     ? <ClientProvider client={railClient} token="fixture"><TypographyFixture /></ClientProvider>
+    : parameters.get("case") === "inline-references"
+    ? <ClientProvider client={railClient} token="fixture"><InlineReferencesFixture /></ClientProvider>
     : parameters.get("case") === "idle-compaction"
     ? <IdleCompactionFixture />
     : parameters.get("case") === "history-hydration"
