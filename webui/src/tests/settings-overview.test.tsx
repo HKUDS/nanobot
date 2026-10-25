@@ -170,6 +170,37 @@ describe("Settings overview and appearance", () => {
     expect(url.href).not.toContain("private-host");
   });
 
+  it("edits browser appearance while gateway settings are pending or unavailable", async () => {
+    let rejectSettings!: (reason: Error) => void;
+    const pendingSettings = new Promise<Response>((_, reject) => { rejectSettings = reject; });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input) === "/api/settings"
+      ? pendingSettings : new Promise<Response>(() => {})));
+    renderSettingsView({ initialSection: "appearance", initialSettings: null, showSidebar: true });
+    const input = screen.getByRole("spinbutton", { name: "Custom text size" });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "22" } });
+    await waitFor(() => expect(readLocalPreferences().customReadingTextSize).toBe(22));
+    await act(async () => { rejectSettings(new Error("Gateway unavailable")); });
+    expect(screen.getByRole("spinbutton", { name: "Custom text size" })).toBe(input);
+    fireEvent.change(input, { target: { value: "24" } });
+    await waitFor(() => expect(readLocalPreferences().customReadingTextSize).toBe(24));
+    expect(screen.queryByText("Gateway unavailable")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Models" }));
+    expect(await screen.findByText("Gateway unavailable")).toBeVisible();
+  });
+
+  it("keeps an explicit native restart failure visible on Appearance", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    const restart = vi.fn().mockRejectedValue(new Error("Engine restart failed"));
+    renderSettingsView({ initialSection: "appearance", showSidebar: true,
+      initialSettings: { ...settingsPayload(), surface: "native", runtime_capabilities: { can_restart_engine: true, can_open_logs: false, can_export_diagnostics: false } },
+      onNativeEngineRestart: restart });
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+    expect(await screen.findByText("Engine restart failed")).toBeVisible();
+    expect(restart).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("spinbutton", { name: "Custom text size" })).toBeEnabled();
+  });
+
   it("saves the reading size immediately while preserving the other local preferences", async () => {
     const previous = { ...DEFAULT_LOCAL_PREFS, codeWrap: false, brandLogos: false, notificationSound: true };
     writeLocalPreferences(previous);

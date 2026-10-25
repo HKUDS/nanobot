@@ -270,15 +270,6 @@ export function SettingsPage({
         return <AboutSettings settings={settings} />;
       case "notifications":
         return <NotificationSettings localPrefs={localPrefs} onChangeLocalPrefs={setLocalPrefs} />;
-      case "appearance":
-        return (
-          <AppearanceSettings
-            themePreference={themePreference}
-            onChangeTheme={onChangeTheme}
-            localPrefs={localPrefs}
-            onChangeLocalPrefs={setLocalPrefs}
-          />
-        );
       case "models":
         return (
           <div className="settings-stack">
@@ -494,6 +485,9 @@ export function SettingsPage({
 
   const renderSection = (section: SettingsSectionKey, embedded = false): ReactNode => {
     switch (section) {
+      case "appearance":
+        return <AppearanceSettings themePreference={themePreference} onChangeTheme={onChangeTheme}
+          localPrefs={localPrefs} onChangeLocalPrefs={setLocalPrefs} />;
       case "channels":
         return (
           <ChannelsSettings
@@ -623,7 +617,9 @@ export function SettingsPage({
         return renderSettingsSection(section, embedded);
     }
   };
-  const sectionReady = settings !== null || activeSection === "skills" || activeSection === "apps"
+  // Appearance reads only browser-local preferences, not the gateway settings snapshot.
+  const localSection = activeSection === "appearance";
+  const sectionReady = localSection || settings !== null || activeSection === "skills" || activeSection === "apps"
     || activeSection === "channels" || activeSection === "automations";
 
   return (
@@ -790,7 +786,7 @@ export function SettingsPage({
                   "flex min-h-0 flex-1 flex-col xl:overflow-hidden",
               )}
             >
-              {error ? (
+              {error && (!localSection || settings !== null) ? (
                 <div className="rounded-floating border border-destructive/20 bg-destructive/5 px-4 py-3 text-[13px] text-destructive">
                   {error}
                 </div>
