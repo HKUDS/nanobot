@@ -1,8 +1,6 @@
 # Channel Package Guide
 
-Use this guide to add a self-contained channel package to the nanobot repository. A channel is part of nanobot when its package lives at `nanobot/channels/<channel>/`; there is no separate external channel-plugin path.
-
-> **Breaking change:** nanobot no longer discovers the `nanobot.channels` Python entry-point group. Move an entry-point implementation into `nanobot/channels/<channel>/` with a package-owned manifest, runtime, tests, and optional WebUI contribution.
+Use this guide to add a self-contained channel package to the nanobot repository. Each channel lives at `nanobot/channels/<channel>/` and owns its manifest, runtime, tests, and optional WebUI contribution.
 
 ## How It Works
 
@@ -341,6 +339,34 @@ A normal return from `send()` means either the visible payload was accepted by t
 
 `send()` may run as soon as `is_running` becomes true. If a channel sets `_running` before its transport is ready, it must keep raising until delivery can be attempted safely. Small platform-specific retries are fine, but the final failure must still reach the manager.
 
+### Optional shared proxy
+
+Existing `__init__(config, bus)` constructors remain valid. `BaseChannel.uses_shared_proxy` defaults to `False`; only runtimes that explicitly set this class capability to `True` receive the instance-scoped top-level `NetworkConfig` as the keyword-only `network` argument. This capability is not a user setting.
+
+To support the shared proxy, declare `use_proxy: bool = False` on your channel's config model and expose `"useProxy": ChannelFieldSpec(kind="bool", default=False)` in its setup fields. Opt in on the runtime class and forward `network` to the base constructor:
+
+```python
+from typing import Any
+
+from nanobot.bus.queue import MessageBus
+from nanobot.channels.base import BaseChannel
+from nanobot.config.network import NetworkConfig
+
+
+class WebhookChannel(BaseChannel):
+    uses_shared_proxy = True
+
+    def __init__(
+        self, config: Any, bus: MessageBus, *, network: NetworkConfig | None = None,
+    ):
+        if isinstance(config, dict):
+            config = WebhookConfig(**config)
+        super().__init__(config, bus, network=network)
+        self._proxy = self.network.resolve_proxy(self.config.use_proxy)
+```
+
+Pass the resolved address to your platform clients. `useProxy: false` keeps the channel direct even when `network.proxy` is configured; `true` requires a shared proxy address and fails rather than silently connecting directly. Setup validators receive the same settings through `context.network`. Do not load global config or persist a proxy address in the channel config.
+
 ### Interactive Login
 
 If your channel requires interactive authentication (e.g. QR code scan), override `login(force=False)`:
@@ -485,7 +511,7 @@ class OutboundMessage:
     event: object | None # typed runtime/UI event; usually inspect with isinstance()
 ```
 
-Runtime/UI semantics live on `msg.event`. Plugin-authored outbound messages should use typed events instead of legacy metadata flags such as `_progress`, `_stream_delta`, `_stream_end`, `_reasoning_delta`, `_turn_end`, or `_goal_status`. nanobot still accepts those old flags as a compatibility bridge for existing in-process extensions, but new plugin code should not add fresh dependencies on them.
+Runtime/UI semantics live on `msg.event`. Use `outbound_message_for_event()` from `nanobot.bus.outbound_events` to build outbound messages with the appropriate typed event. Keep `metadata` for channel routing context, such as message and thread IDs, and optional `OUTBOUND_META_AGENT_UI` payloads.
 
 ## Streaming Support
 
@@ -524,7 +550,7 @@ async def send_delta(
     # delta contains a small chunk of text (a few tokens)
 ```
 
-Streaming state is passed through keyword-only arguments, not `_stream_delta` or `_stream_end` metadata flags. Use `stream_id` to key any per-stream buffers; fall back to `chat_id` when it is missing.
+Streaming state is passed through keyword-only arguments. Use `stream_id` to key any per-stream buffers; fall back to `chat_id` when it is missing.
 
 ### Example: Webhook with Streaming
 

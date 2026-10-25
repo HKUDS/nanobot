@@ -19,11 +19,13 @@ from pydantic import Field
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect as ws_connect
 
+from nanobot.bus.delivery import ChannelNotReadyError, DeliveryRejectedError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
-from nanobot.config.schema import Base
+from nanobot.config_base import Base
+from nanobot.events import ContextCompactionEvent
 from nanobot.security.network import validate_url_target
 from nanobot.utils.helpers import safe_filename
 
@@ -437,13 +439,16 @@ class NapcatChannel(BaseChannel):
     # ------------------------------------------------------------------
 
     async def send(self, msg: OutboundMessage) -> None:
+        if isinstance(msg.event, ContextCompactionEvent) and not (
+            msg.event.notify or self.show_compaction_notices
+        ):
+            return
         if self._ws is None:
-            raise RuntimeError("napcat: not connected")
+            raise ChannelNotReadyError("napcat: not connected")
 
         kind, _, target = msg.chat_id.partition(":")
         if kind not in ("private", "group") or not target:
-            logger.error("napcat: invalid chat_id '{}'", msg.chat_id)
-            return
+            raise DeliveryRejectedError("napcat: invalid chat_id")
 
         segments: list[dict[str, Any]] = []
         for ref in msg.media or []:
@@ -542,7 +547,7 @@ class NapcatChannel(BaseChannel):
                     url,
                 )
                 return None
-        except (TypeError, KeyError):
+        except (TypeError, KeyError, ValueError):
             pass
 
         try:

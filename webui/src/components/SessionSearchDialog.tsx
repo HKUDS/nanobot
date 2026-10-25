@@ -140,14 +140,14 @@ export function SessionSearchDialog({
       <DialogContent
         showCloseButton={false}
         className={cn(
-          "flex max-h-[min(40rem,calc(100vh-2rem))] w-[calc(100vw-2rem)] max-w-[42rem] flex-col gap-0 overflow-hidden p-0",
+          "session-search-dialog flex max-h-[min(40rem,100%)] w-[calc(100vw-2rem)] max-w-[42rem] flex-col gap-0 overflow-hidden p-0",
         )}
       >
         <DialogTitle className="sr-only">{t("sidebar.searchAria")}</DialogTitle>
         <DialogDescription className="sr-only">
           {t("sidebar.searchPlaceholder")}
         </DialogDescription>
-        <div className="flex h-[62px] shrink-0 items-center gap-3 border-b border-border px-[18px]">
+        <div className="session-search-input flex h-[62px] shrink-0 items-center gap-3 border-b border-border px-[18px]">
           <Search
             className="h-[18px] w-[18px] shrink-0 text-muted-foreground"
             aria-hidden
@@ -170,7 +170,7 @@ export function SessionSearchDialog({
           className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2.5 scrollbar-thin scrollbar-track-transparent"
         >
           <section>
-            <div className="px-2.5 pb-1.5 pt-1 text-[12px] font-medium text-muted-foreground">
+            <div className="session-search-label px-2.5 pb-1.5 pt-1 text-[12px] font-medium text-muted-foreground">
               {sectionLabel}
             </div>
 

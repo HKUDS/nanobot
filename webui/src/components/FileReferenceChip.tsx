@@ -1,4 +1,8 @@
-import type { KeyboardEvent, MouseEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type HTMLAttributes } from "react";
+import { File, FileArchive, FileAudio, FileChartColumn, FileCode2, FileImage, FileJson2, FileSpreadsheet, FileText, FileVideo2, type LucideIcon } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { FileActions, useFilePreviewLoader } from "@/components/FileActions";
+import { inferMediaKind } from "@/lib/media";
 
 import {
   Tooltip,
@@ -10,20 +14,30 @@ import { cn } from "@/lib/utils";
 
 export type FileReferenceKind =
   | "default"
+  | "archive"
+  | "audio"
   | "css"
+  | "document"
   | "html"
+  | "image"
   | "javascript"
   | "json"
   | "markdown"
   | "notebook"
+  | "presentation"
   | "python"
   | "react"
-  | "typescript";
+  | "spreadsheet"
+  | "text"
+  | "typescript"
+  | "video";
 
 interface FileReferenceChipProps {
   path: string;
   tooltipPath?: string;
   display?: "name" | "path";
+  showIcon?: boolean;
+  truncateFromStart?: boolean;
   active?: boolean;
   className?: string;
   textClassName?: string;
@@ -36,6 +50,8 @@ export function FileReferenceChip({
   path,
   tooltipPath,
   display = "name",
+  showIcon = true,
+  truncateFromStart = false,
   active = false,
   className,
   textClassName,
@@ -43,28 +59,35 @@ export function FileReferenceChip({
   onOpen,
   testId = "inline-file-path",
 }: FileReferenceChipProps) {
+  const { t } = useTranslation();
+  const [tooltipOpen, setTooltipOpen] = useState(false);
   const { directory, name } = splitFilePath(path);
-  const kind = fileKindForPath(path);
   const displayText = display === "path" ? path.replace(/\\/g, "/") : name;
   const fullPath = tooltipPath || path;
   const targetPath = previewPath || tooltipPath || path;
+  const kind = fileKindForPath(targetPath);
   const interactive = Boolean(onOpen);
+  const imageQuickLook = kind === "image" && interactive;
   const openPreview = (event: MouseEvent | KeyboardEvent) => {
     if (!onOpen) return;
     event.preventDefault();
     event.stopPropagation();
+    setTooltipOpen(false);
     onOpen(targetPath);
   };
+  const Text = truncateFromStart ? StartTruncatedText : "span";
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     openPreview(event);
   };
   return (
+    <FileActions path={targetPath} className={truncateFromStart ? "min-w-0" : undefined}>
     <TooltipProvider>
-      <Tooltip>
+      <Tooltip open={tooltipOpen} onOpenChange={setTooltipOpen}>
         <TooltipTrigger asChild>
           <span
-            className={cn("not-prose inline-flex max-w-full align-baseline leading-[inherit]", className)}
+            onContextMenuCapture={() => setTooltipOpen(false)}
+            className={cn("not-prose inline-flex max-w-full align-baseline leading-[inherit]", truncateFromStart && "min-w-0", className)}
           >
             <span
               data-testid={testId}
@@ -75,51 +98,104 @@ export function FileReferenceChip({
               onKeyDown={interactive ? onKeyDown : undefined}
               className={cn(
                 "inline-flex max-w-full items-baseline gap-[0.28em] font-medium leading-[inherit]",
-                "text-sky-600 transition-colors hover:text-sky-700",
-                "dark:text-sky-300 dark:hover:text-sky-200",
+                truncateFromStart && "min-w-0",
+                interactive
+                  ? "text-sky-600 transition-colors hover:text-sky-700 dark:text-sky-300 dark:hover:text-sky-200"
+                  : "text-muted-foreground",
                 interactive && [
                   "cursor-pointer rounded-compact",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/45",
                 ],
               )}
             >
-              <FileReferenceIcon kind={kind} />
-              <span
+              {showIcon ? <FileReferenceIcon kind={kind} className="translate-y-[0.12em]" /> : null}
+              <Text
                 data-sheen-text={active ? displayText : undefined}
                 className={cn(
-                  "min-w-0 max-w-full [overflow-wrap:anywhere] sm:truncate",
-                  active && "streaming-text-sheen file-reference-sheen",
+                  "min-w-0 max-w-full",
+                  !truncateFromStart && "[overflow-wrap:anywhere] sm:truncate",
+                  active && !truncateFromStart && "streaming-text-sheen file-reference-sheen",
                   textClassName,
                 )}
               >
                 {display === "path" && directory ? (
                   <>
-                    <span className="text-muted-foreground/65">{directory}</span>
-                    <span className="font-semibold text-sky-700 dark:text-sky-200">{name}</span>
+                    <span className="text-muted-foreground">{directory}</span>
+                    <span className={cn("font-semibold", interactive && "text-sky-700 dark:text-sky-200")}>{name}</span>
                   </>
                 ) : (
                   displayText
                 )}
-              </span>
+              </Text>
             </span>
           </span>
         </TooltipTrigger>
         <TooltipContent
+          aria-label={truncateFromStart ? fullPath : imageQuickLook ? t("filePreview.aria") : undefined}
           side="top"
-          align="center"
+          align={truncateFromStart ? "start" : "center"}
           sideOffset={8}
           collisionPadding={12}
           className={cn(
-            "max-w-[min(38rem,calc(100vw-2rem))] rounded-control",
-            "px-2.5 py-1.5",
-            "break-all font-mono text-[11px] leading-snug text-popover-foreground",
+            "rounded-control text-popover-foreground",
+            imageQuickLook && truncateFromStart && "space-y-2",
+            imageQuickLook
+              ? cn("w-max p-2", truncateFromStart ? "max-w-[min(38rem,calc(100vw-2rem))]" : "max-w-[calc(100vw-2rem)]")
+              : cn("max-w-[min(38rem,calc(100vw-2rem))] px-2.5 py-1.5 font-mono text-[11px] leading-snug", truncateFromStart ? "text-left [overflow-wrap:anywhere]" : "break-all"),
           )}
         >
-          {fullPath}
+          {truncateFromStart ? <span className="block max-w-full select-text whitespace-pre-wrap text-left font-mono text-[11px] leading-snug [overflow-wrap:anywhere]">{fullPath.split(/([\\/])/).map((part, index) => (
+            <span key={index}>{part}{/^[\\/]$/.test(part) ? <wbr /> : null}</span>
+          ))}</span> : !imageQuickLook ? fullPath : null}
+          {imageQuickLook && tooltipOpen ? <FileImageQuickLook key={targetPath} path={targetPath} /> : null}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
+    </FileActions>
   );
+}
+
+function StartTruncatedText({ children, className, ...props }: HTMLAttributes<HTMLSpanElement> & { "data-sheen-text"?: string }) {
+  const container = useRef<HTMLSpanElement>(null);
+  const content = useRef<HTMLSpanElement>(null);
+  const [clipped, setClipped] = useState(false);
+  useLayoutEffect(() => {
+    const update = () => setClipped(content.current!.getBoundingClientRect().width > container.current!.getBoundingClientRect().width);
+    const observer = new ResizeObserver(update);
+    observer.observe(container.current!);
+    observer.observe(content.current!);
+    update();
+    return () => observer.disconnect();
+  }, []);
+  return <span ref={container} className={cn("inline-flex items-baseline overflow-hidden whitespace-nowrap", className)}>
+    {clipped ? <span aria-hidden className="shrink-0">…</span> : null}
+    <span className="flex min-w-0 justify-end overflow-hidden">
+      <span ref={content} className={cn("shrink-0", props["data-sheen-text"] && "streaming-text-sheen file-reference-sheen")} {...props}>{children}</span>
+    </span>
+  </span>;
+}
+
+/** Only loads after the normal hover/focus delay, through the session's guarded preview API. */
+function FileImageQuickLook({ path }: { path: string }) {
+  const { t } = useTranslation();
+  const load = useFilePreviewLoader();
+  const [result, setResult] = useState<{ load: typeof load; source: string | null }>();
+  const source = result?.load === load ? result?.source : undefined;
+  useEffect(() => {
+    let cancelled = false;
+    void load?.(path).then((payload) => {
+      if (!cancelled) setResult({ load, source: payload.kind === "image" ? payload.data_url : null });
+    }).catch(() => { if (!cancelled) setResult({ load, source: null }); });
+    return () => { cancelled = true; };
+  }, [path, load]);
+  if (!load || source === null) return <span className="block px-1 py-1 text-xs text-muted-foreground">
+    {t("filePreview.failed", { defaultValue: "Could not preview this file." })}
+  </span>;
+  return <span data-testid="file-image-quick-look" className="block w-max max-w-full overflow-hidden rounded-mark" aria-hidden>
+    {source ? <img src={source} alt="" decoding="async" draggable={false}
+      className="block h-auto max-h-36 w-auto max-w-[min(14rem,calc(100vw-3rem))] rounded-mark object-contain" onError={() => setResult({ load, source: null })} />
+      : <span className="block h-36 w-56 max-w-[calc(100vw-3rem)] animate-pulse bg-muted/40 motion-reduce:animate-none" />}
+  </span>;
 }
 
 export function isLikelyFilePath(value: string): boolean {
@@ -151,7 +227,9 @@ export function splitFilePath(path: string): { directory: string; name: string }
   };
 }
 
-function fileKindForPath(path: string): FileReferenceKind {
+export function fileKindForPath(path: string): FileReferenceKind {
+  const mediaKind = inferMediaKind({ url: path });
+  if (mediaKind === "image" || mediaKind === "video") return mediaKind;
   const normalized = path.toLowerCase();
   const name = normalized.split(/[\\/]/).pop() ?? normalized;
   const ext = name.includes(".") ? name.split(".").pop() ?? "" : "";
@@ -159,6 +237,40 @@ function fileKindForPath(path: string): FileReferenceKind {
     return "default";
   }
   switch (ext) {
+    case "zip":
+    case "7z":
+    case "rar":
+    case "tar":
+    case "gz":
+    case "bz2":
+    case "xz":
+    case "tgz":
+      return "archive";
+    case "mp3":
+    case "wav":
+    case "ogg":
+    case "m4a":
+    case "flac":
+    case "aac":
+      return "audio";
+    case "pdf":
+    case "doc":
+    case "docx":
+    case "odt":
+    case "rtf":
+      return "document";
+    case "xls":
+    case "xlsx":
+    case "csv":
+    case "tsv":
+    case "ods":
+      return "spreadsheet";
+    case "ppt":
+    case "pptx":
+    case "odp":
+      return "presentation";
+    case "avif":
+      return "image";
     case "py":
     case "pyi":
       return "python";
@@ -188,122 +300,41 @@ function fileKindForPath(path: string): FileReferenceKind {
       return "markdown";
     case "ipynb":
       return "notebook";
+    case "txt":
+    case "log":
+      return "text";
     default:
       return "default";
   }
 }
 
-function FileReferenceIcon({ kind }: { kind: FileReferenceKind }) {
-  if (kind === "python") {
-    return (
-      <svg
-        aria-hidden
-        className="h-[1em] w-[1em] shrink-0 translate-y-[0.12em]"
-        viewBox="0 0 24 24"
-      >
-        <path
-          d="M11.9 2.3c-3 0-4.5.8-4.5 2.3v2.1h4.8v.8H5.5C4 7.5 3 8.8 3 10.8v2.1c0 1.8 1.1 3 2.7 3h1.6v-2.3c0-1.7 1.4-3.1 3.1-3.1h4.2c1.3 0 2.3-1 2.3-2.3V4.6c0-1.4-1.5-2.3-4.6-2.3h-.4Z"
-          fill="#3776AB"
-        />
-        <path
-          d="M12.1 21.7c3 0 4.5-.8 4.5-2.3v-2.1h-4.8v-.8h6.7c1.5 0 2.5-1.3 2.5-3.3v-2.1c0-1.8-1.1-3-2.7-3h-1.6v2.3c0 1.7-1.4 3.1-3.1 3.1H9.4c-1.3 0-2.3 1-2.3 2.3v3.6c0 1.4 1.5 2.3 4.6 2.3h.4Z"
-          fill="#FFD43B"
-        />
-        <circle cx="9" cy="5.1" r="0.8" fill="#fff" />
-        <circle cx="15" cy="18.9" r="0.8" fill="#5C3B00" opacity="0.85" />
-      </svg>
-    );
-  }
-  if (kind === "react") {
-    return (
-      <svg
-        aria-hidden
-        className="h-[0.92em] w-[0.92em] shrink-0 translate-y-[0.11em] text-sky-500 dark:text-sky-300"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <circle cx="12" cy="12" r="1.9" fill="currentColor" stroke="none" />
-        <ellipse cx="12" cy="12" rx="9" ry="3.7" />
-        <ellipse cx="12" cy="12" rx="9" ry="3.7" transform="rotate(60 12 12)" />
-        <ellipse cx="12" cy="12" rx="9" ry="3.7" transform="rotate(120 12 12)" />
-      </svg>
-    );
-  }
-  if (kind === "default") {
-    return (
-      <svg
-        aria-hidden
-        className="h-[0.92em] w-[0.92em] shrink-0 translate-y-[0.11em] text-sky-500 dark:text-sky-300"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z" />
-        <path d="M14 2v5h5" />
-      </svg>
-    );
-  }
-  const label = fileKindLabel(kind);
-  return (
-    <svg
-      aria-hidden
-      className="h-[0.96em] w-[0.96em] shrink-0 translate-y-[0.12em] text-sky-500 dark:text-sky-300"
-      viewBox="0 0 24 24"
-      fill="none"
-    >
-      <path
-        d="M7 3.5h6.6L18 7.9V19a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19V5a1.5 1.5 0 0 1 1.5-1.5Z"
-        fill="currentColor"
-        opacity="0.12"
-      />
-      <path
-        d="M13.5 3.75V8h4.25M7 3.5h6.6L18 7.9V19a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19V5a1.5 1.5 0 0 1 1.5-1.5Z"
-        stroke="currentColor"
-        strokeWidth="1.75"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <text
-        x="12"
-        y="15.7"
-        textAnchor="middle"
-        fill="currentColor"
-        fontSize={label.length > 1 ? "5.8" : "7.2"}
-        fontWeight="800"
-        letterSpacing="-0.2"
-      >
-        {label}
-      </text>
-    </svg>
-  );
+const FILE_ICONS = {
+  default: File,
+  archive: FileArchive,
+  audio: FileAudio,
+  css: FileCode2,
+  document: FileText,
+  html: FileCode2,
+  image: FileImage,
+  javascript: FileCode2,
+  json: FileJson2,
+  markdown: FileText,
+  notebook: FileCode2,
+  presentation: FileChartColumn,
+  python: FileCode2,
+  react: FileCode2,
+  spreadsheet: FileSpreadsheet,
+  text: FileText,
+  typescript: FileCode2,
+  video: FileVideo2,
+} satisfies Record<FileReferenceKind, LucideIcon>;
+
+export function fileIconForPath(path: string): LucideIcon {
+  return FILE_ICONS[fileKindForPath(path)];
 }
 
-function fileKindLabel(kind: FileReferenceKind): string {
-  switch (kind) {
-    case "css":
-      return "#";
-    case "html":
-      return "H";
-    case "javascript":
-      return "JS";
-    case "json":
-      return "{}";
-    case "markdown":
-      return "M";
-    case "notebook":
-      return "N";
-    case "python":
-      return "PY";
-    case "typescript":
-      return "TS";
-    default:
-      return "";
-  }
+/** The same file silhouette and stroke in replies, tabs, and attachment tiles. */
+export function FileReferenceIcon({ kind, className }: { kind: FileReferenceKind; className?: string }) {
+  const Icon = FILE_ICONS[kind];
+  return <Icon aria-hidden strokeWidth={1.75} className={cn("h-[1em] w-[1em] shrink-0", className)} />;
 }

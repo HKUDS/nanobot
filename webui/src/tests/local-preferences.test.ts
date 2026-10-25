@@ -26,6 +26,27 @@ describe("local preferences", () => {
     expect(readLocalPreferences().brandLogos).toBe(false);
   });
 
+  it.each([undefined, "obsolete", 24])("defaults missing or invalid reading sizes without resetting other preferences: %s", (readingTextSize) => {
+    localStorage.setItem(LOCAL_PREFS_STORAGE_KEY, JSON.stringify({
+      schemaVersion: 1,
+      readingTextSize,
+      activityMode: "expanded",
+      codeWrap: false,
+      brandLogos: false,
+      notificationSound: true,
+      fileEditDisplayMode: "diff",
+    }));
+    expect(readLocalPreferences()).toEqual({
+      ...DEFAULT_LOCAL_PREFS,
+      readingTextSize: "standard",
+      activityMode: "expanded",
+      codeWrap: false,
+      brandLogos: false,
+      notificationSound: true,
+      fileEditDisplayMode: "diff",
+    });
+  });
+
   it("keeps browser notifications opt-in", () => {
     expect(DEFAULT_LOCAL_PREFS.browserNotifications).toBe(false);
     expect(readLocalPreferences().browserNotifications).toBe(false);

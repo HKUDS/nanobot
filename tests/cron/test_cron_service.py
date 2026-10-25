@@ -157,6 +157,21 @@ def test_add_job_rejects_missing_cron_expression(tmp_path, expr: str | None) -> 
     assert service.list_jobs(include_disabled=True) == []
 
 
+@pytest.mark.parametrize("every_ms", [None, 0, -60_000])
+def test_add_job_rejects_non_positive_interval(tmp_path, every_ms: int | None) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+
+    with pytest.raises(ValueError, match="requires a positive 'every_ms'"):
+        service.add_job(
+            name="never runs",
+            schedule=CronSchedule(kind="every", every_ms=every_ms),
+            message="hello",
+            **_bound_chat(),
+        )
+
+    assert service.list_jobs(include_disabled=True) == []
+
+
 def test_add_job_rejects_invalid_cron_expression_before_persisting(tmp_path) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
 
@@ -1232,7 +1247,14 @@ def test_update_job_rejects_system_job(tmp_path) -> None:
     assert service.get_job("dream").name == "dream"
 
 
-def test_update_job_validates_schedule(tmp_path) -> None:
+@pytest.mark.parametrize(
+    "schedule,error",
+    [
+        (CronSchedule(kind="cron", expr="0 9 * * *", tz="Bad/Zone"), "unknown timezone"),
+        (CronSchedule(kind="every", every_ms=0), "positive 'every_ms'"),
+    ],
+)
+def test_update_job_validates_schedule(tmp_path, schedule, error) -> None:
     service = CronService(tmp_path / "cron" / "jobs.json")
     job = service.add_job(
         name="validate",
@@ -1240,11 +1262,12 @@ def test_update_job_validates_schedule(tmp_path) -> None:
         message="hello",
         **_bound_chat(),
     )
-    with pytest.raises(ValueError, match="unknown timezone"):
-        service.update_job(
-            job.id,
-            schedule=CronSchedule(kind="cron", expr="0 9 * * *", tz="Bad/Zone"),
-        )
+    action_path = service.store_path.with_name("action.jsonl")
+    before = action_path.read_bytes()
+    with pytest.raises(ValueError, match=error):
+        service.update_job(job.id, schedule=schedule)
+    assert action_path.read_bytes() == before
+    assert service.get_job(job.id).schedule.every_ms == 60_000
 
 
 @pytest.mark.asyncio
@@ -1427,3 +1450,70 @@ def test_load_jobs_skips_null_run_history_elements(tmp_path) -> None:
     assert len(jobs[0].state.run_history) == 1
     assert jobs[0].state.run_history[0].run_at_ms == 1
     assert jobs[0].state.run_history[0].status == "ok"
+
+
+def _dream_job(every_ms: int) -> CronJob:
+    return CronJob(
+        id="dream",
+        name="dream",
+        schedule=CronSchedule(kind="every", every_ms=every_ms),
+        payload=CronPayload(kind="system_event"),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("restart_hours,expected_hours", [(23, 24), (25, 49)])
+async def test_restart_keeps_pending_every_job_run(tmp_path, monkeypatch, restart_hours, expected_hours) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    t0 = 1_800_000_000_000
+    hour = 3_600_000
+    monkeypatch.setattr("nanobot.cron.service._now_ms", lambda: t0)
+    service = CronService(store_path)
+    await service.start()
+    job = service.add_job(
+        name="daily",
+        schedule=CronSchedule(kind="every", every_ms=24 * hour),
+        message="hello",
+        **_bound_chat(),
+    )
+    service.stop()
+    assert job.state.next_run_at_ms == t0 + 24 * hour
+
+    for elapsed in (restart_hours * hour, restart_hours * hour + hour // 4):
+        monkeypatch.setattr("nanobot.cron.service._now_ms", lambda: t0 + elapsed)
+        restarted = CronService(store_path)
+        await restarted.start()
+        try:
+            reloaded = restarted.get_job(job.id)
+            assert reloaded is not None
+            assert reloaded.state.next_run_at_ms == t0 + expected_hours * hour
+        finally:
+            restarted.stop()
+
+
+@pytest.mark.asyncio
+async def test_reregistering_system_job_keeps_pending_every_run(tmp_path, monkeypatch) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    t0 = 1_800_000_000_000
+    minute = 60_000
+
+    async def boot(now: int, every_ms: int) -> int | None:
+        monkeypatch.setattr("nanobot.cron.service._now_ms", lambda: now)
+        service = CronService(store_path)
+        service.register_system_job(_dream_job(every_ms))
+        await service.start()
+        try:
+            job = service.get_job("dream")
+            assert job is not None
+            return job.state.next_run_at_ms
+        finally:
+            service.stop()
+
+    assert await boot(t0, 120 * minute) == t0 + 120 * minute
+    # A gateway restart before the interval elapses must not push Dream back.
+    assert await boot(t0 + 90 * minute, 120 * minute) == t0 + 120 * minute
+    # A changed interval is a new schedule and is computed from now.
+    assert await boot(t0 + 100 * minute, 60 * minute) == t0 + 160 * minute
+    assert await boot(t0 + 110 * minute, 60 * minute) == t0 + 160 * minute
+    # An overdue interval keeps the existing no-catch-up behavior.
+    assert await boot(t0 + 170 * minute, 60 * minute) == t0 + 230 * minute

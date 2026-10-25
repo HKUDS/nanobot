@@ -1,0 +1,88 @@
+# Update protocol
+
+This document is for gateway, client and updater maintainers. For installation choices, WebUI steps and recovery commands, see the [user update guide](updating.md). Release approval, catalogue and artifact schemas belong to the [release contract](releasing.md).
+
+## Ownership and approval boundaries
+
+The gateway owns policy, installation inspection and durable update state; clients present reviews and explicit consent. Reviewing a release, preparing files, approving shutdown, admitting package mutation and activating a gateway are separate decisions. None can be inferred from another's progress, a lost response or elapsed time.
+
+An [immutable plan](../nanobot/update_plan.py) binds an exact release artifact to the interpreter/environment snapshot, ownership receipts, extras, channel revision and known gateway profiles. Its lifetime is at most fifteen minutes. Preparation and shutdown preflight revalidate that target, never substitute a new latest version. Changed environment metadata, ownership, profiles, channel revision, expiry or release eligibility blocks progress. Planning and preflight share the installation's `releases` history: catalogue rollback or changed contents under the same generation must not become acceptable through a fresh per-job cache. A network failure is not a fresh successful check. See [release discovery](../nanobot/release_feed.py) and the [release contract](releasing.md) for approval and download rules.
+
+[Manager policy](../nanobot/update_manager.py) comes from the owner's receipt, not dependency-based guesses. Its hash binds the complete private settings; the review uses a credential-free summary of extras, constraints, source, pins/locks and additional package names. An absent `owner_restriction` is not execution eligibility. Supported pipx receipt schemas are `0.5` and `0.12`; reading them does not enable pipx execution or newer manager flags. The native uv transaction is limited to compatible POSIX uv `0.11.16` registry tools and preserves receipt policy. Unfrozen external resolver policy requires the owner's workflow. A plain-venv transaction requires explicit extras, including `[]` for the base package; installer- or manager-recorded extras cannot be replaced by a client.
+
+## Client interface
+
+Capabilities are optional additions to the [WebUI contract](../nanobot/webui/client_contract.py), not package-version comparisons or a higher protocol floor. Action names below have the prefix `settings.nanobot.update.`; read paths have the prefix `/api/settings/nanobot-update/`.
+
+| Capability | Interface |
+| --- | --- |
+| `webui.update-plans.v1` | `plan`; `GET plan?id=<id>` |
+| `webui.update-jobs.read.v1` | `GET job?id=<id>` |
+| `webui.update-jobs.prepare.v1` | `prepare`, `settle` for interrupted preparation |
+| `webui.update-jobs.execute.v1` | `execute` |
+| `webui.update-jobs.retry-handoff.v1` | `retry` |
+| `webui.update-jobs.settle-handoff.v1` | `settle` also retires inactive, uncommitted handoffs |
+| `webui.update-channels.v1` | `channel` with the saved revision |
+| `webui.update-flow.v1` | Client flow using review, preparation, execution and reconnection |
+
+All routes require authentication. Actions require an authenticated WebSocket; plain HTTP cannot create plans or mutate jobs. Preparation, settlement, execution, retry and channel changes also require the existing local-browser or explicit remote package-install permission and runtime admission checks. Review does not require installation permission. Desktop's native surface retains its distributor's updater. [Transport routing](../nanobot/webui/settings_routes.py) and the [settings handler](../nanobot/webui/settings_system.py) own these checks; update responses are `no-store`.
+
+`plan` accepts only `channel`, `restart_running` (default `false`) and optional `extras`. The default channel is the installation preference, or Stable when absent. It cannot accept a download URL, command, environment path or caller-supplied plan. `restart_running=true` selects known running background gateways with explicit lifetime and cooperative shutdown support, not stopped profiles or unknown supervisors. Inline eligibility requires the requesting gateway and every running peer in the reviewed stop/restart selection, with no unconfirmed owner.
+
+The review separates `installation_allowed` (caller policy) from `execution_available` and `execution_blocked_reason` (exact-plan eligibility). Neither authorizes execution. `validity` is a local snapshot result: `current`, `expired`, `installation_changed`, `profiles_changed` or `channel_changed`. Reading a saved review can inspect the current installation and profiles, but does not contact the release feed or choose another target.
+
+Job actions use `id`; execution additionally requires `confirm_restart: true`, and retry requires `previous_confirmation_id`. A job read returns durable facts including `recorded_phase`, `attempt`, `mutation_started`, `updated_at` and `execution_confirmation_id`, not worker liveness or permission to retry. Missing jobs return 404, invalid identifiers 400, and corrupt or misbound records 409. Reads do not start the installation's Python, contact release services or take its runtime lease; an active writer or incomplete-install marker does not hide history. Environment-path scoping can retain history after a reinstall, but does not authorize resuming the predecessor's job. Raw logs, resolver credentials and diagnostic messages are not exposed. Recovery flags distinguish automatic recovery selection, supervisor ownership and restored service. A returned recovery command is display-only.
+
+[Record publication](../nanobot/utils/atomic_file.py) is atomic, never delete-then-copy. Windows snapshot readers share deletion so polling can coexist with POSIX-style replacement on supported filesystems. Sharing and permission failures remain errors, not permission to publish partial records.
+
+Channel changes use revision checks, invalidate old reviews and retire only safely settled inactive jobs. They never install, downgrade or discard active work. Consumers recover lost preparation/execution responses by reading the same job; a missing journal or transport timeout alone is not authority to submit a replacement operation.
+
+## Preparation leases and settlement
+
+[Preparation](../nanobot/update_jobs.py) saves the immutable plan and a preparation journal before native inspection or resolution. It compares fresh environment metadata before and after staging, verifies the exact nanobot wheel and stages the resolved dependency transaction without changing installed files. Pip preparation retains its configured package-source trust policy; credential-bearing resolver files remain private and temporary. There is no source-build or global-manager fallback. For uv, a sealed private preparation cache and recorded dependency versions bind the offline transaction without rewriting the shared cache or saved policy.
+
+The frozen worker and helpers are standard-library-only and stored outside the installation. [Preparation children](../nanobot/update_process.py) start with `-I -S`, acquire their own runtime and native-preparation leases, validate the preparation generation, then initialize the target's site. Those leases cover `.pth`/site hooks, the actual probe or pip command and `atexit` cleanup, even if the parent disappears. Python commands run in the lease-owning process on POSIX and Windows. Native uv uses POSIX `exec` with retained descriptors; inherited handles do not transfer Windows byte-range lock ownership. Failed `exec` restores descriptor inheritance flags. These leases do not contain arbitrary descendants spawned by custom hooks.
+
+Cancellation does not release preparation ownership until native work actually returns. An orphan native child blocks another preparation and coordinated shutdown. A `preparing` record alone proves neither liveness nor completion. Settlement requires both parent and native preparation leases, revokes that generation and records `preparation_failed`; it neither deletes staging nor starts an install. Late children from the revoked generation cannot run. Older parent-only lease records cannot establish this proof. Retrying preparation must retain the same immutable plan; changed consent needs a new ID.
+
+The immutable `request.json`, written after inputs and initial status are flushed, is the preparation commit record. A `ready` journal alone is insufficient. Preparation grants no package-mutation authority.
+
+## Confirmation generations and offline execution
+
+The [job service](../nanobot/update_service.py) persists execution confirmation before launching a detached owner. Each confirmation may claim the operation once. Replaying execute, repeating a retry or presenting a stale predecessor returns history, not another attempt. Explicit retry replaces exactly `previous_confirmation_id` while worker and preflight leases are free; delayed launchers with the replaced confirmation cannot start. The original target, artifacts, plan expiry, release checks and selected runtime identities still apply. Retry cannot extend the review or repair mutation.
+
+Confirmation identity and expiry are separate checks. Launch consent is short-lived and bound to the immutable request. Under its lease, the supervisor validates that identity before publishing even its first journal or launching work. Completion and bounded recovery, including restoration, retain the same identity without reapplying the launch-window expiry. Fresh local repair can renew approval only for an already admitted exact job, not prepared files alone; it rechecks inputs and environment, preserves and verifies the original backup once created, and never resolves or downloads a release.
+
+The [offline worker](../nanobot/update_worker.py) uses the base Python with `-I -S`. Its actual installer child owns exclusive installation/data leases before target site initialization and rechecks ownership, environment, inputs and approval before mutation. Pip's CLI runs in that same single-use Python process on both POSIX and Windows, retaining locks through exit cleanup. It accepts only staged wheels with network resolution, builds and destination/configuration overrides disabled. Native uv retains its leases through POSIX `exec` and applies the sealed transaction offline.
+
+A pending-install fence and data reservation survive interrupted mutation. Repair cannot overwrite unrelated package changes or a different target installed by another updater. Restart-phase recovery retries restart, not installation. Installed-package verification uses a separately lease-owning child and a completion checkpoint: the target must import from the correct environment, application files including bundled assets must match the wheel, and dependency checks must pass. Without restart participants the result is `installed`, not a verified running gateway.
+
+## Shutdown and maintenance
+
+[Installation leases](../nanobot/installation_lock.py) are account-scoped by the real environment path, independent of profile home and symlink aliases. Cooperating runtimes hold shared OS locks; mutation needs exclusive access. Lock files must never be removed or replaced: a PID file is not ownership. Ordinary startup refuses an active updater or pending-install fence. These leases do not discover older runtimes, arbitrary imports, other accounts or external supervisors.
+
+The detached owner's [old-runtime preflight](../nanobot/update_handoff.py) owns a shared lease before application imports, revalidates the exact release using shared release history, closes the release client and requests [cooperative shutdown](../nanobot/update_stop.py). Every selected gateway must hold its idle admission gate before any stop is committed. Refusal before commit reopens intake; a durable commit is irrevocable and is not undone by a later failure. The owner waits for actual gateway and preflight process exit, not inactive receipts, before acquiring exclusive installation/data leases and admitting installation. Shutdown consent alone is not mutation approval.
+
+[Runtime admission](../nanobot/runtime_admission.py) accounts for accepted and detached work through cleanup without cancelling active tasks. Channel setup and provider sign-in owners must stay busy until native workers, callbacks and cleanup actually exit; cancelling an awaiter, expiring a flow or returning a QR/browser response does not establish idle. Failed cleanup retains ownership for retry. See the [connector lifecycle](../nanobot/channels/connect.py) and [sign-in registry](../nanobot/webui/settings_services.py). A loaded connector without that lifecycle cannot claim coordinated-update idleness.
+
+Handoff settlement requires free worker, preflight and stop-coordinator leases and refuses committed shutdown, installation admission or mutation. It records `cancelled` without deleting saved files or launching work; repeated settlement is safe. An uncertain response is resolved by reading the old job.
+
+## Data protection and protected restart
+
+[Profile receipts](../nanobot/update_profiles.py) preserve known stopped profiles for backup and retain original launch selectors, paths and process/run identities, not configuration contents or arbitrary environment variables. A PID alone is not liveness. A new run, changed inventory or unconfirmed owner invalidates review; inventory does not authorize stopping a supervisor or starting a previously stopped profile.
+
+[Data leases](../nanobot/data_access.py) protect overlapping named stores even across cooperating Python installations. Reservations bind the exact job and scope across crashes. [Backups](../nanobot/update_backup.py) cover recorded nanobot stores and required receipts, not entire homes, arbitrary projects or external services. Redirected paths, symlinks/reparse points, special files, changing data or insufficient space block backup. The original backup is verified and retained across retries, never replaced by post-mutation data. Automatic data rollback is unavailable.
+
+[Protected restart](../nanobot/update_restart.py) launches only reviewed participants through lease-owning frozen entrypoints using their saved selectors. A startup grant permits initialization of one participant's exact reserved data scope, not agent/tool/scheduler work or broader paths; its bearer is removed before normal runtime configuration. Grants cannot expand an older updater's reservation. For protocol-1 grants predating the lazy delivery store, that store takes an ordinary lease and cannot initialize, migrate or write before activation.
+
+Gateways remain in maintenance until their actual run identities, target versions and readiness are verified. Durable activation names those exact runs; a generic HTTP success or receipt is insufficient. Verification after intake opens precedes fence/reservation cleanup and `succeeded`. A crash during finalization resumes cleanup only, not reinstall or activation. Clients additionally require authenticated reconnection to the target-running gateway before reporting update completion.
+
+The optional macOS Dock helper belongs to the gateway, starts only after activation and exits when its owner stops. It holds no installation/data lease and is not loaded by the frozen updater or recovery supervisor. Its instance-scoped visibility intent survives reviewed restart/recovery; the helper does not own update execution or completion.
+
+## Recovery and compatibility limits
+
+For installer-owned dedicated venvs with selected background participants, [automatic recovery](../nanobot/update_fallback.py) preserves a verified sibling program/dependency snapshot before mutation. An independent supervisor can try the already admitted exact target once, then restore only the original program before candidate activation and only if protected user-file contents still match the original backup. Backup failure before mutation can restart the intact original program. Restoration uses journaled same-filesystem renames, retains the failed generation and replays one transient filesystem failure; duplicate launches do not gain another recovery budget.
+
+Restored service is not update success: the wire result remains `failed` for older clients and adds `service_restored`. Successful upgrades may remove their redundant program snapshot but retain the data backup. Changed data or durable activation forbids older-program restoration; only same-target completion remains safe. Corrupt snapshots, changed ownership, persistent filesystem faults, missing base Python or loss of both supervisor and worker can require operator recovery. This is neither malware remediation nor an OS boot-time recovery service.
+
+Compatibility is explicit, not inferred from versions. Protocol 1 covers worker request schema 4, frozen `-I -S` startup with child-owned installation leases, scoped data-startup grants and activation bound to the exact restarted run. The target must declare a supported protected-handoff contract; see [release compatibility](releasing.md#protected-updater-handoff-compatibility) for its schema and publication requirements. External managers, unsupported layouts and older jobs are not silently adopted. Hosts without settlement/retry capabilities retain their existing status/recovery route rather than accepting unsupported actions. The [standalone launcher](../nanobot/update_recovery.py) uses the saved worker and original base Python independently of a broken application environment; user commands and operational limits remain in the [update guide](updating.md).

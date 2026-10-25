@@ -2,6 +2,10 @@
   "setup": {
     "docsLabel": "開啟 QQ 設定指南",
     "officialLabel": "開啟 QQ 機器人後台",
+    "sections": {
+      "credentials": "手動憑證",
+      "advanced": "進階"
+    },
     "fields": {
       "appId": {
         "label": "App ID",
@@ -12,7 +16,7 @@
         "placeholder": "••••••"
       },
       "allowFrom": {
-        "label": "允許的使用者",
+        "label": "允許使用者",
         "placeholder": "Open ID，以逗號分隔"
       },
       "msgFormat": {
@@ -23,17 +27,43 @@
         }
       },
       "ackMessage": {
-        "label": "處理中提示"
+        "label": "處理提示"
       },
       "mediaDir": {
         "label": "媒體目錄"
       },
       "downloadChunkSize": {
-        "label": "下載分塊大小"
+        "label": "分塊大小（位元組）"
       },
       "downloadMaxBytes": {
-        "label": "下載大小上限"
+        "label": "下載上限（位元組）"
+      },
+      "showCompactionNotices": {
+        "label": "壓縮通知",
+        "choices": {
+          "true": "開",
+          "false": "關"
+        }
       }
     }
+  },
+  "custom": {
+    "scanTitle": "用手機 QQ 掃碼綁定",
+    "waiting": "等待掃碼…",
+    "connected": "綁定成功",
+    "stopped": "已取消",
+    "connecting": "產生中…",
+    "qrAlt": "QQ 綁定 QR code",
+    "scanAgainWarning": "重新綁定可能中斷其他軟體與此 QQ 機器人的連線。若 App Secret 被重設，舊金鑰將失效，使用舊金鑰的軟體也需更新金鑰。",
+    "configured": "已設定",
+    "bind": "綁定機器人",
+    "rebind": "重新綁定",
+    "refresh": "更新 QR code",
+    "retry": "重試",
+    "expired": "QR code 已過期",
+    "failed": "綁定失敗",
+    "cancelFailed": "取消失敗",
+    "retrying": "正在重試…",
+    "manualSetup": "手動設定"
   }
 }

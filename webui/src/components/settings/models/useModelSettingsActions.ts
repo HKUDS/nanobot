@@ -1,4 +1,4 @@
-import { useCallback, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import type { TFunction } from "i18next";
 
 import type {
@@ -7,15 +7,19 @@ import type {
   PendingRestartSections,
 } from "@/components/settings/contracts";
 import { agentDraftFromPayload } from "@/components/settings/models/ModelsSettings";
+import { modelAPISelection } from "@/components/settings/models/modelAPI";
+import type { RequestParameterDraft } from "@/components/settings/models/ProviderParameterFields";
 import {
   CUSTOM_PROVIDER_CREATION_KEY,
   providerFormFromRow,
+  providerJsonValue,
   type CustomProviderDraft,
-} from "@/components/settings/models/ProviderSettings";
+} from "@/components/settings/models/providerForm";
 import type { ModelSettingsState } from "@/components/settings/models/useModelSettingsState";
 import { normalizeContextWindowTokens } from "@/components/settings/shared/ModelControls";
 import {
   ApiError,
+  cancelProviderOAuth,
   completeProviderOAuth,
   createModelConfiguration,
   createProviderSettings,
@@ -60,9 +64,8 @@ interface ModelSettingsActionsOptions {
   setError: Dispatch<SetStateAction<string | null>>;
   onModelNameChange: (modelName: string | null) => void;
   remoteBrowserAccess: boolean;
-  closeProviderOAuthFlow: () => void;
+  closeProviderOAuthFlow: (cancelPending?: boolean) => void;
   installCapabilities: (names: string[]) => Promise<boolean>;
-  modelDirty: boolean;
   configuredModelProviderOptions: Array<{ name: string; label: string }>;
 }
 
@@ -79,11 +82,14 @@ export function useModelSettingsActions({
   remoteBrowserAccess,
   closeProviderOAuthFlow,
   installCapabilities,
-  modelDirty,
   configuredModelProviderOptions,
 }: ModelSettingsActionsOptions) {
+  const oauthMounted = useRef(true);
+  useEffect(() => {
+    oauthMounted.current = true;
+    return () => { oauthMounted.current = false; };
+  }, []);
   const {
-    expandedProvider,
     form,
     modelCallOrder,
     modelCallOrderSaving,
@@ -100,7 +106,6 @@ export function useModelSettingsActions({
     providerSaving,
     saving,
     setEditingProviderKeys,
-    setExpandedProvider,
     setForm,
     setModelCallOrder,
     setModelCallOrderSaving,
@@ -115,15 +120,26 @@ export function useModelSettingsActions({
     setProviderOAuthDialogError,
     setProviderOAuthFlow,
     setProviderOAuthResponse,
-    setProviderSaving,
+    setProviderOperation,
     setSaving,
     setVisibleProviderKeys,
     visibleProviderKeys,
   } = state;
 
+  const latestSettings = useRef(settings);
+  latestSettings.current = settings;
+  // Renaming changes the server key, not the owner of already queued edits.
+  const editTargetSequence = useRef(0);
+  const editTargetRef = useRef({ name: modelPresetEditingName, identity: 0 });
+  if (editTargetRef.current.name !== modelPresetEditingName) {
+    editTargetSequence.current += 1;
+    editTargetRef.current = { name: modelPresetEditingName, identity: editTargetSequence.current };
+  }
+  const editTarget = editTargetRef.current;
+
   const presetNameConflict = (name: string, currentName?: string) => {
     const normalized = name.toLowerCase();
-    return settings?.model_presets.some(
+    return latestSettings.current?.model_presets.some(
       (preset) =>
         !preset.is_default &&
         preset.name !== currentName &&
@@ -151,11 +167,15 @@ export function useModelSettingsActions({
   const saveModelSettings = async () => {
     if (
       !settings ||
-      saving ||
       modelCallOrderSaving ||
-      modelConfigurationSaving
+      modelConfigurationSaving ||
+      !Number.isSafeInteger(form.maxTokens) ||
+      form.maxTokens <= 0 ||
+      !Number.isSafeInteger(form.contextWindowTokens) ||
+      form.contextWindowTokens <= 0 ||
+      !Number.isFinite(form.temperature) || form.temperature < 0 || form.temperature > 2
     ) {
-      return;
+      return false;
     }
 
     if (modelPresetCreating) {
@@ -167,15 +187,14 @@ export function useModelSettingsActions({
         !provider ||
         !model ||
         form.maxTokens <= 0 ||
-        form.contextWindowTokens <= 0 ||
         form.temperature < 0 ||
         form.temperature > 2
       ) {
-        return;
+        return false;
       }
       if (presetNameConflict(name)) {
         showPresetNameConflict();
-        return;
+        return false;
       }
       setModelPresetNameError(null);
       setModelConfigurationSaving(true);
@@ -188,10 +207,16 @@ export function useModelSettingsActions({
           contextWindowTokens: form.contextWindowTokens,
           temperature: form.temperature,
           reasoningEffort: form.reasoningEffort || null,
+          api: form.api ?? undefined,
+          ...(settings.model_request_overrides_supported ? {
+            extraHeaders: form.extraHeaders,
+            extraQuery: form.extraQuery,
+            extraBody: form.extraBody,
+          } : {}),
         });
         const createdPreset = payload.created_model_preset;
         const nextOrder = createdPreset ? [...modelCallOrder, createdPreset] : null;
-        applyPayload(payload);
+        applyPayload(payload, { preserveCapabilityForms: true });
         if (createdPreset) {
           setForm(agentDraftFromPayload(payload, createdPreset));
           setModelPresetEditingName(createdPreset);
@@ -200,7 +225,7 @@ export function useModelSettingsActions({
         let finalPayload = payload;
         if (nextOrder) {
           const orderedPayload = await updateModelCallOrder(client, nextOrder);
-          applyPayload(orderedPayload);
+          applyPayload(orderedPayload, { preserveCapabilityForms: true });
           finalPayload = orderedPayload;
         }
         if (createdPreset) {
@@ -216,19 +241,19 @@ export function useModelSettingsActions({
       } finally {
         setModelConfigurationSaving(false);
       }
-      return;
+      return false;
     }
 
-    if (!modelDirty) return;
-    const selectedPreset = settings.model_presets.find(
-      (preset) => !preset.is_default && preset.name === modelPresetEditingName,
+    const targetName = editTarget.name;
+    const selectedPreset = latestSettings.current?.model_presets.find(
+      (preset) => !preset.is_default && preset.name === targetName,
     );
-    if (!selectedPreset) return;
+    if (!selectedPreset) return false;
     const nextName = form.modelPreset.trim();
     const nameChanged = form.modelPreset !== selectedPreset.name;
     if (nameChanged && presetNameConflict(nextName, selectedPreset.name)) {
       showPresetNameConflict();
-      return;
+      return false;
     }
     setModelPresetNameError(null);
     const reasoningEffort = form.reasoningEffort || null;
@@ -250,15 +275,43 @@ export function useModelSettingsActions({
           form.temperature !== selectedPreset.temperature ? form.temperature : undefined,
         reasoningEffort:
           reasoningEffort !== selectedPreset.reasoning_effort ? reasoningEffort : undefined,
+        api: modelAPISelection(form.api) !== modelAPISelection(selectedPreset.api)
+          ? form.api : undefined,
+        ...(settings.model_request_overrides_supported ? {
+          extraHeaders: form.extraHeaders !== providerJsonValue(selectedPreset.extra_headers) ? form.extraHeaders : undefined,
+          extraQuery: form.extraQuery !== providerJsonValue(selectedPreset.extra_query) ? form.extraQuery : undefined,
+          extraBody: form.extraBody !== providerJsonValue(selectedPreset.extra_body) ? form.extraBody : undefined,
+        } : {}),
       });
-      applyPayload(payload);
-      setForm(agentDraftFromPayload(payload, nextName));
-      setModelPresetEditingName(nextName);
+      latestSettings.current = payload;
+      editTarget.name = nextName;
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
+      setForm((current) => current === form ? agentDraftFromPayload(payload, nextName) : current);
+      if (editTargetRef.current === editTarget) {
+        setModelPresetEditingName(nextName);
+      }
       onModelNameChange(payload.agent.model || null);
       setModelPresetNameError(null);
       setError(null);
+      return true;
     } catch (err) {
       handlePresetSaveError(err);
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveModelRequestSettings = async (values: Partial<RequestParameterDraft>) => {
+    setSaving(true);
+    try {
+      const payload = await updateModelConfiguration(client, {
+        name: modelPresetEditingName,
+        ...values,
+      });
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
+      setForm((current) => current === form ? agentDraftFromPayload(payload, modelPresetEditingName) : current);
+      setError(null);
     } finally {
       setSaving(false);
     }
@@ -283,6 +336,10 @@ export function useModelSettingsActions({
       modelPreset: "",
       provider,
       model: "",
+      api: null,
+      extraHeaders: "",
+      extraQuery: "",
+      extraBody: "",
       maxTokens: primaryPreset?.max_tokens ?? settings.agent.max_tokens,
       contextWindowTokens: normalizeContextWindowTokens(
         primaryPreset?.context_window_tokens ?? settings.agent.context_window_tokens,
@@ -322,7 +379,7 @@ export function useModelSettingsActions({
     setModelCallOrderSaving(true);
     try {
       const payload = await updateModelCallOrder(client, nextOrder);
-      applyPayload(payload, { preserveAgentForm: true });
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
       onModelNameChange(payload.agent.model || null);
       setError(null);
     } catch (err) {
@@ -338,7 +395,7 @@ export function useModelSettingsActions({
     setModelMigrationSaving(true);
     try {
       const payload = await migrateModelConfigurations(client);
-      applyPayload(payload);
+      applyPayload(payload, { preserveCapabilityForms: true });
       onModelNameChange(payload.agent.model || null);
       setError(null);
     } catch (err) {
@@ -355,50 +412,51 @@ export function useModelSettingsActions({
       modelCallOrderSaving ||
       modelConfigurationSaving
     ) {
-      return;
+      return false;
     }
     setSaving(true);
     try {
       const payload = await deleteModelConfiguration(client, modelPresetPendingDelete.name);
-      applyPayload(payload);
+      applyPayload(payload, { preserveCapabilityForms: true });
       setModelPresetPendingDelete(null);
       setError(null);
+      return true;
     } catch (err) {
       setError((err as Error).message);
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
-  const saveProvider = async (providerName: string) => {
-    if (providerSaving) return;
+  const saveProvider = async (providerName: string): Promise<boolean> => {
+    if (providerSaving) return false;
     const provider = settings?.providers.find((item) => item.name === providerName);
-    if (!provider) return;
+    if (!provider) return false;
     const isOauthProvider = provider.auth_type === "oauth";
     const providerForm = providerForms[providerName] ?? providerFormFromRow(provider);
     const apiKey = providerForm.apiKey.trim();
-    const apiKeyRequired = provider.api_key_required ?? true;
-    if (!isOauthProvider && !provider.configured && apiKeyRequired && !apiKey) {
+    if (!isOauthProvider && !provider.configured && (provider.api_key_required ?? true) && !apiKey) {
       setError(t("settings.byok.apiKeyRequired"));
-      return;
+      return false;
     }
-    setProviderSaving(providerName);
+    setProviderOperation({ provider: providerName, action: "save" });
     try {
       const supportName = providerName === "bedrock"
         ? "bedrock"
         : providerName === "azure_openai"
           ? "azure"
           : null;
-      if (supportName && !(await installCapabilities([supportName]))) return;
+      if (supportName && !(await installCapabilities([supportName]))) return false;
       const update: ProviderSettingsUpdate = { provider: providerName };
       if (!isOauthProvider) {
         update.apiKey = apiKey || undefined;
         update.apiBase = providerForm.apiBase.trim();
         if (provider.is_custom) update.displayName = providerForm.displayName.trim();
+        if (provider.provider_api_configurable) update.api = providerForm.api;
       }
       for (const field of provider.advanced_fields ?? []) {
-        if (field === "api_type") update.apiType = providerForm.apiType;
-        if (field === "proxy") update.proxy = providerForm.proxy.trim();
+        if (field === "use_proxy") update.use_proxy = providerForm.useProxy;
         if (field === "extra_headers") {
           update.extraHeaders = providerForm.extraHeaders.trim();
         }
@@ -411,58 +469,51 @@ export function useModelSettingsActions({
         if (field === "profile") update.profile = providerForm.profile.trim();
       }
       const payload = await updateProviderSettings(client, update);
-      applyPayload(payload);
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, image: true }));
       }
       await maybeRestartHostEngine(payload);
-      setProviderForms((prev) => ({
-        ...prev,
-        [providerName]: {
-          ...providerForm,
-          displayName: providerForm.displayName.trim(),
-          apiKey: "",
-          apiBase: providerForm.apiBase.trim(),
-          proxy: providerForm.proxy.trim(),
-          thinkingStyle: providerForm.thinkingStyle.trim(),
-          region: providerForm.region.trim(),
-          profile: providerForm.profile.trim(),
-        },
-      }));
+      setProviderForms((prev) => {
+        const next = { ...prev };
+        delete next[providerName];
+        return next;
+      });
       setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: false }));
       setEditingProviderKeys((prev) => ({ ...prev, [providerName]: false }));
-      if (!isOauthProvider) setExpandedProvider(null);
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setProviderSaving(null);
-    }
-  };
-
-  const createCustomProvider = async (draft: CustomProviderDraft): Promise<boolean> => {
-    if (providerSaving) return false;
-    setProviderSaving(CUSTOM_PROVIDER_CREATION_KEY);
-    try {
-      const payload = await createProviderSettings(client, {
-        name: draft.name.trim(),
-        apiKey: draft.apiKey.trim() || undefined,
-        apiBase: draft.apiBase.trim(),
-        proxy: draft.proxy.trim(),
-        extraHeaders: draft.extraHeaders.trim(),
-        extraBody: draft.extraBody.trim(),
-        extraQuery: draft.extraQuery.trim(),
-        thinkingStyle: draft.thinkingStyle.trim(),
-      });
-      applyPayload(payload);
-      setExpandedProvider(null);
       setError(null);
       return true;
     } catch (err) {
       setError((err as Error).message);
       return false;
     } finally {
-      setProviderSaving(null);
+      setProviderOperation(null);
+    }
+  };
+
+  const createCustomProvider = async (draft: CustomProviderDraft): Promise<SettingsPayload | null> => {
+    if (providerSaving) return null;
+    setProviderOperation({ provider: CUSTOM_PROVIDER_CREATION_KEY, action: "create" });
+    try {
+      const payload = await createProviderSettings(client, {
+        name: draft.name.trim(),
+        apiKey: draft.apiKey.trim() || undefined,
+        apiBase: draft.apiBase.trim(),
+        ...(settings?.provider_api_configuration_supported ? { api: draft.api } : {}),
+        use_proxy: draft.useProxy,
+        extraHeaders: draft.extraHeaders.trim(),
+        extraBody: draft.extraBody.trim(),
+        extraQuery: draft.extraQuery.trim(),
+        thinkingStyle: draft.thinkingStyle.trim(),
+      });
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
+      setError(null);
+      return payload;
+    } catch (err) {
+      setError((err as Error).message);
+      return null;
+    } finally {
+      setProviderOperation(null);
     }
   };
 
@@ -481,7 +532,7 @@ export function useModelSettingsActions({
         popup = null;
       }
     }
-    setProviderSaving(providerName);
+    setProviderOperation({ provider: providerName, action });
     try {
       const payload =
         action === "login"
@@ -492,6 +543,10 @@ export function useModelSettingsActions({
             )
           : await logoutProviderOAuth(client, providerName);
       if (isProviderOAuthAuthorizationRequired(payload)) {
+        if (payload.completion_input === "device_code" && !oauthMounted.current) {
+          await cancelProviderOAuth(client, payload.provider, payload.flow_id).catch(() => {});
+          return;
+        }
         try {
           if (popup && !popup.closed) popup.location.href = payload.authorization_url;
         } catch {
@@ -501,20 +556,18 @@ export function useModelSettingsActions({
         setProviderOAuthFlow(payload);
         setProviderOAuthResponse("");
         setProviderOAuthDialogError(null);
-        setExpandedProvider(providerName);
         setError(null);
         return;
       }
       popup?.close();
-      closeProviderOAuthFlow();
-      applyPayload(payload);
-      setExpandedProvider(providerName);
+      closeProviderOAuthFlow(false);
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
       setError(null);
     } catch (err) {
       popup?.close();
       setError((err as Error).message);
     } finally {
-      setProviderSaving(null);
+      setProviderOperation(null);
     }
   };
 
@@ -533,10 +586,9 @@ export function useModelSettingsActions({
       );
       if (providerOAuthFlowRef.current?.flow_id !== flow.flow_id) return;
       if (isProviderOAuthPending(payload)) return;
-      applyPayload(payload);
-      setExpandedProvider(flow.provider);
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
       setError(null);
-      closeProviderOAuthFlow();
+      closeProviderOAuthFlow(false);
     } catch (err) {
       if (providerOAuthFlowRef.current?.flow_id === flow.flow_id) {
         setProviderOAuthDialogError((err as Error).message);
@@ -557,30 +609,21 @@ export function useModelSettingsActions({
     setEditingProviderKeys((prev) => ({ ...prev, [providerName]: false }));
   }, [settings]);
 
-  const handleToggleProvider = useCallback((providerName: string) => {
-    if (expandedProvider) resetProviderDraft(expandedProvider);
-    setExpandedProvider(expandedProvider === providerName ? null : providerName);
-  }, [expandedProvider, resetProviderDraft]);
-
   const toggleProviderKeyVisibility = (providerName: string) => {
     const isVisible = visibleProviderKeys[providerName];
     setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: !isVisible }));
   };
 
   const toggleProviderKeyEditing = (providerName: string) => {
+    const provider = settings?.providers.find((row) => row.name === providerName);
+    if (!provider) return;
     setEditingProviderKeys((prev) => {
       const nextEditing = !prev[providerName];
       if (!nextEditing) {
         setProviderForms((forms) => ({
           ...forms,
           [providerName]: {
-            ...(forms[providerName] ?? providerFormFromRow(
-              settings?.providers.find((provider) => provider.name === providerName) ?? {
-                name: providerName,
-                label: providerName,
-                configured: false,
-              },
-            )),
+            ...(forms[providerName] ?? providerFormFromRow(provider)),
             apiKey: "",
           },
         }));
@@ -591,6 +634,7 @@ export function useModelSettingsActions({
   };
 
   return {
+    modelEditIdentity: String(editTarget.identity),
     beginModelPresetCreation,
     cancelModelPresetCreation,
     changeModelCallOrder,
@@ -598,10 +642,10 @@ export function useModelSettingsActions({
     createCustomProvider,
     handleDeleteModelConfiguration,
     handleMigrateModelConfigurations,
-    handleToggleProvider,
     resetProviderDraft,
     runProviderOAuth,
     saveModelSettings,
+    saveModelRequestSettings,
     saveProvider,
     toggleProviderKeyEditing,
     toggleProviderKeyVisibility,

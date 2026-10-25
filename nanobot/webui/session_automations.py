@@ -5,13 +5,16 @@ from __future__ import annotations
 from collections.abc import Collection
 from typing import Any, Protocol, cast
 
+from nanobot.cron.binding import binding_revision
+from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import (
-    _message_preview_text,  # pyright: ignore[reportPrivateUsage]
-    _metadata_title,  # pyright: ignore[reportPrivateUsage]
+    message_preview_text,  # pyright: ignore[reportPrivateUsage]
+    metadata_title,  # pyright: ignore[reportPrivateUsage]
 )
 from nanobot.triggers.local_types import LocalTrigger
+from nanobot.webui.session_identity import is_webui_session_key
 
 AutomationJob = CronJob | LocalTrigger
 
@@ -72,6 +75,7 @@ def session_automations_payload(
     session_key: str,
     *,
     local_trigger_store: _LocalTriggerStoreLike | None = None,
+    session_manager: _SessionManagerLike | None = None,
     pending_job_ids: Collection[str] | None = None,
 ) -> dict[str, Any]:
     """Return user-created automation jobs attached to a WebUI session."""
@@ -83,6 +87,8 @@ def session_automations_payload(
                 local_trigger_store=local_trigger_store,
             ),
             pending_job_ids=pending_job_ids,
+            include_details=True,
+            session_manager=session_manager,
         )
     }
 
@@ -171,22 +177,26 @@ def _serialize_job(
     payload["created_at_ms"] = job.created_at_ms
     payload["updated_at_ms"] = job.updated_at_ms
     payload["payload"].update({"kind": job.payload.kind})
+    run_history: list[dict[str, Any]] = []
+    for record in job.state.run_history[-5:]:
+        session_key = record.session_key or job.payload.session_key or ""
+        run_history.append({
+            "run_at_ms": record.run_at_ms,
+            "status": record.status,
+            "duration_ms": record.duration_ms,
+            "error": record.error,
+            "webui_session_key": session_key if is_webui_session_key(session_key) else None,
+        })
     payload["state"].update(
         {
             "last_run_at_ms": job.state.last_run_at_ms,
             "last_error": job.state.last_error,
-            "run_history": [
-                {
-                    "run_at_ms": record.run_at_ms,
-                    "status": record.status,
-                    "duration_ms": record.duration_ms,
-                    "error": record.error,
-                }
-                for record in job.state.run_history[-5:]
-            ],
+            "run_history": run_history,
         }
     )
     payload["origin"] = _origin_payload(job, session_manager)
+    if is_bound_cron_job(job):
+        payload["chat_binding_revision"] = binding_revision(job)
     return payload
 
 
@@ -312,7 +322,7 @@ def _websocket_origin_payload(
     if session_manager is not None:
         data = session_manager.read_session_file(session_key)
         if isinstance(data, dict):
-            title = _metadata_title(data.get("metadata"))
+            title = metadata_title(data.get("metadata"))
             preview = _session_preview(data.get("messages"))
 
     return {
@@ -334,7 +344,7 @@ def _session_preview(messages: Any) -> str:
         message = cast(dict[str, Any], message_value)
         if is_hidden_history_message(message):
             continue
-        text = _message_preview_text(message)
+        text = message_preview_text(message)
         if not text:
             continue
         if message.get("role") == "user":

@@ -8,6 +8,7 @@ from nanobot.bus.outbound_events import (
     RetryStatusEvent,
     TurnEndEvent,
 )
+from nanobot.events import CompactionReason
 from nanobot.providers.base import LLMUsage
 from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
 from nanobot.webui.outbound_wire import (
@@ -18,12 +19,14 @@ from nanobot.webui.outbound_wire import (
 )
 
 
-def test_encode_context_compaction_projects_the_lifecycle() -> None:
+@pytest.mark.parametrize("reason", [None, "idle", "context_pressure", "manual", "provider_native"])
+def test_encode_context_compaction_projects_the_lifecycle(reason: CompactionReason | None) -> None:
     payload = encode_context_compaction(
         "chat-1",
         ContextCompactionEvent(
             compaction_id="compact-1",
             phase="succeeded",
+            reason=reason,
         ),
     )
 
@@ -32,6 +35,7 @@ def test_encode_context_compaction_projects_the_lifecycle() -> None:
         "chat_id": "chat-1",
         "compaction_id": "compact-1",
         "phase": "succeeded",
+        **({"reason": reason} if reason is not None else {}),
     }
 
 

@@ -12,7 +12,7 @@ import type { TFunction } from "i18next";
 import { Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { currentLocale } from "@/i18n";
-import { fmtDateTime } from "@/lib/format";
+import { fmtDateTime } from "@/lib/format-time";
 import type { SessionAutomationJob } from "@/lib/types";
 
 interface DeleteConfirmProps {
@@ -81,7 +81,6 @@ export function DeleteConfirm({
                     <span className="truncate">
                       {formatAutomationSchedule(job, t, locale)}
                     </span>
-                    <span aria-hidden>·</span>
                     <span className="truncate">{formatAutomationNextRun(job, t, locale)}</span>
                   </div>
                 </div>

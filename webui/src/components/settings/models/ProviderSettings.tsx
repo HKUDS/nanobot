@@ -1,13 +1,13 @@
-import { useId, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { DisclosureContent } from "@/components/ui/disclosure";
 import {
   ChevronDown,
+  ChevronLeft,
   Clipboard,
   Eye,
   EyeOff,
   ExternalLink,
   Globe2,
-  Hexagon,
   Loader2,
   Pencil,
   Plus,
@@ -15,14 +15,17 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { PROVIDER_ICONS } from "@/components/settings/shared/ModelControls";
-import {
-  CapabilityInstallNotice,
-  SettingsGroup,
-  SettingsSectionTitle,
-} from "@/components/settings/shared/SettingsControls";
-import { ToggleButton } from "@/components/settings/ToggleButton";
+import type { ProviderOperation } from "@/components/settings/models/useModelSettingsState";
+import { ProviderIcon } from "@/components/settings/shared/ProviderIcon";
+import { ProviderSearchList } from "@/components/settings/models/ProviderSearchList";
+export { ProviderIcon } from "@/components/settings/shared/ProviderIcon";
+import { CapabilityInstallNotice } from "@/components/settings/shared/SettingsControls";
+import { ToggleButton } from "@/components/ui/toggle-button";
+import { ModelAPIControl } from "@/components/settings/models/ModelAPIControl";
+import { ProviderAPIControl } from "@/components/settings/models/ProviderAPIControl";
 import { Button } from "@/components/ui/button";
+import { SettingsHint } from "@/components/settings/shared/SettingsHint";
+import { ProxySettingsControl } from "@/components/settings/shared/ProxySettingsControl";
 import {
   Dialog,
   DialogContent,
@@ -30,45 +33,39 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { SheetContent } from "@/components/ui/sheet";
+import { FloatingPortalContext } from "@/components/ui/floating-portal";
 import { Textarea } from "@/components/ui/textarea";
-import { SettingsTextEditor } from "@/components/settings/shared/SettingsTextEditor";
-import { useLogoFallback } from "@/hooks/useLogoFallback";
-import { providerBrand } from "@/lib/provider-brand";
+import { ProviderParameterFields } from "@/components/settings/models/ProviderParameterFields";
+import {
+  CUSTOM_PROVIDER_CREATION_KEY,
+  emptyCustomProviderDraft,
+  parseProviderObject,
+  providerFormFromRow,
+  providerJsonValue,
+  type CustomProviderDraft,
+  type ProviderAdvancedField,
+  type ProviderForm,
+} from "@/components/settings/models/providerForm";
+export type { CustomProviderDraft, ProviderForm } from "@/components/settings/models/providerForm";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { cn } from "@/lib/utils";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import type {
   NanobotFeaturesPayload,
+  ModelAPIConfig,
   ProviderOAuthAuthorizationRequired,
   SettingsPayload,
 } from "@/lib/types";
 
-type ProviderApiType = "auto" | "chat_completions" | "responses";
-type ProviderAdvancedField = NonNullable<
-  SettingsPayload["providers"][number]["advanced_fields"]
->[number];
-export type ProviderForm = {
-  displayName: string;
-  apiKey: string;
-  apiBase: string;
-  apiType: ProviderApiType;
-  proxy: string;
-  extraHeaders: string;
-  extraBody: string;
-  extraQuery: string;
-  thinkingStyle: string;
-  region: string;
-  profile: string;
-};
-export type CustomProviderDraft = ProviderForm & { name: string };
 const OAUTH_PROXY_PROVIDERS = new Set(["openai_codex", "xai_grok"]);
 type ProviderRequestOption = {
   kind: "priority" | "hosted_tool";
@@ -86,7 +83,7 @@ const PROVIDER_REQUEST_OPTIONS: Partial<Record<string, ProviderRequestOption[]>>
     titleKey: "settings.providers.capabilityFastMode",
     title: "Fast mode",
     helpKey: "settings.providers.capabilityFastModeHelp",
-    help: "Use OpenAI's priority service tier for faster responses. This consumes credits faster.",
+    help: "Faster responses, increased usage.",
   }],
   openai: [{
     kind: "hosted_tool",
@@ -96,15 +93,6 @@ const PROVIDER_REQUEST_OPTIONS: Partial<Record<string, ProviderRequestOption[]>>
     help: "Allow compatible Responses API models to search the web. Search activity appears in chat.",
     toolType: "web_search",
     forceResponses: true,
-  }],
-  deepseek: [{
-    kind: "hosted_tool",
-    titleKey: "settings.providers.capabilityDeepSeekSearch",
-    title: "DeepSeek web search",
-    helpKey: "settings.providers.capabilityDeepSeekSearchHelp",
-    help: "Let DeepSeek V4 Flash search the web through its Responses API. Search activity appears in chat.",
-    toolType: "web_search",
-    defaultEnabled: true,
   }],
   xai_grok: [{
     kind: "hosted_tool",
@@ -116,30 +104,13 @@ const PROVIDER_REQUEST_OPTIONS: Partial<Record<string, ProviderRequestOption[]>>
     defaultEnabled: true,
   }],
 };
-export const CUSTOM_PROVIDER_CREATION_KEY = "__custom_provider__";
 const CUSTOM_PROVIDER_ADVANCED_FIELDS: ProviderAdvancedField[] = [
   "extra_headers",
   "extra_body",
   "extra_query",
-  "proxy",
+  "use_proxy",
   "thinking_style",
 ];
-
-function providerJsonValue(value: Record<string, unknown> | null | undefined): string {
-  return value && Object.keys(value).length > 0 ? JSON.stringify(value, null, 2) : "";
-}
-
-function parseProviderExtraBody(value: string): Record<string, unknown> | null {
-  if (!value.trim()) return {};
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : null;
-  } catch {
-    return null;
-  }
-}
 
 function isHostedSearchTool(tool: unknown, toolType: "web_search" | "x_search"): boolean {
   if (!tool || typeof tool !== "object" || Array.isArray(tool)) return false;
@@ -169,7 +140,7 @@ function updateProviderRequestOption(
   enabled: boolean,
   form: ProviderForm,
 ): Partial<ProviderForm> {
-  const extraBody = { ...(parseProviderExtraBody(form.extraBody) ?? {}) };
+  const extraBody = { ...(parseProviderObject(form.extraBody) ?? {}) };
   if (option.kind === "priority") {
     if (enabled) extraBody.service_tier = "priority";
     else if (extraBody.service_tier === "priority") delete extraBody.service_tier;
@@ -188,58 +159,10 @@ function updateProviderRequestOption(
   return {
     extraBody: providerJsonValue(extraBody),
     ...(option.forceResponses && enabled
-      ? { apiType: "responses" as const }
+      ? { api: { supported_apis: ["responses"], preferred_api: "responses" } satisfies ModelAPIConfig }
       : {}),
   };
 }
-
-export function providerFormFromRow(
-  provider: SettingsPayload["providers"][number],
-): ProviderForm {
-  return {
-    displayName: provider.is_custom ? provider.label : "",
-    apiKey: "",
-    apiBase: provider.api_base ?? provider.default_api_base ?? "",
-    apiType: provider.api_type ?? "auto",
-    proxy: provider.proxy ?? "",
-    extraHeaders: providerJsonValue(provider.extra_headers),
-    extraBody: providerJsonValue(provider.extra_body),
-    extraQuery: providerJsonValue(provider.extra_query),
-    thinkingStyle: provider.thinking_style ?? "",
-    region: provider.region ?? "",
-    profile: provider.profile ?? "",
-  };
-}
-
-function emptyCustomProviderDraft(): CustomProviderDraft {
-  return {
-    name: "",
-    displayName: "",
-    apiKey: "",
-    apiBase: "",
-    apiType: "auto",
-    proxy: "",
-    extraHeaders: "",
-    extraBody: "",
-    extraQuery: "",
-    thinkingStyle: "",
-    region: "",
-    profile: "",
-  };
-}
-
-const OPENAI_API_TYPE_OPTIONS: Array<{ value: ProviderApiType; label: string }> = [
-  { value: "auto", label: "Auto" },
-  { value: "chat_completions", label: "Chat Completions" },
-  { value: "responses", label: "Responses" },
-];
-
-const LOCAL_UNCONFIGURED_PROVIDER_ORDER = new Map(
-  ["vllm", "ollama", "lm_studio", "atomic_chat", "ovms"].map((name, index) => [
-    name,
-    index,
-  ]),
-);
 
 export function ProviderOAuthLoginDialog({
   flow,
@@ -266,6 +189,8 @@ export function ProviderOAuthLoginDialog({
 }) {
   const { t } = useTranslation();
   const expectsCallbackUrl = flow?.completion_input === "callback_url";
+  const isDeviceCode = flow?.completion_input === "device_code";
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const inputId = expectsCallbackUrl ? "provider-oauth-callback" : "provider-oauth-code";
   const inputLabel = expectsCallbackUrl
     ? t("settings.oauth.callbackUrl")
@@ -289,7 +214,9 @@ export function ProviderOAuthLoginDialog({
           <DialogHeader>
             <DialogTitle>{providerLabel}</DialogTitle>
             <DialogDescription>
-              {expectsCallbackUrl
+              {isDeviceCode
+                ? t("settings.oauth.deviceCodeHelp")
+                : expectsCallbackUrl
                 ? remoteBrowserAccess
                   ? t("settings.oauth.remoteCallbackHelp")
                   : t("settings.oauth.localCallbackHelp")
@@ -305,12 +232,37 @@ export function ProviderOAuthLoginDialog({
               <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
             )}
             <span>
-              {expectsCallbackUrl && remoteBrowserAccess
+              {isDeviceCode
+                ? t("settings.oauth.waitingForDeviceApproval")
+                : expectsCallbackUrl && remoteBrowserAccess
                 ? t("settings.oauth.pasteCallbackToContinue")
                 : t("settings.oauth.waitingForCallback")}
             </span>
           </div>
-          <div className="space-y-2">
+          {isDeviceCode ? (
+            <div className="space-y-2">
+              <label htmlFor="provider-device-code" className="block text-xs font-medium text-foreground">
+                {t("settings.oauth.deviceCode")}
+              </label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="provider-device-code"
+                  value={flow?.user_code ?? ""}
+                  readOnly
+                  onFocus={(event) => event.target.select()}
+                  className="h-12 text-center font-mono text-xl tracking-widest"
+                />
+                <Button type="button" variant="outline" onClick={async () => {
+                  if (flow?.user_code && await copyTextToClipboard(flow.user_code)) {
+                    setCopiedCode(flow.flow_id);
+                  }
+                }}>
+                  <Clipboard className="mr-2 h-4 w-4" aria-hidden />
+                  {copiedCode === flow?.flow_id ? t("code.copied") : t("code.copy")}
+                </Button>
+              </div>
+            </div>
+          ) : <div className="space-y-2">
             <label
               htmlFor={inputId}
               className="block text-xs font-medium text-foreground"
@@ -339,7 +291,7 @@ export function ProviderOAuthLoginDialog({
                 spellCheck={false}
               />
             )}
-          </div>
+          </div>}
           {error ? (
             <p
               role="alert"
@@ -351,13 +303,15 @@ export function ProviderOAuthLoginDialog({
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onOpenAuthorization}>
               <ExternalLink className="mr-2 h-4 w-4" aria-hidden />
-              {expectsCallbackUrl
+              {isDeviceCode
+                ? t("settings.oauth.openGitHub")
+                : expectsCallbackUrl
                 ? t("settings.oauth.openChatGPT")
                 : t("settings.oauth.signIn")}
             </Button>
-            <Button type="submit" disabled={!authorizationResponse.trim() || completing}>
+            {!isDeviceCode ? <Button type="submit" disabled={!authorizationResponse.trim() || completing}>
               {completing ? t("settings.oauth.signingIn") : t("settings.oauth.finishSignIn")}
-            </Button>
+            </Button> : null}
           </DialogFooter>
         </form>
       </DialogContent>
@@ -368,16 +322,19 @@ export function ProviderOAuthLoginDialog({
 function ProviderRequestOptions({
   providerName,
   form,
+  apiConfigurable,
   onChange,
 }: {
   providerName: string;
   form: ProviderForm;
+  apiConfigurable: boolean;
   onChange: (value: Partial<ProviderForm>) => void;
 }) {
   const { t } = useTranslation();
-  const options = PROVIDER_REQUEST_OPTIONS[providerName] ?? [];
+  const options = (PROVIDER_REQUEST_OPTIONS[providerName] ?? [])
+    .filter((option) => !option.forceResponses || apiConfigurable);
   if (options.length === 0) return null;
-  const extraBody = parseProviderExtraBody(form.extraBody) ?? {};
+  const extraBody = parseProviderObject(form.extraBody) ?? {};
 
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
 
@@ -390,17 +347,23 @@ function ProviderRequestOptions({
         return (
           <div
             key={option.titleKey}
-            className="flex items-center justify-between gap-4 rounded-xl px-4 py-3 transition-colors settings-hover focus-within:bg-sidebar-accent/60"
+            className="flex items-center justify-between gap-4 rounded-control px-4 py-3 transition-colors settings-hover focus-within:bg-sidebar-accent/60"
           >
-            <div className="flex min-w-0 items-start gap-3">
-              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted/70 text-muted-foreground">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted/70 text-muted-foreground">
                 <Icon className="h-4 w-4" aria-hidden />
               </span>
               <div className="min-w-0">
-                <p className="text-[13px] font-semibold text-foreground">{title}</p>
-                <p className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
-                  {tx(option.helpKey, option.help)}
-                </p>
+                <div className="text-[13px] font-semibold text-foreground">
+                  {option.kind === "priority"
+                    ? <SettingsHint description={tx(option.helpKey, option.help)}>{title}</SettingsHint>
+                    : title}
+                </div>
+                {option.kind !== "priority" ? (
+                  <p className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
+                    {tx(option.helpKey, option.help)}
+                  </p>
+                ) : null}
               </div>
             </div>
             <ToggleButton
@@ -419,21 +382,23 @@ function ProviderRequestOptions({
 }
 
 function ProviderAdvancedOptions({
+  onConfigureProxy,
   fields,
   form,
   onChange,
-  footer,
+  children,
 }: {
+  onConfigureProxy?: () => void;
   fields: ProviderAdvancedField[];
   form: ProviderForm;
   onChange: (value: Partial<ProviderForm>) => void;
-  footer?: ReactNode;
+  children?: ReactNode;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const enabled = new Set(fields);
   const contentId = useId();
-  if (enabled.size === 0) return null;
+  if (enabled.size === 0 && !children) return null;
 
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const thinkingStyleOptions = [
@@ -450,7 +415,7 @@ function ProviderAdvancedOptions({
         aria-expanded={open}
         aria-controls={contentId}
         onClick={() => setOpen((value) => !value)}
-        className="flex min-h-[48px] w-full items-center justify-between gap-4 px-1 py-2.5 text-left transition-colors hover:text-foreground"
+        className="flex min-h-[48px] w-full items-center justify-between gap-4 px-3 py-2.5 text-left transition-colors hover:text-foreground"
       >
         <span className="text-[13px] font-medium text-foreground">
           {tx("settings.providers.advancedOptions", "Advanced options")}
@@ -464,47 +429,12 @@ function ProviderAdvancedOptions({
         />
       </button>
       <DisclosureContent id={contentId} open={open}>
-        <div className="py-3">
+        <div className="space-y-3 py-3">
+          {children}
           <div className="grid gap-3 md:grid-cols-2">
-            {enabled.has("api_type") ? (
-              <label className="block space-y-1.5">
-                <span className="text-[12px] font-medium text-muted-foreground">
-                  {tx("settings.providers.apiType", "API type")}
-                </span>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-9 w-full justify-between rounded-full px-3 text-[13px]"
-                    >
-                      <span>
-                        {OPENAI_API_TYPE_OPTIONS.find(
-                          (option) => option.value === form.apiType,
-                        )?.label ?? form.apiType}
-                      </span>
-                      <ChevronDown
-                        className="h-3.5 w-3.5 text-muted-foreground"
-                        aria-hidden
-                      />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="min-w-[220px]">
-                    {OPENAI_API_TYPE_OPTIONS.map((option) => (
-                      <DropdownMenuItem
-                        key={option.value}
-                        onSelect={() => onChange({ apiType: option.value })}
-                      >
-                        {option.label}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </label>
-            ) : null}
             {enabled.has("thinking_style") ? (
               <label className="block space-y-1.5">
-                <span className="text-[12px] font-medium text-muted-foreground">
+                <span className="block px-3 text-[12px] font-medium text-muted-foreground">
                   {tx("settings.providers.thinkingStyle", "Reasoning parameter format")}
                 </span>
                 <DropdownMenu>
@@ -539,26 +469,17 @@ function ProviderAdvancedOptions({
                 </DropdownMenu>
               </label>
             ) : null}
-            {enabled.has("proxy") ? (
-              <label className="block space-y-1.5 md:col-span-2">
-                <span className="text-[12px] font-medium text-muted-foreground">
-                  {tx("settings.providers.proxy", "Network proxy")}
-                </span>
-                <Input
-                  value={form.proxy}
-                  onChange={(event) => onChange({ proxy: event.target.value })}
-                  placeholder="http://127.0.0.1:7890"
-                  autoCapitalize="none"
-                  autoComplete="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  className="h-9 rounded-full font-mono text-[12px]"
-                />
-              </label>
+            {enabled.has("use_proxy") ? (
+              <ProxySettingsControl
+                className="px-3 py-2 md:col-span-2"
+                checked={form.useProxy}
+                onChange={(useProxy) => onChange({ useProxy })}
+                onConfigure={onConfigureProxy}
+              />
             ) : null}
             {enabled.has("region") ? (
               <label className="block space-y-1.5">
-                <span className="text-[12px] font-medium text-muted-foreground">
+                <span className="block px-3 text-[12px] font-medium text-muted-foreground">
                   {tx("settings.providers.region", "Region")}
                 </span>
                 <Input
@@ -575,7 +496,7 @@ function ProviderAdvancedOptions({
             ) : null}
             {enabled.has("profile") ? (
               <label className="block space-y-1.5">
-                <span className="text-[12px] font-medium text-muted-foreground">
+                <span className="block px-3 text-[12px] font-medium text-muted-foreground">
                   {tx("settings.providers.profile", "AWS profile")}
                 </span>
                 <Input
@@ -590,95 +511,81 @@ function ProviderAdvancedOptions({
                 />
               </label>
             ) : null}
-            {enabled.has("extra_headers") ? (
-              <label className="block min-w-0 space-y-1.5">
-                <span className="text-[12px] font-medium text-muted-foreground">
-                  {tx("settings.providers.extraHeaders", "Extra headers")}
-                </span>
-                <SettingsTextEditor title={tx("settings.providers.extraHeaders", "Extra headers")}
-                  value={form.extraHeaders} onSave={(value) => onChange({ extraHeaders: value })}
-                  placeholder={'{"X-Header":"value"}'}
-                />
-              </label>
-            ) : null}
-            {enabled.has("extra_query") ? (
-              <label className="block min-w-0 space-y-1.5">
-                <span className="text-[12px] font-medium text-muted-foreground">
-                  {tx("settings.providers.extraQuery", "Additional query parameters")}
-                </span>
-                <SettingsTextEditor title={tx("settings.providers.extraQuery", "Additional query parameters")}
-                  value={form.extraQuery} onSave={(value) => onChange({ extraQuery: value })}
-                  placeholder={'{"api-version":"2024-02-01"}'}
-                />
-              </label>
-            ) : null}
-            {enabled.has("extra_body") ? (
-              <label className="block min-w-0 space-y-1.5 md:col-span-2">
-                <span className="text-[12px] font-medium text-muted-foreground">
-                  {tx("settings.providers.extraBody", "Additional body parameters")}
-                </span>
-                <SettingsTextEditor title={tx("settings.providers.extraBody", "Additional body parameters")}
-                  value={form.extraBody} onSave={(value) => onChange({ extraBody: value })}
-                  placeholder={'{"service_tier":"priority"}'}
-                />
-              </label>
-            ) : null}
+            <ProviderParameterFields fields={fields} form={form} onChange={onChange} />
           </div>
         </div>
       </DisclosureContent>
-      {footer ? (
-        <div className="flex items-center justify-end gap-2 py-3">
-          {footer}
-        </div>
-      ) : null}
+
     </div>
   );
 }
 
+export type ProviderSettingsEntry =
+  | { kind: "manage" | "add" }
+  | { kind: "edit"; provider: string };
+
+type ProviderSettingsView =
+  | { kind: "list" | "picker" | "custom" }
+  | { kind: "provider"; name: string; adding: boolean };
+
 export function ProvidersSettings({
+  onConfigureProxy,
+  entry,
+  onClose,
+  onCloseAutoFocus,
+  onProviderAdded,
   settings,
   nanobotFeatures,
   featureAction,
   capabilityError,
-  expandedProvider,
   providerForms,
   visibleProviderKeys,
   editingProviderKeys,
   providerSaving,
   showBrandLogos,
   remoteBrowserAccess,
-  onToggleProvider,
+  onResetProviderDraft,
   onToggleProviderKey,
   onToggleProviderKeyEditing,
   onChangeProviderForm,
   onSaveProvider,
   onCreateCustomProvider,
+  providerOperation,
   onProviderOAuthLogin,
   onProviderOAuthLogout,
 }: {
+  entry: ProviderSettingsEntry;
+  onConfigureProxy?: () => void;
+  onClose: () => void;
+  onCloseAutoFocus: (event: Event) => void;
+  onProviderAdded?: (provider: string) => void;
   settings: SettingsPayload;
   nanobotFeatures: NanobotFeaturesPayload | null;
   featureAction: string | null;
   capabilityError: string | null;
-  expandedProvider: string | null;
   providerForms: Record<string, ProviderForm>;
   visibleProviderKeys: Record<string, boolean>;
   editingProviderKeys: Record<string, boolean>;
   providerSaving: string | null;
   showBrandLogos: boolean;
   remoteBrowserAccess: boolean;
-  onToggleProvider: (provider: string) => void;
+  onResetProviderDraft: (provider: string) => void;
   onToggleProviderKey: (provider: string) => void;
   onToggleProviderKeyEditing: (provider: string) => void;
   onChangeProviderForm: (provider: string, value: Partial<ProviderForm>) => void;
-  onSaveProvider: (provider: string) => void;
-  onCreateCustomProvider: (draft: CustomProviderDraft) => Promise<boolean>;
+  onSaveProvider: (provider: string) => Promise<boolean>;
+  onCreateCustomProvider: (draft: CustomProviderDraft) => Promise<SettingsPayload | null>;
+  providerOperation?: ProviderOperation | null;
   onProviderOAuthLogin: (provider: string) => void;
   onProviderOAuthLogout: (provider: string) => void;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const [creatingCustomProvider, setCreatingCustomProvider] = useState(false);
+  const [view, setView] = useState<ProviderSettingsView>(() => entry.kind === "edit"
+    ? { kind: "provider", name: entry.provider, adding: false }
+    : { kind: entry.kind === "manage" ? "list" : "picker" });
+  const lastProvider = useRef<string | null>(null);
+  const [providerSearch, setProviderSearch] = useState("");
   const [customProviderKeyVisible, setCustomProviderKeyVisible] = useState(false);
   const [customProviderDraft, setCustomProviderDraft] = useState<CustomProviderDraft>(
     emptyCustomProviderDraft,
@@ -686,61 +593,90 @@ export function ProvidersSettings({
   const configuredProviders = settings.providers.filter((provider) => provider.configured);
   const unconfiguredProviders = useMemo(
     () =>
-      orderUnconfiguredProviders(
-        settings.providers.filter(
-          (provider) => !provider.configured && provider.name !== "custom",
-        ),
+      settings.providers.filter(
+        (provider) => !provider.configured && provider.name !== "custom",
       ),
     [settings.providers],
   );
-  const selectedUnconfiguredProvider =
-    unconfiguredProviders.find((provider) => provider.name === expandedProvider) ?? null;
   const customProviderSaving = providerSaving === CUSTOM_PROVIDER_CREATION_KEY;
-  const toggleProvider = (providerName: string) => {
-    setCreatingCustomProvider(false);
-    onToggleProvider(providerName);
+  const selectedProvider = view.kind === "provider"
+    ? settings.providers.find((provider) => provider.name === view.name)
+    : null;
+  useEffect(() => {
+    if (view.kind === "provider" && view.adding && selectedProvider?.auth_type === "oauth"
+      && selectedProvider.configured && !providerSaving && onProviderAdded) {
+      onProviderAdded(view.name);
+      onResetProviderDraft(view.name);
+      onClose();
+    }
+  }, [view, selectedProvider?.auth_type, selectedProvider?.configured, providerSaving, onProviderAdded, onResetProviderDraft, onClose]);
+  const closePanel = () => {
+    if (view.kind === "provider") onResetProviderDraft(view.name);
+    onClose();
+  };
+  const returnToOrigin = () => {
+    if (entry.kind === "manage") setView({ kind: "list" });
+    else onClose();
+  };
+  const returnFromEditor = () => {
+    if (view.kind === "provider") onResetProviderDraft(view.name);
+    returnToOrigin();
+  };
+  const goBack = () => {
+    if (view.kind === "provider") onResetProviderDraft(view.name);
+    setView({ kind: view.kind === "custom" || (view.kind === "provider" && view.adding)
+      ? "picker" : "list" });
+  };
+  const editProvider = (provider: string, adding: boolean) => {
+    lastProvider.current = provider;
+    onResetProviderDraft(provider);
+    setView({ kind: "provider", name: provider, adding });
+  };
+  const saveProvider = async (provider: string) => {
+    if (await onSaveProvider(provider)) {
+      if (selectedProvider?.auth_type === "oauth" && !selectedProvider.configured) return;
+      if (view.kind === "provider" && view.adding) onProviderAdded?.(provider);
+      returnToOrigin();
+    }
   };
   const beginCustomProviderCreation = () => {
-    if (expandedProvider) onToggleProvider(expandedProvider);
     setCustomProviderDraft(emptyCustomProviderDraft());
     setCustomProviderKeyVisible(false);
-    setCreatingCustomProvider(true);
-  };
-  const cancelCustomProviderCreation = () => {
-    setCreatingCustomProvider(false);
-    setCustomProviderDraft(emptyCustomProviderDraft());
-    setCustomProviderKeyVisible(false);
+    setView({ kind: "custom" });
   };
   const saveCustomProvider = async () => {
     if (customProviderSaving) return;
-    if (await onCreateCustomProvider(customProviderDraft)) {
-      cancelCustomProviderCreation();
+    const payload = await onCreateCustomProvider(customProviderDraft);
+    if (payload) {
+      if (payload.created_provider) onProviderAdded?.(payload.created_provider);
+      lastProvider.current = payload.created_provider ?? null;
+      returnToOrigin();
     }
   };
-  const renderProviderRow = (provider: SettingsPayload["providers"][number]) => {
-    const expanded = expandedProvider === provider.name;
+  const renderProviderForm = (provider: SettingsPayload["providers"][number]) => {
     const form = providerForms[provider.name] ?? providerFormFromRow(provider);
     const saving = providerSaving === provider.name;
     const isOauthProvider = provider.auth_type === "oauth";
+    const oauthAuthenticated = provider.configured;
     const supportsOauthAdvancedSettings =
       isOauthProvider && OAUTH_PROXY_PROVIDERS.has(provider.name);
     const keyVisible = !!visibleProviderKeys[provider.name];
-    const editingKey = !provider.configured || !!editingProviderKeys[provider.name];
+    const editingKey = !provider.api_key_hint || !!editingProviderKeys[provider.name];
     const apiKeyRequired = provider.api_key_required ?? true;
     const apiKey = form.apiKey.trim();
     const apiBase = form.apiBase.trim();
     const advancedFields = provider.advanced_fields ?? [];
     const oauthSettingsDirty = isOauthProvider && (
-      form.proxy.trim() !== (provider.proxy ?? "").trim()
+      form.useProxy !== (provider.use_proxy ?? false)
       || form.extraBody.trim() !== providerJsonValue(provider.extra_body).trim()
     );
-    const oauthSettingsSaving = saving && oauthSettingsDirty;
-    const oauthActionBusy = saving && !oauthSettingsSaving;
+    const oauthSettingsSaving = saving && providerOperation?.action === "save";
+    const oauthActionBusy = saving && (providerOperation?.action === "login" || providerOperation?.action === "logout");
     const missingRequiredApiKey = !isOauthProvider && apiKeyRequired && !provider.configured && !apiKey;
     const hasOptionalProviderSetting = Boolean(
       apiKey
       || apiBase
-      || form.proxy.trim()
+      || form.useProxy
       || form.extraHeaders.trim()
       || form.extraBody.trim()
       || form.extraQuery.trim()
@@ -762,35 +698,7 @@ export function ProvidersSettings({
       ? (nanobotFeatures?.features ?? []).find((feature) => feature.name === supportName)
       : null;
     return (
-      <Dialog key={provider.name} open={expanded} onOpenChange={(open) => {
-        if (open !== expanded) toggleProvider(provider.name);
-      }}>
-        <DialogTrigger asChild>
-        <button
-          type="button"
-          aria-label={provider.label}
-          className="settings-list-row flex w-full items-center justify-between gap-4 py-2.5 text-left transition-colors settings-hover"
-        >
-          <span className="flex min-w-0 items-center gap-3">
-            <ProviderIcon
-              provider={provider.name}
-              showBrandLogos={showBrandLogos}
-            />
-            <span className="min-w-0">
-              <span className="block truncate text-[14px] font-medium leading-5 text-foreground">
-                {provider.label}
-              </span>
-            </span>
-          </span>
-          <span className="shrink-0 px-2 py-1 text-[13px] font-normal leading-5 text-muted-foreground">
-            {t("settings.configure")}
-          </span>
-        </button>
-        </DialogTrigger>
-
-        {expanded ? (
-          <DialogContent aria-describedby={undefined} className="max-h-[85dvh] w-[min(calc(100vw-2rem),40rem)] max-w-none overflow-y-auto">
-            <DialogHeader><DialogTitle>{provider.label}</DialogTitle></DialogHeader>
+      <>
             {supportFeature && !supportFeature.installed ? (
               <CapabilityInstallNotice
                 title={tx("settings.capabilities.providerSupport", "Provider dependencies")}
@@ -808,15 +716,14 @@ export function ProvidersSettings({
               <>
                 <div className="flex flex-col gap-3 rounded-floating border border-border/45 bg-background/75 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
-                    <p className="text-[13px] font-semibold text-foreground">
-                      {tx("settings.oauth.authentication", "OAuth authentication")}
-                    </p>
-                    <p className="mt-1 text-[12px] text-muted-foreground">
-                      {provider.configured
-                        ? t("settings.oauth.signedInAs", {
-                            account: provider.oauth_account || provider.label,
-                            defaultValue: "Signed in as {{account}}",
-                          })
+                    {!oauthAuthenticated ? (
+                      <p className="text-[13px] font-semibold text-foreground">
+                        {tx("settings.oauth.authentication", "OAuth authentication")}
+                      </p>
+                    ) : null}
+                    <p className={oauthAuthenticated ? "text-[13px] text-foreground" : "mt-1 text-[12px] text-muted-foreground"}>
+                      {oauthAuthenticated
+                        ? t("settings.oauth.signedIn")
                         : provider.name === "openai_codex" && remoteBrowserAccess
                           ? tx(
                               "settings.oauth.codexRemoteSignInHelp",
@@ -831,7 +738,7 @@ export function ProvidersSettings({
                     </p>
                   </div>
                   <div className="flex shrink-0 justify-end gap-2">
-                    {provider.configured ? (
+                    {oauthAuthenticated ? (
                       <Button
                         size="sm"
                         variant="ghost"
@@ -862,7 +769,7 @@ export function ProvidersSettings({
                       ) : null}
                       {oauthActionBusy
                         ? tx("settings.oauth.signingIn", "Signing in...")
-                        : provider.configured
+                        : oauthAuthenticated
                           ? tx("settings.oauth.signInAgain", "Sign in again")
                           : tx("settings.oauth.signIn", "Sign in")}
                     </Button>
@@ -870,52 +777,39 @@ export function ProvidersSettings({
                 </div>
                 <ProviderRequestOptions
                   providerName={provider.name}
+                  apiConfigurable={provider.provider_api_configurable === true}
                   form={form}
                   onChange={(value) => onChangeProviderForm(provider.name, value)}
                 />
                 {supportsOauthAdvancedSettings ? (
                   <ProviderAdvancedOptions
+                    onConfigureProxy={onConfigureProxy}
                     fields={advancedFields}
                     form={form}
                     onChange={(value) => onChangeProviderForm(provider.name, value)}
-                    footer={
-                      <>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => toggleProvider(provider.name)}
-                          disabled={saving}
-                          className="rounded-full"
-                        >
-                          {t("settings.actions.cancel")}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => onSaveProvider(provider.name)}
-                          disabled={saving || !oauthSettingsDirty}
-                          className="rounded-full"
-                        >
-                          {oauthSettingsSaving ? (
-                            <Loader2
-                              className="mr-1.5 h-3.5 w-3.5 animate-spin"
-                              aria-hidden
-                            />
-                          ) : null}
-                          {oauthSettingsSaving
-                            ? t("settings.actions.saving")
-                            : tx("settings.providers.saveProvider", "Save provider")}
-                        </Button>
-                      </>
-                    }
                   />
                 ) : null}
+                <div className="flex flex-wrap items-center justify-end gap-2 py-3">
+                  <Button size="sm" variant="ghost" onClick={returnFromEditor}
+                    disabled={saving} className="rounded-full">
+                    {t("settings.actions.cancel")}
+                  </Button>
+                  {supportsOauthAdvancedSettings ? (
+                    <Button size="sm" variant="outline" onClick={() => saveProvider(provider.name)}
+                      disabled={saving || !oauthSettingsDirty} className="rounded-full">
+                      {oauthSettingsSaving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+                      {oauthSettingsSaving
+                        ? t("settings.actions.saving")
+                        : tx("settings.providers.saveProvider", "Save provider")}
+                    </Button>
+                  ) : null}
+                </div>
               </>
             ) : (
               <>
                 {provider.is_custom ? (
                   <label className="block space-y-1.5">
-                    <span className="text-[12px] font-medium text-muted-foreground">
+                    <span className="block px-3 text-[12px] font-medium text-muted-foreground">
                       {tx("settings.providers.customProviderName", "Provider name")}
                     </span>
                     <Input
@@ -928,7 +822,7 @@ export function ProvidersSettings({
                   </label>
                 ) : null}
                 <label className="block space-y-1.5">
-                  <span className="text-[12px] font-medium text-muted-foreground">
+                  <span className="block px-3 text-[12px] font-medium text-muted-foreground">
                     {t("settings.byok.apiKey")}
                   </span>
                   <div className="relative">
@@ -941,7 +835,7 @@ export function ProvidersSettings({
                             onChangeProviderForm(provider.name, { apiKey: event.target.value })
                           }
                           placeholder={
-                            provider.configured
+                            provider.api_key_hint
                               ? t("settings.byok.apiKeyConfiguredPlaceholder")
                               : t("settings.byok.apiKeyPlaceholder")
                           }
@@ -957,7 +851,7 @@ export function ProvidersSettings({
                               ? t("settings.byok.hideApiKey")
                               : t("settings.byok.showApiKey")
                           }
-                          className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground settings-hover hover:text-foreground"
+                          className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:text-foreground"
                         >
                           {keyVisible ? (
                             <EyeOff className="h-3.5 w-3.5" aria-hidden />
@@ -977,7 +871,7 @@ export function ProvidersSettings({
                           size="icon"
                           onClick={() => onToggleProviderKeyEditing(provider.name)}
                           aria-label={t("settings.actions.edit")}
-                          className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground settings-hover hover:text-foreground"
+                          className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:text-foreground"
                         >
                           <Pencil className="h-3.5 w-3.5" aria-hidden />
                         </Button>
@@ -986,7 +880,7 @@ export function ProvidersSettings({
                   </div>
                 </label>
                 <label className="block space-y-1.5">
-                  <span className="text-[12px] font-medium text-muted-foreground">
+                  <span className="block px-3 text-[12px] font-medium text-muted-foreground">
                     {t("settings.byok.apiBase")}
                   </span>
                   <Input
@@ -1000,19 +894,37 @@ export function ProvidersSettings({
                 </label>
                 <ProviderRequestOptions
                   providerName={provider.name}
+                  apiConfigurable={provider.provider_api_configurable === true}
                   form={form}
                   onChange={(value) => onChangeProviderForm(provider.name, value)}
                 />
                 <ProviderAdvancedOptions
+                  onConfigureProxy={onConfigureProxy}
                   fields={advancedFields}
                   form={form}
                   onChange={(value) => onChangeProviderForm(provider.name, value)}
-                />
-                <div className="flex items-center justify-end gap-2">
+                >
+                  {provider.provider_api_configurable && (provider.name === "openai" ? (
+                    <ModelAPIControl
+                      provider={provider}
+                      title={t("settings.providers.defaultAPI")}
+                      description={t("settings.providers.openaiDefaultAPIDescription")}
+                      value={form.api}
+                      onChange={(api) => onChangeProviderForm(provider.name, { api })}
+                    />
+                  ) : (
+                    <ProviderAPIControl
+                      value={form.api}
+                      onChange={(api) => onChangeProviderForm(provider.name, { api })}
+                    />
+                  ))}
+                </ProviderAdvancedOptions>
+                <div className="flex flex-wrap items-center justify-end gap-2">
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => toggleProvider(provider.name)}
+                    onClick={returnFromEditor}
+                    disabled={saving}
                     className="rounded-full"
                   >
                     {t("settings.actions.cancel")}
@@ -1020,7 +932,7 @@ export function ProvidersSettings({
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => onSaveProvider(provider.name)}
+                    onClick={() => saveProvider(provider.name)}
                     disabled={
                       saving
                       || missingRequiredApiKey
@@ -1031,23 +943,20 @@ export function ProvidersSettings({
                   >
                     {saving
                       ? t("settings.actions.saving")
-                      : tx("settings.providers.saveProvider", "Save provider")}
+                      : provider.configured
+                        ? tx("settings.providers.saveProvider", "Save provider")
+                        : tx("settings.providers.addProvider", "Add provider")}
                   </Button>
                 </div>
               </>
             )}
-          </DialogContent>
-        ) : null}
-      </Dialog>
+      </>
     );
   };
-  const customProviderForm = creatingCustomProvider ? (
-    <Dialog open onOpenChange={(open) => { if (!open) cancelCustomProviderCreation(); }}>
-      <DialogContent aria-describedby={undefined} className="max-h-[85dvh] w-[min(calc(100vw-2rem),40rem)] max-w-none overflow-y-auto">
-        <DialogHeader><DialogTitle>{tx("settings.providers.customProvider", "Custom provider")}</DialogTitle></DialogHeader>
+  const customProviderForm = view.kind === "custom" ? (
       <div className="space-y-3">
         <label className="block space-y-1.5">
-          <span className="text-[12px] font-medium text-muted-foreground">
+          <span className="block px-3 text-[12px] font-medium text-muted-foreground">
             {tx("settings.providers.customProviderName", "Provider name")}
           </span>
           <Input
@@ -1067,7 +976,7 @@ export function ProvidersSettings({
           />
         </label>
         <label className="block space-y-1.5">
-          <span className="text-[12px] font-medium text-muted-foreground">
+          <span className="block px-3 text-[12px] font-medium text-muted-foreground">
             {t("settings.byok.apiBase")}
           </span>
           <Input
@@ -1087,7 +996,7 @@ export function ProvidersSettings({
           />
         </label>
         <label className="block space-y-1.5">
-          <span className="text-[12px] font-medium text-muted-foreground">
+          <span className="block px-3 text-[12px] font-medium text-muted-foreground">
             {t("settings.byok.apiKey")}
           </span>
           <div className="relative">
@@ -1117,7 +1026,7 @@ export function ProvidersSettings({
                   ? t("settings.byok.hideApiKey")
                   : t("settings.byok.showApiKey")
               }
-              className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground settings-hover hover:text-foreground"
+              className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:text-foreground"
             >
               {customProviderKeyVisible ? (
                 <EyeOff className="h-3.5 w-3.5" aria-hidden />
@@ -1128,17 +1037,25 @@ export function ProvidersSettings({
           </div>
         </label>
         <ProviderAdvancedOptions
+          onConfigureProxy={onConfigureProxy}
           fields={CUSTOM_PROVIDER_ADVANCED_FIELDS}
           form={customProviderDraft}
           onChange={(value) =>
             setCustomProviderDraft((current) => ({ ...current, ...value }))
           }
-        />
+        >
+          {settings.provider_api_configuration_supported && (
+            <ProviderAPIControl
+              value={customProviderDraft.api}
+              onChange={(api) => setCustomProviderDraft((current) => ({ ...current, api }))}
+            />
+          )}
+        </ProviderAdvancedOptions>
         <div className="flex items-center justify-end gap-2">
           <Button
             size="sm"
             variant="ghost"
-            onClick={cancelCustomProviderCreation}
+            onClick={returnFromEditor}
             disabled={customProviderSaving}
             className="rounded-full"
           >
@@ -1157,156 +1074,125 @@ export function ProvidersSettings({
           >
             {customProviderSaving
               ? t("settings.actions.saving")
-              : tx("settings.providers.saveProvider", "Save provider")}
+              : tx("settings.providers.addProvider", "Add provider")}
           </Button>
         </div>
       </div>
-      </DialogContent>
-    </Dialog>
   ) : null;
+  const title = view.kind === "list"
+    ? t("settings.providers.manageProviders")
+    : view.kind === "custom"
+      ? t("settings.providers.customProvider")
+      : selectedProvider?.label ?? t("settings.providers.addProvider");
+  const canGoBack = view.kind === "custom"
+    || (view.kind === "provider" && (view.adding || entry.kind === "manage"))
+    || (view.kind === "picker" && entry.kind === "manage");
   return (
-    <div className="space-y-6">
-      <section>
-        <SettingsSectionTitle>
-          {tx("settings.providers.title", "Model providers")}
-        </SettingsSectionTitle>
-        <SettingsGroup>
-          {configuredProviders.map(renderProviderRow)}
-          {selectedUnconfiguredProvider
-            ? renderProviderRow(selectedUnconfiguredProvider)
-            : null}
-          {customProviderForm}
-          {!expandedProvider && !creatingCustomProvider ? (
-            <DropdownMenu modal={false}>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className="group settings-list-row flex w-full items-center justify-between gap-4 py-2.5 text-left transition-colors settings-hover"
-                >
-                  <span className="flex min-w-0 items-center gap-3">
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-control bg-muted text-muted-foreground">
-                      <Plus className="h-5 w-5" aria-hidden />
-                    </span>
-                    <span className="truncate text-[14px] font-medium text-foreground">
-                      {tx(
-                        "settings.providers.addOwnProvider",
-                        "Add your own model provider",
-                      )}
-                    </span>
-                  </span>
-                  <ChevronDown
-                    className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180"
-                    aria-hidden
-                  />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="end"
-                sideOffset={8}
-                className="max-h-[24rem] w-[380px] max-w-[calc(100vw-2rem)] overflow-y-auto scrollbar-thin scrollbar-track-transparent"
-              >
-                <DropdownMenuItem
-                  onSelect={beginCustomProviderCreation}
-                  className="flex min-h-[54px] cursor-default items-center gap-3 px-2.5 py-2 focus:bg-muted/85 focus:text-foreground"
-                >
-                  <ProviderIcon provider="custom" showBrandLogos={showBrandLogos} />
-                  <span className="truncate text-[13px] font-medium">
-                    {tx("settings.providers.customProvider", "Custom provider")}
-                  </span>
-                </DropdownMenuItem>
-                {unconfiguredProviders.length > 0 ? <DropdownMenuSeparator /> : null}
-                {unconfiguredProviders.map((provider) => (
-                  <DropdownMenuItem
-                    key={provider.name}
-                    onSelect={() => {
-                      setCreatingCustomProvider(false);
-                      if (expandedProvider !== provider.name) {
-                        onToggleProvider(provider.name);
-                      }
-                    }}
-                    className="flex min-h-[54px] cursor-default items-center gap-3 px-2.5 py-2 focus:bg-muted/85 focus:text-foreground"
-                  >
-                    <ProviderIcon
-                      provider={provider.name}
-                      showBrandLogos={showBrandLogos}
-                    />
-                    <span className="truncate text-[13px] font-medium">
-                      {provider.label}
-                    </span>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : null}
-        </SettingsGroup>
-      </section>
-    </div>
+    <ProviderSetupPanel
+      view={view.kind}
+      title={title}
+      busy={Boolean(providerSaving)}
+      onClose={closePanel}
+      onCloseAutoFocus={onCloseAutoFocus}
+      onBack={canGoBack ? goBack : undefined}
+    >
+      {view.kind === "list" ? (
+        <div className="min-h-0 overflow-y-auto overscroll-contain px-5 pb-5">
+          <div className="space-y-1">
+            {configuredProviders.map((provider) => (
+              <button key={provider.name} type="button" aria-label={provider.label}
+                data-provider-return-focus={lastProvider.current === provider.name ? "" : undefined}
+                onClick={() => editProvider(provider.name, false)}
+                className="flex min-h-14 w-full rounded-xl px-3 items-center justify-between gap-4 py-2.5 text-left transition-colors settings-hover">
+                <span className="flex min-w-0 items-center gap-3">
+                  <ProviderIcon provider={provider.name} showBrandLogos={showBrandLogos} />
+                  <span className="truncate text-[14px] font-medium leading-5 text-foreground">{provider.label}</span>
+                </span>
+                <span className="shrink-0 px-2 py-1 text-[13px] text-muted-foreground">{t("settings.configure")}</span>
+              </button>
+            ))}
+            {configuredProviders.length === 0 ? (
+              <p className="px-4 py-5 text-sm text-muted-foreground">{t("settings.byok.noConfiguredProviders")}</p>
+            ) : null}
+          </div>
+          <div className="flex justify-end pt-4">
+            <Button type="button" variant="outline" size="sm"
+              className="h-11 gap-2 text-[13px] font-normal sm:h-9"
+              data-provider-add onClick={() => {
+                setProviderSearch("");
+                setView({ kind: "picker" });
+              }}>
+              <Plus className="h-4 w-4 text-muted-foreground" aria-hidden />
+              {t("settings.providers.addProvider")}
+            </Button>
+          </div>
+        </div>
+      ) : view.kind === "picker" ? (
+        <ProviderSearchList providers={unconfiguredProviders} showBrandLogos={showBrandLogos}
+          query={providerSearch} onQueryChange={setProviderSearch}
+          onSelect={(name) => editProvider(name, true)}
+          onCustom={beginCustomProviderCreation} onClose={entry.kind === "manage" ? goBack : closePanel} />
+      ) : (
+        <div className="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-5 pb-5">
+          {view.kind === "custom" ? customProviderForm : selectedProvider ? renderProviderForm(selectedProvider) : null}
+        </div>
+      )}
+    </ProviderSetupPanel>
   );
 }
 
-function orderUnconfiguredProviders(
-  providers: SettingsPayload["providers"],
-): SettingsPayload["providers"] {
-  return providers
-    .map((provider, index) => ({ provider, index }))
-    .sort((left, right) => {
-      const rank = providerVisibilityRank(left.provider) - providerVisibilityRank(right.provider);
-      return rank || left.index - right.index;
-    })
-    .map(({ provider }) => provider);
-}
-
-function providerVisibilityRank(provider: SettingsPayload["providers"][number]): number {
-  const localRank = LOCAL_UNCONFIGURED_PROVIDER_ORDER.get(provider.name);
-  if (localRank !== undefined) return localRank;
-  if ((provider.api_key_required ?? true) === false) return 100;
-  return 200;
-}
-
-export function ProviderIcon({
-  provider,
-  showBrandLogos,
-}: {
-  provider: string;
-  showBrandLogos: boolean;
+function ProviderSetupPanel({ view, onClose, onCloseAutoFocus, title, busy, onBack, children }: {
+  view: ProviderSettingsView["kind"];
+  onClose: () => void;
+  onCloseAutoFocus: (event: Event) => void;
+  title: string;
+  busy: boolean;
+  onBack?: () => void;
+  children: ReactNode;
 }) {
-  const brand = providerBrand(provider);
-  const Icon = PROVIDER_ICONS[provider] ?? Hexagon;
-  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
-
-  if (showBrandLogos && logoUrl) {
-    return (
-      <span
-        data-testid={`provider-logo-${provider}`}
-        className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-control border border-border/45 bg-background"
-      >
-        <img
-          src={logoUrl}
-          alt=""
-          decoding="async"
-          loading="lazy"
-          className="h-6 w-6 object-contain"
-          onLoad={onLogoLoad}
-          onError={onLogoError}
-        />
-      </span>
-    );
-  }
-  if (showBrandLogos && brand) {
-    return (
-      <span
-        data-testid={`provider-logo-fallback-${provider}`}
-        className="grid h-8 w-8 shrink-0 place-items-center rounded-control text-[11px] font-semibold text-white"
-        style={{ backgroundColor: brand.color }}
-        aria-hidden
-      >
-        {brand.initials}
-      </span>
-    );
-  }
-  return (
-    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-control bg-muted text-foreground/82 dark:bg-muted/70">
-      <Icon className="h-5 w-5" strokeWidth={2} aria-hidden />
-    </span>
-  );
+  const { t } = useTranslation();
+  const mobile = useMediaQuery("(max-width: 639px)");
+  const [container, setContainer] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const target = view === "list"
+      ? container?.querySelector<HTMLElement>("[data-provider-return-focus]")
+        ?? container?.querySelector<HTMLElement>("[data-provider-add]")
+      : (view === "picker" && !mobile) || view === "custom"
+        ? container?.querySelector<HTMLInputElement>("input")
+        : null;
+    (target ?? container)?.focus({ preventScroll: true });
+  }, [view, title, container, mobile]);
+  const content = <>
+    <div className="flex h-16 shrink-0 items-center gap-2 px-5 pr-12">
+      {onBack ? <Button type="button" variant="ghost" size="icon" onClick={onBack} disabled={busy}
+        aria-label={t("settings.providers.backToProviders")}
+        className="-ml-2 h-9 w-9 shrink-0 rounded-full">
+        <ChevronLeft className="h-4 w-4" aria-hidden />
+      </Button> : null}
+      <DialogTitle className="truncate text-base font-semibold">{title}</DialogTitle>
+    </div>
+    {children}
+  </>;
+  const onEscapeKeyDown = (event: KeyboardEvent) => {
+    if (onBack) {
+      event.preventDefault();
+      if (!busy) onBack();
+    }
+  };
+  return <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}>
+    {mobile ? <SheetContent side="bottom" ref={setContainer} aria-describedby={undefined}
+      onOpenAutoFocus={(event) => event.preventDefault()}
+      onCloseAutoFocus={onCloseAutoFocus}
+      onEscapeKeyDown={onEscapeKeyDown}
+      className={cn("mx-auto max-h-[85dvh] max-w-md gap-0 overflow-hidden rounded-t-3xl pb-[env(safe-area-inset-bottom)] outline-none", view === "picker" && "h-[min(36rem,85dvh)]")}
+      closeButtonClassName="grid h-9 w-9 place-items-center right-3 top-3 rounded-full">
+      <FloatingPortalContext.Provider value={container}>{content}</FloatingPortalContext.Provider>
+    </SheetContent> : <DialogContent ref={setContainer} aria-describedby={undefined}
+      onOpenAutoFocus={(event) => event.preventDefault()}
+      onCloseAutoFocus={onCloseAutoFocus}
+      onEscapeKeyDown={onEscapeKeyDown}
+      className={cn("flex max-h-[85dvh] w-[min(28rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden p-0 outline-none", view === "picker" && "h-[min(32rem,85dvh)]", view === "list" && "w-[min(26rem,calc(100vw-2rem))]")}>
+      {content}
+    </DialogContent>}
+  </Dialog>;
 }

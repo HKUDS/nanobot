@@ -14,9 +14,36 @@ class AgentEvent:
 
 
 @dataclass(frozen=True)
+class ResponseSource:
+    """Display-safe identity captured at the actual provider invocation."""
+
+    provider: str
+    model: str
+    preset: str
+    fallback: bool = False
+
+
+@dataclass(frozen=True)
+class ResponseSourceEvent(AgentEvent):
+    """Set the source of subsequent answer text in this operation only."""
+
+    source: ResponseSource | None
+    # Completed provider text authorizes attribution of a non-streamed reply;
+    # synthetic runner/command messages must not inherit the last model's name.
+    content: str | None = None
+
+
+CompactionReason = Literal["idle", "context_pressure", "manual", "provider_native"]
+
+
+@dataclass(frozen=True)
 class ContextCompactionEvent(AgentEvent):
     compaction_id: str
     phase: Literal["started", "succeeded", "failed", "cancelled"]
+    # Request a chat notice (e.g. /compact), not event delivery or persistence.
+    # Interactive clients still consume every phase when this is false.
+    notify: bool = False
+    reason: CompactionReason | None = None
 
 
 @dataclass(frozen=True)
@@ -42,6 +69,7 @@ class RecoveryStateEvent(AgentEvent):
     reason: str | None = None
     attempts: int = 0
     can_continue: bool | None = None
+    failure_error_kind: str | None = None
 
 
 @dataclass(frozen=True)

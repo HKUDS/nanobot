@@ -11,12 +11,20 @@ import {
 import { ArrowRight, ChevronDown, Eye, EyeOff, Moon, ShieldCheck, Sun, X } from "lucide-react";
 import { Trans, useTranslation } from "react-i18next";
 import { channelUiPresentation } from "@/channel-plugins/registry";
+import { StarPrompt } from "@/components/StarPrompt";
 import { Sidebar } from "@/components/Sidebar";
+import { RemoteInstances } from "@/components/remote/RemoteInstances";
+import { useRemoteConnections } from "@/components/remote/remote-context";
+import { LazyRemoteConnectionsPage } from "@/components/remote/LazyRemoteConnectionsPage";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SidebarResizeHandle, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "@/components/SidebarResizeHandle";
 import { matchSidebarShortcut } from "@/lib/sidebar-shortcuts";
 import type { SidebarDeleteItem } from "@/components/ChatList";
 import type { SettingsSectionKey } from "@/components/settings/SettingsView";
+import { StartupShell } from "@/components/StartupShell";
+import { ComposerDraftStore, clearStoredComposerDrafts } from "@/lib/composer-draft";
+import { activateReloadCache, clearReloadCache } from "@/lib/reload-cache";
+import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
 import type { SettingsExitGuard } from "@/components/settings/contracts";
 import { PaneWorkbench } from "@/components/workbench/PaneWorkbench";
@@ -41,14 +49,17 @@ import { floatingSurfaceElevationClassName } from "@/components/ui/floating-surf
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 
 import { useSessions } from "@/hooks/useSessions";
+import { useReconnectRuns } from "@/hooks/useReconnectRuns";
 import { useDeferredTitleRefresh } from "@/hooks/useDeferredTitleRefresh";
 import { useSidebarState } from "@/hooks/useSidebarState";
 import { useSkills } from "@/hooks/useSkills";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { useAppViewport } from "@/hooks/useAppViewport";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
 import { ThemeProvider, useTheme } from "@/hooks/useTheme";
+import { useReadingTypography } from "@/hooks/useReadingTypography";
 import { logoFallbackUrls } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
 import {
@@ -63,7 +74,12 @@ import {
 import { displayTitle, sortSessions } from "@/lib/chat-groups";
 import { deriveTitle } from "@/lib/format";
 import { NanobotClient } from "@/lib/nanobot-client";
+import { BrowserNotifications, useBrowserNotificationLifecycle } from "@/components/BrowserNotifications";
+import { ThreadMessageCache } from "@/lib/thread-message-cache";
+import { FilePreviewStore } from "@/hooks/useFilePreviewState";
 import { ClientProvider, useClient } from "@/providers/ClientProvider";
+import { useVersionCheck } from "@/providers/VersionCheckProvider";
+import { useUpdateFlow } from "@/providers/UpdateFlowProvider";
 import type {
   BootstrapResponse,
   ChatSummary,
@@ -106,7 +122,13 @@ type BootState =
       modelName: string | null;
       ingressLimits: BootstrapResponse["limits"] | null;
       runtimeSurface: RuntimeSurface;
+      webuiCapabilities: string[];
     };
+
+function bootstrapCapabilities(boot: BootstrapResponse): string[] {
+  const capabilities = boot.terminal?.webui?.capabilities;
+  return Array.isArray(capabilities) ? capabilities.filter((entry) => typeof entry === "string") : [];
+}
 
 const SIDEBAR_STORAGE_KEY = "nanobot-webui.sidebar";
 const SESSION_UPDATES_STORAGE_KEY = "nanobot-webui.sidebar.session-updates.v1";
@@ -123,14 +145,15 @@ const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
 const PAIRING_POLL_INTERVAL_MS = 5_000;
 const PAIRING_IDLE_POLL_INTERVAL_MS = 15_000;
 const PAIRING_DISMISS_SNOOZE_MS = 30_000;
-type ShellView = "chat" | "settings" | "apps" | "automations" | "skills" | "channels";
+type ShellView = "chat" | "settings" | "apps" | "automations" | "skills" | "channels" | "remote";
 type ShellRoute = {
   view: ShellView;
   activeKey: string | null;
   settingsSection: SettingsSectionKey;
   temporary?: boolean;
 };
-const ThreadShell = lazy(() => import("@/components/thread/ThreadShell").then(
+const loadThreadShell = () => import("@/components/thread/ThreadShell");
+const ThreadShell = lazy(() => loadThreadShell().then(
   (module) => ({ default: module.ThreadShell }),
 ));
 const loadSettingsView = () => import("@/components/settings/SettingsView");
@@ -146,32 +169,17 @@ const DeleteConfirm = lazy(async () => {
   const module = await import("@/components/DeleteConfirm");
   return { default: module.DeleteConfirm };
 });
-const RenameChatDialog = lazy(async () => {
-  const module = await import("@/components/RenameChatDialog");
-  return { default: module.RenameChatDialog };
+const RenameDialog = lazy(async () => {
+  const module = await import("@/components/RenameDialog");
+  return { default: module.RenameDialog };
 });
-
-function SurfaceLoadingFallback({ label }: { label?: string }) {
-  const { t } = useTranslation();
-  return (
-    <div
-      aria-busy="true"
-      className="flex h-full w-full flex-col gap-5 px-5 py-8 sm:px-8 lg:px-12"
-    >
-      <span className="sr-only">{label ?? t("settings.status.loading")}</span>
-      <div className="h-4 w-20 animate-pulse rounded bg-muted/70 motion-reduce:animate-none" />
-      <div className="h-9 w-48 animate-pulse rounded bg-muted/70 motion-reduce:animate-none" />
-      <div className="mt-4 h-12 w-full max-w-3xl animate-pulse rounded-md bg-muted/55 motion-reduce:animate-none" />
-      <div className="h-28 w-full max-w-3xl animate-pulse rounded-md bg-muted/40 motion-reduce:animate-none" />
-    </div>
-  );
-}
 
 const SETTINGS_SECTION_KEYS: SettingsSectionKey[] = [
   "capabilities",
   "overview",
   "about",
   "appearance",
+  "notifications",
   "models",
   "image",
   "voice",
@@ -196,6 +204,11 @@ function defaultShellRoute(): ShellRoute {
 function shellViewForSettingsSection(section: SettingsSectionKey): ShellView {
   if (section === "apps" || section === "automations" || section === "skills" || section === "channels") return section;
   return "settings";
+}
+
+function changesSettingsSurface(current: ShellRoute, next: ShellRoute): boolean {
+  return current.view !== "chat" && current.view !== "remote" &&
+    (current.view !== next.view || current.settingsSection !== next.settingsSection);
 }
 
 function fallbackRestartHash(hash: string): boolean {
@@ -247,26 +260,36 @@ function readShellRoute(): ShellRoute {
   const settingsSection = isSettingsSectionKey(rawSettingsSection)
     ? rawSettingsSection
     : "overview";
-  const activeKey = params.get("chat")?.trim() || null;
+  const saved: unknown = window.history.state?.nanobotReturnChat;
+  const returnChat = saved && typeof saved === "object" && "hash" in saved
+    && saved.hash === window.location.hash ? saved : null;
+  const activeKey = params.get("chat")?.trim()
+    || (returnChat && "key" in returnChat && typeof returnChat.key === "string"
+      ? returnChat.key : null);
+  const temporary = Boolean(returnChat && "temporary" in returnChat && returnChat.temporary === true);
 
   if (path === "/settings") {
     return {
       view: shellViewForSettingsSection(settingsSection),
       activeKey,
+      temporary,
       settingsSection,
     };
   }
   if (path === "/apps") {
-    return { view: "apps", activeKey, settingsSection: "apps" };
+    return { view: "apps", activeKey, temporary, settingsSection: "apps" };
   }
   if (path === "/automations") {
-    return { view: "automations", activeKey, settingsSection: "automations" };
+    return { view: "automations", activeKey, temporary, settingsSection: "automations" };
   }
   if (path === "/channels") {
-    return { view: "channels", activeKey, settingsSection: "channels" };
+    return { view: "channels", activeKey, temporary, settingsSection: "channels" };
+  }
+  if (path === "/remote") {
+    return { view: "remote", activeKey, temporary, settingsSection: "overview" };
   }
   if (path === "/skills") {
-    return { view: "skills", activeKey, settingsSection: "skills" };
+    return { view: "skills", activeKey, temporary, settingsSection: "skills" };
   }
   if (path.startsWith("/temporary/")) {
     const encoded = path.slice("/temporary/".length);
@@ -309,7 +332,6 @@ function shellRouteHash(route: ShellRoute): string {
       : "#/new";
   }
   const params = new URLSearchParams();
-  if (route.activeKey) params.set("chat", route.activeKey);
   if (route.view === "settings" && route.settingsSection !== "overview") {
     params.set("section", route.settingsSection);
   }
@@ -320,20 +342,20 @@ function shellRouteHash(route: ShellRoute): string {
 function writeShellRoute(route: ShellRoute, replace = false): void {
   if (typeof window === "undefined") return;
   const nextHash = shellRouteHash(route);
-  if (window.location.hash === nextHash) return;
-  if (replace) {
-    window.history.replaceState(
-      null,
-      "",
-      `${window.location.pathname}${window.location.search}${nextHash}`,
-    );
-    return;
+  const state = {
+    ...window.history.state,
+    nanobotReturnChat: route.view === "chat" ? null : {
+      hash: nextHash,
+      key: route.activeKey,
+      temporary: route.temporary === true,
+    },
+  };
+  const url = `${window.location.pathname}${window.location.search}${nextHash}`;
+  if (replace || window.location.hash === nextHash) {
+    window.history.replaceState(state, "", url);
+  } else {
+    window.history.pushState(state, "", url);
   }
-  window.history.pushState(
-    null,
-    "",
-    `${window.location.pathname}${window.location.search}${nextHash}`,
-  );
 }
 
 function bootstrapTokenExpiresAt(expiresInSeconds: number): number {
@@ -591,31 +613,55 @@ function PairingCodePopup({
   busyCode: string | null;
   error: string | null;
   onApprove: (code: string) => void;
-  onDismiss: (code: string) => void;
+  onDismiss: (request: PairingRequestInfo) => void;
 }) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
+  const attemptedCode = useRef<string | null>(null);
   const normalizedCode = normalizePairingCode(value);
   const matchedRequest = useMemo(
     () => requests.find((request) => request.code === normalizedCode) ?? null,
     [normalizedCode, requests],
   );
-  const firstRequest = requests[0] ?? null;
+  // Keep delivered and legacy requests usable even when another bot cannot reply.
+  const firstRequest = requests.find((request) => (
+    !request.delivery_status || request.delivery_status === "sent"
+  )) ?? requests[0] ?? null;
   const displayRequest = matchedRequest ?? firstRequest;
-  const expires = formatPairingExpiry(firstRequest?.expires_in_seconds);
+  const deliveryBlocked = displayRequest?.delivery_status === "failed"
+    || displayRequest?.delivery_status === "sending";
+  const expires = formatPairingExpiry(displayRequest?.expires_in_seconds);
   const isCompleteCode = normalizedCode.length === 9;
   const showNoMatch = isCompleteCode && !matchedRequest && !busyCode;
 
   useEffect(() => {
-    if (!matchedRequest || busyCode) return;
+    if (!matchedRequest || busyCode || attemptedCode.current === matchedRequest.code) return;
+    attemptedCode.current = matchedRequest.code;
     onApprove(matchedRequest.code);
   }, [busyCode, matchedRequest, onApprove]);
 
   useEffect(() => {
-    if (!requests.length) setValue("");
+    if (!requests.length) {
+      setValue("");
+      attemptedCode.current = null;
+    }
   }, [requests.length]);
 
   if (!firstRequest) return null;
+
+  const codeInput = (
+    <PairingCodeSlots
+      value={value}
+      disabled={Boolean(busyCode)}
+      matched={Boolean(matchedRequest)}
+      invalid={showNoMatch}
+      ariaLabel={t("app.pairing.code", { defaultValue: "Pairing code" })}
+      onChange={(next) => {
+        attemptedCode.current = null;
+        setValue(formatPairingCodeInput(next));
+      }}
+    />
+  );
 
   return (
     <div
@@ -638,8 +684,15 @@ function PairingCodePopup({
               <p className="text-[15px] font-semibold tracking-[-0.01em]">
                 {t("app.pairing.title", { defaultValue: "Pair a chat user" })}
               </p>
-              <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
-                {t("app.pairing.description", {
+              <p
+                className="mt-1 text-pretty text-[13px] leading-5 text-muted-foreground"
+                role={displayRequest.delivery_status === "failed" ? "alert" : undefined}
+              >
+                {displayRequest.delivery_status === "failed" ? t("app.pairing.deliveryFailed", {
+                  defaultValue: "Couldn't send the pairing code. Check this bot's send-message permissions and gateway logs, then send it another private message to retry.",
+                }) : displayRequest.delivery_status === "sending" ? t("app.pairing.deliverySending", {
+                  defaultValue: "Sending a pairing code to your chat. If it doesn't arrive, send the bot another private message to retry.",
+                }) : t("app.pairing.description", {
                   defaultValue: "Enter the pairing code shown in the chat.",
                 })}
               </p>
@@ -647,46 +700,52 @@ function PairingCodePopup({
             <button
               type="button"
               aria-label={t("common.close", { defaultValue: "Close" })}
-              onClick={() => onDismiss(firstRequest.code)}
+              onClick={() => onDismiss(displayRequest)}
               className="rounded-full p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
             >
               <X className="h-4 w-4" aria-hidden />
             </button>
           </div>
 
-          <label className="mt-4 block text-[12.5px] font-medium text-foreground">
-            {t("app.pairing.code", { defaultValue: "Pairing code" })}
-          </label>
-          <PairingCodeSlots
-            value={value}
-            disabled={Boolean(busyCode)}
-            matched={Boolean(matchedRequest)}
-            invalid={showNoMatch}
-            ariaLabel={t("app.pairing.code", { defaultValue: "Pairing code" })}
-            onChange={(next) => setValue(formatPairingCodeInput(next))}
-          />
+          {deliveryBlocked ? (
+            <details className="mt-3 text-[12.5px] text-muted-foreground">
+              <summary className="cursor-pointer">
+                {t("app.pairing.haveCode", { defaultValue: "Already received a code?" })}
+              </summary>
+              {codeInput}
+            </details>
+          ) : (
+            <>
+              <label className="mt-4 block text-[12.5px] font-medium text-foreground">
+                {t("app.pairing.code", { defaultValue: "Pairing code" })}
+              </label>
+              {codeInput}
+            </>
+          )}
 
-          <div className="mt-3 flex items-center justify-between gap-3 text-[12.5px] text-muted-foreground">
-            <span>
-              {matchedRequest
-                ? t("app.pairing.matched", {
-                    defaultValue: "Matched {{channel}}. Connecting...",
-                    channel: channelLabel(matchedRequest.channel),
-                  })
-                : t("app.pairing.expiresInline", {
-                    defaultValue: "Code expires {{expires}}.",
-                    expires,
-                  })}
-            </span>
-            {total > 1 ? (
-              <span className="shrink-0">
-                {t("app.pairing.queueCount", {
-                  defaultValue: "{{count}} pending",
-                  count: total,
-                })}
+          {!deliveryBlocked || total > 1 ? (
+            <div className="mt-3 flex items-center justify-between gap-3 text-[12.5px] text-muted-foreground">
+              <span>
+                {matchedRequest && busyCode === matchedRequest.code
+                  ? t("app.pairing.matched", {
+                      defaultValue: "Matched {{channel}}. Connecting...",
+                      channel: channelLabel(matchedRequest.channel),
+                    })
+                  : deliveryBlocked ? null : t("app.pairing.expiresInline", {
+                      defaultValue: "Code expires {{expires}}.",
+                      expires,
+                    })}
               </span>
-            ) : null}
-          </div>
+              {total > 1 ? (
+                <span className="shrink-0">
+                  {t("app.pairing.queueCount", {
+                    defaultValue: "{{count}} pending",
+                    count: total,
+                  })}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
 
           {showNoMatch ? (
             <p className="mt-2 text-[12px] leading-5 text-destructive">
@@ -697,7 +756,19 @@ function PairingCodePopup({
           ) : null}
 
           {error ? (
-            <p className="mt-2 text-[12px] leading-5 text-destructive">{error}</p>
+            <div className="mt-2 space-y-2">
+              <p role="alert" className="text-[12px] leading-5 text-destructive">{error}</p>
+              {matchedRequest ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={Boolean(busyCode)}
+                  onClick={() => onApprove(matchedRequest.code)}
+                >
+                  {t("common.retry", { defaultValue: "Retry" })}
+                </Button>
+              ) : null}
+            </div>
           ) : null}
         </div>
       </div>
@@ -875,6 +946,9 @@ function resolveRuntimeSurface(
 }
 
 export default function App() {
+  useAppViewport();
+  useBrowserNotificationLifecycle();
+  useReadingTypography();
   const { t } = useTranslation();
   const [state, setState] = useState<BootState>({ status: "loading" });
   const bootstrapSecretRef = useRef("");
@@ -903,6 +977,7 @@ export default function App() {
               modelName: boot.model_name ?? current.modelName,
               ingressLimits: boot.limits ?? current.ingressLimits,
               runtimeSurface,
+              webuiCapabilities: bootstrapCapabilities(boot),
             }
           : current,
       );
@@ -914,6 +989,7 @@ export default function App() {
   const bootstrapWithSecret = useCallback(
     (secret: string) => {
       let cancelled = false;
+      if (readShellRoute().view === "chat") void loadThreadShell().catch(() => {});
       (async () => {
         setState({ status: "loading" });
         try {
@@ -921,6 +997,7 @@ export default function App() {
           if (cancelled) return;
           if (secret) saveSecret(secret);
           const url = deriveWsUrl(boot.ws_path, boot.token, boot.ws_url);
+          activateReloadCache(url);
           const runtimeSurface = resolveRuntimeSurface(boot.runtime_surface, "browser");
           const runtimeHost = createRuntimeHost(runtimeSurface, boot.runtime_capabilities);
           const client = new NanobotClient({
@@ -948,10 +1025,14 @@ export default function App() {
             modelName: boot.model_name ?? null,
             ingressLimits: boot.limits ?? null,
             runtimeSurface,
+            webuiCapabilities: bootstrapCapabilities(boot),
           });
         } catch (e) {
           if (cancelled) return;
           if (isBootstrapAuthRequired(e)) {
+            clearReloadCache();
+            clearStoredComposerDrafts();
+            webuiThreadCache.clear();
             setState({ status: "auth", failed: !!secret });
           } else {
             setState({
@@ -976,6 +1057,9 @@ export default function App() {
         await refreshReadyClient(client, state.runtimeSurface);
       } catch (e) {
         if (isBootstrapAuthRequired(e)) {
+          clearReloadCache();
+          clearStoredComposerDrafts();
+          webuiThreadCache.clear();
           setState({ status: "auth", failed: !!bootstrapSecretRef.current });
         }
       }
@@ -989,19 +1073,7 @@ export default function App() {
   }, [bootstrapWithSecret]);
 
   if (state.status === "loading") {
-    return (
-      <div className="flex h-full w-full items-center justify-center">
-        <div className="flex flex-col items-center gap-3 animate-in fade-in-0 duration-300">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-foreground/40" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-foreground/60" />
-            </span>
-            {t("app.loading.connecting")}
-          </div>
-        </div>
-      </div>
-    );
+    return <StartupShell />;
   }
   if (state.status === "auth") {
     return (
@@ -1036,6 +1108,9 @@ export default function App() {
       state.client.close();
     }
     clearSavedSecret();
+    clearReloadCache();
+    clearStoredComposerDrafts();
+    webuiThreadCache.clear();
     setState({ status: "auth" });
   };
 
@@ -1070,13 +1145,16 @@ export default function App() {
       token={state.token}
       modelName={state.modelName}
       ingressLimits={state.ingressLimits}
+      webuiCapabilities={state.webuiCapabilities}
+      allowUpdateFlow={state.runtimeSurface !== "native"}
     >
-      <Shell
+      <BrowserNotifications client={state.client} />
+      <RemoteInstances><Shell
         runtimeSurface={state.runtimeSurface}
         onModelNameChange={handleModelNameChange}
         onLogout={handleLogout}
         onNativeEngineRestart={handleNativeEngineRestart}
-      />
+      /></RemoteInstances>
     </ClientProvider>
   );
 }
@@ -1093,29 +1171,67 @@ function Shell({
   onNativeEngineRestart: () => Promise<string>;
 }) {
   const { t, i18n } = useTranslation();
-  const { client, getToken } = useClient();
+  const remoteConnections = useRemoteConnections();
+  const versionCheck = useVersionCheck();
+  const updateFlow = useUpdateFlow();
+  const localActive = remoteConnections?.localActive !== false;
+  const managingConnections = remoteConnections?.managing === true && !remoteConnections?.activeHostId;
   const { theme, toggle } = useTheme();
+  const managementMain = useRef<HTMLElement>(null);
+  const reportManagementSurface = remoteConnections?.reportManagementSurface;
+  useEffect(() => {
+    const main = managementMain.current;
+    if (!main || !reportManagementSurface) return;
+    const report = () => {
+      const rect = main.getBoundingClientRect();
+      reportManagementSurface({ left: rect.left, top: rect.top, width: rect.width, height: rect.height }, theme);
+    };
+    const observer = new ResizeObserver(report);
+    observer.observe(main);
+    window.addEventListener("resize", report);
+    report();
+    return () => { observer.disconnect(); window.removeEventListener("resize", report); };
+  }, [reportManagementSurface, theme]);
+  const remoteConnectionsRef = useRef(remoteConnections);
+  remoteConnectionsRef.current = remoteConnections;
+  const { client, getToken } = useClient();
+  useReconnectRuns(client, getToken);
   const {
     sessions,
     loading,
+    initialLoading: sessionsInitialLoading,
+    error: sessionsError,
     refresh,
     createChat,
     forkChat,
     deleteChat,
     getSessionAutomations,
   } = useSessions();
+  // Failed reads retain an empty list or partial reload cache, not proof of deletion.
+  const sessionsLoaded = !loading && sessionsError === null;
   const {
     state: sidebarState,
     loading: sidebarStateLoading,
     update: updateSidebarState,
+    rename: onRequestRename,
   } =
-    useSidebarState(sessions, !loading);
+    useSidebarState(sessions, sessionsLoaded);
   const initialRouteRef = useRef<ShellRoute | null>(null);
   if (!initialRouteRef.current) initialRouteRef.current = readShellRoute();
   const [activeKey, setActiveKey] = useState<string | null>(
     initialRouteRef.current.activeKey,
   );
   const [view, setView] = useState<ShellView>(initialRouteRef.current.view);
+  const [chatVisited, setChatVisited] = useState(initialRouteRef.current.view === "chat");
+  useEffect(() => {
+    if (view === "chat") setChatVisited(true);
+  }, [view]);
+  useEffect(() => {
+    // Normalize legacy links while retaining their return destination in history.
+    if (new URLSearchParams(window.location.hash.split("?")[1]).has("chat")) {
+      writeShellRoute(initialRouteRef.current!, true);
+    }
+  }, []);
   const [temporarySessions, setTemporarySessions] = useState<Record<string, ChatSummary>>({});
   const [temporaryChatEnabled, setTemporaryChatEnabled] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] =
@@ -1125,6 +1241,11 @@ function Shell({
   const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
   const [sidebarDragging, setSidebarDragging] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  useEffect(() => {
+    // The drawer portals outside the local host panel; don't leave it over a remote view.
+    if (!localActive || managingConnections) setMobileSidebarOpen(false);
+  }, [localActive, managingConnections]);
+  const mobileSidebarRef = useRef<HTMLDivElement>(null);
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
   const mobileWorkbench = useMediaQuery("(max-width: 767px)");
   const workbenchState = sidebarState.workbench;
@@ -1143,10 +1264,6 @@ function Shell({
     items: SidebarDeleteItem[];
     automations?: SessionAutomationJob[];
   } | null>(null);
-  const [pendingRename, setPendingRename] = useState<{
-    key: string;
-    label: string;
-  } | null>(null);
   const [pendingTabRename, setPendingTabRename] = useState<{
     key: string;
     label: string;
@@ -1156,21 +1273,27 @@ function Shell({
     label: string;
   } | null>(null);
   const restartSawDisconnectRef = useRef(false);
+  const restartStartedAtRef = useRef(0);
   const [restartToast, setRestartToast] = useState<string | null>(null);
   const [isRestarting, setIsRestarting] = useState(false);
   const [pairingRequests, setPairingRequests] = useState<PairingRequestInfo[]>([]);
   const [pairingBusyCode, setPairingBusyCode] = useState<string | null>(null);
   const [pairingError, setPairingError] = useState<string | null>(null);
   const pairingRefreshRef = useRef<Promise<number> | null>(null);
-  const [snoozedPairingCodes, setSnoozedPairingCodes] = useState<Map<string, number>>(
+  const [snoozedPairingCodes, setSnoozedPairingCodes] = useState<Map<string, {
+    until: number;
+    deliveryStatus: PairingRequestInfo["delivery_status"];
+  }>>(
     () => new Map(),
   );
   const [runningChatIds, setRunningChatIds] = useState<Set<string>>(() => new Set());
   const [updatedChatIds, setUpdatedChatIds] = useState<Set<string>>(readSessionUpdateChatIds);
   const [workspaces, setWorkspaces] = useState<WorkspacesPayload | null>(null);
-  const skills = useSkills(getToken);
+  const { skills, loading: skillsLoading, error: skillsError } = useSkills(getToken);
   const pageVisible = usePageVisibility();
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsPayload | null>(null);
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const settingsRefreshGenerationRef = useRef(0);
   const [pendingAutomationMessage, setPendingAutomationMessage] = useState<{
     id: string;
     chatId: string;
@@ -1180,7 +1303,10 @@ function Shell({
   } | null>(null);
   const settingsExitGuardRef = useRef<SettingsExitGuard | null>(null);
   const currentShellRouteRef = useRef<ShellRoute>({ view, activeKey, settingsSection: settingsInitialSection });
-  currentShellRouteRef.current = { view, activeKey, settingsSection: settingsInitialSection };
+  currentShellRouteRef.current = {
+    view, activeKey, settingsSection: settingsInitialSection,
+    temporary: Boolean(activeKey && temporarySessions[activeKey]),
+  };
   const registerSettingsExitGuard = useCallback((guard: SettingsExitGuard | null) => {
     settingsExitGuardRef.current = guard;
   }, []);
@@ -1199,7 +1325,7 @@ function Shell({
   const showMainSidebar = view !== "settings";
   const activeTemporarySession = activeKey ? temporarySessions[activeKey] ?? null : null;
   const temporaryChatId = activeTemporarySession?.chatId ?? null;
-  const temporaryChatActive = view === "chat" && temporaryChatId !== null;
+  const temporaryChatActive = temporaryChatId !== null;
   const temporaryChatRequested = temporaryChatActive || temporaryChatEnabled;
   const temporarySessionList = useMemo(
     () => Object.values(temporarySessions).sort((a, b) => (
@@ -1211,27 +1337,56 @@ function Shell({
     () => temporarySessionList.map((session) => session.chatId),
     [temporarySessionList],
   );
+  // Pane shells can unmount during navigation. Keep replay state for this app
+  // session, pinning temporary chats because they cannot reload disk history.
+  const retainedTemporaryChatIdsRef = useRef(new Set<string>());
+  const [draftStore] = useState(() => new ComposerDraftStore());
+  const [filePreviewStore] = useState(() => new FilePreviewStore());
+  const [threadMessageCache] = useState(() => new ThreadMessageCache(
+    (key) => retainedTemporaryChatIdsRef.current.has(key),
+  ));
+  useEffect(() => {
+    const retained = new Set(temporaryChatIds);
+    for (const chatId of retainedTemporaryChatIdsRef.current) {
+      if (!retained.has(chatId)) {
+        threadMessageCache.delete(chatId);
+        filePreviewStore.delete(`websocket:${chatId}`);
+        draftStore.delete(`websocket:${chatId}`);
+      }
+    }
+    retainedTemporaryChatIdsRef.current = retained;
+  }, [temporaryChatIds, threadMessageCache, filePreviewStore, draftStore]);
 
+  const commitNavigation = useCallback((route: ShellRoute, options?: { replace?: boolean }) => {
+    // The visible sidebar always belongs to its existing host. Navigation
+    // dismisses global management without switching to a different host.
+    if (remoteConnectionsRef.current?.managing) remoteConnectionsRef.current.closeManagement();
+    setActiveKey(route.activeKey);
+    setView(route.view);
+    setSettingsInitialSection(route.settingsSection);
+    writeShellRoute({
+      ...route,
+      temporary: route.temporary || Boolean(route.activeKey && temporarySessionsRef.current[route.activeKey]),
+    }, options?.replace);
+  }, []);
   const navigate = useCallback(
     (route: ShellRoute, options?: { replace?: boolean }) => {
-      const leave = () => {
-        setActiveKey(route.activeKey);
-        setView(route.view);
-        setSettingsInitialSection(route.settingsSection);
-        writeShellRoute(route, options?.replace);
-      };
-      if (currentShellRouteRef.current.view === "settings" && route.view !== "settings" && settingsExitGuardRef.current) {
-        settingsExitGuardRef.current(leave);
+      const leave = () => commitNavigation(route, options);
+      const current = currentShellRouteRef.current;
+      if (changesSettingsSurface(current, route) && settingsExitGuardRef.current) {
+        settingsExitGuardRef.current(leave, { promptRestart: current.view !== route.view });
       } else leave();
     },
-    [],
+    [commitNavigation],
   );
 
   useEffect(() => {
     const applyRoute = () => {
       const route = readShellRoute();
-      if (currentShellRouteRef.current.view === "settings" && route.view !== "settings" && settingsExitGuardRef.current) {
-        writeShellRoute(currentShellRouteRef.current, true);
+      if (route.view === "remote") setMobileSidebarOpen(false);
+      const current = currentShellRouteRef.current;
+      if (changesSettingsSurface(current, route) && settingsExitGuardRef.current) {
+        writeShellRoute(current, true);
         settingsExitGuardRef.current(() => {
           setActiveKey(route.activeKey);
           setView(route.view);
@@ -1239,7 +1394,7 @@ function Shell({
           writeShellRoute(route, true);
           setWorkspaceError(null);
           if (route.view === "chat" && !route.activeKey) setDraftWorkspaceScope(null);
-        });
+        }, { promptRestart: current.view !== route.view });
         return;
       }
       setActiveKey(route.activeKey);
@@ -1275,12 +1430,21 @@ function Shell({
 
   useEffect(() => {
     let cancelled = false;
+    const requestGeneration = settingsRefreshGenerationRef.current;
+    setSettingsLoading(true);
     fetchSettings(getToken())
       .then((payload) => {
-        if (!cancelled) setSettingsSnapshot(payload);
+        if (!cancelled && requestGeneration === settingsRefreshGenerationRef.current) {
+          setSettingsSnapshot(payload);
+        }
       })
       .catch(() => {
-        if (!cancelled) setSettingsSnapshot(null);
+        if (!cancelled && requestGeneration === settingsRefreshGenerationRef.current) {
+          setSettingsSnapshot(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSettingsLoading(false);
       });
     return () => {
       cancelled = true;
@@ -1317,11 +1481,13 @@ function Shell({
         setPairingRequests(requests);
         setSnoozedPairingCodes((current) => {
           if (current.size === 0) return current;
-          const activeCodes = new Set(requests.map((request) => request.code));
+          const activeRequests = new Map(requests.map((request) => [request.code, request]));
           const now = Date.now();
           const next = new Map(
             Array.from(current).filter(
-              ([code, snoozedUntil]) => activeCodes.has(code) && snoozedUntil > now,
+              ([code, snooze]) => activeRequests.has(code)
+                && snooze.until > now
+                && activeRequests.get(code)?.delivery_status === snooze.deliveryStatus,
             ),
           );
           return next.size === current.size ? current : next;
@@ -1437,7 +1603,7 @@ function Shell({
   }, [refreshWorkspaces]);
 
   useEffect(() => {
-    if (loading) return;
+    if (!sessionsLoaded) return;
     const knownChatIds = new Set(sessions.map((session) => session.chatId));
     setUpdatedChatIds((current) => {
       const next = new Set(
@@ -1449,16 +1615,16 @@ function Shell({
       const entries = Object.entries(current).filter(([chatId]) => knownChatIds.has(chatId));
       return entries.length === Object.keys(current).length ? current : Object.fromEntries(entries);
     });
-  }, [loading, sessions]);
+  }, [sessionsLoaded, sessions]);
 
   useEffect(() => {
-    if (loading || sidebarStateLoading) return;
+    if (!sessionsLoaded || sidebarStateLoading) return;
     const validKeys = new Set(sessions.map((session) => session.key));
     updateWorkbenchState((current) => {
       return reconcileWorkbench(current, validKeys);
     });
   }, [
-    loading,
+    sessionsLoaded,
     sidebarStateLoading,
     sessions,
     updateWorkbenchState,
@@ -1472,9 +1638,11 @@ function Shell({
     }
     if (!activeKey) return;
     const currentRoute = readShellRoute();
+    if (temporarySessions[activeKey]) return;
     if (currentRoute.temporary) {
-      if (temporarySessions[activeKey]) return;
-      navigate(defaultShellRoute(), { replace: true });
+      navigate(currentRoute.view === "chat" ? defaultShellRoute() : {
+        ...currentRoute, activeKey: null, temporary: false,
+      }, { replace: true });
       return;
     }
     if (sessions.some((session) => session.key === activeKey)) return;
@@ -1538,25 +1706,6 @@ function Shell({
     for (const chatId of activeRunIds) {
       client.attach(chatId);
     }
-    setRunningChatIds((current) => {
-      let changed = false;
-      const next = new Set(current);
-      for (const chatId of activeRunIds) {
-        if (!next.has(chatId)) changed = true;
-        next.add(chatId);
-      }
-      if (!changed) return current;
-      runningChatIdsRef.current = next;
-      return next;
-    });
-    setUpdatedChatIds((current) => {
-      let changed = false;
-      const next = new Set(current);
-      for (const chatId of activeRunIds) {
-        if (next.delete(chatId)) changed = true;
-      }
-      return changed ? next : current;
-    });
   }, [client, loading, sessions]);
 
   const openHostSidebar = useCallback(() => {
@@ -1835,32 +1984,6 @@ function Shell({
     [updateSidebarState],
   );
 
-  const onRequestRename = useCallback((key: string, label: string) => {
-    setPendingRename({ key, label });
-  }, []);
-
-  const onConfirmRename = useCallback(
-    (title: string) => {
-      if (!pendingRename) return;
-      const key = pendingRename.key;
-      setPendingRename(null);
-      void updateSidebarState((current) => {
-        const titleOverrides = { ...current.title_overrides };
-        const cleaned = title.trim();
-        if (cleaned) {
-          titleOverrides[key] = cleaned;
-        } else {
-          delete titleOverrides[key];
-        }
-        return {
-          ...current,
-          title_overrides: titleOverrides,
-        };
-      });
-    },
-    [pendingRename, updateSidebarState],
-  );
-
   const onRequestRenameTab = useCallback((key: string, label: string) => {
     setPendingTabRename({ key, label });
   }, []);
@@ -2073,6 +2196,7 @@ function Shell({
     const actions = { newChat: onNewChat, search: onOpenSessionSearch, apps: onOpenApps,
       skills: onOpenSkills, automations: onOpenAutomations, channels: onOpenChannels, settings: () => onOpenSettings() };
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (!localActive) return;
       const action = matchSidebarShortcut(event);
       if (!action) return;
       event.preventDefault();
@@ -2080,29 +2204,30 @@ function Shell({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onNewChat, onOpenSessionSearch, onOpenApps, onOpenSkills, onOpenAutomations, onOpenChannels, onOpenSettings]);
+  }, [localActive, onNewChat, onOpenSessionSearch, onOpenApps, onOpenSkills, onOpenAutomations, onOpenChannels, onOpenSettings]);
 
   const onSettingsSectionChange = useCallback(
     (section: SettingsSectionKey) => {
-      navigate({
-        view: shellViewForSettingsSection(section),
-        activeKey,
-        settingsSection: section,
-      });
+      const route = { view: shellViewForSettingsSection(section), activeKey, settingsSection: section };
+      // The page has completed or retained its outgoing drafts for in-page transitions.
+      if (currentShellRouteRef.current.view === route.view) commitNavigation(route);
+      else navigate(route);
     },
-    [activeKey, navigate],
+    [activeKey, commitNavigation, navigate],
   );
 
   const onBackToChat = useCallback(() => {
     setMobileSidebarOpen(false);
     const nextKey = (() => {
       if (!activeKey) return null;
+      if (temporarySessionsRef.current[activeKey]) return activeKey;
       if (topicSessions.some((session) => session.key === activeKey)) return activeKey;
-      return topicSessions[0]?.key ?? null;
+      return null;
     })();
     navigate({
       view: "chat",
       activeKey: nextKey,
+      temporary: Boolean(nextKey && temporarySessionsRef.current[nextKey]),
       settingsSection: "overview",
     });
   }, [activeKey, navigate, topicSessions]);
@@ -2111,10 +2236,11 @@ function Shell({
     const chatId = activeSession?.chatId ?? client.defaultChatId;
     if (!chatId) return;
     restartSawDisconnectRef.current = false;
+    restartStartedAtRef.current = Date.now();
     setIsRestarting(true);
     rememberRestartRoute();
     try {
-      window.localStorage.setItem(RESTART_STARTED_KEY, String(Date.now()));
+      window.localStorage.setItem(RESTART_STARTED_KEY, String(restartStartedAtRef.current));
     } catch {
       // ignore storage errors
     }
@@ -2128,8 +2254,8 @@ function Shell({
   }, [client, onModelNameChange]);
 
   useEffect(() => {
-    return client.onRunStatus((chatId, startedAt) => {
-      if (startedAt != null) {
+    return client.onRunStatus((chatId, state) => {
+      if (state.active) {
         const nextRunning = new Set(runningChatIdsRef.current);
         nextRunning.add(chatId);
         runningChatIdsRef.current = nextRunning;
@@ -2174,6 +2300,7 @@ function Shell({
       }
       if (!wasOpen) return;
       wasOpen = false;
+      filePreviewStore.clear();
       if (Object.keys(temporarySessionsRef.current).length === 0) return;
       temporarySessionsRef.current = {};
       setTemporarySessions({});
@@ -2181,11 +2308,26 @@ function Shell({
         navigate(defaultShellRoute(), { replace: true });
       }
     });
-  }, [client, navigate]);
+  }, [client, navigate, filePreviewStore]);
 
   useEffect(() => {
-    return client.onStatus((status) => {
-      const startedAt = (() => {
+    let cancelled = false;
+    let retryTimer: number | undefined;
+    const refreshSettings = (generation: number, attempt = 0): void => {
+      void fetchSettings(getToken())
+        .then((payload) => {
+          if (!cancelled && generation === settingsRefreshGenerationRef.current) {
+            setSettingsSnapshot(payload);
+          }
+        })
+        .catch(() => {
+          if (cancelled || generation !== settingsRefreshGenerationRef.current || attempt >= 3) return;
+          retryTimer = window.setTimeout(() => refreshSettings(generation, attempt + 1), 250);
+        });
+    };
+    const unsubscribe = client.onStatus((status) => {
+      // Another tab can consume the reload marker before this tab reconnects.
+      const startedAt = restartStartedAtRef.current || (() => {
         try {
           return Number(window.localStorage.getItem(RESTART_STARTED_KEY) ?? "0");
         } catch {
@@ -2194,6 +2336,7 @@ function Shell({
       })();
       if (!startedAt) return;
       if (status !== "open") {
+        restartStartedAtRef.current = startedAt;
         restartSawDisconnectRef.current = true;
         return;
       }
@@ -2205,11 +2348,19 @@ function Shell({
       } catch {
         // ignore storage errors
       }
+      const refreshGeneration = ++settingsRefreshGenerationRef.current;
+      restartStartedAtRef.current = 0;
       setIsRestarting(false);
       setRestartToast(t("app.restart.completed", { seconds: (elapsedMs / 1000).toFixed(1) }));
       window.setTimeout(() => setRestartToast(null), 3_500);
+      refreshSettings(refreshGeneration);
     });
-  }, [client, t]);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+    };
+  }, [client, getToken, t]);
 
   const onTurnEnd = useDeferredTitleRefresh(
     temporaryChatActive ? null : activePaneSession,
@@ -2255,6 +2406,8 @@ function Shell({
           });
           return;
         }
+        filePreviewStore.delete(item.key);
+        draftStore.delete(item.key);
       }
       setPendingDelete(null);
       if (deletingActive) {
@@ -2267,7 +2420,7 @@ function Shell({
     } catch (e) {
       console.error("Failed to delete session", e);
     }
-  }, [pendingDelete, deleteChat, activeKey, activeTabState, navigate, topicSessions]);
+  }, [pendingDelete, deleteChat, activeKey, activeTabState, navigate, topicSessions, filePreviewStore, draftStore]);
 
   const onRequestDeleteMany = useCallback(async (items: SidebarDeleteItem[]) => {
     const uniqueItems = Array.from(new Map(items.map((item) => [item.key, item])).values());
@@ -2289,8 +2442,8 @@ function Shell({
     () => {
       const now = Date.now();
       return pairingRequests.filter((request) => {
-        const snoozedUntil = snoozedPairingCodes.get(request.code);
-        return !snoozedUntil || snoozedUntil <= now;
+        const snooze = snoozedPairingCodes.get(request.code);
+        return !snooze || snooze.until <= now;
       });
     },
     [pairingRequests, snoozedPairingCodes],
@@ -2319,12 +2472,13 @@ function Shell({
     [client, refreshPairingRequests],
   );
 
-  const onDismissPairingRequest = useCallback((code: string) => {
+  const onDismissPairingRequest = useCallback((request: PairingRequestInfo) => {
     setSnoozedPairingCodes((current) => {
-      const snoozedUntil = Date.now() + PAIRING_DISMISS_SNOOZE_MS;
-      if (current.get(code) === snoozedUntil) return current;
       const next = new Map(current);
-      next.set(code, snoozedUntil);
+      next.set(request.code, {
+        until: Date.now() + PAIRING_DISMISS_SNOOZE_MS,
+        deliveryStatus: request.delivery_status,
+      });
       return next;
     });
   }, []);
@@ -2544,6 +2698,7 @@ function Shell({
   }, [updateWorkbenchState]);
 
   useEffect(() => {
+    if (!localActive) return;
     if (view === "settings") {
       document.title = t("app.documentTitle.chat", {
         title: t("settings.sidebar.title"),
@@ -2566,6 +2721,10 @@ function Shell({
       document.title = t("app.documentTitle.chat", { title: t("settings.nav.channels") });
       return;
     }
+    if (view === "remote") {
+      document.title = t("app.documentTitle.chat", { title: t("remote.title") });
+      return;
+    }
     if (view === "skills") {
       document.title = t("app.documentTitle.chat", {
         title: t("settings.nav.skills", { defaultValue: "Skills" }),
@@ -2575,7 +2734,7 @@ function Shell({
     document.title = activeSession
       ? t("app.documentTitle.chat", { title: headerTitle })
       : t("app.documentTitle.base");
-  }, [activeSession, headerTitle, i18n.resolvedLanguage, t, view]);
+  }, [localActive, activeSession, headerTitle, i18n.resolvedLanguage, t, view]);
 
   const pinnedPaneKeys = useMemo(
     () => new Set(sidebarState.pinned_keys),
@@ -2598,13 +2757,14 @@ function Shell({
     : activeKey;
 
   const sidebarProps = {
-    sessions: sidebarTopicSessions,
-    temporarySessions: temporarySessionList,
-    activeKey: view === "chat"
+    sessions: sidebarStateLoading ? [] : sidebarTopicSessions,
+    temporarySessions: sidebarStateLoading ? [] : temporarySessionList,
+    activeKey: !managingConnections && view === "chat"
       ? (temporaryChatActive ? activeKey : activeSidebarKey)
       : null,
-    loading,
-    newChatActive: view === "chat" && activeKey === null,
+    loading: loading || sidebarStateLoading,
+    initialLoading: sessionsInitialLoading || sidebarStateLoading,
+    newChatActive: !managingConnections && view === "chat" && activeKey === null,
     onNewChat,
     onSelect: onSelectSidebarItem,
     onCloseTemporaryChat,
@@ -2624,13 +2784,19 @@ function Shell({
     onRequestRenameProject,
     onNewChatInProject,
     onOpenSettings,
+    onOpenUpdates: () => onOpenSettings("about"),
+    availableUpdate: localActive && !isNativeRuntime(effectiveRuntimeSurface)
+      && versionCheck.result?.type === "update" && versionCheck.result.latestVersion !== versionCheck.dismissedVersion
+      ? { version: versionCheck.result.latestVersion, onDismiss: versionCheck.dismiss, onRequestUpdate: updateFlow.open,
+        installationMethod: updateFlow.pending ? null : versionCheck.installationMethod }
+      : undefined,
     onOpenApps,
     onOpenAutomations,
     onOpenChannels,
     onOpenSkills,
     onSettingsIntent,
     onOpenSearch: onOpenSessionSearch,
-    activeUtility: view === "apps" || view === "automations" || view === "skills" || view === "channels" ? view : null,
+    activeUtility: !managingConnections && (view === "apps" || view === "automations" || view === "skills" || view === "channels") ? view : null,
     onToggleArchived,
     pinnedKeys: sidebarPinnedTabKeys,
     archivedKeys: sidebarArchivedTabKeys,
@@ -2659,6 +2825,7 @@ function Shell({
 
   return (
     <ThemeProvider theme={theme}>
+      <StarPrompt ready={localActive && !managingConnections && !loading && !sidebarStateLoading} />
       <div
         className={cn(
           "relative h-full w-full overflow-hidden",
@@ -2739,6 +2906,18 @@ function Shell({
               onOpenChange={(open) => setMobileSidebarOpen(open)}
             >
               <SheetContent
+                ref={mobileSidebarRef}
+                onEscapeKeyDown={(event) => {
+                  if (event.target instanceof Element
+                    && event.target.closest("[data-sidebar-topic-rename]")) {
+                    event.preventDefault();
+                  }
+                }}
+                onOpenAutoFocus={(event) => {
+                  // Keep opening navigation from focusing the search tooltip trigger.
+                  event.preventDefault();
+                  mobileSidebarRef.current?.focus({ preventScroll: true });
+                }}
                 side="left"
                 showCloseButton={false}
                 aria-describedby={undefined}
@@ -2768,19 +2947,23 @@ function Shell({
               />
             </Suspense>
           ) : null}
-        <main
+        <main ref={managementMain}
+          aria-hidden={managingConnections && remoteConnections?.embeddedManagement || undefined}
+          {...(managingConnections && remoteConnections?.embeddedManagement ? { inert: "" } : {})}
           className={cn(
             "relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background",
           )}
         >
-            <div
+          <div className={cn("absolute inset-0 flex flex-col", managingConnections && "hidden")}
+            aria-hidden={managingConnections || undefined} {...(managingConnections ? { inert: "" } : {})}>
+            {(view === "chat" || chatVisited) && <div
               className={cn(
                 "absolute inset-0 flex flex-col",
                 view !== "chat" && "hidden",
               )}
             >
-              <ThreadVisibilityContext.Provider value={view === "chat"}>
-                <Suspense fallback={<SurfaceLoadingFallback label={t("chat.loading")} />}>
+              <ThreadVisibilityContext.Provider value={localActive && !managingConnections && view === "chat"}>
+                <Suspense fallback={<StartupShell embedded surface="chat" sidebarExpanded={hostSidebarOpen} />}>
                   <PaneWorkbench
                     panes={renderedWorkbenchPanes}
                     activePaneKey={renderedActivePaneKey}
@@ -2820,9 +3003,13 @@ function Shell({
                           <ThreadShell
                             session={activeSession}
                             sessions={sessions}
+                            titleOverrides={sidebarState.title_overrides}
                             title={headerTitle}
                             temporary={temporaryChatRequested}
                             temporaryChatIds={temporaryChatIds}
+                            messageCache={threadMessageCache}
+                            filePreviewStore={filePreviewStore}
+                            draftStore={draftStore}
                             temporaryChatEnabled={temporaryChatEnabled}
                             onTemporaryChatEnabledChange={
                               !activeKey ? onTemporaryChatEnabledChange : undefined
@@ -2847,6 +3034,7 @@ function Shell({
                             workspaceError={workspaceError}
                             onWorkspaceScopeChange={applyWorkspaceScope}
                             settingsSnapshot={settingsSnapshot}
+                            settingsLoading={settingsLoading}
                             onOpenModelSettings={onOpenModelSettings}
                             skills={skills}
                           />
@@ -2866,7 +3054,12 @@ function Shell({
                         <ThreadShell
                           session={paneSession}
                           sessions={sessions}
+                          titleOverrides={sidebarState.title_overrides}
                           title={pane.title}
+                          temporaryChatIds={temporaryChatIds}
+                          messageCache={threadMessageCache}
+                          filePreviewStore={filePreviewStore}
+                          draftStore={draftStore}
                           onToggleSidebar={toggleSidebar}
                           onNewChat={onNewChat}
                           onCreateChat={onCreateChat}
@@ -2885,6 +3078,7 @@ function Shell({
                           headerPortalTarget={context.headerPortalTarget}
                           headerActive={context.active}
                           composerPortalTarget={context.composerPortalTarget}
+                          navigationFrame={context.navigationFrame}
                           composerActive={context.active}
                           composerInputAriaLabel={t("workbench.composerAria", {
                             title: pane.title,
@@ -2906,6 +3100,7 @@ function Shell({
                             client.setWorkspaceScope(paneSession.chatId, next);
                           }}
                           settingsSnapshot={settingsSnapshot}
+                          settingsLoading={settingsLoading}
                           onOpenModelSettings={onOpenModelSettings}
                           skills={skills}
                         />
@@ -2914,10 +3109,14 @@ function Shell({
                   />
                 </Suspense>
               </ThreadVisibilityContext.Provider>
-            </div>
+            </div>}
             {view !== "chat" && (
               <div className="absolute inset-0 flex flex-col">
-                <Suspense fallback={<SurfaceLoadingFallback />}>
+                {view === "remote" ? <LazyRemoteConnectionsPage
+                  mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
+                  hostChromeInset={showHostChrome}
+                  onBackToChat={onBackToChat}
+                /> : <Suspense fallback={<StartupShell embedded surface={view} sidebarExpanded={hostSidebarOpen} />}>
                   <SettingsView
                     registerExitGuard={registerSettingsExitGuard}
                     theme={theme}
@@ -2930,8 +3129,11 @@ function Shell({
                     onModelNameChange={onModelNameChange}
                     onSettingsChange={setSettingsSnapshot}
                     skills={skills}
+                    skillsLoading={skillsLoading}
+                    skillsError={skillsError}
                     onStartAutomationChat={onStartAutomationChat}
                     titleOverrides={sidebarState.title_overrides}
+                    sessions={topicSessions}
                     onSectionChange={onSettingsSectionChange}
                     onLogout={onLogout}
                     onRestart={onRestart}
@@ -2939,9 +3141,17 @@ function Shell({
                     isRestarting={isRestarting}
                     hostChromeInset={showHostChrome}
                   />
-                </Suspense>
+                </Suspense>}
               </div>
             )}
+          </div>
+          {managingConnections && !remoteConnections?.embeddedManagement && <div className="absolute inset-0 flex flex-col">
+            <LazyRemoteConnectionsPage
+              mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
+              hostChromeInset={showHostChrome}
+              onBackToChat={() => remoteConnections?.closeManagement()}
+            />
+          </div>}
           </main>
         </div>
 
@@ -2957,19 +3167,9 @@ function Shell({
             />
           </Suspense>
         ) : null}
-        {pendingRename ? (
-          <Suspense fallback={null}>
-            <RenameChatDialog
-              open
-              title={pendingRename.label}
-              onCancel={() => setPendingRename(null)}
-              onConfirm={onConfirmRename}
-            />
-          </Suspense>
-        ) : null}
         {pendingTabRename ? (
           <Suspense fallback={null}>
-            <RenameChatDialog
+            <RenameDialog
               open
               title={pendingTabRename.label}
               dialogTitle={t("workbench.renameGroupTitle")}
@@ -2982,7 +3182,7 @@ function Shell({
         ) : null}
         {pendingProjectRename ? (
           <Suspense fallback={null}>
-            <RenameChatDialog
+            <RenameDialog
               open
               title={pendingProjectRename.label}
               dialogTitle={t("chat.renameProjectTitle")}

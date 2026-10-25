@@ -29,13 +29,15 @@ from telegram.error import BadRequest, InvalidToken, NetworkError, RetryAfter, T
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from telegram.request import BaseRequest, HTTPXRequest
 
+from nanobot.bus.delivery import ChannelNotReadyError, DeliveryRejectedError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import build_help_text
+from nanobot.config.network import NetworkConfig
 from nanobot.config.paths import get_media_dir
-from nanobot.config.schema import Base
+from nanobot.config_base import Base
 from nanobot.events import ContextCompactionEvent
 from nanobot.security.network import validate_url_target
 from nanobot.utils.helpers import split_message
@@ -99,6 +101,22 @@ class _LivenessTrackedRequest(BaseRequest):
         return result
 
 
+_FENCE_OPEN_RE = re.compile(r'^[ \t]*(`{3,}|~{3,})(.*)$')
+_INLINE_FENCE_RE = re.compile(r'```(?:[^\n]*\n)?([\s\S]*?)```')
+
+
+def _opening_code_fence(line: str) -> str | None:
+    match = _FENCE_OPEN_RE.match(line)
+    if match and not (match.group(1)[0] == '`' and '`' in match.group(2)):
+        return match.group(1)
+    return None
+
+
+def _closes_code_fence(line: str, fence: str) -> bool:
+    closing = line.strip()
+    return len(closing) >= len(fence) and closing == fence[0] * len(closing)
+
+
 def _split_telegram_markdown(content: str, max_len: int) -> list[str]:
     """Split raw Telegram Markdown without leaving fenced code blocks unbalanced."""
     if not content:
@@ -115,13 +133,33 @@ def _split_telegram_markdown(content: str, max_len: int) -> list[str]:
             return content[fence_pos:]
         return content[fence_pos:line_end]
 
-    def split_inside_fenced_code_block(pos: int) -> tuple[bool, int, str]:
-        if content[:pos].count("```") % 2 == 0:
-            return False, -1, ""
-        opening = content.rfind("```", 0, pos)
-        if opening < 0:
-            return True, -1, "```"
-        return True, opening, fence_line(opening)
+    def split_inside_fenced_code_block(pos: int) -> tuple[int, str, str] | None:
+        fence = None
+        opening = -1
+        inline = False
+        offset = 0
+        for line in content[:pos].split("\n"):
+            if fence is not None and not inline:
+                if _closes_code_fence(line, fence):
+                    fence = None
+            else:
+                marker = _opening_code_fence(line) if fence is None else None
+                if marker is not None:
+                    fence = marker
+                    opening = offset
+                    inline = False
+                else:
+                    # Keep the legacy renderer's inline triple-backtick blocks.
+                    for match in re.finditer("```", line):
+                        if fence is None:
+                            fence = "```"
+                            opening = offset + match.start()
+                            inline = True
+                        else:
+                            fence = None
+                            inline = False
+            offset += len(line) + 1
+        return (opening, fence_line(opening), fence) if fence is not None else None
 
     chunks: list[str] = []
     while content:
@@ -136,12 +174,13 @@ def _split_telegram_markdown(content: str, max_len: int) -> list[str]:
         if pos <= 0:
             pos = max_len
 
-        inside_code, opening, fence = split_inside_fenced_code_block(pos)
-        if inside_code:
+        active_fence = split_inside_fenced_code_block(pos)
+        if active_fence is not None:
+            opening, fence, marker = active_fence
             if opening > 0:
                 pos = opening
             else:
-                closing = "\n```"
+                closing = "\n" + marker
                 min_code_pos = len(fence)
                 if content.startswith(fence + "\n"):
                     min_code_pos += 1
@@ -204,6 +243,35 @@ def _strip_md(s: str) -> str:
     return s.strip()
 
 
+def _replace_fenced_code(text: str, replace: Callable[[str], str]) -> str:
+    """Replace fenced code blocks with ``replace(code)``.
+
+    A block opens on a ``` or ~~~ line and closes on a line holding only a run
+    of the same character that is at least as long, so tilde fences work and a
+    ```` fence can show a ``` example. What remains (one-line ```code``` and
+    unclosed fences) keeps the previous regex handling.
+    """
+    lines = text.split('\n')
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        fence = _opening_code_fence(lines[i])
+        if fence is not None:
+            for j in range(i + 1, len(lines)):
+                if _closes_code_fence(lines[j], fence):
+                    out.append(replace(''.join(line + '\n' for line in lines[i + 1:j])))
+                    i = j + 1
+                    break
+            else:
+                out.append(lines[i])
+                i += 1
+            continue
+        out.append(lines[i])
+        i += 1
+    text = '\n'.join(out)
+    return _INLINE_FENCE_RE.sub(lambda m: replace(m.group(1)), text)
+
+
 def _strip_md_block(text: str) -> str:
     """Strip block-level and inline markdown for readable plain-text preview.
 
@@ -211,7 +279,7 @@ def _strip_md_block(text: str) -> str:
     markdown syntax while the response is still being generated.
     """
     # Code blocks -> just the code
-    text = re.sub(r'```(?:[^\n]*\n)?([\s\S]*?)```', r'\1', text)
+    text = _replace_fenced_code(text, lambda code: code)
     # Headers -> plain text
     text = re.sub(r'^#{1,6}\s+(.+)$', r'\1', text, flags=re.MULTILINE)
     # Blockquotes
@@ -273,11 +341,11 @@ def _markdown_to_telegram_html(text: str) -> str:
 
     # 1. Extract and protect code blocks (preserve content from other processing)
     code_blocks: list[str] = []
-    def save_code_block(m: re.Match[str]) -> str:
-        code_blocks.append(m.group(1))
+    def save_code_block(code: str) -> str:
+        code_blocks.append(code)
         return f"\x00CB{len(code_blocks) - 1}\x00"
 
-    text = re.sub(r'```(?:[^\n]*\n)?([\s\S]*?)```', save_code_block, text)
+    text = _replace_fenced_code(text, save_code_block)
 
     # 1.5. Convert markdown tables to box-drawing (reuse code_block placeholders)
     lines = text.split('\n')
@@ -317,8 +385,15 @@ def _markdown_to_telegram_html(text: str) -> str:
     # 5. Escape HTML special characters
     text = _escape_telegram_html(text)
 
-    # 6. Links [text](url) - must be before bold/italic to handle nested cases
-    text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
+    # 6. Links [text](url) - must be before bold/italic to handle nested cases.
+    # Park the URL in a placeholder so later inline-formatting passes cannot
+    # rewrite it (e.g. ``__init__.py`` must not become ``<b>init</b>.py``).
+    link_urls: list[str] = []
+    def save_link(m: re.Match[str]) -> str:
+        link_urls.append(m.group(2).replace('"', "&quot;"))
+        return f'<a href="\x00LK{len(link_urls) - 1}\x00">{m.group(1)}</a>'
+
+    text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', save_link, text)
 
     # 7. Bold **text** or __text__
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
@@ -336,6 +411,10 @@ def _markdown_to_telegram_html(text: str) -> str:
     # 10.5. Numbered lists  1. item -> 1. item (keep number, normalize indent)
     text = re.sub(r'^(\d+)\.\s+', r'\1. ', text, flags=re.MULTILINE)
 
+    # 10.6. Restore link URLs protected in step 6
+    for i, url in enumerate(link_urls):
+        text = text.replace(f"\x00LK{i}\x00", url)
+
     # 11. Restore inline code with HTML tags
     for i, code in enumerate(inline_codes):
         # Escape HTML in code content
@@ -348,7 +427,7 @@ def _markdown_to_telegram_html(text: str) -> str:
         escaped = _escape_telegram_html(code)
         text = text.replace(f"\x00CB{i}\x00", f"<pre><code>{escaped}</code></pre>")
 
-    # 13. Restore header bold markers (inserted in step 3, after HTML escaping)
+    # 13. Restore header bold markers inserted in step 3 before HTML escaping.
     text = text.replace('⟪B⟫', '<b>').replace('⟪/B⟫', '</b>')
 
     return text
@@ -417,7 +496,7 @@ class TelegramConfig(Base):
     token: str = ""
     mode: Literal["polling", "webhook"] = "polling"
     allow_from: list[str] = Field(default_factory=list)
-    proxy: str | None = None
+    use_proxy: bool = False
     reply_to_message: bool = False
     react_emoji: str = "👀"
     group_policy: Literal["open", "mention"] = "mention"
@@ -510,6 +589,7 @@ class TelegramChannel(BaseChannel):
 
     name = "telegram"
     display_name = "Telegram"
+    uses_shared_proxy = True
 
     # Commands registered with Telegram's command menu
     BOT_COMMANDS: list[BotCommand] = [
@@ -538,18 +618,21 @@ class TelegramChannel(BaseChannel):
     # Canonical hyphenated commands stay on a separate handler (below).
     TELEGRAM_BUS_SLASH_COMMAND_RE = re.compile(
         r"^/(?:new|compact|stop|restart|status|dream|history|goal|trigger|pairing|model|skill"
-        r"|dream_log|dream_restore|dream_prompt|evaluator_prompt|evaluator-prompt)(?:@\w+)?(?:\s+.*)?$"
+        r"|dream_log|dream_restore|dream_prompt|evaluator_prompt|evaluator-prompt)(?:@\w+)?(?:\s+[\s\S]*)?$"
     )
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
         return TelegramConfig().model_dump(by_alias=True)
 
-    def __init__(self, config: Any, bus: MessageBus):
+    def __init__(
+        self, config: Any, bus: MessageBus, *, network: NetworkConfig | None = None,
+    ):
         if isinstance(config, dict):
             config = TelegramConfig.model_validate(config)
-        super().__init__(config, bus)
+        super().__init__(config, bus, network=network)
         self.config: TelegramConfig = config
+        self._proxy = self.network.resolve_proxy(self.config.use_proxy)
         self._app: TelegramApplication | None = None
         self._typing_tasks: dict[str, asyncio.Task[None]] = {}  # chat_id -> typing loop task
         self._media_group_buffers: dict[str, dict[str, Any]] = {}
@@ -595,10 +678,9 @@ class TelegramChannel(BaseChannel):
         """Map Telegram-safe command aliases back to canonical nanobot commands."""
         if not content.startswith("/"):
             return content
-        for alias, canonical in _TELEGRAM_COMMAND_ALIASES.items():
-            if content == alias or content.startswith(f"{alias} "):
-                return canonical + content[len(alias):]
-        return content
+        command = content.split(maxsplit=1)[0]
+        canonical = _TELEGRAM_COMMAND_ALIASES.get(command, command)
+        return canonical + content[len(command):]
 
     async def start(self) -> None:
         """Start the Telegram bot, rebuilding the app whenever polling stalls."""
@@ -658,9 +740,7 @@ class TelegramChannel(BaseChannel):
 
     async def _start_app(self) -> None:
         """Build, initialize and start the Telegram application."""
-        proxy = self.config.proxy or None
-        if proxy and "://" not in proxy:
-            proxy = f"http://{proxy}"
+        proxy = self._proxy
 
         # Separate pools so long-polling (getUpdates) never starves outbound sends.
         api_request = HTTPXRequest(
@@ -697,7 +777,7 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(
             MessageHandler(
                 filters.Regex(
-                    r"^/(?:dream-log|dream-restore|dream-prompt)(?:@\w+)?(?:\s+.*)?$"
+                    r"^/(?:dream-log|dream-restore|dream-prompt)(?:@\w+)?(?:\s+[\s\S]*)?$"
                 ),
                 self._forward_command,
             )
@@ -791,7 +871,7 @@ class TelegramChannel(BaseChannel):
         with suppress(asyncio.TimeoutError):
             await asyncio.wait_for(self._app_ready.wait(), APP_RESTART_SEND_WAIT_SECONDS)
         if not self._app_ready.is_set() or self._app is None:
-            raise RuntimeError("Telegram application is restarting; message not delivered")
+            raise ChannelNotReadyError("Telegram application is restarting; message not delivered")
         return self._app
 
     def _note_poll_ok(self) -> None:
@@ -860,7 +940,8 @@ class TelegramChannel(BaseChannel):
     @staticmethod
     def _get_media_type(path: str) -> str:
         """Guess media type from file extension."""
-        ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+        filename = urlparse(path).path if path.startswith(("http://", "https://")) else path
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         if ext in ("jpg", "jpeg", "png", "gif", "webp"):
             return "photo"
         if ext in ("mp4", "mov", "avi", "mkv", "webm", "3gp"):
@@ -1058,10 +1139,13 @@ class TelegramChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
+        if isinstance(msg.event, ContextCompactionEvent) and not (
+            msg.event.notify or self.show_compaction_notices
+        ):
+            return
         app = await self._wait_for_app()
         if app is None:
-            self.logger.warning("bot not running")
-            return
+            raise ChannelNotReadyError("Telegram bot not running")
 
         progress_event = msg.event if isinstance(msg.event, ProgressEvent) else None
 
@@ -1075,8 +1159,7 @@ class TelegramChannel(BaseChannel):
         try:
             chat_id = int(msg.chat_id)
         except ValueError:
-            self.logger.exception("Invalid chat_id: {}", msg.chat_id)
-            return
+            raise DeliveryRejectedError("Invalid Telegram chat_id") from None
         reply_to_message_id = msg.metadata.get("message_id")
         message_thread_id = msg.metadata.get("message_thread_id")
         if message_thread_id is None and reply_to_message_id is not None:
@@ -1929,10 +2012,9 @@ class TelegramChannel(BaseChannel):
 
         # Strip @bot_username suffix if present
         content = message.text or ""
-        if content.startswith("/") and "@" in content:
-            cmd_part, *rest = content.split(" ", 1)
-            cmd_part = cmd_part.split("@")[0]
-            content = f"{cmd_part} {rest[0]}" if rest else cmd_part
+        if content.startswith("/"):
+            command = content.split(maxsplit=1)[0]
+            content = command.split("@", 1)[0] + content[len(command):]
         content = self._normalize_telegram_command(content)
 
         await self._handle_message(

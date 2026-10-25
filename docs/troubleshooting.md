@@ -1,42 +1,41 @@
 # Troubleshooting
 
-Use this page to isolate where a failure lives. Start with the smallest surface that proves the most: local CLI first, then gateway, then WebUI or chat apps.
+Use the first check that matches what you see, then follow its next step. This avoids investigating the browser or a chat app before confirming nanobot can start and contact its model.
 
 ## Fast Diagnosis Order
 
-Run these in order:
+- **The `nanobot` command is not found, or nanobot will not start:** check [Installation Problems](#installation-problems). Run `nanobot --version` to confirm the command is available.
+- **nanobot starts, but does not answer:** run `nanobot status`. Check that it points to the config and workspace you expect and that the active model is ready. This command does not contact the model; if setup is incomplete, follow its WebUI **Settings → Models** or CLI wizard instructions.
+- **Status looks ready, but a test question fails:** run `nanobot agent -m "Hello!"`. If it fails, troubleshoot [Provider and Model Problems](#provider-and-model-problems) before testing the gateway or a chat app.
+- **The test question works, but the browser or chat app does not:** start `nanobot gateway` and follow [Gateway Problems](#gateway-problems), [WebUI Problems](#webui-problems), or [Chat App Problems](#chat-app-problems), depending on what is failing.
 
-```bash
-nanobot --version
-nanobot status
-nanobot agent -m "Hello!"
-```
+`nanobot status` checks local configuration and provider readiness without making a model request. A successful `nanobot agent -m "Hello!"` confirms the local agent can get a reply; it does not prove that a gateway, browser, or chat app is working.
 
-Then, only if the CLI works:
+## Empty topics after a WebUI restart
 
-```bash
-nanobot gateway
-```
+The Restart button in WebUI settings does not create a conversation or add messages to an existing conversation. Reopening WebUI or reconnecting to the gateway also does not save a topic until a message or another session action creates it.
 
-This separates failures into layers:
+Older gateway versions could save an empty topic when the Restart button had no current chat. Update the gateway to stop creating these topics. Existing topics are not deleted by the update; check their contents before removing them. A typed `/restart` command remains part of that chat's display history.
 
-| Layer | What it proves |
-|---|---|
-| `nanobot --version` | Install and shell command discovery |
-| `nanobot status` | Config path, workspace, environment references, and active provider/model configuration |
-| `nanobot agent -m "Hello!"` | Config loading, provider/model access, workspace writes, and agent loop |
-| `nanobot gateway` | Channel startup, cron system jobs, heartbeat, WebUI/WebSocket, and health endpoint |
+If settings stay disabled after a restart while another tab has reconnected, reload the affected page. Updated WebUI clients track restart completion per tab, so one tab cannot leave another tab waiting by clearing the shared restart marker.
 
-If `nanobot agent -m "Hello!"` fails, fix that before debugging WebUI, Telegram, Discord, Docker, systemd, or any chat app.
+## Session storage overlaps the workspace
 
-`nanobot status` does not call the model. If provider/model setup is incomplete, it points to
-WebUI **Settings → Models** or the CLI setup wizard, then prints the command to check again.
+Sessions live at `<config-dir>/sessions/<workspace-id>/`, outside the agent workspace. If startup reports a conflict, compare the printed paths. A valid layout is `bot/config.json`, `bot/sessions/`, and `bot/workspace/`.
+
+`--workspace` overrides `agents.defaults.workspace` without moving sessions. The override is temporary for `agent` and `gateway`; `webui --workspace` saves it to the config.
+
+To fix an existing instance:
+
+1. Stop the instance and back up its config directory and workspace.
+2. Keep the workspace and `.nanobot/workspace-id` in place. Move the config file **and its runtime data, including sessions**, to a directory outside the workspace.
+3. Update `--config` in your launch command or service, check relative paths, and restart.
+
+Moving only the config leaves history behind. Choosing a new workspace without moving its contents (including memory, skills, and `.nanobot/workspace-id`) can start an empty workspace with a different session identity.
 
 ## How to Read `nanobot status`
 
-`nanobot status` does not call a model. It checks the selected config and workspace,
-resolves environment references, and validates the local settings required by the active
-provider/model without constructing a provider client.
+`nanobot status` does not call a model. It checks the selected config and workspace, resolves environment references, and validates the local settings required by the active provider/model without constructing a provider client.
 
 The output has this shape:
 
@@ -75,7 +74,7 @@ Use the same Python command for install checks and module fallback. On macOS/Lin
 | `curl: command not found` | The macOS/Linux one-command installer could not download the script. Install curl, or use a manual isolated install such as `uv tool install nanobot-ai` or `pipx install nanobot-ai`. |
 | `irm` is not recognized | PowerShell could not run the download helper. Use manual install: `uv tool install nanobot-ai`, `pipx install nanobot-ai`, or `py -m pip install nanobot-ai` inside an environment you control. |
 | Could not download `raw.githubusercontent.com` | Your network, proxy, or firewall blocked the installer script download. Use manual install from PyPI, or configure your proxy and rerun the command. |
-| `nanobot: command not found` | Use the module form, for example `python -m nanobot ...`, `python3 -m nanobot ...`, or `py -m nanobot ...`. Reinstall with the same Python command, or add that Python's scripts directory to `PATH`. |
+| `nanobot: command not found` | With the recommended installer, reuse its printed full command; with uv/pipx, use `uv tool run --from nanobot-ai nanobot ...` / `pipx run --spec nanobot-ai nanobot ...`. For a pip install, use `<installing-python> -m nanobot ...` from that same environment. A system `python` or `py` may not contain the isolated installation. |
 | `No module named nanobot` | You are running a different Python than the one used for installation. Run `python -m pip show nanobot-ai`, `python3 -m pip show nanobot-ai`, or `py -m pip show nanobot-ai`, matching the command that installed nanobot. |
 | `pip is not available` | When the installer uses a virtual environment, it tries `python -m ensurepip --upgrade`. If that fails, install pip for that Python, or use a Python installer/distribution that includes pip. |
 | `externally-managed-environment` | Your system Python blocks global pip installs. Use the one-command installer, `uv tool install nanobot-ai`, `pipx install nanobot-ai`, or create a virtual environment; do not add `--break-system-packages` for nanobot. |
@@ -149,16 +148,20 @@ If you need a known-good snippet instead of diagnosis, use [`provider-cookbook.m
 | Local model connection refused | Ollama, vLLM, LM Studio, or another local server is not running, or `apiBase` points to the wrong port. |
 | Bedrock validation error | Check AWS region, credentials, model access, model ID, and whether the model supports Converse. |
 | OAuth provider fails | Run the matching login command: `openai-codex`, `xai-grok`, or `github-copilot`, normally with `--set-main`. |
-| Codex OAuth needs a proxy | Set `providers.openaiCodex.proxy` before running the login command. The proxy applies to login, token refresh, and Codex API requests. |
+| Codex OAuth needs a proxy | Set the address in **Settings → Advanced → Shared proxy** and enable **Use proxy** for OpenAI Codex before login. In `config.json`, use `network.proxy` and `providers.openaiCodex.useProxy: true`. This applies to login, token refresh, and Codex API requests. |
 | Codex login runs on a remote/headless machine | In the WebUI, open ChatGPT in your local browser; when the localhost callback page cannot load, copy the full `http://localhost:1455/auth/callback?...` URL from the address bar and paste it into the WebUI dialog. From the CLI, open the printed URL locally and paste the same callback URL back into the terminal. |
 | Codex login runs in Docker | Start the container with `docker run -it` so the OAuth flow has an interactive terminal. |
 | Codex says a model is not supported with a ChatGPT account | Use provider `openai_codex` with a Codex model such as `openai-codex/gpt-5.6-sol`. Do not use the direct-API `openai/...` prefix with Codex OAuth. |
 | Config says `providers.openai_codex` conflicts with the built-in provider | Under `providers`, keep only the canonical `openaiCodex` settings key and remove a duplicate `openai_codex` key. A model preset's `provider` value remains `openai_codex`. |
-| xAI OAuth needs a proxy | Set `providers.xaiGrok.proxy` before login. It applies to OAuth discovery, token exchange/refresh, and Grok subscription requests. |
+| xAI OAuth needs a proxy | Set `network.proxy` and `providers.xaiGrok.useProxy: true` before login, or use the shared address and provider switch in Settings. This applies to OAuth discovery, token exchange/refresh, and Grok subscription requests. |
 | xAI login runs on a remote/headless machine | In the WebUI, finish sign-in in your local browser; if the loopback redirect cannot reach the server, copy the final URL from the address bar into the WebUI dialog. From the CLI, run `nanobot provider login xai-grok` interactively, open the printed URL elsewhere, and paste the final callback URL or authorization code when prompted. |
 | xAI returns 403 or subscription access denied | Confirm the signed-in account has an eligible X Premium / Grok subscription, then run `nanobot provider login xai-grok` again. This provider does not use an xAI API key or X Developer OAuth. |
 | xAI returns 400 `invalid-argument` | Read the bounded `Response body` appended to the provider error. Hosted `x_search` is sent only when xAI's model catalog advertises `supportsBackendSearch`; the model ID `grok-4.5` itself is valid. |
 | xAI model or X Search stops working after an upstream release | The integration follows Grok Build's public OAuth/proxy client contract. Update nanobot if xAI changes that contract. |
+
+### Local Token Estimation
+
+Gateway loads the fallback tokenizer in the background, caching it beside the active config under `cache/tiktoken` unless `TIKTOKEN_CACHE_DIR` or `DATA_GYM_CACHE_DIR` is set; chats use UTF-8 byte estimates while loading or after failure (restart to retry), and token estimates may differ from model usage.
 
 ## Langfuse Problems
 
@@ -169,7 +172,7 @@ Langfuse tracing is optional and controlled by environment variables.
 | `LANGFUSE_SECRET_KEY is set but langfuse is not installed` | Install `langfuse` in the same Python environment that runs nanobot, then restart the process. |
 | No traces appear | Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_BASE_URL` before starting nanobot. |
 | Wrong Langfuse project or region | Check that the key pair and `LANGFUSE_BASE_URL` come from the same Langfuse project/region. |
-| Only some providers trace | Langfuse tracing applies to OpenAI-compatible provider calls; native providers may not use that client path. |
+| Only some providers trace | Langfuse tracing applies to OpenAI-compatible provider calls and the Codex OAuth provider; other native providers may not use either client path. |
 
 See [`configuration.md#langfuse-observability`](./configuration.md#langfuse-observability) for setup commands.
 
@@ -202,17 +205,9 @@ nanobot gateway --verbose
 
 ### Slow Optional Channel Dependency Installation
 
-Before loading enabled channels, the gateway checks the dependencies declared by their
-channel manifests. The CLI and WebUI normally install these dependencies when a channel is
-enabled. Installation during startup is a recovery path for an enabled config whose Python
-environment no longer has the required packages, for example after manually editing the
-config, upgrading nanobot, or recreating an isolated `uv tool`/`pipx` environment. The
-gateway waits for the install so an enabled channel is not silently skipped; later starts
-skip the installation once the dependencies are present.
+Before loading enabled channels, the gateway checks the dependencies declared by their channel manifests. The CLI and WebUI normally install these dependencies when a channel is enabled. Installation during startup is a recovery path for an enabled config whose Python environment no longer has the required packages, for example after manually editing the config, upgrading nanobot, or recreating an isolated `uv tool`/`pipx` environment. The gateway waits for the install so an enabled channel is not silently skipped; later starts skip the installation once the dependencies are present.
 
-If access to PyPI is slow in your region, configure pip to use a trusted package index. The
-installer honors the standard `PIP_INDEX_URL` environment variable, including when nanobot
-itself was installed with `uv tool`:
+If access to PyPI is slow in your region, configure pip to use a trusted package index. The installer honors the standard `PIP_INDEX_URL` environment variable, including when nanobot itself was installed with `uv tool`:
 
 ```bash
 PIP_INDEX_URL=https://your-trusted-mirror.example/simple nanobot gateway
@@ -236,11 +231,14 @@ systemctl --user daemon-reload
 systemctl --user restart nanobot-gateway.service
 ```
 
-For a system-level or custom service, use `sudo systemctl edit <unit>` instead. Prefer an
-HTTPS index operated by an organization you trust, and do not put index credentials in
-commands or logs.
+For a system-level or custom service, use `sudo systemctl edit <unit>` instead. Prefer an HTTPS index operated by an organization you trust, and do not put index credentials in commands or logs.
 
 ## WebUI Problems
+
+Run `nanobot webui` to prepare the local WebSocket channel and open the browser. Finish model setup in **Settings → Models**.
+
+<details>
+<summary>Manual WebSocket configuration</summary>
 
 The packaged WebUI is served by the WebSocket channel.
 
@@ -268,6 +266,10 @@ Open:
 http://127.0.0.1:8765
 ```
 
+</details>
+
+For first access, copy the complete login link printed by `nanobot webui`, including the fragment after `#`. In WSL, open that link in your Windows browser if automatic opening fails. The plain page address does not sign in a new browser.
+
 If accessing from another device, bind the WebSocket channel to `0.0.0.0` and set `token` or `tokenIssueSecret`. The WebSocket channel refuses public binds without a token or token issue secret.
 
 | Symptom | Check |
@@ -294,7 +296,7 @@ Then check:
 |---|---|
 | Bot never replies | Gateway is not running, the channel is not enabled, or the bot/app token is wrong. |
 | Unknown sender ignored | Configure `allowFrom`, pairing, or the channel-specific allow list. |
-| Telegram shows a saved configuration but cannot complete a live check | The token is saved. Confirm the gateway can reach `api.telegram.org`, or open **Settings → Channels → Telegram → Advanced → Network proxy** and enter an HTTP or SOCKS proxy. |
+| Telegram shows a saved configuration but cannot complete a live check | The token is saved. Confirm the gateway can reach `api.telegram.org`, or open **Channels → Telegram → Advanced → Network proxy** and enter an HTTP or SOCKS proxy. |
 | Telegram rejects the token | Copy the current token from BotFather or regenerate it. |
 | Telegram receives no messages | Confirm the channel is enabled, the gateway is running, and the sender is paired or listed in `allowFrom`. |
 | Discord replies missing | Enable Message Content intent and invite the bot with the required permissions. |

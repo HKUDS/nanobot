@@ -77,17 +77,47 @@ describe("SessionInfoPopover", () => {
     expect(screen.queryByText("Check the project status")).not.toBeInTheDocument();
 
     await user.click(row);
+    await screen.findByText("Check the project status");
     const detail = screen.getByRole("dialog", { name: "Morning check" });
     expect(detail).toHaveClass("max-w-[520px]", "rounded-modal");
-    expect(within(detail).queryByText("Instructions")).not.toBeInTheDocument();
+    expect(within(detail).queryByText("Task instructions")).not.toBeInTheDocument();
     expect(within(detail).getByText("Check the project status")).toBeInTheDocument();
     await user.click(within(detail).getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Morning check" })).not.toBeInTheDocument());
     expect(screen.getByRole("button", { name: "Session details" })).toHaveFocus();
   });
 
+  it("uses a skeleton for the initial request and keeps jobs while reopening and refreshing", async () => {
+    let finish!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const user = userEvent.setup();
+    const view = render(<SessionInfoPopover client={client} sessionKey="websocket:chat-1" token="tok" title="Release work" />);
+    await user.click(screen.getByRole("button", { name: "Session details" }));
+    expect(screen.getByRole("status", { name: "Loading automations..." })).toHaveAttribute("aria-busy", "true");
+    await act(async () => finish(automationsResponse([automationJob()])));
+    expect(await screen.findByRole("button", { name: /Morning check/ })).toBeVisible();
+    await user.keyboard("{Escape}");
+    let fail!: (error: Error) => void;
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
+    await user.click(screen.getByRole("button", { name: "Session details" }));
+    expect(screen.getByRole("button", { name: /Morning check/ })).toBeVisible();
+    expect(screen.queryByRole("status", { name: "Loading automations..." })).not.toBeInTheDocument();
+    await act(async () => fail(new Error("Refresh failed")));
+    expect(screen.getByRole("button", { name: /Morning check/ })).toBeVisible();
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    view.rerender(<SessionInfoPopover client={client} sessionKey="websocket:chat-2" token="tok" title="Other project" />);
+    expect(screen.queryByRole("button", { name: /Morning check/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Loading automations..." })).toBeVisible();
+    await act(async () => finish(automationsResponse([])));
+    expect(await screen.findByText("No automations in this session yet.")).toBeVisible();
+  });
+
   it("manages a session task through the shared detail dialog", async () => {
-    const pausedJob = { ...automationJob(), enabled: false };
+    const boundJob = { ...automationJob(), origin: {
+      session_key: "websocket:chat-1", channel: "websocket", chat_id: "chat-1",
+    } };
+    vi.mocked(fetch).mockResolvedValue(automationsResponse([boundJob]));
+    const pausedJob = { ...boundJob, enabled: false };
     requestMutation.mockResolvedValue({ jobs: [pausedJob] });
     const user = userEvent.setup();
 
@@ -102,15 +132,28 @@ describe("SessionInfoPopover", () => {
 
     await user.click(screen.getByRole("button", { name: "Session details" }));
     await user.click(await screen.findByRole("button", { name: /Morning check/ }));
+    await screen.findByText("Check the project status");
     const detail = screen.getByRole("dialog", { name: "Morning check" });
-    await user.click(within(detail).getByRole("button", { name: "Disable" }));
+    await user.click(within(detail).getByRole("button", { name: "More actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Disable" }));
 
     expect(requestMutation).toHaveBeenCalledWith(
       "automation.disable",
       { id: "job-1" },
       20_000,
     );
-    await waitFor(() => expect(within(detail).getByRole("button", { name: "Enable" })).toBeVisible());
+    await waitFor(() => expect(within(detail).getByRole("button", { name: "More actions" })).toBeEnabled());
+    await user.click(within(detail).getByRole("button", { name: "More actions" }));
+    expect(screen.getByRole("menuitem", { name: "Enable" })).toBeVisible();
+    requestMutation.mockResolvedValue({ jobs: [boundJob] });
+    await user.click(screen.getByRole("menuitem", { name: "Enable" }));
+    expect(requestMutation).toHaveBeenLastCalledWith(
+      "automation.enable", { id: "job-1" }, 20_000,
+    );
+    await user.click(within(detail).getByRole("button", { name: "More actions" }));
+    expect(screen.getByRole("menuitem", { name: "Disable" })).toBeVisible();
+    await user.keyboard("{Escape}");
+    expect(within(detail).getByRole("button", { name: "More actions" })).toHaveFocus();
   });
 
   it("returns from the shared editor to the same task detail", async () => {
@@ -126,10 +169,10 @@ describe("SessionInfoPopover", () => {
 
     await user.click(screen.getByRole("button", { name: "Session details" }));
     await user.click(await screen.findByRole("button", { name: /Morning check/ }));
-    await user.click(screen.getByRole("button", { name: "Edit", exact: true }));
-    const editor = await screen.findByRole("dialog", { name: "Edit automation" });
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    const editor = await screen.findByRole("dialog", { name: "Edit task" });
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
-    await user.click(within(editor).getByRole("button", { name: "Cancel", exact: true }));
+    await user.click(within(editor).getByRole("button", { name: "Cancel" }));
 
     expect(await screen.findByRole("dialog", { name: "Morning check" })).toBeVisible();
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
@@ -219,6 +262,7 @@ describe("SessionInfoPopover", () => {
     const row = await screen.findByRole("button", { name: /PR monitor/ });
     expect(screen.queryByText("Review PR #4591")).not.toBeInTheDocument();
     await user.click(row);
+    await screen.findByText("Command");
     const detail = screen.getByRole("dialog", { name: "PR monitor" });
     expect(within(detail).getByText("Command")).toBeInTheDocument();
     expect(within(detail).getByText('nanobot trigger trg_123 "message"')).toBeInTheDocument();

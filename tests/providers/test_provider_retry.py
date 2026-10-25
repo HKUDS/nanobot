@@ -44,6 +44,20 @@ class ScriptedProvider(LLMProvider):
         return "test-model"
 
 
+@pytest.mark.parametrize(("response", "expected"), [
+    (LLMResponse(content=None, finish_reason="error", error_kind="oauth_auth_required"), "authentication"),
+    (LLMResponse(content=None, finish_reason="error", error_status_code=401), "authentication"),
+    (LLMResponse(content=None, finish_reason="error", error_status_code=403), "unknown"),
+    (LLMResponse(
+        content=None, finish_reason="error", error_status_code=403, error_code="content_filter",
+    ), "unknown"),
+])
+def test_public_authentication_diagnosis_requires_credential_evidence(
+    response: LLMResponse, expected: str,
+) -> None:
+    assert LLMProvider.public_error_kind(response) == expected
+
+
 @pytest.mark.asyncio
 async def test_chat_with_retry_retries_transient_error_then_succeeds(monkeypatch) -> None:
     provider = ScriptedProvider([
@@ -134,7 +148,7 @@ async def test_chat_with_retry_clears_waiting_status_on_terminal_non_transient_e
     assert response.content == "401 unauthorized"
     assert [status.state for status in statuses] == ["waiting", "cleared"]
     assert statuses[-1].attempt == 2
-    assert statuses[-1].error_kind == "unknown"
+    assert statuses[-1].error_kind == "authentication"
 
 
 @pytest.mark.asyncio
@@ -403,6 +417,36 @@ async def test_chat_with_retry_explicit_override_beats_defaults() -> None:
 
 # ---------------------------------------------------------------------------
 # Image fallback tests
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [
+    LLMResponse(content="unauthorized", finish_reason="error", error_status_code=401),
+    LLMResponse(content="login expired", finish_reason="error", error_kind="authentication"),
+    LLMResponse(
+        content="Sign in again.", finish_reason="error",
+        error_kind="oauth_auth_required", error_should_retry=False,
+    ),
+    LLMResponse(content="billing", finish_reason="error", error_status_code=402),
+])
+async def test_account_failure_does_not_retry_without_images(error: LLMResponse) -> None:
+    provider = ScriptedProvider([error])
+    messages = copy.deepcopy(_IMAGE_MSG)
+    original = copy.deepcopy(messages)
+    state = ProviderConversationState(
+        provider="scripted", model="test-model", kind="test", version=1, payload={},
+    )
+    context = ProviderCallContext(conversation_state=state)
+
+    response = await provider.chat_with_retry(messages=messages, provider_context=context)
+
+    assert response is error
+    assert provider.calls == 1
+    assert messages == original
+    assert context.conversation_state is state
+    assert LLMProvider.public_error_kind(response) in {"authentication", "billing"}
+
+
 # ---------------------------------------------------------------------------
 
 _IMAGE_MSG = [
@@ -522,6 +566,8 @@ async def test_image_retry_discards_provider_state_with_images(
         provider_context=ProviderCallContext(
             conversation_state=state,
             session_id="webui:cache-test",
+            response_preset="saved fallback",
+            response_is_fallback=True,
         ),
     )
 
@@ -530,6 +576,8 @@ async def test_image_retry_discards_provider_state_with_images(
     assert isinstance(retry_context, ProviderCallContext)
     assert retry_context.conversation_state is None
     assert retry_context.session_id == "webui:cache-test"
+    assert retry_context.response_preset == "saved fallback"
+    assert retry_context.response_is_fallback is True
     public_content = messages[0]["content"]
     if isinstance(public_content, list):
         assert all(block.get("type") != "image_url" for block in public_content)
@@ -615,6 +663,29 @@ def test_extract_retry_after_supports_common_provider_formats() -> None:
     assert LLMProvider._extract_retry_after('{"error":{"retry_after":20}}') == 20.0
     assert LLMProvider._extract_retry_after("Rate limit reached, please try again in 20s") == 20.0
     assert LLMProvider._extract_retry_after("retry-after: 20") == 20.0
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("Rate limit reached for gpt-x. Please try again in 1m30s.", 90.0),
+        ("Please try again in 2m0.5s", 120.5),
+        ("Please try again in 1h2m3s", 3723.0),
+        ("Please try again in 6m0s. Visit https://example.com", 360.0),
+        ("Please try again in 1.5s", 1.5),
+        ("Please try again in 20ms", 0.1),
+        ("Please try again in 30 seconds", 30.0),
+        ("Please try again in 2 minutes", 120.0),
+    ],
+)
+def test_extract_retry_after_sums_compound_durations(message: str, expected: float) -> None:
+    assert LLMProvider._extract_retry_after(message) == pytest.approx(expected)
+
+
+def test_extract_retry_after_prefers_retry_after_over_try_again_in() -> None:
+    message = "retry after 5s; otherwise try again in 1m30s"
+
+    assert LLMProvider._extract_retry_after(message) == 5.0
 
 
 def test_extract_retry_after_from_headers_supports_numeric_and_http_date() -> None:

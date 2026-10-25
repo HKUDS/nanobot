@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 
-import type { ChannelPresentation } from "@/components/settings/channels/catalog";
+import type { ChannelPresentation } from "@/channel-plugins/catalog";
 import type {
   NanobotFeatureInfo,
   NanobotFeaturesPayload,
@@ -25,6 +25,8 @@ export type ChannelPluginPanelProps = {
   showBrandLogos: boolean;
   onAction: ChannelFeatureAction;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
+  onConfigureMcp?: (name: string) => void;
+  onBeforeCloseChange?: (handler: (() => Promise<boolean>) | null) => void;
 };
 
 export type ChannelPluginConnectFlowProps = {
@@ -32,13 +34,19 @@ export type ChannelPluginConnectFlowProps = {
   feature: NanobotFeatureInfo;
   idleLabel?: string;
   connectRequestId?: number;
+  onOpenAdvanced?: () => void;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
+};
+
+export type ChannelPluginHelpProps = {
+  feature: NanobotFeatureInfo;
 };
 
 export type ChannelUiContribution = {
   presentation: ChannelPresentation;
   aliases?: Record<string, Partial<ChannelPresentation>>;
   Panel?: ComponentType<ChannelPluginPanelProps>;
+  HelpContent?: ComponentType<ChannelPluginHelpProps>;
   ConnectFlow?: ComponentType<ChannelPluginConnectFlowProps>;
   canConnectBeforeConfigured?: boolean;
 };

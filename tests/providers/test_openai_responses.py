@@ -5,8 +5,10 @@ from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from loguru import logger
+from openai.types.responses import ResponseFunctionToolCall
 
 from nanobot.providers.base import LLMUsage
 from nanobot.providers.openai_responses.converters import (
@@ -32,6 +34,33 @@ from nanobot.providers.openai_responses.state import (
     responses_state_context_tokens,
     responses_state_items,
 )
+
+
+async def test_sdk_tool_alias_survives_capture_and_next_request_replay():
+    item = ResponseFunctionToolCall.model_validate({
+        "type": "function_call", "id": "fc_alias", "call_id": "call_alias",
+        "name": "lookup", "arguments": "{}", "async": True,
+    })
+    events = [SimpleNamespace(
+        type="response.completed",
+        response=SimpleNamespace(status="completed", usage=None, output=[item]),
+    )]
+
+    async def stream():
+        for event in events:
+            yield event
+
+    capture = ResponsesStreamCapture()
+    await consume_sdk_stream(stream(), capture=capture)
+    state = build_responses_state(
+        provider="fixture", model="fixture", input_items=[], output_items=capture.output_items,
+    )
+    _, items, replayed = prepare_responses_input(
+        [], state=state, provider="fixture", model="fixture",
+    )
+    assert replayed
+    assert items[0]["async"] is True
+    assert "async_" not in items[0]
 
 # ======================================================================
 # converters - split_tool_call_id
@@ -161,7 +190,7 @@ class TestConvertMessages:
         assert items == [
             {
                 "type": "reasoning",
-                "content": [{"type": "output_text", "text": "think first"}],
+                "content": [{"type": "reasoning_text", "text": "think first"}],
             },
             {
                 "type": "message",
@@ -193,7 +222,7 @@ class TestConvertMessages:
 
         assert items[0]["type"] == "reasoning"
         assert items[0]["content"] == [
-            {"type": "output_text", "text": "Michael topped up DeepSeek with $10."},
+            {"type": "reasoning_text", "text": "Michael topped up DeepSeek with $10."},
         ]
         assert items[1]["type"] == "function_call"
 
@@ -382,6 +411,29 @@ class TestConvertTools:
         assert result[0]["name"] == "get_weather"
         assert result[0]["description"] == "Get weather"
         assert "properties" in result[0]["parameters"]
+
+    @pytest.mark.parametrize("wrapped", [False, True])
+    @pytest.mark.parametrize("strict", [None, False, True])
+    def test_preserves_strict_and_optional_parameters(self, wrapped, strict):
+        parameters = {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "customView": {"type": "string", "minLength": 1},
+            },
+            "required": [],
+        }
+        function = {"name": "list_issues", "parameters": parameters}
+        if strict is not None:
+            function["strict"] = strict
+        tool = {"type": "function", "function": function} if wrapped else function
+
+        result = convert_tools([tool])[0]
+
+        assert result["strict"] is (strict if strict is not None else False)
+        assert result["parameters"] == parameters
+        assert parameters["required"] == []
+        assert ("strict" in function) is (strict is not None)
 
     def test_tool_without_name_skipped(self):
         tools = [{"type": "function", "function": {"parameters": {}}}]
@@ -629,16 +681,6 @@ class TestParseResponseOutput:
         assert result.content == "sdk"
         assert result.usage is not None
         assert result.usage.input_tokens == 1
-
-    def test_usage_maps_responses_api_keys(self):
-        """Responses API uses input_tokens/output_tokens, not prompt_tokens/completion_tokens."""
-        resp = {
-            "output": [],
-            "status": "completed",
-            "usage": {"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
-        }
-        result = parse_response_output(resp)
-        assert result.usage == LLMUsage.reported(input_tokens=100, output_tokens=50)
 
     def test_non_stream_preserves_provider_reported_total(self):
         result = parse_response_output({
@@ -999,9 +1041,11 @@ class TestResponsesConversationState:
         assert replayed is True
         reasoning_items = [item for item in items if item.get("type") == "reasoning"]
         assert len(reasoning_items) == 2  # one replayed, one converted delta
-        for item in reasoning_items:
-            assert isinstance(item["content"], list)
-            assert item["content"][0]["type"] == "output_text"
+        assert isinstance(reasoning_items[0]["content"], list)
+        # Stored replay items keep their original block type.
+        assert reasoning_items[0]["content"][0]["type"] == "output_text"
+        assert isinstance(reasoning_items[1]["content"], list)
+        assert reasoning_items[1]["content"][0]["type"] == "reasoning_text"
 
 
 # ======================================================================
@@ -1020,6 +1064,36 @@ class _SseResponse:
 
 
 class TestConsumeSse:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("prefix", ["", "\ufeff"])
+    async def test_leading_utf8_bom_preserves_first_content_delta(self, prefix):
+        events = [
+            {"type": "response.output_text.delta", "delta": "Hello "},
+            {"type": "response.output_text.delta", "delta": "\ufeff世界"},
+            {"type": "response.completed", "response": {"status": "completed"}},
+        ]
+        wire = prefix + "".join(
+            f"data: {json.dumps(event, ensure_ascii=False)}\n\n" for event in events
+        )
+        response = httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=wire.encode("utf-8"),
+        )
+        deltas = []
+
+        async def on_delta(delta):
+            deltas.append(delta)
+
+        content, tool_calls, finish_reason, _, _ = await consume_sse_with_reasoning(
+            response, on_content_delta=on_delta,
+        )
+
+        assert content == "Hello \ufeff世界"
+        assert deltas == ["Hello ", "\ufeff世界"]
+        assert tool_calls == []
+        assert finish_reason == "stop"
+
     @pytest.mark.asyncio
     @pytest.mark.parametrize("event_type", ["response.output_text.delta", "response.refusal.delta"])
     async def test_eof_without_terminal_event_is_a_connection_error(self, event_type):
@@ -1393,6 +1467,46 @@ class TestConsumeSse:
         assert reasoning == "part summary"
 
     @pytest.mark.asyncio
+    async def test_reasoning_text_streamed(self):
+        response = _SseResponse([
+            {"type": "response.reasoning_text.delta", "delta": "step 1 "},
+            {"type": "response.reasoning_text.delta", "delta": "step 2"},
+            {"type": "response.reasoning_text.done", "text": "step 1 step 2"},
+            {"type": "response.completed", "response": {"status": "completed", "output": []}},
+        ])
+        deltas: list[str] = []
+
+        async def on_reasoning(delta: str) -> None:
+            deltas.append(delta)
+
+        _, _, _, _, reasoning = await consume_sse_with_reasoning(
+            response,
+            on_reasoning_delta=on_reasoning,
+        )
+
+        assert reasoning == "step 1 step 2"
+        assert deltas == ["step 1 ", "step 2"]
+
+    @pytest.mark.asyncio
+    async def test_reasoning_text_done_without_deltas(self):
+        response = _SseResponse([
+            {"type": "response.reasoning_text.done", "text": "final reasoning"},
+            {"type": "response.completed", "response": {"status": "completed", "output": []}},
+        ])
+        deltas: list[str] = []
+
+        async def on_reasoning(delta: str) -> None:
+            deltas.append(delta)
+
+        _, _, _, _, reasoning = await consume_sse_with_reasoning(
+            response,
+            on_reasoning_delta=on_reasoning,
+        )
+
+        assert reasoning == "final reasoning"
+        assert deltas == ["final reasoning"]
+
+    @pytest.mark.asyncio
     async def test_raw_sse_usage_extracted(self):
         response = _SseResponse([
             {
@@ -1660,7 +1774,7 @@ class TestConsumeSdkStream:
                 "call_id": "ws_1",
                 "name": "web_search",
                 "arguments": {
-                    "query": "nanobot DeepSeek · nanobot latest release",
+                    "query": "nanobot DeepSeek\nnanobot latest release",
                 },
                 "result": {
                     "status": "completed",

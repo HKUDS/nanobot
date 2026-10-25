@@ -12,11 +12,6 @@ def test_commands_keeps_safe_file_history_import_compatible() -> None:
 
 
 class TestSanitizeSurrogates:
-    def test_paired_surrogates_reconstructed(self):
-        """Windows console produces \\ud83d\\udc08 for U+1F408 — must be restored."""
-        result = _sanitize_surrogates("你为什么会用 🐈")
-        assert result == "你为什么会用 🐈"
-
     def test_lone_surrogates_replaced(self):
         result = _sanitize_surrogates("hello \udce9 world")
         assert "\udce9" not in result
@@ -56,11 +51,15 @@ class TestSafeFileHistory:
         entries = list(hist.load_history_strings())
         assert entries[0] == "normal ascii text"
 
-    def test_emoji_preserved(self, tmp_path):
-        hist = SafeFileHistory(str(tmp_path / "history"))
-        hist.store_string("hello 🐈 nanobot")
-        entries = list(hist.load_history_strings())
-        assert entries[0] == "hello 🐈 nanobot"
+    def test_windows_surrogate_pair_round_trips_as_emoji(self, tmp_path):
+        """Raw UTF-16 console input must survive a UTF-8 history write and reload."""
+        history_path = tmp_path / "history"
+        hist = SafeFileHistory(str(history_path))
+        hist.store_string("hello \ud83d\udc08 nanobot")
+
+        history_path.read_bytes().decode("utf-8")  # Strict decoding must not raise.
+        reloaded = SafeFileHistory(str(history_path))
+        assert list(reloaded.load_history_strings()) == ["hello 🐈 nanobot"]
 
     def test_mixed_unicode_preserved(self, tmp_path):
         """CJK + emoji + latin should all pass through cleanly."""

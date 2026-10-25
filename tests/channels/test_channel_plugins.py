@@ -281,7 +281,19 @@ def test_channels_config_keeps_shared_delivery_defaults():
 
 @pytest.mark.parametrize(
     "name",
-    ["websocket", "telegram", "discord", "slack", "email", "feishu", "matrix", "weixin", "whatsapp"],
+    [
+        "websocket",
+        "telegram",
+        "discord",
+        "slack",
+        "email",
+        "feishu",
+        "linear",
+        "matrix",
+        "weixin",
+        "whatsapp",
+        "whatsapp_agent",
+    ],
 )
 def test_special_setup_validation_is_owned_by_channel_package(name: str):
     plugin = load_channel_package(name)
@@ -292,14 +304,19 @@ def test_special_setup_validation_is_owned_by_channel_package(name: str):
     assert plugin.setup.validator.__module__ == f"nanobot.channels.{name}.validation"
 
 
-@pytest.mark.parametrize("name", ["feishu", "weixin", "whatsapp"])
+@pytest.mark.parametrize("name", ["feishu", "linear", "qq", "weixin", "whatsapp"])
 def test_interactive_connector_is_owned_by_channel_package(name: str):
+    from nanobot.channels.connect import ManagedChannelConnector
+
     plugin = load_channel_package(name)
 
     assert plugin is not None
     assert plugin.connector is not None
     assert plugin.connector.startswith(f"nanobot.channels.{name}.")
-    assert plugin.load_connector().__class__.__module__ == f"nanobot.channels.{name}.connect"
+    connector = plugin.load_connector()
+    assert connector.__class__.__module__ == f"nanobot.channels.{name}.connect"
+    assert isinstance(connector, ManagedChannelConnector)
+    assert connector.has_pending_work is False
 
 
 def test_descriptor_defaults_cover_onboarding_fields_without_runtime_import():
@@ -895,11 +912,13 @@ def test_discover_enabled_warns_for_enabled_package_import_errors():
 # Manager _init_channels with dict config
 # ---------------------------------------------------------------------------
 
-def test_manager_loads_plugin_from_dict_config(monkeypatch):
-    """ChannelManager should instantiate a channel package from a raw dict config."""
+@pytest.mark.parametrize("proxy", ["", "http://127.0.0.1:7890"])
+def test_manager_loads_plugin_from_dict_config(monkeypatch, proxy):
+    """Existing two-argument plugins work with or without a shared proxy configured."""
     from nanobot.channels.manager import ChannelManager
 
     fake_config = Config.model_validate({
+        "network": {"proxy": proxy},
         "channels": {
             "fakeplugin": {"enabled": True, "allowFrom": ["*"]},
         }
@@ -2626,9 +2645,12 @@ def test_optional_dependency_metadata_for_enable():
     required = data["project"]["dependencies"]
 
     assert "boto3>=1.43.0" not in data["project"]["dependencies"]
-    assert deps["bedrock"] == ["boto3>=1.43.0"]
+    assert deps["bedrock"] == ["boto3>=1.43.0", "botocore>=1.43.0,<2.0.0"]
+    # The built-in remote WebUI proxy now needs aiohttp even without channels.
+    # Keep the historical API extra installable for existing deployment commands.
+    assert "aiohttp>=3.14.3,<4.0.0" in required
+    assert deps["api"] == ["aiohttp>=3.9.0,<4.0.0"]
     for dep_name in (
-        "aiohttp",
         "dingtalk-stream",
         "lark-oapi",
         "msgpack",
@@ -2656,7 +2678,7 @@ def test_optional_dependency_metadata_for_enable():
         "python-pptx>=1.0.0,<2.0.0",
     ]
     assert deps["pdf"] == ["pypdf>=5.0.0,<6.0.0"]
-    assert deps["langfuse"] == ["langfuse>=3.0.0,<4.0.0"]
+    assert deps["langfuse"] == ["langfuse>=4.7.0,<5.0.0"]
     assert deps["olostep"] == ["olostep>=0.1.0; python_version < '3.14'"]
     expected_olostep_args = [] if sys.version_info >= (3, 14) else ["olostep>=0.1.0"]
     assert optional_features.install_args_for_extra("olostep", deps["olostep"]) == (
@@ -2667,6 +2689,7 @@ def test_optional_dependency_metadata_for_enable():
         "dingtalk",
         "discord",
         "feishu",
+        "linear",
         "matrix",
         "mochat",
         "msteams",
@@ -2714,6 +2737,8 @@ def test_optional_dependency_metadata_for_enable():
         "weixin": ("qrcode[pil]>=8.0", "pycryptodome>=3.20.0"),
         "whatsapp": (
             "neonize>=0.4.3.post0,<0.5.0",
+            "python-magic>=0.4.27; sys_platform != 'win32'",
+            "python-magic-bin>=0.4.14; sys_platform == 'win32'",
             "segno>=1.6.1,<2.0.0",
         ),
     }
@@ -3541,9 +3566,8 @@ async def test_stop_all_cancels_dispatcher_and_stops_channels():
         providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
     )
 
-    mgr = ChannelManager.__new__(ChannelManager)
+    mgr = ChannelManager(Config.model_validate({"channels": {"websocket": {"enabled": False}}}), MessageBus())
     mgr.config = fake_config
-    mgr.bus = MessageBus()
 
     ch = _StartableChannel(fake_config, mgr.bus)
     mgr.channels = {"startable": ch}
@@ -3623,9 +3647,8 @@ async def test_stop_all_handles_channel_exception():
         providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
     )
 
-    mgr = ChannelManager.__new__(ChannelManager)
+    mgr = ChannelManager(Config.model_validate({"channels": {"websocket": {"enabled": False}}}), MessageBus())
     mgr.config = fake_config
-    mgr.bus = MessageBus()
     mgr.channels = {"stopfailing": _StopFailingChannel(fake_config, mgr.bus)}
     mgr._channel_tasks = {}
     mgr._outbound_tasks = {}
@@ -3660,9 +3683,8 @@ async def test_stop_all_handles_channel_stop_cancelled_task():
         providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
     )
 
-    mgr = ChannelManager.__new__(ChannelManager)
+    mgr = ChannelManager(Config.model_validate({"channels": {"websocket": {"enabled": False}}}), MessageBus())
     mgr.config = fake_config
-    mgr.bus = MessageBus()
     next_channel = _StartableChannel(fake_config, mgr.bus)
     mgr.channels = {
         "stopcancelled": _StopCancelledChannel(fake_config, mgr.bus),
@@ -3686,9 +3708,8 @@ async def test_start_all_no_channels_logs_warning():
         providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
     )
 
-    mgr = ChannelManager.__new__(ChannelManager)
+    mgr = ChannelManager(Config.model_validate({"channels": {"websocket": {"enabled": False}}}), MessageBus())
     mgr.config = fake_config
-    mgr.bus = MessageBus()
     mgr.channels = {}  # No channels
     mgr._dispatch_task = None
 
@@ -3706,9 +3727,8 @@ async def test_start_all_creates_dispatch_task():
         providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
     )
 
-    mgr = ChannelManager.__new__(ChannelManager)
+    mgr = ChannelManager(Config.model_validate({"channels": {"websocket": {"enabled": False}}}), MessageBus())
     mgr.config = fake_config
-    mgr.bus = MessageBus()
 
     ch = _StartableChannel(fake_config, mgr.bus)
     mgr.channels = {"startable": ch}

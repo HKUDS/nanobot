@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import traceback
 import urllib.parse
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
 from contextlib import AsyncExitStack, suppress
@@ -17,7 +18,9 @@ import httpx
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool, ToolResult
+from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.config.network import NetworkConfig
 from nanobot.security.network import (
     PinnedDNSAsyncTransport,
     env_proxy_applies_to_url,
@@ -51,11 +54,15 @@ _TRANSIENT_EXC_NAMES: frozenset[str] = frozenset((
 
 _WINDOWS_SHELL_LAUNCHERS: frozenset[str] = frozenset(("npx", "npm", "pnpm", "yarn", "bunx"))
 
+# Mirror the MCP SDK's httpx defaults (MCP_DEFAULT_TIMEOUT / MCP_DEFAULT_SSE_READ_TIMEOUT).
+_HTTP_TIMEOUT = 30.0
+_HTTP_READ_TIMEOUT = 300.0
+
 # Characters allowed in tool names by model providers (Anthropic, OpenAI, etc.).
 # Replace anything outside [a-zA-Z0-9_-] with underscore and collapse runs.
 _SANITIZE_RE = re.compile(r"_+")
 _ReconnectCallback = Callable[[str, str, Tool], Awaitable[Tool | None]]
-MCPServerLoader = Callable[[], Mapping[str, "MCPServerConfig"]]
+MCPServerLoader = Callable[[], tuple[Mapping[str, "MCPServerConfig"], NetworkConfig]]
 MCPRuntimeStatus = Literal["connecting", "connected", "failed"]
 
 
@@ -211,14 +218,33 @@ def _is_transient_connection_failure(exc: BaseException) -> bool:
     return isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)) or _is_transient(exc)
 
 
-def _log_mcp_connection_failure(name: str, exc: BaseException, hint: str = "") -> None:
+def _log_mcp_connection_failure(
+    name: str, exc: BaseException, hint: str = "", *, proxy: str | None = None,
+) -> None:
+    exception: Exception | bool = False
+    if tool_log_content_allowed():
+        details = "".join(traceback.TracebackException.from_exception(
+            exc, capture_locals=False,
+        ).format())
+        if proxy:
+            for value in (proxy, urllib.parse.unquote(proxy)):
+                details = details.replace(value, _redact_url(proxy))
+            # Match userinfo only with its URL delimiter, never isolated short
+            # credentials that could rewrite exception types or stack text.
+            userinfo = urllib.parse.urlsplit(proxy).netloc.rpartition("@")[0]
+            if userinfo:
+                for value in (userinfo, urllib.parse.unquote(userinfo)):
+                    details = details.replace(f"{value}@", "[redacted]@")
+        # Keep exception-aware sinks, but never give Loguru live frames or a raw
+        # exception chain: diagnose=True would render credential-bearing locals.
+        exception = Exception("\n" + details.rstrip())
     if _is_transient_connection_failure(exc):
         logger.warning("MCP server '{}': transient connection failure", name)
-        logger.opt(exception=exc).debug(
+        logger.opt(exception=exception).debug(
             "MCP server '{}' transient connection failure details", name
         )
         return
-    logger.opt(exception=exc).error("MCP server '{}': failed to connect: {}", name, hint)
+    logger.opt(exception=exception).error("MCP server '{}': failed to connect: {}", name, hint)
 
 
 def _is_session_terminated(exc: BaseException) -> bool:
@@ -236,7 +262,7 @@ def _is_session_terminated(exc: BaseException) -> bool:
     )
 
 
-async def _probe_http_url(url: str, timeout: float = 3.0) -> bool:
+async def _probe_http_url(url: str, timeout: float = 3.0, *, proxy: str | None = None) -> bool:
     """Quick TCP probe to check if an HTTP MCP server is reachable.
 
     Avoids entering ``streamable_http_client`` / ``sse_client`` when the port is
@@ -252,7 +278,7 @@ async def _probe_http_url(url: str, timeout: float = 3.0) -> bool:
     ok, _, resolved_ips = resolve_url_target(url)
     if not ok:
         return False
-    if env_proxy_applies_to_url(url):
+    if proxy or env_proxy_applies_to_url(url):
         return True
     for target_host in resolved_ips or (host,):
         try:
@@ -288,7 +314,9 @@ def _redact_url(url: str) -> str:
         return "<redacted-url>"
 
 
-def _pinned_transport_kwargs() -> dict[str, Any]:
+def _pinned_transport_kwargs(proxy: str | None = None) -> dict[str, Any]:
+    if proxy:
+        return {"transport": httpx.AsyncHTTPTransport(proxy=proxy), "trust_env": False}
     kwargs: dict[str, Any] = {"transport": PinnedDNSAsyncTransport()}
     mounts = httpx_env_proxy_mounts()
     if mounts:
@@ -666,7 +694,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                         await asyncio.sleep(1)  # Brief backoff before retry
                         continue
                     # Second transient failure — give up with retry-specific message
-                    logger.exception(
+                    logger.opt(exception=tool_log_content_allowed()).error(
                         "MCP tool '{}' failed after retry: {}",
                         self._name,
                         type(exc).__name__,
@@ -674,11 +702,11 @@ class MCPToolWrapper(_MCPWrapperBase):
                     return ToolResult.error(
                         f"(MCP tool call failed after retry: {type(exc).__name__})"
                     )
-                logger.exception(
+                logger.opt(exception=tool_log_content_allowed()).error(
                     "MCP tool '{}' failed: {}: {}",
                     self._name,
                     type(exc).__name__,
-                    exc,
+                    exc if tool_log_content_allowed() else "[content hidden]",
                 )
                 return ToolResult.error(
                     f"(MCP tool call failed: {type(exc).__name__})"
@@ -691,11 +719,11 @@ class MCPToolWrapper(_MCPWrapperBase):
                         return ToolResult.error(rendered)
                     return rendered
                 except Exception as exc:
-                    logger.exception(
+                    logger.opt(exception=tool_log_content_allowed()).error(
                         "MCP tool '{}' failed while rendering result: {}: {}",
                         self._name,
                         type(exc).__name__,
-                        exc,
+                        exc if tool_log_content_allowed() else "[content hidden]",
                     )
                     return ToolResult.error(
                         f"(MCP tool returned malformed content: {type(exc).__name__})"
@@ -749,7 +777,7 @@ class MCPToolWrapper(_MCPWrapperBase):
             logger.warning(
                 "MCP tool '{}' returned an image that could not be stored: {}",
                 self._name,
-                exc,
+                exc if tool_log_content_allowed() else type(exc).__name__,
             )
             return None
 
@@ -833,17 +861,17 @@ class MCPResourceWrapper(_MCPWrapperBase):
                         )
                         await asyncio.sleep(1)
                         continue
-                    logger.exception(
+                    logger.opt(exception=tool_log_content_allowed()).error(
                         "MCP resource '{}' failed after retry: {}",
                         self._name,
                         type(exc).__name__,
                     )
                     return f"(MCP resource read failed after retry: {type(exc).__name__})"
-                logger.exception(
+                logger.opt(exception=tool_log_content_allowed()).error(
                     "MCP resource '{}' failed: {}: {}",
                     self._name,
                     type(exc).__name__,
-                    exc,
+                    exc if tool_log_content_allowed() else "[content hidden]",
                 )
                 return f"(MCP resource read failed: {type(exc).__name__})"
             else:
@@ -942,11 +970,11 @@ class MCPPromptWrapper(_MCPWrapperBase):
                 ):
                     refreshed_session = True
                     continue
-                logger.exception(
+                logger.opt(exception=tool_log_content_allowed()).error(
                     "MCP prompt '{}' failed: code={} message={}",
                     self._name,
                     exc.error.code,
-                    exc.error.message,
+                    exc.error.message if tool_log_content_allowed() else "[content hidden]",
                 )
                 return f"(MCP prompt call failed: {exc.error.message} [code {exc.error.code}])"
             except Exception as exc:
@@ -967,17 +995,17 @@ class MCPPromptWrapper(_MCPWrapperBase):
                         )
                         await asyncio.sleep(1)
                         continue
-                    logger.exception(
+                    logger.opt(exception=tool_log_content_allowed()).error(
                         "MCP prompt '{}' failed after retry: {}",
                         self._name,
                         type(exc).__name__,
                     )
                     return f"(MCP prompt call failed after retry: {type(exc).__name__})"
-                logger.exception(
+                logger.opt(exception=tool_log_content_allowed()).error(
                     "MCP prompt '{}' failed: {}: {}",
                     self._name,
                     type(exc).__name__,
-                    exc,
+                    exc if tool_log_content_allowed() else "[content hidden]",
                 )
                 return f"(MCP prompt call failed: {type(exc).__name__})"
             else:
@@ -1002,6 +1030,7 @@ async def connect_mcp_servers(
     registry: ToolRegistry,
     *,
     oauth_handlers: Mapping[str, MCPOAuthHandlers] | None = None,
+    network: NetworkConfig | None = None,
 ) -> dict[str, MCPConnection]:
     """Connect to configured MCP servers and register their tools, resources, prompts.
 
@@ -1009,10 +1038,14 @@ async def connect_mcp_servers(
     entered the MCP SDK contexts alive so reconnect and shutdown can close
     AnyIO cancel scopes from their owning task.
     """
-    from mcp import ClientSession, StdioServerParameters
+    from mcp import ClientSession, StdioServerParameters, types
     from mcp.client.sse import sse_client
     from mcp.client.stdio import stdio_client
     from mcp.client.streamable_http import streamable_http_client
+
+    # Stack-exit failures are logged outside open_single_server; retain the exact
+    # selected value there too, including credentials resolved from environment refs.
+    selected_proxies: dict[str, str | None] = {}
 
     async def open_single_server(
         name: str, cfg: MCPServerConfig, server_stack: AsyncExitStack
@@ -1041,6 +1074,10 @@ async def connect_mcp_servers(
                     )
                     return False
 
+            if cfg.use_proxy and transport_type == "stdio":
+                raise ValueError("The shared proxy is available for HTTP and SSE MCP connections")
+            proxy = (network or NetworkConfig()).resolve_proxy(cfg.use_proxy)
+            selected_proxies[name] = proxy
             oauth_auth: httpx.Auth | None = None
             if cfg.auth == "oauth":
                 if transport_type not in {"sse", "streamableHttp"}:
@@ -1078,7 +1115,7 @@ async def connect_mcp_servers(
                 )
                 read, write = await server_stack.enter_async_context(stdio_client(params))
             elif transport_type == "sse":
-                if not await _probe_http_url(cfg.url):
+                if not await _probe_http_url(cfg.url, proxy=proxy):
                     logger.warning("MCP server '{}': {} unreachable, skipping", name, _redact_url(cfg.url))
                     return False
 
@@ -1098,7 +1135,7 @@ async def connect_mcp_servers(
                         follow_redirects=True,
                         timeout=timeout,
                         auth=auth,
-                        **_pinned_transport_kwargs(),
+                        **_pinned_transport_kwargs(proxy),
                     )
 
                 sse_kwargs: dict[str, Any] = {
@@ -1110,7 +1147,7 @@ async def connect_mcp_servers(
                     sse_client(cfg.url, **sse_kwargs)
                 )
             elif transport_type == "streamableHttp":
-                if not await _probe_http_url(cfg.url):
+                if not await _probe_http_url(cfg.url, proxy=proxy):
                     logger.warning("MCP server '{}': {} unreachable, skipping", name, _redact_url(cfg.url))
                     return False
 
@@ -1118,8 +1155,14 @@ async def connect_mcp_servers(
                     "headers": cfg.headers or None,
                     "event_hooks": {"request": [_validate_mcp_request_url]},
                     "follow_redirects": True,
-                    "timeout": httpx.Timeout(30.0, connect=10.0),
-                    **_pinned_transport_kwargs(),
+                    # Read must outlast the tool call itself; otherwise a slow tool
+                    # fails with ReadTimeout before tool_timeout is reached.
+                    "timeout": httpx.Timeout(
+                        _HTTP_TIMEOUT,
+                        connect=10.0,
+                        read=max(_HTTP_READ_TIMEOUT, cfg.tool_timeout),
+                    ),
+                    **_pinned_transport_kwargs(proxy),
                 }
                 if oauth_auth is not None:
                     http_client_kwargs["auth"] = oauth_auth
@@ -1135,16 +1178,29 @@ async def connect_mcp_servers(
 
             read = _filter_malformed_mcp_progress_notifications(read, name)
             session = await server_stack.enter_async_context(ClientSession(read, write))
-            await session.initialize()
+            initialization = await session.initialize()
 
-            tools = await session.list_tools()
+            # Finish discovery before registering tools so a failed page leaves no partial set.
+            tool_defs: list[MCPToolDefinition] = []
+            if initialization.capabilities.tools is not None:
+                page = await session.list_tools()
+                tool_defs.extend(page.tools)
+                seen_cursors: set[str] = set()
+                while page.nextCursor is not None:
+                    cursor = page.nextCursor
+                    if cursor in seen_cursors:
+                        raise ValueError("MCP tools/list returned a repeated pagination cursor")
+                    seen_cursors.add(cursor)
+                    page = await session.list_tools(params=types.PaginatedRequestParams(cursor=cursor))
+                    tool_defs.extend(page.tools)
+
             enabled_tools = set(cfg.enabled_tools)
             allow_all_tools = "*" in enabled_tools
             registered_count = 0
             matched_enabled_tools: set[str] = set()
-            available_raw_names = [tool_def.name for tool_def in tools.tools]
-            available_wrapped_names = [_sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}") for tool_def in tools.tools]
-            for tool_def in tools.tools:
+            available_raw_names = [tool_def.name for tool_def in tool_defs]
+            available_wrapped_names = [_sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}") for tool_def in tool_defs]
+            for tool_def in tool_defs:
                 wrapped_name = _sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}")
                 if (
                     not allow_all_tools
@@ -1191,7 +1247,18 @@ async def connect_mcp_servers(
             if register_extras:
                 try:
                     resources_result = await session.list_resources()
-                    for resource in resources_result.resources:
+                    resources = list(resources_result.resources)
+                    resource_cursors: set[str] = set()
+                    while resources_result.nextCursor is not None:
+                        cursor = resources_result.nextCursor
+                        if cursor in resource_cursors:
+                            raise ValueError("MCP resources/list returned a repeated pagination cursor")
+                        resource_cursors.add(cursor)
+                        resources_result = await session.list_resources(
+                            params=types.PaginatedRequestParams(cursor=cursor)
+                        )
+                        resources.extend(resources_result.resources)
+                    for resource in resources:
                         wrapper = MCPResourceWrapper(
                             session, name, resource, resource_timeout=cfg.tool_timeout
                         )
@@ -1204,12 +1271,23 @@ async def connect_mcp_servers(
                         )
                 except Exception as e:
                     logger.debug(
-                        "MCP server '{}': resources not supported or failed: {}", name, e
+                        "MCP server '{}': resources not supported or failed: {}", name, type(e).__name__
                     )
 
                 try:
                     prompts_result = await session.list_prompts()
-                    for prompt in prompts_result.prompts:
+                    prompts = list(prompts_result.prompts)
+                    prompt_cursors: set[str] = set()
+                    while prompts_result.nextCursor is not None:
+                        cursor = prompts_result.nextCursor
+                        if cursor in prompt_cursors:
+                            raise ValueError("MCP prompts/list returned a repeated pagination cursor")
+                        prompt_cursors.add(cursor)
+                        prompts_result = await session.list_prompts(
+                            params=types.PaginatedRequestParams(cursor=cursor)
+                        )
+                        prompts.extend(prompts_result.prompts)
+                    for prompt in prompts:
                         wrapper = MCPPromptWrapper(
                             session, name, prompt, prompt_timeout=cfg.tool_timeout
                         )
@@ -1222,7 +1300,7 @@ async def connect_mcp_servers(
                         )
                 except Exception as e:
                     logger.debug(
-                        "MCP server '{}': prompts not supported or failed: {}", name, e
+                        "MCP server '{}': prompts not supported or failed: {}", name, type(e).__name__
                     )
             else:
                 logger.info(
@@ -1253,7 +1331,7 @@ async def connect_mcp_servers(
                     " Hint: this looks like stdio protocol pollution. Make sure the MCP server writes "
                     "only JSON-RPC to stdout and sends logs/debug output to stderr instead."
                 )
-            _log_mcp_connection_failure(name, e, hint)
+            _log_mcp_connection_failure(name, e, hint, proxy=selected_proxies.get(name))
             return False
 
     async def connect_single_server(
@@ -1303,7 +1381,7 @@ async def connect_mcp_servers(
             try:
                 result = await connect_single_server(name, cfg)
             except Exception as e:
-                _log_mcp_connection_failure(name, e)
+                _log_mcp_connection_failure(name, e, proxy=selected_proxies.get(name))
                 continue
             if result[1] is not None:
                 server_stacks[result[0]] = result[1]
@@ -1337,10 +1415,11 @@ def _configured_servers(config: Config) -> dict[str, MCPServerConfig]:
     )
 
 
-def _load_current_servers() -> dict[str, MCPServerConfig]:
+def _load_current_servers() -> tuple[dict[str, MCPServerConfig], NetworkConfig]:
     from nanobot.config.loader import load_config, resolve_config_env_vars
 
-    return _configured_servers(resolve_config_env_vars(load_config()))
+    config = resolve_config_env_vars(load_config())
+    return _configured_servers(config), config.network
 
 
 class MCPProvider:
@@ -1352,8 +1431,10 @@ class MCPProvider:
         registry: ToolRegistry,
         *,
         server_loader: MCPServerLoader | None = None,
+        network: NetworkConfig | None = None,
     ) -> None:
         self._servers = dict(servers)
+        self._network = (network or NetworkConfig()).model_copy(deep=True)
         self._registry = registry
         self._server_loader = server_loader or _load_current_servers
         self._connections: dict[str, MCPConnection] = {}
@@ -1373,6 +1454,7 @@ class MCPProvider:
             _configured_servers(config),
             registry,
             server_loader=server_loader,
+            network=config.network,
         )
 
     @property
@@ -1444,7 +1526,7 @@ class MCPProvider:
                 return
             self._set_runtime_status(missing_servers, "connecting")
             try:
-                connected = await connect_mcp_servers(missing_servers, self._registry)
+                connected = await connect_mcp_servers(missing_servers, self._registry, network=self._network)
                 if self._closing:
                     await _close_mcp_connections(connected)
                     return
@@ -1479,7 +1561,8 @@ class MCPProvider:
             if self._closing:
                 return self._closing_result()
             try:
-                next_servers = dict(self._server_loader())
+                loaded_servers, next_network = self._server_loader()
+                next_servers = dict(loaded_servers)
             except Exception as exc:
                 logger.warning("MCP hot reload could not read config: {}", exc)
                 return {
@@ -1506,6 +1589,7 @@ class MCPProvider:
                 for name in current_names & next_names
                 if _server_signature(current_servers[name])
                 != _server_signature(next_servers[name])
+                or (next_servers[name].use_proxy and self._network.proxy != next_network.proxy)
             )
 
             tools_removed = 0
@@ -1517,6 +1601,7 @@ class MCPProvider:
                 self._runtime_statuses.pop(name, None)
 
             self._servers = next_servers
+            self._network = next_network.model_copy(deep=True)
             retry_missing = sorted(
                 name
                 for name in next_names
@@ -1533,7 +1618,7 @@ class MCPProvider:
             if to_connect:
                 self._set_runtime_status(to_connect, "connecting")
                 try:
-                    connected = await connect_mcp_servers(to_connect, self._registry)
+                    connected = await connect_mcp_servers(to_connect, self._registry, network=self._network)
                 except BaseException:
                     self._set_runtime_status(to_connect, "failed")
                     raise
@@ -1648,6 +1733,7 @@ class MCPProvider:
             connected = await connect_mcp_servers(
                 {server_name: cfg},
                 self._registry,
+                network=self._network,
             )
             if self._closing:
                 await _close_mcp_connections(connected)

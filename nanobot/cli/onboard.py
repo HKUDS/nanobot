@@ -27,10 +27,10 @@ from rich.table import Table
 
 from nanobot.cli.models import (
     format_token_count,
+    get_model_catalog,
     get_model_context_limit,
-    get_model_suggestions,
 )
-from nanobot.config.loader import get_config_path, load_config, resolve_config_env_vars
+from nanobot.config.loader import get_config_path, load_config
 from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.providers.oauth_guidance import OAUTH_CLI_KIT_MISSING_MESSAGE
 
@@ -153,119 +153,60 @@ def _select_with_back(
         The selected choice string if user confirmed
         None if user cancelled (Ctrl+C)
     """
-    import shutil
-
-    from prompt_toolkit.application import Application
-    from prompt_toolkit.keys import Keys
-    from prompt_toolkit.layout import Layout
-    from prompt_toolkit.layout.containers import HSplit, Window
+    from prompt_toolkit.key_binding import merge_key_bindings
+    from prompt_toolkit.layout.containers import Window
     from prompt_toolkit.layout.controls import FormattedTextControl
-    from prompt_toolkit.styles import Style
 
-    # Validate choices
     if not choices:
         logger.warning("Empty choices list provided to _select_with_back")
         return None
 
-    # Find default index
-    selected_index = 0
-    if default and default in choices:
-        selected_index = choices.index(default)
+    bindings = _input_back_key_bindings()
 
-    # State holder for the result
-    state: dict[str, str | None | object] = {"result": None}
-    terminal_lines = shutil.get_terminal_size((80, 24)).lines
-    visible_count = min(len(choices), max(1, terminal_lines - 3))
-
-    # Build menu items (uses closure over selected_index)
-    def get_menu_text() -> list[tuple[str, str]]:
-        items: list[tuple[str, str]] = []
-        start, end = _choice_viewport(selected_index, len(choices), visible_count)
-        for i in range(start, end):
-            choice = choices[i]
-            if i == selected_index:
-                items.append(("class:selected", f"> {choice}\n"))
-            else:
-                items.append(("", f"  {choice}\n"))
-        return items
-
-    # Create layout
-    menu_control = FormattedTextControl(cast(Any, get_menu_text), show_cursor=False)
-    menu_window = Window(content=menu_control, height=visible_count, always_hide_cursor=True)
-
-    def get_prompt_text() -> list[tuple[str, str]]:
-        suffix = f" ({selected_index + 1}/{len(choices)})" if len(choices) > visible_count else ""
-        return [("class:question", f"{prompt}{suffix}")]
-
-    prompt_control = FormattedTextControl(cast(Any, get_prompt_text), show_cursor=False)
-    prompt_window = Window(content=prompt_control, height=1, always_hide_cursor=True)
-
-    layout = Layout(HSplit([prompt_window, menu_window]))
-
-    # Key bindings
-    bindings = KeyBindings()
-
-    # KeyBindings consumes these handlers through decorator registration.
-    @bindings.add(Keys.Up)
-    def _up(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
-        nonlocal selected_index
-        selected_index = (selected_index - 1) % len(choices)
-        event.app.invalidate()
-
-    @bindings.add(Keys.Down)
-    def _down(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
-        nonlocal selected_index
-        selected_index = (selected_index + 1) % len(choices)
-        event.app.invalidate()
-
-    @bindings.add(Keys.Enter)
-    def _enter(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
-        state["result"] = choices[selected_index]
-        event.app.exit()
-
-    @bindings.add("escape")
-    def _escape(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
-        state["result"] = _BACK_PRESSED
-        event.app.exit()
-
-    @bindings.add(Keys.Left)
+    @bindings.add("left")
     def _left(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
-        state["result"] = _BACK_PRESSED
-        event.app.exit()
+        event.app.exit(result=_BACK_PRESSED)
 
-    @bindings.add(Keys.ControlC)
-    def _ctrl_c(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
-        state["result"] = None
-        event.app.exit()
+    @bindings.add("c-c", eager=True)
+    def _cancel(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
+        event.app.exit(result=None)
 
-    # Style
-    style = Style.from_dict({
-        "selected": f"fg:{_UI_ACCENT} bold",
-        "question": f"fg:{_UI_TEXT}",
-    })
+    q = _get_questionary()
+    from questionary.prompts.common import InquirerControl
 
-    app = Application[object](layout=layout, key_bindings=bindings, style=style)
-    app.ttimeoutlen = 0.05
-    app.timeoutlen = 0.05
+    question = q.select(
+        prompt,
+        choices=choices,
+        default=default if default in choices else choices[0],
+        qmark="",
+        pointer=">",
+        instruction=" ",
+        use_jk_keys=False,
+        use_emacs_keys=False,
+        style=q.Style([
+            ("question", f"fg:{_UI_TEXT} nobold"),
+            ("pointer", f"fg:{_UI_ACCENT} bold"),
+            ("highlighted", f"fg:{_UI_ACCENT} bold noreverse"),
+            ("selected", f"fg:{_UI_ACCENT} bold noreverse"),
+            ("answer", f"fg:{_UI_ACCENT} bold"),
+        ]),
+    )
+    control = next(
+        c for c in question.application.layout.find_all_controls() if isinstance(c, InquirerControl)
+    )
+    question.application.layout.container.children.insert(1, Window(
+        FormattedTextControl(lambda: f"({control.pointed_at + 1}/{len(choices)})"),
+        height=1,
+        style=f"fg:{_UI_TEXT}",
+    ))
+    question.application.key_bindings = merge_key_bindings([
+        question.application.key_bindings, bindings,
+    ])
     try:
-        app.run()
+        return _ask_prompt(question)
     except Exception:
         logger.exception("Error in select prompt")
         return None
-
-    return state["result"]
-
-
-def _choice_viewport(selected_index: int, total: int, visible_count: int) -> tuple[int, int]:
-    """Return the visible slice for a long terminal menu."""
-    if total <= 0:
-        return 0, 0
-    visible_count = max(1, min(visible_count, total))
-    selected_index = max(0, min(selected_index, total - 1))
-    half = visible_count // 2
-    start = selected_index - half
-    start = max(0, min(start, total - visible_count))
-    return start, start + visible_count
 
 # --- Type Introspection ---
 
@@ -650,18 +591,17 @@ def _get_current_provider(model: BaseModel) -> str:
 
 
 def _input_model_with_autocomplete(
-    display_name: str, current: Any, provider: str
+    display_name: str, current: Any, provider: str, *, config: Config
 ) -> str | None | object:
     """Get model input with autocomplete suggestions.
 
     """
     default = str(current) if current else ""
 
-    class DynamicModelCompleter(Completer):
-        """Completer that dynamically fetches model suggestions."""
+    models = get_model_catalog(config, provider, default)
 
-        def __init__(self, provider_name: str):
-            self.provider = provider_name
+    class DynamicModelCompleter(Completer):
+        """Filter one provider snapshot without network requests while typing."""
 
         def get_completions(
             self,
@@ -670,11 +610,8 @@ def _input_model_with_autocomplete(
         ) -> Iterable[Completion]:
             _ = complete_event
             text = document.text_before_cursor
-            suggestions = get_model_suggestions(text, provider=self.provider, limit=50)
+            suggestions = [row.id for row in models if text.lower() in row.id.lower()][:50]
             for model in suggestions:
-                # Skip if model doesn't contain the typed text
-                if text.lower() not in model.lower():
-                    continue
                 yield Completion(
                     model,
                     start_position=-len(text),
@@ -685,7 +622,7 @@ def _input_model_with_autocomplete(
         _get_questionary().autocomplete(
             f"{display_name}:",
             choices=[""],  # Placeholder, actual completions from completer
-            completer=DynamicModelCompleter(provider),
+            completer=DynamicModelCompleter(),
             default=default,
             key_bindings=_input_back_key_bindings(),
             qmark=">",
@@ -698,7 +635,7 @@ def _input_model_with_autocomplete(
 
 
 def _input_context_window_with_recommendation(
-    display_name: str, current: Any, model_obj: BaseModel
+    display_name: str, current: Any, model_obj: BaseModel, *, config: Config
 ) -> int | None | object:
     """Get context window input with option to fetch recommended value."""
     current_val = current if current else ""
@@ -728,7 +665,7 @@ def _input_context_window_with_recommendation(
             return None
 
         provider = _get_current_provider(model_obj)
-        context_limit = get_model_context_limit(model_name, provider)
+        context_limit = get_model_context_limit(model_name, provider, config=config)
 
         if context_limit:
             console.print(
@@ -760,24 +697,26 @@ def _input_context_window_with_recommendation(
 
 
 def _handle_model_field(
-    working_model: BaseModel, field_name: str, field_display: str, current_value: Any
+    working_model: BaseModel, field_name: str, field_display: str, current_value: Any,
+    *, config: Config,
 ) -> None:
     """Handle the 'model' field with autocomplete and context-window auto-fill."""
     provider = _get_current_provider(working_model)
-    new_value = _input_model_with_autocomplete(field_display, current_value, provider)
+    new_value = _input_model_with_autocomplete(field_display, current_value, provider, config=config)
     if new_value is _BACK_PRESSED:
         return
     if new_value is not None and new_value != current_value:
         setattr(working_model, field_name, new_value)
-        _try_auto_fill_context_window(working_model, cast(str, new_value))
+        _try_auto_fill_context_window(working_model, cast(str, new_value), config=config)
 
 
 def _handle_context_window_field(
-    working_model: BaseModel, field_name: str, field_display: str, current_value: Any
+    working_model: BaseModel, field_name: str, field_display: str, current_value: Any,
+    *, config: Config,
 ) -> None:
     """Handle context_window_tokens with recommendation lookup."""
     new_value = _input_context_window_with_recommendation(
-        field_display, current_value, working_model
+        field_display, current_value, working_model, config=config
     )
     if new_value is _BACK_PRESSED:
         return
@@ -930,6 +869,7 @@ def _configure_pydantic_model(
     display_name: str,
     *,
     skip_fields: set[str] | None = None,
+    config: Config | None = None,
 ) -> _ModelT | None:
     """Configure a Pydantic model interactively.
 
@@ -997,7 +937,7 @@ def _configure_pydantic_model(
             if nested is None and ftype.inner_type:
                 nested = ftype.inner_type()
             if nested and isinstance(nested, BaseModel):
-                updated = _configure_pydantic_model(nested, field_display)
+                updated = _configure_pydantic_model(nested, field_display, config=config)
                 if updated is not None:
                     setattr(working_model, field_name, updated)
                 elif created:
@@ -1007,7 +947,10 @@ def _configure_pydantic_model(
         # Registered special-field handlers
         handler = _resolve_field_handler(working_model, field_name)
         if handler:
-            handler(working_model, field_name, field_display, current_value)
+            if field_name in {"model", "context_window_tokens"}:
+                handler(working_model, field_name, field_display, current_value, config=config or Config())
+            else:
+                handler(working_model, field_name, field_display, current_value)
             continue
 
         # Select fields with hints (e.g. reasoning_effort)
@@ -1050,7 +993,9 @@ def _configure_pydantic_model(
             setattr(working_model, field_name, new_value)
 
 
-def _try_auto_fill_context_window(model: BaseModel, new_model_name: str) -> None:
+def _try_auto_fill_context_window(
+    model: BaseModel, new_model_name: str, *, config: Config,
+) -> None:
     """Try to auto-fill context_window_tokens if it's at default value.
 
     Note:
@@ -1074,7 +1019,7 @@ def _try_auto_fill_context_window(model: BaseModel, new_model_name: str) -> None
         return  # User has customized it, don't override
 
     provider = _get_current_provider(model)
-    context_limit = get_model_context_limit(new_model_name, provider)
+    context_limit = get_model_context_limit(new_model_name, provider, config=config)
 
     if context_limit:
         setattr(model, "context_window_tokens", context_limit)
@@ -1083,7 +1028,7 @@ def _try_auto_fill_context_window(model: BaseModel, new_model_name: str) -> None
             f"{format_token_count(context_limit)} tokens[/]"
         )
     else:
-        console.print("[dim]Could not auto-fill context window - model not in database[/dim]")
+        console.print("[dim]Could not auto-fill context window - provider did not return a context limit[/dim]")
 
 
 # --- Model Preset Configuration ---
@@ -1157,7 +1102,7 @@ def _configure_model_presets(config: Config) -> None:
                     _pause()
                     continue
                 new_preset = ModelPresetConfig(model="")
-                updated = _configure_pydantic_model(new_preset, f"New Preset: {name}")
+                updated = _configure_pydantic_model(new_preset, f"New Preset: {name}", config=config)
                 if updated is not None:
                     config.model_presets[name] = updated
                     _sync_preset_cache(config)
@@ -1197,7 +1142,7 @@ def _configure_model_presets(config: Config) -> None:
                 continue
 
             if action == "Edit":
-                updated = _configure_pydantic_model(preset, f"Edit Preset: {preset_name}")
+                updated = _configure_pydantic_model(preset, f"Edit Preset: {preset_name}", config=config)
                 if updated is not None:
                     config.model_presets[preset_name] = updated
                     _sync_preset_cache(config)
@@ -1376,7 +1321,8 @@ def _run_channel_login(
 
     console.print(f"[{_UI_ACCENT}]Starting {display_name} login...[/]")
     try:
-        channel = channel_cls(model, bus=None)
+        kwargs = {"network": config.network} if channel_cls.uses_shared_proxy else {}
+        channel = channel_cls(model, bus=None, **kwargs)
         success = asyncio.run(channel.login(force=False))
     except KeyboardInterrupt:
         console.print("\n[dim]Login cancelled.[/dim]")
@@ -1493,7 +1439,7 @@ def _configure_general_settings(config: Config, section: str) -> None:
         return
     display_name, _subtitle, skip = meta
     model = _SETTINGS_GETTER[section](config)
-    updated = _configure_pydantic_model(model, display_name, skip_fields=skip)
+    updated = _configure_pydantic_model(model, display_name, skip_fields=skip, config=config)
     if updated is not None:
         _SETTINGS_SETTER[section](config, updated)
 
@@ -1656,9 +1602,7 @@ def _quick_start_requires_api_key(provider_name: str, info: _QuickStartProviderI
 
 def _quick_start_codex_proxy(config: Config) -> str | None:
     """Resolve only the Codex proxy without validating unrelated provider secrets."""
-    proxy_config = Config()
-    proxy_config.providers.openai_codex.proxy = config.providers.openai_codex.proxy
-    return resolve_config_env_vars(proxy_config).providers.openai_codex.proxy or None
+    return config.network.resolve_proxy(config.providers.openai_codex.use_proxy)
 
 
 def _quick_start_oauth_login(config: Config, provider_name: str) -> bool:
@@ -1837,10 +1781,18 @@ def _configure_quick_start_provider(config: Config) -> bool | object:
             console.print(f"[red]Unknown provider: {provider_name}[/red]")
             return False
 
+        catalog_config = config.model_copy(deep=True)
+        catalog_provider = getattr(catalog_config.providers, provider_name)
+        if api_key is not None:
+            catalog_provider.api_key = api_key
+        if api_base and (base_was_prompted or not catalog_provider.api_base):
+            catalog_provider.api_base = api_base
+
         model = _input_model_with_autocomplete(
             "Model ID",
             provider_info.default_model if provider_info else "",
             provider_name,
+            config=catalog_config,
         )
         if model is _BACK_PRESSED:
             continue
@@ -2119,12 +2071,3 @@ def run_onboard(initial_config: Config | None = None) -> OnboardResult:
             return OnboardResult(config=original_config, should_save=False)
         if answer == "[A] Advanced Settings":
             _configure_advanced_settings(config)
-
-
-def run_quick_start_onboard(initial_config: Config) -> OnboardResult:
-    """Run the compact provider + local WebUI setup path directly."""
-    _get_questionary()
-    draft = initial_config.model_copy(deep=True)
-    if _configure_quick_start(draft):
-        return OnboardResult(config=draft, should_save=True)
-    return OnboardResult(config=initial_config, should_save=False)

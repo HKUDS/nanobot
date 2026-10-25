@@ -20,7 +20,11 @@ if not WECOM_AVAILABLE:
 from wecom_aibot_sdk import UploadResult, WSClient
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.outbound_events import ProgressEvent
+from nanobot.bus.outbound_events import (
+    ContextCompactionEvent,
+    ProgressEvent,
+    outbound_message_for_event,
+)
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.wecom.runtime import (
     WECOM_WEBSOCKET_HOST,
@@ -97,7 +101,7 @@ def test_sanitize_filename_empty_or_dots_fallback() -> None:
 
 
 @pytest.mark.asyncio
-async def test_download_and_save_success() -> None:
+async def test_download_and_save_success(tmp_path: Path) -> None:
     """Successful download writes file and returns sanitized path."""
     channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["*"]), MessageBus())
     client = _FakeWeComClient()
@@ -106,14 +110,12 @@ async def test_download_and_save_success() -> None:
     fake_data = b"\x89PNG\r\nfake image"
     client.download_file.return_value = (fake_data, "raw_photo.png")
 
-    with patch("nanobot.channels.wecom.runtime.get_media_dir", return_value=Path(tempfile.gettempdir())):
+    with patch("nanobot.channels.wecom.runtime.get_media_dir", return_value=tmp_path):
         path = await channel._download_and_save_media("https://example.com/img.png", "aes_key", "image", "photo.png")
 
     assert path is not None
-    assert os.path.isfile(path)
-    assert os.path.basename(path) == "photo.png"
-    # Cleanup
-    os.unlink(path)
+    assert Path(path) == tmp_path / "photo.png"
+    assert Path(path).read_bytes() == fake_data
 
 
 @pytest.mark.asyncio
@@ -169,6 +171,31 @@ async def test_download_and_save_failure() -> None:
 
 
 # ── send() ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("has_frame", [False, True])
+@pytest.mark.parametrize("notify", [False, True])
+@pytest.mark.parametrize("show_notices", [False, True])
+@pytest.mark.parametrize("phase", ["started", "succeeded", "failed", "cancelled"])
+async def test_compaction_notice_policy(has_frame, notify, show_notices, phase) -> None:
+    channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["*"]), MessageBus())
+    channel.show_compaction_notices = show_notices
+    client = _FakeWeComClient()
+    channel._client = client
+    channel._generate_req_id = lambda x: f"req_{x}"
+    if has_frame:
+        channel._chat_frames["chat1"] = _FakeFrame()
+
+    await channel.send(outbound_message_for_event(
+        channel="wecom", chat_id="chat1",
+        event=ContextCompactionEvent("compact", phase, notify=notify),
+    ))
+
+    assert client.reply_stream.await_count == int((notify or show_notices) and has_frame)
+    assert client.send_message.await_count == int((notify or show_notices) and not has_frame)
+    # A quiet event must not consume the response route for the actual answer.
+    assert ("chat1" in channel._chat_frames) is has_frame
 
 
 @pytest.mark.asyncio

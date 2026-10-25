@@ -9,12 +9,41 @@ from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import TurnCompleted
 from nanobot.events import RetryStatusEvent
 from nanobot.providers.base import LLMProvider, ProviderCallContext
+from nanobot.session.keys import HEARTBEAT_SESSION_KEY
 from nanobot.session.manager import SessionManager
 from nanobot.session.webui_turns import WebuiTurnRoutePolicy
 from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
     WEBUI_TURN_METADATA_KEY,
 )
+
+
+@pytest.mark.parametrize("channel", ["telegram", "discord", "websocket", "cli", "custom"])
+@pytest.mark.parametrize("legacy_route", [False, True])
+@pytest.mark.parametrize("key", [HEARTBEAT_SESSION_KEY, "dream:20260602-155256"])
+async def test_internal_compaction_never_reaches_its_result_destination(channel, legacy_route, key):
+    factory = TurnDeliveryFactory(MessageBus())
+    msg = InboundMessage(channel=channel, sender_id="user", chat_id="chat", content="check")
+    delivery = factory.create(msg, key)
+    metadata = {"_compaction_route": {"channel": channel, "chat_id": "chat"}} if legacy_route else {}
+    idle_events = factory.session_events(key, metadata, generation="generation")
+    for sink in (delivery.events, idle_events):
+        assert not sink.accepts(ContextCompactionEvent)
+        for phase in ("started", "succeeded", "failed", "cancelled"):
+            await sink.emit(ContextCompactionEvent("internal-compact", phase))
+    assert factory.bus.outbound.empty()
+
+    delivery.remember_session_route(metadata)
+    assert "_compaction_route" not in metadata
+
+    # The same destination still receives the user's own compaction lifecycle.
+    user_delivery = factory.create(msg, f"{channel}:chat")
+    user_delivery.remember_session_route(metadata)
+    for sink in (user_delivery.events, factory.session_events(f"{channel}:chat", metadata, generation="generation")):
+        await sink.emit(ContextCompactionEvent("user-compact", "succeeded"))
+        assert factory.bus.outbound.get_nowait().event == ContextCompactionEvent(
+            "user-compact", "succeeded",
+        )
 
 
 @pytest.mark.parametrize("unified", [False, True])
@@ -30,11 +59,14 @@ from nanobot.webui.metadata import (
      {"message_id": "reply", "thread_id": "root", "chat_type": "group"}),
     ("dingtalk:group:conversation:user", "dingtalk", "group:conversation", {}),
 ])
-async def test_idle_compaction_uses_the_session_delivery_route(
+async def test_session_route_delivers_automatic_and_manual_compaction(
     key, channel, chat_id, metadata, unified,
 ) -> None:
     factory = TurnDeliveryFactory(MessageBus())
-    event = ContextCompactionEvent(compaction_id="compact-1", phase="started")
+    automatic = ContextCompactionEvent(compaction_id="auto-1", phase="started")
+    notified = ContextCompactionEvent(
+        compaction_id="notified-1", phase="started", notify=True,
+    )
     key = "unified:default" if unified else key
     msg = InboundMessage(
         channel=channel, sender_id="user", chat_id=chat_id, content="hello",
@@ -47,13 +79,16 @@ async def test_idle_compaction_uses_the_session_delivery_route(
     session_metadata = {}
     delivery.remember_session_route(session_metadata)
 
-    sink = factory.session_events(key, session_metadata)
+    sink = factory.session_events(key, session_metadata, generation="generation")
     assert sink.publish is not None
-    await sink.emit(event)
+    await sink.emit(automatic)
+    await sink.emit(notified)
 
-    outbound = factory.bus.outbound.get_nowait()
-    assert (outbound.channel, outbound.chat_id, outbound.metadata) == (channel, chat_id, metadata)
-    assert outbound.event is event
+    outbounds = [factory.bus.outbound.get_nowait() for _ in range(2)]
+    assert [(outbound.channel, outbound.chat_id, outbound.metadata) for outbound in outbounds] == [
+        (channel, chat_id, metadata),
+    ] * 2
+    assert [outbound.event for outbound in outbounds] == [automatic, notified]
 
 
 async def test_idle_compaction_keeps_its_route_when_a_unified_session_moves() -> None:
@@ -65,15 +100,15 @@ async def test_idle_compaction_keeps_its_route_when_a_unified_session_moves() ->
         metadata={"slack": {"thread_ts": "1700000000.000100"}},
     )
     factory.create(original, key).remember_session_route(session_metadata)
-    sink = factory.session_events(key, session_metadata)
+    sink = factory.session_events(key, session_metadata, generation="generation")
     assert sink.publish is not None
-    await sink.emit(ContextCompactionEvent("compact-1", "started"))
+    await sink.emit(ContextCompactionEvent("compact-1", "started", notify=True))
 
     latest = InboundMessage(
         channel="telegram", sender_id="user", chat_id="42", content="next question",
     )
     factory.create(latest, key).remember_session_route(session_metadata)
-    await sink.emit(ContextCompactionEvent("compact-1", "succeeded"))
+    await sink.emit(ContextCompactionEvent("compact-1", "succeeded", notify=True))
 
     events = [factory.bus.outbound.get_nowait() for _ in range(2)]
     assert [(msg.channel, msg.chat_id, msg.metadata) for msg in events] == [
@@ -81,14 +116,13 @@ async def test_idle_compaction_keeps_its_route_when_a_unified_session_moves() ->
     ] * 2
 
 
-async def test_idle_compaction_can_deliver_to_a_legacy_websocket_session() -> None:
+async def test_automatic_compaction_reaches_legacy_websocket_session() -> None:
     factory = TurnDeliveryFactory(MessageBus())
     event = ContextCompactionEvent(compaction_id="compact-1", phase="succeeded")
-    sink = factory.session_events("websocket:chat", {})
+    sink = factory.session_events("websocket:chat", {}, generation="generation")
     assert sink.publish is not None
     await sink.emit(event)
-    outbound = factory.bus.outbound.get_nowait()
-    assert (outbound.channel, outbound.chat_id, outbound.event) == ("websocket", "chat", event)
+    assert factory.bus.outbound.get_nowait().event is event
 
 
 @pytest.mark.asyncio
@@ -291,13 +325,14 @@ def test_websocket_lifecycle_reuses_registered_ingress_owner(tmp_path: Path) -> 
         wth.clear_websocket_turn_if_current("chat-queued", owner)
 
 
-def test_internal_user_input_uses_the_persisted_webui_route(tmp_path: Path) -> None:
+async def test_internal_user_input_uses_the_persisted_webui_route(tmp_path: Path) -> None:
     from nanobot.session import webui_turns as wth
 
     sessions = SessionManager(tmp_path / "sessions")
     target = sessions.get_or_create("websocket:target")
     target.metadata["webui"] = True
     sessions.save(target)
+    await sessions.state.read(target.key)
     factory = TurnDeliveryFactory(
         MessageBus(),
         route_policy=WebuiTurnRoutePolicy(sessions),
@@ -384,7 +419,7 @@ async def test_same_chat_different_sessions_restore_previous_active_projection(
         wth._WEBSOCKET_TURN_OWNERS.pop("shared-chat", None)
 
 
-def test_late_subagent_route_requires_webui_owned_session(tmp_path: Path) -> None:
+async def test_late_subagent_route_requires_webui_owned_session(tmp_path: Path) -> None:
     sessions = SessionManager(tmp_path)
     factory = TurnDeliveryFactory(
         MessageBus(),
@@ -412,6 +447,8 @@ def test_late_subagent_route_requires_webui_owned_session(tmp_path: Path) -> Non
 
     session = sessions.get_or_create(session_key)
     session.metadata["webui"] = True
+    sessions.save(session)
+    await sessions.state.read(session_key)
     first_visible_route = factory.create(msg, session_key).route
     second_visible_route = factory.create(msg, session_key).route
 
@@ -437,3 +474,32 @@ def test_late_subagent_route_requires_webui_owned_session(tmp_path: Path) -> Non
         "injected_event": "subagent_result",
         "subagent_task_id": "sub-1",
     }
+
+
+@pytest.mark.asyncio
+async def test_unified_display_route_admits_alias_generation_and_rejects_stale_lifetime(tmp_path):
+    from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
+    from nanobot.session.sqlite_store import SessionConflictError
+
+    sessions = SessionManager(tmp_path)
+    alias = await sessions.state.get_header("websocket:chat")
+    source = await sessions.state.get_header("unified:default")
+    policy = WebuiTurnRoutePolicy(sessions)
+    factory = TurnDeliveryFactory(MessageBus(), route_policy=policy, route_admission=policy.admit)
+    message = InboundMessage(channel="system", sender_id="cron", chat_id="websocket:chat", content="notice")
+    delivery = factory.create(message, source.key)
+    await delivery.bind_session_generation(source.generation)
+    assert delivery.route.metadata[HISTORY_GENERATION_METADATA_KEY] == alias.generation
+    assert delivery.delivery_message.session_generation == source.generation
+    response = delivery.background_response("done", stop_reason="end_turn", streamed=False, latency_ms=1)
+    assert response.metadata[HISTORY_GENERATION_METADATA_KEY] == alias.generation
+    await sessions.state.delete(alias.key)
+    replacement = await sessions.state.get_header(alias.key)
+    stale = factory.create(InboundMessage(
+        channel="websocket", sender_id="user", chat_id="chat", content="old queued input",
+        metadata={HISTORY_GENERATION_METADATA_KEY: alias.generation},
+    ), source.key)
+    with pytest.raises(SessionConflictError):
+        await stale.bind_session_generation(source.generation)
+    assert replacement.generation != alias.generation
+    await sessions.state.aclose()

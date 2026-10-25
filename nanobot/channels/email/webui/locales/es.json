@@ -15,7 +15,7 @@
     },
     "fields": {
       "consentGranted": {
-        "label": "Permitir que nanobot lea y envíe correos",
+        "label": "Acceso al correo",
         "choices": {
           "true": "Concedido",
           "false": "No concedido"
@@ -58,7 +58,7 @@
         "placeholder": "bot@example.com"
       },
       "pollIntervalSeconds": {
-        "label": "Intervalo de consulta del correo (segundos)",
+        "label": "Intervalo de revisión (segundos)",
         "placeholder": "30"
       },
       "allowFrom": {
@@ -125,41 +125,41 @@
         }
       },
       "postActionMoveMailbox": {
-        "label": "Mover al buzón"
+        "label": "Buzón de destino"
       },
       "postActionExpunge": {
-        "label": "Aplicar permanentemente la acción",
+        "label": "Borrado permanente",
         "choices": {
           "true": "encendido",
           "false": "Apagado"
         }
       },
       "postActionIgnoreSkipped": {
-        "label": "Ignorar mensajes omitidos",
+        "label": "Conservar correo omitido",
         "choices": {
           "true": "encendido",
           "false": "Apagado"
         }
       },
       "maxBodyChars": {
-        "label": "Longitud máxima del cuerpo"
+        "label": "Límite del cuerpo (caracteres)"
       },
       "subjectPrefix": {
-        "label": "Prefijo del asunto de respuesta"
+        "label": "Prefijo del asunto"
       },
       "allowedAttachmentTypes": {
-        "label": "Tipos de archivos adjuntos permitidos"
+        "label": "Tipos de adjuntos"
       },
       "maxAttachmentSize": {
-        "label": "Tamaño máximo de archivo adjunto"
+        "label": "Límite por adjunto (bytes)"
       },
       "maxAttachmentsPerEmail": {
-        "label": "Archivos adjuntos máximos"
+        "label": "Límite de adjuntos"
       },
       "trustedAuthservIds": {
         "label": "Servicios de autenticación confiables",
         "placeholder": "mx.google.com, separados por comas",
-        "help": "Valores authserv-id exactos añadidos por el servicio receptor. Obligatorio al verificar SPF o DKIM."
+        "help": "Introduce valores authserv-id de confianza.\n\nValores authserv-id exactos añadidos por el servicio receptor. Obligatorio al verificar SPF o DKIM."
       }
     }
   }

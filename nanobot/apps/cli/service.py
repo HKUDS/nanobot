@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -20,7 +21,7 @@ from urllib.parse import urlparse
 import httpx
 from loguru import logger
 
-from nanobot.agent.skills import parse_skill_metadata, valid_skill_metadata
+from nanobot.agent.skill_metadata import parse_skill_metadata, valid_skill_metadata
 from nanobot.apps.protocol import app_manifest, compact_dict
 from nanobot.config.paths import get_runtime_subdir
 from nanobot.security.workspace_policy import is_path_within
@@ -506,7 +507,7 @@ class CliAppManager:
         *,
         force_refresh: bool = False,
     ) -> dict[str, Any]:
-        data, cached_at = self._cached_registry(cache_path)
+        data, cached_at = await asyncio.to_thread(self._cached_registry, cache_path)
         if (
             not force_refresh
             and data is not None
@@ -526,7 +527,7 @@ class CliAppManager:
                 return data
             raise
 
-        _write_json(cache_path, {"_cached_at": _now(), "data": fetched})
+        await asyncio.to_thread(_write_json, cache_path, {"_cached_at": _now(), "data": fetched})
         return fetched
 
     async def refresh_catalog_cache(self, *, force_refresh: bool = False) -> None:
@@ -993,7 +994,7 @@ class CliAppManager:
     def _subprocess_env(self) -> dict[str, str]:
         """Minimal env for CLI app subprocesses — no API keys or secrets.
 
-        Mirrors the shell tool's allowlist so installed apps cannot read
+        Uses an explicit allowlist so installed apps cannot read
         provider credentials from the parent process environment.
         """
         if sys.platform == "win32":
@@ -1011,13 +1012,17 @@ class CliAppManager:
                 "PYTHONUNBUFFERED": "1",
             }
             return env
-        return {
+        env = {
             "HOME": os.environ.get("HOME", "/tmp"),
             "LANG": os.environ.get("LANG", "C.UTF-8"),
             "TERM": os.environ.get("TERM", "dumb"),
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "PYTHONUNBUFFERED": "1",
         }
+        # Desktop CLIs use this directory to locate the running application.
+        if "XDG_RUNTIME_DIR" in os.environ:
+            env["XDG_RUNTIME_DIR"] = os.environ["XDG_RUNTIME_DIR"]
+        return env
 
     def _run_argv(self, argv: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
         command = subprocess.list2cmdline(argv)

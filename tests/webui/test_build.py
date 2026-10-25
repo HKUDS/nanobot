@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-import tomllib
+from contextlib import nullcontext
 from pathlib import Path
 
 from nanobot.webui.build import (
@@ -88,13 +88,6 @@ def test_shared_notifications_make_existing_bundle_stale(tmp_path: Path) -> None
     assert status.newest_source == shared
 
 
-def test_channel_owned_ui_sources_are_included_in_distributions() -> None:
-    project_root = Path(__file__).resolve().parents[2]
-    pyproject = tomllib.loads((project_root / "pyproject.toml").read_text(encoding="utf-8"))
-
-    assert "nanobot/channels/*/webui/**/*" in pyproject["tool"]["hatch"]["build"]["include"]
-
-
 def test_inspect_webui_bundle_accepts_fresh_dist(tmp_path: Path) -> None:
     source = tmp_path / "webui"
     dist = tmp_path / "nanobot" / "web" / "dist"
@@ -108,7 +101,8 @@ def test_inspect_webui_bundle_accepts_fresh_dist(tmp_path: Path) -> None:
     assert status.reason == "fresh"
 
 
-def test_ensure_webui_bundle_auto_builds_stale_dist(tmp_path: Path) -> None:
+def test_ensure_webui_bundle_auto_builds_stale_dist(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.webui.build.bun_environment", lambda _: nullcontext({"PATH": "bun"}))
     source = tmp_path / "webui"
     dist = tmp_path / "nanobot" / "web" / "dist"
     _touch(source / "package.json", mtime_ns=10)
@@ -116,11 +110,13 @@ def test_ensure_webui_bundle_auto_builds_stale_dist(tmp_path: Path) -> None:
     _touch(dist / "index.html", mtime_ns=20)
     commands: list[tuple[str, ...]] = []
 
-    def fake_run(command, *, cwd: Path, check: bool) -> None:
+    def fake_run(command, *, cwd: Path, check: bool, env: dict[str, str], timeout: int) -> None:
         commands.append(tuple(command))
         assert cwd == source
         assert check is True
-        if command == ["bun", "run", "build"]:
+        assert "PATH" in env
+        assert timeout == 900
+        if command == ["bun", "--bun", "run", "build"]:
             _touch(dist / "index.html", mtime_ns=40)
 
     status = ensure_webui_bundle(
@@ -132,7 +128,7 @@ def test_ensure_webui_bundle_auto_builds_stale_dist(tmp_path: Path) -> None:
     )
 
     assert status.stale is False
-    assert commands == [("bun", "install"), ("bun", "run", "build")]
+    assert commands == [("bun", "install", "--frozen-lockfile"), ("bun", "--bun", "run", "build")]
 
 
 def test_pick_webui_build_runner_returns_resolved_executable(monkeypatch) -> None:

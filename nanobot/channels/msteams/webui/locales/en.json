@@ -30,7 +30,7 @@
         "label": "Listen port"
       },
       "replyInThread": {
-        "label": "Reply in thread",
+        "label": "Thread replies",
         "choices": {
           "true": "On",
           "false": "Off"
@@ -40,34 +40,34 @@
         "label": "Mention-only reply"
       },
       "validateInboundAuth": {
-        "label": "Validate incoming requests",
+        "label": "Verify requests",
         "choices": {
           "true": "On",
           "false": "Off"
         }
       },
       "refTtlDays": {
-        "label": "Conversation lifetime"
+        "label": "Reference lifetime (days)"
       },
       "pruneWebChatRefs": {
-        "label": "Remove Web Chat conversations",
+        "label": "Clear Web Chat references",
         "choices": {
           "true": "On",
           "false": "Off"
         }
       },
       "pruneNonPersonalRefs": {
-        "label": "Remove non-personal conversations",
+        "label": "Clear group references",
         "choices": {
           "true": "On",
           "false": "Off"
         }
       },
       "refTouchIntervalS": {
-        "label": "Conversation refresh interval"
+        "label": "Refresh interval (seconds)"
       },
       "trustedServiceUrlHosts": {
-        "label": "Trusted service hosts"
+        "label": "Trusted hosts"
       }
     }
   }

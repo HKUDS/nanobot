@@ -2,6 +2,10 @@
   "setup": {
     "docsLabel": "Buka panduan QQ",
     "officialLabel": "Buka konsol bot QQ",
+    "sections": {
+      "credentials": "Kredensial manual",
+      "advanced": "Lanjutan"
+    },
     "fields": {
       "appId": {
         "label": "App ID",
@@ -12,7 +16,7 @@
         "placeholder": "••••••"
       },
       "allowFrom": {
-        "label": "Pengguna yang diizinkan",
+        "label": "Pengguna diizinkan",
         "placeholder": "Open ID, dipisahkan koma"
       },
       "msgFormat": {
@@ -23,17 +27,43 @@
         }
       },
       "ackMessage": {
-        "label": "Pesan pengakuan"
+        "label": "Pesan penerimaan"
       },
       "mediaDir": {
         "label": "Direktori media"
       },
       "downloadChunkSize": {
-        "label": "Unduh ukuran potongan"
+        "label": "Ukuran chunk (byte)"
       },
       "downloadMaxBytes": {
-        "label": "Ukuran unduhan maksimum"
+        "label": "Batas unduhan (byte)"
+      },
+      "showCompactionNotices": {
+        "label": "Pemberitahuan pemadatan",
+        "choices": {
+          "true": "Aktif",
+          "false": "Nonaktif"
+        }
       }
     }
+  },
+  "custom": {
+    "scanTitle": "Pindai dengan QQ di ponsel",
+    "waiting": "Menunggu pemindaian…",
+    "connected": "Penautan selesai",
+    "stopped": "Dibatalkan",
+    "connecting": "Menyiapkan kode QR…",
+    "qrAlt": "Kode QR penautan QQ",
+    "scanAgainWarning": "Menautkan ulang dapat mengganggu aplikasi lain yang menggunakan bot QQ ini. Jika App Secret direset, kunci lama menjadi tidak berlaku dan aplikasi tersebut perlu menggunakan kunci baru.",
+    "configured": "Terkonfigurasi",
+    "bind": "Tautkan bot QQ",
+    "rebind": "Tautkan ulang bot",
+    "refresh": "Perbarui kode QR",
+    "retry": "Coba lagi",
+    "expired": "Kode QR kedaluwarsa",
+    "failed": "Penautan gagal",
+    "cancelFailed": "Pembatalan gagal",
+    "retrying": "Mencoba lagi…",
+    "manualSetup": "Masukkan kredensial secara manual"
   }
 }

@@ -6,10 +6,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib.util
 import json
+import os
+import re
 import ssl
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
+from uuid import uuid4
 
 import httpx
 from loguru import logger
@@ -18,39 +22,149 @@ from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
 from oauth_cli_kit.storage import FileTokenStorage
 
 from nanobot import __version__
+from nanobot.events import NO_EVENTS, ContextCompactionEvent
 from nanobot.providers.base import (
+    CONTEXT_SAFETY_BUFFER,
     LLMProvider,
     LLMResponse,
+    LLMUsage,
     ProviderCallContext,
     ProviderConversationState,
-    resolve_stream_idle_timeout_s,
 )
-from nanobot.providers.oauth_model_catalog import (
+from nanobot.providers.images import prepare_inline_images
+from nanobot.providers.oauth_catalog_cache import (
+    OAuthCatalogAuthRequiredError,
     OAuthModelCatalog,
     OAuthModelCatalogSnapshot,
+    oauth_catalog_auth_rejected,
 )
 from nanobot.providers.openai_responses import (
-    ResponsesStreamCapture,
-    build_responses_compaction_state,
-    build_responses_state,
-    consume_sse_with_reasoning,
-    convert_tools,
-    is_compaction_compatibility_error,
-    is_replayable_finish_reason,
-    prepare_responses_input,
-    resolve_compact_threshold,
-    responses_state_context_tokens,
-    responses_state_items,
+    ResponsesBackend,
+    ResponsesWebSocketOptions,
     responses_state_matches,
 )
+from nanobot.providers.openai_responses.state import (
+    responses_compaction_items,
+    without_response_item_ids,
+)
+from nanobot.providers.openai_responses.websocket import ResponsesWebSocketError
 from nanobot.providers.registry import ProviderModelSpec, find_by_name
+from nanobot.utils.cancellation import shield_and_drain
+from nanobot.utils.helpers import estimate_prompt_tokens
 
 DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 DEFAULT_OPENAI_CODEX_MODELS_URL = "https://chatgpt.com/backend-api/codex/models"
-# The server gates model visibility by client version; older catalogs omit Astra.
-OPENAI_CODEX_CATALOG_CLIENT_VERSION = "0.153.4"
+# Avoid restricting model discovery to a pinned Codex client release.
+OPENAI_CODEX_CATALOG_CLIENT_VERSION = "99.99.99"
 DEFAULT_ORIGINATOR = "nanobot"
-_COMPACTION_RETAINED_CHAR_BUDGET = 256_000
+
+
+_LANGFUSE_TRACE_WARNING = "Langfuse tracing failed for Codex request: {}"
+
+
+def _usage_details(usage: LLMUsage | None) -> dict[str, int] | None:
+    """Split inclusive input usage into Langfuse's exclusive token buckets."""
+    if usage is None:
+        return None
+    cached_tokens = (usage.cache_read_tokens or 0) + (usage.cache_write_tokens or 0)
+    details = {
+        "input": usage.input_tokens - cached_tokens,
+        "output": usage.output_tokens,
+        "total": usage.total_tokens,
+    }
+    if usage.cache_read_tokens is not None:
+        details["input_cached_tokens"] = usage.cache_read_tokens
+    if usage.cache_write_tokens is not None:
+        details["input_cache_creation"] = usage.cache_write_tokens
+    return details
+
+
+class _CodexGenerationTracer:
+    """Best-effort Langfuse updates; the request owns generation closure."""
+
+    def __init__(self, generation: Any | None) -> None:
+        self._generation = generation
+
+    def record_success(self, result: LLMResponse) -> None:
+        output: Any = result.content
+        if result.tool_calls:
+            output = {
+                "content": result.content,
+                "tool_calls": [
+                    {"name": call.name, "arguments": call.arguments} for call in result.tool_calls
+                ],
+            }
+        self._update(output=output, usage_details=_usage_details(result.usage))
+
+    def record_error(self, response: LLMResponse) -> None:
+        self._update(
+            output=response.content,
+            level="ERROR",
+            status_message=response.content,
+        )
+
+    def _update(self, **kwargs: Any) -> None:
+        generation = self._generation
+        filtered = {k: v for k, v in kwargs.items() if v is not None}
+        if generation is None or not filtered:
+            return
+        try:
+            generation.update(**filtered)
+        except Exception as exc:
+            logger.warning(_LANGFUSE_TRACE_WARNING, exc)
+
+    def close(self) -> None:
+        generation = self._generation
+        if generation is None:
+            return
+        try:
+            generation.end()
+        except Exception as exc:
+            logger.warning(_LANGFUSE_TRACE_WARNING, exc)
+
+
+def _start_codex_langfuse_generation(
+    *,
+    name: str,
+    model: str,
+    body: dict[str, Any],
+) -> _CodexGenerationTracer:
+    """Start a Langfuse generation for a Codex request, or a no-op tracer.
+
+    Detection and the SDK call share one try/except so a broken
+    ``find_spec`` can't fail the Codex request itself.
+    """
+    try:
+        if os.environ.get("LANGFUSE_SECRET_KEY") and importlib.util.find_spec("langfuse"):
+            from langfuse import get_client
+
+            langfuse = get_client()
+            generation = langfuse.start_observation(
+                name=name,
+                as_type="generation",
+                model=model,
+                input={
+                    "instructions": body.get("instructions"),
+                    "input": body.get("input"),
+                    "tools": body.get("tools"),
+                },
+                model_parameters={
+                    key: body[key]
+                    for key in ("reasoning", "tool_choice", "text", "parallel_tool_calls")
+                    if key in body
+                },
+            )
+            return _CodexGenerationTracer(generation)
+
+        if os.environ.get("LANGFUSE_SECRET_KEY"):
+            logger.warning(
+                "LANGFUSE_SECRET_KEY is set but langfuse is not installed; "
+                "run `nanobot plugins enable langfuse` to enable tracing"
+            )
+        return _CodexGenerationTracer(None)
+    except Exception as exc:
+        logger.warning(_LANGFUSE_TRACE_WARNING, exc)
+        return _CodexGenerationTracer(None)
 
 
 class OpenAICodexProvider(LLMProvider):
@@ -68,8 +182,13 @@ class OpenAICodexProvider(LLMProvider):
         self.default_model = default_model
         self.proxy = proxy or None
         self._extra_body = dict(extra_body or {})
-        self._native_compaction_available = True
+        self._responses = ResponsesBackend(websocket_options=ResponsesWebSocketOptions(
+            beta_header="responses_websockets=2026-02-06",
+        ))
         self._ssl_contexts: dict[bool, ssl.SSLContext] = {}
+
+    async def aclose(self) -> None:
+        await self._responses.aclose()
 
     def _ssl_context(self, *, verify: bool) -> ssl.SSLContext:
         """Reuse synchronous TLS setup across requests on the shared event loop."""
@@ -105,25 +224,22 @@ class OpenAICodexProvider(LLMProvider):
             sanitized_state = sanitized_state.with_pending_messages(
                 self._sanitize_empty_content(sanitized_state.pending_messages)
             )
-        system_prompt, input_items, replayed = prepare_responses_input(
-            sanitized_messages,
-            state=sanitized_state,
-            provider=self._responses_state_provider(),
-            model=_strip_model_prefix(model),
+        prepared = self._responses.prepare(
+            sanitized_messages, state=sanitized_state,
+            provider=self._responses_state_provider(), model=_strip_model_prefix(model),
+            tools=tools, tool_choice=tool_choice,
         )
+        body = prepared.body
+        replayed = prepared.replayed
         session_id = provider_context.session_id if provider_context is not None else None
         session_routing_key = _prompt_cache_key(session_id) if session_id else None
-
-        body: dict[str, Any] = {
-            "model": _strip_model_prefix(model),
-            "store": False,
+        body.update({
             "stream": True,
-            "instructions": system_prompt,
-            "input": input_items,
+            "instructions": body["instructions"] or "",
             "text": {"verbosity": "medium"},
             "tool_choice": tool_choice or "auto",
             "parallel_tool_calls": True,
-        }
+        })
         if session_routing_key:
             body["prompt_cache_key"] = session_routing_key
         body["include"] = ["reasoning.encrypted_content"]
@@ -133,16 +249,46 @@ class OpenAICodexProvider(LLMProvider):
             reasoning_options["context"] = "all_turns"
         if reasoning_options:
             body["reasoning"] = reasoning_options
-        if tools:
-            body["tools"] = convert_tools(tools)
         if self._extra_body:
             # Apply explicit provider overrides last, matching other provider backends.
             body.update(self._extra_body)
         effective_cache_key = body.get("prompt_cache_key")
+        request_model = _diagnostic_token(body.get("model"))
+        effective_reasoning = body.get("reasoning")
+        request_effort = _diagnostic_token(
+            cast(dict[object, object], effective_reasoning).get("effort")
+            if isinstance(effective_reasoning, dict) else None
+        )
 
         stage = "oauth_token"
-        native_compaction_applied = False
         native_compaction_state: ProviderConversationState | None = None
+        native_compaction_event_id: str | None = None
+        events = provider_context.events if provider_context is not None else NO_EVENTS
+
+        def finish_compaction(result: LLMResponse) -> LLMResponse:
+            if native_compaction_state is not None and not result.provider_compaction_applied:
+                result.provider_compaction_applied = True
+                result.provider_compaction_state = native_compaction_state
+                result.provider_compaction_scope = "prior_context"
+                result.provider_compaction_event_id = native_compaction_event_id
+            return result
+
+        input_budget = (
+            provider_context.compaction_input_budget if provider_context is not None else None
+        )
+        if input_budget is not None:
+            if not replayed or not self.supports_pre_request_compaction(model):
+                return LLMResponse(
+                    content="Required Codex pre-request compaction is unavailable; request not sent.",
+                    finish_reason="error", error_kind="context_window_exceeded",
+                    error_should_retry=False,
+                    preserve_provider_state_on_error=True,
+                )
+            if provider_context is not None and provider_context.context_window_tokens is not None:
+                input_budget = min(
+                    input_budget,
+                    provider_context.context_window_tokens - max_tokens - CONTEXT_SAFETY_BUFFER,
+                )
         try:
             token = await asyncio.to_thread(get_codex_token, proxy=self.proxy)
             headers = _build_headers(
@@ -157,104 +303,127 @@ class OpenAICodexProvider(LLMProvider):
                 request_body: dict[str, Any],
                 *,
                 emit_deltas: bool,
+                trace_name: str,
+                validate: Callable[[LLMResponse], object] | None = None,
             ) -> LLMResponse:
-                wire_body = _without_response_item_ids(request_body)
+                wire_body = await prepare_inline_images(without_response_item_ids(request_body))
+                tracer = _start_codex_langfuse_generation(
+                    name=trace_name,
+                    model=_strip_model_prefix(str(wire_body.get("model") or model)),
+                    body=wire_body,
+                )
                 try:
-                    return await _request_codex(
-                        DEFAULT_CODEX_URL,
-                        headers,
-                        wire_body,
-                        verify=self._ssl_context(verify=True),
-                        proxy=self.proxy,
-                        on_content_delta=on_content_delta if emit_deltas else None,
-                        on_thinking_delta=on_thinking_delta if emit_deltas else None,
-                        on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
-                    )
+                    result = None
+                    if session_id:
+                        result = await self._responses.websocket_request(
+                            session_id, DEFAULT_CODEX_URL, headers, wire_body,
+                            provider=self._responses_state_provider(),
+                            verify=self._ssl_context(verify=True), proxy=self.proxy,
+                            on_content_delta=on_content_delta if emit_deltas else None,
+                            on_thinking_delta=on_thinking_delta if emit_deltas else None,
+                            on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
+                        )
+                    if result is None:
+                        try:
+                            result = await _request_codex(
+                                DEFAULT_CODEX_URL,
+                                headers,
+                                wire_body,
+                                verify=self._ssl_context(verify=True),
+                                proxy=self.proxy,
+                                on_content_delta=on_content_delta if emit_deltas else None,
+                                on_thinking_delta=on_thinking_delta if emit_deltas else None,
+                                on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
+                            )
+                        except Exception as exc:
+                            if "CERTIFICATE_VERIFY_FAILED" not in str(exc):
+                                raise
+                            logger.warning(
+                                "SSL verification failed for Codex API; retrying with verify=False"
+                            )
+                            result = await _request_codex(
+                                DEFAULT_CODEX_URL,
+                                headers,
+                                wire_body,
+                                verify=self._ssl_context(verify=False),
+                                proxy=self.proxy,
+                                on_content_delta=on_content_delta if emit_deltas else None,
+                                on_thinking_delta=on_thinking_delta if emit_deltas else None,
+                                on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
+                            )
+                    if validate is not None:
+                        validate(result)
                 except Exception as exc:
-                    if "CERTIFICATE_VERIFY_FAILED" not in str(exc):
-                        raise
-                    logger.warning(
-                        "SSL verification failed for Codex API; retrying with verify=False"
-                    )
-                    return await _request_codex(
-                        DEFAULT_CODEX_URL,
-                        headers,
-                        wire_body,
-                        verify=self._ssl_context(verify=False),
-                        proxy=self.proxy,
-                        on_content_delta=on_content_delta if emit_deltas else None,
-                        on_thinking_delta=on_thinking_delta if emit_deltas else None,
-                        on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
-                    )
+                    tracer.record_error(_codex_error_response(exc))
+                    raise
+                else:
+                    tracer.record_success(result)
+                    return result
+                finally:
+                    tracer.close()
 
-            compact_threshold = resolve_compact_threshold(
-                (provider_context.context_window_tokens if provider_context is not None else None),
-                max_tokens,
-            )
-            if (
-                self.supports_native_compaction(model)
-                and replayed
-                and sanitized_state is not None
-                and compact_threshold is not None
-                and responses_state_context_tokens(sanitized_state) >= compact_threshold
-            ):
+            if self.supports_native_compaction(model) and replayed and sanitized_state is not None:
                 stage = "codex_compaction"
-                history_items = responses_state_items(sanitized_state) or []
-                delta_items = input_items[len(history_items):]
-                compact_body = {
-                    **body,
-                    "input": [*history_items, {"type": "compaction_trigger"}],
-                }
-                try:
-                    compact_result = await _send(compact_body, emit_deltas=False)
-                    compact_items = (
-                        responses_state_items(compact_result.provider_state)
-                        if compact_result.provider_state is not None
-                        else None
-                    )
-                    if not compact_items or compact_items[-1].get("type") not in {
-                        "compaction",
-                        "compaction_summary",
-                        "context_compaction",
-                    }:
-                        raise RuntimeError("Codex compaction returned no compaction item")
-                    body["input"] = [
-                        *_retained_compaction_messages(history_items),
-                        *compact_items,
-                        *delta_items,
-                    ]
-                    native_compaction_state = build_responses_compaction_state(
-                        provider=self._responses_state_provider(),
-                        model=_strip_model_prefix(model),
-                        output_items=compact_items,
-                    )
-                    native_compaction_applied = True
-                except Exception as compact_error:
-                    if is_compaction_compatibility_error(compact_error):
-                        self._native_compaction_available = False
-                    logger.warning(
-                        "Codex native compaction unavailable; continuing without it "
-                        "(type={} status={} disabled={})",
-                        type(compact_error).__name__,
-                        getattr(compact_error, "status_code", None),
-                        not self._native_compaction_available,
-                    )
 
+                async def send_compaction(request: dict[str, Any]) -> LLMResponse:
+                    nonlocal native_compaction_event_id
+                    compaction_id = uuid4().hex
+                    try:
+                        await events.emit(ContextCompactionEvent(compaction_id, "started", reason="provider_native"))
+                        compacted = await _send(
+                            request,
+                            emit_deltas=False,
+                            trace_name="codex_compaction",
+                            validate=responses_compaction_items,
+                        )
+                    except (Exception, asyncio.CancelledError) as exc:
+                        await shield_and_drain(events.emit(ContextCompactionEvent(
+                            compaction_id,
+                            "cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
+                            reason="provider_native",
+                        )))
+                        raise
+                    native_compaction_event_id = compaction_id
+                    await shield_and_drain(events.emit(ContextCompactionEvent(compaction_id, "succeeded", reason="provider_native")))
+                    return compacted
+
+                native_compaction_state = await self._responses.compact_before_request(
+                    body, state=sanitized_state,
+                    provider=self._responses_state_provider(), model=_strip_model_prefix(model),
+                    context_window_tokens=(
+                        provider_context.context_window_tokens if provider_context else None
+                    ),
+                    max_output_tokens=max_tokens, input_budget=input_budget,
+                    send=send_compaction,
+                )
+
+            if input_budget is not None:
+                estimated = estimate_prompt_tokens([{
+                    "role": "user", "content": json.dumps(body, ensure_ascii=False),
+                }])
+                if input_budget <= 0 or estimated > input_budget:
+                    return finish_compaction(LLMResponse(
+                        content=(
+                            "Codex input still exceeds the local budget after native compaction "
+                            f"({estimated}/{input_budget} estimated tokens); request not sent."
+                        ),
+                        finish_reason="error", error_kind="context_window_exceeded",
+                        error_should_retry=False,
+                        preserve_provider_state_on_error=True,
+                    ))
             stage = "codex_request"
-            result = await _send(body, emit_deltas=True)
-            result.provider_compaction_applied = (
-                result.provider_compaction_applied or native_compaction_applied
-            )
-            if native_compaction_state is not None:
-                result.provider_compaction_state = native_compaction_state
-                result.provider_compaction_scope = "prior_context"
-            return result
+            result = await _send(body, emit_deltas=True, trace_name="codex_request")
+            return finish_compaction(result)
         except Exception as e:
             response = _codex_error_response(e)
+            if input_budget is not None and stage != "codex_request":
+                response.preserve_provider_state_on_error = True
             exc_type = "CodexHTTPError" if isinstance(e, _CodexHTTPError) else type(e).__name__
             logger.warning(
                 "Codex API request failed: stage={} type={} kind={} retryable={} status={} "
-                "error_type={} error_code={} retry_after={} summary={}",
+                "error_type={} error_code={} retry_after={} summary={} "
+                "model={} reasoning_effort={} replayed={} compaction_applied={} "
+                "error_param={} error_message={} request_id={}",
                 stage,
                 exc_type,
                 response.error_kind,
@@ -264,8 +433,15 @@ class OpenAICodexProvider(LLMProvider):
                 response.error_code,
                 response.retry_after,
                 _codex_log_summary(exc_type, response),
+                request_model,
+                request_effort,
+                replayed,
+                native_compaction_state is not None,
+                getattr(e, "error_param", None),
+                getattr(e, "error_message", None),
+                getattr(e, "request_id", None),
             )
-            return response
+            return finish_compaction(response)
 
     async def chat(
         self,
@@ -358,61 +534,16 @@ class OpenAICodexProvider(LLMProvider):
     def supports_native_compaction(self, model: str | None = None) -> bool:
         """Use the Codex backend's inline compaction trigger when needed."""
         _ = model
-        return self._native_compaction_available
+        return self._responses.native_compaction_available
+
+    def supports_pre_request_compaction(self, model: str | None = None) -> bool:
+        return self.supports_native_compaction(model)
 
 
 def _strip_model_prefix(model: str) -> str:
     if model.startswith("openai-codex/") or model.startswith("openai_codex/"):
         return model.split("/", 1)[1]
     return model
-
-
-def _without_response_item_ids(
-    request_body: dict[str, Any],
-) -> dict[str, Any]:
-    """Match Codex's default ``store=false`` request-item contract."""
-    if request_body.get("store") is True:
-        return request_body
-    raw_input = request_body.get("input")
-    if not isinstance(raw_input, list):
-        return request_body
-
-    input_items: list[object] = cast(list[object], raw_input)
-    sanitized_input: list[object] = []
-    for raw_item in input_items:
-        if not isinstance(raw_item, dict):
-            sanitized_input.append(raw_item)
-            continue
-        item = cast(dict[str, Any], raw_item)
-        sanitized_input.append({key: value for key, value in item.items() if key != "id"})
-
-    body = dict(request_body)
-    body["input"] = sanitized_input
-    return body
-
-
-def _retained_compaction_messages(
-    input_items: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Mirror Codex's bounded retention of user/developer/system messages."""
-    retained_reversed: list[dict[str, Any]] = []
-    remaining = _COMPACTION_RETAINED_CHAR_BUDGET
-    for item in reversed(input_items):
-        if item.get("type") not in {None, "message"} or item.get("role") not in {
-            "user",
-            "developer",
-            "system",
-        }:
-            continue
-        size = len(json.dumps(item, ensure_ascii=False))
-        if size > remaining and retained_reversed:
-            continue
-        retained_reversed.append(item)
-        remaining = max(0, remaining - size)
-        if remaining == 0:
-            break
-    retained_reversed.reverse()
-    return retained_reversed
 
 
 def _build_reasoning_options(reasoning_effort: str | None) -> dict[str, str] | None:
@@ -456,6 +587,9 @@ class _CodexHTTPError(RuntimeError):
         error_code: str | None = None,
         should_retry: bool | None = None,
         compaction_unsupported: bool = False,
+        error_param: str | None = None,
+        error_message: str | None = None,
+        request_id: str | None = None,
     ):
         super().__init__(message)
         self.status_code = status_code
@@ -464,6 +598,9 @@ class _CodexHTTPError(RuntimeError):
         self.error_code = error_code
         self.should_retry = should_retry
         self.compaction_unsupported = compaction_unsupported
+        self.error_param = error_param
+        self.error_message = error_message
+        self.request_id = request_id
 
 
 async def _request_codex(
@@ -476,67 +613,30 @@ async def _request_codex(
     on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
     on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> LLMResponse:
-    idle_timeout_s = resolve_stream_idle_timeout_s()
-    client_kwargs: dict[str, Any] = {"timeout": idle_timeout_s, "verify": verify}
-    if proxy:
-        client_kwargs["proxy"] = proxy
-        client_kwargs["trust_env"] = False
-    async with httpx.AsyncClient(**client_kwargs) as client:
-        async with client.stream("POST", url, headers=headers, json=body) as response:
-            if response.status_code != 200:
-                text = await response.aread()
-                raw = text.decode("utf-8", "ignore")
-                retry_after = LLMProvider._extract_retry_after_from_headers(response.headers)
-                error_type, error_code = LLMProvider._extract_error_type_code(raw)
-                compaction_unsupported = response.status_code in {400, 404, 422} and any(
-                    marker in raw.lower()
-                    for marker in (
-                        "context_management",
-                        "compact_threshold",
-                        "compaction_trigger",
-                    )
-                )
-                raise _CodexHTTPError(
-                    _friendly_error(response.status_code, raw),
-                    status_code=response.status_code,
-                    retry_after=retry_after,
-                    error_type=error_type,
-                    error_code=error_code,
-                    should_retry=_should_retry_status(
-                        response.status_code, error_type, error_code, raw
-                    ),
-                    compaction_unsupported=compaction_unsupported,
-                )
-            capture = ResponsesStreamCapture()
-            (
-                content,
-                tool_calls,
-                finish_reason,
-                usage,
-                reasoning_content,
-            ) = await consume_sse_with_reasoning(
-                response,
-                on_content_delta=on_content_delta,
-                on_tool_call_delta=on_tool_call_delta,
-                on_reasoning_delta=on_thinking_delta,
-                capture=capture,
-            )
-            result = LLMResponse(
-                content=content,
-                tool_calls=tool_calls,
-                finish_reason=finish_reason,
-                usage=usage,
-                reasoning_content=reasoning_content,
-            )
-            if capture.completed and is_replayable_finish_reason(finish_reason):
-                result.provider_state = build_responses_state(
-                    provider=f"openai_codex:{url.rstrip('/')}",
-                    model=str(body.get("model") or ""),
-                    input_items=cast(list[dict[str, Any]], body.get("input") or []),
-                    output_items=capture.output_items,
-                    usage=usage,
-                )
-            return result
+    return await ResponsesBackend.sse_request(
+        url, headers, body, provider=f"openai_codex:{url.rstrip('/')}",
+        verify=verify, proxy=proxy, error_factory=_build_codex_http_error,
+        on_content_delta=on_content_delta, on_thinking_delta=on_thinking_delta,
+        on_tool_call_delta=on_tool_call_delta,
+    )
+
+
+def _build_codex_http_error(status_code: int, headers: httpx.Headers, raw: str) -> _CodexHTTPError:
+    retry_after = LLMProvider._extract_retry_after_from_headers(headers)
+    error_type, error_code = LLMProvider._extract_error_type_code(raw)
+    error_param, error_message = _codex_error_details(raw)
+    compaction_unsupported = status_code in {400, 404, 422} and any(
+        marker in raw.lower()
+        for marker in ("context_management", "compact_threshold", "compaction_trigger")
+    )
+    return _CodexHTTPError(
+        _friendly_error(status_code, raw), status_code=status_code,
+        retry_after=retry_after, error_type=error_type, error_code=error_code,
+        should_retry=_should_retry_status(status_code, error_type, error_code, raw),
+        compaction_unsupported=compaction_unsupported,
+        error_param=error_param, error_message=error_message,
+        request_id=_diagnostic_token(headers.get("x-request-id")),
+    )
 
 
 def _prompt_cache_key(session_id: str) -> str:
@@ -550,8 +650,50 @@ def _friendly_error(status_code: int, raw: str) -> str:
     return f"HTTP {status_code}: Codex API request failed"
 
 
+def _diagnostic_token(value: object) -> str | None:
+    if isinstance(value, str) and re.fullmatch(r"[a-zA-Z0-9_.:/\[\]-]{1,160}", value):
+        return value
+    return None
+
+
+def _codex_error_details(raw: str) -> tuple[str | None, str | None]:
+    """Retain parameter paths and known enum errors without upstream prompt echoes."""
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return None, None
+    error = cast(dict[str, object], payload).get("error") if isinstance(payload, dict) else None
+    if not isinstance(error, dict):
+        return None, None
+    fields = cast(dict[str, object], error)
+    param = _diagnostic_token(fields.get("param"))
+    message = fields.get("message")
+    # Arbitrary upstream messages may contain credentials or user input. Only
+    # retain this bounded rejection template with known reasoning/verbosity values.
+    enum = r"'(?:none|minimal|low|medium|high|xhigh|max|ultra|auto|concise|detailed)'"
+    if (
+        param in {"reasoning.effort", "text.verbosity"}
+        and isinstance(message, str)
+        and len(message) <= 512
+        and re.fullmatch(
+            rf"Unsupported value: {enum} is not supported with the 'gpt-[a-zA-Z0-9.-]{{1,80}}' "
+            rf"model\. Supported values are: {enum}(?:(?:, |, and | and ){enum})*\.",
+            message,
+        )
+    ):
+        return param, message
+    return param, None
+
+
 def _codex_error_response(exc: Exception) -> LLMResponse:
     """Convert Codex transport/API failures into actionable, retryable metadata."""
+    if isinstance(exc, RuntimeError) and _codex_login_required(exc):
+        return LLMResponse(
+            content="OpenAI Codex authorization expired. Please sign in again.",
+            finish_reason="error",
+            error_kind="oauth_auth_required",
+            error_should_retry=False,
+        )
     exc_type = "CodexHTTPError" if isinstance(exc, _CodexHTTPError) else type(exc).__name__
     detail = str(exc).strip()
 
@@ -572,7 +714,7 @@ def _codex_error_response(exc: Exception) -> LLMResponse:
         error_kind = "connection"
         default_detail = "network connection failed"
         should_retry = True if should_retry is None else should_retry
-    elif isinstance(exc, _CodexHTTPError):
+    elif isinstance(exc, (_CodexHTTPError, ResponsesWebSocketError)):
         error_kind = "http"
         default_detail = "HTTP request failed"
 
@@ -641,21 +783,47 @@ def _should_retry_status(
 
 def get_openai_codex_model_catalog(
     proxy: str | None = None,
+    *,
+    refresh: bool = False,
 ) -> OAuthModelCatalogSnapshot:
     storage = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename)
     token = storage.load()
     account_id = getattr(token, "account_id", None)
     account_key = _catalog_account_key(account_id)
     cache_key = f"{storage.get_token_path()}\0{account_key}\0{proxy or ''}"
-    return _OPENAI_CODEX_MODEL_CATALOG.get(cache_key=cache_key, proxy=proxy)
+    return _OPENAI_CODEX_MODEL_CATALOG.get(cache_key=cache_key, proxy=proxy, refresh=refresh)
 
 
 def invalidate_openai_codex_model_catalog() -> None:
     _OPENAI_CODEX_MODEL_CATALOG.invalidate()
 
 
+def _codex_login_required(exc: RuntimeError) -> bool:
+    # oauth-cli-kit exposes refresh failures as strings, not typed HTTP errors.
+    # Interpret only its exact envelope; never propagate the raw token response.
+    detail = str(exc)
+    if detail == "OAuth credentials not found. Please run the login command.":
+        return True
+    prefix = "Token refresh failed: "
+    if detail.startswith(prefix):
+        status, _, body = detail[len(prefix):].partition(" ")
+        payload: object = None
+        if len(body) <= 16_384:
+            try:
+                payload = json.loads(body)
+            except ValueError:
+                pass
+        return status.isdecimal() and oauth_catalog_auth_rejected(int(status), payload)
+    return False
+
+
 def _fetch_openai_codex_models(proxy: str | None) -> tuple[ProviderModelSpec, ...]:
-    token = get_codex_token(proxy=proxy)
+    try:
+        token = get_codex_token(proxy=proxy)
+    except RuntimeError as exc:
+        if _codex_login_required(exc):
+            raise OAuthCatalogAuthRequiredError() from None
+        raise
     account_id = getattr(token, "account_id", None)
     if not isinstance(account_id, str) or not account_id:
         raise RuntimeError("OpenAI Codex OAuth token has no account ID")

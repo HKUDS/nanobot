@@ -6,9 +6,9 @@ import asyncio
 import hashlib
 import time
 import uuid
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any, Protocol
 
-from nanobot.agent.tools.cron import CronTool
+from nanobot.bus.delivery import DELIVERY_RUN_META
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.cron.session_delivery import origin_delivery_context
 from nanobot.cron.session_turns import CRON_DEFER_UNTIL_IDLE_META, CRON_TRIGGER_META
@@ -16,13 +16,8 @@ from nanobot.cron.types import CronJob, CronRunResult
 from nanobot.cron.webui_metadata import cron_proactive_delivery_metadata
 from nanobot.utils.prompt_templates import render_template
 
-if TYPE_CHECKING:
-    from nanobot.agent.tools.registry import ToolRegistry
-
 
 class BoundCronAgent(Protocol):
-    tools: ToolRegistry
-
     async def submit_cron_turn(self, msg: InboundMessage) -> OutboundMessage | None:
         ...
 
@@ -58,6 +53,10 @@ def _bound_session_delivery_context(
                 source_label=source_label,
             )
         )
+    else:
+        # External scheduled results need one recoverable final message, not a
+        # transient stream whose completion marker cannot be replayed safely.
+        metadata.pop("_wants_stream", None)
 
     return channel, chat_id, metadata
 
@@ -95,6 +94,7 @@ async def run_bound_cron_job(
         ),
     }
     metadata[CRON_DEFER_UNTIL_IDLE_META] = True
+    metadata[DELIVERY_RUN_META] = run_id
     run_record_base: dict[str, Any] = {
         "job_id": job.id,
         "job_name": job.name,
@@ -112,10 +112,6 @@ async def run_bound_cron_job(
         },
     )
 
-    cron_tool = agent.tools.get("cron")
-    cron_token = None
-    if isinstance(cron_tool, CronTool):
-        cron_token = cron_tool.set_cron_context(True)
     try:
         resp = await agent.submit_cron_turn(
             InboundMessage(
@@ -138,10 +134,6 @@ async def run_bound_cron_job(
             },
         )
         raise
-    finally:
-        if isinstance(cron_tool, CronTool) and cron_token is not None:
-            cron_tool.reset_cron_context(cron_token)
-
     response = resp.content if resp else ""
     cron.write_run_record(
         run_id,

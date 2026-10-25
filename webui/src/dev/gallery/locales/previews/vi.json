@@ -1,0 +1,431 @@
+{
+  "rename": {
+    "title": "RenameDialog · Đổi tên nhóm và dự án",
+    "description": "Thử hộp thoại đổi tên nhóm và dự án. Chủ đề được đổi tên ngay trong danh sách trò chuyện.",
+    "options": "Bên gọi cung cấp dialogTitle, description và placeholder. title đặt giá trị ban đầu; onConfirm nhận tên đã bỏ khoảng trắng ở hai đầu. Không thể lưu tên trống.",
+    "hint": "Khi lưu, tiêu đề phía trên sẽ được cập nhật."
+  },
+  "delete": {
+    "title": "DeleteConfirm · Xác nhận xóa",
+    "description": "So sánh việc xóa một cuộc trò chuyện, nhiều cuộc trò chuyện hoặc cuộc trò chuyện có tác vụ tự động.",
+    "options": "count điều khiển nội dung xóa hàng loạt. automations hiển thị tác vụ liên kết, lịch và lần chạy tiếp theo. Xác nhận sẽ gọi onConfirm.",
+    "scenario": "Tình huống xóa",
+    "open": "Mở xác nhận xóa",
+    "confirmed": "Đã xác nhận xóa ví dụ.",
+    "hint": "Chọn một, nhiều hoặc cuộc trò chuyện có tác vụ tự động."
+  },
+  "inlineTokens": {
+    "title": "Inline tokens · Lệnh và định danh phiên",
+    "description": "Sửa lệnh và định danh để xem phần tô sáng và màu ổn định của phiên.",
+    "options": "SlashCommandText nhận command; InlineTokenHighlight nhận color và nội dung. SessionHandleLabel xác định màu từ id.",
+    "command": "Văn bản lệnh",
+    "run": "Chạy <command/> để kiểm tra trạng thái.",
+    "handle": "Định danh phiên",
+    "continue": "Tiếp tục làm việc trong <session/>.",
+    "highlight": "Tô sáng dùng chung",
+    "review": "Dùng <skill/> để kiểm tra thay đổi.",
+    "skill": "Kỹ năng: {{name}}"
+  },
+  "sessionLinks": {
+    "selected": "Phiên đã chọn: {{name}}.",
+    "hint": "Chọn một lượt nhắc đến phiên để xem phản hồi."
+  },
+  "userText": {
+    "title": "UserMessageText · Lượt nhắc trong tin nhắn",
+    "description": "Sửa tin nhắn có nhắc đến kỹ năng, ứng dụng, MCP và phiên.",
+    "options": "text là tin nhắn gốc. cliApps, mcpPresets và sessionMentions giúp phân giải lượt nhắc. Kỹ năng dùng $name; các lượt nhắc khác dùng @name.",
+    "message": "Nội dung tin nhắn"
+  },
+  "capabilityTokens": {
+    "title": "CapabilityMentionToken · Nhắc đến ứng dụng",
+    "description": "So sánh lượt nhắc đến ứng dụng, MCP và phiên trong ô soạn thảo và tin nhắn.",
+    "options": "segment chỉ định cli, mcp hoặc session cùng siêu dữ liệu. variant chọn composer hoặc message. Ví dụ dùng ảnh thương hiệu cục bộ.",
+    "position": "Vị trí lượt nhắc"
+  },
+  "productIcons": {
+    "title": "Product icons · Danh mục biểu tượng",
+    "description": "Duyệt biểu tượng, đổi kích thước và chọn biểu tượng để tô sáng.",
+    "options": "Biểu tượng nhận LucideProps như size, strokeWidth và className. Màu kế thừa currentColor; các nút có tên thao tác hỗ trợ tiếp cận.",
+    "size": "Kích thước biểu tượng",
+    "selected": "Đã chọn: {{name}}"
+  },
+  "startup": {
+    "title": "StartupShell · Màn hình chờ khởi động",
+    "description": "Xem trước bố cục chờ tối giản khi ứng dụng đang kết nối.",
+    "options": "embedded dùng phần tử section; trường hợp khác dùng main. aria-busy và trạng thái tải luôn được cung cấp. Kiểu hiển thị đến từ điểm vào ứng dụng."
+  },
+  "fileActions": {
+    "title": "FileActions · Menu tệp",
+    "description": "Nhấp chuột phải để sao chép đường dẫn đầy đủ, tương đối hoặc văn bản tham chiếu.",
+    "options": "path là văn bản tham chiếu. metadata cung cấp đường dẫn đầy đủ và đường dẫn tương đối tùy chọn. Thư viện cung cấp siêu dữ liệu mà không tải tệp.",
+    "scope": "Phạm vi tệp",
+    "hint": "Nhấp chuột phải để mở menu sao chép, hoặc đưa tiêu điểm vào tệp rồi nhấn Shift+F10."
+  },
+  "workbench": {
+    "title": "PaneWorkbench · Nhiều ngăn",
+    "description": "Đổi bố cục, kích hoạt hoặc thêm ngăn, điều chỉnh vị trí và kích thước.",
+    "options": "Bên gọi điều khiển panes, activePaneKey, layout và splitRatios. renderPane cung cấp nội dung; hàm gọi lại cập nhật trạng thái cục bộ. Màn hình hẹp chỉ hiển thị ngăn đang hoạt động.",
+    "layout": "Bố cục ngăn",
+    "limit": "Tối đa bốn ngăn",
+    "notes": "Ghi chú {{title}}",
+    "active": "Ngăn đang hoạt động",
+    "activate": "Chọn ngăn này để kích hoạt",
+    "hint": "Đang hoạt động: {{title}}. Kéo tay nắm bên dưới để di chuyển ngăn, kéo đường biên để đổi kích thước."
+  },
+  "hostConnection": {
+    "title": "HostConnectionStatus · Trạng thái kết nối",
+    "description": "So sánh trạng thái đã kết nối, ngắt kết nối, đang kết nối và lỗi.",
+    "options": "state điều khiển biểu tượng và văn bản. compact ẩn văn bản hiển thị nhưng giữ trạng thái hỗ trợ tiếp cận và chú giải.",
+    "state": "Trạng thái kết nối",
+    "withText": "Trạng thái kèm văn bản",
+    "compact": "Hiển thị thu gọn"
+  },
+  "compatibility": {
+    "title": "HostCompatibilityDialog · Tương thích phiên bản",
+    "description": "Xem phiên bản, hướng dẫn chuẩn bị và nâng cấp cho từng kết quả tương thích.",
+    "options": "profile mở hộp thoại; compatibility cung cấp kết quả và phiên bản. onClose đóng hộp thoại. Thành phần này chỉ hiển thị thông tin.",
+    "state": "Tương thích phiên bản",
+    "open": "Xem chi tiết tương thích"
+  },
+  "composer": {
+    "title": "ThreadComposer · Soạn tin nhắn",
+    "description": "Thử tin nhắn, tệp đính kèm, lệnh và trích dẫn ở trạng thái bận hoặc bị vô hiệu hóa.",
+    "options": "onSend thành công sẽ xóa ô nhập. isStreaming điều khiển dừng và xếp hàng; variant chọn kiểu trò chuyện hoặc trang chào. Nội dung gửi chỉ được giữ trong bản xem trước này.",
+    "statusCommand": "Trạng thái phiên",
+    "statusDescription": "Xem trạng thái phiên hiện tại",
+    "compactCommand": "Nén ngữ cảnh",
+    "compactDescription": "Nén ngữ cảnh của phiên hiện tại",
+    "helpCommand": "Trợ giúp về lệnh",
+    "helpDescription": "Xem các lệnh có sẵn",
+    "state": "Trạng thái ô nhập",
+    "addQuote": "Thêm trích dẫn",
+    "input": "Tin nhắn ví dụ",
+    "placeholder": "Nhập tin nhắn, hoặc / để xem lệnh",
+    "stopped": "Đã dừng tác vụ ví dụ.",
+    "sent": "Nội dung đã gửi: {{content}}{{attachments}}",
+    "attachments": " · Tệp đính kèm: {{amount}}",
+    "hint": "Thử gửi tin nhắn, chọn tệp đính kèm, đổi mô hình và mở menu lệnh."
+  },
+  "modelPreset": {
+    "title": "ModelPresetBadge · Cấu hình sẵn của mô hình",
+    "description": "Thử menu mô hình, điều hướng bằng bàn phím và trạng thái cần thiết lập.",
+    "options": "modelPresets cung cấp cấu hình sẵn; modelPreset và onPresetChange điều khiển lựa chọn. needsSetup hiển thị lối vào thiết lập.",
+    "state": "Trạng thái bộ chọn mô hình",
+    "manage": "Đã mở quản lý mô hình.",
+    "settings": "Đã mở cài đặt mô hình.",
+    "hint": "Cấu hình hiện tại: {{preset}}. Mở menu hoặc dùng phím mũi tên để đổi."
+  },
+  "usage": {
+    "title": "ComposerUsagePopover · Mức sử dụng ngữ cảnh",
+    "description": "Xem ngữ cảnh, bộ nhớ đệm, thời gian tạo, cảnh báo và bảng phía dưới.",
+    "options": "context cung cấp dung lượng; rounds cung cấp thống kê theo lượt. bottomSheet chọn bảng cho thiết bị di động.",
+    "state": "Trạng thái sử dụng",
+    "hint": "Mở chi tiết để xem ngữ cảnh, bộ nhớ đệm và thời gian tạo của từng lượt."
+  },
+  "workspace": {
+    "title": "WorkspaceControls · Thư mục làm việc",
+    "description": "Chọn dự án ví dụ và đổi chế độ truy cập của bản xem trước.",
+    "options": "scope và onChange điều khiển lựa chọn; onLoadProjects cung cấp thư mục ví dụ. Gateway phân giải đường dẫn thực và thực thi quyền truy cập.",
+    "state": "Trạng thái thư mục làm việc"
+  },
+  "navigator": {
+    "title": "PromptNavigator · Điều hướng câu hỏi",
+    "description": "Tìm câu hỏi trước đó và xem hàm gọi lại khi chuyển đến câu hỏi.",
+    "options": "messages cung cấp toàn bộ hội thoại; thành phần trích xuất câu hỏi của người dùng. onJumpToPrompt nhận ID tin nhắn đích.",
+    "hint": "Mở điều hướng câu hỏi, tìm kiếm rồi chọn một câu hỏi.",
+    "empty": "Chưa chọn câu hỏi nào"
+  },
+  "header": {
+    "title": "ThreadHeader · Thanh tiêu đề trò chuyện",
+    "description": "Thử thanh bên, giao diện, trò chuyện tạm thời và điều hướng câu hỏi.",
+    "options": "title, handle, theme và temporaryChatEnabled cung cấp trạng thái hiển thị. Hàm gọi lại chuyển thao tác cho bên gọi.",
+    "jump": "Đã chuyển đến {{id}}",
+    "sidebar": "Đã chuyển trạng thái thanh bên",
+    "hint": "Thử các thao tác trên thanh tiêu đề",
+    "temporary": "Trò chuyện tạm thời",
+    "regular": "Trò chuyện thông thường"
+  },
+  "messages": {
+    "title": "ThreadMessages · Danh sách tin nhắn",
+    "description": "Khám phá hội thoại nhiều lượt, menu tin nhắn, nhánh và trích dẫn văn bản đã chọn.",
+    "options": "messages chứa tin nhắn đã được chiếu sang giao diện. onForkFromMessage nhận chỉ mục câu hỏi; onQuoteSelection nhận văn bản trả lời đã chọn.",
+    "quoted": "Trích dẫn: {{text}}",
+    "forked": "Đã tạo nhánh từ câu hỏi {{index}}",
+    "hint": "Mở menu tin nhắn, hoặc chọn văn bản trả lời rồi chọn Trích dẫn."
+  },
+  "viewport": {
+    "title": "ThreadViewport · Cuộn trò chuyện",
+    "description": "Cuộn hội thoại dài với dấu câu hỏi, điều hướng và quay về cuối.",
+    "options": "Bản xem trước có chiều cao cố định. messages cung cấp lịch sử; ref.jumpToUserPrompt định vị câu hỏi. emptyState cung cấp nội dung khi chưa có tin nhắn.",
+    "state": "Chế độ xem trò chuyện",
+    "empty": "Nhập tin nhắn để bắt đầu trò chuyện",
+    "hint": "Cuộn để xem dấu câu hỏi, hoặc dùng điều hướng rồi quay về cuối."
+  },
+  "history": {
+    "title": "ThreadHistoryStatus · Trạng thái lịch sử",
+    "description": "Hiển thị trạng thái đang tải, đầu lịch sử và lỗi kèm thao tác thử lại.",
+    "options": "loading cho biết đang gửi yêu cầu, exhausted cho biết không còn tin nhắn cũ hơn, error cung cấp chi tiết lỗi và onRetry thử tải lại.",
+    "state": "Trạng thái lịch sử",
+    "error": "Lịch sử ví dụ hiện không khả dụng.",
+    "retries": "Số lần thử lại: {{amount}}"
+  },
+  "recovery": {
+    "title": "RecoveryNotice · Khôi phục tác vụ",
+    "description": "So sánh gián đoạn, tiếp tục, lỗi và không thể tiếp tục; thử tiếp tục hoặc đóng.",
+    "options": "state cung cấp ảnh chụp trạng thái khôi phục. onContinue và onDismiss trả về Promise. Hàm gọi lại chỉ cập nhật bản xem trước.",
+    "state": "Trạng thái khôi phục",
+    "continued": "Đã tiếp tục tác vụ ví dụ.",
+    "dismissed": "Đã đóng thông báo khôi phục.",
+    "reset": "Đặt lại bản xem trước",
+    "hint": "Chọn trạng thái khôi phục, rồi thử tiếp tục hoặc đóng."
+  },
+  "fallback": {
+    "title": "ModelFallbackNotice · Mô hình dự phòng",
+    "description": "Xem thông báo mô hình dự phòng, ủy quyền hết hạn và thử mở cài đặt hoặc đóng.",
+    "options": "model xác định mô hình dự phòng; reauthProviderLabel nêu bên có ủy quyền hết hạn. Bên gọi cung cấp onOpenSettings và onDismiss.",
+    "state": "Trạng thái mô hình dự phòng",
+    "showAgain": "Hiển thị lại",
+    "hint": "Thử liên kết cài đặt mô hình và nút đóng."
+  },
+  "compaction": {
+    "title": "ContextCompactionNotice · Nén ngữ cảnh",
+    "description": "So sánh trạng thái bắt đầu, thành công, thất bại và hủy nén.",
+    "options": "compaction.phase chọn thông báo; announce điều khiển thông báo của trình đọc màn hình.",
+    "phase": "Giai đoạn nén ngữ cảnh"
+  },
+  "streamError": {
+    "title": "StreamErrorNotice · Lỗi tin nhắn",
+    "description": "So sánh lỗi kích thước, quyền thư mục, từ chối lượt và yêu cầu mô hình.",
+    "options": "error.kind chọn nội dung lỗi; onDismiss đóng thông báo.",
+    "kind": "Loại lỗi tin nhắn"
+  },
+  "cluster": {
+    "title": "AgentActivityCluster · Hoạt động đầy đủ",
+    "description": "Xem suy luận và bản ghi công cụ khi đang chạy, hoàn tất hoặc thất bại.",
+    "options": "messages chứa phần chiếu reasoning và trace. isTurnStreaming điều khiển hoạt động; bên gọi có thể điều khiển expanded.",
+    "state": "Trạng thái hoạt động",
+    "error": "Không thể đọc tệp."
+  },
+  "search": {
+    "title": "WebSearchRun · Hoạt động tìm kiếm",
+    "description": "Xem tiến độ và nguồn của tìm kiếm web và X.",
+    "options": "run cung cấp query, target, status và sources; turnActive điều khiển hiệu ứng đang chạy. Thành phần dùng chung tải biểu tượng của trang nguồn.",
+    "state": "Trạng thái tìm kiếm",
+    "source": "Nguồn tìm kiếm"
+  },
+  "responseSources": {
+    "title": "FallbackResponseSources · Nguồn phản hồi",
+    "description": "Xem cấu hình sẵn, mô hình và nhà cung cấp dự phòng dùng trong phản hồi trước.",
+    "options": "sources giữ trạng thái mô hình tại thời điểm trả lời. Chỉ nguồn có fallback bằng true mới hiển thị huy hiệu.",
+    "hint": "Chọn huy hiệu dự phòng để xem cấu hình sẵn, mô hình và nhà cung cấp của phản hồi đó."
+  },
+  "filePreview": {
+    "title": "FilePreviewPanelView · Nội dung tệp",
+    "description": "So sánh văn bản, ảnh, nội dung bị cắt, đang tải và lỗi. Chọn ảnh để phóng to.",
+    "options": "state cung cấp trạng thái hiển thị; path xác định loại và tên tệp. Hàm gọi lại mở ảnh và lỗi ảnh cập nhật bản xem trước.",
+    "state": "Trạng thái xem trước tệp"
+  },
+  "session": {
+    "title": "SessionInfoPopoverView · Tác vụ tự động của phiên",
+    "description": "Xem, sửa, tắt và xóa tác vụ với trạng thái đang tải và lỗi.",
+    "options": "Bên gọi cung cấp jobs, loading, loadFailed và now. onAction và onEdit trả về tác vụ đã cập nhật; giao diện phối hợp hộp thoại, tiêu điểm và phản hồi.",
+    "state": "Trạng thái tác vụ tự động của phiên",
+    "saveError": "Lưu ví dụ thất bại. Vui lòng thử lại.",
+    "providerError": "Nhà cung cấp ví dụ hiện không khả dụng.",
+    "saved": "Đã lưu tác vụ tự động.",
+    "openedChat": "Đã mở cuộc trò chuyện ví dụ.",
+    "openedCalendar": "Đã mở lịch tác vụ tự động.",
+    "actionError": "Thao tác ví dụ thất bại. Vui lòng thử lại.",
+    "delete": "Đã xóa: {{name}}",
+    "run": "Đã yêu cầu chạy: {{name}}",
+    "enable": "Đã bật: {{name}}",
+    "disable": "Đã tắt: {{name}}",
+    "hint": "Mở chi tiết phiên để xem, bật tắt, sửa và xóa tác vụ tự động."
+  },
+  "subagent": {
+    "title": "SubagentThreadView · Tin nhắn tác nhân phụ",
+    "description": "Xem tin nhắn, suy luận, đang tải, lỗi và thử lại của tác nhân phụ.",
+    "options": "Runtime chiếu messages sang giao diện. loading và error dùng thành phần trạng thái lịch sử chung; isStreaming và activeTurnId xác định hoạt động. Giao diện không tải lịch sử.",
+    "state": "Trạng thái trò chuyện tác nhân phụ"
+  },
+  "pairRoute": {
+    "title": "PairRouteSettingsView · Tuyến ghép nối",
+    "description": "Chọn và lưu tuyến cục bộ, so sánh trạng thái lưu, lỗi và làm mới thất bại.",
+    "options": "Bên gọi quản lý route và original; routes cung cấp tuyến SSH. Lưu thành công và làm mới thư mục thất bại được hiển thị riêng. Thư viện và cài đặt dùng cùng giao diện.",
+    "state": "Trạng thái tuyến"
+  },
+  "quickPair": {
+    "title": "QuickPairSetupView · Ghép nối nhanh",
+    "description": "Thử sao chép lời mời, nhập mã phản hồi, xác nhận quyền, máy chủ hiện có và thử lại.",
+    "options": "state cung cấp trạng thái ghép nối và hiển thị; hàm gọi lại thực hiện thao tác. routeSettings kết hợp cài đặt tuyến. Thư viện dùng dữ liệu ví dụ và hàm cục bộ; QuickPairSetup quản lý ghép nối thực.",
+    "state": "Giai đoạn ghép nối",
+    "open": "Mở ghép nối nhanh",
+    "connected": "Kết nối đã chọn: {{name}}.",
+    "ssh": "Đã chọn kết nối SSH.",
+    "hint": "Lời mời và mã phản hồi ví dụ chỉ để minh họa. Xác nhận chỉ cập nhật phản hồi cục bộ."
+  },
+  "sshHost": {
+    "title": "SSHHostPickerView · Địa chỉ SSH",
+    "description": "Lọc bí danh SSH, chọn bằng phím mũi tên và so sánh nhập, đang tải và lỗi.",
+    "options": "discovery cung cấp máy chủ từ cấu hình hiện tại. Bên gọi điều khiển value, busy, error và hàm gọi lại. customConfig giữ khả năng tìm bí danh từ cấu hình tùy chỉnh; inputRef khôi phục tiêu điểm sau khi chọn.",
+    "state": "Trạng thái địa chỉ SSH",
+    "refreshed": "Đã làm mới địa chỉ ví dụ.",
+    "entered": "Đã nhập: {{value}}",
+    "hint": "Nhập để lọc địa chỉ; dùng phím mũi tên để chọn bí danh SSH."
+  },
+  "connectionBadge": {
+    "title": "ConnectionBadge · Chỉ báo kết nối",
+    "description": "So sánh màu, chuyển động và văn bản trạng thái hỗ trợ tiếp cận.",
+    "options": "Bên gọi cung cấp status. Thành phần bao trang quản lý đăng ký theo dõi kết nối.",
+    "state": "Trạng thái kết nối",
+    "idle": "Chờ",
+    "connecting": "Đang kết nối",
+    "open": "Đã kết nối",
+    "reconnecting": "Đang kết nối lại",
+    "closed": "Đã ngắt kết nối",
+    "error": "Lỗi kết nối"
+  },
+  "hostPicker": {
+    "title": "HostSwitcherView · Menu máy chủ",
+    "description": "Chọn máy cục bộ hoặc máy chủ ví dụ; so sánh đang chờ, ngoại tuyến và thu gọn.",
+    "options": "picker cung cấp dữ liệu máy chủ và hàm gọi lại; status là trạng thái kết nối hiện tại. HostSwitcher thực đăng ký theo dõi client.",
+    "state": "Trạng thái menu máy chủ",
+    "offline": "Máy chủ ví dụ đã ngắt kết nối.",
+    "manage": "Đã mở quản lý kết nối.",
+    "cancelled": "Đã hủy chuyển máy chủ ví dụ.",
+    "selected": "Máy chủ xem trước: {{name}}"
+  },
+  "chats": {
+    "title": "ChatList · Danh sách trò chuyện",
+    "description": "Chọn cuộc trò chuyện và thử ghim, lưu trữ hoặc xóa từ menu.",
+    "options": "Bên gọi cung cấp sessions, activeKey và khóa đã ghim hoặc lưu trữ. Hàm gọi lại thao tác cập nhật danh sách ví dụ.",
+    "state": "Trạng thái danh sách trò chuyện",
+    "renamed": "Đã đổi tên: {{name}}",
+    "selected": "Cuộc trò chuyện đã chọn: {{name}}",
+    "none": "Không có"
+  },
+  "sidebarResize": {
+    "title": "SidebarResizeHandle · Kích thước thanh bên",
+    "description": "Đổi kích thước, thu gọn và mở rộng thanh bên bằng chuột hoặc bàn phím.",
+    "options": "width và open là trạng thái được điều khiển. onResize cập nhật kích thước và mở rộng; onDraggingChange thông báo trạng thái kéo.",
+    "content": "Nội dung thanh bên",
+    "hint": "Kéo đường phân cách, hoặc đưa tiêu điểm vào đó rồi dùng phím mũi tên, Home, End và Enter.",
+    "collapsed": "Đã thu gọn",
+    "dragging": "Đang kéo"
+  },
+  "language": {
+    "title": "LanguageSwitcher · Ngôn ngữ giao diện",
+    "description": "Đổi ngôn ngữ của thư viện và các thành phần thực.",
+    "options": "Dùng i18n của ứng dụng và ngôn ngữ ưu tiên của trình duyệt, không cần gateway. Bộ chọn ngôn ngữ phía trên dùng cùng thành phần."
+  },
+  "channelMarks": {
+    "title": "Channel marks · Nhận diện kênh",
+    "description": "Xem văn bản đại diện khi thiếu ảnh, biểu tượng không gian làm việc và dấu WebSocket.",
+    "options": "LinearAvatar nhận name, url và workspace. Khi không có ảnh hợp lệ, thành phần hiển thị văn bản thay thế hoặc biểu tượng.",
+    "name": "Tên ảnh đại diện",
+    "member": "Ảnh đại diện thành viên",
+    "workspace": "Biểu tượng không gian làm việc"
+  },
+  "secret": {
+    "title": "LinearSecretField · Sửa khóa bí mật",
+    "description": "Sửa, hiện, lưu và thay khóa; kiểm tra giữ bản nháp khi lưu thất bại.",
+    "options": "configured chỉ trạng thái đã lưu; onSave lưu lâu dài khóa bí mật. Hàm gọi lại của thư viện chỉ cập nhật trạng thái cục bộ.",
+    "state": "Trạng thái khóa bí mật",
+    "error": "Lưu ví dụ thất bại.",
+    "hint": "Nhập văn bản ví dụ rồi lưu, hoặc chọn trạng thái lỗi để kiểm tra việc giữ bản nháp."
+  },
+  "channelHelp": {
+    "title": "LinearHelpContent · Trợ giúp kênh",
+    "description": "Xem trợ giúp kênh trong menu thả xuống thực.",
+    "options": "Nội dung dùng bản dịch sẵn có của kênh; bên gọi cung cấp thành phần bao menu.",
+    "open": "Mở trợ giúp kênh"
+  },
+  "channel": {
+    "title": "{{channel}} · Thiết lập kênh",
+    "description": "Khám phá biểu mẫu thiết lập kênh thực và các trạng thái.",
+    "options": "Dùng đăng ký kênh, ảnh chụp hợp đồng thiết lập Python và ChannelSetupSurfaceView thực. Nội dung nhập, hiện thông tin xác thực, cấu hình sẵn, kiểm tra và bật tắt chỉ tác động đến bản xem trước này.",
+    "state": "Trạng thái thiết lập kênh",
+    "credentialsError": "Thông tin xác thực ví dụ bị từ chối. Cập nhật giá trị xem trước rồi thử lại.",
+    "validation": "Cấu hình xem trước"
+  },
+  "channelConnect": {
+    "state": "Trạng thái kết nối {{channel}}",
+    "error": "Tạm thời không thể ủy quyền. Vui lòng thử lại."
+  },
+  "qqConnect": {
+    "title": "QQConnectFlowView · Kết nối QR QQ",
+    "description": "Thử đăng nhập QR QQ, thử lại và cảnh báo thay thế App Secret.",
+    "options": "Giao diện nhận trạng thái kết nối và callback. Thao tác xem trước chỉ đổi trạng thái cục bộ; phần runtime tạo phiên và thăm dò cổng QQ."
+  },
+  "feishuConnect": {
+    "title": "FeishuConnectFlowView · Ủy quyền QR Feishu",
+    "description": "Thử luồng QR Feishu thực với chờ, thành công, hết hạn, hủy và lỗi.",
+    "options": "connect, busy và error cung cấp trạng thái hiển thị; mã QR được tạo cục bộ. Tính năng quản lý bắt đầu, hủy và thăm dò; hàm gọi lại chỉ thay đổi ví dụ này."
+  },
+  "feishuAssistants": {
+    "title": "FeishuAssistantsPanelView · Trợ lý Feishu",
+    "description": "Khám phá thẻ trợ lý, trạng thái chạy và ủy quyền, cài đặt nâng cao và thêm trợ lý.",
+    "options": "feature và instances cung cấp ảnh chụp trạng thái. Giao diện quản lý bản nháp và phản hồi lưu; onToggleInstance, onSaveInstance và renderConnectFlow kết nối thao tác runtime.",
+    "state": "Trạng thái chạy của trợ lý",
+    "error": "Trợ lý đã dừng. Kiểm tra thông tin xác thực trước khi khởi động lại.",
+    "on": "{{name}}: đã bật",
+    "off": "{{name}}: đã tắt",
+    "saved": "{{name}}: số trường xem trước đã lưu: {{amount}}"
+  },
+  "whatsappConnect": {
+    "title": "WhatsAppConnectFlowView · Liên kết thiết bị WhatsApp",
+    "description": "So sánh liên kết tự động, thành công, hết hạn và lỗi; thử liên kết tài khoản khác.",
+    "options": "Giao diện giữ quy tắc hiển thị tự bắt đầu và bố cục tối giản. Bên gọi điều khiển trạng thái và thử lại. Điểm vào thực quản lý tự bắt đầu, buộc thử lại và thăm dò."
+  },
+  "linearPanel": {
+    "title": "LinearPanelView · Thiết lập Linear",
+    "description": "Khám phá ứng dụng, khóa, cài đặt nâng cao, không gian làm việc, quyền và ủy quyền web.",
+    "options": "state và workspaces cung cấp ảnh chụp trạng thái; hàm gọi lại nối thao tác không gian làm việc, lưu và MCP. Ba vị trí kết hợp giao diện thành viên, ủy quyền và đặt lại dùng trong sản phẩm.",
+    "state": "Trạng thái thiết lập Linear",
+    "runtimeError": "Không thể khởi động webhook Linear.",
+    "saveError": "Không thể lưu cài đặt. Bản nháp đã được giữ lại.",
+    "inspectionError": "Không thể kiểm tra không gian làm việc đã kết nối.",
+    "refreshed": "Đã làm mới không gian làm việc ví dụ.",
+    "removed": "Đã gỡ không gian làm việc ví dụ: {{name}}",
+    "mcp": "Đã chọn thiết lập Linear MCP."
+  },
+  "linearMembers": {
+    "title": "LinearMemberAccessView · Quyền truy cập thành viên",
+    "description": "Tìm thành viên, sửa quyền và so sánh đang tải, trống, lưu và chưa xác nhận.",
+    "options": "snapshot chứa trạng thái thành viên đã xác nhận. onLoad và onSetAllowed thuộc điểm vào kênh; gateway vẫn kiểm tra quyền.",
+    "state": "Trạng thái thành viên",
+    "loadError": "Danh bạ thành viên hiện không khả dụng.",
+    "saveError": "Quyền truy cập chưa được xác nhận."
+  },
+  "linearConnect": {
+    "title": "LinearConnectFlowView · Ủy quyền Linear",
+    "description": "Thử ủy quyền qua trình duyệt với chờ, bắt đầu, hủy, thành công và thất bại.",
+    "options": "Tái sử dụng ChannelQrConnectFlowView. Linear cung cấp cách hiển thị, nhãn và xử lý tiêu điểm; điểm vào runtime tạo phiên và thăm dò.",
+    "state": "Giai đoạn ủy quyền",
+    "error": "Không thể hoàn tất ủy quyền.",
+    "hint": "Liên kết ủy quyền và không gian làm việc là ví dụ. Bắt đầu và Hủy chỉ thay đổi giai đoạn xem trước."
+  },
+  "linearReset": {
+    "title": "LinearResetConnectionView · Đặt lại kết nối",
+    "description": "Xem phần bị xóa hoặc giữ lại, trạng thái bận và thử lại sau khi đặt lại một phần.",
+    "options": "onReset thực hiện toàn bộ giao dịch thu hồi và dọn dẹp. Giao diện quản lý xác nhận, lỗi, giới hạn đóng và khôi phục tiêu điểm.",
+    "state": "Kết quả đặt lại",
+    "error": "Không thể dừng kênh. Cài đặt ứng dụng đã được giữ lại.",
+    "completed": "Đã xóa không gian làm việc và cài đặt ứng dụng trong bản xem trước."
+  },
+  "weixinPanel": {
+    "title": "WeixinPanelView · Cài đặt Weixin",
+    "description": "Khám phá cài đặt, tùy chọn nâng cao, phản hồi lưu và khôi phục đăng nhập hết hạn.",
+    "options": "Các trường đến từ hợp đồng thiết lập kênh. Giao diện quản lý mở rộng và hiện khóa; điểm vào runtime quản lý tự lưu, hợp nhất bản nháp và khôi phục đăng nhập.",
+    "state": "Trạng thái bảng Weixin"
+  },
+  "weixinConnect": {
+    "title": "WeixinConnectFlowView · QR và xác minh Weixin",
+    "description": "So sánh quét QR, mã xác minh, thành công, hết hạn, hủy và lỗi kết nối.",
+    "options": "Giao diện nhận ảnh chụp kết nối và hàm gọi lại, giữ bản nháp mã xác minh. Mã QR được tạo trong trình duyệt. Điểm vào thực quản lý ủy quyền, tạm dừng thăm dò, làm mới và hủy.",
+    "state": "Trạng thái kết nối Weixin",
+    "error": "Kết nối bị gián đoạn. Vui lòng thử lại.",
+    "refreshed": "Đã hiển thị mã QR xem trước mới.",
+    "hint": "Nhập 123456 để hoàn tất xác minh ví dụ. Nội dung khác sẽ giữ bản nháp và hiển thị lỗi."
+  }
+}

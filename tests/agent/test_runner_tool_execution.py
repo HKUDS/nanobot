@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -22,6 +23,68 @@ from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.providers.openai_responses.parsing import parse_response_output
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
+
+
+@pytest.mark.parametrize("schema, emitted, expected", [
+    ({"oneOf": [
+        {"type": "object", "properties": {"count": {"type": "string"}}, "required": ["count"]},
+        {"type": "object", "properties": {"count": {"type": "integer"}}, "required": ["count"]},
+    ]}, '{"count":12}', {"count": 12}),
+    ({"anyOf": [{"type": "object"}, {"type": "string"}]}, '{"count":12}', '{"count":12}'),
+    ({"type": "array", "items": {"type": "integer"}}, '["1","2"]', [1, 2]),
+])
+async def test_nested_arguments_reach_mcp_without_rewriting_model_history(schema, emitted, expected):
+    from mcp.server.lowlevel import Server
+    from mcp.shared.memory import create_connected_server_and_client_session
+    from mcp.types import TextContent
+    from mcp.types import Tool as MCPTool
+
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.tools.mcp import MCPToolWrapper
+    from nanobot.session.manager import Session
+
+    server = Server("nested-arguments-test")
+    received = []
+
+    @server.list_tools()
+    async def list_tools():
+        return [MCPTool(name="echo", inputSchema={
+            "type": "object", "properties": {"value": schema}, "required": ["value"],
+        })]
+
+    @server.call_tool()
+    async def call_tool(name, arguments):
+        received.append((name, arguments))
+        return [TextContent(type="text", text="accepted")]
+
+    async with create_connected_server_and_client_session(server) as client:
+        definition = (await client.list_tools()).tools[0]
+        registry = ToolRegistry()
+        tool = MCPToolWrapper(client, "test", definition)
+        registry.register(tool)
+        schemas_before = json.dumps(registry.get_definitions())
+        call = ToolCallRequest(id="nested", name=tool.name, arguments={"value": emitted})
+        original_call = call.to_openai_tool_call()
+        provider = MagicMock()
+        provider.chat_stream_with_retry = AsyncMock(side_effect=[
+            LLMResponse(content=None, tool_calls=[call]), LLMResponse(content="done"),
+        ])
+        result = await AgentRunner().run(make_run_spec(
+            provider, tools=registry, model="test-model", max_iterations=2,
+            initial_messages=[{"role": "user", "content": "echo the value"}],
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        ))
+        assert result.final_content == "done"
+        assert received == [("echo", {"value": expected})]
+        requests = provider.chat_stream_with_retry.await_args_list
+        model_call = next(m for m in requests[1].kwargs["messages"] if m.get("tool_calls"))
+        assert model_call["tool_calls"] == [original_call]
+        assert call.to_openai_tool_call() == original_call
+        assert all(json.dumps(r.kwargs["tools"]) == schemas_before for r in requests)
+        session = Session(key="test:nested-arguments")
+        AgentLoop.__new__(AgentLoop)._save_turn(session, result.messages, skip=0)
+        replay = next(m for m in session.get_history() if m.get("tool_calls"))
+        assert replay["tool_calls"] == [original_call]
 
 
 class _DelayTool(Tool):
@@ -486,7 +549,12 @@ async def test_runner_preserves_structured_plugin_success_that_starts_with_error
 
 
 @pytest.mark.asyncio
-async def test_runner_blocks_repeated_external_fetches():
+@pytest.mark.parametrize(("urls", "expected_fetches"), [
+    (["https://example.com"] * 3, 2),
+    ([f"https://example.com/{path}" for path in ("API", "Api", "api")], 3),
+    ([f"https://example.com/?id={value}" for value in ("ABC", "Abc", "abc")], 3),
+])
+async def test_runner_blocks_repeated_external_fetches(urls, expected_fetches):
     provider = MagicMock()
     captured_final_call: list[dict] = []
     call_count = {"n": 0}
@@ -496,7 +564,7 @@ async def test_runner_blocks_repeated_external_fetches():
         if call_count["n"] <= 3:
             return LLMResponse(
                 content="working",
-                tool_calls=[ToolCallRequest(id=f"call_{call_count['n']}", name="web_fetch", arguments={"url": "https://example.com"})],
+                tool_calls=[ToolCallRequest(id=f"call_{call_count['n']}", name="web_fetch", arguments={"url": urls[call_count['n'] - 1]})],
                 usage=None,
             )
         captured_final_call[:] = messages
@@ -517,9 +585,12 @@ async def test_runner_blocks_repeated_external_fetches():
     ))
 
     assert result.final_content == "done"
-    assert tools.execute.await_count == 2
+    assert tools.execute.await_count == expected_fetches
     blocked_tool_message = [
         msg for msg in captured_final_call
         if msg.get("role") == "tool" and msg.get("tool_call_id") == "call_3"
     ][0]
-    assert "repeated external lookup blocked" in blocked_tool_message["content"]
+    if expected_fetches == 2:
+        assert "repeated external lookup blocked" in blocked_tool_message["content"]
+    else:
+        assert blocked_tool_message["content"] == "page content"

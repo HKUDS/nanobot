@@ -1,6 +1,6 @@
-import { useAutoSave } from "@/components/settings/shared/useAutoSave";
+import { useEditCompletion, type EditCompletion } from "@/components/settings/shared/useEditCompletion";
 import { SettingsAdvancedOptions } from "@/components/settings/shared/SettingsFeature";
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { Eye, EyeOff, Pencil } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -14,7 +14,7 @@ import {
   SettingsSectionTitle,
   StatusPill,
 } from "@/components/settings/shared/SettingsControls";
-import { ToggleButton } from "@/components/settings/ToggleButton";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type {
@@ -76,6 +76,7 @@ export function webSearchDraftState(settings: SettingsPayload, form: WebSearchSe
 
 export function WebSettings({
   embedded = false,
+  editCompletion,
   error,
   enabled = true,
   settings,
@@ -96,8 +97,10 @@ export function WebSettings({
   olostepFeature,
   olostepInstalling,
   capabilityError,
+  children,
 }: {
   embedded?: boolean;
+  editCompletion?: EditCompletion;
   error?: string;
   enabled?: boolean;
   settings: SettingsPayload;
@@ -118,6 +121,7 @@ export function WebSettings({
   olostepFeature?: NanobotFeatureInfo;
   olostepInstalling: boolean;
   capabilityError: string | null;
+  children?: ReactNode;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -128,10 +132,11 @@ export function WebSettings({
   const effectiveJinaReader = form.useJinaReader ?? settings.web.fetch.use_jina_reader;
   const showKeyInput = webSearchProviderAcceptsApiKey(selectedProvider) && (!hasExistingSecret || keyEditing);
 
-  useAutoSave(form, dirty, saving, onSave, !embedded && !missingCredential && (form.provider !== "olostep" || olostepFeature?.installed === true));
+  const localEdits = useEditCompletion(form, dirty, onSave, !editCompletion && !missingCredential && (form.provider !== "olostep" || olostepFeature?.installed === true));
+  const edits = editCompletion ?? localEdits;
 
   return (
-    <div className="settings-stack">
+    <div className="settings-stack" onChangeCapture={edits.onChangeCapture} onFocusCapture={edits.onFocusCapture} onBlurCapture={edits.onBlurCapture}>
       <section>
         {enabled && !embedded ? <SettingsSectionTitle>{tx("settings.sections.webSearch", "Web search")}</SettingsSectionTitle> : null}
         <div hidden={!embedded && !enabled}>
@@ -159,7 +164,7 @@ export function WebSettings({
               value={form.provider}
               emptyLabel={t("settings.byok.webSearch.selectProvider")}
               showProviderLogos={showBrandLogos}
-              onChange={onChangeProvider}
+              onChange={(provider) => { edits.complete(); onChangeProvider(provider); }}
             />
           </SettingsRow>
 
@@ -198,7 +203,7 @@ export function WebSettings({
                       aria-label={
                         keyVisible ? t("settings.byok.hideApiKey") : t("settings.byok.showApiKey")
                       }
-                      className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground settings-hover hover:text-foreground"
+                      className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:text-foreground"
                     >
                       {keyVisible ? (
                         <EyeOff className="h-3.5 w-3.5" aria-hidden />
@@ -218,7 +223,7 @@ export function WebSettings({
                       size="icon"
                       onClick={onToggleKeyEditing}
                       aria-label={t("settings.actions.edit")}
-                      className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground settings-hover hover:text-foreground"
+                      className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:text-foreground"
                     >
                       <Pencil className="h-3.5 w-3.5" aria-hidden />
                     </Button>
@@ -272,6 +277,7 @@ export function WebSettings({
               label={effectiveJinaReader ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
             />
           </SettingsRow>
+          {children}
           </SettingsAdvancedOptions>
           </div>
           <RestartSettingsFooter

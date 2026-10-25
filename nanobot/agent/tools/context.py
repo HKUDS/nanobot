@@ -7,16 +7,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Protocol, runtime_checkable
 
+from nanobot.config.network import NetworkConfig
+
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
     from nanobot.agent.tools.exec_session import ExecSessionManager
     from nanobot.agent.tools.file_state import FileStates
     from nanobot.agent.tools.runtime_control import RuntimeControl
     from nanobot.bus.queue import MessageBus
-    from nanobot.config.schema import ProviderConfig, ToolsConfig
+    from nanobot.config.schema import ProvidersConfig, ToolsConfig
     from nanobot.cron.service import CronService
     from nanobot.providers.factory import ProviderSnapshot
-    from nanobot.security.workspace_access import WorkspaceSandboxStatus
+    from nanobot.security.workspace_access import WorkspaceSandboxStatus, WorkspaceScope
     from nanobot.session.manager import SessionManager
     from nanobot.utils.llm_runtime import LLMRuntime
 
@@ -33,6 +35,7 @@ class RequestContext:
     chat_id: str
     message_id: str | None = None
     session_key: str | None = None
+    session_generation: str | None = field(default=None, kw_only=True)
     original_user_text: str | None = None
     runtime: LLMRuntime | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -40,6 +43,12 @@ class RequestContext:
     turn_id: str | None = None
     workspace: Path | None = None
     attributes: dict[str, Any] = field(default_factory=dict)
+    log_content: bool = True
+    # The host can consume completion messages after this request returns.
+    can_receive_background_results: bool = True
+    persist_session: bool = True
+    # Effective tool scope; injected inputs retain the active run's scope.
+    workspace_scope: WorkspaceScope | None = None
 
 
 @runtime_checkable
@@ -70,6 +79,12 @@ def current_request_context() -> RequestContext | None:
     return _CURRENT_REQUEST_CONTEXT.get()
 
 
+def tool_log_content_allowed() -> bool:
+    """Whether diagnostics may include content from the current tool request."""
+    ctx = current_request_context()
+    return ctx is None or ctx.log_content
+
+
 def current_request_session_key() -> str | None:
     ctx = current_request_context()
     return ctx.session_key if ctx else None
@@ -79,6 +94,7 @@ def current_request_session_key() -> str | None:
 class ToolContext:
     config: ToolsConfig
     workspace: str
+    network: NetworkConfig = field(default_factory=NetworkConfig)
     bus: MessageBus | None = None
     subagent_manager: SubagentManager | None = None
     cron_service: CronService | None = None
@@ -86,7 +102,7 @@ class ToolContext:
     sessions: SessionManager | None = None
     file_state_store: FileStates | None = None
     provider_snapshot_loader: Callable[..., ProviderSnapshot] | None = None
-    image_generation_provider_configs: dict[str, ProviderConfig] | None = None
+    providers_config: ProvidersConfig | None = None
     timezone: str = "UTC"
     workspace_sandbox: WorkspaceSandboxStatus | None = None
     runtime_control: RuntimeControl | None = None

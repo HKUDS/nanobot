@@ -1,5 +1,6 @@
 import animate from "tailwindcss-animate";
 import typography from "@tailwindcss/typography";
+import plugin from "tailwindcss/plugin";
 
 /** @type {import('tailwindcss').Config} */
 export default {
@@ -7,6 +8,7 @@ export default {
   content: [
     "./index.html",
     "./src/**/*.{ts,tsx}",
+    ...(process.env.NODE_ENV === "production" ? ["!./src/dev/**"] : []),
     "../nanobot/channels/*/webui/**/*.{ts,tsx}",
     "./node_modules/streamdown/dist/*.js",
   ],
@@ -19,6 +21,21 @@ export default {
       },
     },
     extend: {
+      // Text roles own their metrics; reading preferences never change the rem grid.
+      fontSize: {
+        ui: ["0.8125rem", { lineHeight: "1.25rem", fontWeight: "400" }],
+        "ui-label": ["0.75rem", { lineHeight: "1.125rem", fontWeight: "500" }],
+        "ui-heading": ["0.8125rem", { lineHeight: "1.25rem", fontWeight: "600" }],
+        "ui-body": ["0.875rem", { lineHeight: "1.25rem", fontWeight: "400" }],
+        "control-label": ["0.875rem", { lineHeight: "1.25rem", fontWeight: "500" }],
+        caption: ["0.75rem", { lineHeight: "1.125rem", fontWeight: "400" }],
+        title: ["1.25rem", { lineHeight: "1.75rem", fontWeight: "600" }],
+        reading: ["var(--text-reading-size)", { lineHeight: "var(--cjk-line-height)", fontWeight: "400" }],
+        "reading-small": ["calc(var(--text-reading-size) * 0.875)", { lineHeight: "var(--cjk-line-height)", fontWeight: "400" }],
+        code: ["var(--text-code-size)", { lineHeight: "1.6", fontWeight: "400" }],
+        "code-dense": ["var(--text-code-dense-size)", { lineHeight: "1.6", fontWeight: "400" }],
+        composer: ["max(16px, var(--text-reading-size))", { lineHeight: "1.5", fontWeight: "400" }],
+      },
       fontFamily: {
         sans: [
           "system-ui",
@@ -39,6 +56,8 @@ export default {
         ],
         mono: [
           '"JetBrains Mono"',
+          '"SFMono-Regular"',
+          '"SF Mono"',
           '"Fira Code"',
           '"Cascadia Code"',
           '"Source Code Pro"',
@@ -90,6 +109,14 @@ export default {
           DEFAULT: "hsl(var(--destructive))",
           foreground: "hsl(var(--destructive-foreground))",
         },
+        "diff-added": {
+          DEFAULT: "var(--diff-added)",
+          foreground: "var(--diff-added-foreground)",
+        },
+        "diff-deleted": {
+          DEFAULT: "var(--diff-deleted)",
+          foreground: "var(--diff-deleted-foreground)",
+        },
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
@@ -124,5 +151,14 @@ export default {
       },
     },
   },
-  plugins: [animate, typography],
+  plugins: [
+    animate,
+    typography,
+    plugin(({ addVariant, addUtilities }) => {
+      addUtilities({ ".rounded-full": { cornerShape: "round" } });
+      // Revealing controls on emulated hover can consume the first Safari
+      // tap. Keep these sidebar hover effects on hover-capable pointers.
+      addVariant("media-hover", "@media (hover: hover)");
+    }),
+  ],
 };

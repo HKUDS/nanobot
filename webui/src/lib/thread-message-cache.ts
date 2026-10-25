@@ -1,8 +1,8 @@
-import type { UIMessage } from "./types";
+import type { ThreadTranscriptSnapshot } from "./thread-transcript";
 import { MemoryLruCache } from "./memory-lru-cache";
 
 /** Bounded replay cache; temporary chats remain pinned because they have no disk history. */
-export class ThreadMessageCache extends MemoryLruCache<UIMessage[]> {
+export class ThreadMessageCache extends MemoryLruCache<ThreadTranscriptSnapshot> {
 
   constructor(
     isPinned: (key: string) => boolean,

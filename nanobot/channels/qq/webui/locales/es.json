@@ -2,6 +2,10 @@
   "setup": {
     "docsLabel": "Abrir guía de QQ",
     "officialLabel": "Abrir consola del bot de QQ",
+    "sections": {
+      "credentials": "Credenciales manuales",
+      "advanced": "Avanzado"
+    },
     "fields": {
       "appId": {
         "label": "App ID",
@@ -23,17 +27,43 @@
         }
       },
       "ackMessage": {
-        "label": "Mensaje de reconocimiento"
+        "label": "Mensaje de recepción"
       },
       "mediaDir": {
         "label": "Directorio de medios"
       },
       "downloadChunkSize": {
-        "label": "Descargar tamaño de fragmento"
+        "label": "Tamaño de bloque (bytes)"
       },
       "downloadMaxBytes": {
-        "label": "Tamaño máximo de descarga"
+        "label": "Límite de descarga (bytes)"
+      },
+      "showCompactionNotices": {
+        "label": "Avisos de compactación",
+        "choices": {
+          "true": "Activado",
+          "false": "Desactivado"
+        }
       }
     }
+  },
+  "custom": {
+    "scanTitle": "Escanea con QQ en el móvil",
+    "waiting": "Esperando escaneo…",
+    "connected": "Vinculación completada",
+    "stopped": "Cancelado",
+    "connecting": "Preparando código QR…",
+    "qrAlt": "Código QR para vincular QQ",
+    "scanAgainWarning": "Volver a vincular este bot de QQ puede interrumpir otras aplicaciones que lo usan. Si se restablece su App Secret, el secreto anterior deja de ser válido y esas aplicaciones necesitan el nuevo.",
+    "configured": "Configurado",
+    "bind": "Vincular bot de QQ",
+    "rebind": "Volver a vincular el bot",
+    "refresh": "Actualizar código QR",
+    "retry": "Reintentar",
+    "expired": "Código QR caducado",
+    "failed": "Vinculación fallida",
+    "cancelFailed": "No se pudo cancelar",
+    "retrying": "Reintentando…",
+    "manualSetup": "Introducir credenciales manualmente"
   }
 }

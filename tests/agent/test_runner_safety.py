@@ -182,6 +182,21 @@ async def test_runner_lets_llm_recover_from_shell_guard_path_outside():
     assert result.tool_events and result.tool_events[0]["status"] == "error"
     # v2: detail keeps the breadcrumb but the runner did not raise.
     assert "workspace_violation" in result.tool_events[0]["detail"]
+    calls = [
+        call
+        for message in captured_second_call if message.get("role") == "assistant"
+        for call in message.get("tool_calls", []) if call["id"] == "call_blocked"
+    ]
+    assert len(calls) == 1
+    assert calls[0]["function"]["name"] == "exec"
+    rejections = [
+        message for message in captured_second_call
+        if message.get("role") == "tool" and message.get("tool_call_id") == "call_blocked"
+    ]
+    assert len(rejections) == 1
+    assert rejections[0]["name"] == "exec"
+    assert "Command blocked by safety guard (path outside working dir)" in rejections[0]["content"]
+    assert "Consider this result in the context of the user's goal" in rejections[0]["content"]
 
 
 @pytest.mark.asyncio

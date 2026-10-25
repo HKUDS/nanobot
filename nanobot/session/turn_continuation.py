@@ -12,30 +12,64 @@ from typing import TYPE_CHECKING, Any, Mapping, MutableMapping
 
 from loguru import logger
 
+from nanobot.runtime_context import RuntimeContextBlock, wrap_runtime_context_lines
 from nanobot.session.goal_state import (
     goal_state_runtime_lines,
     sustained_goal_active,
     sustained_goal_turn,
 )
+from nanobot.session.recovery import REQUEST_ORIGIN_METADATA_KEY
 
 if TYPE_CHECKING:
     from nanobot.agent.loop import TurnContext
+    from nanobot.agent.tools.context import RequestContext
+    from nanobot.session.state import SessionState
 
 INTERNAL_CONTINUATION_META = "_internal_continuation"
 INTERNAL_CONTINUATION_KIND_META = "_internal_continuation_kind"
-INTERNAL_CONTINUATION_PENDING_META = "_internal_continuation_pending"
 INTERNAL_CONTINUATION_RUN_STARTED_AT_META = "_internal_continuation_run_started_at"
 SKIP_USER_PERSIST_META = "_skip_user_persist"
+_ITERATION_LIMIT_META = "_stopped_at_iteration_limit"
 
 _GOAL_CONTINUATION_KIND = "sustained_goal"
 _GOAL_CONTINUATION_SENDER = "system:continuation"
 _GOAL_CONTINUATION_ROUNDS_KEY = "_sustained_goal_continuation_rounds"
 _MAX_GOAL_CONTINUATION_ROUNDS = 12
 _STRIPPED_INBOUND_META_KEYS = {
-    INTERNAL_CONTINUATION_PENDING_META,
     "goal_requested",
     "original_command",
 }
+
+
+def record_iteration_limit(
+    metadata: MutableMapping[str, Any], stop_reason: str, *, continuation_pending: bool,
+) -> None:
+    """Remember a terminal budget stop, not an internal continuation handoff."""
+    if stop_reason == "max_iterations" and not continuation_pending:
+        metadata[_ITERATION_LIMIT_META] = True
+    else:
+        metadata.pop(_ITERATION_LIMIT_META, None)
+
+
+async def iteration_limit_context(
+    state: SessionState, request: RequestContext,
+) -> RuntimeContextBlock | None:
+    """Attach the previous terminal budget outcome to the new input suffix."""
+    if not request.session_key or not request.persist_session:
+        return None
+    if internal_continuation_inbound(request.metadata):
+        return None
+    payload = await state.read_metadata(request.session_key)
+    if payload is None or not payload["metadata"].get(_ITERATION_LIMIT_META):
+        return None
+    return RuntimeContextBlock(
+        source="iteration_limit",
+        content=wrap_runtime_context_lines([
+            "The previous turn stopped at the tool-iteration limit without finishing its work.",
+            "Follow the current request. Resume unfinished work only if the user asks for it.",
+            "Completed tool calls and their results remain in the history; do not repeat them blindly.",
+        ]),
+    )
 
 
 def internal_continuation_inbound(metadata: Mapping[str, Any] | None) -> bool:
@@ -43,9 +77,13 @@ def internal_continuation_inbound(metadata: Mapping[str, Any] | None) -> bool:
     return bool(metadata and metadata.get(INTERNAL_CONTINUATION_META) is True)
 
 
-def internal_continuation_pending(metadata: Mapping[str, Any] | None) -> bool:
-    """True when the current turn scheduled an invisible continuation slice."""
-    return bool(metadata and metadata.get(INTERNAL_CONTINUATION_PENDING_META) is True)
+def sustained_goal_continuation_inbound(metadata: Mapping[str, Any] | None) -> bool:
+    """True only for an internal continuation owned by sustained-goal policy."""
+    return bool(
+        internal_continuation_inbound(metadata)
+        and metadata
+        and metadata.get(INTERNAL_CONTINUATION_KIND_META) == _GOAL_CONTINUATION_KIND
+    )
 
 
 def internal_continuation_run_started_at(metadata: Mapping[str, Any] | None) -> float | None:
@@ -104,14 +142,16 @@ def should_finalize_on_max_iterations(
     )
 
 
-async def maybe_continue_turn(ctx: TurnContext) -> bool:
+async def maybe_continue_turn(
+    ctx: TurnContext, *, session_metadata: Mapping[str, Any],
+) -> bool:
     """Queue an internal continuation for *ctx* when policy allows it."""
     if ctx.session is None or ctx.pending_queue is None:
         return False
     if not _continuation_available(
         stop_reason=ctx.stop_reason,
         pending_queue_available=True,
-        session_metadata=ctx.session.metadata,
+        session_metadata=session_metadata,
         message_metadata=ctx.msg.metadata,
     ):
         return False
@@ -120,12 +160,17 @@ async def maybe_continue_turn(ctx: TurnContext) -> bool:
         ctx.msg.metadata,
         run_started_at=ctx.visible_run_started_at,
     )
-    content = _goal_continuation_prompt(ctx.session.metadata)
+    request = ctx.request_context
+    assert request is not None and request.turn_id is not None
+    metadata[REQUEST_ORIGIN_METADATA_KEY] = {
+        "message_id": request.message_id,
+        "turn_id": request.turn_id,
+    }
+    content = _goal_continuation_prompt(session_metadata)
     messages = _strip_terminal_assistant(ctx.all_messages, ctx.final_content)
     _increment_goal_continuation_round(ctx.session.metadata)
 
     logger.info("Turn budget reached; scheduling internal continuation")
-    ctx.msg.metadata[INTERNAL_CONTINUATION_PENDING_META] = True
     ctx.final_content = ""
     ctx.all_messages = messages
     ctx.suppress_response = True

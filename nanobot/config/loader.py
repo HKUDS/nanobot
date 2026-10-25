@@ -10,15 +10,13 @@ from pydantic import BaseModel, ValidationError
 from pydantic_settings import SettingsError
 
 from nanobot.config.errors import ConfigIssue, ConfigLoadError, validation_issues
-from nanobot.config.schema import (
-    Config,
-    _resolve_tool_config_refs,  # pyright: ignore[reportPrivateUsage]
-)
-from nanobot.utils.helpers import _write_text_atomic  # pyright: ignore[reportPrivateUsage]
+from nanobot.config.home import get_home_path
+from nanobot.config.network import NetworkConfig
+from nanobot.config.schema import Config
+from nanobot.utils.file_io import write_text_atomic
 
 # Global variable to store current config path (for multi-instance support)
 _current_config_path: Path | None = None
-_schema_refs_ready = False
 
 
 def _as_config_object(value: object) -> dict[str, Any] | None:
@@ -36,7 +34,7 @@ def get_config_path() -> Path:
     """Get the configuration file path."""
     if _current_config_path:
         return _current_config_path
-    return Path.home() / ".nanobot" / "config.json"
+    return get_home_path() / "config.json"
 
 
 def load_config(config_path: Path | None = None) -> Config:
@@ -49,11 +47,6 @@ def load_config(config_path: Path | None = None) -> Config:
     Returns:
         Loaded configuration object.
     """
-    global _schema_refs_ready
-    if not _schema_refs_ready:
-        _resolve_tool_config_refs()
-        _schema_refs_ready = True
-
     path = config_path or get_config_path()
 
     if not path.exists():
@@ -164,14 +157,15 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
         settings = provider.model_dump(
             mode="json",
             by_alias=True,
-            include={"proxy", "extra_body"},
+            include={"use_proxy", "extra_body"},
             exclude_none=True,
+            exclude_unset=True,
         )
         if settings:
             data.setdefault("providers", {})[alias] = settings
 
     # Temp + replace so a crash mid-write cannot leave a truncated config.json.
-    _write_text_atomic(path, json.dumps(data, indent=2, ensure_ascii=False))
+    write_text_atomic(path, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def merge_missing_defaults(existing: object, defaults: object) -> object:
@@ -242,6 +236,9 @@ def resolve_env_refs(value: object) -> object:
 
 
 def _resolve_in_place(obj: Any) -> Any:
+    if isinstance(obj, NetworkConfig):
+        proxy = obj.resolve_environment()
+        return obj.model_copy(update={"proxy": proxy}) if proxy != obj.proxy else obj
     if isinstance(obj, str):
         new = _ENV_REF_PATTERN.sub(_env_replace, obj)
         return new if new != obj else obj

@@ -4,8 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CredentialForm,
   channelValuesForSubmit,
+  defaultChannelFieldValues,
 } from "@/components/settings/channels/CredentialForm";
-import type { ChannelConfigField } from "@/components/settings/channels/catalog";
+import { channelSetup } from "@/components/settings/channels/ChannelIdentity";
+import type { ChannelConfigField } from "@/channel-plugins/catalog";
 
 const fields: ChannelConfigField[] = [
   {
@@ -24,6 +26,60 @@ const fields: ChannelConfigField[] = [
 ];
 
 describe("CredentialForm", () => {
+  it("preserves inherited notices and lets an explicit override return to the default", () => {
+    const key = "channels.qq.showCompactionNotices";
+    const setup = channelSetup({
+      name: "qq", display_name: "QQ", type: "channel", enabled: false,
+      installed: true, ready: false, status: "not_enabled",
+      install_supported: true, requires_restart: false,
+      setup: { fields: [{
+        key, field: "showCompactionNotices", kind: "bool", choices: [],
+        required: false, inheritable: true,
+      }] },
+    });
+    const noticeFields = setup.fields!;
+    expect(defaultChannelFieldValues(noticeFields)).toEqual({ [key]: "" });
+    expect(channelValuesForSubmit(noticeFields, {}, new Set())).toEqual({});
+    expect(defaultChannelFieldValues(noticeFields, { [key]: "false" })).toEqual({ [key]: "false" });
+    expect(channelValuesForSubmit(noticeFields, { [key]: "true" }, new Set([key])))
+      .toEqual({ [key]: "true" });
+    expect(channelValuesForSubmit(noticeFields, { [key]: "" }, new Set([key])))
+      .toEqual({ [key]: "" });
+
+    const onChange = vi.fn();
+    render(<CredentialForm fields={noticeFields} values={{ [key]: "false" }}
+      visibleSecrets={{}} onChange={onChange} onToggleSecret={vi.fn()} />);
+    expect(screen.getByRole("radio", { name: "Off" })).toBeChecked();
+    fireEvent.click(screen.getByRole("radio", { name: "Default" }));
+    expect(onChange).toHaveBeenCalledWith(key, "");
+  });
+
+  it.each(["telegram", "discord", "matrix", "slack", "whatsapp"])("renders %s proxy configuration as a switch and submits both boolean states", (channel) => {
+    const key = `channels.${channel}.useProxy`;
+    const setup = channelSetup({
+      name: channel, display_name: channel, type: "channel", enabled: true,
+      webui: channel === "whatsapp" ? "webui/index.tsx" : "webui/index.ts",
+      installed: true, ready: true, status: "enabled",
+      install_supported: true, requires_restart: false,
+      setup: { fields: [{ key, field: "use_proxy", kind: "bool", choices: [], required: false, default_value: "false" }] },
+    });
+    const proxyFields = [...setup.fields ?? [], ...setup.manualFields ?? []];
+    expect(proxyFields[0].section).toBe("connection");
+    const onChange = vi.fn();
+    const { rerender } = render(<CredentialForm fields={proxyFields} values={{ [key]: "true" }}
+      visibleSecrets={{}} onChange={onChange} onToggleSecret={vi.fn()} />);
+    const useProxy = screen.getByRole("switch", { name: "Use proxy" });
+    expect(useProxy).toBeChecked();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    fireEvent.click(useProxy);
+    expect(onChange).toHaveBeenCalledWith(key, "false");
+    expect(channelValuesForSubmit(proxyFields, { [key]: "false" }, new Set([key]))).toEqual({ [key]: "false" });
+    rerender(<CredentialForm fields={proxyFields} values={{ [key]: "false" }}
+      visibleSecrets={{}} onChange={onChange} onToggleSecret={vi.fn()} />);
+    fireEvent.click(screen.getByRole("switch", { name: "Use proxy" }));
+    expect(onChange).toHaveBeenLastCalledWith(key, "true");
+  });
+
   it("uses native radio semantics for option fields", () => {
     const onChange = vi.fn();
     render(
@@ -93,7 +149,7 @@ describe("CredentialForm", () => {
     const password = screen.getByLabelText("Password");
     expect(password).toHaveAttribute("aria-invalid", "true");
     expect(password).toHaveAccessibleDescription("Required to complete setup.");
-    fireEvent.click(screen.getByRole("button", { name: "Remove saved credential" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove credentials" }));
     expect(onClearSecret).toHaveBeenCalledWith("channels.matrix.password", true);
   });
 

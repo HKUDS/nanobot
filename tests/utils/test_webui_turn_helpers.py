@@ -1,5 +1,6 @@
 """Tests for WebSocket turn timing strip bookkeeping."""
 
+import sqlite3
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -20,7 +21,8 @@ from nanobot.bus.runtime_events import (
     TurnRuntimeAdmitted,
     UserInputAccepted,
 )
-from nanobot.providers.base import GenerationSettings
+from nanobot.providers.base import GenerationSettings, LLMUsage
+from nanobot.providers.fallback_provider import FallbackModelSelection
 from nanobot.session import webui_turns as wth
 from nanobot.session.manager import SessionManager
 from nanobot.session.session_handles import session_handle_for_name
@@ -101,10 +103,13 @@ async def test_publish_turn_run_status_idle_retains_registry_until_delivery() ->
     assert wth.websocket_turn_id("chat-b") == "turn-b"
 
 
-def test_clear_websocket_turn_only_clears_matching_owner() -> None:
-    wth._WEBSOCKET_TURN_WALL_STARTED_AT["chat-b"] = 1234.5
-    wth._WEBSOCKET_TURN_IDS["chat-b"] = "turn-new"
-    wth._WEBSOCKET_TURN_OWNERS["chat-b"] = "owner-new"
+async def test_clear_websocket_turn_only_clears_matching_owner() -> None:
+    bus = MessageBus()
+    msg = InboundMessage(
+        channel="websocket", sender_id="u", chat_id="chat-b", content="hi",
+        metadata={"webui_turn_id": "turn-new", WEBSOCKET_TURN_OWNER_METADATA_KEY: "owner-new"},
+    )
+    await wth.publish_turn_run_status(bus, msg, "running", started_at=1234.5)
 
     assert wth.clear_websocket_turn_if_current("chat-b", "owner-old") is False
     assert wth.websocket_turn_wall_started_at("chat-b") == 1234.5
@@ -177,7 +182,7 @@ async def test_fallback_model_is_scoped_to_its_websocket_chat() -> None:
             metadata={"webui": True},
         )
     ):
-        await observer("deepseek/deepseek-chat")
+        await observer(FallbackModelSelection("deepseek/deepseek-chat", "openai_codex"))
 
     outbound = bus.publish_outbound.await_args.args[0]
     assert outbound.channel == "websocket"
@@ -186,6 +191,7 @@ async def test_fallback_model_is_scoped_to_its_websocket_chat() -> None:
     assert isinstance(outbound.event, TurnModelUpdatedEvent)
     assert outbound.event.model == "deepseek/deepseek-chat"
     assert outbound.event.model_preset == "Deep Research"
+    assert outbound.event.reauth_provider == "openai_codex"
 
 
 @pytest.mark.asyncio
@@ -286,9 +292,11 @@ async def test_turn_retry_cause_survives_only_actual_exhaustion(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("write_succeeds", [True, False])
 async def test_session_input_is_projected_by_the_webui_coordinator(
     tmp_path,
     monkeypatch,
+    write_succeeds,
 ) -> None:
     bus = MessageBus()
     bus.publish_outbound = AsyncMock()
@@ -305,7 +313,7 @@ async def test_session_input_is_projected_by_the_webui_coordinator(
         "source_session_key": "websocket:source",
         "target_session_key": "websocket:target",
     }
-    append_input = MagicMock()
+    append_input = AsyncMock(side_effect=None if write_succeeds else OSError("write failed"))
     monkeypatch.setattr(wth, "append_session_message_input", append_input)
     coordinator = wth.WebuiTurnCoordinator(
         bus=bus,
@@ -324,7 +332,10 @@ async def test_session_input_is_projected_by_the_webui_coordinator(
         content="Review this",
     ))
 
-    append_input.assert_called_once()
+    append_input.assert_awaited_once()
+    if not write_succeeds:
+        bus.publish_outbound.assert_not_awaited()
+        return
     outbound = bus.publish_outbound.await_args.args[0]
     assert outbound.channel == "websocket"
     assert outbound.chat_id == "target"
@@ -343,6 +354,78 @@ async def test_fallback_model_ignores_non_websocket_requests() -> None:
     observer = wth.build_webui_fallback_model_observer(bus)
 
     with request_context(RequestContext(channel="telegram", chat_id="chat-model")):
-        await observer("fallback")
+        await observer(FallbackModelSelection("fallback", "openai_codex"))
 
     bus.publish_outbound.assert_not_awaited()
+
+
+@pytest.mark.parametrize(("goal_status", "outcome"), [
+    ("active", "completed"),
+    ("blocked", "failed"),
+])
+async def test_turn_end_reads_goal_without_loading_conversation_history(
+    tmp_path, monkeypatch, goal_status, outcome,
+) -> None:
+    sessions = SessionManager(tmp_path)
+    key = "websocket:long-chat"
+    messages = [{"role": "user", "content": f"message {i}"} for i in range(100)]
+    await sessions.state.import_messages(key, messages)
+    await sessions.state.update_metadata(key, {
+        "goal_state": {"status": goal_status, "objective": "Finish the task"},
+    })
+    await sessions.state.aclose()
+
+    # A new owner has no cached history to hide an accidental full draft read.
+    sessions = SessionManager(tmp_path)
+
+    def deny_history(action, table, *_args):
+        return (
+            sqlite3.SQLITE_DENY
+            if action == sqlite3.SQLITE_READ and table == "messages"
+            else sqlite3.SQLITE_OK
+        )
+
+    open_connection = sessions._store._open_connection
+
+    def protected_connection(*args, **kwargs):
+        db = open_connection(*args, **kwargs)
+        db.set_authorizer(deny_history)
+        return db
+
+    monkeypatch.setattr(sessions._store, "_open_connection", protected_connection)
+    bus = MessageBus()
+    coordinator = wth.WebuiTurnCoordinator(
+        bus=bus, sessions=sessions, schedule_background=lambda coro: coro.close(),
+    )
+    msg = InboundMessage(
+        channel="websocket", sender_id="user", chat_id="long-chat", content="hello",
+        metadata={"webui": True, "webui_turn_id": "turn-1"},
+    )
+    usage = LLMUsage.reported(input_tokens=100, output_tokens=20)
+    failure_kind = "model" if outcome == "failed" else None
+    try:
+        await coordinator.handle_turn_end(
+            msg, session_key=key, latency_ms=123, usage=usage,
+            round_usages=(usage,), context_window_tokens=8192, outcome=outcome,
+            failure_kind=failure_kind,
+        )
+        outbound = bus.outbound.get_nowait()
+        assert outbound.channel == "websocket"
+        assert outbound.chat_id == "long-chat"
+        assert outbound.metadata == msg.metadata
+        event = outbound.event
+        assert isinstance(event, TurnEndEvent)
+        assert event.goal_state == {
+            "active": goal_status == "active", "status": goal_status,
+            "objective": "Finish the task",
+        }
+        assert event.latency_ms == 123
+        assert event.usage == usage
+        assert event.round_usages == (usage,)
+        assert event.context_window_tokens == 8192
+        assert event.outcome == outcome
+        assert event.failure_kind == failure_kind
+    finally:
+        await sessions.state.aclose()
+        monkeypatch.setattr(sessions._store, "_open_connection", open_connection)
+    assert sessions.read_session_snapshot(key).messages == messages

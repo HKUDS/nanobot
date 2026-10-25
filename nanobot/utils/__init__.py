@@ -6,7 +6,7 @@ import sys
 from importlib import import_module
 from types import ModuleType
 
-from nanobot.utils.helpers import ensure_dir
+from nanobot.utils.file_io import ensure_dir
 from nanobot.utils.path import abbreviate_path
 
 __all__ = ["ensure_dir", "abbreviate_path"]
@@ -30,7 +30,6 @@ class _LazyModuleAlias(ModuleType):
 
 
 _LEGACY_MODULE_ALIASES = {
-    "webui_thread_disk": "nanobot.webui.thread_disk",
     "webui_transcript": "nanobot.webui.transcript",
     "webui_turn_helpers": "nanobot.session.webui_turns",
 }

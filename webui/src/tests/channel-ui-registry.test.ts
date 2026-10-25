@@ -1,7 +1,10 @@
-import { readFileSync } from "node:fs";
+import assert from "node:assert/strict";
 import { resolve } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import postcss from "postcss";
+import tailwindcss from "tailwindcss";
+import loadConfig from "tailwindcss/loadConfig";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   channelUiContribution,
@@ -13,6 +16,7 @@ import {
 describe("channel UI contributions", () => {
   it("selects channel-owned UI only through the backend manifest entry", () => {
     expect(channelUiContribution("feishu", "webui/index.tsx")?.Panel).toBeDefined();
+    expect(channelUiContribution("linear", "webui/index.tsx")?.Panel).toBeDefined();
     expect(channelUiContribution("weixin", "webui/index.tsx")?.ConnectFlow).toBeDefined();
     expect(channelUiContribution("feishu", undefined)).toBeUndefined();
     expect(channelUiContribution("feishu", "webui/missing.tsx")).toBeUndefined();
@@ -20,7 +24,7 @@ describe("channel UI contributions", () => {
 
     const registrations = registeredChannelUiContributions();
     const channels = registrations.map((entry) => entry.channel);
-    expect(channels).toEqual(expect.arrayContaining(["feishu", "weixin"]));
+    expect(channels).toEqual(expect.arrayContaining(["feishu", "linear", "weixin"]));
     expect(new Set(channels).size).toBe(channels.length);
     expect(registrations.every((entry) => /^webui\/index\.tsx?$/.test(entry.webui))).toBe(true);
     expect(channelUiContribution("slack", "webui/index.ts")?.presentation.displayName).toBe("Slack");
@@ -33,9 +37,26 @@ describe("channel UI contributions", () => {
     expect(channelUiOwner("wechat")).toBe("weixin");
   });
 
-  it("includes channel-owned UI in Tailwind's production scan", () => {
-    const source = readFileSync(resolve(process.cwd(), "tailwind.config.js"), "utf8");
+  it("includes channel-owned UI in Tailwind's production scan", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      const config = loadConfig(resolve(process.cwd(), "tailwind.config.js"));
+      assert(Array.isArray(config.content));
+      // Keep production channel globs and exclusions without rebuilding unrelated app/test CSS.
+      const content = config.content.filter((entry) => typeof entry === "string"
+        && (entry.includes("../nanobot/channels/") || entry.startsWith("!")));
+      const result = await postcss([tailwindcss({ ...config, content })]).process("@tailwind utilities;", { from: undefined });
 
-    expect(source).toContain("../nanobot/channels/*/webui/**/*.{ts,tsx}");
+      // Linear's connecting indicator uses a channel-only arbitrary color.
+      let backgroundColor: string | undefined;
+      result.root.walkRules(".bg-\\[\\#5E6AD2\\]", (rule) => {
+        rule.walkDecls("background-color", (declaration) => {
+          backgroundColor = declaration.value;
+        });
+      });
+      expect(backgroundColor?.trim()).toBeTruthy();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

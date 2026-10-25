@@ -13,6 +13,7 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ChannelsConfig
 from nanobot.providers.base import LLMResponse
+from nanobot.runtime_context import public_history_message
 from nanobot.utils.document import reference_non_image_attachments
 
 
@@ -109,7 +110,7 @@ async def test_document_reference_survives_session_reload(tmp_path: Path) -> Non
     persisted = loop.sessions.get_or_create(session_key)
 
     assert [message["role"] for message in persisted.messages] == ["user"]
-    assert persisted.messages[0]["content"] == (
+    assert public_history_message(persisted.messages[0])["content"] == (
         f"review this\n\n[Attachment: {doc_path.resolve()}]"
     )
     assert "media" not in persisted.messages[0]
@@ -158,8 +159,9 @@ async def test_pending_document_attachment_keeps_body_out_of_prompt(
         pending_queue=pending_queue,
     )
 
-    assert result.final_content == "answer-2"
+    assert result.final_content == "answer-1"
     assert result.had_injections is True
+    assert call_count == 1
     injected_user_content = [
         message["content"]
         for message in captured_messages[-1]
@@ -211,3 +213,52 @@ def test_attachment_references_canonicalize_existing_relative_paths(
 
     assert media == [str(image_path.resolve())]
     assert f"[Attachment: {doc_path.resolve()}]" in content
+
+
+@pytest.mark.asyncio
+async def test_borrowed_image_origin_survives_canonical_reload(tmp_path: Path) -> None:
+    from nanobot.webui.transcript import build_session_thread_response
+
+    source = tmp_path / "borrowed.png"
+    source.write_bytes(base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9kAAAAASUVORK5CYII="
+    ))
+    loop = _make_loop(tmp_path)
+    loop._run_agent_loop = AsyncMock(side_effect=RuntimeError("interrupt"))
+    message = InboundMessage(
+        channel="websocket", sender_id="u", chat_id="borrowed-origin", content="look",
+        media=[str(source)], metadata={"local_media_paths": [str(source)]},
+    )
+    with pytest.raises(RuntimeError, match="interrupt"):
+        await loop._process_message(message)
+    loop.sessions.invalidate(message.session_key)
+    persisted = loop.sessions.get_or_create(message.session_key)
+    assert persisted.messages[0]["local_media_paths"] == [str(source)]
+    augment = MagicMock(return_value=[{"kind": "image", "url": "/borrowed"}])
+    response = build_session_thread_response(persisted, augment_user_media=augment)
+    augment.assert_called_once_with([str(source)], [str(source)])
+    assert response["events"][0]["media_urls"][0]["url"] == "/borrowed"
+
+
+@pytest.mark.asyncio
+async def test_image_path_remains_visible_once_after_session_reload(tmp_path: Path) -> None:
+    image = tmp_path / "original.png"
+    image.write_bytes(base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9kAAAAASUVORK5CYII="
+    ))
+    loop = _make_loop(tmp_path)
+    loop.provider.aclose = AsyncMock()
+    try:
+        await loop.process_direct("edit this image", session_key="websocket:image-reference", channel="websocket", chat_id="image-reference", media=[str(image)])
+        initial = loop.provider.chat_stream_with_retry.call_args.kwargs["messages"]
+        current = initial[-1]["content"]
+        assert any(block.get("type") == "image_url" for block in current)
+        assert sum(block.get("text", "").count(str(image)) for block in current) == 1
+        loop.sessions.invalidate("websocket:image-reference")
+        await loop.process_direct("which file was that?", session_key="websocket:image-reference", channel="websocket", chat_id="image-reference")
+        following = loop.provider.chat_stream_with_retry.call_args.kwargs["messages"]
+        previous = next(message["content"] for message in following if message["role"] == "user")
+        previous_text = previous if isinstance(previous, str) else "\n".join(block.get("text", "") for block in previous)
+        assert previous_text.count(str(image)) == 1
+    finally:
+        await loop.aclose()

@@ -821,7 +821,7 @@ def _skillhub_skill(
         "provider": _PROVIDER_SKILLHUB,
         "installs": installs if isinstance(installs, int) and installs >= 0 else 0,
         "downloads": downloads if isinstance(downloads, int) and downloads >= 0 else 0,
-        "url": f"{_SKILLHUB_PAGE_BASE_URL}/{quote(handle.strip(), safe='')}/"
+        "url": f"{_SKILLHUB_PAGE_BASE_URL}/skills/{quote(handle.strip(), safe='')}/"
         f"{quote(skill_id, safe='')}",
         "installed": skill_id in installed,
         "install_supported": True,
@@ -935,4 +935,4 @@ def _safe_output_tail(output: bytes | None) -> str:
         return ""
     text = _ANSI_RE.sub("", output.decode("utf-8", errors="replace"))
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    return " · ".join(lines[-3:])[-600:]
+    return "\n".join(lines[-3:])[-600:]

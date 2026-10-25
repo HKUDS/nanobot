@@ -17,12 +17,14 @@ from typing import Any, TypedDict, cast
 import httpx
 from pydantic import Field, computed_field, field_validator
 
+from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
-from nanobot.config.schema import Base
+from nanobot.config_base import Base
+from nanobot.events import ContextCompactionEvent
 from nanobot.pairing import is_approved
 from nanobot.utils.helpers import safe_filename, split_message
 
@@ -431,6 +433,7 @@ class SignalChannel(BaseChannel):
         is_dm: bool = False,
         authorization_id: str | None = None,
         require_existing_session: bool = False,
+        session_generation: str | None = None,
     ) -> None:
         """Handle an inbound message whose policy has already been checked.
 
@@ -453,6 +456,7 @@ class SignalChannel(BaseChannel):
                 media=media or [],
                 metadata=meta,
                 session_key_override=session_key,
+                session_generation=session_generation,
                 require_existing_session=require_existing_session,
             )
         )
@@ -564,6 +568,12 @@ class SignalChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Signal."""
+        if isinstance(msg.event, ContextCompactionEvent) and not (
+            msg.event.notify or self.show_compaction_notices
+        ):
+            return
+        if not self._http:
+            raise ChannelNotReadyError("Signal client not connected")
         is_progress_message = isinstance(msg.event, ProgressEvent)
         try:
             plain_text, text_styles = _markdown_to_signal(msg.content)
@@ -624,10 +634,6 @@ class SignalChannel(BaseChannel):
                     if not self._running:
                         break
 
-                    # Debug: log raw SSE lines (except keepalive pings)
-                    if line and line != ":":
-                        self.logger.debug("SSE line received: {}", line[:200])
-
                     # SSE format handling
                     if isinstance(line, str):  # pyright: ignore[reportUnnecessaryIsInstance]
                         # Empty line signals end of event
@@ -641,7 +647,6 @@ class SignalChannel(BaseChannel):
                                     if data is None:
                                         self.logger.warning("Ignoring non-object SSE event: {}", data_str[:200])
                                         continue
-                                    self.logger.debug("SSE event parsed: {}", data)
                                     await self._handle_receive_notification(data)
                                 except json.JSONDecodeError as e:
                                     self.logger.warning(
@@ -690,12 +695,9 @@ class SignalChannel(BaseChannel):
 
     async def _handle_receive_notification(self, params: dict[str, Any]) -> None:
         """Handle incoming message notification from signal-cli."""
-        self.logger.debug("_handle_receive_notification called with: {}", params)
         async with self._safe_handle("receive notification", params):
             # Extract envelope from SSE notification: {"envelope": {...}}
             envelope = _as_json_object(params.get("envelope"))
-
-            self.logger.debug("Extracted envelope: {}", envelope)
 
             if envelope is None:
                 self.logger.debug("No envelope found in params")
@@ -814,7 +816,7 @@ class SignalChannel(BaseChannel):
             chat_id=chat_id,
         )
 
-        self.logger.debug("Signal message from {}: {}...", sender_number, content[:50])
+        self.logger.debug("Received Signal message from {}", sender_number)
 
         await self._start_typing(chat_id)
         try:

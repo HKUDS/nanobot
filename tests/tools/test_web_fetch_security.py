@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import socket
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from urllib.request import getproxies_environment
 
 import httpx
 import pytest
 
 from nanobot.agent.tools import web as web_module
+from nanobot.agent.tools.registry import is_tool_error_result
 from nanobot.agent.tools.web import WebFetchTool, _get_with_safe_redirects
 from nanobot.config.schema import WebFetchConfig
 from nanobot.security.network import PinnedDNSAsyncTransport
@@ -96,6 +98,7 @@ async def test_web_fetch_blocks_private_ip():
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_private):
         result = await tool.execute(url="http://169.254.169.254/computeMetadata/v1/")
     data = json.loads(result)
+    assert is_tool_error_result(result)
     assert "error" in data
     assert "private" in data["error"].lower() or "blocked" in data["error"].lower()
 
@@ -108,6 +111,7 @@ async def test_web_fetch_blocks_localhost():
     with patch("nanobot.security.network.socket.getaddrinfo", _resolve_localhost):
         result = await tool.execute(url="http://localhost/admin")
     data = json.loads(result)
+    assert is_tool_error_result(result)
     assert "error" in data
 
 
@@ -126,6 +130,7 @@ async def test_web_fetch_blocks_localhost_even_in_full_workspace_scope(tmp_path)
     finally:
         reset_workspace_scope(token)
     data = json.loads(result)
+    assert is_tool_error_result(result)
     assert "error" in data
 
 
@@ -139,6 +144,7 @@ async def test_web_fetch_result_contains_untrusted_flag(monkeypatch: pytest.Monk
         result = await tool.execute(url="https://example.com/page")
 
     data = json.loads(result)
+    assert not is_tool_error_result(result)
     assert data.get("untrusted") is True
     assert "[External content" in data.get("text", "")
 
@@ -278,6 +284,7 @@ async def test_web_fetch_does_not_fallback_after_pinned_dns_rebind_rejection(mon
         result = await tool.execute(url="http://evil.example/page")
 
     data = json.loads(result)
+    assert is_tool_error_result(result)
     assert "error" in data
     assert "blocked" in data["error"].lower()
     assert calls["evil.example"] == 3
@@ -452,9 +459,57 @@ async def test_web_fetch_blocks_private_redirect_before_readability_request(monk
         result = await tool.execute(url="https://attacker.example/start")
 
     data = json.loads(result)
+    assert is_tool_error_result(result)
     assert "error" in data
     assert "redirect blocked" in data["error"].lower()
     assert requested == ["https://attacker.example/start"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("preflight_fails", [False, True], ids=["stream", "fallback"])
+@pytest.mark.parametrize("content_type,expected_mime", [
+    ("image/png", "image/png"),
+    ("Image/PNG", "image/png"),
+    ("Image/PNG; profile=MiXeD", "image/png; profile=MiXeD"),
+])
+async def test_web_fetch_image_media_type_is_case_insensitive(
+    monkeypatch, preflight_fails, content_type, expected_mime,
+):
+    tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/"
+        "iZk9HQAAAABJRU5ErkJggg=="
+    )
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if preflight_fails and len(requests) == 1:
+            raise httpx.ConnectError("Image preflight unavailable", request=request)
+        return httpx.Response(
+            200, headers={"Content-Type": content_type}, content=png, request=request,
+        )
+
+    transport = httpx.MockTransport(handler)
+    real_async_client = httpx.AsyncClient
+
+    class TransportAsyncClient(real_async_client):
+        def __init__(self, *args, **kwargs):
+            kwargs.pop("proxy", None)
+            kwargs.pop("transport", None)
+            super().__init__(*args, transport=transport, **kwargs)
+
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", TransportAsyncClient)
+    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: object())
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
+        result = await tool.execute(url="https://example.com/image.png")
+
+    assert isinstance(result, list), f"Expected native image blocks, requests={len(requests)}"
+    image = next(block for block in result if block["type"] == "image_url")
+    prefix, encoded = image["image_url"]["url"].split(";base64,", 1)
+    assert prefix == f"data:{expected_mime}"
+    assert base64.b64decode(encoded, validate=True) == png
+    assert len(requests) == (2 if preflight_fails else 1)
 
 
 @pytest.mark.asyncio
@@ -498,6 +553,7 @@ async def test_web_fetch_blocks_private_redirect_before_returning_image(monkeypa
         result = await tool.execute(url="https://example.com/image.png")
 
     data = json.loads(result)
+    assert is_tool_error_result(result)
     assert "error" in data
     assert "redirect blocked" in data["error"].lower()
 
@@ -539,6 +595,55 @@ async def test_web_fetch_does_not_request_private_redirect_target(monkeypatch):
         result = await tool.execute(url="https://attacker.example/start")
 
     data = json.loads(result)
+    assert is_tool_error_result(result)
     assert "error" in data
     assert "redirect blocked" in data["error"].lower()
     assert requested == ["https://attacker.example/start"]
+
+
+@pytest.mark.parametrize(
+    ("failure", "error_text"),
+    [("http", "404"), ("timeout", "request timed out"), ("proxy", "Proxy error: proxy unavailable")],
+)
+async def test_web_fetch_marks_terminal_fetch_failures_as_errors(monkeypatch, failure, error_text):
+    url = "https://93.184.216.34/page"
+    tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if failure == "timeout":
+            raise httpx.ReadTimeout("request timed out", request=request)
+        if failure == "proxy":
+            raise httpx.ProxyError("proxy unavailable", request=request)
+        return httpx.Response(404, request=request)
+
+    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: httpx.MockTransport(handler))
+
+    result = await tool.execute(url=url)
+
+    assert is_tool_error_result(result)
+    data = json.loads(result)
+    assert data["url"] == url
+    assert error_text in data["error"]
+
+
+async def test_web_fetch_jina_fallback_keeps_json_error_content_successful(monkeypatch):
+    url = "https://93.184.216.34/page"
+    tool = WebFetchTool()
+    jina = AsyncMock(return_value=None)
+    source = {"error": "This is fetched document content, not a tool failure."}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=source, request=request)
+
+    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: httpx.MockTransport(handler))
+    monkeypatch.setattr(tool, "_fetch_jina", jina)
+
+    result = await tool.execute(url=url)
+
+    jina.assert_awaited_once()
+    assert not is_tool_error_result(result)
+    data = json.loads(result)
+    assert data["status"] == 200
+    assert data["extractor"] == "json"
+    assert data["untrusted"] is True
+    assert json.dumps(source, indent=2) in data["text"]
