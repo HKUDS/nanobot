@@ -1160,7 +1160,7 @@ export function ThreadComposer({
   // keyboard still get the newline-on-Enter behavior.
   const hasCoarsePointer = useMediaQuery("(pointer: coarse)");
   const mobileWorkspaceControls = useMediaQuery("(max-width: 639px)");
-  const { readingTextSize } = useLocalPreferences();
+  const { readingTextSize, customReadingTextSize } = useLocalPreferences();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionOverlayRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -1846,7 +1846,7 @@ export function ThreadComposer({
     // The parent projects typography tokens in its layout effect; measure after it.
     const input = textareaRef.current;
     if (input) autosizeTextarea(input);
-  }, [readingTextSize]);
+  }, [readingTextSize, customReadingTextSize]);
 
   // Runs before paint so switching sessions never flashes stale draft text.
   useLayoutEffect(() => {

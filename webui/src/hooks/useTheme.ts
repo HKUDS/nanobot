@@ -10,16 +10,19 @@ import {
 } from "react";
 import "./theme-transition.css";
 
+import { useMediaQuery } from "@/hooks/useMediaQuery";
+
+export type ThemePreference = "system" | "light" | "dark";
 type Theme = "light" | "dark";
 const STORAGE_KEY = "nanobot-webui.theme";
 const ThemeContext = createContext<Theme>("light");
 
-function readStored(): Theme | null {
+function readStored(): ThemePreference {
   try {
-    const v = localStorage.getItem(STORAGE_KEY);
-    return v === "light" || v === "dark" ? v : null;
+    const value = localStorage.getItem(STORAGE_KEY);
+    return value === "light" || value === "dark" ? value : "system";
   } catch {
-    return null;
+    return "system";
   }
 }
 
@@ -38,19 +41,13 @@ function applyTheme(theme: Theme): void {
 
 export function useTheme(): {
   theme: Theme;
+  preference: ThemePreference;
   toggle: () => void;
-  setTheme: (t: Theme) => void;
+  setTheme: (value: ThemePreference) => void;
 } {
-  const [theme, setThemeState] = useState<Theme>(() => {
-    const stored = readStored();
-    if (stored) return stored;
-    if (typeof window !== "undefined" && window.matchMedia) {
-      return window.matchMedia("(prefers-color-scheme: dark)").matches
-        ? "dark"
-        : "light";
-    }
-    return "light";
-  });
+  const [preference, setPreference] = useState(readStored);
+  const systemDark = useMediaQuery("(prefers-color-scheme: dark)");
+  const theme: Theme = preference === "system" ? (systemDark ? "dark" : "light") : preference;
 
   const switchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => {
@@ -63,27 +60,43 @@ export function useTheme(): {
 
   useEffect(() => {
     applyTheme(theme);
-    try {
-      localStorage.setItem(STORAGE_KEY, theme);
-    } catch {
-      // ignore
-    }
   }, [theme]);
 
-  const setTheme = useCallback((next: Theme) => {
-    if (next === theme || switchTimer.current !== null) return;
-    document.documentElement.dataset.themeTransition = next;
-    setThemeState(next);
-    switchTimer.current = setTimeout(() => {
-      delete document.documentElement.dataset.themeTransition;
-      switchTimer.current = null;
-    }, 600);
-  }, [theme]);
+  useEffect(() => {
+    const refresh = (event: StorageEvent) => {
+      if (event.key !== null && event.key !== STORAGE_KEY) return;
+      if (event.storageArea && event.storageArea !== window.localStorage) return;
+      setPreference(readStored());
+    };
+    window.addEventListener("storage", refresh);
+    return () => window.removeEventListener("storage", refresh);
+  }, []);
+
+  const setTheme = useCallback((value: ThemePreference) => {
+    if (value === preference) return;
+    const next = value === "system" ? (systemDark ? "dark" : "light") : value;
+    // Changing preference without changing the palette must not start or block a transition.
+    if (next !== theme) {
+      if (switchTimer.current !== null) return;
+      document.documentElement.dataset.themeTransition = next;
+      switchTimer.current = setTimeout(() => {
+        delete document.documentElement.dataset.themeTransition;
+        switchTimer.current = null;
+      }, 600);
+    }
+    setPreference(value);
+    // Only user choices persist. Resolved system changes and other tabs never write back.
+    try {
+      localStorage.setItem(STORAGE_KEY, value);
+    } catch {
+      // Browser-only preferences should never block the interface.
+    }
+  }, [preference, systemDark, theme]);
   const toggle = useCallback(
     () => setTheme(theme === "dark" ? "light" : "dark"),
     [setTheme, theme],
   );
-  return { theme, toggle, setTheme };
+  return { theme, preference, toggle, setTheme };
 }
 
 export function ThemeProvider({ theme, children }: { theme: Theme; children: ReactNode }) {

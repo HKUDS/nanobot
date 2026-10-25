@@ -1,129 +1,108 @@
-import type { Dispatch, SetStateAction } from "react";
+import { useId, type Dispatch, type SetStateAction } from "react";
+import { Check, Monitor, Moon, Sun } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SettingsGroup, SettingsRow, SettingsSectionTitle } from "@/components/settings/shared/SettingsControls";
 import { ToggleButton } from "@/components/ui/toggle-button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
+import type { ThemePreference } from "@/hooks/useTheme";
 import type { FileEditDisplayMode, LocalActivityMode, LocalPreferences } from "@/lib/local-preferences";
+import { ReadingSettings } from "./ReadingSettings";
+import "./appearance-settings.css";
 
-export function AppearanceSettingsView({
-  theme,
-  onToggleTheme,
-  localPrefs,
-  onChangeLocalPrefs,
-}: {
-  theme: "light" | "dark";
-  onToggleTheme: () => void;
+export function AppearanceSettingsView({ themePreference, onChangeTheme, localPrefs, onChangeLocalPrefs }: {
+  themePreference: ThemePreference;
+  onChangeTheme: (preference: ThemePreference) => void;
   localPrefs: LocalPreferences;
   onChangeLocalPrefs: Dispatch<SetStateAction<LocalPreferences>>;
 }) {
   const { t } = useTranslation();
-  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  return (
-    <div className="settings-stack">
-      <section>
-        <SettingsSectionTitle>{t("settings.sections.interface")}</SettingsSectionTitle>
-        <SettingsGroup>
-          <SettingsRow title={t("settings.rows.theme")}>
-            <SegmentedControl
-              value={theme}
-              ariaLabel={t("settings.rows.theme")}
-              className="bg-muted p-0.5"
-              itemClassName="px-3"
-              options={[
-                { value: "light", label: t("settings.values.light") },
-                { value: "dark", label: t("settings.values.dark") },
-              ]}
-              onChange={(nextTheme) => {
-                if (nextTheme !== theme) onToggleTheme();
-              }}
-            />
-          </SettingsRow>
+  const themeId = useId();
+  const themes = [
+    { value: "system", label: t("settings.appearance.system"), icon: Monitor },
+    { value: "light", label: t("settings.values.light"), icon: Sun },
+    { value: "dark", label: t("settings.values.dark"), icon: Moon },
+  ] as const;
+  const editHelp = { summary: "summaryHelp", diff: "diffHelp", collapsed_diff: "collapsedHelp" } as const;
 
-          <SettingsRow title={t("settings.rows.language")}>
-            <LanguageSwitcher />
+  return <div className="settings-stack appearance-page">
+    <section>
+      <SettingsSectionTitle>{t("settings.rows.theme")}</SettingsSectionTitle>
+      <fieldset>
+        <legend className="sr-only">{t("settings.rows.theme")}</legend>
+        <div className="appearance-theme-grid">
+          {themes.map(({ value, label, icon: Icon }) => <label key={value} className="appearance-theme-option">
+            <input className="appearance-theme-input" type="radio" name={themeId} value={value}
+              checked={themePreference === value} onChange={() => onChangeTheme(value)} />
+            <span className="appearance-theme-card">
+              <span className="appearance-theme-miniature" data-mode={value} aria-hidden>
+                <span className="appearance-mini-sidebar"><span /><span /><span /></span>
+                <span className="appearance-mini-main"><span /><span /><span /><span /></span>
+              </span>
+              <span className="appearance-theme-label text-ui-label">
+                <span className="flex min-w-0 items-center gap-1.5"><Icon className="h-3.5 w-3.5 shrink-0" aria-hidden /><span>{label}</span></span>
+                <Check className="appearance-theme-check h-3.5 w-3.5 shrink-0" aria-hidden />
+              </span>
+            </span>
+          </label>)}
+        </div>
+      </fieldset>
+    </section>
+
+    <section>
+      <SettingsSectionTitle>{t("settings.appearance.reading")}</SettingsSectionTitle>
+      <ReadingSettings preferences={localPrefs} onChange={onChangeLocalPrefs} />
+      <div className="mt-2">
+        <SettingsGroup>
+          <SettingsRow title={t("settings.rows.codeWrap")} description={t("settings.help.codeWrap")}>
+            <ToggleButton checked={localPrefs.codeWrap}
+              onChange={(codeWrap) => onChangeLocalPrefs((previous) => ({ ...previous, codeWrap }))}
+              ariaLabel={t("settings.rows.codeWrap")}
+              label={t(localPrefs.codeWrap ? "settings.values.on" : "settings.values.off")} />
           </SettingsRow>
         </SettingsGroup>
-      </section>
+      </div>
+    </section>
 
-      <section>
-        <SettingsSectionTitle>{tx("settings.sections.localPreferences", "Local preferences")}</SettingsSectionTitle>
-        <SettingsGroup>
-          <SettingsRow title={t("settings.rows.readingTextSize")}>
-            <SegmentedControl
-              value={localPrefs.readingTextSize}
-              mode="radio"
-              ariaLabel={t("settings.rows.readingTextSize")}
-              className="w-36 [@media(pointer:coarse)]:w-40"
-              itemClassName="flex flex-1 basis-0 items-center justify-center !overflow-visible px-0 after:absolute after:inset-x-0 after:top-1/2 after:h-11 after:-translate-y-1/2 after:content-['']"
-              options={([
-                ["small", "text-[12px]"],
-                ["standard", "text-[16px]"],
-                ["large", "text-[20px]"],
-              ] as const).map(([value, size]) => ({
-                value,
-                label: <span aria-hidden className={size}>A</span>,
-                ariaLabel: t(`settings.readingTextSize.${value}`),
-                tooltip: t(`settings.readingTextSize.${value}`),
-              }))}
-              onChange={(readingTextSize) =>
-                onChangeLocalPrefs((prev) => ({ ...prev, readingTextSize }))
-              }
-            />
-          </SettingsRow>
-          <SettingsRow title={tx("settings.rows.activityMode", "Activity detail")}>
-            <SegmentedControl
-              value={localPrefs.activityMode}
+    <section>
+      <SettingsSectionTitle>{t("settings.appearance.process")}</SettingsSectionTitle>
+      <p className="appearance-setting-help">{t("settings.appearance.processHelp")}</p>
+      <SettingsGroup>
+        <SettingsRow title={t("settings.rows.activityMode")}>
+          <SegmentedControl<LocalActivityMode> value={localPrefs.activityMode}
+            ariaLabel={t("settings.rows.activityMode")}
+            options={[{ value: "auto", label: t("settings.values.auto") }, { value: "expanded", label: t("settings.values.expanded") }]}
+            onChange={(activityMode) => onChangeLocalPrefs((previous) => ({ ...previous, activityMode }))} />
+        </SettingsRow>
+        <p className="appearance-setting-help">{t(`settings.appearance.${localPrefs.activityMode === "auto" ? "autoHelp" : "expandedHelp"}`)}</p>
+        <div className="settings-group-divider">
+          <SettingsRow title={t("settings.rows.fileEditDisplay")}>
+            <SegmentedControl<FileEditDisplayMode> value={localPrefs.fileEditDisplayMode}
+              ariaLabel={t("settings.rows.fileEditDisplay")}
               options={[
-                { value: "auto", label: tx("settings.values.auto", "Auto") },
-                { value: "expanded", label: tx("settings.values.expanded", "Expanded") },
+                { value: "summary", label: t("settings.values.summary") },
+                { value: "diff", label: t("settings.values.diff") },
+                { value: "collapsed_diff", label: t("settings.values.collapsedDiff") },
               ]}
-              onChange={(activityMode) =>
-                onChangeLocalPrefs((prev) => ({ ...prev, activityMode: activityMode as LocalActivityMode }))
-              }
-            />
+              onChange={(fileEditDisplayMode) => onChangeLocalPrefs((previous) => ({ ...previous, fileEditDisplayMode }))} />
           </SettingsRow>
-          <SettingsRow title={tx("settings.rows.fileEditDisplay", "File edit display")}>
-            <SegmentedControl
-              value={localPrefs.fileEditDisplayMode}
-              options={[
-                { value: "summary", label: tx("settings.values.summary", "Summary") },
-                { value: "diff", label: tx("settings.values.diff", "Diff") },
-                { value: "collapsed_diff", label: tx("settings.values.collapsedDiff", "Collapsed diff") },
-              ]}
-              onChange={(fileEditDisplayMode) =>
-                onChangeLocalPrefs((prev) => ({
-                  ...prev,
-                  fileEditDisplayMode: fileEditDisplayMode as FileEditDisplayMode,
-                }))
-              }
-            />
-          </SettingsRow>
-          <SettingsRow title={tx("settings.rows.codeWrap", "Code wrapping")}>
-            <ToggleButton
-              checked={localPrefs.codeWrap}
-              onChange={(codeWrap) => onChangeLocalPrefs((prev) => ({ ...prev, codeWrap }))}
-              ariaLabel={tx("settings.rows.codeWrap", "Code wrapping")}
-              label={localPrefs.codeWrap ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
-            />
-          </SettingsRow>
-          <SettingsRow
-            title={tx("settings.rows.brandLogos", "Brand logos")}
-            description={tx(
-              "settings.legal.thirdPartyBrands",
-              "Product names, logos, and brands are property of their respective owners. Use is for identification only and does not imply endorsement.",
-            )}
-          >
-            <ToggleButton
-              checked={localPrefs.brandLogos}
-              onChange={(brandLogos) => onChangeLocalPrefs((prev) => ({ ...prev, brandLogos }))}
-              ariaLabel={tx("settings.rows.brandLogos", "Brand logos")}
-              label={localPrefs.brandLogos ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
-            />
-          </SettingsRow>
-        </SettingsGroup>
-      </section>
-    </div>
-  );
+          <p className="appearance-setting-help">{t(`settings.appearance.${editHelp[localPrefs.fileEditDisplayMode]}`)}</p>
+        </div>
+      </SettingsGroup>
+    </section>
+
+    <section>
+      <SettingsSectionTitle>{t("settings.sections.interface")}</SettingsSectionTitle>
+      <SettingsGroup>
+        <SettingsRow title={t("settings.rows.language")}><LanguageSwitcher /></SettingsRow>
+        <SettingsRow title={t("settings.rows.brandLogos")} description={t("settings.legal.thirdPartyBrands")}>
+          <ToggleButton checked={localPrefs.brandLogos}
+            onChange={(brandLogos) => onChangeLocalPrefs((previous) => ({ ...previous, brandLogos }))}
+            ariaLabel={t("settings.rows.brandLogos")}
+            label={t(localPrefs.brandLogos ? "settings.values.on" : "settings.values.off")} />
+        </SettingsRow>
+      </SettingsGroup>
+    </section>
+  </div>;
 }

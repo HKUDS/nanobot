@@ -9,6 +9,7 @@ import { AutomationRunDialogView, type AutomationRunResult } from "@/components/
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { DEFAULT_LOCAL_PREFS } from "@/lib/local-preferences";
+import type { ThemePreference } from "@/hooks/useTheme";
 import type { UpdateChannel } from "@/lib/api";
 import type { AutomationChatsPayload, SessionAutomationJob } from "@/lib/types";
 import { StatePicker, type ComponentExample } from "./example";
@@ -91,9 +92,9 @@ function AboutPreview() {
 }
 
 function AppearancePreview() {
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [theme, setTheme] = useState<ThemePreference>("system");
   const [preferences, setPreferences] = useState(DEFAULT_LOCAL_PREFS);
-  return <><AppearanceSettingsView theme={theme} onToggleTheme={() => setTheme((current) => current === "light" ? "dark" : "light")}
+  return <><AppearanceSettingsView themePreference={theme} onChangeTheme={setTheme}
     localPrefs={preferences} onChangeLocalPrefs={setPreferences} />
     <pre role="status" className="mt-4 overflow-auto rounded-control bg-muted p-4 text-xs">{JSON.stringify({ theme, ...preferences }, null, 2)}</pre></>;
 }
@@ -127,7 +128,7 @@ export const runtimeSettingsExamples: ComponentExample[] = [
   { title: "controls.appearance.title", files: ["webui/src/components/settings/overview/AppearanceSettingsView.tsx"], Preview: AppearancePreview,
     description: "controls.appearance.description",
     options: "controls.appearance.options",
-    code: '<AppearanceSettingsView theme={theme} onToggleTheme={toggleTheme} localPrefs={preferences} onChangeLocalPrefs={setPreferences} onChangeBrowserNotifications={changeNotifications} />' },
+    code: '<AppearanceSettingsView themePreference={preference} onChangeTheme={setTheme} localPrefs={preferences} onChangeLocalPrefs={setPreferences} />' },
   { title: "controls.starInvitation.title", files: ["webui/src/components/StarPromptView.tsx"], Preview: StarInvitationPreview,
     description: "controls.starInvitation.description",
     options: "controls.starInvitation.options",

@@ -905,6 +905,28 @@
       "failed": "Task failed. Click for details.",
       "interrupted": "Task needs attention. Click to continue."
     },
+    "appearance": {
+      "system": "System",
+      "reading": "Reading",
+      "readingHelp": "Adjust messages, code and the composer—not navigation.",
+      "custom": "Custom",
+      "customSize": "Custom text size",
+      "customRange": "Enter a whole number from {{min}} to {{max}} px.\nCode scales with the text; the composer stays at least 16px.",
+      "customInvalid": "Use a whole number from {{min}} to {{max}} px.\nYour text remains at {{size}} px.",
+      "small": "Small",
+      "standard": "Standard",
+      "large": "Large",
+      "preview": "Live preview",
+      "previewText": "**A little room to think.**\n\nClear words, comfortable reading. Make this space your own.",
+      "previewPlaceholder": "Where should we begin?",
+      "process": "Activity display",
+      "processHelp": "Choose how much detail appears as nanobot works.",
+      "autoHelp": "Show progress while working; keep finished work compact.",
+      "expandedHelp": "Keep activity details expanded by default.",
+      "summaryHelp": "Show changed files and line counts.",
+      "diffHelp": "Show code changes directly in the conversation.",
+      "collapsedHelp": "Keep code changes folded until you open them."
+    },
     "readingTextSize": {
       "small": "Small reading text",
       "standard": "Standard reading text",

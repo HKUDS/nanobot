@@ -182,6 +182,47 @@ describe("Settings overview and appearance", () => {
     expect(screen.getByRole("radio", { name: "Large reading text" })).toBeChecked();
   });
 
+  it("edits and remembers a custom reading size without committing an empty input", async () => {
+    writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, notificationSound: true, codeWrap: false });
+    renderSettingsView({ initialSection: "appearance", initialSettings: settingsPayload() });
+    fireEvent.focus(screen.getByRole("spinbutton", { name: "Custom text size" }));
+    const input = screen.getByRole("spinbutton", { name: "Custom text size" });
+    fireEvent.change(input, { target: { value: "" } });
+    expect(readLocalPreferences().customReadingTextSize).toBe(18);
+    fireEvent.change(input, { target: { value: "24" } });
+    await waitFor(() => expect(readLocalPreferences()).toMatchObject({
+      readingTextSize: "custom", customReadingTextSize: 24, notificationSound: true, codeWrap: false,
+    }));
+    fireEvent.click(screen.getByRole("radio", { name: "Standard reading text" }));
+    fireEvent.focus(screen.getByRole("spinbutton", { name: "Custom text size" }));
+    expect(screen.getByRole("spinbutton", { name: "Custom text size" })).toHaveValue(24);
+    const currentInput = screen.getByRole("spinbutton", { name: "Custom text size" });
+    fireEvent.change(currentInput, { target: { value: "21" } });
+    expect(readLocalPreferences().customReadingTextSize).toBe(21);
+    fireEvent.change(currentInput, { target: { value: "40" } });
+    fireEvent.blur(currentInput);
+    expect(currentInput).toHaveValue(40);
+    expect(currentInput).toHaveAttribute("aria-invalid", "true");
+    expect(readLocalPreferences().customReadingTextSize).toBe(21);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Your text remains at 21 px.");
+    fireEvent.change(currentInput, { target: { value: "22" } });
+    expect(currentInput).not.toHaveAttribute("aria-invalid", "true");
+    expect(readLocalPreferences().customReadingTextSize).toBe(22);
+  });
+
+  it.each(["", "40"])("restores the saved custom size after another tab interrupts draft %j", async (draft) => {
+    writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, readingTextSize: "custom", customReadingTextSize: 24 });
+    renderSettingsView({ initialSection: "appearance", initialSettings: settingsPayload() });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Custom text size" }), { target: { value: draft } });
+    act(() => {
+      localStorage.setItem(LOCAL_PREFS_STORAGE_KEY, JSON.stringify({ ...readLocalPreferences(), schemaVersion: 1, readingTextSize: "small" }));
+      window.dispatchEvent(new StorageEvent("storage", { key: LOCAL_PREFS_STORAGE_KEY }));
+    });
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Small reading text" })).toBeChecked());
+    fireEvent.focus(screen.getByRole("spinbutton", { name: "Custom text size" }));
+    expect(screen.getByRole("spinbutton", { name: "Custom text size" })).toHaveValue(24);
+  });
+
   it("persists the file edit display local preference", async () => {
     renderSettingsView({
       initialSection: "appearance",

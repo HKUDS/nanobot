@@ -644,6 +644,28 @@
       "failed": "La tarea falló. Haz clic para ver los detalles.",
       "interrupted": "La tarea necesita atención. Haz clic para continuar."
     },
+    "appearance": {
+      "system": "Sistema",
+      "reading": "Lectura",
+      "readingHelp": "Ajusta los mensajes, el código y el campo de escritura, sin cambiar la navegación.",
+      "custom": "Personalizado",
+      "customSize": "Tamaño de texto personalizado",
+      "customRange": "Introduce un número entero entre {{min}} y {{max}} px.\nEl código se escala con el texto; el campo de entrada mantiene un mínimo de 16px.",
+      "customInvalid": "Usa un número entero entre {{min}} y {{max}} px.\nEl texto sigue en {{size}} px.",
+      "small": "Pequeño",
+      "standard": "Estándar",
+      "large": "Grande",
+      "preview": "Vista previa en vivo",
+      "previewText": "**Un poco de espacio para pensar.**\n\nPalabras claras, lectura cómoda. Haz tuyo este espacio.",
+      "previewPlaceholder": "¿Por dónde empezamos?",
+      "process": "Visualización de actividad",
+      "processHelp": "Elige cuánto detalle se muestra mientras nanobot trabaja.",
+      "autoHelp": "Muestra el progreso durante el trabajo y una vista compacta al terminar.",
+      "expandedHelp": "Mantén los detalles de actividad expandidos por defecto.",
+      "summaryHelp": "Muestra los archivos modificados y el número de líneas.",
+      "diffHelp": "Muestra los cambios de código directamente en la conversación.",
+      "collapsedHelp": "Mantén los cambios de código contraídos hasta que los abras."
+    },
     "readingTextSize": {
       "small": "Texto de lectura pequeño",
       "standard": "Texto de lectura estándar",

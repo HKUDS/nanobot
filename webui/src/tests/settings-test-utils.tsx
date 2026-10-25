@@ -129,6 +129,8 @@ type SettingsViewTestOptions = Partial<Pick<
   React.ComponentProps<typeof SettingsView>,
   | "initialSection"
   | "initialSettings"
+  | "themePreference"
+  | "onChangeTheme"
   | "skills"
   | "skillsLoading"
   | "showSidebar"
@@ -151,14 +153,14 @@ export function renderSettingsView(options: SettingsViewTestOptions = {}) {
       },
     } as never} token="tok">
       <SettingsView
-        theme="light"
+        themePreference={options.themePreference ?? "light"}
         initialSection={options.initialSection ?? "apps"}
         initialSettings={options.initialSettings}
         skills={options.skills}
         skillsLoading={options.skillsLoading}
         showSidebar={options.showSidebar}
         mainNavigationExpanded={options.mainNavigationExpanded}
-        onToggleTheme={() => {}}
+        onChangeTheme={options.onChangeTheme ?? (() => {})}
         onBackToChat={options.onBackToChat ?? (() => {})}
         onModelNameChange={() => {}}
         onSettingsChange={options.onSettingsChange}

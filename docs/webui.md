@@ -258,7 +258,9 @@ Local triggers do not have a WebUI "Run now" action because each run needs a mes
 
 Runtime settings may require a gateway restart; the WebUI marks those controls.
 
-**Appearance → Local preferences** applies immediately to the current browser without changing gateway configuration. **Reading text size** adjusts conversation text, Markdown, code and the input, but not navigation or toolbars; standard is the default.
+**Appearance** preferences apply immediately in the current browser without changing gateway configuration. Choose **System**, **Light**, or **Dark** for the theme; **System** follows operating-system changes while the app is open. Existing explicit light/dark preferences are preserved.
+
+Under **Reading**, choose a small, standard or large preset, or enter a custom size in the inline **Custom** field beside them. Select the field to edit the saved custom value, using whole pixels from 14 to 28. Hovering or focusing the field shows the supported range and how reading sizes apply. An out-of-range or fractional entry is marked invalid when you finish editing, with a hint showing the size still in use; it does not silently clamp or replace your last valid size. The size applies to both desktop and narrow screens. The input retains a 16px minimum on every screen. The live preview uses the same reading typography as conversations: messages, Markdown and code scale together, while navigation and toolbars stay unchanged. Standard remains the default; switching to a preset preserves your custom value for later use. **Activity display** controls how much process and file-edit detail appears, not what the agent executes.
 
 ## LAN Access
 

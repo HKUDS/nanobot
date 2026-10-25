@@ -644,6 +644,28 @@
       "failed": "Tugas gagal. Klik untuk melihat detailnya.",
       "interrupted": "Tugas perlu perhatian. Klik untuk melanjutkan."
     },
+    "appearance": {
+      "system": "Ikuti sistem",
+      "reading": "Membaca",
+      "readingHelp": "Sesuaikan pesan, kode, dan kolom pesan, tanpa mengubah navigasi.",
+      "custom": "Kustom",
+      "customSize": "Ukuran teks kustom",
+      "customRange": "Masukkan bilangan bulat dari {{min}} hingga {{max}} px.\nKode mengikuti ukuran teks; kolom input tetap minimal 16px.",
+      "customInvalid": "Gunakan bilangan bulat dari {{min}} hingga {{max}} px.\nTeks tetap berukuran {{size}} px.",
+      "small": "Kecil",
+      "standard": "Standar",
+      "large": "Besar",
+      "preview": "Pratinjau langsung",
+      "previewText": "**Sedikit ruang untuk berpikir.**\n\nKata-kata yang jelas, nyaman dibaca. Jadikan ruang ini milik Anda.",
+      "previewPlaceholder": "Dari mana kita mulai?",
+      "process": "Tampilan aktivitas",
+      "processHelp": "Pilih seberapa banyak detail yang ditampilkan saat nanobot bekerja.",
+      "autoHelp": "Tampilkan progres saat bekerja dan tampilan ringkas setelah selesai.",
+      "expandedHelp": "Perluas detail aktivitas secara default.",
+      "summaryHelp": "Tampilkan berkas yang diubah dan jumlah baris.",
+      "diffHelp": "Tampilkan perubahan kode langsung dalam percakapan.",
+      "collapsedHelp": "Lipat perubahan kode hingga Anda membukanya."
+    },
     "readingTextSize": {
       "small": "Teks bacaan kecil",
       "standard": "Teks bacaan standar",

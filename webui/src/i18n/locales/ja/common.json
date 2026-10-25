@@ -644,6 +644,28 @@
       "failed": "タスクが失敗しました。クリックして詳細を確認。",
       "interrupted": "対応が必要です。クリックして続行。"
     },
+    "appearance": {
+      "system": "システムに合わせる",
+      "reading": "読みやすさ",
+      "readingHelp": "メッセージ、コード、入力欄の文字サイズを調整します。ナビゲーションは変わりません。",
+      "custom": "カスタム",
+      "customSize": "文字サイズを指定",
+      "customRange": "{{min}}～{{max}} px の整数を入力してください。\nコードは本文に合わせて拡大縮小され、入力欄は最低 16px を保ちます。",
+      "customInvalid": "{{min}}～{{max}} px の整数を指定してください。\n現在の文字サイズは {{size}} px のままです。",
+      "small": "小",
+      "standard": "標準",
+      "large": "大",
+      "preview": "ライブプレビュー",
+      "previewText": "**考えるための、少しの余白。**\n\n明快な言葉と、心地よい読みやすさ。この空間を、あなたらしく。",
+      "previewPlaceholder": "何から始めましょうか？",
+      "process": "処理状況の表示",
+      "processHelp": "nanobot の作業中に表示する詳細の量を選びます。",
+      "autoHelp": "作業中は進捗を表示し、完了後はコンパクトにまとめます。",
+      "expandedHelp": "処理の詳細を既定で展開します。",
+      "summaryHelp": "変更されたファイルと行数を表示します。",
+      "diffHelp": "コードの変更を会話内に直接表示します。",
+      "collapsedHelp": "コードの変更は、開くまで折りたたんでおきます。"
+    },
     "readingTextSize": {
       "small": "本文の文字サイズ：小",
       "standard": "本文の文字サイズ：標準",

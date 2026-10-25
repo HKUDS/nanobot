@@ -905,6 +905,28 @@
       "failed": "任务失败，点击查看详情。",
       "interrupted": "任务需要处理，点击继续。"
     },
+    "appearance": {
+      "system": "跟随系统",
+      "reading": "阅读",
+      "readingHelp": "调整消息、代码和输入框，不改变导航大小。",
+      "custom": "自定义",
+      "customSize": "自定义字号",
+      "customRange": "支持 {{min}}–{{max}} px 整数。\n代码随正文缩放，输入框最小 16px。",
+      "customInvalid": "请输入 {{min}}–{{max}} px 的整数。\n当前仍使用 {{size}} px。",
+      "small": "小",
+      "standard": "标准",
+      "large": "大",
+      "preview": "实时预览",
+      "previewText": "**给思考留一点空间。**\n\n清晰的文字，舒服的节奏。让每一个想法，都有自在展开的空间。",
+      "previewPlaceholder": "接下来，想聊点什么？",
+      "process": "过程展示",
+      "processHelp": "选择 nanobot 工作时展示多少细节。",
+      "autoHelp": "工作时显示进度，结束后保持简洁。",
+      "expandedHelp": "默认展开工具活动与子任务详情。",
+      "summaryHelp": "显示修改文件和增删行数。",
+      "diffHelp": "在对话中直接展示代码差异。",
+      "collapsedHelp": "默认收起代码差异，需要时点开。"
+    },
     "readingTextSize": {
       "small": "阅读字号：小",
       "standard": "阅读字号：标准",

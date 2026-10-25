@@ -644,6 +644,28 @@
       "failed": "任務失敗，點選查看詳情。",
       "interrupted": "任務需要處理，點選繼續。"
     },
+    "appearance": {
+      "system": "跟隨系統",
+      "reading": "閱讀",
+      "readingHelp": "調整訊息、程式碼和輸入框，不改變導覽大小。",
+      "custom": "自訂",
+      "customSize": "自訂字級",
+      "customRange": "支援 {{min}}–{{max}} px 整數。\n程式碼隨內文縮放，輸入框最小 16px。",
+      "customInvalid": "請輸入 {{min}}–{{max}} px 的整數。\n目前仍使用 {{size}} px。",
+      "small": "小",
+      "standard": "標準",
+      "large": "大",
+      "preview": "即時預覽",
+      "previewText": "**給思考留一點空間。**\n\n清晰的文字，舒服的節奏。讓每一個想法，都有自在展開的空間。",
+      "previewPlaceholder": "接下來，想聊點什麼？",
+      "process": "過程展示",
+      "processHelp": "選擇 nanobot 工作時展示多少細節。",
+      "autoHelp": "工作時顯示進度，結束後保持簡潔。",
+      "expandedHelp": "預設展開工具活動與子任務詳情。",
+      "summaryHelp": "顯示修改檔案和增刪行數。",
+      "diffHelp": "在對話中直接展示程式碼差異。",
+      "collapsedHelp": "預設收合程式碼差異，需要時點開。"
+    },
     "readingTextSize": {
       "small": "閱讀字級：小",
       "standard": "閱讀字級：標準",

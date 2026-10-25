@@ -644,6 +644,28 @@
       "failed": "Tác vụ thất bại. Nhấp để xem chi tiết.",
       "interrupted": "Tác vụ cần chú ý. Nhấp để tiếp tục."
     },
+    "appearance": {
+      "system": "Theo hệ thống",
+      "reading": "Đọc",
+      "readingHelp": "Điều chỉnh tin nhắn, mã và ô soạn thảo, không thay đổi phần điều hướng.",
+      "custom": "Tùy chỉnh",
+      "customSize": "Cỡ chữ tùy chỉnh",
+      "customRange": "Nhập số nguyên từ {{min}} đến {{max}} px.\nMã thay đổi theo cỡ chữ; ô nhập liệu luôn giữ tối thiểu 16px.",
+      "customInvalid": "Hãy dùng số nguyên từ {{min}} đến {{max}} px.\nCỡ chữ vẫn giữ ở {{size}} px.",
+      "small": "Nhỏ",
+      "standard": "Tiêu chuẩn",
+      "large": "Lớn",
+      "preview": "Xem trước trực tiếp",
+      "previewText": "**Một chút không gian để suy nghĩ.**\n\nCâu chữ rõ ràng, đọc thật thoải mái. Biến không gian này thành của riêng bạn.",
+      "previewPlaceholder": "Chúng ta nên bắt đầu từ đâu?",
+      "process": "Hiển thị hoạt động",
+      "processHelp": "Chọn mức độ chi tiết hiển thị khi nanobot làm việc.",
+      "autoHelp": "Hiển thị tiến độ khi đang làm việc và thu gọn khi hoàn tất.",
+      "expandedHelp": "Mặc định mở rộng chi tiết hoạt động.",
+      "summaryHelp": "Hiển thị các tệp đã thay đổi và số dòng.",
+      "diffHelp": "Hiển thị thay đổi mã ngay trong cuộc trò chuyện.",
+      "collapsedHelp": "Thu gọn thay đổi mã cho đến khi bạn mở ra."
+    },
     "readingTextSize": {
       "small": "Cỡ chữ đọc nhỏ",
       "standard": "Cỡ chữ đọc tiêu chuẩn",

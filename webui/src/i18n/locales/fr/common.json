@@ -644,6 +644,28 @@
       "failed": "La tâche a échoué. Cliquez pour les détails.",
       "interrupted": "La tâche demande votre attention. Cliquez pour continuer."
     },
+    "appearance": {
+      "system": "Système",
+      "reading": "Lecture",
+      "readingHelp": "Ajustez les messages, le code et la zone de saisie, sans changer la navigation.",
+      "custom": "Personnalisé",
+      "customSize": "Taille du texte personnalisée",
+      "customRange": "Saisissez un nombre entier entre {{min}} et {{max}} px.\nLe code suit la taille du texte ; le champ de saisie reste à 16px minimum.",
+      "customInvalid": "Utilisez un nombre entier entre {{min}} et {{max}} px.\nLe texte reste à {{size}} px.",
+      "small": "Petit",
+      "standard": "Standard",
+      "large": "Grand",
+      "preview": "Aperçu en direct",
+      "previewText": "**Un peu d’espace pour réfléchir.**\n\nDes mots clairs, une lecture agréable. Faites de cet espace le vôtre.",
+      "previewPlaceholder": "Par où commencer ?",
+      "process": "Affichage de l’activité",
+      "processHelp": "Choisissez le niveau de détail affiché pendant que nanobot travaille.",
+      "autoHelp": "Affichez la progression en cours et gardez les activités terminées compactes.",
+      "expandedHelp": "Gardez les détails de l’activité développés par défaut.",
+      "summaryHelp": "Affichez les fichiers modifiés et le nombre de lignes.",
+      "diffHelp": "Affichez les changements de code directement dans la conversation.",
+      "collapsedHelp": "Gardez les changements de code repliés jusqu’à leur ouverture."
+    },
     "readingTextSize": {
       "small": "Texte de lecture : petit",
       "standard": "Texte de lecture : standard",

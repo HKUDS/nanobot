@@ -46,16 +46,17 @@ import { RuntimeConfigSettings } from "@/components/settings/system/RuntimeConfi
 import { RuntimeSettings } from "@/components/settings/system/RuntimeSettings";
 import type { SettingsController } from "@/components/settings/useSettingsController";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
+import type { ThemePreference } from "@/hooks/useTheme";
 import type { ChatSummary, SessionAutomationJob, SkillSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface SettingsPageProps {
   registerExitGuard?: (guard: SettingsExitGuard | null) => void;
   controller: SettingsController;
-  theme: "light" | "dark";
+  themePreference: ThemePreference;
   showSidebar: boolean;
   mainNavigationExpanded: boolean;
-  onToggleTheme: () => void;
+  onChangeTheme: (value: ThemePreference) => void;
   onBackToChat: () => void;
   skills: SkillSummary[];
   skillsLoading: boolean;
@@ -76,10 +77,10 @@ interface SettingsPageProps {
 export function SettingsPage({
   registerExitGuard,
   controller,
-  theme,
+  themePreference,
   showSidebar,
   mainNavigationExpanded,
-  onToggleTheme,
+  onChangeTheme,
   onBackToChat,
   skills,
   skillsLoading,
@@ -272,8 +273,8 @@ export function SettingsPage({
       case "appearance":
         return (
           <AppearanceSettings
-            theme={theme}
-            onToggleTheme={onToggleTheme}
+            themePreference={themePreference}
+            onChangeTheme={onChangeTheme}
             localPrefs={localPrefs}
             onChangeLocalPrefs={setLocalPrefs}
           />

@@ -129,7 +129,7 @@ function SkeletonSurface() {
           automationsError: state === "error" ? "Preview read failed" : null,
         },
       }}
-        theme={dark ? "dark" : "light"} showSidebar mainNavigationExpanded={false} onToggleTheme={noop} onBackToChat={noop}
+        themePreference={dark ? "dark" : "light"} showSidebar mainNavigationExpanded={false} onChangeTheme={noop} onBackToChat={noop}
         skills={empty ? [] : [skill]} skillsLoading={loading && empty} skillsError={state === "error"} isRestarting={false} hostChromeInset={false} /></div>
         : <main className="settings-grid mx-auto w-full p-4" style={surface === "automations" ? { maxWidth: 960 } : undefined}>
           {surface === "chats" ? <div style={{ height: 440, width: 280, maxWidth: "100%" }} className="bg-sidebar"><ChatList sessions={empty ? [] : sessions} activeKey={null} loading={loading} density={density}

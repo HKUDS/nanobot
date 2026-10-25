@@ -644,6 +644,28 @@
       "failed": "작업이 실패했습니다. 눌러서 자세히 확인하세요.",
       "interrupted": "확인이 필요합니다. 눌러서 계속하세요."
     },
+    "appearance": {
+      "system": "시스템 설정",
+      "reading": "읽기",
+      "readingHelp": "메시지, 코드, 입력창의 글자 크기를 조절합니다. 탐색 메뉴는 바뀌지 않습니다.",
+      "custom": "사용자 지정",
+      "customSize": "사용자 지정 글자 크기",
+      "customRange": "{{min}}~{{max}} px 사이의 정수를 입력하세요.\n코드는 본문에 맞춰 조절되며, 입력란은 최소 16px을 유지합니다.",
+      "customInvalid": "{{min}}~{{max}} px 사이의 정수를 사용하세요.\n본문은 현재 {{size}} px로 유지됩니다.",
+      "small": "작게",
+      "standard": "표준",
+      "large": "크게",
+      "preview": "실시간 미리보기",
+      "previewText": "**생각을 위한 작은 여유.**\n\n명확한 글과 편안한 읽기. 이 공간을 나에게 맞게 꾸며 보세요.",
+      "previewPlaceholder": "어디서부터 시작할까요?",
+      "process": "활동 표시",
+      "processHelp": "nanobot이 작업하는 동안 표시할 세부 정보의 양을 선택하세요.",
+      "autoHelp": "작업 중에는 진행 상황을 표시하고, 완료 후에는 간결하게 표시합니다.",
+      "expandedHelp": "활동 세부 정보를 기본으로 펼쳐 둡니다.",
+      "summaryHelp": "변경된 파일과 줄 수를 표시합니다.",
+      "diffHelp": "코드 변경 내용을 대화에 바로 표시합니다.",
+      "collapsedHelp": "코드 변경 내용은 직접 열 때까지 접어 둡니다."
+    },
     "readingTextSize": {
       "small": "읽기 글자 크기: 작게",
       "standard": "읽기 글자 크기: 표준",

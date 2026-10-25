@@ -15,7 +15,8 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, Dia
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { SettingsIcon } from "@/components/icons/product-icons";
-import { initializeI18n } from "@/i18n";
+import { initializeI18n, setAppLanguage } from "@/i18n";
+import { normalizeLocale } from "@/i18n/config";
 import type { McpPresetInfo, UIMessage } from "@/lib/types";
 import { SkeletonFixture } from "./skeleton-fixture";
 import { installSkeletonPreviewApi, SkeletonAdditionsFixture } from "./skeleton-additions-fixture";
@@ -42,6 +43,7 @@ import { ThemeToggleFixture } from "./theme-toggle-fixture";
 import { DisplayMathFixture } from "./display-math-fixture";
 import { AttachmentLayoutFixture } from "./attachment-layout-fixture";
 import { LoadedSessionSearchFixture } from "./loaded-session-search-fixture";
+import { AppearanceFixture } from "./appearance-fixture";
 
 const history: UIMessage[] = [
   { id: "question", role: "user", content: "Earlier question", createdAt: 1_700_000_000_000 },
@@ -214,8 +216,13 @@ function AppsFixture() {
 if (parameters.get("case") === "skeleton-additions") installSkeletonPreviewApi();
 if (parameters.get("case") === "idle-compaction") installIdleCompactionApi();
 await initializeI18n();
+if (parameters.get("case") === "appearance" && parameters.has("lang")) {
+  await setAppLanguage(normalizeLocale(parameters.get("lang")));
+}
 createRoot(document.getElementById("root")!).render(<TooltipProvider>
-  {parameters.get("case") === "loaded-session-search"
+  {parameters.get("case") === "appearance"
+    ? <AppearanceFixture />
+    : parameters.get("case") === "loaded-session-search"
     ? <LoadedSessionSearchFixture />
     : parameters.get("case") === "attachments"
     ? <AttachmentLayoutFixture />
