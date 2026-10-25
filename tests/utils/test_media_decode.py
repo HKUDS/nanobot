@@ -97,6 +97,19 @@ def test_returns_none_for_malformed_data_url(tmp_path) -> None:
     assert save_base64_data_url("not-a-data-url", tmp_path) is None
 
 
+@pytest.mark.parametrize("marker", ["BASE64", "Base64"])
+def test_saves_data_url_when_base64_marker_case_varies(tmp_path: Path, marker: str) -> None:
+    """RFC 2397 treats the base64 token as case-insensitive."""
+    payload = b"hello"
+    encoded = base64.b64encode(payload).decode()
+    result = save_base64_data_url(
+        f"data:text/plain;charset=utf-8;{marker},{encoded}",
+        tmp_path,
+    )
+    assert result is not None
+    assert Path(result).read_bytes() == payload
+
+
 @pytest.mark.parametrize("payload", ["not-valid-base64!!!", "@@@@"])
 def test_returns_none_for_broken_base64(tmp_path, payload: str) -> None:
     assert save_base64_data_url(f"data:image/png;base64,{payload}", tmp_path) is None

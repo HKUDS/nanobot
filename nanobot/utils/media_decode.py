@@ -16,7 +16,11 @@ from nanobot.utils.helpers import safe_filename
 DEFAULT_MAX_BYTES = 10 * 1024 * 1024
 MAX_FILE_SIZE = DEFAULT_MAX_BYTES
 
-_DATA_URL_RE = re.compile(r"^data:([^;,]+)(?:;[^,]*)*;base64,(.+)$", re.DOTALL)
+# RFC 2397: the ";base64" token is case-insensitive. Clients send BASE64 and Base64.
+_DATA_URL_RE = re.compile(
+    r"^data:([^;,]+)(?:;[^,]*)*;base64,(.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
 _MIME_EXTENSION_OVERRIDES = {
     # Python's ``mimetypes`` maps browser-recorded audio/webm to ``.weba`` and
     # audio/ogg to ``.oga`` on macOS. Some transcription APIs validate by the
