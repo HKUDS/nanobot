@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { LoadingRing } from "@/components/ui/loading-ring";
 import { HoverHint } from "@/components/ui/hover-hint";
 import { SubagentThread } from "@/components/thread/SubagentThread";
+import { ComposerActionIcon } from "@/components/thread/ComposerActionIcon";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useThreadVisibility } from "@/hooks/useThreadVisibility";
@@ -174,18 +175,18 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
         }}>
           <div className="flex min-h-[60px] shrink-0 items-center gap-3 border-b py-2 pl-5 pr-14">
             <SheetTitle className="min-w-0 flex-1 truncate text-base" title={selected?.label}>{selected?.label}</SheetTitle>
-            <SheetDescription className={selected?.state === "done" ? "sr-only" : "flex shrink-0 items-center gap-2 whitespace-nowrap"}>
+            <SheetDescription className={selected?.state === "done" || selected?.state === "running" ? "sr-only" : "flex shrink-0 items-center gap-2 whitespace-nowrap"}>
               {selected ? <>
-                {selected.state !== "done" ? <TaskStateIcon task={selected} /> : null}
+                {selected.state !== "done" && selected.state !== "running" ? <TaskStateIcon task={selected} /> : null}
                 <span>{t(`thread.subagents.states.${selected.state}`)}</span>
               </> : null}
             </SheetDescription>
             {selected && canStopSelected ? <HoverHint content={t("thread.subagents.stopTask", { label: selected.label })}>
-              <Button type="button" variant="ghost" size="icon"
-                className="h-11 w-11 shrink-0 rounded-full text-muted-foreground hover:text-destructive sm:h-9 sm:w-9"
+              <Button type="button" size="icon"
+                className="composer-primary-action touch-target h-11 w-11 shrink-0 rounded-full border border-transparent bg-foreground/[0.045] bg-clip-padding text-foreground/85 hover:bg-foreground/[0.08] hover:text-foreground disabled:text-muted-foreground/50 sm:h-9 sm:w-9"
                 aria-label={t("thread.subagents.stopTask", { label: selected.label })} aria-busy={stoppingId === selected.task_id}
                 disabled={stoppingId !== null} onClick={() => void stop(selected)}>
-                <StopIcon className="h-3.5 w-3.5" aria-hidden />
+                {selected.state === "running" ? <ComposerActionIcon state="stop" /> : <StopIcon className="h-3.5 w-3.5" aria-hidden />}
               </Button>
             </HoverHint> : null}
           </div>

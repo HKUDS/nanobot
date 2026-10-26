@@ -56,6 +56,9 @@ for (const width of [1440, 390]) {
     await expect(detail).toBeFocused();
     await settledMotion(detail);
     const headerStop = detail.getByRole("button", { name: "Stop 检查项目实现", exact: true });
+    await expect(detail).toHaveAccessibleDescription("Running");
+    await expect(detail.getByText("Running", { exact: true }).locator("..")).toHaveClass(/\bsr-only\b/);
+    await expect(headerStop.locator('[data-action-icon="stop"][data-active] .loading-ring-arc')).toBeVisible();
     const headerTitle = detail.getByRole("heading", { name: "检查项目实现", exact: true });
     const stopBounds = (await headerStop.boundingBox())!;
     const closeBounds = (await detail.getByRole("button", { name: "Close", exact: true }).boundingBox())!;

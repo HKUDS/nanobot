@@ -706,6 +706,9 @@ describe("session-owned task UI", () => {
     const detail = screen.getByRole("dialog", { name: "Config check" });
     const stop = within(detail).getByRole("button", { name: "Stop Config check" });
     expect(within(detail).getByRole("heading", { name: "Config check" }).parentElement).toContainElement(stop);
+    expect(detail).toHaveAccessibleDescription("Running");
+    expect(within(detail).getByText("Running").parentElement).toHaveClass("sr-only");
+    expect(stop.querySelector('[data-action-icon="stop"][data-active] .loading-ring-arc')).toBeInTheDocument();
     await user.click(stop);
     expect(stop).toBeDisabled();
     expect(stop).toHaveAttribute("aria-busy", "true");
