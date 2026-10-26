@@ -1962,6 +1962,10 @@
       "removeQuotedContext": "Remover citação",
       "modelNotConfigured": "Modelo não configurado",
       "configureModel": "Configurar modelo",
+      "shell": {
+        "run": "Executar comando Shell",
+        "removeContext": "Remova os anexos e o texto citado antes de executar um comando."
+      },
       "chooseAI": "Escolher modelo",
       "switchModel": "Trocar modelo",
       "manageModels": "Gerenciar presets",

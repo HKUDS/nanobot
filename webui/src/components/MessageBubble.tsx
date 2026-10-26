@@ -16,6 +16,7 @@ import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { FallbackResponseSources } from "@/components/ResponseSourceBadge";
 import { ImageGallery } from "@/components/ImageGallery";
 import { InlineImageProvider, useInlineImages } from "@/components/InlineImageContext";
+import { INLINE_REFERENCE_HIGHLIGHT_COLOR, InlineTokenHighlight } from "@/components/InlineTokenHighlight";
 import { MarkdownText } from "@/components/MarkdownText";
 import { SlashCommandText } from "@/components/SlashCommandText";
 import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
@@ -452,7 +453,16 @@ export function MessageBubble({
       message.deliveryStatus === "sending" || message.deliveryStatus === "failed";
     const quotedContext = parsedMessage.quotedContext;
     const slashCommand = matchingSlashCommand(userContent, slashCommands);
-    const messageText = slashCommand ? (
+    const bangPrefix = /^(\s*)!/.exec(userContent);
+    const messageText = bangPrefix ? (
+      <>
+        {bangPrefix[1]}
+        <InlineTokenHighlight testId="message-shell-prefix" className="font-normal" color={INLINE_REFERENCE_HIGHLIGHT_COLOR}>
+          <span className="opacity-90">!</span>
+        </InlineTokenHighlight>
+        {userContent.slice(bangPrefix[0].length)}
+      </>
+    ) : slashCommand ? (
       <>
         <SlashCommandText command={slashCommand.command} />
         <UserMessageText

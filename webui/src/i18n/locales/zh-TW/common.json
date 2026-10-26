@@ -1948,6 +1948,10 @@
       "removeQuotedContext": "移除引用",
       "modelNotConfigured": "尚未設定模型",
       "configureModel": "設定模型",
+      "shell": {
+        "run": "執行 Shell 命令",
+        "removeContext": "執行命令前，請移除附件和引用文字。"
+      },
       "chooseAI": "選擇模型",
       "switchModel": "切換模型",
       "manageModels": "管理預設",

@@ -22,6 +22,7 @@ from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest
 
 from nanobot.bus.events import (
+    INBOUND_META_USER_SHELL,
     OUTBOUND_META_AGENT_UI,
     OutboundMessage,
 )
@@ -57,6 +58,7 @@ from nanobot.webui.outbound_wire import (
     WebUIWirePayload,
     WebUIWirePersistence,
     project_tool_events,
+    render_plain_text,
 )
 from nanobot.webui.session_identity import is_valid_webui_chat_id
 from nanobot.webui.transcript import WEBUI_TRANSCRIPT_INCOMPLETE_KEY
@@ -1235,7 +1237,8 @@ class WebSocketChannel(BaseChannel):
         """Serialize one ordinary outbound message selected by the projector."""
         conns = list(self._subs.get(msg.chat_id, ()))
         text = msg.content
-        wire_text = self._media.rewrite_local_markdown_images(text)
+        user_shell = msg.metadata.get(INBOUND_META_USER_SHELL) is True
+        wire_text = render_plain_text(text) if user_shell else self._media.rewrite_local_markdown_images(text)
         payload: dict[str, Any] = {
             "event": "message",
             "chat_id": msg.chat_id,
@@ -1277,7 +1280,7 @@ class WebSocketChannel(BaseChannel):
             metadata=msg.metadata,
             phase=phase,
             include_source=True,
-            transcript_overrides={"text": text},
+            transcript_overrides={"text": text, **({"render_as": "text"} if user_shell else {})},
         )
         raw = json.dumps(payload, ensure_ascii=False)
         if not conns:

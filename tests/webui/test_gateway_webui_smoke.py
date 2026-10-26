@@ -266,6 +266,8 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
             }))
             shell = await _recv_until(ws, "message")
             assert "shell-ok" in shell["text"]
+            assert shell["text"].startswith("```text\n")
+            assert shell["text"].endswith("\n```")
             assert shell["turn_id"] == "shell-turn"
             await _recv_until(ws, "turn_end")
 
@@ -287,7 +289,7 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
         assert "/model" in contents
         assert any("Current model: `custom/smoke-model`" in text for text in contents)
         assert "!printf shell-ok" in contents
-        assert any("shell-ok" in text for text in contents)
+        assert shell["text"] in contents
     finally:
         _stop_gateway(process)
 

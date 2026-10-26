@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import INBOUND_META_USER_SHELL, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.manager import ChannelManager
 from nanobot.channels.websocket import runtime
@@ -478,3 +478,27 @@ async def test_normal_cleanup_can_overlap_connection_retirement(monkeypatch) -> 
     assert connection not in channel._connection_outbound
     assert connection not in channel._conn_chats
     assert channel._subs == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_shell", [True, False])
+async def test_shell_output_is_literal_without_changing_other_command_replies(user_shell: bool) -> None:
+    channel = _channel()
+    connection = _RecordingConnection()
+    channel._attach(cast(Any, connection), "shell-output")
+    output = "Path\n----\n  __pycache__\n```mermaid\nflowchart LR\n```\n![preview](local.png)"
+    message = OutboundMessage(
+        channel="websocket", chat_id="shell-output", content=output,
+        metadata={"render_as": "text", INBOUND_META_USER_SHELL: user_shell},
+    )
+    try:
+        await channel.send(message)
+        expected = f"````text\n{output}\n````" if user_shell else output
+        assert await _next_text(connection) == expected
+        persisted = channel._persist_turn_transcript_event.await_args
+        assert persisted.kwargs["transcript_overrides"] == {
+            "text": output, **({"render_as": "text"} if user_shell else {}),
+        }
+        assert message.content == output
+    finally:
+        await channel._cleanup_connection(cast(Any, connection))

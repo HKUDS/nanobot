@@ -1,3 +1,5 @@
+import { EOL } from "node:os";
+
 import { expect, test, type Locator } from "@playwright/test";
 
 async function expectMatchingInputLayers(input: Locator) {
@@ -134,6 +136,38 @@ for (const narrow of [false, true]) {
       await expect(command.locator("span")).toHaveCSS("opacity", "0.9");
       await expect(page.locator("[data-user-text-bubble]").last().locator("p")).toHaveText(text);
       await page.screenshot({ path: info.outputPath("slash-command-and-skill.png") });
+
+      const shellCommand = '  !echo "hello! $workflow @typography"\nWrite-Output "命令输出"';
+      await input.fill(shellCommand);
+      const bang = page.getByTestId("composer-shell-prefix");
+      await expect(bang).toHaveText("!");
+      await expect(bang).toHaveCSS("color", await page.getByTestId("message-skill-reference-workflow").evaluate(node => getComputedStyle(node).color));
+      await expect(bang).toHaveCSS("font-weight", "400");
+      await expectMatchingInputLayers(input);
+      await input.press("ControlOrMeta+a");
+      await input.press("ControlOrMeta+c");
+      expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(shellCommand);
+      await input.press("ArrowRight");
+      await page.screenshot({ path: info.outputPath("composer-bang.png") });
+      const prefixColor = await bang.evaluate(node => getComputedStyle(node).color);
+      await page.getByRole("button", { name: "Run Shell command", exact: true }).click();
+      const sentPrefix = page.getByTestId("message-shell-prefix");
+      await expect(sentPrefix).toHaveText("!");
+      await expect(sentPrefix).toHaveCSS("color", prefixColor);
+      await expect(sentPrefix).toHaveCSS("font-weight", "400");
+      const sentCommand = page.locator("[data-user-text-bubble]").last().locator("p");
+      expect(await sentCommand.textContent()).toBe(shellCommand.trim());
+      await sentCommand.evaluate(node => {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        const selection = window.getSelection()!;
+        selection.removeAllRanges();
+        selection.addRange(range);
+      });
+      await page.keyboard.press("ControlOrMeta+c");
+      expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(shellCommand.trim().replaceAll("\n", EOL));
+      await page.evaluate(() => window.getSelection()?.removeAllRanges());
+      await page.screenshot({ path: info.outputPath("sent-bang.png") });
       expect(errors).toEqual([]);
     });
   }

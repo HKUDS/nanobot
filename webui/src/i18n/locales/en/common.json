@@ -2154,6 +2154,10 @@
       "removeQuotedContext": "Remove quote",
       "modelNotConfigured": "Model not configured",
       "configureModel": "Configure model",
+      "shell": {
+        "run": "Run Shell command",
+        "removeContext": "Remove attachments and quoted text before running a command."
+      },
       "chooseAI": "Choose model",
       "switchModel": "Switch model",
       "manageModels": "Manage presets",

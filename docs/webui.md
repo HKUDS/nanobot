@@ -183,6 +183,8 @@ In Restricted mode, ordinary file and shell work stays inside the selected proje
 
 The composer supports text, attachments (images, documents, and videos), slash commands and `@` mentions. With voice transcription configured, the empty composer offers voice input; transcription is added to the draft before sending.
 
+Start a message with `!` to run a Shell command directly in the topic's workspace, without calling the model (for example, `!git status`). Multiline commands are supported; remove attachments and quoted text before running a command. Commands run immediately, separately from waiting messages, and use the topic's existing permissions and Shell limits.
+
 Images appear as thumbnails above the draft. Hover over a thumbnail for its filename and size; use its top-right × to remove it before sending. Documents and videos keep their file cards, and attachment errors remain visible.
 
 Choose or drop MP4, WebM, or MOV videos into the composer (one per message, up to 20 MiB per upload). You can play them in WebUI; the Agent cannot directly analyze their contents yet.

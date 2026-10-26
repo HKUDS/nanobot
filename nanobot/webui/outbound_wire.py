@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -21,6 +22,14 @@ _JSONValue: TypeAlias = (
 )
 
 _TOOL_EVENT_BINARY_OMISSION = "[binary content omitted from WebUI]"
+
+
+def render_plain_text(content: str) -> str:
+    """Keep literal output intact in the clients' existing Markdown code blocks."""
+    longest = max((len(match[0]) for match in re.finditer(r"`+", content)), default=0)
+    fence = "`" * max(3, longest + 1)
+    newline = "" if content.endswith("\n") else "\n"
+    return f"{fence}text\n{content}{newline}{fence}"
 
 
 def _is_base64_data_url(value: str) -> bool:

@@ -69,6 +69,7 @@ export interface SendOptions {
   quotedContext?: string;
   workspaceScope?: WorkspaceScopePayload | null;
   sideChannel?: boolean;
+  userShell?: boolean;
   finalizeActiveTurn?: boolean;
   /** Append guidance to the running turn without detaching its active answer segment. */
   continueActiveTurn?: boolean;
@@ -1023,9 +1024,11 @@ export function useNanobotStream(
       delete clientOptions.sideChannel;
       delete clientOptions.finalizeActiveTurn;
       delete clientOptions.continueActiveTurn;
-      const delivery = wireMedia?.length
-        ? client.sendAttachments(chatId, outboundContent, wireMedia, clientOptions)
-        : undefined;
+      const delivery = options?.userShell
+        ? client.sendUserShellCommand(chatId, outboundContent, clientOptions)
+        : wireMedia?.length
+          ? client.sendAttachments(chatId, outboundContent, wireMedia, clientOptions)
+          : undefined;
       if (!delivery) client.sendMessage(chatId, outboundContent, undefined, clientOptions);
       // Every caller may keep this promise to retain its draft until accepted.
       // Also observe it here for queued/landing sends without an active composer.

@@ -498,6 +498,20 @@ describe("MessageBubble", () => {
     expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@Zoom");
   });
 
+  it.each(["! ls", "  !pwd", '!echo "$github" @zoom\nWrite-Output "hello!"'])("highlights a sent bang prefix while preserving the command literally: %s", (content) => {
+    const message: UIMessage = { id: "u-shell", role: "user", content, createdAt: Date.now() };
+    const { container, rerender } = render(<MessageBubble message={message} cliApps={CLI_APPS} />);
+    const prefix = screen.getByTestId("message-shell-prefix");
+    expect(prefix).toHaveTextContent(/^!$/);
+    expect(prefix).toHaveClass("font-normal");
+    expect(prefix.style.color).toBe("var(--inline-reference-highlight)");
+    expect(container.querySelector("[data-user-text-bubble] p")?.textContent).toBe(content);
+
+    rerender(<MessageBubble message={{ ...message, content: "Explain !pwd, please!" }} />);
+    expect(screen.queryByTestId("message-shell-prefix")).not.toBeInTheDocument();
+    expect(container.querySelector("[data-user-text-bubble] p")?.textContent).toBe("Explain !pwd, please!");
+  });
+
   it("highlights skill references without a live skill catalog", () => {
     const message: UIMessage = {
       id: "u-skill-reference",

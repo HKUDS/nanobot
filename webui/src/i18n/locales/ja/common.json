@@ -1948,6 +1948,10 @@
       "removeQuotedContext": "引用を削除",
       "modelNotConfigured": "モデルが未設定です",
       "configureModel": "モデルを設定",
+      "shell": {
+        "run": "Shell コマンドを実行",
+        "removeContext": "コマンドを実行する前に、添付ファイルと引用テキストを削除してください。"
+      },
       "chooseAI": "モデルを選択",
       "switchModel": "モデルを切り替え",
       "manageModels": "プリセット管理",

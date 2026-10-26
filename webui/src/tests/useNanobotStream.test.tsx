@@ -101,6 +101,7 @@ function fakeClient() {
         return () => errorHandlers.delete(handler);
       },
       sendMessage: vi.fn(lifecycle.sendMessage.bind(lifecycle)),
+      sendUserShellCommand: vi.fn(lifecycle.sendUserShellCommand.bind(lifecycle)),
       sendAttachments: vi.fn(async (...args: Parameters<NanobotClient["sendAttachments"]>) => {
         lifecycle.sendMessage(args[0], args[1], undefined, args[3]);
       }),
@@ -3057,6 +3058,34 @@ describe("useNanobotStream", () => {
     expect(result.current.isStreaming).toBe(false);
     expect(result.current.messages).toHaveLength(1);
     expect(result.current.messages[0].content).toBe("long task");
+  });
+
+  it("delivers bang output separately while the active Agent answer continues", async () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("shell", EMPTY_MESSAGES), { wrapper: wrap(fake.client) });
+    act(() => { result.current.send("long task"); });
+    const activeTurnId = fake.client.sendMessage.mock.calls.at(-1)![3]!.turnId!;
+    act(() => { fake.emit("shell", { event: "delta", chat_id: "shell", text: "first ", turn_id: activeTurnId, stream_id: "answer" }); });
+    await flushStreamFrame();
+    const answerId = result.current.messages.find((row) => row.role === "assistant")!.id;
+    let shell!: ReturnType<typeof result.current.send>;
+    act(() => { shell = result.current.send("!pwd", undefined, { sideChannel: true, userShell: true }); });
+    expect(fake.client.sendUserShellCommand).toHaveBeenCalledWith("shell", "!pwd", expect.objectContaining({ turnId: shell!.turnId, startsNewRun: false }));
+    expect(fake.client.sendMessage).toHaveBeenCalledOnce();
+    act(() => {
+      fake.emit("shell", { event: "message_accepted", chat_id: "shell", turn_id: shell!.turnId, starts_turn: false, active_turn_id: activeTurnId });
+      fake.emit("shell", { event: "message", chat_id: "shell", text: "```text\nPath\n----\n```", turn_id: shell!.turnId });
+    });
+    await shell!.delivery;
+    expect(result.current.isStreaming).toBe(true);
+    act(() => { fake.emit("shell", { event: "delta", chat_id: "shell", text: "last", turn_id: activeTurnId, stream_id: "answer" }); });
+    await flushStreamFrame();
+    expect(result.current.messages.find((row) => row.id === answerId)).toMatchObject({ content: "first last", isStreaming: true });
+    const shellAnswer = result.current.messages.find((row) => row.turnId === shell!.turnId && row.role === "assistant");
+    expect(shellAnswer).toMatchObject({ content: "```text\nPath\n----\n```" });
+    expect(Boolean(shellAnswer!.isStreaming)).toBe(false);
+    act(() => { fake.emit("shell", { event: "turn_end", chat_id: "shell", turn_id: activeTurnId }); });
+    expect(result.current.isStreaming).toBe(false);
   });
 
   it("does not mark side-channel slash commands as streaming", () => {

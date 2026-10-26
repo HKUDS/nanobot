@@ -1948,6 +1948,10 @@
       "removeQuotedContext": "인용 삭제",
       "modelNotConfigured": "모델이 설정되지 않음",
       "configureModel": "모델 설정",
+      "shell": {
+        "run": "Shell 명령 실행",
+        "removeContext": "명령을 실행하기 전에 첨부 파일과 인용문을 제거하세요."
+      },
       "chooseAI": "모델 선택",
       "switchModel": "모델 전환",
       "manageModels": "프리셋 관리",

@@ -40,7 +40,7 @@ _CONTENT_FIELDS = frozenset({
     "session_message", INBOUND_META_LOCAL_MEDIA, "tool_events", "edits", "source", "response_sources", "resuming",
     "merge_next", "latency_ms", "usage", "round_usages", "context_window_tokens", "goal_state",
     "outcome", "failure_kind", "failure_error_kind", "failure_attempts", "failure_message",
-    "transcript_incomplete", "stream_id", "compaction_id", "phase", "reason",
+    "transcript_incomplete", "stream_id", "compaction_id", "phase", "reason", "render_as",
 })
 
 

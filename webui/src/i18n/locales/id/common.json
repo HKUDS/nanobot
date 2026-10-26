@@ -1948,6 +1948,10 @@
       "removeQuotedContext": "Hapus kutipan",
       "modelNotConfigured": "Model belum dikonfigurasi",
       "configureModel": "Konfigurasi model",
+      "shell": {
+        "run": "Jalankan perintah Shell",
+        "removeContext": "Hapus lampiran dan teks kutipan sebelum menjalankan perintah."
+      },
       "chooseAI": "Pilih model",
       "switchModel": "Ganti model",
       "manageModels": "Kelola preset",

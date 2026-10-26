@@ -53,8 +53,9 @@ import {
 import {
   composerMentionText,
   isCapabilityMentionStart,
+  type CapabilityMentionSegment,
 } from "@/lib/composer-mention-text";
-import { INLINE_TOKEN_HIGHLIGHT_COLOR } from "@/components/InlineTokenHighlight";
+import { INLINE_REFERENCE_HIGHLIGHT_COLOR, INLINE_TOKEN_HIGHLIGHT_COLOR, InlineTokenHighlight } from "@/components/InlineTokenHighlight";
 import { SlashCommandText } from "@/components/SlashCommandText";
 import {
   ChevronDown,
@@ -1324,18 +1325,21 @@ export function ThreadComposer({
   );
   const hasErrors = images.some((img) => img.status === "error");
 
+  const isUserShell = value.trimStart().startsWith("!");
+  const requiresModelSetup = modelNeedsSetup && !isUserShell;
   const hasComposerContent = value.trim().length > 0 || readyImages.length > 0;
   const canSend =
     !interactionDisabled
-    && !modelNeedsSetup
+    && !requiresModelSetup
     && !encoding
     && !hasErrors
     && hasComposerContent;
   const canOpenModelSettings = Boolean(
-    modelNeedsSetup && onModelBadgeClick && !interactionDisabled,
+    requiresModelSetup && onModelBadgeClick && !interactionDisabled,
   );
   const canQueueGuidance =
     isStreaming
+    && !isUserShell
     && !interactionDisabled
     && !modelNeedsSetup
     && !encoding
@@ -1354,7 +1358,7 @@ export function ThreadComposer({
   }, [interactionDisabled, slashMenuDismissed, value]);
 
   const skillQuery = useMemo(() => {
-    if (interactionDisabled || slashMenuDismissed) return null;
+    if (interactionDisabled || isUserShell || slashMenuDismissed) return null;
     const caret = Math.min(Math.max(cursorPosition, 0), value.length);
     const beforeCaret = value.slice(0, caret);
     const match = /\$([A-Za-z0-9_-]*)$/i.exec(beforeCaret);
@@ -1364,7 +1368,7 @@ export function ThreadComposer({
       start: match.index,
       text: match[1].toLowerCase(),
     };
-  }, [cursorPosition, interactionDisabled, slashMenuDismissed, value]);
+  }, [cursorPosition, interactionDisabled, isUserShell, slashMenuDismissed, value]);
 
   const skillMenuActive = skillQuery !== null;
   useEffect(() => {
@@ -1498,7 +1502,7 @@ export function ThreadComposer({
 
   const showSlashMenu = filteredSlashCommands.length > 0;
   const cliAppMention = useMemo<CliAppMentionQuery | null>(() => {
-    if (interactionDisabled || cliAppMenuDismissed) return null;
+    if (interactionDisabled || isUserShell || cliAppMenuDismissed) return null;
     const caret = Math.min(Math.max(cursorPosition, 0), value.length);
     const beforeCaret = value.slice(0, caret);
     const match = /@([\p{L}\p{N}_-]*)$/iu.exec(beforeCaret);
@@ -1509,7 +1513,7 @@ export function ThreadComposer({
       start: match.index,
       end: caret,
     };
-  }, [cliAppMenuDismissed, cursorPosition, interactionDisabled, value]);
+  }, [cliAppMenuDismissed, cursorPosition, interactionDisabled, isUserShell, value]);
 
   const mentionSearchActive = cliAppMention !== null;
   useEffect(() => {
@@ -1524,9 +1528,10 @@ export function ThreadComposer({
     () => [...availableSessionMentions, ...boundSessionMentions],
     [availableSessionMentions, boundSessionMentions],
   );
-  const mentionSegments = useMemo(
-    () => splitCapabilityMentionSegments(value, cliApps, mcpPresets, sessionMentionCatalog),
-    [cliApps, mcpPresets, sessionMentionCatalog, value],
+  const mentionSegments = useMemo<CapabilityMentionSegment[]>(
+    () => isUserShell ? [{ kind: "text", text: value }]
+      : splitCapabilityMentionSegments(value, cliApps, mcpPresets, sessionMentionCatalog),
+    [cliApps, isUserShell, mcpPresets, sessionMentionCatalog, value],
   );
   const editMentionInput = useCallback((next: string, cursor: number) => {
     setValue(next);
@@ -1543,7 +1548,7 @@ export function ThreadComposer({
   const { rawSelection, replace: replaceMentionInput } = mentionInput;
   const onPaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
     onAttachmentPaste(event);
-    if (event.defaultPrevented || interactionDisabled || !onInspectAttachment) return;
+    if (event.defaultPrevented || interactionDisabled || isUserShell || !onInspectAttachment) return;
     const raw = event.clipboardData.getData("text/plain");
     const path = pastedFilePath(raw);
     if (!path) return;
@@ -1562,11 +1567,11 @@ export function ThreadComposer({
       if (error instanceof Error && "status" in error && error.status === 404) return;
       setInlineError(error instanceof Error ? error.message : t("message.attachmentUnavailable"));
     });
-  }, [interactionDisabled, onAttachmentPaste, onInspectAttachment, rawSelection, replaceMentionInput, scopeIdentity, t, value]);
+  }, [interactionDisabled, isUserShell, onAttachmentPaste, onInspectAttachment, rawSelection, replaceMentionInput, scopeIdentity, t, value]);
 
   useLayoutEffect(() => {
     if (!pathInspection) return;
-    if (pathInspection.scope !== scopeIdentity || !pathInspection.range.update(value)) {
+    if (isUserShell || pathInspection.scope !== scopeIdentity || !pathInspection.range.update(value)) {
       pathCheckGeneration.current += 1;
       setPathInspection(null);
       return;
@@ -1583,7 +1588,7 @@ export function ThreadComposer({
       }
     }
     setPathInspection(null);
-  }, [addLocal, formatRejection, mentionInput.isComposing, pathInspection, rawSelection, replaceMentionInput, scopeIdentity, value]);
+  }, [addLocal, formatRejection, isUserShell, mentionInput.isComposing, pathInspection, rawSelection, replaceMentionInput, scopeIdentity, value]);
 
   const draftText = composerMentionText(mentionInput.segments).raw;
   const sessionDragInsertion = sessionDragPreview
@@ -1720,11 +1725,11 @@ export function ThreadComposer({
   const showCliAppMenu = filteredMentionCandidates.length > 0;
   const showAnyPalette = showSlashMenu || showCliAppMenu;
   const inlineSegments = useMemo(
-    () => withSkillReferences(displayMentionSegments),
-    [displayMentionSegments],
+    () => isUserShell ? displayMentionSegments : withSkillReferences(displayMentionSegments),
+    [displayMentionSegments, isUserShell],
   );
   const slashCommand = matchingSlashCommand(sessionDragInsertion?.value ?? draftText, slashCommands);
-  const hasInlineDecorations = slashCommand !== null || inlineSegments.some((segment) => segment.kind !== "text");
+  const hasInlineDecorations = isUserShell || slashCommand !== null || inlineSegments.some((segment) => segment.kind !== "text");
   const activeCliMentionApps = useMemo(() => {
     const seen = new Set<string>();
     return mentionSegments.flatMap((segment) => {
@@ -2184,13 +2189,17 @@ export function ThreadComposer({
   }, [completedTurnIds, interactionDisabled, sendQueuedPrompt, isStreaming, pendingQueueKey, queuedPrompt, queuedPromptStorageKey]);
 
   const submit = useCallback(() => {
-    if (modelNeedsSetup) {
+    if (requiresModelSetup) {
       if (hasComposerContent) {
         setModelSetupAttentionRequest((request) => request + 1);
       }
       return;
     }
     if (!canSend) return;
+    if (isUserShell && (images.length > 0 || normalizedQuotedContext)) {
+      setInlineError(t("thread.composer.shell.removeContext"));
+      return;
+    }
     const trimmed = value.trim();
     const content = trimmed;
     if (utf8Bytes(formatQuotedUserMessage(content, normalizedQuotedContext)) > maxTextBytes) {
@@ -2202,11 +2211,12 @@ export function ThreadComposer({
     const payload = queuedImagesToSendImages(readyImagesToQueuedImages(readyImages));
     const attachedCliApps = activeCliMentionApps.map(cliAppMentionPayload);
     const attachedMcpPresets = activeMcpPresetMentions.map(mcpPresetMentionPayload);
-    const options: SendOptions | undefined =
+    const options: SendOptions | undefined = !isUserShell && (
       attachedCliApps.length > 0
       || attachedMcpPresets.length > 0
       || activeSessionMentions.length > 0
       || normalizedQuotedContext
+    )
         ? {
             ...(attachedCliApps.length > 0 ? { cliApps: attachedCliApps } : {}),
             ...(attachedMcpPresets.length > 0 ? { mcpPresets: attachedMcpPresets } : {}),
@@ -2235,10 +2245,10 @@ export function ThreadComposer({
       onQuotedContextChange?.(null);
       return;
     }
-    const isSlashSideChannel = isSideChannelLifecycle(slashLifecycle);
+    const isSideChannel = isUserShell || isSideChannelLifecycle(slashLifecycle);
     const finalizeActiveTurn =
       slashLifecycle === "finalize_active_turn";
-    if (!slashLifecycle) {
+    if (!isUserShell && !slashLifecycle) {
       const prompt = collectGuidancePrompt();
       const error = queuedPromptError(prompt);
       if (error) {
@@ -2260,7 +2270,7 @@ export function ThreadComposer({
       if (draftKey && draftStore && draftStore.get(draftKey) !== submittedDraft) return;
       if (draftKey) draftStore?.delete(draftKey);
       if (hasTouchPrimaryPointer) textareaRef.current?.blur();
-      if (!isStreaming || finalizeActiveTurn) setQueuedPrompt(null);
+      if ((!isStreaming && !isUserShell) || finalizeActiveTurn) setQueuedPrompt(null);
       // Bubble owns the data URL copy; safe to revoke every staged blob
       // preview here without affecting the rendered message.
       clear();
@@ -2270,10 +2280,11 @@ export function ThreadComposer({
     const result = onSend(
       content,
       payload,
-      isSlashSideChannel
+      isSideChannel
         ? {
             ...options,
             sideChannel: true,
+            ...(isUserShell ? { userShell: true } : {}),
             ...(finalizeActiveTurn ? { finalizeActiveTurn } : {}),
           }
         : isStreaming ? { ...options, continueActiveTurn: true } : options,
@@ -2308,15 +2319,18 @@ export function ThreadComposer({
     hasTouchPrimaryPointer,
     hasComposerContent,
     handleStop,
+    images.length,
     isStreaming,
+    isUserShell,
     maxTextBytes,
-    modelNeedsSetup,
+    requiresModelSetup,
     onSend,
     onStop,
     onQuotedContextChange,
     normalizedQuotedContext,
     readyImages,
     slashCommands,
+    t,
     textTooLargeMessage,
     value,
   ]);
@@ -2471,7 +2485,7 @@ export function ThreadComposer({
   const showStopButton = isStreaming && !!onStop && !canSend;
   const actionState: ComposerActionState = showVoiceButton
     ? voiceRecorder.state === "transcribing" ? "busy" : voiceRecorder.isRecording ? "recording" : "voice"
-    : showStopButton ? "stop" : modelNeedsSetup ? "setup" : canSend || !isStreaming ? "send" : "busy";
+    : showStopButton ? "stop" : requiresModelSetup ? "setup" : canSend || !isStreaming ? "send" : "busy";
   const relaxedHeroInput = isHero && images.length === 0 && !isStreaming;
   const compactIdle = compactWhenIdle && !compactControls && !isHero && !composerFocused
     && value.length === 0 && images.length === 0 && !inlineError
@@ -2833,7 +2847,7 @@ export function ThreadComposer({
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
-                    type={showVoiceButton || showStopButton || modelNeedsSetup ? "button" : "submit"}
+                    type={showVoiceButton || showStopButton || requiresModelSetup ? "button" : "submit"}
                     size="icon"
                     disabled={showVoiceButton ? voiceRecorder.buttonDisabled : showStopButton ? interactionDisabled : !canSend && !canOpenModelSettings}
                     aria-label={
@@ -2841,9 +2855,9 @@ export function ThreadComposer({
                         ? voiceButtonLabel
                         : showStopButton
                           ? t("thread.composer.stop")
-                          : modelNeedsSetup
+                          : requiresModelSetup
                             ? t("thread.composer.configureModel", { defaultValue: "Configure model" })
-                            : t("thread.composer.send")
+                            : isUserShell ? t("thread.composer.shell.run") : t("thread.composer.send")
                     }
                     aria-keyshortcuts={showVoiceButton ? VOICE_SHORTCUT_ARIA : undefined}
                     onPointerDown={showVoiceButton ? voiceRecorder.beginPress : undefined}
@@ -2854,7 +2868,7 @@ export function ThreadComposer({
                       event.preventDefault();
                       event.stopPropagation();
                     }}
-                    onClick={showVoiceButton ? voiceRecorder.handleClick : showStopButton ? handleStop : modelNeedsSetup ? onModelBadgeClick : undefined}
+                    onClick={showVoiceButton ? voiceRecorder.handleClick : showStopButton ? handleStop : requiresModelSetup ? onModelBadgeClick : undefined}
                     className={cn(
                       "composer-primary-action thread-composer-action thread-composer-round-action touch-target rounded-full bg-clip-padding",
                       actionState === "stop"
@@ -2867,7 +2881,9 @@ export function ThreadComposer({
                       isHero ? "h-8 w-8" : "h-9 w-9",
                     )}
                   >
-                    <ComposerActionIcon state={actionState} />
+                    {isUserShell && actionState === "send"
+                      ? <ToolRunIcon className="h-4 w-4" />
+                      : <ComposerActionIcon state={actionState} />}
                   </Button>
                 </TooltipTrigger>
                 {showVoiceButton ? (
@@ -2883,6 +2899,8 @@ export function ThreadComposer({
                       </kbd>
                     ) : null}
                   </TooltipContent>
+                ) : isUserShell ? (
+                  <TooltipContent>{t("thread.composer.shell.run")}</TooltipContent>
                 ) : null}
               </Tooltip>
             </TooltipProvider>
@@ -3032,12 +3050,17 @@ function ComposerInlineReferenceOverlay({
         const start = offset;
         offset += segment.text.length;
         if (segment.kind === "text") {
-          return <span key={`text-${index}`}>
-            {start === 0 && slashCommand ? <>
-              <SlashCommandText command={slashCommand} testId="composer-slash-command" />
-              {segment.text.slice(slashCommand.length)}
-            </> : segment.text}
-          </span>;
+          const bangPrefix = index === 0 ? /^(\s*)!/.exec(segment.text) : null;
+          return <span key={`text-${index}`}>{bangPrefix ? <>
+            {bangPrefix[1]}
+            <InlineTokenHighlight testId="composer-shell-prefix" className="font-normal" color={INLINE_REFERENCE_HIGHLIGHT_COLOR}>
+              <span className="opacity-90">!</span>
+            </InlineTokenHighlight>
+            {segment.text.slice(bangPrefix[0].length)}
+          </> : start === 0 && slashCommand ? <>
+            <SlashCommandText command={slashCommand} testId="composer-slash-command" />
+            {segment.text.slice(slashCommand.length)}
+          </> : segment.text}</span>;
         }
         if (segment.kind === "skill") {
           return <SkillReferenceToken

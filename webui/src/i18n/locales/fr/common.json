@@ -1948,6 +1948,10 @@
       "removeQuotedContext": "Retirer la citation",
       "modelNotConfigured": "Modèle non configuré",
       "configureModel": "Configurer le modèle",
+      "shell": {
+        "run": "Exécuter une commande Shell",
+        "removeContext": "Retirez les pièces jointes et le texte cité avant d’exécuter une commande."
+      },
       "chooseAI": "Choisir le modèle",
       "switchModel": "Changer de modèle",
       "manageModels": "Gérer les préréglages",
