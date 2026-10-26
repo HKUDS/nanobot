@@ -230,7 +230,13 @@ test("wheel loading hands off to a retained 48px slot; prepend and delayed layou
   const { body, header } = await openSettledHistory(page);
   const nativeTop = await body.evaluate((node) => node.scrollTop);
   await body.hover();
+  // Lazy Markdown can change scrollTop before the queued wheel reaches the viewport.
+  const wheelDelivered = await body.evaluateHandle((node) => ({
+    done: new Promise<void>((resolve) => node.addEventListener("wheel", () => resolve(), { once: true })),
+  }));
   await page.mouse.wheel(0, -100);
+  await wheelDelivered.evaluate(({ done }) => done);
+  await wheelDelivered.dispose();
   await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBeLessThan(nativeTop);
   expect(await displacement(body)).toBe(0);
   expect(history.reads).toHaveLength(0);
