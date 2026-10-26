@@ -89,16 +89,68 @@ class Schema(ABC):
         return f"{path}.{key}" if path else key
 
     @staticmethod
+    def defs_from(schema: dict[str, Any]) -> dict[str, Any]:
+        """Collect the named subschemas a local ``$ref`` can point at (``$defs`` or ``definitions``)."""
+        defs: dict[str, Any] = {}
+        for key in ("definitions", "$defs"):
+            named = schema.get(key)
+            if isinstance(named, dict):
+                defs.update(cast(dict[str, Any], named))
+        return defs
+
+    @staticmethod
+    def resolve_ref(
+        schema: dict[str, Any], defs: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Resolve a local ``$ref`` (``#/$defs/...`` / ``#/definitions/...``) against ``defs``."""
+        ref = schema.get("$ref")
+        if not isinstance(ref, str) or not defs:
+            return None
+        for prefix in ("#/$defs/", "#/definitions/"):
+            if ref.startswith(prefix):
+                target = defs.get(ref[len(prefix):])
+                return cast(dict[str, Any], target) if isinstance(target, dict) else None
+        return None
+
+    @staticmethod
     def validate_json_schema_value(
         val: Any, schema: dict[str, Any] | bool, path: str = "",
+        defs: dict[str, Any] | None = None,
     ) -> list[str]:
         """Validate ``val`` against a JSON Schema fragment; returns error messages (empty means valid).
 
         Used by :class:`Tool` and each concrete Schema's :meth:`validate_value`.
+        ``defs`` carries the root schema's named subschemas so local ``$ref``
+        fragments resolve at any depth.
         """
         label = path or "parameter"
         if isinstance(schema, bool):
             return [] if schema else [f"{label} is not allowed by schema"]
+
+        if "$ref" in schema:
+            resolved = Schema.resolve_ref(schema, defs)
+            if resolved is not None:
+                errors = Schema.validate_json_schema_value(val, resolved, path, defs)
+                siblings = {k: v for k, v in schema.items() if k != "$ref"}
+                if any(k not in ("description", "title", "default", "examples") for k in siblings):
+                    errors.extend(Schema.validate_json_schema_value(val, siblings, path, defs))
+                return errors
+
+        for keyword in ("anyOf", "oneOf"):
+            branches = schema.get(keyword)
+            if isinstance(branches, list) and branches:
+                branch_errors = [
+                    Schema.validate_json_schema_value(val, cast(dict[str, Any] | bool, branch), path, defs)
+                    for branch in cast(list[Any], branches)
+                ]
+                matches = sum(1 for errs in branch_errors if not errs)
+                if keyword == "anyOf" and matches >= 1:
+                    break
+                if keyword == "oneOf" and matches == 1:
+                    break
+                if keyword == "oneOf" and matches > 1:
+                    return [f"{label} should match exactly one of the allowed schemas"]
+                return min(branch_errors, key=len)
 
         raw_type = schema.get("type")
         nullable = (isinstance(raw_type, list) and "null" in raw_type) or schema.get("nullable", False)
@@ -151,7 +203,9 @@ class Schema(ABC):
             additional = schema.get("additionalProperties", True)
             for k, v in object_value.items():
                 if k in props:
-                    errors.extend(Schema.validate_json_schema_value(v, props[k], Schema.subpath(path, k)))
+                    errors.extend(
+                        Schema.validate_json_schema_value(v, props[k], Schema.subpath(path, k), defs)
+                    )
                 elif additional is False:
                     errors.append(f"unexpected parameter {Schema.subpath(path, k)}")
                 elif isinstance(additional, dict):
@@ -160,6 +214,7 @@ class Schema(ABC):
                             v,
                             cast(dict[str, Any], additional),
                             Schema.subpath(path, k),
+                            defs,
                         )
                     )
         if t == "array":
@@ -168,12 +223,28 @@ class Schema(ABC):
                 errors.append(f"{label} must have at least {schema['minItems']} items")
             if "maxItems" in schema and len(array_value) > schema["maxItems"]:
                 errors.append(f"{label} must be at most {schema['maxItems']} items")
-            if "items" in schema:
-                prefix = f"{path}[{{}}]" if path else "[{}]"
-                for i, item in enumerate(array_value):
-                    errors.extend(
-                        Schema.validate_json_schema_value(item, schema["items"], prefix.format(i))
+            prefix = f"{path}[{{}}]" if path else "[{}]"
+            items = schema.get("items")
+            prefix_items = schema.get("prefixItems")
+            positional: list[Any] = []
+            if isinstance(prefix_items, list):
+                positional = cast(list[Any], prefix_items)
+            elif isinstance(items, list):
+                # Draft-07 tuple form: ``items`` itself is the positional list.
+                positional = cast(list[Any], items)
+                items = None
+            for i, item in enumerate(array_value):
+                if i < len(positional):
+                    item_schema: Any = positional[i]
+                elif items is not None:
+                    item_schema = items
+                else:
+                    break
+                errors.extend(
+                    Schema.validate_json_schema_value(
+                        item, cast(dict[str, Any] | bool, item_schema), prefix.format(i), defs
                     )
+                )
         return errors
 
     @staticmethod
@@ -394,8 +465,22 @@ class Tool(ABC):
 
         if t == "array" and isinstance(val, list):
             items = schema.get("items")
+            prefix_items = schema.get("prefixItems")
+            positional: list[Any] = []
+            if isinstance(prefix_items, list):
+                positional = cast(list[Any], prefix_items)
+            elif isinstance(items, list):
+                positional = cast(list[Any], items)
+                items = None
             array_value = cast(list[Any], val)
-            return [self._cast_value(x, items) for x in array_value] if items else array_value
+            if not positional and not items:
+                return array_value
+            return [
+                self._cast_value(x, positional[i])
+                if i < len(positional)
+                else self._cast_value(x, cast(dict[str, Any] | bool, items))
+                for i, x in enumerate(array_value)
+            ]
 
         if t == "object" and isinstance(val, dict):
             return self._cast_object(val, schema)
@@ -409,7 +494,9 @@ class Tool(ABC):
         schema = self.parameters or {}
         if schema.get("type", "object") != "object":
             raise ValueError(f"Schema must be object type, got {schema.get('type')!r}")
-        return Schema.validate_json_schema_value(params, {**schema, "type": "object"}, "")
+        return Schema.validate_json_schema_value(
+            params, {**schema, "type": "object"}, "", Schema.defs_from(schema)
+        )
 
     def to_schema(self) -> dict[str, Any]:
         """OpenAI function schema."""
