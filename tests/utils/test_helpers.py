@@ -194,14 +194,17 @@ def test_write_text_atomic_keeps_file_when_directory_fsync_is_unsupported(
     assert len(fsync_calls) == 1
 
 
-def test_atomic_write_text_creates_parent_and_replaces_exact_content(tmp_path: Path) -> None:
+@pytest.mark.parametrize("newline", ["\n", "\r\n", "\r"])
+def test_atomic_write_text_creates_parent_and_replaces_exact_content(
+    tmp_path: Path, newline: str,
+) -> None:
     target = tmp_path / "runs" / "record.json"
     atomic_write_text(target, "old")
     assert target.read_text(encoding="utf-8") == "old"
 
-    content = '{"message": "café"}'
+    content = f'{{{newline}  "message": "café"{newline}}}{newline}'
     atomic_write_text(target, content)
-    assert target.read_text(encoding="utf-8") == content
+    assert target.read_bytes() == content.encode("utf-8")
 
     atomic_write_text(target, "")
     assert target.read_text(encoding="utf-8") == ""
