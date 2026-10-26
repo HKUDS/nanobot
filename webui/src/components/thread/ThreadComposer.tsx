@@ -2500,6 +2500,7 @@ export function ThreadComposer({
       scope={workspaceScope}
       disabled={interactionDisabled || workspaceScopeDisabled}
       onChange={onWorkspaceScopeChange}
+      hintBoundaryRef={formRef}
     />
   ) : null;
   const workspaceControl = showProjectPicker ? (
