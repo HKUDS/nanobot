@@ -434,13 +434,15 @@ describe("MessageBubble", () => {
     const command = screen.getByTestId("message-slash-command");
     expect(command).toHaveTextContent("/model");
     expect(command).toHaveClass(
-      "font-[550]",
+      "font-normal",
       "transition-colors",
       "duration-150",
     );
     expect(command).not.toHaveClass("font-mono");
     expect(command.getAttribute("style")).not.toContain("text-shadow");
-    expect(command.getAttribute("style")).toContain("var(--inline-token-highlight)");
+    expect(command.getAttribute("style")).toContain("var(--inline-reference-highlight)");
+    expect(command.firstElementChild).toHaveTextContent(/^\/$/);
+    expect(command.firstElementChild).toHaveClass("opacity-90");
     expect(command.className).not.toMatch(/(?:^|\s)(?:bg-|border|ring|rounded)/);
     expect(command.parentElement).toHaveTextContent("/model gpt-5");
     expect(command.parentElement).toHaveClass("rounded-floating", "bg-secondary/70");
@@ -475,7 +477,7 @@ describe("MessageBubble", () => {
     const message: UIMessage = {
       id: "u-command-mention",
       role: "user",
-      content: "/goal ask @zoom to schedule the review",
+      content: "/goal ask $github and @zoom to schedule the review",
       createdAt: Date.now(),
     };
 
@@ -487,7 +489,12 @@ describe("MessageBubble", () => {
       />,
     );
 
-    expect(screen.getByTestId("message-slash-command")).toHaveTextContent("/goal");
+    const command = screen.getByTestId("message-slash-command");
+    const skill = screen.getByTestId("message-skill-reference-github");
+    expect(command).toHaveTextContent("/goal");
+    expect(skill).toHaveTextContent("$github");
+    expect(command.className).toBe(skill.className);
+    expect(command.getAttribute("style")).toBe(skill.getAttribute("style"));
     expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@Zoom");
   });
 

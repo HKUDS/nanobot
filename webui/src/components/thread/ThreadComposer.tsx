@@ -55,6 +55,7 @@ import {
   isCapabilityMentionStart,
 } from "@/lib/composer-mention-text";
 import { INLINE_TOKEN_HIGHLIGHT_COLOR } from "@/components/InlineTokenHighlight";
+import { SlashCommandText } from "@/components/SlashCommandText";
 import {
   ChevronDown,
   ChevronUp,
@@ -138,6 +139,7 @@ import { requestSkillsRefresh } from "@/lib/skill-events";
 import {
   isRegisteredSlashCommand,
   isSideChannelLifecycle,
+  matchingSlashCommand,
   slashCommandLifecycle,
 } from "@/lib/slash-command";
 import {
@@ -1721,7 +1723,8 @@ export function ThreadComposer({
     () => withSkillReferences(displayMentionSegments),
     [displayMentionSegments],
   );
-  const hasInlineDecorations = inlineSegments.some((segment) => segment.kind !== "text");
+  const slashCommand = matchingSlashCommand(sessionDragInsertion?.value ?? draftText, slashCommands);
+  const hasInlineDecorations = slashCommand !== null || inlineSegments.some((segment) => segment.kind !== "text");
   const activeCliMentionApps = useMemo(() => {
     const seen = new Set<string>();
     return mentionSegments.flatMap((segment) => {
@@ -2714,6 +2717,7 @@ export function ThreadComposer({
             <ComposerInlineReferenceOverlay
               overlayRef={mentionOverlayRef}
               segments={inlineSegments}
+              slashCommand={slashCommand?.command ?? null}
               isHero={isHero}
               isComposing={mentionInput.isComposing}
               className={inputTextClasses}
@@ -2997,6 +3001,7 @@ function QueuedPromptPreview({
 function ComposerInlineReferenceOverlay({
   overlayRef,
   segments,
+  slashCommand,
   isHero,
   isComposing,
   className,
@@ -3004,6 +3009,7 @@ function ComposerInlineReferenceOverlay({
 }: {
   overlayRef: Ref<HTMLDivElement>;
   segments: InlineReferenceSegment[];
+  slashCommand: string | null;
   isHero: boolean;
   isComposing: boolean;
   className: string;
@@ -3026,7 +3032,12 @@ function ComposerInlineReferenceOverlay({
         const start = offset;
         offset += segment.text.length;
         if (segment.kind === "text") {
-          return <span key={`text-${index}`}>{segment.text}</span>;
+          return <span key={`text-${index}`}>
+            {start === 0 && slashCommand ? <>
+              <SlashCommandText command={slashCommand} testId="composer-slash-command" />
+              {segment.text.slice(slashCommand.length)}
+            </> : segment.text}
+          </span>;
         }
         if (segment.kind === "skill") {
           return <SkillReferenceToken

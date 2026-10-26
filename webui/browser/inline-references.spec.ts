@@ -78,9 +78,15 @@ for (const narrow of [false, true]) {
 
       const input = page.getByRole("textbox", { name: "Message input", exact: true });
       const overlay = page.locator(".thread-composer-input > div[aria-hidden]");
-      const text = "like $workflow 和 $skill-creator，检查中文 English 与换行。";
+      const text = "/goal like $workflow 和 $skill-creator，检查中文 English 与换行。";
       await input.focus();
-      await input.pressSequentially(text);
+      await input.pressSequentially("/goal ");
+      const composerCommand = page.getByTestId("composer-slash-command");
+      await expect(composerCommand).toHaveText("/goal");
+      await expect(composerCommand).toHaveCSS("color", "rgb(244, 169, 73)");
+      await expect(composerCommand).toHaveCSS("font-weight", "400");
+      await expectMatchingInputLayers(input);
+      await input.pressSequentially(text.slice("/goal ".length));
       const skill = page.getByTestId("composer-skill-reference-workflow");
       await expect(skill).toHaveText("$workflow");
       await expect(skill).toHaveCSS("color", "rgb(244, 169, 73)");
@@ -119,7 +125,15 @@ for (const narrow of [false, true]) {
       await page.getByRole("button", { name: "Send message", exact: true }).click();
       await expect(page.getByTestId("message-skill-reference-workflow")).toHaveText("$workflow");
       await expect(page.getByTestId("message-skill-reference-workflow")).toHaveCSS("color", "rgb(244, 169, 73)");
+      const command = page.getByTestId("message-slash-command");
+      const sentSkill = page.getByTestId("message-skill-reference-workflow");
+      await expect(command).toHaveText("/goal");
+      await expect(command).toHaveCSS("color", await sentSkill.evaluate(node => getComputedStyle(node).color));
+      await expect(command).toHaveCSS("font-weight", "400");
+      await expect(command.locator("span")).toHaveText("/");
+      await expect(command.locator("span")).toHaveCSS("opacity", "0.9");
       await expect(page.locator("[data-user-text-bubble]").last().locator("p")).toHaveText(text);
+      await page.screenshot({ path: info.outputPath("slash-command-and-skill.png") });
       expect(errors).toEqual([]);
     });
   }

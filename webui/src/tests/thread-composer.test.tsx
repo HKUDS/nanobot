@@ -1870,6 +1870,8 @@ describe("ThreadComposer", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(input).toHaveValue("/history ");
+    expect(screen.getByTestId("composer-slash-command")).toHaveTextContent("/history");
+    expect(input.previousElementSibling?.textContent).toBe("/history ");
     expect(onSend).not.toHaveBeenCalled();
     expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
   });
@@ -2562,6 +2564,38 @@ describe("ThreadComposer", () => {
     }]);
   });
 
+  it("highlights slash commands alongside skills without changing native edits or sending", () => {
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} slashCommands={COMMANDS} />);
+    const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
+    const text = "/history $workflow 中文 English";
+    fireEvent.change(input, { target: { value: text, selectionStart: text.length } });
+
+    const command = screen.getByTestId("composer-slash-command");
+    const skill = screen.getByTestId("composer-skill-reference-workflow");
+    expect(command).toHaveTextContent("/history");
+    expect(command.className).toBe(skill.className);
+    expect(command.getAttribute("style")).toBe(skill.getAttribute("style"));
+    expect(input.previousElementSibling).toHaveAttribute("aria-hidden", "true");
+    expect(input.previousElementSibling?.textContent).toBe(text);
+
+    input.setSelectionRange(1, 4);
+    const setData = vi.fn();
+    fireEvent.copy(input, { clipboardData: { setData } });
+    expect(setData).toHaveBeenCalledWith("text/plain", "his");
+    fireEvent.cut(input, { clipboardData: { setData } });
+    expect(input).toHaveValue("/tory $workflow 中文 English");
+    expect(screen.queryByTestId("composer-slash-command")).not.toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "z", ctrlKey: true });
+    expect(input).toHaveValue(text);
+    expect(input.selectionStart).toBe(1);
+    expect(input.selectionEnd).toBe(4);
+    expect(screen.getByTestId("composer-slash-command")).toHaveTextContent("/history");
+
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).toHaveBeenCalledWith(text, undefined, { sideChannel: true });
+  });
+
   it("highlights literal skill references while preserving partial edits, clipboard text and sending", () => {
     const onSend = vi.fn();
     render(<ThreadComposer onSend={onSend} />);
@@ -2592,22 +2626,23 @@ describe("ThreadComposer", () => {
     expect(onSend).toHaveBeenCalledWith(text, undefined, undefined);
   });
 
-  it("mirrors skill references during composition without submitting the IME confirmation", () => {
+  it.each(["", "/history "])("mirrors inline references during composition without submitting the IME confirmation: %s", (prefix) => {
     const onSend = vi.fn();
-    render(<ThreadComposer onSend={onSend} />);
+    render(<ThreadComposer onSend={onSend} slashCommands={COMMANDS} />);
     const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
-    fireEvent.change(input, { target: { value: "$workflow " } });
+    fireEvent.change(input, { target: { value: `${prefix}$workflow ` } });
     fireEvent.compositionStart(input);
-    fireEvent.change(input, { target: { value: "$workflow zhong" } });
+    fireEvent.change(input, { target: { value: `${prefix}$workflow zhong` } });
+    if (prefix) expect(screen.getByTestId("composer-slash-command")).toHaveTextContent("/history");
     expect(screen.getByTestId("composer-skill-reference-workflow")).toHaveTextContent(/^\$workflow$/);
     expect(input.previousElementSibling?.textContent).toBe(input.value);
     expect(input.previousElementSibling).toHaveClass("z-20");
     fireEvent.keyDown(input, { key: "Enter", isComposing: true });
     expect(onSend).not.toHaveBeenCalled();
-    fireEvent.change(input, { target: { value: "$workflow 中" } });
+    fireEvent.change(input, { target: { value: `${prefix}$workflow 中` } });
     fireEvent.compositionEnd(input, { data: "中" });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-    expect(onSend).toHaveBeenCalledWith("$workflow 中", undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith(`${prefix}$workflow 中`, undefined, prefix ? { sideChannel: true } : undefined);
   });
 
   it("opens skills only from a $ reference and prioritizes the skill name", () => {
@@ -3305,6 +3340,7 @@ describe("ThreadComposer", () => {
 
     const input = screen.getByLabelText("Message input");
     fireEvent.change(input, { target: { value: "/new with a title" } });
+    expect(screen.queryByTestId("composer-slash-command")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(onSend).toHaveBeenCalledWith("/new with a title", undefined, undefined);
@@ -3542,6 +3578,7 @@ describe("ThreadComposer", () => {
       const { rerender } = render(composer(true));
       const input = screen.getByLabelText("Message input");
       fireEvent.change(input, { target: { value: content } });
+      expect(screen.queryByTestId("composer-slash-command")).not.toBeInTheDocument();
       fireEvent.keyDown(input, { key: "Enter" });
 
       expect(onSend).not.toHaveBeenCalled();
