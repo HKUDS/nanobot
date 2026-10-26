@@ -3,8 +3,7 @@
 .appearance-theme-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .appearance-theme-option { position: relative; min-width: 0; cursor: pointer; }
 .appearance-theme-input { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
-.appearance-theme-card { --appearance-theme-inset: 8px; display: block; padding: var(--appearance-theme-inset); border: 1px solid hsl(var(--border)); border-radius: var(--radius-panel); background: hsl(var(--settings-surface)); transition: border-color 160ms ease, box-shadow 160ms ease; }
-.appearance-theme-option input:checked + .appearance-theme-card { border-color: hsl(var(--foreground) / 0.6); box-shadow: 0 0 0 1px hsl(var(--foreground) / 0.15); }
+.appearance-theme-card { --appearance-theme-inset: 8px; display: block; padding: var(--appearance-theme-inset); border: 1px solid hsl(var(--border)); border-radius: var(--radius-panel); background: hsl(var(--settings-surface)); transition: border-color 160ms ease; }
 .appearance-theme-option input:focus-visible + .appearance-theme-card { outline: 2px solid hsl(var(--ring) / 0.65); outline-offset: 3px; }
 .appearance-theme-check { opacity: 0; }
 .appearance-theme-option input:checked + .appearance-theme-card .appearance-theme-check { opacity: 1; }
