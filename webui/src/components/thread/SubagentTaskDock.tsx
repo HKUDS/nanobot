@@ -211,7 +211,7 @@ function TaskTree({ tasks, maxHeight }: { tasks: ObservedSubagentTask[]; maxHeig
     <ol className="space-y-0.5">
       {tasks.map(task => <li key={task.task_id} data-task-state={task.state}
         className="rounded-lg transition-colors duration-150 hover:bg-muted/50 focus-within:bg-muted/50 motion-reduce:transition-none">
-        <div className="flex min-w-0 items-center gap-0.5">
+        <div className="sticky top-0 z-20 flex min-w-0 items-center gap-0.5 bg-card">
           <SubagentTaskButton task={task} surface="activity" />
           {task.state === "queued" || task.state === "running" ? <HoverHint content={t("thread.subagents.stopTask", { label: task.label })}>
             <Button type="button" variant="ghost" size="icon"

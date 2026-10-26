@@ -138,6 +138,18 @@ for (const width of [1440, 390]) {
     expect(dimensions.scrollWidth).toBe(dimensions.clientWidth);
     expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight);
     await page.screenshot({ path: info.outputPath("result-markdown-start.png") });
+    const copy = await tree.getByRole("button", { name: "Copy code", exact: true }).elementHandle();
+    await tree.evaluate((node, copyButton) => {
+      const header = node.querySelector('[data-subagent-id="preview-0"]')!.getBoundingClientRect();
+      const bounds = copyButton!.getBoundingClientRect();
+      node.scrollTop += bounds.y + bounds.height / 2 - header.y - header.height / 2;
+    }, copy);
+    expect(await row.evaluate((node, copyButton) => {
+      const header = node.getBoundingClientRect();
+      const bounds = copyButton!.getBoundingClientRect();
+      return node.contains(document.elementFromPoint(bounds.x + bounds.width / 2, header.y + header.height / 2));
+    }, copy)).toBe(true);
+    await tree.evaluate(node => { node.scrollTop = 0; });
     const beforeScroll = await messages.evaluate(node => node.scrollTop);
     const tail = tree.getByText("最后一条完整结论：以上结果均可继续核对。", { exact: true });
     await tail.scrollIntoViewIfNeeded();
@@ -146,6 +158,15 @@ for (const width of [1440, 390]) {
     await expect(tree.locator("pre")).toContainText("checked_at: 2026-10-25T20:52:00+08:00");
     expect(await messages.evaluate(node => node.scrollTop)).toBe(beforeScroll);
     await page.screenshot({ path: info.outputPath("result-markdown-end.png") });
+    await expect(row).toBeInViewport();
+    expect(await row.evaluate(node => {
+      const bounds = node.getBoundingClientRect();
+      return node.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2));
+    })).toBe(true);
+    await tail.dblclick();
+    expect(await page.evaluate(() => window.getSelection()?.toString())).toBeTruthy();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    const readingPosition = await tree.evaluate(node => node.scrollTop);
     const input = page.getByRole("textbox").first();
     await input.fill("继续阅读完整结果，同时输入下一条消息");
     await expect(trigger).toHaveAttribute("aria-expanded", "true");
@@ -166,6 +187,13 @@ for (const width of [1440, 390]) {
     await title.locator("..").screenshot({ path: info.outputPath("completed-detail-header.png") });
     await page.keyboard.press("Escape");
     await expect(row).toBeFocused();
+    expect(await tree.evaluate(node => node.scrollTop)).toBeCloseTo(readingPosition, 0);
+    await expect(tail).toBeInViewport();
+    const nextRow = tree.locator('[data-subagent-id="preview-1"]');
+    await nextRow.scrollIntoViewIfNeeded();
+    await expect(nextRow).toBeInViewport();
+    await nextRow.click();
+    await expect(page.getByRole("dialog", { name: "核对回归测试", exact: true })).toBeVisible();
   });
 }
 
