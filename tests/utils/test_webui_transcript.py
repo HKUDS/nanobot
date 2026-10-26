@@ -1197,7 +1197,7 @@ def test_shell_output_format_survives_reload_and_paging_without_loading_model_hi
     from nanobot.session.manager import SessionManager
 
     key = "websocket:shell-output"
-    output = "Path\n----\n  __pycache__\n```mermaid\nflowchart LR\n```"
+    output = "Path\n----\n  __pycache__\n```mermaid\nflowchart LR\n```\n![preview](local.png)\n"
     history.append(key, {"event": "user", "text": "!pwd", "turn_id": "shell-turn"})
     history.append(key, {
         "event": "message", "text": output, "render_as": "text", "turn_id": "shell-turn",
@@ -1211,13 +1211,15 @@ def test_shell_output_format_survives_reload_and_paging_without_loading_model_hi
 
     def build(**kwargs):
         return reopened.project_history(key, lambda snapshot: transcript_module.build_webui_thread_response(
-            key, history=snapshot, session_messages_loader=fail_if_loaded, **kwargs,
+            key, history=snapshot, session_messages_loader=fail_if_loaded,
+            augment_assistant_text=lambda text: text.replace("local.png", "/api/media/signed"), **kwargs,
         ))
 
     latest = build(limit=2, direction="latest")
     older = build(limit=2, before=latest["page"]["before_cursor"])
     [answer] = [event for event in older["events"] if event["event"] == "message"]
-    assert answer["text"] == f"````text\n{output}\n````"
+    assert answer["text"] == output
+    assert answer["render_as"] == "text"
     assert history.read(key)[1]["text"] == output
     assert history.read(key)[1]["render_as"] == "text"
 
@@ -1236,6 +1238,7 @@ def test_existing_shell_output_uses_canonical_command_identity_not_bang_text(his
     ]
     response = history.build(key, session_messages=messages)
     [answer] = [event for event in response["events"] if event["event"] == "message"]
-    assert answer["text"] == (f"```text\n{output}\n```" if command else output)
+    assert answer["text"] == output
+    assert answer.get("render_as") == ("text" if command else None)
     assert history.read(key)[1]["text"] == output
     assert messages[1]["content"] == output

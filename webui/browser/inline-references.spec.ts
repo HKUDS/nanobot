@@ -168,6 +168,13 @@ for (const narrow of [false, true]) {
       expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(shellCommand.trim().replaceAll("\n", EOL));
       await page.evaluate(() => window.getSelection()?.removeAllRanges());
       await page.screenshot({ path: info.outputPath("sent-bang.png") });
+
+      const output = page.getByTestId("plain-code-fallback");
+      const literal = "  __pycache__\n```mermaid\nflowchart LR\n```\n![preview](local.png)\n<b>raw</b>\n";
+      expect(await output.textContent()).toBe(literal);
+      await expect(output.locator("img, b")).toHaveCount(0);
+      await page.getByRole("button", { name: "Copy code", exact: true }).click();
+      await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(literal);
       expect(errors).toEqual([]);
     });
   }

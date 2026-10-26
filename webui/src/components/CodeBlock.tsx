@@ -14,6 +14,7 @@ interface CodeBlockProps {
   className?: string;
   chrome?: "default" | "none";
   highlight?: boolean;
+  ansi?: boolean;
   showLineNumbers?: boolean;
   wrapLongLines?: boolean;
   viewportHighlight?: boolean;
@@ -169,6 +170,7 @@ export const CodeBlock = memo(function CodeBlock({
   className,
   chrome = "default",
   highlight = true,
+  ansi = true,
   showLineNumbers = false,
   wrapLongLines = true,
   viewportHighlight = false,
@@ -177,7 +179,7 @@ export const CodeBlock = memo(function CodeBlock({
   const rootRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
   const [highlightedSource, setHighlightedSource] = useState<string | null>(null);
-  const renderAnsi = useMemo(() => shouldRenderAnsi(language, code), [language, code]);
+  const renderAnsi = useMemo(() => ansi && shouldRenderAnsi(language, code), [ansi, language, code]);
   const plainCode = useMemo(() => renderAnsi ? stripAnsi(code) : code, [renderAnsi, code]);
   const isDark = useThemeValue() === "dark";
   const hasChrome = chrome === "default";

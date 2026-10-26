@@ -1,17 +1,23 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { MessageBlockMenuActions, MessageBubble } from "@/components/MessageBubble";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { setAppLanguage } from "@/i18n";
+import { parseWebuiThreadPayload } from "@/lib/api";
 import * as clipboard from "@/lib/clipboard";
 import { formatMessageEndTime } from "@/lib/format-time";
+import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
+import { projectThreadEvents } from "@/lib/thread-event-projection";
+import { ThreadTranscript } from "@/lib/thread-transcript";
 import type {
   CliAppInfo,
   McpPresetInfo,
   SlashCommand,
+  ThreadProjectionEvent,
   UIMessage,
 } from "@/lib/types";
+import { createStreamClient } from "./stream-client";
 
 const CLI_APPS: CliAppInfo[] = [
   {
@@ -104,6 +110,90 @@ function menuActions(root: ParentNode = document): HTMLElement {
 }
 
 describe("MessageBubble", () => {
+  it.each(["live", "paged history"] as const)("renders and copies literal output unchanged through %s, alongside ordinary Markdown", async (source) => {
+    const raw = [
+      "  Switched model preset to `raw`.",
+      "__pycache__ <script>alert(\"raw\")</script>",
+      "![capture](https://example.invalid/output.png)",
+      "```mermaid",
+      "graph TD; A-->B",
+      "```",
+      "$$x^2$$",
+      "\x1b[31mred\x1b[0m",
+      "[Subagent task completed]",
+      "Task: print this",
+      "Result:",
+      "  literal result\t",
+      "Summarize this naturally",
+      "",
+      "",
+    ].join("\n");
+    const shellEvents: ThreadProjectionEvent[] = [
+      { event: "user_message", chat_id: "literal-chat", turn_id: "shell", turn_seq: 1, starts_turn: false, text: "!printf output" },
+      { event: "message", chat_id: "literal-chat", turn_id: "shell", turn_seq: 2, render_as: "text", text: raw },
+    ];
+    const normalEvents: ThreadProjectionEvent[] = [
+      { event: "user_message", chat_id: "literal-chat", turn_id: "normal", turn_seq: 1, starts_turn: true, text: "Explain the output" },
+      { event: "message", chat_id: "literal-chat", turn_id: "normal", turn_seq: 2, text: "**Normal reply** [docs](https://example.invalid/docs)" },
+      { event: "turn_end", chat_id: "literal-chat", turn_id: "normal", turn_seq: 3 },
+    ];
+    const transcript = new ThreadTranscript();
+    if (source === "live") {
+      const { client, receive } = createStreamClient();
+      const unsubscribe = client.onTranscript("literal-chat", (event) => {
+        if (event.event === "user_message" || event.event === "message" || event.event === "turn_end") {
+          transcript.project(event, { createId: () => crypto.randomUUID(), now: 1_800_000_000_000 });
+        }
+      });
+      try {
+        [...shellEvents, ...normalEvents].forEach(receive);
+      } finally {
+        unsubscribe();
+        client.close();
+      }
+    } else {
+      expect(transcript.accept(parseWebuiThreadPayload({
+        schemaVersion: 3, projection: "events", events: normalEvents, completed_turn_ids: ["normal"],
+        page: { before_cursor: "before-normal", has_more_before: true, user_message_offset: 1 },
+      }), transcript.begin("initial"))).toBe(true);
+      expect(transcript.accept(parseWebuiThreadPayload({
+        schemaVersion: 3, projection: "events", events: shellEvents,
+        page: { before_cursor: null, has_more_before: false, user_message_offset: 0 },
+      }), transcript.begin("older"))).toBe(true);
+    }
+    const writeText = vi.spyOn(clipboard, "copyTextToClipboard").mockResolvedValue(true);
+    try {
+      const { container } = render(<ThreadMessages messages={projectWebuiThreadMessages(transcript.messages)} />);
+      const output = screen.getByTestId("plain-code-fallback");
+      expect(output.textContent).toBe(raw);
+      expect(output).toHaveClass("whitespace-pre-wrap");
+      expect(output.querySelector("code")!.childNodes).toHaveLength(1);
+      expect(output.querySelector("code")!.firstChild!.nodeType).toBe(Node.TEXT_NODE);
+      expect((await screen.findByText("Normal reply")).tagName).toBe("STRONG");
+      expect(container.querySelector("img, script, .katex, [data-testid='mermaid-block']")).toBeNull();
+      expect(screen.getByRole("link", { name: "docs" })).toHaveAttribute("href", "https://example.invalid/docs");
+      fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
+      await waitFor(() => expect(writeText).toHaveBeenNthCalledWith(1, raw));
+      fireEvent.click(within(output.closest<HTMLElement>("[data-thread-display-unit]")!).getByRole("button", { name: "Message actions" }));
+      fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+      await waitFor(() => expect(writeText).toHaveBeenNthCalledWith(2, raw));
+    } finally {
+      writeText.mockRestore();
+    }
+  });
+
+  it.each([undefined, "TEXT"])("keeps Markdown after bang input unless render_as is literally text (%s)", async (render_as) => {
+    const payload = parseWebuiThreadPayload({
+      schemaVersion: 3, projection: "events", events: [
+        { event: "user_message", chat_id: "chat", text: "!echo **ordinary output**", starts_turn: true, turn_id: "bang" },
+        { event: "message", chat_id: "chat", text: "**ordinary output**", render_as, turn_id: "bang" },
+      ],
+    });
+    const { container } = render(<ThreadMessages messages={projectWebuiThreadMessages(projectThreadEvents(payload.events))} />);
+    await waitFor(() => expect(container.querySelector("[data-assistant-message] strong")?.textContent).toBe("ordinary output"));
+    expect(screen.queryByTestId("plain-code-fallback")).not.toBeInTheDocument();
+  });
+
   it.each([false, undefined])("keeps normal sources out of the block menu (fallback: %s)", (fallback) => {
     const message: UIMessage = { id: "primary", role: "assistant", content: "Hello", createdAt: 0,
       responseSources: [{ provider: "openai_codex", model: "gpt", preset: "codex", fallback }] };

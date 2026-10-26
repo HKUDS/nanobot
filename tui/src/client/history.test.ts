@@ -40,6 +40,25 @@ test("restores canonical event history, media, tools, file edits and absolute fo
   })
 })
 
+test("preserves literal shell output and leaves ordinary replies as Markdown", async () => {
+  const output = "  __pycache__ `ticks`\n![image](image.png) <b>HTML</b>\n```mermaid\ngraph TD; A --> B\n```\n"
+  respond([
+    { event: "user_message", starts_turn: false, text: "!ls", turn_id: "shell" },
+    { event: "message", text: output, render_as: "text", turn_id: "shell" },
+    { event: "user_message", starts_turn: true, text: "explain", turn_id: "answer" },
+    { event: "message", text: "**Markdown** \\(x_1^2\\)", turn_id: "answer" },
+    { event: "turn_end", turn_id: "answer" },
+    { event: "message", text: "**Another reply**", render_as: true, turn_id: "next" },
+  ])
+  expect((await fetchHistory("http://fixture", "token", "chat")).messages).toEqual([
+    { role: "user", content: "!ls", turnId: "shell" },
+    { role: "assistant", content: output, renderAs: "text", forkIndex: 1 },
+    { role: "user", content: "explain", turnId: "answer" },
+    { role: "assistant", content: "**Markdown** \\(x_1^2\\)", forkIndex: 2 },
+    { role: "assistant", content: "**Another reply**", forkIndex: 2 },
+  ])
+})
+
 test("keeps distinct answer segments and resumes an unfinished stream", async () => {
   respond([
     { event: "user_message", starts_turn: true, text: "question" },

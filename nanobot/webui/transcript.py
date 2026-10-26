@@ -41,7 +41,7 @@ from nanobot.webui.history import (
     turn_records,
 )
 from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
-from nanobot.webui.outbound_wire import project_tool_events, render_plain_text
+from nanobot.webui.outbound_wire import project_tool_events
 from nanobot.webui.session_identity import webui_chat_id, webui_session_key
 
 WEBUI_TRANSCRIPT_SCHEMA_VERSION = 3
@@ -1463,11 +1463,12 @@ def _client_projection_event(
     if event == "message":
         text = record.get("text")
         content = text if isinstance(text, str) else ""
-        if record.get("render_as") == "text":
-            content = render_plain_text(content)
-        elif augment_assistant_text is not None:
+        render_as_text = record.get("render_as") == "text"
+        if not render_as_text and augment_assistant_text is not None:
             content = augment_assistant_text(content)
         projected = {"event": "message", **common, "text": content}
+        if render_as_text:
+            projected["render_as"] = "text"
         kind = record.get("kind")
         if kind in {"tool_hint", "progress", "reasoning"}:
             projected["kind"] = kind

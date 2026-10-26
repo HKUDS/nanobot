@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next";
 import { DisclosureContent } from "@/components/ui/disclosure";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
+import { CodeBlock } from "@/components/CodeBlock";
 import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { FallbackResponseSources } from "@/components/ResponseSourceBadge";
 import { ImageGallery } from "@/components/ImageGallery";
@@ -107,6 +108,7 @@ function useMessageCopy(content: string) {
 }
 
 function messageCopyContent(message: UIMessage, t: (key: string) => string) {
+  if (message.renderAs === "text") return message.content;
   return message.role === "assistant" && message.compactReply === "empty"
     ? t("thread.compaction.empty")
     : message.role === "assistant" && message.compactReply === "failed"
@@ -525,11 +527,7 @@ export function MessageBubble({
     );
   }
 
-  const assistantContent = message.compactReply === "empty"
-    ? t("thread.compaction.empty")
-    : message.compactReply === "failed"
-      ? t("thread.compaction.failed")
-      : message.content;
+  const assistantContent = messageCopyContent(message, t);
   const empty = assistantContent.trim().length === 0;
   const media = message.media ?? [];
   const reasoning = message.role === "assistant" ? message.reasoning ?? "" : "";
@@ -553,14 +551,18 @@ export function MessageBubble({
       ) : empty && message.isStreaming ? null : (
         <InlineImageProvider>
           <div data-assistant-selectable={message.isStreaming ? undefined : "true"}>
-            {/* A mode switch rebuilds Streamdown's subtree and moves the scroll anchor. */}
-            <MarkdownText
-              streaming={!!message.isStreaming}
-              preserveStreamingLayout
-              onOpenFilePreview={onOpenFilePreview}
-            >
-              {assistantContent}
-            </MarkdownText>
+            {message.renderAs === "text" ? (
+              <CodeBlock language="text" code={assistantContent} highlight={false} ansi={false} />
+            ) : (
+              /* A mode switch rebuilds Streamdown's subtree and moves the scroll anchor. */
+              <MarkdownText
+                streaming={!!message.isStreaming}
+                preserveStreamingLayout
+                onOpenFilePreview={onOpenFilePreview}
+              >
+                {assistantContent}
+              </MarkdownText>
+            )}
           </div>
           {media.length > 0 ? <MessageMedia media={media} align="left" /> : null}
         </InlineImageProvider>

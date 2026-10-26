@@ -262,7 +262,7 @@ export class Transcript {
       else if (message.role === "user") {
         this.user(message.content, message.turnId, message.media)
       }
-      else if (message.role === "assistant") this.assistant(message.content)
+      else if (message.role === "assistant") this.assistant(message.content, message.renderAs)
       else if (message.fileEdits?.length) this.fileEdits(message.fileEdits)
       else this.progress(message.content, message.toolEvents)
     }
@@ -282,7 +282,7 @@ export class Transcript {
         this.writeUser(message.content, message.media, index++)
         if (message.turnId) this.userTurnIds.add(message.turnId)
       } else if (message.role === "assistant") {
-        this.writeMarkdown(message.content, false, index++)
+        this.writeAnswer(message.content, message.renderAs, index++)
       } else {
         const activity = this.createActivity(index++)
         const events: ToolProgressEvent[] = message.fileEdits?.length
@@ -319,11 +319,11 @@ export class Transcript {
     return true
   }
 
-  assistant(content: string): void {
-    if (!content.trim()) return
+  assistant(content: string, renderAs?: "text"): void {
+    if (!(renderAs === "text" ? content : content.trim())) return
     this.noteOutput()
     this.finishActivity()
-    this.writeMarkdown(content, false)
+    this.writeAnswer(content, renderAs)
   }
 
   notice(content: string, error = false): void {
@@ -756,17 +756,26 @@ export class Transcript {
     return markdown
   }
 
-  private writeMarkdown(content: string, streaming: boolean, index?: number): void {
-    this.writeAssistant(this.createMarkdown(content, streaming), index)
+  private writeAnswer(content: string, renderAs?: "text", index?: number): void {
+    if (renderAs !== "text") {
+      this.writeAssistant(this.createMarkdown(content, false), index)
+      return
+    }
+    const text = this.createText(content, "text", false, "assistant-text")
+    text.width = "auto"
+    text.minWidth = 0
+    text.flexGrow = 1
+    text.flexShrink = 1
+    this.writeAssistant(text, index)
   }
 
-  private writeAssistant(markdown: MarkdownRenderable, index?: number): BoxRenderable {
+  private writeAssistant(content: MarkdownRenderable | TextRenderable, index?: number): BoxRenderable {
     const row = this.createRow("assistant", "row")
     const prefix = this.createText("•", "muted", false, "role-marker")
     prefix.width = 2
     prefix.flexShrink = 0
     row.add(prefix)
-    row.add(markdown)
+    row.add(content)
     this.root.add(row, index)
     this.wrote = true
     return row
