@@ -54,6 +54,19 @@ for (const width of [1440, 390]) {
     const detail = page.getByRole("dialog", { name: "检查项目实现", exact: true });
     await expect(detail).toBeVisible();
     await expect(detail).toBeFocused();
+    await settledMotion(detail);
+    const headerStop = detail.getByRole("button", { name: "Stop 检查项目实现", exact: true });
+    const headerTitle = detail.getByRole("heading", { name: "检查项目实现", exact: true });
+    const stopBounds = (await headerStop.boundingBox())!;
+    const closeBounds = (await detail.getByRole("button", { name: "Close", exact: true }).boundingBox())!;
+    expect(Math.abs(stopBounds.y + stopBounds.height / 2 - closeBounds.y - closeBounds.height / 2)).toBeLessThanOrEqual(1);
+    expect((await headerTitle.boundingBox())!.x + (await headerTitle.boundingBox())!.width).toBeLessThanOrEqual(stopBounds.x);
+    expect(stopBounds.x + stopBounds.width).toBeLessThanOrEqual(closeBounds.x);
+    if (width === 390) {
+      expect(stopBounds.width).toBeGreaterThanOrEqual(44);
+      expect(stopBounds.height).toBeGreaterThanOrEqual(44);
+    }
+    await headerTitle.locator("..").screenshot({ path: info.outputPath("running-detail-header-stop.png") });
     await detail.getByRole("button", { name: "Close", exact: true }).click();
     await expect(detail).toHaveCount(0);
     await expect(tree).toBeVisible();
@@ -374,7 +387,16 @@ test("keeps long task names, stop controls and detail handoff usable on a narrow
   expect(titleBounds.height).toBeLessThan(30);
   expect(Math.abs(titleBounds.y + titleBounds.height / 2 - closeBounds.y - closeBounds.height / 2)).toBeLessThanOrEqual(1);
   expect(titleBounds.x + titleBounds.width).toBeLessThanOrEqual(closeBounds.x);
+  const detailStop = detail.getByRole("button", { name: `Stop ${label}`, exact: true });
+  const detailStopBounds = (await detailStop.boundingBox())!;
+  expect(detailStopBounds.width).toBeGreaterThanOrEqual(44);
+  expect(detailStopBounds.height).toBeGreaterThanOrEqual(44);
+  expect(Math.abs(detailStopBounds.y + detailStopBounds.height / 2 - closeBounds.y - closeBounds.height / 2)).toBeLessThanOrEqual(1);
+  expect(titleBounds.x + titleBounds.width).toBeLessThanOrEqual(detailStopBounds.x);
+  expect(detailStopBounds.x + detailStopBounds.width).toBeLessThanOrEqual(closeBounds.x);
   await title.locator("..").screenshot({ path: info.outputPath("long-running-detail-header.png") });
+  await detailStop.click();
+  await expect(detail).toHaveAccessibleDescription("Cancelled");
   await close.click();
   await expect(row).toBeFocused();
 });
@@ -532,5 +554,59 @@ for (const width of [1440, 390, 320]) {
     await expect(rows.first()).toBeFocused();
     await header.click();
     await expect(rows.first()).toBeHidden();
+  });
+}
+
+for (const width of [1440, 390]) {
+  test(`keeps composer palettes reachable above an open task drawer at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/browser/fixture.html?case=subagent-dock");
+    const trigger = page.getByTestId("subagent-task-dock-trigger");
+    await trigger.click();
+    await settledMotion(page.getByTestId("subagent-task-dock"));
+    const input = page.getByRole("textbox").first();
+    for (const [query, inserted] of [["/", "/history"], ["@ref", "@reference "]]) {
+      await input.fill(query);
+      const option = page.getByRole("option").first();
+      await expect(option).toBeVisible();
+      expect(await option.evaluate(node => {
+        const bounds = node.getBoundingClientRect();
+        const hit = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+        return !!hit && node.contains(hit);
+      })).toBe(true);
+      await option.click();
+      await expect(input).toHaveValue(inserted);
+      await expect(trigger).toHaveAttribute("aria-expanded", "true");
+      await expect(page.getByTestId("subagent-task-tree")).toBeVisible();
+    }
+  });
+
+  test(`keeps result image portals owned by the task drawer at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.route("https://example.com/dock-result.svg", route => route.fulfill({
+      contentType: "image/svg+xml",
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800"><rect width="1200" height="800" fill="#7788aa" /></svg>',
+    }));
+    await page.goto("/browser/fixture.html?case=subagent-dock&image-result");
+    const trigger = page.getByTestId("subagent-task-dock-trigger");
+    await trigger.click();
+    await page.getByRole("button", { name: "全部完成", exact: true }).evaluate(node => (node as HTMLButtonElement).click());
+    const tree = page.getByTestId("subagent-task-tree");
+    const thumbnail = tree.getByRole("button", { name: "View image: Result image", exact: true });
+    await thumbnail.click();
+    const viewer = page.getByRole("dialog", { name: "Result image", exact: true });
+    await expect(viewer).toBeVisible();
+    await viewer.getByRole("button", { name: "Zoom in", exact: true }).click();
+    await expect(viewer.getByRole("button", { name: "Fit image", exact: true })).toHaveText("150%");
+    await viewer.getByRole("img", { name: "Result image", exact: true }).click();
+    await expect(viewer).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(viewer).toHaveCount(0);
+    await expect(thumbnail).toBeFocused();
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await page.locator("main").click({ position: { x: 4, y: 65 } });
+    await expect(tree).toHaveCount(0);
+    await expect(trigger).toHaveCount(0);
+    await expect(page.getByRole("textbox").first()).toBeFocused();
   });
 }

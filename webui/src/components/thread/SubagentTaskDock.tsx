@@ -26,6 +26,7 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
   const panelId = useId();
   const progressId = useId();
   const root = useRef<HTMLDivElement>(null);
+  const ownedPointerDown = useRef<PointerEvent | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -106,9 +107,9 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
 
   useEffect(() => {
     if ((!open && dragHeight === null) || context.detailOpen) return;
-    const outside = (event: MouseEvent) => {
+    const outside = (event: PointerEvent) => {
       const target = event.target;
-      if (gesture.current || !(target instanceof Element) || root.current?.closest(".thread-composer-stack")?.contains(target)) return;
+      if (gesture.current || ownedPointerDown.current === event || !(target instanceof Element) || root.current?.closest(".thread-composer-stack")?.contains(target)) return;
       // Dismissing on blank space must not strand focus after the last task.
       const focusable = target.closest("button, a[href], input, textarea, select, [tabindex], [contenteditable=true]");
       const returnFocus = !running && !focusable;
@@ -138,8 +139,9 @@ function TaskDock({ allTasks, inputKey }: { allTasks: ObservedSubagentTask[]; in
   const title = t("thread.subagents.workTitle");
 
   if (!tasks.length) return null;
-  return <div ref={root} data-testid="subagent-task-dock" className="subagent-task-dock relative mx-auto h-11 sm:h-7">
-    <div className="absolute inset-x-0 bottom-0 z-40 overflow-hidden rounded-t-2xl border border-b-0 border-border/70 bg-card shadow-[0_-4px_20px_rgba(15,23,42,0.06)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.24)]">
+  return <div ref={root} data-testid="subagent-task-dock" className="subagent-task-dock relative mx-auto h-11 sm:h-7"
+    onPointerDownCapture={event => { ownedPointerDown.current = event.nativeEvent; }}>
+    <div className="absolute inset-x-0 bottom-0 z-30 overflow-hidden rounded-t-2xl border border-b-0 border-border/70 bg-card shadow-[0_-4px_20px_rgba(15,23,42,0.06)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.24)]">
       <HoverHint enabled={!open && dragHeight === null} content={`${title} · ${summary}`}>
         <button ref={trigger} type="button" data-testid="subagent-task-dock-trigger"
           aria-expanded={open} aria-controls={panelId}

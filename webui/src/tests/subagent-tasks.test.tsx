@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { preloadMarkdownText } from "@/components/MarkdownText";
 import { SubagentTasksProvider } from "@/components/thread/SubagentTasks";
 import { SubagentTaskDock } from "@/components/thread/SubagentTaskDock";
 import { SubagentThreadMessages } from "@/components/thread/SubagentTaskResults";
@@ -435,6 +436,25 @@ describe("session-owned task UI", () => {
     expect(await within(screen.getByRole("dialog", { name: "Config check" })).findByRole("link", { name: /Full evidence/ })).toHaveAttribute("href", "https://example.com/evidence");
   });
 
+  it("keeps result-owned image portals inside the drawer interaction boundary", async () => {
+    await preloadMarkdownText();
+    const user = userEvent.setup();
+    render(layout());
+    const tree = await openTaskList(user);
+    emitTask(task({ revision: 2, state: "done", completed_at: 102, result: "![Result image](https://example.com/result.png)" }));
+    await user.click(await within(tree).findByRole("button", { name: "View image: Result image" }));
+    const viewer = screen.getByRole("dialog", { name: "Result image" });
+    fireEvent.pointerDown(within(viewer).getByRole("img", { name: "Result image" }));
+    expect(viewer).toBeInTheDocument();
+    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveAttribute("aria-expanded", "true");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId("subagent-task-tree")).toBe(tree);
+    fireEvent.pointerDown(screen.getByTestId("messages"));
+    expect(screen.queryByTestId("subagent-task-dock-trigger")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus();
+  });
+
   it("keeps task order, actual tool activity and cancellation outcomes in the dock", async () => {
     const user = userEvent.setup();
     vi.mocked(fetch).mockImplementation(async () => response([
@@ -685,8 +705,10 @@ describe("session-owned task UI", () => {
     await user.click(row);
     const detail = screen.getByRole("dialog", { name: "Config check" });
     const stop = within(detail).getByRole("button", { name: "Stop Config check" });
+    expect(within(detail).getByRole("heading", { name: "Config check" }).parentElement).toContainElement(stop);
     await user.click(stop);
     expect(stop).toBeDisabled();
+    expect(stop).toHaveAttribute("aria-busy", "true");
     expect(activityStop).toBeDisabled();
     expect(activityStop).toHaveAttribute("aria-busy", "true");
     vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { resolveRefresh = resolve; }));
@@ -722,6 +744,25 @@ describe("session-owned task UI", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(chatHandlers.get("a")?.size).toBe(0);
     expect(statusHandlers.size).toBe(0);
+  });
+
+  it("reports a failed header stop and lets the user retry without closing details", async () => {
+    const user = userEvent.setup();
+    requestMutation.mockRejectedValueOnce(new Error("Cannot stop task"));
+    render(layout());
+    const list = await openTaskList(user);
+    await user.click(within(list).getByRole("button", { name: /Config check Running/ }));
+    const detail = screen.getByRole("dialog", { name: "Config check" });
+    const stop = within(detail).getByRole("button", { name: "Stop Config check" });
+    expect(within(detail).getByRole("heading", { name: "Config check" }).parentElement).toContainElement(stop);
+    await user.click(stop);
+    expect(await within(detail).findByRole("alert")).toHaveTextContent("Cannot stop task");
+    expect(stop).toBeEnabled();
+    requestMutation.mockResolvedValueOnce(task({ revision: 2, state: "cancelled", completed_at: 102 }));
+    await user.click(stop);
+    expect(screen.getByRole("dialog", { name: "Config check" })).toBe(detail);
+    expect(detail).toHaveTextContent("Cancelled");
+    expect(requestMutation).toHaveBeenCalledTimes(2);
   });
 
   it("preserves loaded tasks and stop errors across background snapshot failures", async () => {

@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { LoadingRing } from "@/components/ui/loading-ring";
+import { HoverHint } from "@/components/ui/hover-hint";
 import { SubagentThread } from "@/components/thread/SubagentThread";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
@@ -139,6 +140,7 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
     }
   };
   const selected = enabled && active && paneVisible ? tasks.find((task) => task.task_id === selectedId) : undefined;
+  const canStopSelected = selected?.state === "queued" || selected?.state === "running";
   const value: TaskContext = {
     sessionKey, available: enabled && active && paneVisible, detailOpen: !!selected,
     tasks: enabled ? tasks : [],
@@ -178,7 +180,16 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
                 <span>{t(`thread.subagents.states.${selected.state}`)}</span>
               </> : null}
             </SheetDescription>
+            {selected && canStopSelected ? <HoverHint content={t("thread.subagents.stopTask", { label: selected.label })}>
+              <Button type="button" variant="ghost" size="icon"
+                className="h-11 w-11 shrink-0 rounded-full text-muted-foreground hover:text-destructive sm:h-9 sm:w-9"
+                aria-label={t("thread.subagents.stopTask", { label: selected.label })} aria-busy={stoppingId === selected.task_id}
+                disabled={stoppingId !== null} onClick={() => void stop(selected)}>
+                <StopIcon className="h-3.5 w-3.5" aria-hidden />
+              </Button>
+            </HoverHint> : null}
           </div>
+          {canStopSelected && stopError ? <p role="alert" className="px-5 pt-3 text-xs text-destructive">{stopError}</p> : null}
           {selected && sessionKey ? <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-5">
             {selected.state === "interrupted" || selected.error ? <div className="space-y-2 px-5 pb-4 text-sm">
               {selected.state === "interrupted" ? <p className="text-muted-foreground">{t("thread.subagents.interruptedHelp")}</p> : null}
@@ -194,11 +205,6 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
                 return count ? <p key={receipt}>{t(`thread.subagents.receipts.${receipt}`, { count })}</p> : null;
               })}
             </details> : null}
-          </div> : null}
-          {selected && (selected.state === "queued" || selected.state === "running") ? <div className="shrink-0 border-t px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-            <Button type="button" variant="outline" size="sm" disabled={stoppingId !== null}
-              onClick={() => void stop(selected)}><StopIcon className="mr-2 h-3 w-3" aria-hidden />{t("thread.subagents.stopTask", { label: selected.label })}</Button>
-            {stopError ? <p role="alert" className="mt-2 text-xs text-destructive">{stopError}</p> : null}
           </div> : null}
         </SheetContent>
       </Sheet>
