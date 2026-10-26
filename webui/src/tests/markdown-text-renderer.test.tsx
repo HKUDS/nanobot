@@ -18,7 +18,7 @@ describe("MarkdownTextRenderer", () => {
 
     const link = screen.getByRole("link", { name: "local server" });
     expect(link).toHaveAttribute("href", "http://127.0.0.1:7891/");
-    expect(link).toHaveClass("text-blue-500", "dark:text-blue-300");
+    expect(link).toHaveClass("text-content-link");
   });
 
   it.each(["#session/", "#/chat/"])("renders %s session references as same-tab links", (prefix) => {

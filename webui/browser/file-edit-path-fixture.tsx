@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { MarkdownText } from "@/components/MarkdownText";
 import { FileActionsProvider } from "@/components/FileActions";
 import { FileEditGroup, type FileEditSummary } from "@/components/thread/activity/FileEditRow";
 
@@ -22,6 +23,12 @@ export function FileEditPathFixture() {
         };
         return <FileEditGroup key={path} edits={[edit]} displayMode="collapsed_diff" onOpenFilePreview={setOpened} />;
       })}
+    </section>
+    <section aria-label="Chat links" className="mt-6">
+      <MarkdownText>{"正文 [NAN-368](https://example.com/issue) 与文件名使用相同蓝色。\n\n- Example — Reference guide  \n  https://example.com/guide"}</MarkdownText>
+    </section>
+    <section aria-label="Document links" className="mt-6">
+      <MarkdownText documentPath="/workspace/REPORT.md">{"报告 [Reference](https://example.com/document)"}</MarkdownText>
     </section>
     <output aria-label="Opened file">{opened}</output>
   </main></FileActionsProvider>;

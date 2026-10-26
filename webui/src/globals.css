@@ -71,6 +71,8 @@
 @layer base {
   :root {
     color-scheme: light;
+    --content-link: #0369a1;
+    --content-link-hover: #075985;
     --background: 0 0% 100%;
     --foreground: 240 3% 12%;
     --card: 0 0% 100%;
@@ -164,6 +166,8 @@
 
   .dark {
     color-scheme: dark;
+    --content-link: #bae6fd;
+    --content-link-hover: #e0f2fe;
     --background: 0 0% 19%;
     --foreground: 240 4% 96%;
     --card: 0 0% 22%;
