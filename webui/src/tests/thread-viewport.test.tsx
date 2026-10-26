@@ -261,6 +261,44 @@ function ViewportWithPromptNavigator({ messages }: { messages: UIMessage[] }) {
 }
 
 describe("ThreadViewport", () => {
+  it("reports the live tail only after the latest rendered page is ready, not a detached history window", () => {
+    const onLatestVisible = vi.fn();
+    const navigation: PromptHistoryNavigation = {
+      prompts: [], window: { messages, userMessageOffset: 0, hasMoreBefore: false,
+        hasMoreAfter: true, forkBoundaryMessageCount: null },
+      target: null, operation: null, loading: false, error: null, jump: vi.fn(), older: vi.fn(),
+      newer: vi.fn(), cancel: vi.fn(), latest: vi.fn(), retry: vi.fn(), updateMessages: vi.fn(),
+    };
+    const props = { messages, isStreaming: false, conversationKey: "read", onLatestVisible };
+    const view = render(<ThreadViewport {...props} navigation={navigation} />);
+    const scroller = screen.getByTestId("thread-message-region");
+    mockScrollGeometry(scroller, 600, 400, 200);
+    fireEvent.scroll(scroller);
+    expect(onLatestVisible).toHaveBeenLastCalledWith(false);
+    view.rerender(<ThreadViewport {...props} conversationReady={false} navigation={{ ...navigation, window: null }} />);
+    fireEvent.scroll(scroller);
+    expect(onLatestVisible).toHaveBeenLastCalledWith(false);
+    view.rerender(<ThreadViewport {...props} conversationReady navigation={{ ...navigation, window: null }} />);
+    act(() => { scroller.scrollTop = 200; fireEvent.scroll(scroller); });
+    expect(onLatestVisible).toHaveBeenLastCalledWith(true);
+    act(() => { scroller.scrollTop = 0; fireEvent.scroll(scroller); });
+    expect(onLatestVisible).toHaveBeenLastCalledWith(false);
+  });
+  it("does not report a covered conversation and rechecks when the preview closes", () => {
+    const onLatestVisible = vi.fn();
+    const props = { messages, isStreaming: false, conversationKey: "covered", onLatestVisible };
+    const view = render(<ThreadViewport {...props} />);
+    const scroller = screen.getByTestId("thread-message-region");
+    mockScrollGeometry(scroller, 600, 400, 200);
+    fireEvent.scroll(scroller);
+    expect(onLatestVisible).toHaveBeenLastCalledWith(true);
+    scroller.style.visibility = "hidden";
+    view.rerender(<ThreadViewport {...props} previewOpen />);
+    expect(onLatestVisible).toHaveBeenLastCalledWith(false);
+    scroller.style.visibility = "visible";
+    view.rerender(<ThreadViewport {...props} previewOpen={false} />);
+    expect(onLatestVisible).toHaveBeenLastCalledWith(true);
+  });
   it("keeps reasoning disclosure anchored for pointer and keyboard toggles", () => {
     const takeUserControl = vi.spyOn(
       ThreadMotionCoordinator.prototype,

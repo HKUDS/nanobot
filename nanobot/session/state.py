@@ -14,7 +14,13 @@ from datetime import datetime
 from typing import Any, TypeVar, cast
 
 from nanobot.bus.events import InboundMessage
-from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind, HistoryReader
+from nanobot.session.display_history import (
+    HistoryFact,
+    HistoryImport,
+    HistoryKind,
+    HistoryReader,
+    SessionReadState,
+)
 from nanobot.session.keys import is_dream_session
 from nanobot.session.manager import (
     Session,
@@ -716,13 +722,22 @@ class SessionState:
 
     async def append_history(
         self, key: str, facts: Sequence[HistoryFact], *, expected_generation: str | None,
-    ) -> None:
+        notify_completion: bool = True,
+    ) -> SessionReadState | None:
         """Append to an existing session; None selects its current generation."""
         records = list(facts)
-        await self._execute(
+        return await self._execute(
             key,
-            lambda: self._store.append_history(key, deepcopy(records), expected_generation=expected_generation),
+            lambda: self._store.append_history(
+                key, deepcopy(records), expected_generation=expected_generation,
+                notify_completion=notify_completion,
+            ),
             operation_name="append_history",
+        )
+
+    async def mark_read(self, key: str, generation: str, cursor: int) -> tuple[SessionReadState, bool]:
+        return await self._execute(
+            key, lambda: self._store.mark_read(key, generation, cursor), operation_name="mark_read",
         )
 
     async def record_delivery(
@@ -984,6 +999,7 @@ class SessionState:
                     facts = history_projection(target)
                     facts.append(HistoryFact(HistoryKind.FORK_BOUNDARY, created_at_ms=int(target.created_at.timestamp() * 1000)))
                     self._store.append_history(target.key, facts, expected_generation=target.generation)
+                    self._store.baseline_history_read(target.key)
                 return target
 
             target = self._store.run_write(write)

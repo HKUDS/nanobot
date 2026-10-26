@@ -13,7 +13,13 @@ from pathlib import Path
 from typing import Any, TypeVar, cast
 
 from nanobot.providers.base import ProviderConversationState
-from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind, HistoryReader
+from nanobot.session.display_history import (
+    HistoryFact,
+    HistoryImport,
+    HistoryKind,
+    HistoryReader,
+    SessionReadState,
+)
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import (
     Session,
@@ -96,9 +102,20 @@ def _create_schema_v2(db: sqlite3.Connection) -> None:
         db.execute(statement)
 
 
+def _create_schema_v3(db: sqlite3.Connection) -> None:
+    db.execute("ALTER TABLE history_heads ADD COLUMN latest_result INTEGER NOT NULL DEFAULT 0")
+    db.execute("ALTER TABLE history_heads ADD COLUMN read_result INTEGER NOT NULL DEFAULT 0")
+    # Existing history is the rollout baseline, not a backlog of new notifications.
+    db.execute("""UPDATE history_heads SET latest_result=coalesce((
+        SELECT max(ordinal)+1 FROM history_turns
+        WHERE session_key=history_heads.session_key AND completed=1
+    ), 0)""")
+    db.execute("UPDATE history_heads SET read_result=latest_result")
+
+
 # Entries upgrade version N to N+1. Preserve released entries and append upgrades.
 _SCHEMA_MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
-    _create_schema_v1, _create_schema_v2,
+    _create_schema_v1, _create_schema_v2, _create_schema_v3,
 )
 
 
@@ -443,6 +460,7 @@ class SqliteSessionStore:
                 if revision is not None and revision[1] >= 0:
                     raise SessionConflictError(f"history already exists before import: {item.key}")
                 self.append_history(item.key, item.facts, expected_generation=session.generation)
+                self.baseline_history_read(item.key)
                 db.execute("UPDATE history_heads SET updated_at_ms=max(updated_at_ms, ?) WHERE session_key=?",
                            (item.updated_at_ms, item.key))
                 # Import ownership survives deletion: another namespace must not
@@ -457,7 +475,8 @@ class SqliteSessionStore:
 
     def append_history(
         self, key: str, facts: list[HistoryFact], *, expected_generation: str | None,
-    ) -> None:
+        notify_completion: bool = True,
+    ) -> SessionReadState | None:
         encoded = [(fact, fact.encode()) for fact in facts]
         with self.transaction() as db:
             row = db.execute("SELECT generation FROM sessions WHERE key=?", (key,)).fetchone()
@@ -470,6 +489,7 @@ class SqliteSessionStore:
             ).fetchone()
             ordinal, position = (int(tail[0]), int(tail[1])) if tail is not None else (0, 0)
             completed = tail is not None and bool(tail[2])
+            result_changed = False
             for fact, record in encoded:
                 if completed:
                     ordinal, position = ordinal + 1, 0
@@ -481,6 +501,9 @@ class SqliteSessionStore:
                     key, ordinal, position, fact.kind.value, record,
                 ))
                 completed = fact.kind is HistoryKind.COMPLETION
+                if completed and notify_completion:
+                    db.execute("UPDATE history_heads SET latest_result=? WHERE session_key=?", (ordinal + 1, key))
+                    result_changed = True
                 db.execute(
                     """UPDATE history_turns SET record_count=record_count+1, byte_count=byte_count+?,
                        user_count=user_count+?, completed=? WHERE session_key=? AND ordinal=?""",
@@ -497,6 +520,31 @@ class SqliteSessionStore:
                            (fact.created_at_ms, key))
             if encoded:
                 db.execute("UPDATE history_heads SET revision=revision+1 WHERE session_key=?", (key,))
+            return HistoryReader(db, key, self.path).read_state if result_changed else None
+
+    def baseline_history_read(self, key: str) -> None:
+        """Copied/imported history is already known, not a newly delivered result."""
+        with self.transaction() as db:
+            db.execute("UPDATE history_heads SET read_result=latest_result WHERE session_key=?", (key,))
+
+    def mark_read(self, key: str, generation: str, cursor: int) -> tuple[SessionReadState, bool]:
+        """Advance only the acknowledged generation and persisted result position."""
+        with self.transaction() as db:
+            state = HistoryReader(db, key, self.path).read_state
+            if state is None or state["generation"] != generation:
+                raise SessionConflictError("read receipt belongs to a deleted or replaced session")
+            if cursor < 0 or cursor > state["latest"]:
+                raise ValueError("read receipt is beyond the persisted result")
+            if cursor <= state["read"]:
+                return state, False
+            completed = db.execute(
+                "SELECT completed FROM history_turns WHERE session_key=? AND ordinal=?",
+                (key, cursor - 1),
+            ).fetchone()
+            if completed is None or not completed[0]:
+                raise ValueError("read receipt does not identify a completed result")
+            db.execute("UPDATE history_heads SET read_result=? WHERE session_key=?", (cursor, key))
+            return {**state, "read": cursor}, True
 
     def copy_history_prefix(self, source_key: str, target: Session, before_input: int) -> bool:
         """Copy a display prefix alongside its canonical fork, in the caller's transaction."""
@@ -521,6 +569,7 @@ class SqliteSessionStore:
             return False
         facts.append(HistoryFact(HistoryKind.FORK_BOUNDARY, created_at_ms=int(target.created_at.timestamp() * 1000)))
         self.append_history(target.key, facts, expected_generation=target.generation)
+        self.baseline_history_read(target.key)
         return True
 
 
@@ -567,10 +616,13 @@ class SqliteSessionStore:
                     'key', key, 'created_at', created_at, 'updated_at', updated_at,
                     'title', title, 'preview', preview, 'visible_updated_at', visible_updated_at,
                     'metadata', metadata, 'history_updated_at_ms', history_updated_at_ms,
-                    'history_preview', history_preview
+                    'history_preview', history_preview,
+                    'read_state', json_object('generation', generation, 'latest', latest_result, 'read', read_result)
                 )) FROM (
                     SELECT sessions.*, coalesce(history_heads.updated_at_ms, 0) AS history_updated_at_ms,
-                           coalesce(nullif(history_heads.user_preview, ''), history_heads.preview, '') AS history_preview
+                           coalesce(nullif(history_heads.user_preview, ''), history_heads.preview, '') AS history_preview,
+                           coalesce(history_heads.latest_result, 0) AS latest_result,
+                           coalesce(history_heads.read_result, 0) AS read_result
                     FROM sessions LEFT JOIN history_heads ON history_heads.session_key=sessions.key
                     ORDER BY sessions.updated_at DESC
                 )

@@ -1,6 +1,7 @@
 import { uploadAttachments, uploadCapability, type AttachmentReference, type UploadCapability } from "../../../packages/client-events/attachments";
 import { DeliveryReceipts } from "../../../packages/client-events/delivery";
 import { decodeNotification } from "../../../packages/client-events/notifications";
+import { isReadPosition, parseSessionReadState, type SessionReadState } from "../../../packages/client-events/read-state";
 import type {
   ConnectionStatus,
   InboundEvent,
@@ -86,7 +87,16 @@ type SessionUpdateHandler = (
   scope?: SessionUpdateScope,
   workspaceScope?: WorkspaceScopePayload,
 ) => void;
+type SessionReadStateHandler = (chatId: string, state: SessionReadState) => void;
 type SidebarStateUpdateHandler = (state: SidebarStatePayload) => void;
+
+interface ReadMark {
+  generation: string;
+  cursor: number;
+  sent: number;
+  inFlight: boolean;
+  blocked: boolean;
+}
 type PairingChangeHandler = () => void;
 type RunStatusHandler = (chatId: string, state: RunState) => void;
 
@@ -234,6 +244,9 @@ export class NanobotClient {
   private statusHandlers = new Set<StatusHandler>();
   private runtimeModelHandlers = new Set<RuntimeModelHandler>();
   private sessionUpdateHandlers = new Set<SessionUpdateHandler>();
+  private sessionReadStateHandlers = new Set<SessionReadStateHandler>();
+  /** One coalesced observation per session, never an offline command queue. */
+  private readMarks = new Map<string, ReadMark>();
   private sidebarStateUpdateHandlers = new Set<SidebarStateUpdateHandler>();
   private runStatusHandlers = new Set<RunStatusHandler>();
   private runCompletionHandlers = new Set<RunCompletionHandler>();
@@ -318,6 +331,47 @@ export class NanobotClient {
     return () => {
       this.sessionUpdateHandlers.delete(handler);
     };
+  }
+
+  onSessionReadState(handler: SessionReadStateHandler): Unsubscribe {
+    this.sessionReadStateHandlers.add(handler);
+    return () => { this.sessionReadStateHandlers.delete(handler); };
+  }
+
+  /** Submit only an observed result cursor. Failures leave the server-owned state unread. */
+  markRead(sessionKey: string, generation: string, cursor: number): void {
+    if (!sessionKey.trim() || !generation.trim() || !isReadPosition(cursor) || cursor === 0) return;
+    let mark = this.readMarks.get(sessionKey);
+    if (!mark || mark.generation !== generation) {
+      mark = { generation, cursor, sent: 0, inFlight: false, blocked: false };
+      this.readMarks.set(sessionKey, mark);
+    }
+    mark.cursor = Math.max(mark.cursor, cursor);
+    this.flushReadMark(sessionKey, mark);
+  }
+
+  private flushReadMark(sessionKey: string, mark: ReadMark): void {
+    if (this.status !== "open" || mark.inFlight || mark.blocked || mark.sent >= mark.cursor) return;
+    const cursor = mark.cursor;
+    mark.sent = cursor;
+    mark.inFlight = true;
+    void this.requestMutation<unknown>("session.mark_read", {
+      session_key: sessionKey, generation: mark.generation, cursor,
+    }).then((value) => {
+      if (this.readMarks.get(sessionKey) !== mark) return;
+      if (!value || typeof value !== "object" || !("state" in value)
+        || !("changed" in value) || typeof value.changed !== "boolean") throw new Error("Invalid read acknowledgement");
+      const state = parseSessionReadState(value.state);
+      if (!state) throw new Error("Invalid read acknowledgement state");
+      if (state.generation !== mark.generation) mark.cursor = mark.sent;
+      this.emitSessionReadState(sessionKey.slice(sessionKey.indexOf(":") + 1), state);
+    }).catch(() => {
+      // Retry at the next authenticated ready, not on every render/scroll or a timer.
+      mark.blocked = true;
+    }).finally(() => {
+      mark.inFlight = false;
+      if (this.readMarks.get(sessionKey) === mark) this.flushReadMark(sessionKey, mark);
+    });
   }
 
   onPairingChange(handler: PairingChangeHandler): Unsubscribe {
@@ -575,6 +629,7 @@ export class NanobotClient {
       // ignore
     }
     this.clearTemporaryChats();
+    this.readMarks.clear();
     this.setStatus("closed");
   }
 
@@ -910,6 +965,24 @@ export class NanobotClient {
       return;
     }
 
+    if (parsed.event === "session_read_state") {
+      const state = parseSessionReadState(parsed.state);
+      if (typeof parsed.chat_id === "string" && parsed.chat_id.trim() && state) {
+        this.emitSessionReadState(parsed.chat_id, state);
+      }
+      return;
+    }
+
+    if (parsed.event === "turn_end") {
+      const state = parseSessionReadState(parsed.read_state) ?? undefined;
+      if ("read_state" in parsed || "read_cursor" in parsed) {
+        parsed = { ...parsed, read_state: state, read_cursor: isReadPosition(parsed.read_cursor) ? parsed.read_cursor : 0 };
+      }
+      if (state && typeof parsed.chat_id === "string" && parsed.chat_id.trim()) {
+        this.emitSessionReadState(parsed.chat_id, state);
+      }
+    }
+
     if (parsed.event === "error" && !parsed.turn_id) {
       const fallback = this.legacyRejectionTarget(parsed);
       if (fallback) {
@@ -979,6 +1052,10 @@ export class NanobotClient {
       this.upload = uploadCapability(parsed.upload);
       this.readyChatId = parsed.chat_id;
       this.knownChats.add(parsed.chat_id);
+      for (const [key, mark] of this.readMarks) {
+        if (mark.blocked) { mark.blocked = false; mark.sent = 0; }
+        this.flushReadMark(key, mark);
+      }
       for (const handler of this.readyHandlers) {
         try { handler(); } catch { /* One listener must not block another ready consumer. */ }
       }
@@ -1069,6 +1146,10 @@ export class NanobotClient {
       }
       this.dispatch(correlatedChatId, parsed);
     }
+  }
+
+  private emitSessionReadState(chatId: string, state: SessionReadState): void {
+    for (const handler of this.sessionReadStateHandlers) handler(chatId, state);
   }
 
   private emitRuntimeModelUpdate(modelName: string | null, modelPreset?: string | null): void {

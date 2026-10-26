@@ -97,6 +97,34 @@ describe("webui API helpers", () => {
     vi.unstubAllGlobals();
   });
 
+  it("parses server-owned read snapshots on the session list without a legacy-host fallback", async () => {
+    const state = { generation: "g", latest: 8, read: 2 };
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ sessions: [
+      { key: "websocket:valid", read_state: state },
+      { key: "websocket:invalid", read_state: { ...state, read: "2" } },
+      { key: "websocket:legacy" },
+    ] }) } as Response);
+    const rows = await listSessions("tok");
+    expect(rows[0].readState).toEqual(state);
+    expect(rows[1].readState).toBeUndefined();
+    expect(rows[2].readState).toBeUndefined();
+  });
+
+  it("keeps the actual replay cursor distinct from total latest and validates both at the HTTP boundary", async () => {
+    const body = { schemaVersion: 3, projection: "events", events: [],
+      read_state: { generation: "g", latest: 8, read: 2 }, read_cursor: 3 };
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => body } as Response);
+    expect(await fetchWebuiThread("tok", "websocket:chat")).toMatchObject(body);
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true,
+      json: async () => ({ ...body, read_state: { ...body.read_state, generation: 1 }, read_cursor: "3" }) } as Response);
+    const invalid = await fetchWebuiThread("tok", "websocket:chat");
+    expect(invalid?.read_state).toBeUndefined();
+    expect(invalid?.read_cursor).toBe(0);
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true,
+      json: async () => ({ schemaVersion: 3, projection: "events", events: [] }) } as Response);
+    expect((await fetchWebuiThread("tok", "websocket:chat"))?.read_cursor).toBe(0);
+  });
+
   it("percent-encodes websocket keys when fetching webui-thread snapshot", async () => {
     await fetchWebuiThread("tok", "websocket:chat-1");
 

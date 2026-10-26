@@ -1,4 +1,6 @@
 import type { ContextCompaction, NotificationEvent, RecoveryState, RetryStatus as WireRetryStatus } from "../../../packages/client-events/notifications";
+import type { SessionReadState } from "../../../packages/client-events/read-state";
+export type { SessionReadState, SessionReadObservation } from "../../../packages/client-events/read-state";
 export type { RecoveryState } from "../../../packages/client-events/notifications";
 
 type Role = "user" | "assistant" | "tool" | "system";
@@ -459,6 +461,7 @@ export interface ChatSummary {
   projectLocked?: boolean;
   /** Stable, server-owned @handle for this session. */
   handle?: SessionHandle | null;
+  readState?: SessionReadState;
 }
 
 export type WorkspaceAccessMode = "restricted" | "full";
@@ -1589,6 +1592,8 @@ export type InboundEvent =
   | ({
       event: "turn_end";
       chat_id: string;
+      read_state?: SessionReadState;
+      read_cursor?: number;
       latency_ms?: number;
       usage?: TurnUsage;
       round_usages?: RoundUsage[];
@@ -1619,6 +1624,11 @@ export type InboundEvent =
       chat_id: string;
       scope?: "metadata" | "thread" | string;
       workspace_scope?: WorkspaceScopePayload;
+    }
+  | {
+      event: "session_read_state";
+      chat_id: string;
+      state: SessionReadState;
     }
   | {
       event: "sidebar_state_updated";
@@ -1730,6 +1740,8 @@ export interface PromptIndex {
 
 export interface WebuiThreadPersistedPayload {
   schemaVersion: number;
+  read_state?: SessionReadState;
+  read_cursor?: number;
   sessionKey?: string;
   savedAt?: string;
   /** Cheap server revision used for application-managed conditional revalidation. */

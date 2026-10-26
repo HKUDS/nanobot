@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { mergeSessionReadState, type SessionReadState } from "../../../packages/client-events/read-state";
 
 import { useClient } from "@/providers/ClientProvider";
 import { useNanobotStream } from "@/hooks/useNanobotStream";
@@ -46,6 +47,10 @@ export function useSessions(): {
   const optimisticKeysRef = useRef<Set<string>>(new Set());
   const refreshPendingRef = useRef(false);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
+  const readVersionRef = useRef(0);
+  const readStatesRef = useRef<Map<string, { state: SessionReadState; version: number }> | null>(null);
+  const readStates = readStatesRef.current ??= new Map<string, { state: SessionReadState; version: number }>(sessions.flatMap((row) => row.readState
+    ? [[row.chatId, { state: row.readState, version: 0 }] as const] : []));
   tokenRef.current = token;
 
   useEffect(() => {
@@ -61,9 +66,30 @@ export function useSessions(): {
         while (refreshPendingRef.current) {
           refreshPendingRef.current = false;
           try {
-            const rows = await listSessions(tokenRef.current);
+            const readVersion = readVersionRef.current;
+            const rows = (await listSessions(tokenRef.current)).map((row) => {
+              const known = readStates.get(row.chatId);
+              // Generations are opaque: a conflicting event received during the read
+              // needs another authoritative snapshot, not a guessed generation order.
+              if (known && known.version > readVersion && known.state.generation !== row.readState?.generation) {
+                refreshPendingRef.current = true;
+              }
+              const readState = row.readState ? mergeSessionReadState(known?.state, row.readState) : undefined;
+              if (readState) readStates.set(row.chatId, { state: readState, version: known?.version ?? 0 });
+              else readStates.delete(row.chatId);
+              return readState === row.readState ? row : { ...row, readState };
+            });
             setLoadedOnce(true);
             const serverKeys = new Set(rows.map((row) => row.key));
+            const retainedChatIds = new Set([
+              ...rows.map((row) => row.chatId),
+              ...Array.from(optimisticKeysRef.current, (key) => key.slice(key.indexOf(":") + 1)),
+            ]);
+            for (const [chatId, known] of readStates) {
+              if (retainedChatIds.has(chatId)) continue;
+              if (known.version > readVersion) refreshPendingRef.current = true;
+              else readStates.delete(chatId);
+            }
             setSessions((prev) => {
               const byKey = new Map(prev.map((row) => [row.key, row]));
               const next = [
@@ -96,11 +122,33 @@ export function useSessions(): {
     })();
     refreshInFlightRef.current = request;
     return request;
-  }, []);
+  }, [readStates]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => client.onReady(() => { void refresh(); }), [client, refresh]);
+
+  useEffect(() => client.onSessionReadState((chatId, incoming) => {
+    const known = readStates.get(chatId);
+    if (known && known.state.generation !== incoming.generation) {
+      // This may be a reset or a delayed pre-reset broadcast/ACK. Neither can
+      // replace the current generation without a fresh list snapshot.
+      void refresh();
+      return;
+    }
+    const state = mergeSessionReadState(known?.state, incoming);
+    if (state === known?.state) return;
+    readStates.set(chatId, { state, version: ++readVersionRef.current });
+    setSessions((previous) => {
+      const index = previous.findIndex((row) => row.chatId === chatId);
+      if (index < 0 || previous[index].readState === state) return previous;
+      const next = previous.slice();
+      next[index] = { ...previous[index], readState: state };
+      return next;
+    });
+  }), [client, readStates, refresh]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -178,13 +226,14 @@ export function useSessions(): {
       const result = await apiDeleteSession(client, key, options);
       if (result.blocked_by_automations || (!result.deleted && !optimistic)) return result;
       optimisticKeysRef.current.delete(key);
+      readStates.delete(key.slice(key.indexOf(":") + 1));
       webuiThreadCache.delete(key);
       setSessions((prev) => prev.filter((s) => s.key !== key));
       // The gateway may have restarted and forgotten an unpersisted chat's
       // draft scope, but removing that optimistic session is still a deletion.
       return result.deleted ? result : { ...result, deleted: true };
     },
-    [client],
+    [client, readStates],
   );
 
   const getSessionAutomations = useCallback(async (key: string) => {

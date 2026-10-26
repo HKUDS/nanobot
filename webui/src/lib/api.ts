@@ -1,4 +1,5 @@
 import { isCompactionPhase, isCompactionReason } from "../../../packages/client-events/notifications";
+import { isReadPosition, parseSessionReadState } from "../../../packages/client-events/read-state";
 import type {
   ApiServicePayload,
   AutomationChatsPayload,
@@ -208,6 +209,7 @@ export async function listSessions(
     workspace_scope?: WorkspaceScopePayload | null;
     project_locked?: boolean;
     handle?: SessionHandle | null;
+    read_state?: unknown;
   };
   const body = await request<{ sessions: Row[] }>(
     `${base}/api/sessions`,
@@ -230,6 +232,7 @@ export async function listSessions(
       workspaceScope: s.workspace_scope ?? null,
       projectLocked: s.project_locked,
       handle,
+      readState: parseSessionReadState(s.read_state) ?? undefined,
     };
   });
 }
@@ -405,6 +408,8 @@ export function parseWebuiThreadPayload(value: unknown): WebuiThreadPersistedPay
     ...value,
     projection: "events",
     events,
+    read_state: parseSessionReadState(value.read_state) ?? undefined,
+    read_cursor: isReadPosition(value.read_cursor) ? value.read_cursor : 0,
   } as unknown as WebuiThreadPersistedPayload;
 }
 

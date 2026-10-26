@@ -12,6 +12,7 @@ import type {
   ChatSummary,
   ConnectionStatus,
   SessionAutomationJob,
+  SessionReadState,
   SidebarStatePayload,
   WorkspaceScopePayload,
 } from "@/lib/types";
@@ -44,6 +45,7 @@ const sessionUpdateHandlers = new Set<(
   workspaceScope?: WorkspaceScopePayload,
 ) => void>();
 const sidebarStateUpdateHandlers = new Set<(state: SidebarStatePayload) => void>();
+const readStateHandlers = new Set<(chatId: string, state: SessionReadState) => void>();
 const pairingChangeHandlers = new Set<() => void>();
 const readyHandlers = new Set<() => void>();
 let mockSessions: ChatSummary[] = [];
@@ -284,6 +286,11 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
       sessionUpdateHandlers.add(handler);
       return () => sessionUpdateHandlers.delete(handler);
     };
+    onSessionReadState = (handler: (chatId: string, state: SessionReadState) => void) => {
+      readStateHandlers.add(handler);
+      return () => readStateHandlers.delete(handler);
+    };
+    markRead = vi.fn();
     onSidebarStateUpdate = (handler: (state: SidebarStatePayload) => void) => {
       sidebarStateUpdateHandlers.add(handler);
       return () => sidebarStateUpdateHandlers.delete(handler);
@@ -328,6 +335,15 @@ import App from "@/App";
 import { mockBrowserFocus } from "./browser-focus";
 
 const defaultUseSessions = vi.mocked(useSessions).getMockImplementation()!;
+
+async function useServerSessionRows() {
+  const actual = await vi.importActual<typeof import("@/hooks/useSessions")>("@/hooks/useSessions");
+  vi.mocked(useSessions).mockImplementation(actual.useSessions);
+  mockFetchRoutes({ "/api/sessions": () => ({ sessions: mockSessions.map((row) => ({
+    key: row.key, created_at: row.createdAt, updated_at: row.updatedAt, title: row.title,
+    preview: row.preview, run_started_at: row.runStartedAt, read_state: row.readState,
+  })) }) });
+}
 
 describe("App layout", () => {
   let restoreBrowserFocus: (() => void) | undefined;
@@ -2863,8 +2879,6 @@ describe("App layout", () => {
       return Response.json({}, { status: 404 });
     }));
 
-    const markersKey = "nanobot-webui.sidebar.session-updates.v1";
-    localStorage.setItem(markersKey, JSON.stringify(["chat-b", "deleted"]));
     render(<App />);
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     act(() => statusHandlers.forEach((handler) => handler("open")));
@@ -2874,7 +2888,6 @@ describe("App layout", () => {
     await act(async () => {});
     expect(within(sidebar).queryByText("Loading…")).not.toBeInTheDocument();
     expect(setSidebarStateSpy).not.toHaveBeenCalled();
-    expect(JSON.parse(localStorage.getItem(markersKey)!)).toEqual(["chat-b", "deleted"]);
 
     // A successful full list can authorize removal; the failed read and cache cannot.
     sessionsFail = false;
@@ -2902,7 +2915,6 @@ describe("App layout", () => {
       },
     }));
 
-    expect(JSON.parse(localStorage.getItem(markersKey)!)).toEqual(["chat-b"]);
     serverSessions = [];
     act(() => sessionUpdateHandlers.forEach((handler) => handler("chat-a")));
     await waitFor(() => expect(setSidebarStateSpy).toHaveBeenLastCalledWith({
@@ -2910,7 +2922,6 @@ describe("App layout", () => {
       pinned_keys: [], archived_keys: [], session_order: [],
       title_overrides: {}, tags_by_key: {}, workbench: { version: 1, tabs: {} },
     }));
-    expect(JSON.parse(localStorage.getItem(markersKey)!)).toEqual([]);
   }, 10_000);
 
   it("sorts chats by displayed title when A-Z is persisted", async () => {
@@ -2984,7 +2995,8 @@ describe("App layout", () => {
     expect(labels).toEqual(["Alpha plan", "New topic", "Zulu work"]);
   });
 
-  it("shows running and completed session indicators in the sidebar", async () => {
+  it("shows running status and server-owned unread results without clearing on selection", async () => {
+    await useServerSessionRows();
     mockSessions = [
       {
         key: "websocket:chat-a",
@@ -3021,19 +3033,21 @@ describe("App layout", () => {
 
     act(() => {
       for (const handler of runStatusHandlers) handler("chat-a", runState(null));
+      for (const handler of readStateHandlers) handler("chat-a", { generation: "g", latest: 2, read: 1 });
     });
-    expect(within(sidebar).queryByRole("img", { name: "Agent running" }))
-      .not.toBeInTheDocument();
+    expect(within(sidebar).queryByRole("img", { name: "Agent running" })).not.toBeInTheDocument();
     expect(within(sidebar).getByRole("img", { name: "New activity" })).toBeInTheDocument();
-
     await act(async () => {
       fireEvent.click(within(sidebar).getByRole("button", { name: /^Working chat$/ }));
+      fireEvent.click(within(sidebar).getByRole("button", { name: /^Quiet chat$/ }));
     });
-    expect(within(sidebar).queryByRole("img", { name: "New activity" }))
-      .not.toBeInTheDocument();
+    expect(within(sidebar).getByRole("img", { name: "New activity" })).toBeInTheDocument();
+    act(() => { for (const handler of readStateHandlers) handler("chat-a", { generation: "g", latest: 2, read: 2 }); });
+    expect(within(sidebar).queryByRole("img", { name: "New activity" })).not.toBeInTheDocument();
   });
 
-  it("does not show an updated dot later when the active session finishes", async () => {
+  it("preserves an unseen active completion when leaving until authoritative confirmation arrives", async () => {
+    await useServerSessionRows();
     mockSessions = [
       {
         key: "websocket:chat-a",
@@ -3075,20 +3089,19 @@ describe("App layout", () => {
 
     act(() => {
       for (const handler of runStatusHandlers) handler("chat-a", runState(null));
+      for (const handler of readStateHandlers) handler("chat-a", { generation: "g", latest: 3, read: 2 });
     });
-    expect(within(sidebar).queryByRole("img", { name: "Agent running" }))
-      .not.toBeInTheDocument();
-    expect(within(sidebar).queryByRole("img", { name: "New activity" }))
-      .not.toBeInTheDocument();
-
+    expect(within(sidebar).queryByRole("img", { name: "Agent running" })).not.toBeInTheDocument();
     await act(async () => {
       fireEvent.click(within(sidebar).getByRole("button", { name: /^Other chat$/ }));
     });
-    expect(within(sidebar).queryByRole("img", { name: "New activity" }))
-      .not.toBeInTheDocument();
+    expect(within(sidebar).getByRole("img", { name: "New activity" })).toBeInTheDocument();
+    act(() => { for (const handler of readStateHandlers) handler("chat-a", { generation: "g", latest: 3, read: 3 }); });
+    expect(within(sidebar).queryByRole("img", { name: "New activity" })).not.toBeInTheDocument();
   });
 
-  it("marks inactive sessions when a thread update arrives", async () => {
+  it("marks inactive sessions from small read-state updates and clears them after cross-device confirmation", async () => {
+    await useServerSessionRows();
     mockSessions = [
       {
         key: "websocket:chat-a",
@@ -3116,16 +3129,15 @@ describe("App layout", () => {
       fireEvent.click(within(sidebar).getByRole("button", { name: /^Open chat$/ }));
     });
 
-    act(() => {
-      for (const handler of sessionUpdateHandlers) handler("chat-b", "thread");
-    });
-
+    act(() => { for (const handler of readStateHandlers) handler("chat-b", { generation: "g", latest: 1, read: 0 }); });
     expect(within(sidebar).getByRole("img", { name: "New activity" })).toBeInTheDocument();
 
     await act(async () => {
       fireEvent.click(within(sidebar).getByRole("button", { name: /^Scheduled update target$/ }));
+      fireEvent.click(within(sidebar).getByRole("button", { name: /^Open chat$/ }));
     });
-
+    expect(within(sidebar).getByRole("img", { name: "New activity" })).toBeInTheDocument();
+    act(() => { for (const handler of readStateHandlers) handler("chat-b", { generation: "g", latest: 1, read: 1 }); });
     expect(within(sidebar).queryByRole("img", { name: "New activity" }))
       .not.toBeInTheDocument();
   });
@@ -3148,12 +3160,9 @@ describe("App layout", () => {
         createdAt: "2026-04-16T11:00:00Z",
         updatedAt: "2026-04-16T11:00:00Z",
         preview: "Completed after reload",
+        readState: { generation: "g", latest: 2, read: 1 },
       },
     ];
-    localStorage.setItem(
-      "nanobot-webui.sidebar.session-updates.v1",
-      JSON.stringify(["chat-b"]),
-    );
 
     const { rerender } = render(<App />);
 

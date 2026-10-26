@@ -5,7 +5,7 @@ import { canonicalThreadPayload } from "./thread-test-payload";
 
 afterEach(() => { clearReloadCache(); vi.restoreAllMocks(); });
 
-const thread = canonicalThreadPayload({ schemaVersion: 3, revision: "rev-1", messages: [
+const thread = canonicalThreadPayload({ schemaVersion: 3, revision: "rev-1", read_cursor: 0, messages: [
   { id: "a", role: "assistant", content: "Saved answer", createdAt: 1 },
 ] })!;
 
@@ -27,6 +27,18 @@ describe("tab reload cache", () => {
     clearReloadCache();
     activateReloadCache("ws://localhost:8765/");
     expect(new WebuiThreadCache().get("websocket:a")).toBeUndefined();
+  });
+
+  it("restores only validated server read snapshots within the authenticated gateway scope", () => {
+    activateReloadCache("ws://localhost:8765/");
+    const row = { key: "websocket:a", channel: "websocket", chatId: "a", preview: "Answer" };
+    const state = { generation: "B", latest: 2, read: 1 };
+    writeReloadCache("sessions", [{ ...row, readState: state },
+      { ...row, key: "websocket:b", chatId: "b", readState: { ...state, latest: "2" } }]);
+    expect(readReloadSessions()[0].readState).toEqual(state);
+    expect(readReloadSessions()[1].readState).toBeUndefined();
+    activateReloadCache("ws://localhost:8888/");
+    expect(readReloadSessions()).toEqual([]);
   });
 
   it("removes deleted sessions and ignores malformed replay", () => {

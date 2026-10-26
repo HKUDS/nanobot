@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { preloadMarkdownText } from "@/components/MarkdownText";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
 import { ThreadShell } from "@/components/thread/ThreadShell";
+import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
 import { SessionSearchDialog } from "@/components/SessionSearchDialog";
 import i18n from "@/i18n";
 import { ComposerDraftStore, clearStoredComposerDrafts } from "@/lib/composer-draft";
@@ -131,6 +132,7 @@ function makeClient() {
     },
     sendMessage,
     sendSystemCommand: vi.fn().mockResolvedValue(undefined),
+    markRead: vi.fn(),
     newChat: vi.fn(),
     forkChat: vi.fn(),
     attach: vi.fn(),
@@ -482,6 +484,75 @@ describe("ThreadShell", () => {
         json: async () => ({}),
       }),
     );
+  });
+
+  it("confirms only a loaded rendered cursor in a foreground visible pane at the live tail", async () => {
+    const client = makeClient();
+    const readState = { generation: "g", latest: 8, read: 0 };
+    const body = { ...transcriptFromSimpleMessages([{ role: "assistant", content: "Loaded result" }]),
+      read_state: readState, read_cursor: 3 };
+    const fetch = vi.fn(async (input: RequestInfo | URL) => String(input).includes("/webui-thread")
+      ? httpJson(body) : new Response(null, { status: 404 }));
+    vi.stubGlobal("fetch", fetch);
+    const visibility = Object.getOwnPropertyDescriptor(document, "visibilityState");
+    setDocumentVisibility("hidden");
+    const shell = (visible: boolean) => wrap(client, <ThreadVisibilityContext.Provider value={visible}>
+      <ThreadShell session={{ ...session("read"), readState }} title="Read" onToggleSidebar={() => {}} />
+    </ThreadVisibilityContext.Provider>);
+    const view = render(shell(false));
+    try {
+      await screen.findByText("Loaded result");
+      const scroller = screen.getByTestId("thread-message-region");
+      Object.defineProperties(scroller, {
+        scrollHeight: { configurable: true, value: 1200 }, clientHeight: { configurable: true, value: 400 },
+        scrollTop: { configurable: true, writable: true, value: 800 },
+      });
+      fireEvent.scroll(scroller);
+      expect(client.markRead).not.toHaveBeenCalled();
+      act(() => setDocumentVisibility("visible"));
+      expect(client.markRead).not.toHaveBeenCalled();
+      act(() => { scroller.scrollTop = 0; fireEvent.wheel(scroller, { deltaY: -200 }); fireEvent.scroll(scroller); });
+      view.rerender(shell(true));
+      expect(client.markRead).not.toHaveBeenCalled();
+      const bodyReads = fetch.mock.calls.filter(([url]) => String(url).includes("/webui-thread")).length;
+      act(() => { scroller.scrollTop = 800; fireEvent.scroll(scroller); });
+      expect(client.markRead).toHaveBeenLastCalledWith("websocket:read", "g", 3);
+      expect(fetch.mock.calls.filter(([url]) => String(url).includes("/webui-thread"))).toHaveLength(bodyReads);
+    } finally { view.unmount(); restoreDocumentVisibility(visibility); }
+  });
+
+  it.each([undefined, 0])("does not confirm a live incomplete/missing cursor (%s), then confirms a rendered completion", async (cursor) => {
+    const client = makeClient();
+    const readState = { generation: "g", latest: 9, read: 0 };
+    const body = { ...transcriptFromSimpleMessages([{ role: "assistant", content: "Earlier body" }]),
+      read_state: readState, read_cursor: 0 };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input).includes("/webui-thread")
+      ? httpJson(body) : new Response(null, { status: 404 })));
+    const view = render(wrap(client, <ThreadShell session={{ ...session("live-read"), readState }}
+      title="Read" onToggleSidebar={() => {}} />));
+    await screen.findByText("Earlier body");
+    const scroller = screen.getByTestId("thread-message-region");
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 400 }, clientHeight: { configurable: true, value: 400 },
+    });
+    act(() => {
+      client._emitChat("live-read", { event: "user_message", chat_id: "live-read", turn_id: "first", starts_turn: true, text: "First request" });
+      client._emitChat("live-read", { event: "stream_end", chat_id: "live-read", turn_id: "first", turn_seq: 2, text: "Incomplete result" });
+      client._emitChat("live-read", { event: "turn_end", chat_id: "live-read", turn_id: "first", turn_seq: 3,
+        read_state: readState, ...(cursor === undefined ? {} : { read_cursor: cursor }) });
+    });
+    await screen.findByText("Incomplete result");
+    fireEvent.scroll(scroller);
+    expect(client.markRead).not.toHaveBeenCalled();
+    act(() => {
+      client._emitChat("live-read", { event: "user_message", chat_id: "live-read", turn_id: "second", starts_turn: true, text: "Second request" });
+      client._emitChat("live-read", { event: "stream_end", chat_id: "live-read", turn_id: "second", turn_seq: 2, text: "Rendered completion" });
+      client._emitChat("live-read", { event: "turn_end", chat_id: "live-read", turn_id: "second", turn_seq: 3,
+        read_state: readState, read_cursor: 4 });
+    });
+    await screen.findByText("Rendered completion");
+    expect(client.markRead).toHaveBeenLastCalledWith("websocket:live-read", "g", 4);
+    view.unmount();
   });
 
   it("publishes received and live body text to local search without search-driven reads", async () => {

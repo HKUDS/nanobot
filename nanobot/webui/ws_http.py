@@ -40,6 +40,7 @@ from nanobot.session.session_handles import (
     SessionHandle,
     SessionHandleResolver,
 )
+from nanobot.session.sqlite_store import SessionConflictError
 from nanobot.triggers.local_types import LocalTrigger
 from nanobot.webui.automation_chats import AutomationChat, automation_chats
 from nanobot.webui.automation_results import cron_run_response, trigger_run_response
@@ -194,6 +195,7 @@ _WEBUI_MUTATION_PATHS = {
     "star_prompt.claim": "/api/webui/star-prompt/claim",
     "star_prompt.dismiss": "/api/webui/star-prompt/dismiss",
     "sidebar.update": "/api/webui/sidebar-state/update",
+    "session.mark_read": "/api/webui/sessions/mark-read",
     "workspace.favorite": "/api/workspaces/favorite",
     "workspace.resolve_project": "/api/workspaces/resolve-project",
     "recovery.continue": "/api/webui/recovery/continue",
@@ -551,6 +553,7 @@ class GatewayHTTPHandler:
             "/api/webui/star-prompt/claim",
             "/api/webui/star-prompt/dismiss",
             "/api/webui/sidebar-state/update",
+            "/api/webui/sessions/mark-read",
             "/api/workspaces/resolve-project",
             "/api/workspaces/favorite",
             "/api/webui/subagents/cancel",
@@ -974,6 +977,29 @@ class GatewayHTTPHandler:
         if session is None:
             return _http_error(404, "session not found")
         return _http_json_response(session_context_payload(session))
+
+    async def _handle_session_mark_read(self, request: WsRequest) -> Response:
+        if not getattr(request, _WEBUI_MUTATION_REQUEST_ATTR, False):
+            return _http_error(405, "Read receipts require an authenticated WebSocket")
+        if self.session_manager is None:
+            return _http_error(503, "session manager unavailable")
+        payload = _mutation_payload(request)
+        if payload is None:
+            return _http_error(400, "invalid read receipt")
+        key, generation, cursor = payload.get("session_key"), payload.get("generation"), payload.get("cursor")
+        if not isinstance(key, str) or not is_webui_session_key(key) or len(key) > 512:
+            return _http_error(400, "invalid session key")
+        if not isinstance(generation, str) or not generation or len(generation) > 128:
+            return _http_error(400, "invalid session generation")
+        if isinstance(cursor, bool) or not isinstance(cursor, int) or not 0 <= cursor <= 2**53 - 1:
+            return _http_error(400, "invalid read cursor")
+        try:
+            state, changed = await self.session_manager.state.mark_read(key, generation, cursor)
+        except SessionConflictError as exc:
+            return _http_error(409, str(exc))
+        except ValueError as exc:
+            return _http_error(400, str(exc))
+        return _http_json_response({"state": state, "changed": changed}, extra_headers=_NO_STORE_HEADERS)
 
     async def _handle_sessions_list(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
@@ -1692,6 +1718,8 @@ class GatewayHTTPHandler:
     ) -> Response | None:
         if got == "/api/sessions":
             return await self._handle_sessions_list(request)
+        if got == "/api/webui/sessions/mark-read":
+            return await self._handle_session_mark_read(request)
         if got == "/api/commands":
             return self._handle_commands(request)
         if got == "/api/workspaces/favorite":

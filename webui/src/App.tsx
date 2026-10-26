@@ -132,8 +132,6 @@ function bootstrapCapabilities(boot: BootstrapResponse): string[] {
 }
 
 const SIDEBAR_STORAGE_KEY = "nanobot-webui.sidebar";
-const SESSION_UPDATES_STORAGE_KEY = "nanobot-webui.sidebar.session-updates.v1";
-const LEGACY_COMPLETED_RUNS_STORAGE_KEY = "nanobot-webui.sidebar.completed-runs.v1";
 const RESTART_STARTED_KEY = "nanobot-webui.restartStartedAt";
 const RESTART_ROUTE_KEY = "nanobot-webui.restartRoute";
 const RESTART_ROUTE_TTL_MS = 5 * 60 * 1000;
@@ -541,31 +539,6 @@ function readSidebarOpen(): boolean {
     return raw === "1";
   } catch {
     return true;
-  }
-}
-
-function readSessionUpdateChatIds(): Set<string> {
-  if (typeof window === "undefined") return new Set();
-  try {
-    const raw =
-      window.localStorage.getItem(SESSION_UPDATES_STORAGE_KEY)
-      ?? window.localStorage.getItem(LEGACY_COMPLETED_RUNS_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(parsed)) return new Set();
-    return new Set(parsed.filter((item): item is string => typeof item === "string"));
-  } catch {
-    return new Set();
-  }
-}
-
-function writeSessionUpdateChatIds(chatIds: Set<string>): void {
-  try {
-    window.localStorage.setItem(
-      SESSION_UPDATES_STORAGE_KEY,
-      JSON.stringify(Array.from(chatIds)),
-    );
-  } catch {
-    // ignore storage errors (private mode, etc.)
   }
 }
 
@@ -1289,7 +1262,6 @@ function Shell({
     () => new Map(),
   );
   const [runningChatIds, setRunningChatIds] = useState<Set<string>>(() => new Set());
-  const [updatedChatIds, setUpdatedChatIds] = useState<Set<string>>(readSessionUpdateChatIds);
   const [workspaces, setWorkspaces] = useState<WorkspacesPayload | null>(null);
   const { skills, loading: skillsLoading, error: skillsError } = useSkills(getToken);
   const pageVisible = usePageVisibility();
@@ -1469,10 +1441,6 @@ function Shell({
     }
   }, [hostSidebarOpen, sidebarWidth]);
 
-  useEffect(() => {
-    writeSessionUpdateChatIds(updatedChatIds);
-  }, [updatedChatIds]);
-
   const refreshPairingRequests = useCallback((): Promise<number> => {
     if (pairingRefreshRef.current) {
       // An earlier snapshot may predate the notice or completed mutation.
@@ -1563,7 +1531,9 @@ function Shell({
     lastActivePaneByTabRef.current.set(activeTabKey, activeKey);
   }, [activeKey, activeTabKey, activeTabState]);
   const runningChatIdList = useMemo(() => Array.from(runningChatIds), [runningChatIds]);
-  const updatedChatIdList = useMemo(() => Array.from(updatedChatIds), [updatedChatIds]);
+  const updatedChatIdList = useMemo(() => sessions
+    .filter((session) => session.readState && session.readState.latest > session.readState.read)
+    .map((session) => session.chatId), [sessions]);
   const recoveryChatIdList = useMemo(
     () => sessions
       .filter((session) => (
@@ -1576,13 +1546,6 @@ function Shell({
   const activeChatId = activePaneSession?.chatId ?? null;
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
-    if (!activeChatId) return;
-    setUpdatedChatIds((current) => {
-      if (!current.has(activeChatId)) return current;
-      const next = new Set(current);
-      next.delete(activeChatId);
-      return next;
-    });
   }, [activeChatId]);
   const activeWorkspaceScope = useMemo<WorkspaceScopePayload | null>(() => {
     if (temporaryChatRequested) {
@@ -1623,12 +1586,6 @@ function Shell({
   useEffect(() => {
     if (!sessionsLoaded) return;
     const knownChatIds = new Set(sessions.map((session) => session.chatId));
-    setUpdatedChatIds((current) => {
-      const next = new Set(
-        Array.from(current).filter((chatId) => knownChatIds.has(chatId)),
-      );
-      return next.size === current.size ? current : next;
-    });
     setWorkspaceOverrides((current) => {
       const entries = Object.entries(current).filter(([chatId]) => knownChatIds.has(chatId));
       return entries.length === Object.keys(current).length ? current : Object.fromEntries(entries);
@@ -1679,20 +1636,7 @@ function Shell({
   }, [activeKey, loading, navigate, sessions, temporarySessions]);
 
   useEffect(() => {
-    return client.onSessionUpdate((chatId, scope, workspaceScope) => {
-      if (scope === "thread") {
-        setUpdatedChatIds((current) => {
-          const next = new Set(current);
-          if (activeChatIdRef.current === chatId) {
-            next.delete(chatId);
-          } else {
-            next.add(chatId);
-          }
-          return next.size === current.size && next.has(chatId) === current.has(chatId)
-            ? current
-            : next;
-        });
-      }
+    return client.onSessionUpdate((chatId, _scope, workspaceScope) => {
       if (!workspaceScope) return;
       const next = normalizeWorkspaceScope(workspaceScope);
       setWorkspaceOverrides((current) => ({
@@ -1937,15 +1881,6 @@ function Shell({
       const selectedTemporary = temporarySessionsRef.current[key];
       const selected = selectedTemporary
         ?? sessions.find((session) => session.key === key);
-      const selectedChatId = selected?.chatId;
-      if (selectedChatId) {
-        setUpdatedChatIds((current) => {
-          if (!current.has(selectedChatId)) return current;
-          const next = new Set(current);
-          next.delete(selectedChatId);
-          return next;
-        });
-      }
       if (selected?.workspaceScope) {
         setDraftWorkspaceScope(normalizeWorkspaceScope(selected.workspaceScope));
       } else {
@@ -2278,12 +2213,6 @@ function Shell({
         nextRunning.add(chatId);
         runningChatIdsRef.current = nextRunning;
         setRunningChatIds(nextRunning);
-        setUpdatedChatIds((current) => {
-          if (!current.has(chatId)) return current;
-          const next = new Set(current);
-          next.delete(chatId);
-          return next;
-        });
         return;
       }
 
@@ -2292,20 +2221,6 @@ function Shell({
       nextRunning.delete(chatId);
       runningChatIdsRef.current = nextRunning;
       setRunningChatIds(nextRunning);
-      if (
-        Object.values(temporarySessionsRef.current).some(
-          (session) => session.chatId === chatId,
-        )
-      ) return;
-      setUpdatedChatIds((current) => {
-        const next = new Set(current);
-        if (activeChatIdRef.current === chatId) {
-          next.delete(chatId);
-        } else {
-          next.add(chatId);
-        }
-        return next;
-      });
     });
   }, [client]);
 
