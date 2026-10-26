@@ -1859,6 +1859,7 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
 | `volcengine` | `apiKey` | `VOLCENGINE_SEARCH_API_KEY` or `WEB_SEARCH_API_KEY` | Monthly quota, then paid |
 | `keenable` | `apiKey` (optional) | `KEENABLE_API_KEY` | Yes (no key needed; key raises limits) |
 | `searxng` | `baseUrl` | `SEARXNG_BASE_URL` | Yes (self-hosted) |
+| `google_browser_scraper` | `baseUrl`, `apiKey` (optional) | `GBS_BASE_URL`, `GBS_API_KEY` | Yes (self-hosted, uses your own proxy) |
 | `duckduckgo` (default) | — | — | Yes |
 
 **Brave:**
@@ -2060,6 +2061,27 @@ Create a key at [serper.dev](https://serper.dev). You can also set `SERPER_API_K
 
 </details>
 
+**Google Browser Scraper** (self-hosted Google, no API key needed):
+<details>
+<summary>Manual configuration</summary>
+
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "google_browser_scraper",
+        "baseUrl": "http://127.0.0.1:8000"
+      }
+    }
+  }
+}
+```
+
+</details>
+
+Run [google-browser-scraper](https://github.com/nodemaven/google-browser-scraper) as a local server: `pip install google-browser-scraper`, then `google-browser-scraper serve --proxy "http://USER:PASS@host:port" --prewarm`. Each query is a Google search in a real browser, usually 8-25 seconds, one at a time per server, so nanobot runs these searches one after another. If the server sets `GBS_API_KEY`, give nanobot the same value through `GBS_API_KEY` in its environment (or `apiKey` in the config file).
+
 **DuckDuckGo** (zero config):
 <details>
 <summary>Manual configuration</summary>
@@ -2125,9 +2147,9 @@ Queries are limited to 128 Unicode characters after trimming whitespace; longer 
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `provider` | string | `"duckduckgo"` | Search backend: `brave`, `tavily`, `jina`, `kagi`, `olostep`, `bocha`, `volcengine`, `keenable`, `serper`, `anysearch`, `deepseek`, `searxng`, `duckduckgo` |
+| `provider` | string | `"duckduckgo"` | Search backend: `brave`, `tavily`, `jina`, `kagi`, `olostep`, `bocha`, `volcengine`, `keenable`, `serper`, `anysearch`, `deepseek`, `searxng`, `google_browser_scraper`, `duckduckgo` |
 | `apiKey` | string | `""` | API key for API-backed search providers |
-| `baseUrl` | string | `""` | Base URL for SearXNG |
+| `baseUrl` | string | `""` | Base URL for SearXNG or google-browser-scraper |
 | `maxResults` | integer | `5` | Results per search (1–10) |
 
 ### Web Fetch

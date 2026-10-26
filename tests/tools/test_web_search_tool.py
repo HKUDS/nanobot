@@ -1248,6 +1248,102 @@ async def test_searxng_invalid_url():
     assert "Error" in result
 
 
+def _gbs_page(status: str = "Success", verdict: str = "results", rows: list | None = None) -> dict:
+    return {
+        "search_metadata": {"status": status, "page_verdict": verdict},
+        "organic_results": rows or [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_google_browser_scraper_search(monkeypatch):
+    async def mock_get(self, url, **kw):
+        assert url == "http://127.0.0.1:8000/search.json"
+        assert kw["params"] == {"q": "gbs"}
+        assert kw["headers"]["Authorization"] == "Bearer gbs-key"
+        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
+        return _response(json=_gbs_page(rows=[
+            {"position": 1, "title": "Unresolved", "link": None},
+            {"position": 2, "title": "Kept", "link": "https://kept.example", "snippet": "From Google"},
+            {"position": 3, "title": "Second", "link": "https://second.example", "snippet": "More"},
+        ]))
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+    tool = _tool(
+        provider="google_browser_scraper",
+        api_key="gbs-key",
+        base_url="http://127.0.0.1:8000/",
+        user_agent="nanobot-search-test",
+    )
+    result = await tool.execute(query="gbs", count=1)
+    assert "1. Kept" in result
+    assert "https://kept.example" in result
+    assert "From Google" in result
+    assert "Unresolved" not in result
+    assert "Second" not in result
+
+
+@pytest.mark.asyncio
+async def test_google_browser_scraper_uses_env_base_url_without_a_key(monkeypatch):
+    async def mock_get(self, url, **kw):
+        assert url == "http://gbs.local:8000/search.json"
+        assert "Authorization" not in kw["headers"]
+        return _response(json=_gbs_page(rows=[{"title": "Env", "link": "https://env.example"}]))
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+    monkeypatch.setenv("GBS_BASE_URL", "http://gbs.local:8000")
+    monkeypatch.delenv("GBS_API_KEY", raising=False)
+    tool = _tool(provider="google_browser_scraper")
+    result = await tool.execute(query="gbs")
+    assert "Env" in result
+
+
+@pytest.mark.asyncio
+async def test_google_browser_scraper_reports_a_blocked_page(monkeypatch):
+    async def mock_get(self, url, **kw):
+        return _response(json=_gbs_page(status="Error", verdict="captcha"))
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+    tool = _tool(provider="google_browser_scraper", base_url="http://127.0.0.1:8000")
+    result = await tool.execute(query="gbs")
+    assert "no results page (captcha)" in result
+    assert is_tool_error_result(result)
+
+
+@pytest.mark.asyncio
+async def test_google_browser_scraper_http_error(monkeypatch):
+    async def mock_get(self, url, **kw):
+        return _response(status=401, json={"error": "missing or wrong api_key"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+    tool = _tool(provider="google_browser_scraper", base_url="http://127.0.0.1:8000")
+    result = await tool.execute(query="gbs")
+    assert "Error: google-browser-scraper search failed (401)" in result
+    assert is_tool_error_result(result)
+
+
+@pytest.mark.asyncio
+async def test_google_browser_scraper_without_base_url_falls_back(monkeypatch):
+    class MockDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            return [{"title": "Fallback", "href": "https://ddg.example", "body": "fallback"}]
+
+    monkeypatch.setattr("ddgs.DDGS", MockDDGS)
+    monkeypatch.delenv("GBS_BASE_URL", raising=False)
+    tool = _tool(provider="google_browser_scraper")
+    result = await tool.execute(query="gbs")
+    assert "Fallback" in result
+
+
+def test_google_browser_scraper_searches_run_one_at_a_time():
+    tool = _tool(provider="google_browser_scraper", base_url="http://127.0.0.1:8000")
+    assert tool.exclusive is True
+    assert tool.concurrency_safe is False
+
+
 @pytest.mark.asyncio
 async def test_jina_422_falls_back_to_duckduckgo(monkeypatch):
     class MockDDGS:
