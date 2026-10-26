@@ -48,6 +48,7 @@ import {
 } from "@/components/ui/tooltip";
 import { MAX_WORKBENCH_PANES } from "@/components/workbench/workbench-model";
 import { SidebarTopicRename } from "@/components/SidebarTopicRename";
+import { ArchiveConfirm } from "@/components/ArchiveConfirm";
 import { SkeletonStatus } from "@/components/settings/shared/SkeletonStatus";
 import { LoadingRing } from "@/components/ui/loading-ring";
 import {
@@ -189,6 +190,8 @@ export interface SidebarDeleteItem {
   label: string;
 }
 
+export type SidebarDeleteDecision = (confirmed: boolean) => void;
+
 function droppablePaneKey(
   dataTransfer: DataTransfer,
   group: SidebarPaneGroup,
@@ -225,12 +228,13 @@ interface ChatListProps {
   activeKey: string | null;
   onSelect: (key: string) => void;
   onCloseTemporaryChat?: (key: string) => void;
-  onRequestDelete: (key: string, label: string) => void;
-  onRequestDeleteMany?: (items: SidebarDeleteItem[]) => void;
+  onRequestDelete: (key: string, label: string, onDecision?: SidebarDeleteDecision) => void;
+  onRequestDeleteMany?: (items: SidebarDeleteItem[], onDecision?: SidebarDeleteDecision) => void;
   onTogglePin: (key: string) => void;
   onRequestRename: (key: string, title: string) => Promise<void>;
   onRequestRenameTab?: (key: string, label: string) => void;
   onToggleArchive: (key: string) => void;
+  onArchiveMany?: (keys: string[], archive: boolean) => void;
   paneGroups?: Record<string, SidebarPaneGroup>;
   onSelectPane?: (tabKey: string, paneKey: string) => void;
   onCreateTab?: (paneKey: string) => void;
@@ -276,6 +280,7 @@ export const ChatList = memo(function ChatList({
   onRequestRename,
   onRequestRenameTab,
   onToggleArchive,
+  onArchiveMany,
   paneGroups = {},
   onSelectPane,
   onCreateTab,
@@ -308,6 +313,7 @@ export const ChatList = memo(function ChatList({
   const { t } = useTranslation();
   const [visibleLimit, setVisibleLimit] = useState(INITIAL_VISIBLE_SESSIONS);
   const scrollViewportRef = useRef<HTMLDivElement>(null);
+  const selectionBarRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const viewport = scrollViewportRef.current;
     if (!viewport) return;
@@ -343,6 +349,11 @@ export const ChatList = memo(function ChatList({
   );
   const [paneDropTarget, setPaneDropTarget] = useState<string | null>(null);
   const [deleteSelectionMode, setDeleteSelectionMode] = useState(false);
+  const [deleteConfirmationPending, setDeleteConfirmationPending] = useState(false);
+  const [pendingArchive, setPendingArchive] = useState<{
+    keys: string[];
+    archive: boolean;
+  } | null>(null);
   const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
   const [renamingTopic, setRenamingTopic] = useState<{ key: string } | null>(null);
   const renamingKey = renamingTopic?.key ?? null;
@@ -364,6 +375,12 @@ export const ChatList = memo(function ChatList({
     () => new Set(),
   );
   const deleteSelectionAnchorRef = useRef<string | null>(null);
+  const selectionConfirmationPending = pendingArchive !== null || deleteConfirmationPending;
+  const closeDeleteSelection = useCallback(() => {
+    setDeleteSelectionMode(false);
+    setSelectedDeleteKeys(new Set());
+    deleteSelectionAnchorRef.current = null;
+  }, []);
 
   useEffect(() => {
     const clearPaneDropTarget = () => setPaneDropTarget(null);
@@ -484,14 +501,26 @@ export const ChatList = memo(function ChatList({
     if (!deleteSelectionMode) return;
     setOpenActionMenuId(null);
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setDeleteSelectionMode(false);
-      setSelectedDeleteKeys(new Set());
-      deleteSelectionAnchorRef.current = null;
+      if (event.key !== "Escape" || selectionConfirmationPending) return;
+      closeDeleteSelection();
+    };
+    const onClick = (event: MouseEvent) => {
+      if (selectionConfirmationPending) return;
+      const target = event.target;
+      if (target instanceof Node && selectionBarRef.current?.contains(target)) return;
+      const row = target instanceof Element
+        ? target.closest("[data-chat-row], [data-workbench-tab]")
+        : null;
+      if (row && scrollViewportRef.current?.contains(row)) return;
+      closeDeleteSelection();
     };
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [deleteSelectionMode]);
+    document.addEventListener("click", onClick, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("click", onClick, true);
+    };
+  }, [closeDeleteSelection, deleteSelectionMode, selectionConfirmationPending]);
 
   useEffect(() => {
     writeCollapsedPaneGroups(collapsedPaneGroups);
@@ -631,6 +660,7 @@ export const ChatList = memo(function ChatList({
     shiftKey = false,
     targetKey = keys[0],
   ) => {
+    if (selectionConfirmationPending) return;
     const validKeys = keys.filter((key) => deleteItemsByKey.has(key));
     const anchorKey = deleteSelectionAnchorRef.current;
     const range = shiftKey && anchorKey && targetKey
@@ -652,25 +682,25 @@ export const ChatList = memo(function ChatList({
     });
     if (!range) deleteSelectionAnchorRef.current = targetKey ?? null;
   };
-  const closeDeleteSelection = () => {
-    setDeleteSelectionMode(false);
-    setSelectedDeleteKeys(new Set());
-    deleteSelectionAnchorRef.current = null;
-  };
-  const requestDeleteItems = (items: SidebarDeleteItem[]) => {
+  const requestDeleteItems = (items: SidebarDeleteItem[], onDecision?: SidebarDeleteDecision) => {
     if (items.length === 0) return;
-    if (onRequestDeleteMany) onRequestDeleteMany(items);
-    else if (items.length === 1) onRequestDelete(items[0].key, items[0].label);
+    if (onRequestDeleteMany) onRequestDeleteMany(items, onDecision);
+    else if (items.length === 1) onRequestDelete(items[0].key, items[0].label, onDecision);
   };
-  const requestDeleteKeys = (keys: string[]) => {
+  const requestDeleteKeys = (keys: string[], onDecision?: SidebarDeleteDecision) => {
     requestDeleteItems(keys
       .map((key) => deleteItemsByKey.get(key))
-      .filter((item): item is SidebarDeleteItem => item !== undefined));
+      .filter((item): item is SidebarDeleteItem => item !== undefined), onDecision);
   };
   const confirmDeleteSelection = () => {
-    requestDeleteKeys(Array.from(selectedDeleteKeys));
-    closeDeleteSelection();
+    setDeleteConfirmationPending(true);
+    requestDeleteKeys(Array.from(selectedDeleteKeys), (confirmed) => {
+      setDeleteConfirmationPending(false);
+      if (confirmed) closeDeleteSelection();
+    });
   };
+  const allSelectedArchived = selectedDeleteKeys.size > 0
+    && Array.from(selectedDeleteKeys).every((key) => archivedPanes.has(key) || archived.has(key));
   return (
     <div ref={scrollViewportRef} className="sidebar-scroll-fade sidebar-scrollbar h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain pb-2">
       <SidebarSelectionHighlight
@@ -1161,35 +1191,59 @@ export const ChatList = memo(function ChatList({
         ) : null}
         {deleteSelectionMode ? (
           <div
+            ref={selectionBarRef}
             data-testid="delete-selection-bar"
-            className="sticky bottom-2 z-30 mx-1 mt-3 flex min-h-11 items-center gap-2 rounded-floating border border-sidebar-border/80 bg-popover/95 p-1.5 pl-2 shadow-[0_10px_30px_rgba(15,23,42,0.14)] backdrop-blur-xl"
+            aria-busy={deleteConfirmationPending}
+            className="sticky bottom-2 z-30 mx-1 mt-3 flex min-h-11 items-center gap-1 rounded-floating border border-sidebar-border/80 bg-popover/95 p-1.5 pl-3 shadow-[0_10px_30px_rgba(15,23,42,0.14)] backdrop-blur-xl"
           >
-            <button
-              type="button"
-              onClick={closeDeleteSelection}
-              aria-label={t("chat.cancelSelection", {
-                defaultValue: "Cancel selection",
-              })}
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sidebar-muted-foreground transition-colors media-hover:hover:text-foreground"
-            >
-              <X className="h-4 w-4" aria-hidden />
-            </button>
-            <span className="min-w-0 flex-1 truncate px-1 text-[12.5px] font-medium text-foreground/85">
+            <span className="min-w-0 flex-1 truncate pr-2 text-[12.5px] font-medium text-foreground/85">
               {t("chat.selectedCount", {
                 defaultValue: "{{count}} selected",
                 count: selectedDeleteKeys.size,
               })}
             </span>
-            <button
-              type="button"
-              disabled={selectedDeleteKeys.size === 0}
-              onClick={confirmDeleteSelection}
-              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-destructive px-3 text-[12px] font-semibold text-destructive-foreground transition-colors media-hover:hover:bg-destructive/90 disabled:pointer-events-none disabled:opacity-40"
-            >
-              <Trash2 className="h-3.5 w-3.5" aria-hidden />
-              {t("chat.deleteSelected", { defaultValue: "Delete" })}
-            </button>
+            {onArchiveMany ? (
+              <HoverHint content={t(allSelectedArchived ? "chat.unarchive" : "chat.archive")}>
+                <button
+                  type="button"
+                  aria-label={t(allSelectedArchived ? "chat.unarchive" : "chat.archive")}
+                  disabled={selectedDeleteKeys.size === 0 || deleteConfirmationPending}
+                  onClick={() => setPendingArchive({
+                    keys: Array.from(selectedDeleteKeys),
+                    archive: !allSelectedArchived,
+                  })}
+                  className="touch-target inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-foreground transition-colors media-hover:hover:bg-sidebar-accent disabled:pointer-events-none disabled:opacity-40"
+                >
+                  {allSelectedArchived
+                    ? <ArchiveRestore className="h-4 w-4" aria-hidden />
+                    : <Archive className="h-4 w-4" aria-hidden />}
+                </button>
+              </HoverHint>
+            ) : null}
+            <HoverHint content={t("chat.delete")}>
+              <button
+                type="button"
+                aria-label={t("chat.delete")}
+                disabled={selectedDeleteKeys.size === 0 || deleteConfirmationPending}
+                onClick={confirmDeleteSelection}
+                className="touch-target inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-destructive transition-colors media-hover:hover:bg-destructive/10 disabled:pointer-events-none disabled:opacity-40"
+              >
+                <Trash2 className="h-4 w-4" aria-hidden />
+              </button>
+            </HoverHint>
           </div>
+        ) : null}
+        {pendingArchive ? (
+          <ArchiveConfirm
+            count={pendingArchive.keys.length}
+            archive={pendingArchive.archive}
+            onCancel={() => setPendingArchive(null)}
+            onConfirm={() => {
+              onArchiveMany?.(pendingArchive.keys, pendingArchive.archive);
+              setPendingArchive(null);
+              closeDeleteSelection();
+            }}
+          />
         ) : null}
       </SidebarSelectionHighlight>
     </div>
