@@ -279,7 +279,7 @@ async def test_tool_execution_propagates_cancellation_without_error_hook():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("stop", ["caller", "caller_twice", "tool", "hook"])
+@pytest.mark.parametrize("stop", ["caller", "caller_twice", "caller_late_hook_error", "tool", "hook"])
 async def test_runner_waits_for_parallel_tool_cleanup_before_finalizing(stop):
     started, abort, cleaning, release, cleaned = (asyncio.Event() for _ in range(5))
     finalized = asyncio.Event()
@@ -306,8 +306,13 @@ async def test_runner_waits_for_parallel_tool_cleanup_before_finalizing(stop):
 
     class CleanupHook(AgentHook):
         async def before_execute_tool(self, context, tool_call, tool, params):
-            if stop == "hook" and tool_call.name == "quick":
-                await abort.wait()
+            if stop in {"hook", "caller_late_hook_error"} and tool_call.name == "quick":
+                try:
+                    await abort.wait()
+                except asyncio.CancelledError:
+                    if stop == "caller_late_hook_error":
+                        raise RuntimeError("hook failed during cancellation") from None
+                    raise
                 raise failure
 
         async def on_finally(self, context):

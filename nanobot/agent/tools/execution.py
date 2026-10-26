@@ -88,9 +88,11 @@ async def execute_tool_calls(
                 )
                 for tool_call in batch
             ]
-            batch_future = asyncio.gather(*tasks)
+            batch_task = asyncio.create_task(_collect_tool_batch(tasks))
             try:
-                batch_results = await asyncio.shield(batch_future)
+                batch_results = await asyncio.shield(batch_task)
+                if isinstance(batch_results, BaseException):
+                    raise batch_results
             except BaseException:
                 # Own cancellation once; repeated stop requests must not interrupt
                 # tool cleanup or let the runner finalize before the batch settles.
@@ -98,13 +100,10 @@ async def execute_tool_calls(
                     if not task.done():
                         task.cancel()
                 try:
-                    await shield_and_drain(asyncio.gather(*tasks, return_exceptions=True))
+                    await shield_and_drain(asyncio.gather(batch_task, *tasks, return_exceptions=True))
                 except asyncio.CancelledError:
                     # Propagate the original failure after cleanup has drained.
                     pass
-                finally:
-                    # Draining children does not observe the original aggregate.
-                    batch_future.exception()
                 raise
             tool_results.extend(batch_results)
         else:
@@ -123,6 +122,17 @@ async def execute_tool_calls(
     results = [result for result, _event in tool_results]
     events = [event for _result, event in tool_results]
     return results, events
+
+
+async def _collect_tool_batch(
+    tasks: list[asyncio.Task[tuple[Any, dict[str, str]]]],
+) -> list[tuple[Any, dict[str, str]]] | BaseException:
+    # Return failures to the owner: Python 3.14 shield reports exceptions in
+    # an abandoned inner future even when the owner subsequently observes them.
+    try:
+        return await asyncio.gather(*tasks)
+    except BaseException as exc:
+        return exc
 
 
 async def _execute_tool_call(
