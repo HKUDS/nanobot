@@ -46,6 +46,9 @@ const noop = () => {};
 function ThemeChatFixture({ theme, toggle }: { theme: "light" | "dark"; toggle: () => void }) {
   const [activeKey, setActiveKey] = useState(sessions[0].key);
   const composer = <ThreadComposer onSend={noop} />;
+  const header = <ThreadHeader title="Theme chat" hideTitle theme={theme} onToggleTheme={toggle} onToggleSidebar={noop} />;
+  const panes = [{ key: "theme", title: "Theme chat" }];
+  if (new URLSearchParams(location.search).has("split")) panes.push({ key: "theme-secondary", title: "Secondary chat" });
   return <main data-theme-surface className="flex bg-background" style={{ height: "100vh" }}>
     <aside className="hidden w-64 shrink-0 sm:block">
       <Sidebar sessions={sessions} activeKey={activeKey} onSelect={setActiveKey} loading={false} newChatActive={false}
@@ -55,14 +58,16 @@ function ThemeChatFixture({ theme, toggle }: { theme: "light" | "dark"; toggle: 
         onOpenChannels={noop} onOpenSearch={noop} onToggleArchived={noop} />
     </aside>
     <div className="min-w-0 flex-1">
-      <PaneWorkbench panes={[{ key: "theme", title: "Theme chat" }]} activePaneKey="theme" layout="columns"
+      <PaneWorkbench panes={panes} activePaneKey="theme" layout="columns"
         showLayoutControl={false} onActivatePane={noop} onAddPane={noop} onLayoutChange={noop} onPaneOrderChange={noop}
         renderPane={(_pane, context) => <div className="relative flex min-h-0 flex-1 flex-col">
-          <ThreadHeader title="Theme chat" hideTitle theme={theme} onToggleTheme={toggle} onToggleSidebar={noop} />
+          {context.active && (context.headerPortalTarget
+            ? createPortal(header, context.headerPortalTarget)
+            : context.headerPortalTarget === undefined ? header : null)}
           <ThreadViewport messages={messages} isStreaming={false} conversationKey={activeKey}
-            navigationFrame={context.navigationFrame} composer={null} />
+            navigationFrame={context.navigationFrame} composer={context.composerPortalTarget === undefined ? composer : null} />
           <ThreadHistoryStatus loading={false} error={null} exhausted onRetry={noop} />
-          {context.composerPortalTarget && createPortal(composer, context.composerPortalTarget)}
+          {context.active && context.composerPortalTarget && createPortal(composer, context.composerPortalTarget)}
         </div>} />
     </div>
   </main>;

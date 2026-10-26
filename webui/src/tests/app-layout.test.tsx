@@ -4042,7 +4042,7 @@ describe("App layout", () => {
     fireEvent.change(alphaInput.closest(".thread-composer-surface")!.querySelector('input[type="file"]')!, {
       target: { files: [new File(["notes"], "alpha-notes.txt", { type: "text/plain" })] },
     });
-    expect(await screen.findByTestId("composer-chip")).toHaveTextContent("alpha-notes.txt");
+    expect(within(await screen.findByTestId("composer-chip")).getByRole("button", { name: "alpha-notes.txt" })).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "Add pane" }));
     expect(screen.queryByRole("dialog", { name: "Search" })).not.toBeInTheDocument();
@@ -4122,7 +4122,7 @@ describe("App layout", () => {
     const restoredInput = await screen.findByRole("textbox", { name: "Message Alpha" });
     expect(screen.getByTestId("workbench-pane-websocket:chat-alpha")).toContainElement(restoredInput);
     expect(restoredInput).toHaveValue("keep this Alpha draft");
-    expect(await screen.findByTestId("composer-chip")).toHaveTextContent("alpha-notes.txt");
+    expect(within(await screen.findByTestId("composer-chip")).getByRole("button", { name: "alpha-notes.txt" })).toBeVisible();
     const researchGroup = within(sidebar).getByRole("button", {
       name: "Group: Research",
     }).closest("[data-sidebar-tab-group]") as HTMLElement;

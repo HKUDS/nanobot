@@ -106,14 +106,14 @@ test("reduced motion keeps the canvas fade but switches the icon directly", asyn
 
 for (const width of [1440, 390]) {
   for (const initial of ["light", "dark"] as const) {
-    test(`reduced motion fades existing chat surfaces together from ${initial} at ${width}px`, async ({ page }) => {
+    test(`reduced motion fades shared-composer chat surfaces together from ${initial} at ${width}px`, async ({ page }) => {
       await page.emulateMedia({ reducedMotion: "reduce" });
       await page.setViewportSize({ width, height: 844 });
       await page.addInitScript((theme) => {
         localStorage.setItem("nanobot.locale", "en");
         localStorage.setItem("nanobot-webui.theme", theme);
       }, initial);
-      await page.goto("/browser/fixture.html?case=theme-toggle&chat");
+      await page.goto("/browser/fixture.html?case=theme-toggle&chat&split");
       const input = page.getByRole("textbox");
       await input.fill("Keep this draft while changing theme");
       const inputBox = await input.boundingBox();
