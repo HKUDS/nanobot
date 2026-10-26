@@ -254,8 +254,8 @@ export function SubagentTaskButton({ task, surface = "archive" }: { task: Observ
       ? "grid min-h-11 min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-0.5 rounded-lg px-2 py-2 text-left text-[13px] leading-5 transition-colors duration-150 hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none sm:min-h-9 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:py-1.5"
       : "col-span-full grid min-h-11 min-w-0 grid-cols-subgrid items-center gap-y-0.5 rounded-control py-2 text-left text-[13px] leading-5 hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-9 sm:py-1.5"}>
     <span className="col-start-1 row-start-1 self-center"><TaskStateIcon task={task} /></span>
-    <span className="col-start-2 row-start-1 min-w-0 line-clamp-2 break-words font-medium sm:line-clamp-none sm:truncate">{task.label}</span>
-    <span className={completed ? "sr-only" : "col-start-2 row-start-2 text-xs leading-4 text-muted-foreground sm:col-start-3 sm:row-start-1"}>{t(`thread.subagents.states.${task.state}`)}</span>
-    <span className={`col-start-3 text-right text-xs tabular-nums text-muted-foreground sm:col-start-4 sm:row-start-1 sm:min-w-[5ch] ${completed ? "row-start-1" : "row-start-2"}`}><TaskElapsed task={task} /></span>
+    <span className={`col-start-2 row-start-1 min-w-0 line-clamp-2 break-words font-medium sm:line-clamp-none sm:truncate ${activity ? "" : "col-span-2 sm:col-span-1"}`}>{task.label}</span>
+    <span className={completed ? "sr-only" : `col-start-2 row-start-2 text-xs leading-4 text-muted-foreground sm:col-start-3 sm:row-start-1 ${activity ? "" : "col-span-2 sm:col-span-1"}`}>{t(`thread.subagents.states.${task.state}`)}</span>
+    <span className={`${activity ? "col-start-3 sm:col-start-4" : "col-start-4"} text-right text-xs tabular-nums text-muted-foreground sm:row-start-1 sm:min-w-[5ch] ${completed ? "row-start-1" : "row-start-2"}`}><TaskElapsed task={task} /></span>
   </button>;
 }

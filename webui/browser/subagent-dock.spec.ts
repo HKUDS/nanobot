@@ -521,12 +521,15 @@ test.describe("touch task drawer", () => {
 });
 
 for (const width of [1440, 390, 320]) {
-  test(`aligns archived task columns with their disclosure at ${width}px`, async ({ page }) => {
+  test(`aligns archived task columns with their disclosure at ${width}px`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 900 });
     await page.goto(`/browser/fixture.html?case=subagent-dock&archived${width === 320 ? "&long-labels" : ""}`);
     if (width === 1440) await page.evaluate(() => { document.documentElement.style.zoom = "1.25"; });
     const archive = page.locator("[data-subagent-results]").first();
     const header = archive.locator("[data-subagent-results-summary]");
+    const logo = header.locator("img");
+    await expect(logo).toHaveAttribute("src", "/brand/nanobot_mark.svg");
+    await expect.poll(() => logo.evaluate(node => (node as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
     const rows = archive.locator('[data-subagent-surface="archive"]');
     await expect(rows.first()).toBeHidden();
     await header.click();
@@ -539,6 +542,10 @@ for (const width of [1440, 390, 320]) {
       return {
         overflow: node.scrollWidth > node.clientWidth,
         header: [header.children[0], header.children[1]].map(element => bounds(element).x),
+        headerCenters: [...header.children].map(element => {
+          const rect = bounds(element);
+          return rect.y + rect.height / 2;
+        }),
         trailingEdge: bounds(header.lastElementChild!).right,
         rows: [...node.querySelectorAll('[data-subagent-surface="archive"]')].map(row => ({
           columns: [row.children[0], row.children[1]].map(element => bounds(element).x),
@@ -547,10 +554,15 @@ for (const width of [1440, 390, 320]) {
       };
     });
     expect(geometry.overflow).toBe(false);
+    expect(Math.max(...geometry.headerCenters) - Math.min(...geometry.headerCenters)).toBeLessThan(0.5);
     for (const row of geometry.rows) {
       row.columns.forEach((position, index) => expect(Math.abs(position - geometry.header[index])).toBeLessThan(0.5));
       expect(Math.abs(row.elapsedRight - geometry.trailingEdge)).toBeLessThan(0.5);
     }
+    await archive.screenshot({ path: info.outputPath("archive-logo-light.png") });
+    await page.getByRole("button", { name: "切换主题", exact: true }).click();
+    await expect(logo).toBeVisible();
+    await archive.screenshot({ path: info.outputPath("archive-logo-dark.png") });
     await rows.first().click();
     await expect(page.getByRole("dialog")).toBeFocused();
     await page.keyboard.press("Escape");

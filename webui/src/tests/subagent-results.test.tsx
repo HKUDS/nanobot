@@ -107,6 +107,8 @@ describe("subagent result archives", () => {
     const archive = screen.getByRole("region", { name: "Subtasks" });
     expect(screen.getByTestId("has-results")).toHaveTextContent("yes");
     expect(summary(archive)).toHaveTextContent("Completed: 1");
+    expect(summary(archive).querySelector("img")).toHaveAttribute("src", "/brand/nanobot_mark.svg");
+    expect(summary(archive).querySelector("img")).toHaveAttribute("alt", "");
     expect(summary(archive)).toHaveAttribute("aria-expanded", "false");
     await user.click(summary(archive));
     expect(within(archive).getByRole("button", { name: "Config check Completed 4s" })).toBeVisible();
