@@ -91,10 +91,6 @@ The sidebar is the topic switcher. Each topic keeps its own history, title, work
 
 Drag topics within a sidebar group to reorder them. **Rename** edits a topic title in place; a failed save keeps the draft for retry.
 
-Unread activity is shared across authorized WebUI devices connected to the same gateway. Viewing the latest result in a foreground chat clears its indicator on the other devices too. Background tabs and reading older history do not mark a new result as read; reconnecting restores the shared state. Temporary chats remain private to their connection. Notification sounds and browser notification permissions remain device-local.
-
-When upgrading from browser-local activity indicators, existing history starts as read, so earlier unread indicators may reset once.
-
 ### Conversation groups and panes
 
 Open a topic's sidebar action menu and choose **Create group** to turn it into a conversation group. Use **Add pane** in the workbench header to start another topic alongside it. A group holds up to four panes. To bring in an existing topic, drag it onto the group or use **Move to** in its action menu.
