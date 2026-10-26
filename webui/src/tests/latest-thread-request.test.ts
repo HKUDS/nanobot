@@ -69,7 +69,7 @@ describe("shared latest thread requests", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const body = cachedThread("new");
     for (const read of reads) read.resolve(new Response(JSON.stringify(body), { status: 200 }));
-    await expect(recovered).resolves.toEqual(body);
+    await expect(recovered).resolves.toEqual({ ...body, read_cursor: 0 });
   });
 
   it.each(["thread update", "turn end"] as const)("replaces surviving reads only for their own chat's %s", async (invalidation) => {
@@ -100,7 +100,7 @@ describe("shared latest thread requests", () => {
     const body = cachedThread("complete");
     reads[0].resolve(new Response(JSON.stringify(cachedThread("stale")), { status: 200 }));
     reads[1].resolve(new Response(JSON.stringify(body), { status: 200 }));
-    await Promise.all([first, surviving, fresh].map((read) => expect(read).resolves.toEqual(body)));
+    await Promise.all([first, surviving, fresh].map((read) => expect(read).resolves.toEqual({ ...body, read_cursor: 0 })));
   });
 
   it("keeps host clients and renewed credentials in separate reads", async () => {
