@@ -315,6 +315,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="aimlapi",
         keywords=("aimlapi",),
         env_key="AIMLAPI_API_KEY",
+        request_apis=("chat_completions",),
         display_name="aimlapi.com",
         backend="openai_compat",
         default_extra_headers=(
