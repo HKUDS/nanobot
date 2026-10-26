@@ -1429,6 +1429,8 @@ class WebFetchTool(Tool):
             text = text[offset:offset + max_chars]
             truncated = offset + len(text) < total_length
             next_offset = offset + len(text) if truncated else None
+            if offset > 0 and offset >= total_length:
+                text = f"No content at offset {offset}. Extracted text is {total_length} characters long."
             text = f"{_UNTRUSTED_BANNER}\n\n{text}"
 
             return json.dumps({
@@ -1489,6 +1491,8 @@ class WebFetchTool(Tool):
             text = text[offset:offset + max_chars]
             truncated = offset + len(text) < total_length
             next_offset = offset + len(text) if truncated else None
+            if offset > 0 and offset >= total_length:
+                text = f"No content at offset {offset}. Extracted text is {total_length} characters long."
             text = f"{_UNTRUSTED_BANNER}\n\n{text}"
 
             return json.dumps({

@@ -61,10 +61,35 @@ async def test_fetch_pages_preserve_content_and_trust_banner(monkeypatch, extrac
         offset = data["nextOffset"]
     assert "".join(chunks) == content
 
-    beyond = json.loads(await tool.execute(url=url, maxChars=100, offset=len(content) + 10))
-    assert beyond["text"] == _UNTRUSTED_BANNER + "\n\n"
-    assert beyond["nextOffset"] is None
-    assert beyond["truncated"] is False
+    for end_offset in (len(content), len(content) + 10):
+        beyond = json.loads(await registry.execute(
+            "web_fetch", {"url": url, "maxChars": 100, "offset": end_offset},
+        ))
+        assert beyond["text"] == (
+            f"{_UNTRUSTED_BANNER}\n\nNo content at offset {end_offset}. "
+            f"Extracted text is {len(content)} characters long."
+        )
+        assert beyond["offset"] == end_offset
+        assert beyond["totalLength"] == len(content)
+        assert beyond["nextOffset"] is None
+        assert beyond["truncated"] is False
+
+
+async def test_empty_page_at_initial_offset_is_not_reported_as_past_the_end(monkeypatch):
+    transport = httpx.MockTransport(lambda request: httpx.Response(
+        200, text="", headers={"Content-Type": "text/plain"},
+    ))
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr(web_module.httpx, "AsyncClient", lambda **kwargs: original_client(transport=transport))
+    registry = ToolRegistry()
+    registry.register(WebFetchTool(config=WebFetchConfig(use_jina_reader=False)))
+
+    result = json.loads(await registry.execute("web_fetch", {"url": "https://93.184.216.34/empty"}))
+
+    assert result["text"] == _UNTRUSTED_BANNER + "\n\n"
+    assert result["offset"] == result["totalLength"] == 0
+    assert result["nextOffset"] is None
+    assert result["truncated"] is False
 
 
 async def test_fetch_rejects_negative_offset_before_request():
