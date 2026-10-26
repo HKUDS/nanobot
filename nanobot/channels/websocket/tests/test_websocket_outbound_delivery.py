@@ -17,6 +17,7 @@ from nanobot.channels.websocket import runtime
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
 from nanobot.config.schema import Config
 from nanobot.runtime_admission import RuntimeBusyError
+from nanobot.session.manager import SessionManager
 from nanobot.webui.gateway_services import build_gateway_services
 
 
@@ -64,7 +65,7 @@ class _RecordingConnection:
             await self.release_close.wait()
 
 
-def _channel() -> WebSocketChannel:
+def _channel(session_manager: SessionManager | None = None) -> WebSocketChannel:
     bus = MessageBus()
     config = WebSocketConfig(
         enabled=True,
@@ -74,7 +75,7 @@ def _channel() -> WebSocketChannel:
     gateway = build_gateway_services(
         config=config,
         bus=bus,
-        session_manager=None,
+        session_manager=session_manager,
         static_dist_path=None,
         workspace_path=Path.cwd(),
         default_restrict_to_workspace=False,
@@ -82,10 +83,7 @@ def _channel() -> WebSocketChannel:
         runtime_surface="tui",
         runtime_capabilities_overrides=None,
     )
-    channel = WebSocketChannel(config, bus, gateway=gateway)
-    # Keep disk latency out of every connection delivery synchronization check.
-    channel._persist_turn_transcript_event = AsyncMock(return_value=True)
-    return channel
+    return WebSocketChannel(config, bus, gateway=gateway)
 
 
 def _message(chat_id: str, text: str) -> OutboundMessage:
@@ -216,6 +214,49 @@ async def test_slow_tui_does_not_block_same_topic_fanout() -> None:
         slow.release_send.set()
         await channel._cleanup_connection(cast(Any, slow))
         await channel._cleanup_connection(cast(Any, healthy))
+
+
+@pytest.mark.asyncio
+async def test_message_recipients_are_snapshotted_before_history_append(history, monkeypatch) -> None:
+    channel = _channel(history.sessions)
+    first_connection = _RecordingConnection()
+    late_connection = _RecordingConnection()
+    channel._attach(cast(Any, first_connection), "chat-snapshot")
+    first_message = await history.message(
+        channel="websocket", chat_id="chat-snapshot", content="first",
+    )
+    append_started = asyncio.Event()
+    release_append = asyncio.Event()
+    append_history = history.sessions.state.append_history
+
+    async def blocked_append(*args, **kwargs):
+        append_started.set()
+        await release_append.wait()
+        return await append_history(*args, **kwargs)
+
+    monkeypatch.setattr(history.sessions.state, "append_history", blocked_append)
+    sending = asyncio.create_task(channel.send(first_message))
+    try:
+        await asyncio.wait_for(append_started.wait(), timeout=1)
+        channel._attach(cast(Any, late_connection), "chat-snapshot")
+        release_append.set()
+        await asyncio.wait_for(sending, timeout=1)
+        assert await _next_text(first_connection) == "first"
+
+        await channel.send(await history.message(
+            channel="websocket", chat_id="chat-snapshot", content="second",
+        ))
+        assert await _next_text(first_connection) == "second"
+        assert await _next_text(late_connection) == "second"
+        assert late_connection.sent.empty()
+        assert [record["text"] for record in history.read("websocket:chat-snapshot")] == [
+            "first", "second",
+        ]
+    finally:
+        release_append.set()
+        await asyncio.gather(sending, return_exceptions=True)
+        await channel._cleanup_connection(cast(Any, first_connection))
+        await channel._cleanup_connection(cast(Any, late_connection))
 
 
 @pytest.mark.asyncio
@@ -483,15 +524,15 @@ async def test_normal_cleanup_can_overlap_connection_retirement(monkeypatch) -> 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("user_shell", [True, False])
 async def test_shell_output_is_literal_without_changing_other_command_replies(
-    user_shell: bool, monkeypatch: pytest.MonkeyPatch,
+    history, user_shell: bool, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    channel = _channel()
+    channel = _channel(history.sessions)
     connection = _RecordingConnection()
     channel._attach(cast(Any, connection), "shell-output")
     output = "Path\n----\n  __pycache__\n```mermaid\nflowchart LR\n```\n![preview](local.png)\n"
     rewritten = output.replace("local.png", "/api/media/signed")
-    monkeypatch.setattr(channel._media, "rewrite_local_markdown_images", lambda text: rewritten)
-    message = OutboundMessage(
+    monkeypatch.setattr(channel.gateway.media, "rewrite_local_markdown_images", lambda text: rewritten)
+    message = await history.message(
         channel="websocket", chat_id="shell-output", content=output,
         metadata={"render_as": "text", INBOUND_META_USER_SHELL: user_shell},
     )
@@ -500,9 +541,10 @@ async def test_shell_output_is_literal_without_changing_other_command_replies(
         payload = json.loads(await asyncio.wait_for(connection.sent.get(), timeout=1))
         assert payload["text"] == (output if user_shell else rewritten)
         assert payload.get("render_as") == ("text" if user_shell else None)
-        persisted = channel._persist_turn_transcript_event.await_args
-        assert persisted.args[1] == payload
-        assert persisted.kwargs["transcript_overrides"] == {"text": output}
+        [persisted] = history.read("websocket:shell-output")
+        assert persisted["event"] == "message"
+        assert persisted["text"] == output
+        assert persisted.get("render_as") == ("text" if user_shell else None)
         assert message.content == output
     finally:
         await channel._cleanup_connection(cast(Any, connection))

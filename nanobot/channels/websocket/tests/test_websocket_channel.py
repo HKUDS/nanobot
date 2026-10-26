@@ -793,7 +793,12 @@ async def test_send_session_updated_broadcasts_to_other_webui_connections(bus) -
     assert sorted(channel._subs) == ["chat-a", "chat-b"]
     assert sum(len(conns) for conns in channel._subs.values()) == 2
 
-    await channel.send_session_updated("chat-a", scope="thread")
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-a",
+        content="",
+        event=SessionUpdatedEvent(scope="thread"),
+    ))
 
     active_events = [json.loads(raw)["event"] for raw in active_conn.sent]
     other_events = [json.loads(raw)["event"] for raw in other_conn.sent]
@@ -2274,7 +2279,7 @@ async def test_in_flight_message_without_scope_uses_latest_access_mode(
         hydrate_started.set()
         await release_hydrate.wait()
 
-    channel._hydrate_after_subscribe = blocked_hydrate
+    monkeypatch.setattr(channel._outbound, "hydrate", blocked_hydrate)
     message_conn = AsyncMock()
     message_conn.remote_address = ("203.0.113.8", 50123)
     settings_conn = AsyncMock()
@@ -2883,7 +2888,7 @@ async def test_send_delta_marks_resuming_stream_end() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_delta_keeps_buffer_across_merged_stream_boundary(history, ) -> None:
+async def test_send_delta_preserves_merged_text_then_starts_fresh_segment(history) -> None:
 
 
     bus = MagicMock()
@@ -2914,13 +2919,21 @@ async def test_send_delta_keeps_buffer_across_merged_stream_boundary(history, ) 
         "first ",
         "second",
     ]
-    assert ("chat-1", "sid") not in channel._stream_text_buffers
     lines = history.read("websocket:chat-1")
     assert [line["event"] for line in lines] == ["stream_end", "stream_end"]
     assert [line["text"] for line in lines] == ["first ", "first second"]
     body = history.build("websocket:chat-1")
     assert body is not None
     assert _thread_conversation_events(body)[-1]["content"] == "first second"
+
+    await history.stream(
+        channel, "send_delta", "chat-1", "new segment", stream_id="sid", stream_end=True,
+    )
+
+    assert _sent_ws_payloads(mock_ws)[-1]["text"] == "new segment"
+    assert [line["text"] for line in history.read("websocket:chat-1")] == [
+        "first ", "first second", "new segment",
+    ]
 
 
 @pytest.mark.asyncio
@@ -3224,25 +3237,42 @@ async def test_reasoning_transcript_persists_one_canonical_record(history, monke
 
 
 @pytest.mark.asyncio
-async def test_turn_end_discards_unclosed_stream_buffers() -> None:
+async def test_turn_end_keeps_unclosed_text_out_of_the_next_stream_segment(history) -> None:
     bus = MagicMock()
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"], "streaming": True},
         bus,
-        gateway=_basic_handler(bus),
+        gateway=_basic_handler(bus, session_manager=history.sessions),
     )
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-unclosed")
 
-    await channel.send_delta("chat-unclosed", "partial", stream_id="s1")
-    await channel.send_reasoning_delta("chat-unclosed", "thinking", stream_id="r1")
-    await channel.send(OutboundMessage(
+    await history.stream(channel, "send_delta", "chat-unclosed", "partial", stream_id="s1")
+    await history.stream(channel, "send_reasoning_delta", "chat-unclosed", "thinking", stream_id="r1")
+    await channel.send(await history.message(
         channel="websocket",
         chat_id="chat-unclosed",
         content="",
         event=TurnEndEvent(),
     ))
+    await history.stream(channel, "send_delta", "chat-unclosed", "fresh", stream_id="s1")
+    await history.stream(
+        channel, "send_delta", "chat-unclosed", " answer", stream_id="s1", stream_end=True,
+    )
+    await history.stream(channel, "send_reasoning_delta", "chat-unclosed", "new thought", stream_id="r1")
+    await history.stream(channel, "send_reasoning_end", "chat-unclosed", stream_id="r1")
 
-    assert channel._stream_text_buffers == {}
-    assert channel._reasoning_text_buffers == {}
+    payloads = _sent_ws_payloads(mock_ws)
+    assert next(payload for payload in payloads if payload["event"] == "stream_end")["text"] == "fresh answer"
+    assert payloads[-2]["event"] == "reasoning_delta"
+    assert payloads[-2]["text"] == "new thought"
+    assert payloads[-1] == {
+        "event": "reasoning_end", "chat_id": "chat-unclosed", "stream_id": "r1",
+    }
+    lines = history.read("websocket:chat-unclosed")
+    assert [(line["event"], line.get("text")) for line in lines] == [
+        ("turn_end", None), ("stream_end", "fresh answer"), ("reasoning_end", "new thought"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -3267,19 +3297,19 @@ async def test_send_turn_end_emits_turn_end_event() -> None:
 
 @pytest.mark.asyncio
 async def test_retry_status_is_transient_and_turn_scoped(
-    monkeypatch: pytest.MonkeyPatch,
+    history, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("nanobot.webui.outbound_wire.time.time", lambda: 120.0)
     bus = MagicMock()
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
         bus,
-        gateway=_basic_handler(bus),
+        gateway=_basic_handler(bus, session_manager=history.sessions),
     )
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-1")
 
-    await channel.send(OutboundMessage(
+    await channel.send(await history.message(
         channel="websocket",
         chat_id="chat-1",
         content="",
@@ -3303,21 +3333,21 @@ async def test_retry_status_is_transient_and_turn_scoped(
         "error_kind": "connection",
         "retry_after_s": 3.5,
     }]
+    assert history.read("websocket:chat-1") == []
 
 
 @pytest.mark.asyncio
-async def test_legacy_retry_wait_is_not_sent_or_persisted() -> None:
+async def test_legacy_retry_wait_is_not_sent_or_persisted(history) -> None:
     bus = MagicMock()
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
         bus,
-        gateway=_basic_handler(bus),
+        gateway=_basic_handler(bus, session_manager=history.sessions),
     )
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-1")
-    channel._persist_turn_transcript_event = MagicMock(return_value=True)
 
-    await channel.send(OutboundMessage(
+    await channel.send(await history.message(
         channel="websocket",
         chat_id="chat-1",
         content="Model request failed, retry in 2s (attempt 1).",
@@ -3327,7 +3357,7 @@ async def test_legacy_retry_wait_is_not_sent_or_persisted() -> None:
     ))
 
     assert _sent_ws_payloads(mock_ws) == []
-    channel._persist_turn_transcript_event.assert_not_called()
+    assert history.read("websocket:chat-1") == []
 
 
 @pytest.mark.asyncio
@@ -3439,18 +3469,17 @@ async def test_context_compaction_is_structured_persisted_and_summary_free(histo
 
 
 @pytest.mark.asyncio
-async def test_recovery_state_is_a_structured_event_not_assistant_text() -> None:
+async def test_recovery_state_is_a_structured_event_not_assistant_text(history) -> None:
     bus = MagicMock()
     channel = WebSocketChannel(
         {"enabled": True, "allowFrom": ["*"]},
         bus,
-        gateway=_basic_handler(bus),
+        gateway=_basic_handler(bus, session_manager=history.sessions),
     )
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-1")
-    channel._persist_turn_transcript_event = MagicMock(return_value=True)
 
-    await channel.send(OutboundMessage(
+    await channel.send(await history.message(
         channel="websocket",
         chat_id="chat-1",
         content="",
@@ -3470,7 +3499,7 @@ async def test_recovery_state_is_a_structured_event_not_assistant_text() -> None
         "reason": "tool_state_unknown",
         "attempts": 1,
     }]
-    channel._persist_turn_transcript_event.assert_not_called()
+    assert history.read("websocket:chat-1") == []
 
 
 @pytest.mark.asyncio

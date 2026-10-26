@@ -49,7 +49,7 @@ async def channel(tmp_path, monkeypatch):
         assert not channel._commands.request_tasks
 
 
-async def test_send_delegates_the_outbound_message_to_the_projector(channel, monkeypatch):
+async def test_send_delegates_the_outbound_message_to_delivery(channel, monkeypatch):
     send = AsyncMock()
     hydrate = AsyncMock()
     monkeypatch.setattr(channel._outbound, "send", send)
@@ -71,10 +71,32 @@ async def test_subscribe_hydration_delegates_the_requested_chat(channel, monkeyp
     monkeypatch.setattr(channel._outbound, "hydrate", hydrate)
     monkeypatch.setattr(channel._outbound, "send", send)
 
-    await channel._hydrate_after_subscribe("chat-2")
+    await channel._dispatch_envelope(
+        AsyncMock(), "client-1", {"type": "attach", "chat_id": "chat-2"},
+    )
 
     hydrate.assert_awaited_once_with("chat-2")
     send.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("method", "args", "kwargs"),
+    [
+        ("send_delta", ("chat-1", "part", {"webui_turn_id": "turn-1"}), {
+            "stream_id": "s1", "stream_end": True, "resuming": True, "merge_next": True,
+        }),
+        ("send_reasoning_delta", ("chat-1", "plan", {"webui_turn_id": "turn-1"}), {"stream_id": "r1"}),
+        ("send_reasoning_end", ("chat-1", {"webui_turn_id": "turn-1"}), {"stream_id": "r1"}),
+        ("send_file_edit_events", ("chat-1", [{"path": "a.py"}], {"webui_turn_id": "turn-1"}), {}),
+    ],
+)
+async def test_streaming_capabilities_use_the_same_delivery_owner(channel, monkeypatch, method, args, kwargs):
+    deliver = AsyncMock()
+    monkeypatch.setattr(channel._outbound, method, deliver)
+
+    await getattr(channel, method)(*args, **kwargs)
+
+    deliver.assert_awaited_once_with(*args, **kwargs)
 
 
 async def test_envelope_delegates_connection_client_and_payload_to_application(channel, monkeypatch):
