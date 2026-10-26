@@ -157,6 +157,7 @@ for (const narrow of [false, true]) {
       await expect(sentPrefix).toHaveCSS("font-weight", "400");
       const sentCommand = page.locator("[data-user-text-bubble]").last().locator("p");
       expect(await sentCommand.textContent()).toBe(shellCommand.trim());
+      await sentCommand.click();
       await sentCommand.evaluate(node => {
         const range = document.createRange();
         range.selectNodeContents(node);
