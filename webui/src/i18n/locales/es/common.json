@@ -1786,7 +1786,6 @@
     "subagents": {
       "stopFailed": "No se pudo detener esta tarea.",
       "stopTask": "Detener {{label}}",
-      "receiptHelp": "Entregado significa que el mensaje se incluyó en la siguiente solicitud del subagente, sin confirmar su ejecución.",
       "states": {
         "queued": "En cola",
         "running": "En curso",
@@ -1797,11 +1796,6 @@
         "cancelled": "Cancelada",
         "interrupted": "Interrumpida"
       },
-      "receipts": {
-        "accepted": "En cola: {{count}}",
-        "delivered": "Entregados: {{count}}",
-        "undelivered": "Sin entregar: {{count}}"
-      },
       "interruptedHelp": "El servidor se reinició antes de terminar esta tarea. No se ha vuelto a ejecutar automáticamente.",
       "workTitle": "Subtareas",
       "otherWorkTitle": "Otras tareas",
@@ -1810,8 +1804,7 @@
       "running": "En curso: {{count}}",
       "finished": "Finalizadas: {{count}}",
       "completed": "Completadas: {{count}}",
-      "needsReview": "Revisar: {{count}}",
-      "messages": "Estado de mensajes"
+      "needsReview": "Revisar: {{count}}"
     },
     "compaction": {
       "reasons": {

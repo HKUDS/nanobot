@@ -1785,7 +1785,6 @@
     "subagents": {
       "stopFailed": "Tidak dapat menghentikan tugas ini.",
       "stopTask": "Hentikan {{label}}",
-      "receiptHelp": "Terkirim berarti pesan disertakan dalam permintaan model berikutnya dari subagen, bukan konfirmasi bahwa pekerjaan selesai.",
       "states": {
         "queued": "Dalam antrean",
         "running": "Berjalan",
@@ -1796,11 +1795,6 @@
         "cancelled": "Dibatalkan",
         "interrupted": "Terputus"
       },
-      "receipts": {
-        "accepted": "Dalam antrean: {{count}}",
-        "delivered": "Terkirim: {{count}}",
-        "undelivered": "Tidak terkirim: {{count}}"
-      },
       "interruptedHelp": "Server dimulai ulang sebelum tugas ini selesai. Tugas tidak dijalankan ulang secara otomatis.",
       "workTitle": "Subtugas",
       "otherWorkTitle": "Tugas lain",
@@ -1809,8 +1803,7 @@
       "running": "Berjalan: {{count}}",
       "finished": "Berakhir: {{count}}",
       "completed": "Selesai: {{count}}",
-      "needsReview": "Perlu diperiksa: {{count}}",
-      "messages": "Status pesan"
+      "needsReview": "Perlu diperiksa: {{count}}"
     },
     "compaction": {
       "reasons": {

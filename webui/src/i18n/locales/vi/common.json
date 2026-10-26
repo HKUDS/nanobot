@@ -1785,7 +1785,6 @@
     "subagents": {
       "stopFailed": "Không thể dừng tác vụ này.",
       "stopTask": "Dừng {{label}}",
-      "receiptHelp": "Đã chuyển nghĩa là tin nhắn đã được đưa vào yêu cầu mô hình tiếp theo của tác nhân con, không xác nhận công việc đã hoàn tất.",
       "states": {
         "queued": "Đang chờ",
         "running": "Đang chạy",
@@ -1796,11 +1795,6 @@
         "cancelled": "Đã hủy",
         "interrupted": "Bị gián đoạn"
       },
-      "receipts": {
-        "accepted": "Đang chờ: {{count}}",
-        "delivered": "Đã chuyển: {{count}}",
-        "undelivered": "Chưa chuyển: {{count}}"
-      },
       "interruptedHelp": "Máy chủ khởi động lại trước khi tác vụ hoàn thành. Tác vụ không tự động chạy lại.",
       "workTitle": "Tác vụ con",
       "otherWorkTitle": "Tác vụ khác",
@@ -1809,8 +1803,7 @@
       "running": "Đang chạy: {{count}}",
       "finished": "Đã kết thúc: {{count}}",
       "completed": "Đã hoàn thành: {{count}}",
-      "needsReview": "Cần kiểm tra: {{count}}",
-      "messages": "Trạng thái tin nhắn"
+      "needsReview": "Cần kiểm tra: {{count}}"
     },
     "compaction": {
       "reasons": {

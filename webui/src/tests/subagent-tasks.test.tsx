@@ -670,10 +670,10 @@ describe("session-owned task UI", () => {
     expect(requestMutation).not.toHaveBeenCalled();
   });
 
-  it("shows truthful partial output, interruption and receipts, and restores keyboard focus", async () => {
+  it("shows truthful partial output and interruption, and restores keyboard focus", async () => {
     vi.mocked(fetch).mockResolvedValue(response([task({
       state: "interrupted", partial: true, result: "Found a conflicting setting",
-      stop_reason: "host_restarted", completed_at: 102, receipts: { a: "delivered", b: "undelivered" },
+      stop_reason: "host_restarted", completed_at: 102,
     })]));
     const user = userEvent.setup();
     render(layout());
@@ -686,8 +686,6 @@ describe("session-owned task UI", () => {
     expect(detail).toHaveFocus();
     expect(within(detail).getByText("Interrupted")).toBeVisible();
     expect(within(detail).getByText("Found a conflicting setting")).toBeVisible();
-    await user.click(within(detail).getByText("Message status"));
-    expect(within(detail).getByText("Delivered: 1")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Stop Config check" })).not.toBeInTheDocument();
     await user.keyboard("{Escape}");
     await waitFor(() => expect(row).toHaveFocus());

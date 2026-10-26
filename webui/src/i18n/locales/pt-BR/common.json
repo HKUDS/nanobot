@@ -1799,7 +1799,6 @@
     "subagents": {
       "stopFailed": "Não foi possível interromper esta tarefa.",
       "stopTask": "Interromper {{label}}",
-      "receiptHelp": "Entregue significa que a mensagem foi incluída na próxima solicitação do subagente, sem confirmar sua execução.",
       "states": {
         "queued": "Na fila",
         "running": "Em execução",
@@ -1810,11 +1809,6 @@
         "cancelled": "Cancelada",
         "interrupted": "Interrompida"
       },
-      "receipts": {
-        "accepted": "Na fila: {{count}}",
-        "delivered": "Entregues: {{count}}",
-        "undelivered": "Não entregues: {{count}}"
-      },
       "interruptedHelp": "O servidor reiniciou antes de concluir esta tarefa. Ela não foi executada novamente automaticamente.",
       "workTitle": "Subtarefas",
       "otherWorkTitle": "Outras tarefas",
@@ -1823,8 +1817,7 @@
       "running": "Em andamento: {{count}}",
       "finished": "Encerradas: {{count}}",
       "completed": "Concluídas: {{count}}",
-      "needsReview": "Revisar: {{count}}",
-      "messages": "Status das mensagens"
+      "needsReview": "Revisar: {{count}}"
     },
     "compaction": {
       "reasons": {

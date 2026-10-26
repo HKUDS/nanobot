@@ -1785,7 +1785,6 @@
     "subagents": {
       "stopFailed": "このタスクを停止できませんでした。",
       "stopTask": "{{label}} を停止",
-      "receiptHelp": "配信済みは子タスクの次のモデルリクエストにメッセージが含まれたことを示し、実行完了を意味しません。",
       "states": {
         "queued": "待機中",
         "running": "実行中",
@@ -1796,11 +1795,6 @@
         "cancelled": "キャンセル済み",
         "interrupted": "中断"
       },
-      "receipts": {
-        "accepted": "待機中: {{count}}",
-        "delivered": "配信済み: {{count}}",
-        "undelivered": "未配信: {{count}}"
-      },
       "interruptedHelp": "タスクの完了前にサーバーが再起動しました。タスクは自動的に再実行されていません。",
       "workTitle": "サブタスク",
       "otherWorkTitle": "ほかのタスク",
@@ -1809,8 +1803,7 @@
       "running": "実行中: {{count}}",
       "finished": "終了: {{count}}",
       "completed": "完了: {{count}}",
-      "needsReview": "要確認: {{count}}",
-      "messages": "メッセージの状態"
+      "needsReview": "要確認: {{count}}"
     },
     "compaction": {
       "reasons": {

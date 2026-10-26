@@ -1785,7 +1785,6 @@
     "subagents": {
       "stopFailed": "無法停止此任務。",
       "stopTask": "停止 {{label}}",
-      "receiptHelp": "已送達表示訊息已進入子任務的下一次模型請求，不代表已執行完成。",
       "states": {
         "queued": "排隊中",
         "running": "執行中",
@@ -1796,11 +1795,6 @@
         "cancelled": "已取消",
         "interrupted": "已中斷"
       },
-      "receipts": {
-        "accepted": "已排隊：{{count}}",
-        "delivered": "已送達：{{count}}",
-        "undelivered": "未送達：{{count}}"
-      },
       "interruptedHelp": "後端重新啟動時此任務尚未結束，任務沒有自動恢復或重新執行。",
       "workTitle": "子任務",
       "otherWorkTitle": "其他任務",
@@ -1809,8 +1803,7 @@
       "running": "{{count}} 項進行中",
       "finished": "{{count}} 項已結束",
       "completed": "{{count}} 項已完成",
-      "needsReview": "{{count}} 項需檢查",
-      "messages": "訊息狀態"
+      "needsReview": "{{count}} 項需檢查"
     },
     "compaction": {
       "reasons": {

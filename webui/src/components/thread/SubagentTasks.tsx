@@ -198,14 +198,6 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
             </div> : null}
             <SubagentThread key={`${sessionKey}:${selected.task_id}`} token={token} sessionKey={sessionKey}
               task={selected} historyEnabled={historyEnabled} isStreaming={isActiveSubagentTask(selected)} />
-            {Object.keys(selected.receipts).length ? <details className="mt-5 space-y-2 px-5 text-xs text-muted-foreground">
-              <summary className="cursor-pointer py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{t("thread.subagents.messages")}</summary>
-              <p>{t("thread.subagents.receiptHelp")}</p>
-              {(["accepted", "delivered", "undelivered"] as const).map((receipt) => {
-                const count = Object.values(selected.receipts).filter((entry) => entry === receipt).length;
-                return count ? <p key={receipt}>{t(`thread.subagents.receipts.${receipt}`, { count })}</p> : null;
-              })}
-            </details> : null}
           </div> : null}
         </SheetContent>
       </Sheet>

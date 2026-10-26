@@ -1785,7 +1785,6 @@
     "subagents": {
       "stopFailed": "Impossible d’arrêter cette tâche.",
       "stopTask": "Arrêter {{label}}",
-      "receiptHelp": "Livré signifie que le message a été inclus dans la prochaine requête du sous-agent, sans confirmer son exécution.",
       "states": {
         "queued": "En attente",
         "running": "En cours",
@@ -1796,11 +1795,6 @@
         "cancelled": "Annulée",
         "interrupted": "Interrompue"
       },
-      "receipts": {
-        "accepted": "En attente : {{count}}",
-        "delivered": "Livrés : {{count}}",
-        "undelivered": "Non livrés : {{count}}"
-      },
       "interruptedHelp": "Le serveur a redémarré avant la fin de cette tâche. Elle n’a pas été relancée automatiquement.",
       "workTitle": "Sous-tâches",
       "otherWorkTitle": "Autres tâches",
@@ -1809,8 +1803,7 @@
       "running": "En cours : {{count}}",
       "finished": "Terminées : {{count}}",
       "completed": "Réussies : {{count}}",
-      "needsReview": "À vérifier : {{count}}",
-      "messages": "État des messages"
+      "needsReview": "À vérifier : {{count}}"
     },
     "compaction": {
       "reasons": {

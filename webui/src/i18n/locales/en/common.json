@@ -1991,7 +1991,6 @@
     "subagents": {
       "stopFailed": "Could not stop this task.",
       "stopTask": "Stop {{label}}",
-      "receiptHelp": "Delivered means the message was included in the subtask’s next model request. It does not mean the instructions have been carried out.",
       "states": {
         "queued": "Queued",
         "running": "Running",
@@ -2002,11 +2001,6 @@
         "cancelled": "Cancelled",
         "interrupted": "Interrupted"
       },
-      "receipts": {
-        "accepted": "Queued: {{count}}",
-        "delivered": "Delivered: {{count}}",
-        "undelivered": "Undelivered: {{count}}"
-      },
       "interruptedHelp": "The host restarted before this task finished. It has not been restarted automatically.",
       "workTitle": "Subtasks",
       "otherWorkTitle": "Other tasks",
@@ -2015,8 +2009,7 @@
       "running": "Running: {{count}}",
       "finished": "Finished: {{count}}",
       "completed": "Completed: {{count}}",
-      "needsReview": "Review needed: {{count}}",
-      "messages": "Message status"
+      "needsReview": "Review needed: {{count}}"
     },
     "compaction": {
       "reasons": {

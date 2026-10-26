@@ -1991,7 +1991,6 @@
     "subagents": {
       "stopFailed": "无法停止此任务。",
       "stopTask": "停止 {{label}}",
-      "receiptHelp": "已送达表示消息已进入子任务的下一次模型请求，不代表已执行完成。",
       "states": {
         "queued": "排队中",
         "running": "执行中",
@@ -2002,11 +2001,6 @@
         "cancelled": "已取消",
         "interrupted": "已中断"
       },
-      "receipts": {
-        "accepted": "已排队：{{count}}",
-        "delivered": "已送达：{{count}}",
-        "undelivered": "未送达：{{count}}"
-      },
       "interruptedHelp": "后端重启时此任务尚未结束，任务没有自动恢复或重新执行。",
       "workTitle": "子任务",
       "otherWorkTitle": "其他任务",
@@ -2015,8 +2009,7 @@
       "running": "{{count}} 项进行中",
       "finished": "{{count}} 项已结束",
       "completed": "{{count}} 项已完成",
-      "needsReview": "{{count}} 项需检查",
-      "messages": "消息状态"
+      "needsReview": "{{count}} 项需检查"
     },
     "compaction": {
       "reasons": {

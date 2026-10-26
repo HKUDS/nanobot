@@ -1785,7 +1785,6 @@
     "subagents": {
       "stopFailed": "이 작업을 중지할 수 없습니다.",
       "stopTask": "{{label}} 중지",
-      "receiptHelp": "전달됨은 메시지가 하위 작업의 다음 모델 요청에 포함되었음을 뜻하며, 실행 완료를 의미하지 않습니다.",
       "states": {
         "queued": "대기 중",
         "running": "실행 중",
@@ -1796,11 +1795,6 @@
         "cancelled": "취소됨",
         "interrupted": "중단됨"
       },
-      "receipts": {
-        "accepted": "대기 중: {{count}}",
-        "delivered": "전달됨: {{count}}",
-        "undelivered": "미전달: {{count}}"
-      },
       "interruptedHelp": "작업이 완료되기 전에 서버가 다시 시작되었습니다. 작업은 자동으로 다시 실행되지 않았습니다.",
       "workTitle": "하위 작업",
       "otherWorkTitle": "다른 작업",
@@ -1809,8 +1803,7 @@
       "running": "진행 중: {{count}}",
       "finished": "종료: {{count}}",
       "completed": "완료: {{count}}",
-      "needsReview": "확인 필요: {{count}}",
-      "messages": "메시지 상태"
+      "needsReview": "확인 필요: {{count}}"
     },
     "compaction": {
       "reasons": {
