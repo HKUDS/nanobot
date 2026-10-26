@@ -1112,7 +1112,10 @@ describe("ThreadShell", () => {
     portal.remove();
   });
 
-  it("keeps inferred file paths non-interactive when the availability probe fails", async () => {
+  it.each([
+    { kind: "inferred", content: "Unreadable file: `prompts/dream.md`", path: "prompts/dream.md" },
+    { kind: "explicit", content: "[Python code](／home/example/workspace/model_check.py)", path: "／home/example/workspace/model_check.py" },
+  ])("keeps $kind file references non-interactive when the availability probe fails", async ({ content, path }) => {
     await preloadMarkdownText();
     const client = makeClient();
     let resolveProbe!: (value: Response) => void;
@@ -1123,7 +1126,7 @@ describe("ThreadShell", () => {
       const url = String(input);
       if (url.includes("websocket%3Apreview-error/webui-thread")) {
         return Promise.resolve(httpJson(transcriptFromSimpleMessages([
-          { role: "assistant", content: "Unreadable file: `prompts/dream.md`" },
+          { role: "assistant", content },
         ])));
       }
       if (url.includes("websocket%3Apreview-error/file-preview?")) return probe;
@@ -1146,7 +1149,7 @@ describe("ThreadShell", () => {
 
     const reference = await screen.findByTestId("inline-file-path");
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("file-preview?path=prompts%2Fdream.md&probe=1"),
+      expect.stringContaining(`file-preview?path=${encodeURIComponent(path)}&probe=1`),
       expect.anything(),
     ));
     await act(async () => {
