@@ -130,11 +130,8 @@ export function ReadingSettings({ preferences, onChange }: {
     <div className="reading-typography appearance-reading-preview"
       data-reading-text-size={preferences.readingTextSize}
       style={{ "--custom-reading-size": `${preferences.customReadingTextSize}px` } as CSSProperties}>
-      <div className="mb-4 flex items-center justify-between gap-3 text-caption text-muted-foreground">
-        <span className="inline-flex items-center gap-2 font-medium text-foreground">
-          <img src="/brand/nanobot_mark.svg" className="h-5 w-5" alt="" />nanobot
-        </span>
-        <span className="inline-flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-emerald-600/70 dark:bg-emerald-400/70" />{t("settings.appearance.preview")}</span>
+      <div className="mb-4 flex items-center gap-2 text-caption font-medium text-foreground">
+        <img src="/brand/nanobot_mark.svg" className="h-5 w-5" alt="" />nanobot
       </div>
       <div data-reading-preview-content>
         <MarkdownText>{t("settings.appearance.previewText")}</MarkdownText>
