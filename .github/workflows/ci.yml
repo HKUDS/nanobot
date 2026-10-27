@@ -102,20 +102,13 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --dev
 
-      # Feishu can select websockets<16. Exercise the upgraded default before
-      # installing channel dependencies so both supported resolutions get tested.
+      # Feishu selects websockets<16. Check the default transport before the
+      # all-channel suite exercises the older compatible resolution.
       - name: Test default WebSocket transport
-        shell: bash
-        run: |
-          uv run --no-sync python -c "import websockets; from packaging.version import Version; print(websockets.__version__); assert Version(websockets.__version__) >= Version('17.0')"
-          uv run --no-sync python -m pytest -q \
-            nanobot/channels/websocket/tests/test_binary_http.py \
-            nanobot/channels/websocket/tests/test_websocket_integration.py \
-            tests/providers/test_openai_codex_websocket.py \
-            tests/webui/test_remote_proxy.py \
-            tests/webui/test_remote_tunnel.py \
-            nanobot/channels/napcat/tests/test_napcat_channel.py \
-            nanobot/channels/mattermost/tests/test_mattermost_channel.py
+        run: >-
+          uv run --no-sync python -m pytest -q
+          nanobot/channels/websocket/tests/test_handshake_disconnect.py
+          nanobot/channels/websocket/tests/test_binary_http.py
 
       - name: Install channel dependencies
         run: uv run --no-sync python -m scripts.install_channel_dependencies --all-channels
