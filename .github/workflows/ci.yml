@@ -480,7 +480,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.docker_required == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
 
     steps:
       - uses: actions/checkout@v4
@@ -490,6 +490,29 @@ jobs:
 
       - name: Verify first-boot WebUI and API
         run: python scripts/docker_compose_smoke.py --image nanobot:test
+
+      - name: Check out the real previous release for retained-volume acceptance
+        uses: actions/checkout@v4
+        with:
+          ref: 1bb712d3488915ca4ed9ccc1a93067ff722f5ab9 # v0.3.5
+          path: .docker-baseline
+          persist-credentials: false
+
+      - name: Verify old-image upgrade without replacing user data
+        run: |
+          docker build -t nanobot:baseline .docker-baseline
+          python scripts/docker_upgrade_smoke.py --baseline-image nanobot:baseline \
+            --image nanobot:test --version "$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')" \
+            --source-commit "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/docker-upgrade-report.json"
+
+      - name: Retain Docker upgrade acceptance report
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-upgrade-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/docker-upgrade-report.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Verify Docker Compose startup and privilege boundary
         env:
