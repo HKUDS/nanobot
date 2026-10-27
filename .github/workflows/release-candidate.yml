@@ -252,6 +252,31 @@ jobs:
           merge-multiple: true
           path: ${{ runner.temp }}/retained-candidate
 
+      - name: Verify the downloaded handoff before retaining accepted bytes
+        if: inputs.retain_installable
+        env:
+          HANDOFF: ${{ runner.temp }}/retained-candidate
+          CANDIDATE_COMMIT: ${{ needs.candidate.outputs.candidate_commit }}
+          MANIFEST_SHA256: ${{ needs.candidate.outputs.manifest_sha256 }}
+        run: |
+          git --git-dir="$HANDOFF/source.git" fsck --full
+          test "$(git --git-dir="$HANDOFF/source.git" rev-parse HEAD)" = "$CANDIDATE_COMMIT"
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+
+          root = Path(os.environ["HANDOFF"])
+          manifest = (root / "artifacts/release-manifest.json").read_bytes()
+          assert hashlib.sha256(manifest).hexdigest() == os.environ["MANIFEST_SHA256"]
+          handoff = json.loads((root / "handoff.json").read_text())
+          assert handoff["candidate_commit"] == os.environ["CANDIDATE_COMMIT"]
+          assert handoff["manifest_sha256"] == os.environ["MANIFEST_SHA256"]
+          for artifact in json.loads(manifest)["artifacts"]:
+              payload = (root / "artifacts" / artifact["filename"]).read_bytes()
+              assert len(payload) == artifact["size"]
+              assert hashlib.sha256(payload).hexdigest() == artifact["sha256"]
+          PY
+
       - name: Retain accepted installable candidate for separate approval
         if: inputs.retain_installable
         uses: actions/upload-artifact@v4

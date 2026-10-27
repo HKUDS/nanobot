@@ -326,6 +326,9 @@ def retain_candidate(root: Path, artifacts: Path, output: Path, *, source_commit
         _git(root, "-c", f"init.templateDir={template}", "clone", "--bare", "--depth", "2",
              "--single-branch", "--no-tags", root.as_uri(), str(source))
     (source / "config").write_text("[core]\nrepositoryformatversion = 0\nbare = true\n", encoding="utf-8")
+    # Artifact transport keeps files, not empty directories. A bare clone can
+    # have only packed refs; retain a loose ref so the downloaded Git tree works.
+    _git(source, "update-ref", "refs/retained/candidate", manifest.candidate_commit)
     _git(source, "fsck", "--full")
     if _git(source, "rev-parse", "HEAD") != manifest.candidate_commit:
         raise ValueError("Retained source differs from the candidate")

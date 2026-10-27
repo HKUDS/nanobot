@@ -3,9 +3,12 @@
 import subprocess
 import tomllib
 from types import SimpleNamespace
+from zipfile import ZipFile
 
 import pytest
 
+from nanobot.releases import ReleaseArtifact, ReleaseManifest, release_filenames
+from scripts import release_candidate
 from scripts.release_candidate import (
     _candidate_identity,
     _source_payload,
@@ -151,3 +154,37 @@ def test_candidate_verifies_bundled_documentation_against_its_tracked_source(sou
     for name in (reference, "docs/README.md"):
         with pytest.raises(ValueError, match="differs from the candidate"):
             _source_payload(root, {**packaged, prefix + name: b"Unchecked instructions"}, prefix)
+
+
+def test_retained_source_survives_file_only_artifact_transport(tmp_path, source, monkeypatch):
+    root, commit = source
+    manifest = ReleaseManifest(
+        version="0.3.5", source_commit=commit, candidate_commit=commit,
+        requires_python=">=3.11",
+        artifacts=[ReleaseArtifact(filename=name, size=123, sha256="c" * 64)
+                   for name in sorted(release_filenames("0.3.5"))],
+    )
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    for artifact in manifest.artifacts:
+        (artifacts / artifact.filename).write_bytes(b"structurally verified elsewhere")
+    (artifacts / "release-manifest.json").write_text(manifest.model_dump_json(), encoding="utf-8")
+    # Exercise actual Git retention and ZIP transport; packaging has independent
+    # real-archive coverage and is not the contract under test here.
+    monkeypatch.setattr(release_candidate, "verify_candidate", lambda *args, **kwargs: manifest)
+    monkeypatch.setattr(release_candidate, "write_install_guide", lambda *args, **kwargs: None)
+    retained = tmp_path / "retained"
+    release_candidate.retain_candidate(root, artifacts, retained, source_commit=commit)
+    with ZipFile(tmp_path / "handoff.zip", "w") as archive:
+        for path in retained.rglob("*"):
+            if path.is_file():
+                archive.write(path, path.relative_to(retained))
+    downloaded = tmp_path / "downloaded"
+    with ZipFile(tmp_path / "handoff.zip") as archive:
+        archive.extractall(downloaded)
+    restored = downloaded / "source.git"
+    git(restored, "fsck", "--full")
+    assert git(restored, "rev-parse", "HEAD") == commit
+    checkout = tmp_path / "checkout"
+    git(tmp_path, "clone", str(restored), str(checkout))
+    assert (checkout / "pyproject.toml").read_bytes() == (root / "pyproject.toml").read_bytes()
