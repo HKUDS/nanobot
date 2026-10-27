@@ -35,9 +35,11 @@ const LazyHighlightedCode = lazy(async () => {
   const [
     { default: SyntaxHighlighter },
     { ViewportCodeRows },
+    { WrappedCodeRows },
   ] = await Promise.all([
     import("react-syntax-highlighter/dist/esm/prism-async-light"),
     import("@/components/ViewportCodeRows"),
+    import("@/components/WrappedCodeRows"),
   ]);
 
   return {
@@ -84,7 +86,8 @@ const LazyHighlightedCode = lazy(async () => {
           PreTag="pre"
           showLineNumbers={showLineNumbers && !viewportHighlight}
           wrapLongLines={wrapLongLines}
-          renderer={viewportHighlight ? props => <ViewportCodeRows {...props} /> : undefined}
+          renderer={viewportHighlight ? props => <ViewportCodeRows {...props} />
+            : showLineNumbers && wrapLongLines ? props => <WrappedCodeRows {...props} /> : undefined}
         >
           {code}
         </SyntaxHighlighter>

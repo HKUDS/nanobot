@@ -24,6 +24,7 @@ import { NewChatSkeletonFixture } from "./new-chat-skeleton-fixture";
 import "../src/globals.css";
 import { DiagramFixture } from "./diagram-fixture";
 import { TypographyFixture } from "./typography-fixture";
+import { CodeWrappingFixture } from "./code-wrapping-fixture";
 import { InlineReferencesFixture } from "./inline-references-fixture";
 import { HistoryBoundaryFixture } from "./history-boundary-fixture";
 import { ChatFailureFixture } from "./chat-failure-fixture";
@@ -251,6 +252,8 @@ createRoot(document.getElementById("root")!).render(<TooltipProvider>
     ? <ChatFailureFixture parameters={parameters} />
     : parameters.get("case") === "display-math"
     ? <DisplayMathFixture />
+    : parameters.get("case") === "code-wrapping"
+    ? <CodeWrappingFixture />
     : parameters.get("case") === "typography"
     ? <ClientProvider client={railClient} token="fixture"><TypographyFixture /></ClientProvider>
     : parameters.get("case") === "inline-references"
