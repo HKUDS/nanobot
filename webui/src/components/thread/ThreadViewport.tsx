@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 import { PromptRail } from "@/components/thread/PromptRail";
 import { SubagentThreadMessages, useHasSubagentResults } from "@/components/thread/SubagentTaskResults";
 import { DiagramScope } from "@/components/markdown-diagrams/context";
+import { DiffViewportContext } from "./activity/DiffViewportContext";
 import { ThreadHistoryStatus } from "@/components/thread/ThreadHistoryStatus";
 import { isAgentActivityMember } from "@/components/thread/AgentActivityCluster";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
@@ -297,6 +298,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const contentRef = useRef<HTMLDivElement>(null);
   const messageRegionRef = useRef<HTMLDivElement | null>(null);
   const messageContentRef = useRef<HTMLDivElement>(null);
+  const diffViewport = useMemo(() => ({ scroller: messageRegionRef, content: messageContentRef }), []);
   const emptyStateRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -1153,6 +1155,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
               )}
             >
               <div ref={messageContentRef} className="w-full">
+                <DiffViewportContext.Provider value={diffViewport}>
                 <DiagramScope identity={conversationKey}>
                 <SubagentThreadMessages
                   messages={visibleMessages}
@@ -1180,6 +1183,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                   onActivityToggle={yieldCameraToUser}
                 />
                 </DiagramScope>
+                </DiffViewportContext.Provider>
               </div>
               <div aria-hidden className="thread-message-end-gap shrink-0" />
               <div ref={bottomRef} aria-hidden className="h-px shrink-0" />

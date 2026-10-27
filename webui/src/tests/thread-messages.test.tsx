@@ -10,6 +10,12 @@ import {
 import { preloadMarkdownText } from "@/components/MarkdownText";
 import type { UIMessage } from "@/lib/types";
 
+// These DOM tests exercise disclosure/source contracts; the real shadow renderer runs in browser tests.
+vi.mock("@/components/thread/activity/DiffSyntaxHighlight", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/thread/activity/DiffSyntaxHighlight")>();
+  return { ...actual, DiffSyntaxHighlight: actual.PlainDiffLines };
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
