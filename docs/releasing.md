@@ -88,6 +88,8 @@ Before release, measure TUI first-screen and Mermaid render latency on each supp
 
 Native acceptance runs `tui/scripts/native_smoke.py` against the exact input wheel. It reuses the PTY/ConPTY input, resize and terminal-restoration checks, records five first-frame samples and cold/warm Mermaid samples with system font discovery, then terminates a submitted render and verifies a fresh worker. Its small report includes wheel/executable identities and sizes; obtain ZIP sizes from that candidate's manifest. This is automated native terminal interaction with an unavailable fixture gateway, not connected-model E2E or controlled cold-OS-cache timing. The `DiagramJobs` integration tests separately cover UI-side cancellation and subsequent-job completion.
 
+The native render fixture includes Chinese C4 labels and generated Latin punctuation. Linux acceptance installs the supported `fonts-noto-cjk` system dependency; macOS and Windows use their installed fonts. This setup does not bundle fonts in the wheel or prove Chinese rendering on a host without suitable fonts. Keep the glyph checks enabled and retain the source-view fallback for users whose fonts are unavailable.
+
 ### Build the PyPI platform wheels
 
 After `uv build` and native archive checks, from the exact release checkout:

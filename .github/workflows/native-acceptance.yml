@@ -112,6 +112,12 @@ jobs:
         if: runner.os == 'Windows'
         run: python -m pip install --disable-pip-version-check pywinpty==3.0.5
 
+      - name: Install Linux CJK diagram fonts
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y fonts-noto-cjk
+
       - name: Verify packaged terminal interaction and native render latency
         run: |
           python tui/scripts/native_smoke.py --wheel "$ACCEPTANCE_WHEEL" \
