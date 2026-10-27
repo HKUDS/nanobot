@@ -241,6 +241,7 @@ class ChannelManager:
             )
             kwargs["gateway"] = gateway
         channel = cls(section, self.bus, **kwargs)
+        channel.tool_hint_max_length = self.config.agents.defaults.tool_hint_max_length
         if runtime_name and runtime_name != channel.name:
             channel.name = runtime_name
         progress_default, tool_hints_default = channel.progress_transport_defaults() or (
@@ -801,6 +802,8 @@ class ChannelManager:
         """
         if msg.delivery_id in self._scheduled_deliveries:
             return
+        if isinstance(msg.event, ProgressEvent) and msg.event.tool_events:
+            msg = channel.prepare_tool_events(msg)
         await self._outbound_slots.acquire()
         if msg.channel in self._stopping_channels or self.channels.get(msg.channel) is not channel:
             self._outbound_slots.release()

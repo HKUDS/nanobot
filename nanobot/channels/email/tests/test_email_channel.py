@@ -7,7 +7,7 @@ import pytest
 
 from nanobot.bus.delivery import DeliveryRejectedError
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.outbound_events import ProgressEvent
+from nanobot.bus.outbound_events import ProgressEvent, outbound_message_for_event
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.email.runtime import EmailChannel, EmailConfig
@@ -814,7 +814,14 @@ async def test_send_uses_smtp_and_reply_subject(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_skips_progress_messages_before_smtp(monkeypatch) -> None:
+@pytest.mark.parametrize("event", [
+    ProgressEvent(tool_hint=True, tool_events=[{
+        "phase": "start", "call_id": "call-1", "name": "exec",
+        "arguments": {"command": "git status"},
+    }]),
+    ProgressEvent(tool_events=[{"phase": "end", "call_id": "call-1", "name": "exec"}]),
+], ids=["tool-start", "tool-end"])
+async def test_send_skips_progress_messages_before_smtp(monkeypatch, event) -> None:
     called = {"smtp": False}
 
     def _smtp_factory(*_args, **_kwargs):
@@ -825,14 +832,12 @@ async def test_send_skips_progress_messages_before_smtp(monkeypatch) -> None:
 
     channel = EmailChannel(_make_config(), MessageBus())
 
-    await channel.send(
-        OutboundMessage(
-            channel="email",
-            chat_id="alice@example.com",
-            content="",
-            event=ProgressEvent(tool_events=[{"phase": "end", "name": "exec"}]),
-        )
+    msg = outbound_message_for_event(
+        channel="email",
+        chat_id="alice@example.com",
+        event=event,
     )
+    await ChannelManager._send_once(channel, channel.prepare_tool_events(msg))
 
     assert called["smtp"] is False
 

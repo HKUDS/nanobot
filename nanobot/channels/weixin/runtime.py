@@ -1865,6 +1865,11 @@ class WeixinChannel(BaseChannel):
         self._raise_for_api_error("sendmessage", data)
         self._record_context_send(context_token)
 
+    def prepare_tool_events(self, msg: OutboundMessage) -> OutboundMessage:
+        if self.config.reply_progress_messages:
+            return msg
+        return super().prepare_tool_events(msg)
+
     async def send(self, msg: OutboundMessage) -> None:
         event = getattr(msg, "event", None)
         if isinstance(event, ContextCompactionEvent) and not (

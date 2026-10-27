@@ -443,18 +443,30 @@ async def test_structured_progress_is_capped_and_uses_one_run_id() -> None:
         {"phase": "start", "call_id": "call-2", "name": "exec"},
     ]
 
-    await channel.send(
-        OutboundMessage(
-            channel="weixin",
-            chat_id="wx-user",
-            content="read_file",
-            event=ProgressEvent(content="read_file", tool_hint=True, tool_events=events),
-        )
+    send = AsyncMock(wraps=channel.send)
+    channel.send = send
+    msg = OutboundMessage(
+        channel="weixin",
+        chat_id="wx-user",
+        content="",
+        event=ProgressEvent(tool_hint=True, tool_events=events),
     )
+    await ChannelManager._send_once(channel, channel.prepare_tool_events(msg))
 
+    send.assert_awaited_once_with(msg)
+    assert send.await_args.args[0] is msg
+    assert msg.content == ""
     assert channel._send_message_item.await_count == 2
     first = channel._send_message_item.await_args_list[0]
     second = channel._send_message_item.await_args_list[1]
     assert first.args[1]["type"] == ITEM_TOOL_CALL_START
     assert second.args[1]["type"] == ITEM_TOOL_CALL_RESULT
+    assert first.args[1]["tool_call_start_item"] == {
+        "tool_name": "read_file", "tool_call_id": "call-1",
+    }
+    assert second.args[1]["tool_call_result_item"] == {
+        "tool_name": "read_file", "tool_call_id": "call-1", "status": "completed",
+    }
+    assert first.args[2] == second.args[2] == "ctx-1"
     assert first.kwargs["run_id"] == second.kwargs["run_id"]
+    assert first.kwargs["reserve_budget"] == second.kwargs["reserve_budget"] == 1

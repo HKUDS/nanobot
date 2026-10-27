@@ -109,7 +109,7 @@ async def test_runner_routes_hosted_tool_events_to_structured_progress():
             "embeds": [],
         },
     ]
-    assert progress_text == ['search X "nanobot oauth"', ""]
+    assert progress_text == ["", ""]
     assert timeline == [
         "delta:Before search.", "end:True", "tool:start", "tool:end", "delta:done", "end:False",
     ]
