@@ -1532,7 +1532,7 @@ async def test_session_inbox_is_installed_before_worker_start(tmp_path, monkeypa
 @pytest.mark.asyncio
 @pytest.mark.parametrize("log_content", [True, False])
 async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(
-    tmp_path, request, log_content,
+    tmp_path, request, monkeypatch, log_content,
 ):
     """Messages accumulated during a model call share its next request snapshot."""
     from loguru import logger
@@ -1550,7 +1550,7 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(
     provider.get_default_model.return_value = "test-model"
     first_request_started = asyncio.Event()
     release_first_request = asyncio.Event()
-    second_request_started = asyncio.Event()
+    all_enqueued = asyncio.Event()
     captured_messages: list[list[dict]] = []
 
     async def chat_stream_with_retry(*, messages, **kwargs):
@@ -1559,7 +1559,6 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(
             first_request_started.set()
             await release_first_request.wait()
             return LLMResponse(content="first answer", tool_calls=[], usage=None)
-        second_request_started.set()
         return LLMResponse(content="batch answer", tool_calls=[], usage=None)
 
     provider.chat_stream_with_retry = chat_stream_with_retry
@@ -1573,38 +1572,44 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(
     await loop.sessions.state.get("cli:c")
     await loop.sessions.state.set_policy("cli:c", SessionPolicy(log_content=log_content))
     followups = [f"follow-up-{index:02}" for index in range(12)]
+    enqueue = loop._enqueue_session_message
+
+    async def capture_enqueue(msg):
+        await enqueue(msg)
+        if msg.content == followups[-1]:
+            all_enqueued.set()
+
+    monkeypatch.setattr(loop, "_enqueue_session_message", capture_enqueue)
 
     run_task = asyncio.create_task(loop.run())
-    await loop.bus.publish_inbound(InboundMessage(
-        channel="cli",
-        sender_id="u",
-        chat_id="c",
-        content="initial",
-    ))
-    await asyncio.wait_for(first_request_started.wait(), timeout=2)
-    for content in followups:
+    try:
         await loop.bus.publish_inbound(InboundMessage(
             channel="cli",
             sender_id="u",
             chat_id="c",
-            content=content,
+            content="initial",
         ))
-    for _ in range(200):
-        pending = loop._pending_queues.get("cli:c")
-        if pending is not None and pending.qsize() == len(followups):
-            break
-        await asyncio.sleep(0.01)
-    assert loop._pending_queues["cli:c"].qsize() == len(followups)
+        await asyncio.wait_for(first_request_started.wait(), timeout=30)
+        for content in followups:
+            await loop.bus.publish_inbound(InboundMessage(
+                channel="cli",
+                sender_id="u",
+                chat_id="c",
+                content=content,
+            ))
+        await asyncio.wait_for(all_enqueued.wait(), timeout=30)
+        assert loop._pending_queues["cli:c"].qsize() == len(followups)
+        workers = list(loop._active_tasks["cli:c"])
 
-    release_first_request.set()
-    await asyncio.wait_for(second_request_started.wait(), timeout=2)
-    for _ in range(200):
-        if "cli:c" not in loop._pending_queues:
-            break
-        await asyncio.sleep(0.01)
-    loop.stop()
-    # Shutdown drains accepted writes and closes the worker's WAL connection.
-    await asyncio.wait_for(run_task, timeout=30)
+        release_first_request.set()
+        # Wait for the real worker, including durable writes, not a disk-speed SLA.
+        await asyncio.wait_for(asyncio.gather(*workers), timeout=30)
+        assert "cli:c" not in loop._pending_queues
+    finally:
+        release_first_request.set()
+        loop.stop()
+        # Shutdown drains accepted writes and closes the worker's WAL connection.
+        await asyncio.wait_for(run_task, timeout=30)
 
     assert len(captured_messages) == 2
     second_request = "\n".join(
