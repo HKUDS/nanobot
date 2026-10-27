@@ -140,6 +140,7 @@ describe("Inline shared proxy setup", () => {
     expect(input).toBeDisabled();
     fireEvent.keyDown(setup, { key: "Escape" });
     expect(setup).toBeInTheDocument();
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledTimes(2));
     await act(async () => { resolveSave(saved); });
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Shared proxy" })).not.toBeInTheDocument());
     expect(screen.getByRole("dialog", { name: "Docs MCP" })).toBe(parent);
