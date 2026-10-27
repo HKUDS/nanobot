@@ -321,8 +321,13 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const historySlotRef = useRef<HTMLDivElement | null>(null);
   const historyInputRef = useRef<"touch" | "other">("other");
   const historyTouchRef = useRef<{
-    lastY: number; startX: number; startY: number; pulling: boolean; horizontal: boolean;
+    target: Node; lastY: number; startX: number; startY: number; pulling: boolean; horizontal: boolean;
   } | null>(null);
+  const historyTouchTargetCleanupRef = useRef<(() => void) | null>(null);
+  const clearHistoryTouchTarget = useCallback(() => {
+    historyTouchTargetCleanupRef.current?.();
+    historyTouchTargetCleanupRef.current = null;
+  }, []);
   const historyDistanceRef = useRef(0);
   const historyStatusRef = useRef<HTMLDivElement | null>(null);
   const historySpringRef = useRef<ThreadHistorySpring | null>(null);
@@ -693,6 +698,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   useLayoutEffect(() => {
     if (lastConversationKeyRef.current === conversationKey) return;
     lastConversationKeyRef.current = conversationKey;
+    clearHistoryTouchTarget();
     historyTouchRef.current = null;
     historyInputRef.current = "other";
     resetHistoryHeader();
@@ -719,7 +725,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
         fill: "forwards",
       },
     );
-  }, [conversationKey, hasMessages, resetHistoryHeader]);
+  }, [clearHistoryTouchTarget, conversationKey, hasMessages, resetHistoryHeader]);
 
   useLayoutEffect(() => {
     if (!conversationReady) {
@@ -991,21 +997,28 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       }
     };
     const handleTouchCancel = () => {
+      clearHistoryTouchTarget();
       historyTouchRef.current = null;
       historySpringRef.current?.endTouch(true);
     };
     const handleTouchStart = (event: TouchEvent) => {
       historyInputRef.current = "touch";
       const touch = event.touches[0];
-      historyTouchRef.current = event.touches.length === 1 && touch
-        ? {
-            lastY: touch.clientY,
-            startX: touch.clientX,
-            startY: touch.clientY,
-            pulling: false,
-            horizontal: false,
-          }
-        : null;
+      if (event.touches.length !== 1 || !touch) {
+        handleTouchCancel();
+        return;
+      }
+      clearHistoryTouchTarget();
+      const target = event.target as Node;
+      historyTouchRef.current = {
+        target,
+        lastY: touch.clientY,
+        startX: touch.clientX,
+        startY: touch.clientY,
+        pulling: false,
+        horizontal: false,
+      };
+      observeHistoryTouchTarget(target);
     };
     const handleTouchMove = (event: TouchEvent) => {
       const gesture = historyTouchRef.current;
@@ -1037,8 +1050,29 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     };
     const handleTouchEnd = () => {
       const pulling = historyTouchRef.current?.pulling;
+      clearHistoryTouchTarget();
       historyTouchRef.current = null;
       if (historySpringRef.current?.endTouch() && pulling && canLoadAtTop()) loadEarlierMessages();
+    };
+    const observeHistoryTouchTarget = (target: Node) => {
+      if (target === el) return;
+      // Touch events remain targeted at the original node even after React replaces it.
+      // Keep ordinary connected events on the existing viewport path and only forward
+      // events that can no longer reach it through DOM propagation.
+      const detached = (handler: (event: TouchEvent) => void) => (event: Event) => {
+        if (historyTouchRef.current?.target === target && !event.composedPath().includes(el)) handler(event as TouchEvent);
+      };
+      const move = detached(handleTouchMove);
+      const end = detached(handleTouchEnd);
+      const cancel = detached(handleTouchCancel);
+      target.addEventListener("touchmove", move, { passive: false });
+      target.addEventListener("touchend", end, { passive: true });
+      target.addEventListener("touchcancel", cancel, { passive: true });
+      historyTouchTargetCleanupRef.current = () => {
+        target.removeEventListener("touchmove", move);
+        target.removeEventListener("touchend", end);
+        target.removeEventListener("touchcancel", cancel);
+      };
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
@@ -1061,6 +1095,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       historyInputRef.current = "other";
       handleDirectionalInput(keyboardScrollDirection(event));
     };
+    if (historyTouchRef.current) observeHistoryTouchTarget(historyTouchRef.current.target);
     el.addEventListener("scroll", handleScroll, { passive: true });
     el.addEventListener("wheel", handleWheel, { passive: true });
     el.addEventListener("touchstart", handleTouchStart, { passive: true });
@@ -1070,6 +1105,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     el.addEventListener("pointerdown", handlePointerDown);
     el.addEventListener("keydown", handleKeyDown);
     return () => {
+      clearHistoryTouchTarget();
       el.removeEventListener("scroll", handleScroll);
       el.removeEventListener("wheel", handleWheel);
       el.removeEventListener("touchstart", handleTouchStart);
@@ -1081,6 +1117,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     };
   }, [
     captureHistoryScrollAnchor,
+    clearHistoryTouchTarget,
     conversationReady,
     hasMessages,
     hasMoreBefore,
