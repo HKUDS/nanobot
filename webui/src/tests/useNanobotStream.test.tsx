@@ -822,6 +822,26 @@ describe("useNanobotStream", () => {
     },
   );
 
+  it.each([true, false, undefined])("keeps saved-reply facts consistent live and on attach (%s)", (preserved) => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-preserved", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    const state = {
+      recovery_id: "preserved-1", status: "awaiting_user" as const,
+      reason: "model_request_failed", failure_error_kind: "connection",
+      ...(preserved === undefined ? {} : { reply_preserved: preserved }),
+    };
+    act(() => fake.emit("chat-preserved", {
+      event: "recovery_state", chat_id: "chat-preserved", ...state,
+    }));
+    expect(result.current.recoveryState).toEqual(state);
+    act(() => fake.emit("chat-preserved", {
+      event: "attached", chat_id: "chat-preserved", recovery_state: state,
+    }));
+    expect(result.current.recoveryState).toEqual(state);
+  });
+
   it("does not let historical recovered state clear a later active turn", () => {
     const fake = fakeClient();
     const { result } = renderHook(

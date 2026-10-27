@@ -2340,6 +2340,7 @@
     "failedHelp": "La tâche enregistrée n’a pas pu être restaurée en toute sécurité. Vérifiez-la avant de continuer.",
     "resuming": "Restauration de la tâche interrompue…",
     "review": "Vérifiez la tâche avant de continuer. Les outils ne seront pas relancés automatiquement.",
+    "replyPreserved": "La réponse est enregistrée. Vous pouvez continuer.",
     "safeResume": "Reprise depuis le contexte de conversation enregistré.",
     "dismiss": "Ignorer",
     "continue": "Continuer"
@@ -2464,7 +2465,7 @@
       "authenticationBody": "Reconnectez-vous ou vérifiez la clé API dans les paramètres du modèle.",
       "billingTitle": "Quota du fournisseur du modèle indisponible",
       "billingBody": "Ajoutez du crédit ou vérifiez la facturation du compte fournisseur, puis réessayez.",
-      "connectionTitle": "Impossible de se connecter au fournisseur du modèle",
+      "connectionTitle": "Échec de connexion au modèle",
       "timeoutTitle": "La requête au fournisseur du modèle a expiré",
       "rateLimitTitle": "Limite de requêtes du fournisseur du modèle atteinte",
       "serverTitle": "Erreur du service du fournisseur du modèle",

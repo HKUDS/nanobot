@@ -1120,7 +1120,7 @@ class LLMProvider(ABC):
             ),
             timeout=resolve_stream_idle_timeout_s(),
         )
-        if on_content_delta and response.content:
+        if on_content_delta and response.content and response.finish_reason != "error":
             await on_content_delta(response.content)
         return response
 

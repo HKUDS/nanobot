@@ -2546,6 +2546,7 @@
     "failedHelp": "无法安全恢复已保存的任务，继续前请先检查。",
     "resuming": "正在恢复中断的任务…",
     "review": "继续前请检查任务。工具不会被自动重放。",
+    "replyPreserved": "回复已保留，可继续生成。",
     "safeResume": "正在从已保存的对话上下文继续。",
     "dismiss": "忽略",
     "continue": "继续"
@@ -2670,7 +2671,7 @@
       "authenticationBody": "请在模型设置中重新登录或检查 API 密钥。",
       "billingTitle": "模型提供商账户额度不足",
       "billingBody": "请为提供商账户充值或检查账单状态后重试。",
-      "connectionTitle": "无法连接模型提供商",
+      "connectionTitle": "模型连接异常",
       "timeoutTitle": "模型提供商请求超时",
       "rateLimitTitle": "模型提供商请求受限",
       "serverTitle": "模型提供商服务异常",

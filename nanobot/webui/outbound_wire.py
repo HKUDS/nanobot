@@ -73,6 +73,7 @@ class RecoveryStateWirePayload(_ChatWirePayload):
     reason: NotRequired[str]
     can_continue: NotRequired[bool]
     failure_error_kind: NotRequired[str]
+    reply_preserved: NotRequired[bool]
 
 
 class RetryStatusWirePayload(_ChatWirePayload):
@@ -139,6 +140,8 @@ def encode_recovery_state(
         payload["can_continue"] = event.can_continue
     if event.failure_error_kind is not None:
         payload["failure_error_kind"] = event.failure_error_kind
+    if event.reply_preserved is not None:
+        payload["reply_preserved"] = event.reply_preserved
     return payload
 
 

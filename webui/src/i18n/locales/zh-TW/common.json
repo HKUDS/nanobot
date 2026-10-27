@@ -2340,6 +2340,7 @@
     "failedHelp": "無法安全復原已儲存的任務，繼續前請先檢查。",
     "resuming": "正在復原中斷的任務…",
     "review": "繼續前請檢查任務。工具不會自動重播。",
+    "replyPreserved": "回覆已保留，可繼續生成。",
     "safeResume": "正在從已儲存的對話上下文繼續。",
     "dismiss": "略過",
     "continue": "繼續"
@@ -2464,7 +2465,7 @@
       "authenticationBody": "請在模型設定中重新登入或檢查 API 金鑰。",
       "billingTitle": "模型供應商額度無法使用",
       "billingBody": "請為供應商帳戶儲值或檢查帳單狀態後再試。",
-      "connectionTitle": "無法連線至模型供應商",
+      "connectionTitle": "模型連線異常",
       "timeoutTitle": "模型供應商請求逾時",
       "rateLimitTitle": "模型供應商請求受到限制",
       "serverTitle": "模型供應商服務發生錯誤",

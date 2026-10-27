@@ -2340,6 +2340,7 @@
     "failedHelp": "저장된 작업을 안전하게 복구할 수 없습니다. 계속하기 전에 검토하세요.",
     "resuming": "중단된 작업을 복구하는 중…",
     "review": "계속하기 전에 작업을 검토하세요. 도구는 자동으로 다시 실행되지 않습니다.",
+    "replyPreserved": "답변이 저장되었습니다. 계속 생성할 수 있습니다.",
     "safeResume": "저장된 대화 컨텍스트에서 계속합니다.",
     "dismiss": "닫기",
     "continue": "계속"
@@ -2464,7 +2465,7 @@
       "authenticationBody": "모델 설정에서 다시 로그인하거나 API 키를 확인하세요.",
       "billingTitle": "모델 제공업체 할당량을 사용할 수 없음",
       "billingBody": "제공업체 계정에 크레딧을 추가하거나 결제 상태를 확인한 후 다시 시도하세요.",
-      "connectionTitle": "모델 제공업체에 연결할 수 없음",
+      "connectionTitle": "모델 연결 오류",
       "timeoutTitle": "모델 제공업체 요청 시간 초과",
       "rateLimitTitle": "모델 제공업체 요청 한도 초과",
       "serverTitle": "모델 제공업체 서비스 오류",

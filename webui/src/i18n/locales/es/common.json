@@ -2341,6 +2341,7 @@
     "failedHelp": "La tarea guardada no se pudo restaurar de forma segura. Revísala antes de continuar.",
     "resuming": "Restaurando la tarea interrumpida…",
     "review": "Revisa la tarea antes de continuar. Las herramientas no se repetirán automáticamente.",
+    "replyPreserved": "La respuesta está guardada. Puedes continuar.",
     "safeResume": "Continuando desde el contexto guardado de la conversación.",
     "dismiss": "Descartar",
     "continue": "Continuar"
@@ -2465,7 +2466,7 @@
       "authenticationBody": "Vuelve a iniciar sesión o revisa la clave API en los ajustes del modelo.",
       "billingTitle": "La cuota del proveedor del modelo no está disponible",
       "billingBody": "Añade crédito o revisa la facturación de la cuenta del proveedor y vuelve a intentarlo.",
-      "connectionTitle": "No se pudo conectar con el proveedor del modelo",
+      "connectionTitle": "Error de conexión con el modelo",
       "timeoutTitle": "La solicitud al proveedor del modelo agotó el tiempo de espera",
       "rateLimitTitle": "Se alcanzó el límite de solicitudes del proveedor del modelo",
       "serverTitle": "Error del servicio del proveedor del modelo",

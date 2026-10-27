@@ -2546,6 +2546,7 @@
     "failedHelp": "The saved task could not be restored safely. Review it before continuing.",
     "resuming": "Restoring interrupted task…",
     "review": "Review the task before continuing. Tools will not be replayed automatically.",
+    "replyPreserved": "Reply saved. You can continue.",
     "safeResume": "Continuing from saved conversation context.",
     "dismiss": "Dismiss",
     "continue": "Continue"
@@ -2670,7 +2671,7 @@
       "authenticationBody": "Sign in again or check the provider’s API key in model settings.",
       "billingTitle": "Model provider quota is unavailable",
       "billingBody": "Add credit or check billing for the provider account, then try again.",
-      "connectionTitle": "Could not connect to the model provider",
+      "connectionTitle": "Model connection failed",
       "timeoutTitle": "Model provider request timed out",
       "rateLimitTitle": "Model provider rate limit reached",
       "serverTitle": "Model provider service error",

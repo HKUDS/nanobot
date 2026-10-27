@@ -452,4 +452,6 @@ def recovery_state_from_metadata(metadata: Mapping[str, Any] | None) -> dict[str
         "authentication", "billing", "connection", "timeout", "rate_limit", "server", "unknown",
     }:
         payload["failure_error_kind"] = failure_error_kind
+    if state.get("reply_preserved") is True:
+        payload["reply_preserved"] = True
     return payload
