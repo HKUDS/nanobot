@@ -1310,6 +1310,7 @@ describe("AgentActivityCluster", () => {
     expect(screen.queryByText(/signed-secret|secret1234|url-secret/)).not.toBeInTheDocument();
     expect(screen.getByLabelText("Searched the web, release notes access_token=<redacted>")).toBeInTheDocument();
     expect(screen.getByText("Release <redacted>")).toBeInTheDocument();
+    expect(screen.getByText("Release <redacted>").closest("a")).toHaveClass("text-content-link", "hover:text-content-link-hover");
     expect(screen.getByText("Release <redacted>").closest("a")).toHaveAttribute(
       "href",
       "https://example.com/release",
