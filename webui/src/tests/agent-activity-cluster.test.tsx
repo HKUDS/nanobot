@@ -215,25 +215,53 @@ describe("AgentActivityCluster", () => {
     });
   });
 
-  it("shows model retries in the existing live activity header", () => {
-    render(
-      <AgentActivityCluster
-        messages={[]}
-        isTurnStreaming
-        hasBodyBelow={false}
-        retryStatus={{
-          state: "waiting",
-          attempt: 1,
-          max_attempts: 4,
-          error_kind: "connection",
-          next_retry_at: Date.now() / 1000 + 5,
-        }}
-      />,
-    );
+  it.each([
+    {
+      locale: "en" as const,
+      waiting: "Connection failed Retrying in 5s",
+      retrying: "Connection failed Retrying",
+      exhausted: "Connection failed Ending turn",
+    },
+    {
+      locale: "zh-CN" as const,
+      waiting: "连接失败 5 秒后重试",
+      retrying: "连接失败 正在重试",
+      exhausted: "连接失败 正在结束本次任务",
+    },
+  ])("shows localized model retry progress in the activity header ($locale)", async ({
+    locale, waiting, retrying, exhausted,
+  }) => {
+    await act(async () => setAppLanguage(locale));
+    vi.useFakeTimers();
+    try {
+      const retryStatus = {
+        state: "waiting" as const,
+        attempt: 1,
+        max_attempts: 4,
+        error_kind: "connection" as const,
+        next_retry_at: Date.now() / 1000 + 5,
+      };
+      const { rerender, unmount } = render(
+        <AgentActivityCluster messages={[]} isTurnStreaming hasBodyBelow={false} retryStatus={retryStatus} />,
+      );
 
-    expect(
-      screen.getByText("Connection failed. Retrying in 5s (attempt 1/4)."),
-    ).toBeInTheDocument();
+      expect(screen.getByRole("status", { name: waiting })).toBeVisible();
+      act(() => { vi.advanceTimersByTime(5_000); });
+      expect(screen.getByRole("status", { name: retrying })).toBeVisible();
+
+      rerender(
+        <AgentActivityCluster
+          messages={[]}
+          isTurnStreaming
+          hasBodyBelow={false}
+          retryStatus={{ ...retryStatus, state: "exhausted", attempt: 4 }}
+        />,
+      );
+      expect(screen.getByRole("status", { name: exhausted })).toBeVisible();
+      unmount();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps intermediate assistant output as normal Markdown inside live activity", async () => {
@@ -616,7 +644,7 @@ describe("AgentActivityCluster", () => {
             retryStatus={{ state: "waiting", attempt: 1, max_attempts: 4, error_kind: "connection" }}
           />,
         );
-        expect(screen.getByRole("status", { name: "Connection failed. Retrying in 0s (attempt 1/4)." }))
+        expect(screen.getByRole("status", { name: "Connection failed Retrying" }))
           .toBeVisible();
         unmount();
         render(<AgentActivityCluster messages={messages} isTurnStreaming={false} hasBodyBelow />);

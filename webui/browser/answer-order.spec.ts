@@ -6,10 +6,10 @@ const turnId = "answer-order-turn";
 const source = { provider: "fixture", model: "fixture", preset: "fixture" };
 const base = { chat_id: chatId, turn_id: turnId };
 
-async function openThread(page: Page, events: ThreadProjectionEvent[] = []) {
+async function openThread(page: Page, events: ThreadProjectionEvent[] = [], locale = "en") {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.addInitScript(() => { localStorage.setItem("nanobot.locale", "en"); });
+  await page.addInitScript((language) => { localStorage.setItem("nanobot.locale", language); }, locale);
   await page.route("**/api/**", (route) => route.fulfill({ status: 404, json: {} }));
   await page.route("**/api/commands", (route) => route.fulfill({ json: { commands: [] } }));
   await page.route("**/api/sessions/*/webui-thread?*", (route) => {
@@ -44,6 +44,31 @@ async function expectAnswerOrder(page: Page) {
   const texts = await page.locator("[data-thread-display-unit]").allTextContents();
   expect(texts.findIndex((text) => text.includes("Earlier answer")))
     .toBeLessThan(texts.findIndex((text) => text.includes("Later answer")));
+}
+
+for (const scenario of [
+  { locale: "en", width: 1440, waiting: /Connection failed Retrying in [1-9][0-9]*s/, retrying: "Connection failed Retrying" },
+  { locale: "zh-CN", width: 390, waiting: /连接失败 [1-9][0-9]* 秒后重试/, retrying: "连接失败 正在重试" },
+]) {
+  test(`shows retry progress in the live thread at ${scenario.width}px (${scenario.locale})`, async ({ page }, info) => {
+    await page.setViewportSize({ width: scenario.width, height: 900 });
+    await page.clock.install();
+    const { emit, errors } = await openThread(page, [], scenario.locale);
+    emit({ event: "user_message", ...base, text: "Retry fixture", starts_turn: true, active_turn_id: turnId });
+    await expect(page.getByText("Retry fixture", { exact: true })).toBeVisible();
+    emit(
+      { event: "goal_status", ...base, status: "running", started_at: Date.now() / 1000 },
+      { event: "retry_status", ...base, state: "waiting", attempt: 1, max_attempts: 4, error_kind: "connection", retry_after_s: 30 },
+    );
+    await expect(page.getByRole("status", { name: scenario.waiting })).toBeVisible();
+    await page.screenshot({ path: info.outputPath("retry-waiting.png") });
+    await page.clock.fastForward(30_000);
+    await expect(page.getByRole("status", { name: scenario.retrying, exact: true })).toBeVisible();
+    await page.screenshot({ path: info.outputPath("retry-status.png") });
+    emit({ event: "retry_status", ...base, state: "recovered", attempt: 2, max_attempts: 4, error_kind: "connection" });
+    await expect(page.getByRole("status", { name: scenario.retrying, exact: true })).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
 }
 
 test.describe("answer order", () => {
