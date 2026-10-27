@@ -318,11 +318,15 @@ test("archived task results stay with the retained boundary when earlier message
   const body = page.getByTestId("thread-message-region");
   const otherTasks = body.getByRole("region", { name: "Other tasks" });
   await expect(otherTasks).toBeAttached();
+  // Clicking an offscreen disclosure scrolls it into view and can prefetch history.
+  await positionAtTop(body);
   await otherTasks.getByRole("button", { name: /Other tasks/ }).click();
   await expect(otherTasks.getByRole("button", { name: /Earlier check Completed/ })).toBeVisible();
   await stableLayout(body);
   const originalTop = await positionAtTop(body);
   await body.hover();
+  await expect(body.locator(".thread-history-slot")).toHaveCount(0);
+  expect(history.reads).toHaveLength(0);
   await page.mouse.wheel(0, -100);
   await expect(page.locator(".thread-history-status")).toHaveAttribute("data-state", "loading");
   const held = await expectHeld(body, "Question 40");

@@ -991,19 +991,29 @@ describe("session-owned task UI", () => {
 
   it("keeps elapsed time in task rows without repeating it in details", async () => {
     vi.useFakeTimers();
+    // At 12s row elapsed, the independent activity clock reads 1m 12s.
+    vi.setSystemTime(new Date(162_000));
     vi.spyOn(performance, "now").mockImplementation(() => Date.now());
     render(layout());
     await act(async () => { await Promise.resolve(); });
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
     fireEvent.click(screen.getByTestId("subagent-task-dock-trigger"));
     const row = within(screen.getByTestId("subagent-task-tree")).getByRole("button", { name: /Config check Running/ });
-    expect(row).toHaveTextContent("12s");
+    expect(within(row).getByText("12s", { exact: true })).toBeVisible();
     fireEvent.click(row);
     const detail = screen.getByRole("dialog", { name: "Config check" });
     expect(detail).toHaveAccessibleDescription("Running");
-    expect(detail).not.toHaveTextContent("12s");
+    // The child activity has its own wall-clock duration, not the row's elapsed time.
+    const activity = within(detail).getByRole("status", { name: "Working for 1m 12s" });
+    expect(activity).toHaveTextContent(/^Working for 1m 12s$/);
+    const duplicateElapsed = (elapsed: string) => within(detail).queryByText((text, element) =>
+      new RegExp(`\\b${elapsed}\\b`).test(text) && !activity.contains(element));
+    expect(duplicateElapsed("12s")).not.toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
-    expect(row).toHaveTextContent("13s");
+    expect(within(row).getByText("13s", { exact: true })).toBeVisible();
+    expect(activity).toHaveAccessibleName("Working for 1m 13s");
+    expect(activity).toHaveTextContent(/^Working for 1m 13s$/);
+    expect(duplicateElapsed("13s")).not.toBeInTheDocument();
     expect(fetch).toHaveBeenCalledTimes(1);
     vi.mocked(performance.now).mockRestore();
   });
