@@ -5,9 +5,17 @@ on:
   workflow_dispatch:
     inputs:
       next_stable:
-        description: Next stable base (for example 0.3.6); must not have a stable tag
+        description: Stable version/base (for example 0.4.0); must not have a stable tag
         required: true
         type: string
+      channel:
+        description: Preview makes a version-only commit; stable keeps the ref's exact final version
+        required: true
+        default: preview
+        type: choice
+        options:
+          - preview
+          - stable
       retain_installable:
         description: Retain this exact installable candidate and source for 1 day (~400 MB); not publication
         required: false
@@ -35,6 +43,7 @@ jobs:
       SOURCE_COMMIT: ${{ github.sha }}
       NEXT_STABLE: ${{ inputs.next_stable }}
       PREVIEW_SEQUENCE: ${{ github.run_number }}
+      CANDIDATE_CHANNEL: ${{ inputs.channel }}
 
     steps:
       - name: Set candidate directory
@@ -63,10 +72,21 @@ jobs:
 
       - name: Prepare an exact, separate candidate
         run: |
-          python -m scripts.release_candidate prepare \
-            --source-commit "$SOURCE_COMMIT" --base "$NEXT_STABLE" \
-            --sequence "$PREVIEW_SEQUENCE" --output "$CANDIDATE_DIR" \
-            > "$RUNNER_TEMP/candidate.json"
+          case "$CANDIDATE_CHANNEL" in
+            stable)
+              python -m scripts.release_candidate prepare-stable \
+                --source-commit "$SOURCE_COMMIT" --version "$NEXT_STABLE" \
+                --output "$CANDIDATE_DIR" > "$RUNNER_TEMP/candidate.json"
+              ;;
+            preview)
+              python -m scripts.release_candidate prepare \
+                --source-commit "$SOURCE_COMMIT" --base "$NEXT_STABLE" \
+                --sequence "$PREVIEW_SEQUENCE" --output "$CANDIDATE_DIR" \
+                > "$RUNNER_TEMP/candidate.json"
+              ;;
+            *) exit 1 ;;
+          esac
+          python -c 'import json, os; print("CANDIDATE_VERSION=" + json.load(open(os.environ["RUNNER_TEMP"] + "/candidate.json"))["version"])' >> "$GITHUB_ENV"
 
       - name: Verify packaging and selection contracts
         working-directory: ${{ env.CANDIDATE_DIR }}
@@ -120,7 +140,7 @@ jobs:
       - name: Assemble and verify the complete candidate
         working-directory: ${{ env.CANDIDATE_DIR }}
         run: |
-          version="${NEXT_STABLE}.dev${PREVIEW_SEQUENCE}"
+          version="$CANDIDATE_VERSION"
           python -m scripts.release_candidate assemble --source-commit "$SOURCE_COMMIT" \
             --wheel "$RUNNER_TEMP/python-dist/nanobot_ai-${version}-py3-none-any.whl" \
             --sdist "$RUNNER_TEMP/python-dist/nanobot_ai-${version}.tar.gz" \

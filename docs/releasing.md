@@ -103,6 +103,8 @@ PyPI receives **five platform wheels and one sdist**, not the intermediate unive
 
 Final releases also require `release-manifest.json` for `stable`. Run `scripts.release_candidate assemble` as shown below from the clean final-version checkout, using that final commit as `--source-commit` without Preview preparation. GitHub receives the same wheels/sdist, ten archive/checksum files and manifest; PyPI receives only wheels/sdist. Verify final source and public bytes before catalogue advancement. A TUI-only GitHub Release cannot deliver the final release to Preview subscribers.
 
+For the same-build Linux and Windows candidate acceptance, run **Verify Release Candidate** at the exact final-version ref with `channel=stable`, `next_stable` equal to that declared version and `retain_installable=true`. Stable preparation copies the exact commit without changing version declarations or creating a Preview commit; it rejects mismatched versions and existing stable tags. The default `channel=preview` retains the version-only Preview preparation. Both modes are read-only preparation, require **Candidate required** and retain accepted files for one day; neither publishes a tag, release, PyPI package or feed. Download and independently preserve the accepted handoff before expiry, then complete native macOS and historical-owner acceptance against that same manifest.
+
 ## Publish, with maintainer approval
 
 ### Release approval proof

@@ -10,6 +10,7 @@ from scripts.release_candidate import (
     _candidate_identity,
     _source_payload,
     prepare_preview,
+    prepare_stable,
     preview_version,
 )
 
@@ -62,6 +63,31 @@ def test_dirty_source_is_not_accidentally_included_in_candidate(tmp_path, source
     assert not (tmp_path / "candidate/secret.txt").exists()
     assert "0.3.6.dev1" in (tmp_path / "candidate/nanobot/__init__.py").read_text()
     assert (root / "nanobot/__init__.py").read_text() == "uncommitted work"
+
+
+def test_stable_preparation_preserves_exact_source_and_ignores_local_changes(tmp_path, source):
+    root, commit = source
+    (root / "nanobot/__init__.py").write_text("uncommitted work")
+    target = tmp_path / "stable"
+    result = prepare_stable(root, target, source_commit=commit, version="0.3.5")
+    assert result == {"version": "0.3.5", "source_commit": commit, "candidate_commit": commit}
+    assert git(target, "rev-parse", "HEAD") == commit
+    assert git(target, "status", "--porcelain") == ""
+    assert _candidate_identity(target, commit) == ("0.3.5", ">=3.11", commit)
+    assert (root / "nanobot/__init__.py").read_text() == "uncommitted work"
+
+
+def test_stable_preparation_refuses_version_mismatch_and_published_identity(tmp_path, source):
+    root, commit = source
+    target = tmp_path / "stable"
+    with pytest.raises(ValueError, match="already declare"):
+        prepare_stable(root, target, source_commit=commit, version="0.4.0")
+    with pytest.raises(ValueError, match="final version"):
+        prepare_stable(root, target, source_commit=commit, version="0.4.0.dev1")
+    git(root, "tag", "v0.3.5")
+    with pytest.raises(ValueError, match="existing stable tag"):
+        prepare_stable(root, target, source_commit=commit, version="0.3.5")
+    assert not target.exists()
 
 
 def test_refuses_existing_output_and_published_stable_base(tmp_path, source):
