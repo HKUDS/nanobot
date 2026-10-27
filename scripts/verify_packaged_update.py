@@ -820,13 +820,15 @@ def run_serial(args, root: Path, target: Path, version: str, original_hash: str,
         raise ValueError("Baseline must precede the target; select an earlier baseline wheel")
     results = []
     system = isolated_environment(root)
-    # Install once per lane, without inherited user pip settings; every case
-    # resets only nanobot. No mutable venv or dependency snapshot crosses lanes.
+    # Version-only fixtures share the target's dependency constraints. Real
+    # historical packages must resolve their own dependencies for every case.
+    # No mutable venv or dependency snapshot crosses lanes.
     with timings.measure("venv"):
         subprocess.run([sys.executable, "-I", "-B", "-m", "venv", str(environment)], check=True, env=system, timeout=90)
-    with timings.measure("initial_dependency_install"):
-        subprocess.run([str(python), "-I", "-m", "pip", "install", "--only-binary=:all:", str(target)],
-                       check=True, env=system, timeout=600, stdout=subprocess.DEVNULL)
+    if not args.baseline_wheel:
+        with timings.measure("initial_dependency_install"):
+            subprocess.run([str(python), "-I", "-m", "pip", "install", "--only-binary=:all:", str(target)],
+                           check=True, env=system, timeout=600, stdout=subprocess.DEVNULL)
     write(environment / "nanobot-install.json", {"schema_version": 1, "owner": "nanobot-installer",
                                                "environment": str(environment), "extras": []})
     for scenario in scenarios:
@@ -865,8 +867,10 @@ def run_serial(args, root: Path, target: Path, version: str, original_hash: str,
                         "target_unmodified": selected == target}
                 write(case_root / "case.json", case)
             with timings.measure("baseline_install", scenario=scenario, journey=1):
-                subprocess.run([str(python), "-I", "-m", "pip", "install", "--no-deps", "--force-reinstall", str(baseline)],
-                               check=True, env=env, timeout=120, stdout=subprocess.DEVNULL)
+                dependencies = ["--only-binary=:all:"] if args.baseline_wheel else ["--no-deps"]
+                subprocess.run([str(python), "-I", "-m", "pip", "install", *dependencies,
+                                "--force-reinstall", str(baseline)], check=True, env=env,
+                               timeout=600 if args.baseline_wheel else 120, stdout=subprocess.DEVNULL)
             child = [str(python), "-I", str(Path(__file__).resolve())]
             # Raw logs stay private to this local evidence root, including on success.
             with (case_root / "acceptance.log").open("w", encoding="utf-8") as log:

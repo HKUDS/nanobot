@@ -534,7 +534,7 @@ def test_controller_error_does_not_print_exception_values_or_commands(tmp_path):
 @pytest.mark.parametrize("version,baseline_version", [
     ("0.3.6", None), ("0.4.0", None), ("1.0.0", None), ("0.4.0", "0.3.5"),
 ])
-def test_serial_lanes_install_dependencies_once_and_keep_recovery_chains_on_the_same_venv(
+def test_serial_lanes_resolve_baseline_dependencies_and_keep_recovery_chains_on_the_same_venv(
     tmp_path, monkeypatch, version, baseline_version,
 ):
     package = Path(__file__).resolve().parents[1] / "nanobot"
@@ -549,7 +549,7 @@ def test_serial_lanes_install_dependencies_once_and_keep_recovery_chains_on_the_
             installations.append(Path(command[-1]))
             Path(command[-1]).mkdir()
         elif "pip" in command:
-            (baselines if "--no-deps" in command else dependencies).append(command[0])
+            (baselines if "--force-reinstall" in command else dependencies).append(command)
         elif "--phase" in command:
             phase = command[command.index("--phase") + 1]
             case_root = Path(command[command.index("--output") + 1])
@@ -583,8 +583,14 @@ def test_serial_lanes_install_dependencies_once_and_keep_recovery_chains_on_the_
         args = Namespace(baseline_wheel=baseline, commit="a" * 40, dock=False)
         results.extend(probe.run_serial(args, root, target, version, original_hash, scenarios,
                                         Timings(root / "packaged-update-timings.json")))
-    assert len(installations) == len(dependencies) == 2 and len(set(installations)) == 2
+    assert len(installations) == len(set(installations)) == 2
+    assert len(dependencies) == (0 if baseline_version else 2)
     assert len(baselines) == 9 and len(stages) == 9
+    for command in baselines:
+        # Actual historical constraints must be resolved again after each
+        # successful upgrade, rather than paired with the target's dependencies.
+        assert ("--no-deps" in command) == (baseline_version is None)
+        assert ("--only-binary=:all:" in command) == (baseline_version is not None)
     assert sum(1 + ("subsequent_update" in result) for result in results) == 15
     assert digest(target) == original_hash
     upgrade = next(result for result in results if result["scenario"] == "upgrade")
