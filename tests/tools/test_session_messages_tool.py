@@ -104,13 +104,16 @@ async def test_list_sessions_pages_after_excluding_current(tmp_path: Path) -> No
     registry = ToolRegistry()
     registry.register(ListSessionsTool(sessions))
 
-    with request_context(RequestContext(
-        channel="websocket", chat_id="current", session_key=current.session_key,
-    )):
-        first = json.loads(await registry.execute("list_sessions", {"limit": 2}))
-        second = json.loads(await registry.execute("list_sessions", {"offset": 2, "limit": 2}))
-        remaining = json.loads(await registry.execute("list_sessions", {"offset": 2}))
-        end = json.loads(await registry.execute("list_sessions", {"offset": 4, "limit": 2}))
+    try:
+        with request_context(RequestContext(
+            channel="websocket", chat_id="current", session_key=current.session_key,
+        )):
+            first = json.loads(await registry.execute("list_sessions", {"limit": 2}))
+            second = json.loads(await registry.execute("list_sessions", {"offset": 2, "limit": 2}))
+            remaining = json.loads(await registry.execute("list_sessions", {"offset": 2}))
+            end = json.loads(await registry.execute("list_sessions", {"offset": 4, "limit": 2}))
+    finally:
+        await sessions.state.aclose()
 
     assert first == expected[:2]
     assert second == remaining == expected[2:]
