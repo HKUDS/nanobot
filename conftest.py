@@ -148,7 +148,6 @@ def create_integration_env(tmp_path_factory: pytest.TempPathFactory) -> Callable
         "--python", sys.executable,
         "--creator", "venv",
         "--seeder", "app-data",
-        "--copies",
         "--no-download",
         "--no-periodic-update",
         "--pip", versions["pip"],
@@ -159,6 +158,8 @@ def create_integration_env(tmp_path_factory: pytest.TempPathFactory) -> Callable
     def create(environment: Path) -> Path:
         # Keep stdlib creation semantics; use virtualenv only for copied seed
         # packages and prefix-specific launchers, not its runtime import hooks.
+        # Do not request creator --copies: Homebrew disallows copying its Python,
+        # and this creator is never run. The app-data seeder copies by default.
         venv.EnvBuilder(with_pip=False).create(environment)
         with session_via_cli([str(environment), *options], setup_logging=False, env=env) as session:
             session.seeder.run(session.creator)
