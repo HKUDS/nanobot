@@ -36,8 +36,7 @@ jobs:
     outputs:
       candidate_commit: ${{ steps.identity.outputs.candidate_commit }}
       manifest_sha256: ${{ steps.identity.outputs.manifest_sha256 }}
-      linux_artifact_id: ${{ steps.linux_input.outputs.artifact-id }}
-      windows_artifact_id: ${{ steps.windows_input.outputs.artifact-id }}
+      candidate_artifact_id: ${{ steps.native_input.outputs.artifact-id }}
       prepared_artifact_id: ${{ steps.prepared.outputs.artifact-id }}
     env:
       SOURCE_COMMIT: ${{ github.sha }}
@@ -164,25 +163,13 @@ jobs:
           PY
 
       # Temporary same-run inputs, not approved release handoffs. Do not rebuild on consumers.
-      - name: Transfer exact Linux acceptance input
-        id: linux_input
+      - name: Transfer exact native acceptance inputs
+        id: native_input
         uses: actions/upload-artifact@v4
         with:
-          name: candidate-native-linux-x64-${{ github.run_number }}-${{ github.run_attempt }}
+          name: candidate-native-wheels-${{ github.run_number }}-${{ github.run_attempt }}
           path: |
-            ${{ runner.temp }}/release-artifacts/*-manylinux_2_17_x86_64.whl
-            ${{ runner.temp }}/release-artifacts/release-manifest.json
-          if-no-files-found: error
-          retention-days: 1
-          compression-level: 0
-
-      - name: Transfer exact Windows acceptance input
-        id: windows_input
-        uses: actions/upload-artifact@v4
-        with:
-          name: candidate-native-win32-x64-${{ github.run_number }}-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/release-artifacts/*-win_amd64.whl
+            ${{ runner.temp }}/release-artifacts/*.whl
             ${{ runner.temp }}/release-artifacts/release-manifest.json
           if-no-files-found: error
           retention-days: 1
@@ -236,8 +223,13 @@ jobs:
       candidate: true
       candidate_commit: ${{ needs.candidate.outputs.candidate_commit }}
       manifest_sha256: ${{ needs.candidate.outputs.manifest_sha256 }}
-      linux_artifact_id: ${{ needs.candidate.outputs.linux_artifact_id }}
-      windows_artifact_id: ${{ needs.candidate.outputs.windows_artifact_id }}
+      candidate_artifact_id: ${{ needs.candidate.outputs.candidate_artifact_id }}
+      platforms: >-
+        [{"os":"ubuntu-latest","target":"linux-x64","wheel_tag":"manylinux_2_17_x86_64"},
+        {"os":"ubuntu-24.04-arm","target":"linux-arm64","wheel_tag":"manylinux_2_17_aarch64"},
+        {"os":"windows-latest","target":"win32-x64","wheel_tag":"win_amd64"},
+        {"os":"macos-15","target":"darwin-arm64","wheel_tag":"macosx_13_0_arm64"},
+        {"os":"macos-15-intel","target":"darwin-x64","wheel_tag":"macosx_13_0_x86_64"}]
 
   verified:
     name: Candidate required
@@ -246,7 +238,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Require build and both native acceptance jobs
+      - name: Require build and every native acceptance job
         env:
           BUILD_RESULT: ${{ needs.candidate.result }}
           NATIVE_RESULT: ${{ needs.native.result }}
@@ -275,5 +267,5 @@ jobs:
           CANDIDATE_COMMIT: ${{ needs.candidate.outputs.candidate_commit }}
           MANIFEST_SHA256: ${{ needs.candidate.outputs.manifest_sha256 }}
         run: |
-          printf 'Candidate: `%s`\n\nManifest SHA-256: `%s`\n\nLinux and Windows native acceptance passed. Publication requires separate approval.\n' \
+          printf 'Candidate: `%s`\n\nManifest SHA-256: `%s`\n\nAll five native targets passed installation and update/recovery acceptance. Publication requires separate approval.\n' \
             "$CANDIDATE_COMMIT" "$MANIFEST_SHA256" >> "$GITHUB_STEP_SUMMARY"

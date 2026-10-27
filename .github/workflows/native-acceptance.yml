@@ -13,12 +13,13 @@ on:
       manifest_sha256:
         type: string
         default: ''
-      linux_artifact_id:
+      candidate_artifact_id:
         type: string
         default: ''
-      windows_artifact_id:
+      platforms:
+        description: Native runner and wheel pairs; ordinary PRs keep the two-platform budget
         type: string
-        default: ''
+        default: '[{"os":"ubuntu-latest","target":"linux-x64","wheel_tag":"manylinux_2_17_x86_64"},{"os":"windows-latest","target":"win32-x64","wheel_tag":"win_amd64"}]'
 
 permissions:
   contents: read
@@ -31,13 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            target: linux-x64
-            wheel_tag: manylinux_2_17_x86_64
-          - os: windows-latest
-            target: win32-x64
-            wheel_tag: win_amd64
+        include: ${{ fromJSON(inputs.platforms) }}
     defaults:
       run:
         shell: bash
@@ -81,7 +76,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           # Producer IDs survive a failed-jobs-only retry without rebuilding bytes.
-          artifact-ids: ${{ matrix.target == 'linux-x64' && inputs.linux_artifact_id || inputs.windows_artifact_id }}
+          artifact-ids: ${{ inputs.candidate_artifact_id }}
           merge-multiple: true
           path: ${{ runner.temp }}/native-wheel
 

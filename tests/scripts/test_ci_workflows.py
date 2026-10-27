@@ -1,8 +1,8 @@
 """Producer/consumer artifact wiring must survive failed-jobs-only retries."""
 
+import json
 from pathlib import Path
 
-import pytest
 import yaml
 
 WORKFLOWS = Path(__file__).resolve().parents[2] / ".github/workflows"
@@ -12,10 +12,10 @@ def workflow(name):
     return yaml.load((WORKFLOWS / name).read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
 
 
-@pytest.mark.parametrize("platform,step", [("linux", "linux_input"), ("windows", "windows_input")])
-def test_native_consumers_receive_immutable_producer_ids(platform, step):
+def test_native_consumers_receive_immutable_producer_ids():
     jobs = workflow("release-candidate.yml")["jobs"]
-    key = f"{platform}_artifact_id"
+    key = "candidate_artifact_id"
+    step = "native_input"
     producer = jobs["candidate"]
     assert producer["outputs"][key] == "${{ steps." + step + ".outputs.artifact-id }}"
     upload = next(item for item in producer["steps"] if item.get("id") == step)
@@ -26,6 +26,22 @@ def test_native_consumers_receive_immutable_producer_ids(platform, step):
     assert "inputs." + key in download["with"]["artifact-ids"]
     assert "name" not in download["with"]
     assert download["with"]["merge-multiple"] == "true"
+
+
+def test_candidate_executes_all_five_native_wheels_without_expanding_pr_matrix():
+    native = workflow("native-acceptance.yml")
+    assert native["jobs"]["native"]["strategy"]["matrix"]["include"] == "${{ fromJSON(inputs.platforms) }}"
+    defaults = json.loads(native["on"]["workflow_call"]["inputs"]["platforms"]["default"])
+    assert {item["target"] for item in defaults} == {"linux-x64", "win32-x64"}
+    candidate = workflow("release-candidate.yml")["jobs"]["native"]["with"]
+    assert candidate["candidate"] == "true"
+    assert {(item["os"], item["target"], item["wheel_tag"]) for item in json.loads(candidate["platforms"])} == {
+        ("ubuntu-latest", "linux-x64", "manylinux_2_17_x86_64"),
+        ("ubuntu-24.04-arm", "linux-arm64", "manylinux_2_17_aarch64"),
+        ("windows-latest", "win32-x64", "win_amd64"),
+        ("macos-15", "darwin-arm64", "macosx_13_0_arm64"),
+        ("macos-15-intel", "darwin-x64", "macosx_13_0_x86_64"),
+    }
 
 
 def test_accepted_handoff_uses_the_producer_id_and_requires_native_success():
