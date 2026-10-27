@@ -48,8 +48,9 @@ function getFonts(selected?: DiagramInput["fonts"]): FontSet {
   const font = (face: DiagramFont): Font => {
     const loaded = file(face.path)
     const available = "fonts" in loaded ? loaded.fonts : [loaded]
-    const result = available.find(font => font.postscriptName === face.postscriptName)
-    if (!result) throw new Error(`Diagram font unavailable: ${face.postscriptName}; available faces: ${JSON.stringify(available.map(font => font.postscriptName))}`)
+    // Fontkit returns an ASCII Buffer for some legacy macOS name-table records.
+    const result = available.find(font => String(font.postscriptName) === face.postscriptName)
+    if (!result) throw new Error(`Diagram font unavailable: ${face.postscriptName}`)
     return result
   }
   activeFonts = { selected: faces, regular: font(faces.regular), bold: font(faces.bold), mono: font(faces.mono), system: !selected }

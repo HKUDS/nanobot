@@ -24,7 +24,8 @@ from zipfile import ZipFile
 
 REPLY_LIMIT = 16_000_000
 REQUEST = {"kind": "render", "input": {
-    "source": "graph TD\n A[Start] --> B{Check data}\n B -->|Pass| C[Done]",
+    # Exercise real CJK outlines and C4's generated Latin punctuation together.
+    "source": 'C4Container\n Person(user, "用户")\n Container(api, "API 服务", "TypeScript")\n Rel(user, api, "调用", "HTTPS")',
     "width": 800, "scale": 2,
     "colors": {"foreground": "#202020", "muted": "#666666", "surface": "#eeeeee",
                "border": "#888888", "accent": "#3366cc"},
@@ -143,6 +144,7 @@ def main() -> None:
                   "executable_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
                   "first_screen_ms": frames, "render_ms_cold_then_warm": renders,
                   "render_after_restart_ms": restarted, "unicode_input_resize_exit": True,
+                  "render_fixture": "C4Container: Chinese labels and Latin stereotypes",
                   "default_system_font_resolution": True, "worker_termination_restart": True,
                   "connected_gateway_or_model": False, "os_cache_controlled": False}
     report["temporary_directory_removed"] = not root.exists()
