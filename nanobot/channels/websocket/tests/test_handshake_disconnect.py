@@ -4,7 +4,9 @@ import asyncio
 import json
 import logging
 import sys
+import tempfile
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import pytest
 from websockets.asyncio.client import connect, unix_connect
@@ -14,6 +16,17 @@ from nanobot.channels.websocket import runtime
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
 from nanobot.webui.gateway_services import build_gateway_services
 from nanobot.webui.websocket_logging import WebSocketHandshakeNoiseFilter
+
+
+@pytest.fixture
+def listener_path(tmp_path):
+    if sys.platform != "darwin":
+        yield tmp_path
+        return
+    # macOS limits sockaddr_un to 104 bytes; pytest's descriptive temporary
+    # paths can exceed it. Keep the real socket in its own private short root.
+    with tempfile.TemporaryDirectory(prefix="nb-ws-", dir="/tmp") as root:
+        yield Path(root)
 
 
 @asynccontextmanager
@@ -84,7 +97,7 @@ async def _request(writer, path):
 @pytest.mark.parametrize("unix", [False, True], ids=["tcp", "unix"])
 @pytest.mark.parametrize("half_close", [False, True], ids=["close", "half-close"])
 async def test_disconnect_during_http_response_keeps_listener_usable(
-    tmp_path, monkeypatch, caplog, unix, half_close,
+    listener_path, monkeypatch, caplog, unix, half_close,
 ):
     arrived = asyncio.get_running_loop().create_future()
     release = asyncio.Event()
@@ -97,7 +110,7 @@ async def test_disconnect_during_http_response_keeps_listener_usable(
             completed.set()
         return connection.respond(200, "healthy\n")
 
-    async with _listener(tmp_path, monkeypatch, caplog, unix, process_request) as (channel, address):
+    async with _listener(listener_path, monkeypatch, caplog, unix, process_request) as (channel, address):
         try:
             async with _stream(address) as (_reader, writer):
                 await _request(writer, "/delayed")
@@ -136,7 +149,7 @@ async def test_disconnect_during_http_response_keeps_listener_usable(
 @pytest.mark.parametrize("unix", [False, True], ids=["tcp", "unix"])
 @pytest.mark.parametrize("peer_left", [False, True], ids=["connected", "disconnected"])
 async def test_http_callback_failure_remains_visible(
-    tmp_path, monkeypatch, caplog, unix, peer_left,
+    listener_path, monkeypatch, caplog, unix, peer_left,
 ):
     arrived = asyncio.get_running_loop().create_future()
     release = asyncio.Event()
@@ -147,7 +160,7 @@ async def test_http_callback_failure_remains_visible(
         await release.wait()
         raise failure
 
-    async with _listener(tmp_path, monkeypatch, caplog, unix, process_request) as (_channel, address):
+    async with _listener(listener_path, monkeypatch, caplog, unix, process_request) as (_channel, address):
         try:
             async with _stream(address) as (reader, writer):
                 await _request(writer, "/delayed")

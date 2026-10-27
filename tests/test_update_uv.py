@@ -71,6 +71,13 @@ def uv_installation(tmp_path, monkeypatch):
     tmp_path = tmp_path.resolve()
     account = tmp_path / "private account"
     account.mkdir()
+    # Test the receipt-bound installation, not the invoking uv run process or
+    # a developer's resolver policy. Explicit policy cases add their own input.
+    for key in list(os.environ):
+        if key.startswith("UV_"):
+            monkeypatch.delenv(key)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(account / ".config"))
+    monkeypatch.setenv("XDG_CONFIG_DIRS", str(account / "config-dirs"))
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: account))
     # The read-only bootstrap has the same isolated account as frozen workers.
     monkeypatch.setattr(update_process, "_INSPECTION_BOOTSTRAP", (

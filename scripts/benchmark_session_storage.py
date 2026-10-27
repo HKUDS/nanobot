@@ -11,6 +11,7 @@ import json
 import math
 import os
 import platform
+import plistlib
 import shutil
 import sqlite3
 import statistics
@@ -111,6 +112,20 @@ def filesystem_identity(path):
         )
         filesystem_type = fs_name.value if ok else None
         collector = "GetVolumeInformationW"
+    elif sys.platform == "darwin":
+        # diskutil accepts a device or mount point, not an arbitrary directory.
+        # df resolves APFS firmlinks (for example /Users on the Data volume).
+        try:
+            rows = subprocess.check_output(["/bin/df", "-P", str(resolved)], text=True, timeout=10).splitlines()
+            device = rows[1].split()[0]
+            info = plistlib.loads(subprocess.check_output(
+                ["/usr/sbin/diskutil", "info", "-plist", device], timeout=10,
+            ))
+            filesystem_type = info.get("FilesystemType")
+            mount_point = info.get("MountPoint", mount_point)
+            collector = "diskutil"
+        except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+            pass
     else:
         try:
             best = ("", None)
