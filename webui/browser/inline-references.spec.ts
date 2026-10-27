@@ -76,7 +76,7 @@ for (const narrow of [false, true]) {
       const externalLink = page.getByRole("link", { name: "外部文档", exact: true });
       await expect(externalLink).toHaveAttribute("href", "https://example.com/reference");
       await expect(externalLink).toHaveAttribute("target", "_blank");
-      await expect(externalLink).toHaveCSS("color", theme === "light" ? "rgb(59, 130, 246)" : "rgb(147, 197, 253)");
+      await expect(externalLink).toHaveCSS("color", theme === "light" ? "rgb(3, 105, 161)" : "rgb(186, 230, 253)");
 
       const input = page.getByRole("textbox", { name: "Message input", exact: true });
       const overlay = page.locator(".thread-composer-input > div[aria-hidden]");
@@ -174,7 +174,7 @@ for (const narrow of [false, true]) {
       expect(await output.textContent()).toBe(literal);
       await expect(output.locator("img, b")).toHaveCount(0);
       await page.getByRole("button", { name: "Copy code", exact: true }).click();
-      await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(literal);
+      await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(literal.replaceAll("\n", EOL));
       expect(errors).toEqual([]);
     });
   }
