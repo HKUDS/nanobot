@@ -66,6 +66,10 @@ class DiscordConfig(Base):
     streaming: bool = True
     reply_to_message: bool = False
     use_proxy: bool = False
+    # Send step updates (progress + tool hints) with Discord's Suppress
+    # Notifications flag so they land without a ping. Final replies are
+    # unaffected; set false to restore the pinging behaviour.
+    silent_progress: bool = True
 
 
 if DISCORD_AVAILABLE:
@@ -295,6 +299,9 @@ if DISCORD_AVAILABLE:
             )
             sent_media = False
             failed_media: list[str] = []
+            silent_steps = self._channel.config.silent_progress and isinstance(
+                msg.event, ProgressEvent
+            )
 
             for media_path in msg.media or []:
                 if await self._send_file(
@@ -302,6 +309,7 @@ if DISCORD_AVAILABLE:
                     media_path,
                     reference=reference if not sent_media else None,
                     mention_settings=mention_settings,
+                    silent=silent_steps,
                 ):
                     sent_media = True
                 else:
@@ -314,6 +322,8 @@ if DISCORD_AVAILABLE:
                 if index == 0 and reference is not None and not sent_media:
                     kwargs["reference"] = reference
                     kwargs["allowed_mentions"] = mention_settings
+                if silent_steps:
+                    kwargs["silent"] = True
                 sent = await messageable_channel.send(**kwargs)
                 if compaction is not None and compaction.phase == "started" and index == 0:
                     self._channel._remember_compaction_notice(
@@ -340,6 +350,7 @@ if DISCORD_AVAILABLE:
             *,
             reference: discord.MessageReference | None,
             mention_settings: discord.AllowedMentions,
+            silent: bool = False,
         ) -> bool:
             """Send a file attachment via discord.py."""
             path = Path(file_path)
@@ -356,6 +367,8 @@ if DISCORD_AVAILABLE:
                 if reference is not None:
                     kwargs["reference"] = reference
                     kwargs["allowed_mentions"] = mention_settings
+                if silent:
+                    kwargs["silent"] = True
                 await channel.send(**kwargs)
                 self._channel.logger.info("file sent: {}", path.name)
                 return True

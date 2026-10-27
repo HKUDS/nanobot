@@ -1465,6 +1465,119 @@ async def test_client_send_outbound_reports_failed_attachments_when_no_text(tmp_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "content,event,expected",
+    [
+        (
+            "Reading files",
+            ProgressEvent(content="Reading files", tool_hint=True),
+            {"content": "Reading files", "silent": True},
+        ),
+        (
+            "Thinking",
+            ProgressEvent(content="Thinking", reasoning=True),
+            {"content": "Thinking", "silent": True},
+        ),
+        ("final answer", None, {"content": "final answer"}),
+    ],
+)
+async def test_client_send_outbound_silences_progress_only(content, event, expected) -> None:
+    # Progress bubbles carry silent=True so they do not ping; final replies stay loud.
+    owner = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"]),
+        MessageBus(),
+    )
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    target = _FakeChannel(channel_id=123)
+    client.get_channel = lambda channel_id: target if channel_id == 123 else None  # type: ignore[method-assign]
+
+    await client.send_outbound(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content=content,
+            event=event,
+        )
+    )
+
+    assert target.sent_payloads == [expected]
+
+
+@pytest.mark.asyncio
+async def test_client_send_outbound_silent_progress_disabled_keeps_pings() -> None:
+    # silentProgress=false restores notification pings for progress bubbles.
+    owner = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"], silent_progress=False),
+        MessageBus(),
+    )
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    target = _FakeChannel(channel_id=123)
+    client.get_channel = lambda channel_id: target if channel_id == 123 else None  # type: ignore[method-assign]
+
+    await client.send_outbound(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content="Reading files",
+            event=ProgressEvent(content="Reading files", tool_hint=True),
+        )
+    )
+
+    assert target.sent_payloads == [{"content": "Reading files"}]
+
+
+@pytest.mark.asyncio
+async def test_client_send_outbound_silent_progress_applies_to_chunks() -> None:
+    # Every chunk of a long progress bubble is silenced, not just the first.
+    owner = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"]),
+        MessageBus(),
+    )
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    target = _FakeChannel(channel_id=123)
+    client.get_channel = lambda channel_id: target if channel_id == 123 else None  # type: ignore[method-assign]
+    content = "a" * (MAX_MESSAGE_LEN + 1)
+
+    await client.send_outbound(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content=content,
+            event=ProgressEvent(content=content, tool_hint=True),
+        )
+    )
+
+    assert len(target.sent_payloads) > 1
+    assert all(payload.get("silent") is True for payload in target.sent_payloads)
+
+
+@pytest.mark.asyncio
+async def test_client_send_outbound_silent_progress_covers_attachments(tmp_path) -> None:
+    # A step update that carries a file silences the attachment, not just the text.
+    owner = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"]),
+        MessageBus(),
+    )
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    target = _FakeChannel(channel_id=123)
+    client.get_channel = lambda channel_id: target if channel_id == 123 else None  # type: ignore[method-assign]
+    file_path = tmp_path / "step-output.txt"
+    file_path.write_text("hi")
+
+    await client.send_outbound(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content="step output",
+            media=[str(file_path)],
+            event=ProgressEvent(content="step output", tool_hint=True),
+        )
+    )
+
+    assert [payload.get("silent") for payload in target.sent_payloads] == [True, True]
+
+
+@pytest.mark.asyncio
 async def test_send_stops_typing_after_send() -> None:
     # Active typing indicators should be cancelled/cleared after a successful send.
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
