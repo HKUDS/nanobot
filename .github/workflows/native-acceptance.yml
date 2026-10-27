@@ -108,6 +108,15 @@ jobs:
             --commit "$ACCEPTANCE_COMMIT" --gateway \
             --report "$RUNNER_TEMP/native-install-report.json"
 
+      - name: Install ConPTY acceptance driver
+        if: runner.os == 'Windows'
+        run: python -m pip install --disable-pip-version-check pywinpty==3.0.5
+
+      - name: Verify packaged terminal interaction and native render latency
+        run: |
+          python tui/scripts/native_smoke.py --wheel "$ACCEPTANCE_WHEEL" \
+            --report "$RUNNER_TEMP/native-tui-report.json"
+
       - name: Verify packaged upgrades and automatic service recovery
         run: |
           python -I scripts/verify_packaged_update.py \
@@ -123,6 +132,7 @@ jobs:
           path: |
             ${{ runner.temp }}/native-input.json
             ${{ runner.temp }}/native-install-report.json
+            ${{ runner.temp }}/native-tui-report.json
             ${{ runner.temp }}/packaged-update/packaged-update-report.json
             ${{ runner.temp }}/packaged-update/packaged-update-timings.json
             ${{ runner.temp }}/packaged-update/*/result.json

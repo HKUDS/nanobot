@@ -16,7 +16,6 @@ import select
 import shutil
 import signal
 import struct
-import sys
 import termios
 import time
 from pathlib import Path
@@ -72,12 +71,13 @@ def _wait_for_exit(pid: int, timeout: float) -> int:
     raise AssertionError("TUI did not exit after the exit command")
 
 
-def main() -> int:
+def smoke(executable: Path | None = None, *, cwd: Path = ROOT) -> float:
     if os.name != "posix":
         raise SystemExit("PTY smoke test requires POSIX")
-    bun = shutil.which("bun")
-    if not bun:
+    bun = shutil.which("bun") if executable is None else None
+    if executable is None and not bun:
         raise SystemExit("bun is required")
+    command = [str(executable)] if executable else [bun, str(ROOT / "src/index.ts")]
     env = {
         **os.environ,
         "NANOBOT_TUI_WS_URL": "ws://127.0.0.1:9/ws",
@@ -95,16 +95,20 @@ def main() -> int:
     env.pop("HERDR_ENV", None)
     env.pop("HERDR_PANE_ID", None)
 
+    started = time.perf_counter()
     pid, master = pty.fork()
     if pid == 0:
-        os.chdir(ROOT)
-        os.execvpe(bun, [bun, "src/index.ts"], env)
+        os.chdir(cwd)
+        os.execvpe(command[0], command, env)
 
     output = bytearray()
     reaped = False
     try:
         _resize(master, 24, 80)
-        output.extend(_wait_for(master, ENTER_ALT_SCREEN, 10))
+        output.extend(_wait_for(master, b"Ask nanobot anything", 10))
+        first_screen_ms = (time.perf_counter() - started) * 1000
+        if ENTER_ALT_SCREEN not in output:
+            raise AssertionError("TUI did not enter its alternate screen")
 
         # Feed committed UTF-8 one grapheme at a time. The raw terminal stream
         # should contain every glyph, even though differential rendering may
@@ -164,8 +168,8 @@ def main() -> int:
         if escape in output:
             raise AssertionError(f"TUI painted a fixed background: {escape!r}")
     print("PTY smoke test passed: Unicode input, resize, restoration, and session resume")
-    return 0
+    return first_screen_ms
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    smoke()

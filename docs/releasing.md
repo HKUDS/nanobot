@@ -86,6 +86,8 @@ Candidate builds bundle minified JavaScript and the standalone Bun runtime with 
 
 Before release, measure TUI first-screen and Mermaid render latency on each supported target, including first and warm renders. Verify cancellation and worker restart. Retain latency distributions and record executable, ZIP and final platform-wheel sizes separately. Cross-compilation and startup probes do not replace native interactive acceptance.
 
+Native acceptance runs `tui/scripts/native_smoke.py` against the exact input wheel. It reuses the PTY/ConPTY input, resize and terminal-restoration checks, records five first-frame samples and cold/warm Mermaid samples with system font discovery, then terminates a submitted render and verifies a fresh worker. Its small report includes wheel/executable identities and sizes; obtain ZIP sizes from that candidate's manifest. This is automated native terminal interaction with an unavailable fixture gateway, not connected-model E2E or controlled cold-OS-cache timing. The `DiagramJobs` integration tests separately cover UI-side cancellation and subsequent-job completion.
+
 ### Build the PyPI platform wheels
 
 After `uv build` and native archive checks, from the exact release checkout:
