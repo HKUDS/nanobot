@@ -52,6 +52,12 @@ DYNAMIC_PROVIDER_NAME = "my-company-api"
 DYNAMIC_PROVIDER_API_BASE = "https://example.test/v1"
 
 
+@pytest.fixture(autouse=True)
+def isolate_settings_config(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Settings tests must never fall through to a user's default config."""
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
+
+
 @pytest.fixture
 def oauth_flows() -> WebUIOAuthFlowRegistry:
     return WebUIOAuthFlowRegistry()

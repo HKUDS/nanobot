@@ -38,6 +38,7 @@ _PORT = 29900
 @pytest.fixture(autouse=True)
 def _isolate_runtime_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
 
 
 class _MatrixChannel(BaseChannel):
