@@ -46,10 +46,11 @@ async function expectAnswerOrder(page: Page) {
     .toBeLessThan(texts.findIndex((text) => text.includes("Later answer")));
 }
 
-for (const width of [1440, 390]) {
+test.describe("answer order", () => {
+  test.use({ viewport: { width: 1440, height: 1000 } });
+
   for (const path of ["callback", "cached return"] as const) {
-    test(`keeps closed answer order through ${path} and textless streams at ${width}px`, async ({ page }, info) => {
-      await page.setViewportSize({ width, height: 1000 });
+    test(`keeps closed answer order through ${path} and textless streams`, async ({ page }, info) => {
       const { emit, errors } = await openThread(page);
       emit(
         { event: "goal_status", ...base, status: "running", started_at: 100 },
@@ -89,8 +90,7 @@ for (const width of [1440, 390]) {
     });
   }
 
-  test(`keeps hosted-tool answer segments after a cached return at ${width}px`, async ({ page }) => {
-    await page.setViewportSize({ width, height: 1000 });
+  test("keeps hosted-tool answer segments after a cached return", async ({ page }) => {
     const { emit, errors } = await openThread(page);
     emit(
       { event: "goal_status", ...base, status: "running", started_at: 100 },
@@ -117,36 +117,37 @@ for (const width of [1440, 390]) {
     expect(errors).toEqual([]);
   });
 
-  test(`replays legacy cumulative answers on both sides of a hosted tool at ${width}px`, async ({ page }) => {
-    await page.setViewportSize({ width, height: 1000 });
-    const { errors } = await openThread(page, [
-      { event: "stream_end", ...base, stream_id: "legacy", turn_seq: 2, text: "First ", resuming: true, merge_next: true },
-      { event: "message", ...base, turn_seq: 3, kind: "tool_hint", text: "web_search(query)" },
-      { event: "stream_end", ...base, stream_id: "legacy", turn_seq: 5, text: "First last" },
-      { event: "turn_end", ...base, turn_seq: 6 },
-    ]);
-    const first = page.getByText("First", { exact: true });
-    const last = page.getByText("last", { exact: true });
-    await expect(first).toHaveCount(1);
-    await expect(last).toHaveCount(1);
-    await expect(page.getByRole("button", { name: "Stop response" })).toHaveCount(0);
-    // Completed activity is folded into the answer block, not lost or still running.
-    const lastBlock = last.locator("xpath=ancestor::*[@data-thread-display-unit]");
-    await lastBlock.hover();
-    await lastBlock.getByRole("button", { name: "Message actions" }).click();
-    await page.locator("[data-message-block-activity-action]").click();
-    const tool = page.getByText(/Searched the web/).first();
-    await expect(tool).toBeVisible();
-    const [firstNode, lastNode] = await Promise.all([first.elementHandle(), last.elementHandle()]);
-    expect(await tool.evaluate((node, [before, after]) => (
-      !!(before.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)
-      && !!(node.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING)
-    ), [firstNode!, lastNode!])).toBe(true);
-    expect(errors).toEqual([]);
-  });
+  for (const width of [1440, 390]) {
+    test(`replays legacy cumulative answers on both sides of a hosted tool at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 1000 });
+      const { errors } = await openThread(page, [
+        { event: "stream_end", ...base, stream_id: "legacy", turn_seq: 2, text: "First ", resuming: true, merge_next: true },
+        { event: "message", ...base, turn_seq: 3, kind: "tool_hint", text: "web_search(query)" },
+        { event: "stream_end", ...base, stream_id: "legacy", turn_seq: 5, text: "First last" },
+        { event: "turn_end", ...base, turn_seq: 6 },
+      ]);
+      const first = page.getByText("First", { exact: true });
+      const last = page.getByText("last", { exact: true });
+      await expect(first).toHaveCount(1);
+      await expect(last).toHaveCount(1);
+      await expect(page.getByRole("button", { name: "Stop response" })).toHaveCount(0);
+      // Completed activity is folded into the answer block, not lost or still running.
+      const lastBlock = last.locator("xpath=ancestor::*[@data-thread-display-unit]");
+      await lastBlock.hover();
+      await lastBlock.getByRole("button", { name: "Message actions" }).click();
+      await page.locator("[data-message-block-activity-action]").click();
+      const tool = page.getByText(/Searched the web/).first();
+      await expect(tool).toBeVisible();
+      const [firstNode, lastNode] = await Promise.all([first.elementHandle(), last.elementHandle()]);
+      expect(await tool.evaluate((node, [before, after]) => (
+        !!(before.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)
+        && !!(node.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING)
+      ), [firstNode!, lastNode!])).toBe(true);
+      expect(errors).toEqual([]);
+    });
+  }
 
-  test(`keeps a rewritten image intact before a hosted tool at ${width}px`, async ({ page }, info) => {
-    await page.setViewportSize({ width, height: 1000 });
+  test("keeps a rewritten image intact before a hosted tool", async ({ page }, info) => {
     const { emit, errors } = await openThread(page);
     await page.route("**/api/media/**", (route) => route.fulfill({ contentType: "image/png", body: Buffer.from(
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j5hUAAAAASUVORK5CYII=", "base64",
@@ -177,8 +178,7 @@ for (const width of [1440, 390]) {
     expect(errors).toEqual([]);
   });
 
-  test(`resumes merge_next with cumulative HTTP snapshots at ${width}px`, async ({ page }) => {
-    await page.setViewportSize({ width, height: 1000 });
+  test("resumes merge_next with cumulative HTTP snapshots", async ({ page }) => {
     const events: ThreadProjectionEvent[] = [
       { event: "stream_end", ...base, stream_id: "answer", turn_seq: 2, text: "First ", resuming: true, merge_next: true, projection_id: "http-first" },
       { event: "reasoning_end", ...base, stream_id: "answer", turn_seq: 3, text: "More reasoning", projection_id: "http-reasoning" },
@@ -199,4 +199,4 @@ for (const width of [1440, 390]) {
     await expect(page.getByText("First last", { exact: true })).toHaveCount(0);
     expect(errors).toEqual([]);
   });
-}
+});
