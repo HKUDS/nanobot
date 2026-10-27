@@ -35,6 +35,24 @@ if TYPE_CHECKING:
     from .runtime_context import RuntimeContextBlock, RuntimeContextProvider
 
 
+def _init_truststore() -> bool:
+    """Inject system certificate store verification into Python's ssl module.
+
+    Allows httpx and standard SSL contexts to recognize corporate/system CA certificates
+    (such as Windows CryptoAPI or macOS Keychain) without OpenSSL basicConstraints failures.
+    """
+    try:
+        import truststore
+
+        truststore.inject_into_ssl()
+        return True
+    except Exception:
+        return False
+
+
+_init_truststore()
+
+
 def _read_pyproject_version() -> str | None:
     """Read the source-tree version when package metadata is unavailable."""
     pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
