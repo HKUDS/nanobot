@@ -2317,7 +2317,7 @@
     "actions": "Message actions",
     "streaming": "streaming",
     "delivery": {
-      "sending": "Sending…",
+      "sending": "Sending",
       "failed": "Not sent"
     },
     "assistantTyping": "Assistant is typing",

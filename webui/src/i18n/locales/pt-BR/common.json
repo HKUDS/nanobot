@@ -2125,7 +2125,7 @@
     "actions": "Ações da mensagem",
     "streaming": "transmitindo",
     "delivery": {
-      "sending": "Enviando…",
+      "sending": "Enviando",
       "failed": "Não enviada"
     },
     "assistantTyping": "Assistente está digitando",

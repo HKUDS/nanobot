@@ -2111,7 +2111,7 @@
     "actions": "메시지 작업",
     "streaming": "생성 중",
     "delivery": {
-      "sending": "전송 중…",
+      "sending": "전송 중",
       "failed": "전송되지 않음"
     },
     "assistantTyping": "도우미가 입력 중",

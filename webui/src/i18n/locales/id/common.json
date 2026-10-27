@@ -2111,7 +2111,7 @@
     "actions": "Tindakan pesan",
     "streaming": "sedang mengalir",
     "delivery": {
-      "sending": "Mengirim…",
+      "sending": "Mengirim",
       "failed": "Belum terkirim"
     },
     "assistantTyping": "Asisten sedang mengetik",

@@ -424,7 +424,7 @@ describe("MessageBubble", () => {
 
     const { rerender } = render(<MessageBubble message={message} />);
 
-    expect(screen.getByRole("status")).toHaveTextContent("Sending…");
+    expect(screen.getByRole("status")).toHaveTextContent("Sending");
 
     rerender(<MessageBubble message={{ ...message, deliveryStatus: "accepted" }} />);
     expect(screen.queryByRole("status")).not.toBeInTheDocument();

@@ -2111,7 +2111,7 @@
     "actions": "Thao tác tin nhắn",
     "streaming": "đang truyền",
     "delivery": {
-      "sending": "Đang gửi…",
+      "sending": "Đang gửi",
       "failed": "Chưa gửi"
     },
     "assistantTyping": "Trợ lý đang nhập",

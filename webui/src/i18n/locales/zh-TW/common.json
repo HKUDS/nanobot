@@ -2111,7 +2111,7 @@
     "actions": "訊息操作",
     "streaming": "串流輸出中",
     "delivery": {
-      "sending": "傳送中…",
+      "sending": "傳送中",
       "failed": "未傳送"
     },
     "assistantTyping": "助理正在輸入",

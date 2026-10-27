@@ -2111,7 +2111,7 @@
     "actions": "メッセージ操作",
     "streaming": "生成中",
     "delivery": {
-      "sending": "送信中…",
+      "sending": "送信中",
       "failed": "未送信"
     },
     "assistantTyping": "アシスタントが入力中",

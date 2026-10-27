@@ -2112,7 +2112,7 @@
     "actions": "Acciones del mensaje",
     "streaming": "transmitiendo",
     "delivery": {
-      "sending": "Enviando…",
+      "sending": "Enviando",
       "failed": "No enviado"
     },
     "assistantTyping": "El asistente está escribiendo",

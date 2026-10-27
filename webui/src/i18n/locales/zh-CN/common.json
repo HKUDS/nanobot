@@ -2317,7 +2317,7 @@
     "actions": "消息操作",
     "streaming": "流式输出中",
     "delivery": {
-      "sending": "发送中…",
+      "sending": "发送中",
       "failed": "未发送"
     },
     "assistantTyping": "助手正在输入",

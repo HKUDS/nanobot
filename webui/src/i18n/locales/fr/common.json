@@ -2111,7 +2111,7 @@
     "actions": "Actions du message",
     "streaming": "en cours de génération",
     "delivery": {
-      "sending": "Envoi…",
+      "sending": "Envoi",
       "failed": "Non envoyé"
     },
     "assistantTyping": "L’assistant est en train d’écrire",
