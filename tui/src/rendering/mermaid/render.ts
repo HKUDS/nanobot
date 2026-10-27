@@ -47,8 +47,9 @@ function getFonts(selected?: DiagramInput["fonts"]): FontSet {
   const faces = selected ?? systemFonts(file)
   const font = (face: DiagramFont): Font => {
     const loaded = file(face.path)
-    const result = "fonts" in loaded ? loaded.fonts.find(font => font.postscriptName === face.postscriptName) : loaded
-    if (!result || result.postscriptName !== face.postscriptName) throw new Error("Diagram font unavailable")
+    const available = "fonts" in loaded ? loaded.fonts : [loaded]
+    const result = available.find(font => font.postscriptName === face.postscriptName)
+    if (!result) throw new Error(`Diagram font unavailable: ${face.postscriptName}; available faces: ${JSON.stringify(available.map(font => font.postscriptName))}`)
     return result
   }
   activeFonts = { selected: faces, regular: font(faces.regular), bold: font(faces.bold), mono: font(faces.mono), system: !selected }
