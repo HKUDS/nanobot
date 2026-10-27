@@ -133,6 +133,8 @@ File previews follow the active topic's access mode. Restricted workspace access
 
 ### Model failures
 
+If a model stream fails after producing reply text, the text is retained for reading and follow-up questions. A reply can look complete even when the request ended with a connection error.
+
 After a model request fails and automatic retries stop, the WebUI shows the failure category. Use **Continue** to resume from the saved conversation, or open model settings to change the model or correct its authorization. Review completed work before continuing: saved tool results are retained, but the model can choose to call tools again. Continuing does not resend the original message. Sending a new message or dismissing the notice clears the pending decision. Saved recovery decisions remain available after a refresh or gateway restart; temporary chats still follow their normal lifetime.
 
 ### Delegated work
