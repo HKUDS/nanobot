@@ -54,8 +54,109 @@ async function expectMatchingInputLayers(input: Locator) {
   }
 }
 
+async function minimumHandleContrast(handle: Locator): Promise<number> {
+  return handle.evaluate(node => {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 1;
+    const context = canvas.getContext("2d", { willReadFrequently: true })!;
+    const pixel = (color: string) => {
+      context.clearRect(0, 0, 1, 1);
+      context.fillStyle = color;
+      context.fillRect(0, 0, 1, 1);
+      return [...context.getImageData(0, 0, 1, 1).data];
+    };
+    const layers: number[][] = [];
+    for (let element = node.parentElement; element; element = element.parentElement) {
+      layers.push(pixel(getComputedStyle(element).backgroundColor));
+    }
+    let background = [255, 255, 255];
+    for (const [r, g, b, alpha] of layers.reverse()) {
+      const opacity = alpha / 255;
+      background = [r, g, b].map((channel, index) => channel * opacity + background[index] * (1 - opacity));
+    }
+    const luminance = (rgb: number[]) => {
+      const linear = rgb.map(value => {
+        const channel = value / 255;
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+    };
+    const style = getComputedStyle(node);
+    const lightness = style.getPropertyValue("--session-handle-lightness").trim();
+    const chroma = style.getPropertyValue("--session-handle-chroma").trim();
+    const backgroundLuminance = luminance(background);
+    return Math.min(...Array.from({ length: 360 }, (_, hue) => {
+      const foreground = luminance(pixel(`oklch(${lightness} ${chroma} ${hue})`).slice(0, 3));
+      return (Math.max(foreground, backgroundLuminance) + 0.05) / (Math.min(foreground, backgroundLuminance) + 0.05);
+    }));
+  });
+}
+
+test("keeps a long app name readable in a minimum-width pane", async ({ page }) => {
+  await page.setViewportSize({ width: 200, height: 844 });
+  await page.addInitScript(() => localStorage.setItem("nanobot.locale", "en"));
+  await page.goto("/browser/fixture.html?case=inline-references");
+  const input = page.getByRole("textbox", { name: "Message input", exact: true });
+  await input.fill("@adobe");
+  const option = page.getByRole("option", { name: /@adobe-express-docs Adobe Express Developer/i });
+  const label = option.getByText("Adobe Express Developer", { exact: true });
+  await expect(label).toBeVisible();
+  expect(await label.evaluate(node => node.clientWidth)).toBeGreaterThanOrEqual(64);
+  expect(await option.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+  await expect(option.locator("img")).toBeVisible();
+  await expect(option.getByText("MCP", { exact: true })).toBeVisible();
+});
+
 for (const narrow of [false, true]) {
   for (const theme of ["light", "dark"]) {
+    test(`mention choices show colored session handles and retain app icons: ${narrow ? "narrow" : "desktop"}, ${theme}`, async ({ page }, info) => {
+      await page.setViewportSize(narrow ? { width: 320, height: 844 } : { width: 1440, height: 1000 });
+      await page.addInitScript(theme => {
+        localStorage.setItem("nanobot.locale", "en");
+        localStorage.setItem("nanobot-webui.theme", theme);
+      }, theme);
+      await page.goto("/browser/fixture.html?case=inline-references");
+      const input = page.getByRole("textbox", { name: "Message input", exact: true });
+      await input.fill("@");
+      const conversation = page.getByRole("option", { name: /@typography Reference target/i });
+      const app = page.getByRole("option", { name: /@drawio Draw.io/i });
+      const mcp = page.getByRole("option", { name: /@linear Linear/i });
+      const sessionHandle = conversation.locator(":scope > span").nth(0);
+      await expect(sessionHandle).toHaveText("@typography");
+      await expect(conversation.locator(":scope > span").nth(1)).toHaveText("Reference target");
+      await expect(conversation.locator('[data-product-icon="conversation"]')).toHaveCount(0);
+      const sessionColor = await sessionHandle.evaluate(node => getComputedStyle(node).color);
+      expect(await minimumHandleContrast(sessionHandle)).toBeGreaterThanOrEqual(4.5);
+      for (const [option, id, name] of [[app, "@drawio", "Draw.io"], [mcp, "@linear", "Linear"]] as const) {
+        await expect(option.locator(":scope > span").nth(0)).toHaveText(id);
+        await expect(option.locator(":scope > span").nth(1).locator("img, svg")).toBeVisible();
+        await expect(option.getByText(name, { exact: true })).toBeVisible();
+      }
+      const longHandle = page.getByRole("option", { name: /@mimamimamimamima/i }).getByText("@mimamimamimamima", { exact: true });
+      await expect(longHandle).toBeVisible();
+      expect(await longHandle.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+      const palette = page.getByRole("listbox", { name: "Mentions" });
+      expect(await palette.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+      await page.screenshot({ path: info.outputPath("mention-order.png") });
+      await input.fill("@adobe");
+      const longApp = page.getByRole("option", { name: /@adobe-express-docs Adobe Express Developer/i });
+      const longAppHandle = longApp.getByText("@adobe-express-docs", { exact: true });
+      const longAppName = longApp.getByText("Adobe Express Developer", { exact: true });
+      await expect(longAppHandle).toBeVisible();
+      await expect(longAppName).toBeVisible();
+      expect(await longAppHandle.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+      expect(await longAppName.evaluate(node => node.clientWidth)).toBeGreaterThanOrEqual(64);
+      expect(await longApp.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+      await page.screenshot({ path: info.outputPath("long-mention.png") });
+      await input.fill("@typography ");
+      await expect(page.getByTestId("composer-session-mention-typography")).toHaveCSS("color", sessionColor);
+      await input.fill("@draw");
+      await input.press("Tab");
+      await expect(page.getByTestId("composer-cli-mention-drawio")).toHaveText("@\u00a0Draw.io");
+      await expect(page.getByTestId("composer-cli-mention-logo-drawio")).toBeVisible();
+      await expectMatchingInputLayers(input);
+    });
+
     test(`inline references preserve native editing: ${narrow ? "narrow" : "desktop"}, ${theme}`, async ({ page }, info) => {
       await page.setViewportSize(narrow ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
       await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
@@ -175,7 +276,7 @@ for (const narrow of [false, true]) {
       expect(await output.textContent()).toBe(literal);
       await expect(output.locator("img, b")).toHaveCount(0);
       await page.getByRole("button", { name: "Copy code", exact: true }).click();
-      await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(literal);
+      await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(literal.replaceAll("\n", EOL));
       expect(errors).toEqual([]);
     });
   }
