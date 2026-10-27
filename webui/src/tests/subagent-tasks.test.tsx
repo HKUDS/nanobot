@@ -432,8 +432,28 @@ describe("session-owned task UI", () => {
     expect(evidence).toHaveAttribute("rel", "noreferrer noopener");
     expect(within(tree).queryByRole("link", { name: "Unsafe link" })).not.toBeInTheDocument();
     expect(tree.querySelector("pre")?.textContent).toContain("const verified = true;");
-    await user.click(within(tree).getByRole("button", { name: /Config check Completed/ }));
+    await user.click(within(tree).getByText("Final finding after the long result."));
     expect(await within(screen.getByRole("dialog", { name: "Config check" })).findByRole("link", { name: /Full evidence/ })).toHaveAttribute("href", "https://example.com/evidence");
+  });
+
+  it("opens the owning task from tool activity and error content", async () => {
+    vi.mocked(fetch).mockImplementation(async () => response([
+      task({ tool_events: [{ name: "read_file", status: "running" }] }),
+      task({ task_id: "sibling", label: "Sibling check", created_at: 101, tool_events: [{ name: "exec", status: "running" }] }),
+    ]));
+    const user = userEvent.setup();
+    render(layout());
+    const tree = await openTaskList(user);
+    await user.click(within(tree).getByText("exec"));
+    expect(screen.getByRole("dialog", { name: "Sibling check" })).toBeVisible();
+    await user.keyboard("{Escape}");
+    await user.click(within(tree).getByText("read_file"));
+    expect(screen.getByRole("dialog", { name: "Config check" })).toBeVisible();
+    await user.keyboard("{Escape}");
+    emitTask(task({ revision: 2, state: "error", error: "Cannot read configuration", completed_at: 102 }));
+    await user.click(within(tree).getByText("Cannot read configuration"));
+    expect(screen.getByRole("dialog", { name: "Config check" })).toBeVisible();
+    expect(requestMutation).not.toHaveBeenCalled();
   });
 
   it("keeps result-owned image portals inside the drawer interaction boundary", async () => {
@@ -444,8 +464,8 @@ describe("session-owned task UI", () => {
     emitTask(task({ revision: 2, state: "done", completed_at: 102, result: "![Result image](https://example.com/result.png)" }));
     await user.click(await within(tree).findByRole("button", { name: "View image: Result image" }));
     const viewer = screen.getByRole("dialog", { name: "Result image" });
-    fireEvent.pointerDown(within(viewer).getByRole("img", { name: "Result image" }));
-    expect(viewer).toBeInTheDocument();
+    await user.click(within(viewer).getByRole("img", { name: "Result image" }));
+    expect(screen.getAllByRole("dialog")).toEqual([viewer]);
     expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveAttribute("aria-expanded", "true");
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

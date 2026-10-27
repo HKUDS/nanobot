@@ -210,8 +210,16 @@ function TaskTree({ tasks, maxHeight }: { tasks: ObservedSubagentTask[]; maxHeig
   return <div data-testid="subagent-task-tree" style={{ maxHeight }} className="min-h-0 overflow-y-auto overscroll-contain p-1.5 pt-0 scrollbar-thin">
     <ol className="space-y-0.5">
       {tasks.map(task => <li key={task.task_id} data-task-state={task.state}
-        className="rounded-lg transition-colors duration-150 hover:bg-muted/50 focus-within:bg-muted/50 motion-reduce:transition-none">
-        <div className="sticky top-0 z-20 flex min-w-0 items-center gap-0.5 bg-card">
+        onClick={event => {
+          const target = event.target;
+          if (event.defaultPrevented || !(target instanceof Element) || !event.currentTarget.contains(target)
+            || target.closest("button, a[href], input, textarea, select, summary, [role=button], [role=link], [contenteditable=true]")) return;
+          const selection = window.getSelection();
+          if (selection && !selection.isCollapsed && selection.containsNode(event.currentTarget, true)) return;
+          context.open(task, event.currentTarget.querySelector<HTMLButtonElement>("[data-subagent-id]")!);
+        }}
+        className="cursor-pointer rounded-lg transition-colors duration-150 hover:bg-muted/50 focus-within:bg-muted/50 motion-reduce:transition-none">
+        <div className="flex min-w-0 items-center gap-0.5">
           <SubagentTaskButton task={task} surface="activity" />
           {task.state === "queued" || task.state === "running" ? <HoverHint content={t("thread.subagents.stopTask", { label: task.label })}>
             <Button type="button" variant="ghost" size="icon"
