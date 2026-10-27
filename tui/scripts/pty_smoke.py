@@ -16,6 +16,7 @@ import select
 import shutil
 import signal
 import struct
+import sys
 import termios
 import time
 from pathlib import Path
@@ -59,13 +60,15 @@ def _wait_for(fd: int, needle: bytes, timeout: float) -> bytes:
     return bytes(output)
 
 
-def _wait_for_exit(pid: int, timeout: float) -> int:
+def _wait_for_exit(pid: int, fd: int, output: bytearray, timeout: float) -> int:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        # Drain while waiting: a controlling terminal can hold child exit until
+        # the parent consumes its final output (notably on macOS).
+        output.extend(_read(fd, min(0.05, deadline - time.monotonic())))
         child, status = os.waitpid(pid, os.WNOHANG)
         if child:
             return os.waitstatus_to_exitcode(status)
-        time.sleep(0.05)
     os.kill(pid, signal.SIGKILL)
     os.waitpid(pid, 0)
     raise AssertionError("TUI did not exit after the exit command")
@@ -98,6 +101,11 @@ def smoke(executable: Path | None = None, *, cwd: Path = ROOT) -> float:
     started = time.perf_counter()
     pid, master = pty.fork()
     if pid == 0:
+        if sys.platform == "darwin":
+            # forkpty alone can lose unread output when the last slave closes
+            # on macOS. Opening the controlling tty establishes S_CTTYREF so
+            # exit drains its output, as a real interactive shell would.
+            os.close(os.open("/dev/tty", os.O_RDWR))
         os.chdir(cwd)
         os.execvpe(command[0], command, env)
 
@@ -131,7 +139,7 @@ def smoke(executable: Path | None = None, *, cwd: Path = ROOT) -> float:
         output.extend(_read(master, 0.2))
         os.write(master, b"exit\r")
         output.extend(_wait_for(master, LEAVE_ALT_SCREEN, 5))
-        exit_code = _wait_for_exit(pid, 5)
+        exit_code = _wait_for_exit(pid, master, output, 5)
         output.extend(_read(master, 0.5))
         reaped = True
     finally:
@@ -154,7 +162,10 @@ def smoke(executable: Path | None = None, *, cwd: Path = ROOT) -> float:
     if "Traceback" in text or "Task exception was never retrieved" in text:
         raise AssertionError("TUI emitted an exception during shutdown")
     if output.count(RESUME_COMMAND) != 1:
-        raise AssertionError("TUI did not print exactly one reusable session command")
+        raise AssertionError(
+            f"TUI printed {output.count(RESUME_COMMAND)} reusable session commands; "
+            f"recent output: {output[-1000:]!r}"
+        )
     if output.index(RESUME_COMMAND) < output.index(LEAVE_ALT_SCREEN):
         raise AssertionError("TUI printed the session command before restoring the terminal")
     # The UI must inherit the host terminal background. Fixed RGB/indexed

@@ -1176,22 +1176,25 @@ async def test_unified_websocket_followup_admits_effective_session(tmp_path):
     pending = asyncio.Queue(maxsize=20)
     loop._pending_queues[UNIFIED_SESSION_KEY] = pending
 
-    run_task = asyncio.create_task(loop.run())
     msg = InboundMessage(
         channel="websocket",
         sender_id="u",
         chat_id="chat",
         content="new request",
     )
-    await loop.bus.publish_inbound(msg)
-
-    queued_msg = await asyncio.wait_for(pending.get(), timeout=2)
-    admitted_msg = admission.admit.await_args.args[0]
-    assert admitted_msg.session_key == UNIFIED_SESSION_KEY
-    assert queued_msg.session_key == UNIFIED_SESSION_KEY
-
-    loop.stop()
-    await asyncio.wait_for(run_task, timeout=2)
+    try:
+        # Exercise the real routing/journaling boundary to completion. This is
+        # a session-key contract, not a two-second SQLite fsync benchmark.
+        await loop._dispatch_inbound(msg)
+        queued_msg = pending.get_nowait()
+        admission.admit.assert_awaited_once()
+        admitted_msg = admission.admit.await_args.args[0]
+        assert admitted_msg.session_key == UNIFIED_SESSION_KEY
+        assert queued_msg.session_key == UNIFIED_SESSION_KEY
+        assert queued_msg.content == msg.content
+        assert queued_msg.metadata["_recovery_followup_id"]
+    finally:
+        await loop.aclose()
 
 
 @pytest.mark.asyncio
