@@ -804,15 +804,20 @@ def run_serial(args, root: Path, target: Path, version: str, original_hash: str,
 
     environment = root / "managed"
     python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    base = Version(version).release
-    baseline_version = ".".join(map(str, (*base[:-1], max(0, base[-1] - 1))))
-    if Version(baseline_version) >= Version(version):
-        raise ValueError("Select a baseline wheel for this candidate version")
     baseline_source = args.baseline_wheel.resolve(strict=True) if args.baseline_wheel else target
     if args.baseline_wheel:
         baseline_version = str(parse_wheel_filename(baseline_source.name)[1])
-        if Version(baseline_version) >= Version(version):
-            raise ValueError("Baseline must precede the target")
+    else:
+        # A version-only fixture, not a claim about a published predecessor.
+        # Minor/major releases have a zero patch component (e.g. 0.4.0).
+        base = list(Version(version).release)
+        for index in reversed(range(len(base))):
+            if base[index]:
+                base[index] -= 1
+                break
+        baseline_version = ".".join(map(str, base))
+    if Version(baseline_version) >= Version(version):
+        raise ValueError("Baseline must precede the target; select an earlier baseline wheel")
     results = []
     system = isolated_environment(root)
     # Install once per lane, without inherited user pip settings; every case
