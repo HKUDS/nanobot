@@ -1677,9 +1677,7 @@
     "showArchived": "Tampilkan yang diarsipkan",
     "hideArchived": "Sembunyikan yang diarsipkan",
     "select": "Pilih",
-    "cancelSelection": "Batalkan pilihan",
     "selectedCount": "{{count}} dipilih",
-    "deleteSelected": "Hapus",
     "delete": "Hapus",
     "newChat": "Topik baru",
     "groups": {
@@ -1691,6 +1689,14 @@
       "earlier": "Sebelumnya",
       "archived": "Diarsipkan"
     }
+  },
+  "archiveConfirm": {
+    "title": "Arsipkan topik ini?",
+    "titleMany": "Arsipkan {{count}} topik?",
+    "unarchiveTitle": "Batalkan arsip topik ini?",
+    "unarchiveTitleMany": "Batalkan arsip {{count}} topik?",
+    "description": "Percakapan tetap tersimpan. Anda dapat membatalkan arsipnya kapan saja.",
+    "unarchiveDescription": "Topik ini akan kembali muncul di bilah samping."
   },
   "deleteConfirm": {
     "title": "Hapus obrolan ini?",

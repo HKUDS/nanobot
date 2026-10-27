@@ -1677,9 +1677,7 @@
     "showArchived": "顯示封存",
     "hideArchived": "隱藏封存",
     "select": "選取",
-    "cancelSelection": "取消選取",
     "selectedCount": "已選取 {{count}} 項",
-    "deleteSelected": "刪除",
     "delete": "刪除",
     "newChat": "新增話題",
     "groups": {
@@ -1691,6 +1689,14 @@
       "earlier": "更早",
       "archived": "已封存"
     }
+  },
+  "archiveConfirm": {
+    "title": "封存此話題？",
+    "titleMany": "封存 {{count}} 個話題？",
+    "unarchiveTitle": "取消封存此話題？",
+    "unarchiveTitleMany": "取消封存 {{count}} 個話題？",
+    "description": "聊天記錄會保留，可隨時取消封存。",
+    "unarchiveDescription": "這些話題將重新顯示在側欄中。"
   },
   "deleteConfirm": {
     "title": "刪除這個話題？",

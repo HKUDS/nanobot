@@ -1691,9 +1691,7 @@
     "showArchived": "Mostrar arquivadas",
     "hideArchived": "Ocultar arquivadas",
     "select": "Selecionar",
-    "cancelSelection": "Cancelar seleção",
     "selectedCount": "{{count}} selecionados",
-    "deleteSelected": "Excluir",
     "delete": "Excluir",
     "newChat": "Novo tópico",
     "groups": {
@@ -1705,6 +1703,14 @@
       "earlier": "Anteriores",
       "archived": "Arquivadas"
     }
+  },
+  "archiveConfirm": {
+    "title": "Arquivar este tópico?",
+    "titleMany": "Arquivar {{count}} tópicos?",
+    "unarchiveTitle": "Desarquivar este tópico?",
+    "unarchiveTitleMany": "Desarquivar {{count}} tópicos?",
+    "description": "As conversas são mantidas. Você pode desarquivá-las a qualquer momento.",
+    "unarchiveDescription": "Estes tópicos voltarão à barra lateral."
   },
   "deleteConfirm": {
     "title": "Excluir esta conversa?",

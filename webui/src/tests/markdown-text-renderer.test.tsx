@@ -136,20 +136,26 @@ describe("MarkdownTextRenderer", () => {
     );
   });
 
-  it("keeps unavailable inferred inline file paths non-interactive", async () => {
+  it.each([
+    { kind: "inferred", markdown: "Future file: `notes/missing.md`", path: "notes/missing.md", label: "missing.md" },
+    { kind: "explicit", markdown: "[Future report](notes/missing.md)", path: "notes/missing.md", label: "Future report" },
+    { kind: "malformed explicit", markdown: "[Python code](／home/example/workspace/model_check.py)", path: "／home/example/workspace/model_check.py", label: "Python code" },
+  ])("keeps unavailable $kind file references non-interactive", async ({ markdown, path, label }) => {
     const onOpenFilePreview = vi.fn();
     const resolve = vi.fn().mockResolvedValue(false);
     render(
       <FilePreviewAvailabilityProvider resolve={resolve}>
         <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>
-          {"Future file: `notes/missing.md`"}
+          {markdown}
         </MarkdownTextRenderer>
       </FilePreviewAvailabilityProvider>,
     );
 
     const reference = screen.getByTestId("inline-file-path");
-    expect(reference).toHaveTextContent("missing.md");
-    await waitFor(() => expect(resolve).toHaveBeenCalledWith("notes/missing.md"));
+    expect(reference).toHaveTextContent(label);
+    expect(reference).not.toHaveAttribute("role");
+    expect(reference).toHaveClass("text-muted-foreground");
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith(path));
     expect(reference).not.toHaveAttribute("role");
     expect(reference).not.toHaveAttribute("tabindex");
 
@@ -158,7 +164,7 @@ describe("MarkdownTextRenderer", () => {
     expect(onOpenFilePreview).not.toHaveBeenCalled();
   });
 
-  it("keeps inferred inline file paths non-interactive when availability lookup fails", async () => {
+  it.each(["inferred", "explicit"])("keeps %s file references non-interactive when availability lookup fails", async (kind) => {
     const onOpenFilePreview = vi.fn();
     let rejectAvailability!: (reason?: unknown) => void;
     const resolve = vi.fn(() => new Promise<boolean>((_resolve, reject) => {
@@ -167,7 +173,7 @@ describe("MarkdownTextRenderer", () => {
     render(
       <FilePreviewAvailabilityProvider resolve={resolve}>
         <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>
-          {"Unreadable file: `notes/locked.md`"}
+          {kind === "inferred" ? "Unreadable file: `notes/locked.md`" : "[Unreadable report](notes/locked.md)"}
         </MarkdownTextRenderer>
       </FilePreviewAvailabilityProvider>,
     );
@@ -185,18 +191,25 @@ describe("MarkdownTextRenderer", () => {
     expect(onOpenFilePreview).not.toHaveBeenCalled();
   });
 
-  it("makes available inferred inline file paths previewable", async () => {
+  it.each(["inferred", "explicit"])("makes available %s file references previewable after the probe succeeds", async (kind) => {
     const onOpenFilePreview = vi.fn();
-    const resolve = vi.fn().mockResolvedValue(true);
+    let resolveAvailability!: (available: boolean) => void;
+    const resolve = vi.fn(() => new Promise<boolean>((settle) => {
+      resolveAvailability = settle;
+    }));
     render(
       <FilePreviewAvailabilityProvider resolve={resolve}>
         <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>
-          {"Existing file: `notes/ready.md`"}
+          {kind === "inferred" ? "Existing file: `notes/ready.md`" : "[Existing report](notes/ready.md)"}
         </MarkdownTextRenderer>
       </FilePreviewAvailabilityProvider>,
     );
 
     const reference = screen.getByTestId("inline-file-path");
+    expect(reference).not.toHaveAttribute("role");
+    expect(reference).toHaveClass("text-muted-foreground");
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith("notes/ready.md"));
+    await act(async () => resolveAvailability(true));
     await waitFor(() => expect(reference).toHaveAttribute("role", "button"));
     expect(reference).toHaveAttribute("tabindex", "0");
 

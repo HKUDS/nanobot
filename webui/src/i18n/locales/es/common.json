@@ -1678,9 +1678,7 @@
     "showArchived": "Mostrar archivados",
     "hideArchived": "Ocultar archivados",
     "select": "Seleccionar",
-    "cancelSelection": "Cancelar selección",
     "selectedCount": "{{count}} seleccionados",
-    "deleteSelected": "Eliminar",
     "delete": "Eliminar",
     "newChat": "Nuevo tema",
     "groups": {
@@ -1692,6 +1690,14 @@
       "earlier": "Anteriores",
       "archived": "Archivados"
     }
+  },
+  "archiveConfirm": {
+    "title": "¿Archivar este tema?",
+    "titleMany": "¿Archivar {{count}} temas?",
+    "unarchiveTitle": "¿Desarchivar este tema?",
+    "unarchiveTitleMany": "¿Desarchivar {{count}} temas?",
+    "description": "Las conversaciones se conservan. Puedes desarchivarlas en cualquier momento.",
+    "unarchiveDescription": "Estos temas volverán a la barra lateral."
   },
   "deleteConfirm": {
     "title": "¿Eliminar este chat?",

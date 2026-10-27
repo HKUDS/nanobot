@@ -1677,9 +1677,7 @@
     "showArchived": "Hiện mục đã lưu trữ",
     "hideArchived": "Ẩn mục đã lưu trữ",
     "select": "Chọn",
-    "cancelSelection": "Hủy chọn",
     "selectedCount": "Đã chọn {{count}} mục",
-    "deleteSelected": "Xóa",
     "delete": "Xóa",
     "newChat": "Chủ đề mới",
     "groups": {
@@ -1691,6 +1689,14 @@
       "earlier": "Trước đó",
       "archived": "Đã lưu trữ"
     }
+  },
+  "archiveConfirm": {
+    "title": "Lưu trữ chủ đề này?",
+    "titleMany": "Lưu trữ {{count}} chủ đề?",
+    "unarchiveTitle": "Bỏ lưu trữ chủ đề này?",
+    "unarchiveTitleMany": "Bỏ lưu trữ {{count}} chủ đề?",
+    "description": "Lịch sử trò chuyện vẫn được giữ lại. Bạn có thể bỏ lưu trữ bất cứ lúc nào.",
+    "unarchiveDescription": "Các chủ đề này sẽ xuất hiện lại trên thanh bên."
   },
   "deleteConfirm": {
     "title": "Xóa cuộc trò chuyện này?",

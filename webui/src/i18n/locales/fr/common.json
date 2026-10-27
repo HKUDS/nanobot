@@ -1677,9 +1677,7 @@
     "showArchived": "Afficher les archives",
     "hideArchived": "Masquer les archives",
     "select": "Sélectionner",
-    "cancelSelection": "Annuler la sélection",
     "selectedCount": "{{count}} sélectionnés",
-    "deleteSelected": "Supprimer",
     "delete": "Supprimer",
     "newChat": "Nouveau sujet",
     "groups": {
@@ -1691,6 +1689,14 @@
       "earlier": "Plus anciens",
       "archived": "Archivés"
     }
+  },
+  "archiveConfirm": {
+    "title": "Archiver ce sujet ?",
+    "titleMany": "Archiver {{count}} sujets ?",
+    "unarchiveTitle": "Désarchiver ce sujet ?",
+    "unarchiveTitleMany": "Désarchiver {{count}} sujets ?",
+    "description": "Les conversations sont conservées. Vous pouvez les désarchiver à tout moment.",
+    "unarchiveDescription": "Ces sujets réapparaîtront dans la barre latérale."
   },
   "deleteConfirm": {
     "title": "Supprimer cette discussion ?",

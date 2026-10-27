@@ -4,6 +4,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  type ComponentProps,
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -86,13 +87,11 @@ type AvailabilityResult = {
   resolve: FilePreviewAvailabilityResolver;
 };
 
-function InferredFileReferenceChip({
-  path,
+function AvailableFileReferenceChip({
   onOpen,
-}: {
-  path: string;
-  onOpen?: (path: string) => void;
-}) {
+  ...props
+}: ComponentProps<typeof FileReferenceChip>) {
+  const path = props.previewPath || props.tooltipPath || props.path;
   const resolve = useFilePreviewAvailabilityResolver();
   const [result, setResult] = useState<AvailabilityResult | null>(null);
 
@@ -118,7 +117,7 @@ function InferredFileReferenceChip({
   );
   return (
     <FileReferenceChip
-      path={path}
+      {...props}
       onOpen={onOpen && resolvedAvailable ? onOpen : undefined}
     />
   );
@@ -557,7 +556,7 @@ export default function MarkdownTextRenderer({
         const raw = String(kids).replace(/\n$/, "");
         if (!documentPath && isLikelyFilePath(raw)) {
           return (
-            <InferredFileReferenceChip
+            <AvailableFileReferenceChip
               path={raw}
               onOpen={onOpenFilePreview}
             />
@@ -644,7 +643,7 @@ export default function MarkdownTextRenderer({
         if (filePath) {
           const label = nodeText(markdownChildren).trim();
           return (
-            <FileReferenceChip
+            <AvailableFileReferenceChip
               path={label || filePath}
               tooltipPath={filePath}
               previewPath={filePath}

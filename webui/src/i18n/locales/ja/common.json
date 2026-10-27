@@ -1677,9 +1677,7 @@
     "showArchived": "アーカイブ済みを表示",
     "hideArchived": "アーカイブ済みを隠す",
     "select": "選択",
-    "cancelSelection": "選択を解除",
     "selectedCount": "{{count}} 件を選択中",
-    "deleteSelected": "削除",
     "delete": "削除",
     "newChat": "新しいトピック",
     "groups": {
@@ -1691,6 +1689,14 @@
       "earlier": "以前",
       "archived": "アーカイブ済み"
     }
+  },
+  "archiveConfirm": {
+    "title": "このトピックをアーカイブしますか？",
+    "titleMany": "{{count}} 件のトピックをアーカイブしますか？",
+    "unarchiveTitle": "このトピックのアーカイブを解除しますか？",
+    "unarchiveTitleMany": "{{count}} 件のトピックのアーカイブを解除しますか？",
+    "description": "会話履歴は保持され、いつでもアーカイブを解除できます。",
+    "unarchiveDescription": "これらのトピックがサイドバーに再表示されます。"
   },
   "deleteConfirm": {
     "title": "このチャットを削除しますか？",

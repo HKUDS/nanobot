@@ -1883,9 +1883,7 @@
     "showArchived": "显示归档",
     "hideArchived": "隐藏归档",
     "select": "选择",
-    "cancelSelection": "取消选择",
     "selectedCount": "已选择 {{count}} 项",
-    "deleteSelected": "删除",
     "delete": "删除",
     "newChat": "新建话题",
     "groups": {
@@ -1897,6 +1895,14 @@
       "earlier": "更早",
       "archived": "已归档"
     }
+  },
+  "archiveConfirm": {
+    "title": "归档此话题？",
+    "titleMany": "归档 {{count}} 个话题？",
+    "unarchiveTitle": "取消归档此话题？",
+    "unarchiveTitleMany": "取消归档 {{count}} 个话题？",
+    "description": "聊天记录会保留，可随时取消归档。",
+    "unarchiveDescription": "这些话题将重新显示在侧栏中。"
   },
   "deleteConfirm": {
     "title": "删除这个话题？",

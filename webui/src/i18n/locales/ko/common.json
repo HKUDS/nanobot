@@ -1677,9 +1677,7 @@
     "showArchived": "보관된 항목 표시",
     "hideArchived": "보관된 항목 숨기기",
     "select": "선택",
-    "cancelSelection": "선택 취소",
     "selectedCount": "{{count}}개 선택됨",
-    "deleteSelected": "삭제",
     "delete": "삭제",
     "newChat": "새 주제",
     "groups": {
@@ -1691,6 +1689,14 @@
       "earlier": "이전",
       "archived": "보관됨"
     }
+  },
+  "archiveConfirm": {
+    "title": "이 주제를 보관할까요?",
+    "titleMany": "주제 {{count}}개를 보관할까요?",
+    "unarchiveTitle": "이 주제의 보관을 해제할까요?",
+    "unarchiveTitleMany": "주제 {{count}}개의 보관을 해제할까요?",
+    "description": "대화 기록은 유지되며 언제든지 보관을 해제할 수 있습니다.",
+    "unarchiveDescription": "이 주제들이 사이드바에 다시 표시됩니다."
   },
   "deleteConfirm": {
     "title": "이 채팅을 삭제할까요?",

@@ -1883,9 +1883,7 @@
     "showArchived": "Show archived",
     "hideArchived": "Hide archived",
     "select": "Select",
-    "cancelSelection": "Cancel selection",
     "selectedCount": "{{count}} selected",
-    "deleteSelected": "Delete",
     "delete": "Delete",
     "newChat": "New topic",
     "groups": {
@@ -1897,6 +1895,14 @@
       "earlier": "Earlier",
       "archived": "Archived"
     }
+  },
+  "archiveConfirm": {
+    "title": "Archive this topic?",
+    "titleMany": "Archive {{count}} topics?",
+    "unarchiveTitle": "Unarchive this topic?",
+    "unarchiveTitleMany": "Unarchive {{count}} topics?",
+    "description": "Conversations are kept. You can unarchive them at any time.",
+    "unarchiveDescription": "These topics will return to the sidebar."
   },
   "deleteConfirm": {
     "title": "Delete this topic?",
