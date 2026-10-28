@@ -3269,6 +3269,7 @@ async def test_turn_end_keeps_unclosed_text_out_of_the_next_stream_segment(histo
     assert payloads[-2]["text"] == "new thought"
     assert payloads[-1] == {
         "event": "reasoning_end", "chat_id": "chat-unclosed", "stream_id": "r1",
+        "history_generation": history.sessions.read_session_version("websocket:chat-unclosed")[0],
     }
     lines = history.read("websocket:chat-unclosed")
     assert [(line["event"], line.get("text")) for line in lines] == [
@@ -3333,6 +3334,7 @@ async def test_retry_status_is_transient_and_turn_scoped(
         "max_attempts": 4,
         "error_kind": "connection",
         "retry_after_s": 3.5,
+        "history_generation": history.sessions.read_session_version("websocket:chat-1")[0],
     }]
     assert history.read("websocket:chat-1") == []
 
@@ -3503,6 +3505,7 @@ async def test_recovery_state_is_a_structured_event_not_assistant_text(history) 
         "recovery_id": "recovery-1",
         "reason": "tool_state_unknown",
         "attempts": 1,
+        "history_generation": history.sessions.read_session_version("websocket:chat-1")[0],
     }]
     assert history.read("websocket:chat-1") == []
 

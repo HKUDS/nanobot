@@ -252,7 +252,12 @@ async def test_mismatched_source_identity_cannot_truncate_a_different_message(ed
     assert not submissions
 
 
-async def test_late_old_generation_stream_completion_cannot_reappend_discarded_suffix(editing):
+async def test_replacement_delivery_keeps_retired_generation_out_of_wire_and_history(editing):
+    import asyncio
+    import json
+
+    from nanobot.bus.delivery import DeliveryRequest
+    from nanobot.bus.events import OutboundMessage
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
     from nanobot.webui.gateway_services import build_gateway_services
@@ -271,13 +276,55 @@ async def test_late_old_generation_stream_completion_cannot_reappend_discarded_s
     channel = WebSocketChannel(config, bus, gateway=gateway)
     rows = read_rows(manager)
     event = {"event": "stream_end", "text": "discarded late completion"}
-    persisted = await channel._persist_turn_stream_event(
+    persisted = await channel._outbound._persist_turn_stream_event(
         "edit-chat", event, completed_text="discarded late completion", phase="answer",
         metadata={"webui": True, "webui_turn_id": "old-3", HISTORY_GENERATION_METADATA_KEY: source.generation},
     )
     assert persisted is False
     assert event["history_generation"] == source.generation
     assert read_rows(manager) == rows
+
+    frames = []
+    delivered = asyncio.Event()
+
+    async def receive(raw):
+        frame = json.loads(raw)
+        frames.append(frame)
+        if frame.get("text") == "replacement answer":
+            delivered.set()
+
+    connection = AsyncMock()
+    connection.send.side_effect = receive
+    channel._attach(connection, "edit-chat")
+    try:
+        current = await manager.state.read(KEY)
+        body = await manager.state.project_history(KEY, lambda history: transcript.build_webui_thread_response(KEY, history=history))
+        assert body is not None
+        body["history_generation"] = current.generation
+        await channel._commands.announce_webui_history_replacement(
+            "edit-chat", body, retired_turn_ids=["old-3"], previous_generation=source.generation,
+        )
+        await channel.send(OutboundMessage(
+            channel="websocket", chat_id="edit-chat", content="discarded late reply",
+            delivery=DeliveryRequest("old-run", KEY, source.generation),
+            metadata={"webui": True, "webui_turn_id": "old-3", HISTORY_GENERATION_METADATA_KEY: source.generation},
+        ))
+        await channel.send(OutboundMessage(
+            channel="websocket", chat_id="edit-chat", content="replacement answer",
+            delivery=DeliveryRequest("new-run", KEY, current.generation),
+            metadata={"webui": True, "webui_turn_id": "new-edit", HISTORY_GENERATION_METADATA_KEY: current.generation},
+        ))
+        await asyncio.wait_for(delivered.wait(), 2)
+        assert frames[0]["event"] == "history_replaced"
+        assert frames[0]["previous_generation"] == source.generation
+        assert frames[0]["thread"]["history_generation"] == current.generation
+        replies = [frame for frame in frames if frame["event"] == "message"]
+        assert [frame["text"] for frame in replies] == ["replacement answer"]
+        assert replies[0]["history_generation"] == current.generation
+        assert "discarded late reply" not in str(read_rows(manager))
+        assert read_rows(manager)[-1]["text"] == "replacement answer"
+    finally:
+        await channel._cleanup_connection(connection)
 
 
 async def test_new_fork_and_replace_share_the_source_owner_boundary(editing, monkeypatch):
