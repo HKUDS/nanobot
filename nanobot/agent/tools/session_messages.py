@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 from collections import OrderedDict, deque
 from collections.abc import Callable
@@ -57,48 +56,6 @@ class _PendingReply:
     target_handle: str
     request: SessionMessageEnvelope
     timer: _CancelHandle | None = None
-
-
-@tool_parameters(tool_parameters_schema(
-    offset=IntegerSchema(description="Skip this many other sessions, ordered by handle.", minimum=0),
-    limit=IntegerSchema(description="Maximum handles to return; omit for all remaining sessions.", minimum=1),
-))
-class ListSessionsTool(Tool):
-    """List the handles of other persisted sessions."""
-
-    def __init__(self, sessions: SessionManager) -> None:
-        self._handles = SessionHandleResolver(sessions)
-
-    @classmethod
-    def create(cls, ctx: ToolContext) -> Tool:
-        if ctx.sessions is None:
-            raise RuntimeError("list_sessions requires a session manager")
-        return cls(ctx.sessions)
-
-    @classmethod
-    def enabled(cls, ctx: ToolContext) -> bool:
-        return ctx.sessions is not None
-
-    @property
-    def name(self) -> str:
-        return "list_sessions"
-
-    @property
-    def description(self) -> str:
-        return "List other persisted sessions by @handle. Use offset and limit to read in pages."
-
-    async def execute(self, offset: int = 0, limit: int | None = None, **kwargs: Any) -> str:
-        request = current_request_context()
-        if request is None or not request.session_key:
-            return ToolResult.error("Error: session context is unavailable")
-        handles = await self._handles.alist_all()
-        names = [
-            f"@{handle.name}"
-            for handle in handles
-            if handle.session_key != request.session_key
-        ]
-        end = offset + limit if limit is not None else None
-        return json.dumps(names[offset:end], ensure_ascii=True)
 
 
 @tool_parameters(
