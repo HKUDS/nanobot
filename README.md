@@ -226,7 +226,7 @@ Keep the launcher terminal open while using the browser. It starts or joins the 
 
 1. Open **Settings → Models** and save a provider/model preset with your credential or supported sign-in. See [model setup](./docs/quick-start.md#2-configure-your-model) if you need the full steps.
 2. Start a new topic and send `Hello!` to verify the model connection.
-3. To try file work, put a copy of `notes.txt` in a practice folder, select that folder and **Restricted** access, and ask: "Read notes.txt and write a short summary to summary.md." Open `summary.md` in that folder to check the result. See [Your first file task](./docs/start-without-technical-background.md#your-first-file-task).
+3. To try file work, put a copy of `notes.txt` in a practice folder, select that folder and **Default Permission** (workspace-only access), and ask: "Read notes.txt and write a short summary to summary.md." Open `summary.md` in that folder to check the result. See [Your first file task](./docs/start-without-technical-background.md#your-first-file-task).
 
 A normal reply verifies the provider/model and browser connection. The file task separately checks the selected project and its file permissions. Attaching a file sends it to the conversation; it does not change the selected project folder.
 
@@ -379,20 +379,29 @@ Prefer your own infrastructure? Follow the [deployment guide](./docs/deployment.
 
 The WebUI ships **inside the published wheel** with no separate frontend build. It is the browser workbench for persistent topics, temporary chats, visible agent activity, workspace controls, Apps, Skills, Automations, and settings. Start it with `nanobot webui`. WebUI access grants administration of the same agent instance; share it only with trusted operators. See [Sharing access](./docs/webui.md#sharing-access).
 
-The screenshots below use example conversations, illustrative token counts, and paused schedules.
+The screenshots below show the current source WebUI with example conversations, illustrative token counts, and paused schedules.
 
 <p align="center">
   <a href="./images/nanobot_webui-source.png">
-    <img src="./images/nanobot_webui.png" alt="nanobot WebUI new-topic screen with the hero composer, workspace access, project, and model controls" width="900">
+    <img src="./images/nanobot_webui.png" alt="nanobot WebUI new-topic screen with project-grouped topics, the composer, workspace access, and model controls" width="900">
   </a>
 </p>
+
+<details>
+<summary>Mobile WebUI · dark theme</summary>
+
+<p align="center">
+  <img src="./images/nanobot-mobile.png" alt="Mobile WebUI in dark theme with a saved conversation, model controls, context usage, and workspace-only permissions" width="390">
+</p>
+
+</details>
 
 Use it to:
 
 - keep separate topics for different tasks and projects;
 - use temporary chats when a conversation should not be saved to history or memory;
 - inspect reasoning, tool calls, file edits, diffs, command output, and generated artifacts;
-- switch models and workspaces without leaving the conversation;
+- switch model presets and choose a project before starting a topic;
 - configure models in **Settings**, connect chat platforms in **Channels**, and manage Apps, Skills, and Automations.
 
 ### Keep related work side by side
@@ -407,7 +416,7 @@ Choose a project, access mode, and model for each task. Topics separate conversa
 
 ### Inspect the work and its context
 
-Expand agent activity to see reasoning, tool calls, and file changes. Switch **Settings → Appearance → File edit display** to **Diff** for inline patches. The composer's context indicator shows the current context size, input tokens by round, and cache reuse when the provider reports it.
+Expand agent activity to see reasoning, tool calls, and file changes. Switch **Settings → Appearance → Edit preview** to **Diff** for inline patches. The composer's context indicator shows the current context size, input tokens by round, and cache reuse when the provider reports it.
 
 <p align="center">
   <img src="./images/nanobot-context.png" alt="An expanded file-edit diff above the context usage chart, with input tokens and cache reuse shown across four rounds" width="900">
@@ -420,7 +429,7 @@ Context compaction also appears in the conversation timeline. [Explore activity 
 Use Apps to connect MCP servers, enable Agent Plugins, and manage local CLI App adapters. Add a preset or a custom server, then attach an available tool with `@`. Skills provide reusable instructions. **Settings** holds model, voice, image, and web setup; **Channels** handles chat-platform connections.
 
 <p align="center">
-  <img src="./images/nanobot-apps.png" alt="The Apps MCP catalog with integration presets and controls to add or import a custom MCP server" width="900">
+  <img src="./images/nanobot-apps.png" alt="The Apps MCP catalog with searchable integration presets and Connect actions" width="900">
 </p>
 
 [Explore Apps →](./docs/webui.md#apps) · [Discover Skills →](./docs/webui.md#skills) · [Connect chat apps →](./docs/guides/chat-app-ai-agent.md)
@@ -432,12 +441,12 @@ Before connecting a personal bot to shared channels, check the platform's DM pai
 Ask for an automation from the topic that should receive its results. Use **Tasks** to review and manage schedules, or **Calendar** to scan completed and upcoming runs by date. Local triggers let a script start a saved task on demand.
 
 <p align="center">
-  <img src="./images/nanobot-automations.png" alt="The Automations calendar with completed and upcoming recurring tasks arranged by date" width="900">
+  <img src="./images/nanobot-automations.png" alt="The Automations calendar with example completed runs arranged by date" width="900">
 </p>
 
 Keep the gateway running and the host awake for scheduled delivery. Missed scheduled times are not replayed after a gateway restart. See [delivery and recovery rules](./docs/automations.md#delivery-and-reliability). [Explore Automations →](./docs/automations.md)
 
-For a conversation that should stay out of saved topic history and long-term memory, use [Temporary chat](./docs/webui.md#temporary-chats) from the header. Temporary chats end when the connection closes and use the default workspace in Restricted mode. Requests still go to the configured model provider, and files created by tools remain after the chat closes.
+For a conversation that should stay out of saved topic history and long-term memory, use [Temporary chat](./docs/webui.md#temporary-chats) from the header. Temporary chats end when the connection closes and use the default workspace with workspace-only permissions. Requests still go to the configured model provider, and files created by tools remain after the chat closes.
 
 See the [WebUI guide](./docs/webui.md) for LAN access, background operation, workspace controls, and the full feature tour. Working on the frontend itself? Use [`webui/README.md`](./webui/README.md).
 
@@ -468,24 +477,29 @@ Browse the [repo docs](./docs/README.md) for current source documentation, or vi
 
 ## Releases
 
-**Latest release: [v0.3.5](https://github.com/HKUDS/nanobot/releases/tag/v0.3.5)**
+**Latest release: [v0.4.0](https://github.com/HKUDS/nanobot/releases/tag/v0.4.0)**
 
-v0.3.5 brings the workbench to the terminal and makes conversations easier to continue across the browser, terminal, and chat apps.
+v0.4.0 makes everyday work easier to continue, with durable conversation history, a more capable browser workbench, and diagrams in the terminal.
 
-- Use the native terminal workbench with the same gateway and saved conversations as the WebUI.
-- Arrange up to four browser conversations side by side, mention saved sessions, or open a temporary chat.
-- Inspect per-round context usage and compaction progress, with more durable history and recovery.
-- Discover Skills, connect Apps, and manage scheduled work through expanded WebUI flows.
+- Keep model and browser conversation history in SQLite, with imports of existing conversations and retained source backups.
+- Navigate prompt history, search loaded messages and session handles, and keep delegated tasks within reach.
+- Work with local-file and video attachments, image thumbnails, file cards, and improved mobile and reading controls.
+- Connect remote instances, inspect Mermaid diagrams in the terminal, and edit or pause scheduled tasks in place.
 
-[Read the v0.3.5 release notes and upgrade notes](https://github.com/HKUDS/nanobot/releases/tag/v0.3.5)
+Upgrade through your original installation method and back up the complete stopped instance first. In-app automatic installation is not enabled for this release yet. See [Updating nanobot](./docs/updating.md) and the [v0.4.0 release notes and upgrade notes](https://github.com/HKUDS/nanobot/releases/tag/v0.4.0).
 
 ## Recent Updates
 
-- **2026-09-19** 🔎 Searchable provider setup, consistent provider identities, and smoother Linear onboarding.
-- **2026-09-18** ♻️ Clearer recovery for interrupted work and Discord reply-context support.
-- **2026-09-16** 📦 Platform wheels bundle the version-matched native terminal UI.
-- **2026-09-15** 🚀 Released [v0.3.5](https://github.com/HKUDS/nanobot/releases/tag/v0.3.5) with a shared terminal workbench, multi-pane WebUI, and visible context continuity.
-- **2026-09-07** 🔌 WeCom media uploads use the SDK API, and CI skips unrelated jobs.
+- **2026-10-28** 🚀 Released [v0.4.0](https://github.com/HKUDS/nanobot/releases/tag/v0.4.0) with durable conversation history, remote WebUI connections, richer attachments, and terminal diagrams.
+- **2026-10-27** 🗂️ Batch topic archiving, clearer mentions, and preserved partial replies after model failures.
+- **2026-10-26** 🧰 WebUI `!` shell commands show literal output; delegated tasks and their details stay within reach.
+- **2026-10-25** ⏰ Edit or pause scheduled tasks and inspect recent runs; Ctrl+K searches loaded messages and session handles.
+- **2026-10-24** ⚡ Smaller native terminal builds, Kimi K3.1 Pro support, and corrected API session routing.
+- **2026-10-23** 🧭 Compact workspace controls, MiniMax-M3.1-Flash support, and corrected DeepSeek reasoning replay.
+- **2026-10-22** 📎 Local-file and video attachments, shared proxy settings for remote MCP, and idle-compaction controls.
+- **2026-10-21** 🔄 Shared SQLite history storage and update review in About, with in-app installation gated on verified release approval.
+- **2026-10-20** 🖼️ Mermaid diagrams in the terminal, QQ QR-code setup, and reading-size preferences.
+- **2026-10-19** 🔍 DeepSeek Search, WebUI Mermaid diagrams, and first-run Docker Compose onboarding.
 
 For earlier updates, see the [release archive](./docs/release-archive.md) or [GitHub releases](https://github.com/HKUDS/nanobot/releases).
 
