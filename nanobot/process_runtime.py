@@ -717,41 +717,52 @@ def _darwin_process_birth(pid: int) -> tuple[int, int, int] | None:
     return process_group, started_at_seconds, started_at_microseconds
 
 
-def _windows_process_identity(pid: int) -> str | None:
-    if os.name != "nt":
-        return None
+# Python before 3.14 retains each distinct pointer type in a global ctypes cache.
+class _FileTime(ctypes.Structure):
+    _fields_ = [("low", ctypes.c_uint32), ("high", ctypes.c_uint32)]
 
-    class FileTime(ctypes.Structure):
-        _fields_ = [("low", ctypes.c_uint32), ("high", ctypes.c_uint32)]
+    @property
+    def value(self) -> int:
+        return (int(self.high) << 32) | int(self.low)
 
-        @property
-        def value(self) -> int:
-            return (int(self.high) << 32) | int(self.low)
 
-    process_query_limited_information = 0x1000
+_FILE_TIME_PTR = ctypes.POINTER(_FileTime)
+
+
+@lru_cache(maxsize=1)
+def _windows_kernel32() -> Any:
+    """Reuse the native bindings while querying process identity on every call."""
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     kernel32.OpenProcess.restype = wintypes.HANDLE
     kernel32.GetProcessTimes.argtypes = [
         wintypes.HANDLE,
-        ctypes.POINTER(FileTime),
-        ctypes.POINTER(FileTime),
-        ctypes.POINTER(FileTime),
-        ctypes.POINTER(FileTime),
+        _FILE_TIME_PTR,
+        _FILE_TIME_PTR,
+        _FILE_TIME_PTR,
+        _FILE_TIME_PTR,
     ]
     kernel32.GetProcessTimes.restype = wintypes.BOOL
     kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
     kernel32.GetExitCodeProcess.restype = wintypes.BOOL
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
     kernel32.CloseHandle.restype = wintypes.BOOL
-    handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+    return kernel32
+
+
+def _windows_process_identity(pid: int) -> str | None:
+    if os.name != "nt":
+        return None
+
+    kernel32 = _windows_kernel32()
+    handle = kernel32.OpenProcess(0x1000, False, pid)
     if not handle:
         return None
     try:
-        creation_time = FileTime()
-        exit_time = FileTime()
-        kernel_time = FileTime()
-        user_time = FileTime()
+        creation_time = _FileTime()
+        exit_time = _FileTime()
+        kernel_time = _FileTime()
+        user_time = _FileTime()
         ok = kernel32.GetProcessTimes(
             handle,
             ctypes.byref(creation_time),
