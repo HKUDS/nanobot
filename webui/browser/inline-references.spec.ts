@@ -235,7 +235,7 @@ for (const narrow of [false, true]) {
       await expect(command).toHaveCSS("font-weight", "400");
       await expect(command.locator("span")).toHaveText("/");
       await expect(command.locator("span")).toHaveCSS("opacity", "0.9");
-      await expect(page.locator("[data-user-text-bubble]").last().locator("p")).toHaveText(text);
+      await expect(page.locator("[data-user-message-body]").last()).toHaveText(text);
       await page.screenshot({ path: info.outputPath("slash-command-and-skill.png") });
 
       const shellCommand = '  !echo "hello! $workflow @typography"\nWrite-Output "命令输出"';
@@ -256,7 +256,7 @@ for (const narrow of [false, true]) {
       await expect(sentPrefix).toHaveText("!");
       await expect(sentPrefix).toHaveCSS("color", prefixColor);
       await expect(sentPrefix).toHaveCSS("font-weight", "400");
-      const sentCommand = page.locator("[data-user-text-bubble]").last().locator("p");
+      const sentCommand = page.locator("[data-user-message-body]").last();
       expect(await sentCommand.textContent()).toBe(shellCommand.trim());
       await sentCommand.click();
       await sentCommand.evaluate(node => {

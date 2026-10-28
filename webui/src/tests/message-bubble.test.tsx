@@ -598,11 +598,11 @@ describe("MessageBubble", () => {
     expect(prefix).toHaveTextContent(/^!$/);
     expect(prefix).toHaveClass("font-normal");
     expect(prefix.style.color).toBe("var(--inline-reference-highlight)");
-    expect(container.querySelector("[data-user-text-bubble] p")?.textContent).toBe(content);
+    expect(container.querySelector("[data-user-message-body]")?.textContent).toBe(content);
 
     rerender(<MessageBubble message={{ ...message, content: "Explain !pwd, please!" }} />);
     expect(screen.queryByTestId("message-shell-prefix")).not.toBeInTheDocument();
-    expect(container.querySelector("[data-user-text-bubble] p")?.textContent).toBe("Explain !pwd, please!");
+    expect(container.querySelector("[data-user-message-body]")?.textContent).toBe("Explain !pwd, please!");
   });
 
   it("highlights skill references without a live skill catalog", () => {

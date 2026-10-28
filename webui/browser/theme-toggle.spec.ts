@@ -120,7 +120,7 @@ for (const width of [1440, 390]) {
       await expect(page.locator("[data-user-text-bubble]").first()).toBeInViewport();
       const selectors = [
         ".thread-workspace", ".workbench-pane", ".thread-composer-surface",
-        "[data-testid='thread-header'] > div:last-child", "[data-user-text-bubble] p",
+        "[data-testid='thread-header'] > div:last-child", "[data-user-message-body]",
         "blockquote", "[data-session-message] > div:last-child",
       ];
       const readPaint = () => page.evaluate((targets) => targets.map(selector =>
@@ -195,7 +195,7 @@ for (const width of [1440, 390]) {
         return {
           durations: fades.map(fade => fade.effect!.getTiming().duration),
           canvas: getComputedStyle(document.querySelector(".workbench-pane")!).backgroundColor,
-          bubble: getComputedStyle(document.querySelector("[data-user-text-bubble] p")!).backgroundColor,
+          bubble: getComputedStyle(document.querySelector("[data-user-message-body]")!).backgroundColor,
           oldOpacity: Number(oldTheme.opacity), newOpacity: Number(newTheme.opacity),
           oldBlend: oldTheme.mixBlendMode, newBlend: newTheme.mixBlendMode,
           isolation: getComputedStyle(root, "::view-transition-image-pair(root)").isolation,
