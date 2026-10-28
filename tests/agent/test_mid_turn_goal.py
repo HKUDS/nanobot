@@ -4,8 +4,8 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from agent.session_helpers import stop_loop
 
+from agent.session_helpers import stop_loop
 from nanobot.agent.goal_permission import goal_mutation_allowed, goal_mutation_permission
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
