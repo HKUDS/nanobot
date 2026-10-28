@@ -1191,3 +1191,54 @@ def test_build_response_schema(history, monkeypatch, tmp_path) -> None:
     assert out["schemaVersion"] == WEBUI_TRANSCRIPT_SCHEMA_VERSION
     assert out["sessionKey"] == key
     assert len(_conversation_events(out)) == 1
+
+
+def test_shell_output_format_survives_reload_and_paging_without_loading_model_history(history, tmp_path) -> None:
+    from nanobot.session.manager import SessionManager
+
+    key = "websocket:shell-output"
+    output = "Path\n----\n  __pycache__\n```mermaid\nflowchart LR\n```\n![preview](local.png)\n"
+    history.append(key, {"event": "user", "text": "!pwd", "turn_id": "shell-turn"})
+    history.append(key, {
+        "event": "message", "text": output, "render_as": "text", "turn_id": "shell-turn",
+    })
+    history.append(key, {"event": "turn_end", "turn_id": "shell-turn"})
+    _append_numbered_turn(history, key, "shell-output", 2)
+    reopened = SessionManager(tmp_path)
+
+    def fail_if_loaded():
+        pytest.fail("Recorded output formatting must not load model history")
+
+    def build(**kwargs):
+        return reopened.project_history(key, lambda snapshot: transcript_module.build_webui_thread_response(
+            key, history=snapshot, session_messages_loader=fail_if_loaded,
+            augment_assistant_text=lambda text: text.replace("local.png", "/api/media/signed"), **kwargs,
+        ))
+
+    latest = build(limit=2, direction="latest")
+    older = build(limit=2, before=latest["page"]["before_cursor"])
+    [answer] = [event for event in older["events"] if event["event"] == "message"]
+    assert answer["text"] == output
+    assert answer["render_as"] == "text"
+    assert history.read(key)[1]["text"] == output
+    assert history.read(key)[1]["render_as"] == "text"
+
+
+@pytest.mark.parametrize("command", [True, False])
+def test_existing_shell_output_uses_canonical_command_identity_not_bang_text(history, command) -> None:
+    key = "websocket:existing-shell-output"
+    output = "Path\n----\n__pycache__"
+    history.append(key, {"event": "user", "text": "!pwd", "turn_id": "shell-turn"})
+    history.append(key, {"event": "message", "text": output, "turn_id": "shell-turn"})
+    history.append(key, {"event": "turn_end", "turn_id": "shell-turn"})
+    messages = [
+        {"role": "user", "content": "/__shell pwd" if command else "!pwd",
+         "webui_turn_id": "shell-turn", "_command": command},
+        {"role": "assistant", "content": output, "_command": command},
+    ]
+    response = history.build(key, session_messages=messages)
+    [answer] = [event for event in response["events"] if event["event"] == "message"]
+    assert answer["text"] == output
+    assert answer.get("render_as") == ("text" if command else None)
+    assert history.read(key)[1]["text"] == output
+    assert messages[1]["content"] == output

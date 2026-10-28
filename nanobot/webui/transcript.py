@@ -22,6 +22,7 @@ from urllib.parse import unquote, urlparse
 from loguru import logger
 
 from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA, INBOUND_META_TURN_ID
+from nanobot.command.builtin import USER_SHELL_COMMAND
 from nanobot.runtime_context import public_history_message
 from nanobot.session.automation_turns import is_automation_kind
 from nanobot.session.display_history import (
@@ -757,6 +758,15 @@ def _is_legacy_raw_subagent_result(message: dict[str, Any]) -> bool:
     )
 
 
+def _is_user_shell_command(message: Mapping[str, Any]) -> bool:
+    content = message.get("content")
+    return (
+        message.get("role") == "user" and message.get("_command") is True
+        and isinstance(content, str)
+        and (content == USER_SHELL_COMMAND or content.startswith(f"{USER_SHELL_COMMAND} "))
+    )
+
+
 def _session_user_event(
     session_key: str,
     message: dict[str, Any],
@@ -1453,9 +1463,12 @@ def _client_projection_event(
     if event == "message":
         text = record.get("text")
         content = text if isinstance(text, str) else ""
-        if augment_assistant_text is not None:
+        render_as_text = record.get("render_as") == "text"
+        if not render_as_text and augment_assistant_text is not None:
             content = augment_assistant_text(content)
         projected = {"event": "message", **common, "text": content}
+        if render_as_text:
+            projected["render_as"] = "text"
         kind = record.get("kind")
         if kind in {"tool_hint", "progress", "reasoning"}:
             projected["kind"] = kind
@@ -1795,6 +1808,31 @@ def build_webui_thread_response(
         lines = recovered_lines
     if _needs_incomplete_turn_recovery(lines):
         lines = _recover_incomplete_turns(lines, load_session_turns())
+    bang_inputs = {
+        record.get("turn_id") for record in lines
+        if record.get("event") == "user" and isinstance(text := record.get("text"), str)
+        and text.startswith("!")
+    }
+    legacy_shell_candidates = {
+        record.get("turn_id") for record in lines
+        if record.get("event") == "message" and record.get("kind") is None
+        and record.get("render_as") != "text" and record.get("turn_id") in bang_inputs
+        and isinstance(record.get("turn_id"), str)
+    }
+    if legacy_shell_candidates:
+        if session_messages is None and session_messages_loader is not None:
+            session_messages = session_messages_loader()
+        shell_turns = {
+            message.get(INBOUND_META_TURN_ID) for message in session_messages or []
+            if _is_user_shell_command(message)
+            and message.get(INBOUND_META_TURN_ID) in legacy_shell_candidates
+        }
+        lines = [
+            {**record, "render_as": "text"}
+            if record.get("event") == "message" and record.get("kind") is None
+            and record.get("turn_id") in shell_turns else record
+            for record in lines
+        ]
     lines = _ensure_replay_identities(lines)
     payload: dict[str, Any] = {
         "schemaVersion": WEBUI_TRANSCRIPT_SCHEMA_VERSION,

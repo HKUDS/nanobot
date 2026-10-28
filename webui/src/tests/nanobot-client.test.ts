@@ -779,6 +779,54 @@ describe("NanobotClient", () => {
     ).toBe(false);
   });
 
+  it("sends bang commands with a receipt without taking over an active run or replaying on reconnect", async () => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    socket.fakeMessage({ event: "goal_status", chat_id: "shell", status: "running", turn_id: "agent", started_at: 12_345 });
+    const run = client.getRunState("shell");
+    const pending = client.sendUserShellCommand("shell", "!pwd", { turnId: "bang" });
+    expect(JSON.parse(socket.sent.at(-1)!)).toMatchObject({ type: "message", chat_id: "shell", content: "!pwd", turn_id: "bang", webui: true, user_shell: true });
+    socket.fakeMessage({ event: "message_accepted", chat_id: "shell", turn_id: "bang", starts_turn: false, active_turn_id: "agent", started_at: 12_345 });
+    await expect(pending).resolves.toBeUndefined();
+    socket.fakeMessage({ event: "message", chat_id: "shell", turn_id: "bang", text: "Exit code: 0" });
+    expect(client.getRunState("shell")).toEqual(run);
+    socket.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    lastSocket().fakeOpen();
+    expect(lastSocket().sent.map((frame) => JSON.parse(frame)).filter((frame) => frame.type === "message")).toEqual([]);
+    client.close();
+  });
+
+  it.each(["disconnected", "write failure"])("does not queue a failed bang command for reconnect: %s", async (failure) => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    if (failure === "write failure") {
+      socket.fakeOpen();
+      vi.spyOn(socket, "send").mockImplementationOnce(() => { throw new Error("send failed"); });
+    }
+    await expect(client.sendUserShellCommand("shell", "!pwd", { turnId: "bang" })).rejects.toThrow();
+    expect(client.getRunState("shell").active).toBe(false);
+    socket.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    lastSocket().fakeOpen();
+    expect(lastSocket().sent.map((frame) => JSON.parse(frame)).filter((frame) => frame.type === "message")).toEqual([]);
+    client.close();
+  });
+
+  it("reports a gateway-rejected bang command to its receipt waiter", async () => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    const pending = client.sendUserShellCommand("shell", "!pwd", { turnId: "bang" });
+    socket.fakeMessage({ event: "error", chat_id: "shell", turn_id: "bang", detail: "workspace_scope_rejected", reason: "Workspace unavailable" });
+    await expect(pending).rejects.toThrow("Workspace unavailable");
+    client.close();
+  });
+
   it("does not register injected guidance as an independently unsettled run", () => {
     const client = new NanobotClient({
       url: "ws://test",

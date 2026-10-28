@@ -12,10 +12,12 @@ import { useTranslation } from "react-i18next";
 import { DisclosureContent } from "@/components/ui/disclosure";
 
 import { AttachmentTile } from "@/components/AttachmentTile";
+import { CodeBlock } from "@/components/CodeBlock";
 import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { FallbackResponseSources } from "@/components/ResponseSourceBadge";
 import { ImageGallery } from "@/components/ImageGallery";
 import { InlineImageProvider, useInlineImages } from "@/components/InlineImageContext";
+import { INLINE_REFERENCE_HIGHLIGHT_COLOR, InlineTokenHighlight } from "@/components/InlineTokenHighlight";
 import { MarkdownText } from "@/components/MarkdownText";
 import { SlashCommandText } from "@/components/SlashCommandText";
 import { ReasoningRow } from "@/components/thread/activity/ReasoningRow";
@@ -106,6 +108,7 @@ function useMessageCopy(content: string) {
 }
 
 function messageCopyContent(message: UIMessage, t: (key: string) => string) {
+  if (message.renderAs === "text") return message.content;
   return message.role === "assistant" && message.compactReply === "empty"
     ? t("thread.compaction.empty")
     : message.role === "assistant" && message.compactReply === "failed"
@@ -452,7 +455,16 @@ export function MessageBubble({
       message.deliveryStatus === "sending" || message.deliveryStatus === "failed";
     const quotedContext = parsedMessage.quotedContext;
     const slashCommand = matchingSlashCommand(userContent, slashCommands);
-    const messageText = slashCommand ? (
+    const bangPrefix = /^(\s*)!/.exec(userContent);
+    const messageText = bangPrefix ? (
+      <>
+        {bangPrefix[1]}
+        <InlineTokenHighlight testId="message-shell-prefix" className="font-normal" color={INLINE_REFERENCE_HIGHLIGHT_COLOR}>
+          <span className="opacity-90">!</span>
+        </InlineTokenHighlight>
+        {userContent.slice(bangPrefix[0].length)}
+      </>
+    ) : slashCommand ? (
       <>
         <SlashCommandText command={slashCommand.command} />
         <UserMessageText
@@ -515,11 +527,7 @@ export function MessageBubble({
     );
   }
 
-  const assistantContent = message.compactReply === "empty"
-    ? t("thread.compaction.empty")
-    : message.compactReply === "failed"
-      ? t("thread.compaction.failed")
-      : message.content;
+  const assistantContent = messageCopyContent(message, t);
   const empty = assistantContent.trim().length === 0;
   const media = message.media ?? [];
   const reasoning = message.role === "assistant" ? message.reasoning ?? "" : "";
@@ -543,14 +551,18 @@ export function MessageBubble({
       ) : empty && message.isStreaming ? null : (
         <InlineImageProvider>
           <div data-assistant-selectable={message.isStreaming ? undefined : "true"}>
-            {/* A mode switch rebuilds Streamdown's subtree and moves the scroll anchor. */}
-            <MarkdownText
-              streaming={!!message.isStreaming}
-              preserveStreamingLayout
-              onOpenFilePreview={onOpenFilePreview}
-            >
-              {assistantContent}
-            </MarkdownText>
+            {message.renderAs === "text" ? (
+              <CodeBlock language="text" code={assistantContent} highlight={false} ansi={false} />
+            ) : (
+              /* A mode switch rebuilds Streamdown's subtree and moves the scroll anchor. */
+              <MarkdownText
+                streaming={!!message.isStreaming}
+                preserveStreamingLayout
+                onOpenFilePreview={onOpenFilePreview}
+              >
+                {assistantContent}
+              </MarkdownText>
+            )}
           </div>
           {media.length > 0 ? <MessageMedia media={media} align="left" /> : null}
         </InlineImageProvider>

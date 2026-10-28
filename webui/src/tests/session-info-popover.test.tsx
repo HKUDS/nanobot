@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import { setAppLanguage } from "@/i18n";
@@ -34,6 +34,8 @@ function automationsResponse(jobs: unknown[]) {
 }
 
 describe("SessionInfoPopover", () => {
+  beforeAll(async () => { await import("@/components/settings/system/AutomationsSettings"); });
+
   beforeEach(async () => {
     await setAppLanguage("en");
     requestMutation.mockReset();

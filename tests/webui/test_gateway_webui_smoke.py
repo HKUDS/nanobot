@@ -259,13 +259,15 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
             await ws.send(json.dumps({
                 "type": "message",
                 "chat_id": chat_id,
-                "content": "!printf shell-ok",
+                "content": "!echo shell-ok",
                 "webui": True,
                 "user_shell": True,
                 "turn_id": "shell-turn",
             }))
             shell = await _recv_until(ws, "message")
-            assert "shell-ok" in shell["text"]
+            assert shell["text"].splitlines()[0] == "shell-ok"
+            assert "Exit code: 0" in shell["text"]
+            assert shell["render_as"] == "text"
             assert shell["turn_id"] == "shell-turn"
             await _recv_until(ws, "turn_end")
 
@@ -286,8 +288,12 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
         ]
         assert "/model" in contents
         assert any("Current model: `custom/smoke-model`" in text for text in contents)
-        assert "!printf shell-ok" in contents
-        assert any("shell-ok" in text for text in contents)
+        assert "!echo shell-ok" in contents
+        assert shell["text"] in contents
+        [shell_history] = [event for event in thread["events"] if event.get("event") == "message"
+                           and event.get("turn_id") == "shell-turn"]
+        assert shell_history["text"] == shell["text"]
+        assert shell_history["render_as"] == shell["render_as"]
     finally:
         _stop_gateway(process)
 

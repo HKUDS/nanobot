@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChatList } from "@/components/ChatList";
@@ -806,8 +806,114 @@ describe("ChatList", () => {
       { key: "websocket:root", label: "Root topic" },
       { key: "websocket:child", label: "Research pane" },
       { key: "websocket:target", label: "Target tab" },
-    ]);
+    ], expect.any(Function));
+    expect(screen.getByText("3 selected")).toBeInTheDocument();
+    act(() => onRequestDeleteMany.mock.calls[0][1](true));
     expect(screen.queryByTestId("delete-selection-bar")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { archivedKeys: [], action: "Archive", archive: true },
+    { archivedKeys: ["websocket:root", "websocket:child"], action: "Unarchive", archive: false },
+    { archivedKeys: ["websocket:child"], action: "Archive", archive: true },
+  ])("confirms $action for selected panes without toggling mixed archive states", async ({ archivedKeys, action, archive }) => {
+    const onArchiveMany = vi.fn();
+    render(<ChatList
+      sessions={[session({ chatId: "root", title: "Root topic" })]}
+      activeKey="websocket:root"
+      paneGroups={{
+        "websocket:root": {
+          tabKey: "websocket:root",
+          title: "Root topic",
+          activePaneKey: "websocket:root",
+          panes: [
+            { key: "websocket:root", chatId: "root", title: "Root topic" },
+            { key: "websocket:child", chatId: "child", title: "Research pane" },
+          ],
+        },
+      }}
+      archivedPaneKeys={archivedKeys}
+      onSelect={vi.fn()}
+      onRequestDelete={vi.fn()}
+      onTogglePin={vi.fn()}
+      onRequestRename={vi.fn()}
+      onToggleArchive={vi.fn()}
+      onArchiveMany={onArchiveMany}
+    />);
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Root topic pane actions" }), { button: 0 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
+    fireEvent.click(screen.getByRole("button", { name: "Group: Root topic" }));
+    const bar = screen.getByTestId("delete-selection-bar");
+    fireEvent.click(within(bar).getByRole("button", { name: action }));
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog).toHaveAccessibleName(`${action} 2 topics?`);
+    fireEvent.click(document.body);
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
+    expect(onArchiveMany).not.toHaveBeenCalled();
+    if (archive) fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    else fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Research pane" })).toHaveAttribute("aria-pressed", "true");
+    expect(onArchiveMany).not.toHaveBeenCalled();
+
+    fireEvent.click(within(bar).getByRole("button", { name: action }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: action }));
+    expect(onArchiveMany).toHaveBeenCalledTimes(1);
+    expect(onArchiveMany).toHaveBeenCalledWith(["websocket:root", "websocket:child"], archive);
+    expect(screen.queryByTestId("delete-selection-bar")).not.toBeInTheDocument();
+  });
+
+  it("disables batch archive when all topics are deselected", async () => {
+    render(<ChatList
+      sessions={[session({ chatId: "first", title: "First topic" })]}
+      activeKey={null}
+      onSelect={vi.fn()}
+      onRequestDelete={vi.fn()}
+      onTogglePin={vi.fn()}
+      onRequestRename={vi.fn()}
+      onToggleArchive={vi.fn()}
+      onArchiveMany={vi.fn()}
+    />);
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Topic actions for First topic" }), { button: 0 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
+    fireEvent.click(screen.getByRole("button", { name: "First topic" }));
+    expect(screen.getByRole("button", { name: "Archive" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();
+  });
+
+  it.each(["outside action", "list whitespace"])("exits selection from %s without consuming the click", async (target) => {
+    const outsideAction = vi.fn();
+    const onSelect = vi.fn();
+    const { container } = render(<>
+      <button onClick={outsideAction}>Outside action</button>
+      <ChatList
+        sessions={[session({ chatId: "first", title: "First topic" })]}
+        activeKey={null}
+        onSelect={onSelect}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+        onArchiveMany={vi.fn()}
+      />
+    </>);
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Topic actions for First topic" }), { button: 0 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "First topic" }));
+    expect(screen.getByText("0 selected")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "First topic" }));
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+    expect(onSelect).not.toHaveBeenCalled();
+
+    fireEvent.click(target === "outside action"
+      ? screen.getByRole("button", { name: "Outside action" })
+      : container.querySelector("[data-chat-list-content]")!);
+    expect(screen.queryByTestId("delete-selection-bar")).not.toBeInTheDocument();
+    expect(outsideAction).toHaveBeenCalledTimes(target === "outside action" ? 1 : 0);
+    fireEvent.click(screen.getByRole("button", { name: "First topic" }));
+    expect(onSelect).toHaveBeenCalledWith("websocket:first");
   });
 
   it("selects a contiguous session range with Shift-click", async () => {

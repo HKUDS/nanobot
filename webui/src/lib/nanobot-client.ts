@@ -766,6 +766,24 @@ export class NanobotClient {
     }
   }
 
+  async sendUserShellCommand(
+    chatId: string, content: string, options?: Parameters<NanobotClient["sendMessage"]>[3],
+  ): Promise<void> {
+    const turnId = options?.turnId ?? crypto.randomUUID();
+    try {
+      await this.receipts.wait(turnId, () => {
+        if (!this.sendMessage(chatId, content, undefined, { ...options, turnId, userShell: true, startsNewRun: false })) {
+          throw new Error("Shell command was not sent; draft retained");
+        }
+      });
+    } catch (error) {
+      this.applyRunEffects(this.runs.transition({ kind: "reject", chatId, turnId }));
+      this.emitError({ kind: "turn_rejected", chatId, turnId, detail: "message_rejected",
+        reason: error instanceof Error ? error.message : "Shell command send failed" });
+      throw error;
+    }
+  }
+
   sendMessage(
     chatId: string,
     content: string,
@@ -776,12 +794,14 @@ export class NanobotClient {
       sessionMentions?: SessionMention[];
       quotedContext?: string;
       intent?: "create_automation";
+      userShell?: boolean;
       workspaceScope?: WorkspaceScopePayload | null;
       turnId?: string;
       /** False for side-channel or injected messages that do not own a lifecycle. */
       startsNewRun?: boolean;
     },
   ): boolean {
+    if (options?.userShell && this.socket?.readyState !== WS_OPEN) return false;
     const temporary = this.temporaryChatIds.has(chatId);
     if (!temporary) this.knownChats.add(chatId);
     const frame: Outbound = {
@@ -796,6 +816,7 @@ export class NanobotClient {
         : {}),
       ...(options?.quotedContext?.trim() ? { quoted_context: options.quotedContext.trim() } : {}),
       ...(options?.intent === "create_automation" ? { intent: options.intent } : {}),
+      ...(options?.userShell ? { user_shell: true } : {}),
       ...(options?.workspaceScope ? { workspace_scope: options.workspaceScope } : {}),
       ...(options?.turnId ? { turn_id: options.turnId } : {}),
       webui: true,
@@ -819,6 +840,7 @@ export class NanobotClient {
         role: options.startsNewRun === false ? "supplement" : "candidate-owner",
       }));
     }
+    if (options?.userShell) return this.rawSend(frame);
     this.queueSend(frame);
     return true;
   }
@@ -1285,8 +1307,8 @@ export class NanobotClient {
     return new TextEncoder().encode(JSON.stringify(frame)).byteLength <= this.maxFrameBytes;
   }
 
-  private rawSend(frame: Outbound): void {
-    if (!this.socket) return;
+  private rawSend(frame: Outbound): boolean {
+    if (!this.socket) return false;
     try {
       this.socket.send(JSON.stringify(frame));
       this.lastSocketMessageSend = null;
@@ -1297,9 +1319,11 @@ export class NanobotClient {
           this.lastSocketMessageSend = ref;
         }
       }
+      return true;
     } catch {
-      // Send failure will materialize as a close; queue the frame for retry.
-      this.sendQueue.push(frame);
+      // Shell commands require a new explicit submission, never reconnect replay.
+      if (frame.type !== "message" || !frame.user_shell) this.sendQueue.push(frame);
+      return false;
     }
   }
 

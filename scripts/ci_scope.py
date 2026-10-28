@@ -87,7 +87,7 @@ RULES = (
       "nanobot/cli/_macos_dock.py", "nanobot/cli/runtime_config.py", "nanobot/cli/webui.py", "nanobot/cli/webui_support.py",
       "nanobot/config/paths.py", "nanobot/utils/rotating_output.py",
       "nanobot/utils/atomic_file.py", "nanobot/utils/file_io.py", "nanobot/utils/runtime.py",
-      "nanobot/utils/restart.py", "nanobot/skills/update-setup/*"),
+      "nanobot/utils/restart.py"),
      PYTHON | DOCKER | NATIVE, "installed application lifecycle, update or runtime"),
     (("nanobot/*",), PYTHON | DOCKER, "Python production source"),
     (("tests/test_update*", "tests/test_windows_update*", "tests/test_release*",

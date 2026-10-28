@@ -24,6 +24,7 @@ for (const width of [360, 1024]) {
     await expect(references.nth(1)).not.toContainText("…");
     // The last filename stays inside the clipping viewport, without reversing text direction.
     const filename = longPath.locator(".font-semibold");
+    await expect(filename).toHaveCSS("color", "rgb(3, 105, 161)");
     const tail = await filename.evaluate((element) => {
       const clip = element.parentElement!.parentElement!.getBoundingClientRect();
       const name = element.getBoundingClientRect();
@@ -33,6 +34,7 @@ for (const width of [360, 1024]) {
     expect(tail.right).toBeLessThanOrEqual(tail.clipRight + 1);
     await page.screenshot({ path: testInfo.outputPath("summary.png") });
     await longPath.hover();
+    await expect(filename).toHaveCSS("color", "rgb(7, 89, 133)");
     const hint = page.getByRole("tooltip");
     await expect(hint).toHaveText(longEditPath);
     const surface = page.locator('[data-radix-popper-content-wrapper] > [data-state="delayed-open"], [data-radix-popper-content-wrapper] > [data-state="instant-open"]');

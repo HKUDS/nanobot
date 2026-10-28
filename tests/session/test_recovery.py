@@ -739,10 +739,15 @@ async def test_dismiss_does_not_queue_work(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_model_failure_waits_across_restart_and_rejects_duplicate_continue(tmp_path: Path) -> None:
+@pytest.mark.parametrize("reply_preserved", [False, True])
+async def test_model_failure_waits_across_restart_and_rejects_duplicate_continue(
+    tmp_path: Path, reply_preserved: bool,
+) -> None:
     coordinator, bus, sessions = _coordinator(tmp_path)
     session = sessions.get_or_create("websocket:chat")
     session.messages = [{"role": "user", "content": "finish this"}]
+    if reply_preserved:
+        session.messages.append({"role": "assistant", "content": "saved reply", "_interrupted": True})
     _persist(sessions, session)
 
     await coordinator.turn_completed("websocket:chat", failure_kind="model", failure_error_kind="connection")
@@ -752,6 +757,11 @@ async def test_model_failure_waits_across_restart_and_rejects_duplicate_continue
     assert bus.inbound.empty()
     state = sessions.get_or_create("websocket:chat").metadata[RECOVERY_METADATA_KEY]
     assert state["failure_error_kind"] == "connection"
+    assert state.get("reply_preserved", False) is reply_preserved
+    from nanobot.session.recovery import recovery_state_from_metadata
+    public_state = recovery_state_from_metadata({RECOVERY_METADATA_KEY: state})
+    assert public_state is not None
+    assert public_state.get("reply_preserved", False) is reply_preserved
     assert state["status"] == "awaiting_user"
     payload = {"chat_id": "chat", "recovery_id": state["recovery_id"]}
     await coordinator.handle_action("continue", payload)

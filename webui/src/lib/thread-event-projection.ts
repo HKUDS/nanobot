@@ -1053,6 +1053,7 @@ export function projectThreadEvent(
       : undefined;
     const projected = {
       content: event.text,
+      ...(event.render_as === "text" ? { renderAs: event.render_as } : {}),
       ...(media?.length ? { media } : {}),
       ...(latencyMs !== undefined ? { latencyMs } : {}),
       ...(event.source ? { source: event.source } : {}),

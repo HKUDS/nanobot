@@ -1677,9 +1677,7 @@
     "showArchived": "アーカイブ済みを表示",
     "hideArchived": "アーカイブ済みを隠す",
     "select": "選択",
-    "cancelSelection": "選択を解除",
     "selectedCount": "{{count}} 件を選択中",
-    "deleteSelected": "削除",
     "delete": "削除",
     "newChat": "新しいトピック",
     "groups": {
@@ -1691,6 +1689,14 @@
       "earlier": "以前",
       "archived": "アーカイブ済み"
     }
+  },
+  "archiveConfirm": {
+    "title": "このトピックをアーカイブしますか？",
+    "titleMany": "{{count}} 件のトピックをアーカイブしますか？",
+    "unarchiveTitle": "このトピックのアーカイブを解除しますか？",
+    "unarchiveTitleMany": "{{count}} 件のトピックのアーカイブを解除しますか？",
+    "description": "会話履歴は保持され、いつでもアーカイブを解除できます。",
+    "unarchiveDescription": "これらのトピックがサイドバーに再表示されます。"
   },
   "deleteConfirm": {
     "title": "このチャットを削除しますか？",
@@ -1893,6 +1899,10 @@
       "removeQuotedContext": "引用を削除",
       "modelNotConfigured": "モデルが未設定です",
       "configureModel": "モデルを設定",
+      "shell": {
+        "run": "Shell コマンドを実行",
+        "removeContext": "コマンドを実行する前に、添付ファイルと引用テキストを削除してください。"
+      },
       "chooseAI": "モデルを選択",
       "switchModel": "モデルを切り替え",
       "manageModels": "プリセット管理",
@@ -2101,7 +2111,7 @@
     "actions": "メッセージ操作",
     "streaming": "生成中",
     "delivery": {
-      "sending": "送信中…",
+      "sending": "送信中",
       "failed": "未送信"
     },
     "assistantTyping": "アシスタントが入力中",
@@ -2307,8 +2317,9 @@
     "retryRateLimit": "リクエスト制限に達しました",
     "retryServer": "モデルを利用できません",
     "retryUnknown": "モデルリクエストに失敗しました",
-    "retryWaiting": "{{error}}, {{seconds}}秒後に再試行, 試行 {{attempt}}",
-    "retryExhausted": "{{error}}, ターンを終了します",
+    "retryWaiting": "{{error}} {{seconds}}秒後に再試行",
+    "retrying": "{{error}} 再試行中",
+    "retryExhausted": "{{error}} ターンを終了します",
     "cliActivityRunningOne": "{{name}} を使用中",
     "cliActivityRanOne": "{{name}} を使用しました",
     "cliActivityFailedOne": "{{name}} を使用できませんでした",
@@ -2329,6 +2340,7 @@
     "failedHelp": "保存されたタスクを安全に復元できませんでした。続行前に確認してください。",
     "resuming": "中断されたタスクを復元しています…",
     "review": "続行する前にタスクを確認してください。ツールは自動的に再実行されません。",
+    "replyPreserved": "返信は保存されています。生成を続けられます。",
     "safeResume": "保存された会話コンテキストから続行しています。",
     "dismiss": "閉じる",
     "continue": "続行"
@@ -2453,7 +2465,7 @@
       "authenticationBody": "モデル設定で再度ログインするか、API キーを確認してください。",
       "billingTitle": "モデルプロバイダーの利用枠を使用できません",
       "billingBody": "プロバイダーアカウントにクレジットを追加するか、請求状況を確認してから、もう一度お試しください。",
-      "connectionTitle": "モデルプロバイダーに接続できません",
+      "connectionTitle": "モデル接続エラー",
       "timeoutTitle": "モデルプロバイダーへのリクエストがタイムアウトしました",
       "rateLimitTitle": "モデルプロバイダーのリクエスト上限に達しました",
       "serverTitle": "モデルプロバイダーでサービスエラーが発生しました",

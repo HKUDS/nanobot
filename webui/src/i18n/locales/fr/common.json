@@ -1677,9 +1677,7 @@
     "showArchived": "Afficher les archives",
     "hideArchived": "Masquer les archives",
     "select": "Sélectionner",
-    "cancelSelection": "Annuler la sélection",
     "selectedCount": "{{count}} sélectionnés",
-    "deleteSelected": "Supprimer",
     "delete": "Supprimer",
     "newChat": "Nouveau sujet",
     "groups": {
@@ -1691,6 +1689,14 @@
       "earlier": "Plus anciens",
       "archived": "Archivés"
     }
+  },
+  "archiveConfirm": {
+    "title": "Archiver ce sujet ?",
+    "titleMany": "Archiver {{count}} sujets ?",
+    "unarchiveTitle": "Désarchiver ce sujet ?",
+    "unarchiveTitleMany": "Désarchiver {{count}} sujets ?",
+    "description": "Les conversations sont conservées. Vous pouvez les désarchiver à tout moment.",
+    "unarchiveDescription": "Ces sujets réapparaîtront dans la barre latérale."
   },
   "deleteConfirm": {
     "title": "Supprimer cette discussion ?",
@@ -1893,6 +1899,10 @@
       "removeQuotedContext": "Retirer la citation",
       "modelNotConfigured": "Modèle non configuré",
       "configureModel": "Configurer le modèle",
+      "shell": {
+        "run": "Exécuter une commande Shell",
+        "removeContext": "Retirez les pièces jointes et le texte cité avant d’exécuter une commande."
+      },
       "chooseAI": "Choisir le modèle",
       "switchModel": "Changer de modèle",
       "manageModels": "Gérer les préréglages",
@@ -2101,7 +2111,7 @@
     "actions": "Actions du message",
     "streaming": "en cours de génération",
     "delivery": {
-      "sending": "Envoi…",
+      "sending": "Envoi",
       "failed": "Non envoyé"
     },
     "assistantTyping": "L’assistant est en train d’écrire",
@@ -2307,8 +2317,9 @@
     "retryRateLimit": "Limite de requêtes atteinte",
     "retryServer": "Modèle indisponible",
     "retryUnknown": "Échec de la requête au modèle",
-    "retryWaiting": "{{error}}, nouvelle tentative dans {{seconds}} s, tentative {{attempt}}",
-    "retryExhausted": "{{error}}, fin du tour",
+    "retryWaiting": "{{error}} Nouvelle tentative dans {{seconds}} s",
+    "retrying": "{{error}} Nouvelle tentative en cours",
+    "retryExhausted": "{{error}} Fin du tour",
     "cliActivityRunningOne": "Utilisation de {{name}}",
     "cliActivityRanOne": "{{name}} utilisé",
     "cliActivityFailedOne": "Impossible d’utiliser {{name}}",
@@ -2329,6 +2340,7 @@
     "failedHelp": "La tâche enregistrée n’a pas pu être restaurée en toute sécurité. Vérifiez-la avant de continuer.",
     "resuming": "Restauration de la tâche interrompue…",
     "review": "Vérifiez la tâche avant de continuer. Les outils ne seront pas relancés automatiquement.",
+    "replyPreserved": "La réponse est enregistrée. Vous pouvez continuer.",
     "safeResume": "Reprise depuis le contexte de conversation enregistré.",
     "dismiss": "Ignorer",
     "continue": "Continuer"
@@ -2453,7 +2465,7 @@
       "authenticationBody": "Reconnectez-vous ou vérifiez la clé API dans les paramètres du modèle.",
       "billingTitle": "Quota du fournisseur du modèle indisponible",
       "billingBody": "Ajoutez du crédit ou vérifiez la facturation du compte fournisseur, puis réessayez.",
-      "connectionTitle": "Impossible de se connecter au fournisseur du modèle",
+      "connectionTitle": "Échec de connexion au modèle",
       "timeoutTitle": "La requête au fournisseur du modèle a expiré",
       "rateLimitTitle": "Limite de requêtes du fournisseur du modèle atteinte",
       "serverTitle": "Erreur du service du fournisseur du modèle",

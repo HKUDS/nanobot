@@ -1,6 +1,6 @@
 [project]
 name = "nanobot-ai"
-version = "0.3.5"
+version = "0.4.0"
 description = "A lightweight personal AI assistant framework"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
@@ -41,7 +41,7 @@ dependencies = [
     "lxml-html-clean>=0.4.0,<1.0.0",
     "rich>=14.0.0,<15.0.0",
     "qrcode[pil]>=8.0",
-    "pillow>=11.0,<13.0",
+    "pillow>=13.0.0,<14.0.0",
     "croniter>=6.0.0,<7.0.0",
     "prompt-toolkit>=3.0.52,<4.0.0",
     "setproctitle>=1.3.7,<2.0.0; sys_platform != 'win32'",
@@ -52,7 +52,7 @@ dependencies = [
     "openai>=2.8.0",
     "tiktoken>=0.12.0,<1.0.0",
     "jinja2>=3.1.0,<4.0.0",
-    "dulwich>=0.24.0,<1.0.0",
+    "dulwich>=1.2.20,<2.0.0",
     "rapidfuzz>=3.14.6,<4.0.0",
     "pyyaml>=6.0,<7.0.0",
     "filelock>=3.25.2",
@@ -61,7 +61,7 @@ dependencies = [
     "tzdata>=2025.2",
     "tzlocal>=5.3.1,<6.0.0",
     "defusedxml>=0.7.1,<1.0.0",
-    "pypdf>=5.0.0,<6.0.0",
+    "pypdf>=6.21.3,<7.0.0",
     "python-docx>=1.1.0,<2.0.0",
     "openpyxl>=3.1.0,<4.0.0",
     "python-pptx>=1.0.0,<2.0.0",
@@ -81,7 +81,7 @@ bedrock = [
 documents = [
     # Compatibility extra: document readers are bundled since v0.2.3.
     "defusedxml>=0.7.1,<1.0.0",
-    "pypdf>=5.0.0,<6.0.0",
+    "pypdf>=6.21.3,<7.0.0",
     "python-docx>=1.1.0,<2.0.0",
     "openpyxl>=3.1.0,<4.0.0",
     "python-pptx>=1.0.0,<2.0.0",
@@ -91,7 +91,7 @@ langfuse = [
 ]
 pdf = [
     # Compatibility extra: PDF reading is bundled since v0.2.3.
-    "pypdf>=5.0.0,<6.0.0",
+    "pypdf>=6.21.3,<7.0.0",
 ]
 olostep = [
     "olostep>=0.1.0; python_version < '3.14'",
@@ -108,7 +108,7 @@ dev = [
     "basedpyright>=1.39.0,<2.0.0",
     "setproctitle>=1.3.7,<2.0.0",
     "pymupdf>=1.25.0",
-    "pypdf>=5.0.0,<6.0.0",
+    "pypdf>=6.21.3,<7.0.0",
     "python-docx>=1.1.0,<2.0.0",
     "openpyxl>=3.1.0,<4.0.0",
     "python-pptx>=1.0.0,<2.0.0",

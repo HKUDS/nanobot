@@ -502,6 +502,8 @@ describe("gateway protocol", () => {
         starts_turn: true,
         media_urls: [{ kind: "file", url: "/api/media/sig/file", name: "report.pdf" }],
       },
+      { event: "message", chat_id: "one", text: "  __pycache__ `ticks`\n", render_as: "text" },
+      { event: "message", chat_id: "one", text: "**Markdown reply**" },
       { event: "delta", chat_id: "one", text: "hello" },
       { event: "stream_end", chat_id: "one", resuming: false },
       { event: "turn_end", chat_id: "one", latency_ms: 12 },
@@ -522,6 +524,10 @@ describe("gateway protocol", () => {
         socket.emit("message", { data: JSON.stringify(frame) })
       }
       expect(delivered).toEqual(frames)
+      socket.emit("message", { data: JSON.stringify({
+        event: "message", chat_id: "one", text: "**Markdown reply**", render_as: true,
+      }) })
+      expect(delivered.at(-1)).toEqual({ event: "message", chat_id: "one", text: "**Markdown reply**" })
     } finally {
       client.close()
       Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })

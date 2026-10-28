@@ -20,8 +20,11 @@ from pydantic import Field, PrivateAttr, field_validator, model_validator
 from websockets.asyncio.server import Server, ServerConnection, serve, unix_serve
 from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest
+from websockets.http11 import Response as WsResponse
+from websockets.protocol import CONNECTING
 
 from nanobot.bus.events import (
+    INBOUND_META_USER_SHELL,
     OUTBOUND_META_AGENT_UI,
     OutboundMessage,
 )
@@ -704,6 +707,20 @@ class WebSocketChannel(BaseChannel):
         ) -> Any:
             return await self._dispatch_http(connection, request)
 
+        def process_response(
+            connection: ServerConnection, _request: WsRequest, response: WsResponse,
+        ) -> WsResponse:
+            # Stay synchronous: websockets sends immediately after this hook returns.
+            if connection.state is not CONNECTING:
+                exc = connection.protocol.handshake_exc
+                if exc is not None:
+                    connection.logger.error(
+                        "opening handshake failed", exc_info=(type(exc), exc, exc.__traceback__),
+                    )
+                # The request callback finished; cancel only this connection's handshake.
+                raise asyncio.CancelledError("Peer disconnected before handshake response")
+            return response
+
         async def handler(connection: ServerConnection) -> None:
             await self._connection_loop(connection)
 
@@ -744,6 +761,7 @@ class WebSocketChannel(BaseChannel):
                             handler,
                             socket_path,
                             process_request=process_request,
+                            process_response=process_response,
                             create_connection=bridge.connection_factory,
                             open_timeout=_WEBUI_HTTP_OPEN_TIMEOUT_S,
                             max_size=self.config.max_message_bytes,
@@ -759,6 +777,7 @@ class WebSocketChannel(BaseChannel):
                             self.config.host,
                             self.config.port,
                             process_request=process_request,
+                            process_response=process_response,
                             create_connection=bridge.connection_factory,
                             open_timeout=_WEBUI_HTTP_OPEN_TIMEOUT_S,
                             max_size=self.config.max_message_bytes,
@@ -1235,12 +1254,15 @@ class WebSocketChannel(BaseChannel):
         """Serialize one ordinary outbound message selected by the projector."""
         conns = list(self._subs.get(msg.chat_id, ()))
         text = msg.content
-        wire_text = self._media.rewrite_local_markdown_images(text)
+        user_shell = msg.metadata.get(INBOUND_META_USER_SHELL) is True
+        wire_text = text if user_shell else self._media.rewrite_local_markdown_images(text)
         payload: dict[str, Any] = {
             "event": "message",
             "chat_id": msg.chat_id,
             "text": wire_text,
         }
+        if user_shell:
+            payload["render_as"] = "text"
         turn_id = msg.metadata.get(WEBUI_TURN_METADATA_KEY)
         if isinstance(turn_id, str) and turn_id:
             payload["turn_id"] = turn_id

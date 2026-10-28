@@ -1691,9 +1691,7 @@
     "showArchived": "Mostrar arquivadas",
     "hideArchived": "Ocultar arquivadas",
     "select": "Selecionar",
-    "cancelSelection": "Cancelar seleção",
     "selectedCount": "{{count}} selecionados",
-    "deleteSelected": "Excluir",
     "delete": "Excluir",
     "newChat": "Novo tópico",
     "groups": {
@@ -1705,6 +1703,14 @@
       "earlier": "Anteriores",
       "archived": "Arquivadas"
     }
+  },
+  "archiveConfirm": {
+    "title": "Arquivar este tópico?",
+    "titleMany": "Arquivar {{count}} tópicos?",
+    "unarchiveTitle": "Desarquivar este tópico?",
+    "unarchiveTitleMany": "Desarquivar {{count}} tópicos?",
+    "description": "As conversas são mantidas. Você pode desarquivá-las a qualquer momento.",
+    "unarchiveDescription": "Estes tópicos voltarão à barra lateral."
   },
   "deleteConfirm": {
     "title": "Excluir esta conversa?",
@@ -1907,6 +1913,10 @@
       "removeQuotedContext": "Remover citação",
       "modelNotConfigured": "Modelo não configurado",
       "configureModel": "Configurar modelo",
+      "shell": {
+        "run": "Executar comando Shell",
+        "removeContext": "Remova os anexos e o texto citado antes de executar um comando."
+      },
       "chooseAI": "Escolher modelo",
       "switchModel": "Trocar modelo",
       "manageModels": "Gerenciar presets",
@@ -2115,7 +2125,7 @@
     "actions": "Ações da mensagem",
     "streaming": "transmitindo",
     "delivery": {
-      "sending": "Enviando…",
+      "sending": "Enviando",
       "failed": "Não enviada"
     },
     "assistantTyping": "Assistente está digitando",
@@ -2293,8 +2303,9 @@
     "retryRateLimit": "Limite de solicitações atingido",
     "retryServer": "Modelo indisponível",
     "retryUnknown": "Falha na solicitação ao modelo",
-    "retryWaiting": "{{error}}, tentando novamente em {{seconds}} s, tentativa {{attempt}}",
-    "retryExhausted": "{{error}}, encerrando o turno",
+    "retryWaiting": "{{error}} Tentando novamente em {{seconds}} s",
+    "retrying": "{{error}} Tentando novamente",
+    "retryExhausted": "{{error}} Encerrando o turno",
     "cliActivityRunningOne": "Usando {{name}}",
     "cliActivityRanOne": "Usou {{name}}",
     "cliActivityFailedOne": "Não foi possível usar {{name}}",
@@ -2343,6 +2354,7 @@
     "failedHelp": "Não foi possível restaurar a tarefa salva com segurança. Revise-a antes de continuar.",
     "resuming": "Restaurando a tarefa interrompida…",
     "review": "Revise a tarefa antes de continuar. As ferramentas não serão executadas novamente de forma automática.",
+    "replyPreserved": "A resposta foi salva. Você pode continuar.",
     "safeResume": "Continuando a partir do contexto de conversa salvo.",
     "dismiss": "Descartar",
     "continue": "Continuar"
@@ -2467,7 +2479,7 @@
       "authenticationBody": "Entre novamente ou verifique a chave API nas configurações do modelo.",
       "billingTitle": "A cota do provedor do modelo está indisponível",
       "billingBody": "Adicione créditos ou verifique o faturamento da conta do provedor e tente novamente.",
-      "connectionTitle": "Não foi possível conectar ao provedor do modelo",
+      "connectionTitle": "Falha na conexão com o modelo",
       "timeoutTitle": "A solicitação ao provedor do modelo expirou",
       "rateLimitTitle": "Limite de solicitações do provedor do modelo atingido",
       "serverTitle": "Erro no serviço do provedor do modelo",

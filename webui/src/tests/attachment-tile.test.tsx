@@ -27,7 +27,7 @@ describe("attachment download cards", () => {
   it("changes a pending file to a download only after its URL arrives", () => {
     const attachment = { kind: "file" as const, name: "report.pdf" };
     const { rerender } = render(<AttachmentTile attachment={attachment} pending />);
-    expect(screen.getByText("Sending…")).toBeVisible();
+    expect(screen.getByText("Sending")).toBeVisible();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
 
     rerender(<AttachmentTile attachment={{ ...attachment, url: "/api/media/signed/report" }} />);

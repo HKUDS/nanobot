@@ -136,7 +136,7 @@ for (const width of [1024, 360]) {
       }
       await expect(files.nth(2).getByRole("link")).toHaveAccessibleName(chinese ? "下载 文件附件" : "Download File attachment");
       for (const [label, filename, status] of [
-        ["Pending attachment", "pending.zip", chinese ? "发送中…" : "Sending…"],
+        ["Pending attachment", "pending.zip", chinese ? "发送中" : "Sending"],
         ["Unavailable attachment", "unavailable.pdf", chinese ? "附件不可用" : "Attachment unavailable"],
       ]) {
         const region = page.getByRole("region", { name: label, exact: true });

@@ -337,24 +337,25 @@ function FoldedAgentActivity({
         : retryStatus?.error_kind === "server"
           ? t("message.retryServer", { defaultValue: "Model unavailable" })
           : t("message.retryUnknown", { defaultValue: "Model request failed" });
-  const retryAttempt = retryStatus?.max_attempts
-    ? `${retryStatus.attempt}/${retryStatus.max_attempts}`
-    : String(retryStatus?.attempt ?? "");
   const retrySeconds = retryStatus?.next_retry_at === undefined
     ? 0
     : Math.max(0, Math.ceil(retryStatus.next_retry_at - now / 1000));
   const activityLabel = retryStatus?.state === "exhausted"
     ? t("message.retryExhausted", {
         error: retryError,
-        defaultValue: "{{error}}. Ending turn.",
+        defaultValue: "{{error}} Ending turn",
       })
     : retryStatus?.state === "waiting"
-      ? t("message.retryWaiting", {
-          error: retryError,
-          seconds: retrySeconds,
-          attempt: retryAttempt,
-          defaultValue: "{{error}}. Retrying in {{seconds}}s (attempt {{attempt}}).",
-        })
+      ? retrySeconds > 0
+        ? t("message.retryWaiting", {
+            error: retryError,
+            seconds: retrySeconds,
+            defaultValue: "{{error}} Retrying in {{seconds}}s",
+          })
+        : t("message.retrying", {
+            error: retryError,
+            defaultValue: "{{error}} Retrying",
+          })
       : isTurnStreaming
     ? t("message.activityWorkingFor", {
         duration: activityDuration,

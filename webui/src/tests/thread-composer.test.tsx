@@ -2626,6 +2626,24 @@ describe("ThreadComposer", () => {
     expect(onSend).toHaveBeenCalledWith(text, undefined, undefined);
   });
 
+  it("highlights only the leading bang with the skill-reference color and preserves literal command text", () => {
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} />);
+    const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "$workflow " } });
+    const referenceColor = screen.getByTestId("composer-skill-reference-workflow").style.color;
+    const command = '  !echo "hello! $workflow @typography"\nWrite-Output done';
+    fireEvent.change(input, { target: { value: command } });
+    const bang = screen.getByTestId("composer-shell-prefix");
+    expect(bang).toHaveTextContent(/^!$/);
+    expect(bang.style.color).toBe(referenceColor);
+    expect(input.previousElementSibling).toHaveAttribute("aria-hidden", "true");
+    expect(input.previousElementSibling?.textContent).toBe(command);
+    expect(input).toHaveValue(command);
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith(command.trim(), undefined, { sideChannel: true, userShell: true });
+  });
+
   it.each(["", "/history "])("mirrors inline references during composition without submitting the IME confirmation: %s", (prefix) => {
     const onSend = vi.fn();
     render(<ThreadComposer onSend={onSend} slashCommands={COMMANDS} />);
@@ -2719,8 +2737,8 @@ describe("ThreadComposer", () => {
             available: true,
           },
           {
-            name: "update-setup",
-            description: "One-time setup wizard",
+            name: "upload-files",
+            description: "Transfer local files",
             source: "builtin",
             available: true,
           },
@@ -2741,7 +2759,7 @@ describe("ThreadComposer", () => {
       .getAllByRole("option");
     expect(options.map((option) => option.textContent)).toEqual([
       "upExact match",
-      "update-setupOne-time setup wizard",
+      "upload-filesTransfer local files",
       "setup-updateConfigure upgrades",
       "skill-creatorCreate or update AgentSkills",
     ]);
@@ -2774,6 +2792,30 @@ describe("ThreadComposer", () => {
     expect(options[0]).toHaveTextContent("Recent");
   });
 
+  it("shows session handles without an icon and preserves app icons after their identifiers", () => {
+    render(<ThreadComposer
+      onSend={vi.fn()}
+      sessions={[session("pricing", "Pricing", "", "bime")]}
+      cliApps={CLI_APPS}
+      mcpPresets={MCP_PRESETS}
+    />);
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
+
+    const conversation = screen.getByRole("option", { name: /@bime Pricing/i });
+    const app = screen.getByRole("option", { name: /@gimp GIMP/i });
+    const mcp = screen.getByRole("option", { name: /@browserbase Browserbase/i });
+    expect(conversation.children[0]).toHaveTextContent("@bime");
+    expect(conversation.children[1]).toHaveTextContent("Pricing");
+    expect(conversation.querySelector('[data-product-icon="conversation"]')).not.toBeInTheDocument();
+    expect(app.children[0]).toHaveTextContent("@gimp");
+    expect(app.children[1].querySelector("img")).toHaveAttribute("src", CLI_APPS[0].logo_url);
+    expect(app.children[1]).toHaveTextContent("GIMP");
+    expect(mcp.children[0]).toHaveTextContent("@browserbase");
+    expect(mcp.children[1].querySelector("img")).toHaveAttribute("src", MCP_PRESETS[0].logo_url);
+    expect(mcp.children[1]).toHaveTextContent("Browserbase");
+  });
+
   it("shows right-side source badges so users can distinguish CLI apps from MCP servers", () => {
     render(
       <ThreadComposer
@@ -2789,8 +2831,8 @@ describe("ThreadComposer", () => {
 
     expect(screen.queryByText("CLI Apps")).not.toBeInTheDocument();
     expect(screen.queryByText("MCP servers")).not.toBeInTheDocument();
-    const gimp = screen.getByRole("option", { name: /GIMP @gimp .* CLI/i });
-    const browserbase = screen.getByRole("option", { name: /Browserbase @browserbase .* MCP/i });
+    const gimp = screen.getByRole("option", { name: /@gimp GIMP .* CLI/i });
+    const browserbase = screen.getByRole("option", { name: /@browserbase Browserbase .* MCP/i });
     // Reuse the app's 44px coarse-pointer targets without changing desktop density.
     expect(gimp).toHaveClass("touch-target");
     expect(browserbase).toHaveClass("touch-target");
@@ -3241,6 +3283,98 @@ describe("ThreadComposer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(onSend).toHaveBeenCalledWith("Draw a friendly robot", undefined, undefined);
+  });
+
+  it.each(["!pwd", "  ! pwd  ", "!Write-Output first\nWrite-Output second", "!"])("runs bang input directly without a configured model: %s", (command) => {
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} modelNeedsSetup />);
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: command } });
+    fireEvent.click(screen.getByRole("button", { name: "Run Shell command" }));
+
+    expect(onSend).toHaveBeenCalledWith(command.trim(), undefined, { sideChannel: true, userShell: true });
+    expect(input).toHaveValue("");
+  });
+
+  it("keeps bang commands separate from pending guidance and the active turn", async () => {
+    const onSend = vi.fn();
+    const onStop = vi.fn();
+    const { rerender } = render(<ThreadComposer onSend={onSend} onStop={onStop} isStreaming />);
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "waiting guidance" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: "!pwd" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onSend).toHaveBeenCalledOnce();
+    expect(onSend).toHaveBeenCalledWith("!pwd", undefined, { sideChannel: true, userShell: true });
+    expect(within(screen.getByRole("group", { name: "Waiting to send" })).getByText("waiting guidance")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
+    expect(onStop).not.toHaveBeenCalled();
+
+    rerender(<ThreadComposer onSend={onSend} onStop={onStop} isStreaming={false} />);
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+    expect(onSend).toHaveBeenLastCalledWith("waiting guidance");
+  });
+
+  it.each(["!echo @gimp", "!echo $weather"])("keeps bang arguments literal instead of opening a mention or skill menu: %s", (command) => {
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} cliApps={CLI_APPS} skills={[{ name: "weather", description: "Weather", source: "builtin", available: true }]} />);
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: command, selectionStart: command.length } });
+    expect(input).toHaveValue(command);
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith(command, undefined, { sideChannel: true, userShell: true });
+  });
+
+  it("keeps exclamation marks inside ordinary messages on the chat path", () => {
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} />);
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "Please explain !pwd" } });
+    fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith("Please explain !pwd", undefined, undefined);
+  });
+
+  it("retains a bang draft when delivery is rejected without retrying it", async () => {
+    const onSend = vi.fn().mockRejectedValue(new Error("Shell send rejected"));
+    const { rerender } = render(<ThreadComposer onSend={onSend} />);
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "!pwd" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Shell send rejected"));
+    expect(input).toHaveValue("!pwd");
+    rerender(<ThreadComposer onSend={onSend} isStreaming={false} />);
+    expect(onSend).toHaveBeenCalledOnce();
+    expect(onSend).toHaveBeenCalledWith("!pwd", undefined, { sideChannel: true, userShell: true });
+  });
+
+  it("rejects attachments on bang input without losing the draft or attachment", async () => {
+    const onSend = vi.fn();
+    const { container } = render(<ThreadComposer onSend={onSend} />);
+    fireEvent.change(container.querySelector('input[type="file"]')!, {
+      target: { files: [new File(["image"], "photo.png", { type: "image/png" })] },
+    });
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "!pwd" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Run Shell command" })).toBeEnabled());
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByRole("alert")).toHaveTextContent("Remove attachments and quoted text before running a command.");
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input).toHaveValue("!pwd");
+    expect(screen.getByRole("button", { name: "Remove attachment" })).toHaveAttribute("aria-description", "photo.png");
+  });
+
+  it("rejects quoted context on bang input without clearing it", () => {
+    const onSend = vi.fn();
+    const onQuotedContextChange = vi.fn();
+    render(<ThreadComposer onSend={onSend} quotedContext="keep this quote" onQuotedContextChange={onQuotedContextChange} />);
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "!pwd" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByRole("alert")).toHaveTextContent("Remove attachments and quoted text before running a command.");
+    expect(input).toHaveValue("!pwd");
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onQuotedContextChange).not.toHaveBeenCalled();
   });
 
   it("marks known slash commands as side-channel sends", () => {

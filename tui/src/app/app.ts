@@ -770,7 +770,7 @@ export class NanobotTui {
             if (this.modelCommandTurns.delete(event.turn_id)) {
               void this.refreshSessionMetadata(event.chat_id)
             }
-            if (!silent) this.transcript.assistant(event.text)
+            if (!silent) this.transcript.assistant(event.text, event.render_as)
             if (!this.activeTurn) this.status.content = "Ready"
             return
           }
@@ -780,6 +780,8 @@ export class NanobotTui {
           this.activeLabel = event.kind === "tool_hint" ? "Working" : "Thinking"
           this.transcript.progress(event.text, event.tool_events)
           this.setActive(true)
+        } else if (event.render_as === "text") {
+          this.transcript.assistant(event.text, event.render_as)
         } else {
           this.finalMessage = event.text
         }

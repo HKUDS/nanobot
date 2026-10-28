@@ -942,6 +942,32 @@ def test_managed_background_hands_off_virtualenv_launcher_pid(tmp_path: Path) ->
         launcher.wait(timeout=3)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="requires Windows process identity APIs")
+def test_windows_identity_polling_reuses_pointer_types(tmp_path, monkeypatch):
+    import ctypes
+
+    pointer_types = set()
+    pointer = ctypes.POINTER
+
+    def record_pointer_type(cls):
+        result = pointer(cls)
+        pointer_types.add(result)
+        return result
+
+    monkeypatch.setattr(ctypes, "POINTER", record_pointer_type)
+    runtime = GatewayRuntime(paths=_paths(tmp_path))
+    pid = os.getpid()
+    identity = runtime.process_identity(pid)
+    assert isinstance(identity, str) and identity.isdecimal()
+    warmed_types = pointer_types.copy()
+
+    for _ in range(100):
+        assert runtime.process_identity(pid) == identity
+
+    # Fresh pointer types remain cached on Python versions before 3.14.
+    assert pointer_types == warmed_types
+
+
 def test_windows_process_probe_never_sends_ctrl_c(monkeypatch):
     monkeypatch.setattr(
         "nanobot.process_runtime._windows_process_identity",
