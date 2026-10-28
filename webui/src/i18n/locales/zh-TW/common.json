@@ -2111,7 +2111,7 @@
     "actions": "訊息操作",
     "streaming": "串流輸出中",
     "delivery": {
-      "sending": "傳送中…",
+      "sending": "傳送中",
       "failed": "未傳送"
     },
     "assistantTyping": "助理正在輸入",
@@ -2319,8 +2319,9 @@
     "retryRateLimit": "請求頻率受限",
     "retryServer": "模型服務無法使用",
     "retryUnknown": "模型請求失敗",
-    "retryWaiting": "{{error}}，{{seconds}} 秒後重試，第 {{attempt}} 次",
-    "retryExhausted": "{{error}}，正在結束本輪",
+    "retryWaiting": "{{error}} {{seconds}} 秒後重試",
+    "retrying": "{{error}} 正在重試",
+    "retryExhausted": "{{error}} 正在結束本輪",
     "cliActivityRunningMany": "正在使用 {{count}} 個 CLI 應用程式",
     "cliActivityRanMany": "已使用 {{count}} 個 CLI 應用程式",
     "cliActivityFailedMany": "{{count}} 個 CLI 應用程式失敗",
@@ -2339,6 +2340,7 @@
     "failedHelp": "無法安全復原已儲存的任務，繼續前請先檢查。",
     "resuming": "正在復原中斷的任務…",
     "review": "繼續前請檢查任務。工具不會自動重播。",
+    "replyPreserved": "回覆已保留，可繼續生成。",
     "safeResume": "正在從已儲存的對話上下文繼續。",
     "dismiss": "略過",
     "continue": "繼續"
@@ -2463,7 +2465,7 @@
       "authenticationBody": "請在模型設定中重新登入或檢查 API 金鑰。",
       "billingTitle": "模型供應商額度無法使用",
       "billingBody": "請為供應商帳戶儲值或檢查帳單狀態後再試。",
-      "connectionTitle": "無法連線至模型供應商",
+      "connectionTitle": "模型連線異常",
       "timeoutTitle": "模型供應商請求逾時",
       "rateLimitTitle": "模型供應商請求受到限制",
       "serverTitle": "模型供應商服務發生錯誤",

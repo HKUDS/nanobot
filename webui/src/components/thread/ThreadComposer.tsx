@@ -15,7 +15,6 @@ import {
   MemoryIcon,
   HelpIcon,
   HistoryIcon,
-  ConversationIcon,
   AttachIcon,
   RestartIcon,
   RestrictedAccessIcon,
@@ -3178,6 +3177,9 @@ function CliAppMentionPalette({
             {group.items.map(({ candidate, index }) => {
               const selected = index === selectedIndex;
               const name = candidate.name;
+              const handleColor = candidate.kind === "session"
+                ? candidate.mention.id ? sessionHandleColor(candidate.mention.id) : INLINE_TOKEN_HIGHLIGHT_COLOR
+                : undefined;
               const typeLabel = candidate.kind === "cli"
                 ? t("thread.composer.mentions.cliBadge")
                 : candidate.kind === "mcp"
@@ -3195,7 +3197,7 @@ function CliAppMentionPalette({
                   role="option"
                   data-palette-index={index}
                   aria-selected={selected}
-                  aria-label={`${candidate.displayName} @${name} ${ariaDescription} ${typeLabel}`}
+                  aria-label={`@${name} ${candidate.displayName} ${ariaDescription} ${typeLabel}`}
                   onMouseEnter={() => onHover(index)}
                   onMouseDown={(e) => {
                     e.preventDefault();
@@ -3204,33 +3206,39 @@ function CliAppMentionPalette({
                   className={cn(
                     floatingItemClassName,
                     floatingItemFocusClassName,
-                    "touch-target flex min-h-10 w-full items-center gap-2.5 px-2.5 py-1.5 text-left transition-colors",
+                    "touch-target flex min-h-10 w-full flex-wrap items-center gap-x-2.5 gap-y-1 px-2.5 py-1.5 text-left transition-colors",
                     selected
-                      ? "bg-foreground/[0.055] text-foreground"
+                      ? "bg-foreground/[0.055] text-foreground dark:bg-black/[0.12]"
                       : "text-foreground/90 hover:bg-foreground/[0.04]",
                   )}
                 >
-                  <MentionCandidateLogo candidate={candidate} selected={selected} />
-                  <span className="flex min-w-0 flex-1 items-baseline gap-2">
-                    <span className="min-w-0 truncate text-[15px] font-medium tracking-normal text-foreground">
+                  <span
+                    className="max-w-full shrink-0 truncate text-[15px] font-normal tracking-normal text-muted-foreground/72"
+                    style={{ color: handleColor }}
+                  >
+                    @{name}
+                  </span>
+                  <span className={cn(
+                    "flex max-w-full flex-1 flex-wrap items-center gap-x-2.5 gap-y-1",
+                    candidate.kind === "session" ? "min-w-[min(4rem,100%)]" : "min-w-[min(8rem,100%)]",
+                  )}>
+                    {candidate.kind !== "session" ? <MentionCandidateLogo candidate={candidate} selected={selected} /> : null}
+                    <span className="min-w-[min(4rem,100%)] flex-1 truncate text-[15px] font-medium tracking-normal text-foreground">
                       {candidate.displayName}
                     </span>
-                    <span className="truncate text-[15px] font-normal tracking-normal text-muted-foreground/72">
-                      @{name}
-                    </span>
+                    {candidate.kind !== "session" ? (
+                      <span
+                        className={cn(
+                          "ml-2 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold tracking-normal",
+                          candidate.kind === "cli"
+                            ? "bg-orange-500/10 text-orange-600 dark:text-orange-300"
+                            : "bg-sky-500/10 text-sky-600 dark:text-sky-300",
+                        )}
+                      >
+                        {typeLabel}
+                      </span>
+                    ) : null}
                   </span>
-                  {candidate.kind !== "session" ? (
-                    <span
-                      className={cn(
-                        "ml-2 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold tracking-normal",
-                        candidate.kind === "cli"
-                          ? "bg-orange-500/10 text-orange-600 dark:text-orange-300"
-                          : "bg-sky-500/10 text-sky-600 dark:text-sky-300",
-                      )}
-                    >
-                      {typeLabel}
-                    </span>
-                  ) : null}
                 </button>
               );
             })}
@@ -3245,28 +3253,13 @@ function MentionCandidateLogo({
   candidate,
   selected,
 }: {
-  candidate: MentionCandidate;
+  candidate: Extract<MentionCandidate, { kind: "cli" | "mcp" }>;
   selected: boolean;
 }) {
-  const color = candidate.kind === "session"
-    ? candidate.mention.id
-      ? sessionHandleColor(candidate.mention.id)
-      : INLINE_TOKEN_HIGHLIGHT_COLOR
-    : candidate.brandColor || INLINE_TOKEN_HIGHLIGHT_COLOR;
-  const rawLogoUrl = candidate.kind === "session" ? null : candidate.logoUrl;
-  const logoUrls = useMemo(() => logoFallbackUrls(rawLogoUrl), [rawLogoUrl]);
+  const color = candidate.brandColor || INLINE_TOKEN_HIGHLIGHT_COLOR;
+  const logoUrls = useMemo(() => logoFallbackUrls(candidate.logoUrl), [candidate.logoUrl]);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
 
-  if (candidate.kind === "session") {
-    return (
-      <span
-        className="flex h-5 w-5 shrink-0 items-center justify-center"
-        style={{ color }}
-      >
-        <ConversationIcon className="h-4 w-4" aria-hidden />
-      </span>
-    );
-  }
   if (logoUrl) {
     return (
       <span

@@ -100,7 +100,7 @@ export function FileReferenceChip({
                 "inline-flex max-w-full items-baseline gap-[0.28em] font-medium leading-[inherit]",
                 truncateFromStart && "min-w-0",
                 interactive
-                  ? "text-sky-600 transition-colors hover:text-sky-700 dark:text-sky-300 dark:hover:text-sky-200"
+                  ? "text-content-link transition-colors hover:text-content-link-hover"
                   : "text-muted-foreground",
                 interactive && [
                   "cursor-pointer rounded-compact",
@@ -121,7 +121,7 @@ export function FileReferenceChip({
                 {display === "path" && directory ? (
                   <>
                     <span className="text-muted-foreground">{directory}</span>
-                    <span className={cn("font-semibold", interactive && "text-sky-700 dark:text-sky-200")}>{name}</span>
+                    <span className="font-semibold">{name}</span>
                   </>
                 ) : (
                   displayText

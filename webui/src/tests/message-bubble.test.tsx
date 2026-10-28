@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import { MessageBlockMenuActions, MessageBubble } from "@/components/MessageBubble";
+import { preloadMarkdownText } from "@/components/MarkdownText";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { setAppLanguage } from "@/i18n";
 import { parseWebuiThreadPayload } from "@/lib/api";
@@ -110,6 +111,8 @@ function menuActions(root: ParentNode = document): HTMLElement {
 }
 
 describe("MessageBubble", () => {
+  beforeAll(preloadMarkdownText);
+
   it.each(["live", "paged history"] as const)("renders and copies literal output unchanged through %s, alongside ordinary Markdown", async (source) => {
     const raw = [
       "  Switched model preset to `raw`.",
@@ -421,7 +424,7 @@ describe("MessageBubble", () => {
 
     const { rerender } = render(<MessageBubble message={message} />);
 
-    expect(screen.getByRole("status")).toHaveTextContent("Sending…");
+    expect(screen.getByRole("status")).toHaveTextContent("Sending");
 
     rerender(<MessageBubble message={{ ...message, deliveryStatus: "accepted" }} />);
     expect(screen.queryByRole("status")).not.toBeInTheDocument();

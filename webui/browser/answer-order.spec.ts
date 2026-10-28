@@ -6,10 +6,10 @@ const turnId = "answer-order-turn";
 const source = { provider: "fixture", model: "fixture", preset: "fixture" };
 const base = { chat_id: chatId, turn_id: turnId };
 
-async function openThread(page: Page, events: ThreadProjectionEvent[] = []) {
+async function openThread(page: Page, events: ThreadProjectionEvent[] = [], locale = "en") {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.addInitScript(() => { localStorage.setItem("nanobot.locale", "en"); });
+  await page.addInitScript((language) => { localStorage.setItem("nanobot.locale", language); }, locale);
   await page.route("**/api/**", (route) => route.fulfill({ status: 404, json: {} }));
   await page.route("**/api/commands", (route) => route.fulfill({ json: { commands: [] } }));
   await page.route("**/api/sessions/*/webui-thread?*", (route) => {
@@ -46,10 +46,36 @@ async function expectAnswerOrder(page: Page) {
     .toBeLessThan(texts.findIndex((text) => text.includes("Later answer")));
 }
 
-for (const width of [1440, 390]) {
+for (const scenario of [
+  { locale: "en", width: 1440, waiting: /Connection failed Retrying in [1-9][0-9]*s/, retrying: "Connection failed Retrying" },
+  { locale: "zh-CN", width: 390, waiting: /连接失败 [1-9][0-9]* 秒后重试/, retrying: "连接失败 正在重试" },
+]) {
+  test(`shows retry progress in the live thread at ${scenario.width}px (${scenario.locale})`, async ({ page }, info) => {
+    await page.setViewportSize({ width: scenario.width, height: 900 });
+    await page.clock.install();
+    const { emit, errors } = await openThread(page, [], scenario.locale);
+    emit({ event: "user_message", ...base, text: "Retry fixture", starts_turn: true, active_turn_id: turnId });
+    await expect(page.getByText("Retry fixture", { exact: true })).toBeVisible();
+    emit(
+      { event: "goal_status", ...base, status: "running", started_at: Date.now() / 1000 },
+      { event: "retry_status", ...base, state: "waiting", attempt: 1, max_attempts: 4, error_kind: "connection", retry_after_s: 30 },
+    );
+    await expect(page.getByRole("status", { name: scenario.waiting })).toBeVisible();
+    await page.screenshot({ path: info.outputPath("retry-waiting.png") });
+    await page.clock.fastForward(30_000);
+    await expect(page.getByRole("status", { name: scenario.retrying, exact: true })).toBeVisible();
+    await page.screenshot({ path: info.outputPath("retry-status.png") });
+    emit({ event: "retry_status", ...base, state: "recovered", attempt: 2, max_attempts: 4, error_kind: "connection" });
+    await expect(page.getByRole("status", { name: scenario.retrying, exact: true })).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+}
+
+test.describe("answer order", () => {
+  test.use({ viewport: { width: 1440, height: 1000 } });
+
   for (const path of ["callback", "cached return"] as const) {
-    test(`keeps closed answer order through ${path} and textless streams at ${width}px`, async ({ page }, info) => {
-      await page.setViewportSize({ width, height: 1000 });
+    test(`keeps closed answer order through ${path} and textless streams`, async ({ page }, info) => {
       const { emit, errors } = await openThread(page);
       emit(
         { event: "goal_status", ...base, status: "running", started_at: 100 },
@@ -89,8 +115,7 @@ for (const width of [1440, 390]) {
     });
   }
 
-  test(`keeps hosted-tool answer segments after a cached return at ${width}px`, async ({ page }) => {
-    await page.setViewportSize({ width, height: 1000 });
+  test("keeps hosted-tool answer segments after a cached return", async ({ page }) => {
     const { emit, errors } = await openThread(page);
     emit(
       { event: "goal_status", ...base, status: "running", started_at: 100 },
@@ -117,36 +142,37 @@ for (const width of [1440, 390]) {
     expect(errors).toEqual([]);
   });
 
-  test(`replays legacy cumulative answers on both sides of a hosted tool at ${width}px`, async ({ page }) => {
-    await page.setViewportSize({ width, height: 1000 });
-    const { errors } = await openThread(page, [
-      { event: "stream_end", ...base, stream_id: "legacy", turn_seq: 2, text: "First ", resuming: true, merge_next: true },
-      { event: "message", ...base, turn_seq: 3, kind: "tool_hint", text: "web_search(query)" },
-      { event: "stream_end", ...base, stream_id: "legacy", turn_seq: 5, text: "First last" },
-      { event: "turn_end", ...base, turn_seq: 6 },
-    ]);
-    const first = page.getByText("First", { exact: true });
-    const last = page.getByText("last", { exact: true });
-    await expect(first).toHaveCount(1);
-    await expect(last).toHaveCount(1);
-    await expect(page.getByRole("button", { name: "Stop response" })).toHaveCount(0);
-    // Completed activity is folded into the answer block, not lost or still running.
-    const lastBlock = last.locator("xpath=ancestor::*[@data-thread-display-unit]");
-    await lastBlock.hover();
-    await lastBlock.getByRole("button", { name: "Message actions" }).click();
-    await page.locator("[data-message-block-activity-action]").click();
-    const tool = page.getByText(/Searched the web/).first();
-    await expect(tool).toBeVisible();
-    const [firstNode, lastNode] = await Promise.all([first.elementHandle(), last.elementHandle()]);
-    expect(await tool.evaluate((node, [before, after]) => (
-      !!(before.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)
-      && !!(node.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING)
-    ), [firstNode!, lastNode!])).toBe(true);
-    expect(errors).toEqual([]);
-  });
+  for (const width of [1440, 390]) {
+    test(`replays legacy cumulative answers on both sides of a hosted tool at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 1000 });
+      const { errors } = await openThread(page, [
+        { event: "stream_end", ...base, stream_id: "legacy", turn_seq: 2, text: "First ", resuming: true, merge_next: true },
+        { event: "message", ...base, turn_seq: 3, kind: "tool_hint", text: "web_search(query)" },
+        { event: "stream_end", ...base, stream_id: "legacy", turn_seq: 5, text: "First last" },
+        { event: "turn_end", ...base, turn_seq: 6 },
+      ]);
+      const first = page.getByText("First", { exact: true });
+      const last = page.getByText("last", { exact: true });
+      await expect(first).toHaveCount(1);
+      await expect(last).toHaveCount(1);
+      await expect(page.getByRole("button", { name: "Stop response" })).toHaveCount(0);
+      // Completed activity is folded into the answer block, not lost or still running.
+      const lastBlock = last.locator("xpath=ancestor::*[@data-thread-display-unit]");
+      await lastBlock.hover();
+      await lastBlock.getByRole("button", { name: "Message actions" }).click();
+      await page.locator("[data-message-block-activity-action]").click();
+      const tool = page.getByText(/Searched the web/).first();
+      await expect(tool).toBeVisible();
+      const [firstNode, lastNode] = await Promise.all([first.elementHandle(), last.elementHandle()]);
+      expect(await tool.evaluate((node, [before, after]) => (
+        !!(before.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)
+        && !!(node.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING)
+      ), [firstNode!, lastNode!])).toBe(true);
+      expect(errors).toEqual([]);
+    });
+  }
 
-  test(`keeps a rewritten image intact before a hosted tool at ${width}px`, async ({ page }, info) => {
-    await page.setViewportSize({ width, height: 1000 });
+  test("keeps a rewritten image intact before a hosted tool", async ({ page }, info) => {
     const { emit, errors } = await openThread(page);
     await page.route("**/api/media/**", (route) => route.fulfill({ contentType: "image/png", body: Buffer.from(
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j5hUAAAAASUVORK5CYII=", "base64",
@@ -177,8 +203,7 @@ for (const width of [1440, 390]) {
     expect(errors).toEqual([]);
   });
 
-  test(`resumes merge_next with cumulative HTTP snapshots at ${width}px`, async ({ page }) => {
-    await page.setViewportSize({ width, height: 1000 });
+  test("resumes merge_next with cumulative HTTP snapshots", async ({ page }) => {
     const events: ThreadProjectionEvent[] = [
       { event: "stream_end", ...base, stream_id: "answer", turn_seq: 2, text: "First ", resuming: true, merge_next: true, projection_id: "http-first" },
       { event: "reasoning_end", ...base, stream_id: "answer", turn_seq: 3, text: "More reasoning", projection_id: "http-reasoning" },
@@ -199,4 +224,4 @@ for (const width of [1440, 390]) {
     await expect(page.getByText("First last", { exact: true })).toHaveCount(0);
     expect(errors).toEqual([]);
   });
-}
+});

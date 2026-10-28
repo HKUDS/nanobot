@@ -102,6 +102,14 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --dev
 
+      # Feishu selects websockets<16. Check the default transport before the
+      # all-channel suite exercises the older compatible resolution.
+      - name: Test default WebSocket transport
+        run: >-
+          uv run --no-sync python -m pytest -q
+          nanobot/channels/websocket/tests/test_handshake_disconnect.py
+          nanobot/channels/websocket/tests/test_binary_http.py
+
       - name: Install channel dependencies
         run: uv run --no-sync python -m scripts.install_channel_dependencies --all-channels
 

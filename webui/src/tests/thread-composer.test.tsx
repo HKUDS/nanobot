@@ -2792,6 +2792,30 @@ describe("ThreadComposer", () => {
     expect(options[0]).toHaveTextContent("Recent");
   });
 
+  it("shows session handles without an icon and preserves app icons after their identifiers", () => {
+    render(<ThreadComposer
+      onSend={vi.fn()}
+      sessions={[session("pricing", "Pricing", "", "bime")]}
+      cliApps={CLI_APPS}
+      mcpPresets={MCP_PRESETS}
+    />);
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "@", selectionStart: 1 } });
+
+    const conversation = screen.getByRole("option", { name: /@bime Pricing/i });
+    const app = screen.getByRole("option", { name: /@gimp GIMP/i });
+    const mcp = screen.getByRole("option", { name: /@browserbase Browserbase/i });
+    expect(conversation.children[0]).toHaveTextContent("@bime");
+    expect(conversation.children[1]).toHaveTextContent("Pricing");
+    expect(conversation.querySelector('[data-product-icon="conversation"]')).not.toBeInTheDocument();
+    expect(app.children[0]).toHaveTextContent("@gimp");
+    expect(app.children[1].querySelector("img")).toHaveAttribute("src", CLI_APPS[0].logo_url);
+    expect(app.children[1]).toHaveTextContent("GIMP");
+    expect(mcp.children[0]).toHaveTextContent("@browserbase");
+    expect(mcp.children[1].querySelector("img")).toHaveAttribute("src", MCP_PRESETS[0].logo_url);
+    expect(mcp.children[1]).toHaveTextContent("Browserbase");
+  });
+
   it("shows right-side source badges so users can distinguish CLI apps from MCP servers", () => {
     render(
       <ThreadComposer
@@ -2807,8 +2831,8 @@ describe("ThreadComposer", () => {
 
     expect(screen.queryByText("CLI Apps")).not.toBeInTheDocument();
     expect(screen.queryByText("MCP servers")).not.toBeInTheDocument();
-    const gimp = screen.getByRole("option", { name: /GIMP @gimp .* CLI/i });
-    const browserbase = screen.getByRole("option", { name: /Browserbase @browserbase .* MCP/i });
+    const gimp = screen.getByRole("option", { name: /@gimp GIMP .* CLI/i });
+    const browserbase = screen.getByRole("option", { name: /@browserbase Browserbase .* MCP/i });
     // Reuse the app's 44px coarse-pointer targets without changing desktop density.
     expect(gimp).toHaveClass("touch-target");
     expect(browserbase).toHaveClass("touch-target");

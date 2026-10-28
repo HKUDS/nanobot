@@ -5207,7 +5207,7 @@ describe("ThreadShell", () => {
     });
 
     const banner = await screen.findByRole("alert");
-    expect(banner).toHaveTextContent("无法连接模型提供商");
+    expect(banner).toHaveTextContent("模型连接异常");
     expect(banner).toHaveTextContent(
       "已尝试 4 次，仍未成功。可稍后继续或切换模型。",
     );
@@ -5224,7 +5224,7 @@ describe("ThreadShell", () => {
         });
       });
       expect(screen.getAllByRole("alert")).toHaveLength(1);
-      expect(screen.getByRole("alert")).toHaveTextContent("无法连接模型提供商");
+      expect(screen.getByRole("alert")).toHaveTextContent("模型连接异常");
       expect(screen.getByRole("button", { name: "继续" })).toBeEnabled();
     }
 

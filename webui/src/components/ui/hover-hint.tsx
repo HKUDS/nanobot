@@ -18,10 +18,10 @@ export function HoverHint({ content, children, enabled = true, side = "top", ali
     <TooltipProvider>
       <Tooltip open={enabled && open} onOpenChange={(next) => setOpen(enabled && next)}>
         <TooltipTrigger asChild>{children}</TooltipTrigger>
-        <TooltipContent side={side} align={align} sideOffset={sideOffset}
+        {enabled && open ? <TooltipContent side={side} align={align} sideOffset={sideOffset}
           className={cn("max-w-[min(28rem,calc(100vw-2rem))] whitespace-pre-wrap break-words", contentClassName)}>
           {content}
-        </TooltipContent>
+        </TooltipContent> : null}
       </Tooltip>
     </TooltipProvider>
   );

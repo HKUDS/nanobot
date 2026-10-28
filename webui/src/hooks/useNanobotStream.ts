@@ -870,6 +870,9 @@ export function useNanobotStream(
           ...(typeof ev.failure_error_kind === "string"
             ? { failure_error_kind: ev.failure_error_kind }
             : {}),
+          ...(typeof ev.reply_preserved === "boolean"
+            ? { reply_preserved: ev.reply_preserved }
+            : {}),
         };
         setRecoveryState(next);
         if (ev.reason === "model_request_failed" || ev.status === "resuming") {

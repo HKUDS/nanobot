@@ -2111,7 +2111,7 @@
     "actions": "Tindakan pesan",
     "streaming": "sedang mengalir",
     "delivery": {
-      "sending": "Mengirim…",
+      "sending": "Mengirim",
       "failed": "Belum terkirim"
     },
     "assistantTyping": "Asisten sedang mengetik",
@@ -2317,8 +2317,9 @@
     "retryRateLimit": "Batas permintaan tercapai",
     "retryServer": "Model tidak tersedia",
     "retryUnknown": "Permintaan model gagal",
-    "retryWaiting": "{{error}}, mencoba lagi dalam {{seconds}} dtk, percobaan {{attempt}}",
-    "retryExhausted": "{{error}}, mengakhiri giliran",
+    "retryWaiting": "{{error}} Mencoba lagi dalam {{seconds}} detik",
+    "retrying": "{{error}} Sedang mencoba lagi",
+    "retryExhausted": "{{error}} Mengakhiri giliran",
     "cliActivityRunningOne": "Menggunakan {{name}}",
     "cliActivityRanOne": "Menggunakan {{name}} selesai",
     "cliActivityFailedOne": "Tidak dapat menggunakan {{name}}",
@@ -2339,6 +2340,7 @@
     "failedHelp": "Tugas tersimpan tidak dapat dipulihkan dengan aman. Tinjau sebelum melanjutkan.",
     "resuming": "Memulihkan tugas yang terputus…",
     "review": "Tinjau tugas sebelum melanjutkan. Alat tidak akan dijalankan ulang secara otomatis.",
+    "replyPreserved": "Balasan tersimpan. Anda dapat melanjutkan.",
     "safeResume": "Melanjutkan dari konteks percakapan yang tersimpan.",
     "dismiss": "Abaikan",
     "continue": "Lanjutkan"
@@ -2463,7 +2465,7 @@
       "authenticationBody": "Masuk kembali atau periksa kunci API di pengaturan model.",
       "billingTitle": "Kuota penyedia model tidak tersedia",
       "billingBody": "Tambahkan kredit atau periksa tagihan akun penyedia, lalu coba lagi.",
-      "connectionTitle": "Tidak dapat terhubung ke penyedia model",
+      "connectionTitle": "Koneksi model gagal",
       "timeoutTitle": "Permintaan ke penyedia model kehabisan waktu",
       "rateLimitTitle": "Batas permintaan penyedia model tercapai",
       "serverTitle": "Kesalahan layanan penyedia model",

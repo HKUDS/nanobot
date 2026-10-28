@@ -2111,7 +2111,7 @@
     "actions": "Thao tác tin nhắn",
     "streaming": "đang truyền",
     "delivery": {
-      "sending": "Đang gửi…",
+      "sending": "Đang gửi",
       "failed": "Chưa gửi"
     },
     "assistantTyping": "Trợ lý đang nhập",
@@ -2317,8 +2317,9 @@
     "retryRateLimit": "Đã đạt giới hạn yêu cầu",
     "retryServer": "Mô hình không khả dụng",
     "retryUnknown": "Yêu cầu mô hình thất bại",
-    "retryWaiting": "{{error}}, thử lại sau {{seconds}} giây, lần thử {{attempt}}",
-    "retryExhausted": "{{error}}, đang kết thúc lượt",
+    "retryWaiting": "{{error}} Thử lại sau {{seconds}} giây",
+    "retrying": "{{error}} Đang thử lại",
+    "retryExhausted": "{{error}} Đang kết thúc lượt",
     "cliActivityRunningOne": "Đang dùng {{name}}",
     "cliActivityRanOne": "Đã dùng {{name}}",
     "cliActivityFailedOne": "Không thể dùng {{name}}",
@@ -2339,6 +2340,7 @@
     "failedHelp": "Không thể khôi phục an toàn tác vụ đã lưu. Hãy xem lại trước khi tiếp tục.",
     "resuming": "Đang khôi phục tác vụ bị gián đoạn…",
     "review": "Hãy xem lại tác vụ trước khi tiếp tục. Công cụ sẽ không tự động chạy lại.",
+    "replyPreserved": "Câu trả lời đã được lưu. Bạn có thể tiếp tục.",
     "safeResume": "Đang tiếp tục từ ngữ cảnh hội thoại đã lưu.",
     "dismiss": "Bỏ qua",
     "continue": "Tiếp tục"
@@ -2463,7 +2465,7 @@
       "authenticationBody": "Đăng nhập lại hoặc kiểm tra khóa API trong cài đặt mô hình.",
       "billingTitle": "Hạn mức của nhà cung cấp mô hình không khả dụng",
       "billingBody": "Hãy nạp thêm tín dụng hoặc kiểm tra thanh toán của tài khoản nhà cung cấp rồi thử lại.",
-      "connectionTitle": "Không thể kết nối với nhà cung cấp mô hình",
+      "connectionTitle": "Lỗi kết nối mô hình",
       "timeoutTitle": "Yêu cầu tới nhà cung cấp mô hình đã hết thời gian chờ",
       "rateLimitTitle": "Đã đạt giới hạn yêu cầu của nhà cung cấp mô hình",
       "serverTitle": "Lỗi dịch vụ nhà cung cấp mô hình",

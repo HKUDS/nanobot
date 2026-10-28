@@ -50,7 +50,7 @@ for (const width of [1440, 390]) {
     await page.mouse.move(1, 1);
     await page.screenshot({ path: info.outputPath("subtask-tree.png") });
     const row = tree.locator('[data-subagent-id="preview-0"]');
-    await row.click();
+    await tree.getByText("read_file", { exact: true }).click();
     const detail = page.getByRole("dialog", { name: "检查项目实现", exact: true });
     await expect(detail).toBeVisible();
     await expect(detail).toBeFocused();
@@ -138,18 +138,10 @@ for (const width of [1440, 390]) {
     expect(dimensions.scrollWidth).toBe(dimensions.clientWidth);
     expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight);
     await page.screenshot({ path: info.outputPath("result-markdown-start.png") });
-    const copy = await tree.getByRole("button", { name: "Copy code", exact: true }).elementHandle();
-    await tree.evaluate((node, copyButton) => {
-      const header = node.querySelector('[data-subagent-id="preview-0"]')!.getBoundingClientRect();
-      const bounds = copyButton!.getBoundingClientRect();
-      node.scrollTop += bounds.y + bounds.height / 2 - header.y - header.height / 2;
-    }, copy);
-    expect(await row.evaluate((node, copyButton) => {
-      const header = node.getBoundingClientRect();
-      const bounds = copyButton!.getBoundingClientRect();
-      return node.contains(document.elementFromPoint(bounds.x + bounds.width / 2, header.y + header.height / 2));
-    }, copy)).toBe(true);
-    await tree.evaluate(node => { node.scrollTop = 0; });
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await tree.getByRole("button", { name: "Copy code", exact: true }).click();
+    await expect(tree.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
     const beforeScroll = await messages.evaluate(node => node.scrollTop);
     const tail = tree.getByText("最后一条完整结论：以上结果均可继续核对。", { exact: true });
     await tail.scrollIntoViewIfNeeded();
@@ -158,19 +150,25 @@ for (const width of [1440, 390]) {
     await expect(tree.locator("pre")).toContainText("checked_at: 2026-10-25T20:52:00+08:00");
     expect(await messages.evaluate(node => node.scrollTop)).toBe(beforeScroll);
     await page.screenshot({ path: info.outputPath("result-markdown-end.png") });
-    await expect(row).toBeInViewport();
-    expect(await row.evaluate(node => {
-      const bounds = node.getBoundingClientRect();
-      return node.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2));
-    })).toBe(true);
-    await tail.dblclick();
+    const tailBounds = (await tail.boundingBox())!;
+    await page.mouse.move(tailBounds.x + 2, tailBounds.y + tailBounds.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(tailBounds.x + Math.min(120, tailBounds.width - 2), tailBounds.y + tailBounds.height / 2, { steps: 6 });
+    await page.mouse.up();
     expect(await page.evaluate(() => window.getSelection()?.toString())).toBeTruthy();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.route("https://example.com/weather", route => route.fulfill({ body: "Weather source" }));
+    const sourceOpened = page.waitForEvent("popup");
+    await tree.getByRole("link", { name: "天气来源", exact: true }).click();
+    const source = await sourceOpened;
+    await expect(source).toHaveURL("https://example.com/weather");
+    await source.close();
     await expect(page.getByRole("dialog")).toHaveCount(0);
     const readingPosition = await tree.evaluate(node => node.scrollTop);
     const input = page.getByRole("textbox").first();
     await input.fill("继续阅读完整结果，同时输入下一条消息");
     await expect(trigger).toHaveAttribute("aria-expanded", "true");
-    await row.click();
+    await tail.click();
     const detail = page.getByRole("dialog", { name: "检查项目实现", exact: true });
     await expect(detail.getByRole("heading", { level: 2, name: "天气结果" })).toBeVisible();
     await expect(detail).toHaveAccessibleDescription("Completed");
@@ -486,6 +484,59 @@ test("follows the mouse before release and snaps without double toggling", async
 
 test.describe("touch task drawer", () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+  test("keeps native taps working after a fast handle drag", async ({ page }) => {
+    await page.goto("/browser/fixture.html?case=subagent-dock");
+    await page.getByRole("button", { name: "增加任务", exact: true }).click();
+    const trigger = page.getByTestId("subagent-task-dock-trigger");
+    const tree = page.getByTestId("subagent-task-tree");
+    const events = await trigger.evaluateHandle(node => {
+      const records: { type: string; prevented: boolean }[] = [];
+      for (const type of ["touchstart", "touchmove", "click"]) {
+        node.addEventListener(type, event => records.push({ type, prevented: event.defaultPrevented }));
+      }
+      return records;
+    });
+    const cdp = await page.context().newCDPSession(page);
+    try {
+      const closed = (await trigger.boundingBox())!;
+      const x = closed.x + closed.width / 2;
+      const y = closed.y + closed.height / 2;
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: x + 2, y: y + 2 }] });
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await expect(tree.locator("[data-subagent-id]")).toHaveCount(23);
+      expect((await events.jsonValue()).filter(event => event.type === "click")).toHaveLength(1);
+      await settledMotion(page.getByTestId("subagent-task-dock"));
+      await events.evaluate(records => { records.length = 0; });
+
+      const bounds = (await trigger.boundingBox())!;
+      const dragX = bounds.x + bounds.width / 2;
+      const dragY = bounds.y + bounds.height / 2;
+      // Define a fast release independently of CDP round-trip and screenshot timing.
+      const timestamp = (Date.now() - 35) / 1000;
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", timestamp, touchPoints: [{ x: dragX, y: dragY }] });
+      for (let step = 1; step <= 6; step++) {
+        await cdp.send("Input.dispatchTouchEvent", {
+          type: "touchMove", timestamp: timestamp + step * 0.005,
+          touchPoints: [{ x: dragX, y: dragY + step * 10 }],
+        });
+      }
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", timestamp: timestamp + 0.035, touchPoints: [] });
+      await expect(tree).toHaveCount(0);
+      await trigger.tap();
+      await expect(tree.locator("[data-subagent-id]")).toHaveCount(23);
+      const records = await events.jsonValue();
+      expect(records.filter(event => event.type === "click")).toHaveLength(1);
+      expect(records.filter(event => event.type === "touchstart").every(event => !event.prevented)).toBe(true);
+      const moves = records.filter(event => event.type === "touchmove");
+      expect(moves.length).toBeGreaterThan(0);
+      expect(moves.every(event => event.prevented)).toBe(true);
+    } finally {
+      await events.dispose();
+      await cdp.detach();
+    }
+  });
+
   test("follows touch movement, restores a cancelled drag, and keeps list scrolling independent", async ({ page }, info) => {
     await page.goto("/browser/fixture.html?case=subagent-dock");
     const trigger = page.getByTestId("subagent-task-dock-trigger");
@@ -523,7 +574,31 @@ test.describe("touch task drawer", () => {
     await swipe(tree, -100);
     await expect.poll(() => tree.evaluate(node => node.scrollTop)).toBeGreaterThan(0);
     await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
     await cdp.detach();
+  });
+
+  test("opens task details by tapping tool activity and scrolled result content", async ({ page }) => {
+    await page.goto("/browser/fixture.html?case=subagent-dock&markdown-result");
+    await page.getByTestId("subagent-task-dock-trigger").tap();
+    const tree = page.getByTestId("subagent-task-tree");
+    await settledMotion(page.getByTestId("subagent-task-dock"));
+    await tree.getByText("read_file", { exact: true }).tap();
+    const detail = page.getByRole("dialog", { name: "检查项目实现", exact: true });
+    await expect(detail).toHaveAccessibleDescription("Running");
+    await detail.getByRole("button", { name: "Close", exact: true }).tap();
+    await expect(detail).toHaveCount(0);
+    await page.getByRole("button", { name: "全部完成", exact: true }).evaluate(node => (node as HTMLButtonElement).click());
+    const tail = tree.getByText("最后一条完整结论：以上结果均可继续核对。", { exact: true });
+    await tail.scrollIntoViewIfNeeded();
+    await settledMotion(page.getByTestId("subagent-task-dock"));
+    const readingPosition = await tree.evaluate(node => node.scrollTop);
+    await tail.tap();
+    await expect(detail).toHaveAccessibleDescription("Completed");
+    await detail.getByRole("button", { name: "Close", exact: true }).tap();
+    await expect(detail).toHaveCount(0);
+    expect(await tree.evaluate(node => node.scrollTop)).toBeCloseTo(readingPosition, 0);
+    await expect(tail).toBeInViewport();
   });
 
   test("preserves completion feedback when an opening drag is cancelled", async ({ page }) => {

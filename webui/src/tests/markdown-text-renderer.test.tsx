@@ -18,7 +18,7 @@ describe("MarkdownTextRenderer", () => {
 
     const link = screen.getByRole("link", { name: "local server" });
     expect(link).toHaveAttribute("href", "http://127.0.0.1:7891/");
-    expect(link).toHaveClass("text-blue-500", "dark:text-blue-300");
+    expect(link).toHaveClass("text-content-link");
   });
 
   it.each(["#session/", "#/chat/"])("renders %s session references as same-tab links", (prefix) => {
@@ -334,6 +334,7 @@ describe("MarkdownTextRenderer", () => {
         name: "Open link: Polymarket — GPT-5.6 released by...?",
       }),
     ).toHaveAttribute("href", "https://polymarket.com/event/gpt-5pt6-released-by");
+    expect(screen.getByRole("link", { name: "Open link: Polymarket — GPT-5.6 released by...?" })).toHaveClass("text-content-link");
     expect(screen.queryByText("Polymarket · polymarket.com")).not.toBeInTheDocument();
   });
 
@@ -364,6 +365,7 @@ describe("MarkdownTextRenderer", () => {
     expect(container.querySelector("li.list-none, img")).toBeNull();
     expect(screen.getByRole("link", { name: "https://example.com/source" }))
       .toHaveAttribute("href", "https://example.com/source");
+    expect(screen.getByRole("link", { name: "https://example.com/source" })).toHaveClass("text-content-link");
   });
 
   it("falls back through favicon sources before showing a globe for compact link rows", () => {

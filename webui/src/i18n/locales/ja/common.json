@@ -2111,7 +2111,7 @@
     "actions": "メッセージ操作",
     "streaming": "生成中",
     "delivery": {
-      "sending": "送信中…",
+      "sending": "送信中",
       "failed": "未送信"
     },
     "assistantTyping": "アシスタントが入力中",
@@ -2317,8 +2317,9 @@
     "retryRateLimit": "リクエスト制限に達しました",
     "retryServer": "モデルを利用できません",
     "retryUnknown": "モデルリクエストに失敗しました",
-    "retryWaiting": "{{error}}, {{seconds}}秒後に再試行, 試行 {{attempt}}",
-    "retryExhausted": "{{error}}, ターンを終了します",
+    "retryWaiting": "{{error}} {{seconds}}秒後に再試行",
+    "retrying": "{{error}} 再試行中",
+    "retryExhausted": "{{error}} ターンを終了します",
     "cliActivityRunningOne": "{{name}} を使用中",
     "cliActivityRanOne": "{{name}} を使用しました",
     "cliActivityFailedOne": "{{name}} を使用できませんでした",
@@ -2339,6 +2340,7 @@
     "failedHelp": "保存されたタスクを安全に復元できませんでした。続行前に確認してください。",
     "resuming": "中断されたタスクを復元しています…",
     "review": "続行する前にタスクを確認してください。ツールは自動的に再実行されません。",
+    "replyPreserved": "返信は保存されています。生成を続けられます。",
     "safeResume": "保存された会話コンテキストから続行しています。",
     "dismiss": "閉じる",
     "continue": "続行"
@@ -2463,7 +2465,7 @@
       "authenticationBody": "モデル設定で再度ログインするか、API キーを確認してください。",
       "billingTitle": "モデルプロバイダーの利用枠を使用できません",
       "billingBody": "プロバイダーアカウントにクレジットを追加するか、請求状況を確認してから、もう一度お試しください。",
-      "connectionTitle": "モデルプロバイダーに接続できません",
+      "connectionTitle": "モデル接続エラー",
       "timeoutTitle": "モデルプロバイダーへのリクエストがタイムアウトしました",
       "rateLimitTitle": "モデルプロバイダーのリクエスト上限に達しました",
       "serverTitle": "モデルプロバイダーでサービスエラーが発生しました",
