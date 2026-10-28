@@ -93,8 +93,8 @@ class SearchSessionsTool(_SessionTool):
         return (
             "Search other persisted conversations by title or visible message text. Use when "
             "past discussion is relevant or to find the target of a user-requested session "
-            "message. Results include @handles for read_session and send_session_message, "
-            "plus bounded excerpts. When citing a result, link its title to the exact "
+            "message. Results include @handles for read_session and send_session_message "
+            "when available, plus bounded excerpts. When citing a result, link its title to the exact "
             "session_ref using Markdown. The current session is excluded."
         )
 
@@ -121,7 +121,10 @@ class SearchSessionsTool(_SessionTool):
                 {
                     "session_key": match["session_key"],
                     "session_ref": _session_ref(match["session_key"]),
-                    "handle": f"@{handles[match['session_key']].name}",
+                    "handle": (
+                        f"@{handles[match['session_key']].name}"
+                        if match["session_key"] in handles else None
+                    ),
                     "title": match["title"],
                     "updated_at": match["updated_at"],
                     "excerpts": [
@@ -136,7 +139,6 @@ class SearchSessionsTool(_SessionTool):
                     ],
                 }
                 for match in matches
-                if match["session_key"] in handles
             ],
         }
         return json.dumps(result, ensure_ascii=False)

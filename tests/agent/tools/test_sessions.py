@@ -155,6 +155,25 @@ async def test_search_sessions_ranks_titles_before_message_matches(manager):
 
 
 @pytest.mark.asyncio
+async def test_search_keeps_match_if_session_is_deleted_before_handle_lookup(manager, monkeypatch):
+    key = "slack:history"
+    _save_session(manager, key, title="Database notes", messages=[])
+    tool = SearchSessionsTool(manager)
+    lookup = tool._handles.alist_all_by_key
+
+    async def delete_before_lookup():
+        assert await manager.state.delete(key)
+        return await lookup()
+
+    monkeypatch.setattr(tool._handles, "alist_all_by_key", delete_before_lookup)
+    with _webui_request():
+        result = _decode(await tool.execute(query="Database"))
+
+    assert [row["session_key"] for row in result["results"]] == [key]
+    assert result["results"][0]["handle"] is None
+
+
+@pytest.mark.asyncio
 async def test_session_tools_hide_private_and_non_conversation_messages(manager):
     content, marker = append_runtime_context(
         "visible question",
