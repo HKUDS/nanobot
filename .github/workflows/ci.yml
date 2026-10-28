@@ -74,8 +74,9 @@ jobs:
             coverage: false
             # Process identities run serially; isolated update jobs use case-level
             # scheduling below so one file cannot serialize all real venv work.
-            # Double the prior three-worker budget; keep native-process checks separate.
-            pytest_args: "-n 6 --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/cli/test_cli_input.py --ignore=tests/cli/test_desktop_target.py --ignore=tests/cli/test_desktop_target_entrypoints.py --ignore=tests/tools/test_exec_platform.py --ignore=tests/cli/test_wsl_browser.py --ignore=tests/test_install_scripts.py --ignore=tests/test_update_jobs.py --ignore=tests/test_update_profiles.py"
+            # Bound real persistence contention: six workers can delay session
+            # startup beyond its watchdog. Keep every assertion and test enabled.
+            pytest_args: "-n 4 --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/cli/test_cli_input.py --ignore=tests/cli/test_desktop_target.py --ignore=tests/cli/test_desktop_target_entrypoints.py --ignore=tests/tools/test_exec_platform.py --ignore=tests/cli/test_wsl_browser.py --ignore=tests/test_install_scripts.py --ignore=tests/test_update_jobs.py --ignore=tests/test_update_profiles.py"
 
     steps:
       - uses: actions/checkout@v4
