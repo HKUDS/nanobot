@@ -352,6 +352,15 @@ class LLMProvider(ABC):
     """Base class for LLM providers."""
 
     _CHAT_RETRY_DELAYS = (1, 2, 4)
+    # Delays for cold-start rejections (e.g. a local Ollama backend paging a
+    # model back into memory). Longer than regular transient delays because
+    # model loading takes on the order of 30s, not sub-second.
+    _COLD_START_RETRY_DELAYS = (5, 15, 30)
+    # Ollama returns a malformed empty body while paging a model back into
+    # memory, which surfaces as a JSON-decode error with this exact message.
+    _COLD_START_MARKERS = (
+        "expecting value: line 1 column 1",
+    )
     _PERSISTENT_MAX_DELAY = 60
     _PERSISTENT_IDENTICAL_ERROR_LIMIT = 10
     _RETRY_HEARTBEAT_CHUNK = 30
@@ -797,6 +806,14 @@ class LLMProvider(ABC):
         return any(marker in err for marker in cls._TRANSIENT_ERROR_MARKERS)
 
     @classmethod
+    def _is_cold_start_error(cls, content: str | None) -> bool:
+        """Return True when the backend is temporarily unavailable (e.g. a
+        local model loading) rather than genuinely erroring — worth a
+        longer, more patient retry delay than a regular transient error."""
+        err = (content or "").lower()
+        return any(marker in err for marker in cls._COLD_START_MARKERS)
+
+    @classmethod
     def is_transient_response(cls, response: LLMResponse) -> bool:
         """Prefer structured error metadata, fallback to text markers for legacy providers."""
         if response.error_should_retry is not None:
@@ -813,7 +830,11 @@ class LLMProvider(ABC):
         if kind in cls._TRANSIENT_ERROR_KINDS:
             return True
 
-        return cls._is_transient_error(response.content)
+        # Cold-start errors are a form of transient error — the backend
+        # will recover, it just needs the longer _COLD_START_RETRY_DELAYS
+        # pace (applied separately in _run_with_retry) rather than the
+        # default one.
+        return cls._is_transient_error(response.content) or cls._is_cold_start_error(response.content)
 
     @classmethod
     def is_arrearage_response(cls, response: LLMResponse) -> bool:
@@ -1746,7 +1767,12 @@ class LLMProvider(ABC):
                 break
 
             retry_after = self._extract_retry_after_from_response(response)
-            base_delay = delays[min(attempt - 1, len(delays) - 1)]
+            active_delays = (
+                self._COLD_START_RETRY_DELAYS
+                if self._is_cold_start_error(response.content)
+                else delays
+            )
+            base_delay = active_delays[min(attempt - 1, len(active_delays) - 1)]
             delay = retry_after + RETRY_AFTER_BUFFER if retry_after else base_delay
             if persistent:
                 delay = min(delay, self._PERSISTENT_MAX_DELAY)

@@ -96,6 +96,12 @@ _FALLBACK_ERROR_TOKENS = (
     "insufficient_balance",
     "balance",
     "out of credits",
+    # Local/self-hosted backend congestion (e.g. Ollama's own request
+    # queue) — retrying the same backend only makes it worse, fail over
+    # to the next chain entry immediately instead.
+    "server is busy",
+    "queue is full",
+    "too many requests in queue",
 )
 
 
