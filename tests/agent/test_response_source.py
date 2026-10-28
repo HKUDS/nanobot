@@ -352,11 +352,12 @@ async def test_runner_records_each_provider_when_streaming_times_out_and_recover
 @pytest.mark.parametrize("temporary", [False, True])
 async def test_websocket_wire_and_disk_replay_preserve_sources(history, tmp_path, monkeypatch, temporary):
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    channel = WebSocketChannel({"allowFrom": ["*"]}, MessageBus(), gateway=MagicMock())
-    channel._media.rewrite_local_markdown_images.side_effect = lambda text: text
-    channel._transcripts = WebUITranscriptRecorder(history.sessions)
+    gateway = MagicMock()
+    gateway.media.rewrite_local_markdown_images.side_effect = lambda text: text
+    gateway.transcripts = WebUITranscriptRecorder(history.sessions)
+    gateway.temporary_chats.should_persist_transcript = lambda _: not temporary
+    channel = WebSocketChannel({"allowFrom": ["*"]}, MessageBus(), gateway=gateway)
     generation, _ = await history.sessions.state.open_with_metadata("websocket:source-chat", {})
-    channel._temporary_chats.should_persist_transcript = lambda _: not temporary
     channel._safe_send_to = AsyncMock()
     channel._subs["source-chat"] = {MagicMock()}
     sources = [{"provider": "xai", "model": "grok", "preset": "snapshot name", "fallback": True}]

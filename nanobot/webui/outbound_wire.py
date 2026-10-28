@@ -111,9 +111,80 @@ class SubagentTaskWirePayload(_ChatWirePayload):
     task: dict[str, object]
 
 
+class MessageWirePayload(_ChatWirePayload):
+    event: Literal["message"]
+    text: str
+    render_as: NotRequired[Literal["text"]]
+    media: NotRequired[list[str]]
+    media_urls: NotRequired[list[dict[str, str]]]
+    reply_to: NotRequired[str]
+    latency_ms: NotRequired[int]
+    tool_events: NotRequired[list[dict[str, _JSONValue]]]
+    agent_ui: NotRequired[object]
+    kind: NotRequired[Literal["tool_hint", "progress"]]
+
+
+class StreamWirePayload(_ChatWirePayload):
+    event: Literal["delta", "stream_end", "reasoning_delta", "reasoning_end"]
+    text: NotRequired[str]
+    stream_id: NotRequired[str]
+    resuming: NotRequired[bool]
+    merge_next: NotRequired[bool]
+
+
+class FileEditWirePayload(_ChatWirePayload):
+    event: Literal["file_edit"]
+    edits: list[dict[str, Any]]
+
+
+class GoalStateWirePayload(_ChatWirePayload):
+    event: Literal["goal_state"]
+    goal_state: dict[str, Any]
+
+
+class GoalStatusWirePayload(_ChatWirePayload):
+    event: Literal["goal_status"]
+    status: str
+    started_at: NotRequired[float]
+
+
+class SessionUpdatedWirePayload(_ChatWirePayload):
+    event: Literal["session_updated"]
+    scope: NotRequired[str]
+
+
+class UserInputWirePayload(_ChatWirePayload):
+    event: Literal["user_message"]
+    text: str
+    created_at_ms: int
+    starts_turn: bool
+    provenance: NotRequired[dict[str, Any]]
+
+
+class PairingChangedWirePayload(TypedDict):
+    event: Literal["pairing_changed"]
+
+
+class RuntimeModelWirePayload(TypedDict):
+    event: Literal["runtime_model_updated"]
+    model_name: str
+    model_preset: NotRequired[str]
+
+
+class TurnModelWirePayload(_ChatWirePayload):
+    event: Literal["turn_model_updated"]
+    model_name: str
+    model_preset: NotRequired[str]
+    context_window_tokens: NotRequired[int]
+    fallback: NotRequired[bool]
+    reauth_provider: NotRequired[str]
+
+
 WebUIWirePayload: TypeAlias = (
     RetryStatusWirePayload | ContextCompactionWirePayload | RecoveryStateWirePayload | TurnEndWirePayload
-    | SubagentTaskWirePayload
+    | SubagentTaskWirePayload | MessageWirePayload | StreamWirePayload | FileEditWirePayload
+    | GoalStateWirePayload | GoalStatusWirePayload | SessionUpdatedWirePayload | UserInputWirePayload
+    | PairingChangedWirePayload | RuntimeModelWirePayload | TurnModelWirePayload
 )
 WebUIWirePersistence: TypeAlias = Literal[
     "transient",
