@@ -1,7 +1,8 @@
-"""OpenAI-compatible HTTP API server for a fixed nanobot session.
+"""OpenAI-compatible HTTP API server for nanobot sessions.
 
 Provides /v1/chat/completions and /v1/models endpoints.
-All requests route to a single persistent API session.
+Requests without ``session_id`` share one persistent default session; each
+``session_id`` owns an isolated session with its own chat route.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from loguru import logger
 from nanobot.agent.hook import AgentHook, AgentRunHookContext
 from nanobot.config.paths import get_media_dir
 from nanobot.providers.base import LLMUsage
+from nanobot.providers.unconfigured_provider import UnconfiguredProvider
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.media_decode import (
     MAX_FILE_SIZE,
@@ -275,6 +277,12 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
     content_type = _as_str(cast(object, request.content_type or ""))
 
     agent_loop = request.app[_AGENT_LOOP_KEY]
+    if isinstance(agent_loop.provider, UnconfiguredProvider):
+        return _error_json(
+            503,
+            "Model is not configured. Open Settings → Models to configure a provider and model, then restart the API server.",
+            err_type="configuration_error",
+        )
     timeout_s: float = request.app[_REQUEST_TIMEOUT_KEY]
     model_name: str = request.app[_MODEL_NAME_KEY]
 
@@ -309,6 +317,8 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
         return _error_json(400, f"Only configured model '{model_name}' is available")
 
     session_key = f"api:{session_id}" if session_id else API_SESSION_KEY
+    # Keep the existing history identity; derive its route without normalizing the ID.
+    chat_id = session_key.removeprefix("api:")
     session_locks: dict[str, asyncio.Lock] = request.app[_SESSION_LOCKS_KEY]
     session_lock = session_locks.setdefault(session_key, asyncio.Lock())
 
@@ -352,7 +362,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
                             media=media_paths if media_paths else None,
                             session_key=session_key,
                             channel="api",
-                            chat_id=API_CHAT_ID,
+                            chat_id=chat_id,
                             on_stream=_on_stream,
                             on_stream_end=_on_stream_end,
                         )
@@ -396,7 +406,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
                         media=media_paths if media_paths else None,
                         session_key=session_key,
                         channel="api",
-                        chat_id=API_CHAT_ID,
+                        chat_id=chat_id,
                         hooks=[usage_capture],
                     )
                 response_text = _response_text(response)

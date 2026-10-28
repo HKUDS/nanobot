@@ -48,13 +48,31 @@ For separate sends, specify the recipients in the instructions. The agent can st
 
 Writing "send to WhatsApp" in the instructions does not change the task's saved chat. Its normal reply still returns to that chat. A separate send requires the agent to call `message` with the other destination. For a fixed destination, create the task in that chat or use [Change the Chat for a Scheduled Task](#change-the-chat-for-a-scheduled-task). Keep explicit `message` instructions when you want separate sends or several recipients.
 
-If a result does not arrive, check the saved chat and the run's `message` calls first. Then check the gateway's channel send errors. `Turn completed` confirms execution finished, not that the destination received a message. A successful `message` tool return confirms queue acceptance, not receipt by the chat service. Do not resend until you check whether the first send arrived.
+If a result does not arrive, check that the task finished, then check its saved chat and destination. For a separate send, review the run's `message` calls and the gateway's channel send errors. `Turn completed` means the task finished; it does not confirm that the chat service delivered the message. A successful `message` result means nanobot accepted it for sending, not that it arrived. Check the destination before trying again to avoid duplicates.
 
 For background checks that should stay quiet unless there is something useful to report, use heartbeat instead of a user-created scheduled automation.
 
 Repetition alone does not select heartbeat. "Every day at 8am, remind me to drink water" needs a cron schedule. "Keep an eye on open issues and tell me when one needs attention" can use heartbeat if the check time is flexible. Heartbeat does not guarantee a requested time or interval.
 
 An upgrade does not overwrite your workspace's `AGENTS.md` or convert existing heartbeat entries into cron jobs. The current scheduling rules are included in the system prompt. If an old workspace rule directs all recurring tasks to heartbeat, update that rule too. To correct an existing reminder, remove its old heartbeat entry and create the cron task once. Check the task list to avoid duplicates.
+
+### Change a Scheduled Task
+
+Ask nanobot, "Move my daily report from 9am to 10am." The agent can use `cron(action="update", job_id="...", cron_expr="0 10 * * *")` without deleting and recreating the task. It can also update `name` or `message` independently. Supply one complete schedule when changing its timing; omitted fields keep their values. Cron edits retain the existing timezone unless another `tz` is supplied with the expression. Naive `at` values use the runtime default timezone.
+
+The task keeps its ID, linked chat, execution history, enabled state, and automatic-deletion setting. A paused task stays paused. Changing only the name or instruction preserves the next run time. Existing tasks configured to delete after a one-time run still do so; tasks configured to remain keep that behavior. System-managed tasks remain protected. Invalid updates leave the task unchanged.
+
+### Pause and Resume a Scheduled Task
+
+Ask nanobot to pause a scheduled task instead of removing it. The agent can use `cron(action="disable", job_id="...")`, then `cron(action="enable", job_id="...")` to resume it with the same ID, schedule, chat, and run history. Use `cron(action="list", include_disabled=True)` to find paused tasks; the default list still shows only enabled jobs.
+
+Disabling affects future runs. It does not cancel a running task or recall an already queued result. System-managed heartbeat and Dream jobs remain protected; change their configuration instead.
+
+### Inspect Recent Runs
+
+Ask nanobot, "Show the last five runs of my daily report." The agent can use `cron(action="history", job_id="...", limit=5)` to read the retained execution time, status, duration, and error for that task. Results are newest first, using the task's timezone or the runtime default. The default is five records; `limit` accepts 1–20.
+
+This also works for disabled tasks and does not change their schedule or state. Only retained execution records are available: deleted jobs and automatically deleted one-time tasks cannot be queried. Run history does not include the generated reply or confirm message delivery.
 
 ### Scheduled Result Delivery
 
@@ -148,7 +166,7 @@ Future runs use the new chat's history and reply there by default. Previous mess
 
 You can discuss each new result in that same chat. Background task results also return there. If you delete that chat, nanobot asks you to confirm deletion of its scheduled tasks as well. Cancelling the deletion keeps the chat and tasks.
 
-The list contains existing chats on the same gateway with the same effective workspace and access mode. Chat-app targets need a running channel and a saved reply route from an earlier incoming message. If a chat is missing, send nanobot a message there and check that its channel is running. Raw recipient IDs, cross-host moves, unified sessions, system jobs, and local triggers are not supported by this selector. An older gateway keeps the existing read-only view.
+The list shows chats available on this gateway that use the same workspace and access permissions. A chat-app destination appears only after its channel is running and nanobot has received a message there. If the chat you want is missing, first send nanobot a message in that chat, then confirm its channel is running. You cannot choose a raw recipient ID, a chat on another host, a unified session, a system job, or a local trigger. Older gateway versions show this list as read-only.
 
 If a scheduled turn is running or queued, wait for it to finish before changing the chat. The current scheduler also rejects a change while another scheduled turn is active. If another editor changes the task, reopen the task and review the latest instructions. A rejected save leaves the draft visible.
 
@@ -169,7 +187,7 @@ Schedules do not replay missed occurrences after a gateway restart:
 | Schedule | Behavior after restart |
 |---|---|
 | One-time (`at`) | A time already in the past has no next run and is not automatically executed. Review the task and run it manually or create a replacement. |
-| Interval (`every`) | The next run is one full interval after restart; missed intervals are not replayed. |
+| Interval (`every`) | If the next run is still in the future and no more than one interval away, nanobot keeps that time. If it has already passed, that run is skipped and the next run is scheduled; missed runs are not replayed. |
 | Cron expression | The next matching time after restart is used; missed matches are not replayed. |
 
 Intervals are also recalculated after a run finishes, so a long-running task can shift its next interval. Use a cron expression for wall-clock scheduling, and keep the host awake and gateway running when timing matters. These rules concern scheduled jobs; queued local trigger messages have the separate recovery behavior below.

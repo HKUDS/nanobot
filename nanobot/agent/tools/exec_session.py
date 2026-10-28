@@ -238,7 +238,10 @@ class _ExecSession:
         finally:
             stopped.cancel()
             await asyncio.gather(stopped, return_exceptions=True)
-        from nanobot.agent.tools.shell import ExecTool, _reap_pid  # pyright: ignore[reportPrivateUsage]
+        from nanobot.agent.tools.shell import (
+            ExecTool,
+            _reap_pid,  # pyright: ignore[reportPrivateUsage]
+        )
 
         ExecTool._release_process_tree(self.process)  # pyright: ignore[reportPrivateUsage]
         _reap_pid(self.process.pid)
@@ -252,6 +255,18 @@ class _ExecSession:
                 raise RuntimeError(f"session {self.session_id} cleanup failed: {self.cleanup_error}")
             self._state_changed.clear()
             await self._state_changed.wait()
+
+    @property
+    def has_pending_work(self) -> bool:
+        """Include pipe draining and failed/in-flight process-tree cleanup."""
+        cleanup = self._kill_task
+        return (
+            self.finished_at is None
+            or not self._stdout_task.done() or not self._stderr_task.done()
+            or (cleanup is not None and (
+                not cleanup.done() or cleanup.cancelled() or cleanup.exception() is not None
+            ))
+        )
 
     async def _watch_timeout(self) -> None:
         """Supervise execution budgets independently of tool waits and log reads."""
@@ -371,13 +386,16 @@ class _ExecSession:
         await asyncio.shield(self._completion_task)
 
     async def _begin_stop(self, reason: FinishReason) -> None:
-        if self.finished_at is not None:
+        if not self.has_pending_work:
             return
         if self._execution_exited and self._stop_reason is None:
             return
         if self._stop_reason is None:
             self._stop_reason = reason
-        if self._kill_task is None:
+        if self._kill_task is None or (
+            self._kill_task.done()
+            and (self._kill_task.cancelled() or self._kill_task.exception() is not None)
+        ):
             self.cleanup_error = None
             self._kill_task = asyncio.create_task(self._kill())
             self._kill_task.add_done_callback(self._on_kill_done)
@@ -391,8 +409,8 @@ class _ExecSession:
             logger.opt(exception=error if tool_log_content_allowed() else False).error(
                 "Failed to terminate exec session {}", self.session_id,
             )
-        if (task.cancelled() or error is not None) and self._kill_task is task:
-            self._kill_task = None
+        # Retain failed cleanup as unsettled work, even if the parent exited.
+        # kill() replaces it on an explicit retry.
 
     async def _kill(self) -> None:
         from nanobot.agent.tools.shell import ExecTool
@@ -410,8 +428,17 @@ class ExecSessionManager:
         self.result_retention = result_retention
         self._sessions: dict[str, _ExecSession] = {}
         self._starting: dict[str, tuple[str | None, asyncio.Task[_ExecSession]]] = {}
+        self._stopping_launches: set[asyncio.Task[_ExecSession]] = set()
         self._lock = asyncio.Lock()
         self._closed = False
+
+    @property
+    def has_pending_work(self) -> bool:
+        """Inspect owned work without polling, terminating or removing sessions."""
+        return bool(
+            self._lock.locked() or self._starting or self._stopping_launches
+            or any(s.has_pending_work for s in self._sessions.values())
+        )
 
     async def start(
         self,
@@ -574,7 +601,6 @@ class ExecSessionManager:
         async with self._lock:
             self._closed = True
             sessions: list[_ExecSession] = list(self._sessions.values())
-            self._sessions.clear()
             launches = [task for _, task in self._starting.values()]
             self._starting.clear()
         return await self._stop_owned(sessions, launches, "shutdown")
@@ -583,9 +609,9 @@ class ExecSessionManager:
         """Terminate all sessions owned by owner_session_key. Returns count."""
         async with self._lock:
             victims: list[_ExecSession] = []
-            for sid, s in list(self._sessions.items()):
+            for s in self._sessions.values():
                 if s.owner_session_key == owner_session_key:
-                    victims.append(self._sessions.pop(sid))
+                    victims.append(s)
             launches = [
                 task for owner, task in self._starting.values() if owner == owner_session_key
             ]
@@ -598,6 +624,10 @@ class ExecSessionManager:
         self, sessions: list[_ExecSession], launches: list[asyncio.Task[_ExecSession]],
         reason: FinishReason,
     ) -> int:
+        # Removed startup reservations must stay visible until cancellation drains.
+        self._stopping_launches.update(launches)
+        for task in launches:
+            task.add_done_callback(self._stopping_launches.discard)
         results: list[None | BaseException] = list(await asyncio.gather(
             *(session.kill(reason) for session in sessions),
             self._cancel_launches(launches),
@@ -609,10 +639,10 @@ class ExecSessionManager:
             for session, result in zip(sessions, results, strict=True)
             if isinstance(result, BaseException)
         ]
-        if failures:
-            async with self._lock:
-                for session, _ in failures:
-                    self._sessions[session.session_id] = session
+        async with self._lock:
+            for session, result in zip(sessions, results, strict=True):
+                if not isinstance(result, BaseException):
+                    self._sessions.pop(session.session_id, None)
         errors = [result for _, result in failures]
         if isinstance(startup_error, BaseException):
             errors.append(startup_error)
@@ -732,7 +762,7 @@ def format_session_poll(session_id: str, poll: _SessionPoll) -> str:
             nullable=True,
         ),
         until_exit=BooleanSchema(
-            description="Wait for the process to exit.",
+            description="Wait for exit within timeout_ms; return the active session if the wait expires.",
             default=False,
         ),
         timeout_ms=IntegerSchema(

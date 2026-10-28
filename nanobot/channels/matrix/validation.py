@@ -3,11 +3,22 @@
 from typing import Any
 
 from nanobot.channels.contracts import ChannelValidationContext
-from nanobot.channels.validation import check, required_checks, status_from_checks, string_value
+from nanobot.channels.validation import (
+    check,
+    required_checks,
+    resolve_proxy,
+    status_from_checks,
+    string_value,
+)
 
 
-def validate(values: dict[str, Any], _context: ChannelValidationContext) -> dict[str, Any]:
+def validate(values: dict[str, Any], context: ChannelValidationContext) -> dict[str, Any]:
     checks, missing = required_checks("matrix", values)
+    try:
+        resolve_proxy(values, context)
+    except ValueError as exc:
+        checks.append(check("network_proxy", "Network proxy", "fail", str(exc)))
+        return status_from_checks("matrix", checks, missing)
     password = string_value(values.get("password"))
     access_token = string_value(values.get("accessToken"))
     device_id = string_value(values.get("deviceId"))

@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 _NATIVE_STOP_TIMEOUT_SECONDS = 10.0
 _DATABASE_REPLACE_TIMEOUT_SECONDS = 10.0
 _FINALIZE_POLL_WAIT_SECONDS = 0.05
+_CONNECT_TTL_SECONDS = 600
 
 
 @dataclass(slots=True)
@@ -36,6 +37,9 @@ class WhatsAppConnectSession:
     deadline: float
     qr_url: str = ""
     finalize_task: asyncio.Task[None] | None = None
+    stop_task: asyncio.Task[None] | None = None
+    discard_task: asyncio.Task[None] | None = None
+    expiry_task: asyncio.Task[None] | None = None
 
 
 class WhatsAppConnectStore:
@@ -43,6 +47,17 @@ class WhatsAppConnectStore:
 
     def __init__(self) -> None:
         self._sessions: dict[str, WhatsAppConnectSession] = {}
+
+    @property
+    def has_pending_work(self) -> bool:
+        """Keep login/native workers owned until completion or confirmed cleanup."""
+        return any(
+            session.finalize_task is None
+            or not session.finalize_task.done()
+            or not self._session_stopped(session)
+            or (session.discard_task is not None and not session.discard_task.done())
+            for session in self._sessions.values()
+        )
 
     async def handle(self, action: str, query: QueryParams) -> dict[str, Any]:
         if action == "start":
@@ -99,9 +114,13 @@ class WhatsAppConnectStore:
             target_path=target_path,
             pending_path=pending_path,
             created_wall=now_wall,
-            deadline=time.monotonic() + 600,
+            deadline=time.monotonic() + _CONNECT_TTL_SECONDS,
         )
         self._sessions[session_id] = session
+        session.expiry_task = asyncio.create_task(
+            self._expire_session(session), name=f"whatsapp-connect-expire-{session.id}",
+        )
+        session.expiry_task.add_done_callback(self._observe_task)
 
         qr_wait = asyncio.create_task(self._wait_for_qr(session))
         try:
@@ -113,6 +132,7 @@ class WhatsAppConnectStore:
         finally:
             if not qr_wait.done():
                 qr_wait.cancel()
+            await asyncio.gather(qr_wait, return_exceptions=True)
         return self._pending_payload(session)
 
     async def poll(self, session_id: str) -> dict[str, Any]:
@@ -124,6 +144,9 @@ class WhatsAppConnectStore:
                 "status": "expired",
                 "message": "This WhatsApp login has expired. Start again.",
             }
+        if session.discard_task is not None:
+            # A concurrent poll must not promote a login being cancelled.
+            return await self.cancel(session_id)
         if not session.result.done():
             return self._pending_payload(session)
 
@@ -138,21 +161,25 @@ class WhatsAppConnectStore:
             # Finish fast clients in this request without letting native shutdown
             # block the polling response path.
             await asyncio.wait({finalize_task}, timeout=_FINALIZE_POLL_WAIT_SECONDS)
+        if session.discard_task is not None:
+            return await self.cancel(session_id)
         if not finalize_task.done():
             payload = self._pending_payload(session)
             payload["qr_url"] = ""
             payload["message"] = "Finishing the WhatsApp connection."
             return payload
 
-        self._sessions.pop(session_id, None)
         try:
             finalize_task.result()
         except Exception as exc:
+            if self._session_stopped(session):
+                self._sessions.pop(session_id, None)
             return {
                 "session_id": session_id,
                 "status": "failed",
                 "message": f"WhatsApp QR login failed: {exc}",
             }
+        self._sessions.pop(session_id, None)
         return {
             "session_id": session_id,
             "status": "succeeded",
@@ -162,15 +189,21 @@ class WhatsAppConnectStore:
     async def _finalize_session(self, session: WhatsAppConnectSession) -> None:
         try:
             session.result.result()
-            await self._close_session(session)
-            await self._commit_database(session.pending_path, session.target_path)
         except BaseException:
             await self._close_session(session)
             self._remove_database(session.pending_path)
             raise
+        # A stop timeout is not proof that the native SQLite writer exited.
+        # Preserve its database and ownership for an explicit cleanup retry.
+        await self._close_session(session)
+        try:
+            await self._commit_database(session.pending_path, session.target_path)
+        except BaseException:
+            self._remove_database(session.pending_path)
+            raise
 
     async def cancel(self, session_id: str) -> dict[str, Any]:
-        session = self._sessions.pop(session_id, None)
+        session = self._sessions.get(session_id)
         if session is not None:
             await self._discard_session(session)
         return {
@@ -186,17 +219,30 @@ class WhatsAppConnectStore:
             if time.monotonic() >= session.deadline
         ]
         for session_id in expired:
-            session = self._sessions.pop(session_id)
-            await self._discard_session(session)
+            await self.cancel(session_id)
+
+    async def _expire_session(self, session: WhatsAppConnectSession) -> None:
+        await asyncio.sleep(max(0, session.deadline - time.monotonic()))
+        await self.cancel(session.id)
 
     async def close(self) -> None:
         """Stop every login client before the gateway event loop closes."""
         sessions = tuple(self._sessions.values())
-        self._sessions.clear()
         for session in sessions:
             await self._discard_session(session)
 
     async def _discard_session(self, session: WhatsAppConnectSession) -> None:
+        task = session.discard_task
+        if task is None or task.done():
+            task = asyncio.create_task(
+                self._discard_and_remove(session), name=f"whatsapp-connect-discard-{session.id}",
+            )
+            task.add_done_callback(self._observe_task)
+            session.discard_task = task
+        # Closing a browser/request must not drop the native writer's owner.
+        await asyncio.shield(task)
+
+    async def _discard_and_remove(self, session: WhatsAppConnectSession) -> None:
         finalize_task = session.finalize_task
         if (
             finalize_task is not None
@@ -205,9 +251,10 @@ class WhatsAppConnectStore:
             if not finalize_task.done():
                 finalize_task.cancel()
             await asyncio.gather(finalize_task, return_exceptions=True)
-        else:
-            await self._close_session(session)
+        await self._close_session(session)
         self._remove_database(session.pending_path)
+        if self._sessions.get(session.id) is session:
+            del self._sessions[session.id]
 
     @staticmethod
     async def _connect(
@@ -229,50 +276,70 @@ class WhatsAppConnectStore:
         while not session.qr_url and not session.result.done():
             await asyncio.sleep(0.05)
 
+    async def _close_session(self, session: WhatsAppConnectSession) -> None:
+        task = session.stop_task
+        if task is None or (task.done() and not task.cancelled() and task.exception() is not None):
+            task = asyncio.create_task(
+                self._stop_session(session), name=f"whatsapp-connect-stop-{session.id}",
+            )
+            task.add_done_callback(self._observe_task)
+            session.stop_task = task
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=_NATIVE_STOP_TIMEOUT_SECONDS)
+        except TimeoutError as exc:
+            raise RuntimeError(
+                "WhatsApp is still stopping. Retry cancelling the connection before updating."
+            ) from exc
+
     @staticmethod
-    async def _close_session(session: WhatsAppConnectSession) -> None:
+    def _observe_task(task: asyncio.Task[None]) -> None:
+        if not task.cancelled():
+            task.exception()
+
+    @staticmethod
+    def _session_stopped(session: WhatsAppConnectSession) -> bool:
+        task = session.stop_task
+        return task is not None and task.done() and not task.cancelled() and task.exception() is None
+
+    @staticmethod
+    async def _stop_session(session: WhatsAppConnectSession) -> None:
+        if session.expiry_task is not None:
+            session.expiry_task.cancel()
+            await asyncio.gather(session.expiry_task, return_exceptions=True)
         if not session.result.done():
             session.result.cancel()
-        if not session.connect_task.done():
-            session.connect_task.cancel()
-        with suppress(Exception, asyncio.CancelledError):
-            await session.connect_task
-        native_task: asyncio.Task[Any] | None = None
-        if session.connect_task.done() and not session.connect_task.cancelled():
-            with suppress(Exception, asyncio.CancelledError):
-                native_task = session.connect_task.result()
+        elif not session.result.cancelled():
+            session.result.exception()
+        # Both Stop and Neonize use asyncio.to_thread in the supported SDK.
+        # Cancellation cannot join those threads. Signal, then await actual return;
+        # the bounded caller may time out without cancelling this owned task.
+        await session.client.stop()
+        await asyncio.shield(asyncio.gather(session.connect_task, return_exceptions=True))
+        if session.connect_task.cancelled():
+            raise RuntimeError("WhatsApp connection shutdown could not be verified")
+        native_task = session.connect_task.result()
         client_native_task = getattr(session.client, "connect_task", None)
         if native_task is None and isinstance(client_native_task, asyncio.Task):
             native_task = cast(asyncio.Task[Any], client_native_task)
-        with suppress(Exception):
-            await asyncio.wait_for(session.client.stop(), timeout=5)
         if native_task is not None:
-            if not native_task.done():
-                try:
-                    # Stop only signals neonize's Go worker. Wait for that worker
-                    # to return so Windows releases its SQLite file handle before
-                    # the temporary login database is promoted.
-                    await asyncio.wait_for(
-                        asyncio.shield(native_task),
-                        timeout=_NATIVE_STOP_TIMEOUT_SECONDS,
-                    )
-                except TimeoutError:
-                    native_task.cancel()
-            await asyncio.gather(native_task, return_exceptions=True)
+            await asyncio.shield(asyncio.gather(native_task, return_exceptions=True))
+            if native_task.cancelled():
+                raise RuntimeError("WhatsApp native shutdown could not be verified")
 
     @staticmethod
     def _build_channel() -> tuple[WhatsAppChannel, Path]:
         from nanobot.bus.queue import MessageBus
         from nanobot.channels.whatsapp.runtime import WhatsAppChannel
 
-        section = getattr(load_config().channels, "whatsapp", None)
+        root_config = load_config()
+        section = getattr(root_config.channels, "whatsapp", None)
         if section is not None and hasattr(section, "model_dump"):
             config = section.model_dump(mode="json", by_alias=True)
         elif isinstance(section, dict):
             config = dict(cast(dict[str, Any], section))
         else:
             config = {}
-        channel = WhatsAppChannel(config, MessageBus())
+        channel = WhatsAppChannel(config, MessageBus(), network=root_config.network)
         return channel, channel.connect_database_path()
 
     @staticmethod
@@ -327,7 +394,7 @@ class WhatsAppConnectStore:
             "session_id": session.id,
             "status": "pending",
             "interval_ms": 2000,
-            "expires_at_ms": int((session.created_wall + 600) * 1000),
+            "expires_at_ms": int((session.created_wall + _CONNECT_TTL_SECONDS) * 1000),
             "message": "Waiting for the WhatsApp scan.",
         }
         if session.qr_url:

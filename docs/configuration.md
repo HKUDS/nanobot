@@ -69,6 +69,41 @@ If the WebUI does not expose the option you need, start from the task below. Mos
 | Run multiple isolated bots | separate `--home` directories, or `--config` and `--workspace` paths, plus distinct `gateway.port` or channel ports when processes run together | Place `--home` before the subcommand; use the same instance selectors with `status`, `agent`, `webui`, `gateway`, and `serve` | [Multiple Instances](./multiple-instances.md), [CLI Reference](./cli-reference.md) |
 | Observe model calls | `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL` environment variables | Run one model call, then check the matching Langfuse project | [Langfuse Observability](#langfuse-observability) |
 
+## Shared network proxy
+
+Set one proxy address in **Settings → Advanced → Shared proxy**, then turn on **Use proxy** for each provider, Web access, channel, or remote MCP connection that needs it. The address is used by the gateway, so `127.0.0.1` refers to the machine running nanobot. Restart when Settings requests it. MCP connections can select the proxy before browser sign-in.
+
+For proxies that require credentials, expand **Authentication (optional)** and enter the username and password, then choose **Save** to apply the address and credentials together. The same editor is available from **Configure proxy** without leaving the current form. Passwords are masked in the interface but remain part of the proxy URL in the local configuration; protect that file. If the address is a whole-URL `${ENV_VAR}` reference, include authentication in the referenced URL.
+
+Only features with a **Use proxy** switch use this address. Turning a switch off preserves the feature's normal environment/system proxy behavior. An enabled switch without a configured address fails rather than silently connecting directly. Use a trusted proxy and keep credentials in its URL private.
+
+<details>
+<summary>Manual configuration</summary>
+
+```json
+{
+  "network": { "proxy": "http://127.0.0.1:7890" },
+  "providers": { "openai": { "useProxy": true } },
+  "tools": {
+    "web": { "useProxy": true },
+    "mcpServers": {
+      "notion": {
+        "type": "streamableHttp",
+        "url": "https://mcp.notion.com/mcp",
+        "auth": "oauth",
+        "useProxy": true
+      }
+    }
+  }
+}
+```
+
+HTTP, HTTPS, SOCKS5, and SOCKS5H URLs are accepted; individual integrations retain their transport limits. `${ENV_VAR}` references work in `network.proxy`.
+
+</details>
+
+On upgrade, one legacy proxy address moves to `network.proxy` and previously configured features receive `useProxy: true`. The migrated configuration is written on the next normal save, including `nanobot onboard --refresh`. If the old configuration contains different proxy addresses, choose one and set `network.proxy` explicitly before upgrading; multiple per-feature addresses are no longer supported. For Discord configurations that store the entire proxy URL in an environment variable and credentials separately, combine them into one full URL environment variable and set `network.proxy` to that reference before upgrading. Credential references inside a URL remain references when saved. Back up the original configuration before saving if you may need to downgrade.
+
 ## Environment Variables for Secrets
 
 Instead of storing secrets directly in `config.json`, you can use `${VAR_NAME}` references that are resolved from environment variables at startup:
@@ -277,7 +312,7 @@ A Base URL is the service address nanobot sends model requests to. Change it onl
 > - **Xiaomi MiMo thinking mode**: MiMo models (e.g. `mimo-v2.5-pro`) default to enabled thinking. In the preset's **Advanced options**, set reasoning effort to `none` to disable it, or `low` / `medium` / `high` to keep it on. Omitting the field preserves the provider's per-model default.
 > - **Xiaomi MiMo Token Plan**: If you're on MiMo's token plan, open the xiaomi_mimo connection in **Settings → Models** and set its base URL to `https://token-plan-sgp.xiaomimimo.com/v1`.
 > - **Custom providers**: Besides the built-in `custom` provider, any extra key under `providers` can define its own endpoint. For example, `providers.companyProxy.apiBase` plus `modelPresets.primary.provider: "companyProxy"` creates a separate custom provider. Set `apiBase`; set `apiKey` only when the endpoint requires it. Declare accepted protocols with `providers.<name>.api`; custom connections can use Chat Completions, Responses, or Anthropic Messages. See [custom connection APIs](#custom-connection-apis).
-> - **Provider-scoped proxy**: `providers.<name>.proxy` routes only that provider through an HTTP proxy. It is supported for OpenAI-compatible providers, Anthropic Messages, `openai_codex`, and `xai_grok`. Native `bedrock`, `azure_openai`, and `github_copilot` backends reject `proxy`.
+> - **Use proxy**: `providers.<name>.useProxy` opts that provider into the [shared network proxy](#shared-network-proxy). It is supported for OpenAI-compatible providers, Anthropic Messages, `openai_codex`, and `xai_grok`. Native `bedrock`, `azure_openai`, and `github_copilot` backends do not support this switch.
 
 </details>
 
@@ -754,14 +789,13 @@ The default model is `xai-grok/grok-4.6` with a 500,000-token context window. Th
 
 This is xAI subscription OAuth, not X Developer OAuth. nanobot follows the public OAuth client and proxy contract used by [Grok Build](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md). The browser flow uses a random loopback callback and PKCE. The resulting token is stored in the active instance's `auth/xai.json` (normally `~/.nanobot/auth/xai.json`), separately from Grok Build so rotating refresh tokens cannot invalidate one another.
 
-To use a provider-specific proxy, merge this into `config.json` before login:
+To use the shared proxy, configure its address and enable it for xAI before login:
 
 ```json
 {
+  "network": { "proxy": "http://127.0.0.1:7890" },
   "providers": {
-    "xaiGrok": {
-      "proxy": "http://127.0.0.1:7890"
-    }
+    "xaiGrok": { "useProxy": true }
   }
 }
 ```
@@ -1744,7 +1778,7 @@ When ripgrep (`rg`) is installed, nanobot automatically uses it in place of the 
 
 ## Web Tools
 
-Open **Settings → Capabilities → Web access** to enable or disable web tools and configure search and fetch. Use **Configure → Advanced options** for the web proxy and User-Agent, and **Settings → Advanced** for the SSRF whitelist. Follow any restart prompt.
+Open **Settings → Capabilities → Web access** to enable or disable web tools and configure search and fetch. Use **Configure → Advanced options** for **Use proxy** and User-Agent, and **Settings → Advanced** for the shared proxy address and SSRF whitelist. Follow any restart prompt.
 
 nanobot includes web search and web fetch tools. They are enabled by default. The collapsed examples below show the equivalent `tools.web` configuration.
 
@@ -1782,28 +1816,28 @@ nanobot uses a shared SSRF guard for built-in web fetches and HTTP/SSE MCP conne
 
 Keep whitelist entries as narrow as possible, such as a single host CIDR (`192.168.1.50/32`). The whitelist is global for the shared SSRF guard; it is not limited to one tool or one MCP server. This guard does not filter network traffic from shell commands or stdio MCP processes. The shell sandboxes also allow network access; use host or container egress controls when you need to prevent outbound connections.
 
-HTTP/SSE MCP connections use the same process-wide proxy environment behavior as `web_fetch`: proxied targets use the configured proxy, and URLs excluded by `NO_PROXY` remain DNS-pinned direct connections.
+Web access and HTTP/SSE MCP connections can opt into the [shared network proxy](#shared-network-proxy). With **Use proxy** off, their normal environment proxy settings and `NO_PROXY` still apply.
 
-In WebUI, open **Settings → Capabilities → Web access → Configure → Advanced options** to set the web proxy. This setting applies to the agent's web search and page reading, not model providers, MCP, or your browser. `127.0.0.1` refers to the machine that runs nanobot, not the phone or computer that opens WebUI. Clear the field to use the default network settings, which can include proxy environment variables. After saving, restart nanobot when WebUI requests it. You can configure the proxy before enabling web access.
+Set the address in **Settings → Advanced → Shared proxy**, then enable **Use proxy** under **Settings → Capabilities → Web access → Configure → Advanced options**. This switch applies to web search and page reading; providers and MCP connections have their own switches. Your browser uses its own network settings. Follow any restart prompt. You can configure the proxy before enabling web access.
 
 > [!TIP]
-> Use `proxy` in `tools.web` to route web requests through a proxy:
+> Set `network.proxy` once and enable `tools.web.useProxy` to route web requests through it:
 > <details>
 > <summary>Manual configuration</summary>
 >
 > ```json
-> { "tools": { "web": { "proxy": "http://127.0.0.1:7890" } } }
+> { "network": { "proxy": "http://127.0.0.1:7890" }, "tools": { "web": { "useProxy": true } } }
 > ```
 >
 > </details>
-> `web_fetch` applies DNS pinning for direct connections. When an explicit `tools.web.proxy` or a process-wide proxy environment variable applies to the target URL, nanobot still validates the requested URL locally, but DNS resolution for the outbound fetch happens at the proxy; configure only trusted proxies. URLs excluded by `NO_PROXY` keep the DNS-pinned direct path unless `tools.web.proxy` is configured.
+> Web requests still enforce URL safety checks when using a proxy. Use only trusted proxies: the proxy controls final DNS resolution and outbound access. With **Use proxy** enabled, the shared address takes precedence over environment proxy settings, including `NO_PROXY`.
 
 ### `tools.web`
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `enable` | boolean | `true` | Enable or disable all built-in web tools (`web_search` + `web_fetch`) |
-| `proxy` | string or null | `null` | Proxy for web requests, for example `http://127.0.0.1:7890`. `web_fetch` DNS pinning applies only to direct connections; proxied fetches rely on the configured proxy as the trusted network exit. |
+| `useProxy` | boolean | `false` | Use the [shared network proxy](#shared-network-proxy) for web search and fetch. |
 | `userAgent` | string or null | `null` | User-Agent header for all web requests. If null, a browser one will be used |
 
 ### Web Search
@@ -2064,18 +2098,41 @@ Create a key at [serper.dev](https://serper.dev). You can also set `SERPER_API_K
 
 AnySearch works out of the box with no key, via its anonymous quota (lower rate limits). Set `apiKey` (or `ANYSEARCH_API_KEY`) from [anysearch.com](https://anysearch.com/console/api-keys) to lift rate limits. It also offers vertical-domain search and full-page URL content extraction.
 
+**DeepSeek** (keyed, separate Search API):
+<details>
+<summary>Manual configuration</summary>
+
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "deepseek",
+        "apiKey": "${DEEPSEEK_SEARCH_KEY}"
+      }
+    }
+  }
+}
+```
+
+</details>
+
+Create a key at [platform.deepseek.com](https://platform.deepseek.com). Set `tools.web.search.apiKey` directly or with a `${VAR_NAME}` reference. Missing credentials cause a configuration error, with no provider fallback.
+
+Queries are limited to 128 Unicode characters after trimming whitespace; longer queries are rejected. Pricing is ¥5 per 1,000 successful requests, with an account-wide limit of 5 QPS across API keys. See the [DeepSeek Search API documentation](https://api-docs.deepseek.com/zh-cn/guides/search/) for search syntax and billing details.
+
 #### `tools.web.search`
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `provider` | string | `"duckduckgo"` | Search backend: `brave`, `tavily`, `jina`, `kagi`, `olostep`, `bocha`, `volcengine`, `keenable`, `serper`, `anysearch`, `searxng`, `duckduckgo` |
+| `provider` | string | `"duckduckgo"` | Search backend: `brave`, `tavily`, `jina`, `kagi`, `olostep`, `bocha`, `volcengine`, `keenable`, `serper`, `anysearch`, `deepseek`, `searxng`, `duckduckgo` |
 | `apiKey` | string | `""` | API key for API-backed search providers |
 | `baseUrl` | string | `""` | Base URL for SearXNG |
 | `maxResults` | integer | `5` | Results per search (1–10) |
 
 ### Web Fetch
 
-In **Settings → Capabilities → Web access**, expand the fetch options and choose whether to use Jina Reader. Save the change; use **Configure → Advanced options** in the same Web access card for network proxy settings.
+In **Settings → Capabilities → Web access**, expand the fetch options and choose whether to use Jina Reader. Save the change; use **Configure → Advanced options → Use proxy** to enable the address saved in **Settings → Advanced → Shared proxy**.
 
 > [!TIP]
 > If you are having issues with JS proof-of-work or Cloudflare captchas, set a random user agent and disable Jina Reader:
@@ -2311,6 +2368,8 @@ The model may explicitly request a different hard runtime up to `maxRuntimeLimit
 
 For existing configurations, `timeout` remains a hard-runtime alias: `"timeout": 60` still stops a command after 60 seconds, and `"timeout": 0` still means no hard deadline. Use either `timeout` or `maxRuntime`, not both.
 
+`exec` waits up to 1 second by default, then returns an active session ID if the command is still running. Use `exec_session` with that ID to read further output, wait, or stop the command; do not launch the command again just because it is still running. `yield_time_ms` changes the initial wait (0–30000 ms), not the command's runtime budget. Omitting it keeps stdin closed; set it explicitly when the command needs interactive input. `exec_session` waits are also bounded by `timeout_ms`, including `until_exit: true`; an expired wait leaves the command running. Direct `!` shell commands still wait for their completed result.
+
 The tool result distinguishes a hard-runtime termination from inactivity. With `idleAction: "report"`, a silent command continues running under its hard-runtime limit. With `idleAction: "terminate"`, inactivity stops the command and the result reports that reason. Both limits apply without polling. Commands are cleaned up when they finish, reach an enforced limit, or their owning session is cancelled or deleted; normal operation does not require manual process management. `yield_time_ms` and an `exec_session` wait timeout only control how long a tool call waits before returning; neither stops the command nor resets its runtime or inactivity clock.
 
 Silence is not proof that a command is stuck: builds, downloads, and buffered programs can be quiet while working. Only bytes received through stdout or stderr count as activity; output redirected to files is not observed, and reading logs does not refresh the inactivity clock. Inactivity checks do not detect prompts or supply answers. Choose `"terminate"` only when stopping a quiet command is acceptable, and use a finite hard runtime when total execution time must remain bounded. Shell sessions are not durable jobs and should not be used as a replacement for a scheduler or service manager. A command that detaches a background service and exits is not a managed job; these timing checks do not manage that service afterward.
@@ -2473,9 +2532,11 @@ The deprecated `agents.defaults.failOnToolError` field is silently ignored when 
 
 ## Auto Compact
 
-The WebUI has no control for the idle-compaction threshold or scan interval. Configure these fields directly in `config.json`; use `/compact` for an immediate compaction.
+Configure **Auto-compact idle sessions** and **Idle timeout** in **Settings → System → Sessions**, then restart the gateway to apply changes. The scan interval is configured directly in `config.json`; use `/compact` for an immediate compaction.
 
-When a session is idle for longer than a configured threshold, nanobot summarizes its conversation context. When you return, the model receives that summary and new messages instead of replaying the messages covered by the summary. The original conversation remains in your saved chat history, but even its most recent messages are no longer included verbatim in the model's context after idle compaction.
+When a session is idle for longer than the configured timeout, nanobot summarizes its conversation context to reduce input token usage on later requests. Summarization is lossy and may omit details. When you return, the model receives that summary and new messages instead of replaying the messages covered by the summary. The original conversation remains in your saved chat history, but even its most recent messages are no longer included verbatim in the model's context after idle compaction.
+
+If your provider retains its prompt cache longer, you can increase the idle timeout to delay compaction. Set the timeout to `0` to disable idle compaction if preserving the full context matters more than reducing subsequent input usage.
 
 ```json
 {

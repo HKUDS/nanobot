@@ -2,6 +2,10 @@
   "setup": {
     "docsLabel": "Abrir guia do QQ",
     "officialLabel": "Abrir console do bot QQ",
+    "sections": {
+      "credentials": "Credenciais manuais",
+      "advanced": "Avançado"
+    },
     "fields": {
       "appId": {
         "label": "App ID",
@@ -42,5 +46,24 @@
         }
       }
     }
+  },
+  "custom": {
+    "scanTitle": "Escaneie com o QQ no celular",
+    "waiting": "Aguardando leitura…",
+    "connected": "Vinculação concluída",
+    "stopped": "Cancelado",
+    "connecting": "Preparando QR code…",
+    "qrAlt": "QR code de vinculação do QQ",
+    "scanAgainWarning": "Vincular este bot do QQ novamente pode interromper outros aplicativos que o utilizam. Se o App Secret for redefinido, o segredo antigo será invalidado e esses aplicativos precisarão do novo.",
+    "configured": "Configurado",
+    "bind": "Vincular bot QQ",
+    "rebind": "Vincular bot novamente",
+    "refresh": "Atualizar QR code",
+    "retry": "Tentar novamente",
+    "expired": "QR code expirado",
+    "failed": "Falha na vinculação",
+    "cancelFailed": "Não foi possível cancelar",
+    "retrying": "Tentando novamente…",
+    "manualSetup": "Inserir credenciais manualmente"
   }
 }

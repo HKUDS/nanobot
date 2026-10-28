@@ -5,7 +5,7 @@ const port = Number(process.env.NANOBOT_BROWSER_TEST_PORT ?? 4178);
 export default defineConfig({
   testDir: "./browser",
   fullyParallel: false,
-  workers: 1,
+  workers: 2,
   retries: 0,
   timeout: 30_000,
   reporter: "list",

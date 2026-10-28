@@ -1,0 +1,431 @@
+{
+  "rename": {
+    "title": "RenameDialog · Renomear grupos e projetos",
+    "description": "Teste a renomeação de grupos e projetos. Os tópicos são renomeados na lista de conversas.",
+    "options": "O chamador fornece dialogTitle, description e placeholder. title define o valor inicial; onConfirm recebe o título sem espaços nas extremidades. Títulos vazios não podem ser salvos.",
+    "hint": "Ao salvar, o título acima é atualizado."
+  },
+  "delete": {
+    "title": "DeleteConfirm · Confirmação de exclusão",
+    "description": "Compare a exclusão de uma conversa, várias conversas ou uma conversa com automações.",
+    "options": "count controla o texto de exclusão em lote. automations mostra tarefas vinculadas, agendamentos e próximas execuções. Confirmar chama onConfirm.",
+    "scenario": "Cenário de exclusão",
+    "open": "Abrir confirmação de exclusão",
+    "confirmed": "Exclusão de exemplo confirmada.",
+    "hint": "Escolha uma conversa, várias conversas ou uma conversa com automações."
+  },
+  "inlineTokens": {
+    "title": "Inline tokens · Comandos e identificadores de sessão",
+    "description": "Edite comandos e identificadores para ver o destaque e as cores estáveis das sessões.",
+    "options": "SlashCommandText recebe command; InlineTokenHighlight recebe color e conteúdo. SessionHandleLabel determina a cor a partir de id.",
+    "command": "Texto do comando",
+    "run": "Execute <command/> para verificar o status.",
+    "handle": "Identificador da sessão",
+    "continue": "Continue trabalhando em <session/>.",
+    "highlight": "Destaque compartilhado",
+    "review": "Use <skill/> para revisar as alterações.",
+    "skill": "Habilidade: {{name}}"
+  },
+  "sessionLinks": {
+    "selected": "Sessão selecionada: {{name}}.",
+    "hint": "Selecione uma menção de sessão para ver o resultado."
+  },
+  "userText": {
+    "title": "UserMessageText · Menções em mensagens",
+    "description": "Edite uma mensagem com menções a habilidades, aplicativos, MCP e sessões.",
+    "options": "text é a mensagem original. cliApps, mcpPresets e sessionMentions resolvem as menções. Habilidades usam $name; as outras menções usam @name.",
+    "message": "Texto da mensagem"
+  },
+  "capabilityTokens": {
+    "title": "CapabilityMentionToken · Menções a aplicativos",
+    "description": "Compare menções a aplicativos, MCP e sessões no editor e nas mensagens.",
+    "options": "segment especifica cli, mcp ou session e seus metadados. variant escolhe composer ou message. O exemplo usa uma imagem de marca local.",
+    "position": "Local da menção"
+  },
+  "productIcons": {
+    "title": "Product icons · Catálogo de ícones",
+    "description": "Explore os ícones, mude o tamanho e selecione um para destacar.",
+    "options": "Os ícones aceitam LucideProps como size, strokeWidth e className. A cor herda currentColor; os botões têm nomes de ação acessíveis.",
+    "size": "Tamanho do ícone",
+    "selected": "Selecionado: {{name}}"
+  },
+  "startup": {
+    "title": "StartupShell · Tela de inicialização",
+    "description": "Veja a tela discreta exibida enquanto o aplicativo se conecta.",
+    "options": "embedded renderiza section; nos outros casos, main. aria-busy e o status de carregamento permanecem disponíveis. Os estilos vêm da entrada do aplicativo."
+  },
+  "fileActions": {
+    "title": "FileActions · Menu de arquivo",
+    "description": "Clique com o botão direito para copiar o caminho completo, relativo ou o texto de referência.",
+    "options": "path é o texto de referência. metadata fornece o caminho completo e o relativo opcional. A galeria fornece os metadados sem carregar o arquivo.",
+    "scope": "Escopo do arquivo",
+    "hint": "Clique com o botão direito para abrir o menu de cópia, ou foque o arquivo e pressione Shift+F10."
+  },
+  "workbench": {
+    "title": "PaneWorkbench · Múltiplos painéis",
+    "description": "Mude o layout, ative ou adicione painéis e ajuste a posição e o tamanho.",
+    "options": "O chamador controla panes, activePaneKey, layout e splitRatios. renderPane fornece o conteúdo e os callbacks atualizam o estado local. Em telas estreitas, o painel ativo é exibido.",
+    "layout": "Layout dos painéis",
+    "limit": "Até quatro painéis",
+    "notes": "Notas de {{title}}",
+    "active": "Painel ativo",
+    "activate": "Selecione este painel para ativá-lo",
+    "hint": "Ativo: {{title}}. Arraste a alça inferior para mover um painel e as bordas para redimensioná-lo."
+  },
+  "hostConnection": {
+    "title": "HostConnectionStatus · Status da conexão",
+    "description": "Compare os estados conectado, desconectado, conectando e erro.",
+    "options": "state controla o ícone e o texto. compact oculta o texto visível, mantendo o status acessível e a dica.",
+    "state": "Status da conexão",
+    "withText": "Status com texto",
+    "compact": "Exibição compacta"
+  },
+  "compatibility": {
+    "title": "HostCompatibilityDialog · Compatibilidade de versões",
+    "description": "Confira versões, preparativos e o guia de atualização para cada resultado de compatibilidade.",
+    "options": "Um profile abre o diálogo; compatibility fornece o resultado e as versões. onClose o fecha. Este componente apenas exibe informações.",
+    "state": "Compatibilidade de versões",
+    "open": "Ver detalhes de compatibilidade"
+  },
+  "composer": {
+    "title": "ThreadComposer · Entrada de mensagens",
+    "description": "Teste mensagens, anexos, comandos e citações nos estados ocupado e desativado.",
+    "options": "Um onSend bem-sucedido limpa a entrada. isStreaming controla a interrupção e a fila; variant escolhe o estilo de conversa ou boas-vindas. Os envios ficam nesta prévia.",
+    "statusCommand": "Status da sessão",
+    "statusDescription": "Ver o status da sessão atual",
+    "compactCommand": "Compactar contexto",
+    "compactDescription": "Compactar o contexto da sessão atual",
+    "helpCommand": "Ajuda de comandos",
+    "helpDescription": "Ver os comandos disponíveis",
+    "state": "Estado da entrada",
+    "addQuote": "Adicionar citação",
+    "input": "Mensagem de exemplo",
+    "placeholder": "Digite uma mensagem ou / para ver comandos",
+    "stopped": "Tarefa de exemplo interrompida.",
+    "sent": "Conteúdo enviado: {{content}}{{attachments}}",
+    "attachments": " · Anexos: {{amount}}",
+    "hint": "Teste o envio, a seleção de anexos, a troca de modelo e o menu de comandos."
+  },
+  "modelPreset": {
+    "title": "ModelPresetBadge · Predefinições de modelo",
+    "description": "Teste o menu de modelos, a navegação por teclado e o estado de configuração pendente.",
+    "options": "modelPresets fornece as predefinições; modelPreset e onPresetChange controlam a seleção. needsSetup exibe o acesso à configuração.",
+    "state": "Estado do controle de modelo",
+    "manage": "Gerenciamento de modelos aberto.",
+    "settings": "Configurações de modelos abertas.",
+    "hint": "Predefinição atual: {{preset}}. Abra o menu ou use as setas para trocar."
+  },
+  "usage": {
+    "title": "ComposerUsagePopover · Uso do contexto",
+    "description": "Veja contexto, cache e tempo de geração com alertas e painel inferior.",
+    "options": "context fornece a capacidade; rounds fornece estatísticas por turno. bottomSheet escolhe o painel móvel.",
+    "state": "Estado do uso",
+    "hint": "Abra os detalhes para ver contexto, cache e tempo de geração por turno."
+  },
+  "workspace": {
+    "title": "WorkspaceControls · Diretório de trabalho",
+    "description": "Escolha um projeto de exemplo e altere o modo de acesso desta prévia.",
+    "options": "scope e onChange controlam a seleção; onLoadProjects fornece diretórios de exemplo. O gateway resolve os caminhos reais e aplica as permissões.",
+    "state": "Estado do diretório de trabalho"
+  },
+  "navigator": {
+    "title": "PromptNavigator · Navegação de perguntas",
+    "description": "Pesquise perguntas anteriores e confira o callback de navegação.",
+    "options": "messages fornece toda a conversa; o componente extrai as perguntas do usuário. onJumpToPrompt recebe o ID da mensagem de destino.",
+    "hint": "Abra a navegação, pesquise e selecione uma pergunta.",
+    "empty": "Nenhuma pergunta selecionada ainda"
+  },
+  "header": {
+    "title": "ThreadHeader · Cabeçalho da conversa",
+    "description": "Teste a barra lateral, o tema, a conversa temporária e a navegação de perguntas.",
+    "options": "title, handle, theme e temporaryChatEnabled fornecem o estado visual. Os callbacks encaminham as ações ao chamador.",
+    "jump": "Navegou para {{id}}",
+    "sidebar": "Barra lateral alternada",
+    "hint": "Teste as ações do cabeçalho",
+    "temporary": "Conversa temporária",
+    "regular": "Conversa normal"
+  },
+  "messages": {
+    "title": "ThreadMessages · Lista de mensagens",
+    "description": "Explore uma conversa com vários turnos, menus, ramificações e citações de texto selecionado.",
+    "options": "messages contém as mensagens projetadas. onForkFromMessage recebe o índice de uma pergunta; onQuoteSelection recebe o texto selecionado de uma resposta.",
+    "quoted": "Citação: {{text}}",
+    "forked": "Ramificação criada a partir da pergunta {{index}}",
+    "hint": "Abra o menu de uma mensagem, ou selecione o texto de uma resposta e escolha Citar."
+  },
+  "viewport": {
+    "title": "ThreadViewport · Rolagem da conversa",
+    "description": "Percorra uma conversa longa com marcadores, navegação e retorno ao final.",
+    "options": "A prévia tem altura fixa. messages fornece o histórico; ref.jumpToUserPrompt localiza uma pergunta. emptyState fornece o conteúdo de uma conversa vazia.",
+    "state": "Visualização da conversa",
+    "empty": "Digite uma mensagem para iniciar uma conversa",
+    "hint": "Role para explorar os marcadores, ou use a navegação e volte ao final."
+  },
+  "history": {
+    "title": "ThreadHistoryStatus · Estado do histórico",
+    "description": "Mostre o carregamento, o início do histórico e os erros com nova tentativa.",
+    "options": "loading indica uma solicitação, exhausted a ausência de mensagens anteriores, error fornece os detalhes do erro e onRetry tenta carregar novamente.",
+    "state": "Estado do histórico",
+    "error": "O histórico de exemplo está indisponível.",
+    "retries": "Novas tentativas: {{amount}}"
+  },
+  "recovery": {
+    "title": "RecoveryNotice · Recuperação de tarefas",
+    "description": "Compare interrupção, retomada, falha e indisponibilidade; teste continuar e fechar.",
+    "options": "state fornece um retrato da recuperação. onContinue e onDismiss retornam Promises. Esses callbacks apenas atualizam a prévia.",
+    "state": "Estado da recuperação",
+    "continued": "Tarefa de exemplo retomada.",
+    "dismissed": "Aviso de recuperação fechado.",
+    "reset": "Redefinir prévia",
+    "hint": "Selecione um estado de recuperação e teste continuar ou fechar."
+  },
+  "fallback": {
+    "title": "ModelFallbackNotice · Modelo alternativo",
+    "description": "Veja avisos de modelo alternativo e autorização expirada, configurações e fechamento.",
+    "options": "model identifica o modelo alternativo; reauthProviderLabel nomeia a autorização expirada. O chamador fornece onOpenSettings e onDismiss.",
+    "state": "Estado do modelo alternativo",
+    "showAgain": "Mostrar novamente",
+    "hint": "Teste o link para configurações de modelos e o botão de fechar."
+  },
+  "compaction": {
+    "title": "ContextCompactionNotice · Compactação do contexto",
+    "description": "Compare os estados de início, sucesso, falha e cancelamento da compactação.",
+    "options": "compaction.phase seleciona o aviso; announce controla os anúncios do leitor de tela.",
+    "phase": "Fase de compactação do contexto"
+  },
+  "streamError": {
+    "title": "StreamErrorNotice · Erros de mensagem",
+    "description": "Compare erros de tamanho, permissões, rejeição de turno e solicitação ao modelo.",
+    "options": "error.kind escolhe a mensagem de erro; onDismiss fecha o aviso.",
+    "kind": "Tipo de erro de mensagem"
+  },
+  "cluster": {
+    "title": "AgentActivityCluster · Atividade completa",
+    "description": "Veja raciocínio e registros de ferramentas em execução, concluídos ou com falha.",
+    "options": "messages contém projeções de reasoning e trace. isTurnStreaming controla a atividade; expanded pode ser controlado pelo chamador.",
+    "state": "Estado da atividade",
+    "error": "Não foi possível ler o arquivo."
+  },
+  "search": {
+    "title": "WebSearchRun · Atividade de busca",
+    "description": "Veja o progresso e as fontes das buscas na web e no X.",
+    "options": "run fornece query, target, status e sources; turnActive controla o efeito de execução. Componentes compartilhados carregam os ícones dos sites de origem.",
+    "state": "Estado da busca",
+    "source": "Fonte da busca"
+  },
+  "responseSources": {
+    "title": "FallbackResponseSources · Fontes da resposta",
+    "description": "Veja predefinições, modelos e provedores alternativos usados nas respostas anteriores.",
+    "options": "sources preserva o retrato do modelo no momento da resposta. Apenas fontes com fallback em true exibem um selo.",
+    "hint": "Selecione um selo de modelo alternativo para ver a predefinição, o modelo e o provedor da resposta."
+  },
+  "filePreview": {
+    "title": "FilePreviewPanelView · Conteúdo de arquivos",
+    "description": "Compare texto, imagens, truncamento, carregamento e erros. Selecione uma imagem para ampliar.",
+    "options": "state fornece o estado visual; path determina o tipo e o nome do arquivo. Os callbacks de abertura e erro de imagem atualizam a prévia.",
+    "state": "Estado da prévia do arquivo"
+  },
+  "session": {
+    "title": "SessionInfoPopoverView · Automações da sessão",
+    "description": "Veja, edite, desative e exclua tarefas com estados de carregamento e erro.",
+    "options": "O chamador fornece jobs, loading, loadFailed e now. onAction e onEdit retornam tarefas atualizadas; a interface coordena diálogos, foco e resultados.",
+    "state": "Estado das automações da sessão",
+    "saveError": "Falha ao salvar o exemplo. Tente novamente.",
+    "providerError": "O provedor de exemplo está indisponível.",
+    "saved": "Automação salva.",
+    "openedChat": "Conversa de exemplo aberta.",
+    "openedCalendar": "Calendário de automações aberto.",
+    "actionError": "Falha na ação de exemplo. Tente novamente.",
+    "delete": "Excluído: {{name}}",
+    "run": "Execução solicitada: {{name}}",
+    "enable": "Ativado: {{name}}",
+    "disable": "Desativado: {{name}}",
+    "hint": "Abra os detalhes da sessão para ver, alternar, editar e excluir automações."
+  },
+  "subagent": {
+    "title": "SubagentThreadView · Mensagens do subagente",
+    "description": "Veja mensagens, raciocínio, carregamento e falhas do subagente; teste a nova tentativa.",
+    "options": "O runtime projeta messages. loading e error usam o estado compartilhado do histórico; isStreaming e activeTurnId identificam a atividade. A interface não busca o histórico.",
+    "state": "Estado da conversa do subagente"
+  },
+  "pairRoute": {
+    "title": "PairRouteSettingsView · Rota de pareamento",
+    "description": "Selecione e salve rotas localmente, com estados de salvamento, erro e falha de atualização.",
+    "options": "O chamador gerencia route e original; routes fornece rotas SSH. O sucesso ao salvar e a falha ao atualizar o diretório são separados. Galeria e configurações compartilham a interface.",
+    "state": "Estado da rota"
+  },
+  "quickPair": {
+    "title": "QuickPairSetupView · Pareamento rápido",
+    "description": "Teste cópia do convite, entrada da resposta, confirmação de acesso, hosts existentes e novas tentativas.",
+    "options": "state fornece o estado visual e do pareamento; callbacks executam ações. routeSettings integra as configurações de rota. A galeria usa exemplos e callbacks locais; QuickPairSetup gerencia o pareamento real.",
+    "state": "Etapa do pareamento",
+    "open": "Abrir pareamento rápido",
+    "connected": "Conexão selecionada: {{name}}.",
+    "ssh": "Conexão SSH selecionada.",
+    "hint": "Convites e respostas de exemplo são apenas ilustrativos. A confirmação atualiza o resultado local."
+  },
+  "sshHost": {
+    "title": "SSHHostPickerView · Endereço SSH",
+    "description": "Filtre aliases SSH, selecione com as setas e compare importação, carregamento e erros.",
+    "options": "discovery fornece os hosts da configuração atual. O chamador controla value, busy, error e callbacks. customConfig mantém a descoberta de aliases personalizados; inputRef restaura o foco após a seleção.",
+    "state": "Estado do endereço SSH",
+    "refreshed": "Endereços de exemplo atualizados.",
+    "entered": "Valor digitado: {{value}}",
+    "hint": "Digite para filtrar endereços e use as setas para escolher um alias SSH."
+  },
+  "connectionBadge": {
+    "title": "ConnectionBadge · Indicador de conexão",
+    "description": "Compare cores, animações e textos de status acessíveis.",
+    "options": "O chamador fornece status. O contêiner da página gerencia a assinatura da conexão.",
+    "state": "Status da conexão",
+    "idle": "Inativo",
+    "connecting": "Conectando",
+    "open": "Conectado",
+    "reconnecting": "Reconectando",
+    "closed": "Desconectado",
+    "error": "Erro de conexão"
+  },
+  "hostPicker": {
+    "title": "HostSwitcherView · Menu de hosts",
+    "description": "Escolha hosts locais ou de exemplo; compare espera, desconexão e estado recolhido.",
+    "options": "picker fornece dados e callbacks dos hosts; status é o estado atual da conexão. O HostSwitcher de produção assina o cliente.",
+    "state": "Estado do menu de hosts",
+    "offline": "O host de exemplo está desconectado.",
+    "manage": "Gerenciamento de conexões aberto.",
+    "cancelled": "Troca de host de exemplo cancelada.",
+    "selected": "Host da prévia: {{name}}"
+  },
+  "chats": {
+    "title": "ChatList · Lista de conversas",
+    "description": "Selecione conversas e teste fixação, arquivamento e exclusão pelos menus.",
+    "options": "O chamador fornece sessions, activeKey e chaves fixadas ou arquivadas. Os callbacks de ação atualizam a lista de exemplo.",
+    "state": "Estado da lista de conversas",
+    "renamed": "Novo nome: {{name}}",
+    "selected": "Conversa selecionada: {{name}}",
+    "none": "Nenhuma"
+  },
+  "sidebarResize": {
+    "title": "SidebarResizeHandle · Tamanho da barra lateral",
+    "description": "Redimensione, recolha e expanda a barra lateral com o mouse ou teclado.",
+    "options": "width e open são controlados. onResize atualiza o tamanho e a expansão; onDraggingChange informa o arraste.",
+    "content": "Conteúdo da barra lateral",
+    "hint": "Arraste a divisória, ou foque nela e use as setas, Home, End e Enter.",
+    "collapsed": "Recolhida",
+    "dragging": "Arrastando"
+  },
+  "language": {
+    "title": "LanguageSwitcher · Idioma da interface",
+    "description": "Mude o idioma da galeria e dos componentes de produção.",
+    "options": "Usa o i18n do aplicativo e a preferência de idioma do navegador, sem gateway. O seletor superior é o mesmo componente."
+  },
+  "channelMarks": {
+    "title": "Channel marks · Identidade dos canais",
+    "description": "Veja texto alternativo de avatares, ícones de espaço de trabalho e a marca WebSocket.",
+    "options": "LinearAvatar recebe name, url e workspace. Sem imagem válida, exibe texto alternativo ou um ícone.",
+    "name": "Nome do avatar",
+    "member": "Avatar do membro",
+    "workspace": "Ícone do espaço de trabalho"
+  },
+  "secret": {
+    "title": "LinearSecretField · Edição de segredos",
+    "description": "Edite, revele, salve e substitua um segredo; verifique o rascunho após uma falha.",
+    "options": "configured indica o estado salvo; onSave persiste o segredo. Os callbacks da galeria apenas atualizam o estado local.",
+    "state": "Estado do segredo",
+    "error": "Falha ao salvar o exemplo.",
+    "hint": "Digite um exemplo e salve, ou selecione o estado de erro para verificar a preservação do rascunho."
+  },
+  "channelHelp": {
+    "title": "LinearHelpContent · Ajuda do canal",
+    "description": "Veja a ajuda do canal dentro do menu suspenso real.",
+    "options": "O conteúdo usa as traduções existentes do canal; o chamador fornece o contêiner do menu.",
+    "open": "Abrir ajuda do canal"
+  },
+  "channel": {
+    "title": "{{channel}} · Configuração do canal",
+    "description": "Explore o formulário real de configuração e seus estados.",
+    "options": "Usa registros de canal, retratos do contrato Python e ChannelSetupSurfaceView de produção. Entradas, visibilidade das credenciais, predefinições, verificações e interruptores afetam apenas esta prévia.",
+    "state": "Estado da configuração do canal",
+    "credentialsError": "As credenciais de exemplo foram recusadas. Atualize os valores da prévia e tente novamente.",
+    "validation": "Configuração da prévia"
+  },
+  "channelConnect": {
+    "state": "Status da conexão do {{channel}}",
+    "error": "A autorização está temporariamente indisponível. Tente novamente."
+  },
+  "qqConnect": {
+    "title": "QQConnectFlowView · Conexão QR do QQ",
+    "description": "Explore o login QR do QQ, novas tentativas e o aviso de substituição do App Secret.",
+    "options": "A visualização recebe o estado e os callbacks. As ações da prévia ficam locais; a entrada do runtime cria sessões e consulta o portal do QQ."
+  },
+  "feishuConnect": {
+    "title": "FeishuConnectFlowView · Autorização QR do Feishu",
+    "description": "Teste o fluxo QR real do Feishu com espera, sucesso, expiração, cancelamento e erros.",
+    "options": "connect, busy e error fornecem o estado visual; os QR codes são gerados localmente. A funcionalidade gerencia início, cancelamento e consultas periódicas; os callbacks só alteram este exemplo."
+  },
+  "feishuAssistants": {
+    "title": "FeishuAssistantsPanelView · Assistentes do Feishu",
+    "description": "Explore cartões de assistentes, execução, autorização, opções avançadas e adição de assistentes.",
+    "options": "feature e instances fornecem retratos do estado. A interface gerencia rascunhos e resultados; onToggleInstance, onSaveInstance e renderConnectFlow conectam ações do runtime.",
+    "state": "Estado de execução do assistente",
+    "error": "O assistente parou. Verifique as credenciais antes de reiniciá-lo.",
+    "on": "{{name}}: ligado",
+    "off": "{{name}}: desligado",
+    "saved": "{{name}}: campos de prévia salvos: {{amount}}"
+  },
+  "whatsappConnect": {
+    "title": "WhatsAppConnectFlowView · Vinculação de dispositivo WhatsApp",
+    "description": "Compare vinculação automática, sucesso, expiração e erros; teste outra conta.",
+    "options": "A interface mantém as regras de início automático e layout mínimo. O chamador controla estado e novas tentativas. A entrada real gerencia início automático, tentativas forçadas e consultas periódicas."
+  },
+  "linearPanel": {
+    "title": "LinearPanelView · Configuração do Linear",
+    "description": "Explore dados do app, segredos, opções avançadas, espaços, acesso de membros e autorização web.",
+    "options": "state e workspaces fornecem retratos; callbacks conectam ações de espaço, salvamento e MCP. Três slots compõem as interfaces de membros, autorização e redefinição usadas em produção.",
+    "state": "Estado da configuração do Linear",
+    "runtimeError": "Não foi possível iniciar o webhook do Linear.",
+    "saveError": "Não foi possível salvar as configurações. Seu rascunho foi mantido.",
+    "inspectionError": "Não foi possível inspecionar os espaços de trabalho conectados.",
+    "refreshed": "Espaços de trabalho de exemplo atualizados.",
+    "removed": "Espaço de trabalho de exemplo removido: {{name}}",
+    "mcp": "Configuração do Linear MCP selecionada."
+  },
+  "linearMembers": {
+    "title": "LinearMemberAccessView · Acesso de membros",
+    "description": "Pesquise membros, mude o acesso e compare carregamento, lista vazia, salvamento e falta de confirmação.",
+    "options": "snapshot contém o estado confirmado dos membros. onLoad e onSetAllowed pertencem à entrada do canal; o gateway continua validando as permissões.",
+    "state": "Estado dos membros",
+    "loadError": "O diretório de membros está indisponível.",
+    "saveError": "O acesso não foi confirmado."
+  },
+  "linearConnect": {
+    "title": "LinearConnectFlowView · Autorização do Linear",
+    "description": "Teste a autorização no navegador com espera, início, cancelamento, sucesso e falha.",
+    "options": "Reutiliza ChannelQrConnectFlowView. O Linear fornece exibição, rótulos e foco; a entrada do runtime cria sessões e faz consultas periódicas.",
+    "state": "Etapa de autorização",
+    "error": "Não foi possível concluir a autorização.",
+    "hint": "O link de autorização e o espaço de trabalho são exemplos. Iniciar e Cancelar só mudam a etapa da prévia."
+  },
+  "linearReset": {
+    "title": "LinearResetConnectionView · Redefinir conexão",
+    "description": "Revise o que é limpo ou mantido, o estado ocupado e as tentativas após redefinição parcial.",
+    "options": "onReset executa toda a revogação e limpeza. A interface gerencia confirmação, erros, restrições de fechamento e restauração do foco.",
+    "state": "Resultado da redefinição",
+    "error": "Não foi possível parar o canal. As configurações do aplicativo foram mantidas.",
+    "completed": "Espaço de trabalho e configurações do aplicativo da prévia limpos."
+  },
+  "weixinPanel": {
+    "title": "WeixinPanelView · Configurações do Weixin",
+    "description": "Explore configurações, opções avançadas, salvamento e recuperação de login expirado.",
+    "options": "Os campos vêm do contrato do canal. A interface gerencia expansão e visibilidade dos segredos; a entrada do runtime gerencia salvamento automático, mesclagem de rascunhos e recuperação do login.",
+    "state": "Estado do painel do Weixin"
+  },
+  "weixinConnect": {
+    "title": "WeixinConnectFlowView · QR e verificação do Weixin",
+    "description": "Compare leitura QR, códigos de verificação, sucesso, expiração, cancelamento e erros.",
+    "options": "A interface recebe retratos e callbacks, mantendo o código digitado. Os QR codes são gerados no navegador. A entrada real gerencia autorização, pausa de consultas, atualização e cancelamento.",
+    "state": "Status da conexão do Weixin",
+    "error": "Conexão interrompida. Tente novamente.",
+    "refreshed": "Um novo QR code de prévia está sendo exibido.",
+    "hint": "Digite 123456 para concluir a verificação de exemplo. Outra entrada mantém o rascunho e exibe um erro."
+  }
+}

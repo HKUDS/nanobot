@@ -124,7 +124,7 @@ async def test_exec_full_access_skips_command_guard(tmp_path, command):
         restrict_to_workspace=False,
         deny_patterns=[r"echo\s+blocked"],
     )
-    result = await tool.execute(command=command)
+    result = await tool.execute(command=command, yield_time_ms=10000)
 
     assert "Exit code: 0" in result
     assert "Command blocked" not in result
@@ -136,7 +136,7 @@ async def test_exec_full_workspace_scope_skips_command_guard(tmp_path):
     token = bind_workspace_scope(scope)
     try:
         result = await tool.execute(
-            command="echo http://169.254.169.254/latest/meta-data/",
+            command="echo http://169.254.169.254/latest/meta-data/", yield_time_ms=10000,
         )
     finally:
         reset_workspace_scope(token)
@@ -148,7 +148,7 @@ async def test_exec_full_workspace_scope_skips_command_guard(tmp_path):
 @pytest.mark.asyncio
 async def test_exec_allows_normal_commands():
     tool = ExecTool(timeout=5)
-    result = await tool.execute(command="echo hello")
+    result = await tool.execute(command="echo hello", yield_time_ms=10000)
     assert "hello" in result
     assert "Error" not in result.split("\n")[0]
 
@@ -283,7 +283,7 @@ async def test_exec_allows_working_dir_within_workspace(tmp_path):
     subdir = workspace / "project"
     subdir.mkdir(parents=True)
     tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True, timeout=5)
-    result = await tool.execute(command="echo ok", working_dir=str(subdir))
+    result = await tool.execute(command="echo ok", working_dir=str(subdir), yield_time_ms=10000)
     assert "ok" in result
     assert "outside the configured workspace" not in result
 
@@ -294,7 +294,7 @@ async def test_exec_allows_working_dir_equal_to_workspace(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True, timeout=5)
-    result = await tool.execute(command="echo ok", working_dir=str(workspace))
+    result = await tool.execute(command="echo ok", working_dir=str(workspace), yield_time_ms=10000)
     assert "ok" in result
     assert "outside the configured workspace" not in result
 
@@ -307,7 +307,7 @@ async def test_exec_ignores_workspace_check_when_not_restricted(tmp_path):
     other = tmp_path / "other"
     other.mkdir()
     tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=False, timeout=5)
-    result = await tool.execute(command="echo ok", working_dir=str(other))
+    result = await tool.execute(command="echo ok", working_dir=str(other), yield_time_ms=10000)
     assert "ok" in result
     assert "outside the configured workspace" not in result
 

@@ -1,0 +1,508 @@
+{
+  "common": {
+    "unavailable": "사용 불가",
+    "selected": "선택: {{value}}",
+    "savingPreview": "미리보기 값 저장 중…",
+    "savedPreview": "미리보기 값을 저장했습니다",
+    "providerAction": "제공업체 설정 작업을 선택했습니다",
+    "reset": "미리보기 초기화"
+  },
+  "button": {
+    "title": "버튼",
+    "description": "같은 버튼의 모양과 크기를 옵션으로 바꿉니다.",
+    "options": "variant는 모양, size는 크기를 바꿉니다. disabled는 상호작용을 차단하며 onClick은 호출 측에서 제공합니다.",
+    "variants": "변형 — 같은 버튼의 여러 스타일",
+    "sizes": "크기",
+    "add": "예제 추가",
+    "clicks": "버튼 클릭 수: {{count}}"
+  },
+  "input": {
+    "title": "입력 필드",
+    "description": "텍스트 입력과 공통 검색 필드 변형입니다.",
+    "options": "일반 필드에는 Input, 검색에는 SearchInput을 사용합니다. 레이블을 제공하고 잘못된 입력을 설명하세요.",
+    "name": "예제 이름",
+    "projectName": "프로젝트 이름",
+    "search": "검색",
+    "searchName": "예제 검색",
+    "searchProjects": "프로젝트 검색",
+    "invalid": "잘못된 입력",
+    "invalidName": "잘못된 이름",
+    "required": "프로젝트 이름을 입력하세요.",
+    "disabledName": "비활성화된 이름 필드"
+  },
+  "textarea": {
+    "title": "여러 줄 입력",
+    "description": "공통 포커스 스타일을 사용하는 여러 줄 텍스트입니다.",
+    "options": "기본 textarea 속성인 value, onChange, rows, disabled를 받습니다.",
+    "notes": "예제 메모",
+    "disabledNotes": "비활성화된 메모",
+    "readOnly": "읽기 전용 미리보기"
+  },
+  "toggle": {
+    "title": "스위치",
+    "description": "설정, 작업 공간, 채널에서 공유하는 제어형 켜기/끄기 스위치입니다.",
+    "options": "checked와 onChange는 호출 측에서 관리합니다. label은 접근 가능한 이름을 제공합니다.",
+    "enable": "예제 활성화",
+    "unavailableOn": "조작할 수 없는 켜진 스위치",
+    "unavailableOff": "조작할 수 없는 꺼진 스위치"
+  },
+  "select": {
+    "title": "선택 컨트롤",
+    "description": "키보드 탐색과 비활성 옵션을 지원하는 단일 선택입니다.",
+    "options": "Select, SelectTrigger, SelectValue, SelectContent, SelectItem을 조합합니다. 루트가 value/onValueChange를 관리합니다.",
+    "fast": "빠름",
+    "model": "예제 모델",
+    "disabledModel": "비활성화된 모델 선택"
+  },
+  "segmented": {
+    "title": "분할 선택",
+    "description": "적은 수의 선택지를 항상 표시합니다.",
+    "options": "value, options, onChange는 제어되는 값입니다. mode=\"tabs\"는 방향키를 사용한 탭 탐색을 추가합니다.",
+    "day": "일",
+    "week": "주",
+    "month": "월",
+    "period": "예제 기간",
+    "selected": "선택한 기간: {{value}}"
+  },
+  "combobox": {
+    "title": "검색 가능한 선택",
+    "description": "공통 키보드 및 포인터 탐색을 사용하는 검색 가능한 선택지입니다.",
+    "options": "useComboboxNavigation은 입력, 목록, 옵션 속성을 제공합니다. 호출 측에서 값을 필터링하고 선택 상태를 관리합니다.",
+    "search": "예제 옵션 검색",
+    "placeholder": "입력하거나 방향키를 사용하세요",
+    "choices": "예제 옵션",
+    "empty": "일치하는 옵션이 없습니다",
+    "selected": "선택한 옵션: {{value}}"
+  },
+  "chevron": {
+    "title": "컨트롤 화살표",
+    "description": "선택 컨트롤에서 공유하는 꺾쇠 화살표입니다.",
+    "options": "className으로 위치를 조정할 수 있습니다. 아이콘은 장식용이며 접근 가능한 이름은 해당 컨트롤이 제공합니다."
+  },
+  "dialog": {
+    "title": "대화상자",
+    "description": "임시 변경, 중첩 선택, 포커스 복귀를 지원하는 모달 편집기입니다.",
+    "options": "호출 측에서 open/onOpenChange와 초안 및 저장 동작을 관리합니다. DialogTitle을 항상 제공하고 필요하면 설명을 추가하세요.",
+    "open": "대화상자 열기",
+    "edit": "예제 레이블 편집",
+    "help": "변경 사항은 이 미리보기에만 적용됩니다.",
+    "label": "예제 레이블",
+    "save": "레이블 저장",
+    "saved": "저장한 레이블: {{name}}"
+  },
+  "alert": {
+    "title": "확인 대화상자",
+    "description": "취소와 실행 컨트롤을 분리하여 명확하게 확인합니다.",
+    "options": "제목, 설명, 하단 영역을 조합하고 AlertDialogAction의 핸들러에서 작업을 실행합니다.",
+    "remove": "예제 제거",
+    "confirmTitle": "이 예제를 제거할까요?",
+    "help": "미리보기 상태만 변경됩니다.",
+    "confirm": "제거 확인",
+    "removed": "예제를 제거했습니다.",
+    "available": "예제를 사용할 수 있습니다."
+  },
+  "sheet": {
+    "title": "측면 패널",
+    "description": "표시 영역의 가장자리에 붙는 모달 패널입니다.",
+    "options": "SheetContent는 side를 지원합니다. SheetTitle과 SheetDescription을 포함하세요.",
+    "open": "측면 패널 열기",
+    "panelTitle": "예제 측면 패널",
+    "help": "현재 페이지 옆에 표시하는 보조 컨트롤입니다.",
+    "notes": "패널 메모",
+    "placeholder": "여기에서 편집해 보세요"
+  },
+  "popover": {
+    "title": "팝오버",
+    "description": "트리거에 고정된 작은 상호작용 영역입니다.",
+    "options": "트리거와 내용을 조합합니다. open/onOpenChange를 제어할 수 있습니다. 내용은 상위 대화상자의 포털을 따릅니다.",
+    "open": "팝오버 열기",
+    "note": "빠른 메모"
+  },
+  "menu": {
+    "title": "드롭다운 메뉴",
+    "description": "작업, 단일 선택, 중첩 메뉴, 비활성 항목입니다.",
+    "options": "작업에는 onSelect를, 지속되는 선택에는 라디오 그룹을 사용합니다.",
+    "view": "보기 옵션",
+    "layout": "레이아웃",
+    "comfortable": "여유롭게",
+    "compact": "촘촘하게",
+    "rename": "이름 바꾸기",
+    "more": "추가 작업",
+    "duplicate": "복제",
+    "none": "없음",
+    "status": "밀도: {{density}}. 작업: {{action}}."
+  },
+  "tooltip": {
+    "title": "도구 설명과 힌트",
+    "description": "HoverHint는 공통 도구 설명 기본 요소를 조합하며 tooltip.tsx가 공개 가져오기 경로입니다.",
+    "options": "일반 힌트에는 HoverHint를 사용합니다. 중요한 오류는 항상 표시하세요. 호버와 키보드 포커스는 제품 공통의 표시 시간 규칙을 따릅니다.",
+    "primitive": "기본 도구 설명",
+    "primitiveHelp": "포인터에는 공통 지연을 적용하고 키보드 포커스에는 즉시 표시합니다.",
+    "hint": "호버 힌트",
+    "hintHelp": "같은 포커스 및 포인터 동작을 사용하는 조합형 힌트입니다."
+  },
+  "truncated": {
+    "title": "잘린 텍스트 힌트",
+    "description": "측정한 텍스트가 잘린 경우에만 힌트를 표시합니다.",
+    "options": "text와 제한된 너비를 지정합니다. 텍스트 자체가 키보드 포커스를 받아야 하면 tabIndex를 추가하세요."
+  },
+  "disclosure": {
+    "title": "접을 수 있는 내용",
+    "description": "접힌 상태에서도 자식 상태를 유지하는 확장 영역입니다.",
+    "options": "Disclosure가 확장을 관리합니다. 사용자 지정 트리거에는 DisclosureContent의 제어형 open 속성을 사용할 수 있습니다.",
+    "show": "고급 옵션 표시",
+    "help": "닫았다 다시 열어도 이 초안은 유지됩니다.",
+    "draft": "접이식 영역 초안"
+  },
+  "expandable": {
+    "title": "펼칠 수 있는 텍스트",
+    "description": "같은 텍스트를 마운트한 채로 줄 수를 제한해 미리 봅니다.",
+    "options": "호출 측에서 expanded를 관리합니다. lines는 접힌 줄 수를 정합니다. 접근 가능한 전환 컨트롤을 제공하세요.",
+    "less": "접기",
+    "more": "더 보기"
+  },
+  "imageViewport": {
+    "title": "이미지 표시 영역",
+    "description": "이미지별 맞춤, 확대/축소, 이동, 핀치 컨트롤입니다.",
+    "options": "className으로 영역을 제한하고 이미지 식별 정보가 달라지면 다시 마운트합니다. 갤러리가 방향키 탐색을 관리하면 panWithArrows=false로 설정합니다."
+  },
+  "loadingRing": {
+    "title": "진행 링",
+    "description": "배경 링을 선택적으로 표시하는 공용 진행 표시기입니다.",
+    "options": "className으로 크기와 색상을 설정합니다. track=false는 배경 링을 숨기고, strokeWidth와 strokeDasharray는 호를 조절합니다. 동작 줄이기 설정을 따릅니다."
+  },
+  "streaming": {
+    "title": "애니메이션 레이블",
+    "description": "진행 중인 사고와 도구 레이블이 공유하는 텍스트 애니메이션입니다.",
+    "options": "active가 애니메이션을 제어합니다. 문자열 또는 숫자 자식이 글리프 오버레이를 제공하며 동작 줄이기 설정을 따릅니다.",
+    "animate": "레이블 애니메이션",
+    "working": "다음 단계 처리 중…"
+  },
+  "markdown": {
+    "title": "Markdown 답변",
+    "description": "표, 코드, 수식을 포함하는 실제 스트리밍 렌더러입니다.",
+    "options": "children은 Markdown 텍스트입니다. streaming은 미완성 내용을 제어하며 onOpenFilePreview는 화면에서 제공합니다.",
+    "state": "Markdown 상태"
+  },
+  "code": {
+    "title": "코드 표시",
+    "description": "구문 강조, 줄 번호, 복사, ANSI 출력, 표시 영역을 고려한 행 렌더링입니다.",
+    "options": "code와 language가 내용을 제공하며 showLineNumbers, wrapLongLines, chrome이 표시를 제어합니다. 표시 영역 강조에는 줄 번호와 줄 바꿈 없는 행이 필요합니다.",
+    "format": "코드 형식"
+  },
+  "math": {
+    "title": "수학 수식",
+    "description": "Markdown의 블록 수식을 너비에 맞추는 공통 래퍼입니다.",
+    "options": "TeX 소스에는 MarkdownText를 사용합니다. DisplayMath는 이미 렌더링된 수식 노드를 받아 사용 가능한 너비에 맞게 크기를 조정합니다."
+  },
+  "message": {
+    "title": "메시지",
+    "description": "사고 및 전송 상태를 포함한 사용자와 어시스턴트 메시지입니다.",
+    "options": "message는 채팅 런타임이 투영한 UIMessage입니다. 데이터와 네트워크 작업은 렌더러 밖에서 처리합니다.",
+    "state": "메시지 상태"
+  },
+  "activity": {
+    "title": "에이전트 활동",
+    "description": "활동 기본 요소를 진행 중, 완료, 실패 시퀀스로 조합합니다.",
+    "options": "텍스트, 상태, 제어되는 확장 값을 전달합니다. 도구 실행은 gateway가 관리하며 이 컴포넌트는 투영된 상태를 렌더링합니다.",
+    "state": "활동 상태",
+    "working": "처리 중",
+    "details": "활동 세부 정보",
+    "collapse": "접기",
+    "readError": "파일을 읽을 수 없습니다",
+    "read": "소스 읽기"
+  },
+  "files": {
+    "title": "파일 편집",
+    "description": "파일 참조, 변경된 줄 수, 펼칠 수 있는 차이입니다.",
+    "options": "edits는 표시 요약을 담습니다. displayMode는 summary/diff/collapsed_diff를 선택하며 onOpenFilePreview는 화면에서 제공합니다.",
+    "error": "예제 편집을 적용하지 못했습니다.",
+    "state": "파일 편집 상태",
+    "operation": "파일 작업",
+    "display": "차이 표시",
+    "selected": "선택한 파일: {{path}}",
+    "hint": "파일 참조를 선택하여 콜백을 실행해 보세요."
+  },
+  "media": { "study": "색상 연습 {{count}}" },
+  "imageGallery": {
+    "title": "이미지 썸네일",
+    "description": "여러 이미지 레이아웃, 썸네일 선택, 추가 이미지 표시입니다.",
+    "options": "images는 URL과 이름을, size는 큰 썸네일 또는 작은 썸네일을, align은 정렬을 지정합니다. 썸네일은 네 개만 표시하며 내장 ImageLightbox에는 볼 수 있는 모든 이미지가 포함됩니다.",
+    "sixImages": "이미지 6개",
+    "compact": "작은 썸네일",
+    "hint": "썸네일이나 +2를 선택하면 이미지 6개를 모두 볼 수 있습니다."
+  },
+  "imageLightbox": {
+    "title": "전체 화면 이미지 보기",
+    "description": "제어형 전체 화면 보기와 이미지 탐색입니다.",
+    "options": "닫힌 상태에서는 index가 null입니다. 호출 측에서 index와 열기 콜백을 관리합니다. ImageLightbox는 ZoomableImage를 조합하며 이미지가 바뀌면 보기를 초기화합니다.",
+    "open": "전체 화면 뷰어 열기",
+    "hint": "이전/다음, ←/→ 또는 Home/End로 이동하고 × 또는 Escape로 닫습니다."
+  },
+  "zoomableImage": {
+    "title": "이미지 확대/축소",
+    "description": "단일 이미지 확대/축소, 경계 내 이동, 제스처입니다.",
+    "options": "src와 alt는 이미지 하나를 제공합니다. 위치와 높이가 지정된 컨테이너에 배치하고 이미지 변경 시 다시 마운트합니다. 표시 영역에 포커스를 두면 +, −, 0 키를 사용할 수 있습니다.",
+    "hint": "+/−, 두 번 클릭, Ctrl+휠 또는 핀치로 확대/축소합니다. 확대한 뒤 드래그하거나 스크롤하여 이동하고 배율을 클릭하거나 0을 눌러 초기화합니다."
+  },
+  "attachment": {
+    "title": "첨부 파일",
+    "description": "이미지 미리보기, 동영상 재생, 파일 다운로드, 사용할 수 없는 첨부 파일입니다.",
+    "options": "attachment.kind는 image, video, file을 선택합니다. 이미지는 ImageLightbox를 열고 동영상은 기본 컨트롤, 파일은 다운로드 링크를 사용합니다. URL이 없거나 이미지 로드가 실패하면 사용할 수 없는 타일을 표시합니다.",
+    "image": "이미지",
+    "video": "재생 가능한 동영상",
+    "file": "파일 다운로드",
+    "unavailable": "사용할 수 없는 첨부 파일(URL 없음)"
+  },
+  "fileReference": {
+    "title": "파일 참조",
+    "description": "호출 측에서 열기 작업을 관리하는 파일 참조입니다.",
+    "options": "path가 레이블을, onOpen이 작업을 제공합니다. 컴포넌트는 작업 공간 권한을 결정하지 않습니다.",
+    "select": "파일 참조를 선택하세요."
+  },
+  "settingsComposition": {
+    "title": "설정 조합",
+    "description": "실제 설정 행, 그룹, 기능 컴포넌트를 공통 컨트롤과 조합합니다.",
+    "options": "상위 설정 컨트롤러가 값과 영구 저장을 관리합니다. 갤러리 콜백은 로컬 미리보기 상태만 변경합니다.",
+    "preferences": "예제 환경설정",
+    "keepDrafts": "초안 유지",
+    "switchHint": "제어형 스위치를 사용하는 공통 설정 행입니다.",
+    "projectLabel": "프로젝트 레이블",
+    "projectName": "설정의 프로젝트 레이블",
+    "capability": "예제 기능",
+    "notes": "메모",
+    "capabilityNotes": "기능 메모",
+    "localOnly": "로컬 미리보기 전용"
+  },
+  "modelPickers": {
+    "title": "모델 선택",
+    "description": "제공업체를 선택하고 모델 ID를 검색하거나 입력한 뒤 추론 강도를 조정합니다.",
+    "options": "호출 측에서 ProviderPicker의 값과 작업을 제공합니다. ModelIdPicker의 models로 고정 목록을, ReasoningEffortPicker의 savedValues로 기존 옵션을 제공할 수 있습니다.",
+    "chooseProvider": "제공업체 선택",
+    "configure": "{{provider}} 설정"
+  },
+  "providerIcons": {
+    "title": "제공업체 아이콘",
+    "description": "일반, 작은 크기, 채우기 크기와 선택기의 미설정 상태를 비교합니다.",
+    "options": "provider가 기존 아이콘을 선택하고 compact와 fill이 크기를 제어합니다. showBrandLogos=false는 내장 아이콘을 사용합니다.",
+    "size": "아이콘 크기"
+  },
+  "timezone": {
+    "title": "시간대 선택",
+    "description": "시간대 이름, 중국어 이름, UTC 오프셋으로 검색한 뒤 같은 순간의 현지 시간을 확인합니다.",
+    "options": "value는 IANA 시간대이며 onChange가 호출 측의 값을 갱신합니다. 컴포넌트가 검색과 키보드 탐색을 제공합니다."
+  },
+  "textEditor": {
+    "title": "텍스트 편집과 힌트",
+    "description": "편집기를 열어 수정, 저장 또는 취소합니다. 내용을 비우고 저장하면 오류 피드백을 확인할 수 있습니다.",
+    "options": "SettingsTextEditor는 onSave 성공 후 닫히며 실패하면 오류를 표시합니다. SettingsHint는 호버, 포커스, 클릭으로 열립니다.",
+    "state": "편집 상태",
+    "hint": "편집기를 열어 수정, 저장 또는 취소할 수 있습니다. 내용을 비우면 오류 상태를 볼 수 있습니다.",
+    "instructions": "예제 지침",
+    "edit": "예제 지침 편집",
+    "help": "저장하면 변경한 내용이 아래에 표시됩니다.",
+    "required": "내용을 입력하세요."
+  },
+  "removePreset": {
+    "title": "프리셋 삭제",
+    "description": "사용하지 않는 모델 프리셋을 삭제하고 기본 모델이 사용하는 프리셋의 비활성 상태를 확인합니다.",
+    "options": "ModelsSettings에서 사용하는 삭제 버튼입니다. 호출 측에서 disabled와 삭제 작업을 제공합니다. 제공업체 관리는 ProvidersSettings 대화상자를 사용합니다.",
+    "defaultModel": "기본 모델",
+    "codeAssistant": "코딩 어시스턴트",
+    "remove": "{{name}} 삭제",
+    "primaryHint": "기본 모델이 사용하는 프리셋은 삭제할 수 없습니다.",
+    "count": "미리보기 프리셋 수: {{count}}"
+  },
+  "loading": {
+    "title": "로딩 레이아웃",
+    "description": "앱, 채널, 스킬 목록의 로딩 레이아웃을 전환하고 공통 상태 컨테이너를 확인합니다.",
+    "options": "CatalogSkeleton의 layout이 레이아웃을 선택합니다. SkeletonStatus는 label로 화면 읽기 상태를 제공하고 장식 내용을 aria-hidden으로 표시합니다.",
+    "layout": "목록 레이아웃",
+    "catalog": "미리보기 목록 로드 중"
+  },
+  "sidebar": {
+    "title": "설정 탐색",
+    "description": "분류를 선택하고 재시작 대기를 처리하며 브라우저를 좁혀 모바일 메뉴를 확인합니다.",
+    "options": "activeSection과 onSelectSection이 선택을 제어합니다. 돌아가기, 로그아웃, 재시작 작업은 호출 측 콜백입니다.",
+    "back": "채팅으로 돌아가기",
+    "logout": "로그아웃",
+    "restart": "미리보기 재시작 작업을 처리했습니다",
+    "hint": "설정 분류를 선택하거나 브라우저를 좁혀 모바일 탐색을 확인하세요.",
+    "toggleRestart": "재시작 대기 전환"
+  },
+  "providerSearch": {
+    "title": "제공업체 검색",
+    "description": "OAuth, API 키, 로컬 그룹별로 검색하고 항목이나 사용자 지정 제공업체를 선택합니다.",
+    "options": "providers는 기존 목록입니다. query는 제어형 검색 값이며 onSelect와 onCustom이 선택을 부모에게 전달합니다.",
+    "closed": "검색을 닫았습니다",
+    "custom": "사용자 지정 제공업체를 선택했습니다",
+    "hint": "제공업체를 검색하거나 방향키로 선택하세요."
+  },
+  "requestParameters": {
+    "title": "요청 매개변수",
+    "description": "헤더, 쿼리 매개변수, 요청 본문을 편집합니다. 잘못된 JSON으로 실제 검증 피드백을 확인합니다.",
+    "options": "fields는 표시 항목을, form은 JSON 텍스트를 지정합니다. 헤더와 쿼리 매개변수는 문자열 값만 받으며 요청 본문은 JSON 객체의 모든 값 형식을 받습니다."
+  },
+  "requestAPI": {
+    "title": "요청 API 제어",
+    "description": "제공업체의 지원 API, 기본 API, 모델 재정의와 대체 옵션을 선택합니다.",
+    "options": "ProviderAPIControl은 API를 하나 이상 유지합니다. ModelAPIControl은 null로 자동 선택을 허용하며 제공업체 기능에 따라 사용 가능한 API를 표시합니다.",
+    "providerAPI": "제공업체 API",
+    "modelOverride": "모델 재정의"
+  },
+  "usage": {
+    "title": "토큰 사용량",
+    "description": "데이터 있음, 빈 기록, 사용 불가를 전환합니다. 막대에 호버해 일별 사용량을 보고 상세 정보에서 모델 추세를 확인합니다.",
+    "options": "usage는 호출 측에서 제공하는 통계 기록이며 timeZone은 날짜 경계를 정합니다. 상세 대화상자와 차트는 전달받은 데이터만 표시합니다.",
+    "state": "사용량 상태"
+  },
+  "overview": {
+    "title": "설정 개요",
+    "description": "현재 모델, 기능 상태, 사용량을 보고 기능 행을 선택하여 분류 이동을 시험합니다.",
+    "options": "settings가 개요 데이터를 제공하며 onSelectSection이 선택한 설정 분류를 받습니다.",
+    "selected": "선택한 분류: {{section}}"
+  },
+  "web": {
+    "title": "웹 검색 설정",
+    "description": "인증 불필요, API 키, 서버 URL 제공업체를 전환하고 검색 옵션과 자동 저장을 시험합니다.",
+    "options": "settings는 현재 설정을, form은 편집 값을 보관합니다. 저장, 인증 정보 표시, 제공업체 전환은 부모가 제공합니다.",
+    "unsaved": "미리보기 초안이 저장되지 않았습니다"
+  },
+  "image": {
+    "title": "이미지 생성 설정",
+    "description": "이미지 생성을 켜고 끄며 고정 목록의 모델, 종횡비, 크기를 선택하고 고급 옵션에서 수량을 조정합니다.",
+    "options": "form은 제어형 설정이며 dirty는 변경 표시입니다. 제공업체 인증 정보를 재사용하고 저장 작업은 부모가 구현합니다."
+  },
+  "voice": {
+    "title": "음성 전사 설정",
+    "description": "전사를 켜고 끄며 모델, 언어, 길이, 업로드 크기 제한을 편집하고 자동 저장을 시험합니다.",
+    "options": "settings가 제공업체 정보를 제공하고 부모가 form과 저장 콜백을 관리합니다."
+  },
+  "safety": {
+    "title": "접근 설정",
+    "description": "로컬 서비스 접근과 기본 권한을 전환하고 설정 행, 힌트, 자동 저장 피드백을 확인합니다.",
+    "options": "form은 표시 값을 제공하며 onSave가 저장 요청을 처리합니다. 런타임 권한 적용은 계속 gateway가 담당합니다."
+  },
+  "channelCatalog": {
+    "title": "채널 목록과 식별 정보",
+    "description": "실행 중, 시작 중, 실패, 미설치 상태를 전환하고 스위치, 설치 버튼, 도움말 메뉴를 시험합니다.",
+    "options": "feature가 설치 및 실행 상태를 제공합니다. 부모가 onAction과 onSelect를 처리하며 식별 정보, 오류, 도움말은 같은 채널 데이터를 사용합니다.",
+    "exampleChannel": "예제 채널",
+    "state": "채널 상태",
+    "error": "예제 연결에 실패했습니다.",
+    "stopped": "중지됨",
+    "running": "실행 중",
+    "starting": "시작 중",
+    "failed": "실패",
+    "selected": "채널 설정을 선택했습니다",
+    "hint": "스위치나 설치 버튼으로 상태 변화를 확인하세요."
+  },
+  "credentials": {
+    "title": "채널 인증 정보",
+    "description": "인증 정보를 입력하고 비밀 값을 표시하거나 숨기며 연결 프리셋 적용, 필수 항목 확인, 보조 명령 복사를 시험합니다.",
+    "options": "fields가 그룹과 컨트롤을 정의하고 values와 visibleSecrets는 제어형 값입니다. requirements가 인증 정보 조합을 정의하며 프리셋 및 저장 콜백은 이 예제만 갱신합니다.",
+    "botToken": "봇 토큰",
+    "tokenPlaceholder": "예제 토큰",
+    "serverURL": "서버 URL",
+    "replyMode": "응답 모드",
+    "mentions": "멘션",
+    "allMessages": "모든 메시지",
+    "allowFrom": "허용할 발신자",
+    "local": "로컬 서버",
+    "hosted": "호스팅 서버",
+    "required": "봇 토큰을 입력하세요.",
+    "checkSave": "확인 및 저장",
+    "command": "예제 명령",
+    "applied": "{{name}} 적용됨",
+    "incomplete": "인증 정보를 완성하세요.",
+    "saved": "미리보기 인증 정보를 저장했습니다.",
+    "hint": "인증 정보를 입력하고 비밀 값 표시를 전환하거나 연결 프리셋을 적용하세요."
+  },
+  "channelValidation": {
+    "title": "연결 검사",
+    "description": "검사 중, 성공, 실패를 전환하고 순서대로 나타나는 검사 결과와 식별 정보 요약을 확인합니다.",
+    "options": "validation은 검사 기록을 제공하고 validating은 로딩을 제어합니다. 컴포넌트는 결과 표시만 담당합니다.",
+    "expired": "예제 토큰이 만료되었습니다.",
+    "result": "검사 결과"
+  },
+  "runAt": {
+    "title": "예약 시간 선택",
+    "description": "날짜와 시간을 입력하거나 달력을 열어 마우스, 방향키, 페이지 키로 날짜를 선택합니다.",
+    "options": "value는 YYYY-MM-DDTHH:mm 형식의 현지 시간이며 onChange는 편집한 값을 반환합니다. 잘못된 입력은 기존 폼 컨트롤에 표시합니다."
+  },
+  "automationCalendar": {
+    "title": "자동화 달력",
+    "description": "월, 일정, 기록을 전환하고 성공 또는 실패 기록의 결과를 엽니다. 좁은 컨테이너에서는 일정 목록을 표시합니다.",
+    "options": "jobs와 month가 달력 내용을 정합니다. onInspect는 예약 작업을 처리하며 호출 측에서 renderRunDialog로 결과 표시를 제공합니다. 달력은 서비스를 읽지 않습니다.",
+    "providerError": "예제 제공업체를 사용할 수 없었습니다.",
+    "state": "일정 상태",
+    "previousMonth": "이전 달",
+    "nextMonth": "다음 달",
+    "planned": "예약됨",
+    "recorded": "실행 기록",
+    "running": "실행 중",
+    "failed": "실패",
+    "completed": "완료",
+    "skipped": "건너뜀",
+    "system": "시스템 작업",
+    "noEntries": "이번 달 일정이 없습니다",
+    "more": "{{count}}개 더 보기",
+    "selected": "선택한 작업: {{name}}",
+    "hint": "실행 기록을 선택해 결과를 보거나 예약 작업을 선택하세요."
+  },
+  "providers": {
+    "title": "제공업체 관리",
+    "description": "실제 제공업체 관리 대화상자와 추가 과정을 확인합니다.",
+    "options": "설정의 ProvidersSettings를 재사용합니다. 호출 측에서 목록, 폼, 저장 콜백을 제어합니다. 이 미리보기는 로컬 예제 데이터를 변경하며 설정, 검색, 생성, 취소를 지원합니다.",
+    "invalidParameters": "유효한 요청 매개변수 JSON을 입력하세요. 헤더와 쿼리 매개변수의 값은 문자열이어야 합니다.",
+    "saved": "{{name}}의 미리보기 설정을 저장했습니다",
+    "added": "{{name}} 추가됨",
+    "signedIn": "미리보기 인증을 로그인 상태로 설정했습니다",
+    "signedOut": "미리보기 인증을 로그아웃 상태로 설정했습니다",
+    "builtInIcons": "내장 아이콘 사용",
+    "brandIcons": "브랜드 아이콘 사용",
+    "configured": "설정된 제공업체 수: {{count}}",
+    "providerAdded": "제공업체를 추가했습니다"
+  },
+  "runResult": {
+    "title": "자동 실행 결과",
+    "description": "실행 결과를 열어 Markdown 응답, 로딩, 재시도, 빈 응답, 누락된 기록을 비교합니다.",
+    "options": "result는 로딩 상태와 가져온 응답을 제공합니다. 호출 측에서 onRetry를 처리합니다. 이 뷰는 런타임 상태를 읽거나 결과를 요청하지 않습니다.",
+    "state": "실행 결과",
+    "view": "실행 결과 보기"
+  },
+  "chatBinding": {
+    "title": "실행 채팅",
+    "description": "실행 채팅을 선택하고 지침을 편집, 확인, 되돌리기 또는 취소합니다. 작업 사용 중, 로드 오류, 충돌 상태도 비교합니다.",
+    "options": "data와 job은 사용 가능한 채팅과 연결 버전을 제공합니다. 뷰는 확인 초안을 관리하며 기능 진입점이 onSave, onSaved, onReload를 데이터 작업에 연결합니다.",
+    "state": "채팅 연결 상태",
+    "setChat": "실행 채팅 설정",
+    "saved": "다음 실행은 {{title}}에서 진행됩니다",
+    "hint": "대상 채팅을 선택한 뒤 작업 지침을 확인하거나 수정하세요."
+  },
+  "about": {
+    "title": "정보와 버전",
+    "description": "버전 검사 상태, 커밋 링크, 업데이트, 정보 페이지를 비교합니다. 버튼은 예제 결과로 화면을 갱신합니다.",
+    "options": "AboutSettingsView는 버전과 지원 링크 조합을 받습니다. VersionCheckRowView는 checking/result를 표시하며 onCheck로 검사를 요청합니다. 실제 검사와 진단 링크 데이터는 기능 진입점이 담당합니다.",
+    "error": "버전 정보를 가져올 수 없습니다. 다시 시도하세요.",
+    "state": "버전 상태",
+    "selectedLink": "GitHub 링크를 선택했습니다",
+    "preferenceSaved": "예시 설정을 저장했습니다. 설치하거나 다시 시작하지 않습니다.",
+    "updateRequested": "업데이트 검토를 선택했습니다. 이 미리보기에서는 설치하거나 다시 시작하지 않습니다.",
+    "dismissed": "업데이트 알림을 닫았습니다"
+  },
+  "appearance": {
+    "title": "화면 환경설정",
+    "description": "외관, 활동 표시, 파일 차이, 알림 설정을 전환합니다. 예제 값은 아래에 표시됩니다.",
+    "options": "테마와 환경설정은 호출 측에서 관리합니다. onChangeBrowserNotifications는 권한 요청을 기능 진입점에 맡기며 미리보기 콜백은 예제 스위치만 변경합니다."
+  },
+  "starInvitation": {
+    "title": "프로젝트 지원 안내",
+    "description": "실제 안내 대화상자를 열어 저장 및 오류 상태와 나중에 알림, GitHub 링크, 다시 알리지 않기를 시험합니다.",
+    "options": "open, saving, error는 표시 상태입니다. 기존 StarPrompt 진입점에서 안내 수신과 환경설정 저장을 관리하며 뷰는 전달된 작업만 호출합니다.",
+    "state": "안내 상태",
+    "view": "안내 보기",
+    "dismissed": "미리보기에서 다시 알리지 않기를 선택했습니다",
+    "starred": "미리보기에서 GitHub 링크를 선택했습니다"
+  }
+}

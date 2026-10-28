@@ -92,7 +92,6 @@ class WecomChannel(BaseChannel):
         self.config: WecomConfig = config
         self._client: Any = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()
-        self._loop: asyncio.AbstractEventLoop | None = None
         self._generate_req_id: Callable[[str], str] | None = None
         # Store frame headers for each chat to enable replies
         self._chat_frames: dict[str, Any] = {}
@@ -114,7 +113,6 @@ class WecomChannel(BaseChannel):
         from wecom_aibot_sdk import WSClient, generate_req_id
 
         self._running = True
-        self._loop = asyncio.get_running_loop()
         self._generate_req_id = generate_req_id
 
         # Create WebSocket client

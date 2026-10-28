@@ -92,7 +92,8 @@ def read_jsonl(path: Path) -> tuple[Session, list[_LegacyFile]]:
     messages: list[dict[str, Any]] = []
     provider: ProviderConversationState | None = None
     provider_seen = False
-    for line in source.content.decode("utf-8").splitlines():
+    # Unicode line separators are valid inside legacy JSON strings.
+    for line in source.content.decode("utf-8").split("\n"):
         if not line.strip():
             continue
         item = _record(line)

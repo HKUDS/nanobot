@@ -10,6 +10,7 @@ import type { StreamError } from "@/lib/nanobot-client";
 interface StreamErrorNoticeProps {
   error: StreamError;
   onDismiss: () => void;
+  onOpenSettings?: () => void;
 }
 
 /**
@@ -17,7 +18,7 @@ interface StreamErrorNoticeProps {
  * visible failed message. ``role="alert"`` + ``aria-live="assertive"``
  * ensures screen readers announce the failure.
  */
-export function StreamErrorNotice({ error, onDismiss }: StreamErrorNoticeProps) {
+export function StreamErrorNotice({ error, onDismiss, onOpenSettings }: StreamErrorNoticeProps) {
   const { t } = useTranslation();
 
   const { title, body } = resolveCopy(error, t);
@@ -27,7 +28,7 @@ export function StreamErrorNotice({ error, onDismiss }: StreamErrorNoticeProps) 
       role="alert"
       aria-live="assertive"
       className={cn(
-        "mb-2 flex items-start gap-2 rounded-lg border border-destructive/30",
+        "thread-composer-notice mb-2 flex items-start gap-2 rounded-control border border-destructive/30",
         "bg-destructive/10 px-3 py-2 text-[12px] leading-5 text-destructive",
         "animate-in fade-in-0 slide-in-from-bottom-1",
       )}
@@ -36,9 +37,14 @@ export function StreamErrorNotice({ error, onDismiss }: StreamErrorNoticeProps) 
         className="mt-0.5 h-4 w-4 shrink-0"
         aria-hidden
       />
-      <div className="flex-1">
+      <div className="min-w-0 flex-1">
         <p className="font-medium">{title}</p>
         <p className="mt-0.5 text-destructive">{body}</p>
+        {error.kind === "model_request_failed" && onOpenSettings ? (
+          <Button variant="link" size="sm" className="h-auto px-0 py-1" onClick={onOpenSettings}>
+            {t("thread.composer.reauthSettings")}
+          </Button>
+        ) : null}
       </div>
       <Button
         variant="ghost"

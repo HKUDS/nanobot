@@ -8,7 +8,7 @@ from nanobot.channels.whatsapp.validation import validate
 
 SETUP_SPEC = ChannelSetupSpec(
     fields={
-        "proxy": field(),
+        "useProxy": field("bool", default=False),
         "allowFrom": field("list", snapshot=False),
         "groupPolicy": field(
             "enum",

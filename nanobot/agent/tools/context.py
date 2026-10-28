@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Protocol, runtime_checkable
 
+from nanobot.config.network import NetworkConfig
+
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
     from nanobot.agent.tools.exec_session import ExecSessionManager
@@ -92,6 +94,7 @@ def current_request_session_key() -> str | None:
 class ToolContext:
     config: ToolsConfig
     workspace: str
+    network: NetworkConfig = field(default_factory=NetworkConfig)
     bus: MessageBus | None = None
     subagent_manager: SubagentManager | None = None
     cron_service: CronService | None = None

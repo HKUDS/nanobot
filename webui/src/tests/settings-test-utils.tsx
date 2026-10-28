@@ -59,7 +59,7 @@ export function settingsPayload(): SettingsPayload {
     },
     web: {
       enable: true,
-      proxy: null,
+      use_proxy: false,
       user_agent: null,
       search: { max_results: 5, timeout: 30 },
       fetch: { use_jina_reader: true },
@@ -125,31 +125,24 @@ export function settingsPayload(): SettingsPayload {
   };
 }
 
-export function renderSettingsView(
-  options: {
-    client?: NanobotClient;
-    initialSection?:
-      | "overview"
-      | "appearance"
-      | "apps"
-      | "skills"
-      | "channels"
-      | "automations"
-      | "advanced"
-      | "models"
-      | "image"
-      | "browser"
-      | "runtime";
-    initialSettings?: SettingsPayload;
-    showSidebar?: boolean;
-    mainNavigationExpanded?: boolean;
-    onBackToChat?: () => void;
-    onSettingsChange?: (payload: SettingsPayload) => void;
-    onStartAutomationChat?: React.ComponentProps<typeof SettingsView>["onStartAutomationChat"];
-    onNativeEngineRestart?: () => Promise<string>;
-    onRestart?: () => void;
-  } = {},
-) {
+type SettingsViewTestOptions = Partial<Pick<
+  React.ComponentProps<typeof SettingsView>,
+  | "initialSection"
+  | "initialSettings"
+  | "themePreference"
+  | "onChangeTheme"
+  | "skills"
+  | "skillsLoading"
+  | "showSidebar"
+  | "mainNavigationExpanded"
+  | "onBackToChat"
+  | "onSettingsChange"
+  | "onStartAutomationChat"
+  | "onNativeEngineRestart"
+  | "onRestart"
+>> & { client?: NanobotClient };
+
+export function renderSettingsView(options: SettingsViewTestOptions = {}) {
   render(
     <ClientProvider client={options.client ?? {
       requestMutation: requestMutationMock,
@@ -160,12 +153,14 @@ export function renderSettingsView(
       },
     } as never} token="tok">
       <SettingsView
-        theme="light"
+        themePreference={options.themePreference ?? "light"}
         initialSection={options.initialSection ?? "apps"}
         initialSettings={options.initialSettings}
+        skills={options.skills}
+        skillsLoading={options.skillsLoading}
         showSidebar={options.showSidebar}
         mainNavigationExpanded={options.mainNavigationExpanded}
-        onToggleTheme={() => {}}
+        onChangeTheme={options.onChangeTheme ?? (() => {})}
         onBackToChat={options.onBackToChat ?? (() => {})}
         onModelNameChange={() => {}}
         onSettingsChange={options.onSettingsChange}

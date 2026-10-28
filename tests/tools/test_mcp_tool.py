@@ -7,12 +7,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
+from urllib.parse import unquote
 from urllib.request import getproxies_environment
 
 import httpx
 import pytest
 
 import nanobot.agent.tools.mcp as mcp_mod
+from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.mcp import (
     MCPPromptWrapper,
     MCPProvider,
@@ -24,6 +26,7 @@ from nanobot.agent.tools.mcp import (
     connect_mcp_servers,
 )
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
+from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import MCPServerConfig
 
 _PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
@@ -163,7 +166,9 @@ def _make_wrapper(session: object, *, timeout: float = 0.1) -> MCPToolWrapper:
 async def test_mcp_provider_connect_propagates_external_cancellation(monkeypatch) -> None:
     started = asyncio.Event()
 
-    async def connect_mcp_servers(_servers: dict, _registry: ToolRegistry) -> dict:
+    async def connect_mcp_servers(
+        _servers: dict, _registry: ToolRegistry, *, network
+    ) -> dict:
         started.set()
         await asyncio.sleep(60)
         return {}
@@ -211,7 +216,7 @@ async def test_saved_oauth_http_403_projects_failed_runtime_without_details(
         )
         yield object(), object(), object()
 
-    async def reachable(_url: str) -> bool:
+    async def reachable(_url: str, *, proxy: str | None = None) -> bool:
         return True
 
     oauth_mod = ModuleType("nanobot.agent.tools.mcp_oauth")
@@ -782,8 +787,8 @@ def _make_tool_def(name: str) -> SimpleNamespace:
 
 
 def _make_fake_session(tool_names: list[str]) -> SimpleNamespace:
-    async def initialize() -> None:
-        return None
+    async def initialize() -> SimpleNamespace:
+        return SimpleNamespace(capabilities=SimpleNamespace(tools=SimpleNamespace()))
 
     async def list_tools() -> SimpleNamespace:
         return SimpleNamespace(tools=[_make_tool_def(name) for name in tool_names], nextCursor=None)
@@ -1118,6 +1123,160 @@ def test_unexpected_connection_failure_keeps_error_trace() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("transport", ["sse", "streamableHttp"])
+@pytest.mark.parametrize("log_content", [True, False])
+async def test_proxy_constructor_failure_diagnostics_never_render_live_locals(
+    monkeypatch: pytest.MonkeyPatch, transport: str, log_content: bool,
+) -> None:
+    proxy = "http://diagnostic-user:diagnostic-secret@\u2603.example:8080"
+    network = NetworkConfig(proxy=proxy)
+    with pytest.raises(httpx.InvalidURL):
+        httpx.AsyncHTTPTransport(proxy=network.proxy)
+
+    @asynccontextmanager
+    async def sse_client(_url, *, httpx_client_factory):
+        async with httpx_client_factory():
+            yield object(), object()
+
+    monkeypatch.setattr(sys.modules["mcp.client.sse"], "sse_client", sse_client)
+    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
+    monkeypatch.setattr(mcp_mod, "_probe_http_url", AsyncMock(return_value=True))
+    messages: list[str] = []
+    sink = mcp_mod.logger.add(
+        lambda message: messages.append(str(message)), level="DEBUG",
+        format="{level} {message}", diagnose=True, backtrace=True,
+    )
+    registry = ToolRegistry()
+    try:
+        with request_context(RequestContext(channel="test", chat_id="proxy", log_content=log_content)):
+            connections = await connect_mcp_servers(
+                {"remote": MCPServerConfig(
+                    type=transport, url="https://mcp.example.invalid/mcp", use_proxy=True,
+                )}, registry, network=network,
+            )
+    finally:
+        mcp_mod.logger.remove(sink)
+
+    assert connections == {}
+    assert registry.tool_names == []
+    output = "\n".join(messages)
+    assert "diagnostic-secret" not in output
+    assert "diagnostic-user" not in output
+    assert "failed to connect" in output
+    if log_content:
+        assert "InvalidURL" in output
+        assert "Invalid IDNA hostname" in output
+        assert "Traceback (most recent call last)" in output
+        assert "in _pinned_transport_kwargs" in output
+    else:
+        assert "InvalidURL" not in output
+        assert "Traceback" not in output
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_stage", ["open", "cleanup"])
+@pytest.mark.parametrize("userinfo", ["diagnostic-user:diagnostic%3Asecret", "e:p", "e"])
+async def test_connection_failure_redacts_resolved_proxy_in_exception_chain_and_group(
+    fake_mcp_runtime, monkeypatch: pytest.MonkeyPatch, failure_stage: str, userinfo: str,
+) -> None:
+    proxy = f"http://{userinfo}@proxy.example.invalid:8080"
+    authority = proxy.removeprefix("http://")
+    monkeypatch.setenv("MCP_DIAGNOSTIC_PROXY", proxy)
+    network = NetworkConfig(proxy="${MCP_DIAGNOSTIC_PROXY}")
+    session = _make_fake_session(["demo"])
+    session.initialize = AsyncMock(side_effect=RuntimeError("initialize failed"))
+    fake_mcp_runtime["session"] = session
+
+    @asynccontextmanager
+    async def failing_sse(_url, *, httpx_client_factory):
+        if failure_stage == "cleanup":
+            yield object(), object()
+        try:
+            raise ValueError(f"proxy handshake rejected {proxy}")
+        except ValueError as cause:
+            raise ExceptionGroup("MCP transport setup failed", [
+                httpx.ProxyError(
+                    f"authentication rejected {authority} / {unquote(authority)} / {unquote(proxy)}"
+                ),
+            ]) from cause
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(sys.modules["mcp.client.sse"], "sse_client", failing_sse)
+    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
+    monkeypatch.setattr(mcp_mod, "_probe_http_url", AsyncMock(return_value=True))
+    messages: list[str] = []
+    sink = mcp_mod.logger.add(
+        lambda message: messages.append(str(message)), level="DEBUG",
+        format="{level} {message}", diagnose=True, backtrace=True,
+    )
+    try:
+        assert await connect_mcp_servers(
+            {"remote": MCPServerConfig(type="sse", url="https://mcp.example.invalid/sse", use_proxy=True)},
+            ToolRegistry(), network=network,
+        ) == {}
+    finally:
+        mcp_mod.logger.remove(sink)
+
+    output = "\n".join(messages)
+    for credential_context in (proxy, unquote(proxy), f"{userinfo}@", f"{unquote(userinfo)}@"):
+        assert credential_context not in output
+    assert "Traceback (most recent call last)" in output
+    assert "httpx.ProxyError: authentication rejected" in output
+    assert "ValueError: proxy handshake rejected" in output
+    assert "ExceptionGroup: MCP transport setup failed" in output
+    assert "http://proxy.example.invalid:8080" in output
+    assert "[redacted]@proxy.example.invalid:8080" in output
+    assert "direct cause" in output
+    assert "in failing_sse" in output
+    if failure_stage == "cleanup":
+        assert "initialize failed" in output
+
+
+@pytest.mark.parametrize("transient", [False, True])
+def test_connection_failure_retains_useful_trace_without_local_values(transient: bool) -> None:
+    messages: list[str] = []
+    records: list[dict] = []
+
+    def capture(message):
+        messages.append(str(message))
+        records.append(message.record)
+
+    sink = mcp_mod.logger.add(
+        capture, level="DEBUG", format="{level} {message}", diagnose=True, backtrace=True,
+    )
+
+    def fail_transport():
+        local_credential = "unrelated-local-credential"
+        error = httpx.ConnectError if transient else RuntimeError
+        raise error(f"handshake failed (credential length {len(local_credential)})")
+
+    try:
+        try:
+            fail_transport()
+        except Exception as exc:
+            mcp_mod._log_mcp_connection_failure("remote", exc, " check server configuration")
+    finally:
+        mcp_mod.logger.remove(sink)
+
+    output = "\n".join(messages)
+    assert "unrelated-local-credential" not in output
+    assert "handshake failed (credential length 26)" in output
+    assert "in fail_transport" in output
+    assert "Traceback (most recent call last)" in output
+    detail = next(record for record in records if record["exception"] is not None)
+    assert detail["exception"].traceback is None
+    assert detail["exception"].value.__traceback__ is None
+    assert detail["exception"].value.__context__ is None
+    assert detail["level"].name == ("DEBUG" if transient else "ERROR")
+    if transient:
+        assert "ConnectError" in output
+        assert "transient connection failure" in output
+    else:
+        assert "RuntimeError" in output
+        assert "check server configuration" in output
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "config",
     [
@@ -1127,7 +1286,9 @@ def test_unexpected_connection_failure_keeps_error_trace() -> None:
         MCPServerConfig(type="streamableHttp", url="http://169.254.169.254/mcp"),
     ],
 )
+@pytest.mark.parametrize("use_proxy", [False, True])
 async def test_connect_mcp_servers_rejects_unsafe_http_urls_before_probe(
+    use_proxy: bool,
     config: MCPServerConfig,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1145,7 +1306,11 @@ async def test_connect_mcp_servers_rejects_unsafe_http_urls_before_probe(
     monkeypatch.setattr("nanobot.agent.tools.mcp.logger.warning", _warning)
 
     registry = ToolRegistry()
-    stacks = await connect_mcp_servers({"local": config}, registry)
+    stacks = await connect_mcp_servers(
+        {"local": config.model_copy(update={"use_proxy": use_proxy})},
+        registry,
+        network=NetworkConfig(proxy="http://shared-proxy.example:8080"),
+    )
 
     assert stacks == {}
     assert registry.tool_names == []
@@ -1180,7 +1345,7 @@ async def test_connect_mcp_servers_env_proxy_adds_proxy_mounts_and_keeps_pinned_
     fake_mcp_runtime["session"] = _make_fake_session(["demo"])
     client_kwargs: list[dict[str, object]] = []
 
-    async def _reachable(_url: str) -> bool:
+    async def _reachable(_url: str, *, proxy: str | None = None) -> bool:
         return True
 
     def _validate(_url: str) -> tuple[bool, str]:
@@ -1273,7 +1438,9 @@ def test_mcp_http_clients_no_proxy_env_keeps_pinned_direct_route(monkeypatch):
         ),
     ],
 )
+@pytest.mark.parametrize("use_proxy", [False, True])
 async def test_connect_mcp_servers_http_clients_reject_unsafe_redirect_targets(
+    use_proxy: bool,
     config: MCPServerConfig,
     expected_transport: str,
     monkeypatch: pytest.MonkeyPatch,
@@ -1288,7 +1455,7 @@ async def test_connect_mcp_servers_http_clients_reject_unsafe_redirect_targets(
             return False, "loopback blocked"
         return True, ""
 
-    async def _reachable(_url: str) -> bool:
+    async def _reachable(_url: str, *, proxy: str | None = None) -> bool:
         return True
 
     def _handler(request: httpx.Request) -> httpx.Response:
@@ -1329,6 +1496,11 @@ async def test_connect_mcp_servers_http_clients_reject_unsafe_redirect_targets(
         "PinnedDNSAsyncTransport",
         lambda **_kwargs: httpx.MockTransport(_handler),
     )
+    monkeypatch.setattr(
+        mcp_mod.httpx,
+        "AsyncHTTPTransport",
+        lambda **_kwargs: httpx.MockTransport(_handler),
+    )
     monkeypatch.setattr(mcp_mod.httpx, "AsyncClient", _async_client_with_mock_transport)
     monkeypatch.setattr(sys.modules["mcp.client.sse"], "sse_client", _fake_sse_client)
     monkeypatch.setattr(
@@ -1338,7 +1510,11 @@ async def test_connect_mcp_servers_http_clients_reject_unsafe_redirect_targets(
     )
 
     registry = ToolRegistry()
-    stacks = await connect_mcp_servers({"remote": config}, registry)
+    stacks = await connect_mcp_servers(
+        {"remote": config.model_copy(update={"use_proxy": use_proxy})},
+        registry,
+        network=NetworkConfig(proxy="http://shared-proxy.example:8080"),
+    )
 
     assert stacks == {}
     assert registry.tool_names == []
@@ -1503,7 +1679,7 @@ async def test_connect_mcp_servers_streamable_http_uses_finite_timeout(
     fake_mcp_runtime["session"] = _make_fake_session(["demo"])
     captured: dict[str, object] = {}
 
-    async def _reachable(_url: str) -> bool:
+    async def _reachable(_url: str, *, proxy: str | None = None) -> bool:
         return True
 
     def _validate(_url: str) -> tuple[bool, str]:
@@ -1558,7 +1734,7 @@ async def test_connect_mcp_servers_attaches_oauth_to_remote_http_client(
     oauth_handlers = object()
     captured: dict[str, object] = {}
 
-    async def _reachable(_url: str) -> bool:
+    async def _reachable(_url: str, *, proxy: str | None = None) -> bool:
         return True
 
     def _validate(_url: str) -> tuple[bool, str]:
@@ -1642,7 +1818,7 @@ async def test_connect_mcp_servers_skips_background_oauth_without_credentials(
 
     probe_called = False
 
-    async def _probe(_url: str) -> bool:
+    async def _probe(_url: str, *, proxy: str | None = None) -> bool:
         nonlocal probe_called
         probe_called = True
         return True
@@ -1917,8 +2093,8 @@ def _make_fake_session_with_capabilities(
     resource_names: list[str] | None = None,
     prompt_names: list[str] | None = None,
 ) -> SimpleNamespace:
-    async def initialize() -> None:
-        return None
+    async def initialize() -> SimpleNamespace:
+        return SimpleNamespace(capabilities=SimpleNamespace(tools=SimpleNamespace()))
 
     async def list_tools() -> SimpleNamespace:
         return SimpleNamespace(tools=[_make_tool_def(name) for name in tool_names], nextCursor=None)
@@ -1933,7 +2109,7 @@ def _make_fake_session_with_capabilities(
                     description=f"{rname} resource",
                 )
             )
-        return SimpleNamespace(resources=resources)
+        return SimpleNamespace(resources=resources, nextCursor=None)
 
     async def list_prompts() -> SimpleNamespace:
         prompts = []
@@ -1945,7 +2121,7 @@ def _make_fake_session_with_capabilities(
                     arguments=None,
                 )
             )
-        return SimpleNamespace(prompts=prompts)
+        return SimpleNamespace(prompts=prompts, nextCursor=None)
 
     return SimpleNamespace(
         initialize=initialize,
@@ -1953,6 +2129,80 @@ def _make_fake_session_with_capabilities(
         list_resources=list_resources,
         list_prompts=list_prompts,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("catalog", ["resources", "prompts"])
+async def test_connect_registers_all_resource_and_prompt_pages(
+    fake_mcp_runtime: dict[str, object | None], catalog: str,
+) -> None:
+    session = _make_fake_session_with_capabilities(["tool_a"], ["res_b"], ["prompt_c"])
+    definition = (
+        SimpleNamespace(name="second", uri="file:///second", description="second resource")
+        if catalog == "resources"
+        else SimpleNamespace(name="second", description="second prompt", arguments=None)
+    )
+    pages = {
+        None: SimpleNamespace(**{catalog: []}, nextCursor=""),
+        "": SimpleNamespace(**{catalog: []}, nextCursor="opaque:+/="),
+        "opaque:+/=": SimpleNamespace(**{catalog: [definition]}, nextCursor=None),
+    }
+    cursors: list[str | None] = []
+
+    async def list_pages(*, params: SimpleNamespace | None = None) -> SimpleNamespace:
+        cursor = params.cursor if params is not None else None
+        cursors.append(cursor)
+        return pages[cursor]
+
+    setattr(session, f"list_{catalog}", list_pages)
+    fake_mcp_runtime["session"] = session
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers({"test": MCPServerConfig(command="fake")}, registry)
+    try:
+        assert set(stacks) == {"test"}
+        assert cursors == [None, "", "opaque:+/="]
+        kind = "resource" if catalog == "resources" else "prompt"
+        other = "mcp_test_prompt_prompt_c" if catalog == "resources" else "mcp_test_resource_res_b"
+        assert set(registry.tool_names) == {"mcp_test_tool_a", other, f"mcp_test_{kind}_second"}
+    finally:
+        for stack in stacks.values():
+            await stack.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("catalog", ["resources", "prompts"])
+@pytest.mark.parametrize("failure", ["request-error", "repeated-cursor"])
+async def test_connect_failed_catalog_pagination_preserves_other_capabilities(
+    fake_mcp_runtime: dict[str, object | None], catalog: str, failure: str,
+) -> None:
+    session = _make_fake_session_with_capabilities(["tool_a"], ["res_b"], ["prompt_c"])
+    first_page = await getattr(session, f"list_{catalog}")()
+    first_page.nextCursor = "next"
+    cursors: list[str | None] = []
+
+    async def list_pages(*, params: SimpleNamespace | None = None) -> SimpleNamespace:
+        cursor = params.cursor if params is not None else None
+        cursors.append(cursor)
+        if cursor is None:
+            return first_page
+        if failure == "request-error":
+            raise RuntimeError("second page failed")
+        if len(cursors) > 2:
+            raise AssertionError("A repeated cursor must not be requested again")
+        return SimpleNamespace(**{catalog: []}, nextCursor="next")
+
+    setattr(session, f"list_{catalog}", list_pages)
+    fake_mcp_runtime["session"] = session
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers({"test": MCPServerConfig(command="fake")}, registry)
+    try:
+        assert set(stacks) == {"test"}
+        assert cursors == [None, "next"]
+        other = "mcp_test_prompt_prompt_c" if catalog == "resources" else "mcp_test_resource_res_b"
+        assert set(registry.tool_names) == {"mcp_test_tool_a", other}
+    finally:
+        for stack in stacks.values():
+            await stack.aclose()
 
 
 @pytest.mark.asyncio
@@ -1975,6 +2225,85 @@ async def test_connect_registers_resources_and_prompts(
     assert "mcp_test_tool_a" in registry.tool_names
     assert "mcp_test_resource_res_b" in registry.tool_names
     assert "mcp_test_prompt_prompt_c" in registry.tool_names
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("catalog", ["resources", "prompts"])
+@pytest.mark.parametrize("failure", ["http", "rpc"])
+async def test_discovery_failure_logs_do_not_expose_credentials(
+    fake_mcp_runtime: dict[str, object | None],
+    monkeypatch: pytest.MonkeyPatch,
+    catalog: str,
+    failure: str,
+) -> None:
+    from mcp.shared.exceptions import McpError
+
+    secrets = ("userinfo-secret", "path-secret", "signature-secret", "message-secret")
+    url = (
+        f"https://user:{secrets[0]}@mcp.example.com/{secrets[1]}"
+        f"?signature={secrets[2]}"
+    )
+    if failure == "http":
+        response = httpx.Response(403, request=httpx.Request("POST", url))
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            error = exc
+    else:
+        error = McpError(code=-32603, message=f"Discovery failed for {url}: {secrets[3]}")
+
+    session = _make_fake_session_with_capabilities(["tool_a"], ["res_b"], ["prompt_c"])
+    setattr(session, f"list_{catalog}", AsyncMock(side_effect=error))
+    fake_mcp_runtime["session"] = session
+    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
+    monkeypatch.setattr(mcp_mod, "_probe_http_url", AsyncMock(return_value=True))
+    messages: list[str] = []
+    sink = mcp_mod.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+    registry = ToolRegistry()
+    stacks = {}
+    try:
+        stacks = await connect_mcp_servers(
+            {"test": MCPServerConfig(type="streamableHttp", url=url)}, registry
+        )
+        assert set(stacks) == {"test"}
+        other = "mcp_test_prompt_prompt_c" if catalog == "resources" else "mcp_test_resource_res_b"
+        assert set(registry.tool_names) == {"mcp_test_tool_a", other}
+        logs = "\n".join(messages)
+        assert not any(secret in logs for secret in secrets)
+        assert f"MCP server 'test': {catalog} not supported or failed: {type(error).__name__}" in logs
+    finally:
+        for stack in stacks.values():
+            await stack.aclose()
+        mcp_mod.logger.remove(sink)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("catalog", ["resources", "prompts"])
+async def test_connect_accepts_servers_without_tools_capability(
+    fake_mcp_runtime: dict[str, object | None], catalog: str,
+) -> None:
+    from mcp.shared.exceptions import McpError
+
+    session = _make_fake_session_with_capabilities(
+        tool_names=[],
+        resource_names=["document"] if catalog == "resources" else [],
+        prompt_names=["review"] if catalog == "prompts" else [],
+    )
+    session.initialize = AsyncMock(
+        return_value=SimpleNamespace(capabilities=SimpleNamespace(tools=None)),
+    )
+    session.list_tools = AsyncMock(side_effect=McpError(code=-32601, message="Method not found"))
+    fake_mcp_runtime["session"] = session
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers({"test": MCPServerConfig(command="fake")}, registry)
+    try:
+        assert set(stacks) == {"test"}
+        expected = "mcp_test_resource_document" if catalog == "resources" else "mcp_test_prompt_review"
+        assert registry.tool_names == [expected]
+        session.list_tools.assert_not_awaited()
+    finally:
+        for stack in stacks.values():
+            await stack.aclose()
 
 
 # ---------------------------------------------------------------------------
@@ -2189,3 +2518,88 @@ async def test_optional_mcp_filters_reach_server_unchanged(params, error):
     else:
         assert result == "ok"
         session.call_tool.assert_awaited_once_with("list_issues", arguments=params)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport", ["sse", "streamableHttp"])
+@pytest.mark.parametrize("use_proxy", [False, True], ids=["environment-route", "shared-route"])
+async def test_mcp_http_requests_use_selected_transport_without_route_fallback(
+    fake_mcp_runtime,
+    monkeypatch: pytest.MonkeyPatch,
+    transport: str,
+    use_proxy: bool,
+) -> None:
+    fake_mcp_runtime["session"] = _make_fake_session(["demo"])
+    routes: list[str] = []
+    constructed_proxies: list[str] = []
+    shared_proxy = "http://shared.example:8080"
+
+    def recording_transport(route: str) -> httpx.MockTransport:
+        def respond(request: httpx.Request) -> httpx.Response:
+            routes.append(route)
+            return httpx.Response(200, json={"ok": True}, request=request)
+        return httpx.MockTransport(respond)
+
+    def proxy_transport(*, proxy: str) -> httpx.MockTransport:
+        constructed_proxies.append(proxy)
+        return recording_transport("shared")
+
+    async def probe(_url, *, proxy):
+        assert proxy == (shared_proxy if use_proxy else None)
+        return True
+
+    @asynccontextmanager
+    async def sse_client(url, *, httpx_client_factory):
+        async with httpx_client_factory() as client:
+            response = await client.get(url)
+            assert response.json() == {"ok": True}
+        yield object(), object()
+
+    @asynccontextmanager
+    async def streamable_client(url, *, http_client):
+        response = await http_client.get(url)
+        assert response.json() == {"ok": True}
+        yield object(), object(), object()
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://environment.example:8888")
+    monkeypatch.setattr(mcp_mod, "validate_url_target", lambda _url: (True, ""))
+    monkeypatch.setattr(mcp_mod, "_probe_http_url", probe)
+    monkeypatch.setattr(mcp_mod, "PinnedDNSAsyncTransport", lambda: recording_transport("direct"))
+    monkeypatch.setattr(
+        mcp_mod, "httpx_env_proxy_mounts", lambda: {"all://": recording_transport("environment")},
+    )
+    monkeypatch.setattr(mcp_mod.httpx, "AsyncHTTPTransport", proxy_transport)
+    monkeypatch.setattr(sys.modules["mcp.client.sse"], "sse_client", sse_client)
+    monkeypatch.setattr(sys.modules["mcp.client.streamable_http"], "streamable_http_client", streamable_client)
+
+    registry = ToolRegistry()
+    connections = await connect_mcp_servers(
+        {"remote": MCPServerConfig(
+            type=transport, url="https://93.184.216.34/mcp", use_proxy=use_proxy,
+        )},
+        registry,
+        network=NetworkConfig(proxy=shared_proxy),
+    )
+    try:
+        assert set(connections) == {"remote"}
+        assert registry.has("mcp_remote_demo")
+        assert routes == (["shared"] if use_proxy else ["environment"])
+        assert constructed_proxies == ([shared_proxy] if use_proxy else [])
+    finally:
+        for connection in connections.values():
+            await connection.aclose()
+
+
+@pytest.mark.asyncio
+async def test_stdio_cannot_opt_into_shared_proxy(monkeypatch) -> None:
+    stdio_client = AsyncMock()
+    monkeypatch.setattr(sys.modules["mcp.client.stdio"], "stdio_client", stdio_client)
+    registry = ToolRegistry()
+    connections = await connect_mcp_servers(
+        {"local": MCPServerConfig(command="must-not-launch", use_proxy=True)},
+        registry,
+        network=NetworkConfig(proxy="http://shared.example:8080"),
+    )
+    assert connections == {}
+    assert registry.tool_names == []
+    stdio_client.assert_not_called()

@@ -84,9 +84,8 @@
       "dm_allowFrom": {
         "label": "私聊使用者"
       },
-      "proxy": {
-        "label": "網路代理",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "使用代理"
       }
     }
   }

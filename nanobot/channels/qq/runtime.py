@@ -365,6 +365,18 @@ class QQChannel(BaseChannel):
         self.logger.info("media directory: {}", str(root))
         return root
 
+    async def login(self, force: bool = False) -> bool:
+        """Scan a QQ Bot QR code and save the AppID/secret it returns."""
+        from nanobot.channels.qq.connect import QQConnectStore
+
+        if not force and self.config.app_id and self.config.secret:
+            return True
+        credentials = await QQConnectStore().login()
+        if credentials is None:
+            return False
+        self.config.app_id, self.config.secret = credentials
+        return True
+
     async def start(self) -> None:
         """Start the QQ bot with auto-reconnect loop."""
         redirect_lib_logging("botpy", level="WARNING")

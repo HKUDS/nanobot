@@ -30,7 +30,7 @@ export function useSystemSettingsState() {
   const [cliAppsLoading, setCliAppsLoading] = useState(true);
   const [nanobotFeaturesLoading, setNanobotFeaturesLoading] = useState(true);
   const [mcpPresetsLoading, setMcpPresetsLoading] = useState(true);
-  const [automationsLoading, setAutomationsLoading] = useState(false);
+  const [automationsLoading, setAutomationsLoading] = useState(true);
   const [cliAppsAction, setCliAppsAction] = useState<string | null>(null);
   const [nanobotFeatureAction, setNanobotFeatureAction] = useState<string | null>(null);
   const nanobotFeatureActionRef = useRef<string | null>(null);

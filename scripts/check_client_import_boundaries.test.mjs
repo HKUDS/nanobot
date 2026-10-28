@@ -82,6 +82,8 @@ test.each([
   ["webui/src/lib/model.ts", 'import "../i18n";', "webui-lib-bootstrap"],
   ["webui/src/lib/model.ts", 'import "../i18n/index.ts";', "webui-lib-bootstrap"],
   ["webui/src/lib/format.ts", 'import i18n from "i18next";', "pure-format-utils"],
+  ["webui/src/components/markdown-diagrams/runtime.ts", 'import { render } from "pele/lazy";', "diagram-worker-engine"],
+  ["webui/src/components/markdown-diagrams/MermaidBlock.tsx", 'import { SaxesParser } from "saxes";', "diagram-worker-output"],
 ])("rejects the owning boundary in %s", (relative, source, rule) => {
   expect(inspect(relative, source)).toHaveLength(1);
   expect(inspect(relative, source)[0]).toContain(`[${rule}] must not import`);
@@ -92,6 +94,8 @@ test.each([
   ["tui/src/client/api.ts", 'import "../../../packages/client-events/notifications";'],
   ["webui/src/lib/model.ts", 'import "../../../packages/client-events/notifications";'],
   ["webui/src/channel-plugins/types.ts", 'import type { ComponentType } from "react";'],
+  ["webui/src/components/markdown-diagrams/pele.worker.ts", 'import { render } from "pele/lazy";'],
+  ["webui/src/components/markdown-diagrams/svg-image.ts", 'import { parse } from "css-tree/parser";'],
 ])("permits the shared contract or contribution interface in %s", (relative, source) => {
   expect(inspect(relative, source)).toEqual([]);
 });

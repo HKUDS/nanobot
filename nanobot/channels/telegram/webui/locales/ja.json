@@ -7,9 +7,8 @@
         "label": "ボットトークン",
         "placeholder": "123456:ABC..."
       },
-      "proxy": {
-        "label": "ネットワークプロキシ",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "プロキシを使う"
       },
       "allowFrom": {
         "label": "許可ユーザー",

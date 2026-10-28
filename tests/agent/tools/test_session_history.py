@@ -9,7 +9,6 @@ import pytest
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.sessions import ReadSessionTool, SearchSessionsTool
 from nanobot.session.manager import SessionManager
-from nanobot.webui.transcript import append_transcript_object
 
 
 @pytest.mark.asyncio
@@ -57,10 +56,10 @@ async def test_session_tools_find_old_matches_in_full_session(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("state", ["canonical", "transcript", "mixed"])
-async def test_session_tools_use_canonical_records_after_restart(tmp_path, monkeypatch, state):
+async def test_session_tools_use_canonical_records_after_restart(history, tmp_path, monkeypatch, state):
     webui_dir = tmp_path / "webui"
-    monkeypatch.setattr("nanobot.webui.transcript.get_webui_dir", lambda: webui_dir)
-    manager = SessionManager(tmp_path)
+    monkeypatch.setattr("nanobot.webui.history.get_webui_dir", lambda: webui_dir)
+    manager = history.sessions
     key = "websocket:history"
     if state != "transcript":
         session = manager.get_or_create(key)
@@ -68,10 +67,10 @@ async def test_session_tools_use_canonical_records_after_restart(tmp_path, monke
         session.add_message("user", "canonical needle")
         manager.save(session)
     if state != "canonical":
-        append_transcript_object(key, {
+        history.append(key, {
             "event": "user", "chat_id": "history", "text": "display-only needle",
         })
-        append_transcript_object(key, {"event": "turn_end", "chat_id": "history"})
+        history.append(key, {"event": "turn_end", "chat_id": "history"})
 
     def durable_files():
         return {
@@ -82,7 +81,7 @@ async def test_session_tools_use_canonical_records_after_restart(tmp_path, monke
 
     original = durable_files()
     for _ in range(2):
-        manager = SessionManager(tmp_path)
+        manager = history.sessions
         with request_context(RequestContext(
             channel="websocket", chat_id="current", session_key="websocket:current",
         )):
@@ -91,7 +90,7 @@ async def test_session_tools_use_canonical_records_after_restart(tmp_path, monke
             display_search = json.loads(await SearchSessionsTool(manager).execute(query="display-only"))
         if state == "transcript":
             assert search["results"] == []
-            assert read.is_error and "session not found" in str(read)
+            assert json.loads(read)["messages"] == []
         else:
             assert [row["session_key"] for row in search["results"]] == [key]
             assert search["results"][0]["excerpts"][0]["content"] == "canonical needle"

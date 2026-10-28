@@ -80,21 +80,26 @@ def test_session_tools_do_not_own_runtime_context(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_search_sessions_has_no_hidden_content_scan_cutoff(tmp_path):
     manager = SessionManager(tmp_path)
-    for index in range(200):
+    # Seed offline on this thread; nested saves share the existing store transaction.
+    with manager._store.transaction():
+        for index in range(200):
+            _save_session(
+                manager,
+                f"websocket:recent-{index:03d}",
+                title=f"Recent {index}",
+                messages=[{"role": "user", "content": "ordinary"}],
+                updated_at=datetime(2025, 1, 1),
+            )
         _save_session(
             manager,
-            f"websocket:recent-{index:03d}",
-            title=f"Recent {index}",
-            messages=[{"role": "user", "content": "ordinary"}],
-            updated_at=datetime(2025, 1, 1),
+            "websocket:old-target",
+            title="Old target",
+            messages=[{"role": "user", "content": "needle after two hundred sessions"}],
+            updated_at=datetime(2024, 1, 1),
         )
-    _save_session(
-        manager,
-        "websocket:old-target",
-        title="Old target",
-        messages=[{"role": "user", "content": "needle after two hundred sessions"}],
-        updated_at=datetime(2024, 1, 1),
-    )
+    persisted = manager.list_sessions()
+    assert len(persisted) == 201
+    assert persisted[-1]["key"] == "websocket:old-target"
 
     with _webui_request():
         result = _decode(await SearchSessionsTool(manager).execute(query="needle"))

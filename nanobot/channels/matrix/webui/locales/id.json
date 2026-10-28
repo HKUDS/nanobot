@@ -28,7 +28,8 @@
         "choices": {
           "mention": "Hanya mention",
           "open": "Semua pesan",
-          "allowlist": "Daftar izin"
+          "allowlist": "Daftar izin",
+          "listen": "Dengar (balas saat disebut)"
         }
       },
       "groupPolicyOverrides": {
@@ -77,9 +78,8 @@
           "false": "Mati"
         }
       },
-      "proxy": {
-        "label": "Proxy jaringan",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "Gunakan proxy"
       }
     }
   }

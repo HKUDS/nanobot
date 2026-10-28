@@ -30,7 +30,7 @@ describe("Linear saved secret", () => {
     expect(input).toHaveAttribute("placeholder", "Enter secret");
     expect(screen.queryByText("Saved")).not.toBeInTheDocument();
     fireEvent.change(input, { target: { value: "   " } });
-    expect(screen.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onSave).not.toHaveBeenCalled();
   });
@@ -79,12 +79,12 @@ describe("Linear saved secret", () => {
     setup(onSave);
     const input = edit();
     fireEvent.change(input, { target: { value: "new-draft" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not confirm the save");
     expect(screen.getByRole("alert")).not.toHaveTextContent("new-draft");
     expect(input).toHaveAccessibleDescription(/Could not confirm/);
     expect(input).toHaveValue("new-draft");
-    fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Saved"));
     expect(onSave).toHaveBeenCalledTimes(2);
   });

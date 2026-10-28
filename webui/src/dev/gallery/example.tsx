@@ -4,6 +4,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 export interface ComponentExample {
   title: string;
+  titleValues?: Record<string, string>;
   files: string[];
   description: string;
   options: string;

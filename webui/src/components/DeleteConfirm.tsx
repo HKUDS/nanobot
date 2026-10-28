@@ -42,6 +42,7 @@ export function DeleteConfirm({
     <AlertDialog open={open} onOpenChange={(o) => (!o ? onCancel() : undefined)}>
       <AlertDialogContent
         className="w-[min(calc(100vw-2rem),24rem)] gap-0 p-5 text-center"
+        onEscapeKeyDown={(event) => event.stopPropagation()}
       >
         <AlertDialogHeader className="items-center space-y-0 text-center">
           <Trash2

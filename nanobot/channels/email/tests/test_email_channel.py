@@ -62,7 +62,7 @@ def test_email_only_enables_final_reply_delivery() -> None:
     manager.config = Config.model_validate({"channels": {"email": {"enabled": True}}})
     manager.bus = MessageBus()
 
-    channel = manager._build_channel("email", EmailChannel, {"enabled": True})
+    channel = manager._build_channel(EmailChannel, {"enabled": True})
 
     assert channel.send_progress is False
     assert channel.send_tool_hints is False

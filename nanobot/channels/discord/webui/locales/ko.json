@@ -23,14 +23,8 @@
         "label": "허용 사용자",
         "placeholder": "사용자 ID, 쉼표로 구분"
       },
-      "proxy": {
-        "label": "네트워크 프록시"
-      },
-      "proxyUsername": {
-        "label": "프록시 사용자 이름"
-      },
-      "proxyPassword": {
-        "label": "프록시 비밀번호"
+      "useProxy": {
+        "label": "프록시 사용"
       },
       "intents": {
         "label": "게이트웨이 인텐트"

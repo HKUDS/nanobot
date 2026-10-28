@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 import { channelTranslator } from "@/channel-plugins/i18n";
 import { channelUiOwner, channelUiPresentation } from "@/channel-plugins/registry";
 import { AutomationCalendar } from "@/components/settings/system/AutomationCalendar";
+import { SkeletonStatus } from "@/components/settings/shared/SkeletonStatus";
 import { AutomationRunDialog } from "@/components/settings/system/AutomationRunDialog";
 import { AutomationChatBinding, type AutomationChatNames, type ChangeAutomationChat } from "@/components/settings/system/AutomationChatBinding";
 import { AutomationRunAtPicker, parseAutomationRunAt } from "@/components/settings/system/AutomationRunAtPicker";
@@ -283,7 +284,7 @@ export function AutomationsSettings({
                 {new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" }).format(month)}
               </h2>
             ) : null}
-            {filters ? <div className="automation-panel-filters min-w-0">{filters}</div> : null}
+            {filters || (loading && !payload) ? <div className="automation-panel-filters min-w-0">{filters ?? <div className="h-8 w-8" aria-hidden />}</div> : null}
             {view === "calendar" ? (
               <div className="automation-calendar-navigation flex shrink-0 items-center gap-1">
                 <Button type="button" variant="ghost" size="sm" className="h-8 rounded-full bg-background/60 px-3 text-[12px] text-foreground"
@@ -303,11 +304,13 @@ export function AutomationsSettings({
               </div>
             ) : null}
           </div>
-          {loading && !payload ? (
-            <div role="status" className="flex h-44 items-center justify-center rounded-panel border border-border/70 bg-[hsl(var(--settings-surface))] text-[13px] text-muted-foreground">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
-              {tx("settings.automations.loading", "Loading automations...")}
-            </div>
+          {view === "tasks" && loading && !payload ? (
+            <SkeletonStatus label={tx("settings.automations.loading", "Loading automations...")} className="space-y-1 p-1">
+              {[0, 1, 2].map((index) => <div key={index} data-automation-task-skeleton className="px-3 py-3">
+                <div className="flex h-[21px] items-center"><div className="h-3.5 w-2/5 rounded bg-muted-foreground/20" /></div>
+                <div className="mt-1 flex h-5 items-center"><div className="h-3 w-1/4 rounded bg-muted-foreground/15" /></div>
+              </div>)}
+            </SkeletonStatus>
           ) : view === "tasks" ? (
             <section className="p-1" aria-label={tx("settings.automations.views.tasks", "Tasks")}>
               {filtered.length ? (
@@ -352,6 +355,7 @@ export function AutomationsSettings({
             <AutomationCalendar
               renderRunDialog={(props) => <AutomationRunDialog token={token} {...props} />}
               jobs={filtered}
+              loadingLabel={loading && !payload ? tx("settings.automations.loading", "Loading automations...") : undefined}
               month={month}
               locale={locale}
               copy={{

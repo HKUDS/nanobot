@@ -144,10 +144,26 @@ class XAIOAuthLoginFlow:
             name="nanobot-xai-grok-oauth-callback",
             daemon=True,
         )
-        self._server_thread.start()
         self._timeout_timer = threading.Timer(timeout_s, self._expire)
         self._timeout_timer.daemon = True
-        self._timeout_timer.start()
+
+    def start(self) -> XAIOAuthLoginFlow:
+        with self._lock:
+            self._raise_if_finished()
+            self._server_thread.start()
+            self._timeout_timer.start()
+        return self
+
+    @property
+    def has_pending_work(self) -> bool:
+        return self._server_thread.is_alive() or self._timeout_timer.is_alive()
+
+    def wait_closed(self) -> None:
+        # Join outside _lock: the expiry timer can be waiting to acquire it.
+        if self._timeout_timer.ident is not None:
+            self._timeout_timer.join()
+        if self._server_thread.ident is not None:
+            self._server_thread.join()
 
     @property
     def expired(self) -> bool:
@@ -253,8 +269,8 @@ class XAIOAuthLoginFlow:
         self._closed = True
         self._timeout_timer.cancel()
         self._stop_event.set()
-        if threading.current_thread() is not self._server_thread:
-            self._server_thread.join(timeout=2)
+        if self._server_thread.ident is None:
+            self._server.server_close()
 
 
 def get_xai_oauth_storage_path() -> Path:
@@ -309,6 +325,7 @@ def login_xai_oauth(
         return flow.wait(callback_timeout_s)
     finally:
         flow.cancel()
+        flow.wait_closed()
 
 
 def start_xai_oauth_login(
@@ -317,6 +334,15 @@ def start_xai_oauth_login(
     timeout_s: float = 600,
 ) -> XAIOAuthLoginFlow:
     """Create a non-blocking OAuth flow for browser or pasted-callback completion."""
+    return create_xai_oauth_login(proxy=proxy, timeout_s=timeout_s).start()
+
+
+def create_xai_oauth_login(
+    *,
+    proxy: str | None = None,
+    timeout_s: float = 600,
+) -> XAIOAuthLoginFlow:
+    """Prepare the flow so a gateway can own it before starting its threads."""
     discovery = _discover(proxy)
     verifier, challenge = _generate_pkce()
     state = secrets.token_urlsafe(32)
@@ -475,6 +501,10 @@ def _make_callback_server(
     result_queue: queue.Queue[_CallbackResult],
 ) -> ThreadingHTTPServer:
     class CallbackHandler(BaseHTTPRequestHandler):
+        def setup(self) -> None:
+            super().setup()
+            self.connection.settimeout(5)
+
         def do_OPTIONS(self) -> None:  # noqa: N802
             if self.path.split("?", 1)[0] != "/callback":
                 self.send_error(HTTPStatus.NOT_FOUND)
@@ -530,7 +560,11 @@ def _make_callback_server(
             # Callback query strings contain an authorization code.
             return
 
-    return ThreadingHTTPServer(("127.0.0.1", 0), CallbackHandler)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), CallbackHandler)
+    # The listener's server_close must join accepted requests too, not merely
+    # close the listening socket while handlers still run application code.
+    server.daemon_threads = False
+    return server
 
 
 def _serve_callback_server(

@@ -12,9 +12,7 @@ export default {
       docsUrl: chatAppGuideUrl("discord"),
       fields: [
         { key: "channels.discord.token", section: "credentials" },
-        { key: "channels.discord.proxy", section: "connection" },
-        { key: "channels.discord.proxyUsername", section: "connection" },
-        { key: "channels.discord.proxyPassword", section: "connection" },
+        { key: "channels.discord.useProxy", section: "connection", control: "switch" },
         { key: "channels.discord.allowFrom", section: "access" },
         { key: "channels.discord.allowChannels", section: "access" },
         { key: "channels.discord.groupPolicy", section: "behavior" },

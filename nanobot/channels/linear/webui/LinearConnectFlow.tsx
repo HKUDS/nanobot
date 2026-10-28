@@ -8,7 +8,6 @@ import type { ChannelPluginConnectFlowProps } from "@/channel-plugins/types";
 import { LinearConnectFlowView, linearConnectLabels } from "./LinearConnectFlowView";
 
 export function LinearConnectFlow({
-  token,
   feature,
   idleLabel,
   connectRequestId,
@@ -23,7 +22,7 @@ export function LinearConnectFlow({
 }) {
   const { t } = useTranslation();
   const tx = channelTranslator(t, "linear");
-  return <ChannelQrConnectFlow token={token} channelName="linear" idleLabel={idleLabel}
+  return <ChannelQrConnectFlow channelName="linear" idleLabel={idleLabel}
     connectRequestId={connectRequestId} startParams={connectRequestId ? { force: true } : undefined}
     forceOnRepeat showQrCode={false} connected={connected}
     suppressSucceeded={feature.runtime_status === "running" || feature.runtime_status === "failed"}

@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Window as HappyWindow } from "happy-dom";
 
 import {
   assistantForkFlags,
@@ -28,8 +29,8 @@ function assistantActionCounts(root: ParentNode = document) {
     const row = body.closest<HTMLElement>("[data-thread-display-unit]")!;
     if (!row.querySelector("[data-message-block-menu-trigger]")) continue;
     const { menu } = openMessageBlockMenu(row);
-    counts.copy += within(menu).queryAllByRole("button", { name: "Copy", exact: true }).length;
-    counts.fork += within(menu).queryAllByRole("button", { name: "New chat from here", exact: true }).length;
+    counts.copy += within(menu).queryAllByRole("button", { name: "Copy" }).length;
+    counts.fork += within(menu).queryAllByRole("button", { name: "New chat from here" }).length;
     fireEvent.keyDown(menu, { key: "Escape" });
   }
   return counts;
@@ -52,6 +53,29 @@ function openMessageBlockMenu(root: ParentNode): {
 }
 
 describe("ThreadMessages", () => {
+  it("preserves native context menus and navigation on rendered reply links", async () => {
+    await preloadMarkdownText();
+    render(<ThreadMessages messages={[
+      { id: "reply", role: "assistant", content: "[**Website**](https://example.com/?q=one#two)", createdAt: 1 },
+    ]} />);
+    const link = await screen.findByRole("link", { name: "Website" });
+    expect(fireEvent.contextMenu(within(link).getByText("Website"))).toBe(true);
+    link.focus();
+    expect(fireEvent.keyDown(link, { key: "F10", shiftKey: true })).toBe(true);
+    expect(link).toHaveFocus();
+    expect(link).toHaveAttribute("href", "https://example.com/?q=one#two");
+    expect(link).toHaveAttribute("target", "_blank");
+    // Happy DOM follows native links; verify the event without accessing the network.
+    const navigation = (window as unknown as HappyWindow).happyDOM.settings.navigation;
+    const previous = navigation.disableMainFrameNavigation;
+    navigation.disableMainFrameNavigation = true;
+    try {
+      expect(fireEvent.click(link, { ctrlKey: true })).toBe(true);
+    } finally {
+      navigation.disableMainFrameNavigation = previous;
+    }
+  });
+
   it.each(["diff", "collapsed_diff"] as const)(
     "keeps completed %s edits visible when answer activity is toggled",
     (fileEditDisplayMode) => {
@@ -86,7 +110,7 @@ describe("ThreadMessages", () => {
         const assertIndependentDiff = () => {
           const diff = screen.getByTestId("file-edit-diff");
           expect(diff).toBeVisible();
-          expect(screen.getByRole("img", { name: "Edited", exact: true })).toBeInTheDocument();
+          expect(screen.getByRole("img", { name: "Edited" })).toBeInTheDocument();
           expect(diff.closest('[aria-hidden="true"], [inert], [data-testid="agent-activity-content"]'))
             .toBeNull();
           expect(screen.getByText("File updated")).toBeVisible();
@@ -94,7 +118,7 @@ describe("ThreadMessages", () => {
         };
         assertIndependentDiff();
         openAssistantBlockMenu(container);
-        const disclosure = screen.getByRole("button", { name: "Worked for 5s", exact: true });
+        const disclosure = screen.getByRole("button", { name: "Worked for 5s" });
         expect(disclosure).toHaveAttribute("aria-expanded", "false");
         const detailsId = disclosure.getAttribute("aria-controls")!;
         expect(container.querySelectorAll(`[id="${detailsId}"]`)).toHaveLength(1);
@@ -226,7 +250,7 @@ describe("ThreadMessages", () => {
     expect(screen.getByText("latest answer").closest(".thread-render-unit")).toBeNull();
   });
 
-  it("recycles offscreen historical content while preserving its measured space", () => {
+  it("recycles historical content using the latest intersection in each batch", () => {
     let notify: (entries: Array<{ isIntersecting: boolean }>) => void = () => {};
     vi.stubGlobal("IntersectionObserver", class {
       constructor(callback: typeof notify) { notify = callback; }
@@ -243,8 +267,15 @@ describe("ThreadMessages", () => {
     act(() => notify([{ isIntersecting: false }]));
     expect(unit.style.height).toBe("240px");
     expect(unit.childElementCount).toBe(0);
+    act(() => notify([{ isIntersecting: false }, { isIntersecting: true }]));
+    expect(screen.getByText("historical answer")).toBeVisible();
+    expect(unit.style.height).toBe("");
+    act(() => notify([{ isIntersecting: true }, { isIntersecting: false }]));
+    expect(unit.style.height).toBe("240px");
+    expect(unit.childElementCount).toBe(0);
     act(() => notify([{ isIntersecting: true }]));
     expect(screen.getByText("historical answer")).toBeVisible();
+    expect(unit.style.height).toBe("");
     expect(view.container).toHaveTextContent("old question");
   });
 
@@ -260,7 +291,7 @@ describe("ThreadMessages", () => {
         content: "question",
         createdAt: 1,
         turnId,
-        turnPhase: "prompt",
+        turnPhase: "user",
       },
       {
         id: "live-answer",
@@ -313,7 +344,7 @@ describe("ThreadMessages", () => {
             content: "next question",
             createdAt: 3,
             turnId: "turn-2",
-            turnPhase: "prompt",
+            turnPhase: "user",
           },
         ]}
         isStreaming
@@ -334,7 +365,7 @@ describe("ThreadMessages", () => {
       content: "research this",
       createdAt: 1,
       turnId,
-      turnPhase: "prompt",
+      turnPhase: "user",
       turnSeq: 0,
     };
     const commentary: UIMessage = {
@@ -2002,9 +2033,14 @@ describe("ThreadMessages", () => {
     });
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
-    expect(screen.getByText("result.csv")).toBeInTheDocument();
-    const ownerRow = screen.getByText("result.csv")
-      .closest<HTMLElement>("[data-thread-display-unit]")!;
+    const information = screen.getByRole("button", { name: "result.csv" });
+    const download = screen.getByRole("link", { name: "Download result.csv" });
+    expect(information).toBeVisible();
+    expect(download).toHaveAttribute("href", "/api/media/result.csv");
+    expect(download).toHaveAttribute("download", "result.csv");
+    expect(download.closest("[data-testid='activity-model-message'], [data-testid='agent-activity-content']")).toBeNull();
+    const ownerRow = information.closest<HTMLElement>("[data-thread-display-unit]")!;
+    expect(ownerRow).toContainElement(download);
     openAssistantBlockMenu(ownerRow);
     expect(screen.getByRole("button", { name: "Worked" })).toBeInTheDocument();
   });

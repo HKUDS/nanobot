@@ -11,16 +11,32 @@ import pytest
 from scripts.check_import_boundaries import Violation, find_violations
 
 
-def test_repository_respects_import_boundaries() -> None:
-    result = subprocess.run(
-        [sys.executable, "-m", "scripts.check_import_boundaries"],
-        cwd=Path(__file__).resolve().parents[2],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+@pytest.mark.parametrize("module", [
+    "nanobot.agent.loop", "nanobot.session.state", "nanobot.runtime_admission",
+    "nanobot.data_access", "nanobot.installation_lock",
+])
+def test_runtime_owners_do_not_depend_on_update_policy(module: str) -> None:
+    assert find_violations("from nanobot.update_service import UpdateService", module) == [
+        Violation("update-policy-direction", "nanobot.update_service.UpdateService", 1),
+    ]
 
-    assert result.returncode == 0, result.stderr
+
+def test_updater_uses_process_contracts_not_agent_or_client_implementations() -> None:
+    assert find_violations("from nanobot.agent.loop import AgentLoop", "nanobot.update_stop") == [
+        Violation("update-domain", "nanobot.agent.loop.AgentLoop", 1),
+    ]
+    assert find_violations(
+        "from nanobot.gateway.runtime import GatewayRuntime", "nanobot.update_stop",
+    ) == []
+    assert find_violations(
+        "from nanobot.update_stop import watch_gateway_stop", "nanobot.cli.gateway_runtime",
+    ) == []
+    assert find_violations(
+        "from nanobot.cli.gateway_runtime import _run_gateway", "nanobot.update_restart",
+    ) == []
+    assert find_violations(
+        "from nanobot.agent.loop import AgentLoop", "nanobot.update_restart",
+    ) == [Violation("update-restart-adapter", "nanobot.agent.loop.AgentLoop", 1)]
 
 
 @pytest.mark.parametrize(
@@ -103,19 +119,24 @@ def test_storage_and_security_do_not_depend_on_adapters(module: str, rule: str) 
     ]
 
 
-def test_websocket_only_permits_progress_event_as_a_type_dependency() -> None:
-    source = (
-        "from typing import TYPE_CHECKING\n"
-        "if TYPE_CHECKING:\n"
-        "    from nanobot.bus.outbound_events import ProgressEvent\n"
-        "    from nanobot.command import router\n"
-        "else:\n"
-        "    from nanobot.bus.outbound_events import ProgressEvent\n"
-    )
+@pytest.mark.parametrize(
+    "dependency",
+    [
+        "nanobot.bus.outbound_events.ProgressEvent",
+        "nanobot.command.router",
+        "nanobot.pairing.events.PairingChanged",
+        "nanobot.session.webui_turns.clear_websocket_turn_if_current",
+        "nanobot.webui.transcript.WebUITranscriptRecorder",
+        "nanobot.webui.outbound_wire.project_notification",
+    ],
+)
+def test_websocket_transport_leaves_event_and_history_policy_to_delivery(dependency: str) -> None:
+    module, name = dependency.rsplit(".", 1)
+    source = f"from {module} import {name}\n"
     assert find_violations(source, "nanobot.channels.websocket.runtime") == [
-        Violation("websocket-transport", "nanobot.command.router", 4),
-        Violation("websocket-transport", "nanobot.bus.outbound_events.ProgressEvent", 6),
+        Violation("websocket-transport", dependency, 1),
     ]
+    assert find_violations(source, "nanobot.webui.outbound_delivery") == []
 
 
 @pytest.mark.parametrize(

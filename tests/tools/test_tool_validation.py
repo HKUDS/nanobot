@@ -158,6 +158,20 @@ async def test_registry_executes_decorated_tool_end_to_end() -> None:
     assert "Invalid parameters" in err
 
 
+@pytest.mark.parametrize("schema_type", ["integer", ["integer", "null"], ["integer", "string"]])
+def test_integer_schema_accepts_integral_json_numbers(schema_type) -> None:
+    assert Schema.validate_json_schema_value(3.0, {"type": schema_type}) == []
+
+
+async def test_registry_casts_integral_json_number_to_integer() -> None:
+    reg = ToolRegistry()
+    reg.register(DecoratedSampleTool())
+
+    result = await reg.execute("decorated_sample", {"query": "hello", "count": 3.0})
+
+    assert result == "ok:3"
+
+
 def test_validate_params_missing_required() -> None:
     tool = SampleTool()
     errors = tool.validate_params({"query": "hi"})
@@ -178,6 +192,51 @@ def test_validate_params_enum_and_min_length() -> None:
     errors = tool.validate_params({"query": "h", "count": 2, "mode": "slow"})
     assert any("query must be at least 2 chars" in e for e in errors)
     assert any("mode must be one of" in e for e in errors)
+
+
+@pytest.mark.parametrize(
+    "value, allowed, valid",
+    [
+        (True, 1, False),
+        (False, 0, False),
+        (1, True, False),
+        (0, False, False),
+        ([True], [1], False),
+        ({"enabled": True}, {"enabled": 1}, False),
+        (1.0, 1, True),
+        (True, True, True),
+        ("x", "x", True),
+        ({"a": 1, "b": 2}, {"b": 2.0, "a": 1.0}, True),
+    ],
+)
+@pytest.mark.asyncio
+async def test_registry_enforces_json_enum_equality(value, allowed, valid) -> None:
+    calls = []
+
+    class EnumTool(SampleTool):
+        @property
+        def parameters(self) -> dict[str, Any]:
+            return {
+                "type": "object",
+                "properties": {"value": {"enum": [allowed]}},
+                "required": ["value"],
+            }
+
+        async def execute(self, **kwargs: Any) -> str:
+            calls.append(kwargs["value"])
+            return "ok"
+
+    registry = ToolRegistry()
+    registry.register(EnumTool())
+
+    result = await registry.execute("sample", {"value": value})
+
+    if valid:
+        assert result == "ok"
+        assert calls == [value]
+    else:
+        assert "value must be one of" in result
+        assert calls == []
 
 
 def test_validate_params_nested_object_and_array() -> None:
@@ -398,7 +457,7 @@ async def test_exec_allows_resolved_home_inside_workspace(tmp_path, monkeypatch)
     (tmp_path / "file.txt").write_text("allowed home content", encoding="utf-8")
     result = await ExecTool(
         working_dir=str(tmp_path), restrict_to_workspace=True,
-    ).execute(command="cat ~/file.txt", login=False)
+    ).execute(command="cat ~/file.txt", login=False, yield_time_ms=10000)
 
     assert "allowed home content" in result
     assert "Exit code: 0" in result
@@ -880,10 +939,10 @@ def test_cast_params_single_value_not_auto_wrapped_to_array() -> None:
 # --- ExecTool enhancement tests ---
 
 
-async def test_exec_always_returns_exit_code() -> None:
-    """Exit code should appear in output even on success (exit 0)."""
+async def test_completed_exec_returns_exit_code() -> None:
+    """Completed output includes the exit code even on success (exit 0)."""
     tool = ExecTool()
-    result = await tool.execute(command="echo hello")
+    result = await tool.execute(command="echo hello", yield_time_ms=10000)
     assert "Exit code: 0" in result
     assert "hello" in result
 
@@ -905,7 +964,7 @@ async def test_exec_head_tail_truncation(tmp_path) -> None:
         command = subprocess.list2cmdline([sys.executable, str(script_file)])
     else:
         command = f"{shlex.quote(sys.executable)} {shlex.quote(str(script_file))}"
-    result = await tool.execute(command=command)
+    result = await tool.execute(command=command, yield_time_ms=10000)
     assert "chars truncated" in result
     # Head portion should start with As
     assert result.startswith("A")
@@ -920,6 +979,7 @@ async def test_exec_timeout_parameter(runtime_parameter) -> None:
     started_at = time.monotonic()
     result = await tool.execute(
         command=[sys.executable, "-c", "import time; time.sleep(10)"],
+        yield_time_ms=5000,
         **{runtime_parameter: 1},
     )
 

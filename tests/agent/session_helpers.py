@@ -1,6 +1,7 @@
 """Session-worker completion helpers for integration tests."""
 
 import asyncio
+import faulthandler
 import time
 
 from nanobot.agent.loop import AgentLoop
@@ -36,6 +37,19 @@ async def run_session(loop: AgentLoop, msg: InboundMessage) -> None:
     """Submit input and wait for its session worker to finish."""
     (await loop._enqueue_session_message(msg))
     await asyncio.gather(*loop._active_tasks[loop._effective_session_key(msg)])
+
+
+async def stop_loop(loop: AgentLoop, worker: asyncio.Task[None], *, timeout: float) -> None:
+    """Stop an integration loop, retaining native shutdown stacks on timeout."""
+    loop.stop()
+    try:
+        await asyncio.wait_for(worker, timeout=timeout)
+    except TimeoutError:
+        close_task = loop.sessions.state._close_task
+        if close_task is not None:
+            close_task.print_stack()
+        faulthandler.dump_traceback()
+        raise
 
 
 def mock_session_manager(*_args, **_kwargs):

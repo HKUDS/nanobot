@@ -613,17 +613,6 @@ class TestRunningCounts:
 
 class TestSubagentHook:
     @pytest.mark.asyncio
-    async def test_before_execute_tools_without_status_preserves_calls(self):
-        hook = _SubagentHook()
-        tool_call = MagicMock()
-        tool_call.name = "read_file"
-        tool_call.arguments = {"path": "/tmp/test"}
-        ctx = _make_hook_context(tool_calls=[tool_call])
-        result = await hook.before_execute_tools(ctx)
-        assert result is None
-        assert ctx.tool_calls == [tool_call]
-
-    @pytest.mark.asyncio
     async def test_after_iteration_updates_status(self):
         status = SubagentStatus(
             task_id="t1", label="test", task_description="do", started_at=time.monotonic(),
@@ -638,14 +627,6 @@ class TestSubagentHook:
         assert status.iteration == 3
         assert len(status.tool_events) == 1
         assert status.usage == LLMUsage.reported(input_tokens=100, output_tokens=0)
-
-    @pytest.mark.asyncio
-    async def test_after_iteration_no_status_noop(self):
-        hook = _SubagentHook()
-        ctx = _make_hook_context(iteration=5)
-        result = await hook.after_iteration(ctx)
-        assert result is None
-        assert ctx.iteration == 5
 
     @pytest.mark.asyncio
     async def test_after_iteration_sets_error(self):

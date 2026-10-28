@@ -1,4 +1,106 @@
 {
+  "updates": {
+    "guide": {
+      "entry": "Update via {{method}}",
+      "methods": {
+        "managed": "nanobot installer",
+        "uv": "uv",
+        "pipx": "pipx",
+        "pip": "pip",
+        "source": "source checkout",
+        "container": "container deployment",
+        "system": "system package manager"
+      },
+      "host": "Gateway: {{host}}",
+      "where": "Use a terminal on this computer, signed in as the original installation user. For a remote gateway, connect by SSH or its server console—not your browser’s computer. Commands only copy; this page does not run them.",
+      "containerHost": "This is the container’s name and internal path, not the deployment host. Use the server or hosting dashboard that manages this container; do not update inside the running container.",
+      "beforeTitle": "Prepare and stop",
+      "before": "Finish tasks and back up configuration, chats and workspace data. Stop all gateways using this installation through their original launcher or service manager. Keep their profile paths and launch settings.",
+      "installTitle": "Update in {{shell}}",
+      "inspectCommand": "Inspect this installation",
+      "updateCommand": "Update command",
+      "versionCommand": "Installed version",
+      "reasons": {
+        "restart": "The target package is already installed. Do not install it again. Stop the old gateway and restart with the original launcher and profile, then check its running version.",
+        "registry": "Use the original registry and credentials. Manager upgrades keep recorded extras and constraints and may select a different allowed stable version than the notice. Check the command output; do not force a failed update.",
+        "preview": "Preview packages are distributed on GitHub, not necessarily your package index. Select this release’s wheel for the gateway’s Python/platform, verify its checksum, then install it through the original owner with the same extras. A generic upgrade command cannot guarantee this Preview.",
+        "policy": "The receipt has a pin, lock, fixed source, version constraint or unrecognized options. Inspect it below and update through that original workflow, preserving extras and injected packages. Do not remove restrictions just to update.",
+        "extras": "This pip environment does not record the extras originally requested. Inspect the package below, then reuse the original pip requirement with --upgrade and the intended version, keeping its extras and index options. No guessed install command is provided.",
+        "manager": "The package-manager executable or its environment layout could not be confirmed. Use the original installation account and manager settings to target the path above; do not use another pip or nanobot from PATH.",
+        "source": "Inspect this checkout first. Preserve local changes and confirm the intended branch/ref, then update it and rebuild dependencies, WebUI and TUI using the repository workflow. Do not replace an editable checkout with a PyPI package.",
+        "container": "Choose the intended image tag/digest in the existing Compose project or hosting dashboard, pull/build it and recreate only the nanobot service with its existing mounts, secrets and ports. Back up data volumes; never remove them to update.",
+        "system": "Use the operating system’s package manager or ask this server’s administrator. Do not use sudo pip or override an externally managed Python environment.",
+        "review": "The installation or update review is no longer current. Close this dialog and check again before copying an update command."
+      },
+      "verifyTitle": "Restart and verify",
+      "verify": "Start using the same launcher and profile. The terminal command checks installed files only. Reconnect to this same gateway, check its running version against v{{version}}, and confirm your chats and settings are still present.",
+      "check": "Check running gateway",
+      "verified": "Confirmed: this gateway is running v{{version}}.",
+      "observed": "This gateway reports v{{version}}, not the notice’s v{{target}}. Check the installer output and restart the same installation; an installed package alone does not update a running process.",
+      "checkFailed": "Could not read the running version. Reconnect to this same gateway and try again; no update success has been confirmed."
+    },
+    "automaticRecovery": "If the update fails, nanobot will try to restore service, using the previous program when safe. Your chat data will not be rolled back.",
+    "restored": "Previous version restored",
+    "restoredDescription": "The update did not finish. v{{version}} is running again. Your configuration and chats were not rolled back.",
+    "recoveryBeforeInstall": "The update stopped before installation. No package files were changed. Recover the saved update to continue.",
+    "channel": {
+      "settings": "Update settings",
+      "receivePreview": "Receive preview updates",
+      "previewWarning": "This is a preview release and may have bugs.",
+      "preview": "Preview",
+      "hint": "Try new features early.",
+      "saving": "Saving…",
+      "saved": "Update preference saved",
+      "ahead": "This version is ahead of the selected channel. No downgrade will be installed.",
+      "waiting_stable": "Preview updates are off. Keep using this version until a newer stable release is available.",
+      "withdrawn": "This preview was withdrawn. Update to a newer release when available; do not downgrade over your current data.",
+      "unavailable": "Could not check this update channel.",
+      "publishing": "The release is still being published. Check again later.",
+      "unsupported": "No compatible update is available for this Python version and platform.",
+      "releaseNotes": "Release notes"
+    },
+    "reviewAgain": "Review update",
+    "reviewAgainDescription": "No package files were changed. Review the update again before confirming installation and restart.",
+    "settleFailed": "The previous update could not be cleared safely. Check its status again or follow the recovery instructions.",
+    "ownerGuide": "Update instructions for your installation",
+    "recoveryTitle": "Recover on the gateway computer",
+    "recoveryDescription": "Run this command in a terminal on the computer running nanobot. It reviews the saved job before asking to repair. Keep the original backup.",
+    "confirm": "Update nanobot now?",
+    "reviewingTitle": "Checking the update…",
+    "preparing": "Downloading the update…",
+    "installing": "Installing the update…",
+    "working": "Updating nanobot…",
+    "reconnecting": "Reconnecting…",
+    "done": "Update complete",
+    "failed": "Update did not finish",
+    "confirmDescription": "Updating to v{{version}} will restart nanobot on {{host}}. Finish running tasks before continuing.",
+    "reviewing": "Checking the installation and exact target. No files are being changed.",
+    "workingDescription": "Preparing verified files, then backing up and restarting the selected gateway.",
+    "reconnectingDescription": "Waiting for the updated gateway to reconnect. Do not start another update.",
+    "delayed": "Reconnection is taking longer than expected. Progress is saved; you can close this window and check again.",
+    "doneDescription": "Now running v{{version}}.",
+    "preparationFailed": "Preparation or shutdown failed. No package files were changed. Finish any active tasks and check again.",
+    "repairRequired": "Installation or restart failed. The saved backup and update record are retained. Use the update recovery workflow; do not start a different installation.",
+    "reviewFailed": "Could not verify this update. Check the connection and ensure the gateway runs with its installation owner’s supported background launcher.",
+    "confirmationUnknown": "The request may have been accepted. Checking saved progress before another action.",
+    "statusFailed": "Could not read the saved update. Reconnect to the same gateway and check again.",
+    "sharedInstallation": "This shared installation will restart {{count}} running gateways.",
+    "cancel": "Cancel",
+    "close": "Close",
+    "hide": "Hide",
+    "return": "Done",
+    "wait": "Please wait",
+    "checkAgain": "Check again",
+    "apply": "Update & restart",
+    "blocked": {
+      "review_changed": "This review changed or expired. Close it and check again.",
+      "not_upgrade": "This target is not an upgrade. No files will be changed.",
+      "installation_owner": "Update this installation with its original package manager or deployment tool.",
+      "installation_policy": "This installation’s source, extras or version constraints require its original installation workflow.",
+      "external_restart": "This gateway cannot be restarted here. Use its original launch or deployment tool to stop, update and restart it.",
+      "permission": "Open this gateway on localhost or allow remote package installation before updating."
+    }
+  },
   "remote": {
     "compatibility": {
       "title": "Version check",
@@ -253,32 +355,7 @@
   "previewTabs": {
     "title": "Preview",
     "closeTab": "Close {{name}}",
-    "closeAll": "Close preview pane",
-    "websiteInfo": "About website previews"
-  },
-  "webPreview": {
-    "viewLinks": "View links",
-    "back": "Back",
-    "original": "Original link",
-    "actions": "Link actions",
-    "open": "Preview website",
-    "external": "Open in browser",
-    "copy": "Copy link",
-    "copied": "Link copied",
-    "copyFailed": "Could not copy link",
-    "title": "Website preview",
-    "resize": "Resize website preview",
-    "refresh": "Refresh website",
-    "close": "Close preview",
-    "isolated": "Restricted, isolated preview. Sign-in and interactive features may not work.",
-    "blockedHint": "Some sites block embedding. If this view stays blank or fails, open it in your browser.",
-    "loopback": "Localhost points to this browser’s device, not a remote gateway. No ports are forwarded.",
-    "native": "Embedded previews are unavailable in the native host. Open this link in your browser.",
-    "unsupported": "This browser does not support credential-isolated previews. Open this link in a new tab.",
-    "sameOrigin": "The nanobot application itself cannot be embedded here. Open it in a new tab.",
-    "mixedContent": "An HTTPS page cannot preview an HTTP website here. Open it in a new tab.",
-    "invalid": "This address cannot be previewed.",
-    "frame": "Website preview: {{host}}"
+    "closeAll": "Close preview pane"
   },
   "starPrompt": {
     "footerAction": "Star nanobot on GitHub",
@@ -295,7 +372,8 @@
     "brand": "nanobot",
     "loading": {
       "connecting": "Connecting to nanobot…",
-      "boot": "Loading nanobot…"
+      "boot": "Loading nanobot…",
+      "failed": "Couldn't load this view. Go back, or reload the page to try again."
     },
     "error": {
       "title": "Couldn't reach nanobot",
@@ -366,7 +444,7 @@
     "collapse": "Collapse sidebar",
     "newChat": "New topic",
     "searchAria": "Search",
-    "searchPlaceholder": "Search",
+    "searchPlaceholder": "Search loaded content",
     "searchResults": "Results",
     "noSearchResults": "No matching topics.",
     "recent": "Recent topics",
@@ -388,6 +466,16 @@
       "title": "Restart before leaving?",
       "description": "Your changes are saved. Restart to apply them.",
       "later": "Restart later"
+    },
+    "network": {
+      "useProxy": "Use proxy",
+      "useProxyHelp": "Uses the shared proxy in Advanced.",
+      "configureProxy": "Configure proxy",
+      "sharedProxyScope": "Shared by all features with proxy enabled.",
+      "authentication": "Authentication (optional)",
+      "username": "Username",
+      "password": "Password",
+      "proxyReferenceAuth": "Set authentication in the referenced proxy URL."
     },
     "runtimeConfig": {
       "apiSaved": "Saved. Restart the API service to apply changes.",
@@ -507,9 +595,13 @@
           "label": "Blocked commands",
           "help": "Block commands that match these rules.\n\nOne regular expression per line, checked alongside built-in deny rules. Commands that fully match allow rules skip these checks."
         },
-        "tools_web_proxy": {
-          "label": "Web proxy",
-          "help": "Used for the agent's web search and page reading. Leave blank to use the default network settings, including proxy environment variables.\n\n127.0.0.1 refers to the machine that runs nanobot. This setting does not change model, MCP, or browser connections."
+        "network_proxy": {
+          "label": "Shared proxy",
+          "help": "Address used by features with Use proxy enabled. 127.0.0.1 is the machine running nanobot."
+        },
+        "tools_web_use_proxy": {
+          "label": "Use proxy",
+          "help": "Use the shared proxy for web search and page reading."
         },
         "tools_web_user_agent": {
           "label": "User agent",
@@ -597,9 +689,13 @@
           "title": "Shell and sandbox",
           "help": "Set command timeouts, environment, and access rules."
         },
+        "proxy": {
+          "title": "Shared proxy",
+          "help": "Set one address for features that use a proxy."
+        },
         "network": {
           "title": "Web connections",
-          "help": "Set the proxy and User-Agent.\n\nSet the proxy and User-Agent header for web requests."
+          "help": "Set the proxy preference and User-Agent for web requests."
         },
         "safety": {
           "title": "Global permissions",
@@ -643,6 +739,13 @@
       "search": "Find an advanced setting",
       "noResults": "No matching settings.",
       "pending": "Unsaved changes",
+      "idleCompaction": {
+        "label": "Auto-compact idle sessions",
+        "help": "Automatically compact context after the idle timeout to reduce token usage on subsequent requests.",
+        "wait": "Idle timeout",
+        "minutes": "minutes",
+        "numberError": "Enter a non-negative whole number of minutes."
+      },
       "numberError": "Enter a valid number within the allowed range.",
       "activeModel": "Use active model",
       "none": "None",
@@ -665,6 +768,7 @@
       "byok": "BYOK",
       "overview": "Overview",
       "appearance": "Appearance",
+      "notifications": "Notifications",
       "models": "Models",
       "providers": "Providers",
       "image": "Image",
@@ -710,19 +814,12 @@
       "catalogStale": "Cached list may be out of date.",
       "catalogFallback": "Built-in list may be out of date.",
       "selectModel": "Select model",
-      "addConfiguration": "Add configuration",
-      "newConfiguration": "New model configuration",
-      "newConfigurationHelp": "Save a provider, model, and generation settings as a reusable preset.",
-      "configurationName": "Configuration name",
-      "configurationNameHelp": "Rename this saved model configuration.",
-      "configurationNamePlaceholder": "Fast writing",
       "callOrder": "Model order",
       "primary": "Primary",
       "addToOrder": "Enable preset",
       "newPreset": "New preset",
       "newPresetHelp": "Save a model and settings for reuse.",
       "presets": "Model presets",
-      "editPreset": "Edit preset",
       "presetName": "Preset name",
       "presetNameHelp": "Names must be unique; also used by /model.",
       "presetNameDuplicate": "A preset with this name already exists.",
@@ -747,29 +844,78 @@
       "converting": "Converting...",
       "convertAction": "Convert to presets",
       "dragToReorder": "Drag to reorder",
-      "moveUp": "Move up",
-      "moveDown": "Move down",
       "removeFromOrder": "Disable preset",
-      "inCallOrder": "In call order",
       "disabled": "Disabled",
       "noPresets": "No model presets yet",
-      "noPresetsHelp": "Create a preset, then add it to the call order.",
       "removeBeforeDelete": "Cannot delete the primary model",
       "providerSetupRequired": "Provider setup required",
-      "configureProviderBeforeSaving": "Configure this provider before saving the preset.",
       "deletePresetTitle": "Delete model preset?",
       "deletePresetHelp": "Delete “{{name}}” and remove it from the fallback list. Provider credentials will be kept.",
       "searchModels": "Choose model",
       "useCustomModel": "Use",
       "loadingModels": "Loading models...",
       "searchCatalog": "Search this provider’s model catalog.",
-      "modelsAvailable": "available",
       "noModelResults": "No matching models.",
-      "loadFailed": "Model list unavailable.",
       "unsupportedModelList": "Type a model ID manually.",
       "providerNotConfigured": "Configure this provider before loading models.",
       "autoProviderCustomOnly": "Enter a model ID manually when using automatic provider selection.",
       "availableCount": "Models available: {{count}}"
+    },
+    "notifications": {
+      "scope": "This browser",
+      "intro": "Choose how to be notified when a task finishes.",
+      "pageRequired": "No new alerts when this page is closed, suspended, or disconnected.",
+      "revoked": "Notification permission was revoked. Notifications are now off. Allow notifications in this browser’s site settings, then turn them on here.",
+      "retry": "Check again",
+      "statusOff": "Off",
+      "statusPermission": "Permission needed",
+      "statusOn": "On",
+      "statusBlocked": "Blocked",
+      "statusRevoked": "Permission revoked",
+      "statusUnavailable": "Unavailable",
+      "statusWorker": "Not ready",
+      "statusBusy": "Checking…",
+      "statusError": "Could not send",
+      "test": "Test notification",
+      "testBody": "This is a test notification.",
+      "waiting": "Waiting for the browser…",
+      "insecure": "Open nanobot over HTTPS or on localhost to use notifications.",
+      "unsupported": "This browser doesn’t support notifications. Try another browser; on iPhone or iPad, open nanobot from the Home Screen.",
+      "denied": "Notifications are blocked. Allow notifications in this browser’s site settings, then turn them on here.",
+      "dismissed": "Permission was not granted. Turn on notifications and choose Allow.",
+      "permissionFailed": "Could not request permission. Try again in a supported browser.",
+      "workerUnavailable": "The notification service is not ready. Check again or reload this page.",
+      "displayFailed": "The browser could not send the notification. Check site permissions, then try again.",
+      "submitted": "Sent to the browser. If nothing appears, check system notifications and Do Not Disturb.",
+      "completed": "Task completed. Click to view the result.",
+      "failed": "Task failed. Click for details.",
+      "interrupted": "Task needs attention. Click to continue."
+    },
+    "appearance": {
+      "system": "System",
+      "reading": "Reading",
+      "readingHelp": "Adjust messages, code and the composer—not navigation.",
+      "custom": "Custom",
+      "customSize": "Custom text size",
+      "customRange": "Enter a whole number from {{min}} to {{max}} px.\nCode scales with the text; the composer stays at least 16px.",
+      "customInvalid": "Use a whole number from {{min}} to {{max}} px.\nYour text remains at {{size}} px.",
+      "small": "Small",
+      "standard": "Standard",
+      "large": "Large",
+      "previewText": "**A little room to think.**\n\nClear words, comfortable reading. Make this space your own.",
+      "previewPlaceholder": "Where should we begin?",
+      "process": "Activity display",
+      "processHelp": "Choose how much detail appears as nanobot works.",
+      "autoHelp": "Show progress while working; keep finished work compact.",
+      "expandedHelp": "Keep activity details expanded by default.",
+      "summaryHelp": "Show changed files and line counts.",
+      "diffHelp": "Show code changes directly in the conversation.",
+      "collapsedHelp": "Keep code changes folded until you open them."
+    },
+    "readingTextSize": {
+      "small": "Small reading text",
+      "standard": "Standard reading text",
+      "large": "Large reading text"
     },
     "rows": {
       "theme": "Theme",
@@ -785,11 +931,12 @@
       "currentModel": "Current configuration",
       "selectedPreset": "Selected preset",
       "presetModel": "Preset model",
+      "readingTextSize": "Reading text size",
       "activityMode": "Activity details",
       "fileEditDisplay": "Edit preview",
       "codeWrap": "Code wrapping",
       "brandLogos": "Brand logos",
-      "browserNotifications": "Task notifications",
+      "browserNotifications": "Browser notifications",
       "notificationSound": "Completion sound",
       "maxResults": "Result limit",
       "timeout": "Search timeout",
@@ -835,8 +982,8 @@
       "fileEditDisplay": "Show edit line counts or expanded changes by default.",
       "codeWrap": "Wrap long code lines for easier reading.",
       "brandLogos": "Show provider and app logos in Settings.\n\nShow third-party provider and CLI logos in Settings.",
-      "browserNotifications": "Notify when this page is in the background. Off by default.",
-      "notificationSound": "Play a sound when replies finish. Off by default.\n\nPlay a short chime when a turn finishes, even when this page is in the background. Off by default.",
+      "browserNotifications": "Get task status notifications while this page is in the background.",
+      "notificationSound": "Play a chime when a reply ends, even in the background.",
       "maxResults": "Maximum results per search.",
       "timeout": "Maximum wait per search, in seconds.",
       "jinaReader": "Prefer Jina Reader for reading pages.\n\nUse Jina Reader to read web pages when available.",
@@ -870,45 +1017,29 @@
       "empty": "No matching timezones."
     },
     "cliApps": {
-      "allCategories": "All categories",
-      "availableCount": "{{count}} apps",
-      "installedCount": "{{count}} CLIs installed",
-      "summary": "{{installed}} of {{total}} CLIs installed",
-      "filterAll": "All",
-      "filterInstalled": "Installed CLIs",
-      "filterNotInstalled": "Not installed",
-      "searchPlaceholder": "Search CLIs",
-      "loading": "Loading CLI apps…",
-      "empty": "No CLI apps match this filter.",
       "statusInstalled": "App ready",
-      "statusMissing": "Missing",
-      "statusAvailable": "Available",
-      "statusUnsupported": "Unsupported",
-      "statusNotInstalled": "App not installed",
-      "requires": "Requires",
       "test": "Test app",
       "update": "Update app",
       "uninstall": "Uninstall app",
       "install": "Install app",
-      "readyTitle": "@{{name}} is ready",
       "readyStatus": "Ready",
       "readyTry": "Try @{{name}}",
       "readyCopied": "Copied",
       "readyPrompt": "Ask nanobot to use @{{name}} for this task.",
       "openChat": "Open chat",
-      "unsupported": "Unsupported",
-      "unavailable": "Unavailable",
-      "noDescription": "No description available.",
-      "availableCount_one": "{{count}} app",
-      "availableCount_other": "{{count}} apps",
-      "installedCount_one": "{{count}} CLI installed",
-      "installedCount_other": "{{count}} CLIs installed"
+      "unavailable": "Unavailable"
     },
     "about": {
+      "updateNotice": "Update available",
+      "viewUpdateDetails": "View details",
+      "updateNow": "Update",
+      "dismissUpdate": "Dismiss update notice",
+      "updateInstructions": "Update on the computer running nanobot, using your original installation method. This page won’t install or restart anything.",
+      "installationGuide": "Installation guide",
       "documentation": "Documentation",
       "sourceCode": "Source code",
       "reportIssue": "Report an issue",
-      "version": "Version",
+      "version": "Version & updates",
       "checking": "Checking...",
       "checkForUpdates": "Check for updates",
       "upToDate": "You're up to date",
@@ -1147,20 +1278,12 @@
       "workspace": "Working directory"
     },
     "usage": {
-      "title": "Token usage",
       "shortTitle": "Token usage",
-      "last30Days": "Last 30 days",
       "viewDetails": "View details",
-      "previousPage": "Previous page",
-      "nextPage": "Next page",
-      "dailyAverage": "Daily average",
-      "inputTokens": "Input tokens",
       "cacheHitRate": "Cache hit rate",
-      "requestTrend": "Daily requests",
       "cacheRateHelp": "Cache hit rate excludes input with unknown cache status.",
       "dailyTrend": "Daily tokens",
       "bySource": "Usage by source",
-      "byModel": "Usage by model",
       "modelTrend": "Model trends",
       "modelsUnavailable": "No model breakdown available.",
       "otherModels": "Other / unattributed",
@@ -1172,19 +1295,8 @@
       "cacheUnknown": "Unknown status",
       "outputTokens": "Output",
       "otherTokens": "Other tokens",
-      "subtitle": "Provider-reported usage over the last 12 months.",
-      "empty": "Token activity will appear after new model replies.",
       "totalTokens": "Total tokens",
-      "peakTokens": "Peak tokens",
-      "thirtyDayTokens": "30-day tokens",
-      "currentStreak": "Current streak",
-      "longestStreak": "Longest streak",
-      "daysValue": "{{count}}d",
-      "last30": "30 days",
-      "activeDays": "Active days",
       "requests": "Requests",
-      "estimated": "estimated",
-      "includesEstimates": "includes estimates",
       "cellTitle": "{{date}}: {{tokens}} tokens, {{requests}} requests",
       "sources": {
         "user": "Chat",
@@ -1227,7 +1339,6 @@
       "defaultAPIDescription": "Presets set to Auto use this API. A preset can choose another API from the supported list.",
       "declareAPIs": "Set supported APIs",
       "openaiDefaultAPIDescription": "Sets the default API for presets using Auto. Auto here follows known model rules. Individual presets can override this choice.",
-      "proxy": "Network proxy",
       "thinkingStyle": "Reasoning format",
       "region": "Region",
       "profile": "AWS profile",
@@ -1323,6 +1434,7 @@
       "loading": "Loading channels…",
       "empty": "No channels match this filter.",
       "restartRequired": "Restart nanobot to apply updated channel support.",
+      "restartBeforeInstall": "Restart nanobot before installing another channel.",
       "requires": "Requires: {{requirements}}",
       "setUp": "Set up",
       "setupGuide": "Setup guide",
@@ -1636,19 +1748,16 @@
       "signInBeforeSaving": "Sign in before saving this provider in the preset.",
       "signedIn": "Signed in",
       "notSignedIn": "Not signed in",
-      "proxyLabel": "Network proxy",
-      "proxySaveBeforeSignIn": "Save proxy changes before signing in.",
-      "saveProxy": "Save proxy",
       "localCodeHelp": "Complete sign-in in your browser. If nanobot does not connect automatically, paste the authorization code below.",
       "remoteCodeHelp": "Select Sign in to open xAI on your computer. After signing in, paste the authorization code shown by xAI below.",
-      "localCallbackHelp": "Complete sign-in in your browser. If nanobot does not connect automatically, copy the full localhost callback URL from the address bar and paste it below.",
-      "remoteCallbackHelp": "Open ChatGPT in this browser and finish signing in. When the localhost page fails to load, copy the full URL from the address bar and paste it below.",
+      "localCallbackHelp": "Finish signing in using your browser. If nanobot does not connect automatically, copy the full URL from the localhost page’s address bar—even if the page cannot load—paste it below, then select “Finish sign-in”.",
+      "remoteCallbackHelp": "Open ChatGPT in this browser and finish signing in. On the localhost page, copy the full URL from the address bar—even if the page cannot load—paste it below, then select “Finish sign-in”.",
       "authorizationCode": "Authorization code",
       "callbackUrl": "Callback URL",
-      "callbackUrlPlaceholder": "http://localhost:1455/auth/callback?code=…&state=…",
+      "callbackUrlPlaceholder": "Paste the full callback URL here",
       "openChatGPT": "Open ChatGPT",
       "pasteCallbackToContinue": "Paste the callback URL to continue.",
-      "waitingForCallback": "Waiting for the browser callback…",
+      "waitingForCallback": "Waiting for sign-in to finish…",
       "finishSignIn": "Finish sign-in"
     },
     "skills": {
@@ -1774,9 +1883,7 @@
     "showArchived": "Show archived",
     "hideArchived": "Hide archived",
     "select": "Select",
-    "cancelSelection": "Cancel selection",
     "selectedCount": "{{count}} selected",
-    "deleteSelected": "Delete",
     "delete": "Delete",
     "newChat": "New topic",
     "groups": {
@@ -1788,6 +1895,14 @@
       "earlier": "Earlier",
       "archived": "Archived"
     }
+  },
+  "archiveConfirm": {
+    "title": "Archive this topic?",
+    "titleMany": "Archive {{count}} topics?",
+    "unarchiveTitle": "Unarchive this topic?",
+    "unarchiveTitleMany": "Unarchive {{count}} topics?",
+    "description": "Conversations are kept. You can unarchive them at any time.",
+    "unarchiveDescription": "These topics will return to the sidebar."
   },
   "deleteConfirm": {
     "title": "Delete this topic?",
@@ -1827,7 +1942,6 @@
     "subagents": {
       "stopFailed": "Could not stop this task.",
       "stopTask": "Stop {{label}}",
-      "receiptHelp": "Delivered means the message was included in the subtask’s next model request. It does not mean the instructions have been carried out.",
       "states": {
         "queued": "Queued",
         "running": "Running",
@@ -1838,11 +1952,6 @@
         "cancelled": "Cancelled",
         "interrupted": "Interrupted"
       },
-      "receipts": {
-        "accepted": "Queued: {{count}}",
-        "delivered": "Delivered: {{count}}",
-        "undelivered": "Undelivered: {{count}}"
-      },
       "interruptedHelp": "The host restarted before this task finished. It has not been restarted automatically.",
       "workTitle": "Subtasks",
       "otherWorkTitle": "Other tasks",
@@ -1850,10 +1959,36 @@
       "progress": "{{completed}} of {{total}} completed",
       "running": "Running: {{count}}",
       "finished": "Finished: {{count}}",
-      "needsReview": "Review needed: {{count}}",
-      "messages": "Message status"
+      "completed": "Completed: {{count}}",
+      "needsReview": "Review needed: {{count}}"
     },
     "compaction": {
+      "reasons": {
+        "idle": {
+          "started": "Automatically compacting context after inactivity",
+          "succeeded": "Context automatically compacted after inactivity",
+          "failed": "Automatic context compaction failed after inactivity",
+          "cancelled": "Automatic compaction after inactivity did not finish"
+        },
+        "context_pressure": {
+          "started": "Compacting a long context",
+          "succeeded": "Long context compacted",
+          "failed": "Failed to compact a long context",
+          "cancelled": "Compaction of a long context cancelled"
+        },
+        "manual": {
+          "started": "Manual compaction in progress",
+          "succeeded": "Manual compaction complete",
+          "failed": "Manual compaction failed",
+          "cancelled": "Manual compaction cancelled"
+        },
+        "provider_native": {
+          "started": "Compacting context on the provider's server",
+          "succeeded": "Context compacted on the provider's server",
+          "failed": "Failed to compact context on the provider's server",
+          "cancelled": "Context compaction cancelled on the provider's server"
+        }
+      },
       "cancelled": "Context compaction cancelled",
       "empty": "Nothing to compact.",
       "started": "Compressing context",
@@ -1958,7 +2093,6 @@
       "placeholderThread": "Type your message…",
       "placeholderHero": "Describe what you’d like to do",
       "placeholderOpening": "Opening a new topic…",
-      "placeholderStreaming": "Model is responding…",
       "inputAria": "Message input",
       "goalStateStrip": "Goal: {{label}}",
       "goalStateFallback": "Goal",
@@ -1971,6 +2105,10 @@
       "removeQuotedContext": "Remove quote",
       "modelNotConfigured": "Model not configured",
       "configureModel": "Configure model",
+      "shell": {
+        "run": "Run Shell command",
+        "removeContext": "Remove attachments and quoted text before running a command."
+      },
       "chooseAI": "Choose model",
       "switchModel": "Switch model",
       "manageModels": "Manage presets",
@@ -1996,7 +2134,7 @@
         "guide": "Send now",
         "delete": "Delete message",
         "edit": "Edit message",
-        "drag": "Drag to reorder"
+        "tooManyMentions": "A message can mention up to {{max}} chats"
       },
       "attachImage": "Attach files",
       "imageMode": {
@@ -2139,10 +2277,11 @@
         "unsupported_type": "Unsupported file type",
         "empty_file": "Empty files cannot be attached",
         "too_many_attachments": "Max {{max}} attachments per message",
+        "too_many_videos": "Max 1 video per message",
         "too_many_images": "Max {{max}} images per message",
         "magic_mismatch": "File doesn't look like a real image",
         "decode_failed": "Couldn't decode this image",
-        "too_large": "File is too large — try a smaller one",
+        "too_large": "File is too large to upload ({{size}}; maximum {{max}})",
         "total_too_large": "Attachments are too large together — remove some or use smaller files",
         "io": "Couldn't read this file"
       },
@@ -2161,8 +2300,8 @@
     "loadEarlier": "Load earlier messages",
     "history": {
       "loading": "Loading earlier messages…",
-      "error": "Loading failed.",
-      "retry": "Retry"
+      "exhausted": "No earlier messages",
+      "retryLabel": "Loading failed. Retry"
     },
     "forkedFromHistory": "Forked from history",
     "promptNavigator": {
@@ -2178,7 +2317,7 @@
     "actions": "Message actions",
     "streaming": "streaming",
     "delivery": {
-      "sending": "Sending…",
+      "sending": "Sending",
       "failed": "Not sent"
     },
     "assistantTyping": "Assistant is typing",
@@ -2356,8 +2495,9 @@
     "retryRateLimit": "Rate limited",
     "retryServer": "Model unavailable",
     "retryUnknown": "Model request failed",
-    "retryWaiting": "{{error}}. Retrying in {{seconds}}s (attempt {{attempt}}).",
-    "retryExhausted": "{{error}}. Ending turn.",
+    "retryWaiting": "{{error}} Retrying in {{seconds}}s",
+    "retrying": "{{error}} Retrying",
+    "retryExhausted": "{{error}} Ending turn",
     "cliActivityRunningOne": "Using {{name}}",
     "cliActivityRanOne": "Used {{name}}",
     "cliActivityFailedOne": "Could not use {{name}}",
@@ -2370,6 +2510,7 @@
     "imageAttachment": "Image attachment",
     "videoAttachment": "Video attachment",
     "fileAttachment": "File attachment",
+    "downloadAttachment": "Download {{name}}",
     "attachmentUnavailable": "Attachment unavailable",
     "dataTable": "Data table",
     "fileEditPreparing": "Preparing file edit…",
@@ -2386,7 +2527,6 @@
     "turnLatencyTitle": "Response time (end-to-end)",
     "fileEditViewDiff": "View changes",
     "fileEditViewLargeDiff": "Expand changes",
-    "fileEditDiffLineCount": "{{count}} lines",
     "fileEditUnchangedLinesHidden": "{{count}} unchanged lines hidden",
     "fileEditShowMoreLines": "Show {{count}} more lines",
     "fileEditShowFewerLines": "Show fewer lines",
@@ -2406,9 +2546,28 @@
     "failedHelp": "The saved task could not be restored safely. Review it before continuing.",
     "resuming": "Restoring interrupted task…",
     "review": "Review the task before continuing. Tools will not be replayed automatically.",
+    "replyPreserved": "Reply saved. You can continue.",
     "safeResume": "Continuing from saved conversation context.",
     "dismiss": "Dismiss",
     "continue": "Continue"
+  },
+  "diagram": {
+    "graph": "Diagram",
+    "source": "Source",
+    "copy": "Copy source",
+    "enlarge": "Enlarge diagram",
+    "title": "Mermaid diagram",
+    "errors": {
+      "syntax": "Check the diagram syntax in the source.",
+      "unsupported": "This diagram type is not supported. View the source.",
+      "policy": "This diagram uses unsupported styling or resources. View the source.",
+      "limit": "This diagram exceeds the rendering limit. View the source.",
+      "load": "Couldn't load the diagram renderer. Try again.",
+      "deadline": "The diagram took too long to render. Simplify the source or try again.",
+      "worker": "Couldn't render the diagram. Try again.",
+      "image": "Couldn't display the diagram. Try again.",
+      "capability": "Diagram rendering is unavailable in this browser. View the source."
+    }
   },
   "lightbox": {
     "viewAll": "View all {{count}} images",
@@ -2508,15 +2667,17 @@
       "body": "The gateway rejected this message. Review its text or attachments, then try again."
     },
     "modelRequestFailed": {
+      "authenticationTitle": "Model provider authorization failed",
+      "authenticationBody": "Sign in again or check the provider’s API key in model settings.",
       "billingTitle": "Model provider quota is unavailable",
       "billingBody": "Add credit or check billing for the provider account, then try again.",
-      "connectionTitle": "Could not connect to the model provider",
+      "connectionTitle": "Model connection failed",
       "timeoutTitle": "Model provider request timed out",
       "rateLimitTitle": "Model provider rate limit reached",
       "serverTitle": "Model provider service error",
       "unknownTitle": "Model provider request failed",
-      "bodyWithAttempt": "The request still failed on attempt {{attempts}}, so retries stopped. Check the provider configuration or service status, then try again.",
-      "body": "Check the provider configuration or service status, then try again."
+      "bodyWithAttempt": "Stopped after {{attempts}} attempts. Try again later or choose another model.",
+      "body": "Try again later or choose another model."
     }
   },
   "workspace": {

@@ -28,7 +28,8 @@
         "choices": {
           "mention": "Mentions only",
           "open": "All messages",
-          "allowlist": "Allowlist"
+          "allowlist": "Allowlist",
+          "listen": "Listen (reply on mention)"
         }
       },
       "groupPolicyOverrides": {
@@ -77,9 +78,8 @@
           "false": "Off"
         }
       },
-      "proxy": {
-        "label": "Network proxy",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "Use proxy"
       }
     }
   }

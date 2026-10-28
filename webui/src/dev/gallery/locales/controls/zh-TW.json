@@ -1,0 +1,508 @@
+{
+  "common": {
+    "unavailable": "無法使用",
+    "selected": "已選取：{{value}}",
+    "savingPreview": "正在儲存預覽值…",
+    "savedPreview": "已儲存預覽值",
+    "providerAction": "已選取服務商設定操作",
+    "reset": "重設預覽"
+  },
+  "button": {
+    "title": "按鈕",
+    "description": "透過選項調整同一按鈕的外觀與尺寸。",
+    "options": "variant 改變外觀；size 調整尺寸；disabled 禁止互動；onClick 由呼叫端提供。",
+    "variants": "樣式 — 同一按鈕的不同外觀",
+    "sizes": "尺寸",
+    "add": "新增範例",
+    "clicks": "按鈕點擊次數：{{count}}"
+  },
+  "input": {
+    "title": "輸入欄位",
+    "description": "文字輸入與共用的搜尋欄位變體。",
+    "options": "一般欄位使用 Input，搜尋使用 SearchInput。須提供標籤，並說明無效輸入的原因。",
+    "name": "範例名稱",
+    "projectName": "專案名稱",
+    "search": "搜尋",
+    "searchName": "範例搜尋",
+    "searchProjects": "搜尋專案",
+    "invalid": "無效輸入",
+    "invalidName": "無效名稱",
+    "required": "請輸入專案名稱。",
+    "disabledName": "停用的名稱欄位"
+  },
+  "textarea": {
+    "title": "多行輸入",
+    "description": "採用共用焦點樣式的多行文字欄位。",
+    "options": "接受原生 textarea 屬性：value、onChange、rows 和 disabled。",
+    "notes": "範例筆記",
+    "disabledNotes": "停用的筆記欄位",
+    "readOnly": "唯讀預覽"
+  },
+  "toggle": {
+    "title": "開關",
+    "description": "設定、工作區與頻道共用的受控開關。",
+    "options": "呼叫端管理 checked 和 onChange；label 提供無障礙名稱。",
+    "enable": "啟用範例",
+    "unavailableOn": "無法操作的已開啟開關",
+    "unavailableOff": "無法操作的已關閉開關"
+  },
+  "select": {
+    "title": "選擇器",
+    "description": "支援鍵盤導覽與停用選項的單選控制項。",
+    "options": "組合 Select、SelectTrigger、SelectValue、SelectContent 和 SelectItem。根元件管理 value/onValueChange。",
+    "fast": "快速",
+    "model": "範例模型",
+    "disabledModel": "停用的模型選擇器"
+  },
+  "segmented": {
+    "title": "分段選擇",
+    "description": "一組簡短且持續顯示的選項。",
+    "options": "value、options 和 onChange 由呼叫端控制。mode=\"tabs\" 加入方向鍵分頁導覽。",
+    "day": "日",
+    "week": "週",
+    "month": "月",
+    "period": "範例週期",
+    "selected": "已選週期：{{value}}"
+  },
+  "combobox": {
+    "title": "搜尋選擇",
+    "description": "可搜尋選項，共用鍵盤與指標導覽。",
+    "options": "useComboboxNavigation 提供輸入欄位、清單與選項屬性；呼叫端篩選資料並管理選取狀態。",
+    "search": "搜尋範例選項",
+    "placeholder": "輸入文字或使用方向鍵",
+    "choices": "範例選項",
+    "empty": "沒有符合的選項",
+    "selected": "已選選項：{{value}}"
+  },
+  "chevron": {
+    "title": "控制項箭頭",
+    "description": "選擇控制項共用的箭頭圖示。",
+    "options": "可用 className 調整位置。圖示僅供裝飾，無障礙名稱由所屬控制項提供。"
+  },
+  "dialog": {
+    "title": "對話方塊",
+    "description": "支援暫存修改、巢狀選擇與焦點返回。",
+    "options": "呼叫端管理 open/onOpenChange 及草稿與儲存行為。務必提供 DialogTitle，並在需要時提供說明。",
+    "open": "開啟對話方塊",
+    "edit": "編輯範例標籤",
+    "help": "變更只會套用至此預覽。",
+    "label": "範例標籤",
+    "save": "儲存標籤",
+    "saved": "已儲存標籤：{{name}}"
+  },
+  "alert": {
+    "title": "確認對話方塊",
+    "description": "分開取消與執行操作，明確要求確認。",
+    "options": "組合標題、說明與底部操作區；在 AlertDialogAction 的處理函式中執行操作。",
+    "remove": "移除範例",
+    "confirmTitle": "移除此範例？",
+    "help": "此操作只會改變預覽狀態。",
+    "confirm": "確認移除",
+    "removed": "已移除範例。",
+    "available": "範例可供使用。"
+  },
+  "sheet": {
+    "title": "側邊面板",
+    "description": "貼靠檢視區邊緣的模態面板。",
+    "options": "SheetContent 支援 side。須包含 SheetTitle 和 SheetDescription。",
+    "open": "開啟側邊面板",
+    "panelTitle": "範例側邊面板",
+    "help": "目前頁面旁的輔助控制項。",
+    "notes": "面板筆記",
+    "placeholder": "在此嘗試編輯"
+  },
+  "popover": {
+    "title": "浮動面板",
+    "description": "固定於觸發控制項的小型互動區域。",
+    "options": "組合觸發控制項與內容；可控制 open/onOpenChange。內容沿用所屬對話方塊的 portal。",
+    "open": "開啟浮動面板",
+    "note": "隨手筆記"
+  },
+  "menu": {
+    "title": "下拉選單",
+    "description": "操作、單選、巢狀選單與停用項目。",
+    "options": "操作使用 onSelect，持續保留的選擇使用單選群組。",
+    "view": "檢視選項",
+    "layout": "版面配置",
+    "comfortable": "寬鬆",
+    "compact": "緊密",
+    "rename": "重新命名",
+    "more": "更多操作",
+    "duplicate": "建立副本",
+    "none": "無",
+    "status": "密度：{{density}}。操作：{{action}}。"
+  },
+  "tooltip": {
+    "title": "工具提示",
+    "description": "HoverHint 組合共用提示元件；tooltip.tsx 為其公開匯入入口。",
+    "options": "一般提示使用 HoverHint。重要錯誤須持續顯示。懸停與鍵盤焦點遵循產品共用的時間規則。",
+    "primitive": "基礎提示",
+    "primitiveHelp": "指標懸停採用共用延遲，鍵盤聚焦立即顯示。",
+    "hint": "懸停提示",
+    "hintHelp": "組合提示採用相同的焦點與指標行為。"
+  },
+  "truncated": {
+    "title": "截斷提示",
+    "description": "僅在測得文字被截斷時顯示提示。",
+    "options": "提供 text 並限制寬度。文字本身需要接受鍵盤焦點時加入 tabIndex。"
+  },
+  "disclosure": {
+    "title": "摺疊內容",
+    "description": "摺疊時保留子元件狀態的展開區域。",
+    "options": "Disclosure 管理展開狀態；自訂觸發控制項可向 DisclosureContent 傳入受控的 open。",
+    "show": "顯示進階選項",
+    "help": "關閉再開啟後，此草稿仍會保留。",
+    "draft": "摺疊區域草稿"
+  },
+  "expandable": {
+    "title": "文字展開",
+    "description": "同一已掛載文字的限行預覽。",
+    "options": "呼叫端管理 expanded。lines 指定摺疊行數；須提供可無障礙操作的開關。",
+    "less": "收合",
+    "more": "展開"
+  },
+  "imageViewport": {
+    "title": "圖片檢視區",
+    "description": "單張圖片的適應、縮放、平移與雙指縮放。",
+    "options": "用 className 限定邊界；更換圖片身分時重新掛載。圖庫管理方向鍵導覽時設定 panWithArrows=false。"
+  },
+  "loadingRing": {
+    "title": "執行圓環",
+    "description": "可選底環的共用執行指示器。",
+    "options": "className 設定尺寸和顏色。track=false 隱藏底環；strokeWidth 和 strokeDasharray 調整圓弧。遵循減少動態效果設定。"
+  },
+  "streaming": {
+    "title": "流光文字",
+    "description": "思考中與工具標籤共用的文字動畫。",
+    "options": "active 控制動畫。字串或數字子節點提供字形疊層；遵循減少動態效果設定。",
+    "animate": "啟用標籤動畫",
+    "working": "正在處理下一步…"
+  },
+  "markdown": {
+    "title": "回覆排版",
+    "description": "正式串流渲染器，支援表格、程式碼與公式。",
+    "options": "children 為 Markdown 文字。streaming 控制未完成內容；onOpenFilePreview 由頁面提供。",
+    "state": "Markdown 狀態"
+  },
+  "code": {
+    "title": "程式碼顯示",
+    "description": "語法醒目提示、行號、複製、ANSI 輸出與檢視區感知程式碼行。",
+    "options": "code 與 language 提供內容；showLineNumbers、wrapLongLines 和 chrome 控制顯示。檢視區醒目提示要求顯示行號且不換行。",
+    "format": "程式碼格式"
+  },
+  "math": {
+    "title": "數學公式",
+    "description": "為 Markdown 區塊公式提供尺寸適配。",
+    "options": "TeX 原始碼使用 MarkdownText。DisplayMath 本身接收已渲染的公式節點，並依可用寬度縮放。"
+  },
+  "message": {
+    "title": "訊息",
+    "description": "使用者與助理訊息，含思考及傳送狀態。",
+    "options": "message 為聊天執行環境投影的 UIMessage。資料與網路操作不屬於渲染器。",
+    "state": "訊息狀態"
+  },
+  "activity": {
+    "title": "代理活動",
+    "description": "組合執行中、已完成或失敗的活動序列。",
+    "options": "傳入文字、狀態及受控的展開值。工具執行由 gateway 負責；這些元件顯示其投影狀態。",
+    "state": "活動狀態",
+    "working": "處理中",
+    "details": "活動詳情",
+    "collapse": "收合",
+    "readError": "無法讀取檔案",
+    "read": "讀取原始碼"
+  },
+  "files": {
+    "title": "檔案修改",
+    "description": "檔案參照、變更行數與可展開差異。",
+    "options": "edits 包含顯示摘要；displayMode 選擇 summary/diff/collapsed_diff；onOpenFilePreview 由頁面提供。",
+    "error": "無法套用範例修改。",
+    "state": "檔案修改狀態",
+    "operation": "檔案操作",
+    "display": "差異顯示",
+    "selected": "已選檔案：{{path}}",
+    "hint": "選取檔案參照以體驗其回呼。"
+  },
+  "media": { "study": "色彩練習 {{count}}" },
+  "imageGallery": {
+    "title": "圖片縮圖",
+    "description": "多圖配置、縮圖選取與更多圖片。",
+    "options": "images 提供網址和名稱；size 選擇大型或緊密縮圖，align 控制對齊。最多顯示四張縮圖，內建 ImageLightbox 可瀏覽所有有網址的圖片。",
+    "sixImages": "六張圖片",
+    "compact": "緊密縮圖",
+    "hint": "點選縮圖或 +2 查看全部六張圖片。"
+  },
+  "imageLightbox": {
+    "title": "全螢幕預覽",
+    "description": "受控全螢幕預覽與多圖切換。",
+    "options": "index 為 null 時關閉。呼叫端管理 index 與開關回呼；ImageLightbox 內建 ZoomableImage，切換圖片時重設檢視。",
+    "open": "開啟全螢幕預覽",
+    "hint": "使用前後按鈕、←/→ 或 Home/End 切換圖片；點選 × 或按 Escape 關閉。"
+  },
+  "zoomableImage": {
+    "title": "單圖縮放",
+    "description": "單圖縮放、邊界內平移與手勢。",
+    "options": "src 和 alt 提供單張圖片。容器須有定位和明確高度，換圖時重新掛載。聚焦圖片區域後可用 +、− 和 0 操作。",
+    "hint": "使用 +/−、按兩下、Ctrl+滾輪或雙指縮放；放大後拖曳或捲動平移，點選百分比或按 0 重設。"
+  },
+  "attachment": {
+    "title": "附件",
+    "description": "圖片預覽、影片播放、檔案下載與無法使用的附件。",
+    "options": "attachment.kind 區分 image、video 與 file。圖片開啟 ImageLightbox，影片使用原生控制項，檔案提供下載連結。沒有網址時顯示無法使用的附件；圖片載入失敗時亦同。",
+    "image": "圖片",
+    "video": "可播放影片",
+    "file": "下載檔案",
+    "unavailable": "無法使用的附件（無 URL）"
+  },
+  "fileReference": {
+    "title": "檔案參照",
+    "description": "由呼叫端提供開啟操作的檔案參照。",
+    "options": "path 提供標籤；onOpen 提供操作。元件不決定工作區權限。",
+    "select": "請選取檔案參照。"
+  },
+  "settingsComposition": {
+    "title": "設定元件",
+    "description": "實際設定列、群組與能力元件搭配共用控制項。",
+    "options": "所屬設定控制器管理數值與持久化；圖庫回呼只更新本機預覽狀態。",
+    "preferences": "範例偏好",
+    "keepDrafts": "保留草稿",
+    "switchHint": "搭配受控開關的共用設定列。",
+    "projectLabel": "專案標籤",
+    "projectName": "設定中的專案標籤",
+    "capability": "範例能力",
+    "notes": "筆記",
+    "capabilityNotes": "能力筆記",
+    "localOnly": "僅供本機預覽"
+  },
+  "modelPickers": {
+    "title": "模型選擇",
+    "description": "選擇服務商、搜尋或輸入模型 ID，並調整推理強度。",
+    "options": "ProviderPicker 的值與操作由呼叫端提供。ModelIdPicker 的 models 參數可提供固定目錄；ReasoningEffortPicker 的 savedValues 提供既有選項。",
+    "chooseProvider": "選擇服務商",
+    "configure": "設定 {{provider}}"
+  },
+  "providerIcons": {
+    "title": "服務商圖示",
+    "description": "比較一般、緊密與填滿尺寸，以及選擇器未設定狀態。",
+    "options": "provider 選擇既有圖示；compact 與 fill 控制尺寸。showBrandLogos=false 使用內建圖示。",
+    "size": "圖示尺寸"
+  },
+  "timezone": {
+    "title": "時區選擇",
+    "description": "依時區名、中文名稱或 UTC 位移搜尋，查看同一時刻的當地時間。",
+    "options": "value 是 IANA 時區；onChange 更新呼叫端的值。元件提供搜尋與鍵盤導覽。"
+  },
+  "textEditor": {
+    "title": "文字編輯",
+    "description": "開啟編輯視窗，修改、儲存或取消；清空後儲存可查看錯誤回饋。",
+    "options": "SettingsTextEditor 在 onSave 成功後關閉，失敗時顯示錯誤；SettingsHint 可透過懸停、焦點或點擊開啟。",
+    "state": "編輯狀態",
+    "hint": "開啟編輯器後可修改、儲存或取消。清空內容可查看錯誤狀態。",
+    "instructions": "範例說明",
+    "edit": "編輯範例說明",
+    "help": "儲存後，下方會顯示修改的內容。",
+    "required": "請輸入內容。"
+  },
+  "removePreset": {
+    "title": "刪除預設組態",
+    "description": "刪除未使用的模型預設組態，查看預設模型使用中項目的停用狀態。",
+    "options": "這是 ModelsSettings 使用的刪除按鈕；disabled 與刪除操作由呼叫端提供。服務商管理使用 ProvidersSettings 視窗。",
+    "defaultModel": "預設模型",
+    "codeAssistant": "程式碼助理",
+    "remove": "刪除 {{name}}",
+    "primaryHint": "無法刪除預設模型使用中的預設組態。",
+    "count": "預覽組態數量：{{count}}"
+  },
+  "loading": {
+    "title": "載入佔位",
+    "description": "切換應用程式、頻道與技能目錄的載入版面，查看共用狀態容器。",
+    "options": "CatalogSkeleton 的 layout 選擇版面。SkeletonStatus 用 label 提供螢幕閱讀器狀態，將裝飾內容標為 aria-hidden。",
+    "layout": "目錄版面",
+    "catalog": "正在載入預覽目錄"
+  },
+  "sidebar": {
+    "title": "設定導覽",
+    "description": "選擇分類、處理待重新啟動狀態，並縮窄瀏覽器查看行動版選單。",
+    "options": "activeSection 與 onSelectSection 控制選取狀態；返回、登出與重新啟動操作為呼叫端回呼。",
+    "back": "返回聊天",
+    "logout": "登出",
+    "restart": "已處理預覽重新啟動操作",
+    "hint": "選擇設定分類，或縮窄瀏覽器查看行動版導覽。",
+    "toggleRestart": "切換待重新啟動狀態"
+  },
+  "providerSearch": {
+    "title": "服務商搜尋",
+    "description": "搜尋依 OAuth、API 金鑰與本機分組的服務商，選取項目或自訂服務商。",
+    "options": "providers 是既有目錄。query 為受控搜尋值；onSelect 與 onCustom 將選擇交給父元件。",
+    "closed": "已關閉搜尋",
+    "custom": "已選取自訂服務商",
+    "hint": "搜尋服務商，或用方向鍵選擇。"
+  },
+  "requestParameters": {
+    "title": "請求參數",
+    "description": "編輯標頭、查詢參數與請求主體；輸入無效 JSON 查看實際驗證回饋。",
+    "options": "fields 選擇顯示項目，form 儲存 JSON 文字。標頭與查詢參數只接受字串值；請求主體接受任意 JSON 物件值。"
+  },
+  "requestAPI": {
+    "title": "請求協定",
+    "description": "選擇服務商支援的協定、預設協定、模型覆寫與備援選項。",
+    "options": "ProviderAPIControl 至少保留一個協定。ModelAPIControl 允許 null 表示自動選擇，並依服務商能力顯示可用協定。",
+    "providerAPI": "服務商協定",
+    "modelOverride": "模型覆寫"
+  },
+  "usage": {
+    "title": "用量統計",
+    "description": "切換有資料、空記錄與無法使用狀態；懸停長條查看每日用量，開啟詳情查看模型趨勢。",
+    "options": "usage 是呼叫端提供的統計記錄；timeZone 定義日期範圍。詳情視窗與圖表只顯示傳入資料。",
+    "state": "用量狀態"
+  },
+  "overview": {
+    "title": "設定概覽",
+    "description": "查看目前模型、能力狀態與用量，點選功能列體驗分類選擇。",
+    "options": "settings 提供概覽資料；onSelectSection 接收選取的設定分類。",
+    "selected": "已選分類：{{section}}"
+  },
+  "web": {
+    "title": "搜尋設定",
+    "description": "切換免憑證、API 金鑰與伺服器網址服務商，調整搜尋選項並體驗自動儲存。",
+    "options": "settings 儲存目前設定，form 儲存編輯值。儲存、憑證顯示與服務商切換由父元件提供。",
+    "unsaved": "預覽草稿尚未儲存"
+  },
+  "image": {
+    "title": "圖片設定",
+    "description": "開關圖片生成，選擇固定模型目錄、長寬比與尺寸，展開進階選項調整數量。",
+    "options": "form 為受控設定，dirty 標記修改。元件重用服務商憑證，儲存操作由父元件實作。"
+  },
+  "voice": {
+    "title": "轉錄設定",
+    "description": "切換轉錄，編輯模型、語言、時長與上傳大小限制，體驗自動儲存。",
+    "options": "settings 提供服務商資訊；form 與儲存回呼由父元件管理。"
+  },
+  "safety": {
+    "title": "存取設定",
+    "description": "切換本機服務存取與預設權限，查看設定列、提示及自動儲存回饋。",
+    "options": "form 是顯示值；onSave 處理儲存請求。執行時期的權限執行仍由 gateway 負責。"
+  },
+  "channelCatalog": {
+    "title": "頻道項目",
+    "description": "切換執行、啟動、失敗與未安裝狀態；操作開關、安裝入口與說明選單。",
+    "options": "feature 提供安裝與執行狀態。onAction 與 onSelect 由父元件處理；識別、錯誤和說明使用同一頻道資料。",
+    "exampleChannel": "範例頻道",
+    "state": "頻道狀態",
+    "error": "範例連線失敗。",
+    "stopped": "已停止",
+    "running": "執行中",
+    "starting": "啟動中",
+    "failed": "失敗",
+    "selected": "已選取頻道設定",
+    "hint": "點選開關或安裝按鈕，查看狀態變化。"
+  },
+  "credentials": {
+    "title": "頻道憑證",
+    "description": "輸入憑證、顯示或隱藏機密、套用連線預設組態、檢查必填欄位並複製輔助命令。",
+    "options": "fields 定義群組與控制項，values 和 visibleSecrets 為受控值。requirements 定義憑證組合；預設組態與儲存回呼只更新此範例。",
+    "botToken": "機器人權杖",
+    "tokenPlaceholder": "範例權杖",
+    "serverURL": "伺服器 URL",
+    "replyMode": "回覆模式",
+    "mentions": "提及訊息",
+    "allMessages": "所有訊息",
+    "allowFrom": "允許的傳送者",
+    "local": "本機伺服器",
+    "hosted": "託管伺服器",
+    "required": "請輸入機器人權杖。",
+    "checkSave": "檢查並儲存",
+    "command": "範例命令",
+    "applied": "已套用 {{name}}",
+    "incomplete": "請補齊憑證。",
+    "saved": "已儲存預覽憑證。",
+    "hint": "填寫憑證、切換機密顯示，或套用連線預設組態。"
+  },
+  "channelValidation": {
+    "title": "連線檢查",
+    "description": "切換檢查中、成功與失敗，觀察逐項顯示的結果與身分摘要。",
+    "options": "validation 提供檢查記錄，validating 控制載入狀態；元件只負責顯示。",
+    "expired": "範例權杖已過期。",
+    "result": "檢查結果"
+  },
+  "runAt": {
+    "title": "排程時間",
+    "description": "輸入日期時間，或開啟日曆並用滑鼠、方向鍵與翻頁鍵選擇日期。",
+    "options": "value 使用 YYYY-MM-DDTHH:mm 本機時間；onChange 傳回編輯值。無效輸入會顯示在現有表單控制項上。"
+  },
+  "automationCalendar": {
+    "title": "任務日曆",
+    "description": "切換月份、排程與歷史，點選成功或失敗記錄開啟結果；窄容器自動顯示議程。",
+    "options": "jobs 與 month 決定日曆內容。onInspect 處理排程任務；renderRunDialog 由呼叫端提供結果顯示，日曆不讀取服務。",
+    "providerError": "範例服務商無法使用。",
+    "state": "排程狀態",
+    "previousMonth": "上個月",
+    "nextMonth": "下個月",
+    "planned": "已排程",
+    "recorded": "執行記錄",
+    "running": "執行中",
+    "failed": "失敗",
+    "completed": "已完成",
+    "skipped": "已略過",
+    "system": "系統任務",
+    "noEntries": "本月沒有排程",
+    "more": "另外 {{count}} 筆",
+    "selected": "已選任務：{{name}}",
+    "hint": "點選執行記錄查看結果，或選擇排程中的任務。"
+  },
+  "providers": {
+    "title": "服務商管理",
+    "description": "查看實際服務商管理視窗與新增流程。",
+    "options": "重用設定中的 ProvidersSettings。目錄、表單與儲存回呼由呼叫端控制；此處修改本機範例資料，支援設定、搜尋、建立與取消。",
+    "invalidParameters": "請輸入有效的請求參數 JSON；標頭與查詢參數的值須為字串。",
+    "saved": "已儲存 {{name}} 的預覽設定",
+    "added": "已新增 {{name}}",
+    "signedIn": "預覽授權狀態已設為已登入",
+    "signedOut": "預覽授權狀態已設為未登入",
+    "builtInIcons": "使用內建圖示",
+    "brandIcons": "使用品牌圖示",
+    "configured": "已設定服務商數量：{{count}}",
+    "providerAdded": "已新增服務商"
+  },
+  "runResult": {
+    "title": "執行結果",
+    "description": "開啟結果，比較 Markdown 回覆、載入、重試、空回覆與歷史記錄缺失狀態。",
+    "options": "result 提供載入狀態與已取得的回覆。onRetry 由呼叫端處理；此檢視不讀取執行環境或請求結果。",
+    "state": "執行結果",
+    "view": "查看執行結果"
+  },
+  "chatBinding": {
+    "title": "執行聊天",
+    "description": "選擇執行聊天、修改說明、確認、切換回來或取消；比較任務忙碌、載入錯誤與衝突。",
+    "options": "data 與 job 提供可用聊天和綁定版本。檢視管理確認草稿；onSave、onSaved 與 onReload 由功能入口接入資料操作。",
+    "state": "聊天綁定狀態",
+    "setChat": "設定執行聊天",
+    "saved": "下次執行將在 {{title}} 中進行",
+    "hint": "選擇目標聊天，確認或修改任務說明。"
+  },
+  "about": {
+    "title": "關於與版本",
+    "description": "比較版本檢查狀態、提交連結、更新入口與關於頁面；按鈕以範例結果更新顯示。",
+    "options": "AboutSettingsView 接受版本與支援連結的組合。VersionCheckRowView 顯示 checking/result，並透過 onCheck 請求檢查。實際檢查與診斷連結資料由功能入口負責。",
+    "error": "無法取得版本資訊，請重試。",
+    "state": "版本狀態",
+    "selectedLink": "已選取 GitHub 連結",
+    "preferenceSaved": "已儲存範例偏好；不會安裝或重新啟動。",
+    "updateRequested": "已選擇查看更新；元件預覽不會安裝或重新啟動。",
+    "dismissed": "已收起更新提示"
+  },
+  "appearance": {
+    "title": "外觀選項",
+    "description": "切換外觀、活動顯示、檔案差異與通知偏好，下方顯示範例值。",
+    "options": "主題和偏好由呼叫端管理。onChangeBrowserNotifications 將權限請求交給功能入口；預覽回呼只改變範例開關。"
+  },
+  "starInvitation": {
+    "title": "支持邀請",
+    "description": "開啟實際邀請視窗，比較儲存與錯誤狀態，體驗稍後、GitHub 連結與不再提醒。",
+    "options": "open、saving 和 error 是顯示狀態。領取邀請與持久化偏好由既有 StarPrompt 入口負責；檢視只呼叫傳入操作。",
+    "state": "邀請狀態",
+    "view": "查看邀請",
+    "dismissed": "已在預覽中選取不再提醒",
+    "starred": "已在預覽中選取 GitHub 連結"
+  }
+}

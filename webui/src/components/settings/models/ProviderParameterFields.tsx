@@ -71,10 +71,10 @@ export function ProviderParameterFields({ fields, form, onChange, onSave, inheri
               }
             }}
             trigger={
-              <button type="button" className="settings-hover flex min-h-12 w-full items-center gap-3 border-b border-border/60 px-3 py-3 text-left last:border-b-0">
-                <span className="min-w-0 flex-1 text-[13px] font-medium">{title}</span>
-                <span className="min-w-0 text-right text-[12px] text-muted-foreground">{parameterSummary(form[item.formKey], inherit, t)}</span>
-                <span className="shrink-0 text-[13px] text-muted-foreground">{t("settings.actions.edit")}</span>
+              <button type="button" className="settings-hover flex min-h-12 w-full items-center gap-3 border-b border-border/60 px-3 py-3 text-left text-[13px] leading-5 last:border-b-0">
+                <span className="min-w-0 flex-1 font-medium">{title}</span>
+                <span className="min-w-0 text-right text-muted-foreground">{parameterSummary(form[item.formKey], inherit, t)}</span>
+                <span className="shrink-0 text-muted-foreground">{t("settings.actions.edit")}</span>
               </button>
             }
           />

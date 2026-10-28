@@ -77,6 +77,7 @@ class PdfExtraction:
     total_pages: int
     start_page: int
     end_page: int
+    truncated: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +88,8 @@ class LocatedDocumentLine:
     extracted_line: int
     locator: str
     searchable: bool = True
+    # XLSX cell offsets in text: a tab inside a cell is not a column separator.
+    column_starts: tuple[int, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -251,17 +254,21 @@ def _open_xlsx_line_source(path: Path) -> DocumentLineSource:
         extracted_line = 0
         wrote_document_content = False
         try:
-            for sheet_name in workbook.sheetnames:
-                worksheet = workbook[sheet_name]
+            for worksheet in workbook.worksheets:
+                sheet_name = worksheet.title
                 # Producer-supplied dimensions can omit cells that are present in the XML.
                 worksheet.reset_dimensions()
                 wrote_header = False
                 for row_index, row in enumerate(worksheet.iter_rows(values_only=True), 1):
-                    row_text = "\t".join(
-                        str(cell) if cell is not None else "" for cell in row
-                    )
+                    cells = [str(cell) if cell is not None else "" for cell in row]
+                    row_text = "\t".join(cells)
                     if not row_text.strip():
                         continue
+                    column_starts: list[int] = []
+                    offset = 0
+                    for cell in cells:
+                        column_starts.append(offset)
+                        offset += len(cell) + 1
                     if not wrote_header:
                         if wrote_document_content:
                             extracted_line += 1
@@ -282,6 +289,7 @@ def _open_xlsx_line_source(path: Path) -> DocumentLineSource:
                         row_text,
                         extracted_line,
                         f"sheet={sheet_name!r},row={row_index}",
+                        column_starts=tuple(column_starts),
                     )
         finally:
             workbook.close()
@@ -478,10 +486,17 @@ def extract_pdf_pages(
                     f"{_MAX_PDF_CONTENT_STREAM_SIZE // (1024 * 1024)} MB limit"
                 )
         text = (page.extract_text() or "").strip()
-        if text and not collector.add(f"--- Page {index + 1} ---\n{text}", separator="\n\n"):
+        if not text:
+            continue
+        page_text = f"--- Page {index + 1} ---\n{text}"
+        if collector.parts and collector.length + 2 + len(page_text) > max_chars:
+            # Leave this page for the next read instead of returning only its prefix.
+            end = index - 1
+            break
+        if not collector.add(page_text, separator="\n\n"):
             end = index
             break
-    return PdfExtraction(collector.render(), total_pages, start, end)
+    return PdfExtraction(collector.render(), total_pages, start, end, truncated=collector.truncated)
 
 
 def _parse_pdf_page_range(pages: str | None, total_pages: int) -> tuple[int, int]:

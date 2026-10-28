@@ -845,8 +845,13 @@ class EmailChannel(BaseChannel):
         if msg.is_multipart():
             plain_parts: list[str] = []
             html_parts: list[str] = []
-            for part in msg.walk():
+            parts = [msg]
+            while parts:
+                part = parts.pop()
                 if part.get_content_disposition() == "attachment":
+                    continue
+                if part.is_multipart():
+                    parts.extend(reversed(part.get_payload()))
                     continue
                 content_type = part.get_content_type()
                 try:
@@ -1191,6 +1196,7 @@ class EmailChannel(BaseChannel):
             return []
 
         saved: list[Path] = []
+        saved_names: set[str] = set()
         media_dir = get_media_dir("email")
 
         for part in msg.walk():
@@ -1217,11 +1223,17 @@ class EmailChannel(BaseChannel):
 
             raw_name = part.get_filename() or "attachment"
             sanitized = safe_filename(raw_name) or "attachment"
-            dest = media_dir / f"{uid}_{sanitized}"
+            filename = Path(f"{uid}_{sanitized}")
+            dest = media_dir / filename
+            index = 1
+            while dest.name.casefold() in saved_names:
+                dest = media_dir / f"{filename.stem}_{index}{filename.suffix}"
+                index += 1
 
             try:
                 dest.write_bytes(payload)
                 saved.append(dest)
+                saved_names.add(dest.name.casefold())
                 logger.info("Attachment saved: {}", dest)
             except Exception as exc:
                 logger.warning("Failed to save attachment {}: {}", dest, exc)

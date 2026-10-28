@@ -6,7 +6,7 @@ import time
 import uuid
 from contextlib import suppress
 from copy import deepcopy
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime
 from pathlib import Path
 from types import EllipsisType
@@ -26,6 +26,7 @@ from nanobot.cron.types import (
     CronSchedule,
     CronStore,
 )
+from nanobot.runtime_admission import RuntimeAdmission
 from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META
 from nanobot.utils.helpers import atomic_write_text
 from nanobot.utils.run_records import (
@@ -68,6 +69,26 @@ def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
             return None
 
     return None
+
+
+def _resume_next_run(schedule: CronSchedule, persisted_ms: int | None, now_ms: int) -> int | None:
+    """Return the next run for a reloaded job, keeping a pending interval run.
+
+    ``every`` schedules are relative to the previous run, so recomputing them
+    from ``now`` on every startup postpones the job by a full interval each
+    time the gateway restarts. A persisted next run is kept while it is still
+    in the future and no more than one interval away; anything else falls back
+    to :func:`_compute_next_run`.
+    """
+    if (
+        schedule.kind == "every"
+        and schedule.every_ms
+        and schedule.every_ms > 0
+        and persisted_ms is not None
+        and now_ms < persisted_ms <= now_ms + schedule.every_ms
+    ):
+        return persisted_ms
+    return _compute_next_run(schedule, now_ms)
 
 
 def _validate_schedule_for_add(schedule: CronSchedule) -> None:
@@ -182,7 +203,10 @@ class CronService:
         store_path: Path,
         on_job: Callable[[CronJob], Coroutine[Any, Any, str | CronRunResult | None]] | None = None,
         max_sleep_ms: int = 300_000,  # 5 minutes
+        *,
+        admission: RuntimeAdmission | None = None,
     ):
+        self.admission = admission if admission is not None else RuntimeAdmission()
         self.store_path = store_path
         self._action_path = store_path.parent / "action.jsonl"
         self._run_records_dir = store_path.parent / "runs"
@@ -489,7 +513,9 @@ class CronService:
             if self._enforce_agent_binding(job):
                 continue
             if job.enabled:
-                job.state.next_run_at_ms = _compute_next_run(job.schedule, now)
+                job.state.next_run_at_ms = _resume_next_run(
+                    job.schedule, job.state.next_run_at_ms, now
+                )
 
     def _get_next_wake_ms(self) -> int | None:
         """Get the earliest next run time across all jobs."""
@@ -528,6 +554,13 @@ class CronService:
 
     async def _on_timer(self) -> None:
         """Handle timer tick - run due jobs."""
+        # Do not spin on an overdue timestamp or consume jobs while paused.
+        # stop() cancels this waiter; an aborted maintenance wakes it normally.
+        await self.admission.wait_until_open()
+        with self.admission.activity():
+            await self._run_timer()
+
+    async def _run_timer(self) -> None:
         reload_store = self._active_executions == 0
         self._active_executions += 1
         try:
@@ -582,6 +615,7 @@ class CronService:
 
     async def _execute_job(self, job: CronJob) -> None:
         """Execute a single job."""
+        schedule = job.schedule
         start_ms = _now_ms()
         logger.info("Cron: executing job '{}' ({})", job.name, job.id)
         result: str | CronRunResult | None = None
@@ -623,6 +657,10 @@ class CronService:
             session_key=job.payload.session_key,
         ))
         job.state.run_history = job.state.run_history[-self._MAX_RUN_HISTORY:]
+
+        # Completion belongs to the schedule that started this run.
+        if job.schedule is not schedule:
+            return
 
         # Handle one-shot jobs
         if job.schedule.kind == "at":
@@ -772,7 +810,13 @@ class CronService:
         """Register an internal system job (idempotent on restart)."""
         store = self._require_store()
         now = _now_ms()
-        job.state = CronJobState(next_run_at_ms=_compute_next_run(job.schedule, now))
+        existing = next((j for j in store.jobs if j.id == job.id), None)
+        persisted_ms = (
+            existing.state.next_run_at_ms
+            if existing is not None and existing.enabled and existing.schedule == job.schedule
+            else None
+        )
+        job.state = CronJobState(next_run_at_ms=_resume_next_run(job.schedule, persisted_ms, now))
         job.created_at_ms = now
         job.updated_at_ms = now
         store.jobs = [j for j in store.jobs if j.id != job.id]
@@ -867,7 +911,8 @@ class CronService:
         schedule_changed = schedule is not None and schedule != job.schedule
         if schedule is not None:
             _validate_schedule_for_add(schedule)
-            job.schedule = schedule
+            if schedule_changed:
+                job.schedule = replace(schedule)
         if name is not None:
             job.name = name
         if message is not None:
@@ -900,6 +945,10 @@ class CronService:
 
     async def run_job(self, job_id: str, force: bool = False) -> bool:
         """Manually run a job without disturbing the service's running state."""
+        with self.admission.activity():
+            return await self._run_job(job_id, force)
+
+    async def _run_job(self, job_id: str, force: bool) -> bool:
         reload_store = self._active_executions == 0
         self._active_executions += 1
         try:

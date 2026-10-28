@@ -351,7 +351,7 @@ async def test_process_message_pairs_unauthorized_sender_before_media_side_effec
     channel._get_typing_ticket = AsyncMock(return_value="")
     channel._send_text = AsyncMock()
     monkeypatch.setattr(
-        "nanobot.channels.base.generate_code", lambda _ch, _sid: "ABCD-EFGH"
+        "nanobot.channels.base.generate_code", lambda _ch, _sid, *, on_change=None: "ABCD-EFGH"
     )
 
     await channel._process_message(
@@ -799,6 +799,7 @@ async def test_manager_surfaces_actionable_weixin_auth_error_without_traceback(
     )
     manager = manager_mod.ChannelManager.__new__(manager_mod.ChannelManager)
     manager._channel_errors = {}
+    manager.bus = channel.bus
 
     await manager._start_channel("weixin", channel)
 

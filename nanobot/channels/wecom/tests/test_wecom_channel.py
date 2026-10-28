@@ -490,8 +490,6 @@ async def test_process_image_message() -> None:
         assert msg.media[0].endswith("photo.png")
         assert "[image:" in msg.content
     finally:
-        if os.path.exists(saved):
-            pass  # may have been overwritten; clean up if exists
         # Clean up any photo.png in tempdir
         p = os.path.join(os.path.dirname(saved), "photo.png")
         if os.path.exists(p):

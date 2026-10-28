@@ -4,11 +4,12 @@ import {
   useEffect,
   useMemo,
   useState,
+  type ComponentProps,
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Globe2 } from "lucide-react";
-import { decodeString } from "micromark-util-decode-string";
+import remarkCjkFriendly from "remark-cjk-friendly/parseOnly";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -20,10 +21,11 @@ import { parseMathAwareMarkdownBlocks } from "@/lib/markdown-streaming-blocks";
 
 import { DisplayMath } from "@/components/DisplayMath";
 import { AttachmentTile } from "@/components/AttachmentTile";
-import { CodeBlock } from "@/components/CodeBlock";
+import { MarkdownCodeBlock } from "@/components/markdown-diagrams/MarkdownCodeBlock";
+import { MarkdownCodeContext } from "@/components/markdown-diagrams/context";
 import { WebLink } from "@/components/WebLink";
 import {
-  INLINE_TOKEN_HIGHLIGHT_COLOR,
+  INLINE_REFERENCE_HIGHLIGHT_COLOR,
   InlineTokenHighlight,
 } from "@/components/InlineTokenHighlight";
 import {
@@ -60,10 +62,6 @@ type MarkdownAstNode = {
   type: string;
   value?: string;
   children?: MarkdownAstNode[];
-  position?: {
-    start: { offset: number };
-    end: { offset: number };
-  };
   data?: {
     hName?: string;
   };
@@ -89,13 +87,11 @@ type AvailabilityResult = {
   resolve: FilePreviewAvailabilityResolver;
 };
 
-function InferredFileReferenceChip({
-  path,
+function AvailableFileReferenceChip({
   onOpen,
-}: {
-  path: string;
-  onOpen?: (path: string) => void;
-}) {
+  ...props
+}: ComponentProps<typeof FileReferenceChip>) {
+  const path = props.previewPath || props.tooltipPath || props.path;
   const resolve = useFilePreviewAvailabilityResolver();
   const [result, setResult] = useState<AvailabilityResult | null>(null);
 
@@ -121,7 +117,7 @@ function InferredFileReferenceChip({
   );
   return (
     <FileReferenceChip
-      path={path}
+      {...props}
       onOpen={onOpen && resolvedAvailable ? onOpen : undefined}
     />
   );
@@ -262,54 +258,8 @@ function remarkSafeHtmlSubset() {
   };
 }
 
-// Model output can put CJK punctuation or whitespace before a closing `**`
-// followed immediately by a word, which CommonMark leaves as literal text.
-const STRONG_BEFORE_WORD = /(?<!\\)\*\*([^\s*][^*\r\n]*?)(?<!\\)\*\*(?=[\p{L}\p{N}])/gu;
-const CJK_CHARACTER = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
-
-function normalizeCjkStrongBoundaries(node: MarkdownAstNode, source: string): void {
-  if (!node.children) return;
-  node.children = node.children.flatMap((child) => {
-    if (child.type !== "text" || !child.value?.includes("**") || !child.position) {
-      normalizeCjkStrongBoundaries(child, source);
-      return [child];
-    }
-
-    // Match source delimiters before decoding escapes and character references.
-    // Paragraph continuation indentation is not part of the parsed text value.
-    const textSource = source.slice(child.position.start.offset, child.position.end.offset)
-      .replace(/(\r\n?|\n)[\t ]+/g, "$1");
-
-    const replacement: MarkdownAstNode[] = [];
-    let cursor = 0;
-    for (const match of textSource.matchAll(STRONG_BEFORE_WORD)) {
-      const start = match.index;
-      const end = start + match[0].length;
-      const content = decodeString(match[1]);
-      if (!CJK_CHARACTER.test(content + textSource.slice(end, end + 1))) continue;
-      const label = content.trimEnd();
-      if (start > cursor) replacement.push(safeText(decodeString(textSource.slice(cursor, start))));
-      replacement.push({
-        type: "strong",
-        children: [safeText(label)],
-      });
-      if (label.length < content.length) replacement.push(safeText(content.slice(label.length)));
-      cursor = end;
-    }
-    if (cursor === 0) return [child];
-    if (cursor < textSource.length) replacement.push(safeText(decodeString(textSource.slice(cursor))));
-    return replacement;
-  });
-}
-
-function remarkCjkStrongBoundaries() {
-  return (tree: MarkdownAstNode, file: { toString(): string }) => {
-    normalizeCjkStrongBoundaries(tree, file.toString());
-  };
-}
-
 const remarkPlugins: NonNullable<StreamdownProps["remarkPlugins"]> = [
-  remarkCjkStrongBoundaries,
+  remarkCjkFriendly,
   remarkBreaks,
   [remarkGfm, { singleTilde: false }],
   remarkCjkAutolinks,
@@ -409,7 +359,7 @@ function DocumentLink({ href, path, onOpen, children }: {
   // Fragment-only links must not replace the application's hash route.
   if (!href || href.startsWith("#")) return <>{children}</>;
   if (/^(https?:\/\/|mailto:)/i.test(href)) {
-    return <WebLink href={href} className="text-blue-500 underline underline-offset-2 dark:text-blue-300">{children}</WebLink>;
+    return <WebLink href={href} className="text-content-link underline underline-offset-2">{children}</WebLink>;
   }
   if (/^[a-z][a-z\d+.-]*:/i.test(href) || href.startsWith("//")) return <>{children}</>;
   let target = href.split(/[?#]/, 1)[0];
@@ -515,7 +465,7 @@ function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
       aria-label={t("message.openLink", { label })}
       className={cn(
         "not-prose inline-flex max-w-full items-center gap-2 align-baseline",
-        "text-blue-500 no-underline underline-offset-2 hover:underline dark:text-blue-300",
+        "text-content-link no-underline underline-offset-2 hover:underline",
       )}
     >
       <span
@@ -557,12 +507,6 @@ function useFaviconFallback(host: string) {
     onFaviconError: onLogoError,
     onFaviconLoad: onLogoLoad,
   };
-}
-
-function isRenderedCodeBlock(value: ReactNode): boolean {
-  if (!isValidElement(value)) return false;
-  const props = value.props as { code?: unknown };
-  return value.type === CodeBlock || typeof props.code === "string";
 }
 
 function codeFenceFromPreChild(value: ReactNode): { code: string; language?: string } | null {
@@ -609,23 +553,10 @@ export default function MarkdownTextRenderer({
     () => ({
       code({ className: cls, children: kids, node: _node, ...props }) {
         void _node;
-        const match = /language-(\w+)/.exec(cls || "");
-        if (match) {
-          const code = String(kids).replace(/\n$/, "");
-          return (
-            <CodeBlock
-              language={match[1]}
-              code={code}
-              className="my-3"
-              highlight={highlightCode}
-              showLineNumbers={code.includes("\n")}
-            />
-          );
-        }
         const raw = String(kids).replace(/\n$/, "");
         if (!documentPath && isLikelyFilePath(raw)) {
           return (
-            <InferredFileReferenceChip
+            <AvailableFileReferenceChip
               path={raw}
               onOpen={onOpenFilePreview}
             />
@@ -637,8 +568,8 @@ export default function MarkdownTextRenderer({
           return (
             <code
               className={cn(
-                "block min-w-0 max-w-full overflow-x-auto whitespace-pre bg-transparent p-0 font-mono text-[0.8125rem]",
-                "leading-snug text-inherit",
+                "block min-w-0 max-w-full overflow-x-auto whitespace-pre bg-transparent p-0 font-mono text-code",
+                "text-inherit",
                 cls,
               )}
               {...props}
@@ -650,7 +581,7 @@ export default function MarkdownTextRenderer({
         return (
           <code
             className={cn(
-              "rounded bg-muted px-1 py-0.5 font-mono text-[0.85em]",
+              "markdown-inline-code rounded bg-muted px-1 py-0.5 font-mono",
               cls,
             )}
             {...props}
@@ -662,27 +593,17 @@ export default function MarkdownTextRenderer({
       pre({ children: markdownChildren }) {
         const kids = Children.toArray(markdownChildren);
         const lone = kids.length === 1 ? kids[0] : null;
-        /** Highlighted fences render ``CodeBlock`` (block shell); skip invalid ``<pre><div>``. */
-        if (isRenderedCodeBlock(lone)) {
-          return <>{markdownChildren}</>;
-        }
         const fence = codeFenceFromPreChild(lone);
         if (fence) {
           return (
-            <CodeBlock
-              language={fence.language || "text"}
-              code={fence.code}
-              className="my-3"
-              highlight={highlightCode}
-              showLineNumbers={fence.code.includes("\n")}
-            />
+            <MarkdownCodeBlock language={fence.language} code={fence.code} />
           );
         }
         return (
           <pre
             className={cn(
               "my-3 overflow-x-auto rounded-lg border border-border/60 bg-muted/35",
-              "p-3 font-mono text-[0.8125rem] leading-snug text-foreground/90",
+              "p-3 font-mono text-code text-foreground/90",
               "whitespace-pre [overflow-wrap:normal]",
             )}
           >
@@ -707,9 +628,9 @@ export default function MarkdownTextRenderer({
             <a
               href={sessionHref}
               className="rounded-sm underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-              style={{ textDecorationColor: INLINE_TOKEN_HIGHLIGHT_COLOR }}
+              style={{ textDecorationColor: INLINE_REFERENCE_HIGHLIGHT_COLOR }}
             >
-              <InlineTokenHighlight color={INLINE_TOKEN_HIGHLIGHT_COLOR}>
+              <InlineTokenHighlight color={INLINE_REFERENCE_HIGHLIGHT_COLOR}>
                 {markdownChildren}
               </InlineTokenHighlight>
             </a>
@@ -722,7 +643,7 @@ export default function MarkdownTextRenderer({
         if (filePath) {
           const label = nodeText(markdownChildren).trim();
           return (
-            <FileReferenceChip
+            <AvailableFileReferenceChip
               path={label || filePath}
               tooltipPath={filePath}
               previewPath={filePath}
@@ -738,7 +659,7 @@ export default function MarkdownTextRenderer({
             href={href}
             target="_blank"
             rel="noreferrer noopener"
-            className="text-blue-500 underline underline-offset-2 hover:text-blue-600 dark:text-blue-300 dark:hover:text-blue-200"
+            className="text-content-link underline underline-offset-2 hover:text-content-link-hover"
             {...props}
           >
             {markdownChildren}
@@ -783,7 +704,7 @@ export default function MarkdownTextRenderer({
           >
             <table
               className={cn(
-                "w-full table-fixed border-collapse text-[13px] leading-5",
+                "w-full table-fixed border-collapse text-reading-small",
                 "[&_thead]:bg-muted/45 [&_thead]:text-muted-foreground",
                 "[&_th]:border-b [&_th]:border-border/65 [&_th]:px-3 [&_th]:py-2",
                 "[&_th]:text-left [&_th]:font-medium [&_th]:whitespace-normal",
@@ -821,7 +742,7 @@ export default function MarkdownTextRenderer({
             className={cn(
               itemClassName,
               taskItem
-                ? "flex min-w-0 items-start gap-2 text-[13px] leading-5 [&>p]:m-0"
+                ? "flex min-w-0 items-start gap-2 [&>p]:m-0"
                 : "[&>p]:inline",
             )}
           >
@@ -837,12 +758,12 @@ export default function MarkdownTextRenderer({
             data-testid="markdown-task-checkbox"
             data-task-checked={checked ? "true" : "false"}
             className={cn(
-              "mt-0.5 inline-grid h-4 w-4 shrink-0 place-items-center rounded-full",
+              "mt-[0.35em] inline-grid h-[1em] w-[1em] shrink-0 place-items-center rounded-full",
               "border border-dashed border-muted-foreground/55 bg-background text-background",
               checked && "border-solid border-emerald-500 bg-emerald-500 text-white",
             )}
           >
-            {checked ? <Check className="h-3 w-3 stroke-[3]" /> : null}
+            {checked ? <Check className="h-[0.75em] w-[0.75em] stroke-[3]" /> : null}
           </span>
         );
       },
@@ -868,7 +789,7 @@ export default function MarkdownTextRenderer({
       },
       summary({ children: markdownChildren }) {
         return (
-          <summary className="cursor-pointer select-none text-sm font-medium text-foreground/88 marker:text-muted-foreground">
+          <summary className="cursor-pointer select-none text-foreground/88 marker:text-muted-foreground">
             {markdownChildren}
           </summary>
         );
@@ -896,10 +817,11 @@ export default function MarkdownTextRenderer({
         );
       },
     }),
-    [highlightCode, onOpenFilePreview, documentPath, t],
+    [onOpenFilePreview, documentPath, t],
   );
 
   return (
+    <MarkdownCodeContext.Provider value={{ streaming, highlight: highlightCode }}>
     <Streamdown
       key={needsMath && mathPlugin ? "math" : "text"}
       mode={streaming || preserveStreamingLayout ? "streaming" : "static"}
@@ -914,21 +836,21 @@ export default function MarkdownTextRenderer({
       components={components}
       className={cn(
         "markdown-content prose max-w-none dark:prose-invert",
-        "prose-headings:mt-4 prose-headings:mb-2 prose-headings:font-semibold prose-headings:tracking-tight",
-        "prose-h1:text-lg prose-h2:text-base prose-h3:text-sm prose-h4:text-[13px]",
+        "prose-headings:mt-4 prose-headings:mb-2 prose-headings:tracking-tight",
         "prose-p:my-2",
         "prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5",
         "prose-blockquote:my-3 prose-blockquote:border-l-2 prose-blockquote:font-normal",
         "prose-blockquote:not-italic prose-blockquote:text-foreground/80",
-        "prose-a:text-blue-500 prose-a:underline-offset-2 hover:prose-a:text-blue-600 dark:prose-a:text-blue-300 dark:hover:prose-a:text-blue-200",
+        "prose-a:text-content-link prose-a:underline-offset-2 hover:prose-a:text-content-link-hover",
         "prose-hr:my-6",
         "prose-pre:my-0 prose-pre:bg-transparent prose-pre:p-0",
         "prose-code:before:content-none prose-code:after:content-none prose-code:font-normal",
         className,
       )}
     >
-      {/* Streamdown 2.5 ignores repair-option changes in its memo comparator. */}
+      {/* Repair follows generation, independently of the preserved layout mode. */}
       {streaming ? remend(children, REMEND_OPTIONS) : children}
     </Streamdown>
+    </MarkdownCodeContext.Provider>
   );
 }

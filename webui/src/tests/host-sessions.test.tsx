@@ -10,8 +10,8 @@ vi.mock("@/lib/remote-instances", async (original) => ({
   ...await original<typeof import("@/lib/remote-instances")>(), readRemoteInstances: mocks.read,
 }));
 const ids = Array.from({ length: 4 }, (_, i) => `3b968d52-081d-4898-9970-ff0a1fc9381${i}`);
-const connections: RemoteConnection[] = ids.map((id, i) => ({ id, name: `Server ${i}`, hostname: `host-${i}`,
-  gateway_id: `gateway-${i}`, url: `http://127.0.0.1:${24000 + i}/#/?bootstrapSecret=secret` }));
+const connections: RemoteConnection[] = ids.map((id, i) => ({ id, name: `Server ${i}`, host: `host-${i}`, hostname: `host-${i}`,
+  config_path: "/home/test/.nanobot/config.json", gateway_id: `gateway-${i}`, url: `http://127.0.0.1:${24000 + i}/#/?bootstrapSecret=secret` }));
 const directory = { available: true, profiles: connections.map((item) => ({ ...item, connected: true })) };
 const deferred = <T,>() => {
   let resolve!: (value: T) => void;
@@ -43,6 +43,19 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe("host session lifecycle", () => {
+  it("reveals only a loaded live view for notifications, without connecting", async () => {
+    const { result } = renderHook(useHostSessions);
+    await ready(result, 0);
+    await ready(result, 1);
+    mocks.request.mockClear();
+    act(() => { expect(result.current.reveal(ids[0])).toBe(true); });
+    expect(result.current.selected?.id).toBe(ids[0]);
+    act(() => { expect(result.current.reveal(ids[3])).toBe(false); });
+    mocks.read.mockResolvedValue({ ...directory, profiles: directory.profiles.map((p) => ({ ...p, connected: false })) });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    act(() => { expect(result.current.reveal(ids[1])).toBe(false); });
+    expect(mocks.request).not.toHaveBeenCalled();
+  });
   it("clears a failed reconnect only after that host's loaded view recovers", async () => {
     const { result } = renderHook(useHostSessions);
     await ready(result, 0);

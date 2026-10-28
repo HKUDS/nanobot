@@ -109,6 +109,33 @@ async def test_compaction_waits_for_active_sdk_turn_and_preserves_reply(
         provider.release_turn.set()
         result = await asyncio.wait_for(turn, timeout=5)
         assert result.content == "new reply"
+        if trigger == "scheduled_idle":
+            provider.release_summary.set()
+            await asyncio.wait_for(compaction, timeout=5)
+            snapshot = await bot.sessions.export(key)
+            assert snapshot is not None
+            assert ("assistant", "new reply") in [
+                (message["role"], message["content"]) for message in snapshot.messages
+            ]
+            assert "_last_summary" not in snapshot.metadata
+            assert provider.summary_messages == []
+            assert provider.summary_started.is_set() is False
+            assert key not in bot._loop.auto_compact._archiving
+
+            # Only the later, genuinely idle scan may summarize the fresh reply.
+            # sdk:other is idle by then too; this expectation concerns sdk:shared.
+            scheduled = []
+            with patch("nanobot.agent.autocompact.datetime") as clock:
+                clock.now.return_value = datetime.now() + timedelta(minutes=30)
+                clock.fromisoformat.side_effect = datetime.fromisoformat
+                await bot._loop.auto_compact.check_expired(
+                    scheduled.append, bot._loop.runtime_for_session,
+                    active_session_keys={"sdk:other"},
+                )
+                assert len(scheduled) == 1
+                compaction = asyncio.create_task(scheduled[0])
+                tasks.append(compaction)
+                await asyncio.wait_for(provider.summary_started.wait(), timeout=5)
         await asyncio.wait_for(provider.summary_started.wait(), timeout=5)
         provider.release_summary.set()
         compacted = await asyncio.wait_for(compaction, timeout=5)
@@ -137,16 +164,20 @@ async def test_sdk_turn_waits_for_running_idle_archive_and_uses_its_summary(bot)
     bot, provider = bot
     key = "sdk:shared"
     await seed_history(bot, key)
-    archive = asyncio.create_task(await schedule_idle_archive(bot))
     turn_attempted = asyncio.Event()
 
     async def run():
         turn_attempted.set()
         return await bot.run("new question", session_key=key)
 
-    tasks = [archive]
+    tasks = []
     try:
-        await asyncio.wait_for(provider.summary_started.wait(), timeout=5)
+        with patch("nanobot.agent.autocompact.datetime") as clock:
+            clock.now.return_value = datetime.now() + timedelta(minutes=30)
+            clock.fromisoformat.side_effect = datetime.fromisoformat
+            archive = asyncio.create_task(await schedule_idle_archive(bot))
+            tasks.append(archive)
+            await asyncio.wait_for(provider.summary_started.wait(), timeout=5)
         turn = asyncio.create_task(run())
         tasks.append(turn)
         await asyncio.wait_for(turn_attempted.wait(), timeout=5)

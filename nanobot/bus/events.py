@@ -22,6 +22,7 @@ RUNTIME_CONTROL_SESSION_DISCARD = "session_discard"
 
 # Transport-provided turn correlation; the persisted spelling is retained for clients.
 INBOUND_META_TURN_ID = "webui_turn_id"
+INBOUND_META_LOCAL_MEDIA = "local_media_paths"
 
 
 @dataclass

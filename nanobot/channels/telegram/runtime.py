@@ -35,6 +35,7 @@ from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import build_help_text
+from nanobot.config.network import NetworkConfig
 from nanobot.config.paths import get_media_dir
 from nanobot.config_base import Base
 from nanobot.events import ContextCompactionEvent
@@ -100,6 +101,22 @@ class _LivenessTrackedRequest(BaseRequest):
         return result
 
 
+_FENCE_OPEN_RE = re.compile(r'^[ \t]*(`{3,}|~{3,})(.*)$')
+_INLINE_FENCE_RE = re.compile(r'```(?:[^\n]*\n)?([\s\S]*?)```')
+
+
+def _opening_code_fence(line: str) -> str | None:
+    match = _FENCE_OPEN_RE.match(line)
+    if match and not (match.group(1)[0] == '`' and '`' in match.group(2)):
+        return match.group(1)
+    return None
+
+
+def _closes_code_fence(line: str, fence: str) -> bool:
+    closing = line.strip()
+    return len(closing) >= len(fence) and closing == fence[0] * len(closing)
+
+
 def _split_telegram_markdown(content: str, max_len: int) -> list[str]:
     """Split raw Telegram Markdown without leaving fenced code blocks unbalanced."""
     if not content:
@@ -116,13 +133,33 @@ def _split_telegram_markdown(content: str, max_len: int) -> list[str]:
             return content[fence_pos:]
         return content[fence_pos:line_end]
 
-    def split_inside_fenced_code_block(pos: int) -> tuple[bool, int, str]:
-        if content[:pos].count("```") % 2 == 0:
-            return False, -1, ""
-        opening = content.rfind("```", 0, pos)
-        if opening < 0:
-            return True, -1, "```"
-        return True, opening, fence_line(opening)
+    def split_inside_fenced_code_block(pos: int) -> tuple[int, str, str] | None:
+        fence = None
+        opening = -1
+        inline = False
+        offset = 0
+        for line in content[:pos].split("\n"):
+            if fence is not None and not inline:
+                if _closes_code_fence(line, fence):
+                    fence = None
+            else:
+                marker = _opening_code_fence(line) if fence is None else None
+                if marker is not None:
+                    fence = marker
+                    opening = offset
+                    inline = False
+                else:
+                    # Keep the legacy renderer's inline triple-backtick blocks.
+                    for match in re.finditer("```", line):
+                        if fence is None:
+                            fence = "```"
+                            opening = offset + match.start()
+                            inline = True
+                        else:
+                            fence = None
+                            inline = False
+            offset += len(line) + 1
+        return (opening, fence_line(opening), fence) if fence is not None else None
 
     chunks: list[str] = []
     while content:
@@ -137,12 +174,13 @@ def _split_telegram_markdown(content: str, max_len: int) -> list[str]:
         if pos <= 0:
             pos = max_len
 
-        inside_code, opening, fence = split_inside_fenced_code_block(pos)
-        if inside_code:
+        active_fence = split_inside_fenced_code_block(pos)
+        if active_fence is not None:
+            opening, fence, marker = active_fence
             if opening > 0:
                 pos = opening
             else:
-                closing = "\n```"
+                closing = "\n" + marker
                 min_code_pos = len(fence)
                 if content.startswith(fence + "\n"):
                     min_code_pos += 1
@@ -205,6 +243,35 @@ def _strip_md(s: str) -> str:
     return s.strip()
 
 
+def _replace_fenced_code(text: str, replace: Callable[[str], str]) -> str:
+    """Replace fenced code blocks with ``replace(code)``.
+
+    A block opens on a ``` or ~~~ line and closes on a line holding only a run
+    of the same character that is at least as long, so tilde fences work and a
+    ```` fence can show a ``` example. What remains (one-line ```code``` and
+    unclosed fences) keeps the previous regex handling.
+    """
+    lines = text.split('\n')
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        fence = _opening_code_fence(lines[i])
+        if fence is not None:
+            for j in range(i + 1, len(lines)):
+                if _closes_code_fence(lines[j], fence):
+                    out.append(replace(''.join(line + '\n' for line in lines[i + 1:j])))
+                    i = j + 1
+                    break
+            else:
+                out.append(lines[i])
+                i += 1
+            continue
+        out.append(lines[i])
+        i += 1
+    text = '\n'.join(out)
+    return _INLINE_FENCE_RE.sub(lambda m: replace(m.group(1)), text)
+
+
 def _strip_md_block(text: str) -> str:
     """Strip block-level and inline markdown for readable plain-text preview.
 
@@ -212,7 +279,7 @@ def _strip_md_block(text: str) -> str:
     markdown syntax while the response is still being generated.
     """
     # Code blocks -> just the code
-    text = re.sub(r'```(?:[^\n]*\n)?([\s\S]*?)```', r'\1', text)
+    text = _replace_fenced_code(text, lambda code: code)
     # Headers -> plain text
     text = re.sub(r'^#{1,6}\s+(.+)$', r'\1', text, flags=re.MULTILINE)
     # Blockquotes
@@ -274,11 +341,11 @@ def _markdown_to_telegram_html(text: str) -> str:
 
     # 1. Extract and protect code blocks (preserve content from other processing)
     code_blocks: list[str] = []
-    def save_code_block(m: re.Match[str]) -> str:
-        code_blocks.append(m.group(1))
+    def save_code_block(code: str) -> str:
+        code_blocks.append(code)
         return f"\x00CB{len(code_blocks) - 1}\x00"
 
-    text = re.sub(r'```(?:[^\n]*\n)?([\s\S]*?)```', save_code_block, text)
+    text = _replace_fenced_code(text, save_code_block)
 
     # 1.5. Convert markdown tables to box-drawing (reuse code_block placeholders)
     lines = text.split('\n')
@@ -418,7 +485,6 @@ class _QueuedTelegramUpdate:
 
     kind: Literal["command", "message"]
     update: Update
-    context: ContextTypes.DEFAULT_TYPE
     sort_key: tuple[int, int]
 
 
@@ -429,7 +495,7 @@ class TelegramConfig(Base):
     token: str = ""
     mode: Literal["polling", "webhook"] = "polling"
     allow_from: list[str] = Field(default_factory=list)
-    proxy: str | None = None
+    use_proxy: bool = False
     reply_to_message: bool = False
     react_emoji: str = "👀"
     group_policy: Literal["open", "mention"] = "mention"
@@ -522,6 +588,7 @@ class TelegramChannel(BaseChannel):
 
     name = "telegram"
     display_name = "Telegram"
+    uses_shared_proxy = True
 
     # Commands registered with Telegram's command menu
     BOT_COMMANDS: list[BotCommand] = [
@@ -557,11 +624,14 @@ class TelegramChannel(BaseChannel):
     def default_config(cls) -> dict[str, Any]:
         return TelegramConfig().model_dump(by_alias=True)
 
-    def __init__(self, config: Any, bus: MessageBus):
+    def __init__(
+        self, config: Any, bus: MessageBus, *, network: NetworkConfig | None = None,
+    ):
         if isinstance(config, dict):
             config = TelegramConfig.model_validate(config)
-        super().__init__(config, bus)
+        super().__init__(config, bus, network=network)
         self.config: TelegramConfig = config
+        self._proxy = self.network.resolve_proxy(self.config.use_proxy)
         self._app: TelegramApplication | None = None
         self._typing_tasks: dict[str, asyncio.Task[None]] = {}  # chat_id -> typing loop task
         self._media_group_buffers: dict[str, dict[str, Any]] = {}
@@ -669,9 +739,7 @@ class TelegramChannel(BaseChannel):
 
     async def _start_app(self) -> None:
         """Build, initialize and start the Telegram application."""
-        proxy = self.config.proxy or None
-        if proxy and "://" not in proxy:
-            proxy = f"http://{proxy}"
+        proxy = self._proxy
 
         # Separate pools so long-polling (getUpdates) never starves outbound sends.
         api_request = HTTPXRequest(
@@ -871,7 +939,8 @@ class TelegramChannel(BaseChannel):
     @staticmethod
     def _get_media_type(path: str) -> str:
         """Guess media type from file extension."""
-        ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+        filename = urlparse(path).path if path.startswith(("http://", "https://")) else path
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         if ext in ("jpg", "jpeg", "png", "gif", "webp"):
             return "photo"
         if ext in ("mp4", "mov", "avi", "mkv", "webm", "3gp"):
@@ -1867,7 +1936,6 @@ class TelegramChannel(BaseChannel):
         *,
         kind: Literal["command", "message"],
         update: Update,
-        context: ContextTypes.DEFAULT_TYPE,
     ) -> None:
         """Stage a Telegram update behind a short per-session reorder window."""
         message = update.message
@@ -1878,7 +1946,6 @@ class TelegramChannel(BaseChannel):
             _QueuedTelegramUpdate(
                 kind=kind,
                 update=update,
-                context=context,
                 sort_key=self._sort_key_for_update(update),
             )
         )
@@ -1900,9 +1967,9 @@ class TelegramChannel(BaseChannel):
                 for item in batch:
                     try:
                         if item.kind == "command":
-                            await self._process_forward_command(item.update, item.context)
+                            await self._process_forward_command(item.update)
                         else:
-                            await self._process_message_update(item.update, item.context)
+                            await self._process_message_update(item.update)
                     except Exception as e:
                         self.logger.warning(
                             "Telegram queued update handling failed for {}: {}",
@@ -1924,11 +1991,11 @@ class TelegramChannel(BaseChannel):
         if not update.message or not update.effective_user:
             return
         if not self._running:
-            await self._process_forward_command(update, context)
+            await self._process_forward_command(update)
             return
-        self._enqueue_ordered_update(kind="command", update=update, context=context)
+        self._enqueue_ordered_update(kind="command", update=update)
 
-    async def _process_forward_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def _process_forward_command(self, update: Update) -> None:
         """Process a queued slash command."""
         message = update.message
         user = update.effective_user
@@ -1961,11 +2028,11 @@ class TelegramChannel(BaseChannel):
         if not update.message or not update.effective_user:
             return
         if not self._running:
-            await self._process_message_update(update, context)
+            await self._process_message_update(update)
             return
-        self._enqueue_ordered_update(kind="message", update=update, context=context)
+        self._enqueue_ordered_update(kind="message", update=update)
 
-    async def _process_message_update(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def _process_message_update(self, update: Update) -> None:
         """Process a queued Telegram message update."""
 
         message = update.message

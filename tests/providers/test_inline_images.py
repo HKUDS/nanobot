@@ -269,7 +269,7 @@ async def test_text_only_model_keeps_its_image_policy(image_peer, image_blocks, 
     url, requests, _ = image_peer
     provider = OpenAICompatProvider(
         api_key="fixture", api_base=f"{url}/v1", spec=find_by_name("deepseek"),
-        default_model="deepseek-v4-flash", extra_body={"tools": []},
+        default_model="deepseek-v4-pro", extra_body={"tools": []},
     )
     try:
         result = await (provider.chat_stream if streaming else provider.chat)(_messages(image_blocks))

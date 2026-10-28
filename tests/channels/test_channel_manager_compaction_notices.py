@@ -104,7 +104,7 @@ async def test_dispatch_forwards_all_compaction_phases_before_adapter_filtering(
 def test_global_notice_policy_and_channel_override(manager, global_value, override, key):
     manager.config.channels.show_compaction_notices = global_value
     section = {} if override is None else {key: override}
-    channel = manager._build_channel("mock", _MockChannel, section)
+    channel = manager._build_channel(_MockChannel, section)
     assert channel.show_compaction_notices is (global_value if override is None else override)
 
 
@@ -112,10 +112,10 @@ def test_global_notice_config_round_trip_and_rebuild(manager):
     assert Config().channels.show_compaction_notices is False
     manager.config = Config.model_validate({"channels": {"showCompactionNotices": True}})
     manager.config = Config.model_validate_json(manager.config.model_dump_json(by_alias=True))
-    assert manager._build_channel("mock", _MockChannel, {}).show_compaction_notices is True
+    assert manager._build_channel(_MockChannel, {}).show_compaction_notices is True
     # Rebuilding an adapter after a config change must resolve the new default.
     manager.config.channels.show_compaction_notices = False
-    assert manager._build_channel("mock", _MockChannel, {}).show_compaction_notices is False
+    assert manager._build_channel(_MockChannel, {}).show_compaction_notices is False
     assert manager._build_channel(
-        "mock", _MockChannel, {"showCompactionNotices": True},
+        _MockChannel, {"showCompactionNotices": True},
     ).show_compaction_notices

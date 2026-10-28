@@ -62,7 +62,7 @@ describe("RecoveryNotice", () => {
     expect(notice).toHaveAttribute("data-recovery-status", "awaiting_user");
     expect(notice).toHaveAttribute("aria-live", "assertive");
     expect(notice).toHaveClass(
-      "max-w-[49.5rem]",
+      "thread-composer-notice",
       "rounded-control",
       "animate-in",
       "fade-in-0",
@@ -136,4 +136,50 @@ describe("RecoveryNotice", () => {
     expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
   });
+
+  it("shows model authorization recovery after loading saved state", () => {
+    const onOpenSettings = vi.fn();
+    render(
+      <RecoveryNotice
+        state={{ ...INTERRUPTED, reason: "model_request_failed", failure_error_kind: "authentication" }}
+        onContinue={vi.fn().mockResolvedValue(undefined)}
+        onDismiss={vi.fn().mockResolvedValue(undefined)}
+        onOpenSettings={onOpenSettings}
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("Model provider authorization failed");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("Task interrupted");
+    fireEvent.click(screen.getByRole("button", { name: "Open model settings" }));
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
+  });
+});
+
+
+it("shows a saved reply without treating the failed request as completed", async () => {
+  const onContinue = vi.fn().mockResolvedValue(undefined);
+  const onDismiss = vi.fn().mockResolvedValue(undefined);
+  const { rerender } = render(
+    <RecoveryNotice
+      state={{ ...INTERRUPTED, reason: "model_request_failed", failure_error_kind: "connection", reply_preserved: true }}
+      onContinue={onContinue}
+      onDismiss={onDismiss}
+    />,
+  );
+
+  expect(screen.getByRole("alert")).toHaveTextContent("Model connection failed");
+  expect(screen.getByRole("alert")).toHaveTextContent("Reply saved. You can continue.");
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  expect(onContinue).toHaveBeenCalledOnce();
+
+  rerender(
+    <RecoveryNotice
+      state={{ ...INTERRUPTED, recovery_id: "no-output", reason: "model_request_failed", failure_error_kind: "connection" }}
+      onContinue={onContinue}
+      onDismiss={onDismiss}
+    />,
+  );
+  expect(screen.getByRole("alert")).toHaveTextContent("Model connection failed");
+  expect(screen.getByRole("alert")).toHaveTextContent("Try again later or choose another model.");
 });

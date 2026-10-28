@@ -28,7 +28,8 @@
         "choices": {
           "mention": "メンションのみ",
           "open": "全メッセージ",
-          "allowlist": "許可リスト"
+          "allowlist": "許可リスト",
+          "listen": "リッスン（メンションで返信）"
         }
       },
       "groupPolicyOverrides": {
@@ -77,9 +78,8 @@
           "false": "オフ"
         }
       },
-      "proxy": {
-        "label": "ネットワークプロキシ",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "プロキシを使う"
       }
     }
   }

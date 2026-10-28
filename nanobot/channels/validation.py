@@ -74,6 +74,7 @@ def validate_channel_config(
     if setup_spec is not None and setup_spec.validator is not None:
         context = ChannelValidationContext(
             allow_local_service_access=config.tools.webui_allow_local_service_access,
+            network=config.network,
         )
         custom_payload = setup_spec.validator(values, context)
         if cast(object, custom_payload) is not None:
@@ -321,6 +322,11 @@ def _enabled(values: dict[str, Any]) -> bool:
     return _truthy(values.get("enabled"))
 
 
+def resolve_proxy(values: dict[str, Any], context: ChannelValidationContext) -> str | None:
+    """Resolve a channel's opt-in against the host's shared network settings."""
+    return context.network.resolve_proxy(_truthy(channel_field_value(values, "useProxy")))
+
+
 def _label(field: str) -> str:
     words = re.sub(r"([a-z])([A-Z])", r"\1 \2", field).replace(".", " ").replace("_", " ")
     return words[:1].upper() + words[1:]
@@ -424,6 +430,7 @@ __all__ = [
     "payload",
     "probe_tcp",
     "required_checks",
+    "resolve_proxy",
     "status_from_checks",
     "string_value",
     "truthy",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -9,6 +10,7 @@ from typing import Any
 import pytest
 
 from nanobot.channels.whatsapp.connect import WhatsAppConnectStore
+from nanobot.config.schema import Config
 
 
 class _FakeClient:
@@ -41,7 +43,8 @@ class _FakeClient:
                 await self.native_stop.wait()
                 self.native_released = True
             return
-        await asyncio.Event().wait()
+        await self.native_stop.wait()
+        self.native_released = True
 
     async def stop(self) -> None:
         if self.stop_gate is not None:
@@ -107,6 +110,7 @@ async def test_whatsapp_connect_commits_new_session_after_scan(
     assert completed["status"] == "succeeded"
     assert target.read_bytes() == b"new-session"
     assert channel.client.stopped is True
+    assert store.has_pending_work is False
 
 
 @pytest.mark.asyncio
@@ -121,6 +125,7 @@ async def test_whatsapp_connect_cancel_preserves_existing_session(
     monkeypatch.setattr(store, "_build_channel", lambda: (channel, target))
 
     started = await store.start(force=True)
+    assert store.has_pending_work is True
     pending_path = Path(channel.config.database_path)
     pending_path.write_bytes(b"partial-session")
     cancelled = await store.cancel(started["session_id"])
@@ -129,6 +134,7 @@ async def test_whatsapp_connect_cancel_preserves_existing_session(
     assert target.read_bytes() == b"working-session"
     assert not pending_path.exists()
     assert channel.client.stopped is True
+    assert store.has_pending_work is False
 
 
 @pytest.mark.asyncio
@@ -147,6 +153,7 @@ async def test_whatsapp_connect_clears_qr_while_finishing_login(
 
     assert finishing["status"] == "pending"
     assert finishing["qr_url"] == ""
+    assert store.has_pending_work is True
 
     stop_gate.set()
     await asyncio.sleep(0)
@@ -224,3 +231,147 @@ async def test_whatsapp_connect_store_closes_pending_login(
     assert started["status"] == "pending"
     assert not pending_path.exists()
     assert channel.client.stopped is True
+    assert store.has_pending_work is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["cancel", "finalize"])
+async def test_native_thread_timeout_keeps_database_and_can_retry_cleanup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, action: str,
+) -> None:
+    """A cancelled asyncio wrapper cannot prove a native SQLite writer stopped."""
+    target = tmp_path / "neonize.db"
+    target.write_bytes(b"working-session")
+    native_entered, native_release, native_exited = (
+        threading.Event(), threading.Event(), threading.Event(),
+    )
+    channel = _FakeChannel(complete=action == "finalize", linger_until_stopped=True)
+    store = WhatsAppConnectStore()
+    monkeypatch.setattr(store, "_build_channel", lambda: (channel, target))
+    monkeypatch.setattr("nanobot.channels.whatsapp.connect._NATIVE_STOP_TIMEOUT_SECONDS", 0.03)
+
+    def native_writer() -> None:
+        native_entered.set()
+        assert native_release.wait(3)
+        native_exited.set()
+
+    async def connect() -> None:
+        await channel.client.qr_handler(b"whatsapp-qr-payload")
+        Path(channel.config.database_path).write_bytes(b"new-session")
+        if channel.client.complete:
+            channel.client.result.set_result(None)
+        await asyncio.to_thread(native_writer)
+
+    monkeypatch.setattr(channel.client, "connect", connect)
+    started = await store.start(force=True)
+    pending = Path(channel.config.database_path)
+    try:
+        assert await asyncio.to_thread(native_entered.wait, 1)
+        if action == "cancel":
+            with pytest.raises(RuntimeError, match="still stopping"):
+                await store.cancel(started["session_id"])
+        else:
+            result = await store.poll(started["session_id"])
+            assert result["status"] == "failed"
+            assert "still stopping" in result["message"]
+        assert store.has_pending_work is True
+        assert channel.client.connect_task is not None
+        assert not channel.client.connect_task.done()
+        assert not native_exited.is_set()
+        assert pending.read_bytes() == b"new-session"
+        assert target.read_bytes() == b"working-session"
+    finally:
+        native_release.set()
+        await store.cancel(started["session_id"])
+    assert native_exited.is_set()
+    assert store.has_pending_work is False
+    assert not pending.exists()
+    assert target.read_bytes() == b"working-session"
+
+
+@pytest.mark.asyncio
+async def test_cancelling_cleanup_waiter_keeps_owned_shutdown(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    target = tmp_path / "neonize.db"
+    stop_gate = asyncio.Event()
+    channel = _FakeChannel(complete=False, stop_gate=stop_gate)
+    store = WhatsAppConnectStore()
+    monkeypatch.setattr(store, "_build_channel", lambda: (channel, target))
+    started = await store.start(force=True)
+    pending = Path(channel.config.database_path)
+    pending.write_bytes(b"partial-session")
+    waiter = asyncio.create_task(store.cancel(started["session_id"]))
+    await asyncio.sleep(0)
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+    assert store.has_pending_work is True
+    assert pending.exists()
+    stop_gate.set()
+    await store.close()
+    assert store.has_pending_work is False
+    assert channel.client.native_released is True
+    assert not pending.exists()
+
+
+@pytest.mark.asyncio
+async def test_abandoned_login_expires_without_another_browser_poll(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    target = tmp_path / "neonize.db"
+    channel = _FakeChannel(complete=False)
+    store = WhatsAppConnectStore()
+    monkeypatch.setattr(store, "_build_channel", lambda: (channel, target))
+    monkeypatch.setattr("nanobot.channels.whatsapp.connect._CONNECT_TTL_SECONDS", 0.02)
+    started = await store.start(force=True)
+    session = store._sessions[started["session_id"]]
+    try:
+        await asyncio.wait_for(channel.client.native_stop.wait(), timeout=1)
+        assert session.discard_task is not None
+        await asyncio.wait_for(asyncio.shield(session.discard_task), timeout=1)
+        assert store.has_pending_work is False
+        assert channel.client.native_released is True
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_finalize_does_not_promote_login_database(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    target = tmp_path / "neonize.db"
+    target.write_bytes(b"working-session")
+    stop_gate = asyncio.Event()
+    channel = _FakeChannel(complete=True, stop_gate=stop_gate)
+    store = WhatsAppConnectStore()
+    monkeypatch.setattr(store, "_build_channel", lambda: (channel, target))
+    started = await store.start(force=True)
+    assert (await store.poll(started["session_id"]))["status"] == "pending"
+    cancelling = asyncio.create_task(store.cancel(started["session_id"]))
+    await asyncio.sleep(0)
+    polling = asyncio.create_task(store.poll(started["session_id"]))
+    try:
+        assert store.has_pending_work is True
+    finally:
+        stop_gate.set()
+        cancelled, polled = await asyncio.gather(cancelling, polling)
+    assert cancelled["status"] == polled["status"] == "cancelled"
+    assert target.read_bytes() == b"working-session"
+    assert not Path(channel.config.database_path).exists()
+    assert store.has_pending_work is False
+
+
+def test_connect_builds_channel_with_shared_network_settings(monkeypatch, tmp_path) -> None:
+    database = tmp_path / "neonize.db"
+    config = Config.model_validate({
+        "network": {"proxy": "http://127.0.0.1:7890"},
+        "channels": {"whatsapp": {"useProxy": True, "databasePath": str(database)}},
+    })
+    monkeypatch.setattr("nanobot.channels.whatsapp.connect.load_config", lambda: config)
+
+    channel, target = WhatsAppConnectStore._build_channel()
+
+    assert channel.network is config.network
+    assert channel.config.use_proxy is True
+    assert target == database

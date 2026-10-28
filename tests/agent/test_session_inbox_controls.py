@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agent.session_helpers import run_session
+from agent.session_helpers import run_session, stop_loop
 from nanobot.agent.automation_turns import AutomationTurnError
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import current_request_context
@@ -704,5 +704,4 @@ async def test_queued_continuation_keeps_its_origin_after_another_chat_runs(loop
                 replies.append((reply.chat_id, reply.metadata.get("message_id")))
         assert replies == [("chat-a", "message-a")]
     finally:
-        loop.stop()
-        await asyncio.wait_for(worker, timeout=3)
+        await stop_loop(loop, worker, timeout=3)

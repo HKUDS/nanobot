@@ -124,7 +124,6 @@ def _vite_command(runner: str, vite_cli: Path) -> list[str]:
 def start_webui_dev_server(
     *,
     target_url: str,
-    browser_url: str,
     source_dir: Path | None = None,
     runner: str | None = None,
     environ: Mapping[str, str] | None = None,
@@ -190,13 +189,11 @@ def start_webui_dev_server(
 def run_webui_dev_server(
     *,
     target_url: str,
-    browser_url: str,
     output: Callable[[str], None] | None = None,
 ) -> Generator[WebUIDevServer, None, None]:
     """Run a Vite sidecar for the duration of a foreground WebUI command."""
     server = start_webui_dev_server(
         target_url=target_url,
-        browser_url=browser_url,
         output=output,
     )
     try:

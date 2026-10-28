@@ -41,6 +41,7 @@ from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import LLMProvider, LLMUsage
 from nanobot.providers.fallback_provider import FallbackModelObserver, FallbackModelSelection
 from nanobot.runtime_context import public_history_message
+from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
@@ -531,6 +532,25 @@ class WebuiTurnRoutePolicy:
 
         return routed
 
+    async def admit(self, route: TurnRoute, session_key: str, generation: str | None) -> TurnRoute:
+        """Bind replies to the display destination's admitted lifetime."""
+        if route.channel != "websocket":
+            return route
+        target_key = webui_session_key(route.chat_id)
+        metadata = dict(route.metadata)
+        if target_key == session_key and generation is not None:
+            metadata.setdefault(HISTORY_GENERATION_METADATA_KEY, generation)
+            return replace(route, metadata=metadata)
+        revision = await self.sessions.state.project_history(target_key, lambda history: history.revision)
+        if revision is None:
+            raise SessionConflictError("display destination is no longer active")
+        admitted = metadata.get(HISTORY_GENERATION_METADATA_KEY)
+        # A distinct alias admitted by the WebSocket edge must still be current.
+        if admitted not in (None, generation, revision[0]):
+            raise SessionConflictError("display destination generation was replaced")
+        metadata[HISTORY_GENERATION_METADATA_KEY] = revision[0]
+        return replace(route, metadata=metadata)
+
 
 def build_webui_fallback_model_observer(bus: MessageBus) -> FallbackModelObserver:
     """Translate provider fallback choices into chat-scoped WebUI events."""
@@ -630,6 +650,7 @@ class WebuiTurnCoordinator:
             content="",
             metadata=dict(ctx.metadata or {}),
             session_key_override=ctx.session_key,
+            session_generation=ctx.session_generation,
         )
 
     @staticmethod
@@ -657,17 +678,19 @@ class WebuiTurnCoordinator:
             return
         public_metadata = _session_message_public_metadata(envelope)
         try:
-            append_session_message_input(
+            await append_session_message_input(
                 session_key,
+                sessions=self.sessions,
                 content=event.content,
                 created_at_ms=envelope["created_at_ms"],
                 session_message=public_metadata,
             )
-        except (OSError, TypeError, ValueError):
+        except (OSError, TypeError, ValueError, SessionConflictError):
             logger.opt(exception=True).warning(
                 "Failed to persist session input {}",
                 envelope["message_id"],
             )
+            return
         await self.bus.publish_outbound(outbound_message_for_event(
             channel="websocket",
             chat_id=session_key.split(":", 1)[1],
@@ -733,7 +756,11 @@ class WebuiTurnCoordinator:
             failure_attempts=event.failure_attempts,
         )
         if self.recovery is not None:
-            await self.recovery.turn_completed(event.context.session_key)
+            await self.recovery.turn_completed(
+                event.context.session_key,
+                failure_kind=event.failure_kind,
+                failure_error_kind=event.failure_error_kind,
+            )
         if event.outcome == "completed" and is_webui_session_key(event.context.session_key):
             turn_id = event.context.metadata.get(WEBUI_TURN_METADATA_KEY)
             if isinstance(turn_id, str) and turn_id:
@@ -795,7 +822,7 @@ class WebuiTurnCoordinator:
         if msg.channel != "websocket":
             return
 
-        session = await self.sessions.state.get(session_key)
+        session = await self.sessions.state.get_header(session_key)
         await self.bus.publish_outbound(
             outbound_message_for_event(
                 channel=msg.channel,

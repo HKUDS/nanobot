@@ -24,6 +24,8 @@ import type {
   ToolProgressEvent,
 } from "../client"
 import { renderLatexAsUnicode } from "./latex"
+import { TranscriptDiagrams } from "./mermaid/controller"
+import type { DiagramInput } from "./mermaid/types"
 import { hideScrollbars } from "./scrollbox"
 import { mergeToolEvent, renderToolEvent } from "./tool-renderers"
 
@@ -35,6 +37,7 @@ export interface TranscriptTheme {
   userBackground: ColorInput | null
   border: ColorInput
   syntax: SyntaxStyle
+  diagramColors: DiagramInput["colors"]
 }
 
 export interface TranscriptHeader {
@@ -108,6 +111,8 @@ function projectUserMessage(media: readonly UserMessageMedia[]): UserMessageProj
 /** Projects gateway events into retained, reflowable conversation cells. */
 export class Transcript {
   readonly root: ScrollBoxRenderable
+  readonly diagrams: TranscriptDiagrams
+  private readonly diagramStates = new WeakMap<MarkdownRenderable, { settled: boolean }>()
   private live: { row: BoxRenderable; markdown: MarkdownRenderable; content: string } | null = null
   private activity: Activity | null = null
   private readonly styledText: Array<{
@@ -168,11 +173,13 @@ export class Transcript {
       onMouseScroll: () => this.scheduleNavigationUpdate(),
     })
     hideScrollbars(this.root)
+    this.diagrams = new TranscriptDiagrams(renderer, this.root, theme.diagramColors)
   }
 
   setTheme(theme: TranscriptTheme): void {
     const previousSyntax = this.theme.syntax
     this.theme = theme
+    this.diagrams.setTheme(theme.diagramColors)
     this.codeRailColor = parseColor(theme.border)
     for (const { renderable, tone } of this.styledText) renderable.fg = theme[tone]
     for (const { text, phase } of this.compactions.values()) {
@@ -222,6 +229,7 @@ export class Transcript {
   }
 
   reset(header: TranscriptHeader): void {
+    this.diagrams.reset()
     if (this.navigationTimer) clearTimeout(this.navigationTimer)
     this.navigationTimer = null
     this.clearStreamTimer()
@@ -254,7 +262,7 @@ export class Transcript {
       else if (message.role === "user") {
         this.user(message.content, message.turnId, message.media)
       }
-      else if (message.role === "assistant") this.assistant(message.content)
+      else if (message.role === "assistant") this.assistant(message.content, message.renderAs)
       else if (message.fileEdits?.length) this.fileEdits(message.fileEdits)
       else this.progress(message.content, message.toolEvents)
     }
@@ -274,7 +282,7 @@ export class Transcript {
         this.writeUser(message.content, message.media, index++)
         if (message.turnId) this.userTurnIds.add(message.turnId)
       } else if (message.role === "assistant") {
-        this.writeMarkdown(message.content, false, index++)
+        this.writeAnswer(message.content, message.renderAs, index++)
       } else {
         const activity = this.createActivity(index++)
         const events: ToolProgressEvent[] = message.fileEdits?.length
@@ -311,11 +319,11 @@ export class Transcript {
     return true
   }
 
-  assistant(content: string): void {
-    if (!content.trim()) return
+  assistant(content: string, renderAs?: "text"): void {
+    if (!(renderAs === "text" ? content : content.trim())) return
     this.noteOutput()
     this.finishActivity()
-    this.writeMarkdown(content, false)
+    this.writeAnswer(content, renderAs)
   }
 
   notice(content: string, error = false): void {
@@ -381,6 +389,9 @@ export class Transcript {
       // anchors and avoids the one-frame jump caused by replacing the row.
       this.live.markdown.content = renderLatexAsUnicode(content)
       this.live.markdown.streaming = false
+      const state = this.diagramStates.get(this.live.markdown)
+      if (state) state.settled = true
+      this.live.markdown.requestRender()
       this.live = null
     } else if (fallback.trim()) {
       this.assistant(fallback)
@@ -437,6 +448,7 @@ export class Transcript {
   }
 
   destroy(): void {
+    this.diagrams.destroy()
     if (this.navigationTimer) clearTimeout(this.navigationTimer)
     this.clearStreamTimer()
     this.pendingStream = ""
@@ -709,6 +721,7 @@ export class Transcript {
   }
 
   private createMarkdown(content: string, streaming: boolean, id = "markdown"): MarkdownRenderable {
+    const state = { settled: !streaming }
     const markdown = new MarkdownRenderable(this.renderer, {
       id: this.id(id),
       content: renderLatexAsUnicode(content),
@@ -724,7 +737,11 @@ export class Transcript {
         if (token.type !== "code") return undefined
         const code = context.defaultRender()
         if (!(code instanceof CodeRenderable)) return code
-        return this.decorateCodeBlock(code)
+        this.decorateCodeBlock(code)
+        if (token.lang?.trim().toLowerCase() === "mermaid") {
+          return this.diagrams.create(token.text, code, state, this.id("mermaid"))
+        }
+        return code
       },
       tableOptions: {
         style: "columns",
@@ -735,20 +752,30 @@ export class Transcript {
       treeSitterClient: this.treeSitterClient,
     })
     this.markdown.add(markdown)
+    this.diagramStates.set(markdown, state)
     return markdown
   }
 
-  private writeMarkdown(content: string, streaming: boolean, index?: number): void {
-    this.writeAssistant(this.createMarkdown(content, streaming), index)
+  private writeAnswer(content: string, renderAs?: "text", index?: number): void {
+    if (renderAs !== "text") {
+      this.writeAssistant(this.createMarkdown(content, false), index)
+      return
+    }
+    const text = this.createText(content, "text", false, "assistant-text")
+    text.width = "auto"
+    text.minWidth = 0
+    text.flexGrow = 1
+    text.flexShrink = 1
+    this.writeAssistant(text, index)
   }
 
-  private writeAssistant(markdown: MarkdownRenderable, index?: number): BoxRenderable {
+  private writeAssistant(content: MarkdownRenderable | TextRenderable, index?: number): BoxRenderable {
     const row = this.createRow("assistant", "row")
     const prefix = this.createText("•", "muted", false, "role-marker")
     prefix.width = 2
     prefix.flexShrink = 0
     row.add(prefix)
-    row.add(markdown)
+    row.add(content)
     this.root.add(row, index)
     this.wrote = true
     return row

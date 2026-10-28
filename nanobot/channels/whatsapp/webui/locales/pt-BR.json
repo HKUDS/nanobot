@@ -16,9 +16,8 @@
           "allowlist": "Lista de permissão"
         }
       },
-      "proxy": {
-        "label": "Proxy de rede",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "Usar proxy"
       }
     }
   },

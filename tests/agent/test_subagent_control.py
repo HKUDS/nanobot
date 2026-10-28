@@ -185,6 +185,9 @@ async def test_default_loop_keeps_slack_thread_for_late_subagent_result(
     tmp_path, monkeypatch, cache_invalidation,
 ):
     monkeypatch.setattr("nanobot.agent.loop._SUBAGENT_TERMINAL_WAIT_SECONDS", 0.01)
+    # This checks real default-runtime routing and persistence, not disk latency.
+    # Keep bounded waits without treating a loaded Windows runner as a routing failure.
+    timeout = 30
     child_started, release_child, parent_idle = (asyncio.Event() for _ in range(3))
 
     class Provider(LLMProvider):
@@ -229,7 +232,7 @@ async def test_default_loop_keeps_slack_thread_for_late_subagent_result(
     unsubscribe = bus.subscribe(observe_idle, TurnRunStatusChanged)
 
     async def next_reply(content):
-        async with asyncio.timeout(5):
+        async with asyncio.timeout(timeout):
             while True:
                 message = await bus.consume_outbound()
                 if message.content == content and message.event is None:
@@ -242,8 +245,8 @@ async def test_default_loop_keeps_slack_thread_for_late_subagent_result(
             metadata={"slack": slack_route}, session_key_override=session_key,
         ))
         initial_reply = await next_reply("Parent reply")
-        await asyncio.wait_for(child_started.wait(), timeout=5)
-        await asyncio.wait_for(parent_idle.wait(), timeout=5)
+        await asyncio.wait_for(child_started.wait(), timeout=timeout)
+        await asyncio.wait_for(parent_idle.wait(), timeout=timeout)
         saved = SessionManager(workspace, sessions_root=sessions_root).get_existing(session_key)
         assert saved is not None
         saved_route = saved.metadata["_compaction_route"]
@@ -263,8 +266,10 @@ async def test_default_loop_keeps_slack_thread_for_late_subagent_result(
     finally:
         release_child.set()
         loop.stop()
-        await asyncio.wait_for(consumer, timeout=2)
-        unsubscribe()
+        try:
+            await asyncio.wait_for(consumer, timeout=timeout)
+        finally:
+            unsubscribe()
 
 
 @pytest.mark.asyncio

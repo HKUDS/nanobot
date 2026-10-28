@@ -1455,9 +1455,31 @@ def test_minimax_reasoning_split_enabled_with_reasoning_effort() -> None:
     assert kw["extra_body"] == {"reasoning_split": True}
 
 
-def test_minimax_reasoning_split_disabled_for_minimal() -> None:
-    kw = _build_kwargs_for("minimax", "MiniMax-M2.7", reasoning_effort="minimal")
-    assert kw["extra_body"] == {"reasoning_split": False}
+@pytest.mark.parametrize("model", ["MiniMax-M2.7", "MiniMax-M3.1-Flash"])
+@pytest.mark.parametrize("effort", ["none", "minimal"])
+def test_minimax_off_presets_map_to_low_effort(model, effort) -> None:
+    # MiniMax-M3.1-Flash returns HTTP 400 for reasoning_split=false.
+    kw = _build_kwargs_for("minimax", model, reasoning_effort=effort)
+    assert kw["reasoning_effort"] == "low"
+    assert kw["extra_body"] == {"reasoning_split": True}
+
+
+@pytest.mark.parametrize("model", ["MiniMax-M2.7", "MiniMax-M3"])
+def test_minimax_effort_menu_unchanged_for_models_without_metadata(model) -> None:
+    from nanobot.webui.settings_models import reasoning_effort_values_for
+
+    assert reasoning_effort_values_for("minimax", model) == ["", "low", "medium", "high"]
+
+
+def test_minimax_m31_flash_builtin_metadata() -> None:
+    from nanobot.providers.registry import find_by_name
+
+    meta = find_by_name("minimax").model_metadata("MiniMax-M3.1-Flash")
+    assert meta is not None
+    assert meta.context_window == 1_000_000
+    assert meta.reasoning_efforts == ("low", "medium", "high", "xhigh", "max")
+    assert meta.default_reasoning_effort == "max"
+    assert meta.input_modalities == ("text", "image")
 
 
 def test_volcengine_thinking_enabled() -> None:
@@ -1700,6 +1722,7 @@ def test_deepseek_coerces_list_content_to_string() -> None:
 
 @pytest.mark.parametrize("model", [
     "deepseek-flash",
+    "deepseek-v4-flash",
     "deepseek-v4-flash-vision-exp",
 ])
 @pytest.mark.parametrize("prefixed", [False, True])
@@ -1741,6 +1764,28 @@ def test_deepseek_vision_preserves_multimodal_content(
         assert kw["input"] == [{"role": "user", "content": expected}]
     else:
         assert kw["messages"][0]["content"] == content
+
+
+@pytest.mark.parametrize("responses", [False, True])
+def test_deepseek_pro_remains_text_only(responses: bool) -> None:
+    provider = OpenAICompatProvider(
+        api_key="k", default_model="deepseek-v4-pro", spec=find_by_name("deepseek"),
+    )
+    build_request = provider._build_responses_body if responses else provider._build_kwargs
+    body = build_request(
+        messages=[{"role": "user", "content": [
+            {"type": "text", "text": "describe the image"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA=="}},
+        ]}],
+        tools=None, model="deepseek-v4-pro", max_tokens=1024,
+        temperature=0.7, reasoning_effort=None, tool_choice=None,
+    )
+    if responses:
+        assert body["input"] == [{
+            "role": "user", "content": [{"type": "input_text", "text": "describe the image"}],
+        }]
+    else:
+        assert body["messages"] == [{"role": "user", "content": "describe the image"}]
 
 
 def test_non_deepseek_keeps_list_content() -> None:
@@ -1816,9 +1861,14 @@ def test_provider_thinking_type_mapping(provider_name, model, effort, thinking_t
     assert "reasoning_effort" not in kw
 
 
-def test_kimi_k3_uses_native_defaults() -> None:
+@pytest.fixture(params=["kimi-k3", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"])
+def kimi_k3_model(request: pytest.FixtureRequest) -> str:
+    return request.param
+
+
+def test_kimi_k3_uses_native_defaults(kimi_k3_model: str) -> None:
     """K3 omits fixed sampling params and uses the non-deprecated token limit field."""
-    kw = _build_kwargs_for("moonshot", "kimi-k3", reasoning_effort=None)
+    kw = _build_kwargs_for("moonshot", kimi_k3_model, reasoning_effort=None)
 
     assert "temperature" not in kw
     assert "max_tokens" not in kw
@@ -1828,27 +1878,27 @@ def test_kimi_k3_uses_native_defaults() -> None:
 
 
 @pytest.mark.parametrize("effort", ["low", "high", "max"])
-def test_kimi_k3_preserves_supported_reasoning_effort(effort: str) -> None:
+def test_kimi_k3_preserves_supported_reasoning_effort(kimi_k3_model: str, effort: str) -> None:
     """K3 uses top-level reasoning_effort, never the K2.x thinking body."""
-    kw = _build_kwargs_for("moonshot", "kimi-k3", reasoning_effort=effort)
+    kw = _build_kwargs_for("moonshot", kimi_k3_model, reasoning_effort=effort)
 
     assert kw["reasoning_effort"] == effort
     assert "temperature" not in kw
     assert "extra_body" not in kw
 
 
-def test_kimi_k3_normalizes_legacy_enabled_reasoning_effort() -> None:
+def test_kimi_k3_normalizes_legacy_enabled_reasoning_effort(kimi_k3_model: str) -> None:
     """Switching a K2.x preset to K3 must not send unsupported effort values."""
-    kw = _build_kwargs_for("moonshot", "kimi-k3", reasoning_effort="medium")
+    kw = _build_kwargs_for("moonshot", kimi_k3_model, reasoning_effort="medium")
 
     assert kw["reasoning_effort"] == "max"
     assert "extra_body" not in kw
 
 
 @pytest.mark.parametrize("effort", ["none", "minimal"])
-def test_kimi_k3_omits_disabled_reasoning_effort(effort: str) -> None:
+def test_kimi_k3_omits_disabled_reasoning_effort(kimi_k3_model: str, effort: str) -> None:
     """K3 cannot disable reasoning, so disabled effort falls back to its default."""
-    kw = _build_kwargs_for("moonshot", "kimi-k3", reasoning_effort=effort)
+    kw = _build_kwargs_for("moonshot", kimi_k3_model, reasoning_effort=effort)
 
     assert "reasoning_effort" not in kw
     assert "temperature" not in kw
