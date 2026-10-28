@@ -124,7 +124,7 @@ async def test_edit_within_a_turn_rebuilds_paging_summaries_and_keeps_its_prefix
         HistoryFact(HistoryKind.INPUT, {"text": "next input"}, "next-turn"),
     ]
     await manager.state.append_history(key, following, expected_generation=current.generation)
-    assert await manager.state.project_history(key, lambda history: history.read_turn(1)) == [*retained[3:], *following[:2]]
+    assert await manager.state.project_history(key, lambda history: [fact for _, fact in history.read_entries(1)]) == [*retained[3:], *following[:2]]
     assert await manager.state.project_history(key, lambda history: history.user_count_before(2)) == 3
-    assert await manager.state.project_history(key, lambda history: history.read_turn(2)) == following[2:]
+    assert await manager.state.project_history(key, lambda history: [fact for _, fact in history.read_entries(2)]) == following[2:]
     await manager.state.aclose()

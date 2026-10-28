@@ -918,7 +918,8 @@ describe("ThreadShell", () => {
     await waitFor(() => expect(detailCalls).toBe(1));
     await act(async () => {
       retired = true;
-      client._emitChat("trace-replaced", { event: "history_replaced", chat_id: "trace-replaced", thread: newThread });
+      client._emitChat("trace-replaced", { event: "history_replaced", chat_id: "trace-replaced",
+        previous_generation: "before", thread: newThread });
     });
     await screen.findByText("replacement answer");
     await act(async () => resolveOld(httpJson({ message_id: "history-aaaaaaaaaaaaaaaaaaaa", events: [

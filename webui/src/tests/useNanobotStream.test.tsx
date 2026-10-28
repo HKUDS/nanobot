@@ -166,7 +166,8 @@ describe("useNanobotStream", () => {
     act(() => {
       fake.emit("edited", { event: "user_message", chat_id: "edited", turn_id: "old", starts_turn: true, text: "Original" });
       fake.emit("edited", { event: "delta", chat_id: "edited", turn_id: "old", stream_id: "old-answer", turn_seq: 2, text: "Discarded pending output" });
-      fake.emit("edited", { event: "history_replaced", chat_id: "edited", thread: {
+      fake.emit("edited", { event: "history_replaced", chat_id: "edited",
+        previous_generation: "old-generation", retired_turn_ids: ["old"], thread: {
         schemaVersion: 3, projection: "events", history_generation: "new-generation",
         events: [{ event: "user_message", chat_id: "edited", projection_id: "edited-input", turn_id: "new", starts_turn: true, turn_seq: 1, text: "Edited" }],
         has_pending_tool_calls: true, active_turn_id: "new",

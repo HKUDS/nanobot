@@ -50,8 +50,6 @@ const VISIBLE_STREAM_FLUSH_INTERVAL_MS = 50;
 const EMPTY_INITIAL_MESSAGES: UIMessage[] = [];
 const EMPTY_COMPLETED_TURN_IDS: readonly string[] = [];
 
-type StreamHistory = ThreadPaging & { historyGeneration: string | null };
-
 /** Own the received transcript, accepting fetched pages and live events together. */
 /** Payload passed to ``send`` when the user attaches one or more files.
  *
@@ -135,17 +133,9 @@ function appendProjectedSessionInput(
 
 function createTranscript(messages: UIMessage[], saved: ThreadTranscriptSnapshot | undefined, historyKey: string | null) {
   const owner = new ThreadTranscript(messages, saved);
-  const paging = saved?.paging;
-  // Keep the lifecycle fence with the received owner's cached paging, not a
-  // second history projection in the shell or the read-only history hook.
-  const historyGeneration = paging && "historyGeneration" in paging
-    && typeof paging.historyGeneration === "string" ? paging.historyGeneration : null;
-  return Object.assign(owner, { paging: {
-    ...owner.paging,
-    historyGeneration,
-    // The first paint must not enter the welcome layout while history is pending.
-    loading: !!historyKey && owner.paging.version === 0,
-  } });
+  // The first paint must not enter the welcome layout while history is pending.
+  owner.paging = { ...owner.paging, loading: !!historyKey && owner.paging.version === 0 };
+  return owner;
 }
 
 export function useNanobotStream(
@@ -178,7 +168,7 @@ export function useNanobotStream(
   ) => SubmittedTurn | null;
   transcribeAudio: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
   stop: () => void;
-  history: StreamHistory;
+  history: ThreadPaging;
   refreshHistory: () => void;
   loadOlder: () => Promise<void>;
   loadTraceDetails: (refs: string[]) => Promise<Array<{ ref: string; events: ThreadProjectionEvent[] }>>;
