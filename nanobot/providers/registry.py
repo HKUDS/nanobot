@@ -307,24 +307,18 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="edenai",
         default_api_base="https://api.edenai.run/v3",
     ),
-    # AI/ML API: OpenAI-compatible gateway. Models use the "vendor/model" naming
-    # scheme (e.g. "openai/gpt-5"); the full id is sent upstream. The default
-    # headers identify nanobot to the gateway, the same way the OpenRouter
-    # attribution headers do; they ride only on this provider's requests.
+    # AI/ML API: Chat Completions gateway. Preserve vendor/model IDs and leave
+    # request attribution to the user's explicit extra_headers configuration.
     ProviderSpec(
-        name="aimlapi",
-        keywords=("aimlapi",),
+        # Do not take over the existing custom-provider name "aimlapi".
+        name="aiml_api",
+        keywords=("aiml_api",),
         env_key="AIMLAPI_API_KEY",
         request_apis=("chat_completions",),
         display_name="aimlapi.com",
         backend="openai_compat",
-        default_extra_headers=(
-            ("HTTP-Referer", "https://github.com/HKUDS/nanobot"),
-            ("X-Title", "nanobot"),
-            ("X-AIMLAPI-Source", "agent/hkuds-nanobot"),
-            ("X-AIMLAPI-Partner-ID", "part_TcTxHfamJ2kkNiFsYzEVELTy"),
-        ),
         is_gateway=True,
+        strip_model_prefixes=("aiml_api",),
         detect_by_base_keyword="aimlapi",
         default_api_base="https://api.aimlapi.com/v1",
     ),

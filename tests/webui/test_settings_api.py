@@ -129,18 +129,50 @@ def test_settings_payload_exposes_aimlapi_provider(
 ) -> None:
     config_path = tmp_path / "config.json"
     config = Config()
-    config.providers.aimlapi.api_key = "aimlapi-test-key"
+    config.providers.aiml_api.api_key = "aimlapi-test-key"
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
     payload = settings_payload()
-    aimlapi = next(row for row in payload["providers"] if row["name"] == "aimlapi")
+    aimlapi = next(row for row in payload["providers"] if row["name"] == "aiml_api")
 
     assert aimlapi["label"] == "aimlapi.com"
     assert aimlapi["configured"] is True
     assert aimlapi["default_api_base"] == "https://api.aimlapi.com/v1"
     assert aimlapi["model_catalog"] == "catalog"
     assert aimlapi["model_selectable"] is True
+
+
+def test_legacy_aimlapi_settings_remain_separate_from_new_builtin(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.json"
+    config = Config.model_validate({
+        "providers": {
+            "aimlapi": {
+                "apiBase": "https://proxy.example.test/v1",
+                "displayName": "Research proxy",
+                "api": {"supportedApis": ["responses"]},
+            },
+            "aimlApi": {"apiKey": "new-builtin-key"},
+        },
+        "agents": {"defaults": {"provider": "aimlapi", "model": "openai/gpt-5"}},
+    })
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    payload = update_provider_settings({
+        "provider": ["aimlapi"], "apiBase": ["https://updated.example.test/v1"],
+    })
+    providers = {row["name"]: row for row in payload["providers"]}
+    assert providers["aimlapi"]["label"] == "Research proxy"
+    assert providers["aimlapi"]["is_custom"] is True
+    assert providers["aimlapi"]["api_key_required"] is False
+    assert providers["aimlapi"]["provider_api_configurable"] is True
+    assert providers["aimlapi"]["request_apis"] == ["responses"]
+    assert providers["aiml_api"]["label"] == "aimlapi.com"
+    assert providers["aiml_api"]["is_custom"] is False
+    saved = load_config(config_path)
+    assert saved.providers.model_extra["aimlapi"].api_base == "https://updated.example.test/v1"
+    assert saved.providers.aiml_api.api_key == "new-builtin-key"
+    assert saved.get_provider_name() == "aimlapi"
 
 
 def test_settings_payload_exposes_edenai_provider(

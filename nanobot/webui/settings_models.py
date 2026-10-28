@@ -623,6 +623,7 @@ def _extract_model_rows(
     body: object,
     *,
     spec: ProviderSpec | None = None,
+    api_base: str = "",
 ) -> list[ProviderModelRowPayload]:
     raw_rows = cast(dict[str, object], body).get("data") if isinstance(body, dict) else body
     if not isinstance(raw_rows, list):
@@ -632,6 +633,26 @@ def _extract_model_rows(
     for raw_row in cast(list[object], raw_rows):
         if not _model_catalog_row_active(raw_row):
             continue
+        # The new AIMLAPI integration supports Chat Completions only. Leave
+        # legacy custom connections and non-official catalog schemas unchanged.
+        if (
+            spec is not None and spec.name == "aiml_api"
+            and api_base.rstrip("/").lower() == "https://api.aimlapi.com/v1"
+        ):
+            if not isinstance(raw_row, dict):
+                continue
+            raw = cast(dict[str, object], raw_row)
+            if raw.get("type") != "openai/chat-completions":
+                continue
+            info = raw.get("info")
+            metadata = cast(dict[str, object], info) if isinstance(info, dict) else {}
+            raw_row = {
+                **raw,
+                "label": metadata.get("name"),
+                "owned_by": metadata.get("developer"),
+                "description": metadata.get("description"),
+                "context_window": metadata.get("contextLength"),
+            }
         row = _model_row_payload(raw_row, spec=spec)
         if row is None or row["id"] in seen:
             continue
@@ -762,7 +783,7 @@ def provider_models_payload(
             **({"proxy": proxy, "trust_env": False} if proxy else {}),
         )
         response.raise_for_status()
-        rows = _extract_model_rows(response.json(), spec=spec)
+        rows = _extract_model_rows(response.json(), spec=spec, api_base=api_base)
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
         if status in {401, 403}:

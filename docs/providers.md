@@ -213,20 +213,18 @@ Nanobot sends the model ID unchanged, including its provider prefix. Use Eden AI
 
 ### aimlapi.com Gateway
 
-[aimlapi.com](https://aimlapi.com) exposes an OpenAI-compatible chat-completions
-endpoint at `https://api.aimlapi.com/v1`. Configure the built-in `aimlapi`
-provider and use the full `vendor/model` identifier from its catalog:
+[aimlapi.com](https://aimlapi.com) exposes an OpenAI-compatible chat-completions endpoint at `https://api.aimlapi.com/v1`. Configure the built-in `aiml_api` provider and use the full `vendor/model` identifier from its catalog:
 
 ```json
 {
   "providers": {
-    "aimlapi": {
+    "aimlApi": {
       "apiKey": "${AIMLAPI_API_KEY}"
     }
   },
   "modelPresets": {
     "primary": {
-      "provider": "aimlapi",
+      "provider": "aiml_api",
       "model": "openai/gpt-5",
       "maxTokens": 8192
     }
@@ -239,16 +237,13 @@ provider and use the full `vendor/model` identifier from its catalog:
 }
 ```
 
-Nanobot sends the model ID unchanged, including its vendor prefix, and passes
-`reasoning_effort` as the normal top-level Chat Completions parameter. Other
-valid IDs include `anthropic/claude-sonnet-4-6` and `google/gemini-3.1-pro-preview`.
-The public catalog at `https://api.aimlapi.com/v1/models` lists the current IDs;
-entries with `"type": "openai/chat-completions"` are the chat models. The WebUI
-can also load that catalog after the API key is saved under **Settings → Models**.
+Nanobot preserves the vendor prefix in model IDs and passes `reasoning_effort` as the normal top-level Chat Completions parameter. An optional routing prefix such as `aiml_api/openai/gpt-5` is removed before sending `openai/gpt-5` to the provider. Load the current catalog under **Settings → Models**; only entries with `"type": "openai/chat-completions"` from the official endpoint appear in the chat model selector. Image, video, embedding and other request APIs are not part of this integration.
 
-Note that `https://api.aimlapi.com/v1/models` answers `200` for any credential,
-including an invalid one, so a successful model list does not prove the key
-works. The first chat completion is what verifies it.
+Existing custom providers named `aimlapi` remain custom connections: keep their `apiBase`, model IDs, request API declarations and credentials unchanged. The new built-in uses a distinct key so those connections retain their routing and fallback order. When selecting the new built-in, use `aiml_api` as the preset's provider (`aimlApi` is the camelCase configuration key).
+
+Nanobot does not add partner, referral or source attribution headers for this integration. Explicit user-configured `extraHeaders` continue to work.
+
+The model catalog is public; successfully loading it does not verify your API key. A chat request is needed to validate credentials and model access.
 
 ### OpenCode Zen and Go
 
