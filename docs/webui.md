@@ -163,6 +163,8 @@ Temporary does not mean consequence-free. Requests still go to the configured mo
 
 Use the workspace picker to browse folders on the connected nanobot host, enter an absolute path, or return to recent and starred projects; favorites persist across gateway restarts. The host name appears above saved locations. Project paths refer to that machine, not the browser's filesystem.
 
+Choose the project when starting a new topic. Saved topics, including forks, keep their project directory fixed. Start a new topic for another project. You can still change access mode within the same project while the topic is idle.
+
 Browsing does not change the topic's workspace until you choose **Confirm**. **Filter this folder** searches only the current directory. **Cmd/Ctrl+Shift+G** opens host-path entry, with Tab completion; **Last visited folder** returns to the previous location.
 
 Manual path entry remains available when the connected host does not support directory browsing. The host validates the selected path and access policy.
@@ -175,7 +177,7 @@ Selecting a project does not replace the configured agent workspace. The two pat
 | Relative file paths and shell working directory | Long-term memory and history |
 | The normal read/write boundary in Restricted mode | Custom skills and instance state |
 
-A new topic separates conversation history; a project selection changes the file working directory. Neither creates a separate long-term memory store. Project switching can therefore carry preferences and facts learned in other topics into the new project. Use [separate instances](./multiple-instances.md) when client or user data must stay separate; see [Memory](./memory.md) for how shared memory is maintained.
+A new topic separates conversation history; a project selection changes the file working directory. Neither creates a separate long-term memory store. Choosing another project for a new topic can therefore carry preferences and facts learned in other topics into the new project. Use [separate instances](./multiple-instances.md) when client or user data must stay separate; see [Memory](./memory.md) for how shared memory is maintained.
 
 Project-local `SOUL.md` and `USER.md` files are ignored, and the agent workspace's `AGENTS.md` is not inherited by a separately selected project. When the selected project is the configured agent workspace, both roles naturally use the same directory.
 

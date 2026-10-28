@@ -137,6 +137,7 @@ export function useSessions(): {
         preview: "",
         modelPreset: modelPreset ?? null,
         workspaceScope: workspaceScope ?? null,
+        projectLocked: false,
       },
       ...prev.filter((s) => s.key !== key),
     ]);

@@ -791,10 +791,8 @@ export function ThreadShell({
 
   const showHeroComposer = displayMessages.length === 0 && !initialHistoryLoading;
   const composerVariant = showHeroComposer ? emptyComposerVariant : "thread";
-  // The server owns the project lock. Old servers have no marker, so an existing
-  // user turn is read-only here too; the gateway remains the editing authority.
-  const projectLocked = session?.projectLocked === true
-    || (session?.projectLocked === undefined && displayMessages.some((message) => message.role === "user" && message.deliveryStatus !== "failed"));
+  // Only unpersisted drafts can choose a project; history pages do not own this state.
+  const projectLocked = !!session && session.projectLocked !== false;
   const wasShowingHeroComposerRef = useRef(showHeroComposer);
   const sessionModelPreset = session?.modelPreset?.trim() || null;
   const [localModelPreset, setLocalModelPreset] = useState<string | null>(null);

@@ -1052,6 +1052,7 @@ class GatewayHTTPHandler:
             else:
                 scope = default_scope
             row["workspace_scope"] = scope.payload()
+            row["project_locked"] = True
             handle = handles.get(key)
             if handle is not None:
                 row["handle"] = handle.public_payload()

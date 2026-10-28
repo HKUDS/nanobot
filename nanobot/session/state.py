@@ -617,8 +617,9 @@ class SessionState:
         updates: Mapping[str, Any],
         *,
         expected_generation: str | None = None,
+        validate_existing: Callable[[Mapping[str, Any]], None] | None = None,
     ) -> tuple[str, bool]:
-        """Open one generation and atomically attach admission metadata."""
+        """Open one generation and atomically validate and attach admission metadata."""
         values = deepcopy(dict(updates))
         if _RESERVED_KEYS.intersection(values):
             raise ValueError("turn state must be changed through turn operations")
@@ -638,6 +639,8 @@ class SessionState:
                     and session.generation != expected_generation
                 ):
                     raise SessionConflictError("session admission belongs to a replaced session")
+                if not created and validate_existing is not None:
+                    validate_existing(session.metadata)
                 session.metadata.update(values)
                 header_only = session.policy.persist and session.persisted
                 if header_only:

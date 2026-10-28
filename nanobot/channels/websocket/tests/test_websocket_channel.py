@@ -1801,6 +1801,7 @@ async def test_webui_message_scope_inherits_persisted_session_scope(
         },
     )
     assert sessions.list_sessions() == []
+    conn.reset_mock()
     await channel._dispatch_envelope(
         conn,
         "webui-client",
@@ -1812,6 +1813,70 @@ async def test_webui_message_scope_inherits_persisted_session_scope(
         "project_path": str(project.resolve()),
         "access_mode": "full",
     }
+    assert any(
+        event.get("event") == "session_updated" and event.get("scope") == "metadata"
+        for event in (json.loads(call.args[0]) for call in conn.send.await_args_list)
+    )
+
+
+@pytest.mark.parametrize("command", ["set_workspace_scope", "message"])
+@pytest.mark.parametrize("persist_during_request", [False, True], ids=["existing", "admission-race"])
+async def test_persisted_project_rejects_scope_changes_but_keeps_access_controls(
+    bus: MagicMock, tmp_path, monkeypatch, command: str, persist_during_request: bool,
+) -> None:
+    from nanobot.security.workspace_access import default_workspace_scope
+
+    project = tmp_path / "other-project"
+    project.mkdir()
+    sessions = SessionManager(tmp_path / "sessions")
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]}, bus,
+        gateway=_basic_handler(bus, session_manager=sessions, workspace_path=tmp_path),
+    )
+    controller = channel.gateway.workspaces
+    scope = default_workspace_scope(tmp_path, True)
+    chat_id = "bound-project"
+    if persist_during_request:
+        method = "scope_for_message" if command == "message" else "scope_for_set_request"
+        resolve = getattr(controller, method)
+
+        async def resolve_before_other_admission(*args, **kwargs):
+            requested = await resolve(*args, **kwargs)
+            await controller.persist_scope(chat_id, scope)
+            return requested
+
+        monkeypatch.setattr(controller, method, resolve_before_other_admission)
+    else:
+        await controller.persist_scope(chat_id, scope)
+
+    conn = AsyncMock()
+    conn.remote_address = ("203.0.113.8", 50123)
+    await channel._dispatch_envelope(conn, "remote-client", {
+        "type": command, "chat_id": chat_id, "turn_id": "scope-change",
+        "webui": True, "content": "continue editing",
+        "workspace_scope": {"project_path": str(project), "access_mode": "full"},
+    })
+    rejected = json.loads(conn.send.await_args.args[0])
+    assert rejected["event"] == "error"
+    assert rejected["detail"] == "workspace_scope_rejected"
+    assert rejected["reason"] == "project_locked"
+    assert rejected["chat_id"] == chat_id
+    if command == "message":
+        assert rejected["turn_id"] == "scope-change"
+    bus.publish_inbound.assert_not_awaited()
+    saved = sessions.read_session_file(f"websocket:{chat_id}")
+    assert saved["messages"] == []
+    assert saved["metadata"]["workspace_scope"] == scope.metadata()
+
+    if persist_during_request:
+        monkeypatch.setattr(controller, method, resolve)
+    for mode in ("full", "restricted"):
+        await channel._dispatch_envelope(conn, "remote-client", {
+            "type": "set_workspace_scope", "chat_id": chat_id,
+            "workspace_scope": {"project_path": str(tmp_path), "access_mode": mode},
+        })
+        assert json.loads(conn.send.await_args.args[0])["workspace_scope"]["access_mode"] == mode
+        assert controller.scope_for_session_key(f"websocket:{chat_id}").project_path == tmp_path.resolve()
 
 
 @pytest.mark.asyncio
@@ -5850,6 +5915,7 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
             "preview": "work",
             "model_preset": "fast",
             "run_started_at": 1_700_000_000.0,
+            "project_locked": True,
             "handle": handle.public_payload(),
         }
     ]

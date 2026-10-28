@@ -457,7 +457,7 @@ export interface ChatSummary {
   /** Durable recovery state that needs attention after an interrupted turn. */
   recoveryState?: RecoveryState | null;
   workspaceScope?: WorkspaceScopePayload | null;
-  /** Server-owned project binding after the first accepted user message. */
+  /** Persisted sessions keep their project; only unpersisted drafts can change it. */
   projectLocked?: boolean;
   /** Stable, server-owned @handle for this session. */
   handle?: SessionHandle | null;

@@ -456,7 +456,10 @@ class WebUICommandRouter:
             )
             if scope is None:
                 return
-            await self._workspaces.stage_scope(chat_id, scope)
+            if await self.workspace_scope_or_error(
+                connection, lambda: self._workspaces.stage_scope(chat_id, scope), chat_id=chat_id,
+            ) is None:
+                return
             await self._transport.send_session_updated(chat_id, scope="metadata")
             await self._transport.webui_send_event(
                 connection,
@@ -759,16 +762,24 @@ class WebUICommandRouter:
         execution_created = False
         try:
             if not restart_control:
-                session_generation, session_created = await self._workspaces.persist_scope(
-                    chat_id,
-                    scope,
-                    session_key=admission_session_key,
-                    expected_generation=(
-                        temporary_policy.session_generation
-                        if temporary_policy is not None
-                        else None
+                admission = await self.workspace_scope_or_error(
+                    connection,
+                    lambda: self._workspaces.persist_scope(
+                        chat_id,
+                        scope,
+                        session_key=admission_session_key,
+                        expected_generation=(
+                            temporary_policy.session_generation
+                            if temporary_policy is not None
+                            else None
+                        ),
                     ),
+                    chat_id=chat_id,
+                    turn_id=turn_id,
                 )
+                if admission is None:
+                    return
+                session_generation, session_created = admission
                 execution_generation = session_generation
                 if (
                     execution_session_key != admission_session_key
@@ -859,6 +870,8 @@ class WebUICommandRouter:
             if name:
                 attachment["name"] = name
         if is_webui and not restart_control:
+            if session_created:
+                await self._transport.send_session_updated(chat_id, scope="metadata")
             await self.broadcast_user_message(
                 connection,
                 chat_id,
