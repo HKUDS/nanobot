@@ -2737,8 +2737,8 @@ describe("ThreadComposer", () => {
             available: true,
           },
           {
-            name: "update-setup",
-            description: "One-time setup wizard",
+            name: "upload-files",
+            description: "Transfer local files",
             source: "builtin",
             available: true,
           },
@@ -2759,7 +2759,7 @@ describe("ThreadComposer", () => {
       .getAllByRole("option");
     expect(options.map((option) => option.textContent)).toEqual([
       "upExact match",
-      "update-setupOne-time setup wizard",
+      "upload-filesTransfer local files",
       "setup-updateConfigure upgrades",
       "skill-creatorCreate or update AgentSkills",
     ]);
