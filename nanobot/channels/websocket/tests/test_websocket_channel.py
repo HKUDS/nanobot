@@ -3589,10 +3589,12 @@ async def test_durable_incomplete_marker_stays_pending_without_safe_session_reco
 
     original_append = history.sessions.state.append_history
 
-    async def fail_answer(session_key, facts, *, expected_generation):
+    async def fail_answer(session_key, facts, *, expected_generation, notify_completion=True):
         if any(fact.kind is HistoryKind.ANSWER for fact in facts):
             raise OSError("transient disk failure")
-        await original_append(session_key, facts, expected_generation=expected_generation)
+        return await original_append(
+            session_key, facts, expected_generation=expected_generation, notify_completion=notify_completion,
+        )
 
     monkeypatch.setattr(history.sessions.state, "append_history", fail_answer)
 
@@ -3698,10 +3700,12 @@ async def test_http_replay_recovers_marked_answer_from_session_after_gateway_res
 
     original_append = history.sessions.state.append_history
 
-    async def fail_answer(session_key, facts, *, expected_generation):
+    async def fail_answer(session_key, facts, *, expected_generation, notify_completion=True):
         if any(fact.kind is HistoryKind.ANSWER for fact in facts):
             raise OSError("transient disk failure")
-        await original_append(session_key, facts, expected_generation=expected_generation)
+        return await original_append(
+            session_key, facts, expected_generation=expected_generation, notify_completion=notify_completion,
+        )
 
     monkeypatch.setattr(history.sessions.state, "append_history", fail_answer)
     await channel.send(await history.message(
@@ -6847,3 +6851,75 @@ async def test_webui_commands_keep_session_io_off_event_loop(
         assert "save" in calls or "replace_metadata" in calls
     assert all(json.loads(call.args[0])["event"] != "error" for call in conn.send.await_args_list)
     await channel._cleanup_connection(conn)
+
+
+async def test_read_progress_broadcasts_to_other_authenticated_devices_without_list_invalidation(bus, tmp_path):
+    from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
+
+    sessions = SessionManager(tmp_path / "workspace", sessions_root=tmp_path / "sessions")
+    session = await sessions.state.get("websocket:multi-reader")
+    channel = _ch(bus, session_manager=sessions)
+    source, other_device, untrusted = AsyncMock(), AsyncMock(), AsyncMock()
+    source.request = SimpleNamespace(headers=Headers())
+    channel._webui_connections.update({source, other_device})
+    channel._conn_chats[untrusted] = {"other-chat"}
+    channel._register_connection_outbound(other_device)
+    await channel.send_payload(
+        "multi-reader", {"event": "turn_end", "chat_id": "multi-reader"},
+        persistence="turn_complete", metadata={
+            HISTORY_GENERATION_METADATA_KEY: session.generation,
+            "webui_turn_id": "read-result", "webui": True,
+        },
+    )
+    state = {"generation": session.generation, "latest": 1, "read": 0}
+    assert json.loads(other_device.send.await_args.args[0]) == {
+        "event": "session_read_state", "chat_id": "multi-reader", "state": state,
+    }
+    untrusted.send.assert_not_awaited()
+
+    async def receipt(request_id):
+        await channel._dispatch_envelope(source, "webui-client", {
+            "type": "webui_request", "request_id": request_id, "action": "session.mark_read",
+            "payload": {"session_key": session.key, "generation": session.generation, "cursor": 1},
+        })
+        await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+
+    await receipt("first-read")
+    assert json.loads(other_device.send.await_args.args[0]) == {
+        "event": "session_read_state", "chat_id": "multi-reader", "state": {**state, "read": 1},
+    }
+    assert json.loads(source.send.await_args.args[0])["result"] == {"state": {**state, "read": 1}, "changed": True}
+    await receipt("same-result-again")
+    assert other_device.send.await_count == 2
+    assert json.loads(source.send.await_args.args[0])["result"]["changed"] is False
+    await channel._commands.close()
+    await sessions.state.aclose()
+
+
+async def test_transcript_read_cursor_requires_a_persisted_complete_answer(history):
+    from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
+    from nanobot.webui.transcript import (
+        WEBUI_TRANSCRIPT_INCOMPLETE_KEY,
+        WebUITranscriptRecorder,
+        build_webui_thread_response,
+    )
+
+    session = await history.sessions.state.get("websocket:read-recovery")
+    recorder = WebUITranscriptRecorder(history.sessions)
+    metadata = {HISTORY_GENERATION_METADATA_KEY: session.generation, "webui_turn_id": "recoverable"}
+    event = {"event": "turn_end", "chat_id": "read-recovery"}
+    assert await recorder.prepare_and_append(
+        "read-recovery", event, metadata=metadata, phase="complete",
+        transcript_overrides={WEBUI_TRANSCRIPT_INCOMPLETE_KEY: True},
+    )
+    assert event["read_state"]["latest"] == 1
+    assert event["read_cursor"] == 0
+    recovered = history.sessions.project_history(session.key, lambda reader: build_webui_thread_response(session.key, history=reader))
+    assert recovered["read_cursor"] == 0
+
+    command = {"event": "turn_end", "chat_id": "read-recovery"}
+    assert await recorder.prepare_and_append(
+        "read-recovery", command,
+        metadata={**metadata, "webui_turn_id": WEBUI_SYSTEM_COMMAND_TURN_PREFIX + "model"}, phase="complete",
+    )
+    assert history.sessions.project_history(session.key, lambda reader: reader.read_state) == event["read_state"]

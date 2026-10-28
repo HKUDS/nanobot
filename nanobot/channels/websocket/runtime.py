@@ -1499,6 +1499,10 @@ class WebSocketChannel(BaseChannel):
                 # recover the latter from session history after a gateway restart.
                 clear_websocket_turn_if_current(chat_id, turn_owner)
             self._clear_stream_buffers(chat_id)
+            if persisted and "read_state" in body:
+                await self._commands.broadcast_webui_event(
+                    "session_read_state", chat_id=chat_id, state=body["read_state"],
+                )
         raw = json.dumps(body, ensure_ascii=False)
         if not conns:
             return

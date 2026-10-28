@@ -11,6 +11,8 @@ import { createFilePreviewResource } from "@/lib/file-preview-resource";
 import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { usePromptHistory } from "@/hooks/usePromptHistory";
+import { usePageVisibility } from "@/hooks/usePageVisibility";
+import { useThreadVisibility } from "@/hooks/useThreadVisibility";
 import { ModelFallbackNotice } from "@/components/thread/ModelFallbackNotice";
 import { RecoveryNotice } from "@/components/thread/RecoveryNotice";
 import { SubagentTasksProvider } from "@/components/thread/SubagentTasks";
@@ -590,6 +592,7 @@ export function ThreadShell({
   const {
     messages,
     messagesReady,
+    readObservation,
     isStreaming,
     runStartedAt,
     retryStatus,
@@ -622,6 +625,15 @@ export function ThreadShell({
     chatId, undefined, false, handleTurnEnd, undefined, undefined,
     { key: historyKey, cache: messageCacheRef.current },
   );
+  const pageVisible = usePageVisibility();
+  const threadVisible = useThreadVisibility();
+  const readState = session?.readState;
+  const handleLatestVisible = useCallback((visible: boolean) => {
+    if (!visible || !pageVisible || !threadVisible || !messagesReady || !historyKey
+      || !readObservation || !readState || readState.generation !== readObservation.generation
+      || readObservation.cursor <= readState.read) return;
+    client.markRead(historyKey, readObservation.generation, readObservation.cursor);
+  }, [client, historyKey, messagesReady, pageVisible, readObservation, readState, threadVisible]);
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
   const initialHistoryLoading = loading;
   const showTemporaryChatControl =
@@ -1514,6 +1526,8 @@ export function ThreadShell({
             activeTurnStartedHere={activeTurnStartedHere}
             conversationKey={historyKey}
             conversationReady={messagesReady}
+            onLatestVisible={handleLatestVisible}
+            previewOpen={previewOpen}
             showScrollToBottomButton={!!session}
             cliApps={cliApps}
             mcpPresets={mcpPresets}

@@ -1167,6 +1167,13 @@ class WebUICommandRouter:
                             "sidebar_state_updated",
                             state=result,
                         )
+                    if action == "session.mark_read" and isinstance(result, dict):
+                        receipt = cast(dict[str, Any], result)
+                        if receipt.get("changed") is True:
+                            key = payload["session_key"]
+                            await self.broadcast_webui_event(
+                                "session_read_state", chat_id=key.split(":", 1)[1], state=receipt["state"],
+                            )
                     return WebUIRequestResult(result=result)
                 return WebUIRequestResult(
                     status=status,

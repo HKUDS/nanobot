@@ -40,7 +40,11 @@ from nanobot.webui.history import (
     record_from_fact,
     turn_records,
 )
-from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
+from nanobot.webui.metadata import (
+    WEBUI_MESSAGE_SOURCE_METADATA_KEY,
+    WEBUI_SYSTEM_COMMAND_TURN_PREFIX,
+    WEBUI_TURN_METADATA_KEY,
+)
 from nanobot.webui.outbound_wire import project_tool_events
 from nanobot.webui.session_identity import webui_chat_id, webui_session_key
 
@@ -556,7 +560,11 @@ class WebUITranscriptRecorder:
     ) -> bool:
         self.prepare_event(chat_id, event, metadata=metadata, phase=phase, include_source=include_source)
         record = {**event, **(transcript_overrides or {})}
-        return await self.append(chat_id, record, metadata=metadata)
+        persisted = await self.append(chat_id, record, metadata=metadata)
+        if persisted and "read_state" in record:
+            event["read_state"] = record["read_state"]
+            event["read_cursor"] = record["read_cursor"]
+        return persisted
 
     async def prepare_and_append_stream_event(
         self, chat_id: str, event: dict[str, Any], *, completed_text: str | None,
@@ -602,8 +610,13 @@ class WebUITranscriptRecorder:
             return False
         try:
             fact = fact_from_record(_record_for_append(event))
-            await self.sessions.state.append_history(webui_session_key(chat_id), [fact],
-                                                     expected_generation=generation)
+            read_state = await self.sessions.state.append_history(
+                webui_session_key(chat_id), [fact], expected_generation=generation,
+                notify_completion=not (fact.turn_id or "").startswith(WEBUI_SYSTEM_COMMAND_TURN_PREFIX),
+            )
+            if read_state is not None:
+                event["read_state"] = read_state
+                event["read_cursor"] = read_state["latest"] if event.get(WEBUI_TRANSCRIPT_INCOMPLETE_KEY) is not True else 0
         except (OSError, ValueError, TypeError, sqlite3.Error, SessionConflictError, SessionOperationQueueFullError) as exc:
             self._log.warning("history append failed for {}: {}", chat_id, exc)
             return False
@@ -1834,9 +1847,25 @@ def build_webui_thread_response(
             for record in lines
         ]
     lines = _ensure_replay_identities(lines)
+    read_state = history.read_state
+    read_cursor = 0
+    if read_state is not None:
+        for record in lines:
+            if (record.get("event") != "turn_end"
+                    or record.get(WEBUI_TRANSCRIPT_INCOMPLETE_KEY) is True
+                    or str(record.get("turn_id") or "").startswith(WEBUI_SYSTEM_COMMAND_TURN_PREFIX)):
+                continue
+            identity = str(record.get(_WEBUI_REPLAY_IDENTITY_KEY) or "")
+            match = re.fullmatch(r"turn:(\d+):record:\d+", identity)
+            if match is not None:
+                cursor = int(match[1]) + 1
+                if cursor <= read_state["latest"]:
+                    read_cursor = max(read_cursor, cursor)
     payload: dict[str, Any] = {
         "schemaVersion": WEBUI_TRANSCRIPT_SCHEMA_VERSION,
         "sessionKey": session_key,
+        "read_state": read_state,
+        "read_cursor": read_cursor,
         "completed_turn_ids": completed_turn_ids(lines),
         "has_pending_tool_calls": has_pending_tool_calls(
             lines,

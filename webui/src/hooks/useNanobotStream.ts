@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useThreadVisibility } from "@/hooks/useThreadVisibility";
 
 import { useClient } from "@/providers/ClientProvider";
+import { sessionReadObservation, type SessionReadObservation } from "../../../packages/client-events/read-state";
 import { hasPendingAgentActivity } from "@/lib/activity-timeline";
 import { ApiError, fetchWebuiThread, fetchWebuiThreadTraceDetail } from "@/lib/api";
 import { fetchLatestWebuiThread } from "@/lib/latest-thread-request";
@@ -150,6 +151,7 @@ export function useNanobotStream(
   messages: UIMessage[];
   /** Whether ``messages`` belongs to the current ``chatId`` after a session switch. */
   messagesReady: boolean;
+  readObservation: SessionReadObservation | null;
   isStreaming: boolean;
   /** Unix epoch seconds when the current user turn started (WebSocket ``goal_status``). */
   runStartedAt: number | null;
@@ -185,6 +187,20 @@ export function useNanobotStream(
     chatId ? messageCache?.get(chatId) : undefined, historyKey));
   const transcriptRef = useRef(initialTranscript);
   const [historyState, setHistoryState] = useState(initialTranscript.paging);
+  const [readObservation, setReadObservation] = useState<SessionReadObservation | null>(null);
+  const readObservationRef = useRef<SessionReadObservation | null>(null);
+  const readRecoveryRef = useRef<SessionReadObservation | null>(null);
+  // Delivery evidence belongs only to the turn whose start this connection saw.
+  const liveReadTurnRef = useRef<{ turnId: string; body?: { id: string; seq: number } } | null>(null);
+  const observeRead = useCallback((incoming: SessionReadObservation | null) => {
+    const previous = readObservationRef.current;
+    if (!incoming || (previous?.generation === incoming.generation && previous.cursor >= incoming.cursor)) return;
+    readObservationRef.current = incoming;
+    setReadObservation(incoming);
+  }, []);
+  useEffect(() => client.onStatus((status) => {
+    if (status !== "open") liveReadTurnRef.current = null;
+  }), [client]);
   const publishHistory = useCallback(() => setHistoryState(transcriptRef.current.paging), []);
   const [refreshSeq, setRefreshSeq] = useState(0);
   const refreshHistory = useCallback(() => setRefreshSeq((value) => value + 1), []);
@@ -208,6 +224,20 @@ export function useNanobotStream(
     transcriptRef.current.projection = { ...transcriptRef.current.projection, messages: next };
     setRenderedMessages(next);
     setHistoryState(transcriptRef.current.paging);
+  }, []);
+  const rememberReadBody = useCallback((event: Extract<InboundEvent, { event: "message" | "stream_end" }>) => {
+    const delivery = liveReadTurnRef.current;
+    const seq = event.turn_seq;
+    if (!delivery || delivery.turnId !== event.turn_id || seq === undefined
+      || (event.event === "message" ? event.kind !== undefined : event.resuming)) return;
+    const body = messagesRef.current.find((message) => (
+      message.role === "assistant" && !message.kind && message.turnId === delivery.turnId
+      && (message.content.length > 0 || !!message.media?.length || !!message.images?.length)
+      && (message.turnSeq === seq || (event.event === "stream_end" && message.turnSeq === seq - 1))
+      && (event.event !== "stream_end" || (transcriptRef.current.projection.closedAssistantIds.has(message.id)
+        && (!event.stream_id || message.streamId === event.stream_id)))
+    ));
+    if (body) delivery.body = { id: body.id, seq };
   }, []);
   const [messageScope, setMessageScope] = useState({ chatId, historyKey, client });
   /** If history ends in unfinished agent activity, keep the loading spinner alive. */
@@ -496,6 +526,10 @@ export function useNanobotStream(
     transcriptRef.current = createTranscript(initialMessages, chatId ? messageCache?.get(chatId) : undefined, historyKey);
     setMessages(transcriptRef.current.messages);
     setMessageScope({ chatId, historyKey, client });
+    setReadObservation(null);
+    readObservationRef.current = null;
+    readRecoveryRef.current = null;
+    liveReadTurnRef.current = null;
     setRunState(chatId ? client.getRunState(chatId) : null);
     setStreamError(null);
     setRetryStatus(null);
@@ -556,6 +590,7 @@ export function useNanobotStream(
       const accepted = owner.accept(body, decision);
       // Commit the received owner before cache listeners/ledger callbacks can reenter.
       setMessages(owner.messages);
+      if (accepted && body) observeRead(sessionReadObservation(body.read_state, body.read_cursor));
       if (accepted && chatId) messageCache?.set(chatId, owner.save());
       if (ownRead) {
         publishing = true;
@@ -587,7 +622,7 @@ export function useNanobotStream(
         else { owner.finishRead(read, (error as Error).message); publishHistory(); }
       });
     return () => { disposed = true; controller.abort(); cancelOlderRead(); unsubscribe(); };
-  }, [cancelOlderRead, chatId, client, flushPendingStreamEvents, getToken, historyKey, messageCache, publishHistory, refreshSeq, setMessages]);
+  }, [cancelOlderRead, chatId, client, flushPendingStreamEvents, getToken, historyKey, messageCache, observeRead, publishHistory, refreshSeq, setMessages]);
 
   const loadOlder = useCallback(async () => {
     const owner = transcriptRef.current;
@@ -678,6 +713,9 @@ export function useNanobotStream(
         return;
       }
       if (ev.event === "user_message") {
+        if (ev.starts_turn && turnId && client.status === "open" && liveReadTurnRef.current?.turnId !== turnId) {
+          liveReadTurnRef.current = { turnId };
+        }
         if (ev.provenance?.session_message) {
           flushPendingStreamEvents();
           closeActiveAssistantStream();
@@ -774,6 +812,7 @@ export function useNanobotStream(
         if (ev.resuming) {
           return;
         }
+        rememberReadBody(ev);
         // ``stream_end`` closes the current answer segment, not the turn.
         // Tools and follow-up model segments may still arrive before the
         // definitive ``turn_end`` event.
@@ -852,7 +891,26 @@ export function useNanobotStream(
             }
           : null;
         if (modelFailure) setStreamError(modelFailure);
+        const delivery = liveReadTurnRef.current;
+        const body = delivery?.body;
+        const delivered = delivery?.turnId === turnId && body !== undefined
+          && ev.turn_seq !== undefined && body.seq === ev.turn_seq - 1
+          && messagesRef.current.some((message) => message.id === body.id);
         applyProjectionEvent(ev);
+        const observation = sessionReadObservation(ev.read_state, ev.read_cursor);
+        if (observation) {
+          if (delivered) observeRead(observation);
+          else if (historyKey) {
+            const observed = readObservationRef.current;
+            const recovery = readRecoveryRef.current;
+            if (!(observed?.generation === observation.generation && observed.cursor >= observation.cursor)
+              && !(recovery?.generation === observation.generation && recovery.cursor >= observation.cursor)) {
+              readRecoveryRef.current = observation;
+              refreshHistory();
+            }
+          }
+        }
+        if (delivery?.turnId === turnId) liveReadTurnRef.current = null;
         playTurnCompleteSound();
         onTurnEnd?.();
         return;
@@ -912,6 +970,7 @@ export function useNanobotStream(
 
       if (ev.event === "message") {
         applyProjectionEvent(ev, { sideChannel: sideChannelEvent });
+        if (!sideChannelEvent) rememberReadBody(ev);
         if (sideChannelEvent && typeof ev.turn_id === "string") {
           transcriptRef.current.sideChannelTurnIds.delete(ev.turn_id);
         }
@@ -948,6 +1007,10 @@ export function useNanobotStream(
     clearPendingStreamWork,
     flushPendingStreamEvents,
     isSideChannelEvent,
+    historyKey,
+    rememberReadBody,
+    observeRead,
+    refreshHistory,
     onTurnEnd,
     onStreamDetach,
     messageCache,
@@ -976,6 +1039,7 @@ export function useNanobotStream(
         setRetryStatus(null);
       }
       const turnId = crypto.randomUUID();
+      if (!sideChannel && !continueActiveTurn && client.status === "open") liveReadTurnRef.current = { turnId };
       const userMessageId = crypto.randomUUID();
       if (sideChannel) transcriptRef.current.sideChannelTurnIds.add(turnId);
       const previews = hasAttachments ? images!.map(({ preview }) => (
@@ -1080,6 +1144,7 @@ export function useNanobotStream(
   return {
     messages,
     messagesReady: messageScope.chatId === chatId && messageScope.historyKey === historyKey && messageScope.client === client,
+    readObservation,
     isStreaming,
     runStartedAt,
     retryStatus,

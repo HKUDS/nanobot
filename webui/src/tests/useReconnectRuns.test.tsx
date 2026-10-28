@@ -311,7 +311,7 @@ describe("durable run recovery", () => {
     );
     expect(client.getRunStartedAt("inactive")).toBeNull();
     expect(client.hasUnsettledRun("inactive")).toBe(false);
-    expect(cachedAtCompletion).toEqual([body]);
+    expect(cachedAtCompletion).toEqual([{ ...body, read_cursor: 0 }]);
     expect(projectThreadEvents(cachedAtCompletion[0].events).at(-1)?.content).toBe("The complete answer");
     const delayed = vi.fn();
     client.onTranscript("inactive", delayed);
@@ -398,7 +398,7 @@ describe("durable run recovery", () => {
     await reopen();
     expect(client.getRunStartedAt("inactive")).toBeNull();
     expect(client.hasUnsettledRun("inactive")).toBe(false);
-    expect(webuiThreadCache.get("websocket:inactive")).toEqual(body);
+    expect(webuiThreadCache.get("websocket:inactive")).toEqual({ ...body, read_cursor: 0 });
     close();
   });
 

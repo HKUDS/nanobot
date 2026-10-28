@@ -67,8 +67,11 @@ interface ThreadViewportProps {
   traceDetailScope?: string | null;
   onLoadTraceDetails?: (refs: string[]) => void | Promise<void>;
   onOpenFilePreview?: (path: string) => void;
+  previewOpen?: boolean;
   onForkFromMessage?: (beforeUserIndex: number) => void;
   onQuoteSelection?: (text: string) => void;
+  /** Reports the physical live-tail position after content commits and scroll/resize. */
+  onLatestVisible?: (visible: boolean) => void;
 }
 
 const NEAR_BOTTOM_PX = 48;
@@ -278,8 +281,10 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   traceDetailScope = null,
   onLoadTraceDetails,
   onOpenFilePreview,
+  previewOpen = false,
   onForkFromMessage,
   onQuoteSelection,
+  onLatestVisible,
 }, ref) {
   const { t } = useTranslation();
   const historyWindow = navigation?.window;
@@ -311,6 +316,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const previousLoadingOlderRef = useRef(loadingOlder);
   const composerDockHeightRef = useRef(0);
   const [atBottom, setAtBottom] = useState(true);
+  const reportLatestVisibleRef = useRef<() => void>(() => {});
   const [atHistoryTop, setAtHistoryTop] = useState(false);
   const [historyPhase, setHistoryPhase] = useState<HistoryRevealPhase>("hidden");
   const historyPhaseRef = useRef(historyPhase);
@@ -396,6 +402,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
         };
       },
       onGeometry: (geometry: ThreadMotionGeometry) => {
+        reportLatestVisibleRef.current();
         if (Math.abs(composerDockHeightRef.current - geometry.composerHeight) >= 1) {
           composerDockHeightRef.current = geometry.composerHeight;
           setComposerDockHeight(geometry.composerHeight);
@@ -862,6 +869,20 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     animation.oncancel = clearAnimation;
   }, [conversationReady, hasMessages]);
 
+  const reportLatestVisible = useCallback(() => {
+    const el = scrollRef.current;
+    const visibility = el ? getComputedStyle(el).visibility : "hidden";
+    onLatestVisible?.(Boolean(el && visibility !== "hidden" && visibility !== "collapse"
+      && el.clientHeight > 0 && hasMessages && conversationReady
+      && !historyWindow && !pendingConversationScrollRef.current
+      && el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX));
+  }, [conversationReady, hasMessages, historyWindow, onLatestVisible]);
+
+  useLayoutEffect(() => {
+    reportLatestVisibleRef.current = reportLatestVisible;
+    reportLatestVisible();
+  }, [messages, previewOpen, reportLatestVisible]);
+
   useLayoutEffect(() => {
     threadMotionRef.current?.invalidateGeometry();
   }, [composer, hasMessages, visibleMessages.length]);
@@ -908,6 +929,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     if (!el) return;
 
     const onScroll = (allowHistoryLoad = true) => {
+      reportLatestVisible();
       setAtHistoryTop(el.scrollTop <= 1);
       if (el.scrollTop > 1) historySpringRef.current?.leaveBoundary();
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
@@ -1131,6 +1153,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     historySlotKey,
     historyWindow,
     navigation,
+    reportLatestVisible,
     resetHistoryHeader,
   ]);
 

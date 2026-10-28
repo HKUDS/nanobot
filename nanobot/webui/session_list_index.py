@@ -39,6 +39,7 @@ def list_webui_sessions(
             "title": row["title"], "preview": row["preview"] or row["history_preview"],
             "model_preset": model_preset_from_metadata(metadata),
             "recovery_state": recovery_state_from_metadata(metadata),
+            "read_state": row["read_state"],
             **_indexed_workspace_scope_fields(metadata), "path": row["path"],
         })
     return sorted(rows, key=lambda row: row.get("updated_at", ""), reverse=True)

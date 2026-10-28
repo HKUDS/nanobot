@@ -6,12 +6,15 @@ import { useNanobotStream } from "@/hooks/useNanobotStream";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
 import { normalizeActivityTimeline } from "@/lib/activity-timeline";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
+import { projectThreadEvents } from "@/lib/thread-event-projection";
+import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import type { NanobotClient, StreamError } from "@/lib/nanobot-client";
 import type {
   ConnectionStatus,
   InboundEvent,
   UIMediaAttachment,
   UIMessage,
+  WebuiThreadPersistedPayload,
 } from "@/lib/types";
 import { ClientProvider } from "@/providers/ClientProvider";
 import projectionFixture from "./fixtures/live-replay-event-projection.json";
@@ -88,6 +91,11 @@ function fakeClient() {
         return () => statusHandlers.delete(handler);
       },
       onRunStatus: lifecycle.onRunStatus.bind(lifecycle),
+      onRunCompletion: lifecycle.onRunCompletion.bind(lifecycle),
+      onSessionUpdate: lifecycle.onSessionUpdate.bind(lifecycle),
+      canReconcileCanonicalCompletion: lifecycle.canReconcileCanonicalCompletion.bind(lifecycle),
+      reconcileCanonicalCompletion: lifecycle.reconcileCanonicalCompletion.bind(lifecycle),
+      fenceCanonicalCompletedTurns: lifecycle.fenceCanonicalCompletedTurns.bind(lifecycle),
       getRunState: lifecycle.getRunState.bind(lifecycle),
       getRunGeneration: lifecycle.getRunGeneration.bind(lifecycle),
       restorePendingRun: lifecycle.restorePendingRun.bind(lifecycle),
@@ -3773,6 +3781,115 @@ describe("useNanobotStream", () => {
     expect(result.current.goalState).toEqual({ active: false });
   });
 
+});
+
+describe("read observations", () => {
+  it("waits for canonical final text when only turn_end arrives after reconnect", async () => {
+    const fake = fakeClient();
+    const chatId = "read-reconnect";
+    const key = `websocket:${chatId}`;
+    const oldPage: WebuiThreadPersistedPayload = {
+      schemaVersion: 1, projection: "events", completed_turn_ids: ["old"],
+      has_pending_tool_calls: false, active_turn_id: null,
+      read_state: { generation: "read-generation", latest: 1, read: 1 }, read_cursor: 1,
+      events: [
+        { event: "user_message", chat_id: chatId, turn_id: "old", turn_seq: 0, starts_turn: true, text: "Old request" },
+        { event: "message", chat_id: chatId, turn_id: "old", turn_seq: 1, text: "Old answer" },
+        { event: "turn_end", chat_id: chatId, turn_id: "old", turn_seq: 2 },
+      ],
+    };
+    const start: InboundEvent = {
+      event: "user_message", chat_id: chatId, turn_id: "new", turn_seq: 0,
+      starts_turn: true, text: "New request",
+    };
+    const partial: InboundEvent = {
+      event: "stream_end", chat_id: chatId, turn_id: "new", turn_seq: 2,
+      stream_id: "answer", text: "Partial ", resuming: true, merge_next: true,
+    };
+    const end: InboundEvent = {
+      event: "turn_end", chat_id: chatId, turn_id: "new", turn_seq: 5,
+      read_state: { generation: "read-generation", latest: 2, read: 1 }, read_cursor: 2,
+    };
+    const finalPage: WebuiThreadPersistedPayload = {
+      ...oldPage, completed_turn_ids: ["old", "new"], read_state: end.read_state, read_cursor: 2,
+      events: [...oldPage.events, start, partial,
+        { event: "stream_end", chat_id: chatId, turn_id: "new", turn_seq: 4, stream_id: "answer", text: "Partial final answer" },
+        end,
+      ],
+    };
+    const reads: Array<{ resolve: (response: Response) => void }> = [];
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify(oldPage)))
+      .mockImplementation(() => new Promise<Response>((resolve) => { reads.push({ resolve }); }));
+    const initial = projectThreadEvents(oldPage.events);
+    const hook = renderHook(() => useNanobotStream(chatId, initial, false,
+      undefined, undefined, [], { key }), { wrapper: wrap(fake.client) });
+    try {
+      await act(async () => {});
+      expect(hook.result.current.readObservation?.cursor).toBe(1);
+      act(() => {
+        fake.emit(chatId, start);
+        fake.emit(chatId, { event: "delta", chat_id: chatId, turn_id: "new", turn_seq: 1, stream_id: "answer", text: "Partial " });
+        fake.emit(chatId, partial);
+        fake.emitStatus("reconnecting");
+        fake.emitStatus("open");
+        hook.result.current.refreshHistory();
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      act(() => fake.emit(chatId, end));
+      expect(hook.result.current.messages.at(-1)?.content).toBe("Partial ");
+      expect(hook.result.current.readObservation).toEqual({ generation: "read-generation", cursor: 1 });
+      await act(async () => {});
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      await act(async () => { reads.at(-1)!.resolve(new Response(JSON.stringify(finalPage))); });
+      expect(hook.result.current.messages.at(-1)?.content).toBe("Partial final answer");
+      expect(hook.result.current.readObservation).toEqual({ generation: "read-generation", cursor: 2 });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    } finally {
+      hook.unmount();
+      fetchMock.mockRestore();
+      webuiThreadCache.delete(key);
+    }
+  });
+
+  it("observes continuously delivered local and broadcast turns without another HTTP body read", async () => {
+    const fake = fakeClient();
+    const chatId = "read-continuous";
+    const key = `websocket:${chatId}`;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      schemaVersion: 1, projection: "events", events: [],
+      completed_turn_ids: [], has_pending_tool_calls: false, active_turn_id: null,
+    })));
+    const hook = renderHook(() => useNanobotStream(chatId, EMPTY_MESSAGES, false,
+      undefined, undefined, [], { key }), { wrapper: wrap(fake.client) });
+    try {
+      await act(async () => {});
+      let turnId!: string;
+      act(() => { turnId = hook.result.current.send("Local request")!.turnId; });
+      act(() => {
+        fake.emit(chatId, { event: "delta", chat_id: chatId, turn_id: turnId, turn_seq: 1, stream_id: "answer", text: "Local answer" });
+        fake.emit(chatId, { event: "stream_end", chat_id: chatId, turn_id: turnId, turn_seq: 2, stream_id: "answer" });
+        fake.emit(chatId, { event: "turn_end", chat_id: chatId, turn_id: turnId, turn_seq: 3,
+          read_state: { generation: "continuous-generation", latest: 1, read: 0 }, read_cursor: 1 });
+      });
+      expect(hook.result.current.messages.at(-1)?.content).toBe("Local answer");
+      expect(hook.result.current.readObservation?.cursor).toBe(1);
+      act(() => {
+        fake.emit(chatId, { event: "user_message", chat_id: chatId, turn_id: "broadcast", turn_seq: 0, starts_turn: true, text: "Remote request" });
+        fake.emit(chatId, { event: "message", chat_id: chatId, turn_id: "broadcast", turn_seq: 1, text: "Remote answer" });
+        fake.emit(chatId, { event: "turn_end", chat_id: chatId, turn_id: "broadcast", turn_seq: 2,
+          read_state: { generation: "continuous-generation", latest: 2, read: 0 }, read_cursor: 2 });
+      });
+      expect(hook.result.current.messages.at(-1)?.content).toBe("Remote answer");
+      expect(hook.result.current.readObservation).toEqual({ generation: "continuous-generation", cursor: 2 });
+      await act(async () => {});
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      hook.unmount();
+      fetchMock.mockRestore();
+      webuiThreadCache.delete(key);
+    }
+  });
 });
 
 describe("live canonical event projection", () => {

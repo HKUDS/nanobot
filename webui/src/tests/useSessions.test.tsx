@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
+import type { SessionReadState } from "@/lib/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSessionHistory, useSessions } from "@/hooks/useSessions";
@@ -20,11 +21,19 @@ vi.mock("@/lib/api", async (importOriginal) => {
 });
 
 function fakeClient() {
+  const readyHandlers = new Set<() => void>();
+  const readHandlers = new Set<(chatId: string, state: SessionReadState) => void>();
   const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>();
   return {
     status: "open" as const,
     defaultChatId: null as string | null,
     onStatus: () => () => {},
+    onReady: (handler: () => void) => { readyHandlers.add(handler); return () => readyHandlers.delete(handler); },
+    emitReady: () => { for (const handler of readyHandlers) handler(); },
+    onSessionReadState: (handler: (chatId: string, state: SessionReadState) => void) => {
+      readHandlers.add(handler); return () => readHandlers.delete(handler);
+    },
+    emitReadState: (chatId: string, state: SessionReadState) => { for (const handler of readHandlers) handler(chatId, state); },
     onRunCompletion: () => () => {},
     onError: () => () => {},
     onChat: () => () => {},
@@ -64,6 +73,120 @@ function wrap(
 }
 
 describe("useSessions", () => {
+  it("updates only the target row on both clients from small read-state broadcasts", async () => {
+    const rows = ["one", "two"].map((id) => ({ key: `websocket:${id}`, chatId: id, channel: "websocket",
+      createdAt: null, updatedAt: null, preview: id, readState: { generation: id, latest: 1, read: 1 } }));
+    vi.mocked(api.listSessions).mockImplementation(async () => rows.map((row) => ({ ...row })));
+    const clients = [fakeClient(), fakeClient()];
+    const first = renderHook(() => useSessions(), { wrapper: wrap(clients[0]) });
+    const second = renderHook(() => useSessions(), { wrapper: wrap(clients[1]) });
+    await waitFor(() => expect(first.result.current.sessions).toHaveLength(2));
+    await waitFor(() => expect(second.result.current.sessions).toHaveLength(2));
+    const untouched = [first.result.current.sessions[1], second.result.current.sessions[1]];
+    const calls = vi.mocked(api.listSessions).mock.calls.length;
+    const broadcast = (state: SessionReadState) => act(() => {
+      for (const client of clients) client.emitReadState("one", state);
+    });
+    broadcast({ generation: "one", latest: 3, read: 1 });
+    for (const hook of [first, second]) expect(hook.result.current.sessions[0].readState).toEqual({ generation: "one", latest: 3, read: 1 });
+    broadcast({ generation: "one", latest: 3, read: 3 });
+    for (const [index, hook] of [first, second].entries()) {
+      expect(hook.result.current.sessions[0].readState).toEqual({ generation: "one", latest: 3, read: 3 });
+      expect(hook.result.current.sessions[1]).toBe(untouched[index]);
+    }
+    expect(api.listSessions).toHaveBeenCalledTimes(calls);
+    first.unmount(); second.unmount();
+  });
+
+  it("keeps live progress ahead of an old same-generation list response", async () => {
+    const row = { key: "websocket:one", chatId: "one", channel: "websocket", createdAt: null, updatedAt: null,
+      preview: "one", readState: { generation: "old", latest: 2, read: 1 } };
+    vi.mocked(api.listSessions).mockResolvedValue([row]);
+    const client = fakeClient();
+    const hook = renderHook(() => useSessions(), { wrapper: wrap(client) });
+    await waitFor(() => expect(hook.result.current.sessions).toHaveLength(1));
+    let finish!: (rows: typeof row[]) => void;
+    vi.mocked(api.listSessions).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    let pending!: Promise<void>;
+    act(() => { pending = hook.result.current.refresh(); });
+    act(() => client.emitReadState("one", { generation: "old", latest: 4, read: 3 }));
+    await act(async () => { finish([row]); await pending; });
+    expect(hook.result.current.sessions[0].readState).toEqual({ generation: "old", latest: 4, read: 3 });
+    hook.unmount();
+  });
+
+  it("reconciles a reset through the list and never replaces generation B with a delayed generation A event", async () => {
+    const row = { key: "websocket:one", chatId: "one", channel: "websocket", createdAt: null, updatedAt: null,
+      preview: "one", readState: { generation: "A", latest: 8, read: 7 } };
+    vi.mocked(api.listSessions).mockResolvedValue([row]);
+    const client = fakeClient();
+    const hook = renderHook(() => useSessions(), { wrapper: wrap(client) });
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    const reset = { ...row, readState: { generation: "B", latest: 2, read: 0 } };
+    vi.mocked(api.listSessions).mockResolvedValue([reset]);
+    await act(async () => client.emitReadState("one", reset.readState));
+    expect(hook.result.current.sessions[0].readState).toEqual(reset.readState);
+    expect(api.listSessions).toHaveBeenCalledTimes(2);
+    const current = hook.result.current.sessions[0];
+    act(() => client.emitReadState("one", { generation: "A", latest: 8, read: 8 }));
+    expect(hook.result.current.sessions[0]).toBe(current);
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    expect(hook.result.current.sessions[0].readState).toEqual(reset.readState);
+    expect(api.listSessions).toHaveBeenCalledTimes(3);
+    hook.unmount();
+  });
+
+  it("protects a cached server generation while reconciling a delayed pre-reset event", async () => {
+    const row = { key: "websocket:one", chatId: "one", channel: "websocket", createdAt: null, updatedAt: null,
+      preview: "one", readState: { generation: "B", latest: 1, read: 0 } };
+    activateReloadCache("ws://localhost:8765/");
+    writeReloadCache("sessions", [row]);
+    let finish!: (rows: typeof row[]) => void;
+    vi.mocked(api.listSessions).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; })).mockResolvedValue([row]);
+    const client = fakeClient();
+    const hook = renderHook(() => useSessions(), { wrapper: wrap(client) });
+    try {
+      expect(hook.result.current.sessions[0].readState).toEqual(row.readState);
+      act(() => client.emitReadState("one", { generation: "A", latest: 8, read: 8 }));
+      expect(hook.result.current.sessions[0].readState).toEqual(row.readState);
+      await act(async () => finish([row]));
+      await waitFor(() => expect(hook.result.current.loading).toBe(false));
+      expect(hook.result.current.sessions[0].readState).toEqual(row.readState);
+      expect(api.listSessions).toHaveBeenCalledTimes(2);
+    } finally { hook.unmount(); clearReloadCache(); }
+  });
+
+  it("drops read snapshots for rows deleted by a successful list before the channel session is recreated", async () => {
+    const row = { key: "telegram:one", chatId: "one", channel: "telegram", createdAt: null, updatedAt: null,
+      preview: "one", readState: { generation: "A", latest: 8, read: 7 } };
+    vi.mocked(api.listSessions).mockResolvedValue([row]);
+    const client = fakeClient();
+    const hook = renderHook(() => useSessions(), { wrapper: wrap(client) });
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    vi.mocked(api.listSessions).mockResolvedValue([]);
+    await act(async () => { await hook.result.current.refresh(); });
+    expect(hook.result.current.sessions).toEqual([]);
+    const recreated = { ...row, readState: { generation: "B", latest: 1, read: 0 } };
+    act(() => client.emitReadState("one", recreated.readState));
+    expect(api.listSessions).toHaveBeenCalledTimes(2);
+    vi.mocked(api.listSessions).mockResolvedValue([recreated]);
+    await act(async () => { await hook.result.current.refresh(); });
+    expect(hook.result.current.sessions[0].readState).toEqual(recreated.readState);
+    hook.unmount();
+  });
+
+  it("reloads authoritative state on authenticated ready and reconnect", async () => {
+    vi.mocked(api.listSessions).mockResolvedValue([]);
+    const client = fakeClient();
+    const hook = renderHook(() => useSessions(), { wrapper: wrap(client) });
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    for (const count of [2, 3]) {
+      await act(async () => client.emitReady());
+      expect(api.listSessions).toHaveBeenCalledTimes(count);
+    }
+    hook.unmount();
+  });
+
   it("distinguishes initial loading from revalidating a successfully loaded empty list", async () => {
     let finish!: (rows: Awaited<ReturnType<typeof api.listSessions>>) => void;
     vi.mocked(api.listSessions).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));

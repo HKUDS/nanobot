@@ -71,6 +71,102 @@ afterEach(() => {
 });
 
 describe("NanobotClient", () => {
+  it("validates read-state increments without triggering session refresh or transcript delivery", () => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    const read = vi.fn(); const update = vi.fn(); const transcript = vi.fn();
+    client.onSessionReadState(read); client.onSessionUpdate(update); client.onTranscript("chat", transcript);
+    client.connect(); lastSocket().fakeOpen();
+    const state = { generation: "g", latest: 3, read: 1 };
+    for (const invalid of [{ ...state, latest: "3" }, { ...state, read: -1 }, { ...state, read: 0.1 },
+      { ...state, generation: 1 }, { ...state, latest: Number.MAX_SAFE_INTEGER + 1 }]) {
+      lastSocket().fakeMessage({ event: "session_read_state", chat_id: "chat", state: invalid });
+    }
+    lastSocket().fakeMessage({ event: "session_read_state", chat_id: 9, state });
+    expect(read).not.toHaveBeenCalled();
+    lastSocket().fakeMessage({ event: "session_read_state", chat_id: "chat", state });
+    expect(read).toHaveBeenCalledWith("chat", state);
+    expect(update).not.toHaveBeenCalled(); expect(transcript).not.toHaveBeenCalled();
+    client.close();
+  });
+
+  it("deduplicates observed cursors and coalesces pending reads to the largest cursor", async () => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect(); const socket = lastSocket(); socket.fakeOpen();
+    const read = vi.fn(); client.onSessionReadState(read);
+    const requests = () => socket.sent.map((frame) => JSON.parse(frame)).filter((frame) => frame.action === "session.mark_read");
+    client.markRead("websocket:chat", "g", 2);
+    client.markRead("websocket:chat", "g", 2);
+    client.markRead("websocket:chat", "g", 3);
+    client.markRead("websocket:chat", "g", 5);
+    client.markRead("websocket:chat", "g", 4);
+    expect(requests()).toHaveLength(1);
+    expect(requests()[0].payload).toEqual({ session_key: "websocket:chat", generation: "g", cursor: 2 });
+    // latest is already 6: confirming this older rendered result must leave 3..6 unread.
+    socket.fakeMessage({ event: "webui_response", request_id: requests()[0].request_id, ok: true,
+      result: { state: { generation: "g", latest: 6, read: 2 }, changed: true } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(read).toHaveBeenLastCalledWith("chat", { generation: "g", latest: 6, read: 2 });
+    expect(requests()).toHaveLength(2);
+    expect(requests()[1].payload.cursor).toBe(5);
+    socket.fakeMessage({ event: "webui_response", request_id: requests()[1].request_id, ok: true,
+      result: { state: { generation: "g", latest: 6, read: 5 }, changed: true } });
+    await vi.advanceTimersByTimeAsync(0);
+    for (const cursor of [2, 5, 3, 5]) client.markRead("websocket:chat", "g", cursor);
+    expect(requests()).toHaveLength(2);
+    client.markRead("websocket:chat", "new", 1);
+    expect(requests().at(-1).payload).toEqual({ session_key: "websocket:chat", generation: "new", cursor: 1 });
+    client.close();
+  });
+
+  it("does not let an old generation's ACK or delayed broadcast replace a newer read command", async () => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect(); const socket = lastSocket(); socket.fakeOpen();
+    const read = vi.fn(); client.onSessionReadState(read);
+    const requests = () => socket.sent.map((frame) => JSON.parse(frame)).filter((frame) => frame.action === "session.mark_read");
+    client.markRead("websocket:chat", "A", 8);
+    client.markRead("websocket:chat", "B", 1);
+    const [old, current] = requests();
+    socket.fakeMessage({ event: "session_read_state", chat_id: "chat", state: { generation: "A", latest: 8, read: 8 } });
+    read.mockClear();
+    socket.fakeMessage({ event: "webui_response", request_id: old.request_id, ok: true,
+      result: { state: { generation: "A", latest: 8, read: 8 }, changed: true } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(read).not.toHaveBeenCalled();
+    client.markRead("websocket:chat", "B", 1);
+    expect(requests()).toHaveLength(2);
+    socket.fakeMessage({ event: "webui_response", request_id: current.request_id, ok: true,
+      result: { state: { generation: "B", latest: 1, read: 1 }, changed: true } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(read).toHaveBeenCalledWith("chat", { generation: "B", latest: 1, read: 1 });
+    client.close();
+  });
+
+  it("keeps failed reads unread and retries only after reconnect, not on repeated visibility reports", async () => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect(); const first = lastSocket(); first.fakeOpen();
+    const read = vi.fn(); client.onSessionReadState(read);
+    client.markRead("websocket:chat", "g", 2);
+    const request = first.sent.map((frame) => JSON.parse(frame)).find((frame) => frame.action === "session.mark_read");
+    first.fakeMessage({ event: "webui_response", request_id: request.request_id, ok: false, error: { status: 503, message: "disk error" } });
+    await vi.advanceTimersByTimeAsync(0);
+    for (let index = 0; index < 20; index++) client.markRead("websocket:chat", "g", 3);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(read).not.toHaveBeenCalled();
+    expect(first.sent.filter((frame) => JSON.parse(frame).action === "session.mark_read")).toHaveLength(1);
+    first.close(); await vi.advanceTimersByTimeAsync(1_000);
+    const second = lastSocket(); second.fakeOpen(); second.fakeMessage({ event: "ready", chat_id: "default" });
+    const retry = second.sent.map((frame) => JSON.parse(frame)).find((frame) => frame.action === "session.mark_read");
+    expect(retry.payload).toEqual({ session_key: "websocket:chat", generation: "g", cursor: 3 });
+    second.fakeMessage({ event: "webui_response", request_id: retry.request_id, ok: true,
+      result: { state: { generation: "g", latest: 4, read: 3 }, changed: true } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(read).toHaveBeenCalledWith("chat", { generation: "g", latest: 4, read: 3 });
+    client.close();
+  });
+
   it("notifies ready consumers after server ready frames, including reconnects", async () => {
     const client = new NanobotClient({ url: "ws://test?token=fixture-token", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
     const ready = vi.fn();

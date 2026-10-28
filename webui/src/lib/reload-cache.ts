@@ -1,4 +1,5 @@
 import type { ChatSummary, WorkspaceScopePayload } from "./types";
+import { parseSessionReadState } from "../../../packages/client-events/read-state";
 
 const PREFIX = "nanobot.reload.v1.";
 const MAX_CHARS = 512 * 1024;
@@ -50,6 +51,7 @@ export function readReloadSessions(): ChatSummary[] {
     if (!isRecord(row) || typeof row.key !== "string" || typeof row.channel !== "string"
       || typeof row.chatId !== "string" || typeof row.preview !== "string") return [];
     const workspaceScope = readWorkspaceScope(row.workspaceScope);
+    const readState = parseSessionReadState(row.readState);
     return [{
       key: row.key, channel: row.channel, chatId: row.chatId, preview: row.preview,
       title: typeof row.title === "string" ? row.title : undefined,
@@ -58,6 +60,7 @@ export function readReloadSessions(): ChatSummary[] {
       ...(typeof row.modelPreset === "string" ? { modelPreset: row.modelPreset } : {}),
       ...(typeof row.runStartedAt === "number" ? { runStartedAt: row.runStartedAt } : {}),
       ...(workspaceScope ? { workspaceScope } : {}),
+      ...(readState ? { readState } : {}),
       ...(typeof row.projectLocked === "boolean" ? { projectLocked: row.projectLocked } : {}),
     }];
   });

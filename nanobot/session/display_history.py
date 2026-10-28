@@ -8,7 +8,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypedDict, cast
 
 MAX_HISTORY_FACT_BYTES = 8 * 1024 * 1024
 HISTORY_GENERATION_METADATA_KEY = "_history_generation"
@@ -67,6 +67,12 @@ class HistoryImport:
     updated_at_ms: int = 0
 
 
+class SessionReadState(TypedDict):
+    generation: str
+    latest: int
+    read: int
+
+
 @dataclass(frozen=True)
 class HistoryTurn:
     ordinal: int
@@ -91,6 +97,17 @@ class HistoryReader:
             (self.key,),
         ).fetchone()
         return (str(row[0]), int(row[1])) if row is not None else None
+
+    @property
+    def read_state(self) -> SessionReadState | None:
+        row = self._db.execute(
+            """SELECT sessions.generation, coalesce(history_heads.latest_result, 0),
+                      coalesce(history_heads.read_result, 0)
+               FROM sessions LEFT JOIN history_heads ON history_heads.session_key=sessions.key
+               WHERE sessions.key=?""",
+            (self.key,),
+        ).fetchone()
+        return {"generation": str(row[0]), "latest": int(row[1]), "read": int(row[2])} if row is not None else None
 
     @property
     def turn_count(self) -> int:
