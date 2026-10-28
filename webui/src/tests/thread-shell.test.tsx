@@ -45,6 +45,7 @@ function makeClient() {
     (modelName: string | null, modelPreset?: string | null) => void
   >();
   const sessionUpdateHandlers = new Set<(chatId: string, scope?: string) => void>();
+  const sessionTitleHandlers = new Set<(chatId: string, title: string) => void>();
   let status: ConnectionStatus = "open";
   const sendMessage = vi.fn(lifecycle.sendMessage.bind(lifecycle));
   const canReconcileCanonicalCompletion = vi.fn(lifecycle.canReconcileCanonicalCompletion.bind(lifecycle));
@@ -110,6 +111,12 @@ function makeClient() {
       sessionUpdateHandlers.add(handler);
       return () => {
         sessionUpdateHandlers.delete(handler);
+      };
+    },
+    onSessionTitle: (handler: (chatId: string, title: string) => void) => {
+      sessionTitleHandlers.add(handler);
+      return () => {
+        sessionTitleHandlers.delete(handler);
       };
     },
     _emitError(err: StreamError) {

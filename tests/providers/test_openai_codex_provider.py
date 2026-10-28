@@ -129,7 +129,7 @@ def test_codex_error_details_do_not_retain_arbitrary_messages(raw: str) -> None:
 @pytest.mark.asyncio
 async def test_codex_title_omits_effort_even_with_high_chat_reasoning(monkeypatch, tmp_path) -> None:
     from nanobot.session.manager import SessionManager
-    from nanobot.session.webui_turns import maybe_generate_webui_title
+    from nanobot.session.titles import maybe_generate_session_title
 
     _mock_codex_token(monkeypatch)
     requests: list[dict[str, Any]] = []
@@ -147,7 +147,7 @@ async def test_codex_title_omits_effort_even_with_high_chat_reasoning(monkeypatc
     session.add_message("user", "Explain context compaction.")
     sessions.save(session)
 
-    assert await maybe_generate_webui_title(
+    assert await maybe_generate_session_title(
         sessions=sessions, session_key=session.key,
         provider=provider, model="openai-codex/gpt-6-astra",
     )
@@ -164,7 +164,7 @@ async def test_codex_title_failure_logs_request_purpose_and_safe_upstream_detail
     monkeypatch, tmp_path,
 ) -> None:
     from nanobot.session.manager import SessionManager
-    from nanobot.session.webui_turns import maybe_generate_webui_title
+    from nanobot.session.titles import maybe_generate_session_title
     from nanobot.utils.log_config import add_console_log_sink
 
     _mock_codex_token(monkeypatch)
@@ -201,7 +201,7 @@ async def test_codex_title_failure_logs_request_purpose_and_safe_upstream_detail
     logger.enable("nanobot")
     handler_id = add_console_log_sink(sink)
     try:
-        generated = await maybe_generate_webui_title(
+        generated = await maybe_generate_session_title(
             sessions=sessions, session_key=session.key,
             provider=OpenAICodexProvider(extra_body={"reasoning": {"effort": "none"}}),
             model="openai-codex/gpt-6-astra",
@@ -210,7 +210,7 @@ async def test_codex_title_failure_logs_request_purpose_and_safe_upstream_detail
     finally:
         logger.remove(handler_id)
 
-    assert generated is False
+    assert generated is None
     persisted = await sessions.state.read(session.key)
     assert persisted is not None
     assert "title" not in persisted.metadata
