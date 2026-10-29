@@ -86,9 +86,9 @@ class RecoveryCoordinator:
 
     async def scan(self) -> None:
         """Recover every interrupted WebUI session once at gateway startup."""
-        from nanobot.webui.history import initialize_history
+        from nanobot.webui.history import check_history_upgrade
 
-        await initialize_history(self.sessions)
+        await asyncio.to_thread(check_history_upgrade, self.sessions.sessions_dir)
         for key in await self._recovery_candidates():
             metadata_payload = await self.sessions.state.read_metadata(key)
             raw_metadata = metadata_payload.get("metadata") if metadata_payload else None
@@ -118,7 +118,7 @@ class RecoveryCoordinator:
                 await self._publish(route[1], failed)
 
     async def _recovery_candidates(self) -> list[str]:
-        """Legacy display-only sessions have canonical headers after import."""
+        """Display-only sessions also have canonical headers in SQLite."""
         return [item["key"] for item in await self.sessions.state.list_sessions()]
 
     @staticmethod

@@ -462,26 +462,6 @@ class SessionManager:
         """Observe explicit session deletion for process-local state cleanup."""
         self._delete_observer = observer
 
-    @staticmethod
-    def safe_key(key: str) -> str:
-        """Public helper used by HTTP handlers to map an arbitrary key to a stable filename stem."""
-        return SessionLocation.safe_key(key)
-
-    @staticmethod
-    def _storage_key(key: str) -> str:
-        """Collision-resistant encoding for internal session storage filenames."""
-        return SessionLocation.storage_key(key)
-
-    @staticmethod
-    def _decode_storage_key(stem: str) -> str | None:
-        """Reverse _storage_key(): decode a base64url (no-padding) stem back to the original key."""
-        return SessionLocation.decode_storage_key(stem)
-
-    @staticmethod
-    def decode_storage_key(stem: str) -> str | None:
-        """Public decoder for components that inspect canonical session filenames."""
-        return SessionManager._decode_storage_key(stem)
-
     def _require_offline_mutation(self) -> None:
         if self._state is not None and self._state.is_bound:
             raise RuntimeError(

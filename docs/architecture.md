@@ -185,9 +185,7 @@ Session history is the near-term conversation replay. Memory is the longer-term 
 
 Every append carries the generation admitted before execution, including a distinct display destination under unified-session routing. A missing or replaced session rejects the append instead of creating a new row. Delete/reset cascades through both logical histories; fork copies its canonical and display prefixes in one SQLite transaction. Future in-place history replacement should use that same owner transaction rather than file journals or replay-cache writes.
 
-`nanobot/webui/history.py` resolves legacy `<stem>.jsonl` files and numbered JSONL files inside `<stem>.segments/` directories, then imports them through `SessionState` before recovery or transport admission. Recorded chat identities determine the target session; histories without a recorded identity require an unambiguous existing canonical session. Display-only histories with a recorded identity are imported into the starting workspace namespace. Histories owned by exactly one other namespace are deferred to that namespace; duplicate owners and malformed records fail startup.
-
-`SqliteSessionStore.migrate_history()` commits the imported facts and completion markers in one transaction. Per-session ownership receipts in `storage_meta` survive session deletion, so another namespace cannot restore deleted chats by reimporting the unchanged legacy backups.
+Legacy model and WebUI history import ended in 0.5.0. Startup only checks for unconverted sources and directs users through 0.4.x; it does not parse, import, move or remove old history. Completed import markers and per-session ownership receipts in `storage_meta` remain intact, including receipts for deleted sessions, so retained WebUI backups do not block another workspace in the same instance. SQLite schema upgrades and projection of already imported display facts remain supported.
 
 | Store | File area |
 |---|---|

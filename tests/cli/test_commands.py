@@ -128,6 +128,12 @@ class _GatewayAgentContractStub:
 class _EmptyGatewaySessionManager:
     """Minimal session-manager contract for gateway assembly tests."""
 
+    @property
+    def sessions_dir(self) -> Path:
+        from nanobot.session.location import get_runtime_subdir
+
+        return get_runtime_subdir("sessions")
+
     def list_sessions(self) -> list[dict[str, object]]:
         return []
 
@@ -138,7 +144,6 @@ class _EmptyGatewaySessionManager:
     def state(self):
         return SimpleNamespace(
             list_sessions=AsyncMock(return_value=[]),
-            migrate_history=AsyncMock(),
             record_delivery=AsyncMock(),
             aclose=AsyncMock(),
         )
@@ -941,7 +946,7 @@ def test_provider_login_openai_codex_uses_explicit_config_proxy(tmp_path, monkey
     proxy = "http://127.0.0.1:23458"
     config_path = tmp_path / "config.json"
     config_path.write_text(
-        json.dumps({"providers": {"openaiCodex": {"proxy": proxy}}}),
+        json.dumps({"network": {"proxy": proxy}, "providers": {"openaiCodex": {"useProxy": True}}}),
         encoding="utf-8",
     )
     active_path: dict[str, Path] = {}

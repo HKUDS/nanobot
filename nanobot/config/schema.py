@@ -6,6 +6,7 @@ from typing import Any, ClassVar, Literal, cast
 
 from pydantic import AliasChoices, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 from pydantic.fields import FieldInfo
+from pydantic_core import PydanticCustomError
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 from nanobot.agent.tools.cli_apps_config import CliAppsToolConfig
@@ -21,7 +22,7 @@ from nanobot.agent.tools.web_config import (
 )
 from nanobot.agent.tools.web_config import WebToolsConfig
 from nanobot.config.home import get_default_workspace
-from nanobot.config.network import NetworkConfig, migrate_legacy_proxy_config
+from nanobot.config.network import NetworkConfig
 from nanobot.config.provider_api_migration import migrate_legacy_provider_api
 from nanobot.config.timezone import detect_system_timezone
 from nanobot.config_base import Base
@@ -519,8 +520,40 @@ class Config(BaseSettings):
 
     @model_validator(mode="before")
     @classmethod
-    def _migrate_proxy_config(cls, value: Any) -> Any:
-        return migrate_legacy_proxy_config(value)
+    def _reject_legacy_proxy_fields(cls, value: object) -> object:
+        """Reject obsolete routing settings after all settings sources have merged."""
+        if not isinstance(value, dict):
+            return value
+        data = cast(dict[str, object], value)
+        sections: list[tuple[str, object]] = []
+        providers = data.get("providers")
+        if isinstance(providers, dict):
+            sections.extend(("providers", section) for section in cast(dict[str, object], providers).values())
+        tools = data.get("tools")
+        if isinstance(tools, dict):
+            sections.append(("tools.web", cast(dict[str, object], tools).get("web")))
+        channels = data.get("channels")
+        if isinstance(channels, dict):
+            channels = cast(dict[str, object], channels)
+            sections.extend((f"channels.{name}", channels.get(name)) for name in ("telegram", "discord", "slack", "matrix", "whatsapp"))
+        for section_name, section in sections:
+            if not isinstance(section, dict):
+                continue
+            # Nested environment keys are lowercased by pydantic-settings.
+            keys = {key.lower() for key in cast(dict[str, object], section)}
+            legacy_keys = {"proxy"}
+            if section_name == "channels.discord":
+                legacy_keys.update({"proxyusername", "proxy_username", "proxypassword", "proxy_password"})
+            if keys & legacy_keys:
+                raise PydanticCustomError(
+                    "legacy_proxy_settings",
+                    "Legacy proxy settings in {section} are no longer supported. "
+                    "Load and save with nanobot 0.4.x before upgrading, or replace legacy fields "
+                    "with network.proxy and per-feature useProxy. Update legacy NANOBOT_* variables too. "
+                    "Include any Discord credentials in the shared proxy URL.",
+                    {"section": section_name},
+                )
+        return value
 
     @classmethod
     def settings_customise_sources(

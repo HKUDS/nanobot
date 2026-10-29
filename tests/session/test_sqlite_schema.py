@@ -146,7 +146,7 @@ def test_failed_upgrade_rolls_back_schema_version_and_records_then_can_retry(tmp
     assert loaded.provider_state == original.provider_state
 
 
-def test_added_columns_allow_import_and_all_session_write_paths(tmp_path, monkeypatch):
+def test_added_columns_allow_all_session_write_paths(tmp_path, monkeypatch):
     def add_optional_columns(db: sqlite3.Connection) -> None:
         for table in ("storage_meta", "sessions", "messages", "checkpoints", "pending_inputs"):
             db.execute(f"ALTER TABLE {table} ADD COLUMN extension TEXT")
@@ -156,15 +156,8 @@ def test_added_columns_allow_import_and_all_session_write_paths(tmp_path, monkey
         *sqlite_store._SCHEMA_MIGRATIONS, add_optional_columns,
     ))
     workspace = tmp_path / "workspace"
-    imported = _session()
-    _write_legacy(workspace, imported)
     store = SqliteSessionStore(tmp_path)
     store.initialize(workspace)
-    loaded = store.load(imported.key)
-    assert loaded is not None
-    assert loaded.messages == imported.messages
-    assert loaded.metadata == imported.metadata
-    assert loaded.provider_state == imported.provider_state
 
     created = _session()
     created.key = "chat:new"
@@ -183,7 +176,7 @@ def test_added_columns_allow_import_and_all_session_write_paths(tmp_path, monkey
     assert roundtrip.metadata == current.metadata
     assert roundtrip.provider_state == current.provider_state
     with closing(sqlite3.connect(store.path)) as db:
-        for table in ("storage_meta", "sessions", "messages", "checkpoints", "pending_inputs"):
+        for table in ("sessions", "messages", "checkpoints", "pending_inputs"):
             rows = db.execute(f"SELECT extension, format_version FROM {table}").fetchall()
             assert rows and all(row == (None, 1) for row in rows)
 

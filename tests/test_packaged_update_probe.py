@@ -54,8 +54,8 @@ def test_historical_projection_defaults_do_not_mask_history_loss():
         assert_history_preserved(after, before)
 
 
-def test_display_migration_allows_an_empty_owner_without_masking_context_loss(tmp_path):
-    from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind
+def test_display_owner_addition_does_not_mask_context_loss(tmp_path):
+    from nanobot.session.display_history import HistoryFact, HistoryKind
     from nanobot.session.manager import Session
     from nanobot.session.sqlite_store import SqliteSessionStore
 
@@ -65,13 +65,14 @@ def test_display_migration_allows_an_empty_owner_without_masking_context_loss(tm
     session.add_message("user", "Keep this original context")
     store.save(session)
     before = canonical_records(store.path)
-    store.migrate_history("acceptance-import", lambda _: [HistoryImport(
-        key="websocket:display-only", facts=[HistoryFact(HistoryKind.ANSWER, {"text": "Display only"})],
-    )])
+    display = Session(key="websocket:display-only")
+    store.save(display)
+    store.append_history(display.key, [HistoryFact(HistoryKind.ANSWER, {"text": "Display only"})],
+                         expected_generation=display.generation)
     after = canonical_records(store.path)
     assert_canonical_preserved(before, after)
     assert_canonical_preserved(after, after)
-    # The real /api/sessions read allocates the newly imported owner's handle.
+    # The real /api/sessions read allocates the new display owner's handle.
     store.update_metadata("websocket:display-only", {"session_handle": "jeno"})
     after = canonical_records(store.path)
     assert_canonical_preserved(before, after)
@@ -82,6 +83,68 @@ def test_display_migration_allows_an_empty_owner_without_masking_context_loss(tm
     store.update_metadata("websocket:display-only", {"unexpected": "context"})
     with pytest.raises(AssertionError):
         assert_canonical_preserved(before, canonical_records(store.path))
+
+
+@pytest.fixture
+def history_root(tmp_path, monkeypatch):
+    from nanobot.config.paths import get_runtime_subdir, get_webui_dir
+
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "account/.nanobot/config.json")
+    monkeypatch.setattr("nanobot.session.location.get_runtime_subdir", get_runtime_subdir)
+    monkeypatch.setattr("nanobot.webui.history.get_webui_dir", get_webui_dir)
+    return tmp_path
+
+
+async def test_native_history_fixture_reopens_without_mixing_model_and_display_data(history_root):
+    from nanobot.session.manager import SessionManager
+    from nanobot.webui.transcript import WebUITranscriptRecorder, build_webui_thread_response
+
+    fixture = probe.seed_history(history_root)
+    assert fixture == {"kind": "native-sqlite", "legacy_files": []}
+    sessions = SessionManager(history_root / "workspace")
+    await WebUITranscriptRecorder(sessions).initialize()
+    assert sessions.sessions_dir.is_relative_to(history_root / "account/.nanobot")
+    records = canonical_records(sessions.sessions_dir / "sessions.sqlite3")
+    assert len(records["sessions"]) == 3
+    for key in ("websocket:legacy-acceptance", "websocket:canonical-only"):
+        assert sessions.read_session_file(key)["messages"] == [{"role": "user", "content": "配置和聊天不能丢失"}]
+    assert sessions.read_session_file("websocket:display-only")["messages"] == []
+    assert sessions.project_history("websocket:canonical-only", lambda history: history.all_facts()) == []
+    for key in ("websocket:legacy-acceptance", "websocket:display-only"):
+        response = sessions.project_history(key, lambda history, key=key: build_webui_thread_response(key, history=history))
+        assert response["completed_turn_ids"] == ["fixture-" + key.split(":", 1)[1]]
+        assert {event.get("text") for event in response["events"]} >= {"配置和聊天不能丢失", "独立验收数据"}
+    assert canonical_records(sessions.sessions_dir / "sessions.sqlite3") == records
+
+
+def test_importer_enabled_baseline_gets_original_jsonl_sources(history_root, monkeypatch):
+    from nanobot.config.paths import get_webui_dir
+    from nanobot.session.location import SessionLocation
+
+    # This checks fixture selection only. Migration proof requires the real
+    # --baseline-wheel journey, not an importer mocked or copied into this test.
+    find_spec = probe.importlib.util.find_spec
+    monkeypatch.setattr(probe.importlib.util, "find_spec", lambda name: (
+        object() if name == "nanobot.session.jsonl_migration" else find_spec(name)))
+    fixture = probe.seed_history(history_root)
+    assert fixture["kind"] == "legacy-jsonl"
+    location = SessionLocation(history_root / "workspace")
+    expected = set()
+    for key in ("websocket:legacy-acceptance", "websocket:canonical-only"):
+        path = location.sessions_dir / (probe.base64.urlsafe_b64encode(key.encode()).decode().rstrip("=") + ".jsonl")
+        expected.add(str(path))
+        header, message = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+        assert header["key"] == key and header["metadata"] == {"title": "升级前的聊天"}
+        assert message == {"role": "user", "content": "配置和聊天不能丢失"}
+    for chat_id in ("legacy-acceptance", "display-only"):
+        path = get_webui_dir() / f"websocket_{chat_id}.jsonl"
+        expected.add(str(path))
+        events = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+        assert [event["event"] for event in events] == ["user", "message", "turn_end"]
+        assert {event["chat_id"] for event in events} == {chat_id}
+        assert events[1]["text"] == "独立验收数据"
+    assert len(fixture["legacy_files"]) == 4 and set(fixture["legacy_files"]) == expected
+    assert all(Path(name).is_relative_to(history_root / "account/.nanobot") for name in expected)
 
 
 def wheel(tmp_path, version, *, worker=b"# worker\n", fallback=b"# fallback\n"):

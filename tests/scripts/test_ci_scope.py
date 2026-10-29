@@ -32,6 +32,8 @@ def selected(result):
         ("tests/test_docker.sh", {"docker"}),
         ("tests/webui/fixtures/runtime-config-keys.json", {"python", "webui"}),
         ("tests/session/fixtures/sqlite_v1.sql", {"python"}),
+        ("tests/session/fixtures/sqlite_v2_040.sql", {"python"}),
+        ("scripts/docker_upgrade_smoke.py", {"docker"}),
         ("tests/fixtures/sigstore/bundle_v3.txt", {"python", "native"}),
         ("tests/fixtures/sigstore/bundle_v3.txt.sigstore", {"python", "native"}),
         ("tests/fixtures/sigstore/README.md", set()),

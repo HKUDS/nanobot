@@ -102,7 +102,9 @@ HTTP, HTTPS, SOCKS5, and SOCKS5H URLs are accepted; individual integrations reta
 
 </details>
 
-On upgrade, one legacy proxy address moves to `network.proxy` and previously configured features receive `useProxy: true`. The migrated configuration is written on the next normal save, including `nanobot onboard --refresh`. If the old configuration contains different proxy addresses, choose one and set `network.proxy` explicitly before upgrading; multiple per-feature addresses are no longer supported. For Discord configurations that store the entire proxy URL in an environment variable and credentials separately, combine them into one full URL environment variable and set `network.proxy` to that reference before upgrading. Credential references inside a URL remain references when saved. Back up the original configuration before saving if you may need to downgrade.
+**0.5.0 no longer accepts old per-feature `proxy` fields or Discord's separate `proxyUsername` / `proxyPassword` fields**, including snake_case spellings. First use 0.4.x to migrate and save the configuration, for example with `nanobot onboard --refresh`, or manually set `network.proxy` and each feature's `useProxy` choice and remove the old fields. Update environment variables that supply the old structure as well; otherwise loading the configuration fails with upgrade guidance instead of silently changing proxy routing.
+
+Choose one shared address if the old configuration contains different proxy URLs. For Discord, put credentials in that shared URL; if the entire URL comes from an environment variable, include the credentials in that variable too. Credential references inside a URL remain references when saved. Review enabled and disabled proxy choices before upgrading, and keep the original configuration backup if you may need to downgrade.
 
 ## Environment Variables for Secrets
 
