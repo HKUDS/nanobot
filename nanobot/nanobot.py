@@ -390,13 +390,20 @@ class Nanobot:
             self._closed = True
             tasks = tuple(self._runs)
             streams = {task: self._streams[task] for task in tasks if task in self._streams}
+
+            async def close_active_stream(stream: RunStream) -> None:
+                # A completed task can still await its registry-removal callback.
+                # Check at close time, not snapshot time, to retain normal events.
+                if not stream.done:
+                    await stream.aclose()
+
             for task in tasks:
                 if task not in streams:
                     task.cancel()
             try:
                 if tasks:
                     await shield_and_drain(asyncio.gather(
-                        *(stream.aclose() for stream in streams.values()),
+                        *(close_active_stream(stream) for stream in streams.values()),
                         *tasks, return_exceptions=True,
                     ))
             finally:

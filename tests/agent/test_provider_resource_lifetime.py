@@ -331,3 +331,27 @@ async def test_preset_reload_reuses_unchanged_and_releases_changed_or_removed_en
         assert all(client.is_closed() for client in state.clients)
     finally:
         await bot.aclose()
+
+
+@pytest.mark.asyncio
+async def test_sdk_close_retains_unconsumed_events_of_a_completed_stream(http_provider):
+    from nanobot.nanobot import STREAM_EVENT_RUN_COMPLETED, STREAM_EVENT_RUN_STARTED
+
+    state = http_provider
+    bot = state.bot()
+    try:
+        run = await bot.run_streamed("normal", session_key="sdk:completed")
+        async with asyncio.timeout(5):
+            while not run.done:
+                await asyncio.sleep(0)
+        # Closing the owner here may precede its task's registry-removal callback.
+        # A completed stream is no longer work to cancel, but still owns its data.
+        await bot.aclose()
+        events = [event async for event in run.stream_events()]
+        assert events[0].type == STREAM_EVENT_RUN_STARTED
+        assert events[-1].type == STREAM_EVENT_RUN_COMPLETED
+        assert any(event.type == STREAM_EVENT_TEXT_DELTA for event in events)
+        assert (await run.wait()).content == "/v1/chat/completions:tenant/base"
+        assert all(client.is_closed() for client in state.clients)
+    finally:
+        await bot.aclose()
