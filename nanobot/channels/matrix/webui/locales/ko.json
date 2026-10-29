@@ -32,6 +32,9 @@
           "listen": "경청(멘션 시 응답)"
         }
       },
+      "groupPolicyOverrides": {
+        "label": "방별 규칙 예외(JSON)"
+      },
       "allowFrom": {
         "label": "허용 사용자"
       },

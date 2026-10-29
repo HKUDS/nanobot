@@ -32,6 +32,9 @@
           "listen": "Lắng nghe (trả lời khi được nhắc)"
         }
       },
+      "groupPolicyOverrides": {
+        "label": "Ngoại lệ quy tắc theo phòng (JSON)"
+      },
       "allowFrom": {
         "label": "Người dùng được phép"
       },

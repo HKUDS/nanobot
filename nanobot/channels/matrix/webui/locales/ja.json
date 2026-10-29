@@ -32,6 +32,9 @@
           "listen": "リッスン（メンションで返信）"
         }
       },
+      "groupPolicyOverrides": {
+        "label": "部屋ごとのルール例外（JSON）"
+      },
       "allowFrom": {
         "label": "許可ユーザー"
       },

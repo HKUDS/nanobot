@@ -36,7 +36,6 @@ from nanobot.session.sqlite_store import SessionConflictError
 from nanobot.session.state import SessionOperationQueueFullError
 from nanobot.webui.history import (
     fact_from_record,
-    initialize_history,
     record_from_fact,
     turn_records,
 )
@@ -318,25 +317,6 @@ def _compact_completed_stream_deltas(
     ], len(dropped_indexes)
 
 
-def _compact_completed_turns(
-    turns: list[list[dict[str, Any]]],
-) -> tuple[list[list[dict[str, Any]]], int]:
-    compacted: list[list[dict[str, Any]]] = []
-    dropped = 0
-    for turn in turns:
-        next_turn, turn_dropped = _compact_completed_stream_deltas(turn)
-        compacted.append(next_turn)
-        dropped += turn_dropped
-    return compacted, dropped
-
-
-
-
-def compact_legacy_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    turns, _ = _compact_completed_turns(_split_transcript_turns(records))
-    return [record for turn in turns for record in turn]
-
-
 def _records_with_replay_identity(
     records: list[dict[str, Any]],
     *,
@@ -530,11 +510,6 @@ class WebUITranscriptRecorder:
         self.sessions = sessions
         self._log = log
         self._turn_sequences: dict[tuple[str, str], int] = {}
-
-    async def initialize(self) -> None:
-        sessions = self.sessions
-        if sessions is not None:
-            await initialize_history(sessions)
 
     def client_turn_metadata(self, value: Any) -> dict[str, str]:
         return {WEBUI_TURN_METADATA_KEY: normalize_webui_turn_id(value)}

@@ -32,6 +32,9 @@
           "listen": "Escuchar (responder al mencionar)"
         }
       },
+      "groupPolicyOverrides": {
+        "label": "Excepciones de reglas por sala (JSON)"
+      },
       "allowFrom": {
         "label": "Usuarios permitidos"
       },

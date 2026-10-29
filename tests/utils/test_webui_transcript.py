@@ -317,13 +317,6 @@ def test_thread_response_receipts_for_folded_legacy_deltas(
         [{"turn_id": "turn-folded", "ranges": [[6, 6], [10, 10]]}],
     ]
     assert history.read(key) == original_rows
-    # Migration compaction retains its existing record format, without HTTP metadata.
-    assert transcript_module.compact_legacy_records(original_rows) == [
-        original_rows[0], original_rows[3],
-        {**original_rows[6], "text": primary_text},
-        {**original_rows[7], "text": "other"},
-        original_rows[8],
-    ]
 
 
 def test_event_projection_defers_trace_details_without_legacy_fallback(history,

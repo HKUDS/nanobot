@@ -59,9 +59,7 @@ async def test_session_tools_find_old_matches_in_full_session(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("state", ["canonical", "transcript", "mixed"])
-async def test_session_tools_use_canonical_records_after_restart(history, tmp_path, monkeypatch, state):
-    webui_dir = tmp_path / "webui"
-    monkeypatch.setattr("nanobot.webui.history.get_webui_dir", lambda: webui_dir)
+async def test_session_tools_use_canonical_records_after_restart(history, state):
     manager = history.sessions
     key = "websocket:history"
     if state != "transcript":
@@ -75,16 +73,10 @@ async def test_session_tools_use_canonical_records_after_restart(history, tmp_pa
         })
         history.append(key, {"event": "turn_end", "chat_id": "history"})
 
-    def durable_files():
-        return {
-            path: path.read_bytes()
-            for root in (manager.sessions_dir, webui_dir)
-            for path in root.rglob("*.jsonl")
-        }
-
-    original = durable_files()
+    original_messages = manager.read_session_file(key)["messages"]
+    original_display_facts = manager.project_history(key, lambda reader: reader.all_facts())
     for _ in range(2):
-        manager = history.sessions
+        manager = SessionManager(history.sessions.workspace)
         with request_context(RequestContext(
             channel="websocket", chat_id="current", session_key="websocket:current",
         )):
@@ -99,4 +91,6 @@ async def test_session_tools_use_canonical_records_after_restart(history, tmp_pa
             assert search["results"][0]["excerpts"][0]["content"] == "canonical needle"
             assert [item["content"] for item in json.loads(read)["messages"]] == ["canonical needle"]
         assert display_search["results"] == []
-        assert durable_files() == original
+        assert manager.read_session_file(key)["messages"] == original_messages
+        assert manager.project_history(key, lambda reader: reader.all_facts()) == original_display_facts
+        await manager.state.aclose()

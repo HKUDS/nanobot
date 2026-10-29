@@ -32,6 +32,9 @@
           "listen": "Listen (reply on mention)"
         }
       },
+      "groupPolicyOverrides": {
+        "label": "Room policy overrides (JSON)"
+      },
       "allowFrom": {
         "label": "Allowed users"
       },

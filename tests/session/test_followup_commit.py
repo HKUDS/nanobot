@@ -35,7 +35,6 @@ def _input(text, turn_id):
 @pytest.mark.parametrize("count", [1, 2])
 @pytest.mark.parametrize("leave_unconsumed", [False, True])
 async def test_late_consumption_commits_history_and_only_its_ids(tmp_path, monkeypatch, count, leave_unconsumed):
-    monkeypatch.setattr("nanobot.webui.history.get_webui_dir", lambda: tmp_path / "webui")
     sessions = SessionManager(tmp_path / "workspace", sessions_root=tmp_path / "sessions")
     state = sessions.state
     try:

@@ -32,6 +32,9 @@
           "listen": "Dengar (balas saat disebut)"
         }
       },
+      "groupPolicyOverrides": {
+        "label": "Pengecualian aturan per ruang (JSON)"
+      },
       "allowFrom": {
         "label": "Pengguna diizinkan"
       },

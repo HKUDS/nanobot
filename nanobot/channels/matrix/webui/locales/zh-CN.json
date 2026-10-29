@@ -32,6 +32,9 @@
           "listen": "旁听（被提及时回复）"
         }
       },
+      "groupPolicyOverrides": {
+        "label": "按房间的规则例外（JSON）"
+      },
       "allowFrom": {
         "label": "允许用户"
       },

@@ -319,6 +319,9 @@ class MatrixConfig(Base):
     group_allow_from: list[str] = Field(default_factory=list)
     allow_room_mentions: bool = False
     reply_to_message: bool = True
+    # Per-room policy overrides keyed by room id, e.g. {"!abc:matrix.org": "mention"}.
+    # Rooms not listed fall back to `group_policy` (issue #6286).
+    group_policy_overrides: dict[str, MatrixGroupPolicy] = Field(default_factory=dict)
     streaming: bool = False
     use_proxy: bool = False
 
@@ -1217,13 +1220,17 @@ class MatrixChannel(BaseChannel):
             self._listen_buffers.pop(room_id, None)
             self._listen_dropped.pop(room_id, None)
 
+    def _effective_group_policy(self, room_id: str) -> MatrixGroupPolicy:
+        """Per-room override when present, else the channel-level group policy."""
+        return self.config.group_policy_overrides.get(room_id, self.config.group_policy)
+
     def _should_process_message(self, room: MatrixRoom, event: RoomMessage) -> bool:
         """Apply sender and room policy checks."""
         if not self.is_allowed(event.sender):
             return False
         if self._is_direct_room(room):
             return True
-        policy = self.config.group_policy
+        policy = self._effective_group_policy(room.room_id)
         if policy == "open":
             return True
         if policy == "allowlist":
@@ -1483,7 +1490,10 @@ class MatrixChannel(BaseChannel):
     async def _on_message(self, room: MatrixRoom, event: RoomMessageText) -> None:
         if event.sender == self.config.user_id or self._is_pre_startup_event(event):
             return
-        listen_mode = not self._is_direct_room(room) and self.config.group_policy == "listen"
+        listen_mode = (
+            not self._is_direct_room(room)
+            and self._effective_group_policy(room.room_id) == "listen"
+        )
         if listen_mode and not self._is_bot_mentioned(event):
             if self.is_allowed(event.sender):
                 self._buffer_listen_message(room.room_id, event.sender, event.body)
@@ -1511,7 +1521,10 @@ class MatrixChannel(BaseChannel):
     async def _on_media_message(self, room: MatrixRoom, event: MatrixMediaEvent) -> None:
         if event.sender == self.config.user_id or self._is_pre_startup_event(event):
             return
-        listen_mode = not self._is_direct_room(room) and self.config.group_policy == "listen"
+        listen_mode = (
+            not self._is_direct_room(room)
+            and self._effective_group_policy(room.room_id) == "listen"
+        )
         if listen_mode and not self._is_bot_mentioned(event):
             if self.is_allowed(event.sender):
                 media_body = getattr(event, "body", None)

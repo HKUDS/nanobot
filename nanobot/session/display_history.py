@@ -60,14 +60,6 @@ class HistoryFact:
 
 
 @dataclass(frozen=True)
-class HistoryImport:
-    key: str
-    facts: list[HistoryFact]
-    created_at_ms: int = 0
-    updated_at_ms: int = 0
-
-
-@dataclass(frozen=True)
 class HistoryTurn:
     ordinal: int
     record_count: int

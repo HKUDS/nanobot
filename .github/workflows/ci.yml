@@ -498,7 +498,7 @@ jobs:
       - name: Check out the real previous release for retained-volume acceptance
         uses: actions/checkout@v4
         with:
-          ref: 1bb712d3488915ca4ed9ccc1a93067ff722f5ab9 # v0.3.5
+          ref: 8f7a7d17590de7ab187650381894dba2b9e060ab # v0.4.0
           path: .docker-baseline
           persist-credentials: false
 

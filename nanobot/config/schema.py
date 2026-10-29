@@ -21,7 +21,7 @@ from nanobot.agent.tools.web_config import (
 )
 from nanobot.agent.tools.web_config import WebToolsConfig
 from nanobot.config.home import get_default_workspace
-from nanobot.config.network import NetworkConfig, migrate_legacy_proxy_config
+from nanobot.config.network import NetworkConfig
 from nanobot.config.provider_api_migration import migrate_legacy_provider_api
 from nanobot.config.timezone import detect_system_timezone
 from nanobot.config_base import Base
@@ -516,11 +516,6 @@ class Config(BaseSettings):
         validation_alias=AliasChoices("modelPresets", "model_presets"),
         serialization_alias="modelPresets",
     )
-
-    @model_validator(mode="before")
-    @classmethod
-    def _migrate_proxy_config(cls, value: Any) -> Any:
-        return migrate_legacy_proxy_config(value)
 
     @classmethod
     def settings_customise_sources(

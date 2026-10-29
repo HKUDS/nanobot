@@ -102,9 +102,6 @@ class WebUIOutboundDelivery:
         self._stream_text_buffers: dict[tuple[str, str], list[str]] = {}
         self._reasoning_text_buffers: dict[tuple[str, str], list[str]] = {}
 
-    async def initialize(self) -> None:
-        await self._transcripts.initialize()
-
     def bind_pairing(self, bus: MessageBus, *, channel: str) -> Callable[[], None]:
         async def queue_changed(event: PairingChanged) -> None:
             await bus.publish_event(event, channel=channel, chat_id="*")

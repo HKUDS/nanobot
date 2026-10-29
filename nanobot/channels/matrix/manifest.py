@@ -15,6 +15,7 @@ SETUP_SPEC = ChannelSetupSpec(
         "accessToken": field("secret"),
         "deviceId": field(),
         "groupPolicy": field("enum", choices=MATRIX_GROUP_POLICIES, default="open"),
+        "groupPolicyOverrides": field("json", default={}),
         "allowFrom": field("list"),
         "e2eeEnabled": field("bool", default=False),
         "sasVerification": field("bool", default=False),

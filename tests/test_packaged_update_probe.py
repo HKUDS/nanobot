@@ -20,8 +20,6 @@ from nanobot.release_feed import ReleaseFeed
 from scripts import verify_packaged_update as probe
 from scripts.verify_packaged_update import (
     Timings,
-    assert_canonical_preserved,
-    assert_history_preserved,
     canonical_records,
     digest,
     feed_records,
@@ -30,58 +28,33 @@ from scripts.verify_packaged_update import (
 )
 
 
-def test_historical_projection_defaults_do_not_mask_history_loss():
-    # Real retained packages omit unknown timestamps and an inactive goal from
-    # their public projection, although the latter is already in their JSONL.
-    events = [{"event": "user_message", "projection_id": "input", "text": "Keep this"},
-              {"event": "turn_end", "projection_id": "complete"}]
-    before = {"events": events, "completed_turn_ids": ["turn"]}
-    projected = [{**events[0], "created_at_ms": 0},
-                 {**events[1], "created_at_ms": 0, "goal_state": {"active": False}}]
-    after = {**before, "events": projected}
-    assert_history_preserved(before, after)
-    assert_history_preserved(after, after)
-    for change in ({"text": "Changed"}, {"projection_id": "changed"}, {"created_at_ms": 123}):
-        with pytest.raises(AssertionError):
-            assert_history_preserved(before, {**after, "events": [{**projected[0], **change}, projected[1]]})
-    with pytest.raises(AssertionError):
-        assert_history_preserved(before, {**after, "events": [projected[0], {**projected[1], "goal_state": {"active": True}}]})
-    with pytest.raises(AssertionError):
-        assert_history_preserved(before, {**after, "events": projected[:1]})
-    with pytest.raises(AssertionError):
-        assert_history_preserved(before, {**after, "completed_turn_ids": []})
-    with pytest.raises(AssertionError):
-        assert_history_preserved(after, before)
+@pytest.fixture
+def history_root(tmp_path, monkeypatch):
+    from nanobot.config.paths import get_runtime_subdir
+
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "account/.nanobot/config.json")
+    monkeypatch.setattr("nanobot.session.location.get_runtime_subdir", get_runtime_subdir)
+    return tmp_path
 
 
-def test_display_migration_allows_an_empty_owner_without_masking_context_loss(tmp_path):
-    from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind
-    from nanobot.session.manager import Session
-    from nanobot.session.sqlite_store import SqliteSessionStore
+async def test_native_history_fixture_reopens_without_mixing_model_and_display_data(history_root):
+    from nanobot.session.manager import SessionManager
+    from nanobot.webui.transcript import build_webui_thread_response
 
-    store = SqliteSessionStore(tmp_path)
-    store.initialize(tmp_path)
-    session = Session(key="websocket:canonical-only")
-    session.add_message("user", "Keep this original context")
-    store.save(session)
-    before = canonical_records(store.path)
-    store.migrate_history("acceptance-import", lambda _: [HistoryImport(
-        key="websocket:display-only", facts=[HistoryFact(HistoryKind.ANSWER, {"text": "Display only"})],
-    )])
-    after = canonical_records(store.path)
-    assert_canonical_preserved(before, after)
-    assert_canonical_preserved(after, after)
-    # The real /api/sessions read allocates the newly imported owner's handle.
-    store.update_metadata("websocket:display-only", {"session_handle": "jeno"})
-    after = canonical_records(store.path)
-    assert_canonical_preserved(before, after)
-    with pytest.raises(AssertionError):
-        assert_canonical_preserved(before, {**after, "messages": []})
-    with pytest.raises(AssertionError):
-        assert_canonical_preserved(before, {**after, "sessions": after["sessions"][1:]})
-    store.update_metadata("websocket:display-only", {"unexpected": "context"})
-    with pytest.raises(AssertionError):
-        assert_canonical_preserved(before, canonical_records(store.path))
+    probe.seed_history(history_root)
+    sessions = SessionManager(history_root / "workspace")
+    assert sessions.sessions_dir.is_relative_to(history_root / "account/.nanobot")
+    records = canonical_records(sessions.sessions_dir / "sessions.sqlite3")
+    assert len(records["sessions"]) == 3
+    for key in ("websocket:mixed-history", "websocket:canonical-only"):
+        assert sessions.read_session_file(key)["messages"] == [{"role": "user", "content": "配置和聊天不能丢失"}]
+    assert sessions.read_session_file("websocket:display-only")["messages"] == []
+    assert sessions.project_history("websocket:canonical-only", lambda history: history.all_facts()) == []
+    for key in ("websocket:mixed-history", "websocket:display-only"):
+        response = sessions.project_history(key, lambda history, key=key: build_webui_thread_response(key, history=history))
+        assert response["completed_turn_ids"] == ["fixture-" + key.split(":", 1)[1]]
+        assert {event.get("text") for event in response["events"]} >= {"配置和聊天不能丢失", "独立验收数据"}
+    assert canonical_records(sessions.sessions_dir / "sessions.sqlite3") == records
 
 
 def wheel(tmp_path, version, *, worker=b"# worker\n", fallback=b"# fallback\n"):
