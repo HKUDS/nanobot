@@ -36,7 +36,7 @@ import { useSystemSettingsState } from "@/components/settings/system/useSystemSe
 import { getToolsCatalog } from "@/lib/tools-catalog-cache";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useEditCompletion } from "@/components/settings/shared/useEditCompletion";
-import { cancelProviderOAuth, fetchSettings } from "@/lib/api";
+import { cancelProviderOAuth, fetchSettings, updateObservabilitySettings } from "@/lib/api";
 import {
   LOCAL_PREFS_CHANGED_EVENT,
   readLocalPreferences,
@@ -44,7 +44,7 @@ import {
   type LocalPreferences,
 } from "@/lib/local-preferences";
 import { isLoopbackHost } from "@/lib/network";
-import type { SettingsPayload } from "@/lib/types";
+import type { ObservabilitySettingsUpdate, SettingsPayload } from "@/lib/types";
 import { useClient } from "@/providers/ClientProvider";
 
 interface SettingsControllerOptions {
@@ -156,6 +156,10 @@ export function useSettingsController({
   );
 
   const runtimeConfigState = useRuntimeConfigSettings(settings, client, applyPayload);
+  const saveObservabilitySettings = async (draft: ObservabilitySettingsUpdate) => {
+    const payload = await updateObservabilitySettings(client, draft);
+    applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
+  };
 
   const closeProviderOAuthFlow = useCallback((cancelPending = true) => {
     const flow = providerOAuthFlowRef.current;
@@ -448,6 +452,7 @@ export function useSettingsController({
     systemActions,
     activeSection,
     runtimeConfigState,
+    saveObservabilitySettings,
     closeProviderOAuthFlow,
     error,
     featureCatalog,

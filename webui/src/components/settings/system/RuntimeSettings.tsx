@@ -13,7 +13,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { getRuntimeHost, isNativeRuntime } from "@/lib/runtime";
-import type { NanobotFeatureInfo, SettingsPayload } from "@/lib/types";
+import type { NanobotFeatureInfo, ObservabilitySettingsUpdate, SettingsPayload } from "@/lib/types";
+import { LangfuseSettings } from "@/components/settings/system/LangfuseSettings";
 
 export function RuntimeSettings({
   form,
@@ -26,6 +27,7 @@ export function RuntimeSettings({
   capabilityAction,
   capabilityError,
   onInstallCapability,
+  onSaveObservability,
 }: {
   form: AgentSettingsDraft;
   settings: SettingsPayload;
@@ -36,7 +38,8 @@ export function RuntimeSettings({
   capabilitiesLoading: boolean;
   capabilityAction: string | null;
   capabilityError: string | null;
-  onInstallCapability: (name: string) => void;
+  onInstallCapability: (name: string, installOnly?: boolean) => void;
+  onSaveObservability?: (draft: ObservabilitySettingsUpdate) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const showToast = useToast();
@@ -170,7 +173,12 @@ export function RuntimeSettings({
         </section>
       ) : null}
 
-      <section>
+      {onSaveObservability && settings.observability ? (
+        <LangfuseSettings settings={settings.observability} feature={langfuseFeature}
+          loading={capabilitiesLoading} action={capabilityAction} installError={capabilityError}
+          onInstallSupport={() => onInstallCapability("langfuse", true)}
+          onSave={onSaveObservability} disabled={isRestarting} />
+      ) : <section>
         <SettingsSectionTitle>{tx("settings.observability.title", "Observability")}</SettingsSectionTitle>
         <SettingsGroup>
           <SettingsRow
@@ -211,7 +219,7 @@ export function RuntimeSettings({
           </SettingsRow>
         </SettingsGroup>
         {capabilityError ? <p className="mt-2 text-[12px] text-destructive">{capabilityError}</p> : null}
-      </section>
+      </section>}
 
       <section>
         <SettingsSectionTitle>{t("settings.sections.system")}</SettingsSectionTitle>

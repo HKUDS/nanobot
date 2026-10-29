@@ -11,6 +11,7 @@ from nanobot.config.schema import (
     ProviderConfig,
     RequestOverrides,
 )
+from nanobot.observability.langfuse import LangfuseRuntime, provider_langfuse_runtime
 from nanobot.providers.base import GenerationSettings, LLMProvider
 from nanobot.providers.fallback_provider import FallbackProvider
 from nanobot.providers.registry import ProviderSpec, find_by_name
@@ -57,6 +58,7 @@ def _make_provider_core(
     *,
     preset: ModelPresetConfig,
     model: str | None = None,
+    langfuse: LangfuseRuntime,
 ) -> LLMProvider:
     setup = resolve_provider_route(
         config,
@@ -79,6 +81,7 @@ def _make_provider_core(
             extra_body=p.extra_body if p else None,
             fast_mode=preset.codex_fast_mode,
             provider_name=provider_name,
+            langfuse=langfuse,
         )
     elif backend == "xai_grok":
         from nanobot.providers.xai_grok_provider import XAIGrokProvider
@@ -99,6 +102,7 @@ def _make_provider_core(
             api_base=p.api_base,
             default_model=model,
             provider_name=provider_name,
+            langfuse=langfuse,
         )
     elif backend == "github_copilot":
         from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
@@ -106,6 +110,7 @@ def _make_provider_core(
         provider = GitHubCopilotProvider(
             default_model=model, provider_name=provider_name,
             model_api=setup.model_api,
+            langfuse=langfuse,
         )
     elif backend == "anthropic":
         from nanobot.providers.anthropic_provider import AnthropicProvider
@@ -151,6 +156,7 @@ def _make_provider_core(
             extra_query=p.extra_query if p else None,
             proxy=proxy,
             provider_name=provider_name,
+            langfuse=langfuse,
         )
 
     provider.generation = preset.to_generation_settings()
@@ -206,14 +212,15 @@ def make_provider(
     the failover path to create providers for fallback models.
     """
     resolved = _resolve_model_preset(config, preset_name=preset_name, preset=preset)
-    provider = _make_provider_core(config, preset=resolved, model=model)
+    langfuse = provider_langfuse_runtime(config)
+    provider = _make_provider_core(config, preset=resolved, model=model, langfuse=langfuse)
     fallback_presets = _resolve_fallback_presets(config, resolved)
 
     if fallback_presets:
         provider = FallbackProvider(
             primary=provider,
             fallback_presets=fallback_presets,
-            provider_factory=lambda fb: _make_provider_core(config, preset=fb),
+            provider_factory=lambda fb: _make_provider_core(config, preset=fb, langfuse=langfuse),
             primary_context_window_tokens=resolved.context_window_tokens,
             fallback_preset_names=[
                 fallback if isinstance(fallback, str) else None

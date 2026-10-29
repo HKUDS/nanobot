@@ -1565,8 +1565,9 @@ async def test_webui_request_returns_correlated_route_error(bus: MagicMock) -> N
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["settings.agent.update", "settings.observability.update", "settings.observability.test"])
 async def test_webui_request_requires_bootstrap_authenticated_connection(
-    bus: MagicMock,
+    bus: MagicMock, action: str,
 ) -> None:
     channel = _ch(bus)
     conn = AsyncMock()
@@ -1578,7 +1579,7 @@ async def test_webui_request_requires_bootstrap_authenticated_connection(
         {
             "type": "webui_request",
             "request_id": "request-3",
-            "action": "settings.agent.update",
+            "action": action,
             "payload": {},
         },
     )
@@ -4883,6 +4884,20 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert network_safety_body["advanced"]["webui_allow_local_service_access"] is False
         assert network_safety_body["advanced"]["webui_default_access_mode"] == "full"
         assert network_safety_body["advanced"]["private_service_protection_enabled"] is True
+
+        tracing_updated = await _webui_mutate(webui_client, "settings.observability.update", {
+            "enabled": False, "base_url": "https://cloud.langfuse.com",
+            "public_key": "pk-fixture", "secret_key": "sk-tracing-fixture",
+        })
+        assert tracing_updated.status_code == 200
+        assert tracing_updated.json()["observability"]["configured"] is True
+        assert "sk-tracing-fixture" not in tracing_updated.text
+        tracing_test = await _webui_mutate(webui_client, "settings.observability.test", {
+            "enabled": False, "base_url": "https://cloud.langfuse.com", "secret_key": "",
+        })
+        assert tracing_test.status_code == 200
+        assert tracing_test.json() == {"ok": False, "error": "missing_credentials"}
+        assert load_config(config_path).observability.langfuse.secret_key == "sk-tracing-fixture"
 
         image_updated = await _webui_mutate(
             webui_client,

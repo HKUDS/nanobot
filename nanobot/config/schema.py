@@ -33,6 +33,7 @@ from nanobot.config.network import NetworkConfig, migrate_legacy_proxy_config
 from nanobot.config.timezone import detect_system_timezone
 from nanobot.config_base import Base
 from nanobot.cron.types import CronSchedule
+from nanobot.observability.config import ObservabilityConfig
 from nanobot.providers.generation import GenerationSettings
 from nanobot.providers.model_api import ModelAPICapabilities, RequestAPI
 
@@ -504,6 +505,7 @@ class Config(BaseSettings):
     transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     network: NetworkConfig = Field(default_factory=NetworkConfig)
+    observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     model_presets: dict[str, ModelPresetConfig] = Field(

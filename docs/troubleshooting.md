@@ -79,6 +79,21 @@ Compare your setup against [Providers and Models](./providers.md) or grab a work
 | xAI returns `403` / access denied | Confirm your account has an active X Premium / Grok subscription, then sign in again with `nanobot provider login xai-grok` |
 | Codex TLS / certificate error | Check the host's system clock and corporate proxy certificate chain; if your organization uses a private CA, set `SSL_CERT_FILE` (or `SSL_CERT_DIR`) in the gateway environment and restart |
 
+## Langfuse Problems
+
+Langfuse tracing is optional. Configure it in **Settings → System → Tracing**, in `observability.langfuse`, or through the legacy environment-only setup.
+
+| Symptom | Check |
+|---|---|
+| Tracing support is missing | Install support in the Langfuse dialog or run `nanobot plugins enable langfuse`, then restart nanobot. |
+| No traces appear | Check the running state and pending restart notice, test the URL and keys, then send a supported model request after restarting. A connection test does not create a trace. |
+| Environment changes have no effect | An explicit `observability.langfuse` block takes precedence. Update that configuration or use `${VAR}` references. |
+| Self-hosted connection test is blocked | Add the intended private address to `tools.ssrfWhitelist`; do not disable network protections. |
+| Wrong Langfuse project or region | Check that the key pair and service URL come from the same Langfuse project/region. |
+| Only some providers trace | Langfuse tracing applies to OpenAI-compatible provider calls and the Codex OAuth provider; other native providers may not use either client path. |
+
+See [`configuration.md#langfuse-observability`](./configuration.md#langfuse-observability) for setup commands.
+
 ## Gateway Problems
 
 `nanobot gateway` powers the WebUI, chat apps, automations, heartbeat, and Dream. Run `nanobot gateway --verbose` to inspect live logs.
