@@ -97,18 +97,23 @@ async def test_model_override_keeps_request_settings_within_connection(
     await provider._ensure_client()
     provider = bind_transport(provider, handler)
     assert (await provider.chat([{"role": "user", "content": "hello"}], model=model)).content == "ok"
-    request = requests[0]
-    body = json.loads(request.content)
-    assert request.headers["X-Connection"] == target
-    assert request.url.params["connection"] == body["connection"] == target
-    if target == "tenant_a":
-        assert request.headers["X-Tenant-Token"] == "source-secret"
-        assert request.url.params["api_key"] == "source-secret"
-        assert body["metadata"] == {"token": "source-secret"}
-    else:
-        assert "X-Tenant-Token" not in request.headers
-        assert "api_key" not in request.url.params
-        assert "metadata" not in body
+    if entrypoint == "sdk":
+        repeated = resolver.resolve_override(model=model, model_preset=None, config=config)
+        assert repeated.provider is provider
+        assert (await repeated.provider.chat([{"role": "user", "content": "again"}], model=model)).content == "ok"
+    assert len(requests) == (2 if entrypoint == "sdk" else 1)
+    for request in requests:
+        body = json.loads(request.content)
+        assert request.headers["X-Connection"] == target
+        assert request.url.params["connection"] == body["connection"] == target
+        if target == "tenant_a":
+            assert request.headers["X-Tenant-Token"] == "source-secret"
+            assert request.url.params["api_key"] == "source-secret"
+            assert body["metadata"] == {"token": "source-secret"}
+        else:
+            assert "X-Tenant-Token" not in request.headers
+            assert "api_key" not in request.url.params
+            assert "metadata" not in body
     assert config.model_dump() == before
 
 
@@ -602,7 +607,8 @@ async def test_custom_messages_uses_its_proxy_and_does_not_inherit_native_creden
     config = _config()
     connection = config.get_provider(preset=config.model_presets["messages"])
     connection.api_key = None
-    connection.proxy = "http://proxy.test:8080"
+    config.network.proxy = "http://proxy.test:8080"
+    connection.use_proxy = True
     monkeypatch.setenv("ANTHROPIC_API_KEY", "native-key")
     monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "native-token")
     requests = []
@@ -612,7 +618,7 @@ async def test_custom_messages_uses_its_proxy_and_does_not_inherit_native_creden
         return _answer(request)
 
     def transport(**kwargs):
-        assert kwargs.pop("proxy") == connection.proxy
+        assert kwargs.pop("proxy") == config.network.proxy
         assert kwargs["trust_env"] is False
         return DefaultAsyncHttpxClient(transport=httpx.MockTransport(handler), **kwargs)
 

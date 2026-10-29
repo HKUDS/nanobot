@@ -2,12 +2,13 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { isCapabilitySection, type SettingsSectionKey } from "@/components/settings/contracts";
-import { SettingsGroup } from "@/components/settings/shared/SettingsControls";
+import { AboutSettingsLayout } from "@/components/settings/overview/AboutSettingsView";
+import { SettingsGroup, SettingsRow } from "@/components/settings/shared/SettingsControls";
 import { SkeletonStatus } from "@/components/settings/shared/SkeletonStatus";
 import { RUNTIME_CONFIG_FIELDS, RUNTIME_CONFIG_GROUPS, type RuntimeConfigPage } from "@/components/settings/system/runtime-config-fields";
 import { cn } from "@/lib/utils";
 
-type Control = "switch" | "input" | "duration" | "segments" | "reading" | "theme" | "edit" | "text" | "feature";
+type Control = "switch" | "input" | "duration" | "idle-timeout" | "segments" | "edit" | "text" | "feature";
 const block = "rounded bg-muted-foreground/20";
 
 function Title({ heading = false }: { heading?: boolean }) {
@@ -22,11 +23,11 @@ function Row({ control }: { control: Control }) {
     <div className="flex h-5 items-center"><div className={cn(block, "h-3.5 w-32 max-w-full")} /></div>
     <div className="settings-control">
       {control === "feature" ? <div className={cn(block, "mr-3 h-3 w-14")} /> : null}
-      {control === "duration" ? <div className="w-full"><div className={cn(block, "h-9 w-full rounded-full")} /><div className="mt-1.5 flex h-4 items-center"><div className={cn(block, "h-2.5 w-4/5 opacity-60")} /></div></div> : <div data-skeleton-switch={toggle ? "" : undefined} data-skeleton-reading-size={control === "reading" ? "" : undefined} className={cn(block,
+      {control === "idle-timeout" ? <div className="flex items-center gap-2">
+        <div className={cn(block, "h-9 w-28 rounded-full")} /><div className={cn(block, "h-3 w-10")} />
+      </div> : control === "duration" ? <div className="w-full"><div className={cn(block, "h-9 w-full rounded-full")} /><div className="mt-1.5 flex h-4 items-center"><div className={cn(block, "h-2.5 w-4/5 opacity-60")} /></div></div> : <div data-skeleton-switch={toggle ? "" : undefined} className={cn(block,
         toggle ? "h-5 w-9 shrink-0 rounded-full" : control === "input" ? "h-9 w-full rounded-full"
-          : control === "segments" || control === "reading" || control === "theme" ? "segmented-control w-44 rounded-full" : control === "edit" ? "ml-auto h-9 w-9 rounded-full" : "h-[1lh] w-24 text-ui",
-        (control === "segments" || control === "reading") && "h-[34px]", control === "theme" && "h-8",
-        control === "reading" && "w-36 [@media(pointer:coarse)]:w-40",
+          : control === "segments" ? "segmented-control h-[34px] w-44 rounded-full" : control === "edit" ? "ml-auto h-9 w-9 rounded-full" : "h-[1lh] w-24 text-ui",
       )} />}
     </div>
   </div>;
@@ -36,11 +37,27 @@ function Group({ controls }: { controls: Control[] }) {
   return <section><Title /><SettingsGroup>{controls.map((control, index) => <Row key={index} control={control} />)}</SettingsGroup></section>;
 }
 
+function ProxyGroup() {
+  return <section><Title /><SettingsGroup>
+    <div className="px-4 py-4 sm:px-5">
+      <div data-shared-proxy-skeleton className="w-full space-y-3">
+        <div data-proxy-address-skeleton className={cn(block, "h-10 w-full rounded-control")} />
+        <div className="flex h-7 items-center justify-between gap-3 py-1">
+          <div className={cn(block, "h-3 w-40")} /><div className={cn(block, "h-3.5 w-3.5 shrink-0")} />
+        </div>
+      </div>
+    </div>
+  </SettingsGroup></section>;
+}
+
 function RuntimeGroups({ page }: { page: RuntimeConfigPage }) {
   return <>{RUNTIME_CONFIG_GROUPS.filter((group) => group.page === page).map((group) => group.id === "chat"
     ? <Group key={group.id} controls={["switch", "segments"]} />
-    : <Group key={group.id} controls={RUNTIME_CONFIG_FIELDS.filter((field) => field.group === group.id && (!field.when || field.when.value === true)).map((field) =>
-      field.kind === "boolean" || field.kind === "toggle" ? "switch" : field.kind === "list" ? "edit" : field.kind === "duration" ? "duration" : "input",
+    : group.id === "proxy" ? <ProxyGroup key={group.id} />
+    : <Group key={group.id} controls={RUNTIME_CONFIG_FIELDS.filter((field) => field.group === group.id && (!field.when || field.when.value === true)).flatMap<Control>((field) =>
+      field.kind === "idle-compaction" ? ["switch", "idle-timeout"] : [
+        field.kind === "boolean" || field.kind === "toggle" ? "switch" : field.kind === "list" ? "edit" : field.kind === "duration" ? "duration" : "input",
+      ],
     )} />)}</>;
 }
 
@@ -52,9 +69,6 @@ export function SettingsSectionSkeleton({ section, showRestart = false }: { sect
     {[0, 1, 2, 3].map((index) => <SettingsGroup key={index}><Row control={index === 3 ? "switch" : "feature"} /></SettingsGroup>)}
   </>;
   else switch (section) {
-    case "appearance":
-      content = <><Group controls={["theme", "input"]} /><Group controls={["reading", "segments", "segments", "switch", "switch"]} /></>;
-      break;
     case "notifications":
       content = <section><Title /><SettingsGroup>
         <Row control="switch" />
@@ -94,14 +108,14 @@ export function SettingsSectionSkeleton({ section, showRestart = false }: { sect
       content = <RuntimeGroups page="advanced" />;
       break;
     case "about":
-      content = <>
-        <div className="flex flex-col items-center gap-4 py-6">
-          <img src="/brand/nanobot_mark.svg" alt="" className="h-16 w-16" />
-          <img src="/brand/nanobot_wordmark.svg" alt="" className="h-auto w-40 dark:brightness-150" />
-          <div className="flex flex-col items-center gap-4"><div className="mt-0.5 flex h-5 items-center"><div className={cn(block, "h-3 w-20")} /></div><div className={cn(block, "h-9 w-36 rounded-full")} /></div>
-        </div>
+      content = <AboutSettingsLayout starLink={null} versionCheck={
+        <SettingsGroup><SettingsRow title={<>
+          <div className="flex h-5 items-center"><div className={cn(block, "h-3.5 w-20")} /></div>
+          <div className="mt-1 flex h-5 items-center"><div className={cn(block, "h-3 w-24")} /></div>
+        </>}><div className={cn(block, "settings-version-actions h-9 w-36 rounded-control")} /></SettingsRow></SettingsGroup>
+      } links={
         <SettingsGroup>{[0, 1, 2].map((index) => <div key={index} className="settings-list-row flex items-center gap-3"><div className={cn(block, "h-4 w-4")} /><div className={cn(block, "h-3.5 w-28")} /></div>)}</SettingsGroup>
-      </>;
+      } />;
       break;
   }
   return <SkeletonStatus label={t("settings.status.loading")} className="settings-stack">{content}</SkeletonStatus>;

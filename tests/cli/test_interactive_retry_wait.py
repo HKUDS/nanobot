@@ -189,3 +189,26 @@ async def test_non_reasoning_progress_not_affected_by_show_reasoning():
 
     assert handled is True
     assert calls == ["working on it..."]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_interactive_structured_tool_hint_uses_cli_length_and_switch(enabled):
+    msg = SimpleNamespace(
+        content="",
+        event=ProgressEvent(tool_hint=True, tool_events=[{
+            "phase": "start", "call_id": "search-1", "name": "web_search",
+            "arguments": {"query": "abcdefghijklmnopqrstuvwxyz"},
+        }]),
+        metadata={},
+    )
+    config = SimpleNamespace(send_tool_hints=enabled, send_progress=False)
+    with patch("nanobot.cli.terminal._print_interactive_progress_line") as print_progress:
+        handled = await terminal._maybe_print_interactive_progress(
+            msg, None, config, tool_hint_max_length=20,
+        )
+    assert handled is True
+    if enabled:
+        print_progress.assert_awaited_once_with('search "abcdefghijklmnopqrs…"', None, None)
+    else:
+        print_progress.assert_not_awaited()

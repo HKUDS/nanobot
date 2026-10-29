@@ -77,7 +77,7 @@ const messages: UIMessage[] = [
 
 export function TypographyFixture() {
   useReadingTypography();
-  const { theme, toggle } = useTheme();
+  const { theme, preference, setTheme } = useTheme();
   const [preferences, setPreferences] = useState(readLocalPreferences);
   const [sent, setSent] = useState<UIMessage[]>([]);
   const previewMessages = new URLSearchParams(window.location.search).has("stress")
@@ -87,7 +87,7 @@ export function TypographyFixture() {
   return <ThemeProvider theme={theme}>
     <main className="h-full overflow-y-auto">
       <div className="settings-grid mx-auto py-6">
-        <AppearanceSettingsView theme={theme} onToggleTheme={toggle} localPrefs={preferences}
+        <AppearanceSettingsView themePreference={preference} onChangeTheme={setTheme} localPrefs={preferences}
           onChangeLocalPrefs={setPreferences} />
       </div>
       <section className="mx-auto max-w-[var(--content-column-width)] space-y-6 px-4 pb-8" aria-label="Reading preview">

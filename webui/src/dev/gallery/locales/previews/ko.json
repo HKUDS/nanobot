@@ -61,16 +61,6 @@
     "scope": "파일 범위",
     "hint": "오른쪽 클릭으로 복사 메뉴를 열거나 파일에 초점을 두고 Shift+F10을 누르세요."
   },
-  "webLinks": {
-    "title": "Web links · 링크 메뉴",
-    "description": "실제 링크 메뉴에서 메시지의 링크를 선택하고 주소를 복사합니다.",
-    "options": "WebLink는 링크 속성을 받습니다. useMessageWebLinks는 렌더링된 링크를 수집합니다. MessageLinksMenu는 항목과 뒤로 가기·닫기 콜백을 받고 expanded로 너비를 정합니다. 예제 링크는 모두 로컬 갤러리 리소스로 연결됩니다.",
-    "width": "링크 메뉴 너비",
-    "message": "<gallery>컴포넌트 갤러리</gallery>와 <brand>브랜드 이미지</brand>를 확인하세요.",
-    "close": "링크 메뉴 닫기",
-    "open": "메시지 링크 보기",
-    "hint": "링크를 오른쪽 클릭하면 주소를 복사할 수 있습니다. 메시지 메뉴는 실제 표시된 링크를 수집합니다."
-  },
   "workbench": {
     "title": "PaneWorkbench · 여러 창",
     "description": "레이아웃을 바꾸고 창을 선택하거나 추가하며 위치와 크기를 조절합니다.",
@@ -234,14 +224,6 @@
     "description": "텍스트, 이미지, 잘림, 로딩, 오류를 비교합니다. 이미지를 선택하여 확대하세요.",
     "options": "state가 표시 스냅샷을 제공하고 path가 파일 형식과 이름을 정합니다. 이미지 열기와 오류 콜백이 미리보기를 갱신합니다.",
     "state": "파일 미리보기 상태"
-  },
-  "webPreview": {
-    "title": "WebPreviewPanelView · 웹 콘텐츠",
-    "description": "웹 제목 표시줄, 격리 안내, 제한을 확인하고 로컬 문서를 새로 고칩니다.",
-    "options": "런타임이 restriction을 정한 후 내용을 전달합니다. children이 내용을 제공하고 onRefresh가 새로고침을 요청합니다. 이 iframe은 로컬 srcDoc을 사용합니다.",
-    "state": "웹 미리보기 상태",
-    "frame": "로컬 예제 웹페이지",
-    "refreshes": "새로고침 횟수: {{amount}}"
   },
   "session": {
     "title": "SessionInfoPopoverView · 세션 자동화",

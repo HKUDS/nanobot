@@ -1,5 +1,7 @@
 import { Profiler, useState } from "react";
 import { ThreadViewport } from "@/components/thread/ThreadViewport";
+import { SubagentTasksProvider } from "@/components/thread/SubagentTasks";
+import { useClient } from "@/providers/ClientProvider";
 import { useSessionHistory } from "@/hooks/useSessions";
 import { usePromptHistory } from "@/hooks/usePromptHistory";
 import type { UIMessage } from "@/lib/types";
@@ -9,7 +11,8 @@ const localMessages: UIMessage[] = Array.from({ length: 280 }, (_, index) => ({
   content: `Cached message ${index}`, createdAt: index + 1,
 }));
 
-export function HistoryBoundaryFixture({ local = false, navigate = false }: { local?: boolean; navigate?: boolean }) {
+export function HistoryBoundaryFixture({ local = false, navigate = false, tasks = false }: { local?: boolean; navigate?: boolean; tasks?: boolean }) {
+  const { client, token } = useClient();
   const [key, setKey] = useState("websocket:boundary-a");
   const history = useSessionHistory(local ? null : key);
   const messages = local ? localMessages : history.messages;
@@ -21,11 +24,13 @@ export function HistoryBoundaryFixture({ local = false, navigate = false }: { lo
     <Profiler id="history-boundary" onRender={(_, phase, actualDuration) => {
       window.dispatchEvent(new CustomEvent("history-boundary-render", { detail: { phase, actualDuration } }));
     }}>
+    <SubagentTasksProvider client={client} token={token} sessionKey={key} enabled={tasks} liveEvents={false}>
     <ThreadViewport messages={messages} isStreaming={false} conversationKey={key}
       conversationReady={local || !history.loading} hasMoreBefore={history.hasMoreBefore}
       loadingOlder={history.loadingOlder} olderError={history.olderError} onLoadOlder={history.loadOlder}
       navigation={navigate ? navigation : undefined} userMessageOffset={history.userMessageOffset}
       composer={<div className="border-t px-4 py-6" style={{ height: 96 }}>History boundary fixture</div>} />
+    </SubagentTasksProvider>
     </Profiler>
   </main>;
 }

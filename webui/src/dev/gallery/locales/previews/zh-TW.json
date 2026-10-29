@@ -61,16 +61,6 @@
     "scope": "檔案範圍",
     "hint": "按右鍵開啟複製選單，或聚焦檔案後按 Shift+F10。"
   },
-  "webLinks": {
-    "title": "Web links · 連結選單",
-    "description": "選擇訊息連結並複製網址。",
-    "options": "WebLink 接收連結屬性；useMessageWebLinks 收集實際呈現的訊息連結。MessageLinksMenu 接收項目、返回與關閉回呼，expanded 控制寬度。範例連結皆指向本機元件庫資源。",
-    "width": "連結選單寬度",
-    "message": "查看<gallery>元件庫</gallery>與<brand>品牌圖片</brand>。",
-    "close": "關閉連結選單",
-    "open": "查看訊息連結",
-    "hint": "在連結上按右鍵可複製網址；訊息選單從實際呈現的連結收集項目。"
-  },
   "workbench": {
     "title": "PaneWorkbench · 多窗格",
     "description": "切換版面、啟用或新增窗格並調整尺寸。",
@@ -234,14 +224,6 @@
     "description": "比較檔案顯示狀態，點選圖片試用縮放。",
     "options": "state 為顯示快照；path 決定檔案類型與名稱；圖片開啟與失敗回呼更新目前預覽。",
     "state": "檔案預覽狀態"
-  },
-  "webPreview": {
-    "title": "WebPreviewPanelView · 網頁內容",
-    "description": "查看隔離與限制提示，試用重新整理。",
-    "options": "執行階段先決定 restriction，再提供內容。children 接收內容，onRefresh 請求重新整理；此範例的 iframe 使用本機 srcDoc。",
-    "state": "網頁預覽狀態",
-    "frame": "本機範例網頁",
-    "refreshes": "重新整理次數：{{amount}}"
   },
   "session": {
     "title": "SessionInfoPopoverView · 對話任務",

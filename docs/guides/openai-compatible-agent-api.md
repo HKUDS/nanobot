@@ -57,7 +57,7 @@ curl http://127.0.0.1:8900/v1/chat/completions \
 
 - If `/v1/chat/completions` fails, test `nanobot agent -m "Hello!"` first.
 - If remote clients cannot connect, check `api.host`, `api.port`, firewall, and API key configuration.
-- If sessions mix together, pass unique `session_id` values.
+- If sessions mix together, pass a distinct, stable `session_id` for each conversation. Requests without `session_id` all share the `api:default` session. See [session behavior](../openai-api.md#sessions-failures-and-retries) before changing existing IDs.
 
 ## Related nanobot docs
 

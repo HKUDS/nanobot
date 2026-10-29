@@ -112,7 +112,7 @@ async def test_dispatch_cancellation_restores_checkpoint():
     )
     assert checkpoint_key not in session.metadata, \
         "Checkpoint metadata should be cleared after restore"
-    assert loop.sessions.state.restore_interruption.await_count == 1, \
+    assert loop.sessions.state.finish_turn.await_count == 1, \
         "Session should be persisted so the restored state survives process restart"
 
 

@@ -1,6 +1,7 @@
 """Production listener regressions for HTTP upload + small WS references."""
 import asyncio
 import json
+import threading
 from pathlib import Path
 
 import aiohttp
@@ -9,6 +10,8 @@ from websockets.asyncio.client import connect
 
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
+from nanobot.config.loader import load_config
+from nanobot.runtime_admission import RuntimeBusyError
 from nanobot.session.manager import SessionManager
 from nanobot.webui.gateway_services import build_gateway_services
 
@@ -46,6 +49,134 @@ async def event(ws, name):
             payload = json.loads(await ws.recv())
             if payload["event"] == name:
                 return payload
+
+
+@pytest.mark.parametrize("finish", [True, False], ids=["complete", "disconnect"])
+async def test_streaming_upload_blocks_maintenance_until_written_or_cleaned(gateway, finish):
+    channel, bus, http_url, ws_url = gateway
+    port = int(http_url.rsplit(":", 1)[1])
+    store = channel.gateway.uploads.store
+    async with connect(ws_url) as ws:
+        capability = (await event(ws, "ready"))["upload"]
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        try:
+            writer.write((
+                f"POST {capability['path']} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
+                f"Authorization: Bearer {capability['token']}\r\n"
+                "Content-Type: image/png\r\nContent-Length: 8\r\n\r\npart"
+            ).encode())
+            await writer.drain()
+            async with asyncio.timeout(3):
+                while store._active == 0:
+                    await asyncio.sleep(.01)
+            with pytest.raises(RuntimeBusyError):
+                with bus.admission.pause_if_idle(lambda: False):
+                    pytest.fail("Maintenance ignored an in-progress binary write")
+            assert not bus.admission.paused
+            if finish:
+                writer.write(b"done")
+                await writer.drain()
+                response = await asyncio.wait_for(reader.read(), timeout=3)
+                assert response.startswith(b"HTTP/1.1 201"), response
+            else:
+                writer.close()
+                await writer.wait_closed()
+            async with asyncio.timeout(3):
+                while store._active:
+                    await asyncio.sleep(.01)
+            with bus.admission.pause_if_idle(lambda: False):
+                assert bus.admission.paused
+            if not finish:
+                assert not tuple(store._journal.iterdir())
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+
+async def test_threaded_settings_write_stays_busy_after_browser_disconnect(gateway, monkeypatch):
+    channel, bus, _, ws_url = gateway
+    entered, release = threading.Event(), threading.Event()
+    settings = channel.gateway.settings
+    original = settings.config.run_serialized
+
+    def delayed_save(*args, **kwargs):
+        entered.set()
+        assert release.wait(10), "Test did not release the settings writer"
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(settings.config, "run_serialized", delayed_save)
+
+    def connection_url():
+        token = channel.gateway.tokens.issue_token(300, audience="webui")
+        return ws_url.replace("test-secret", token)
+
+    def request(identifier, value):
+        return json.dumps({"type": "webui_request", "request_id": identifier,
+                           "action": "settings.runtime_config.update",
+                           "payload": {"values": {"agents.defaults.max_tool_iterations": value}}})
+
+    try:
+        async with connect(connection_url()) as ws:
+            await event(ws, "ready")
+            await ws.send(request("slow-write", 31))
+            assert await asyncio.to_thread(entered.wait, 3)
+            with pytest.raises(RuntimeBusyError):
+                with bus.admission.pause_if_idle(lambda: False):
+                    pytest.fail("Maintenance ignored a threaded settings write")
+        # Existing mutation ownership deliberately survives a lost browser;
+        # losing its delivery task must not make the gateway appear idle.
+        with pytest.raises(RuntimeBusyError):
+            with bus.admission.pause_if_idle(lambda: False):
+                pytest.fail("Browser disconnect released an unfinished write")
+        operation = channel._commands.request_operations["slow-write"].task
+        release.set()
+        result = await asyncio.wait_for(asyncio.shield(operation), timeout=5)
+        assert result.status is None, result
+        assert load_config(settings.config.path).agents.defaults.max_tool_iterations == 31
+        async with connect(connection_url()) as ws:
+            await event(ws, "ready")
+            with bus.admission.pause_if_idle(lambda: False):
+                await ws.send(request("blocked-write", 32))
+                rejected = await event(ws, "webui_response")
+                assert rejected["error"]["status"] == 503
+                assert load_config(settings.config.path).agents.defaults.max_tool_iterations == 31
+            await ws.send(request("after-abort", 33))
+            assert (await event(ws, "webui_response"))["ok"] is True
+            assert load_config(settings.config.path).agents.defaults.max_tool_iterations == 33
+    finally:
+        release.set()
+
+
+async def test_http_route_is_busy_until_its_async_work_finishes(gateway, monkeypatch):
+    channel, bus, http_url, _ = gateway
+    entered, release = asyncio.Event(), asyncio.Event()
+    route = channel.gateway.http._dispatch_resolved
+
+    async def delayed_route(*args, **kwargs):
+        entered.set()
+        await release.wait()
+        return await route(*args, **kwargs)
+
+    monkeypatch.setattr(channel.gateway.http, "_dispatch_resolved", delayed_route)
+    async with aiohttp.ClientSession(headers={"Authorization": "Bearer test-secret"}) as http:
+        request = asyncio.create_task(http.get(http_url + "/webui/bootstrap"))
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=3)
+            with pytest.raises(RuntimeBusyError):
+                with bus.admission.pause_if_idle(lambda: False):
+                    pytest.fail("Maintenance ignored a running HTTP handler")
+            release.set()
+            async with await asyncio.wait_for(request, timeout=3) as response:
+                assert response.status == 200
+                await response.read()
+            with bus.admission.pause_if_idle(lambda: False):
+                async with http.get(http_url + "/webui/bootstrap") as response:
+                    assert response.status == 503
+            async with http.get(http_url + "/webui/bootstrap") as response:
+                assert response.status == 200
+        finally:
+            release.set()
+            await asyncio.gather(request, return_exceptions=True)
 
 
 @pytest.mark.parametrize("mime,name", [
@@ -176,3 +307,30 @@ async def test_stalled_upload_reports_timeout_and_keeps_connection_retryable(gat
         assert not [p for p in channel.gateway.uploads.store.media_dir.rglob("*") if p.is_file()]
         async with http.post(http_url + capability["path"], data=b"xy", headers=headers) as response:
             assert response.status == 201
+
+
+async def test_stopping_listener_cancels_active_upload_before_clearing_store(gateway):
+    channel, _, http_url, ws_url = gateway
+    port = int(http_url.rsplit(":", 1)[1])
+    async with connect(ws_url) as ws:
+        capability = (await event(ws, "ready"))["upload"]
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        try:
+            writer.write((
+                f"POST {capability['path']} HTTP/1.1\r\nHost: localhost\r\n"
+                f"Authorization: Bearer {capability['token']}\r\n"
+                "Content-Type: image/png\r\nContent-Length: 1024\r\n"
+                "Expect: 100-continue\r\n\r\n"
+            ).encode("ascii"))
+            await writer.drain()
+            assert b"100 Continue" in await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 2)
+            writer.write(b"partial")
+            await writer.drain()
+            async with asyncio.timeout(3):
+                await channel.stop()
+                await reader.read()
+                await ws.wait_closed()
+            assert not [p for p in channel.gateway.uploads.store.media_dir.rglob("*") if p.is_file()]
+        finally:
+            writer.close()
+            await writer.wait_closed()

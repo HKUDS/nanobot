@@ -23,6 +23,7 @@ from typing import Any, Generic, Literal, TypeVar, cast
 
 from filelock import FileLock
 
+from nanobot.utils.atomic_file import read_atomic_bytes, replace_atomic
 from nanobot.utils.rotating_output import (
     BACKGROUND_LOG_BACKUP_COUNT_ENV,
     BACKGROUND_LOG_MAX_BYTES_ENV,
@@ -390,20 +391,18 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
         # not an individual process, and can interrupt the caller when a
         # detached/no-window child has no addressable console group.  Keep
         # termination scoped to the recorded PID tree instead.
-        self._subprocess_run(
-            ["taskkill", "/PID", str(pid), "/T"],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        if self._wait_for_exit(pid, timeout_s):
-            return True
-        self._subprocess_run(
-            ["taskkill", "/PID", str(pid), "/T", "/F"],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        # Cooperative shutdown belongs to the application owner. Non-forced
+        # taskkill cannot close these windowless trees and only wastes its grace period.
+        try:
+            self._subprocess_run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=2,
+            )
+        except subprocess.TimeoutExpired:
+            return False
         return self._wait_for_exit(pid, 2)
 
     def _wait_for_exit(self, pid: int, timeout_s: int | float) -> bool:
@@ -479,8 +478,7 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
 
     def _read_state(self) -> dict[str, Any] | None:
         try:
-            with self.paths.state_path.open(encoding="utf-8") as handle:
-                payload = json.load(handle)
+            payload = json.loads(read_atomic_bytes(self.paths.state_path).decode("utf-8"))
         except (OSError, json.JSONDecodeError, ValueError):
             return None
         return cast(dict[str, Any], payload) if isinstance(payload, dict) else None
@@ -499,7 +497,7 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
                 handle.write("\n")
                 handle.flush()
                 os.fsync(handle.fileno())
-            tmp_path.replace(self.paths.state_path)
+            replace_atomic(tmp_path, self.paths.state_path)
         finally:
             tmp_path.unlink(missing_ok=True)
 
@@ -719,41 +717,52 @@ def _darwin_process_birth(pid: int) -> tuple[int, int, int] | None:
     return process_group, started_at_seconds, started_at_microseconds
 
 
-def _windows_process_identity(pid: int) -> str | None:
-    if os.name != "nt":
-        return None
+# Python before 3.14 retains each distinct pointer type in a global ctypes cache.
+class _FileTime(ctypes.Structure):
+    _fields_ = [("low", ctypes.c_uint32), ("high", ctypes.c_uint32)]
 
-    class FileTime(ctypes.Structure):
-        _fields_ = [("low", ctypes.c_uint32), ("high", ctypes.c_uint32)]
+    @property
+    def value(self) -> int:
+        return (int(self.high) << 32) | int(self.low)
 
-        @property
-        def value(self) -> int:
-            return (int(self.high) << 32) | int(self.low)
 
-    process_query_limited_information = 0x1000
+_FILE_TIME_PTR = ctypes.POINTER(_FileTime)
+
+
+@lru_cache(maxsize=1)
+def _windows_kernel32() -> Any:
+    """Reuse the native bindings while querying process identity on every call."""
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     kernel32.OpenProcess.restype = wintypes.HANDLE
     kernel32.GetProcessTimes.argtypes = [
         wintypes.HANDLE,
-        ctypes.POINTER(FileTime),
-        ctypes.POINTER(FileTime),
-        ctypes.POINTER(FileTime),
-        ctypes.POINTER(FileTime),
+        _FILE_TIME_PTR,
+        _FILE_TIME_PTR,
+        _FILE_TIME_PTR,
+        _FILE_TIME_PTR,
     ]
     kernel32.GetProcessTimes.restype = wintypes.BOOL
     kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
     kernel32.GetExitCodeProcess.restype = wintypes.BOOL
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
     kernel32.CloseHandle.restype = wintypes.BOOL
-    handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+    return kernel32
+
+
+def _windows_process_identity(pid: int) -> str | None:
+    if os.name != "nt":
+        return None
+
+    kernel32 = _windows_kernel32()
+    handle = kernel32.OpenProcess(0x1000, False, pid)
     if not handle:
         return None
     try:
-        creation_time = FileTime()
-        exit_time = FileTime()
-        kernel_time = FileTime()
-        user_time = FileTime()
+        creation_time = _FileTime()
+        exit_time = _FileTime()
+        kernel_time = _FileTime()
+        user_time = _FileTime()
         ok = kernel32.GetProcessTimes(
             handle,
             ctypes.byref(creation_time),

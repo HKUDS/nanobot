@@ -16,9 +16,8 @@
           "allowlist": "白名单"
         }
       },
-      "proxy": {
-        "label": "网络代理",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "使用代理"
       }
     }
   },

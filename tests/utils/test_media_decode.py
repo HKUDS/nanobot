@@ -26,8 +26,12 @@ def test_saves_png_with_correct_extension(tmp_path) -> None:
     assert (tmp_path / result.split("/")[-1]).read_bytes() == b"fake png"
 
 
-def test_saves_data_url_with_mime_parameters(tmp_path) -> None:
-    result = save_base64_data_url(_data_url(b"voice", mime="audio/webm;codecs=opus"), tmp_path)
+@pytest.mark.parametrize("mime", [
+    "audio/webm;codecs=opus",
+    "audio/webm;codecs=opus;name=voice.webm",
+])
+def test_saves_data_url_with_mime_parameters(tmp_path, mime: str) -> None:
+    result = save_base64_data_url(_data_url(b"voice", mime=mime), tmp_path)
     assert result is not None
     assert result.endswith(".webm")
     assert (tmp_path / result.split("/")[-1]).read_bytes() == b"voice"
@@ -93,13 +97,35 @@ def test_document_filename_cannot_escape_media_dir(tmp_path) -> None:
     assert saved.read_bytes() == b"%PDF-1.4"
 
 
-def test_returns_none_for_malformed_data_url(tmp_path) -> None:
-    assert save_base64_data_url("not-a-data-url", tmp_path) is None
+@pytest.mark.parametrize("data_url", [
+    "not-a-data-url",
+    "data:;base64,eA==",
+    "data:image/png,eA==",
+    "data:image/png;base64=1,eA==",
+    "data:image/png;base64",
+])
+def test_returns_none_for_malformed_data_url(tmp_path, data_url: str) -> None:
+    assert save_base64_data_url(data_url, tmp_path) is None
+    assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.parametrize("marker", ["BASE64", "Base64"])
+def test_saves_data_url_when_base64_marker_case_varies(tmp_path: Path, marker: str) -> None:
+    """RFC 2397 treats the base64 token as case-insensitive."""
+    payload = b"hello"
+    encoded = base64.b64encode(payload).decode()
+    result = save_base64_data_url(
+        f"data:text/plain;charset=utf-8;{marker},{encoded}",
+        tmp_path,
+    )
+    assert result is not None
+    assert Path(result).read_bytes() == payload
+
+
+@pytest.mark.parametrize("marker", ["base64", "BASE64"])
 @pytest.mark.parametrize("payload", ["not-valid-base64!!!", "@@@@"])
-def test_returns_none_for_broken_base64(tmp_path, payload: str) -> None:
-    assert save_base64_data_url(f"data:image/png;base64,{payload}", tmp_path) is None
+def test_returns_none_for_broken_base64(tmp_path, payload: str, marker: str) -> None:
+    assert save_base64_data_url(f"data:image/png;{marker},{payload}", tmp_path) is None
     assert list(tmp_path.iterdir()) == []
 
 

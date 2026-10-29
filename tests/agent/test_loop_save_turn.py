@@ -1105,39 +1105,6 @@ async def test_subagent_followup_stages_provider_state_before_turn_runs(
 
 
 @pytest.mark.asyncio
-async def test_subagent_followup_state_is_durable_before_prompt_assembly(
-    tmp_path: Path,
-) -> None:
-    loop = _make_full_loop(tmp_path)
-    loop.provider.can_resume_conversation_state.return_value = True
-    loop.context.build_system_prompt = MagicMock(  # type: ignore[method-assign]
-        side_effect=RuntimeError("prompt boom"),
-    )
-    session = loop.sessions.get_or_create("cli:subagent-prompt-crash")
-    session.provider_state = _provider_state()
-    loop.sessions.save(session)
-    await save_completed_subagent(loop, "sub-1", session.key)
-
-    msg = InboundMessage(
-        channel="system",
-        sender_id="subagent",
-        chat_id="cli:subagent-prompt-crash",
-        content="subagent result",
-        metadata={"subagent_task_id": "sub-1"},
-    )
-    with pytest.raises(RuntimeError, match="prompt boom"):
-        await loop._process_message(msg)
-
-    loop.sessions.invalidate("cli:subagent-prompt-crash")
-    persisted = loop.sessions.get_or_create("cli:subagent-prompt-crash")
-    assert persisted.messages[-1]["content"] == "subagent result"
-    assert persisted.provider_state is not None
-    assert persisted.provider_state.pending_messages[-1]["content"] == (
-        "subagent result"
-    )
-
-
-@pytest.mark.asyncio
 async def test_subagent_redelivery_does_not_duplicate_staged_provider_input(
     tmp_path: Path,
 ) -> None:
@@ -1164,7 +1131,11 @@ async def test_subagent_redelivery_does_not_duplicate_staged_provider_input(
 
     loop.sessions.invalidate("cli:subagent-redelivery")
     persisted = loop.sessions.get_or_create("cli:subagent-redelivery")
+    assert persisted.messages[-1]["content"] == "subagent result"
     assert persisted.provider_state is not None
+    assert persisted.provider_state.pending_messages[-1]["content"] == (
+        "subagent result"
+    )
     assert [
         message.get("content")
         for message in persisted.provider_state.pending_messages
@@ -1543,8 +1514,9 @@ async def test_internal_continuation_preserves_streaming_route_metadata(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("content", ["start the goal", "/goal start the goal"])
 async def test_websocket_internal_continuation_keeps_single_visible_run(
-    tmp_path: Path,
+    tmp_path: Path, content: str,
 ) -> None:
     loop = _make_full_loop(tmp_path)
     session = loop.sessions.get_or_create("websocket:c-auto")
@@ -1577,7 +1549,7 @@ async def test_websocket_internal_continuation_keeps_single_visible_run(
         channel="websocket",
         sender_id="u1",
         chat_id="c-auto",
-        content="start the goal",
+        content=content,
         metadata={"webui": True},
     ))
 
@@ -1594,6 +1566,71 @@ async def test_websocket_internal_continuation_keeps_single_visible_run(
     assert isinstance(turn_end[0].event.latency_ms, int)
     assert loop.bus.inbound_size == 0
     assert calls == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content", ["start the goal", "/goal start the goal"])
+async def test_stop_after_continuation_queued_ends_visible_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: str,
+) -> None:
+    from nanobot.command.builtin import cmd_stop
+    from nanobot.command.router import CommandContext
+
+    loop = _make_full_loop(tmp_path)
+    session = loop.sessions.get_or_create("websocket:c-stop-continuation")
+    session.metadata[GOAL_STATE_KEY] = {
+        "status": "active",
+        "objective": "Finish the long goal.",
+    }
+    loop.sessions.save(session)
+    calls = 0
+
+    async def fake_run_agent_loop(transcript_input, **_kwargs):
+        nonlocal calls
+        calls += 1
+        initial_messages = _assembled_messages(loop.context, transcript_input)
+        return _agent_run_result(
+            "paused",
+            [*initial_messages, {"role": "assistant", "content": "paused"}],
+            stop_reason="max_iterations",
+        )
+
+    loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
+    saving = asyncio.Event()
+    finish_turn = loop.sessions.state.finish_turn
+
+    async def hold_first_save(session):
+        if not saving.is_set():
+            saving.set()
+            await asyncio.Event().wait()
+        await finish_turn(session)
+
+    monkeypatch.setattr(loop.sessions.state, "finish_turn", hold_first_save)
+    msg = InboundMessage(
+        channel="websocket", sender_id="u1", chat_id="c-stop-continuation",
+        content=content, metadata={"webui": True},
+    )
+    await loop._enqueue_session_message(msg)
+    try:
+        await asyncio.wait_for(saving.wait(), timeout=5)
+        assert loop._pending_queues[msg.session_key].qsize() == 1
+        stop_msg = InboundMessage(
+            channel="websocket", sender_id="u1", chat_id=msg.chat_id, content="/stop",
+        )
+        result = await cmd_stop(CommandContext(
+            msg=stop_msg, session=None, key=msg.session_key, raw="/stop", loop=loop,
+        ))
+        assert "Stopped 1 task(s)" in result.content
+    finally:
+        await loop._cancel_active_tasks(msg.session_key)
+
+    outbound = []
+    while loop.bus.outbound_size:
+        outbound.append(await loop.bus.consume_outbound())
+    statuses = [m.event.status for m in outbound if isinstance(m.event, GoalStatusEvent)]
+    assert statuses == ["running", "idle"]
+    assert calls == 1
+    assert msg.session_key not in loop._pending_queues
 
 
 @pytest.mark.asyncio

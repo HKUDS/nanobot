@@ -1,37 +1,23 @@
 {
-  "description": "Utilisez nanobot depuis les tickets Linear grâce aux sessions d’agent natives.",
-  "requirements": "Une application OAuth Linear privée et une URL de rappel HTTPS publique et stable",
   "setup": {
     "docsLabel": "Ouvrir le guide de configuration Linear",
     "officialLabel": "Créer une application OAuth Linear",
-    "tryIt": "Mentionnez l’application ou déléguez-lui un ticket ; aucune nouvelle mention n’est nécessaire dans la session d’agent.",
-    "summary": "Créez une application OAuth Linear privée, enregistrez ses identifiants et son URL publique, puis autorisez l’espace de travail. Lancez une session en mentionnant l’application ou en lui déléguant un ticket ; les commentaires ordinaires sont ignorés.",
-    "steps": [
-      "Exposez cette instance nanobot avec une URL HTTPS stable (un tunnel convient).",
-      "Créez une application OAuth privée dans Linear avec les autorisations read, write, app:mentionable et app:assignable.",
-      "Abonnez le webhook de l’application à AgentSessionEvent, PermissionChange et OAuthAuthorization avec l’URL générée.",
-      "Connectez l’espace de travail avec OAuth, puis mentionnez l’application ou déléguez-lui un ticket."
-    ],
     "fields": {
       "clientId": {
         "label": "ID client OAuth",
-        "placeholder": "ID client OAuth Linear",
-        "help": "Copiez depuis l’application OAuth privée.\n\nCopiez-le depuis l’application OAuth privée dans Linear."
+        "placeholder": "ID client OAuth Linear"
       },
       "clientSecret": {
         "label": "Secret client OAuth",
-        "placeholder": "••••••",
-        "help": "Enregistré uniquement sur cette instance nanobot."
+        "placeholder": "••••••"
       },
       "webhookSigningSecret": {
         "label": "Secret de signature du webhook",
-        "placeholder": "••••••",
-        "help": "Vérifiez la signature Webhook.\n\nUtilisé pour vérifier Linear-Signature avant toute analyse du contenu du webhook."
+        "placeholder": "••••••"
       },
       "publicBaseUrl": {
         "label": "URL HTTPS publique",
-        "placeholder": "https://nanobot.example.com",
-        "help": "Saisissez une URL HTTPS sans chemin.\n\nUne origine HTTPS stable acheminée vers l’écouteur ci-dessous ; n’incluez pas de chemin."
+        "placeholder": "https://nanobot.example.com"
       },
       "host": {
         "label": "Hôte d’écoute",
@@ -51,12 +37,10 @@
       },
       "allowFrom": {
         "label": "Utilisateurs Linear autorisés",
-        "placeholder": "ID utilisateur Linear séparés par des virgules",
-        "help": "Choisissez qui peut utiliser cette connexion.\n\nLaissez vide pour utiliser l’association nanobot, ou saisissez * pour autoriser tous les utilisateurs des espaces connectés."
+        "placeholder": "ID utilisateur Linear séparés par des virgules"
       },
       "showReasoning": {
-        "label": "Afficher le raisonnement",
-        "help": "Publiez le raisonnement comme activité de réflexion.\n\nPublie le raisonnement du modèle comme activités de réflexion dans Linear. Désactivez cette option pour une session plus sobre."
+        "label": "Afficher le raisonnement"
       }
     }
   },
@@ -78,9 +62,6 @@
     "savePublicUrl": "Saisissez une URL HTTPS publique pour créer une application Linear.",
     "retrySave": "Réessayer",
     "channelRunning": "Canal en cours d’exécution",
-    "accessAll": "Tous les membres d’un espace autorisé peuvent exécuter cet agent.",
-    "accessRestricted": "Seuls les ID utilisateur Linear répertoriés dans Avancé peuvent exécuter cet agent.",
-    "accessPairing": "Associez au premier usage et connectez Linear MCP pour rechercher ou modifier des issues.",
     "configureTools": "Configurer Linear MCP",
     "workspacesTitle": "Espaces autorisés",
     "refreshWorkspaces": "Actualiser les espaces",
@@ -128,7 +109,6 @@
     "allow": "Autoriser {{name}} à utiliser nanobot",
     "saveUnconfirmed": "L’accès n’a pas été confirmé. Actualisez les membres avant de réessayer.",
     "guide": "Utilisez Accès des membres pour approuver vos collègues sans code. Les autorisations existantes restent valables sauf désactivation. Connectez Linear MCP pour rechercher ou modifier des issues.",
-    "intro": "Choisissez qui peut utiliser nanobot dans Linear, sans code d’association.",
     "details": "À propos de l’accès des membres",
     "summary": "{{allowed}} autorisés",
     "loading": "Recherche des membres…",

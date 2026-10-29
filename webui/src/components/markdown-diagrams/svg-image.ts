@@ -1,4 +1,4 @@
-// Worker-only policy for Pele 1.6 image documents. This is NOT an inline-SVG sanitizer.
+// Worker-only policy for Pele 1.9 image documents. This is NOT an inline-SVG sanitizer.
 import { SaxesParser } from "saxes";
 import type * as CssTree from "css-tree";
 // css-tree publishes these split entry points, but @types/css-tree declares only the barrel.
@@ -32,7 +32,7 @@ function fail(reason: DiagramFailure = "policy"): never {
   throw new DiagramImageError(reason);
 }
 
-// Reviewed against the published 1.6.0 string renderer, including nested icon geometry.
+// Reviewed against the published 1.9.0 string renderer, including nested icon geometry.
 // Local marker/clip structures are accepted, but never <use>, links, images or paint servers.
 const ELEMENTS = new Set([
   "svg", "g", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon",
@@ -278,6 +278,10 @@ export function diagramImageTemplate(svg: string, fonts: DiagramInput["fonts"]):
     const root = stack.length === 0;
     if (root && (elements !== 1 || tag.local !== "svg")) fail();
     if (stack.at(-1) === "title" || stack.at(-1) === "desc") fail();
+    // Only Pele's flat, measured sub/sup runs may use relative sizing, never author CSS.
+    const shift = tag.attributes["baseline-shift"]?.value;
+    const shifted = tag.local === "tspan" && stack.at(-1) === "text"
+      && (shift === "sub" || shift === "super") && tag.attributes["font-size"]?.value === "smaller";
     const attributes: string[] = [];
     const rootDrawing: string[] = [];
     for (const attribute of Object.values(tag.attributes)) {
@@ -290,6 +294,8 @@ export function diagramImageTemplate(svg: string, fonts: DiagramInput["fonts"]):
       let accepted = value;
       if (name === "xml:space") {
         if (value !== "preserve" && value !== "default") fail();
+      } else if (name === "baseline-shift" || (name === "font-size" && value === "smaller")) {
+        if (!shifted) fail("unsupported");
       } else if (name === "style") accepted = style(value, root, fonts, refs);
       else if (DRAWING_PROPERTIES.has(name)) accepted = drawingValue(name, css(value, "value"), refs);
       else if (TYPOGRAPHY_PROPERTIES.has(name)) accepted = typography(name, css(value, "value"), root, fonts, true);

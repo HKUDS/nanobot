@@ -59,20 +59,28 @@ describe("SegmentedControl", () => {
       top: "4px",
       width: "64px",
       height: "24px",
-      transform: "translate3d(4px, 0, 0)",
     });
+    expect(indicator?.style.translate).toBe("4px 0");
+    expect(indicator?.style.scale).toBe("1 1");
     expect(indicator).toHaveAttribute("aria-hidden", "true");
     expect(indicator).toHaveAttribute("data-animate", "false");
 
     fireEvent.click(diff);
 
-    expect(indicator).toHaveStyle({
-      width: "48px",
-      transform: "translate3d(72px, 0, 0)",
-    });
+    expect(indicator).toHaveStyle({ width: "64px" });
+    expect(indicator?.style.translate).toBe("72px 0");
+    expect(indicator?.style.scale).toBe("0.75 1");
     expect(indicator).toHaveAttribute("data-animate", "true");
     expect(summary).toHaveAttribute("aria-pressed", "false");
     expect(diff).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent(window, new Event("resize"));
+    expect(indicator).toHaveStyle({ width: "64px" });
+    setGeometry(diff, { left: 72, width: 96 });
+    fireEvent(window, new Event("resize"));
+    expect(indicator).toHaveStyle({ width: "96px" });
+    expect(indicator?.style.scale).toBe("1 1");
+    expect(indicator).toHaveAttribute("data-animate", "false");
   });
 
   it("uses roving focus and arrow-key activation for tabs", () => {

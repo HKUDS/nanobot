@@ -77,11 +77,11 @@ export function StartupSkeleton({
                 <div className="startup-composer-surface">
                   <div className="startup-composer-input"><Block /></div>
                   <div className="startup-composer-footer">
-                    <div className="startup-composer-primary"><Block className="startup-attach" /><Block className="startup-workspace" /><Block className="startup-access" /><Block className="startup-mobile-model" /></div>
+                    <div className="startup-composer-primary"><Block className="startup-attach" /><Block className="startup-access" /></div>
                     <div className="startup-composer-actions"><Block className="startup-model" /><Block className="startup-send" /></div>
                   </div>
-                  <div className="startup-workspace-row"><Block /><Block /></div>
                 </div>
+                <div className="startup-workspace-row"><Block className="startup-workspace" /></div>
               </div>
               <div className="startup-chat-spacer" />
             </div>

@@ -166,6 +166,11 @@
     "description": "이미지별 맞춤, 확대/축소, 이동, 핀치 컨트롤입니다.",
     "options": "className으로 영역을 제한하고 이미지 식별 정보가 달라지면 다시 마운트합니다. 갤러리가 방향키 탐색을 관리하면 panWithArrows=false로 설정합니다."
   },
+  "loadingRing": {
+    "title": "진행 링",
+    "description": "배경 링을 선택적으로 표시하는 공용 진행 표시기입니다.",
+    "options": "className으로 크기와 색상을 설정합니다. track=false는 배경 링을 숨기고, strokeWidth와 strokeDasharray는 호를 조절합니다. 동작 줄이기 설정을 따릅니다."
+  },
   "streaming": {
     "title": "애니메이션 레이블",
     "description": "진행 중인 사고와 도구 레이블이 공유하는 텍스트 애니메이션입니다.",
@@ -481,7 +486,10 @@
     "options": "AboutSettingsView는 버전과 지원 링크 조합을 받습니다. VersionCheckRowView는 checking/result를 표시하며 onCheck로 검사를 요청합니다. 실제 검사와 진단 링크 데이터는 기능 진입점이 담당합니다.",
     "error": "버전 정보를 가져올 수 없습니다. 다시 시도하세요.",
     "state": "버전 상태",
-    "selectedLink": "GitHub 링크를 선택했습니다"
+    "selectedLink": "GitHub 링크를 선택했습니다",
+    "preferenceSaved": "예시 설정을 저장했습니다. 설치하거나 다시 시작하지 않습니다.",
+    "updateRequested": "업데이트 검토를 선택했습니다. 이 미리보기에서는 설치하거나 다시 시작하지 않습니다.",
+    "dismissed": "업데이트 알림을 닫았습니다"
   },
   "appearance": {
     "title": "화면 환경설정",

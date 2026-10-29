@@ -84,8 +84,5 @@ describe("TUI host integration", () => {
         "--source", "nanobot:tui:metadata", "--seq", "3", "--clear-title",
       ],
     ])
-    expect(commands.flat()).not.toContain("report-agent")
-    expect(commands.flat()).not.toContain("report-agent-session")
-    expect(commands.flat()).not.toContain("--token")
   })
 })

@@ -90,7 +90,10 @@ class BedrockProvider(LLMProvider):
 
         idle_timeout_s = resolve_stream_idle_timeout_s()
         client_kwargs: dict[str, Any] = {
-            "config": Config(connect_timeout=idle_timeout_s, read_timeout=idle_timeout_s),
+            "config": Config(
+                connect_timeout=idle_timeout_s, read_timeout=idle_timeout_s,
+                retries={"total_max_attempts": 1},
+            ),
         }
         if self.region:
             client_kwargs["region_name"] = self.region

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { CircleAlert, Loader2, RotateCcw, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -324,6 +324,7 @@ export function RestartSettingsFooter({
             size="sm"
             variant="ghost"
             onClick={onReset}
+            data-settings-reset=""
             disabled={!dirty || saving}
             className="rounded-full"
           >
@@ -411,16 +412,20 @@ export function NumberInput({
   onChange: (value: number) => void;
   suffix?: string;
 }) {
+  const [draft, setDraft] = useState<{ text: string; value: number } | null>(null);
   return (
     <div className="relative w-full">
       <Input
         type="number"
         min={min}
         max={max}
-        value={value}
+        aria-invalid={!Number.isFinite(value) || value < min || value > max}
+        value={draft && Object.is(draft.value, value) ? draft.text : Number.isFinite(value) ? value : ""}
         onChange={(event) => {
-          const parsed = Number(event.target.value);
-          if (Number.isFinite(parsed)) onChange(parsed);
+          const text = event.target.value;
+          const parsed = text.trim() ? Number(text) : Number.NaN;
+          setDraft({ text, value: parsed });
+          onChange(parsed);
         }}
         className={cn("h-9 w-full rounded-full text-[13px]", suffix && "pr-12")}
       />

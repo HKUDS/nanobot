@@ -30,6 +30,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
 from nanobot.utils.helpers import sanitize_surrogates as _sanitize_surrogates
+from nanobot.utils.tool_hints import format_tool_event_hints
 
 __all__ = [
     "_ReasoningBuffer",
@@ -367,6 +368,8 @@ async def _maybe_print_interactive_progress(
     channels_config: Any,
     renderer: StreamRenderer | None = None,
     reasoning_buffer: _ReasoningBuffer | None = None,
+    *,
+    tool_hint_max_length: int = 40,
 ) -> bool:
     event = msg.event
     if isinstance(event, ContextCompactionEvent):
@@ -403,7 +406,10 @@ async def _maybe_print_interactive_progress(
     if channels_config and not is_tool_hint and not channels_config.send_progress:
         return True
 
-    await _print_interactive_progress_line(msg.content, thinking, renderer)
+    content = msg.content
+    if is_tool_hint and event.tool_events:
+        content = format_tool_event_hints(event.tool_events, max_length=tool_hint_max_length)
+    await _print_interactive_progress_line(content, thinking, renderer)
     return True
 
 

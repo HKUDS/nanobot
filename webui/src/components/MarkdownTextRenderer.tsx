@@ -4,11 +4,12 @@ import {
   useEffect,
   useMemo,
   useState,
+  type ComponentProps,
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Globe2 } from "lucide-react";
-import { decodeString } from "micromark-util-decode-string";
+import remarkCjkFriendly from "remark-cjk-friendly/parseOnly";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -24,7 +25,7 @@ import { MarkdownCodeBlock } from "@/components/markdown-diagrams/MarkdownCodeBl
 import { MarkdownCodeContext } from "@/components/markdown-diagrams/context";
 import { WebLink } from "@/components/WebLink";
 import {
-  INLINE_TOKEN_HIGHLIGHT_COLOR,
+  INLINE_REFERENCE_HIGHLIGHT_COLOR,
   InlineTokenHighlight,
 } from "@/components/InlineTokenHighlight";
 import {
@@ -61,10 +62,6 @@ type MarkdownAstNode = {
   type: string;
   value?: string;
   children?: MarkdownAstNode[];
-  position?: {
-    start: { offset: number };
-    end: { offset: number };
-  };
   data?: {
     hName?: string;
   };
@@ -90,13 +87,11 @@ type AvailabilityResult = {
   resolve: FilePreviewAvailabilityResolver;
 };
 
-function InferredFileReferenceChip({
-  path,
+function AvailableFileReferenceChip({
   onOpen,
-}: {
-  path: string;
-  onOpen?: (path: string) => void;
-}) {
+  ...props
+}: ComponentProps<typeof FileReferenceChip>) {
+  const path = props.previewPath || props.tooltipPath || props.path;
   const resolve = useFilePreviewAvailabilityResolver();
   const [result, setResult] = useState<AvailabilityResult | null>(null);
 
@@ -122,7 +117,7 @@ function InferredFileReferenceChip({
   );
   return (
     <FileReferenceChip
-      path={path}
+      {...props}
       onOpen={onOpen && resolvedAvailable ? onOpen : undefined}
     />
   );
@@ -263,54 +258,8 @@ function remarkSafeHtmlSubset() {
   };
 }
 
-// Model output can put CJK punctuation or whitespace before a closing `**`
-// followed immediately by a word, which CommonMark leaves as literal text.
-const STRONG_BEFORE_WORD = /(?<!\\)\*\*([^\s*][^*\r\n]*?)(?<!\\)\*\*(?=[\p{L}\p{N}])/gu;
-const CJK_CHARACTER = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
-
-function normalizeCjkStrongBoundaries(node: MarkdownAstNode, source: string): void {
-  if (!node.children) return;
-  node.children = node.children.flatMap((child) => {
-    if (child.type !== "text" || !child.value?.includes("**") || !child.position) {
-      normalizeCjkStrongBoundaries(child, source);
-      return [child];
-    }
-
-    // Match source delimiters before decoding escapes and character references.
-    // Paragraph continuation indentation is not part of the parsed text value.
-    const textSource = source.slice(child.position.start.offset, child.position.end.offset)
-      .replace(/(\r\n?|\n)[\t ]+/g, "$1");
-
-    const replacement: MarkdownAstNode[] = [];
-    let cursor = 0;
-    for (const match of textSource.matchAll(STRONG_BEFORE_WORD)) {
-      const start = match.index;
-      const end = start + match[0].length;
-      const content = decodeString(match[1]);
-      if (!CJK_CHARACTER.test(content + textSource.slice(end, end + 1))) continue;
-      const label = content.trimEnd();
-      if (start > cursor) replacement.push(safeText(decodeString(textSource.slice(cursor, start))));
-      replacement.push({
-        type: "strong",
-        children: [safeText(label)],
-      });
-      if (label.length < content.length) replacement.push(safeText(content.slice(label.length)));
-      cursor = end;
-    }
-    if (cursor === 0) return [child];
-    if (cursor < textSource.length) replacement.push(safeText(decodeString(textSource.slice(cursor))));
-    return replacement;
-  });
-}
-
-function remarkCjkStrongBoundaries() {
-  return (tree: MarkdownAstNode, file: { toString(): string }) => {
-    normalizeCjkStrongBoundaries(tree, file.toString());
-  };
-}
-
 const remarkPlugins: NonNullable<StreamdownProps["remarkPlugins"]> = [
-  remarkCjkStrongBoundaries,
+  remarkCjkFriendly,
   remarkBreaks,
   [remarkGfm, { singleTilde: false }],
   remarkCjkAutolinks,
@@ -410,7 +359,7 @@ function DocumentLink({ href, path, onOpen, children }: {
   // Fragment-only links must not replace the application's hash route.
   if (!href || href.startsWith("#")) return <>{children}</>;
   if (/^(https?:\/\/|mailto:)/i.test(href)) {
-    return <WebLink href={href} className="text-blue-500 underline underline-offset-2 dark:text-blue-300">{children}</WebLink>;
+    return <WebLink href={href} className="text-content-link underline underline-offset-2">{children}</WebLink>;
   }
   if (/^[a-z][a-z\d+.-]*:/i.test(href) || href.startsWith("//")) return <>{children}</>;
   let target = href.split(/[?#]/, 1)[0];
@@ -516,7 +465,7 @@ function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
       aria-label={t("message.openLink", { label })}
       className={cn(
         "not-prose inline-flex max-w-full items-center gap-2 align-baseline",
-        "text-blue-500 no-underline underline-offset-2 hover:underline dark:text-blue-300",
+        "text-content-link no-underline underline-offset-2 hover:underline",
       )}
     >
       <span
@@ -607,7 +556,7 @@ export default function MarkdownTextRenderer({
         const raw = String(kids).replace(/\n$/, "");
         if (!documentPath && isLikelyFilePath(raw)) {
           return (
-            <InferredFileReferenceChip
+            <AvailableFileReferenceChip
               path={raw}
               onOpen={onOpenFilePreview}
             />
@@ -679,9 +628,9 @@ export default function MarkdownTextRenderer({
             <a
               href={sessionHref}
               className="rounded-sm underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-              style={{ textDecorationColor: INLINE_TOKEN_HIGHLIGHT_COLOR }}
+              style={{ textDecorationColor: INLINE_REFERENCE_HIGHLIGHT_COLOR }}
             >
-              <InlineTokenHighlight color={INLINE_TOKEN_HIGHLIGHT_COLOR}>
+              <InlineTokenHighlight color={INLINE_REFERENCE_HIGHLIGHT_COLOR}>
                 {markdownChildren}
               </InlineTokenHighlight>
             </a>
@@ -694,7 +643,7 @@ export default function MarkdownTextRenderer({
         if (filePath) {
           const label = nodeText(markdownChildren).trim();
           return (
-            <FileReferenceChip
+            <AvailableFileReferenceChip
               path={label || filePath}
               tooltipPath={filePath}
               previewPath={filePath}
@@ -710,7 +659,7 @@ export default function MarkdownTextRenderer({
             href={href}
             target="_blank"
             rel="noreferrer noopener"
-            className="text-blue-500 underline underline-offset-2 hover:text-blue-600 dark:text-blue-300 dark:hover:text-blue-200"
+            className="text-content-link underline underline-offset-2 hover:text-content-link-hover"
             {...props}
           >
             {markdownChildren}
@@ -892,7 +841,7 @@ export default function MarkdownTextRenderer({
         "prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5",
         "prose-blockquote:my-3 prose-blockquote:border-l-2 prose-blockquote:font-normal",
         "prose-blockquote:not-italic prose-blockquote:text-foreground/80",
-        "prose-a:text-blue-500 prose-a:underline-offset-2 hover:prose-a:text-blue-600 dark:prose-a:text-blue-300 dark:hover:prose-a:text-blue-200",
+        "prose-a:text-content-link prose-a:underline-offset-2 hover:prose-a:text-content-link-hover",
         "prose-hr:my-6",
         "prose-pre:my-0 prose-pre:bg-transparent prose-pre:p-0",
         "prose-code:before:content-none prose-code:after:content-none prose-code:font-normal",

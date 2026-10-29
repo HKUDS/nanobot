@@ -127,7 +127,7 @@ See the [native Linear agent guide](./guides/linear-agent.md) for the complete s
 
 1. Create a bot with `@BotFather` and copy its token.
 2. Run `nanobot webui`, then open **Channels → Telegram**.
-3. Paste the token. If the gateway cannot reach Telegram directly, expand **Advanced** and add an HTTP or SOCKS proxy.
+3. Paste the token. If the gateway cannot reach Telegram directly, set the address in **Settings → Advanced → Shared proxy**, then enable **Use proxy** in Telegram's advanced options.
 4. Save and enable Telegram, then send the bot a direct message.
 
 The configuration badge means nanobot found a saved token. The live connection check is separate, so a temporary Telegram or proxy outage does not make an existing configuration disappear. Saved tokens and proxy URLs remain masked.
@@ -161,13 +161,14 @@ nanobot plugins enable telegram
 }
 ```
 
-If the gateway cannot reach Telegram directly, add a proxy to the same section:
+If the gateway cannot reach Telegram directly, set the shared address and enable it for Telegram:
 
 ```json
 {
+  "network": { "proxy": "http://127.0.0.1:7890" },
   "channels": {
     "telegram": {
-      "proxy": "http://127.0.0.1:7890"
+      "useProxy": true
     }
   }
 }
@@ -375,6 +376,7 @@ nanobot plugins enable matrix
       "allowFrom": ["@your_user:matrix.org"],
       "groupPolicy": "open",
       "groupAllowFrom": [],
+      "groupPolicyOverrides": {},
       "allowRoomMentions": false,
       "maxMediaBytes": 20971520
     }
@@ -387,12 +389,16 @@ nanobot plugins enable matrix
 | Option | Description |
 |--------|-------------|
 | `allowFrom` | User IDs allowed to interact. Empty denies all; use `["*"]` to allow everyone. |
-| `groupPolicy` | `open` (default), `mention`, or `allowlist`. |
+| `groupPolicy` | `open` (default), `mention`, `allowlist`, or `listen`. |
 | `groupAllowFrom` | Room allowlist (used when policy is `allowlist`). |
+| `groupPolicyOverrides` | Optional per-room overrides for `groupPolicy`, keyed by Matrix room ID (for example, `"!abc123:matrix.org"`). Values mirror `groupPolicy`: `"open"`, `"mention"`, or `"allowlist"` (an `allowlist` override is checked against `groupAllowFrom`). Rooms not listed fall back to `groupPolicy`. |
 | `allowRoomMentions` | Accept `@room` mentions in mention mode. |
+| `replyToMessage` | Quote the user's message in non-threaded replies (default `true`). Set `false` to send without quotes; thread replies are unchanged. |
 | `e2eeEnabled` | E2EE support (default `true`). Set `false` for plaintext-only. |
 | `sasVerification` | Complete Element-initiated SAS device verification for allowed users (default `false`). This does not add cross-signing, clear Element's cross-signing trust warning, or let the bot initiate verification. |
 | `maxMediaBytes` | Max attachment size (default `20MB`). Set `0` to block all media. |
+
+In `listen` mode the bot reads every message from allowed senders in the room but replies only when mentioned (same mention semantics as `mention`, including `allowRoomMentions`). Unheard messages are kept in a bounded per-room buffer and attached as context to the next mention-triggered reply, so the answer reflects the conversation since its last response. The buffer clears once used, and nothing is ever replied to unheard messages. The buffer is in-memory only — if the bot restarts it starts empty (the bot does not announce the gap). When the buffer cap evicts older messages, the context block notes how many were dropped.
 
 
 

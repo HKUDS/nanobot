@@ -55,6 +55,27 @@ it("loads the complete index without bodies, reads bounded windows and leaves li
   expect(latest).toHaveLength(1);
 });
 
+it.each(["older", "newer"] as const)("keeps one pending %s page when boundary inputs arrive before the next render", async (operation) => {
+  const { result } = renderHook(() => usePromptHistory("a", 1, latest), { wrapper: wrapper() });
+  await waitFor(() => expect(result.current.prompts).toHaveLength(2000));
+  await act(async () => result.current.jump("u10"));
+  let finish!: (body: WebuiThreadPersistedPayload) => void;
+  vi.mocked(api.fetchWebuiThread).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  const load = result.current[operation];
+  act(() => {
+    load();
+    load();
+  });
+  expect(api.fetchWebuiThread).toHaveBeenCalledTimes(2);
+  const options = vi.mocked(api.fetchWebuiThread).mock.lastCall?.[2];
+  if (typeof options !== "object") throw new Error("expected page options");
+  expect(options.signal?.aborted).toBe(false);
+  expect(result.current.loading).toBe(true);
+  await act(async () => finish(page(operation === "older" ? 9 : 11)));
+  expect(result.current.loading).toBe(false);
+  expect(result.current.window?.messages).toHaveLength(4);
+});
+
 it("keeps the current page on failure and offers retry; superseded jumps and session reads cannot win", async () => {
   const { result, rerender } = renderHook(({ key }) => usePromptHistory(key, 1, latest), {
     wrapper: wrapper(), initialProps: { key: "a" },
@@ -174,4 +195,29 @@ it("merges a live input by transport identity without adding an anchor or reorde
   expect(result.current.prompts.map((prompt) => prompt.id)).toEqual(["old", "persisted", "distinct"]);
   expect(result.current.window).toBeNull();
   expect(result.current.target).toBeNull();
+});
+
+
+it("keeps the request operation with failures and retries", async () => {
+  const { result } = renderHook(() => usePromptHistory("a", 1, latest), { wrapper: wrapper() });
+  await waitFor(() => expect(result.current.prompts).toHaveLength(2000));
+  let finish!: (body: WebuiThreadPersistedPayload) => void;
+  vi.mocked(api.fetchWebuiThread).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  act(() => result.current.jump("u10"));
+  expect(result.current.operation).toBe("jump");
+  expect(result.current.loading).toBe(true);
+  await act(async () => finish(page(10)));
+  expect(result.current.operation).toBeNull();
+
+  for (const operation of ["older", "newer"] as const) {
+    vi.mocked(api.fetchWebuiThread).mockRejectedValueOnce(new Error("offline"));
+    await act(async () => result.current[operation]());
+    expect(result.current.operation).toBe(operation);
+    expect(result.current.error).toBe("offline");
+    await act(async () => result.current.retry());
+    expect(result.current.operation).toBeNull();
+    expect(result.current.error).toBeNull();
+  }
+  act(() => result.current.cancel());
+  expect(result.current.operation).toBeNull();
 });

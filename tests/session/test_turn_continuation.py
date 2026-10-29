@@ -18,10 +18,8 @@ from nanobot.session.recovery import REQUEST_ORIGIN_METADATA_KEY
 from nanobot.session.turn_continuation import (
     INTERNAL_CONTINUATION_KIND_META,
     INTERNAL_CONTINUATION_META,
-    INTERNAL_CONTINUATION_PENDING_META,
     INTERNAL_CONTINUATION_RUN_STARTED_AT_META,
     _save_skip_for_turn,
-    internal_continuation_pending,
     internal_continuation_run_started_at,
     maybe_continue_turn,
     should_finalize_on_max_iterations,
@@ -82,7 +80,6 @@ async def test_maybe_continue_turn_queues_internal_message():
     assert sustained_goal_continuation_inbound(queued.metadata) is True
     assert queued.metadata[INTERNAL_CONTINUATION_RUN_STARTED_AT_META] == 1234.5
     assert internal_continuation_run_started_at(queued.metadata) == 1234.5
-    assert internal_continuation_pending(ctx.msg.metadata)
     assert queued.metadata["webui"] is True
     assert queued.metadata["message_id"] == "msg-1"
     assert queued.metadata[REQUEST_ORIGIN_METADATA_KEY] == {
@@ -97,7 +94,6 @@ async def test_maybe_continue_turn_queues_internal_message():
     assert ctx.all_messages == messages[:-1]
     assert ctx.final_content == ""
     assert ctx.suppress_response is True
-    assert ctx.msg.metadata[INTERNAL_CONTINUATION_PENDING_META] is True
     assert meta["_sustained_goal_continuation_rounds"] == 1
 
 

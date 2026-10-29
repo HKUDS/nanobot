@@ -22,7 +22,6 @@ from nanobot.runtime_context import public_history_message
 from nanobot.session.keys import UNIFIED_SESSION_KEY, session_key_for_channel
 from nanobot.session.manager import SessionManager
 from nanobot.session.webui_turns import clear_websocket_turns
-from nanobot.webui.transcript import read_transcript_lines
 
 
 class _Provider(LLMProvider):
@@ -155,7 +154,7 @@ async def test_failed_transport_admission_removes_new_sessions(
     assert await runtime.sessions.state.list_sessions() == []
 
 
-async def test_temporary_chat_retains_its_own_generation(runtime: _Runtime) -> None:
+async def test_temporary_chat_retains_its_own_generation(history, runtime: _Runtime) -> None:
     await runtime.channel._dispatch_envelope(
         runtime.connection, "webui-client", {"type": "new_temporary_chat"},
     )
@@ -166,7 +165,7 @@ async def test_temporary_chat_retains_its_own_generation(runtime: _Runtime) -> N
     assert runtime.provider.calls == 1
     assert runtime.loop._effective_session_key(first) == f"websocket:{chat_id}"
     assert await runtime.sessions.state.list_sessions() == []
-    assert read_transcript_lines(f"websocket:{chat_id}") == []
+    assert history.read(f"websocket:{chat_id}") == []
 
     queued = await runtime.message(chat_id, "discarded input")
     await runtime.channel.gateway.temporary_chats.discard(runtime.connection, chat_id)

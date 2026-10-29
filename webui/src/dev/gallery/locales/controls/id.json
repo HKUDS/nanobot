@@ -166,6 +166,11 @@
     "description": "Kontrol penyesuaian, zoom, geser, dan cubit untuk setiap gambar.",
     "options": "Sediakan className dengan batas area dan pasang ulang untuk identitas gambar yang berbeda. Atur panWithArrows=false jika galeri mengelola navigasi panah."
   },
+  "loadingRing": {
+    "title": "Cincin aktivitas",
+    "description": "Indikator aktivitas bersama dengan jalur opsional.",
+    "options": "className mengatur ukuran dan warna. track=false menyembunyikan jalur; strokeWidth dan strokeDasharray mengatur busur. Mengikuti preferensi pengurangan gerakan."
+  },
   "streaming": {
     "title": "Label beranimasi",
     "description": "Animasi teks bersama untuk proses berpikir aktif dan label alat.",
@@ -481,7 +486,10 @@
     "options": "AboutSettingsView menerima gabungan tautan versi dan dukungan. VersionCheckRowView menampilkan checking/result dan meminta pemeriksaan melalui onCheck. Titik masuk fitur mengelola pemeriksaan sebenarnya serta data tautan diagnostik.",
     "error": "Tidak dapat mengambil informasi versi. Coba lagi.",
     "state": "Status versi",
-    "selectedLink": "Tautan GitHub dipilih"
+    "selectedLink": "Tautan GitHub dipilih",
+    "preferenceSaved": "Preferensi contoh disimpan; tidak ada yang akan diinstal atau dimulai ulang.",
+    "updateRequested": "Peninjauan pembaruan dipilih; pratinjau ini tidak menginstal atau memulai ulang apa pun.",
+    "dismissed": "Pemberitahuan pembaruan ditutup"
   },
   "appearance": {
     "title": "Preferensi tampilan",

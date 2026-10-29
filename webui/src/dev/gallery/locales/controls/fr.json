@@ -166,6 +166,11 @@
     "description": "Commandes d’ajustement, zoom, déplacement et pincement propres à l’image.",
     "options": "Fournissez une className délimitant la zone et remontez le composant si l’identité de l’image change. Définissez panWithArrows=false si une galerie gère les flèches."
   },
+  "loadingRing": {
+    "title": "Anneau d’activité",
+    "description": "Un indicateur d’activité partagé avec une piste facultative.",
+    "options": "className définit la taille et la couleur. track=false masque la piste ; strokeWidth et strokeDasharray ajustent l’arc. Respecte la préférence de réduction des animations."
+  },
   "streaming": {
     "title": "Libellés animés",
     "description": "Une animation de texte partagée pour la réflexion et les libellés d’outils actifs.",
@@ -481,7 +486,10 @@
     "options": "AboutSettingsView accepte la composition des liens de version et d’assistance. VersionCheckRowView affiche checking/result et demande une vérification via onCheck. Le point d’entrée gère les vérifications réelles et les liens de diagnostic.",
     "error": "Impossible d’obtenir la version. Réessayez.",
     "state": "État de la version",
-    "selectedLink": "Lien GitHub sélectionné"
+    "selectedLink": "Lien GitHub sélectionné",
+    "preferenceSaved": "Préférence d’exemple enregistrée ; rien ne sera installé ni redémarré.",
+    "updateRequested": "Examen de la mise à jour sélectionné ; cet aperçu n’installe ni ne redémarre rien.",
+    "dismissed": "Avis de mise à jour masqué"
   },
   "appearance": {
     "title": "Préférences d’apparence",

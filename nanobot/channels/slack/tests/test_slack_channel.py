@@ -15,8 +15,11 @@ except ImportError:
     pytest.skip("Slack dependencies not installed (slack-sdk)", allow_module_level=True)
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent, outbound_message_for_event
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.manager import ChannelManager
 from nanobot.channels.slack.runtime import SLACK_MAX_MESSAGE_LEN, SlackChannel, SlackConfig
+from nanobot.config.network import NetworkConfig
 
 
 class _FakeAsyncWebClient:
@@ -138,6 +141,33 @@ async def test_send_uses_thread_for_channel_messages() -> None:
     assert fake_web.chat_post_calls[0]["thread_ts"] == "1700000000.000100"
     assert len(fake_web.file_upload_calls) == 1
     assert fake_web.file_upload_calls[0]["thread_ts"] == "1700000000.000100"
+
+
+@pytest.mark.asyncio
+async def test_structured_tool_start_sends_text_in_thread() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    channel._web_client = fake_web
+    channel.tool_hint_max_length = 20
+    msg = outbound_message_for_event(
+        channel="slack",
+        chat_id="C123",
+        event=ProgressEvent(tool_hint=True, tool_events=[{
+            "phase": "start", "call_id": "call-1", "name": "web_search",
+            "arguments": {"query": "abcdefghijklmnopqrstuvwxyz"},
+        }]),
+        metadata={"slack": {"thread_ts": "1700000000.000100", "channel_type": "channel"}},
+    )
+
+    await ChannelManager._send_once(channel, channel.prepare_tool_events(msg))
+
+    assert fake_web.chat_post_calls == [{
+        "channel": "C123",
+        "text": 'search "abcdefghijklmnopqrs…"',
+        "thread_ts": "1700000000.000100",
+    }]
+    assert msg.content == ""
+    assert msg.event.content == ""
 
 
 @pytest.mark.asyncio
@@ -463,7 +493,6 @@ async def test_with_thread_context_fetches_root_once() -> None:
     content = await channel._with_thread_context(
         "what did you see?",
         chat_id="C123",
-        channel_type="channel",
         thread_ts="111.000",
         raw_thread_ts="111.000",
         current_ts="113.000",
@@ -482,7 +511,6 @@ async def test_with_thread_context_fetches_root_once() -> None:
     second = await channel._with_thread_context(
         "again",
         chat_id="C123",
-        channel_type="channel",
         thread_ts="111.000",
         raw_thread_ts="111.000",
         current_ts="114.000",
@@ -508,7 +536,6 @@ async def test_with_thread_context_fetches_replies_in_dm_thread() -> None:
     content = await channel._with_thread_context(
         "what did you see?",
         chat_id="D123",
-        channel_type="im",
         thread_ts="211.000",
         raw_thread_ts="211.000",
         current_ts="213.000",
@@ -984,3 +1011,74 @@ async def test_download_follows_safe_redirect(
     assert validated == [url, "https://cdn.example/file.bin"]
     assert requests[0].headers["Authorization"] == "Bearer xoxb-test"
     assert "Authorization" not in requests[1].headers
+
+
+@pytest.mark.parametrize("use_proxy", [True, False])
+@pytest.mark.asyncio
+async def test_start_uses_shared_proxy_for_web_api_and_socket_mode(monkeypatch, use_proxy) -> None:
+    network = NetworkConfig(proxy="http://127.0.0.1:7890")
+    channel = SlackChannel(
+        SlackConfig(bot_token="xoxb-test", app_token="xapp-test", use_proxy=use_proxy),
+        MessageBus(),
+        network=network,
+    )
+    captured = {}
+
+    def web_client(**kwargs):
+        captured["web"] = kwargs
+        return SimpleNamespace(auth_test=AsyncMock(return_value={"user_id": "U42"}))
+
+    async def connect():
+        channel._running = False
+
+    def socket_client(**kwargs):
+        captured["socket"] = kwargs
+        return SimpleNamespace(socket_mode_request_listeners=[], connect=connect)
+
+    monkeypatch.setattr("nanobot.channels.slack.runtime.AsyncWebClient", web_client)
+    monkeypatch.setattr("nanobot.channels.slack.runtime.SocketModeClient", socket_client)
+
+    await channel.start()
+
+    expected = network.proxy if use_proxy else None
+    assert captured["web"] == {"token": "xoxb-test", "proxy": expected}
+    assert captured["socket"]["proxy"] == expected
+    assert captured["socket"]["web_client"] is channel._web_client
+    assert channel._bot_user_id == "U42"
+
+
+@pytest.mark.asyncio
+async def test_download_uses_shared_proxy_and_keeps_redirect_validation(monkeypatch, tmp_path) -> None:
+    proxies = []
+    requests = []
+    validated = []
+    network = NetworkConfig(proxy="http://user:pass@127.0.0.1:7890")
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(302, headers={"location": "http://169.254.169.254/secret"})
+
+    def proxy_transport(*, proxy):
+        proxies.append(proxy)
+        return httpx.MockTransport(handler)
+
+    monkeypatch.setattr("nanobot.channels.slack.runtime.httpx.AsyncHTTPTransport", proxy_transport)
+    monkeypatch.setattr("nanobot.channels.slack.runtime.PinnedDNSAsyncTransport", lambda: httpx.MockTransport(handler))
+    monkeypatch.setattr("nanobot.channels.slack.runtime.get_media_dir", lambda _name: tmp_path)
+    _patch_download_validation(monkeypatch, validated)
+    channel = SlackChannel(
+        SlackConfig(bot_token="xoxb-test", use_proxy=True), MessageBus(), network=network,
+    )
+    url = "https://files.slack.com/file.bin"
+
+    path, _marker = await channel._download_slack_file({
+        "id": "F1", "name": "file.bin", "url_private_download": url,
+    })
+
+    assert path is None
+    assert len(proxies) == 1
+    assert proxies[0].url == httpx.URL("http://127.0.0.1:7890")
+    assert proxies[0].raw_auth == (b"user", b"pass")
+    assert len(requests) == 1
+    assert validated == [url, "http://169.254.169.254/secret"]
+    assert requests[0].headers["Authorization"] == "Bearer xoxb-test"

@@ -1,7 +1,6 @@
 import { useState } from "react";
 
 import { FilePreviewPanelView, type FilePreviewPanelState } from "@/components/FilePreviewPanelView";
-import { WebPreviewPanelView } from "@/components/WebPreviewPanelView";
 import { SessionInfoPopoverView } from "@/components/thread/SessionInfoPopoverView";
 import { SubagentThreadView } from "@/components/thread/SubagentThreadView";
 import type { AutomationUpdatePayload, SessionAutomationJob, UIMessage } from "@/lib/types";
@@ -28,26 +27,6 @@ function FilePreview() {
       <FilePreviewPanelView key={path} path={path} state={state} imageOpen={imageOpen} onImageOpenChange={setImageOpen}
         onImageError={() => { setMode("error"); setImageOpen(false); }} />
     </div>
-  </div>;
-}
-
-const localDocument = '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><style>body{font-family:system-ui;padding:32px;color:#252525}h1{font-size:24px}p{line-height:1.7}code{background:#f2f2f2;padding:4px 8px;border-radius:6px}</style><h1>网页预览</h1><p>这段内容来自当前示例的本地文档。</p><p>点击顶部 <code>刷新</code> 按钮，重新显示文档；打开信息按钮查看隔离说明。</p></html>';
-
-function WebsitePreview() {
-  const { t } = useGalleryTranslation();
-  const [mode, setMode] = useState<"available" | "native" | "unsupported" | "sameOrigin" | "mixedContent" | "invalid">("available");
-  const [revision, setRevision] = useState(0);
-  const url = mode === "invalid" ? null : new URL(mode === "sameOrigin" ? window.location.href : "https://example.com/preview");
-  return <div className="space-y-4">
-    <StatePicker label={t("previews.webPreview.state")} value={mode} options={["available", "native", "unsupported", "sameOrigin", "mixedContent", "invalid"]} onChange={setMode} />
-    <div className="flex h-80 flex-col overflow-hidden rounded-control border">
-      <WebPreviewPanelView url={url} restriction={mode === "available" ? null : mode} loopback={mode === "sameOrigin"}
-        onRefresh={() => setRevision((value) => value + 1)}>
-        <iframe key={revision} title={t("previews.webPreview.frame")} sandbox="" referrerPolicy="no-referrer" srcDoc={localDocument}
-          className="min-h-0 w-full flex-1 border-0 bg-white" />
-      </WebPreviewPanelView>
-    </div>
-    <p role="status" className="text-xs text-muted-foreground">{t("previews.webPreview.refreshes", { amount: revision })}</p>
   </div>;
 }
 
@@ -125,9 +104,6 @@ export const contentExamples: ComponentExample[] = [
   { title: "previews.filePreview.title", files: ["webui/src/components/FilePreviewPanelView.tsx"], Preview: FilePreview,
     description: "previews.filePreview.description", options: "previews.filePreview.options",
     code: '<FilePreviewPanelView path={path} state={previewState} imageOpen={imageOpen} onImageOpenChange={setImageOpen} onImageError={reportImageError} />' },
-  { title: "previews.webPreview.title", files: ["webui/src/components/WebPreviewPanelView.tsx"], Preview: WebsitePreview,
-    description: "previews.webPreview.description", options: "previews.webPreview.options",
-    code: '<WebPreviewPanelView url={url} restriction={restriction} loopback={loopback} onRefresh={refresh}>{frame}</WebPreviewPanelView>' },
   { title: "previews.session.title", files: ["webui/src/components/thread/SessionInfoPopoverView.tsx"], Preview: SessionPreview,
     description: "previews.session.description", options: "previews.session.options",
     code: '<SessionInfoPopoverView title={title} jobs={jobs} loading={loading} loadFailed={failed} now={now} onAction={act} onEdit={edit} onOpenCalendar={openCalendar} />' },

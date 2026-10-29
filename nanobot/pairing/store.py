@@ -12,6 +12,7 @@ import secrets
 import string
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -85,6 +86,16 @@ def _save(data: dict[str, Any]) -> None:
     _write_text_atomic(path, json.dumps(payload, indent=2, ensure_ascii=False))
 
 
+def _notify_changed(on_change: Callable[[], object] | None) -> None:
+    # Notification is best-effort and runs outside the domain lock. A consumer
+    # failure must not make an already-persisted mutation appear to have failed.
+    if on_change is not None:
+        try:
+            on_change()
+        except Exception:
+            logger.exception("Could not publish pairing change")
+
+
 def _gc_pending(data: dict[str, Any]) -> None:
     """Remove expired pending entries in-place."""
     now = time.time()
@@ -114,6 +125,8 @@ def generate_code(
     channel: str,
     sender_id: str,
     ttl: int = _TTL_DEFAULT_S,
+    *,
+    on_change: Callable[[], object] | None = None,
 ) -> str:
     """Return an active pairing code for *sender_id* on *channel*.
 
@@ -138,10 +151,14 @@ def generate_code(
         }
         _save(data)
         logger.info("Generated pairing code {} for {}@{}", code, sender_id, channel)
-        return code
+    _notify_changed(on_change)
+    return code
 
 
-def record_delivery(code: str, status: Literal["sending", "sent", "failed"]) -> None:
+def record_delivery(
+    code: str, status: Literal["sending", "sent", "failed"],
+    *, on_change: Callable[[], object] | None = None,
+) -> None:
     """Record a reply outcome without changing approval or reviving a stale request.
 
     Once a code has been sent, a failed concurrent retry must not hide it.
@@ -153,15 +170,19 @@ def record_delivery(code: str, status: Literal["sending", "sent", "failed"]) -> 
             data = _load()
             _gc_pending(data)
             info = data["pending"].get(code)
-            if info is None or info.get("delivery_status") == "sent":
+            if info is None or info.get("delivery_status") in ("sent", status):
                 return
             info["delivery_status"] = status
             _save(data)
     except OSError:
         logger.warning("Could not persist pairing reply delivery status")
+        return
+    _notify_changed(on_change)
 
 
-def approve_code(code: str) -> tuple[str, str] | None:
+def approve_code(
+    code: str, *, on_change: Callable[[], object] | None = None,
+) -> tuple[str, str] | None:
     """Approve a pending pairing code.
 
     Returns ``(channel, sender_id)`` on success, or ``None`` if the code
@@ -179,10 +200,11 @@ def approve_code(code: str) -> tuple[str, str] | None:
         data.setdefault("approved", {}).setdefault(channel, set()).add(sender_id)
         _save(data)
         logger.info("Approved pairing code {} for {}@{}", code, sender_id, channel)
-        return channel, sender_id
+    _notify_changed(on_change)
+    return channel, sender_id
 
 
-def deny_code(code: str) -> bool:
+def deny_code(code: str, *, on_change: Callable[[], object] | None = None) -> bool:
     """Reject and discard a pending pairing code.
 
     Returns ``True`` if the code existed and was removed.
@@ -191,12 +213,13 @@ def deny_code(code: str) -> bool:
         data = _load()
         _gc_pending(data)
         pending: dict[str, Any] = data.get("pending", {})
-        if code in pending:
-            del pending[code]
-            _save(data)
-            logger.info("Denied pairing code {}", code)
-            return True
-        return False
+        if code not in pending:
+            return False
+        del pending[code]
+        _save(data)
+        logger.info("Denied pairing code {}", code)
+    _notify_changed(on_change)
+    return True
 
 
 def is_approved(channel: str, sender_id: str) -> bool:
@@ -226,7 +249,9 @@ def list_pending() -> list[dict[str, Any]]:
         ]
 
 
-def revoke(channel: str, sender_id: str) -> bool:
+def revoke(
+    channel: str, sender_id: str, *, on_change: Callable[[], object] | None = None,
+) -> bool:
     """Remove an approved sender from *channel*.
 
     Returns ``True`` if the sender was present and removed.
@@ -236,14 +261,15 @@ def revoke(channel: str, sender_id: str) -> bool:
         approved: dict[str, set[str]] = data.get("approved", {})
         users = approved.get(channel, set())
         sid = str(sender_id)
-        if sid in users:
-            users.discard(sid)
-            if not users:
-                del approved[channel]
-            _save(data)
-            logger.info("Revoked {} from {}", sid, channel)
-            return True
-    return False
+        if sid not in users:
+            return False
+        users.discard(sid)
+        if not users:
+            del approved[channel]
+        _save(data)
+        logger.info("Revoked {} from {}", sid, channel)
+    _notify_changed(on_change)
+    return True
 
 
 def revoke_channel(channel: str) -> int:
@@ -319,21 +345,25 @@ def format_expiry(expires_at: float) -> str:
     return f"{remaining}s" if remaining > 0 else "expired"
 
 
-def handle_pairing_command(channel: str, subcommand_text: str) -> str:
+def handle_pairing_command(
+    channel: str, subcommand_text: str, *, on_change: Callable[[], object] | None = None,
+) -> str:
     """Execute a pairing subcommand and return the reply text.
 
-    This is a pure function (no side effects other than store mutations)
-    so it can be used from both the CLI and the agent CommandRouter.
+    CLI and agent commands share the same mutations. The optional notifier runs
+    only after a successful persistent change, without changing the reply text.
     """
     try:
-        return _handle_pairing_subcommand(channel, subcommand_text)
+        return _handle_pairing_subcommand(channel, subcommand_text, on_change=on_change)
     except OSError:
         # Mutations fail loudly on a transient I/O error instead of lying
         # ("invalid code") or silently rewriting the store from an empty view.
         return "The pairing store is temporarily unavailable. Please try again."
 
 
-def _handle_pairing_subcommand(channel: str, subcommand_text: str) -> str:
+def _handle_pairing_subcommand(
+    channel: str, subcommand_text: str, *, on_change: Callable[[], object] | None,
+) -> str:
     parts = subcommand_text.split()
     sub = parts[0] if parts else "list"
     arg = parts[1] if len(parts) > 1 else None
@@ -353,7 +383,7 @@ def _handle_pairing_subcommand(channel: str, subcommand_text: str) -> str:
     elif sub == "approve":
         if arg is None:
             return "Usage: `/pairing approve <code>`"
-        result = approve_code(arg)
+        result = approve_code(arg, on_change=on_change)
         if result is None:
             return f"Invalid or expired pairing code: `{arg}`"
         ch, sid = result
@@ -362,7 +392,7 @@ def _handle_pairing_subcommand(channel: str, subcommand_text: str) -> str:
     elif sub == "deny":
         if arg is None:
             return "Usage: `/pairing deny <code>`"
-        if deny_code(arg):
+        if deny_code(arg, on_change=on_change):
             return f"Denied pairing code `{arg}`"
         return f"Pairing code `{arg}` not found or already expired"
 
@@ -370,13 +400,13 @@ def _handle_pairing_subcommand(channel: str, subcommand_text: str) -> str:
         if len(parts) == 2:
             return (
                 f"Revoked {arg} from {channel}"
-                if revoke(channel, parts[1])
+                if revoke(channel, parts[1], on_change=on_change)
                 else f"{arg} was not in the approved list for {channel}"
             )
         if len(parts) == 3:
             return (
                 f"Revoked {parts[2]} from {arg}"
-                if revoke(parts[1], parts[2])
+                if revoke(parts[1], parts[2], on_change=on_change)
                 else f"{parts[2]} was not in the approved list for {arg}"
             )
         return "Usage: `/pairing revoke <user_id>` or `/pairing revoke <channel> <user_id>`"

@@ -10,7 +10,6 @@ export interface FooterHintTheme {
   accent: ColorInput
   danger: ColorInput
   muted: ColorInput
-  separator: ColorInput
 }
 
 export type FooterMode =
@@ -30,8 +29,6 @@ export function contextualFooterHints(
   mode: FooterMode,
   width: number,
   theme: FooterHintTheme,
-  _platform: string = process.platform,
-  _shiftedEnter = false,
 ): StyledText {
   return footerHints(hintsFor(mode, width), theme)
 }

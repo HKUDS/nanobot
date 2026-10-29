@@ -1,168 +1,170 @@
-import type { ThreadCameraScheduler } from "@/components/thread/thread-camera";
+import { animate, motionValue, type AnimationPlaybackControls, type MotionValue } from "motion";
 
 export const HISTORY_PULL_LIMIT_PX = 80;
-export const HISTORY_PULL_TRIGGER_PX = 42;
-const LOADING_POCKET_PX = 20;
+export const HISTORY_HOLD_PX = 48;
+export const HISTORY_PULL_TRIGGER_PX = 56;
 const RESISTANCE_LENGTH_PX = 120;
-const FREQUENCY = 22;
-const DAMPING_RATIO = 0.78;
+
+export type HistoryRevealPhase = "hidden" | "feedback" | "held";
 
 interface HistorySpringOptions {
   onUpdate: (distance: number) => void;
-  onFeedbackChange: (active: boolean) => void;
-  scheduler?: ThreadCameraScheduler;
+  onPhaseChange: (phase: HistoryRevealPhase) => void;
   prefersReducedMotion?: () => boolean;
 }
 
-/** Presentation only: the thread camera remains the sole scroll-position owner. */
+/** Presentation only: Motion owns spring integration; the thread camera remains the sole scroll-position owner. */
 export class ThreadHistorySpring {
   private readonly options: HistorySpringOptions;
-  private readonly scheduler: ThreadCameraScheduler;
   private readonly reducedMotion: () => boolean;
-  private frame: number | null = null;
-  private timestamp: number | null = null;
-  private distance = 0;
-  private velocity = 0;
-  private loading = false;
+  private readonly value: MotionValue<number> = motionValue(0);
+  private animation: AnimationPlaybackControls | null = null;
+  private destination: number | null = null;
+  private animationGeneration = 0;
+  private phase: HistoryRevealPhase = "hidden";
   private dragging = false;
   private travel = 0;
   private wheelLatched = false;
-  private feedbackActive = false;
 
   constructor(options: HistorySpringOptions) {
     this.options = options;
-    this.scheduler = options.scheduler ?? {
-      request: (callback) => window.requestAnimationFrame(callback),
-      cancel: (id) => window.cancelAnimationFrame(id),
-      now: () => performance.now(),
-    };
-    const motionPreference = typeof window !== "undefined" && typeof window.matchMedia === "function"
+    const preference = typeof window !== "undefined" && typeof window.matchMedia === "function"
       ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
-    this.reducedMotion = options.prefersReducedMotion ?? (() => motionPreference?.matches ?? false);
+    this.reducedMotion = options.prefersReducedMotion ?? (() => preference?.matches ?? false);
+    this.value.on("change", this.publish);
   }
 
-  setLoading(loading: boolean): void {
-    if (this.loading === loading) return;
-    this.loading = loading;
-    if (!this.dragging) this.animate();
+  hold(): void {
+    this.wheelLatched = true;
+    this.setPhase("held");
+    this.animateTo(HISTORY_HOLD_PX);
   }
 
   wheel(travel: number): boolean {
-    if (this.dragging) return false;
+    if (this.dragging || travel === 0) return false;
     const first = !this.wheelLatched && travel > 0;
-    this.wheelLatched = true;
-    if (travel > 0) this.setFeedbackActive(true);
-    // Wheel packets add pressure to one live spring, without a position jump.
-    const speed = FREQUENCY * (travel > 0
-      ? HISTORY_PULL_LIMIT_PX - Math.max(0, this.distance)
-      : -Math.max(0, this.distance));
-    this.velocity += (speed - this.velocity) * (1 - Math.exp(-Math.abs(travel) / RESISTANCE_LENGTH_PX));
-    this.animate();
+    if (travel > 0) {
+      this.wheelLatched = true;
+      if (this.phase !== "held") this.setPhase("feedback");
+    }
+    const pressure = 1 - Math.exp(-Math.abs(travel) / RESISTANCE_LENGTH_PX);
+    const current = this.boundedValue();
+    const pressured = current + ((travel > 0 ? HISTORY_PULL_LIMIT_PX : 0) - current) * pressure;
+    // Each packet retargets the same MotionValue; interruption keeps the live spring velocity.
+    this.animateTo(Math.max(0, Math.min(HISTORY_PULL_LIMIT_PX, pressured)));
     return first;
   }
 
   startTouch(): void {
-    this.stopFrame();
+    this.stopAnimation();
+    const visible = this.boundedValue();
+    this.value.set(visible);
     this.dragging = true;
-    this.setFeedbackActive(true);
-    this.velocity = 0;
-    this.travel = -RESISTANCE_LENGTH_PX
-      * Math.log(Math.max(Number.EPSILON, 1 - Math.max(0, this.distance) / HISTORY_PULL_LIMIT_PX));
+    if (this.phase !== "held") this.setPhase("feedback");
+    this.travel = -RESISTANCE_LENGTH_PX * Math.log(Math.max(Number.EPSILON, 1 - visible / HISTORY_PULL_LIMIT_PX));
   }
 
   moveTouch(travel: number): void {
+    if (!this.dragging) return;
     this.travel = Math.max(0, this.travel + travel);
-    this.distance = HISTORY_PULL_LIMIT_PX * (1 - Math.exp(-this.travel / RESISTANCE_LENGTH_PX));
-    this.publish();
+    this.value.set(HISTORY_PULL_LIMIT_PX * (1 - Math.exp(-this.travel / RESISTANCE_LENGTH_PX)));
   }
 
   endTouch(cancelled = false): boolean {
-    const triggered = this.dragging && !cancelled && this.distance >= HISTORY_PULL_TRIGGER_PX;
+    if (!this.dragging) return false;
+    const triggered = !cancelled && this.boundedValue() >= HISTORY_PULL_TRIGGER_PX;
     this.dragging = false;
     this.travel = 0;
-    this.publish();
-    this.animate();
+    this.animateTo(this.restPosition());
     return triggered;
   }
 
+  /** Native scrolling releases this input round, not the committed reveal. */
   leaveBoundary(): void {
-    this.loading = false;
     this.dragging = false;
     this.wheelLatched = false;
-    this.setFeedbackActive(false);
-    this.animate();
+    if (this.reducedMotion() && this.phase !== "held") {
+      this.stopAnimation();
+      this.value.set(0);
+      this.setPhase("hidden");
+      return;
+    }
+    this.animateTo(this.restPosition());
   }
 
   reset(): void {
-    this.stopFrame();
-    this.distance = 0;
-    this.velocity = 0;
-    this.travel = 0;
-    this.loading = false;
+    this.stopAnimation();
     this.dragging = false;
+    this.travel = 0;
     this.wheelLatched = false;
-    this.setFeedbackActive(false);
-    this.publish();
+    this.setPhase("hidden");
+    this.value.set(0);
   }
 
-  private setFeedbackActive(active: boolean): void {
-    if (this.feedbackActive === active) return;
-    this.feedbackActive = active;
-    this.options.onFeedbackChange(active);
+  private readonly publish = (distance: number): void => {
+    const bounded = Math.max(0, Math.min(HISTORY_PULL_LIMIT_PX, distance));
+    this.options.onUpdate(this.phase !== "held" && this.reducedMotion() ? 0 : bounded);
+  };
+
+  private boundedValue(): number {
+    return Math.max(0, Math.min(HISTORY_PULL_LIMIT_PX, this.value.get()));
   }
 
-  private publish(): void {
-    // Reduced motion suppresses travel, not the input/settlement lifecycle.
-    this.options.onUpdate(this.reducedMotion() ? 0 : Math.max(0, this.distance));
+  private restPosition(): number {
+    return this.phase === "held" ? HISTORY_HOLD_PX : 0;
   }
 
-  private stopFrame(): void {
-    if (this.frame !== null) this.scheduler.cancel(this.frame);
-    this.frame = null;
-    this.timestamp = null;
+  private setPhase(phase: HistoryRevealPhase): void {
+    if (this.phase === phase) return;
+    this.phase = phase;
+    this.options.onPhaseChange(phase);
   }
 
-  private animate(): void {
-    if (this.frame !== null) return;
-    if (this.distance === (this.loading ? LOADING_POCKET_PX : 0) && this.velocity === 0) {
-      if (!this.loading) {
-        this.wheelLatched = false;
-        this.setFeedbackActive(false);
-      }
+  private stopAnimation(): void {
+    this.animationGeneration++;
+    this.animation?.stop();
+    this.animation = null;
+    this.destination = null;
+  }
+
+  private animateTo(target: number): void {
+    if (this.dragging) return;
+    const next = Math.max(0, Math.min(HISTORY_PULL_LIMIT_PX, target));
+    if (this.destination === next && this.animation) return;
+    if (this.reducedMotion() && this.phase === "held") {
+      this.stopAnimation();
+      this.value.set(HISTORY_HOLD_PX);
       return;
     }
-    this.timestamp = this.scheduler.now();
-    this.frame = this.scheduler.request(this.advance);
+    if (Math.abs(this.value.get() - next) < 0.01) {
+      this.stopAnimation();
+      this.value.set(next);
+      this.finish(next, this.animationGeneration);
+      return;
+    }
+    const generation = ++this.animationGeneration;
+    this.destination = next;
+    this.animation = animate(this.value, next, {
+      type: "spring",
+      stiffness: 484,
+      damping: 34,
+      mass: 1,
+      onComplete: () => this.finish(next, generation),
+    });
   }
 
-  private readonly advance = (timestamp: number): void => {
-    this.frame = null;
-    const seconds = Math.max(0, timestamp - (this.timestamp ?? timestamp)) / 1000;
-    this.timestamp = timestamp;
-    const target = this.loading ? LOADING_POCKET_PX : 0;
-    // Exact damped-oscillator solution stays stable across slow or suspended frames.
-    const decay = FREQUENCY * DAMPING_RATIO;
-    const frequency = FREQUENCY * Math.sqrt(1 - DAMPING_RATIO ** 2);
-    const displacement = this.distance - target;
-    const sine = (this.velocity + decay * displacement) / frequency;
-    const phase = frequency * seconds;
-    const envelope = Math.exp(-decay * seconds);
-    this.distance = target + envelope * (displacement * Math.cos(phase) + sine * Math.sin(phase));
-    this.velocity = envelope * (
-      (sine * frequency - decay * displacement) * Math.cos(phase)
-      - (displacement * frequency + decay * sine) * Math.sin(phase)
-    );
-    const settled = Math.abs(this.distance - target) < 0.08 && Math.abs(this.velocity) < 0.8;
-    if (settled) {
-      this.distance = target;
-      this.velocity = 0;
-      this.timestamp = null;
-      if (!this.loading) {
-        this.wheelLatched = false;
-        this.setFeedbackActive(false);
-      }
+  private finish(destination: number, generation: number): void {
+    if (generation !== this.animationGeneration) return;
+    this.animation = null;
+    this.destination = null;
+    this.value.set(destination);
+    if (destination !== this.restPosition()) {
+      this.animateTo(this.restPosition());
+      return;
     }
-    this.publish();
-    if (!settled) this.frame = this.scheduler.request(this.advance);
-  };
+    if (destination === 0 && this.phase !== "held") {
+      this.wheelLatched = false;
+      this.setPhase("hidden");
+    }
+  }
 }

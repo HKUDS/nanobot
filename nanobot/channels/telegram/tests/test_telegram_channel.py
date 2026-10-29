@@ -14,8 +14,9 @@ except ImportError:
 
 from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.outbound_events import ProgressEvent
+from nanobot.bus.outbound_events import ProgressEvent, outbound_message_for_event
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.manager import ChannelManager
 from nanobot.channels.telegram.runtime import (
     TELEGRAM_MAX_MESSAGE_LEN,
     TELEGRAM_REPLY_CONTEXT_MAX_LEN,
@@ -28,6 +29,7 @@ from nanobot.channels.telegram.runtime import (
     _StreamBuf,
     _telegram_command_text,
 )
+from nanobot.config.network import NetworkConfig
 from nanobot.events import ContextCompactionEvent
 
 
@@ -349,10 +351,11 @@ async def test_start_creates_separate_pools_with_proxy(monkeypatch) -> None:
         enabled=True,
         token="123:abc",
         allow_from=["*"],
-        proxy="http://127.0.0.1:7890",
+        use_proxy=True,
     )
     bus = MessageBus()
-    channel = TelegramChannel(config, bus)
+    network = NetworkConfig(proxy="http://127.0.0.1:7890")
+    channel = TelegramChannel(config, bus, network=network)
     app = _FakeApp(lambda: setattr(channel, "_running", False))
     builder = _FakeBuilder(app)
 
@@ -366,8 +369,8 @@ async def test_start_creates_separate_pools_with_proxy(monkeypatch) -> None:
 
     assert len(_FakeHTTPXRequest.instances) == 2
     api_req, poll_req = _FakeHTTPXRequest.instances
-    assert api_req.kwargs["proxy"] == config.proxy
-    assert poll_req.kwargs["proxy"] == config.proxy
+    assert api_req.kwargs["proxy"] == network.proxy
+    assert poll_req.kwargs["proxy"] == network.proxy
     assert api_req.kwargs["connection_pool_size"] == 32
     assert poll_req.kwargs["connection_pool_size"] == 4
     assert builder.request_value is api_req
@@ -792,7 +795,7 @@ async def test_running_message_handler_reorders_same_session_updates() -> None:
     seen: list[int] = []
     processed = asyncio.Event()
 
-    async def fake_process(update, context) -> None:
+    async def fake_process(update) -> None:
         seen.append(update.message.message_id)
         if len(seen) == 2:
             processed.set()
@@ -1908,6 +1911,37 @@ async def test_send_progress_keeps_message_in_topic() -> None:
 
 
 @pytest.mark.asyncio
+async def test_structured_tool_start_sends_quote_in_topic() -> None:
+    config = TelegramConfig(
+        enabled=True, token="123:abc", allow_from=["*"], reply_to_message=True,
+    )
+    channel = TelegramChannel(config, MessageBus())
+    app = _install_ready_app(channel)
+    channel.tool_hint_max_length = 20
+    msg = outbound_message_for_event(
+        channel="telegram",
+        chat_id="123",
+        event=ProgressEvent(tool_hint=True, tool_events=[{
+            "phase": "start", "call_id": "call-1", "name": "web_search",
+            "arguments": {"query": "abcdefghijklmnopqrstuvwxyz"},
+        }]),
+        metadata={"message_id": 10, "message_thread_id": 42},
+    )
+
+    await ChannelManager._send_once(channel, channel.prepare_tool_events(msg))
+
+    assert len(app.bot.sent_messages) == 1
+    sent = app.bot.sent_messages[0]
+    assert sent["chat_id"] == 123
+    assert sent["text"] == '<blockquote expandable>search "abcdefghijklmnopqrs…"</blockquote>'
+    assert sent["parse_mode"] == "HTML"
+    assert sent["message_thread_id"] == 42
+    assert sent["reply_parameters"].message_id == 10
+    assert msg.content == ""
+    assert msg.event.content == ""
+
+
+@pytest.mark.asyncio
 async def test_send_reply_infers_topic_from_message_id_cache() -> None:
     config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], reply_to_message=True)
     channel = TelegramChannel(config, MessageBus())
@@ -2460,7 +2494,7 @@ async def test_forward_command_pairs_unauthorized_private_user(monkeypatch) -> N
     )
     _install_ready_app(channel)
     monkeypatch.setattr(
-        "nanobot.channels.base.generate_code", lambda _ch, _sid: "ABCD-EFGH"
+        "nanobot.channels.base.generate_code", lambda _ch, _sid, *, on_change=None: "ABCD-EFGH"
     )
 
     await channel._forward_command(_make_telegram_update(text="/new", chat_type="private"), None)
@@ -2687,7 +2721,7 @@ async def test_on_start_sends_pairing_code_to_unauthorized_private_user(monkeypa
     update = _make_telegram_update(text="/start", chat_type="private")
     update.message.reply_text = AsyncMock()
     monkeypatch.setattr(
-        "nanobot.channels.base.generate_code", lambda _ch, _sid: "ABCD-EFGH"
+        "nanobot.channels.base.generate_code", lambda _ch, _sid, *, on_change=None: "ABCD-EFGH"
     )
 
     await channel._on_start(update, None)
@@ -2707,7 +2741,7 @@ async def test_on_help_sends_pairing_code_to_unauthorized_private_user(monkeypat
     update = _make_telegram_update(text="/help", chat_type="private")
     update.message.reply_text = AsyncMock()
     monkeypatch.setattr(
-        "nanobot.channels.base.generate_code", lambda _ch, _sid: "ABCD-EFGH"
+        "nanobot.channels.base.generate_code", lambda _ch, _sid, *, on_change=None: "ABCD-EFGH"
     )
 
     await channel._on_help(update, None)
@@ -2731,7 +2765,7 @@ async def test_on_message_pairs_unauthorized_private_user_before_side_effects(
     channel._add_reaction = AsyncMock(return_value=None)
     channel._download_message_media = AsyncMock(return_value=([], []))
     monkeypatch.setattr(
-        "nanobot.channels.base.generate_code", lambda _ch, _sid: "ABCD-EFGH"
+        "nanobot.channels.base.generate_code", lambda _ch, _sid, *, on_change=None: "ABCD-EFGH"
     )
 
     await channel._on_message(_make_telegram_update(text="hello", chat_type="private"), None)

@@ -15,7 +15,7 @@ import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { ThreadHistoryStatus } from "@/components/thread/ThreadHistoryStatus";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
-import { WorkspaceAccessToggle, WorkspaceProjectPicker } from "@/components/thread/WorkspaceControls";
+import { WorkspaceAccessMenu, WorkspaceProjectPicker } from "@/components/thread/WorkspaceControls";
 import { WebSearchRun } from "@/components/thread/activity/WebSearchRun";
 import { Button } from "@/components/ui/button";
 import type { StreamError } from "@/lib/nanobot-client";
@@ -119,14 +119,15 @@ function WorkspacePreview() {
   const { t: g } = useGalleryTranslation();
   const [scope, setScope] = useState(projectScope);
   const [mode, setMode] = useState<"ready" | "disabled">("ready");
+  const hintBoundaryRef = useRef<HTMLDivElement>(null);
   return <div className="space-y-4">
     <StatePicker label={g("previews.workspace.state")} value={mode} options={["ready", "disabled"]} onChange={setMode} />
-    <div className="flex flex-wrap items-center gap-3">
-      <WorkspaceProjectPicker isHero scope={scope} defaultScope={projectScope} controls={workspaceCatalog.controls}
+    <div ref={hintBoundaryRef} className="flex min-w-0 flex-wrap items-center gap-1">
+      <WorkspaceProjectPicker scope={scope} defaultScope={projectScope} controls={workspaceCatalog.controls}
         disabled={mode === "disabled"} onLoadProjects={loadExampleProjects} onChange={setScope} />
-      <WorkspaceAccessToggle scope={scope} isHero disabled={mode === "disabled"} onChange={setScope} />
+      <WorkspaceAccessMenu scope={scope} disabled={mode === "disabled"} onChange={setScope} hintBoundaryRef={hintBoundaryRef} />
     </div>
-    <p role="status" className="text-sm text-muted-foreground">{scope.project_path} · {t(scope.access_mode === "full" ? "thread.composer.workspace.full" : "thread.composer.workspace.default")}</p>
+    <p role="status" className="text-sm text-muted-foreground">{scope.project_path} · {t("thread.composer.workspace.full")}: {t(scope.access_mode === "full" ? "settings.values.on" : "settings.values.off")}</p>
   </div>;
 }
 
@@ -309,7 +310,7 @@ export const conversationExamples: ComponentExample[] = [
     code: '<ComposerUsagePopover context={{ contextTokens: 18500, contextWindowTokens: 200000 }} rounds={rounds} showLabel />' },
   { title: "previews.workspace.title", files: ["thread/WorkspaceControls"], Preview: WorkspacePreview,
     description: "previews.workspace.description", options: "previews.workspace.options",
-    code: '<WorkspaceProjectPicker isHero scope={scope} defaultScope={defaultScope} controls={controls} onLoadProjects={loadProjects} onChange={setScope} />\n<WorkspaceAccessToggle scope={scope} isHero onChange={setScope} />' },
+    code: '<WorkspaceAccessMenu scope={scope} onChange={setScope} />\n<WorkspaceProjectPicker scope={scope} defaultScope={defaultScope} controls={controls} onLoadProjects={loadProjects} onChange={setScope} />' },
   { title: "previews.navigator.title", files: ["thread/PromptNavigator"], Preview: NavigatorPreview,
     description: "previews.navigator.description", options: "previews.navigator.options",
     code: '<PromptNavigator messages={messages} onJumpToPrompt={jumpToPrompt} />' },

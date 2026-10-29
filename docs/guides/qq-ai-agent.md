@@ -24,7 +24,9 @@ For terminal or server setup, use the manual configuration section below. Reuse 
 
 ## Enable the QQ channel
 
-In **Channels → QQ**, scan the QR code with mobile QQ. nanobot saves the AppID and Secret automatically, enables the channel, and follows any installation or restart prompt. To use credentials you already copied, open **Advanced** and enter them manually. Scanning again replaces the current App Secret, and the previous secret stops working once the new scan completes.
+In **Channels → QQ**, scan the QR code with mobile QQ. nanobot saves the AppID and Secret automatically, enables the channel, and follows any installation or restart prompt.
+
+Choose **Enter credentials manually** to use existing credentials. **Rebind bot** may interrupt other apps using this QQ bot. If the App Secret is reset, the old secret becomes invalid and those apps need the new secret.
 
 <details>
 <summary>Manual configuration</summary>

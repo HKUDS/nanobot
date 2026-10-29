@@ -2,6 +2,42 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Notices and the input share one width, including the compact screen inset. */
+.thread-composer-stack {
+  --composer-content-width: 49.5rem;
+}
+.thread-composer-stack.is-hero {
+  --composer-content-width: 58rem;
+}
+.subagent-task-dock {
+  --subagent-handle-inset: var(--radius-panel);
+  width: calc(100% - 0.5rem - 2 * var(--subagent-handle-inset));
+  max-width: calc(var(--composer-content-width, 49.5rem) - 2 * var(--subagent-handle-inset));
+}
+.thread-composer-stack.is-hero .subagent-task-dock {
+  --subagent-handle-inset: var(--radius-prominent);
+  width: calc(100% - 2 * var(--subagent-handle-inset));
+}
+.subagent-task-dock + .thread-composer-form {
+  padding-top: 0;
+}
+.thread-composer-notice {
+  width: calc(100% - 0.5rem);
+  max-width: var(--composer-content-width, 49.5rem);
+  margin-inline: auto;
+}
+.thread-composer-stack.is-hero .thread-composer-notice {
+  width: 100%;
+}
+@media (min-width: 640px) {
+  .thread-composer-notice {
+    width: 100%;
+  }
+  .subagent-task-dock {
+    width: calc(100% - 2 * var(--subagent-handle-inset));
+  }
+}
+
 @supports (content-visibility: auto) {
   .apps-catalog-row {
     content-visibility: auto;
@@ -9,10 +45,34 @@
   }
 }
 
+/* Only gradient owners need interpolable colors; palette tokens remain unchanged. */
+@property --thread-history-background {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --host-glass-spot {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --host-glass-start {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --host-glass-end {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+
 /* Design tokens — HSL form, sourced from shadcn/ui's "neutral" palette. */
 @layer base {
   :root {
     color-scheme: light;
+    --content-link: #0369a1;
+    --content-link-hover: #075985;
     --background: 0 0% 100%;
     --foreground: 240 3% 12%;
     --card: 0 0% 100%;
@@ -33,6 +93,7 @@
     --input: 40 8% 90.5%;
     --ring: 0 0% 3.9%;
     --inline-token-highlight: #ad450b;
+    --inline-reference-highlight: rgb(244 169 73);
     --code-comment: #62626b;
     --code-string: #166534;
     --code-keyword: #7e22ce;
@@ -59,11 +120,6 @@
     --radius-pill: 9999px;
     --corner-shape: superellipse(1.5);
     --content-column-width: 49.5rem;
-    --reading-size-wide: 18px;
-    --reading-size-narrow: 16px;
-    --text-reading-size: var(--reading-size-wide);
-    --text-code-size: calc(var(--text-reading-size) * 0.875);
-    --text-code-dense-size: calc(var(--text-reading-size) * 0.75);
     --sidebar: 40 8% 96.8%;
     --sidebar-foreground: 0 0% 3.9%;
     --sidebar-content: 240 3% 30%;
@@ -79,24 +135,39 @@
     --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.42);
   }
 
-  :root[data-reading-text-size="small"] {
+  :root, .reading-typography {
+    --reading-size-wide: 18px;
+    --reading-size-narrow: 16px;
+    --text-reading-size: var(--reading-size-wide);
+    --text-code-size: calc(var(--text-reading-size) * 0.875);
+    --text-code-dense-size: calc(var(--text-reading-size) * 0.75);
+  }
+
+  :root[data-reading-text-size="small"], .reading-typography[data-reading-text-size="small"] {
     --reading-size-wide: 16px;
     --reading-size-narrow: 15px;
   }
 
-  :root[data-reading-text-size="large"] {
+  :root[data-reading-text-size="large"], .reading-typography[data-reading-text-size="large"] {
     --reading-size-wide: 20px;
     --reading-size-narrow: 18px;
   }
 
+  :root[data-reading-text-size="custom"], .reading-typography[data-reading-text-size="custom"] {
+    --reading-size-wide: var(--custom-reading-size, 18px);
+    --reading-size-narrow: var(--custom-reading-size, 18px);
+  }
+
   @media (max-width: 639px) {
-    :root {
+    :root, .reading-typography {
       --text-reading-size: var(--reading-size-narrow);
     }
   }
 
   .dark {
     color-scheme: dark;
+    --content-link: #bae6fd;
+    --content-link-hover: #e0f2fe;
     --background: 0 0% 19%;
     --foreground: 240 4% 96%;
     --card: 0 0% 22%;
@@ -118,6 +189,7 @@
     --input: var(--border);
     --ring: 0 0% 83.1%;
     --inline-token-highlight: #ef8e30;
+    --inline-reference-highlight: rgb(244 169 73);
     --code-comment: #c8c8d0;
     --code-string: #b5d99c;
     --code-keyword: #e3a5f7;
@@ -362,6 +434,12 @@
     backdrop-filter: saturate(185%) blur(34px);
   }
 
+  .host-window-shell {
+    transition: --host-glass-spot var(--theme-paint-duration, 0s) linear,
+      --host-glass-start var(--theme-paint-duration, 0s) linear,
+      --host-glass-end var(--theme-paint-duration, 0s) linear;
+  }
+
   .host-sidebar-glass {
     background: hsl(var(--sidebar) / 0.94);
     -webkit-backdrop-filter: saturate(145%) blur(18px);
@@ -413,6 +491,7 @@
     --tw-prose-headings: hsl(var(--foreground));
     --tw-prose-bold: hsl(var(--foreground));
     --tw-prose-lead: hsl(var(--foreground));
+    transition: var(--theme-ink-transition, color 0s);
     @apply text-reading;
   }
 
@@ -533,9 +612,6 @@
       animation: none;
       content: "";
     }
-    .streaming-text-fallback::after {
-      animation: none;
-    }
   }
 
   /**
@@ -546,6 +622,7 @@
    */
   .thread-layout {
     --thread-composer-fade-height: 2.25rem;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(min-content, 1fr) auto 0fr;
     transition: grid-template-rows 220ms ease-out;
   }
@@ -564,31 +641,53 @@
   /**
    * Keep the transcript and composer visually continuous. The scrollport owns
    * the fade because overflow clips its contents before an adjacent overlay
-   * can soften the edge. The matching in-flow gap keeps the last line fully
-   * visible once the user reaches the bottom.
+   * can soften the edge. On phones, the same mask keeps a clear top edge even
+   * after the initial inset scrolls away. The matching bottom in-flow gap keeps
+   * the last line fully visible once the user reaches the bottom.
    */
   .thread-message-viewport {
+    --thread-top-clearance: 0px;
+    --thread-top-fade-height: 0px;
     -webkit-mask-image: linear-gradient(
       to bottom,
-      #000 0,
+      transparent 0,
+      transparent var(--thread-top-clearance),
+      #000 var(--thread-top-fade-height),
       #000 calc(100% - var(--thread-composer-fade-height)),
       transparent 100%
     );
     mask-image: linear-gradient(
       to bottom,
-      #000 0,
+      transparent 0,
+      transparent var(--thread-top-clearance),
+      #000 var(--thread-top-fade-height),
       #000 calc(100% - var(--thread-composer-fade-height)),
       transparent 100%
     );
+  }
+  @media (max-width: 639px) {
+    .thread-message-viewport {
+      --thread-top-clearance: 6px;
+      --thread-top-fade-height: 22px;
+    }
   }
   .thread-message-end-gap {
     height: var(--thread-composer-fade-height);
   }
 
   .thread-history-status {
-    height: calc(48px + var(--history-pull, 0px));
-    background: linear-gradient(hsl(var(--background)) 35%, hsl(var(--background) / 0));
+    --thread-history-background: hsl(var(--background));
+    height: 48px;
+    background: linear-gradient(var(--thread-history-background) 35%, transparent);
     color: hsl(var(--muted-foreground));
+    transition: --thread-history-background var(--theme-paint-duration, 0s) linear,
+      var(--theme-ink-transition, color 0s);
+  }
+  .thread-history-reveal {
+    transform: translateY(calc(var(--history-pull, 0px) - 100%));
+  }
+  .thread-history-reveal:focus-within {
+    transform: none;
   }
   .thread-history-control {
     display: flex;
@@ -599,7 +698,7 @@
   }
   /* loading.dev Blocks, Copyright (c) 2026 Jakub Krehel (MIT); THIRD_PARTY_NOTICES.md. */
   .thread-history-blocks {
-    color: #d35e14;
+    color: hsl(var(--muted-foreground));
     display: grid;
     width: 20px;
     height: 20px;
@@ -617,7 +716,7 @@
     height: 24px;
     color: hsl(var(--destructive));
   }
-  .thread-history-status[data-state="error"] .thread-history-blocks > span {
+  .thread-history-status:not([data-state="loading"]):not([data-state="error"]) .thread-history-blocks > span {
     animation: none;
     transform: none;
   }
@@ -626,6 +725,9 @@
     35% { transform: scale(0); }
   }
   @media (prefers-reduced-motion: reduce) {
+    .thread-history-feedback {
+      transform: none;
+    }
     .thread-history-blocks > span {
       animation: none;
       transform: scale(0.8);
@@ -652,27 +754,12 @@
       transform: translateY(0) scale(1);
     }
   }
-  @keyframes composer-status-strip-exit {
-    0% {
-      max-height: var(--composer-strip-max-height, 46px);
-      opacity: 1;
-      transform: translateY(0) scale(1);
-    }
-    100% {
-      max-height: 0;
-      opacity: 0;
-      transform: translateY(8px) scale(0.99);
-    }
-  }
   .composer-status-strip {
     transform-origin: bottom center;
     will-change: max-height, opacity, transform;
   }
   .composer-status-strip[data-state="enter"] {
     animation: composer-status-strip-enter 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
-  }
-  .composer-status-strip[data-state="exit"] {
-    animation: composer-status-strip-exit 180ms ease-in both;
   }
   .composer-status-drawer {
     --composer-status-drawer-duration: 220ms;
@@ -746,19 +833,6 @@
       transform: translateY(0);
     }
   }
-  @keyframes queued-prompt-row-enter {
-    0% {
-      opacity: 0;
-      transform: translateY(6px);
-    }
-    100% {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-  .queued-prompt-row {
-    animation: queued-prompt-row-enter 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
-  }
   @media (prefers-reduced-motion: reduce) {
     .composer-status-strip {
       will-change: auto;
@@ -775,9 +849,6 @@
     }
     .thread-layout {
       transition-duration: 0.01ms;
-    }
-    .queued-prompt-row {
-      animation: none;
     }
   }
 
@@ -824,45 +895,6 @@
 
   .workbench-pane {
     transform-origin: top left;
-  }
-
-  /** Goal halo: pale sky blue (not ``--primary``, which often reads as neutral gray). */
-  @keyframes goal-shell-glow-breathe {
-    0%,
-    100% {
-      filter: drop-shadow(0 0 10px hsl(204 72% 52% / 0.22))
-        drop-shadow(0 0 24px hsl(199 80% 58% / 0.14));
-    }
-    50% {
-      filter: drop-shadow(0 0 17px hsl(204 78% 48% / 0.32))
-        drop-shadow(0 0 38px hsl(199 85% 55% / 0.2));
-    }
-  }
-  .goal-shell-glow {
-    animation: goal-shell-glow-breathe 4.8s ease-in-out infinite;
-  }
-  @keyframes goal-shell-glow-breathe-dark {
-    0%,
-    100% {
-      filter: drop-shadow(0 0 12px hsl(198 90% 72% / 0.28))
-        drop-shadow(0 0 28px hsl(195 95% 65% / 0.16));
-    }
-    50% {
-      filter: drop-shadow(0 0 20px hsl(198 95% 78% / 0.42))
-        drop-shadow(0 0 42px hsl(195 100% 70% / 0.24));
-    }
-  }
-  .dark .goal-shell-glow {
-    animation-name: goal-shell-glow-breathe-dark;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .goal-shell-glow {
-      animation: none;
-      filter: drop-shadow(0 0 14px hsl(204 70% 50% / 0.24));
-    }
-    .dark .goal-shell-glow {
-      filter: drop-shadow(0 0 14px hsl(198 88% 70% / 0.32));
-    }
   }
 
   /* Subtle scrollbar that doesn't fight the dark background. */
@@ -937,13 +969,6 @@
   .thread-viewport {
     container-name: thread-viewport;
     container-type: inline-size;
-  }
-
-  @supports (content-visibility: auto) {
-    .thread-render-unit {
-      content-visibility: auto;
-      contain-intrinsic-size: auto 12rem;
-    }
   }
 
   .thread-prompt-rail {
@@ -1062,6 +1087,59 @@
   }
 }
 
+/* loading.dev Ring, Copyright (c) 2026 Jakub Krehel (MIT); THIRD_PARTY_NOTICES.md. */
+.loading-ring-arc {
+  transform-origin: center;
+  animation: loading-ring-spin 800ms linear infinite;
+}
+@keyframes loading-ring-spin {
+  to { transform: rotate(360deg); }
+}
+
+.composer-primary-action {
+  transition: color 160ms ease-out, background-color 160ms ease-out, border-color 160ms ease-out;
+}
+.composer-action-icons {
+  transition: transform 120ms ease-out;
+}
+.composer-primary-action:active:not(:disabled) .composer-action-icons {
+  transform: scale(0.94);
+}
+.composer-action-glyph {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transform: scale(0.72);
+  transition: opacity 140ms ease-out, transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.composer-action-glyph[data-active] {
+  opacity: 1;
+  transform: scale(1);
+}
+.composer-action-icons[data-state="stop"] [data-action-icon="send"] {
+  transform: translateY(-3px) scale(0.8);
+}
+.composer-action-glyph:not([data-active]) .loading-ring-arc {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .loading-ring-arc {
+    animation: none;
+  }
+  .composer-primary-action,
+  .composer-action-icons,
+  .composer-primary-action:active:not(:disabled) .composer-action-icons {
+    transition: none;
+    transform: none;
+  }
+  .composer-action-icons[data-state] .composer-action-glyph {
+    transform: none;
+    transition: opacity 80ms linear;
+  }
+}
+
 @media (pointer: coarse) {
   /* Readable form text avoids Safari's focus zoom without disabling the user's
      pinch zoom. Keep this after utilities so compact desktop overrides cannot
@@ -1107,13 +1185,38 @@
   }
 }
 
-/*
- * Composer controls adapt to their actual container, not just the viewport.
- * Narrow layouts move access and usage into a separate metadata row.
- */
+.sidebar-selection-highlight {
+  transition: transform 300ms ease-out, width 300ms ease-out, height 300ms ease-out,
+    var(--theme-paint-transition, background-color 0s);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-selection-highlight {
+    transition: var(--theme-paint-transition, none);
+  }
+}
+
+/* Composer controls adapt to their actual container, not just the viewport. */
 .thread-composer-surface {
+  --composer-shadow-color: 240 10% 16%;
+  --tw-shadow: inset 0 0 0 1px hsl(var(--border) / 0.75), 0 4px 18px -8px hsl(var(--composer-shadow-color) / 0.12);
+  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+  transition: var(--theme-paint-transition, background-color 160ms ease-out, box-shadow 160ms ease-out), opacity 160ms ease-out;
   container-name: thread-composer;
   container-type: inline-size;
+}
+
+.dark .thread-composer-surface {
+  --composer-shadow-color: 240 12% 3%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-composer-surface { transition: var(--theme-paint-transition, none); }
+}
+
+@media (forced-colors: active) {
+  .thread-composer-surface { outline: 1px solid CanvasText; }
+  .thread-composer-surface:focus-within { outline: 2px solid Highlight; }
 }
 
 .thread-composer-footer-actions {
@@ -1252,8 +1355,22 @@
   }
 }
 
-/* Narrow composers separate message actions from permissions and usage instead
- * of shrinking touch targets or hiding the active model and access state. */
+/* Match the directory glyph's start to the attachment glyph, not its hit area. */
+.thread-composer-meta {
+  padding-inline-start: calc(var(--composer-footer-inset) + var(--composer-action-margin) + (var(--composer-action-size) - 0.875rem) / 2 - 0.5rem);
+}
+
+@media (pointer: coarse) {
+  .thread-composer-form { --composer-action-size: 2.75rem; }
+}
+
+/* Compact composers keep their primary actions on a stable 44px touch grid. */
+.thread-composer-form[data-compact-controls] {
+  --composer-action-size: 2.25rem;
+  --composer-action-margin: 0.25rem;
+  --composer-footer-inset: 0.5rem;
+}
+
 [data-compact-controls] .thread-composer-footer {
   column-gap: 0.25rem;
   padding: 0 0.5rem 0.5rem;
@@ -1265,8 +1382,7 @@
 }
 
 [data-compact-controls] .thread-composer-footer-actions {
-  flex: none;
-  max-width: none;
+  max-width: 50%;
 }
 
 [data-compact-controls] .thread-composer-action.touch-target {
@@ -1288,11 +1404,11 @@
  * state; margins reserve its space so adjacent controls never overlap it. */
 [data-compact-controls] .thread-composer-round-action.touch-target {
   position: relative;
-  width: 2.25rem;
-  height: 2.25rem;
-  min-width: 2.25rem;
-  min-height: 2.25rem;
-  margin: 0.25rem;
+  width: var(--composer-action-size);
+  height: var(--composer-action-size);
+  min-width: var(--composer-action-size);
+  min-height: var(--composer-action-size);
+  margin: var(--composer-action-margin);
 }
 
 [data-compact-controls] .thread-composer-round-action::before {
@@ -1306,31 +1422,11 @@
   height: 2.25rem;
 }
 
-.thread-composer-meta .touch-target {
-  min-height: 2.75rem;
-  min-width: 2.75rem;
-}
-
-.thread-composer-meta .thread-composer-access {
-  max-width: 100%;
-  padding-inline: 0.625rem 0.5rem;
-}
-
-.thread-composer-workspace-row {
-  padding-inline: 0.75rem;
-}
-
-.thread-composer-workspace-row .touch-target {
-  min-height: 2.75rem;
-  min-width: 2.75rem;
-}
-
-.thread-composer-workspace-row .thread-composer-access {
-  padding-inline-end: 0;
-}
-
-.thread-composer-workspace-row .thread-composer-workspace {
-  padding-inline-start: 0.6875rem;
+@media (pointer: coarse) {
+  .thread-composer-meta .touch-target {
+    min-height: 2.75rem;
+    min-width: 2.75rem;
+  }
 }
 
 @media (forced-colors: active) {
@@ -1343,7 +1439,7 @@
 @layer components {
   @media (prefers-reduced-motion: no-preference) {
     .segmented-control-indicator[data-animate="true"] {
-      transition-property: transform, width;
+      transition-property: translate, scale;
       transition-duration: 220ms, 160ms;
       transition-timing-function:
         cubic-bezier(0.2, 0.95, 0.25, 1.08),
@@ -1380,7 +1476,7 @@
   .automation-create-composer .thread-composer-surface {
     max-inline-size: none;
   }
-  .automation-create-composer .thread-composer-input textarea {
+  .automation-create-composer .thread-composer-input > :is(textarea, [aria-hidden]) {
     padding-inline: var(--settings-inset);
   }
   .automation-view-switch .segmented-control button {
@@ -1424,7 +1520,7 @@
     white-space: nowrap;
     text-overflow: ellipsis;
   }
-  .thread-composer-collapsible[data-compact] .thread-composer-input textarea {
+  .thread-composer-collapsible[data-compact] .thread-composer-input > :is(textarea, [aria-hidden]) {
     display: block;
     block-size: 3.125rem !important;
   }
@@ -1432,7 +1528,7 @@
     .thread-composer-collapsible .thread-composer-input {
       inline-size: 100%;
     }
-    .thread-composer-collapsible .thread-composer-input textarea {
+    .thread-composer-collapsible .thread-composer-input > :is(textarea, [aria-hidden]) {
       display: block;
       min-block-size: 3.5rem;
       padding-block: 1.125rem;
@@ -1440,7 +1536,7 @@
     .thread-composer-collapsible[data-compact] .thread-composer-input {
       inline-size: max(0px, calc(100% - var(--composer-compact-controls-width, 15rem) - 1.5rem));
     }
-    .thread-composer-collapsible[data-compact] .thread-composer-input textarea {
+    .thread-composer-collapsible[data-compact] .thread-composer-input > :is(textarea, [aria-hidden]) {
       display: block;
       block-size: 3.5rem !important;
       min-block-size: 3.5rem;
@@ -1639,8 +1735,8 @@
     .settings-grid .settings-row > :nth-child(2),
     .settings-grid .settings-footer > :nth-child(2) { grid-column: 8 / -1; }
     .settings-grid .settings-footer-auto > :first-child { grid-column: 1 / -1; }
-    .settings-grid .settings-row:has(.segmented-control) > :first-child { grid-column: 1 / 7; }
-    .settings-grid .settings-row:has(.segmented-control) > :nth-child(2) { grid-column: 7 / -1; }
+    .settings-grid .settings-row:has(:is(.segmented-control, .settings-version-actions)) > :first-child { grid-column: 1 / 7; }
+    .settings-grid .settings-row:has(:is(.segmented-control, .settings-version-actions)) > :nth-child(2) { grid-column: 7 / -1; }
   }
   @media (min-width: 768px) {
     .settings-grid { --settings-inset: 24px; }

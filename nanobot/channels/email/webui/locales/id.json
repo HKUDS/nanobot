@@ -158,8 +158,7 @@
       },
       "trustedAuthservIds": {
         "label": "Layanan autentikasi tepercaya",
-        "placeholder": "mx.google.com, pisahkan dengan koma",
-        "help": "Masukkan nilai authserv-id tepercaya.\n\nNilai authserv-id persis yang ditambahkan layanan penerima. Wajib saat verifikasi SPF atau DKIM aktif."
+        "placeholder": "mx.google.com, pisahkan dengan koma"
       }
     }
   }

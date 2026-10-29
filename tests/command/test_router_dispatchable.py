@@ -264,7 +264,7 @@ class TestPairingCommandDispatch:
     ) -> None:
         monkeypatch.setattr(
             "nanobot.pairing.store.approve_code",
-            lambda code: ("telegram", "123") if code == "ABCD-EFGH" else None,
+            lambda code, *, on_change=None: ("telegram", "123") if code == "ABCD-EFGH" else None,
         )
         fake_msg.content = "/pairing approve ABCD-EFGH"
         ctx = CommandContext(
@@ -286,7 +286,7 @@ class TestPairingCommandDispatch:
     ) -> None:
         monkeypatch.setattr(
             "nanobot.pairing.store.revoke",
-            lambda ch, sid: sid == "123",
+            lambda ch, sid, *, on_change=None: sid == "123",
         )
         fake_msg.content = "/pairing revoke 123"
         ctx = CommandContext(

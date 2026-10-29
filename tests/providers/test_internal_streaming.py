@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 import httpx
 import pytest
@@ -27,6 +27,7 @@ class _EventStream(httpx.AsyncByteStream):
         self.events = events
         self.stall_at = stall_at
         self.event_delay = event_delay
+        self.sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
         self.closed = False
 
     async def __aiter__(self) -> AsyncIterator[bytes]:
@@ -34,7 +35,7 @@ class _EventStream(httpx.AsyncByteStream):
             if index == self.stall_at:
                 await asyncio.Event().wait()
             if self.event_delay:
-                await asyncio.sleep(self.event_delay)
+                await self.sleep(self.event_delay)
             yield f"data: {json.dumps(event)}\n\n".encode()
 
     async def aclose(self) -> None:
@@ -117,9 +118,22 @@ async def make_provider(monkeypatch):
 
 @pytest.mark.parametrize("api", ["chat", "responses", "azure"])
 @pytest.mark.parametrize("kind", ["content", "reasoning", "tool", "metadata"])
-async def test_silent_stream_renews_idle_timeout_on_every_event(make_provider, api, kind):
+async def test_silent_stream_renews_idle_timeout_on_every_event(
+    make_provider, monkeypatch, api, kind,
+):
     provider, stream = await make_provider(api, kind, event_delay=0.05, idle_timeout=0.3)
+    loop = asyncio.get_running_loop()
+    started_at = now = loop.time()
+    monkeypatch.setattr(loop, "time", lambda: now)
+
+    async def advance_time(delay: float) -> None:
+        nonlocal now
+        now += delay
+        await asyncio.sleep(0)
+
+    stream.sleep = advance_time
     response = await provider.chat_stream_with_retry([{"role": "user", "content": "work"}])
+    assert now - started_at > 0.3
     assert response.finish_reason == "stop"
     assert response.content is not None and response.content.strip().endswith("done")
     assert stream.closed

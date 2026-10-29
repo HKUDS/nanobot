@@ -2,6 +2,10 @@
   "setup": {
     "docsLabel": "Open QQ setup",
     "officialLabel": "Open QQ bot console",
+    "sections": {
+      "credentials": "Manual credentials",
+      "advanced": "Advanced"
+    },
     "fields": {
       "appId": {
         "label": "App ID",
@@ -44,12 +48,22 @@
     }
   },
   "custom": {
-    "qrAlt": "QQ login QR code",
+    "qrAlt": "QQ binding QR code",
     "scanTitle": "Scan with mobile QQ",
-    "waiting": "Waiting for QQ scan…",
-    "connected": "QQ is connected.",
-    "stopped": "QQ login stopped.",
-    "connecting": "Connecting...",
-    "scanAgainWarning": "Scanning again replaces the current App Secret. The previous App Secret stops working once the new scan completes."
+    "waiting": "Waiting for scan…",
+    "connected": "Binding complete",
+    "stopped": "Cancelled",
+    "connecting": "Preparing QR code…",
+    "scanAgainWarning": "Rebinding may interrupt other apps using this QQ bot. If the App Secret is reset, the old secret becomes invalid and those apps need the new secret.",
+    "configured": "Configured",
+    "bind": "Bind QQ bot",
+    "rebind": "Rebind bot",
+    "refresh": "Refresh QR code",
+    "retry": "Retry",
+    "expired": "QR code expired",
+    "failed": "Binding failed",
+    "cancelFailed": "Could not cancel",
+    "retrying": "Retrying…",
+    "manualSetup": "Enter credentials manually"
   }
 }

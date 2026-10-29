@@ -16,6 +16,7 @@ import websockets
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
+from nanobot.channels.manager import ChannelManager
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
 from nanobot.webui.gateway_services import build_gateway_services
 
@@ -220,14 +221,32 @@ async def test_server_send_tags_tool_hint_with_kind(bus: MagicMock) -> None:
             assert plain.raw.get("kind") is None
 
             # Tool-hint breadcrumb: kind == "tool_hint".
-            await ch.send(OutboundMessage(
+            tool_start = {
+                "phase": "start", "call_id": "call-weather", "name": "weather",
+                "arguments": {"action": "get"},
+            }
+            msg = OutboundMessage(
                 channel="websocket", chat_id=ready.chat_id,
-                content='weather("get")',
-                event=ProgressEvent(content='weather("get")', tool_hint=True),
-            ))
+                content="",
+                event=ProgressEvent(tool_hint=True, tool_events=[tool_start]),
+            )
+            await ChannelManager._send_once(ch, ch.prepare_tool_events(msg))
             hint = await c.recv_message()
             assert hint.raw.get("kind") == "tool_hint"
-            assert hint.text == 'weather("get")'
+            assert hint.text == ""
+            assert hint.raw["tool_events"] == [tool_start]
+
+            tool_end = {**tool_start, "phase": "end", "result": "sunny"}
+            msg = OutboundMessage(
+                channel="websocket", chat_id=ready.chat_id,
+                content="",
+                event=ProgressEvent(tool_events=[tool_end]),
+            )
+            await ChannelManager._send_once(ch, ch.prepare_tool_events(msg))
+            result = await c.recv_message()
+            assert result.raw.get("kind") == "progress"
+            assert result.text == ""
+            assert result.raw["tool_events"] == [tool_end]
 
             # Generic progress (non-tool-hint) gets the softer "progress" label.
             await ch.send(OutboundMessage(

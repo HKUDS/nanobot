@@ -225,7 +225,6 @@ export function footerHintTheme(palette: Palette): FooterHintTheme {
     accent: palette.accent,
     danger: palette.error,
     muted: palette.muted,
-    separator: palette.faint,
   }
 }
 

@@ -339,6 +339,34 @@ A normal return from `send()` means either the visible payload was accepted by t
 
 `send()` may run as soon as `is_running` becomes true. If a channel sets `_running` before its transport is ready, it must keep raising until delivery can be attempted safely. Small platform-specific retries are fine, but the final failure must still reach the manager.
 
+### Optional shared proxy
+
+Existing `__init__(config, bus)` constructors remain valid. `BaseChannel.uses_shared_proxy` defaults to `False`; only runtimes that explicitly set this class capability to `True` receive the instance-scoped top-level `NetworkConfig` as the keyword-only `network` argument. This capability is not a user setting.
+
+To support the shared proxy, declare `use_proxy: bool = False` on your channel's config model and expose `"useProxy": ChannelFieldSpec(kind="bool", default=False)` in its setup fields. Opt in on the runtime class and forward `network` to the base constructor:
+
+```python
+from typing import Any
+
+from nanobot.bus.queue import MessageBus
+from nanobot.channels.base import BaseChannel
+from nanobot.config.network import NetworkConfig
+
+
+class WebhookChannel(BaseChannel):
+    uses_shared_proxy = True
+
+    def __init__(
+        self, config: Any, bus: MessageBus, *, network: NetworkConfig | None = None,
+    ):
+        if isinstance(config, dict):
+            config = WebhookConfig(**config)
+        super().__init__(config, bus, network=network)
+        self._proxy = self.network.resolve_proxy(self.config.use_proxy)
+```
+
+Pass the resolved address to your platform clients. `useProxy: false` keeps the channel direct even when `network.proxy` is configured; `true` requires a shared proxy address and fails rather than silently connecting directly. Setup validators receive the same settings through `context.network`. Do not load global config or persist a proxy address in the channel config.
+
 ### Interactive Login
 
 If your channel requires interactive authentication (e.g. QR code scan), override `login(force=False)`:
@@ -595,7 +623,7 @@ Besides normal assistant text, nanobot can emit low-emphasis trace blocks. These
 
 ### Progress and Tool Hints
 
-Progress and tool hints arrive through the normal `send(msg)` path. Check `msg.event` before rendering:
+Generic progress and tool activity arrive through `send(msg)`. Tool activity carries a `ProgressEvent` with structured `tool_events`; its core `content` is empty. Each item retains its call ID, tool name, arguments, lifecycle phase, and terminal result or error. Before queuing delivery, `prepare_tool_events(msg)` projects the activity for this channel. Its default implementation formats starts as concise text in a channel-local message copy, so text-only adapters can keep their normal formatting and thread handling:
 
 ```python
 from nanobot.bus.outbound_events import ProgressEvent
@@ -616,7 +644,9 @@ async def send(self, msg: OutboundMessage) -> None:
     await self._send_message(msg.chat_id, msg.content, media=msg.media)
 ```
 
-Tool hints are on by default. Users can disable them globally or per channel:
+Override `prepare_tool_events(msg)` to return the original message when the platform consumes structured activity directly, or return your own display projection. Keep this hook free of network sends: it runs once before delivery and its returned envelope is reused across retries. In `send(msg)`, consume `msg.event.tool_events` for native activity, grouping, buffering, or card updates; retain destination/thread metadata and handle start/end/error by call ID. Do not assume a preformatted hint is present or route a rendered copy back into the message bus. The default text formatter uses `self.tool_hint_max_length`, initialized from `agents.defaults.toolHintMaxLength`. Direct-call `on_progress` callbacks that display tools must accept the `tool_events` keyword and render those events themselves; `nanobot.utils.tool_hints.format_tool_event_hints()` is available for text consumers.
+
+Tool starts are controlled by `sendToolHints`; terminal tool events retain the existing `sendProgress` policy. Tool hints are on by default. Users can disable them globally or per channel:
 
 ```json
 {

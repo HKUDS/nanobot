@@ -6,6 +6,7 @@ import asyncio
 import html
 import json
 from collections.abc import Awaitable, Callable, Mapping
+from functools import partial
 from typing import Any, cast
 
 from websockets.http11 import Request as WsRequest
@@ -17,6 +18,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.registry import load_channel_plugin
 from nanobot.channels.validation import validate_channel_config
 from nanobot.pairing import approve_code, deny_code, list_pending
+from nanobot.pairing.events import PairingChanged
 from nanobot.webui import settings_capabilities as capability_domain
 from nanobot.webui import settings_contracts as contracts
 from nanobot.webui import settings_models as model_domain
@@ -97,6 +99,7 @@ _MCP_PRESET_ACTIONS_BY_PATH = {
     "/api/settings/mcp-presets/remove": "remove",
     "/api/settings/mcp-presets/test": "test",
     "/api/settings/mcp-presets/reconnect": "reconnect",
+    "/api/settings/mcp-presets/proxy": "proxy",
     "/api/settings/mcp-presets/custom": "custom",
     "/api/settings/mcp-presets/import": "import",
     "/api/settings/mcp-presets/import-cursor": "import-cursor",
@@ -146,6 +149,14 @@ _SYSTEM_ROUTES = {
     "/api/settings/pairing/deny": "pairing-deny",
     "/api/settings/mcp-presets": "mcp-list",
     "/api/settings/version-check": "version-check",
+    "/api/settings/nanobot-update/channel": "update-channel",
+    "/api/settings/nanobot-update/plan": "update-plan-read",
+    "/api/settings/nanobot-update/plan/create": "update-plan-create",
+    "/api/settings/nanobot-update/job": "update-job-read",
+    "/api/settings/nanobot-update/job/prepare": "update-job-prepare",
+    "/api/settings/nanobot-update/job/settle": "update-job-settle",
+    "/api/settings/nanobot-update/job/execute": "update-job-execute",
+    "/api/settings/nanobot-update/job/retry": "update-job-retry",
     **{
         path: f"mcp-{action}"
         for path, action in _MCP_PRESET_ACTIONS_BY_PATH.items()
@@ -153,6 +164,12 @@ _SYSTEM_ROUTES = {
 }
 
 _SETTINGS_MUTATION_PATHS = frozenset({
+    "/api/settings/nanobot-update/channel",
+    "/api/settings/nanobot-update/plan/create",
+    "/api/settings/nanobot-update/job/prepare",
+    "/api/settings/nanobot-update/job/settle",
+    "/api/settings/nanobot-update/job/execute",
+    "/api/settings/nanobot-update/job/retry",
     "/api/settings/runtime-config/update",
     "/api/settings/update",
     "/api/settings/model-configurations/create",
@@ -251,19 +268,21 @@ class WebUISettingsRouter:
         self._mcp_reload = mcp_reload
         self._image_generation_reload = image_generation_reload
         self._mcp_oauth_redirect_uri = mcp_oauth_redirect_uri
-        self._mcp_oauth = McpOAuthManager()
+        self._mcp_oauth = McpOAuthManager(bus.admission)
         self._restart_sections: set[str] = set()
         self._restart_baselines: dict[str, dict[str, Any]] = {}
         self._restart_changes: dict[str, str] = {}
-        self._models = model_domain.ModelSettingsHandler(settings, logger)
+        self._models = model_domain.ModelSettingsHandler(settings, logger, bus.admission)
         self._capabilities = capability_domain.CapabilitySettingsHandler(
             settings,
             logger,
         )
-        self._system = system_domain.SystemSettingsHandler(settings, logger)
+        self._system = system_domain.SystemSettingsHandler(settings, logger, bus.admission)
 
     async def close(self) -> None:
         """Release state owned by settings domains."""
+        await self._mcp_oauth.close()
+        await self._models.close()
         await self._system.close()
 
     async def dispatch(
@@ -303,6 +322,8 @@ class WebUISettingsRouter:
             return await asyncio.to_thread(self._handle_settings_usage)
 
         domain, action = route
+        if action.startswith("update-") and self._runtime_surface == "native":
+            return self._error_response(409, "Update this installation through Nanobot Desktop.")
         restart_before = (
             await asyncio.to_thread(self._restart_values, action)
             if action in {"runtime-config-update", "image-update", "web-search-update"}
@@ -318,6 +339,14 @@ class WebUISettingsRouter:
                     "features-enable",
                     "channel-configure",
                     "channel-connect",
+                    "update-channel",
+                    "version-check",
+                    "update-plan-create",
+                    "update-plan-read",
+                    "update-job-prepare",
+                    "update-job-settle",
+                    "update-job-execute",
+                    "update-job-retry",
                 }
             ),
         )
@@ -362,7 +391,12 @@ class WebUISettingsRouter:
                     self._restart_changes[action] = result.restart_section
                 # Reversible changes are tracked separately from installation and reload failures.
                 result.payload["requires_restart"] = False
-        return self._render_result(result)
+        response = self._render_result(result)
+        if action.startswith("update-") or action == "version-check":
+            # A saved review is immutable, but its local validity and permission
+            # are not. Never reuse a cached success after an installation changes.
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
     def _restart_values(self, action: str) -> dict[str, Any]:
         config = self.settings.config.load()
@@ -509,6 +543,9 @@ class WebUISettingsRouter:
             reload_image=self._reload_image_generation_runtime,
         )
 
+    def _pairing_changed(self) -> None:
+        self.bus.publish_nowait(PairingChanged())
+
     def _system_operations(self) -> system_domain.SystemSettingsOperations:
         return system_domain.SystemSettingsOperations(
             update_runtime_config=update_runtime_config_settings,
@@ -520,8 +557,8 @@ class WebUISettingsRouter:
             validate_channel_config=validate_channel_config,
             load_channel_plugin=load_channel_plugin,
             list_pending=list_pending,
-            approve_code=approve_code,
-            deny_code=deny_code,
+            approve_code=partial(approve_code, on_change=self._pairing_changed),
+            deny_code=partial(deny_code, on_change=self._pairing_changed),
             mcp_presets_action=mcp_presets_settings_action,
             reload_mcp=self._reload_mcp_runtime,
             mcp_runtime_status=self._mcp_runtime_status,
@@ -622,7 +659,7 @@ class WebUISettingsRouter:
             return self._error_response(500, "MCP OAuth callback is not configured")
         query = self._parse_mcp_settings_query(request)
         try:
-            name, cfg = await asyncio.to_thread(
+            name, cfg, network = await asyncio.to_thread(
                 self.settings.mutate,
                 ensure_mcp_oauth_server,
                 query,
@@ -634,6 +671,7 @@ class WebUISettingsRouter:
                 cfg,
                 redirect_uri,
                 reload_mcp=self._reload_mcp_runtime,
+                network=network,
                 reset_credentials=reset,
             )
         except Exception as exc:

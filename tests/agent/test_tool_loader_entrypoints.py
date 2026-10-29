@@ -1,3 +1,6 @@
+import sys
+from importlib.metadata import entry_points
+from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -8,10 +11,8 @@ from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 
 
-def test_loader_discovers_entry_point_tools():
-    """Simulate an entry-point plugin being discovered."""
-    mock_ep = MagicMock()
-    mock_ep.name = "my_plugin"
+def test_loader_discovers_entry_point_tools(tmp_path, monkeypatch):
+    """Discover a real distribution descriptor in the tool entry-point group."""
 
     class _FakeTool(Tool):
         __name__ = "FakeTool"
@@ -41,14 +42,25 @@ def test_loader_discovers_entry_point_tools():
         async def execute(self, **_):
             return "ok"
 
-    mock_ep.load.return_value = _FakeTool
-
-    with patch("nanobot.agent.tools.loader.entry_points", return_value=[mock_ep]):
-        loader = ToolLoader()
-        discovered = loader._discover_plugins()
+    plugin = ModuleType("test_tool_plugin")
+    monkeypatch.setattr(plugin, "FakeTool", _FakeTool, raising=False)
+    monkeypatch.setitem(sys.modules, plugin.__name__, plugin)
+    distribution = tmp_path / "test_tool_plugin-1.0.dist-info"
+    distribution.mkdir()
+    (distribution / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: test-tool-plugin\nVersion: 1.0\n", encoding="utf-8",
+    )
+    (distribution / "entry_points.txt").write_text(
+        "[nanobot.tools]\nmy_plugin = test_tool_plugin:FakeTool\n"
+        "[other.tools]\nother_plugin = test_tool_plugin:FakeTool\n", encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setattr("nanobot.agent.tools.loader.entry_points", entry_points)
+    discovered = ToolLoader()._discover_plugins()
 
     assert "my_plugin" in discovered
     assert discovered["my_plugin"] is _FakeTool
+    assert "other_plugin" not in discovered
 
 
 def test_loader_skips_abstract_entry_point_tools():

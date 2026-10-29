@@ -61,16 +61,6 @@
     "scope": "Escopo do arquivo",
     "hint": "Clique com o botão direito para abrir o menu de cópia, ou foque o arquivo e pressione Shift+F10."
   },
-  "webLinks": {
-    "title": "Web links · Menu de links",
-    "description": "Abra o menu real de links para selecionar links da mensagem e copiar endereços.",
-    "options": "WebLink recebe atributos de link. useMessageWebLinks coleta os links renderizados. MessageLinksMenu recebe entradas e callbacks de voltar e fechar; expanded controla a largura. Todos os links apontam para recursos locais da galeria.",
-    "width": "Largura do menu de links",
-    "message": "Veja a <gallery>galeria de componentes</gallery> e a <brand>imagem de marca</brand>.",
-    "close": "Fechar menu de links",
-    "open": "Ver links da mensagem",
-    "hint": "Clique com o botão direito em um link para copiar o endereço. O menu coleta os links da mensagem renderizada."
-  },
   "workbench": {
     "title": "PaneWorkbench · Múltiplos painéis",
     "description": "Mude o layout, ative ou adicione painéis e ajuste a posição e o tamanho.",
@@ -234,14 +224,6 @@
     "description": "Compare texto, imagens, truncamento, carregamento e erros. Selecione uma imagem para ampliar.",
     "options": "state fornece o estado visual; path determina o tipo e o nome do arquivo. Os callbacks de abertura e erro de imagem atualizam a prévia.",
     "state": "Estado da prévia do arquivo"
-  },
-  "webPreview": {
-    "title": "WebPreviewPanelView · Conteúdo web",
-    "description": "Explore a barra de título, o isolamento e as restrições; atualize um documento local.",
-    "options": "O runtime escolhe restriction antes de fornecer o conteúdo. children fornece o conteúdo; onRefresh solicita a atualização. Este iframe usa um srcDoc local.",
-    "state": "Estado da prévia web",
-    "frame": "Página web local de exemplo",
-    "refreshes": "Atualizações: {{amount}}"
   },
   "session": {
     "title": "SessionInfoPopoverView · Automações da sessão",

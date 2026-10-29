@@ -110,5 +110,5 @@ def test_qq_inherits_global_unless_legacy_override_is_explicit(
         section["showCompactionNotices"] = str(override).lower() if legacy_string else override
     if typed:
         section = QQConfig.model_validate(section)
-    channel = manager._build_channel("qq", QQChannel, section)
+    channel = manager._build_channel(QQChannel, section)
     assert channel.show_compaction_notices is (global_value if override is None else override)

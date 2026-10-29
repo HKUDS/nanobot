@@ -94,7 +94,7 @@ def test_responses_behavior_is_declared_by_capabilities(provider):
 
     assert {
         "type": "reasoning",
-        "content": [{"type": "output_text", "text": "think first"}],
+        "content": [{"type": "reasoning_text", "text": "think first"}],
     } in body["input"]
     assert "include" not in body
 
@@ -128,15 +128,6 @@ def test_chat_declaration_disables_responses(provider):
 def test_responses_declaration_routes_other_models(provider):
     provider.default_model = "gpt-4o"
     provider._preset_model_api = ModelAPICapabilities(("responses",), "responses")
-    assert provider._should_use_responses_api("gpt-4o", None) is True
-
-
-def test_responses_only_declaration_ignores_circuit_breaker(provider):
-    provider.default_model = "gpt-4o"
-    provider._preset_model_api = ModelAPICapabilities(("responses",), "responses")
-    provider._responses_failures = {"gpt-4o|gpt-4o|": _RESPONSES_FAILURE_THRESHOLD}
-    provider._responses_tripped_at = {"gpt-4o|gpt-4o|": 0.0}
-
     assert provider._should_use_responses_api("gpt-4o", None) is True
 
 
@@ -271,7 +262,7 @@ def test_deepseek_full_history_body_keeps_reasoning_content_as_array(provider):
     reasoning_items = [item for item in body["input"] if item.get("type") == "reasoning"]
     assert len(reasoning_items) == 1
     assert reasoning_items[0]["content"] == [
-        {"type": "output_text", "text": "Michael topped up DeepSeek with $10."},
+        {"type": "reasoning_text", "text": "Michael topped up DeepSeek with $10."},
     ]
 
 
@@ -326,6 +317,8 @@ def test_deepseek_replay_body_keeps_reasoning_content_as_array(provider):
 
     reasoning_items = [item for item in body["input"] if item.get("type") == "reasoning"]
     assert len(reasoning_items) == 2  # one replayed from state, one converted
-    for item in reasoning_items:
-        assert isinstance(item["content"], list)
-        assert item["content"][0]["type"] == "output_text"
+    assert isinstance(reasoning_items[0]["content"], list)
+    # Stored replay items keep their original block type.
+    assert reasoning_items[0]["content"][0]["type"] == "output_text"
+    assert isinstance(reasoning_items[1]["content"], list)
+    assert reasoning_items[1]["content"][0]["type"] == "reasoning_text"

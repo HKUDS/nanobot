@@ -10,12 +10,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import INBOUND_META_USER_SHELL, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.manager import ChannelManager
 from nanobot.channels.websocket import runtime
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
 from nanobot.config.schema import Config
+from nanobot.runtime_admission import RuntimeBusyError
+from nanobot.session.manager import SessionManager
 from nanobot.webui.gateway_services import build_gateway_services
 
 
@@ -63,8 +65,8 @@ class _RecordingConnection:
             await self.release_close.wait()
 
 
-def _channel() -> WebSocketChannel:
-    bus = MagicMock(spec=MessageBus)
+def _channel(session_manager: SessionManager | None = None) -> WebSocketChannel:
+    bus = MessageBus()
     config = WebSocketConfig(
         enabled=True,
         allow_from=["*"],
@@ -73,7 +75,7 @@ def _channel() -> WebSocketChannel:
     gateway = build_gateway_services(
         config=config,
         bus=bus,
-        session_manager=None,
+        session_manager=session_manager,
         static_dist_path=None,
         workspace_path=Path.cwd(),
         default_restrict_to_workspace=False,
@@ -81,10 +83,7 @@ def _channel() -> WebSocketChannel:
         runtime_surface="tui",
         runtime_capabilities_overrides=None,
     )
-    channel = WebSocketChannel(config, bus, gateway=gateway)
-    # Keep disk latency out of every connection delivery synchronization check.
-    channel._persist_turn_transcript_event = MagicMock(return_value=True)
-    return channel
+    return WebSocketChannel(config, bus, gateway=gateway)
 
 
 def _message(chat_id: str, text: str) -> OutboundMessage:
@@ -129,9 +128,24 @@ async def test_message_bus_delivers_to_ten_tuis_with_one_blocked_connection() ->
             assert await _next_text(connection) == "first"
             assert await _next_text(connection) == "last"
         assert connections[0].sent.empty()
+        async with asyncio.timeout(2):
+            while manager._outbound_tasks or bus.outbound_size:
+                await asyncio.sleep(0)
+        # The manager's send has finished; the physical transport still owns
+        # its final frames. A shutdown idle check must include that second queue.
+        assert channel.has_pending_delivery
+        with pytest.raises(RuntimeBusyError):
+            with bus.admission.pause_if_idle(lambda: False):
+                pytest.fail("The blocked WebSocket transport was missed")
+        assert not bus.admission.paused
         connections[0].release_send.set()
         assert await _next_text(connections[0]) == "first"
         assert await _next_text(connections[0]) == "last"
+        async with asyncio.timeout(2):
+            while manager.has_pending_delivery:
+                await asyncio.sleep(0)
+        with bus.admission.pause_if_idle(lambda: False):
+            assert bus.admission.paused
     finally:
         dispatcher.cancel()
         await asyncio.gather(dispatcher, return_exceptions=True)
@@ -140,6 +154,26 @@ async def test_message_bus_delivers_to_ten_tuis_with_one_blocked_connection() ->
     assert not manager._outbound_tasks
     assert not manager._outbound_tails
     assert not channel._connection_outbound
+
+
+@pytest.mark.asyncio
+async def test_delivery_remains_busy_until_timed_out_transport_is_retired(monkeypatch) -> None:
+    monkeypatch.setattr(runtime, "_OUTBOUND_SEND_TIMEOUT_S", 0.02)
+    channel = _channel()
+    connection = _RecordingConnection(block_first_send=True, block_close=True)
+    channel._attach(cast(Any, connection), "chat-retiring")
+    try:
+        await channel.send(_message("chat-retiring", "reply"))
+        await asyncio.wait_for(connection.closed.wait(), 2)
+        assert connection.send_cancelled.is_set()
+        assert channel.has_pending_delivery
+        connection.release_close.set()
+        await asyncio.wait_for(_wait_for_retire_tasks(channel), 2)
+        assert not channel.has_pending_delivery
+    finally:
+        connection.release_send.set()
+        connection.release_close.set()
+        await channel._cleanup_connection(cast(Any, connection))
 
 
 @pytest.mark.asyncio
@@ -180,6 +214,49 @@ async def test_slow_tui_does_not_block_same_topic_fanout() -> None:
         slow.release_send.set()
         await channel._cleanup_connection(cast(Any, slow))
         await channel._cleanup_connection(cast(Any, healthy))
+
+
+@pytest.mark.asyncio
+async def test_message_recipients_are_snapshotted_before_history_append(history, monkeypatch) -> None:
+    channel = _channel(history.sessions)
+    first_connection = _RecordingConnection()
+    late_connection = _RecordingConnection()
+    channel._attach(cast(Any, first_connection), "chat-snapshot")
+    first_message = await history.message(
+        channel="websocket", chat_id="chat-snapshot", content="first",
+    )
+    append_started = asyncio.Event()
+    release_append = asyncio.Event()
+    append_history = history.sessions.state.append_history
+
+    async def blocked_append(*args, **kwargs):
+        append_started.set()
+        await release_append.wait()
+        return await append_history(*args, **kwargs)
+
+    monkeypatch.setattr(history.sessions.state, "append_history", blocked_append)
+    sending = asyncio.create_task(channel.send(first_message))
+    try:
+        await asyncio.wait_for(append_started.wait(), timeout=1)
+        channel._attach(cast(Any, late_connection), "chat-snapshot")
+        release_append.set()
+        await asyncio.wait_for(sending, timeout=1)
+        assert await _next_text(first_connection) == "first"
+
+        await channel.send(await history.message(
+            channel="websocket", chat_id="chat-snapshot", content="second",
+        ))
+        assert await _next_text(first_connection) == "second"
+        assert await _next_text(late_connection) == "second"
+        assert late_connection.sent.empty()
+        assert [record["text"] for record in history.read("websocket:chat-snapshot")] == [
+            "first", "second",
+        ]
+    finally:
+        release_append.set()
+        await asyncio.gather(sending, return_exceptions=True)
+        await channel._cleanup_connection(cast(Any, first_connection))
+        await channel._cleanup_connection(cast(Any, late_connection))
 
 
 @pytest.mark.asyncio
@@ -442,3 +519,32 @@ async def test_normal_cleanup_can_overlap_connection_retirement(monkeypatch) -> 
     assert connection not in channel._connection_outbound
     assert connection not in channel._conn_chats
     assert channel._subs == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_shell", [True, False])
+async def test_shell_output_is_literal_without_changing_other_command_replies(
+    history, user_shell: bool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    channel = _channel(history.sessions)
+    connection = _RecordingConnection()
+    channel._attach(cast(Any, connection), "shell-output")
+    output = "Path\n----\n  __pycache__\n```mermaid\nflowchart LR\n```\n![preview](local.png)\n"
+    rewritten = output.replace("local.png", "/api/media/signed")
+    monkeypatch.setattr(channel.gateway.media, "rewrite_local_markdown_images", lambda text: rewritten)
+    message = await history.message(
+        channel="websocket", chat_id="shell-output", content=output,
+        metadata={"render_as": "text", INBOUND_META_USER_SHELL: user_shell},
+    )
+    try:
+        await channel.send(message)
+        payload = json.loads(await asyncio.wait_for(connection.sent.get(), timeout=1))
+        assert payload["text"] == (output if user_shell else rewritten)
+        assert payload.get("render_as") == ("text" if user_shell else None)
+        [persisted] = history.read("websocket:shell-output")
+        assert persisted["event"] == "message"
+        assert persisted["text"] == output
+        assert persisted.get("render_as") == ("text" if user_shell else None)
+        assert message.content == output
+    finally:
+        await channel._cleanup_connection(cast(Any, connection))

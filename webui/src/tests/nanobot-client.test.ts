@@ -71,6 +71,45 @@ afterEach(() => {
 });
 
 describe("NanobotClient", () => {
+  it("notifies ready consumers after server ready frames, including reconnects", async () => {
+    const client = new NanobotClient({ url: "ws://test?token=fixture-token", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    const ready = vi.fn();
+    const unsubscribe = client.onReady(ready);
+    client.connect();
+    lastSocket().fakeOpen();
+    expect(ready).not.toHaveBeenCalled();
+    lastSocket().fakeMessage({ event: "ready", chat_id: "first" });
+    expect(ready).toHaveBeenCalledTimes(1);
+    expect(client.defaultChatId).toBe("first");
+    lastSocket().close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({ event: "ready", chat_id: "second" });
+    expect(ready).toHaveBeenCalledTimes(2);
+    expect(client.defaultChatId).toBe("second");
+    unsubscribe();
+    lastSocket().fakeMessage({ event: "ready", chat_id: "third" });
+    expect(client.defaultChatId).toBe("third");
+    expect(ready).toHaveBeenCalledTimes(2);
+    client.close();
+  });
+
+  it("delivers payload-free pairing changes, isolates listeners and unsubscribes", () => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    const pairing = vi.fn();
+    client.onPairingChange(() => { throw new Error("view failed"); });
+    const unsubscribe = client.onPairingChange(pairing);
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({ event: "pairing_changed" });
+    expect(pairing).toHaveBeenCalledTimes(1);
+    expect(pairing).toHaveBeenCalledWith();
+    unsubscribe();
+    lastSocket().fakeMessage({ event: "pairing_changed" });
+    expect(pairing).toHaveBeenCalledTimes(1);
+    client.close();
+  });
+
   it("emits live task notices without mounted chats, not when the chat replays", () => {
     const client = new NanobotClient({ url: "ws://test", reconnect: false,
       socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
@@ -630,7 +669,7 @@ describe("NanobotClient", () => {
     expect(client.getRunStartedAt("chat-stop")).toBeNull();
     expect(client.hasUnsettledRun("chat-stop")).toBe(false);
     expect(client.isRunCompleted("chat-stop", "turn-stop")).toBe(true);
-    expect(handler).toHaveBeenLastCalledWith("chat-stop", null);
+    expect(handler).toHaveBeenLastCalledWith("chat-stop", expect.objectContaining({ active: false, startedAt: null }));
   });
 
   it("preserves durable run clocks and identities through transport reconnect", async () => {
@@ -672,7 +711,7 @@ describe("NanobotClient", () => {
     expect(client.getUnsettledRunChatIds()).toEqual([]);
     expect(client.isRunCompleted("chat-strip", "turn-strip")).toBe(true);
     expect(client.isRunCompleted("another-chat", "turn-strip")).toBe(false);
-    expect(handler).toHaveBeenLastCalledWith("chat-strip", null);
+    expect(handler).toHaveBeenLastCalledWith("chat-strip", expect.objectContaining({ active: false, startedAt: null }));
     client.close();
   });
 
@@ -697,7 +736,7 @@ describe("NanobotClient", () => {
       chat_id: "chat-strip",
     });
     expect(client.getRunStartedAt("chat-strip")).toBeNull();
-    expect(handler).toHaveBeenLastCalledWith("chat-strip", null);
+    expect(handler).toHaveBeenLastCalledWith("chat-strip", expect.objectContaining({ active: false, startedAt: null }));
   });
 
   it("rejects a completed snapshot when a newer run is not represented", () => {
@@ -738,6 +777,54 @@ describe("NanobotClient", () => {
     expect(
       client.reconcileCanonicalCompletion("chat-submitted", requestGeneration, []),
     ).toBe(false);
+  });
+
+  it("sends bang commands with a receipt without taking over an active run or replaying on reconnect", async () => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    socket.fakeMessage({ event: "goal_status", chat_id: "shell", status: "running", turn_id: "agent", started_at: 12_345 });
+    const run = client.getRunState("shell");
+    const pending = client.sendUserShellCommand("shell", "!pwd", { turnId: "bang" });
+    expect(JSON.parse(socket.sent.at(-1)!)).toMatchObject({ type: "message", chat_id: "shell", content: "!pwd", turn_id: "bang", webui: true, user_shell: true });
+    socket.fakeMessage({ event: "message_accepted", chat_id: "shell", turn_id: "bang", starts_turn: false, active_turn_id: "agent", started_at: 12_345 });
+    await expect(pending).resolves.toBeUndefined();
+    socket.fakeMessage({ event: "message", chat_id: "shell", turn_id: "bang", text: "Exit code: 0" });
+    expect(client.getRunState("shell")).toEqual(run);
+    socket.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    lastSocket().fakeOpen();
+    expect(lastSocket().sent.map((frame) => JSON.parse(frame)).filter((frame) => frame.type === "message")).toEqual([]);
+    client.close();
+  });
+
+  it.each(["disconnected", "write failure"])("does not queue a failed bang command for reconnect: %s", async (failure) => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    if (failure === "write failure") {
+      socket.fakeOpen();
+      vi.spyOn(socket, "send").mockImplementationOnce(() => { throw new Error("send failed"); });
+    }
+    await expect(client.sendUserShellCommand("shell", "!pwd", { turnId: "bang" })).rejects.toThrow();
+    expect(client.getRunState("shell").active).toBe(false);
+    socket.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    lastSocket().fakeOpen();
+    expect(lastSocket().sent.map((frame) => JSON.parse(frame)).filter((frame) => frame.type === "message")).toEqual([]);
+    client.close();
+  });
+
+  it("reports a gateway-rejected bang command to its receipt waiter", async () => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    const pending = client.sendUserShellCommand("shell", "!pwd", { turnId: "bang" });
+    socket.fakeMessage({ event: "error", chat_id: "shell", turn_id: "bang", detail: "workspace_scope_rejected", reason: "Workspace unavailable" });
+    await expect(pending).rejects.toThrow("Workspace unavailable");
+    client.close();
   });
 
   it("does not register injected guidance as an independently unsettled run", () => {
@@ -1752,7 +1839,7 @@ describe("NanobotClient", () => {
       ),
     ).toBe(true);
     expect(client.getRunStartedAt("chat-canonical")).toBeNull();
-    expect(runHandler).toHaveBeenLastCalledWith("chat-canonical", null);
+    expect(runHandler).toHaveBeenLastCalledWith("chat-canonical", expect.objectContaining({ active: false, startedAt: null }));
     const deliveredBeforeLateFrames = chatHandler.mock.calls.length;
 
     lastSocket().fakeMessage({
@@ -1805,19 +1892,22 @@ describe("NanobotClient", () => {
       status: "running",
       started_at: 12_345,
     });
-    expect(handler).toHaveBeenCalledWith("chat-status", 12_345);
+    expect(handler).toHaveBeenCalledWith("chat-status", expect.objectContaining({ active: true, startedAt: 12_345 }));
 
     const lateHandler = vi.fn();
     client.onRunStatus(lateHandler);
-    expect(lateHandler).toHaveBeenCalledWith("chat-status", 12_345);
+    expect(lateHandler).toHaveBeenCalledWith("chat-status", expect.objectContaining({ active: true, startedAt: 12_345 }));
 
     lastSocket().fakeMessage({
       event: "goal_status",
       chat_id: "chat-status",
       status: "idle",
     });
-    expect(handler).toHaveBeenCalledWith("chat-status", null);
-    expect(lateHandler).toHaveBeenCalledWith("chat-status", null);
+    expect(handler).toHaveBeenCalledWith("chat-status", expect.objectContaining({ active: false, startedAt: null }));
+    expect(lateHandler).toHaveBeenCalledWith("chat-status", expect.objectContaining({ active: false, startedAt: null }));
+    const idleSubscriber = vi.fn();
+    client.onRunStatus(idleSubscriber);
+    expect(idleSubscriber).toHaveBeenCalledWith("chat-status", expect.objectContaining({ active: false, startedAt: null }));
   });
 
   it("records goal_state per chat_id without an onChat subscriber", () => {
@@ -2567,6 +2657,7 @@ describe("binary attachment transport", () => {
       const delivery = client.sendAttachments("chat", "look", [
         { data_url: "data:text/plain;base64,eA==", name: "note.txt" },
       ], { turnId: "slow-upload" });
+      expect(client.getRunState("chat")).toMatchObject({ active: true, startedAt: null });
       await vi.advanceTimersByTimeAsync(80_000);
       expect(socket.sent.some((frame) => frame.includes("slow-ref"))).toBe(true);
       socket.fakeMessage({ event: "message_accepted", chat_id: "chat", turn_id: "slow-upload" });
@@ -2637,6 +2728,7 @@ describe("binary attachment transport", () => {
         upload: { path: "/api/attachments", token: "cap" } });
       const draft = [{ data_url: "data:text/plain;base64,eA==", name: "note.txt" }];
       await expect(client.sendAttachments("chat", "look", draft)).rejects.toThrow("401");
+      expect(client.getRunState("chat").active).toBe(false);
       expect(socket.sent.filter((frame) => JSON.parse(frame).type === "message")).toHaveLength(0);
       expect(draft[0].data_url).toBe("data:text/plain;base64,eA==");
       fetchMock.mockImplementation(async () => {
@@ -2644,6 +2736,7 @@ describe("binary attachment transport", () => {
         return Response.json({ reference: "old-connection-ref" });
       });
       await expect(client.sendAttachments("chat", "look", draft)).rejects.toThrow("Connection changed");
+      expect(client.getRunState("chat").active).toBe(false);
       expect(socket.sent.filter((frame) => JSON.parse(frame).type === "message")).toHaveLength(0);
     } finally { client.close(); vi.unstubAllGlobals(); }
   });

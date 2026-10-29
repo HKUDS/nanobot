@@ -14,6 +14,8 @@ from typing import Any, cast
 from urllib.parse import parse_qsl, quote, urljoin, urlparse
 
 import httpx
+from ddgs.exceptions import DDGSException
+from ddgs.exceptions import TimeoutException as DDGSTimeoutException
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
@@ -416,7 +418,7 @@ class WebSearchTool(Tool):
             config_loader = _load_search_config
         return cls(
             config=ctx.config.web.search,
-            proxy=ctx.config.web.proxy,
+            proxy=ctx.network.resolve_proxy(ctx.config.web.use_proxy),
             user_agent=ctx.config.web.user_agent,
             config_loader=config_loader,
         )
@@ -1190,8 +1192,6 @@ class WebSearchTool(Tool):
                 asyncio.to_thread(ddgs.text, query, max_results=n),
                 timeout=self.config.timeout,
             )
-            if not raw:
-                return f"No results for: {query}"
             raw_items = cast(list[dict[str, Any]], raw)
             items: list[dict[str, Any]] = [
                 {"title": r.get("title", ""), "url": r.get("href", ""), "content": r.get("body", "")}
@@ -1203,6 +1203,23 @@ class WebSearchTool(Tool):
                 "DuckDuckGo search failed: {}",
                 e if tool_log_content_allowed() else type(e).__name__,
             )
+            if isinstance(e, TimeoutError):
+                return ToolResult.error(
+                    "Error: Web search timed out while waiting for ddgs. "
+                    "No usable search result was obtained before the tool deadline; "
+                    "matching-page availability is unknown."
+                )
+            if isinstance(e, DDGSTimeoutException):
+                return ToolResult.error(
+                    "Error: Web search unavailable (ddgs reported a timeout). "
+                    "No usable search result was obtained; matching-page availability is unknown."
+                )
+            if isinstance(e, DDGSException):
+                return ToolResult.error(
+                    "Error: Web search unavailable (ddgs; cause unknown). "
+                    "No usable search result was obtained. The search library did not expose "
+                    "a reliable cause; this does not establish that no matching pages exist."
+                )
             return ToolResult.error(f"Error: DuckDuckGo search failed ({e})")
 
     async def _search_bocha(self, query: str, n: int, freshness: str = "noLimit") -> str:
@@ -1296,7 +1313,7 @@ class WebFetchTool(Tool):
     def create(cls, ctx: ToolContext) -> Tool:
         return cls(
             config=ctx.config.web.fetch,
-            proxy=ctx.config.web.proxy,
+            proxy=ctx.network.resolve_proxy(ctx.config.web.use_proxy),
             user_agent=ctx.config.web.user_agent,
         )
 

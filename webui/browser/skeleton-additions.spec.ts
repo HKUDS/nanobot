@@ -19,10 +19,10 @@ async function boxes(locator: Locator) {
   }));
 }
 
-function sameBoxes(actual: Awaited<ReturnType<typeof boxes>>, expected: typeof actual) {
+function sameBoxes(actual: Awaited<ReturnType<typeof boxes>>, expected: typeof actual, surface = "") {
   expect(actual).toHaveLength(expected.length);
   for (let index = 0; index < actual.length; index++) for (const key of ["x", "y", "width", "height"] as const) {
-    expect(Math.abs(actual[index][key] - expected[index][key]), `row ${index} ${key}`).toBeLessThan(0.5);
+    expect(Math.abs(actual[index][key] - expected[index][key]), `${surface} row ${index} ${key}: ${JSON.stringify({ actual: actual[index], expected: expected[index] })}`).toBeLessThan(0.5);
   }
 }
 
@@ -55,7 +55,7 @@ for (const width of [390, 1440]) for (const locale of ["en", "zh-CN"]) {
     });
 
     test("settings sections preserve their loaded row layout", async ({ page }, testInfo) => {
-      for (const section of ["appearance", "notifications", "capabilities", "runtime", "advanced", "overview", "models", "about"]) {
+      for (const section of ["notifications", "capabilities", "runtime", "advanced", "overview", "models", "about"]) {
         const extra = `&section=${section}${section === "notifications" ? "&notificationPermission=granted" : ""}`;
         await page.goto(fixture("settings", "loaded", extra));
         const target = page.locator("[data-settings-section]");
@@ -74,21 +74,52 @@ for (const width of [390, 1440]) for (const locale of ["en", "zh-CN"]) {
         await settle(page);
         const selector = section === "overview" ? "section button.group" : section === "models" ? '[data-testid^="model-call-order-row"], .settings-footer' : section === "about" ? ".settings-list-row" : ".settings-row";
         const notificationDetails = section === "notifications" ? ", .settings-list-inset > .border-t, section > p" : "";
-        const loaded = await boxes(target.locator(selector + notificationDetails));
+        const proxyForm = section === "advanced" ? ", [data-shared-proxy-editor]" : "";
+        const loaded = await boxes(target.locator(selector + notificationDetails + proxyForm));
+        const proxyAddress = section === "advanced" ? await boxes(target.locator('[data-shared-proxy-editor] input')) : null;
         const loadedControls = section === "notifications" ? await boxes(target.getByRole("switch")) : null;
-        const readingControl = section === "appearance" ? await boxes(target.getByRole("radiogroup")) : null;
         await page.goto(fixture("settings", "loading", extra));
         await settle(page);
         const skeletonSelector = section === "overview" ? "[data-overview-skeleton-row]" : section === "models" ? "[data-model-preset-skeleton], .settings-footer" : section === "about" ? ".settings-list-row" : "[data-settings-skeleton-row]";
-        const skeleton = await boxes(target.locator(skeletonSelector + notificationDetails));
-        sameBoxes(skeleton, loaded);
-        if (readingControl) sameBoxes(await boxes(target.locator("[data-skeleton-reading-size]")), readingControl);
+        const proxySkeleton = section === "advanced" ? ", [data-shared-proxy-skeleton]" : "";
+        const skeleton = await boxes(target.locator(skeletonSelector + notificationDetails + proxySkeleton));
+        sameBoxes(skeleton, loaded, section);
+        if (proxyAddress) sameBoxes(await boxes(target.locator("[data-proxy-address-skeleton]")), proxyAddress, "shared proxy address");
         if (loadedControls) {
           const skeletonControls = await boxes(target.locator("[data-skeleton-switch]"));
           sameBoxes(skeletonControls, loadedControls);
           await testInfo.attach("notifications-layout", { body: JSON.stringify({ loaded, skeleton, loadedControls, skeletonControls }, null, 2), contentType: "application/json" });
         }
         await accessibleSkeleton(page);
+      }
+    });
+
+    test("appearance stays usable and keeps its layout while gateway settings load or fail", async ({ page }) => {
+      await page.addInitScript(() => localStorage.setItem("nanobot-webui.settings-preferences", JSON.stringify({
+        schemaVersion: 1, readingTextSize: "custom", customReadingTextSize: 24,
+      })));
+      await page.goto(fixture("settings", "loaded", "&section=appearance"));
+      const target = page.locator('[data-settings-section="appearance"]');
+      const ready = async () => {
+        await expect(target.locator("[data-reading-preview-content] strong")).toBeVisible();
+        await expect(target.locator("[data-reading-preview-content] .markdown-content p").first()).toHaveCSS("font-size", "24px");
+        await settle(page);
+      };
+      await ready();
+      const layout = ".appearance-theme-grid, .appearance-reading-card, .appearance-size-options, .settings-row";
+      const loaded = await boxes(target.locator(layout));
+      for (const state of ["loading", "error", "refresh"]) {
+        await page.goto(fixture("settings", state, "&section=appearance"));
+        await ready();
+        sameBoxes(await boxes(target.locator(layout)), loaded, `appearance ${state}`);
+        await expect(status(page)).toHaveCount(0);
+        const input = target.getByRole("spinbutton");
+        await expect(input).toBeEnabled();
+        await expect(input).toHaveValue("24");
+        await input.fill("22");
+        await input.press("Enter");
+        await expect(target.locator("[data-reading-preview-content] .markdown-content p").first()).toHaveCSS("font-size", "22px");
+        expect(await page.evaluate(() => JSON.parse(localStorage.getItem("nanobot-webui.settings-preferences")!).customReadingTextSize)).toBe(22);
       }
     });
 

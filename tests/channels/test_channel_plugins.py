@@ -306,12 +306,17 @@ def test_special_setup_validation_is_owned_by_channel_package(name: str):
 
 @pytest.mark.parametrize("name", ["feishu", "linear", "qq", "weixin", "whatsapp"])
 def test_interactive_connector_is_owned_by_channel_package(name: str):
+    from nanobot.channels.connect import ManagedChannelConnector
+
     plugin = load_channel_package(name)
 
     assert plugin is not None
     assert plugin.connector is not None
     assert plugin.connector.startswith(f"nanobot.channels.{name}.")
-    assert plugin.load_connector().__class__.__module__ == f"nanobot.channels.{name}.connect"
+    connector = plugin.load_connector()
+    assert connector.__class__.__module__ == f"nanobot.channels.{name}.connect"
+    assert isinstance(connector, ManagedChannelConnector)
+    assert connector.has_pending_work is False
 
 
 def test_descriptor_defaults_cover_onboarding_fields_without_runtime_import():
@@ -907,11 +912,13 @@ def test_discover_enabled_warns_for_enabled_package_import_errors():
 # Manager _init_channels with dict config
 # ---------------------------------------------------------------------------
 
-def test_manager_loads_plugin_from_dict_config(monkeypatch):
-    """ChannelManager should instantiate a channel package from a raw dict config."""
+@pytest.mark.parametrize("proxy", ["", "http://127.0.0.1:7890"])
+def test_manager_loads_plugin_from_dict_config(monkeypatch, proxy):
+    """Existing two-argument plugins work with or without a shared proxy configured."""
     from nanobot.channels.manager import ChannelManager
 
     fake_config = Config.model_validate({
+        "network": {"proxy": proxy},
         "channels": {
             "fakeplugin": {"enabled": True, "allowFrom": ["*"]},
         }
@@ -2657,7 +2664,7 @@ def test_optional_dependency_metadata_for_enable():
     for dependency in (
         "tzdata>=2025.2",
         "defusedxml>=0.7.1,<1.0.0",
-        "pypdf>=5.0.0,<6.0.0",
+        "pypdf>=6.21.3,<7.0.0",
         "python-docx>=1.1.0,<2.0.0",
         "openpyxl>=3.1.0,<4.0.0",
         "python-pptx>=1.0.0,<2.0.0",
@@ -2665,12 +2672,12 @@ def test_optional_dependency_metadata_for_enable():
         assert dependency in required
     assert deps["documents"] == [
         "defusedxml>=0.7.1,<1.0.0",
-        "pypdf>=5.0.0,<6.0.0",
+        "pypdf>=6.21.3,<7.0.0",
         "python-docx>=1.1.0,<2.0.0",
         "openpyxl>=3.1.0,<4.0.0",
         "python-pptx>=1.0.0,<2.0.0",
     ]
-    assert deps["pdf"] == ["pypdf>=5.0.0,<6.0.0"]
+    assert deps["pdf"] == ["pypdf>=6.21.3,<7.0.0"]
     assert deps["langfuse"] == ["langfuse>=4.7.0,<5.0.0"]
     assert deps["olostep"] == ["olostep>=0.1.0; python_version < '3.14'"]
     expected_olostep_args = [] if sys.version_info >= (3, 14) else ["olostep>=0.1.0"]
@@ -2990,6 +2997,7 @@ async def test_send_with_retry_succeeds_first_try():
     mgr.bus = MessageBus()
     mgr.channels = {"failing": _FailingChannel(fake_config, mgr.bus)}
     mgr._dispatch_task = None
+    mgr._outbound_sends = asyncio.Semaphore(32)
 
     msg = OutboundMessage(channel="failing", chat_id="123", content="test")
     await mgr._send_with_retry(mgr.channels["failing"], msg)
@@ -3027,6 +3035,7 @@ async def test_send_with_retry_retries_on_failure():
     mgr.bus = MessageBus()
     mgr.channels = {"failing": _FailingChannel(fake_config, mgr.bus)}
     mgr._dispatch_task = None
+    mgr._outbound_sends = asyncio.Semaphore(32)
 
     msg = OutboundMessage(channel="failing", chat_id="123", content="test")
 
@@ -3068,6 +3077,7 @@ async def test_send_with_retry_no_retry_when_max_is_zero():
     mgr.bus = MessageBus()
     mgr.channels = {"failing": _FailingChannel(fake_config, mgr.bus)}
     mgr._dispatch_task = None
+    mgr._outbound_sends = asyncio.Semaphore(32)
 
     msg = OutboundMessage(channel="failing", chat_id="123", content="test")
 
@@ -3118,6 +3128,7 @@ async def test_send_with_retry_calls_send_delta():
     mgr.bus = MessageBus()
     mgr.channels = {"streaming": _StreamingChannel(fake_config, mgr.bus)}
     mgr._dispatch_task = None
+    mgr._outbound_sends = asyncio.Semaphore(32)
 
     msg = outbound_message_for_event(
         channel="streaming",
@@ -3186,6 +3197,7 @@ async def test_send_with_retry_skips_send_when_streamed():
     mgr.bus = MessageBus()
     mgr.channels = {"streamed": _StreamedChannel(fake_config, mgr.bus)}
     mgr._dispatch_task = None
+    mgr._outbound_sends = asyncio.Semaphore(32)
 
     msg = outbound_message_for_event(
         channel="streamed",
@@ -3302,6 +3314,7 @@ async def test_send_with_retry_propagates_cancelled_error():
     mgr.bus = MessageBus()
     mgr.channels = {"cancelling": _CancellingChannel(fake_config, mgr.bus)}
     mgr._dispatch_task = None
+    mgr._outbound_sends = asyncio.Semaphore(32)
 
     msg = OutboundMessage(channel="cancelling", chat_id="123", content="test")
 
@@ -3339,6 +3352,7 @@ async def test_send_with_retry_propagates_cancelled_error_during_sleep():
     mgr.bus = MessageBus()
     mgr.channels = {"failing": _FailingChannel(fake_config, mgr.bus)}
     mgr._dispatch_task = None
+    mgr._outbound_sends = asyncio.Semaphore(32)
 
     msg = OutboundMessage(channel="failing", chat_id="123", content="test")
 
@@ -3559,9 +3573,8 @@ async def test_stop_all_cancels_dispatcher_and_stops_channels():
         providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
     )
 
-    mgr = ChannelManager.__new__(ChannelManager)
+    mgr = ChannelManager(Config.model_validate({"channels": {"websocket": {"enabled": False}}}), MessageBus())
     mgr.config = fake_config
-    mgr.bus = MessageBus()
 
     ch = _StartableChannel(fake_config, mgr.bus)
     mgr.channels = {"startable": ch}
@@ -3641,9 +3654,8 @@ async def test_stop_all_handles_channel_exception():
         providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
     )
 
-    mgr = ChannelManager.__new__(ChannelManager)
+    mgr = ChannelManager(Config.model_validate({"channels": {"websocket": {"enabled": False}}}), MessageBus())
     mgr.config = fake_config
-    mgr.bus = MessageBus()
     mgr.channels = {"stopfailing": _StopFailingChannel(fake_config, mgr.bus)}
     mgr._channel_tasks = {}
     mgr._outbound_tasks = {}
@@ -3678,9 +3690,8 @@ async def test_stop_all_handles_channel_stop_cancelled_task():
         providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
     )
 
-    mgr = ChannelManager.__new__(ChannelManager)
+    mgr = ChannelManager(Config.model_validate({"channels": {"websocket": {"enabled": False}}}), MessageBus())
     mgr.config = fake_config
-    mgr.bus = MessageBus()
     next_channel = _StartableChannel(fake_config, mgr.bus)
     mgr.channels = {
         "stopcancelled": _StopCancelledChannel(fake_config, mgr.bus),
@@ -3704,9 +3715,8 @@ async def test_start_all_no_channels_logs_warning():
         providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
     )
 
-    mgr = ChannelManager.__new__(ChannelManager)
+    mgr = ChannelManager(Config.model_validate({"channels": {"websocket": {"enabled": False}}}), MessageBus())
     mgr.config = fake_config
-    mgr.bus = MessageBus()
     mgr.channels = {}  # No channels
     mgr._dispatch_task = None
 
@@ -3724,9 +3734,8 @@ async def test_start_all_creates_dispatch_task():
         providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
     )
 
-    mgr = ChannelManager.__new__(ChannelManager)
+    mgr = ChannelManager(Config.model_validate({"channels": {"websocket": {"enabled": False}}}), MessageBus())
     mgr.config = fake_config
-    mgr.bus = MessageBus()
 
     ch = _StartableChannel(fake_config, mgr.bus)
     mgr.channels = {"startable": ch}
@@ -3835,6 +3844,7 @@ async def test_restart_notice_retries_until_running_channel_accepts_delivery():
     mgr = ChannelManager.__new__(ChannelManager)
     mgr.config = fake_config
     mgr.bus = MessageBus()
+    mgr._outbound_sends = asyncio.Semaphore(32)
     channel = _EventuallyDeliverableChannel(fake_config, mgr.bus)
     channel._running = True
     mgr.channels = {"discord": channel}

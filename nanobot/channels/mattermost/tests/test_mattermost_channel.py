@@ -784,7 +784,7 @@ async def test_coalesced_stream_end_posts_inline_content():
 async def test_reaction_add_on_receipt():
     channel, fake = _make_channel()
     channel._self_id = "bot_id"
-    await channel._add_reaction("chan_1", "post_1", "eyes")
+    await channel._add_reaction("post_1", "eyes")
     reactions = [c for c in fake.post_calls if c["path"] == "/api/v4/reactions"]
     assert len(reactions) >= 1
     assert reactions[-1]["json"]["emoji_name"] == "eyes"

@@ -42,6 +42,7 @@ from nanobot.providers.model_api import (
     is_hosted_web_search_tool,
 )
 from nanobot.providers.openai_responses import ResponsesBackend, responses_state_matches
+from nanobot.providers.registry import KIMI_K3_MODELS
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI as AsyncOpenAIType
@@ -81,7 +82,6 @@ _DEFAULT_OPENROUTER_HEADERS = {
     "X-OpenRouter-Title": "nanobot",
     "X-OpenRouter-Categories": "cli-agent,personal-agent",
 }
-_KIMI_K3_MODEL = "kimi-k3"
 _KIMI_THINKING_MODELS: frozenset[str] = frozenset({
     "kimi-k2.5",
     "kimi-k2.6",
@@ -151,7 +151,7 @@ def _model_slug(model_name: str) -> str:
 def _requires_max_completion_tokens(model_name: str) -> bool:
     """Return True for models that require ``max_completion_tokens``."""
     slug = _model_slug(model_name)
-    return slug == _KIMI_K3_MODEL or "gpt-5" in slug or any(
+    return slug in KIMI_K3_MODELS or "gpt-5" in slug or any(
         slug == p or slug.startswith((p + "-", p + ".")) for p in ("o1", "o3", "o4")
     )
 
@@ -866,7 +866,7 @@ class OpenAICompatProvider(LLMProvider):
         o-series models. GPT-6 requires explicit ``"none"`` effort; its
         default enables reasoning.
         """
-        if _model_slug(model_name) == _KIMI_K3_MODEL:
+        if _model_slug(model_name) in KIMI_K3_MODELS:
             return False
         name = model_name.lower()
         if "gpt-6" in name:
@@ -954,7 +954,7 @@ class OpenAICompatProvider(LLMProvider):
 
         wire_effort = reasoning_effort
         slug = _model_slug(model_name)
-        if slug == _KIMI_K3_MODEL and semantic_effort is not None:
+        if slug in KIMI_K3_MODELS and semantic_effort is not None:
             # K3 always reasons and accepts top-level low/high/max effort.
             # Keep disabled presets on the default and normalize other legacy
             # enabled values to "max".

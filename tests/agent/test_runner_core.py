@@ -1210,8 +1210,8 @@ async def test_runner_carries_retry_notifications_in_provider_context():
 
 
 @pytest.mark.asyncio
-async def test_runner_passes_temperature_to_provider():
-    """temperature from AgentRunSpec should reach provider.chat_stream_with_retry."""
+async def test_runner_passes_generation_settings_to_provider():
+    """Non-default generation settings should reach provider.chat_stream_with_retry."""
     from nanobot.agent.runner import AgentRunner
 
     captured: dict = {}
@@ -1232,65 +1232,11 @@ async def test_runner_passes_temperature_to_provider():
         model="test-model",
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        temperature=0.7,
-    ))
-
-    assert captured["temperature"] == 0.7
-
-
-@pytest.mark.asyncio
-async def test_runner_passes_max_tokens_to_provider():
-    """max_tokens from AgentRunSpec should reach provider.chat_stream_with_retry."""
-    from nanobot.agent.runner import AgentRunner
-
-    captured: dict = {}
-
-    async def chat_stream_with_retry(**kwargs):
-        captured.update(kwargs)
-        return LLMResponse(content="done", tool_calls=[], usage=None)
-
-    provider = MagicMock(spec=LLMProvider)
-    provider.chat_stream_with_retry = chat_stream_with_retry
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-
-    runner = AgentRunner()
-    await runner.run(make_run_spec(provider,
-        initial_messages=[{"role": "user", "content": "hi"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        temperature=0.3,
         max_tokens=8192,
-    ))
-
-    assert captured["max_tokens"] == 8192
-
-
-@pytest.mark.asyncio
-async def test_runner_passes_reasoning_effort_to_provider():
-    """reasoning_effort from AgentRunSpec should reach provider.chat_stream_with_retry."""
-    from nanobot.agent.runner import AgentRunner
-
-    captured: dict = {}
-
-    async def chat_stream_with_retry(**kwargs):
-        captured.update(kwargs)
-        return LLMResponse(content="done", tool_calls=[], usage=None)
-
-    provider = MagicMock(spec=LLMProvider)
-    provider.chat_stream_with_retry = chat_stream_with_retry
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-
-    runner = AgentRunner()
-    await runner.run(make_run_spec(provider,
-        initial_messages=[{"role": "user", "content": "hi"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         reasoning_effort="high",
     ))
 
+    assert captured["temperature"] == 0.3
+    assert captured["max_tokens"] == 8192
     assert captured["reasoning_effort"] == "high"

@@ -1,17 +1,24 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import { MessageBlockMenuActions, MessageBubble } from "@/components/MessageBubble";
+import { preloadMarkdownText } from "@/components/MarkdownText";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { setAppLanguage } from "@/i18n";
+import { parseWebuiThreadPayload } from "@/lib/api";
 import * as clipboard from "@/lib/clipboard";
 import { formatMessageEndTime } from "@/lib/format-time";
+import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
+import { projectThreadEvents } from "@/lib/thread-event-projection";
+import { ThreadTranscript } from "@/lib/thread-transcript";
 import type {
   CliAppInfo,
   McpPresetInfo,
   SlashCommand,
+  ThreadProjectionEvent,
   UIMessage,
 } from "@/lib/types";
+import { createStreamClient } from "./stream-client";
 
 const CLI_APPS: CliAppInfo[] = [
   {
@@ -104,6 +111,92 @@ function menuActions(root: ParentNode = document): HTMLElement {
 }
 
 describe("MessageBubble", () => {
+  beforeAll(preloadMarkdownText);
+
+  it.each(["live", "paged history"] as const)("renders and copies literal output unchanged through %s, alongside ordinary Markdown", async (source) => {
+    const raw = [
+      "  Switched model preset to `raw`.",
+      "__pycache__ <script>alert(\"raw\")</script>",
+      "![capture](https://example.invalid/output.png)",
+      "```mermaid",
+      "graph TD; A-->B",
+      "```",
+      "$$x^2$$",
+      "\x1b[31mred\x1b[0m",
+      "[Subagent task completed]",
+      "Task: print this",
+      "Result:",
+      "  literal result\t",
+      "Summarize this naturally",
+      "",
+      "",
+    ].join("\n");
+    const shellEvents: ThreadProjectionEvent[] = [
+      { event: "user_message", chat_id: "literal-chat", turn_id: "shell", turn_seq: 1, starts_turn: false, text: "!printf output" },
+      { event: "message", chat_id: "literal-chat", turn_id: "shell", turn_seq: 2, render_as: "text", text: raw },
+    ];
+    const normalEvents: ThreadProjectionEvent[] = [
+      { event: "user_message", chat_id: "literal-chat", turn_id: "normal", turn_seq: 1, starts_turn: true, text: "Explain the output" },
+      { event: "message", chat_id: "literal-chat", turn_id: "normal", turn_seq: 2, text: "**Normal reply** [docs](https://example.invalid/docs)" },
+      { event: "turn_end", chat_id: "literal-chat", turn_id: "normal", turn_seq: 3 },
+    ];
+    const transcript = new ThreadTranscript();
+    if (source === "live") {
+      const { client, receive } = createStreamClient();
+      const unsubscribe = client.onTranscript("literal-chat", (event) => {
+        if (event.event === "user_message" || event.event === "message" || event.event === "turn_end") {
+          transcript.project(event, { createId: () => crypto.randomUUID(), now: 1_800_000_000_000 });
+        }
+      });
+      try {
+        [...shellEvents, ...normalEvents].forEach(receive);
+      } finally {
+        unsubscribe();
+        client.close();
+      }
+    } else {
+      expect(transcript.accept(parseWebuiThreadPayload({
+        schemaVersion: 3, projection: "events", events: normalEvents, completed_turn_ids: ["normal"],
+        page: { before_cursor: "before-normal", has_more_before: true, user_message_offset: 1 },
+      }), transcript.begin("initial"))).toBe(true);
+      expect(transcript.accept(parseWebuiThreadPayload({
+        schemaVersion: 3, projection: "events", events: shellEvents,
+        page: { before_cursor: null, has_more_before: false, user_message_offset: 0 },
+      }), transcript.begin("older"))).toBe(true);
+    }
+    const writeText = vi.spyOn(clipboard, "copyTextToClipboard").mockResolvedValue(true);
+    try {
+      const { container } = render(<ThreadMessages messages={projectWebuiThreadMessages(transcript.messages)} />);
+      const output = screen.getByTestId("plain-code-fallback");
+      expect(output.textContent).toBe(raw);
+      expect(output).toHaveClass("whitespace-pre-wrap");
+      expect(output.querySelector("code")!.childNodes).toHaveLength(1);
+      expect(output.querySelector("code")!.firstChild!.nodeType).toBe(Node.TEXT_NODE);
+      expect((await screen.findByText("Normal reply")).tagName).toBe("STRONG");
+      expect(container.querySelector("img, script, .katex, [data-testid='mermaid-block']")).toBeNull();
+      expect(screen.getByRole("link", { name: "docs" })).toHaveAttribute("href", "https://example.invalid/docs");
+      fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
+      await waitFor(() => expect(writeText).toHaveBeenNthCalledWith(1, raw));
+      fireEvent.click(within(output.closest<HTMLElement>("[data-thread-display-unit]")!).getByRole("button", { name: "Message actions" }));
+      fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+      await waitFor(() => expect(writeText).toHaveBeenNthCalledWith(2, raw));
+    } finally {
+      writeText.mockRestore();
+    }
+  });
+
+  it.each([undefined, "TEXT"])("keeps Markdown after bang input unless render_as is literally text (%s)", async (render_as) => {
+    const payload = parseWebuiThreadPayload({
+      schemaVersion: 3, projection: "events", events: [
+        { event: "user_message", chat_id: "chat", text: "!echo **ordinary output**", starts_turn: true, turn_id: "bang" },
+        { event: "message", chat_id: "chat", text: "**ordinary output**", render_as, turn_id: "bang" },
+      ],
+    });
+    const { container } = render(<ThreadMessages messages={projectWebuiThreadMessages(projectThreadEvents(payload.events))} />);
+    await waitFor(() => expect(container.querySelector("[data-assistant-message] strong")?.textContent).toBe("ordinary output"));
+    expect(screen.queryByTestId("plain-code-fallback")).not.toBeInTheDocument();
+  });
+
   it.each([false, undefined])("keeps normal sources out of the block menu (fallback: %s)", (fallback) => {
     const message: UIMessage = { id: "primary", role: "assistant", content: "Hello", createdAt: 0,
       responseSources: [{ provider: "openai_codex", model: "gpt", preset: "codex", fallback }] };
@@ -209,12 +302,12 @@ describe("MessageBubble", () => {
     const pill = screen.getByText("hello");
 
     expect(row).toHaveClass("ml-auto", "flex");
-    expect(row).toHaveAttribute("data-user-text-bubble", "true");
+    expect(pill.parentElement).toHaveAttribute("data-user-text-bubble", "true");
     expect(pill).toHaveClass("ml-auto", "w-fit", "rounded-floating");
     expect(pill).toHaveTextContent("hello");
   });
 
-  it("aligns the context trigger to the first text line only when text leads the user block", () => {
+  it("anchors the context trigger to the text even below an image or quote", () => {
     const message: UIMessage = {
       id: "u-alignment", role: "user", content: "first line\nsecond line", createdAt: 0,
     };
@@ -222,18 +315,20 @@ describe("MessageBubble", () => {
     const { container, rerender } = render(
       <MessageBubble message={message} contextMenu={contextMenu} />,
     );
-    const row = container.firstElementChild!;
-    expect(row).toHaveAttribute("data-user-text-bubble", "true");
-    expect(screen.getByRole("button", { name: "Message actions" }).parentElement).toBe(row);
+    const anchor = container.querySelector("[data-user-text-bubble]")!;
+    expect(anchor).toHaveClass("relative");
+    expect(screen.getByRole("button", { name: "Message actions" }).parentElement).toBe(anchor);
 
     rerender(<MessageBubble message={{ ...message, images: [{ name: "image.png" }] }} contextMenu={contextMenu} />);
-    expect(row).not.toHaveAttribute("data-user-text-bubble");
+    expect(screen.getByRole("button", { name: "Message actions" }).parentElement)
+      .toBe(container.querySelector("[data-user-text-bubble]"));
 
     rerender(<MessageBubble message={{ ...message, content: "> [!QUOTE]\n> excerpt\n\nreply" }} contextMenu={contextMenu} />);
-    expect(row).not.toHaveAttribute("data-user-text-bubble");
+    expect(screen.getByRole("button", { name: "Message actions" }).parentElement)
+      .toBe(screen.getByText("reply").parentElement);
   });
 
-  it("renders cross-session input with its public handle", () => {
+  it("renders cross-session input with its public handle above a left-aligned bubble", () => {
     const message: UIMessage = {
       id: "session-message:message-1",
       role: "user",
@@ -248,11 +343,17 @@ describe("MessageBubble", () => {
       },
     };
 
-    const { container } = render(<MessageBubble message={message} />);
+    const contextMenu = <button data-message-block-menu-trigger>Message actions</button>;
+    const { container } = render(<MessageBubble message={message} contextMenu={contextMenu} />);
 
-    expect(container.querySelector("[data-session-message]")).toBeInTheDocument();
-    expect(screen.getByText("@mira-0123456789")).toBeInTheDocument();
-    expect(screen.getByText("Please review this.")).toBeInTheDocument();
+    const row = container.querySelector("[data-session-message]")!;
+    const handle = screen.getByText("@mira-0123456789");
+    const bubble = row.querySelector("[data-assistant-selectable]")!.parentElement!;
+    expect(row).toHaveClass("mr-auto", "w-fit", "max-w-[min(85%,36rem)]");
+    expect(handle.parentElement!.parentElement).toBe(row);
+    expect(bubble).toHaveClass("relative", "rounded-floating", "bg-secondary/70", "px-4", "py-2");
+    expect(bubble).toContainElement(screen.getByText("Please review this."));
+    expect(screen.getByRole("button", { name: "Message actions" }).parentElement).toBe(bubble);
   });
 
   it("outlines temporary-chat user messages with a short dashed border", () => {
@@ -323,7 +424,7 @@ describe("MessageBubble", () => {
 
     const { rerender } = render(<MessageBubble message={message} />);
 
-    expect(screen.getByRole("status")).toHaveTextContent("Sending…");
+    expect(screen.getByRole("status")).toHaveTextContent("Sending");
 
     rerender(<MessageBubble message={{ ...message, deliveryStatus: "accepted" }} />);
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
@@ -426,13 +527,15 @@ describe("MessageBubble", () => {
     const command = screen.getByTestId("message-slash-command");
     expect(command).toHaveTextContent("/model");
     expect(command).toHaveClass(
-      "font-[550]",
+      "font-normal",
       "transition-colors",
       "duration-150",
     );
     expect(command).not.toHaveClass("font-mono");
     expect(command.getAttribute("style")).not.toContain("text-shadow");
-    expect(command.getAttribute("style")).toContain("var(--inline-token-highlight)");
+    expect(command.getAttribute("style")).toContain("var(--inline-reference-highlight)");
+    expect(command.firstElementChild).toHaveTextContent(/^\/$/);
+    expect(command.firstElementChild).toHaveClass("opacity-90");
     expect(command.className).not.toMatch(/(?:^|\s)(?:bg-|border|ring|rounded)/);
     expect(command.parentElement).toHaveTextContent("/model gpt-5");
     expect(command.parentElement).toHaveClass("rounded-floating", "bg-secondary/70");
@@ -467,7 +570,7 @@ describe("MessageBubble", () => {
     const message: UIMessage = {
       id: "u-command-mention",
       role: "user",
-      content: "/goal ask @zoom to schedule the review",
+      content: "/goal ask $github and @zoom to schedule the review",
       createdAt: Date.now(),
     };
 
@@ -479,8 +582,27 @@ describe("MessageBubble", () => {
       />,
     );
 
-    expect(screen.getByTestId("message-slash-command")).toHaveTextContent("/goal");
+    const command = screen.getByTestId("message-slash-command");
+    const skill = screen.getByTestId("message-skill-reference-github");
+    expect(command).toHaveTextContent("/goal");
+    expect(skill).toHaveTextContent("$github");
+    expect(command.className).toBe(skill.className);
+    expect(command.getAttribute("style")).toBe(skill.getAttribute("style"));
     expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@Zoom");
+  });
+
+  it.each(["! ls", "  !pwd", '!echo "$github" @zoom\nWrite-Output "hello!"'])("highlights a sent bang prefix while preserving the command literally: %s", (content) => {
+    const message: UIMessage = { id: "u-shell", role: "user", content, createdAt: Date.now() };
+    const { container, rerender } = render(<MessageBubble message={message} cliApps={CLI_APPS} />);
+    const prefix = screen.getByTestId("message-shell-prefix");
+    expect(prefix).toHaveTextContent(/^!$/);
+    expect(prefix).toHaveClass("font-normal");
+    expect(prefix.style.color).toBe("var(--inline-reference-highlight)");
+    expect(container.querySelector("[data-user-text-bubble] p")?.textContent).toBe(content);
+
+    rerender(<MessageBubble message={{ ...message, content: "Explain !pwd, please!" }} />);
+    expect(screen.queryByTestId("message-shell-prefix")).not.toBeInTheDocument();
+    expect(container.querySelector("[data-user-text-bubble] p")?.textContent).toBe("Explain !pwd, please!");
   });
 
   it("highlights skill references without a live skill catalog", () => {
@@ -499,17 +621,18 @@ describe("MessageBubble", () => {
     );
 
     const skill = screen.getByTestId("message-skill-reference-github");
-    expect(skill).toHaveTextContent(/^github$/);
+    expect(skill).toHaveTextContent(/^\$github$/);
     expect(skill).toHaveClass(
-      "font-[550]",
+      "font-normal",
       "transition-colors",
       "duration-150",
     );
     expect(skill.getAttribute("style")).not.toContain("text-shadow");
-    expect(skill.getAttribute("style")).toContain("var(--inline-token-highlight)");
+    expect(skill.getAttribute("style")).toContain("var(--inline-reference-highlight)");
     expect(skill.className).not.toMatch(/(?:^|\s)(?:bg-|border|ring|rounded)/);
+    expect(skill).not.toHaveAttribute("title");
     expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@Zoom");
-    expect(skill.parentElement).toHaveTextContent("Ask github to review this with @Zoom");
+    expect(skill.parentElement).toHaveTextContent("Ask $github to review this with @Zoom");
   });
 
   it("highlights well-formed skill references and leaves a bare marker plain", () => {
@@ -522,13 +645,13 @@ describe("MessageBubble", () => {
 
     render(<MessageBubble message={message} />);
 
-    expect(screen.getByTestId("message-skill-reference-unknown")).toHaveTextContent(/^unknown$/);
+    expect(screen.getByTestId("message-skill-reference-unknown")).toHaveTextContent(/^\$unknown$/);
     expect(screen.getByTestId("message-skill-reference-blocked-skill"))
-      .toHaveTextContent(/^blocked-skill$/);
+      .toHaveTextContent(/^\$blocked-skill$/);
     const references = screen.getAllByTestId(/^message-skill-reference-/);
     expect(references).toHaveLength(2);
     expect(references[0].parentElement)
-      .toHaveTextContent("Try unknown or blocked-skill and $");
+      .toHaveTextContent("Try $unknown or $blocked-skill and $");
   });
 
   it("renders fork as a contextual assistant action", () => {
@@ -1041,6 +1164,23 @@ describe("MessageBubble", () => {
     expect(content.querySelectorAll("li")).toHaveLength(1000);
   });
 
+  it("retries a failed video locally without replacing a healthy player on history updates", () => {
+    const message: UIMessage = { id: "retry-video", role: "user", content: "watch", createdAt: 0,
+      media: [{ kind: "video", name: "clip.webm", url: "/api/media/sig/clip" }] };
+    const { container, rerender } = render(<MessageBubble message={message} />);
+    const original = container.querySelector("video")!;
+    fireEvent.error(original);
+    expect(container.querySelector("video")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    const retried = container.querySelector("video")!;
+    expect(retried).toHaveAttribute("src", "/api/media/sig/clip");
+    expect(retried).not.toBe(original);
+    rerender(<MessageBubble message={{ ...message, media: [...message.media!] }} />);
+    expect(container.querySelector("video")).toBe(retried);
+    fireEvent.error(retried);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
+  });
+
   it("renders video media as an inline player", () => {
     const message: UIMessage = {
       id: "a1",
@@ -1066,6 +1206,29 @@ describe("MessageBubble", () => {
     expect(container.querySelector("video[controls]")).toBeInTheDocument();
     expect(screen.queryByText("Preview")).not.toBeInTheDocument();
     expect(screen.queryByText("Code")).not.toBeInTheDocument();
+  });
+
+  it("starts an uploaded player from its accepted URL and preserves it through hydration", () => {
+    const message: UIMessage = {
+      id: "optimistic-user", role: "user", content: "Watch this", createdAt: 1,
+      turnId: "video-turn", turnPhase: "user", deliveryStatus: "sending",
+      media: [{ kind: "video", name: "clip.webm" }],
+    };
+    const accepted: UIMessage = {
+      ...message, deliveryStatus: "accepted",
+      media: [{ kind: "video", name: "clip.webm", url: "/api/media/sig/clip" }],
+    };
+    const { rerender, unmount } = render(<ThreadMessages messages={[message]} />);
+    expect(screen.queryByLabelText(/video attachment/i)?.tagName).not.toBe("VIDEO");
+    expect(screen.queryByText(/attachment unavailable/i)).not.toBeInTheDocument();
+    rerender(<ThreadMessages messages={[accepted]} />);
+    const video = screen.getByLabelText(/video attachment/i);
+    rerender(<ThreadMessages messages={[{ ...accepted, id: "history-user" }]} />);
+    expect(screen.getByLabelText(/video attachment/i)).toBe(video);
+    expect(video).toHaveAttribute("src", "/api/media/sig/clip");
+    unmount();
+    render(<ThreadMessages messages={[accepted]} />);
+    expect(screen.getByLabelText(/video attachment/i)).toHaveAttribute("src", "/api/media/sig/clip");
   });
 
   it("renders streaming reasoning as one compact activity line", () => {
@@ -1189,18 +1352,15 @@ describe("MessageBubble", () => {
 
     const { container } = render(<MessageBubble message={message} />);
 
+    const image = container.querySelector("img")!;
+    Object.defineProperties(image, { naturalWidth: { value: 1600 }, naturalHeight: { value: 900 } });
+    fireEvent.load(image);
     const imageButton = screen.getByRole("button", { name: /view image/i });
-    expect(imageButton).toHaveClass("w-[min(100%,28rem)]", "rounded-control");
-    expect(imageButton).toHaveClass(
-      "border",
-      "border-border/60",
-      "focus-visible:ring-2",
-    );
-    expect(imageButton).not.toHaveClass("hover:scale-[1.01]");
-    expect(imageButton).not.toHaveClass("hover:ring-2");
-    expect(imageButton).not.toHaveClass("hover:ring-primary/25");
+    expect(imageButton).toHaveClass("rounded-control", "focus-visible:ring-2");
+    expect(imageButton.style.width).toBe("448px");
+    expect(imageButton.style.height).toBe("252px");
     expect(imageButton).not.toHaveAttribute("title");
-    expect(container.querySelector("img")).toHaveClass("h-auto", "w-full", "object-contain");
+    expect(image).toHaveClass("object-contain");
   });
 
   it("renders mislabeled html assistant media as a file attachment", () => {
@@ -1220,7 +1380,8 @@ describe("MessageBubble", () => {
 
     const { container } = render(<MessageBubble message={message} />);
 
-    expect(screen.getByLabelText("File attachment")).toHaveTextContent("index.html");
+    expect(screen.getByRole("link", { name: "Download index.html" })).toHaveAttribute("download", "index.html");
+    expect(screen.getByRole("button", { name: "index.html" })).toBeVisible();
     expect(container.querySelector("img")).not.toBeInTheDocument();
   });
 
@@ -1243,7 +1404,7 @@ describe("MessageBubble", () => {
 
     expect(screen.getByRole("button", { name: /view image: growth.svg/i })).toBeInTheDocument();
     expect(container.querySelector('img[src="/api/media/sig/svg"]')).toBeInTheDocument();
-    expect(screen.queryByLabelText("File attachment")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Download growth.svg" })).not.toBeInTheDocument();
   });
 
 });

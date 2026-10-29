@@ -15,6 +15,7 @@ function images(root: Renderable): ImageRenderable[] {
 
 const source = "graph TD\n A[中文长标签 English] --> B[完成]"
 const content = `\`\`\`mermaid\n${source}\n\`\`\`\n\nTrailing paragraph`
+const nativeFontsAvailable = process.platform === "darwin" || existsSync("C:/Windows/Fonts/msyh.ttc")
 
 test("streamed stable Mermaid fences stay source until reply completion, including the viewer", async () => {
   setup = await createTestRenderer({ width: 80, height: 35 })
@@ -35,7 +36,7 @@ test("streamed stable Mermaid fences stay source until reply completion, includi
   expect(images(transcript.root)).toHaveLength(0)
 })
 
-test.skipIf(!existsSync("C:/Windows/Fonts/msyh.ttc"))("viewer preserves preview footprint, transcript position and draft; session reset releases images", async () => {
+test.skipIf(!nativeFontsAvailable)("viewer preserves preview footprint, transcript position and draft; session reset releases images", async () => {
   setup = await createTestRenderer({ width: 100, height: 42 })
   Object.defineProperty(setup.renderer, "capabilities", { value: { kitty_graphics: true, multiplexer: "none", image_protocol: "auto" } })
   const app = mount(setup)
@@ -126,7 +127,7 @@ test("diagram command on ordinary Markdown shows an empty viewer and returns to 
   expect(setup.captureCharFrame()).toContain("draft")
 })
 
-test.skipIf(!existsSync("C:/Windows/Fonts/msyh.ttc"))("inline image uses real terminal pixels without upscaling small diagrams", async () => {
+test.skipIf(!nativeFontsAvailable)("inline image uses real terminal pixels without upscaling small diagrams", async () => {
   setup = await createTestRenderer({ width: 100, height: 42 })
   Object.defineProperty(setup.renderer, "capabilities", { value: { kitty_graphics: true, multiplexer: "none", image_protocol: "auto" } })
   Object.defineProperty(setup.renderer, "resolution", { value: { width: 1300, height: 1008 } })
@@ -144,7 +145,7 @@ test.skipIf(!existsSync("C:/Windows/Fonts/msyh.ttc"))("inline image uses real te
 }, 10_000)
 
 
-test.skipIf(!existsSync("C:/Windows/Fonts/msyh.ttc"))("source-only and cancelled viewer release the shared worker; image demand resumes explicitly", async () => {
+test.skipIf(!nativeFontsAvailable)("source-only and cancelled viewer release the shared worker; image demand resumes explicitly", async () => {
   setup = await createTestRenderer({ width: 100, height: 42 })
   Object.defineProperty(setup.renderer, "capabilities", { value: { kitty_graphics: true, multiplexer: "none", image_protocol: "auto" } })
   const app = mount(setup)
@@ -192,7 +193,7 @@ test.skipIf(!existsSync("C:/Windows/Fonts/msyh.ttc"))("source-only and cancelled
 }, 20_000)
 
 
-test.skipIf(!existsSync("C:/Windows/Fonts/msyh.ttc"))("offscreen return and cell-height changes reuse SVG; theme and session changes invalidate it", async () => {
+test.skipIf(!nativeFontsAvailable)("offscreen return and cell-height changes reuse SVG; theme and session changes invalidate it", async () => {
   setup = await createTestRenderer({ width: 100, height: 42 })
   Object.defineProperty(setup.renderer, "capabilities", { value: { kitty_graphics: true, multiplexer: "none", image_protocol: "auto" } })
   const resolution = { width: 1000, height: 840 }
@@ -235,7 +236,7 @@ test.skipIf(!existsSync("C:/Windows/Fonts/msyh.ttc"))("offscreen return and cell
 }, 20_000)
 
 
-test.skipIf(!existsSync("C:/Windows/Fonts/msyh.ttc"))("viewer navigation releases old layout pins under the real transcript budget", async () => {
+test.skipIf(!nativeFontsAvailable)("viewer navigation releases old layout pins under the real transcript budget", async () => {
   setup = await createTestRenderer({ width: 100, height: 42 })
   Object.defineProperty(setup.renderer, "capabilities", { value: { kitty_graphics: true, multiplexer: "none", image_protocol: "auto" } })
   Object.defineProperty(setup.renderer, "resolution", { value: { width: 1000, height: 840 } })
@@ -272,7 +273,7 @@ test.skipIf(!existsSync("C:/Windows/Fonts/msyh.ttc"))("viewer navigation release
 }, 25_000)
 
 
-test.skipIf(!existsSync("C:/Windows/Fonts/msyh.ttc"))("source/image retry after a parser failure keeps the original source visible", async () => {
+test.skipIf(!nativeFontsAvailable)("source/image retry after a parser failure keeps the original source visible", async () => {
   setup = await createTestRenderer({ width: 100, height: 42 })
   Object.defineProperty(setup.renderer, "capabilities", { value: { kitty_graphics: true, multiplexer: "none", image_protocol: "auto" } })
   const app = mount(setup)

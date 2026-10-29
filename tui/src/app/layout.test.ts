@@ -188,8 +188,6 @@ describe("NanobotTui layout and themes", () => {
       expect(setup.renderer.width).toBe(width)
       expect(setup.renderer.height).toBe(height)
       expect(frame).not.toContain("undefined")
-      expect(frame).not.toContain("Steer this turn…")
-      expect(frame).not.toContain("Ask a follow-up…")
       if (width >= 40 && height >= 9) {
         expect(occurrences(frame, "Enter send now  Tab send next")).toBe(1)
       } else if (width >= 28 && height >= 9) {
@@ -840,12 +838,15 @@ describe("NanobotTui layout and themes", () => {
 
     setup.renderer.emit(CliRenderEvents.THEME_MODE, mode)
     await setup.flush()
-    const shimmerColors = new Set(
+    const shimmerColors = () => new Set(
       (ui.status.content as StyledText).chunks
         .slice(0, "Thinking".length)
         .map((chunk) => chunk.fg?.toInts().slice(0, 3).join(",")),
     )
-    expect(shimmerColors.size).toBeGreaterThan(1)
+    // Theme detection updates the palette now; the next animation tick paints
+    // its StyledText chunks. A renderer flush does not advance that timer.
+    await waitUntil(() => shimmerColors().size > 1, 2_000)
+    expect(shimmerColors().size).toBeGreaterThan(1)
     expect(ui.composer.textColor.intent).toBe("rgb")
     expect(ui.composer.textColor.toInts().slice(0, 3)).toEqual(
       mode === "light" ? [24, 24, 27] : [236, 237, 238],

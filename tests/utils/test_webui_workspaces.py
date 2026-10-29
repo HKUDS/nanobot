@@ -203,6 +203,7 @@ async def test_new_chat_scope_is_persisted_only_after_first_message(tmp_path, mo
     )
     scope = default_workspace_scope(project, restrict_to_workspace=False)
 
+    await controller.stage_scope("draft-chat", default_workspace_scope(default, True))
     await controller.stage_scope("draft-chat", scope)
 
     assert sessions.list_sessions() == []
@@ -211,6 +212,27 @@ async def test_new_chat_scope_is_persisted_only_after_first_message(tmp_path, mo
     await controller.persist_scope("draft-chat", scope)
 
     assert [item["key"] for item in sessions.list_sessions()] == ["websocket:draft-chat"]
+    with pytest.raises(WorkspaceScopeError, match="project_locked"):
+        await controller.stage_scope("draft-chat", default_workspace_scope(default, True))
+    await controller.stage_scope("draft-chat", default_workspace_scope(project, True))
+    assert controller.scope_for_session_key("websocket:draft-chat").access_mode == "restricted"
+
+
+async def test_missing_bound_project_does_not_allow_rebinding_to_default(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.webui.workspaces.get_webui_dir", lambda: tmp_path / "webui")
+    project = tmp_path / "project"
+    project.mkdir()
+    sessions = SessionManager(tmp_path / "sessions")
+    controller = WebUIWorkspaceController(
+        session_manager=sessions, default_workspace=tmp_path, default_restrict_to_workspace=True,
+    )
+    await controller.persist_scope("missing-project", default_workspace_scope(project, True))
+    project.rmdir()
+
+    with pytest.raises(WorkspaceScopeError, match="project_locked"):
+        await controller.persist_scope("missing-project", default_workspace_scope(tmp_path, True))
+    saved = sessions.read_session_metadata("websocket:missing-project")
+    assert saved["metadata"][WORKSPACE_SCOPE_METADATA_KEY]["project_path"] == str(project)
 
 
 def test_scope_for_session_key_always_reads_the_active_store(tmp_path, monkeypatch) -> None:

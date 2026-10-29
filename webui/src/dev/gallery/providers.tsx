@@ -14,8 +14,8 @@ type ProviderRow = SettingsPayload["providers"][number];
 const previewProviders: ProviderRow[] = [
   { name: "custom", label: "Custom", configured: true, auth_type: "api_key", api_key_hint: "••••••••", api_base: "https://api.example.com/v1" },
   { name: "anthropic", label: "Anthropic", configured: true, auth_type: "api_key", api_key_hint: "••••••••", api_base: "https://api.anthropic.com", request_apis: ["anthropic_messages"] },
-  { name: "openai_codex", label: "OpenAI Codex", configured: true, auth_type: "oauth", api_key_required: false, oauth_login_supported: true, advanced_fields: ["proxy", "extra_body"] },
-  { name: "xai_grok", label: "xAI Grok", configured: true, auth_type: "oauth", api_key_required: false, oauth_login_supported: true, advanced_fields: ["proxy", "extra_body"] },
+  { name: "openai_codex", label: "OpenAI Codex", configured: true, auth_type: "oauth", api_key_required: false, oauth_login_supported: true, advanced_fields: ["use_proxy", "extra_body"] },
+  { name: "xai_grok", label: "xAI Grok", configured: true, auth_type: "oauth", api_key_required: false, oauth_login_supported: true, advanced_fields: ["use_proxy", "extra_body"] },
   { name: "deepseek", label: "DeepSeek", configured: true, auth_type: "api_key", api_key_hint: "••••••••", api_base: "https://api.deepseek.com" },
   { name: "zhipu", label: "Zhipu AI", configured: true, auth_type: "api_key", api_key_hint: "••••••••", api_base: "https://open.bigmodel.cn/api/paas/v4" },
   { name: "minimax", label: "MiniMax", configured: true, auth_type: "api_key", api_key_hint: "••••••••", api_base: "https://api.minimax.io/v1" },
@@ -44,7 +44,7 @@ function providerValues(form: ProviderForm) {
     api_base: form.apiBase.trim() || null,
     api: form.api,
     api_key_hint: form.apiKey.trim() ? "••••••••" : undefined,
-    proxy: form.proxy.trim() || null,
+    use_proxy: form.useProxy,
     extra_headers: extraHeaders,
     extra_query: extraQuery,
     extra_body: extraBody,
@@ -101,7 +101,7 @@ function ProvidersPreview() {
     const name = `custom_preview_${nextCustomId.current++}`;
     const row: ProviderRow = { ...values, name, label: form.name.trim(), is_custom: true,
       configured: true, auth_type: "api_key", api_key_required: false, provider_api_configurable: true,
-      advanced_fields: ["extra_headers", "extra_body", "extra_query", "proxy", "thinking_style"] };
+      advanced_fields: ["extra_headers", "extra_body", "extra_query", "use_proxy", "thinking_style"] };
     const next: SettingsPayload = { ...payload, providers: [...payload.providers, row], created_provider: name };
     setPayload(next);
     setDrafts((current) => ({ ...current, [name]: providerFormFromRow(row) }));

@@ -1,9 +1,10 @@
 import type { SessionMention } from "./types";
+import { isLocalAttachment, type LocalAttachment } from "../../../packages/client-events/attachments";
 
-/** Files stay in memory, including unfinished attachments. */
+/** Ordered attachments retain browser Files in memory and persist local references. */
 export interface ComposerDraft {
   text: string;
-  files: File[];
+  attachments: Array<File | LocalAttachment>;
   sessionMentions: SessionMention[];
   quotedContext: string | null;
 }
@@ -34,7 +35,9 @@ function readDraft(raw: string): ComposerDraft | undefined {
         ? { id: item.id } : {}),
     }];
   });
-  return { text: value.text, quotedContext: value.quotedContext, sessionMentions, files: [] };
+  const rawAttachments = Array.isArray(value.attachments) ? value.attachments : value.localAttachments;
+  const attachments = Array.isArray(rawAttachments) ? rawAttachments.filter(isLocalAttachment) : [];
+  return { text: value.text, quotedContext: value.quotedContext, sessionMentions, attachments };
 }
 
 function removeStoredDraft(key: string): void {
@@ -69,14 +72,14 @@ export class ComposerDraftStore extends Map<string, ComposerDraft> {
     const unchanged = previous
       && previous.text === draft.text
       && previous.quotedContext === draft.quotedContext
-      && previous.files.length === draft.files.length
-      && previous.files.every((file, index) => file === draft.files[index])
+      && previous.attachments.length === draft.attachments.length
+      && previous.attachments.every((attachment, index) => attachment === draft.attachments[index])
       && previous.sessionMentions.length === draft.sessionMentions.length
       && previous.sessionMentions.every((mention, index) => mention === draft.sessionMentions[index]);
     // Restoring a composer is not an edit. Pending sends retain this identity across mounts.
     super.set(key, unchanged ? previous : draft);
     if (!persist) return this;
-    if (!draft.text && !draft.quotedContext) {
+    if (!draft.text && !draft.quotedContext && !draft.attachments.some(isLocalAttachment)) {
       removeStoredDraft(key);
       return this;
     }
@@ -85,6 +88,7 @@ export class ComposerDraftStore extends Map<string, ComposerDraft> {
         text: draft.text,
         quotedContext: draft.quotedContext,
         sessionMentions: draft.sessionMentions,
+        attachments: draft.attachments.filter(isLocalAttachment),
       });
       if (raw.length <= MAX_STORED_CHARS) localStorage.setItem(STORAGE_PREFIX + key, raw);
       else removeStoredDraft(key);

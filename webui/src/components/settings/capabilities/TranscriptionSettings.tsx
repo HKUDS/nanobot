@@ -1,4 +1,4 @@
-import { useAutoSave } from "@/components/settings/shared/useAutoSave";
+import { useEditCompletion, type EditCompletion } from "@/components/settings/shared/useEditCompletion";
 import { SettingsAdvancedOptions } from "@/components/settings/shared/SettingsFeature";
 import type { Dispatch, SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
@@ -51,6 +51,7 @@ export function transcriptionFormFromPayload(payload: SettingsPayload): Transcri
 
 export function TranscriptionSettings({
   embedded = false,
+  editCompletion,
   error,
   settings,
   form,
@@ -65,6 +66,7 @@ export function TranscriptionSettings({
   requiresRestartPending,
 }: {
   embedded?: boolean;
+  editCompletion?: EditCompletion;
   error?: string;
   settings: SettingsPayload;
   form: TranscriptionSettingsUpdate;
@@ -79,7 +81,8 @@ export function TranscriptionSettings({
   requiresRestartPending: boolean;
 }) {
   const { t } = useTranslation();
-  useAutoSave(form, dirty, saving, onSave, !embedded);
+  const localEdits = useEditCompletion(form, dirty, onSave, !editCompletion);
+  const edits = editCompletion ?? localEdits;
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const transcription = settings.transcription ?? DEFAULT_TRANSCRIPTION_SETTINGS;
   const selectedProvider =
@@ -88,7 +91,7 @@ export function TranscriptionSettings({
   const providerConfigured = !!selectedProvider?.configured;
 
   return (
-    <section>
+    <section onChangeCapture={edits.onChangeCapture} onFocusCapture={edits.onFocusCapture} onBlurCapture={edits.onBlurCapture}>
       {!embedded ? <SettingsSectionTitle>{tx("settings.sections.voiceInput", "Voice input")}</SettingsSectionTitle> : null}
       <SettingsGroup>
         {!embedded ? (
@@ -98,7 +101,7 @@ export function TranscriptionSettings({
         >
           <ToggleButton
             checked={form.enabled}
-            onChange={(enabled) => onChangeForm((prev) => ({ ...prev, enabled }))}
+            onChange={(enabled) => { edits.complete(); onChangeForm((prev) => ({ ...prev, enabled })); }}
             ariaLabel={tx("settings.rows.transcription", "Transcription")}
             label={form.enabled ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
           />
@@ -111,7 +114,7 @@ export function TranscriptionSettings({
             value={form.provider}
             emptyLabel={tx("settings.voice.selectProvider", "Select provider")}
             showProviderLogos={showBrandLogos}
-            onChange={(provider) => onChangeForm((prev) => ({ ...prev, provider }))}
+            onChange={(provider) => { edits.complete(); onChangeForm((prev) => ({ ...prev, provider })); }}
           />
         </SettingsRow>
         <SettingsRow

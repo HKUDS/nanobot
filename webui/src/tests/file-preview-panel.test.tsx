@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
+import { preloadMarkdownText } from "@/components/MarkdownText";
 import { CodeBlock } from "@/components/CodeBlock";
 import { PreviewPane } from "@/components/PreviewPane";
 import { FilePreviewStore, useFilePreviewState } from "@/hooks/useFilePreviewState";
@@ -38,6 +39,8 @@ vi.mock("@/lib/api", async (importOriginal) => {
 });
 
 describe("FilePreviewPanel", () => {
+  beforeAll(preloadMarkdownText);
+
   beforeEach(async () => {
     await setAppLanguage("en");
     vi.mocked(fetchFilePreview).mockReset();
@@ -89,7 +92,7 @@ describe("FilePreviewPanel", () => {
     });
     const store = new FilePreviewStore();
     const resource = createFilePreviewResource(path => fetchFilePreview("test", "a", path));
-    store.open("a", "file", "reports/REPORT.md");
+    store.open("a", "reports/REPORT.md");
     function View() {
       const { state, openFile, resolveFile, selectTab, closeTab, close } = useFilePreviewState("a", store);
       const active = state.tabs.find(tab => tab.id === state.activeId)!;
@@ -160,7 +163,6 @@ describe("FilePreviewPanel", () => {
     expect(codeBlock).toHaveTextContent("print('ok')");
     expect(codeBlock).toHaveAttribute("data-language", "python");
     expect(codeBlock).toHaveAttribute("data-highlight", "true");
-    expect(screen.queryByTestId("file-preview-breadcrumb")).not.toBeInTheDocument();
     expect(screen.queryByText("quicksort.py")).not.toBeInTheDocument();
 
   });

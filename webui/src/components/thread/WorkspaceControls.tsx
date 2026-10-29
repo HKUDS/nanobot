@@ -1,12 +1,13 @@
-import { FullAccessIcon, WorkspaceIcon, RestrictedAccessIcon } from "@/components/icons/product-icons";
-import type { HTMLAttributes, ReactElement } from "react";
+import { FullAccessIcon, RestrictedAccessIcon, WorkspaceIcon } from "@/components/icons/product-icons";
+import type { HTMLAttributes, ReactElement, RefObject } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, ChevronRight, FolderSearch, History, Search, Star } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, FolderSearch, History, Search, Star } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ToggleButton } from "@/components/ui/toggle-button";
 import { Button } from "@/components/ui/button";
 import { floatingItemClassName, floatingItemFocusClassName } from "@/components/ui/floating-surface";
-import { HoverHint } from "@/components/ui/tooltip";
+import { HoverHint, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input, SearchInput } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { SidebarSelectionHighlight, SIDEBAR_SELECTION_ITEM_CLASS } from "@/components/SidebarSelectionHighlight";
@@ -152,9 +153,8 @@ function WorkspacePickerPath({ path }: { path: string }) {
   );
 }
 
-export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, controls, error, onLoadProjects, onResolveProject, onFavoriteProject, onBrowseDirectories, layoutAnchor, onChange }: {
+export function WorkspaceProjectPicker({ disabled, scope, defaultScope, controls, error, onLoadProjects, onResolveProject, onFavoriteProject, onBrowseDirectories, layoutAnchor, onChange }: {
   layoutAnchor?: HTMLElement | null;
-  isHero: boolean;
   disabled?: boolean;
   scope: WorkspaceScopePayload | null;
   defaultScope: WorkspaceScopePayload | null;
@@ -217,7 +217,7 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
   const currentProjectScope = selectedProjectScope(scope, defaultScope);
   const displayedScope = scope ?? defaultScope;
   const projectLabel = displayedScope ? displayedScope.project_name || projectNameFromPath(displayedScope.project_path) : "";
-  const visible = isHero && !!defaultScope && !!onChange && controls?.can_change_project !== false;
+  const visible = !!defaultScope && !!onChange && controls?.can_change_project !== false;
   const canBrowse = controls?.can_browse_directories === true && !!onBrowseDirectories;
   const directoryCache = useMemo(() => onBrowseDirectories ? createWorkspaceDirectoryCache(onBrowseDirectories) : null, [onBrowseDirectories]);
   const previousColumns = useMemo<PickerColumn[]>(() => currentVisit.ancestors.map(ancestor => {
@@ -551,13 +551,14 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
 
   if (!visible || !defaultScope || !onChange) return null;
   return (
-    <div className="inline-flex min-w-0 max-w-[11rem] shrink items-center">
+    <div className="inline-flex min-w-0 max-w-[17.5rem] shrink items-center">
       <Dialog open={open} onOpenChange={setOpen}>
         <HoverHint content={`${t("workspace.picker.switchDirectory")}\n${displayedScope?.project_path ?? ""}`}>
           <DialogTrigger asChild>
-            <button ref={triggerRef} onClick={event => { openedWithKeyboard.current = event.detail === 0; }} onPointerDown={() => setKeyboardInteraction(false)} onKeyDown={() => setKeyboardInteraction(true)} type="button" disabled={disabled} aria-label={t("workspace.picker.switchDirectory")} className="thread-composer-workspace touch-target inline-flex h-8 min-w-0 max-w-full items-center gap-1.5 rounded-control px-2 text-[12px] font-medium text-muted-foreground outline-none transition-colors hover:bg-foreground/[0.055] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-55">
+            <button ref={triggerRef} onClick={event => { openedWithKeyboard.current = event.detail === 0; }} onPointerDown={() => setKeyboardInteraction(false)} onKeyDown={() => setKeyboardInteraction(true)} type="button" disabled={disabled} aria-label={t("workspace.picker.switchDirectory")} className="thread-composer-workspace touch-target inline-flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-muted-foreground outline-none transition-colors motion-reduce:transition-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-55">
               <WorkspaceIcon className="h-3.5 w-3.5 shrink-0" />
               <span className="min-w-0 truncate">{projectLabel}</span>
+              <ChevronDown className="h-3 w-3 shrink-0" aria-hidden />
             </button>
           </DialogTrigger>
         </HoverHint>
@@ -679,58 +680,102 @@ export function WorkspaceProjectPicker({ isHero, disabled, scope, defaultScope, 
   );
 }
 
-export function WorkspaceAccessToggle({
+export function WorkspaceAccessMenu({
   scope,
   disabled,
-  isHero,
   onChange,
+  hintBoundaryRef,
 }: {
   scope: WorkspaceScopePayload;
   disabled?: boolean;
-  isHero: boolean;
   onChange?: (scope: WorkspaceScopePayload) => void;
+  hintBoundaryRef: RefObject<HTMLElement>;
 }) {
   const { t } = useTranslation();
-  const mode = scope.access_mode;
-  const isFull = mode === "full";
-  const accessLabel = t(
-    isFull ? "thread.composer.workspace.full" : "thread.composer.workspace.default",
-  );
-  const shortAccessLabel = t(
-    isFull ? "thread.composer.workspace.fullShort" : "thread.composer.workspace.defaultShort",
-  );
-  const accessAriaLabel = `${t("thread.composer.workspace.accessAria")}: ${accessLabel}`;
+  const coarsePointer = useMediaQuery("(pointer: coarse)");
+  const [open, setOpen] = useState(false);
+  const [hintOpen, setHintOpen] = useState(false);
+  const [hint, setHint] = useState<HTMLDivElement | null>(null);
+  const [hintPosition, setHintPosition] = useState<{ side: "top" | "bottom"; sideOffset: number }>({ side: "bottom", sideOffset: 8 });
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const hintEnabled = !open && !coarsePointer;
+  const restoreTriggerFocus = useRef(true);
+  const descriptionId = useId();
+  const isFull = scope.access_mode === "full";
+  const label = t(isFull ? "thread.composer.workspace.full" : "thread.composer.workspace.default");
+  const description = t(isFull ? "thread.composer.workspace.fullDescription" : "thread.composer.workspace.defaultDescription");
+  const accessAriaLabel = `${t("thread.composer.workspace.accessAria")}: ${label}`;
+  const AccessIcon = isFull ? FullAccessIcon : RestrictedAccessIcon;
+
+  useEffect(() => { if (disabled || !onChange) setOpen(false); }, [disabled, onChange]);
+  useEffect(() => { if (!hintEnabled) setHintOpen(false); }, [hintEnabled]);
+  useLayoutEffect(() => {
+    const trigger = triggerRef.current;
+    const boundary = hintBoundaryRef.current;
+    if (!hint || !trigger || !boundary) return;
+    const placeHint = () => {
+      const triggerBounds = trigger.getBoundingClientRect();
+      const belowFits = triggerBounds.bottom + 8 + hint.offsetHeight <= window.innerHeight;
+      // A locked thread has no project row below the toolbar. Flip above the
+      // whole composer, not above the permission button into the draft.
+      const next = belowFits
+        ? { side: "bottom" as const, sideOffset: 8 }
+        : { side: "top" as const, sideOffset: triggerBounds.top - boundary.getBoundingClientRect().top + 8 };
+      setHintPosition(previous => previous.side === next.side && previous.sideOffset === next.sideOffset ? previous : next);
+    };
+    placeHint();
+    const observer = new ResizeObserver(placeHint);
+    observer.observe(hint);
+    observer.observe(boundary);
+    window.addEventListener("resize", placeHint);
+    return () => { observer.disconnect(); window.removeEventListener("resize", placeHint); };
+  }, [hint, hintBoundaryRef]);
 
   return (
-    <HoverHint side="top" contentClassName="w-max max-w-[calc(100vw-2rem)] text-left leading-relaxed"
-      content={t(isFull ? "thread.composer.workspace.fullDescription" : "thread.composer.workspace.defaultDescription")}>
-          <Button
-            type="button"
-            variant={null}
-            aria-label={accessAriaLabel}
-            aria-pressed={isFull}
-            disabled={disabled || !onChange}
-            onClick={() => onChange?.(scopeWithAccessMode(scope, isFull ? "restricted" : "full"))}
-            className={cn(
-              "settings-hover thread-composer-access touch-target min-w-0 max-w-[min(12.5rem,42vw)] whitespace-nowrap rounded-control border border-transparent font-semibold shadow-none",
-              isHero ? "h-8 px-2.5 text-[12px]" : "h-9 px-3 text-[12.5px]",
-              isFull
-                ? "bg-transparent text-orange-600 hover:text-orange-600 dark:text-orange-300 dark:hover:text-orange-300"
-                : "bg-transparent text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {isFull ? (
-              <FullAccessIcon className={cn("thread-composer-access-icon mr-1.5 shrink-0", isHero ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} />
-            ) : (
-              <RestrictedAccessIcon className={cn("thread-composer-access-icon mr-1.5 shrink-0", isHero ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} />
-            )}
-            <span aria-hidden className="thread-composer-access-label-full min-w-0 truncate">
-              {accessLabel}
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <TooltipProvider>
+        <Tooltip open={hintEnabled && hintOpen} onOpenChange={next => setHintOpen(hintEnabled && next)}>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild disabled={disabled || !onChange}>
+              <button ref={triggerRef} type="button" aria-label={accessAriaLabel} aria-describedby={descriptionId}
+                onPointerDown={() => { restoreTriggerFocus.current = false; }}
+                onKeyDown={() => { restoreTriggerFocus.current = true; }}
+                className={cn(
+                  "thread-composer-access touch-target inline-flex h-8 min-w-0 max-w-full shrink items-center gap-1.5 rounded-md px-2 text-[12px] font-medium outline-none transition-colors motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-55",
+                  isFull ? "text-orange-600 hover:text-orange-700 dark:text-orange-300 dark:hover:text-orange-200" : "text-muted-foreground hover:text-foreground",
+                )}>
+                <AccessIcon className="h-3.5 w-3.5 shrink-0" />
+                <span className="min-w-0 truncate">{label}</span>
+                <ChevronDown className="h-3 w-3 shrink-0" aria-hidden />
+                <span id={descriptionId} className="sr-only">{description}</span>
+              </button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent ref={setHint} side={hintPosition.side} sideOffset={hintPosition.sideOffset}
+            className="max-w-[min(28rem,calc(100vw-2rem))] whitespace-pre-wrap break-words">{description}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+      <DropdownMenuContent side="top" align="start" sideOffset={8} aria-label={t("thread.composer.workspace.accessAria")}
+        onPointerDownCapture={() => { restoreTriggerFocus.current = false; }}
+        onKeyDownCapture={() => { restoreTriggerFocus.current = true; }}
+        onPointerDownOutside={() => { restoreTriggerFocus.current = false; }}
+        onCloseAutoFocus={event => { if (!restoreTriggerFocus.current) event.preventDefault(); }}
+        className="w-max min-w-[13rem] max-w-[calc(100vw-2rem)]">
+        {(["restricted", "full"] as const).map(mode => {
+          const full = mode === "full";
+          const optionLabel = t(full ? "thread.composer.workspace.full" : "thread.composer.workspace.default");
+          const OptionIcon = full ? FullAccessIcon : RestrictedAccessIcon;
+          return <DropdownMenuItem key={mode} role="menuitemradio" aria-checked={scope.access_mode === mode} aria-label={optionLabel}
+            className="touch-target gap-2.5"
+            onSelect={() => { if (!disabled && scope.access_mode !== mode) onChange?.(scopeWithAccessMode(scope, mode)); }}>
+            <OptionIcon className={full ? "text-orange-600 dark:text-orange-300" : undefined} />
+            <span className="min-w-0 flex-1">{optionLabel}</span>
+            <span aria-hidden className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+              {scope.access_mode === mode && <Check className={cn("h-3.5 w-3.5", full && "text-orange-600 dark:text-orange-300")} />}
             </span>
-            <span aria-hidden className="thread-composer-access-label-short hidden min-w-0 truncate">
-              {shortAccessLabel}
-            </span>
-          </Button>
-    </HoverHint>
+          </DropdownMenuItem>;
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

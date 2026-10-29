@@ -166,6 +166,11 @@
     "description": "画像単位のフィット、ズーム、移動、ピンチ操作。",
     "options": "className で領域を制限し、画像の識別情報が変わったら再マウントします。ギャラリーが矢印キー操作を管理する場合は panWithArrows=false にします。"
   },
+  "loadingRing": {
+    "title": "処理リング",
+    "description": "背景リングを省略できる共通の処理インジケーター。",
+    "options": "className でサイズと色を設定します。track=false で背景リングを非表示にし、strokeWidth と strokeDasharray で円弧を調整します。視差効果を減らす設定に従います。"
+  },
   "streaming": {
     "title": "アニメーションラベル",
     "description": "思考中や実行中のツールラベルで共有するテキストアニメーション。",
@@ -481,7 +486,10 @@
     "options": "AboutSettingsView はバージョンとサポートリンクの組み合わせを受け取ります。VersionCheckRowView は checking/result を表示し、onCheck で確認を要求します。実際の確認と診断リンクのデータは機能の入口が管理します。",
     "error": "バージョン情報を取得できませんでした。再試行してください。",
     "state": "バージョンの状態",
-    "selectedLink": "GitHub リンクを選択しました"
+    "selectedLink": "GitHub リンクを選択しました",
+    "preferenceSaved": "サンプル設定を保存しました。インストールや再起動は行いません。",
+    "updateRequested": "更新の確認を選択しました。このプレビューではインストールや再起動は行いません。",
+    "dismissed": "更新通知を閉じました"
   },
   "appearance": {
     "title": "表示設定",

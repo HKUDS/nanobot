@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agent.session_helpers import stop_loop
 from nanobot.agent.goal_permission import goal_mutation_allowed, goal_mutation_permission
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
@@ -89,8 +90,7 @@ async def test_goal_input_enters_running_turn_with_scoped_permission(tmp_path, c
         assert public_history_messages(hidden)[0]["content"] == task
     finally:
         release.set()
-        loop.stop()
-        await asyncio.wait_for(run, 5)
+        await stop_loop(loop, run, timeout=5)
 
 
 async def test_scheduled_goal_command_cannot_generate_internal_input(tmp_path):

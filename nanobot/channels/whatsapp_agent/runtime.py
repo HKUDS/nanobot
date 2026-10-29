@@ -73,7 +73,6 @@ _RATE_WINDOW_SECONDS = 60.0
 # 15 polls/minute is one per 4s even when traffic is continuous.
 _MIN_POLL_GAP_SECONDS = 4.1
 
-_MAX_POLL_LIMIT = 100
 _DEFAULT_POLL_LIMIT = 50
 # The typing indicator expires after 25s, so refresh inside that window.
 _TYPING_REFRESH_SECONDS = 20.0

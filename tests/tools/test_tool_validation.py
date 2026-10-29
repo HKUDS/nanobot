@@ -457,7 +457,7 @@ async def test_exec_allows_resolved_home_inside_workspace(tmp_path, monkeypatch)
     (tmp_path / "file.txt").write_text("allowed home content", encoding="utf-8")
     result = await ExecTool(
         working_dir=str(tmp_path), restrict_to_workspace=True,
-    ).execute(command="cat ~/file.txt", login=False)
+    ).execute(command="cat ~/file.txt", login=False, yield_time_ms=10000)
 
     assert "allowed home content" in result
     assert "Exit code: 0" in result
@@ -939,10 +939,10 @@ def test_cast_params_single_value_not_auto_wrapped_to_array() -> None:
 # --- ExecTool enhancement tests ---
 
 
-async def test_exec_always_returns_exit_code() -> None:
-    """Exit code should appear in output even on success (exit 0)."""
+async def test_completed_exec_returns_exit_code() -> None:
+    """Completed output includes the exit code even on success (exit 0)."""
     tool = ExecTool()
-    result = await tool.execute(command="echo hello")
+    result = await tool.execute(command="echo hello", yield_time_ms=10000)
     assert "Exit code: 0" in result
     assert "hello" in result
 
@@ -964,7 +964,7 @@ async def test_exec_head_tail_truncation(tmp_path) -> None:
         command = subprocess.list2cmdline([sys.executable, str(script_file)])
     else:
         command = f"{shlex.quote(sys.executable)} {shlex.quote(str(script_file))}"
-    result = await tool.execute(command=command)
+    result = await tool.execute(command=command, yield_time_ms=10000)
     assert "chars truncated" in result
     # Head portion should start with As
     assert result.startswith("A")
@@ -979,6 +979,7 @@ async def test_exec_timeout_parameter(runtime_parameter) -> None:
     started_at = time.monotonic()
     result = await tool.execute(
         command=[sys.executable, "-c", "import time; time.sleep(10)"],
+        yield_time_ms=5000,
         **{runtime_parameter: 1},
     )
 

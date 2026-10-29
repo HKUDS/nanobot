@@ -166,6 +166,11 @@
     "description": "单张图片的适应、缩放、平移与双指缩放控件。",
     "options": "用 className 限定边界；更换图片身份时重新挂载。图库管理方向键导航时设置 panWithArrows=false。"
   },
+  "loadingRing": {
+    "title": "运行圆环",
+    "description": "可选底环的共享运行指示器。",
+    "options": "className 设置尺寸和颜色。track=false 隐藏底环；strokeWidth 和 strokeDasharray 调整圆弧。遵循减少动态效果设置。"
+  },
   "streaming": {
     "title": "流光文字",
     "description": "思考中与工具标签共用的文字动画。",
@@ -481,7 +486,10 @@
     "options": "AboutSettingsView 接受版本与支持链接的组合。VersionCheckRowView 展示 checking/result，并通过 onCheck 请求检查。真实检查与诊断链接数据由功能入口负责。",
     "error": "无法获取版本信息，请重试。",
     "state": "版本状态",
-    "selectedLink": "选择了 GitHub 链接"
+    "selectedLink": "选择了 GitHub 链接",
+    "preferenceSaved": "已保存示例偏好；不会安装或重启。",
+    "updateRequested": "已选择查看更新；组件预览不会安装或重启。",
+    "dismissed": "已收起更新提示"
   },
   "appearance": {
     "title": "外观选项",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
@@ -29,6 +29,7 @@ from nanobot.events import (
     ResponseSourceEvent,
 )
 from nanobot.providers.base import LLMUsage
+from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.keys import (
     UNIFIED_SESSION_KEY,
     is_internal_session,
@@ -53,6 +54,7 @@ class TurnRoute:
 
 
 TurnRoutePolicy = Callable[[InboundMessage, str, TurnRoute], TurnRoute]
+TurnRouteAdmission = Callable[[TurnRoute, str, str], Awaitable[TurnRoute]]
 
 
 def _bind_events(
@@ -94,10 +96,12 @@ class TurnDeliveryFactory:
         self,
         bus: MessageBus,
         route_policy: TurnRoutePolicy | None = None,
+        route_admission: TurnRouteAdmission | None = None,
     ) -> None:
         self.bus = bus
         self.runtime_event_publisher = RuntimeEventPublisher(bus)
         self.route_policy = route_policy
+        self.route_admission = route_admission
 
     def create(
         self,
@@ -117,6 +121,7 @@ class TurnDeliveryFactory:
             input_message=msg,
             session_key=session_key,
             route=route,
+            route_admission=self.route_admission,
             enable_stream=enable_stream,
         )
 
@@ -138,6 +143,7 @@ class TurnDeliveryFactory:
         self,
         session_key: str,
         session_metadata: dict[str, Any],
+        *, generation: str,
     ) -> EventSink:
         """Bind idle notifications to one route without acquiring a turn owner."""
         if is_internal_session(session_key):
@@ -151,7 +157,9 @@ class TurnDeliveryFactory:
                 return EventSink()
             if not isinstance(metadata, dict):
                 return EventSink()
-            metadata = cast(dict[str, Any], metadata)
+            metadata = dict(cast(dict[str, Any], metadata))
+            if isinstance(saved_generation := saved_route.get("generation"), str):
+                metadata[HISTORY_GENERATION_METADATA_KEY] = saved_generation
         else:
             # Older sessions have no route snapshot. Only direct clients have a
             # session key that is also an unambiguous delivery address.
@@ -165,7 +173,8 @@ class TurnDeliveryFactory:
             channel, chat_id = route
             metadata = {}
         metadata = deepcopy(metadata)
-
+        if channel == "websocket":
+            metadata.setdefault(HISTORY_GENERATION_METADATA_KEY, generation)
         return _bind_events(self.bus, TurnRoute(channel, chat_id, metadata), session_key)
 
     @staticmethod
@@ -196,7 +205,9 @@ class TurnDelivery:
     input_message: InboundMessage
     session_key: str
     route: TurnRoute
+    route_admission: TurnRouteAdmission | None = None
     enable_stream: bool = False
+    continuation_pending: bool = field(init=False, default=False)
     delivery_message: InboundMessage = field(init=False)
     lifecycle_message: InboundMessage = field(init=False)
     _stream_base_id: str | None = field(init=False, default=None)
@@ -232,10 +243,26 @@ class TurnDelivery:
     def streaming(self) -> bool:
         return self._stream_base_id is not None
 
-    def bind_session_generation(self, generation: str) -> None:
-        """Attach the admitted session identity to all later lifecycle events."""
+    async def bind_session_generation(self, generation: str) -> None:
+        """Admit the destination before publishing any durable turn facts."""
+        previous = self.delivery_message.session_generation
+        metadata = dict(self.route.metadata)
+        stored_generation = metadata.get(HISTORY_GENERATION_METADATA_KEY)
+        if self.route.channel == "websocket" and (stored_generation is None or stored_generation == previous):
+            metadata[HISTORY_GENERATION_METADATA_KEY] = generation
+        route = dataclasses.replace(self.route, metadata=metadata)
+        if self.route_admission is not None:
+            route = await self.route_admission(route, self.session_key, generation)
+        self.route = route
+        self.delivery_message.metadata = dict(route.metadata)
         self.delivery_message.session_generation = generation
         self.lifecycle_message.session_generation = generation
+        if HISTORY_GENERATION_METADATA_KEY in route.metadata:
+            for message in (self.lifecycle_message, self.input_message):
+                message.metadata[HISTORY_GENERATION_METADATA_KEY] = route.metadata[
+                    HISTORY_GENERATION_METADATA_KEY
+                ]
+        self._routed_events = _bind_events(self.bus, self.route, self.session_key)
 
     def remember_session_route(self, session_metadata: dict[str, Any]) -> None:
         """Keep only routing fields needed to deliver a later idle notification."""
@@ -248,6 +275,8 @@ class TurnDelivery:
             "chat_id": self.route.chat_id,
             "metadata": notification_metadata(self.route.channel, self.route.metadata),
         }
+        if generation := self.route.metadata.get(HISTORY_GENERATION_METADATA_KEY):
+            session_metadata["_compaction_route"]["generation"] = generation
 
     async def started(self) -> None:
         if self.route.publish_lifecycle:
@@ -331,6 +360,9 @@ class TurnDelivery:
         if response is not None:
             completed_channel = response.channel
             completed_chat_id = response.chat_id
+            generation = self.route.metadata.get(HISTORY_GENERATION_METADATA_KEY)
+            if generation is not None and (response.channel, response.chat_id) == (self.route.channel, self.route.chat_id):
+                response = dataclasses.replace(response, metadata={**response.metadata, HISTORY_GENERATION_METADATA_KEY: generation})
             if (
                 self._response_source is not None
                 and self._response_content is not None

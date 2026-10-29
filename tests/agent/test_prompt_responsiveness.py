@@ -454,23 +454,35 @@ async def test_local_token_estimation_leaves_loop_available(
 
     loop._extra_hooks.append(Lifecycle())
 
-    def count(*_args, **_kwargs):
-        captured.append(current_request_context())
+    from nanobot.utils.helpers import estimate_prompt_tokens_chain
+
+    def count(*args, **kwargs):
+        captured.append((current_request_context(), threading.get_ident()))
         runtime_loop.call_soon_threadsafe(entered.set)
         try:
             assert release.wait(5), "test did not release local token estimation"
-            return 10, "test-counter"
+            return estimate_prompt_tokens_chain(*args, **kwargs)
         finally:
             runtime_loop.call_soon_threadsafe(completed.set)
 
     module = "context_governance" if phase == "request" else "runner"
     monkeypatch.setattr(f"nanobot.agent.{module}.estimate_prompt_tokens_chain", count)
     task = asyncio.create_task(loop.process_direct("Hello", session_key="cli:token-work"))
+    entry = asyncio.create_task(entered.wait())
     try:
-        await asyncio.wait_for(entered.wait(), timeout=5)
-        assert captured[0] is not None
-        assert captured[0].session_key == "cli:token-work"
-        assert captured[0].workspace_scope.project_path == tmp_path.resolve()
+        # Admission and prompt I/O precede estimation. Its worker gate, not turn
+        # startup, owns the five-second responsiveness deadline.
+        done, _ = await asyncio.wait((task, entry), return_when=asyncio.FIRST_COMPLETED)
+        if task in done:
+            task.result()
+        assert entry in done, "turn ended before local token estimation started"
+        request, worker_thread = captured[0]
+        assert request is not None
+        assert request.session_key == "cli:token-work"
+        assert request.workspace_scope.project_path == tmp_path.resolve()
+        assert worker_thread != threading.get_ident()
+        assert not completed.is_set()
+        assert not release.is_set()
         assert current_request_context() is None
         if phase == "request":
             loop.provider.chat_stream_with_retry.assert_not_awaited()
@@ -493,9 +505,10 @@ async def test_local_token_estimation_leaves_loop_available(
             assert [public_history_message(message)["content"] for message in saved.messages] == ["Hello", "Done"]
     finally:
         release.set()
-        if not task.done():
-            task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
+        for pending in (task, entry):
+            if not pending.done():
+                pending.cancel()
+        await asyncio.gather(task, entry, return_exceptions=True)
         if captured:
             await asyncio.wait_for(completed.wait(), timeout=5)
         await loop.aclose()

@@ -55,6 +55,8 @@ test("complete rail scrolls independently, jumps to unloaded history and returns
   await expect(body.getByText("Question 0", { exact: true })).toBeInViewport();
   expect(reads).toEqual(["?limit=24&after=0"]);
   await expect(body.getByText("Question 1999", { exact: true })).toHaveCount(0);
+  // Force input-before-scroll ordering instead of relying on compositor timing.
+  await body.evaluate((node) => node.addEventListener("wheel", () => undefined, { passive: false }));
   for (const after of [10, 20, 30, 40]) {
     await body.hover();
     await page.mouse.wheel(0, 10000);

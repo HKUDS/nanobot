@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -476,7 +476,11 @@ class TestFallbackWhenPrimaryRaises:
         assert result.content == "fallback ok"
         assert result.finish_reason == "stop"
         factory.assert_called_once_with(_fallback("fallback-a"))
-        assert sleep.await_args_list == [call(1), call(2), call(4)]
+        assert sleep.await_count == 3
+        assert all(
+            ceiling / 2 <= request.args[0] <= ceiling
+            for request, ceiling in zip(sleep.await_args_list, (1, 2, 4))
+        )
 
     @pytest.mark.asyncio
     async def test_authentication_exception_message_is_classified(self) -> None:
@@ -927,7 +931,11 @@ class TestFallbackOnPrimaryError:
 
         assert result.content == "fallback ok"
         assert fallback_models == ["fallback-b"]
-        assert sleep.await_args_list == [call(1), call(2), call(4)]
+        assert sleep.await_count == 3
+        assert all(
+            ceiling / 2 <= request.args[0] <= ceiling
+            for request, ceiling in zip(sleep.await_args_list, (1, 2, 4))
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(("provider_name", "status", "code", "kind", "expected"), [
@@ -1280,6 +1288,34 @@ class TestRetryBeforeFailover:
         )
         assert "cleared" in [status.state for status in retry_statuses]
         assert retry_statuses[-1].state == "exhausted"
+
+    @pytest.mark.asyncio
+    async def test_fallback_auth_error_preserves_primary_diagnosis_and_exhaustion(self) -> None:
+        primary = _FakeProvider("primary", _make_response(
+            "private network detail", finish_reason="error", error_kind="connection",
+        ))
+        fallback = _FakeProvider("fallback", _make_response(
+            "private auth detail", finish_reason="error", error_status_code=401,
+        ))
+        provider = FallbackProvider(primary, [_fallback("backup")], MagicMock(return_value=fallback))
+        statuses: list[RetryStatusEvent] = []
+
+        async def record(status: RetryStatusEvent) -> None:
+            statuses.append(status)
+
+        with patch("nanobot.providers.base.asyncio.sleep", new_callable=AsyncMock):
+            result = await provider.chat_with_retry(
+                [{"role": "user", "content": "hello"}], on_retry_status=record,
+            )
+
+        assert len(primary.chat_calls) == 4
+        assert len(fallback.chat_calls) == 1
+        assert LLMProvider.public_error_kind(result) == "connection"
+        assert result.preserve_provider_state_on_error is True
+        assert not LLMProvider.is_transient_response(result)  # Retry policy is still terminal.
+        assert statuses[-1] == RetryStatusEvent(
+            state="exhausted", attempt=4, max_attempts=4, error_kind="connection",
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("factory_fails", [False, True])

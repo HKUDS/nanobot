@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import subprocess
+import sys
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -40,11 +42,6 @@ def _make_mock_agent(response_text: str = "mock response") -> MagicMock:
 @pytest.fixture
 def mock_agent():
     return _make_mock_agent()
-
-
-@pytest.fixture
-def app(mock_agent):
-    return create_app(mock_agent, model_name="test-model", request_timeout=10.0, api_key=API_KEY)
 
 
 @pytest_asyncio.fixture
@@ -126,6 +123,33 @@ def test_parse_json_content_extracts_text_and_media(tmp_path) -> None:
         assert len(media_paths) == 1
     finally:
         os.chdir(original_cwd)
+
+
+def test_parse_json_content_rejects_malformed_parameter_header_without_stalling(tmp_path) -> None:
+    # Isolate the parser so a backtracking regression cannot hang the test runner.
+    code = """
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
+from nanobot.api.server import _parse_json_content
+
+media_dir = Path(sys.argv[1])
+url = "data:image/png" + ";a" * 128 + ",eA=="
+body = {"messages": [{"role": "user", "content": [
+    {"type": "text", "text": "describe this"},
+    {"type": "image_url", "image_url": {"url": url}},
+]}]}
+with patch("nanobot.api.server.get_media_dir", return_value=media_dir):
+    assert _parse_json_content(body) == ("describe this", [])
+assert list(media_dir.iterdir()) == []
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code, str(tmp_path)],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_parse_json_content_plain_text_only() -> None:
@@ -322,7 +346,12 @@ async def test_multipart_defaults_text_when_missing(aiohttp_client, mock_agent, 
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
-async def test_multipart_with_session_id(aiohttp_client, mock_agent, tmp_path) -> None:
+@pytest.mark.parametrize(("session_id", "chat_id"), [
+    ("my-session", "my-session"), (" my-session ", "my-session"), ("  ", "default"),
+])
+async def test_multipart_with_session_id(
+    aiohttp_client, mock_agent, tmp_path, session_id, chat_id,
+) -> None:
     """Multipart upload with session_id uses custom session key."""
     import os
     original_cwd = os.getcwd()
@@ -338,11 +367,12 @@ async def test_multipart_with_session_id(aiohttp_client, mock_agent, tmp_path) -
         resp = await client.post(
             "/v1/chat/completions",
             headers=AUTH_HEADERS,
-            data={"message": "hello", "session_id": "my-session", "files": data},
+            data={"message": "hello", "session_id": session_id, "files": data},
         )
         assert resp.status == 200
         call_kwargs = mock_agent.process_direct.call_args.kwargs
-        assert call_kwargs["session_key"] == "api:my-session"
+        assert call_kwargs["session_key"] == f"api:{chat_id}"
+        assert call_kwargs["chat_id"] == chat_id
     finally:
         os.chdir(original_cwd)
 
@@ -372,40 +402,40 @@ async def test_plain_text_backward_compat(aiohttp_client, mock_agent) -> None:
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
-async def test_json_base64_image_upload(aiohttp_client, mock_agent, tmp_path) -> None:
+@pytest.mark.parametrize("marker", ["base64", "BASE64", "Base64"])
+async def test_json_base64_image_upload(
+    aiohttp_client, mock_agent, tmp_path, monkeypatch, marker: str,
+) -> None:
     """JSON request with base64 data URL saves file and passes path."""
-    import os
-    original_cwd = os.getcwd()
-    os.chdir(tmp_path)
+    monkeypatch.setattr("nanobot.api.server.get_media_dir", lambda _channel=None: tmp_path)
+    app = create_app(mock_agent, model_name="m", api_key=API_KEY)
+    client = await aiohttp_client(app)
 
-    try:
-        app = create_app(mock_agent, model_name="m", api_key=API_KEY)
-        client = await aiohttp_client(app)
+    # Use valid base64 for a tiny PNG (1x1 transparent pixel)
+    tiny_png_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
 
-        # Use valid base64 for a tiny PNG (1x1 transparent pixel)
-        tiny_png_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
-
-        resp = await client.post(
-            "/v1/chat/completions",
-            headers=AUTH_HEADERS,
-            json={
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": "what is this"},
-                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{tiny_png_b64}"}},
-                        ],
-                    }
-                ]
-            },
-        )
-        assert resp.status == 200
-        call_kwargs = mock_agent.process_direct.call_args.kwargs
-        assert call_kwargs["content"] == "what is this"
-        assert len(call_kwargs.get("media", [])) == 1
-    finally:
-        os.chdir(original_cwd)
+    resp = await client.post(
+        "/v1/chat/completions",
+        headers=AUTH_HEADERS,
+        json={
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "what is this"},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;{marker},{tiny_png_b64}"}},
+                    ],
+                }
+            ]
+        },
+    )
+    assert resp.status == 200
+    mock_agent.process_direct.assert_awaited_once()
+    call_kwargs = mock_agent.process_direct.call_args.kwargs
+    assert call_kwargs["content"] == "what is this"
+    saved, = call_kwargs["media"]
+    assert Path(saved).parent == tmp_path
+    assert Path(saved).read_bytes() == base64.b64decode(tiny_png_b64)
 
 
 # ---------------------------------------------------------------------------

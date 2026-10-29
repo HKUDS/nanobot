@@ -171,7 +171,9 @@ async def test_execute_timeout_kills_and_reaps():
     ):
         try:
             result = await asyncio.wait_for(
-                ExecTool(timeout=1, session_manager=manager).execute(command="sleep 99", timeout=1),
+                ExecTool(timeout=1, session_manager=manager).execute(
+                    command="sleep 99", timeout=1, yield_time_ms=5000,
+                ),
                 timeout=5,
             )
         finally:
@@ -193,16 +195,16 @@ async def test_execute_cancellation_kills_process_tree():
     process = _MockProcess(pid=1005, returncode=None)
     manager = ExecSessionManager()
     waiting = asyncio.Event()
-    wait_exit = _ExecSession.wait_exit
+    poll = _ExecSession.poll
 
-    async def inline_wait(session: _ExecSession) -> None:
+    async def initial_poll(session: _ExecSession, *args, **kwargs):
         waiting.set()
-        await wait_exit(session)
+        return await poll(session, *args, **kwargs)
 
     with (
         patch.object(ExecTool, "_spawn", return_value=process) as spawn,
         patch.object(ExecTool, "_kill_process_tree", side_effect=ExecTool._kill_process) as kill_tree,
-        patch.object(_ExecSession, "wait_exit", new=inline_wait),
+        patch.object(_ExecSession, "poll", new=initial_poll),
         patch("nanobot.agent.tools.shell._reap_pid") as reap,
     ):
         execution = asyncio.create_task(
@@ -375,6 +377,7 @@ async def test_execute_timeout_kills_background_process_tree(tmp_path):
     result = await ExecTool(working_dir=str(tmp_path), timeout=1).execute(
         command=command,
         timeout=1,
+        yield_time_ms=5000,
     )
 
     assert "timed out" in result.lower()
@@ -555,7 +558,7 @@ async def test_real_timeout_leaves_no_zombie(tmp_path):
     import os
 
     tool = ExecTool(working_dir=str(tmp_path), timeout=1)
-    result = await tool.execute(command="sleep 30", timeout=1)
+    result = await tool.execute(command="sleep 30", timeout=1, yield_time_ms=5000)
     assert "timed out" in result.lower()
 
     await asyncio.sleep(0.05)

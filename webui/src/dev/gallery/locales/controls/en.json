@@ -166,6 +166,11 @@
     "description": "Image-local fit, zoom, pan and pinch controls.",
     "options": "Supply a bounded className and remount for a different image identity. Set panWithArrows=false when a gallery owns arrow navigation."
   },
+  "loadingRing": {
+    "title": "Loading ring",
+    "description": "A shared activity ring with an optional track.",
+    "options": "className sets size and color. track=false hides the track; strokeWidth and strokeDasharray adjust the arc. Respects reduced-motion settings."
+  },
   "streaming": {
     "title": "Animated labels",
     "description": "A shared text animation for active thinking and tool labels.",
@@ -481,7 +486,10 @@
     "options": "AboutSettingsView accepts composed version and support links. VersionCheckRowView displays checking/result and requests checks through onCheck. The feature entry owns actual checks and diagnostic link data.",
     "error": "Could not get version information. Try again.",
     "state": "Version state",
-    "selectedLink": "GitHub link selected"
+    "selectedLink": "GitHub link selected",
+    "preferenceSaved": "Sample preference saved; nothing will be installed or restarted.",
+    "updateRequested": "Update review selected; this preview does not install or restart anything.",
+    "dismissed": "Update notice dismissed"
   },
   "appearance": {
     "title": "Appearance preferences",

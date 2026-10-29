@@ -184,15 +184,48 @@ test("an enlarged diagram keeps its camera through resize and recoloring", async
   await loadedImage(block.locator("img"));
 });
 
-test("published Pele renders Chinese subgraph, wrapping, emoji and measured emphasis", async ({ page }) => {
+test("published Pele renders Chinese wrapping and mixed measured styles across widths and themes", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1000 });
   await page.goto("/browser/fixture.html?case=diagrams&edit");
-  const source = 'flowchart TD\nsubgraph 审核流程[中文子图：权限审核与结果交付]\nA["接收用户请求并检查工作区权限，保留中文长标签与 emoji ✅"] --> B["生成结果，并返回说明"]\nend\nclassDef measured font-size:18px,font-weight:bold,font-style:italic\nclass B measured';
+  const chinese = "接收用户请求并检查工作区权限保留中文长标签以及多语言自动换行";
+  const source = `%%{init: {"flowchart":{"wrappingWidth":140}}}%%\nflowchart TD\nsubgraph 审核流程[中文子图：权限审核与结果交付]\nA["${chinese}"] --> B["H<sub>2</sub>O x<sup>2</sup> <u>下划线</u> <b><i><code>List<T></code></i></b> <kbd>键</kbd> <samp>输出</samp> <tt>类型</tt> emoji ✅"]\nend\nclassDef measured font-size:18px,font-weight:bold,font-style:italic\nclass B measured`;
   await page.getByRole("textbox", { name: "Diagram source" }).fill(source);
   const image = page.getByTestId("mermaid-block").locator("img");
   await loadedImage(image);
-  const svg = await image.evaluate(async (element: HTMLImageElement) => fetch(element.src).then((response) => response.text()));
-  expect(svg).toContain("中文子图");
-  expect(svg).toContain("emoji ✅");
-  expect(svg).toContain('font-weight="var(--_w)"');
-  await page.screenshot({ path: test.info().outputPath("chinese-subgraph.png"), fullPage: true });
+  for (const width of [1280, 390]) {
+    if (width === 390) {
+      const previous = await image.getAttribute("src");
+      await page.setViewportSize({ width, height: 844 });
+      await expect(image).not.toHaveAttribute("src", previous!);
+    }
+    for (const theme of ["light", "dark"]) {
+      if (await page.evaluate(() => document.documentElement.classList.contains("dark")) !== (theme === "dark")) {
+        await expect(page.locator("html")).not.toHaveAttribute("data-theme-transition");
+        const previous = await image.getAttribute("src");
+        await page.getByRole("button", { name: "Toggle theme" }).click();
+        await expect.poll(() => page.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(theme === "dark");
+        await expect(image).not.toHaveAttribute("src", previous!);
+      }
+      await image.scrollIntoViewIfNeeded();
+      await loadedImage(image);
+      const rendered = await image.evaluate(async (element: HTMLImageElement) => {
+        const svg = await fetch(element.src).then((response) => response.text());
+        const document = new DOMParser().parseFromString(svg, "image/svg+xml");
+        const lines = Array.from(document.querySelector('g[data-id="A"] text')!.querySelectorAll("tspan"), (span) => span.textContent);
+        return { svg, lines };
+      });
+      expect(rendered.svg).toContain("中文子图");
+      expect(rendered.svg).toContain("✅");
+      expect(rendered.svg).toContain('font-weight="var(--_w)"');
+      expect(rendered.svg).toContain('baseline-shift="sub" font-size="smaller"');
+      expect(rendered.svg).toContain('baseline-shift="super" font-size="smaller"');
+      expect(rendered.svg).toContain('text-decoration="underline"');
+      expect(rendered.svg).toContain('font-family="var(--_fm)"');
+      expect(rendered.svg).toContain("List&lt;T&gt;");
+      expect(rendered.lines.length).toBeGreaterThan(1);
+      expect(rendered.lines.join("")).toBe(chinese);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await page.screenshot({ path: test.info().outputPath(`chinese-mixed-${theme}-${width}.png`), fullPage: true });
+    }
+  }
 });

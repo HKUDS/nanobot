@@ -21,11 +21,12 @@ from loguru import logger
 
 from nanobot.bus.delivery import ChannelNotReadyError, DeliveryRequest
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.outbound_events import ProgressEvent
+from nanobot.bus.outbound_events import ProgressEvent, outbound_message_for_event
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.manager import ChannelManager
 from nanobot.channels.whatsapp_agent import runtime as runtime_module
 from nanobot.channels.whatsapp_agent.protocol import (
+    TEXT_MAX_CHARS,
     APIError,
     WhatsAppAgentAPIError,
     WhatsAppAgentAuthError,
@@ -35,6 +36,7 @@ from nanobot.channels.whatsapp_agent.runtime import (
     WhatsAppAgentChannel,
     WhatsAppAgentConfig,
 )
+from nanobot.utils.helpers import split_message
 
 
 @pytest.fixture(autouse=True)
@@ -92,10 +94,6 @@ def _text_message(wamid: str, body: str = "hi", sender: str = "user:55") -> dict
         "type": "text",
         "text": {"body": body},
     }
-
-
-def _json_response(status: int, payload: Any) -> httpx.Response:
-    return httpx.Response(status, json=payload)
 
 
 # ----------------------------------------------------------------------
@@ -669,9 +667,73 @@ def test_manager_retry_resumes_after_acknowledged_parts(
     monkeypatch.setattr("nanobot.channels.manager._SEND_RETRY_DELAYS", (0,))
     manager = object.__new__(ChannelManager)
     manager.config = Config()
+    manager._outbound_sends = asyncio.Semaphore(32)
     message = OutboundMessage(channel=channel.name, chat_id="creator", content="A" * 4096 + "B")
     asyncio.run(manager._send_with_retry(channel, message))
     assert delivered == ["A" * 4096, "B"]
+    assert not channel._pending_sends
+
+
+async def test_manager_structured_tool_hint_retry_preserves_multipart_progress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    from unittest.mock import AsyncMock
+
+    from nanobot.config.schema import Config
+
+    config = Config.model_validate({
+        "agents": {"defaults": {"toolHintMaxLength": 500}},
+        "channels": {
+            "websocket": {"enabled": False},
+            "whatsapp_agent": {
+                "enabled": True, "token": "test-token", "sendToolHints": True,
+                "stateDir": str(tmp_path),
+            },
+        },
+    })
+    manager = ChannelManager(config, MessageBus(), config_path=tmp_path / "config.json")
+    channel = manager.channels["whatsapp_agent"]
+    channel._state.note_creator("user:55")
+    queries = [f"{index:02d}" + "x" * 498 for index in range(10)]
+    msg = outbound_message_for_event(
+        channel=channel.name,
+        chat_id=CREATOR_CHAT_ID,
+        event=ProgressEvent(tool_hint=True, tool_events=[{
+            "phase": "start", "call_id": f"call-{index}", "name": "web_search",
+            "arguments": {"query": query},
+        } for index, query in enumerate(queries)]),
+    )
+    expected_hint = ", ".join(f'search "{query}"' for query in queries)
+    chunks = split_message(expected_hint, TEXT_MAX_CHARS)
+    assert len(chunks) == 2
+    attempted: list[str] = []
+    delivered: list[str] = []
+
+    def accept(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)["text"]["body"]
+        attempted.append(body)
+        if len(attempted) == 2:
+            raise httpx.ConnectError("not submitted", request=request)
+        delivered.append(body)
+        return httpx.Response(200, json={"messages": [{"id": str(len(attempted))}]})
+
+    send = AsyncMock(wraps=channel.send)
+    monkeypatch.setattr(channel, "send", send)
+    monkeypatch.setattr("nanobot.channels.manager._SEND_RETRY_DELAYS", (0,))
+    async with httpx.AsyncClient(transport=httpx.MockTransport(accept)) as client:
+        channel._client = client
+        await manager._queue_outbound(channel, msg)
+        await asyncio.gather(*manager._outbound_tasks)
+
+    assert delivered == chunks
+    assert attempted == [chunks[0], chunks[1], chunks[1]]
+    assert send.await_count == 2
+    first, retry = [call.args[0] for call in send.await_args_list]
+    assert first is retry
+    assert first is not msg
+    assert first.content == expected_hint
+    assert first.event is msg.event
+    assert msg.content == msg.event.content == ""
     assert not channel._pending_sends
 
 
@@ -703,6 +765,7 @@ def test_media_failure_never_replays_accepted_text_or_attachments(
     monkeypatch.setattr("nanobot.channels.manager._SEND_RETRY_DELAYS", (0,))
     manager = object.__new__(ChannelManager)
     manager.config = Config()
+    manager._outbound_sends = asyncio.Semaphore(32)
     message = OutboundMessage(
         channel=channel.name, chat_id="creator", content="Files",
         media=[str(attachment), str(attachment)],

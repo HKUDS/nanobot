@@ -35,6 +35,7 @@ from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import build_help_text
+from nanobot.config.network import NetworkConfig
 from nanobot.config.paths import get_media_dir
 from nanobot.config_base import Base
 from nanobot.events import ContextCompactionEvent
@@ -484,7 +485,6 @@ class _QueuedTelegramUpdate:
 
     kind: Literal["command", "message"]
     update: Update
-    context: ContextTypes.DEFAULT_TYPE
     sort_key: tuple[int, int]
 
 
@@ -495,7 +495,7 @@ class TelegramConfig(Base):
     token: str = ""
     mode: Literal["polling", "webhook"] = "polling"
     allow_from: list[str] = Field(default_factory=list)
-    proxy: str | None = None
+    use_proxy: bool = False
     reply_to_message: bool = False
     react_emoji: str = "👀"
     group_policy: Literal["open", "mention"] = "mention"
@@ -588,6 +588,7 @@ class TelegramChannel(BaseChannel):
 
     name = "telegram"
     display_name = "Telegram"
+    uses_shared_proxy = True
 
     # Commands registered with Telegram's command menu
     BOT_COMMANDS: list[BotCommand] = [
@@ -623,11 +624,14 @@ class TelegramChannel(BaseChannel):
     def default_config(cls) -> dict[str, Any]:
         return TelegramConfig().model_dump(by_alias=True)
 
-    def __init__(self, config: Any, bus: MessageBus):
+    def __init__(
+        self, config: Any, bus: MessageBus, *, network: NetworkConfig | None = None,
+    ):
         if isinstance(config, dict):
             config = TelegramConfig.model_validate(config)
-        super().__init__(config, bus)
+        super().__init__(config, bus, network=network)
         self.config: TelegramConfig = config
+        self._proxy = self.network.resolve_proxy(self.config.use_proxy)
         self._app: TelegramApplication | None = None
         self._typing_tasks: dict[str, asyncio.Task[None]] = {}  # chat_id -> typing loop task
         self._media_group_buffers: dict[str, dict[str, Any]] = {}
@@ -735,9 +739,7 @@ class TelegramChannel(BaseChannel):
 
     async def _start_app(self) -> None:
         """Build, initialize and start the Telegram application."""
-        proxy = self.config.proxy or None
-        if proxy and "://" not in proxy:
-            proxy = f"http://{proxy}"
+        proxy = self._proxy
 
         # Separate pools so long-polling (getUpdates) never starves outbound sends.
         api_request = HTTPXRequest(
@@ -1133,6 +1135,11 @@ class TelegramChannel(BaseChannel):
         buf.text = tail
         buf.message_id = sent.message_id
         buf.draft_id = None
+
+    def should_retry_send_error(self, error: Exception) -> bool:
+        # Per-part API retries belong to this adapter. Whole-message replay is safe
+        # only before submission; otherwise it may duplicate a successful prefix.
+        return isinstance(error, ChannelNotReadyError)
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
@@ -1934,7 +1941,6 @@ class TelegramChannel(BaseChannel):
         *,
         kind: Literal["command", "message"],
         update: Update,
-        context: ContextTypes.DEFAULT_TYPE,
     ) -> None:
         """Stage a Telegram update behind a short per-session reorder window."""
         message = update.message
@@ -1945,7 +1951,6 @@ class TelegramChannel(BaseChannel):
             _QueuedTelegramUpdate(
                 kind=kind,
                 update=update,
-                context=context,
                 sort_key=self._sort_key_for_update(update),
             )
         )
@@ -1967,9 +1972,9 @@ class TelegramChannel(BaseChannel):
                 for item in batch:
                     try:
                         if item.kind == "command":
-                            await self._process_forward_command(item.update, item.context)
+                            await self._process_forward_command(item.update)
                         else:
-                            await self._process_message_update(item.update, item.context)
+                            await self._process_message_update(item.update)
                     except Exception as e:
                         self.logger.warning(
                             "Telegram queued update handling failed for {}: {}",
@@ -1991,11 +1996,11 @@ class TelegramChannel(BaseChannel):
         if not update.message or not update.effective_user:
             return
         if not self._running:
-            await self._process_forward_command(update, context)
+            await self._process_forward_command(update)
             return
-        self._enqueue_ordered_update(kind="command", update=update, context=context)
+        self._enqueue_ordered_update(kind="command", update=update)
 
-    async def _process_forward_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def _process_forward_command(self, update: Update) -> None:
         """Process a queued slash command."""
         message = update.message
         user = update.effective_user
@@ -2028,11 +2033,11 @@ class TelegramChannel(BaseChannel):
         if not update.message or not update.effective_user:
             return
         if not self._running:
-            await self._process_message_update(update, context)
+            await self._process_message_update(update)
             return
-        self._enqueue_ordered_update(kind="message", update=update, context=context)
+        self._enqueue_ordered_update(kind="message", update=update)
 
-    async def _process_message_update(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def _process_message_update(self, update: Update) -> None:
         """Process a queued Telegram message update."""
 
         message = update.message

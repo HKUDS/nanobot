@@ -10,12 +10,13 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from loguru import logger
 from websockets.asyncio.server import ServerConnection
 
-from nanobot.bus.events import INBOUND_META_USER_SHELL
+from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA, INBOUND_META_USER_SHELL
+from nanobot.channels.websocket.attachment_policy import validate_attachment_batch
 from nanobot.channels.websocket.attachment_store import AttachmentUploadError
 from nanobot.command.builtin import USER_SHELL_COMMAND, builtin_command_starts_agent_turn
 from nanobot.runtime_context import (
@@ -28,6 +29,7 @@ from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
     WorkspaceScopeError,
 )
+from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.keys import session_key_for_channel
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
@@ -38,6 +40,7 @@ from nanobot.session.webui_turns import (
 )
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.prompt_templates import render_template
+from nanobot.webui.attachments import inspect_local_attachment
 from nanobot.webui.cli_apps_api import normalize_cli_app_mentions
 from nanobot.webui.file_preview import (
     WebUIFilePreviewError,
@@ -62,6 +65,9 @@ from nanobot.webui.session_identity import is_valid_webui_chat_id, webui_session
 from nanobot.webui.sidebar_state import write_webui_sidebar_state
 from nanobot.webui.temporary_chats import TemporaryChatError
 from nanobot.webui.transcription_ws import webui_transcription_event
+
+if TYPE_CHECKING:
+    from nanobot.webui.outbound_delivery import WebUIOutboundDelivery
 
 _WEBUI_REQUEST_CACHE_TTL_S = 5 * 60.0
 _WEBUI_REQUEST_CACHE_MAX = 256
@@ -97,10 +103,6 @@ class WebUICommandTransport(Protocol):
 
     def webui_clear_connection_default(self, connection: ServerConnection) -> None: ...
 
-    def webui_clear_stream_buffers(self, chat_id: str) -> None: ...
-
-    async def webui_hydrate(self, chat_id: str) -> None: ...
-
     async def webui_send_event(
         self,
         connection: ServerConnection,
@@ -130,19 +132,15 @@ class WebUICommandTransport(Protocol):
         session_generation: str | None,
     ) -> None: ...
 
-    async def send_session_updated(
-        self,
-        chat_id: str,
-        *,
-        scope: str | None = None,
-    ) -> None: ...
-
 
 class WebUICommandRouter:
     """Own WebUI command semantics while a transport host owns raw connections."""
 
-    def __init__(self, transport: WebUICommandTransport, gateway: GatewayServices) -> None:
+    def __init__(
+        self, transport: WebUICommandTransport, gateway: GatewayServices, *, outbound: WebUIOutboundDelivery,
+    ) -> None:
         self._transport = transport
+        self._outbound = outbound
         self.gateway = gateway
         self._http_router = gateway.http
         self._media = gateway.media
@@ -199,7 +197,7 @@ class WebUICommandRouter:
             scope="metadata",
             workspace_scope=scope.payload(),
         )
-        await self._transport.webui_hydrate(fork_id)
+        await self._outbound.hydrate(fork_id)
 
     async def discard_owned_chat(
         self,
@@ -209,7 +207,7 @@ class WebUICommandRouter:
         await self._temporary_chats.discard(connection, chat_id)
         self._transport.webui_detach(connection, chat_id)
         clear_websocket_turns(chat_id)
-        self._transport.webui_clear_stream_buffers(chat_id)
+        self._outbound.discard(chat_id)
 
     async def cleanup_connection(self, connection: ServerConnection) -> None:
         """Release command-owned state associated with one transport connection."""
@@ -237,8 +235,7 @@ class WebUICommandRouter:
         *,
         turn_id: str | None,
         starts_turn: bool,
-        media_paths: list[str],
-        media_names: list[str | None],
+        media: list[dict[str, Any]],
         cli_apps: list[dict[str, Any]],
         mcp_presets: list[dict[str, Any]],
         session_mentions: list[SessionMention],
@@ -251,10 +248,6 @@ class WebUICommandRouter:
         }
         if turn_id is not None:
             body["turn_id"] = turn_id
-        media = self._media.augment_transcript_user_media(media_paths)
-        for attachment, name in zip(media, media_names, strict=False):
-            if name:
-                attachment["name"] = name
         if media:
             body["media_urls"] = media
         if cli_apps:
@@ -332,7 +325,7 @@ class WebUICommandRouter:
                 scope="metadata",
                 workspace_scope=scope.payload(),
             )
-            await self._transport.webui_hydrate(new_id)
+            await self._outbound.hydrate(new_id)
             return
         if command_type == "new_temporary_chat":
             try:
@@ -399,7 +392,7 @@ class WebUICommandRouter:
                 chat_id=chat_id,
                 **(await self._session_projection.attach_fields(webui_session_key(chat_id))),
             )
-            await self._transport.webui_hydrate(chat_id)
+            await self._outbound.hydrate(chat_id)
             return
         if command_type == "set_sidebar_state":
             if connection not in self._webui_connections:
@@ -458,8 +451,11 @@ class WebUICommandRouter:
             )
             if scope is None:
                 return
-            await self._workspaces.stage_scope(chat_id, scope)
-            await self._transport.send_session_updated(chat_id, scope="metadata")
+            if await self.workspace_scope_or_error(
+                connection, lambda: self._workspaces.stage_scope(chat_id, scope), chat_id=chat_id,
+            ) is None:
+                return
+            await self._outbound.session_updated(chat_id, scope="metadata")
             await self._transport.webui_send_event(
                 connection,
                 "session_updated",
@@ -583,6 +579,8 @@ class WebUICommandRouter:
         media_paths: list[str] = []
         media_names: list[str | None] = []
         references: list[str] = []
+        local_paths: list[str] = []
+        attachment_order: list[tuple[bool, int]] = []
         upload_owner = self._uploads.owner(connection) if raw_media else ""
         try:
             if not isinstance(raw_media, list):
@@ -595,13 +593,21 @@ class WebUICommandRouter:
                     raise AttachmentUploadError("malformed")
                 attachment = cast(dict[str, Any], item)
                 reference = attachment.get("reference")
-                if not isinstance(reference, str) or len(reference) > 64 or "data_url" in attachment:
-                    raise AttachmentUploadError("Expected an HTTP attachment reference")
-                references.append(reference)
+                path = attachment.get("path")
+                if "data_url" in attachment or (reference is None) == (path is None):
+                    raise AttachmentUploadError("Expected an upload reference or local path")
+                if path is not None:
+                    if not isinstance(path, str) or not path or len(path) > 4096:
+                        raise AttachmentUploadError("Invalid local attachment path")
+                    attachment_order.append((True, len(local_paths)))
+                    local_paths.append(path)
+                else:
+                    if not isinstance(reference, str) or len(reference) > 64:
+                        raise AttachmentUploadError("Invalid upload reference")
+                    attachment_order.append((False, len(references)))
+                    references.append(reference)
                 name = attachment.get("name")
                 media_names.append((safe_filename(name) or None) if isinstance(name, str) else None)
-            if references:
-                media_paths = self._uploads.store.resolve(references, owner=upload_owner)
         except AttachmentUploadError as exc:
             await self._transport.webui_send_event(
                 connection, "error", detail="attachment_rejected", reason=str(exc),
@@ -609,7 +615,7 @@ class WebUICommandRouter:
             )
             return
 
-        if not content.strip() and not media_paths:
+        if not content.strip() and not attachment_order:
             await self._transport.webui_send_event(
                 connection,
                 "error",
@@ -619,7 +625,7 @@ class WebUICommandRouter:
             return
         self._transport.webui_attach(connection, chat_id)
         if temporary_policy is None or temporary_policy.hydrate_transcript:
-            await self._transport.webui_hydrate(chat_id)
+            await self._outbound.hydrate(chat_id)
 
         scope = temporary_policy.workspace_scope if temporary_policy is not None else (
             await self.workspace_scope_or_error(
@@ -660,7 +666,7 @@ class WebUICommandRouter:
             and turn_id is not None
             and turn_id.startswith(WEBUI_SYSTEM_COMMAND_TURN_PREFIX)
             and content.strip().lower() == "/restart"
-            and not media_paths
+            and not attachment_order
         )
         if restart_control:
             metadata[WEBUI_RESTART_CONTROL_METADATA_KEY] = True
@@ -696,16 +702,35 @@ class WebUICommandRouter:
         # persisting paths, with no intervening await, so expiry cannot remove
         # files referenced by the canonical transcript.
         try:
+            local = [
+                await asyncio.to_thread(
+                    inspect_local_attachment, path, scope=scope, limits=self._uploads.store.limits,
+                )
+                for path in local_paths
+            ]
+            uploaded = self._uploads.store.inspect(references, owner=upload_owner) if references else []
+            validate_attachment_batch(
+                [item["mime"] for item in local] + [item.mime for item in uploaded],
+                limits=self._uploads.store.limits,
+            )
+            media_paths = [
+                local[index]["path"] if is_local else str(uploaded[index].path)
+                for is_local, index in attachment_order
+            ]
+            if len(set(media_paths)) != len(media_paths):
+                raise AttachmentUploadError("Duplicate attachment reference")
             if references:
-                media_paths = self._uploads.store.commit(references, owner=upload_owner)
-        except AttachmentUploadError as exc:
+                self._uploads.store.commit(references, owner=upload_owner)
+        except (ValueError, WebUIFilePreviewError) as exc:
             await self._transport.webui_send_event(
                 connection, "error", detail="attachment_rejected", reason=str(exc),
                 **rejection_fields,
             )
             return
+        if local:
+            metadata[INBOUND_META_LOCAL_MEDIA] = [item["path"] for item in local]
         if temporary_policy is not None:
-            self._temporary_chats.register_media(connection, chat_id, media_paths)
+            self._temporary_chats.register_media(connection, chat_id, [str(item.path) for item in uploaded])
         is_webui = metadata.get("webui") is True
         queued_owner = None
         if is_webui and not is_user_shell and builtin_command_starts_agent_turn(content):
@@ -732,16 +757,24 @@ class WebUICommandRouter:
         execution_created = False
         try:
             if not restart_control:
-                session_generation, session_created = await self._workspaces.persist_scope(
-                    chat_id,
-                    scope,
-                    session_key=admission_session_key,
-                    expected_generation=(
-                        temporary_policy.session_generation
-                        if temporary_policy is not None
-                        else None
+                admission = await self.workspace_scope_or_error(
+                    connection,
+                    lambda: self._workspaces.persist_scope(
+                        chat_id,
+                        scope,
+                        session_key=admission_session_key,
+                        expected_generation=(
+                            temporary_policy.session_generation
+                            if temporary_policy is not None
+                            else None
+                        ),
                     ),
+                    chat_id=chat_id,
+                    turn_id=turn_id,
                 )
+                if admission is None:
+                    return
+                session_generation, session_created = admission
                 execution_generation = session_generation
                 if (
                     execution_session_key != admission_session_key
@@ -752,10 +785,12 @@ class WebUICommandRouter:
                             execution_session_key, {},
                         )
                     )
+            if session_generation is not None:
+                metadata[HISTORY_GENERATION_METADATA_KEY] = session_generation
             if is_webui and not restart_control and (
                 temporary_policy is None or temporary_policy.persist_transcript
             ):
-                self._transcripts.append_user_message(
+                await self._transcripts.append_user_message(
                     chat_id,
                     content,
                     metadata=metadata,
@@ -822,15 +857,23 @@ class WebUICommandRouter:
             if not accepted and queued_owner is not None:
                 clear_websocket_turn_if_current(chat_id, queued_owner)
 
+        media = self._media.augment_transcript_user_media(
+            media_paths, local_paths=[item["path"] for item in local],
+            session_key=webui_session_key(chat_id),
+        ) if is_webui else []
+        for attachment, name in zip(media, media_names, strict=False):
+            if name:
+                attachment["name"] = name
         if is_webui and not restart_control:
+            if session_created:
+                await self._outbound.session_updated(chat_id, scope="metadata")
             await self.broadcast_user_message(
                 connection,
                 chat_id,
                 content,
                 turn_id=turn_id,
                 starts_turn=queued_owner is not None,
-                media_paths=media_paths,
-                media_names=media_names,
+                media=media,
                 cli_apps=cli_apps,
                 mcp_presets=mcp_presets,
                 session_mentions=session_mentions,
@@ -844,6 +887,7 @@ class WebUICommandRouter:
                 chat_id=chat_id,
                 turn_id=turn_id,
                 starts_turn=queued_owner is not None,
+                **({"media_urls": media} if media else {}),
                 **(
                     {"active_turn_id": active_turn_id}
                     if active_turn_id is not None
@@ -901,6 +945,46 @@ class WebUICommandRouter:
                 status=400,
                 message="WebUI mutation payload must be an object",
             )
+            return
+
+        payload = cast(dict[str, Any], payload)
+        if action == "attachment.inspect":
+            # Read-only and connection-scoped: never retain filesystem results in
+            # the mutation replay cache. Send admission always checks again.
+            chat_id, path = payload.get("chat_id"), payload.get("path")
+            if (chat_id is not None and not is_valid_webui_chat_id(chat_id)) or not isinstance(path, str):
+                await self.send_webui_response(
+                    connection, request_id, status=400, message="invalid attachment request",
+                )
+                return
+            try:
+                if chat_id is None:
+                    scope = await self._workspaces.scope_for_new_chat(
+                        payload, can_change_project=self.workspace_project_selection_available(connection),
+                    )
+                else:
+                    policy = self._temporary_chats.message_policy(connection, chat_id, "")
+                    scope = policy.workspace_scope if policy is not None else (
+                        await self._workspaces.scope_for_message(
+                            payload, chat_id=chat_id,
+                            chat_running=websocket_turn_wall_started_at(chat_id) is not None,
+                            can_change_project=self.workspace_project_selection_available(connection),
+                        )
+                    )
+                result = await asyncio.to_thread(
+                    inspect_local_attachment, path, scope=scope, limits=self._uploads.store.limits,
+                )
+            except (TemporaryChatError, WorkspaceScopeError, WebUIFilePreviewError) as exc:
+                await self.send_webui_response(
+                    connection, request_id, status=getattr(exc, "status", 404), message=str(exc),
+                )
+            else:
+                await self.send_webui_response(
+                    connection, request_id,
+                    result={**result, "url": self._media.local_attachment_url(
+                        result["path"], session_key=webui_session_key(chat_id),
+                    ) if chat_id is not None else ""},
+                )
             return
 
         if action == "temporary_chat.file_preview":
@@ -969,7 +1053,7 @@ class WebUICommandRouter:
                 self.execute_webui_request(
                     connection,
                     action,
-                    cast(dict[str, Any], payload),
+                    payload,
                 )
             )
             new_operation = WebUIRequestOperation(

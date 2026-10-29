@@ -215,25 +215,53 @@ describe("AgentActivityCluster", () => {
     });
   });
 
-  it("shows model retries in the existing live activity header", () => {
-    render(
-      <AgentActivityCluster
-        messages={[]}
-        isTurnStreaming
-        hasBodyBelow={false}
-        retryStatus={{
-          state: "waiting",
-          attempt: 1,
-          max_attempts: 4,
-          error_kind: "connection",
-          next_retry_at: Date.now() / 1000 + 5,
-        }}
-      />,
-    );
+  it.each([
+    {
+      locale: "en" as const,
+      waiting: "Connection failed Retrying in 5s",
+      retrying: "Connection failed Retrying",
+      exhausted: "Connection failed Ending turn",
+    },
+    {
+      locale: "zh-CN" as const,
+      waiting: "连接失败 5 秒后重试",
+      retrying: "连接失败 正在重试",
+      exhausted: "连接失败 正在结束本次任务",
+    },
+  ])("shows localized model retry progress in the activity header ($locale)", async ({
+    locale, waiting, retrying, exhausted,
+  }) => {
+    await act(async () => setAppLanguage(locale));
+    vi.useFakeTimers();
+    try {
+      const retryStatus = {
+        state: "waiting" as const,
+        attempt: 1,
+        max_attempts: 4,
+        error_kind: "connection" as const,
+        next_retry_at: Date.now() / 1000 + 5,
+      };
+      const { rerender, unmount } = render(
+        <AgentActivityCluster messages={[]} isTurnStreaming hasBodyBelow={false} retryStatus={retryStatus} />,
+      );
 
-    expect(
-      screen.getByText("Connection failed. Retrying in 5s (attempt 1/4)."),
-    ).toBeInTheDocument();
+      expect(screen.getByRole("status", { name: waiting })).toBeVisible();
+      act(() => { vi.advanceTimersByTime(5_000); });
+      expect(screen.getByRole("status", { name: retrying })).toBeVisible();
+
+      rerender(
+        <AgentActivityCluster
+          messages={[]}
+          isTurnStreaming
+          hasBodyBelow={false}
+          retryStatus={{ ...retryStatus, state: "exhausted", attempt: 4 }}
+        />,
+      );
+      expect(screen.getByRole("status", { name: exhausted })).toBeVisible();
+      unmount();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps intermediate assistant output as normal Markdown inside live activity", async () => {
@@ -284,8 +312,6 @@ describe("AgentActivityCluster", () => {
     expect(content).toHaveClass("ps-6");
     expect(content).not.toHaveClass("max-h-[180px]");
     expect(content).not.toHaveClass("overflow-y-auto");
-    expect(screen.queryByTestId("activity-scroll-fade-top")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("activity-scroll-fade-bottom")).not.toBeInTheDocument();
 
     view.rerender(<AgentActivityCluster {...props} messages={activityMessages(" updated", {
       id: "next-tool", role: "tool", kind: "trace", content: "open_browser()", createdAt: 3,
@@ -471,8 +497,7 @@ describe("AgentActivityCluster", () => {
       expect(screen.queryByText("Edited files")).not.toBeInTheDocument();
       const fileRef = screen.getByTestId("activity-file-reference");
       expect(fileRef).toHaveTextContent("src/app.tsx");
-      expect(fileRef).toHaveAttribute("aria-label", "src/app.tsx");
-      expect(screen.queryByTestId("activity-header-file-reference")).not.toBeInTheDocument();
+      expect(fileRef).toHaveAttribute("aria-label", "/Users/renxubin/project/src/app.tsx");
       expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
       for (const diffPair of screen.getAllByTestId("activity-diff-pair")) {
         expect(diffPair).toHaveClass("items-baseline");
@@ -619,7 +644,7 @@ describe("AgentActivityCluster", () => {
             retryStatus={{ state: "waiting", attempt: 1, max_attempts: 4, error_kind: "connection" }}
           />,
         );
-        expect(screen.getByRole("status", { name: "Connection failed. Retrying in 0s (attempt 1/4)." }))
+        expect(screen.getByRole("status", { name: "Connection failed Retrying" }))
           .toBeVisible();
         unmount();
         render(<AgentActivityCluster messages={messages} isTurnStreaming={false} hasBodyBelow />);
@@ -794,8 +819,7 @@ describe("AgentActivityCluster", () => {
 
       const toggle = screen.getByTestId("file-edit-diff-toggle");
       expect(toggle).toHaveAttribute("aria-expanded", "false");
-      expect(toggle).toHaveTextContent("Expand changes");
-      expect(toggle).toHaveTextContent("165 lines");
+      expect(toggle).toHaveTextContent(/^Expand changes$/);
       expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
       expect(screen.queryByText("line-1")).not.toBeInTheDocument();
 
@@ -883,8 +907,7 @@ describe("AgentActivityCluster", () => {
 
       const toggle = screen.getByTestId("file-edit-diff-toggle");
       expect(toggle).toHaveAttribute("aria-expanded", "false");
-      expect(toggle).toHaveTextContent("View changes");
-      expect(toggle).toHaveTextContent("3 lines");
+      expect(toggle).toHaveTextContent(/^View changes$/);
       expect(screen.queryByTestId("file-edit-diff")).not.toBeInTheDocument();
       expect(screen.queryByText("return <New />;")).not.toBeInTheDocument();
 
@@ -1052,7 +1075,6 @@ describe("AgentActivityCluster", () => {
     expect(screen.queryByRole("button", { name: /edited app\.tsx/i })).not.toBeInTheDocument();
     expect(screen.queryByTestId("agent-activity-content")).not.toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Edited" })).toBeInTheDocument();
-    expect(screen.queryByTestId("activity-header-file-reference")).not.toBeInTheDocument();
     const marker = screen.getByRole("img", { name: "Edited" });
     expect(marker.querySelector("svg")).toHaveClass("lucide-file-code2");
     expect(marker.closest('[data-testid="activity-step"]')?.querySelectorAll("svg")).toHaveLength(1);
@@ -1316,6 +1338,7 @@ describe("AgentActivityCluster", () => {
     expect(screen.queryByText(/signed-secret|secret1234|url-secret/)).not.toBeInTheDocument();
     expect(screen.getByLabelText("Searched the web, release notes access_token=<redacted>")).toBeInTheDocument();
     expect(screen.getByText("Release <redacted>")).toBeInTheDocument();
+    expect(screen.getByText("Release <redacted>").closest("a")).toHaveClass("text-content-link", "hover:text-content-link-hover");
     expect(screen.getByText("Release <redacted>").closest("a")).toHaveAttribute(
       "href",
       "https://example.com/release",
@@ -2107,7 +2130,6 @@ describe("AgentActivityCluster", () => {
     expect(screen.queryByText("Web")).not.toBeInTheDocument();
     const row = screen.getByText("example.com").closest('[data-testid="activity-step"]');
     expect(row).toHaveTextContent("Read");
-    expect(screen.queryByTestId("activity-evidence-preview")).not.toBeInTheDocument();
     expect(screen.queryByText(/Found image/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("img", { name: "Homepage screenshot" })).not.toBeInTheDocument();
   });
@@ -2214,7 +2236,6 @@ describe("AgentActivityCluster", () => {
 
     expect(screen.queryByText("Vision")).not.toBeInTheDocument();
     expect(screen.getByText("Captured screenshot")).toBeInTheDocument();
-    expect(screen.queryByTestId("activity-evidence-preview")).not.toBeInTheDocument();
     expect(screen.queryByText("missing.png")).not.toBeInTheDocument();
   });
 
@@ -2261,7 +2282,6 @@ describe("AgentActivityCluster", () => {
       expect(line).toHaveClass("overflow-hidden");
       expect(line).toHaveClass("whitespace-nowrap");
       expect(step.querySelector("br")).not.toBeInTheDocument();
-      expect(step.querySelector('[data-testid="activity-evidence-preview"]')).not.toBeInTheDocument();
     }
     expect(document.querySelector("details")).not.toBeInTheDocument();
     expect(document.querySelector("ul, li, section")).not.toBeInTheDocument();

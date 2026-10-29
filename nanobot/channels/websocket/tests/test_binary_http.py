@@ -60,8 +60,8 @@ async def test_binary_body_exceeds_ws_frame_limit_without_changing_ws(tmp_path):
             assert ws.close_code == 1009
     finally:
         server.close()
-        await server.wait_closed()
         await bridge.shutdown()
+        await server.wait_closed()
         store.clear()
 
 
@@ -90,10 +90,12 @@ async def test_fragmented_method_and_shutdown_of_undecided_connection():
         idle_reader, idle_writer = await asyncio.open_connection("127.0.0.1", port)
         idle_writer.write(b"P")
         await idle_writer.drain()
-        await asyncio.sleep(0.01)
+        async with asyncio.timeout(2):
+            while not any(connection._prefix == b"P" for connection in bridge.pending_connections):
+                await asyncio.sleep(0)
         server.close()
-        await server.wait_closed()
         await bridge.shutdown()
+        await server.wait_closed()
         assert await asyncio.wait_for(idle_reader.read(), 2) == b""
         idle_writer.close()
         await idle_writer.wait_closed()
@@ -101,8 +103,8 @@ async def test_fragmented_method_and_shutdown_of_undecided_connection():
         writer.close()
         await writer.wait_closed()
         server.close()
-        await server.wait_closed()
         await bridge.shutdown()
+        await server.wait_closed()
 
 
 @pytest.mark.asyncio
@@ -136,8 +138,8 @@ async def test_ambiguous_http_framing_is_rejected_before_handler(headers):
         writer.close()
         await writer.wait_closed()
         server.close()
-        await server.wait_closed()
         await bridge.shutdown()
+        await server.wait_closed()
 
 
 @pytest.mark.asyncio
@@ -165,8 +167,8 @@ async def test_request_body_is_not_automatically_decompressed():
         assert received == [body]
     finally:
         server.close()
-        await server.wait_closed()
         await bridge.shutdown()
+        await server.wait_closed()
 
 
 @pytest.mark.asyncio
@@ -191,8 +193,8 @@ async def test_incomplete_http_headers_have_a_deadline(monkeypatch):
         writer.close()
         await writer.wait_closed()
         server.close()
-        await server.wait_closed()
         await bridge.shutdown()
+        await server.wait_closed()
 
 
 @pytest.mark.asyncio
@@ -233,6 +235,6 @@ async def test_parsed_request_outlasts_header_deadline(tmp_path, monkeypatch):
         writer.close()
         await writer.wait_closed()
         server.close()
-        await server.wait_closed()
         await bridge.shutdown()
+        await server.wait_closed()
         store.clear()

@@ -61,16 +61,6 @@
     "scope": "Emplacement du fichier",
     "hint": "Ouvrez le menu de copie par clic droit, ou placez le focus sur le fichier et appuyez sur Maj+F10."
   },
-  "webLinks": {
-    "title": "Web links · Menu des liens",
-    "description": "Ouvrez le véritable menu des liens pour sélectionner un lien et copier son adresse.",
-    "options": "WebLink reçoit les attributs du lien. useMessageWebLinks collecte les liens affichés. MessageLinksMenu reçoit les entrées et les rappels de retour et de fermeture ; expanded contrôle la largeur. Les liens pointent vers des ressources locales de la galerie.",
-    "width": "Largeur du menu des liens",
-    "message": "Consultez la <gallery>galerie de composants</gallery> et l’<brand>image de marque</brand>.",
-    "close": "Fermer le menu des liens",
-    "open": "Voir les liens du message",
-    "hint": "Un clic droit permet de copier l’adresse d’un lien. Le menu collecte les liens du message affiché."
-  },
   "workbench": {
     "title": "PaneWorkbench · Volets multiples",
     "description": "Changez la disposition, activez ou ajoutez des volets et ajustez leur position et leur taille.",
@@ -234,14 +224,6 @@
     "description": "Comparez texte, images, troncature, chargement et erreurs. Sélectionnez une image pour zoomer.",
     "options": "state fournit l’état d’affichage ; path détermine le type et le nom du fichier. Les rappels d’ouverture et d’erreur d’image actualisent l’aperçu.",
     "state": "État de l’aperçu du fichier"
-  },
-  "webPreview": {
-    "title": "WebPreviewPanelView · Contenu web",
-    "description": "Explorez le titre, l’isolation et les restrictions ; actualisez un document local.",
-    "options": "Le runtime choisit restriction avant de fournir le contenu. children fournit le contenu ; onRefresh demande une actualisation. Cet iframe utilise un srcDoc local.",
-    "state": "État de l’aperçu web",
-    "frame": "Page web d’exemple locale",
-    "refreshes": "Actualisations : {{amount}}"
   },
   "session": {
     "title": "SessionInfoPopoverView · Automatisations de session",

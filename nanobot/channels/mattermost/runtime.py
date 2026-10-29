@@ -250,7 +250,7 @@ class MattermostChannel(BaseChannel):
 
         if not await self._is_allowed(sender_id, channel_id, channel_type):
             if is_dm and self.config.dm.enabled:
-                code = generate_code(self.name, str(sender_id))
+                code = generate_code(self.name, str(sender_id), on_change=self._pairing_changed)
                 await self.send(
                     OutboundMessage(
                         channel=self.name,
@@ -278,7 +278,7 @@ class MattermostChannel(BaseChannel):
         session_key = f"mattermost:{channel_id}:{thread_ts}" if thread_ts else None
 
         try:
-            await self._add_reaction(channel_id, post_id, self.config.react_emoji)
+            await self._add_reaction(post_id, self.config.react_emoji)
         except Exception:
             self.logger.debug("add reaction failed")
 
@@ -537,7 +537,7 @@ class MattermostChannel(BaseChannel):
                     self.logger.debug("remove reaction failed")
                 if self.config.done_emoji:
                     try:
-                        await self._add_reaction(chat_id, meta["message_id"], self.config.done_emoji)
+                        await self._add_reaction(meta["message_id"], self.config.done_emoji)
                     except Exception:
                         self.logger.debug("done reaction failed")
 
@@ -612,7 +612,7 @@ class MattermostChannel(BaseChannel):
                         self.logger.debug("remove reaction failed")
                 if first_post_id and self.config.done_emoji:
                     try:
-                        await self._add_reaction(chat_id, first_post_id, self.config.done_emoji)
+                        await self._add_reaction(first_post_id, self.config.done_emoji)
                     except Exception:
                         self.logger.debug("done reaction failed")
 
@@ -721,7 +721,7 @@ class MattermostChannel(BaseChannel):
             self.logger.warning("file download failed for {}: {}", file_id, e)
             return None
 
-    async def _add_reaction(self, channel_id: str, post_id: str, emoji: str) -> None:
+    async def _add_reaction(self, post_id: str, emoji: str) -> None:
         if not self._self_id or not emoji:
             return
         await self._api_post("/api/v4/reactions", {

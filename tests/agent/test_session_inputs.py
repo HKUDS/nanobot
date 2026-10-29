@@ -5,13 +5,19 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agent.session_helpers import stop_loop
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.context import RequestContext, request_context
+from nanobot.agent.tools.session_messages import SendSessionMessageTool
 from nanobot.bus.events import InboundMessage
+from nanobot.bus.outbound_events import UserInputEvent
 from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import UserInputAccepted
 from nanobot.providers.base import LLMResponse
 from nanobot.runtime_context import public_history_message
+from nanobot.session.session_handles import SessionHandleResolver
 from nanobot.session.session_messages import SESSION_MESSAGE_METADATA_KEY
+from nanobot.session.webui_turns import WebuiTurnCoordinator
+from nanobot.webui.history import record_from_fact
 
 
 @pytest.fixture
@@ -89,15 +95,14 @@ async def test_session_message_text_is_not_dispatched_as_a_slash_command(
     loop: AgentLoop,
 ) -> None:
     loop.sessions.save(loop.sessions.get_or_create("telegram:target"))
-    task = asyncio.create_task(loop.run())
-    try:
-        await loop.bus.publish_inbound(_message("/stop"))
-        response = await asyncio.wait_for(loop.bus.consume_outbound(), timeout=2)
+    await loop._dispatch_inbound(_message("/stop"))
+    await asyncio.wait_for(
+        asyncio.gather(*loop._active_tasks["telegram:target"]), timeout=2,
+    )
+    response = await asyncio.wait_for(loop.bus.consume_outbound(), timeout=2)
 
-        assert response.content == "Reviewed"
-        loop.provider.chat_stream_with_retry.assert_awaited_once()
-    finally:
-        await stop_loop(loop, task, timeout=2)
+    assert response.content == "Reviewed"
+    loop.provider.chat_stream_with_retry.assert_awaited_once()
 
 
 async def test_path_followup_reaches_running_turn(loop: AgentLoop) -> None:
@@ -139,3 +144,76 @@ async def test_path_followup_reaches_running_turn(loop: AgentLoop) -> None:
         release.set()
         loop.stop()
         await asyncio.wait_for(run, 5)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message_count", [1, 2], ids=["idle", "active"])
+async def test_cross_session_input_preserves_source_in_live_events_and_history(
+    loop: AgentLoop, message_count: int,
+) -> None:
+    source_key, target_key = "websocket:source", "websocket:target"
+    await loop.sessions.state.get(source_key)
+    await loop.sessions.state.get(target_key)
+    await loop.sessions.state.mutate_metadata(target_key, lambda metadata: metadata.update(webui=True))
+    handles = SessionHandleResolver(loop.sessions)
+    source = await handles.ahandle_for_session(source_key)
+    destination = await handles.ahandle_for_session(target_key)
+    assert source is not None and destination is not None
+    tool = SendSessionMessageTool(sessions=loop.sessions, bus=loop.bus)
+    coordinator = WebuiTurnCoordinator(
+        bus=loop.bus, sessions=loop.sessions,
+        schedule_background=lambda coro: coro.close(),
+    )
+    disconnect = coordinator.subscribe()
+    accepted = []
+    disconnect_accepted = loop.bus.subscribe(accepted.append, UserInputAccepted)
+    loop.bus.publish_outbound = AsyncMock()
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def respond(**kwargs):
+        started.set()
+        await release.wait()
+        return LLMResponse(content="Reviewed", tool_calls=[], usage=None)
+
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    run = asyncio.create_task(loop.run())
+    try:
+        for index in range(message_count):
+            with request_context(RequestContext(
+                channel="websocket", chat_id="source", session_key=source_key,
+            )):
+                result = await tool.execute(
+                    to=destination.name, content=f"Review {index}", expect_reply=False,
+                )
+            assert result == f"Sent to @{destination.name}."
+            async with asyncio.timeout(3):
+                while len(accepted) < index + 1:
+                    await asyncio.sleep(0)
+            await asyncio.wait_for(started.wait(), 3)
+        release.set()
+        await asyncio.wait_for(
+            asyncio.gather(*loop._active_tasks[target_key]), 5,
+        )
+        assert len(accepted) == message_count
+        events = [
+            call.args[0].event for call in loop.bus.publish_outbound.await_args_list
+            if isinstance(call.args[0].event, UserInputEvent)
+        ]
+        assert [event.content for event in events] == [f"Review {i}" for i in range(message_count)]
+        provenance = {"id": source.id, "name": source.name}
+        assert all(event.provenance["session_message"]["session"] == provenance for event in events)
+        # Reconnect/reload must preserve provenance, not just live events.
+        records = await loop.sessions.state.project_history(
+            target_key,
+            lambda history: [record_from_fact(fact, target_key) for fact in history.all_facts()],
+        )
+        inputs = [record for record in records if record.get("event") == "user"]
+        assert [record["text"] for record in inputs] == [f"Review {i}" for i in range(message_count)]
+        assert all(record["session_message"]["session"] == provenance for record in inputs)
+        loop.provider.chat_stream_with_retry.assert_awaited()
+    finally:
+        release.set()
+        disconnect()
+        disconnect_accepted()
+        run.cancel()
+        await asyncio.gather(run, return_exceptions=True)

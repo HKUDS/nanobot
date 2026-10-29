@@ -47,14 +47,19 @@ async def test_qq_connect_writes_scanned_credentials_to_config(monkeypatch: pyte
 
     started = await store.start()
     assert started["status"] == "pending"
+    assert started["retrying"] is False
     assert started["qr_url"].endswith("task_id=task-1&_wv=2")
+    assert store.has_pending_work
 
     polled = await store.poll(started["session_id"])
     assert polled["status"] == "succeeded"
+    assert not store.has_pending_work
+    assert polled["retrying"] is False
     assert await store.poll(started["session_id"]) == {
         "session_id": started["session_id"],
         "status": "expired",
         "message": "This QQ login has expired. Start again.",
+        "retrying": False,
     }
 
     saved = json.loads(_isolated_config.read_text(encoding="utf-8"))
@@ -65,19 +70,151 @@ async def test_qq_connect_writes_scanned_credentials_to_config(monkeypatch: pyte
 
 
 @pytest.mark.asyncio
-async def test_qq_connect_keeps_waiting_on_transient_portal_errors(monkeypatch: pytest.MonkeyPatch):
+@pytest.mark.parametrize("stop", ["cancel", "close", "expire"])
+async def test_qq_late_portal_result_cannot_save_after_session_ends(
+    monkeypatch: pytest.MonkeyPatch, _isolated_config: Path, stop: str,
+):
+    key = base64.b64encode(b"k" * 32).decode()
+    polling = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fake_poll(_task_id: str) -> dict[str, Any]:
+        polling.set()
+        await release.wait()
+        return {"status": 2, "bot_appid": "1024", "bot_encrypt_secret": _encrypt("new", key)}
+
+    monkeypatch.setattr(connect, "poll_bind_task", fake_poll)
+    store = QQConnectStore()
+    session = store._new_session("task", key)
+    before = _isolated_config.read_bytes()
+    poll = asyncio.create_task(store.poll(session.id))
+    try:
+        await asyncio.wait_for(polling.wait(), timeout=5)
+        if stop == "cancel":
+            await store.cancel(session.id)
+        elif stop == "close":
+            await store.close()
+        else:
+            session.deadline = 0
+        assert not store.has_pending_work
+    finally:
+        release.set()
+    assert (await poll)["status"] == "expired"
+    assert _isolated_config.read_bytes() == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stop", ["cancel", "close"])
+async def test_qq_cleanup_waits_for_writer_after_poll_request_is_cancelled(
+    monkeypatch: pytest.MonkeyPatch, _isolated_config: Path, stop: str,
+):
+    from nanobot.runtime_admission import RuntimeAdmission, RuntimeBusyError
+
+    key = base64.b64encode(b"k" * 32).decode()
+    saving = threading.Event()
+    release = threading.Event()
+    original_save = connect.save_credentials
+
+    async def fake_poll(_task_id: str) -> dict[str, Any]:
+        return {"status": 2, "bot_appid": "1024", "bot_encrypt_secret": _encrypt("new", key)}
+
+    def slow_save(app_id: str, secret: str) -> None:
+        saving.set()
+        if not release.wait(timeout=5):
+            raise TimeoutError("credential writer was not released")
+        original_save(app_id, secret)
+
+    monkeypatch.setattr(connect, "poll_bind_task", fake_poll)
+    monkeypatch.setattr(connect, "save_credentials", slow_save)
+    store = QQConnectStore()
+    admission = RuntimeAdmission()
+    admission.register_pending_work(lambda: store.has_pending_work)
+    session = store._new_session("task", key)
+    poll = asyncio.create_task(store.poll(session.id))
+    cleanup: asyncio.Task[None | dict[str, Any]] | None = None
+    try:
+        assert await asyncio.to_thread(saving.wait, 5)
+        poll.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await poll
+        session.deadline = 0
+        cleanup = asyncio.create_task(store.close() if stop == "close" else store.cancel(session.id))
+        await asyncio.sleep(0)
+        assert not cleanup.done()
+        assert store.has_pending_work
+        with pytest.raises(RuntimeBusyError), admission.pause_if_idle(lambda: False):
+            pytest.fail("an active credential writer must block an update")
+    finally:
+        release.set()
+        await asyncio.gather(poll, return_exceptions=True)
+        if cleanup is not None:
+            await cleanup
+        await store.close()
+    assert not store.has_pending_work
+    with admission.pause_if_idle(lambda: False):
+        assert admission.paused
+    saved = json.loads(_isolated_config.read_text(encoding="utf-8"))["channels"]["qq"]
+    assert (saved["appId"], saved["secret"], saved["allowFrom"]) == ("1024", "new", ["42"])
+
+
+@pytest.mark.asyncio
+async def test_qq_close_during_start_does_not_leave_a_new_session(monkeypatch: pytest.MonkeyPatch):
+    creating = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fake_create() -> tuple[str, str]:
+        creating.set()
+        await release.wait()
+        return "late-task", base64.b64encode(b"k" * 32).decode()
+
+    monkeypatch.setattr(connect, "create_bind_task", fake_create)
+    store = QQConnectStore()
+    start = asyncio.create_task(store.start())
+    try:
+        await asyncio.wait_for(creating.wait(), timeout=5)
+        await store.close()
+    finally:
+        release.set()
+    with pytest.raises(connect.ChannelConnectError, match="closed"):
+        await start
+    assert not store.has_pending_work
+
+
+@pytest.mark.asyncio
+async def test_qq_connect_clears_retrying_after_portal_recovers(monkeypatch: pytest.MonkeyPatch):
     async def fake_create() -> tuple[str, str]:
         return "task-2", base64.b64encode(b"k" * 32).decode()
 
-    async def fake_poll(_task_id: str) -> dict[str, Any]:
-        raise RuntimeError("portal hiccup")
+    poll_count = 0
+
+    async def fake_poll(task_id: str) -> dict[str, Any]:
+        nonlocal poll_count
+        assert task_id == "task-2"
+        poll_count += 1
+        if poll_count == 1:
+            raise RuntimeError("portal hiccup")
+        return {"status": 0}
 
     monkeypatch.setattr(connect, "create_bind_task", fake_create)
     monkeypatch.setattr(connect, "poll_bind_task", fake_poll)
     store = QQConnectStore()
 
     started = await store.start()
-    assert (await store.poll(started["session_id"]))["status"] == "pending"
+    assert started["retrying"] is False
+
+    retrying = await store.poll(started["session_id"])
+    assert retrying["status"] == "pending"
+    assert retrying["retrying"] is True
+    assert retrying["qr_url"] == started["qr_url"]
+
+    waiting = await store.poll(started["session_id"])
+    assert waiting["status"] == "pending"
+    assert waiting["retrying"] is False
+    assert waiting["qr_url"] == started["qr_url"]
+
+    cancelled = await store.cancel(started["session_id"])
+    assert cancelled["status"] == "cancelled"
+    assert cancelled["retrying"] is False
 
 
 @pytest.mark.asyncio

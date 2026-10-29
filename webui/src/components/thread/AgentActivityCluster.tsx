@@ -337,24 +337,25 @@ function FoldedAgentActivity({
         : retryStatus?.error_kind === "server"
           ? t("message.retryServer", { defaultValue: "Model unavailable" })
           : t("message.retryUnknown", { defaultValue: "Model request failed" });
-  const retryAttempt = retryStatus?.max_attempts
-    ? `${retryStatus.attempt}/${retryStatus.max_attempts}`
-    : String(retryStatus?.attempt ?? "");
   const retrySeconds = retryStatus?.next_retry_at === undefined
     ? 0
     : Math.max(0, Math.ceil(retryStatus.next_retry_at - now / 1000));
   const activityLabel = retryStatus?.state === "exhausted"
     ? t("message.retryExhausted", {
         error: retryError,
-        defaultValue: "{{error}}. Ending turn.",
+        defaultValue: "{{error}} Ending turn",
       })
     : retryStatus?.state === "waiting"
-      ? t("message.retryWaiting", {
-          error: retryError,
-          seconds: retrySeconds,
-          attempt: retryAttempt,
-          defaultValue: "{{error}}. Retrying in {{seconds}}s (attempt {{attempt}}).",
-        })
+      ? retrySeconds > 0
+        ? t("message.retryWaiting", {
+            error: retryError,
+            seconds: retrySeconds,
+            defaultValue: "{{error}} Retrying in {{seconds}}s",
+          })
+        : t("message.retrying", {
+            error: retryError,
+            defaultValue: "{{error}} Retrying",
+          })
       : isTurnStreaming
     ? t("message.activityWorkingFor", {
         duration: activityDuration,
@@ -1268,14 +1269,10 @@ function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; 
         <span
           data-testid={`activity-cli-logo-${run.name.toLowerCase()}`}
           className={cn(
-            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-mark border text-[6.5px] font-semibold text-white",
+            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-mark text-[6.5px] font-semibold text-white",
             rowActive && "animate-pulse",
           )}
-          style={{
-            borderColor: alphaColor(color, 22),
-            backgroundColor: logoUrl ? "hsl(var(--background))" : color,
-            boxShadow: rowActive ? `0 0 0 3px ${alphaColor(color, 9)}` : undefined,
-          }}
+          style={{ backgroundColor: logoUrl ? "transparent" : color }}
           aria-hidden
         >
           {logoUrl ? (
@@ -1284,7 +1281,7 @@ function CliRunRow({ run, active, app }: { run: CliRunSummary; active: boolean; 
               alt=""
               decoding="async"
               loading="lazy"
-              className="h-[78%] w-[78%] object-contain"
+              className="h-full w-full object-contain"
               onLoad={onLogoLoad}
               onError={onLogoError}
             />
@@ -1349,14 +1346,10 @@ function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolea
         <span
           data-testid={`activity-mcp-logo-${run.presetName.toLowerCase()}`}
           className={cn(
-            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-mark border text-[6.5px] font-semibold text-white",
+            "grid h-4 w-4 shrink-0 place-items-center overflow-hidden rounded-mark text-[6.5px] font-semibold text-white",
             rowActive && "animate-pulse",
           )}
-          style={{
-            borderColor: alphaColor(color, 22),
-            backgroundColor: logoUrl ? "hsl(var(--background))" : color,
-            boxShadow: rowActive ? `0 0 0 3px ${alphaColor(color, 9)}` : undefined,
-          }}
+          style={{ backgroundColor: logoUrl ? "transparent" : color }}
           aria-hidden
         >
           {logoUrl ? (
@@ -1365,7 +1358,7 @@ function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolea
               alt=""
               decoding="async"
               loading="lazy"
-              className="h-[78%] w-[78%] object-contain"
+              className="h-full w-full object-contain"
               onLoad={onLogoLoad}
               onError={onLogoError}
             />
@@ -1378,14 +1371,4 @@ function McpRunRow({ run, active, preset }: { run: McpRunSummary; active: boolea
       )}
     />
   );
-}
-
-function alphaColor(color: string, percent: number): string {
-  if (/^#[0-9a-f]{6}$/i.test(color)) {
-    const alpha = Math.round((percent / 100) * 255)
-      .toString(16)
-      .padStart(2, "0");
-    return `${color}${alpha}`;
-  }
-  return `color-mix(in srgb, ${color} ${percent}%, transparent)`;
 }

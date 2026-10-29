@@ -45,15 +45,16 @@ for (const c of cases) for (const locale of ["en", "zh-CN"]) {
         input: await box(page.locator(".thread-composer-input")),
         footer: await box(page.locator(".thread-composer-footer")),
         greeting: await box(page.getByTestId("hero-greeting")),
-        workspaceRow: await page.locator(".thread-composer-workspace-row").isVisible()
-          ? await box(page.locator(".thread-composer-workspace-row")) : null,
+        workspaceRow: await box(page.locator(".thread-composer-meta")),
+        workspaceControl: await box(page.locator(".thread-composer-workspace")),
       };
       await page.goto(`${url}&loading`);
       sameBox(await box(page.locator(".startup-chat-header")), loaded.header);
       sameBox(await box(page.locator(".startup-composer-surface")), loaded.composer);
       sameBox(await box(page.locator(".startup-composer-input")), loaded.input);
       sameBox(await box(page.locator(".startup-composer-footer")), loaded.footer);
-      if (loaded.workspaceRow) sameBox(await box(page.locator(".startup-workspace-row")), loaded.workspaceRow);
+      sameBox(await box(page.locator(".startup-workspace-row")), loaded.workspaceRow);
+      expect((await box(page.locator(".startup-workspace-row .startup-workspace"))).x).toBeCloseTo(loaded.workspaceControl.x, 1);
       const controls = page.locator(".startup-header-menu:visible, .startup-header-actions > div");
       await expect(controls).toHaveCount(loaded.controls.length);
       for (let i = 0; i < loaded.controls.length; i++) sameBox(await box(controls.nth(i)), loaded.controls[i]);

@@ -61,16 +61,6 @@
     "scope": "File scope",
     "hint": "Right-click for the copy menu, or focus the file and press Shift+F10."
   },
-  "webLinks": {
-    "title": "Web links · Link menu",
-    "description": "Open the real link menu to select message links and copy addresses.",
-    "options": "WebLink accepts link attributes. useMessageWebLinks collects rendered message links. MessageLinksMenu takes entries and back/close callbacks; expanded controls width. All example links point to local Gallery resources.",
-    "width": "Link menu width",
-    "message": "View the <gallery>component Gallery</gallery> and <brand>brand image</brand>.",
-    "close": "Close link menu",
-    "open": "View message links",
-    "hint": "Right-click a link to copy its address. The message menu collects links from the rendered message."
-  },
   "workbench": {
     "title": "PaneWorkbench · Multiple panes",
     "description": "Switch layouts, activate or add panes, and adjust their position and size.",
@@ -234,14 +224,6 @@
     "description": "Compare text, images, truncation, loading and errors. Select an image to zoom.",
     "options": "state supplies a display snapshot; path determines the file type and name. Image open and error callbacks update the preview.",
     "state": "File preview state"
-  },
-  "webPreview": {
-    "title": "WebPreviewPanelView · Web content",
-    "description": "Explore the web title bar, isolation notes and restrictions; refresh a local document.",
-    "options": "The runtime chooses restriction before supplying content. children provides content; onRefresh requests a refresh. This iframe uses local srcDoc.",
-    "state": "Web preview state",
-    "frame": "Local example webpage",
-    "refreshes": "Refreshes: {{amount}}"
   },
   "session": {
     "title": "SessionInfoPopoverView · Session automations",

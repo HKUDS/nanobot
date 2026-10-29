@@ -1,4 +1,4 @@
-import { useAutoSave } from "@/components/settings/shared/useAutoSave";
+import { useEditCompletion, type EditCompletion } from "@/components/settings/shared/useEditCompletion";
 import { SettingsAdvancedOptions } from "@/components/settings/shared/SettingsFeature";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { Eye, EyeOff, Pencil } from "lucide-react";
@@ -76,6 +76,7 @@ export function webSearchDraftState(settings: SettingsPayload, form: WebSearchSe
 
 export function WebSettings({
   embedded = false,
+  editCompletion,
   error,
   enabled = true,
   settings,
@@ -99,6 +100,7 @@ export function WebSettings({
   children,
 }: {
   embedded?: boolean;
+  editCompletion?: EditCompletion;
   error?: string;
   enabled?: boolean;
   settings: SettingsPayload;
@@ -130,10 +132,11 @@ export function WebSettings({
   const effectiveJinaReader = form.useJinaReader ?? settings.web.fetch.use_jina_reader;
   const showKeyInput = webSearchProviderAcceptsApiKey(selectedProvider) && (!hasExistingSecret || keyEditing);
 
-  useAutoSave(form, dirty, saving, onSave, !embedded && !missingCredential && (form.provider !== "olostep" || olostepFeature?.installed === true));
+  const localEdits = useEditCompletion(form, dirty, onSave, !editCompletion && !missingCredential && (form.provider !== "olostep" || olostepFeature?.installed === true));
+  const edits = editCompletion ?? localEdits;
 
   return (
-    <div className="settings-stack">
+    <div className="settings-stack" onChangeCapture={edits.onChangeCapture} onFocusCapture={edits.onFocusCapture} onBlurCapture={edits.onBlurCapture}>
       <section>
         {enabled && !embedded ? <SettingsSectionTitle>{tx("settings.sections.webSearch", "Web search")}</SettingsSectionTitle> : null}
         <div hidden={!embedded && !enabled}>
@@ -161,7 +164,7 @@ export function WebSettings({
               value={form.provider}
               emptyLabel={t("settings.byok.webSearch.selectProvider")}
               showProviderLogos={showBrandLogos}
-              onChange={onChangeProvider}
+              onChange={(provider) => { edits.complete(); onChangeProvider(provider); }}
             />
           </SettingsRow>
 

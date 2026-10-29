@@ -371,25 +371,11 @@ def test_build_skills_summary_keeps_absolute_roots_for_selected_project(tmp_path
     assert str(project.resolve()) not in summary
 
 
-def test_bundled_update_setup_description_is_valid_yaml(tmp_path: Path) -> None:
-    metadata = SkillsLoader(tmp_path).get_skill_metadata("update-setup")
-
-    assert metadata is not None
-    description = metadata["description"]
-    assert isinstance(description, str)
-    assert description.strip()
-
-
-def test_bundled_skills_use_agent_owned_paths(tmp_path: Path) -> None:
-    loader = SkillsLoader(tmp_path)
-    memory = loader.load_skill("memory")
-    update_setup = loader.load_skill("update-setup")
+def test_bundled_memory_skill_uses_agent_owned_path(tmp_path: Path) -> None:
+    memory = SkillsLoader(tmp_path).load_skill("memory")
 
     assert memory is not None
     assert "`History log` path from the system prompt" in memory
-    assert update_setup is not None
-    assert "<agent-workspace>/skills/update/SKILL.md" in update_setup
-    assert "Never substitute a project-relative" in update_setup
 
 
 def test_disabled_skills_excluded_from_get_always_skills(tmp_path: Path) -> None:

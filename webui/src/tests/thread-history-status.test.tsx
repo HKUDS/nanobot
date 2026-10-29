@@ -16,17 +16,34 @@ describe("ThreadHistoryStatus", () => {
     expect(container.firstElementChild).toHaveAttribute("data-state", "exhausted");
   });
 
-  it("uses one loading display before and during a request while preserving keyboard activation", () => {
+  it("hides completed feedback without offering another loading action", () => {
     const onRetry = vi.fn();
-    const { container, rerender } = render(<ThreadHistoryStatus loading={false} error={null} onRetry={onRetry} />);
+    const { container, rerender } = render(<ThreadHistoryStatus loading error={null} onRetry={onRetry} />);
     expect(container.firstElementChild).toHaveAttribute("data-state", "loading");
-    const load = screen.getByRole("button", { name: "Load earlier messages" });
-    expect(load.querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
-    fireEvent.click(load);
-    expect(onRetry).toHaveBeenCalledTimes(1);
+    rerender(<ThreadHistoryStatus loading={false} error={null} onRetry={onRetry} />);
+    expect(container.firstElementChild).toHaveAttribute("data-state", "ready");
+    expect(container.firstElementChild).toHaveAttribute("aria-hidden", "true");
+    expect(container.firstElementChild).toHaveClass("invisible");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(onRetry).not.toHaveBeenCalled();
     rerender(<ThreadHistoryStatus loading error={null} onRetry={onRetry} />);
-    expect(container.firstElementChild).toHaveAttribute("data-state", "loading");
-    expect(screen.getByRole("status").querySelectorAll(".thread-history-blocks > span")).toHaveLength(9);
+    expect(container.firstElementChild).not.toHaveClass("invisible");
+    expect(screen.getByRole("status")).toBeInTheDocument();
+  });
+
+  it("shows decorative Blocks while previewing a pull without offering a loading action", () => {
+    const onRetry = vi.fn();
+    const { container } = render(<ThreadHistoryStatus loading={false} error={null} preview onRetry={onRetry} />);
+    expect(container.firstElementChild).toHaveAttribute("data-state", "ready");
+    expect(container.firstElementChild).not.toHaveClass("invisible");
+    const blocks = screen.getByRole("status").querySelector(".thread-history-blocks")!;
+    expect(blocks.children).toHaveLength(9);
+    expect(blocks).toHaveAttribute("aria-hidden", "true");
+    fireEvent.click(blocks);
+    expect(onRetry).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.getByRole("status").textContent).toBe("");
   });
 
   it("offers error Blocks with the actual failure on keyboard focus and resumes loading on retry", () => {

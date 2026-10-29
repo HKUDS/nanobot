@@ -34,7 +34,7 @@ import { createSystemSettingsActions } from "@/components/settings/system/create
 import { useSystemSettingsEffects } from "@/components/settings/system/useSystemSettingsEffects";
 import { useSystemSettingsState } from "@/components/settings/system/useSystemSettingsState";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
-import { useAutoSave } from "@/components/settings/shared/useAutoSave";
+import { useEditCompletion } from "@/components/settings/shared/useEditCompletion";
 import { cancelProviderOAuth, fetchSettings, fetchSettingsUsage } from "@/lib/api";
 import {
   LOCAL_PREFS_CHANGED_EVENT,
@@ -107,10 +107,12 @@ export function useSettingsController({
   } = modelState;
   const capabilityState = useCapabilitySettingsState(initialSettings);
   const {
-    imageGenerationForm, imageGenerationSaving, networkSafetyForm,
+    imageGenerationForm, networkSafetyForm,
     setImageGenerationForm, setNetworkSafetyForm, setTranscriptionForm, setWebSearchForm,
-    transcriptionForm, transcriptionSaving, webSearchForm, webSearchSaving,
+    transcriptionForm, webSearchForm,
   } = capabilityState;
+  const draftsRef = useRef({ form, imageGenerationForm, networkSafetyForm, transcriptionForm, webSearchForm });
+  draftsRef.current = { form, imageGenerationForm, networkSafetyForm, transcriptionForm, webSearchForm };
   const systemState = useSystemSettingsState();
   const featureCatalog = systemState.nanobotFeatures?.features ?? [];
 
@@ -136,8 +138,6 @@ export function useSettingsController({
         setForm(nextForm);
         setModelPresetEditingName(nextForm.modelPreset);
         setModelPresetCreating(false);
-      } else {
-        setForm((current) => ({ ...current, timezone: payload.agent.timezone }));
       }
       setModelCallOrder(payload.model_call_order ?? []);
       if (!options.preserveCapabilityForms) {
@@ -194,18 +194,25 @@ export function useSettingsController({
     if (!shouldApplyRestartedSettings || !initialSettings) {
       return;
     }
-    applyPayload(initialSettings);
+    applyPayload(initialSettings, { preserveAgentForm: true, preserveCapabilityForms: true });
   }, [applyPayload, initialSettings, settings]);
 
   useEffect(() => {
     let cancelled = false;
     const showLoading = settings === null;
     const requestInitialSettings = latestInitialSettingsRef.current;
+    const requestDrafts = draftsRef.current;
     if (showLoading) setLoading(true);
     fetchSettings(getToken())
       .then((payload) => {
         if (!cancelled && latestInitialSettingsRef.current === requestInitialSettings) {
-          applyPayload(payload);
+          const current = draftsRef.current;
+          applyPayload(payload, {
+            preserveAgentForm: current.form !== requestDrafts.form,
+            preserveCapabilityForms: current.imageGenerationForm !== requestDrafts.imageGenerationForm ||
+              current.networkSafetyForm !== requestDrafts.networkSafetyForm ||
+              current.transcriptionForm !== requestDrafts.transcriptionForm || current.webSearchForm !== requestDrafts.webSearchForm,
+          });
           setError(null);
         }
       })
@@ -352,10 +359,17 @@ export function useSettingsController({
       onNativeEngineRestart
     ) {
       setHostEngineApplying(true);
+      const requestDrafts = draftsRef.current;
       try {
         const nextToken = await onNativeEngineRestart();
         const payload = await fetchSettings(nextToken);
-        applyPayload(payload);
+        const current = draftsRef.current;
+        applyPayload(payload, {
+          preserveAgentForm: current.form !== requestDrafts.form,
+          preserveCapabilityForms: current.imageGenerationForm !== requestDrafts.imageGenerationForm ||
+            current.networkSafetyForm !== requestDrafts.networkSafetyForm ||
+            current.transcriptionForm !== requestDrafts.transcriptionForm || current.webSearchForm !== requestDrafts.webSearchForm,
+        });
         setPendingRestartSections(EMPTY_PENDING_RESTART_SECTIONS);
         setError(null);
       } catch (err) {
@@ -385,7 +399,7 @@ export function useSettingsController({
       try {
         const nextToken = await onNativeEngineRestart();
         const refreshed = await fetchSettings(nextToken);
-        applyPayload(refreshed);
+        applyPayload(refreshed, { preserveAgentForm: true, preserveCapabilityForms: true });
         setPendingRestartSections(EMPTY_PENDING_RESTART_SECTIONS);
         setError(null);
       } catch (err) {
@@ -422,7 +436,6 @@ export function useSettingsController({
     remoteBrowserAccess,
     closeProviderOAuthFlow,
     installCapabilities,
-    modelDirty,
     configuredModelProviderOptions,
   });
   const capabilityActions = useCapabilitySettingsActions({
@@ -434,17 +447,17 @@ export function useSettingsController({
     maybeRestartHostEngine,
     setPendingRestartSections,
     installCapabilities,
-    imageGenerationDirty,
-    transcriptionDirty,
-    networkSafetyDirty,
   });
-  useAutoSave(imageGenerationForm, imageGenerationDirty, imageGenerationSaving, capabilityActions.saveImageGenerationSettings,
+  const modelEdits = useEditCompletion(form, modelDirty, modelActions.saveModelSettings,
+    !modelState.modelPresetCreating && !!form.model.trim(), modelActions.modelEditIdentity);
+  const safetyEdits = useEditCompletion(networkSafetyForm, networkSafetyDirty, capabilityActions.saveNetworkSafetySettings);
+  const imageEdits = useEditCompletion(imageGenerationForm, imageGenerationDirty, capabilityActions.saveImageGenerationSettings,
     !imageGenerationForm.enabled || Boolean(settings?.image_generation.providers.find(
       (provider) => provider.name === imageGenerationForm.provider,
     )?.configured));
-  useAutoSave(transcriptionForm, transcriptionDirty, transcriptionSaving, capabilityActions.saveTranscriptionSettings);
+  const transcriptionEdits = useEditCompletion(transcriptionForm, transcriptionDirty, capabilityActions.saveTranscriptionSettings);
   const webDraft = settings ? webSearchDraftState(settings, webSearchForm) : null;
-  useAutoSave(webSearchForm, webDraft?.dirty ?? false, webSearchSaving, capabilityActions.saveWebSearch,
+  const webEdits = useEditCompletion(webSearchForm, webDraft?.dirty ?? false, capabilityActions.saveWebSearch,
     !webDraft?.missingCredential && (webSearchForm.provider !== "olostep" ||
       featureCatalog.some((feature) => feature.name === "olostep" && feature.installed)));
 
@@ -453,6 +466,11 @@ export function useSettingsController({
     modelActions,
     capabilityState,
     capabilityActions,
+    modelEdits,
+    safetyEdits,
+    imageEdits,
+    transcriptionEdits,
+    webEdits,
     systemState,
     systemActions,
     activeSection,

@@ -361,6 +361,7 @@ async def cmd_compact(ctx: CommandContext) -> None:
             runtime=runtime,
             events=delivery.events,
             notify=True,
+            reason="manual",
         )
     except Exception:
         logger.exception("Manual context compaction failed for {}", ctx.key)
@@ -938,8 +939,12 @@ async def cmd_goal(ctx: CommandContext) -> InboundMessage | OutboundMessage:
 async def cmd_pairing(ctx: CommandContext) -> OutboundMessage:
     """List, approve, deny or revoke pairing requests."""
     from nanobot.pairing import PAIRING_COMMAND_META_KEY, handle_pairing_command
+    from nanobot.pairing.events import PairingChanged
 
-    reply = handle_pairing_command(ctx.msg.channel, ctx.args)
+    def changed() -> None:
+        ctx.loop.bus.publish_nowait(PairingChanged())
+
+    reply = handle_pairing_command(ctx.msg.channel, ctx.args, on_change=changed)
     return OutboundMessage(
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,

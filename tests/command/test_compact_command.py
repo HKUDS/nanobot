@@ -130,6 +130,7 @@ async def test_compact_emits_one_lifecycle_and_keeps_the_session(loop, command) 
     assert started.phase == "started"
     assert completed.phase == "succeeded"
     assert started.compaction_id == completed.compaction_id
+    assert started.reason == completed.reason == "manual"
     assert started.notify is True
     assert completed.notify is True
 
@@ -164,6 +165,9 @@ async def test_compacted_session_waits_for_new_input_without_continuation(
     session = loop.sessions.get_or_create(key)
     session.add_message("user", "Inspect the checkpoint")
     session.add_message("assistant", "Inspection complete.")
+    if trigger == "idle":
+        loop.auto_compact._ttl = 15
+        session.updated_at = datetime.now() - timedelta(minutes=20)
     loop.sessions.save(session)
     loop.provider.estimate_prompt_tokens.return_value = (100, "test")
     loop.provider.chat_stream_with_retry.return_value = LLMResponse(content=summary)
@@ -421,6 +425,7 @@ async def test_stop_finishes_inflight_compaction_as_cancelled(loop, command) -> 
     events = [loop.bus.outbound.get_nowait().event for _ in range(loop.bus.outbound_size)]
     assert all(isinstance(event, ContextCompactionEvent) for event in events)
     assert [event.phase for event in events] == ["started", "cancelled"]
+    assert [event.reason for event in events] == ["manual", "manual"]
     assert events[0].compaction_id == events[1].compaction_id
     loop.sessions.invalidate(key)
     reloaded = loop.sessions.get_or_create(key)

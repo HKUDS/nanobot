@@ -26,7 +26,6 @@ RATE_LIMITS = {
     "updates": 15,
     "media": 12,
 }
-_RATE_WINDOW_SECONDS = 60.0
 
 # error.code values that carry a specific recovery contract.
 CODE_INVALID_TOKEN = 100
