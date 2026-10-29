@@ -1,4 +1,10 @@
 {
+  "runtimeControls": {
+    "unavailable": "当前连接不支持运行控制，仍可聊天。",
+    "unconfirmed": "操作结果未确认。请重连查看当前状态，再决定是否重试。",
+    "stopping": "正在停止…",
+    "selectingModel": "正在选择模型…"
+  },
   "updates": {
     "guide": {
       "entry": "通过{{method}}更新",

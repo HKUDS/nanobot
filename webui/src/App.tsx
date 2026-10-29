@@ -23,7 +23,7 @@ import { matchSidebarShortcut } from "@/lib/sidebar-shortcuts";
 import type { SidebarDeleteDecision, SidebarDeleteItem } from "@/components/ChatList";
 import type { SettingsSectionKey } from "@/components/settings/SettingsView";
 import { StartupShell } from "@/components/StartupShell";
-import { ComposerDraftStore, clearStoredComposerDrafts } from "@/lib/composer-draft";
+import { ComposerDraftStore, clearStoredComposerDrafts, type ComposerDraft } from "@/lib/composer-draft";
 import { activateReloadCache, clearReloadCache } from "@/lib/reload-cache";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
@@ -75,6 +75,8 @@ import {
 import { displayTitle, sortSessions } from "@/lib/chat-groups";
 import { deriveTitle } from "@/lib/format";
 import { NanobotClient } from "@/lib/nanobot-client";
+import { RuntimeControlError } from "../../packages/client-events/runtime-controls";
+import { useRuntimeControls } from "@/hooks/useRuntimeControls";
 import { BrowserNotifications, useBrowserNotificationLifecycle } from "@/components/BrowserNotifications";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { FilePreviewStore } from "@/hooks/useFilePreviewState";
@@ -136,6 +138,11 @@ const SESSION_UPDATES_STORAGE_KEY = "nanobot-webui.sidebar.session-updates.v1";
 const LEGACY_COMPLETED_RUNS_STORAGE_KEY = "nanobot-webui.sidebar.completed-runs.v1";
 const RESTART_STARTED_KEY = "nanobot-webui.restartStartedAt";
 const RESTART_ROUTE_KEY = "nanobot-webui.restartRoute";
+const RESTART_GATEWAY_KEY = "nanobot-webui.restartGateway";
+const RESTART_CONFIRM_TIMEOUT_MS = 30_000;
+function restartStorageKey(key: string): string {
+  return `${key}:${window.location.origin}${window.location.pathname}`;
+}
 const RESTART_ROUTE_TTL_MS = 5 * 60 * 1000;
 const SIDEBAR_WIDTH = 272;
 const SIDEBAR_WIDTH_STORAGE_KEY = "nanobot-webui.sidebar.width";
@@ -219,7 +226,7 @@ function fallbackRestartHash(hash: string): boolean {
 function rememberRestartRoute(): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(RESTART_ROUTE_KEY, window.location.hash || "#/new");
+    window.localStorage.setItem(restartStorageKey(RESTART_ROUTE_KEY), window.location.hash || "#/new");
   } catch {
     // ignore storage errors
   }
@@ -228,13 +235,13 @@ function rememberRestartRoute(): void {
 function maybeRestoreRestartHash(hash: string): string {
   if (typeof window === "undefined" || !fallbackRestartHash(hash)) return hash;
   try {
-    const startedAt = Number(window.localStorage.getItem(RESTART_STARTED_KEY) ?? "0");
-    const storedHash = window.localStorage.getItem(RESTART_ROUTE_KEY);
+    const startedAt = Number(window.localStorage.getItem(restartStorageKey(RESTART_STARTED_KEY)) ?? "0");
+    const storedHash = window.localStorage.getItem(restartStorageKey(RESTART_ROUTE_KEY));
     if (!startedAt || !storedHash || Date.now() - startedAt > RESTART_ROUTE_TTL_MS) {
-      window.localStorage.removeItem(RESTART_ROUTE_KEY);
+      window.localStorage.removeItem(restartStorageKey(RESTART_ROUTE_KEY));
       return hash;
     }
-    window.localStorage.removeItem(RESTART_ROUTE_KEY);
+    window.localStorage.removeItem(restartStorageKey(RESTART_ROUTE_KEY));
     const nextHash = storedHash.startsWith("#") ? storedHash : `#${storedHash}`;
     window.history.replaceState(
       null,
@@ -1122,7 +1129,7 @@ export default function App() {
     }
     rememberRestartRoute();
     try {
-      window.localStorage.setItem(RESTART_STARTED_KEY, String(Date.now()));
+      window.localStorage.setItem(restartStorageKey(RESTART_STARTED_KEY), String(Date.now()));
     } catch {
       // ignore storage errors
     }
@@ -1132,8 +1139,8 @@ export default function App() {
       return refreshed.token;
     } finally {
       try {
-        window.localStorage.removeItem(RESTART_STARTED_KEY);
-        window.localStorage.removeItem(RESTART_ROUTE_KEY);
+        window.localStorage.removeItem(restartStorageKey(RESTART_STARTED_KEY));
+        window.localStorage.removeItem(restartStorageKey(RESTART_ROUTE_KEY));
       } catch {
         // ignore storage errors
       }
@@ -1196,6 +1203,7 @@ function Shell({
   const remoteConnectionsRef = useRef(remoteConnections);
   remoteConnectionsRef.current = remoteConnections;
   const { client, getToken } = useClient();
+  const runtimeControlsAvailable = useRuntimeControls(client);
   useReconnectRuns(client, getToken);
   const {
     sessions,
@@ -1274,10 +1282,13 @@ function Shell({
     key: string;
     label: string;
   } | null>(null);
-  const restartSawDisconnectRef = useRef(false);
-  const restartStartedAtRef = useRef(0);
+  const restartAttemptRef = useRef<{ client: NanobotClient; gatewayId: string; startedAt: number; accepted: boolean } | null>(null);
   const [restartToast, setRestartToast] = useState<string | null>(null);
   const [isRestarting, setIsRestarting] = useState(false);
+  useEffect(() => {
+    setIsRestarting(false);
+    return () => { restartAttemptRef.current = null; };
+  }, [client]);
   const [pairingRequests, setPairingRequests] = useState<PairingRequestInfo[]>([]);
   const [pairingBusyCode, setPairingBusyCode] = useState<string | null>(null);
   const [pairingError, setPairingError] = useState<string | null>(null);
@@ -1303,6 +1314,7 @@ function Shell({
     content: string;
     images?: SendAttachment[];
     options?: SendOptions;
+    draft?: ComposerDraft;
   } | null>(null);
   const settingsExitGuardRef = useRef<SettingsExitGuard | null>(null);
   const currentShellRouteRef = useRef<ShellRoute>({ view, activeKey, settingsSection: settingsInitialSection });
@@ -1807,6 +1819,7 @@ function Shell({
     options?: SendOptions,
     modelPreset?: string | null,
   ) => {
+    const draft = draftStore.get("automation:new");
     const chatId = await onCreateChat(
       options?.workspaceScope ?? activeWorkspaceScope,
       content,
@@ -1818,10 +1831,11 @@ function Shell({
       chatId,
       content,
       images,
-      options,
+      options: { ...options, ...(modelPreset != null ? { initialModelPreset: modelPreset } : {}) },
+      draft,
     });
     return true;
-  }, [activeWorkspaceScope, onCreateChat]);
+  }, [activeWorkspaceScope, draftStore, onCreateChat]);
 
   const onPendingAutomationMessageConsumed = useCallback((id: string) => {
     setPendingAutomationMessage((current) => current?.id === id ? null : current);
@@ -2255,19 +2269,32 @@ function Shell({
   }, [activeKey, navigate, topicSessions]);
 
   const onRestart = useCallback(() => {
-    const chatId = activeSession?.chatId ?? client.defaultChatId;
-    if (!chatId) return;
-    restartSawDisconnectRef.current = false;
-    restartStartedAtRef.current = Date.now();
-    setIsRestarting(true);
-    rememberRestartRoute();
-    try {
-      window.localStorage.setItem(RESTART_STARTED_KEY, String(restartStartedAtRef.current));
-    } catch {
-      // ignore storage errors
+    if (restartAttemptRef.current) return;
+    if (!client.supportsRuntimeControls || !client.gatewayId) {
+      setRestartToast(t("runtimeControls.unavailable"));
+      return;
     }
-    void client.sendSystemCommand(chatId, "/restart").catch(() => {});
-  }, [activeSession?.chatId, client]);
+    const attempt = { client, gatewayId: client.gatewayId, startedAt: Date.now(), accepted: false };
+    restartAttemptRef.current = attempt;
+    setIsRestarting(true);
+    setRestartToast(null);
+    void client.restartGateway().then((result) => {
+      if (restartAttemptRef.current !== attempt) return;
+      if (result.gateway_id !== attempt.gatewayId) throw new Error(t("runtimeControls.unconfirmed"));
+      attempt.accepted = true;
+      rememberRestartRoute();
+      try {
+        window.localStorage.setItem(restartStorageKey(RESTART_STARTED_KEY), String(attempt.startedAt));
+        window.localStorage.setItem(restartStorageKey(RESTART_GATEWAY_KEY), attempt.gatewayId);
+      } catch { /* Restart confirmation does not depend on storage. */ }
+    }).catch((error: unknown) => {
+      if (restartAttemptRef.current !== attempt) return;
+      restartAttemptRef.current = null;
+      setIsRestarting(false);
+      setRestartToast(error instanceof RuntimeControlError && error.outcomeUnknown
+        ? t("runtimeControls.unconfirmed") : error instanceof Error ? error.message : String(error));
+    });
+  }, [client, t]);
 
   useEffect(() => {
     return client.onRuntimeModelUpdate((modelName) => {
@@ -2347,39 +2374,43 @@ function Shell({
           retryTimer = window.setTimeout(() => refreshSettings(generation, attempt + 1), 250);
         });
     };
-    const unsubscribe = client.onStatus((status) => {
-      // Another tab can consume the reload marker before this tab reconnects.
-      const startedAt = restartStartedAtRef.current || (() => {
-        try {
-          return Number(window.localStorage.getItem(RESTART_STARTED_KEY) ?? "0");
-        } catch {
-          return 0;
-        }
-      })();
-      if (!startedAt) return;
-      if (status !== "open") {
-        restartStartedAtRef.current = startedAt;
-        restartSawDisconnectRef.current = true;
-        return;
-      }
-      const elapsedMs = Date.now() - startedAt;
-      if (!restartSawDisconnectRef.current && elapsedMs < 1500) return;
+    const clearMarker = () => {
       try {
-        window.localStorage.removeItem(RESTART_STARTED_KEY);
-        window.localStorage.removeItem(RESTART_ROUTE_KEY);
-      } catch {
-        // ignore storage errors
+        for (const key of [RESTART_STARTED_KEY, RESTART_ROUTE_KEY, RESTART_GATEWAY_KEY]) window.localStorage.removeItem(restartStorageKey(key));
+      } catch { /* ignore storage errors */ }
+    };
+    try {
+      const startedAt = Number(window.localStorage.getItem(restartStorageKey(RESTART_STARTED_KEY)) || 0);
+      const gatewayId = window.localStorage.getItem(restartStorageKey(RESTART_GATEWAY_KEY));
+      if (startedAt && gatewayId) {
+        restartAttemptRef.current = { client, gatewayId, startedAt, accepted: true };
+        setIsRestarting(true);
       }
-      const refreshGeneration = ++settingsRefreshGenerationRef.current;
-      restartStartedAtRef.current = 0;
+    } catch { /* ignore storage errors */ }
+    const confirm = () => {
+      const attempt = restartAttemptRef.current;
+      if (!attempt || attempt.client !== client || !attempt.accepted || !client.gatewayId || client.gatewayId === attempt.gatewayId) return;
+      restartAttemptRef.current = null;
+      clearMarker();
       setIsRestarting(false);
-      setRestartToast(t("app.restart.completed", { seconds: (elapsedMs / 1000).toFixed(1) }));
-      window.setTimeout(() => setRestartToast(null), 3_500);
-      refreshSettings(refreshGeneration);
-    });
+      setRestartToast(t("app.restart.completed", { seconds: ((Date.now() - attempt.startedAt) / 1000).toFixed(1) }));
+      refreshSettings(++settingsRefreshGenerationRef.current);
+    };
+    const unsubscribe = client.onReady(confirm);
+    confirm();
+    const confirmationTimer = window.setInterval(() => {
+      confirm();
+      const attempt = restartAttemptRef.current;
+      if (!attempt || attempt.client !== client || Date.now() - attempt.startedAt < RESTART_CONFIRM_TIMEOUT_MS) return;
+      restartAttemptRef.current = null;
+      clearMarker();
+      setIsRestarting(false);
+      setRestartToast(t("runtimeControls.unconfirmed"));
+    }, 1_000);
     return () => {
       cancelled = true;
       unsubscribe();
+      window.clearInterval(confirmationTimer);
       if (retryTimer !== undefined) window.clearTimeout(retryTimer);
     };
   }, [client, getToken, t]);
@@ -3168,6 +3199,9 @@ function Shell({
                     onSectionChange={onSettingsSectionChange}
                     onLogout={onLogout}
                     onRestart={onRestart}
+                    restartUnavailable={runtimeSurface !== "native" && !runtimeControlsAvailable}
+                    runtimeControlsAvailable={runtimeControlsAvailable}
+                    draftStore={draftStore}
                     onNativeEngineRestart={onNativeEngineRestart}
                     isRestarting={isRestarting}
                     hostChromeInset={showHostChrome}

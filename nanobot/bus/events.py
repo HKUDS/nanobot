@@ -1,5 +1,6 @@
 """Event types for the message bus."""
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
@@ -23,6 +24,7 @@ RUNTIME_CONTROL_SESSION_DISCARD = "session_discard"
 # Transport-provided turn correlation; the persisted spelling is retained for clients.
 INBOUND_META_TURN_ID = "webui_turn_id"
 INBOUND_META_LOCAL_MEDIA = "local_media_paths"
+INBOUND_META_INITIAL_MODEL_PRESET = "_initial_model_preset"
 
 
 @dataclass
@@ -73,3 +75,4 @@ class OutboundMessage:
     event: "AgentEvent | None" = None
     delivery: DeliveryRequest | None = None
     delivery_id: str | None = None
+    after_delivery: Callable[[], None] | None = None

@@ -162,6 +162,10 @@ export class NanobotTui {
   private backgroundKnown: boolean
   private activeTurn = false
   private activeTurnId: string | null = null
+  private stoppingTurn: { chatId: string; turnId: string | null } | null = null
+  private draftModelPreset: string | undefined
+  private persistedChat = false
+  private modelSelectionPending = false
   private activeLabel = "Thinking"
   private retryStatus: RenderedRetryStatus | null = null
   private activeStartedAt = 0
@@ -342,7 +346,8 @@ export class NanobotTui {
         available: () => this.ready,
         beforeOpen: () => this.closeTransientMenus(),
         refreshScope: () => this.refreshSessionMetadata(this.client.activeChatId),
-        onModel: (preset) => this.sendGatewayCommand(`/model ${preset}`, "side_channel", true),
+        modelAvailable: () => this.client.supportsRuntimeControls,
+        onModel: (preset) => void this.selectModel(preset),
         onAccess: (scope) => {
           try {
             this.client.setWorkspaceScope(scope)
@@ -562,6 +567,13 @@ export class NanobotTui {
       void this.updateRecovery(visibleContent.toLowerCase() === "/continue" ? "continue" : "dismiss")
       return
     }
+    if (visibleContent.toLowerCase() === "/stop" && this.client.supportsRuntimeControls && !this.draft.media(visibleContent).length) {
+      this.clearComposer()
+      this.commandMenu.hide()
+      this.restoreQueuedPrompts()
+      void this.stopActiveTurn()
+      return
+    }
     const completion = this.commandMenu.completion(visibleContent)
     if (completion) {
       this.setComposer(completion)
@@ -609,18 +621,30 @@ export class NanobotTui {
   }
 
   private sendPrompt(prompt: QueuedPrompt, steering = false, acceptedTurnId?: string): boolean {
-    if (!acceptedTurnId && prompt.options.media?.length) {
+    if (!this.persistedChat && this.draftModelPreset !== undefined) {
+      prompt = { ...prompt, options: { ...prompt.options, initialModelPreset: this.draftModelPreset } }
+    }
+    if (!acceptedTurnId && (prompt.options.media?.length || prompt.options.initialModelPreset !== undefined)) {
       if (this.attachmentSendPending) return false
       this.attachmentSendPending = true
       const originalText = this.composer.plainText
       const chatId = this.client.activeChatId
-      this.status.content = "Sending attachments…"
-      void this.client.sendAttachments(prompt.content, prompt.options).then((turnId) => {
-        if (this.client.activeChatId !== chatId || this.composer.plainText !== originalText) return
+      this.status.content = "Sending…"
+      const turnId = crypto.randomUUID()
+      const submitted = () => { if (!steering && this.client.activeChatId === chatId) this.beginTurn(turnId) }
+      const delivery = prompt.options.media?.length
+        ? this.client.sendAttachments(prompt.content, prompt.options, turnId, submitted)
+        : this.client.sendInitialMessage(prompt.content, prompt.options, turnId, submitted)
+      void delivery.then(() => {
+        if (this.client.activeChatId !== chatId) return
+        this.persistedChat = true
+        this.draftModelPreset = undefined
+        if (this.composer.plainText !== originalText) return
         this.sendPrompt(prompt, steering, turnId)
       }).catch((error: unknown) => {
+        if (this.client.activeChatId !== chatId) return
         this.unsentSubmit = true
-        this.status.content = error instanceof Error ? error.message : "Attachment send failed · draft retained"
+        this.status.content = error instanceof Error ? error.message : "Message send failed · draft retained"
       }).finally(() => { this.attachmentSendPending = false })
       return true
     }
@@ -644,6 +668,9 @@ export class NanobotTui {
       prompt.displayContent,
     )
     this.host.reportTitle(prompt.content)
+    // Upload/initial-preset sends already established their owner before admission.
+    // A late acknowledgement must not restart a turn that Stop has completed.
+    if (acceptedTurnId) { this.updateMeta(); return true }
     if (steering) {
       this.renderActiveStatus()
       this.updateMeta()
@@ -654,6 +681,7 @@ export class NanobotTui {
   }
 
   private beginTurn(turnId: string | null, startedAt?: number): void {
+    if (this.stoppingTurn?.turnId !== turnId) this.stoppingTurn = null
     this.activeTurnId = turnId
     this.readyDetail = ""
     this.finalMessage = ""
@@ -671,6 +699,7 @@ export class NanobotTui {
     started_at?: number
   }): void {
     if (event.active_turn_id && this.activeTurn) {
+      if (this.stoppingTurn?.turnId !== event.active_turn_id) this.stoppingTurn = null
       this.activeTurnId = event.active_turn_id
     } else if (event.active_turn_id || (event.starts_turn && !this.activeTurn)) {
       this.beginTurn(
@@ -693,11 +722,13 @@ export class NanobotTui {
   accept(event: InboundEvent): void {
     if (event.event === "attached") {
       const switchedSession = Boolean(this.currentChatId && this.currentChatId !== event.chat_id)
+      if (switchedSession) { this.draftModelPreset = undefined; this.stoppingTurn = null }
       this.currentChatId = event.chat_id
+      this.persistedChat = event.persisted === true
       this.closeUsage()
       if (event.usage) this.lastUsage = event.usage
       if (event.model_preset !== undefined) {
-        this.applyModelPreset(event.model_preset)
+        this.applyModelPreset(!this.persistedChat && this.draftModelPreset !== undefined ? this.draftModelPreset : event.model_preset)
         this.updateTitle()
       }
       this.commandTurns.clear()
@@ -716,6 +747,11 @@ export class NanobotTui {
       const hydrationId = ++this.hydrationId
       void this.prepareChat(event.chat_id, restoring, hydrationId).then(() => {
         if (hydrationId !== this.hydrationId) return
+        if (this.persistedChat && event.model_preset !== undefined) {
+          this.draftModelPreset = undefined
+          this.applyModelPreset(event.model_preset)
+          this.updateTitle()
+        }
         this.applyRecoveryState(event.recovery_state ?? null)
         this.flushPendingEvents()
         this.syncQueuePreview()
@@ -740,6 +776,7 @@ export class NanobotTui {
         if (event.phase === "succeeded" && this.usagePanel.visible) void this.refreshUsage()
         return
       case "message_accepted":
+        this.persistedChat = true
         this.reconcileTurnOwnership(event)
         return
       case "user_message": {
@@ -836,6 +873,7 @@ export class NanobotTui {
           this.commandTurns.delete(event.turn_id)
           this.modelCommandTurns.delete(event.turn_id)
         }
+        if (this.stoppingTurn?.turnId === event.turn_id) this.stoppingTurn = null
         const failed = event.outcome === "failed"
         this.transcript.finishStream(failed || this.turnHadAnswer ? "" : this.finalMessage)
         if (failed) {
@@ -1180,6 +1218,10 @@ export class NanobotTui {
 
   private renderActiveStatus(): void {
     if (this.sessionLoading || this.sessionMenu.visible) return
+    if (this.stoppingTurn?.turnId === this.activeTurnId) {
+      this.status.content = "Stopping…"
+      return
+    }
     if (this.retryStatus) {
       const navigation = this.transcriptNavigation.awayFromBottom ? "  Ctrl+End latest" : ""
       const queued = this.promptQueue.length ? `  ${this.promptQueue.length} queued` : ""
@@ -1555,12 +1597,7 @@ export class NanobotTui {
       }
       if (this.activeTurn) {
         this.restoreQueuedPrompts()
-        try {
-          this.client.send("/stop")
-          this.status.content = "Stopping…"
-        } catch {
-          this.setActive(false)
-        }
+        void this.stopActiveTurn()
       } else if (this.composer.plainText) {
         this.clearComposer()
         this.status.content = this.readyStatus()
@@ -1691,6 +1728,67 @@ export class NanobotTui {
       this.renderer.width,
       footerHintTheme(this.palette),
     )
+  }
+
+  private async stopActiveTurn(): Promise<void> {
+    if (this.stoppingTurn) return
+    if (!this.client.supportsRuntimeControls) {
+      this.status.content = "Runtime controls are unavailable on this connection"
+      return
+    }
+    const chatId = this.client.activeChatId
+    const turnId = this.activeTurnId
+    const target = { chatId, turnId }
+    this.stoppingTurn = target
+    this.status.content = "Stopping…"
+    try {
+      const result = await this.client.stopSession(chatId, turnId)
+      if (this.client.activeChatId !== chatId || this.activeTurnId !== turnId) return
+      // The original turn_end follows any final buffered output. Never replace
+      // it with the control acknowledgement, which can arrive first.
+      if (result.status === "stopped" && turnId) return
+      if (this.stoppingTurn === target) this.stoppingTurn = null
+      this.client.attach(chatId)
+    } catch (error) {
+      if (this.client.activeChatId !== chatId || this.activeTurnId !== turnId) return
+      const message = error instanceof Error ? error.message : String(error)
+      this.transcript.notice(message, true)
+      this.status.content = message
+      if (this.stoppingTurn === target) this.stoppingTurn = null
+    }
+  }
+
+  private async selectModel(preset: string): Promise<void> {
+    if (this.modelSelectionPending) return
+    if (!this.client.supportsRuntimeControls) {
+      this.status.content = "Runtime controls are unavailable on this connection"
+      return
+    }
+    if (!this.persistedChat && !this.activeTurn) {
+      this.draftModelPreset = preset
+      this.applyModelPreset(preset)
+      this.updateTitle()
+      return
+    }
+    const chatId = this.client.activeChatId
+    this.modelSelectionPending = true
+    try {
+      const result = await this.client.selectModel(chatId, preset)
+      if (this.client.activeChatId !== chatId) return
+      this.persistedChat = true
+      this.draftModelPreset = undefined
+      this.applyModelPreset(result.model_preset)
+      this.modelName = result.model_name
+      this.contextWindowTokens = result.context_window_tokens
+      this.updateTitle()
+    } catch (error) {
+      if (this.client.activeChatId !== chatId) return
+      const message = error instanceof Error ? error.message : String(error)
+      this.transcript.notice(message, true)
+      this.status.content = message
+    } finally {
+      this.modelSelectionPending = false
+    }
   }
 
   private setTurnModel(model: string, preset?: string | null): void {
@@ -2290,6 +2388,8 @@ export class NanobotTui {
       this.host.reportTitle("")
       this.sessionTitle = "New chat"
       this.sessionModelPreset = null
+      this.draftModelPreset = undefined
+      this.persistedChat = false
       this.modelName = this.defaultModelName
       this.modelPreset = this.defaultModelPreset
       this.contextTokens = null
@@ -2342,8 +2442,6 @@ export class NanobotTui {
       this.setActive(false)
       this.status.content = "Resetting chat…"
     } else if (lifecycle === "stop_active_turn") {
-      this.activeTurnId = null
-      this.setActive(false)
       this.status.content = "Stopping…"
     } else if (!this.activeTurn) {
       this.status.content = `Running ${content.split(/\s+/u, 1)[0]}…`

@@ -35,6 +35,7 @@ interface RuntimeControlsOptions {
   available: () => boolean
   beforeOpen: () => void
   refreshScope: () => Promise<void>
+  modelAvailable: () => boolean
   onModel: (name: string) => void
   onAccess: (scope: WorkspaceScopePayload) => void
   onStatus: (message: string) => void
@@ -230,6 +231,10 @@ export class RuntimeControls {
 
   private async openModel(): Promise<void> {
     if (!this.canOpen()) return
+    if (!this.options.modelAvailable()) {
+      this.options.onStatus("Runtime controls are unavailable on this connection")
+      return
+    }
     try {
       await this.load(true)
     } catch (error) {
@@ -294,7 +299,7 @@ export class RuntimeControls {
   private apply(choice: Choice): void {
     this.hide()
     if (choice.kind === "model") {
-      if (choice.name !== this.modelPreset) this.options.onModel(choice.name)
+      this.options.onModel(choice.name)
       return
     }
     if (choice.mode === this.scope.access_mode) return

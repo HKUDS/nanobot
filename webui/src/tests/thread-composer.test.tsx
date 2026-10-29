@@ -3410,7 +3410,7 @@ describe("ThreadComposer", () => {
     expect(onSend).toHaveBeenCalledWith("/status", undefined, undefined);
   });
 
-  it("sends a possible stop command without waiting when command metadata is unavailable", () => {
+  it("routes exact stop to the structured handler even before command metadata arrives", () => {
     const onSend = vi.fn();
     const onStop = vi.fn();
     render(<ThreadComposer onSend={onSend} onStop={onStop} isStreaming />);
@@ -3418,9 +3418,27 @@ describe("ThreadComposer", () => {
     fireEvent.change(input, { target: { value: "/stop" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(onSend).toHaveBeenCalledWith("/stop", undefined, { continueActiveTurn: true });
-    expect(onStop).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onStop).toHaveBeenCalledOnce();
     expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
+  });
+
+  it("leaves /stop arguments on the server validation path and disables unsupported GUI stop", () => {
+    const onSend = vi.fn();
+    const onStop = vi.fn();
+    const { rerender } = render(<ThreadComposer onSend={onSend} onStop={onStop} isStreaming slashCommands={COMMANDS} />);
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "/stop bad" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onStop).not.toHaveBeenCalled();
+    expect(onSend).toHaveBeenCalledWith("/stop bad", undefined, { continueActiveTurn: true });
+    rerender(<ThreadComposer onSend={onSend} onStop={onStop} isStreaming stopUnavailable slashCommands={COMMANDS} />);
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeDisabled();
+    fireEvent.change(input, { target: { value: "/stop" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSend).toHaveBeenLastCalledWith("/stop", undefined, { sideChannel: true });
+    expect(onStop).not.toHaveBeenCalled();
   });
 
   it("marks new chat commands as side-channel sends that finalize the active turn", () => {

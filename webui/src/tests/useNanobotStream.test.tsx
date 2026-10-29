@@ -93,6 +93,8 @@ function fakeClient() {
       restorePendingRun: lifecycle.restorePendingRun.bind(lifecycle),
       getRunStartedAt: lifecycle.getRunStartedAt.bind(lifecycle),
       getRunTurnId: lifecycle.getRunTurnId.bind(lifecycle),
+      isRunCompleted: lifecycle.isRunCompleted.bind(lifecycle),
+      stopSession: vi.fn<NanobotClient["stopSession"]>(() => new Promise(() => {})),
       getGoalState: lifecycle.getGoalState.bind(lifecycle),
       hasUnsettledRun: lifecycle.hasUnsettledRun.bind(lifecycle),
       onTranscript: lifecycle.onTranscript.bind(lifecycle),
@@ -3057,7 +3059,7 @@ describe("useNanobotStream", () => {
     expect(result.current.messages[0].media).toHaveLength(1);
   });
 
-  it("stops the active turn without adding a user slash command bubble", () => {
+  it("keeps stopping until the target ends without adding a user slash command bubble", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-stop", EMPTY_MESSAGES), {
       wrapper: wrap(fake.client),
@@ -3073,11 +3075,43 @@ describe("useNanobotStream", () => {
       result.current.stop();
     });
 
-    expect(fake.client.sendMessage).toHaveBeenLastCalledWith("chat-stop", "/stop");
-    expect(fake.client.finishRunLocally).toHaveBeenCalledWith("chat-stop");
+    const turnId = result.current.messages[0].turnId!;
+    expect(fake.client.stopSession).toHaveBeenCalledWith("chat-stop", turnId);
+    expect(result.current.isStreaming).toBe(true);
+    expect(result.current.isStopping).toBe(true);
+    act(() => fake.emit("chat-stop", { event: "turn_end", chat_id: "chat-stop", turn_id: turnId, outcome: "cancelled" }));
     expect(result.current.isStreaming).toBe(false);
+    expect(result.current.isStopping).toBe(false);
     expect(result.current.messages).toHaveLength(1);
     expect(result.current.messages[0].content).toBe("long task");
+  });
+
+  it("preserves final output when the stop response arrives before the original turn_end", async () => {
+    const fake = fakeClient();
+    fake.client.stopSession.mockResolvedValue({ status: "stopped", stopped_tasks: 1, turn_id: "owner" });
+    const { result } = renderHook(() => useNanobotStream("chat-stop", EMPTY_MESSAGES), { wrapper: wrap(fake.client) });
+    act(() => fake.emit("chat-stop", { event: "goal_status", chat_id: "chat-stop", turn_id: "owner", status: "running", started_at: 100 }));
+    await act(async () => { result.current.stop(); });
+    expect(result.current.isStreaming).toBe(true);
+    expect(result.current.isStopping).toBe(true);
+    act(() => {
+      fake.emit("chat-stop", { event: "delta", chat_id: "chat-stop", turn_id: "owner", text: "last partial output" });
+      fake.emit("chat-stop", { event: "turn_end", chat_id: "chat-stop", turn_id: "owner", outcome: "cancelled" });
+    });
+    expect(result.current.messages.some((message) => message.content === "last partial output")).toBe(true);
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.isStopping).toBe(false);
+  });
+
+  it("does not claim a run stopped after a control failure", async () => {
+    const fake = fakeClient();
+    fake.client.stopSession.mockRejectedValue(new Error("Control result is unconfirmed"));
+    const { result } = renderHook(() => useNanobotStream("chat-stop", EMPTY_MESSAGES), { wrapper: wrap(fake.client) });
+    act(() => { result.current.send("long task"); });
+    await act(async () => { result.current.stop(); });
+    expect(result.current.isStreaming).toBe(true);
+    expect(result.current.isStopping).toBe(false);
+    expect(result.current.controlError?.message).toBe("Control result is unconfirmed");
   });
 
   it("delivers bang output separately while the active Agent answer continues", async () => {

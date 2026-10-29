@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
-import subprocess
-import sys
 import time
 from contextlib import suppress
 from dataclasses import dataclass, replace
@@ -216,16 +213,7 @@ async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
     """Cancel all active tasks and subagents for the session."""
     loop = ctx.loop
     msg = ctx.msg
-    total = await loop._cancel_active_tasks(ctx.key)  # pyright: ignore[reportPrivateUsage]
-    # Also drain pending queue to prevent mid-turn injection deadlock
-    pending = loop._pending_queues.pop(ctx.key, None)  # pyright: ignore[reportPrivateUsage]
-    if pending is not None:
-        while not pending.empty():
-            try:
-                pending.get_nowait()
-                total += 1
-            except Exception:
-                break
+    total = (await loop.stop_session(ctx.key)).stopped_tasks
     content = f"Stopped {total} task(s)." if total else "No active task to stop."
     return OutboundMessage(
         channel=msg.channel, chat_id=msg.chat_id, content=content,
@@ -234,34 +222,26 @@ async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
 
 
 async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
-    """Restart the process."""
+    """Ask the application owner to restart after the command reply is delivered."""
     msg = ctx.msg
-    set_restart_notice_to_env(
-        channel=msg.channel,
-        chat_id=msg.chat_id,
-        metadata=dict(msg.metadata or {}),
-    )
+    request = ctx.loop.restart_request
+    ticket = request() if request is not None else None
+    if ticket is None:
+        return OutboundMessage(
+            channel=msg.channel, chat_id=msg.chat_id,
+            content="Restart is unavailable or already in progress.",
+            metadata=dict(msg.metadata or {}),
+        )
 
-    async def _do_restart():
-        await asyncio.sleep(1)
-        argv = [sys.executable, "-m", "nanobot"] + sys.argv[1:]
-        mode = ctx.loop.restart_mode or "auto"
-        if mode == "auto":
-            mode = "spawn" if sys.platform == "win32" else "exec"
-        if mode == "exec":
-            os.execv(sys.executable, argv)
-            return
-        if mode == "spawn":
-            kwargs: dict[str, Any] = {}
-            if sys.platform == "win32":
-                kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-            subprocess.Popen(argv, **kwargs)
-        os._exit(0)
+    def after_delivery() -> None:
+        set_restart_notice_to_env(
+            channel=msg.channel, chat_id=msg.chat_id, metadata=dict(msg.metadata or {}),
+        )
+        ticket.commit()
 
-    asyncio.create_task(_do_restart())
     return OutboundMessage(
         channel=msg.channel, chat_id=msg.chat_id, content="Restarting...",
-        metadata=dict(msg.metadata or {})
+        metadata=dict(msg.metadata or {}), after_delivery=after_delivery,
     )
 
 

@@ -268,3 +268,117 @@ async def test_cancelled_runtime_tasks_gather_does_not_raise() -> None:
     assert runtime_tasks.done()  # the cancelled gather was awaited without raising
     assert agent.close_calls == 1
     assert provider.close_calls == 1
+
+
+def test_restart_commits_after_reply_then_tears_down_and_releases_all_owners(monkeypatch, tmp_path):
+    from contextlib import contextmanager, nullcontext
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    import pytest
+
+    from nanobot.cli import gateway_runtime as gateway
+    from nanobot.config.schema import Config
+    from nanobot.gateway.runtime import GatewayInstance, GatewayRuntimePaths
+    from nanobot.utils.restart import ProcessRestart
+
+    events = []
+    callbacks = {}
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
+    config.agents.defaults.dream.enabled = True
+    config.gateway.heartbeat.enabled = False
+    config.gateway.restart_mode = "spawn"
+    paths = GatewayRuntimePaths.for_instance(data_dir=tmp_path)
+    instance = GatewayInstance(config_path=tmp_path / "config.json", workspace=None, paths=paths)
+
+    @contextmanager
+    def owner(label):
+        events.append(f"{label} acquired")
+        try:
+            yield SimpleNamespace(health_identity=object())
+        finally:
+            events.append(f"{label} released")
+
+    runtime = MagicMock(paths=paths)
+    runtime.foreground_instance.side_effect = lambda _options: owner("claim")
+    runtime.wait_for_shutdown_request = AsyncMock()
+    runtime.status.return_value = SimpleNamespace(launch_mode="foreground", lifetime="explicit")
+    monkeypatch.setattr(gateway, "GatewayRuntime", lambda **_kwargs: runtime)
+    monkeypatch.setattr(gateway, "installation_access", lambda **_kwargs: owner("installation"))
+    monkeypatch.setattr("nanobot.update_profiles.record_gateway_profile", lambda *_args, **_kwargs: owner("profile"))
+    monkeypatch.setattr(gateway, "get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(gateway, "_tcp_endpoint_reachable", lambda *_args: False)
+    monkeypatch.setattr(gateway, "_webui_channel_enabled", lambda *_args: False)
+    monkeypatch.setattr(gateway, "warmup_token_encoding", lambda: None)
+    monkeypatch.setattr(gateway, "_prepare_webui_bundle_for_gateway", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(gateway, "sync_workspace_templates", lambda *_args: None)
+    monkeypatch.setattr(gateway, "register_image_generation_tool", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(gateway.cli_terminal, "_ensure_interactive_tty_mode", lambda: None)
+    monkeypatch.setattr(gateway, "_install_gateway_shutdown_handlers", lambda *_args: lambda: None)
+    snapshot = SimpleNamespace(provider=MagicMock(), model="test", context_window_tokens=1000, signature=())
+    monkeypatch.setattr("nanobot.providers.factory.build_provider_snapshot", lambda _config: snapshot)
+    monkeypatch.setattr("nanobot.session.manager.SessionManager", MagicMock())
+    monkeypatch.setattr("nanobot.webui.recovery.RecoveryCoordinator", MagicMock(return_value=MagicMock(scan=AsyncMock())))
+    monkeypatch.setattr("nanobot.session.webui_turns.WebuiTurnCoordinator", MagicMock(return_value=SimpleNamespace(connected=nullcontext)))
+
+    async def wait_forever(*_args, **_kwargs):
+        await asyncio.Event().wait()
+
+    agent = MagicMock()
+    agent.model = "test"
+    agent.tools = ToolRegistry()
+    agent.subagents.recover_interrupted = AsyncMock()
+    agent.run = wait_forever
+    agent.aclose = AsyncMock(side_effect=lambda: events.append("agent closed"))
+    agent.preserve_inflight_turns_on_shutdown.side_effect = lambda: events.append("checkpoints preserved")
+    agent.stop.side_effect = lambda: events.append("agent stopped")
+
+    def make_agent(_config, _bus, **kwargs):
+        callbacks["agent"] = kwargs["restart_request"]
+        return agent
+
+    monkeypatch.setattr(gateway, "AgentLoop", SimpleNamespace(from_config=make_agent))
+    provider = MagicMock(connect=AsyncMock(), aclose=AsyncMock())
+    monkeypatch.setattr(gateway, "MCPProvider", SimpleNamespace(from_config=lambda *_args: provider))
+    cron = MagicMock(start=AsyncMock())
+    cron.status.return_value = {"jobs": 0}
+    cron.stop.side_effect = lambda: events.append("cron stopped")
+    monkeypatch.setattr("nanobot.cron.service.CronService", lambda *_args, **_kwargs: cron)
+    monkeypatch.setattr("nanobot.triggers.local_runner.run_local_trigger_queue", wait_forever)
+    monkeypatch.setattr("nanobot.config.watcher.watch_config_file", wait_forever)
+
+    async def channel_start():
+        assert callbacks["agent"] == callbacks["webui"]
+        ticket = callbacks["webui"]()
+        assert ticket is not None
+        events.append("accepted reply drained")
+        assert "cron stopped" not in events
+        ticket.commit()
+        await wait_forever()
+
+    channels = MagicMock(enabled_channels=[])
+    channels.start_all = channel_start
+    channels.stop_all = AsyncMock(side_effect=lambda: events.append("channels stopped"))
+
+    def make_channels(_config, _bus, **kwargs):
+        callbacks["webui"] = kwargs["webui_restart"]
+        assert kwargs["webui_model_runtime"] is agent.runtime_resolver
+        return channels
+
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", make_channels)
+    monkeypatch.setattr("nanobot.gateway.restart.GatewayRestartPlan.execute", lambda _self: events.append("replacement"))
+
+    with pytest.raises(ProcessRestart) as raised:
+        with owner("outer entry installation"):
+            gateway._run_gateway(config, gateway_instance=instance, health_server_enabled=False)
+
+    assert events == [
+        "outer entry installation acquired", "installation acquired", "claim acquired", "profile acquired",
+        "accepted reply drained", "cron stopped", "checkpoints preserved", "agent stopped",
+        "channels stopped", "agent closed", "profile released", "claim released", "installation released",
+        "outer entry installation released",
+    ]
+    raised.value.execute()
+    assert events[-1] == "replacement"
+    assert provider.aclose.await_count == 2

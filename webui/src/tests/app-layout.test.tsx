@@ -31,7 +31,8 @@ const requestMutationSpy = vi.fn();
 const discardTemporaryChatSpy = vi.fn();
 const newTemporaryChatSpy = vi.fn<() => Promise<string>>();
 const sendMessageSpy = vi.fn();
-const sendSystemCommandSpy = vi.fn().mockResolvedValue(undefined);
+const restartGatewaySpy = vi.fn().mockResolvedValue({ status: "accepted", gateway_id: "gateway-one" });
+let mockGatewayId: string | null = "gateway-one";
 let mockDefaultChatId: string | null = null;
 const statusHandlers = new Set<(status: ConnectionStatus) => void>();
 const runStatusHandlers = new Set<(chatId: string, state: RunState) => void>();
@@ -49,6 +50,8 @@ const readyHandlers = new Set<() => void>();
 let mockSessions: ChatSummary[] = [];
 const HERO_GREETING_PATTERN =
   /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
+
+function restartKey(name: string) { return `nanobot-webui.${name}:${window.location.origin}${window.location.pathname}`; }
 
 function setNavigatorPlatform(platform: string): void {
   Object.defineProperty(window.navigator, "platform", {
@@ -258,7 +261,10 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
     onTaskNotice = () => () => {};
     status = "idle" as const;
     defaultChatId = mockDefaultChatId;
-    sendSystemCommand = sendSystemCommandSpy;
+    restartGateway = restartGatewaySpy;
+    isChatPersisted = () => true;
+    get gatewayId() { return mockGatewayId; }
+    get supportsRuntimeControls() { return mockGatewayId !== null; }
     connect = connectSpy;
     onStatus = (handler: (status: ConnectionStatus) => void) => {
       statusHandlers.add(handler);
@@ -354,7 +360,7 @@ describe("App layout", () => {
       `00000000-0000-4000-8000-${String(++temporaryChatCounter).padStart(12, "0")}`
     ));
     sendMessageSpy.mockReset();
-    sendSystemCommandSpy.mockReset().mockResolvedValue(undefined);
+    restartGatewaySpy.mockReset().mockResolvedValue({ status: "accepted", gateway_id: "gateway-one" });
     mockDefaultChatId = null;
     statusHandlers.clear();
     runStatusHandlers.clear();
@@ -371,8 +377,11 @@ describe("App layout", () => {
     localStorage.removeItem("nanobot-webui.sidebar.completed-runs.v1");
     localStorage.removeItem("nanobot-webui.sidebar.session-updates.v1");
     localStorage.removeItem("nanobot-webui.collapsed-pane-groups.v1");
-    localStorage.removeItem("nanobot-webui.restartStartedAt");
-    localStorage.removeItem("nanobot-webui.restartRoute");
+    mockGatewayId = "gateway-one";
+    restartGatewaySpy.mockResolvedValue({ status: "accepted", gateway_id: "gateway-one" });
+    localStorage.removeItem(restartKey("restartStartedAt"));
+    localStorage.removeItem(restartKey("restartRoute"));
+    localStorage.removeItem(restartKey("restartGateway"));
     vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({
       token: "tok",
       api_token: "api-tok",
@@ -1257,9 +1266,9 @@ describe("App layout", () => {
     consoleError.mockRestore();
   });
 
-  it("restores the standalone Channels page from a legacy restart route", async () => {
-    localStorage.setItem("nanobot-webui.restartStartedAt", String(Date.now()));
-    localStorage.setItem("nanobot-webui.restartRoute", "#/settings?section=channels");
+  it("restores the standalone Channels page from this host's restart route", async () => {
+    localStorage.setItem(restartKey("restartStartedAt"), String(Date.now()));
+    localStorage.setItem(restartKey("restartRoute"), "#/settings?section=channels");
     window.history.replaceState(null, "", "/#/new");
     mockFetchRoutes({
       "/api/settings": baseSettingsPayload(),
@@ -1282,8 +1291,9 @@ describe("App layout", () => {
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    expect(window.location.hash).toBe("#/settings?section=channels");
     expect(
-      await screen.findByRole("heading", { name: "Channels" }),
+      await screen.findByRole("heading", { name: "Channels" }, { timeout: 10_000 }),
     ).toBeInTheDocument();
     expect(within(screen.getByRole("navigation", { name: "Sidebar navigation" })).getByRole("button", { name: "Channels" })).toHaveAttribute("aria-current", "page");
     expect(window.location.hash).toBe("#/settings?section=channels");
@@ -1295,16 +1305,62 @@ describe("App layout", () => {
     mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Restart" }));
-    expect(sendSystemCommandSpy).toHaveBeenCalledWith("restart-fixture", "/restart");
+    expect(restartGatewaySpy).toHaveBeenCalledWith();
+    await act(async () => {});
     expect(screen.getByRole("button", { name: "Restarting..." })).toBeDisabled();
     act(() => {
-      if (clearWhen === "before disconnect") localStorage.removeItem("nanobot-webui.restartStartedAt");
+      if (clearWhen === "before disconnect") localStorage.removeItem(restartKey("restartStartedAt"));
       for (const handler of statusHandlers) handler("reconnecting");
-      localStorage.removeItem("nanobot-webui.restartStartedAt");
+      localStorage.removeItem(restartKey("restartStartedAt"));
       for (const handler of statusHandlers) handler("open");
+      for (const handler of readyHandlers) handler();
+    });
+    expect(screen.getByRole("button", { name: "Restarting..." })).toBeDisabled();
+    act(() => {
+      mockGatewayId = "gateway-two";
+      for (const handler of readyHandlers) handler();
     });
     await waitFor(() => expect(screen.getByRole("button", { name: "Restart" })).toBeEnabled());
     expect(createChatSpy).not.toHaveBeenCalled();
+  });
+
+  it("reports an unconfirmed restart after a lost acknowledgement and does not replay it", async () => {
+    restartGatewaySpy.mockRejectedValueOnce(new Error("Restart result is unconfirmed"));
+    window.history.replaceState(null, "", "/#/settings?section=runtime");
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Restart" }));
+    await screen.findByText("Restart result is unconfirmed");
+    expect(screen.getByRole("button", { name: "Restart" })).toBeEnabled();
+    act(() => {
+      mockGatewayId = "gateway-two";
+      for (const handler of readyHandlers) handler();
+    });
+    expect(restartGatewaySpy).toHaveBeenCalledOnce();
+    expect(screen.getByText("Restart result is unconfirmed")).toBeInTheDocument();
+  });
+
+  it("ends a timed-out restart confirmation without treating an open socket as success", async () => {
+    localStorage.setItem(restartKey("restartStartedAt"), String(Date.now() - 31_000));
+    localStorage.setItem(restartKey("restartGateway"), "gateway-one");
+    window.history.replaceState(null, "", "/#/settings?section=runtime");
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
+    render(<App />);
+    await screen.findByText("The result is unconfirmed. Reconnect to check the current state before trying again.", {}, { timeout: 3_000 });
+    expect(screen.getByRole("button", { name: "Restart" })).toBeEnabled();
+    expect(restartGatewaySpy).not.toHaveBeenCalled();
+  });
+
+  it("does not restore a restart route belonging to another host", async () => {
+    localStorage.setItem("nanobot-webui.restartStartedAt:https://other-host/", String(Date.now()));
+    localStorage.setItem("nanobot-webui.restartRoute:https://other-host/", "#/settings?section=channels");
+    window.history.replaceState(null, "", "/#/new");
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
+    render(<App />);
+    await screen.findByText(HERO_GREETING_PATTERN);
+    expect(window.location.hash).toBe("#/new");
+    localStorage.removeItem("nanobot-webui.restartStartedAt:https://other-host/");
+    localStorage.removeItem("nanobot-webui.restartRoute:https://other-host/");
   });
 
   it("refreshes settings after the browser reconnects from a restart", async () => {
@@ -1324,7 +1380,8 @@ describe("App layout", () => {
       requires_restart: false,
       restart_required_sections: [],
     };
-    localStorage.setItem("nanobot-webui.restartStartedAt", String(Date.now() - 2_000));
+    localStorage.setItem(restartKey("restartStartedAt"), String(Date.now() - 2_000));
+    localStorage.setItem(restartKey("restartGateway"), "gateway-one");
     window.history.replaceState(null, "", "/#/settings?section=runtime");
     mockFetchRoutes({
       "/api/settings": () => {
@@ -1345,6 +1402,8 @@ describe("App layout", () => {
     act(() => {
       for (const handler of statusHandlers) handler("reconnecting");
       for (const handler of statusHandlers) handler("open");
+      mockGatewayId = "gateway-two";
+      for (const handler of readyHandlers) handler();
     });
 
     await waitFor(() => expect(refreshedSettingsRequests).toBeGreaterThan(1));

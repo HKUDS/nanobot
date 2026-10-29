@@ -93,3 +93,71 @@ def test_should_show_cli_restart_notice():
     non_cli = RestartNotice(channel="feishu", chat_id="oc_1", started_at_raw="100")
     assert should_show_cli_restart_notice(non_cli, "cli:direct") is False
 
+
+
+async def test_restart_intent_waits_for_reply_commit_and_is_one_shot():
+    from nanobot.utils.restart import RestartController
+
+    restart = RestartController()
+    ticket = restart.request()
+
+    assert ticket is not None
+    assert restart.request() is None
+    assert not restart.shutdown_event.is_set()
+    assert not restart.committed
+
+    ticket.commit()
+    await restart.shutdown_event.wait()
+    ticket.commit()
+    assert restart.committed
+    assert restart.request() is None
+
+
+def test_normal_shutdown_wins_over_an_undelivered_restart_reply():
+    from nanobot.utils.restart import RestartController
+
+    restart = RestartController()
+    ticket = restart.request()
+    assert ticket is not None
+    restart.shutdown_event.set()
+    ticket.commit()
+
+    assert not restart.committed
+    assert restart.request() is None
+
+
+def test_standalone_restart_captures_its_launch_and_runs_only_after_unwind(monkeypatch, tmp_path):
+    from contextlib import contextmanager
+
+    from nanobot.utils.restart import ProcessRestart, standalone_restart
+
+    events = []
+    monkeypatch.setattr("sys.argv", ["nanobot", "agent", "--classic", "--message", "/restart"])
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "nanobot.utils.restart.replace_process",
+        lambda argv, **kwargs: events.append((argv, kwargs)),
+    )
+
+    @contextmanager
+    def lease():
+        try:
+            yield
+        finally:
+            events.append("lease released")
+
+    try:
+        with lease():
+            intent = standalone_restart(mode="spawn", args=["agent", "--classic", "--session", "cli:work"])
+            assert events == []
+            raise intent
+    except ProcessRestart as restart:
+        restart.execute()
+
+    import sys
+
+    assert events == [
+        "lease released",
+        ([sys.executable, "-m", "nanobot", "agent", "--classic", "--session", "cli:work"],
+         {"mode": "spawn", "cwd": tmp_path}),
+    ]

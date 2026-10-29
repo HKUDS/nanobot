@@ -1,4 +1,10 @@
 {
+  "runtimeControls": {
+    "unavailable": "Os controles de execução não estão disponíveis nesta conexão. O chat continua disponível.",
+    "unconfirmed": "O resultado não foi confirmado. Reconecte-se para verificar o estado atual antes de tentar novamente.",
+    "stopping": "Parando…",
+    "selectingModel": "Selecionando modelo…"
+  },
   "updates": {
     "guide": {
       "entry": "Atualizar via {{method}}",

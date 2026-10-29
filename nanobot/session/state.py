@@ -370,6 +370,13 @@ class SessionState:
             session = self._transients.get(key) or self._snapshots.get(key)
             return SessionIdentity(session.generation, session.policy) if session is not None else None
 
+    async def read_identity(self, key: str) -> SessionIdentity | None:
+        """Resolve a control's generation without creating a session or loading history."""
+        def read() -> SessionIdentity | None:
+            session = self._load(key, history=False)
+            return SessionIdentity(session.generation, session.policy) if session is not None else None
+        return await self._execute(key, read, write=False)
+
     def peek_header(self, key: str) -> Session | None:
         """Read cached policy and metadata without detaching message history."""
         with self._cache_lock:
@@ -618,10 +625,12 @@ class SessionState:
         *,
         expected_generation: str | None = None,
         validate_existing: Callable[[Mapping[str, Any]], None] | None = None,
+        initial_updates: Mapping[str, Any] | None = None,
     ) -> tuple[str, bool]:
         """Open one generation and atomically validate and attach admission metadata."""
         values = deepcopy(dict(updates))
-        if _RESERVED_KEYS.intersection(values):
+        initial = deepcopy(dict(initial_updates or {}))
+        if _RESERVED_KEYS.intersection(values) or _RESERVED_KEYS.intersection(initial):
             raise ValueError("turn state must be changed through turn operations")
 
         def open_session() -> tuple[str, bool]:
@@ -641,6 +650,9 @@ class SessionState:
                     raise SessionConflictError("session admission belongs to a replaced session")
                 if not created and validate_existing is not None:
                     validate_existing(session.metadata)
+                if created or (not session.policy.persist and not session.messages):
+                    for name, value in initial.items():
+                        session.metadata.setdefault(name, value)
                 session.metadata.update(values)
                 header_only = session.policy.persist and session.persisted
                 if header_only:

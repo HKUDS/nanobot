@@ -1,3 +1,4 @@
+import type { ComposerDraftStore } from "@/lib/composer-draft";
 import { ChevronLeft } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogLayoutContext, DialogTitle } from "@/components/ui/dialog";
@@ -71,6 +72,9 @@ interface SettingsPageProps {
   sessions?: ChatSummary[];
   onLogout?: () => void;
   isRestarting: boolean;
+  restartUnavailable: boolean;
+  runtimeControlsAvailable: boolean;
+  draftStore?: ComposerDraftStore;
   hostChromeInset: boolean;
 }
 
@@ -90,6 +94,9 @@ export function SettingsPage({
   sessions,
   onLogout,
   isRestarting,
+  restartUnavailable,
+  runtimeControlsAvailable,
+  draftStore,
   hostChromeInset,
 }: SettingsPageProps) {
   const [dialogLayoutAnchor, setDialogLayoutAnchor] = useState<HTMLDivElement | null>(null);
@@ -587,6 +594,8 @@ export function SettingsPage({
         return (
           <div className="settings-stack">
             <AutomationsSettings
+              modelSelectionAvailable={runtimeControlsAvailable}
+              draftStore={draftStore}
               token={token}
               payload={systemState.automations}
               titleOverrides={titleOverrides}
@@ -646,6 +655,7 @@ export function SettingsPage({
           hostChromeInset={hostChromeInset}
           onRestart={settings ? restartViaSettingsSurface : undefined}
           isRestarting={restartInProgress}
+          restartUnavailable={restartUnavailable}
           restartPending={settings?.requires_restart}
           isNativeHost={(settings?.surface ?? settings?.runtime_surface) === "native"}
         />

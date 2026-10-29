@@ -371,6 +371,7 @@ class GatewayHTTPHandler:
         session_manager: SessionManager | None,
         static_dist_path: Path | None,
         runtime_model_name: Callable[[], str | None] | None,
+        unified_session: bool = False,
         runtime_surface: str,
         runtime_capabilities_overrides: dict[str, Any] | None,
         bus: MessageBus,
@@ -402,6 +403,7 @@ class GatewayHTTPHandler:
         self.session_manager = session_manager
         self.static_dist_path = static_dist_path
         self.runtime_model_name = runtime_model_name
+        self.unified_session = unified_session
         self.bus = bus
         self.tokens = tokens
         self.media = media
@@ -1018,6 +1020,13 @@ class GatewayHTTPHandler:
         from nanobot.session.webui_turns import websocket_turn_wall_started_at
 
         sessions = list_webui_sessions(self.session_manager, stored_sessions)
+        shared_preset: str | None = None
+        if self.unified_session:
+            from nanobot.session.keys import UNIFIED_SESSION_KEY
+            from nanobot.session.model_selection import model_preset_from_metadata
+
+            shared = next((row for row in stored_sessions if row["key"] == UNIFIED_SESSION_KEY), None)
+            shared_preset = model_preset_from_metadata(shared["metadata"] if shared is not None else None)
         cleaned: list[dict[str, Any]] = []
         default_scope: WorkspaceScope | None = None
         scopes: dict[str, WorkspaceScope] = {}
@@ -1030,6 +1039,8 @@ class GatewayHTTPHandler:
                 for k, v in s.items()
                 if k != "path" and k not in WEBUI_SESSION_INDEX_INTERNAL_FIELDS
             }
+            if self.unified_session:
+                row["model_preset"] = shared_preset
             # Keep the additive recovery field absent for ordinary sessions so
             # older clients and compact list responses stay unchanged.
             if row.get("recovery_state") is None:

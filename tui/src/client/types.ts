@@ -86,10 +86,11 @@ export interface RuntimeControls {
 }
 
 export type InboundEvent =
-  | { event: "ready"; chat_id: string; client_id: string }
+  | ({ event: "ready"; chat_id: string; client_id: string } & import("../../../packages/client-events/runtime-controls").RuntimeControlsReady)
   | {
       event: "attached"
       chat_id: string
+      persisted?: boolean
       model_preset?: string | null
       usage?: TokenUsage
       recovery_state?: RecoveryState
@@ -190,6 +191,7 @@ export type OutboundEvent =
       content: string
       turn_id: string
       webui: true
+      initial_model_preset?: string
       workspace_scope?: WorkspaceScopePayload
       media?: import("../../../packages/client-events/attachments").AttachmentReference[]
       cli_apps?: Array<{ name: string }>
@@ -308,6 +310,7 @@ export interface MessageOptions {
   mcpPresets?: Array<{ name: string }>
   sessionMentions?: SessionMention[]
   userShell?: boolean
+  initialModelPreset?: string
 }
 
 export interface SlashCommand {

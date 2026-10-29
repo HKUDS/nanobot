@@ -8,9 +8,10 @@ export function readStartupLayout() {
   let sidebarExpanded = true;
   let sidebarWidth = 272;
   try {
+    const hostScope = `${window.location.origin}${window.location.pathname}`;
     if ((!hash || hash === "/" || hash === "/new")
-      && Date.now() - Number(localStorage.getItem("nanobot-webui.restartStartedAt") || 0) < 300_000) {
-      hash = (localStorage.getItem("nanobot-webui.restartRoute") || hash).replace(/^#/, "");
+      && Date.now() - Number(localStorage.getItem(`nanobot-webui.restartStartedAt:${hostScope}`) || 0) < 300_000) {
+      hash = (localStorage.getItem(`nanobot-webui.restartRoute:${hostScope}`) || hash).replace(/^#/, "");
     }
     const stored = localStorage.getItem("nanobot-webui.sidebar");
     sidebarExpanded = stored === null || stored === "1";

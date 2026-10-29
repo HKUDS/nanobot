@@ -1533,3 +1533,46 @@ test("uploads clipboard bytes over HTTP, sends only a reference, and awaits acce
     Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: originalSocket })
   }
 })
+
+test("runtime controls use fresh ready identity and are rejected, not replayed, after disconnect", async () => {
+  const original = globalThis.WebSocket
+  const sockets: FakeSocket[] = []
+  Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: class extends FakeSocket {
+    constructor() { super(); sockets.push(this) }
+  } })
+  const client = new NanobotClient({ url: "ws://test", reconnectDelayMs: 1, onEvent() {}, onStatus() {} })
+  try {
+    client.connect()
+    await waitUntil(() => sockets.length === 1)
+    const first = sockets[0]!
+    first.emit("open")
+    await expect(client.selectModel("chat", "fast")).rejects.toMatchObject({ status: 503 })
+    first.emit("message", { data: JSON.stringify({ event: "ready", chat_id: "chat", client_id: "test", gateway_id: "one", capabilities: ["webui.runtime-controls.v1"] }) })
+    first.emit("message", { data: JSON.stringify({ event: "attached", chat_id: "chat" }) })
+    const model = client.selectModel("chat", "fast")
+    const request = JSON.parse(first.sent.at(-1)!)
+    expect(request).toMatchObject({ type: "webui_request", action: "session.model.select", payload: { chat_id: "chat", preset: "fast", expected_gateway_id: "one" } })
+    first.emit("message", { data: JSON.stringify({ event: "webui_response", request_id: request.request_id, ok: false, error: { status: 400, message: "Unknown preset" } }) })
+    await expect(model).rejects.toMatchObject({ status: 400, message: "Unknown preset" })
+    const turnId = client.send("work", { initialModelPreset: "default" })
+    expect(JSON.parse(first.sent.at(-1)!)).toMatchObject({ initial_model_preset: "default" })
+    const stop = client.stopSession("chat", turnId)
+    expect(JSON.parse(first.sent.at(-1)!)).toMatchObject({ action: "session.stop", payload: { chat_id: "chat", turn_id: turnId, expected_gateway_id: "one" } })
+    first.emit("close")
+    await expect(stop).rejects.toMatchObject({ outcomeUnknown: true })
+    await waitUntil(() => sockets.length === 2)
+    const second = sockets[1]!
+    second.emit("open")
+    await expect(client.stopSession("chat", turnId)).rejects.toMatchObject({ status: 503 })
+    second.emit("message", { data: JSON.stringify({ event: "ready", chat_id: "chat", client_id: "test", gateway_id: "two", capabilities: ["webui.runtime-controls.v1"] }) })
+    expect(second.sent.map((frame) => JSON.parse(frame).type)).toEqual(["attach"])
+    const selection = client.selectModel("chat", "default")
+    const current = JSON.parse(second.sent.at(-1)!)
+    expect(current.payload.expected_gateway_id).toBe("two")
+    second.emit("message", { data: JSON.stringify({ event: "webui_response", request_id: current.request_id, ok: true, result: { model_preset: "default", model_name: "model", context_window_tokens: 1000 } }) })
+    await expect(selection).resolves.toMatchObject({ model_preset: "default" })
+  } finally {
+    client.close()
+    Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
+  }
+})

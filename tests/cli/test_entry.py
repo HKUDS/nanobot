@@ -181,3 +181,32 @@ def test_interrupted_installation_keeps_stop_commands_usable(tmp_path, monkeypat
         with pytest.raises(SystemExit):
             entry.main()
         assert not called
+
+
+def test_restart_executes_after_installation_and_data_leases_exit(tmp_path, monkeypatch):
+    from nanobot.data_access import data_access
+    from nanobot.utils.restart import ProcessRestart
+
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "environment"))
+    monkeypatch.setattr(sys, "argv", ["nanobot", "gateway", "--foreground"])
+    paths = [tmp_path / "profile"]
+    events = []
+
+    def execute():
+        with installation_access(updating=True), data_access(paths, updating=True):
+            events.append("replacement")
+
+    def dispatch():
+        with data_access(paths):
+            with pytest.raises(InstallationBusyError), installation_access(updating=True):
+                pytest.fail("Runtime must still hold its installation lease")
+            try:
+                raise ProcessRestart(execute)
+            finally:
+                events.append("runtime closed")
+
+    monkeypatch.setattr(entry, "_dispatch", dispatch)
+    entry.main()
+
+    assert events == ["runtime closed", "replacement"]

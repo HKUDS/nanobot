@@ -10,6 +10,15 @@ const presets = [
 ];
 
 describe("ModelPresetBadge setup tooltip", () => {
+  it("lets an inherited default become an explicit model selection", async () => {
+    const select = vi.fn();
+    render(<ModelPresetBadge label="Default" modelPreset="default" selectionExplicit={false}
+      modelPresets={[{ name: "default", model: "model" }, ...presets]} onPresetChange={select} isHero />);
+    fireEvent.click(screen.getByRole("button", { name: "Default" }));
+    fireEvent.click(await screen.findByRole("option", { name: "default" }));
+    expect(select).toHaveBeenCalledWith("default");
+  });
+
   it.each([true, false])("keeps setup actionable without repeating its prompt in a tooltip (hero: %s)", async (isHero) => {
     const user = userEvent.setup();
     const onClick = vi.fn();

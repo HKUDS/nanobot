@@ -44,7 +44,10 @@ describe("TUI /usage", () => {
   async function mount(history: (init?: RequestInit) => Promise<Response> = async () => Response.json(page())) {
     const sent: string[] = []
     const client = {
-      activeChatId: "chat", connect() {}, close() {},
+      activeChatId: "chat", connect() {}, close() {}, supportsRuntimeControls: true,
+      async selectModel(_chatId: string, preset: string) { return { model_preset: preset, model_name: preset, context_window_tokens: 1000 } },
+      async stopSession(_chatId: string, turnId: string | null) { return { status: "idle" as const, stopped_tasks: 0, turn_id: turnId } },
+      async sendInitialMessage(content: string) { this.send(content) },
       send(content: string) { sent.push(content); return "turn" },
       async sendAttachments(content: string) { return this.send(content) },
       async inspectAttachment(): Promise<never> { throw new Error("file not found") },

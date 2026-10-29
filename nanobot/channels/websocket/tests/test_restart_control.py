@@ -1,5 +1,6 @@
 """Settings restarts are controls, not persisted chat turns."""
 
+import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,10 +14,14 @@ from nanobot.channels.websocket.runtime import WebSocketChannel
 from nanobot.command.builtin import cmd_restart
 from nanobot.command.router import CommandContext
 from nanobot.session.manager import SessionManager
+from nanobot.utils.restart import RestartController
+from nanobot.webui.gateway_services import build_gateway_services
 from nanobot.webui.metadata import WEBUI_RESTART_CONTROL_METADATA_KEY
 from nanobot.webui.session_list_index import list_webui_sessions
 
 from .test_websocket_channel import _basic_handler, _sent_ws_payloads
+from .test_webui_session_admission import _Runtime
+from .test_webui_session_admission import runtime as runtime
 
 
 def _channel(tmp_path: Path, *, allowed: bool = True, sessions=None):
@@ -65,15 +70,17 @@ async def test_settings_restart_does_not_create_or_change_chat_history(history, 
         await channel._dispatch_envelope(connection, "browser", envelope)
         message = bus.publish_inbound.await_args.args[0]
         assert message.metadata[WEBUI_RESTART_CONTROL_METADATA_KEY] is True
-        # Exercise the real command response, but never execute a process restart.
-        def discard_restart_task(coro):
-            coro.close()
-        with monkeypatch.context() as patch:
-            patch.setattr("nanobot.command.builtin.asyncio.create_task", discard_restart_task)
-            response = await cmd_restart(CommandContext(
-                msg=message, session=None, key=message.session_key, raw=message.content, loop=MagicMock(),
-            ))
+        controller = RestartController()
+        response = await cmd_restart(CommandContext(
+            msg=message, session=None, key=message.session_key, raw=message.content,
+            loop=SimpleNamespace(restart_request=controller.request),
+        ))
+        assert not controller.committed
         await channel.send(response)
+        await channel.webui_flush(connection)
+        assert response.after_delivery is not None
+        response.after_delivery()
+        assert controller.committed
         # A lost ACK retry must not enqueue a second restart.
         calls = bus.publish_inbound.await_count
         await channel._dispatch_envelope(connection, "browser", envelope)
@@ -140,3 +147,93 @@ async def test_generic_websocket_cannot_claim_transient_webui_control(tmp_path):
     assert WEBUI_RESTART_CONTROL_METADATA_KEY not in bus.publish_inbound.await_args.args[0].metadata
     assert len(list_webui_sessions(sessions)) == 1
     await channel._cleanup_connection(connection)
+
+
+async def test_gateway_restart_has_no_chat_side_effects_and_replays_one_receipt(
+    runtime: _Runtime, history,
+) -> None:
+    message = await runtime.message("existing", "Keep this conversation")
+    await runtime.execute(message)
+    before_sessions = await runtime.sessions.state.list_sessions()
+    before_history = history.read("websocket:existing")
+    before_session = await runtime.sessions.state.read(runtime.loop._effective_session_key(message))
+    runtime.connection.sent.clear()
+
+    await runtime.request("restart-once", "gateway.restart", {})
+    accepted = await runtime.response("restart-once")
+    assert accepted["result"] == {
+        "status": "accepted", "gateway_id": runtime.channel.gateway.tokens.instance_id,
+    }
+    assert runtime.restart.committed
+    await runtime.request("restart-once", "gateway.restart", {})
+    assert await runtime.response("restart-once") == accepted
+    await runtime.request("restart-again", "gateway.restart", {})
+    assert (await runtime.response("restart-again"))["error"] == {
+        "status": 409, "message": "restart_unavailable",
+    }
+
+    assert runtime.bus.inbound_size == 0
+    assert await runtime.sessions.state.list_sessions() == before_sessions
+    assert history.read("websocket:existing") == before_history
+    after_session = await runtime.sessions.state.read(runtime.loop._effective_session_key(message))
+    assert after_session is not None and before_session is not None
+    assert after_session.messages == before_session.messages
+    assert after_session.metadata == before_session.metadata
+    assert all(frame["event"] == "webui_response" for frame in runtime.connection.sent)
+
+
+async def test_gateway_restart_receipt_from_old_instance_cannot_restart_replacement(
+    runtime: _Runtime,
+) -> None:
+    await runtime.request("old-restart", "gateway.restart", {})
+    await runtime.response("old-restart")
+    replacement = RestartController()
+    gateway = build_gateway_services(
+        config=runtime.channel.config, bus=runtime.bus, session_manager=runtime.sessions,
+        static_dist_path=None, workspace_path=runtime.sessions.workspace,
+        default_restrict_to_workspace=False, runtime_model_name=None,
+        runtime_surface="browser", runtime_capabilities_overrides=None, restart=replacement.request,
+    )
+    channel = WebSocketChannel(runtime.channel.config, runtime.bus, gateway=gateway)
+    gateway.endpoint.webui_connections.add(runtime.connection)
+    try:
+        await channel._dispatch_envelope(runtime.connection, "webui-client", {
+            "type": "webui_request", "request_id": "old-restart", "action": "gateway.restart",
+            "payload": {"expected_gateway_id": runtime.channel.gateway.tokens.instance_id},
+        })
+        await channel.webui_flush(runtime.connection)
+        assert runtime.connection.sent[-1]["error"] == {"status": 409, "message": "gateway_changed"}
+        assert not replacement.committed
+        assert replacement.request() is not None
+    finally:
+        await channel._cleanup_connection(runtime.connection)
+        await channel._commands.close()
+
+
+async def test_gateway_restart_commits_only_after_ack_is_physically_written(
+    runtime: _Runtime, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    write_started = asyncio.Event()
+    release_write = asyncio.Event()
+    sent = runtime.connection.send
+
+    async def blocked_send(raw: str) -> None:
+        write_started.set()
+        await release_write.wait()
+        assert not runtime.restart.committed
+        await sent(raw)
+
+    monkeypatch.setattr(runtime.connection, "send", blocked_send)
+    try:
+        await runtime.request("write-before-commit", "gateway.restart", {})
+        await asyncio.wait_for(write_started.wait(), 3)
+        assert not runtime.restart.committed
+        assert not runtime.restart.shutdown_event.is_set()
+        assert runtime.connection.sent == []
+    finally:
+        release_write.set()
+    receipt = await runtime.response("write-before-commit")
+    assert receipt["ok"] is True
+    assert runtime.restart.committed
+    assert runtime.restart.shutdown_event.is_set()
+    assert await runtime.sessions.state.list_sessions() == []

@@ -90,8 +90,10 @@ interface ModelPresetBadgeProps {
   label: string;
   modelDetail?: string | null;
   modelPreset?: string | null;
+  selectionExplicit?: boolean;
   modelPresets?: ModelPresetOption[];
   onPresetChange?: (name: string) => void;
+  disabledReason?: string;
   onManageModels?: () => void;
   onRequestComposerFocus?: () => void;
   provider?: string | null;
@@ -106,8 +108,10 @@ export function ModelPresetBadge({
   label,
   modelDetail,
   modelPreset,
+  selectionExplicit = true,
   modelPresets = [],
   onPresetChange,
+  disabledReason,
   onManageModels,
   onRequestComposerFocus,
   provider,
@@ -132,7 +136,7 @@ export function ModelPresetBadge({
     model: modelDetail ?? modelPresets[listedIndex]?.model,
     provider: provider || modelPresets[listedIndex]?.provider,
   };
-  const tooltipParts = needsSetup ? [label] : [...new Set([
+  const tooltipParts = disabledReason ? [disabledReason] : needsSetup ? [label] : [...new Set([
     label,
     modelDetail,
     providerLabel,
@@ -148,7 +152,8 @@ export function ModelPresetBadge({
       : modelPresets.map((preset, index) => index === listedIndex ? activePreset : preset);
   const opensSetup = Boolean(onClick);
   const canSwitch = !opensSetup && Boolean(onPresetChange) && activeName !== "" && presets.length > 1;
-  const canOpenPicker = !opensSetup && (canSwitch || Boolean(onManageModels));
+  const canOpenPicker = !opensSetup && (canSwitch || Boolean(onManageModels)
+    || (!selectionExplicit && activeName !== "" && Boolean(onPresetChange)));
   const pickerPresets = activeName && onPresetChange ? presets : [activePreset];
   const currentIndex = Math.max(0, presets.findIndex((preset) => preset.name === activeName));
   const pillHeight = isHero ? 32 : 36;
@@ -159,7 +164,7 @@ export function ModelPresetBadge({
 
   const selectPreset = (name: string) => {
     setOpen(false);
-    if (name !== activeName) onPresetChange?.(name);
+    if (name && (name !== activeName || !selectionExplicit)) onPresetChange?.(name);
     requestAnimationFrame(() => onRequestComposerFocus?.());
   };
 
@@ -466,7 +471,7 @@ export function ModelPresetBadge({
 
   return (
     <TooltipProvider>
-      <Tooltip open={tooltipParts.length > 1 && tooltipOpen && !open && !motion} onOpenChange={setTooltipOpen}>
+      <Tooltip open={(Boolean(disabledReason) || tooltipParts.length > 1) && tooltipOpen && !open && !motion} onOpenChange={setTooltipOpen}>
         {badge}
         <TooltipContent side="top" className="max-w-[min(24rem,calc(100vw-2rem))] space-y-1 break-words">
           {tooltipParts.map((part, index) => <p key={part} className={index === 0 ? "font-medium" : "whitespace-pre-wrap text-xs text-muted-foreground"}>{part}{index < tooltipParts.length - 1 ? " " : ""}</p>)}

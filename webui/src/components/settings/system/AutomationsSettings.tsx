@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import type { ComposerDraftStore } from "@/lib/composer-draft";
 import type { FormEvent, ReactNode } from "react";
 import type { TFunction } from "i18next";
 import {
@@ -66,6 +67,8 @@ export function AutomationsSettings({
   titleOverrides = EMPTY_TITLE_OVERRIDES,
   sessions = EMPTY_SESSIONS,
   settingsSnapshot = null,
+  modelSelectionAvailable = true,
+  draftStore,
   onFilterChange, onAction,
   onRequestEdit, onRequestDelete, onStartChat, onManageModels,
   returnToDetailJob = null, onReturnToDetailHandled,
@@ -76,6 +79,8 @@ export function AutomationsSettings({
   titleOverrides?: Record<string, string>;
   sessions?: ChatSummary[];
   settingsSnapshot?: SettingsPayload | null;
+  modelSelectionAvailable?: boolean;
+  draftStore?: ComposerDraftStore;
   loading: boolean;
   filter: AutomationFilter;
   actionKey: string | null;
@@ -141,17 +146,7 @@ export function AutomationsSettings({
     { value: "failed", label: tx("settings.automations.filters.failed", "Needs attention"),
       count: visibleJobs.filter(automationNeedsAttention).length },
   ];
-  const configuredPresetNames = useMemo(
-    () => new Set(settingsSnapshot?.model_presets?.map((preset) => preset.name) ?? []),
-    [settingsSnapshot],
-  );
-  const activeModelPreset = (
-    (localModelPreset && (!settingsSnapshot || configuredPresetNames.has(localModelPreset))
-      ? localModelPreset
-      : null)
-    || settingsSnapshot?.agent.model_preset
-    || "default"
-  );
+  const activeModelPreset = localModelPreset ?? settingsSnapshot?.agent.model_preset ?? "default";
   const modelPresetOptions = useMemo(
     () => modelPresetOptionsFromSettings(settingsSnapshot),
     [settingsSnapshot],
@@ -160,7 +155,10 @@ export function AutomationsSettings({
     () => toModelBadgeInfo(settingsSnapshot?.agent.model ?? null, settingsSnapshot, activeModelPreset),
     [activeModelPreset, settingsSnapshot],
   );
-  const modelBadgeLabel = modelBadge.needsSetup
+  const unknownModelPreset = activeModelPreset !== "default" && settingsSnapshot
+    && !settingsSnapshot.model_presets.some((preset) => preset.name === activeModelPreset);
+  const modelNeedsSetup = modelBadge.needsSetup && !unknownModelPreset;
+  const modelBadgeLabel = modelNeedsSetup
     ? tx("thread.composer.chooseAI", "Choose your AI")
     : modelBadge.label;
 
@@ -196,7 +194,7 @@ export function AutomationsSettings({
     content.trim(),
     images,
     { ...options, intent: "create_automation" },
-    activeModelPreset,
+    localModelPreset,
   );
   const filterLabel = filter === "all" ? tx("settings.automations.filter", "Filter") : tx("settings.automations.filteredBy", "Filter: {{status}}", {
     status: summaryOptions.find((option) => option.value === filter)?.label,
@@ -242,6 +240,8 @@ export function AutomationsSettings({
           >
             <ThreadComposer
               onSend={startAutomationChat}
+              draftKey="automation:new"
+              draftStore={draftStore}
               inputAriaLabel={tx("settings.automations.createInput", "Describe an automation")}
               placeholder={tx(
                 "settings.automations.createPrompt",
@@ -252,12 +252,14 @@ export function AutomationsSettings({
               modelLabel={modelBadgeLabel}
               modelDetail={modelBadge.model}
               modelPreset={activeModelPreset}
+              modelSelectionExplicit={localModelPreset !== null}
               modelPresets={modelPresetOptions}
               onModelPresetChange={setLocalModelPreset}
+              modelDisabledReason={modelSelectionAvailable ? undefined : t("runtimeControls.unavailable")}
               modelProvider={modelBadge.provider}
               modelProviderLabel={modelBadge.providerLabel}
-              modelNeedsSetup={modelBadge.needsSetup}
-              onModelBadgeClick={modelBadge.needsSetup ? onManageModels : undefined}
+              modelNeedsSetup={modelNeedsSetup}
+              onModelBadgeClick={modelNeedsSetup ? onManageModels : undefined}
               onManageModels={onManageModels}
             />
           </div>

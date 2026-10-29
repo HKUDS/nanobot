@@ -32,6 +32,8 @@ import { ThreadLoadingSkeleton } from "@/components/thread/ThreadLoadingSkeleton
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
 import { useNanobotStream, type SendAttachment, type SendOptions } from "@/hooks/useNanobotStream";
+import { useRuntimeControls } from "@/hooks/useRuntimeControls";
+import { RuntimeControlError } from "../../../../packages/client-events/runtime-controls";
 import { useFilePreviewState, type FilePreviewState, type FilePreviewStore } from "@/hooks/useFilePreviewState";
 import {
   ApiError,
@@ -350,6 +352,7 @@ function randomHeroGreetingKey(): (typeof HERO_GREETING_KEYS)[number] {
 }
 
 interface PendingFirstMessage {
+  draft?: ComposerDraft;
   finish?: (accepted: boolean) => void;
   content: string;
   images?: SendAttachment[];
@@ -600,6 +603,8 @@ export function ThreadShell({
     send,
     transcribeAudio,
     stop,
+    isStopping,
+    controlError,
     history: {
       loading,
       error: historyError,
@@ -791,28 +796,45 @@ export function ThreadShell({
 
   const showHeroComposer = displayMessages.length === 0 && !initialHistoryLoading;
   const composerVariant = showHeroComposer ? emptyComposerVariant : "thread";
-  // Only unpersisted drafts can choose a project; history pages do not own this state.
-  const projectLocked = !!session && session.projectLocked !== false;
+  const [chatPersisted, setChatPersisted] = useState(() => chatId ? client.isChatPersisted(chatId) : false);
+  // Only the attachment's persistence fact can unlock an existing chat's project/model draft.
+  const projectLocked = !!session && (temporary || chatPersisted !== false);
   const wasShowingHeroComposerRef = useRef(showHeroComposer);
-  const sessionModelPreset = session?.modelPreset?.trim() || null;
+  const runtimeControlsAvailable = useRuntimeControls(client);
+  const sessionModelPreset = session?.modelPreset ?? null;
   const [localModelPreset, setLocalModelPreset] = useState<string | null>(null);
+  const [confirmedModelPreset, setConfirmedModelPreset] = useState<string | null | undefined>(undefined);
+  const [modelSelectionPending, setModelSelectionPending] = useState(false);
+  const [modelSelectionError, setModelSelectionError] = useState<Error | null>(null);
+  const modelScopeRef = useRef({ chatId, client });
+  modelScopeRef.current = { chatId, client };
   useEffect(() => {
     setLocalModelPreset(null);
-  }, [session?.key, sessionModelPreset]);
-  const configuredPresetNames = useMemo(
-    () => new Set(settings?.model_presets.map((preset) => preset.name) ?? []),
-    [settings],
-  );
-  const activeModelPreset = (
-    (localModelPreset && (!settings || configuredPresetNames.has(localModelPreset))
-      ? localModelPreset
-      : null)
-    || (sessionModelPreset && (!settings || configuredPresetNames.has(sessionModelPreset))
-      ? sessionModelPreset
-      : null)
-    || settings?.agent.model_preset
-    || "default"
-  );
+    setConfirmedModelPreset(undefined);
+    setModelSelectionError(null);
+    setModelSelectionPending(false);
+  }, [session?.key, client]);
+  useEffect(() => { setConfirmedModelPreset(undefined); }, [sessionModelPreset]);
+  const selectedModelPreset = localModelPreset
+    ?? (confirmedModelPreset !== undefined ? confirmedModelPreset : sessionModelPreset);
+  const activeModelPreset = selectedModelPreset
+    ?? settings?.agent.model_preset
+    ?? "default";
+  useEffect(() => {
+    setChatPersisted(chatId ? client.isChatPersisted(chatId) : false);
+    if (!chatId) return;
+    return client.onChat(chatId, (event) => {
+      if (event.event === "attached") {
+        if (typeof event.persisted === "boolean") setChatPersisted(event.persisted);
+        if (event.model_preset !== undefined) setConfirmedModelPreset(event.model_preset);
+        if (event.persisted === true) setLocalModelPreset(null);
+      } else if (event.event === "message_accepted" && !temporary) {
+        setChatPersisted(true);
+        if (localModelPreset !== null) setConfirmedModelPreset(localModelPreset);
+        setLocalModelPreset(null);
+      }
+    });
+  }, [chatId, client, temporary, localModelPreset]);
   useEffect(() => {
     setModelFallback(null);
     if (!chatId) return;
@@ -840,16 +862,33 @@ export function ThreadShell({
       });
     });
   }, [activeModelPreset, chatId, client]);
+  const modelIsDraft = !chatId || (!temporary && chatPersisted === false);
   const handleModelPresetChange = useCallback((name: string) => {
-    setLocalModelPreset(name);
-    if (chatId) {
-      void client.sendSystemCommand(chatId, `/model ${name}`).catch(() => {});
+    if (!runtimeControlsAvailable || modelSelectionPending) return;
+    setModelSelectionError(null);
+    if (!chatId || modelIsDraft) {
+      setLocalModelPreset(name);
+      return;
     }
-  }, [chatId, client]);
+    setModelSelectionPending(true);
+    void client.selectModel(chatId, name).then((result) => {
+      if (modelScopeRef.current.chatId !== chatId || modelScopeRef.current.client !== client) return;
+      setConfirmedModelPreset(result.model_preset);
+      setLocalModelPreset(null);
+    }).catch((error: unknown) => {
+      if (modelScopeRef.current.chatId !== chatId || modelScopeRef.current.client !== client) return;
+      setModelSelectionError(error instanceof Error ? error : new Error(String(error)));
+    }).finally(() => {
+      if (modelScopeRef.current.chatId === chatId && modelScopeRef.current.client === client) setModelSelectionPending(false);
+    });
+  }, [chatId, client, runtimeControlsAvailable, modelSelectionPending, modelIsDraft]);
   const modelPresetOptions = useMemo(
     () => modelPresetOptionsFromSettings(settings),
     [settings],
   );
+  const runtimeControlError = modelSelectionError ?? controlError;
+  const modelDisabledReason = !runtimeControlsAvailable ? t("runtimeControls.unavailable")
+    : modelSelectionPending ? t("runtimeControls.selectingModel") : undefined;
   const availableSlashCommands = useMemo(
     () => temporary
       ? slashCommands.filter(({ command }) => command === "/model" || command === "/stop")
@@ -860,7 +899,10 @@ export function ThreadShell({
     () => toModelBadgeInfo(modelName, settings, activeModelPreset),
     [activeModelPreset, modelName, settings],
   );
-  const modelBadgeLabel = modelBadge.needsSetup
+  const unknownModelPreset = activeModelPreset !== "default" && settings
+    && !settings.model_presets.some((preset) => preset.name === activeModelPreset);
+  const modelNeedsSetup = modelBadge.needsSetup && !unknownModelPreset;
+  const modelBadgeLabel = modelNeedsSetup
     ? t("thread.composer.chooseAI", { defaultValue: "Choose your AI" })
     : modelBadge.label;
   useEffect(() => {
@@ -991,7 +1033,8 @@ export function ThreadShell({
       void submitted.delivery.then(() => pending.finish?.(true), (error: unknown) => {
         // Topic creation already unmounted the landing composer. A rejected
         // local reference must hand its draft to that topic, not strand it on /new.
-        if (pending.draft && pending.images?.some((image) => image.media.path !== undefined)) {
+        if (pending.draft && (pending.options?.initialModelPreset !== undefined
+          || pending.images?.some((image) => image.media.path !== undefined))) {
           const targetKey = `websocket:${chatId}`;
           const current = draftStore?.get(targetKey, !temporary);
           if (!current?.text && !current?.attachments.length
@@ -1026,9 +1069,21 @@ export function ThreadShell({
       activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
       setSubmittedViewportTurnId(submitted.turnId);
     }
+    void submitted?.delivery?.catch((error: unknown) => {
+      const targetKey = `websocket:${chatId}`;
+      const current = draftStore?.get(targetKey, !temporary);
+      if (pendingFirstMessage.draft && !current?.text && !current?.attachments.length
+        && !current?.sessionMentions.length && !current?.quotedContext) {
+        draftStore?.set(targetKey, pendingFirstMessage.draft, !temporary);
+        setRestoredFirstDraft((previous) => ({ chatId, revision: (previous?.revision ?? 0) + 1,
+          error: error instanceof Error ? error.message : String(error) }));
+      }
+    });
     onPendingFirstMessageConsumed?.(pendingFirstMessage.id);
   }, [
     chatId,
+    draftStore,
+    temporary,
     onPendingFirstMessageConsumed,
     pendingFirstMessage,
     send,
@@ -1057,7 +1112,8 @@ export function ThreadShell({
       let finish!: (accepted: boolean) => void;
       const delivery = new Promise<boolean>((resolve) => { finish = resolve; });
       pendingFirstRef.current = {
-        content, images, options: withWorkspaceScope(options), finish,
+        content, images, options: withWorkspaceScope({ ...options,
+          ...(localModelPreset !== null ? { initialModelPreset: localModelPreset } : {}) }), finish,
         draftKey, draft: draftStore?.get(draftKey, persistDraft),
       };
       setPendingFirstTargetChatId(null);
@@ -1068,13 +1124,10 @@ export function ThreadShell({
         setBooting(false);
         return false;
       }
-      if (localModelPreset) {
-        await client.sendSystemCommand(newId, `/model ${localModelPreset}`).catch(() => {});
-      }
       setPendingFirstTargetChatId(newId);
       return delivery;
     },
-    [booting, client, draftKey, draftStore, localModelPreset, onCreateChat, persistDraft, withWorkspaceScope, workspaceScope],
+    [booting, draftKey, draftStore, localModelPreset, onCreateChat, persistDraft, withWorkspaceScope, workspaceScope],
   );
 
   const inspectAttachment = useCallback(async (path: string) => {
@@ -1088,7 +1141,9 @@ export function ThreadShell({
   const handleThreadSend = useCallback(
     (content: string, images?: SendAttachment[], options?: SendOptions) => {
       setRestoredFirstDraft((current) => current?.chatId === chatId ? { ...current, error: "" } : current);
-      const submitted = send(content, images, withWorkspaceScope(options));
+      const submitted = send(content, images, withWorkspaceScope({ ...options,
+        ...(!projectLocked && (localModelPreset ?? sessionModelPreset) !== null
+          ? { initialModelPreset: (localModelPreset ?? sessionModelPreset)! } : {}) }));
       if (
         chatId
         && submitted
@@ -1100,7 +1155,7 @@ export function ThreadShell({
       }
       return submitted?.delivery ? submitted.delivery.then(() => true) : submitted !== null;
     },
-    [chatId, send, withWorkspaceScope],
+    [chatId, send, withWorkspaceScope, projectLocked, localModelPreset, sessionModelPreset],
   );
 
   const loadTemporaryFilePreview = useCallback((path: string) =>
@@ -1292,6 +1347,12 @@ export function ThreadShell({
           onOpenSettings={onOpenModelSettings}
         />
       ) : null}
+      {modelSelectionError || controlError ? (
+        <p role="alert" className="px-3 text-sm text-destructive">
+          {runtimeControlError instanceof RuntimeControlError && runtimeControlError.outcomeUnknown
+            ? t("runtimeControls.unconfirmed") : runtimeControlError?.message}
+        </p>
+      ) : null}
       {streamError && !hasInlineDeliveryError(messages, streamError) ? (
         <StreamErrorNotice
           error={streamError}
@@ -1324,12 +1385,14 @@ export function ThreadShell({
           modelLabel={modelBadgeLabel}
           modelDetail={modelBadge.model}
           modelPreset={activeModelPreset}
+          modelSelectionExplicit={selectedModelPreset !== null}
           modelPresets={modelPresetOptions}
           onModelPresetChange={handleModelPresetChange}
+          modelDisabledReason={modelDisabledReason}
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
-          modelNeedsSetup={modelBadge.needsSetup}
-          onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
+          modelNeedsSetup={modelNeedsSetup}
+          onModelBadgeClick={modelNeedsSetup ? onOpenModelSettings : undefined}
           onManageModels={onOpenModelSettings}
           contextUsage={composerContextUsage}
           recentRoundUsage={composerRoundUsage}
@@ -1341,6 +1404,8 @@ export function ThreadShell({
           sessions={mentionSessions}
           skills={skills}
           onStop={stop}
+          stopUnavailable={!runtimeControlsAvailable}
+          isStopping={isStopping}
           onInspectAttachment={inspectAttachment}
           onTranscribeAudio={transcribeAudio}
           goalState={currentGoalState}
@@ -1382,12 +1447,14 @@ export function ThreadShell({
           modelLabel={modelBadgeLabel}
           modelDetail={modelBadge.model}
           modelPreset={activeModelPreset}
+          modelSelectionExplicit={selectedModelPreset !== null}
           modelPresets={modelPresetOptions}
           onModelPresetChange={handleModelPresetChange}
+          modelDisabledReason={modelDisabledReason}
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
-          modelNeedsSetup={modelBadge.needsSetup}
-          onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
+          modelNeedsSetup={modelNeedsSetup}
+          onModelBadgeClick={modelNeedsSetup ? onOpenModelSettings : undefined}
           onManageModels={onOpenModelSettings}
           contextUsage={composerContextUsage}
           recentRoundUsage={composerRoundUsage}

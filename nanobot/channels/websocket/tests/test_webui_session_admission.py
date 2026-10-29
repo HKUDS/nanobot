@@ -16,24 +16,29 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.manager import ChannelManager
 from nanobot.channels.websocket.runtime import WebSocketChannel
-from nanobot.config.schema import Config
+from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.providers.base import LLMProvider, LLMResponse
 from nanobot.runtime_context import public_history_message
+from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
 from nanobot.session.keys import UNIFIED_SESSION_KEY, session_key_for_channel
 from nanobot.session.manager import SessionManager
+from nanobot.session.model_selection import model_preset_from_metadata
 from nanobot.session.webui_turns import clear_websocket_turns
+from nanobot.utils.restart import RestartController
 
 
 class _Provider(LLMProvider):
     def __init__(self) -> None:
         super().__init__(provider_name="test")
         self.calls = 0
+        self.models: list[str | None] = []
 
     def get_default_model(self) -> str:
         return "test-model"
 
     async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> LLMResponse:
         self.calls += 1
+        self.models.append(kwargs.get("model"))
         return LLMResponse(content="hello back", finish_reason="stop")
 
 
@@ -55,19 +60,44 @@ class _Runtime:
     channel: WebSocketChannel
     connection: _Connection
     provider: _Provider
+    restart: RestartController
 
-    async def message(self, chat_id: str, text: str = "hello") -> InboundMessage:
+    async def message(self, chat_id: str, text: str = "hello", **fields: Any) -> InboundMessage:
         await self.channel._dispatch_envelope(
             self.connection,
             "webui-client",
-            {"type": "message", "chat_id": chat_id, "content": text, "webui": True},
+            {"type": "message", "chat_id": chat_id, "content": text, "webui": True, **fields},
         )
-        return await self.bus.consume_inbound()
+        message = await asyncio.wait_for(self.bus.consume_inbound(), 3)
+        assert isinstance(message, InboundMessage)
+        return message
 
     async def execute(self, message: InboundMessage) -> None:
-        await self.loop._enqueue_session_message(message)
-        tasks = self.loop._active_tasks[self.loop._effective_session_key(message)]
-        await asyncio.gather(*tuple(tasks))
+        await self.loop._dispatch_inbound(message)
+        tasks = self.loop._active_tasks.get(self.loop._effective_session_key(message), ())
+        await asyncio.wait_for(asyncio.gather(*tuple(tasks)), 3)
+
+    async def request(
+        self, request_id: str, action: str, payload: dict[str, Any],
+        *, connection: _Connection | None = None,
+    ) -> None:
+        await self.channel._dispatch_envelope(
+            connection or self.connection, "webui-client", {
+                "type": "webui_request", "request_id": request_id, "action": action,
+                "payload": {"expected_gateway_id": self.channel.gateway.tokens.instance_id, **payload},
+            },
+        )
+
+    async def response(
+        self, request_id: str, *, connection: _Connection | None = None,
+    ) -> dict[str, Any]:
+        connection = connection or self.connection
+        task = self.channel._webui_request_tasks.get((connection, request_id))
+        if task is not None:
+            await asyncio.wait_for(asyncio.shield(task), 3)
+        await self.channel.webui_flush(connection)
+        return next(frame for frame in reversed(connection.sent)
+                    if frame.get("request_id") == request_id)
 
 
 @pytest.fixture(params=[False, True], ids=["separate", "shared"])
@@ -84,21 +114,27 @@ async def runtime(request: pytest.FixtureRequest, tmp_path: Path) -> AsyncIterat
     loop = AgentLoop(
         bus=bus, provider=provider, workspace=workspace,
         session_manager=sessions, unified_session=unified,
+        model_presets={
+            "default": ModelPresetConfig(model="test-model"),
+            "fast": ModelPresetConfig(model="fast-model", context_window_tokens=131_072),
+        },
     )
+    restart = RestartController()
     manager = ChannelManager(
         config, bus, session_manager=sessions, webui_static_dist=False,
-        config_path=tmp_path / "config.json",
+        config_path=tmp_path / "config.json", webui_model_runtime=loop.runtime_resolver,
+        webui_restart=restart.request,
     )
     channel = manager.channels["websocket"]
     assert isinstance(channel, WebSocketChannel)
     connection = _Connection()
     channel._webui_connections.add(connection)
     try:
-        yield _Runtime(bus, sessions, loop, channel, connection, provider)
+        yield _Runtime(bus, sessions, loop, channel, connection, provider, restart)
     finally:
         chat_ids = tuple(channel._subs)
         await channel._cleanup_connection(connection)
-        channel.gateway.temporary_chats.close()
+        await channel._commands.close()
         for chat_id in chat_ids:
             clear_websocket_turns(chat_id)
         await loop.aclose()
@@ -174,3 +210,55 @@ async def test_temporary_chat_retains_its_own_generation(history, runtime: _Runt
     assert runtime.provider.calls == 1
     assert await runtime.sessions.state.read(first.session_key) is None
     assert await runtime.sessions.state.list_sessions() == []
+
+
+async def test_invalid_initial_model_does_not_admit_or_lock_project(
+    runtime: _Runtime, tmp_path: Path,
+) -> None:
+    rejected_project = tmp_path / "rejected-project"
+    accepted_project = tmp_path / "accepted-project"
+    rejected_project.mkdir()
+    accepted_project.mkdir()
+    await runtime.channel._dispatch_envelope(runtime.connection, "webui-client", {
+        "type": "message", "chat_id": "first-model", "content": "hello", "webui": True,
+        "initial_model_preset": "missing", "turn_id": "first-attempt",
+        "workspace_scope": {"project_path": str(rejected_project), "access_mode": "restricted"},
+    })
+    await runtime.channel.webui_flush(runtime.connection)
+
+    assert runtime.bus.inbound_size == 0
+    assert await runtime.sessions.state.list_sessions() == []
+    assert any(frame.get("detail") == "model_selection_rejected" for frame in runtime.connection.sent)
+
+    first = await runtime.message(
+        "first-model", turn_id="first-attempt", initial_model_preset="fast",
+        workspace_scope={"project_path": str(accepted_project), "access_mode": "restricted"},
+    )
+    await runtime.execute(first)
+    display = await runtime.sessions.state.read_metadata("websocket:first-model")
+    assert display is not None
+    assert Path(display["metadata"][WORKSPACE_SCOPE_METADATA_KEY]["project_path"]) == accepted_project
+    assert runtime.provider.models == ["fast-model"]
+
+
+@pytest.mark.parametrize("temporary", [False, True], ids=["saved", "temporary"])
+async def test_initial_model_applies_to_first_turn_without_overwriting_later_selection(
+    runtime: _Runtime, temporary: bool,
+) -> None:
+    chat_id = "selected"
+    if temporary:
+        await runtime.channel._dispatch_envelope(runtime.connection, "webui-client", {"type": "new_temporary_chat"})
+        chat_id = next(frame["chat_id"] for frame in runtime.connection.sent if frame["event"] == "attached")
+    first = await runtime.message(chat_id, initial_model_preset="fast")
+    await runtime.execute(first)
+    key = runtime.loop._effective_session_key(first)
+    selected = await runtime.sessions.state.read_metadata(key)
+    assert selected is not None
+    assert model_preset_from_metadata(selected["metadata"]) == "fast"
+
+    later = await runtime.message(chat_id, "follow up", initial_model_preset="default")
+    await runtime.execute(later)
+    selected = await runtime.sessions.state.read_metadata(key)
+    assert selected is not None
+    assert model_preset_from_metadata(selected["metadata"]) == "fast"
+    assert runtime.provider.models == ["fast-model", "fast-model"]

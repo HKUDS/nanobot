@@ -430,6 +430,17 @@ class WebSocketChannel(BaseChannel):
     ) -> None:
         await self._safe_send_to(connection, raw, label=label)
 
+    async def webui_flush(self, connection: ServerConnection) -> None:
+        """Bound the physical write of queued control acknowledgements before shutdown."""
+        state = self._connection_outbound.get(connection)
+        if state is None or state.writer is None:
+            return
+        try:
+            async with asyncio.timeout(_OUTBOUND_SEND_TIMEOUT_S):
+                await asyncio.shield(state.writer)
+        except TimeoutError:
+            self.logger.warning("control acknowledgement could not be flushed before shutdown")
+
     async def webui_dispatch_message(
         self,
         *,
@@ -829,7 +840,7 @@ class WebSocketChannel(BaseChannel):
             client_id = client_id[:128]
 
         default_chat_id = str(uuid.uuid4())
-        from nanobot.webui.client_contract import gateway_identity
+        from nanobot.webui.client_contract import gateway_identity, webui_contract
 
         try:
             await connection.send(
@@ -838,6 +849,8 @@ class WebSocketChannel(BaseChannel):
                         "event": "ready",
                         "chat_id": default_chat_id,
                         "client_id": client_id,
+                        "gateway_id": self.gateway.tokens.instance_id,
+                        "capabilities": webui_contract()["capabilities"],
                         **({"upload": self._uploads.issue(connection)}
                            if self.is_allowed(client_id) else {}),
                         **({"terminal": gateway_identity(self.gateway.tokens.instance_id)}
@@ -1129,6 +1142,8 @@ class WebSocketChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         await self._outbound.send(msg)
+        if msg.after_delivery is not None:
+            await asyncio.gather(*(self.webui_flush(conn) for conn in self.webui_subscribers(msg.chat_id)))
 
     def prepare_tool_events(self, msg: OutboundMessage) -> OutboundMessage:
         return msg

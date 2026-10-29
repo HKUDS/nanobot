@@ -8,17 +8,23 @@ import json
 import re
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from loguru import logger
 from websockets.asyncio.server import ServerConnection
 
-from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA, INBOUND_META_USER_SHELL
+from nanobot.bus.controls import SelectSessionModel, SessionStopResult, StopSession
+from nanobot.bus.events import (
+    INBOUND_META_INITIAL_MODEL_PRESET,
+    INBOUND_META_LOCAL_MEDIA,
+    INBOUND_META_USER_SHELL,
+)
 from nanobot.channels.websocket.attachment_policy import validate_attachment_batch
 from nanobot.channels.websocket.attachment_store import AttachmentUploadError
 from nanobot.command.builtin import USER_SHELL_COMMAND, builtin_command_starts_agent_turn
+from nanobot.runtime_admission import RuntimeMaintenanceError
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_INPUT_META,
     WEBUI_QUOTE_METADATA,
@@ -31,6 +37,9 @@ from nanobot.security.workspace_access import (
 )
 from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.keys import session_key_for_channel
+from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
+from nanobot.session.sqlite_store import SessionConflictError
+from nanobot.session.state import SessionOperationQueueFullError
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     clear_websocket_turns,
@@ -39,6 +48,7 @@ from nanobot.session.webui_turns import (
     websocket_turn_wall_started_at,
 )
 from nanobot.utils.helpers import safe_filename
+from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
 from nanobot.webui.attachments import inspect_local_attachment
 from nanobot.webui.cli_apps_api import normalize_cli_app_mentions
@@ -71,6 +81,7 @@ if TYPE_CHECKING:
 
 _WEBUI_REQUEST_CACHE_TTL_S = 5 * 60.0
 _WEBUI_REQUEST_CACHE_MAX = 256
+_RUNTIME_CONTROL_ACTIONS = frozenset({"session.stop", "session.model.select", "gateway.restart"})
 
 
 @dataclass(frozen=True)
@@ -78,6 +89,7 @@ class WebUIRequestResult:
     result: Any = None
     status: int | None = None
     message: str | None = None
+    after_delivery: Callable[[], None] | None = None
 
 
 @dataclass
@@ -117,6 +129,8 @@ class WebUICommandTransport(Protocol):
         *,
         label: str = "",
     ) -> None: ...
+
+    async def webui_flush(self, connection: ServerConnection) -> None: ...
 
     async def webui_dispatch_message(
         self,
@@ -575,6 +589,24 @@ class WebUICommandRouter:
             )
             return
 
+        initial_model: dict[str, Any] = {}
+        if "initial_model_preset" in envelope:
+            preset = envelope["initial_model_preset"]
+            try:
+                if not isinstance(preset, str) or not preset.strip() or len(preset) > 256:
+                    raise ValueError("invalid model preset")
+                resolver = self.gateway.model_runtime
+                if resolver is None:
+                    raise ValueError("model selection is unavailable")
+                runtime = resolver.resolve_preset(preset)
+                initial_model[SESSION_MODEL_PRESET_METADATA_KEY] = runtime.model_preset
+            except (KeyError, ValueError) as exc:
+                await self._transport.webui_send_event(
+                    connection, "error", detail="model_selection_rejected",
+                    reason=str(exc.args[0]), **rejection_fields,
+                )
+                return
+
         raw_media = envelope.get("media", [])
         media_paths: list[str] = []
         media_names: list[str | None] = []
@@ -763,6 +795,7 @@ class WebUICommandRouter:
                         chat_id,
                         scope,
                         session_key=admission_session_key,
+                        initial_metadata=(initial_model if execution_session_key == admission_session_key else None),
                         expected_generation=(
                             temporary_policy.session_generation
                             if temporary_policy is not None
@@ -785,6 +818,8 @@ class WebUICommandRouter:
                             execution_session_key, {},
                         )
                     )
+            if initial_model and session_created and execution_session_key != admission_session_key:
+                metadata[INBOUND_META_INITIAL_MODEL_PRESET] = initial_model[SESSION_MODEL_PRESET_METADATA_KEY]
             if session_generation is not None:
                 metadata[HISTORY_GENERATION_METADATA_KEY] = session_generation
             if is_webui and not restart_control and (
@@ -1027,6 +1062,45 @@ class WebUICommandRouter:
                 await self.send_webui_response(connection, request_id, result=result)
             return
 
+        control_target: tuple[str, str] | None = None
+        if action in _RUNTIME_CONTROL_ACTIONS:
+            if payload.get("expected_gateway_id") != self.gateway.tokens.instance_id:
+                await self.send_webui_response(
+                    connection, request_id, status=409, message="gateway_changed",
+                )
+                return
+            try:
+                with self._http_router.bus.admission.activity():
+                    if action != "gateway.restart":
+                        chat_id = payload.get("chat_id")
+                        if not is_valid_webui_chat_id(chat_id):
+                            await self.send_webui_response(
+                                connection, request_id, status=400, message="invalid chat_id",
+                            )
+                            return
+                        policy = self._temporary_chats.message_policy(connection, chat_id, "")
+                        key = policy.session_key if policy is not None else session_key_for_channel(
+                            "websocket", chat_id, unified_session=self.gateway.unified_session,
+                        )
+                        sessions = self.gateway.session_manager
+                        display = await sessions.state.read_identity(webui_session_key(chat_id)) if sessions else None
+                        identity = (
+                            await sessions.state.read_identity(key)
+                            if sessions is not None and display is not None else None
+                        )
+                        if identity is None:
+                            await self.send_webui_response(
+                                connection, request_id, status=404, message="session_unavailable",
+                            )
+                            return
+                        control_target = (key, identity.generation)
+            except TemporaryChatError as exc:
+                await self.send_webui_response(connection, request_id, status=404, message=exc.detail)
+                return
+            except (RuntimeMaintenanceError, SessionOperationQueueFullError) as exc:
+                await self.send_webui_response(connection, request_id, status=503, message=str(exc))
+                return
+
         payload_digest = hashlib.sha256(
             json.dumps(
                 payload,
@@ -1049,13 +1123,13 @@ class WebUICommandRouter:
             )
             return
         if operation is None:
-            operation_task = asyncio.create_task(
-                self.execute_webui_request(
-                    connection,
-                    action,
-                    payload,
-                )
-            )
+            if action in _RUNTIME_CONTROL_ACTIONS:
+                # Admission happens before this socket accepts another message.
+                # Waiting for the result is independent of ordinary mutation locks.
+                work = self.admit_runtime_control(action, payload, control_target)
+            else:
+                work = self.execute_webui_request(connection, action, payload)
+            operation_task = asyncio.create_task(work)
             new_operation = WebUIRequestOperation(
                 action=action,
                 payload_digest=payload_digest,
@@ -1081,10 +1155,82 @@ class WebUICommandRouter:
                 connection,
                 request_id,
                 operation.task,
-                sequence=is_replay,
+                sequence=is_replay and action not in _RUNTIME_CONTROL_ACTIONS,
             )
         )
         self.request_tasks[key] = delivery_task
+
+    def admit_runtime_control(
+        self, action: str, payload: dict[str, Any], target: tuple[str, str] | None,
+    ) -> Coroutine[Any, Any, WebUIRequestResult]:
+        async def completed(result: WebUIRequestResult) -> WebUIRequestResult:
+            return result
+
+        if action == "gateway.restart":
+            request = self.gateway.restart
+            ticket = request() if request is not None else None
+            if ticket is None:
+                return completed(WebUIRequestResult(status=409, message="restart_unavailable"))
+            return completed(WebUIRequestResult(
+                result={"status": "accepted", "gateway_id": self.gateway.tokens.instance_id},
+                after_delivery=ticket.commit,
+            ))
+
+        chat_id = cast(str, payload["chat_id"])
+        assert target is not None
+        key, generation = target
+        try:
+            if action == "session.stop":
+                turn_id = payload.get("turn_id")
+                if "turn_id" not in payload or (turn_id is not None and (
+                    not isinstance(turn_id, str) or not turn_id or len(turn_id) > 256
+                )):
+                    return completed(WebUIRequestResult(status=400, message="invalid turn_id"))
+                stop_result: asyncio.Future[SessionStopResult] = asyncio.get_running_loop().create_future()
+                self._http_router.bus.publish_control(StopSession(key, turn_id, generation, stop_result))
+                return self.finish_stop_control(stop_result)
+            preset = payload.get("preset")
+            if not isinstance(preset, str) or not preset.strip() or len(preset) > 256:
+                return completed(WebUIRequestResult(status=400, message="invalid model preset"))
+            model_result: asyncio.Future[LLMRuntime] = asyncio.get_running_loop().create_future()
+            self._http_router.bus.publish_control(SelectSessionModel(key, preset, generation, model_result))
+            return self.finish_model_control(chat_id, model_result)
+        except RuntimeMaintenanceError as exc:
+            return completed(WebUIRequestResult(status=503, message=str(exc)))
+
+    async def finish_stop_control(
+        self, result: asyncio.Future[SessionStopResult],
+    ) -> WebUIRequestResult:
+        try:
+            stopped = await asyncio.shield(result)
+            return WebUIRequestResult(result={
+                "status": stopped.status, "stopped_tasks": stopped.stopped_tasks,
+                "turn_id": stopped.turn_id,
+            })
+        except (SessionConflictError, SessionOperationQueueFullError) as exc:
+            return WebUIRequestResult(status=409, message=str(exc))
+        except Exception:
+            logger.exception("Session stop failed")
+            return WebUIRequestResult(status=500, message="session_stop_failed")
+
+    async def finish_model_control(
+        self, chat_id: str, result: asyncio.Future[LLMRuntime],
+    ) -> WebUIRequestResult:
+        try:
+            runtime = await asyncio.shield(result)
+        except (KeyError, ValueError) as exc:
+            return WebUIRequestResult(status=400, message=str(exc.args[0]))
+        except (SessionConflictError, SessionOperationQueueFullError) as exc:
+            return WebUIRequestResult(status=409, message=str(exc))
+        except Exception:
+            logger.exception("Session model selection failed")
+            return WebUIRequestResult(status=500, message="model_selection_failed")
+        if self._temporary_chats.should_persist_transcript(chat_id):
+            await self._outbound.session_updated(chat_id, scope="metadata")
+        return WebUIRequestResult(result={
+            "model_preset": runtime.model_preset, "model_name": runtime.model,
+            "context_window_tokens": runtime.context_window_tokens,
+        })
 
     def prune_request_operations(self) -> None:
         now = time.monotonic()
@@ -1135,13 +1281,19 @@ class WebUICommandRouter:
                     )
                 return
             result = await asyncio.shield(operation_task)
-            await self.send_webui_response(
-                connection,
-                request_id,
-                result=result.result,
-                status=result.status,
-                message=result.message,
-            )
+            try:
+                await self.send_webui_response(
+                    connection,
+                    request_id,
+                    result=result.result,
+                    status=result.status,
+                    message=result.message,
+                )
+                if result.after_delivery is not None:
+                    await self._transport.webui_flush(connection)
+            finally:
+                if result.after_delivery is not None:
+                    result.after_delivery()
         finally:
             self.request_tasks.pop((connection, request_id), None)
             self.discard_request_lock_if_idle(connection)

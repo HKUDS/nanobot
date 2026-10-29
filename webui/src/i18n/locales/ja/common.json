@@ -1,4 +1,10 @@
 {
+  "runtimeControls": {
+    "unavailable": "この接続では実行制御を利用できません。チャットは引き続き利用できます。",
+    "unconfirmed": "操作結果を確認できません。再接続して現在の状態を確認してから、再試行してください。",
+    "stopping": "停止中…",
+    "selectingModel": "モデルを選択中…"
+  },
   "updates": {
     "guide": {
       "entry": "{{method}}で更新",

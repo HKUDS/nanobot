@@ -30,10 +30,14 @@ export interface AppOptions {
 
 export interface ChatClient {
   readonly activeChatId: string
+  readonly supportsRuntimeControls: boolean
+  selectModel(chatId: string, preset: string): Promise<import("../../../packages/client-events/runtime-controls").ModelSelectionResult>
+  stopSession(chatId: string, turnId: string | null): Promise<import("../../../packages/client-events/runtime-controls").StopResult>
+  sendInitialMessage(content: string, options: MessageOptions, turnId: string, onSubmitted?: () => void): Promise<void>
   connect(): void
   close(): void
   send(content: string, options?: MessageOptions): string
-  sendAttachments(content: string, options: MessageOptions): Promise<string>
+  sendAttachments(content: string, options: MessageOptions, turnId?: string, onSubmitted?: () => void): Promise<string>
   inspectAttachment(path: string): Promise<LocalAttachment>
   attach(chatId: string): void
   newChat(scope?: WorkspaceScopePayload): void

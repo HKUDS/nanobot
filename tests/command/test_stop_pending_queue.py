@@ -1,81 +1,77 @@
-"""Test cmd_stop drains pending queue to prevent mid-turn injection deadlock."""
+"""Slash stop shares the real session cancellation owner and frees its inbox."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from typing import Any
 
 import pytest
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.agent.loop import AgentLoop
+from nanobot.bus.events import InboundMessage
+from nanobot.bus.queue import MessageBus
 from nanobot.command.builtin import cmd_stop
 from nanobot.command.router import CommandContext
+from nanobot.providers.base import LLMProvider, LLMResponse
+from nanobot.runtime_context import public_history_message
+
+
+class _Provider(LLMProvider):
+    def __init__(self) -> None:
+        super().__init__(provider_name="test")
+        self.started = asyncio.Event()
+        self.calls = 0
+
+    def get_default_model(self) -> str:
+        return "test-model"
+
+    async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> LLMResponse:
+        self.calls += 1
+        if self.calls == 1:
+            self.started.set()
+            await asyncio.Event().wait()
+        return LLMResponse(content="next turn completed", finish_reason="stop")
+
+
+def _message(content: str) -> InboundMessage:
+    return InboundMessage(channel="cli", sender_id="user", chat_id="stop-test", content=content)
+
+
+def _context(loop: AgentLoop) -> CommandContext:
+    message = _message("/stop")
+    return CommandContext(msg=message, session=None, key=message.session_key, raw="/stop", loop=loop)
 
 
 @pytest.mark.asyncio
-async def test_cmd_stop_drains_pending_queue():
-    """cmd_stop should drain pending queue in addition to cancelling active tasks."""
-    mock_loop = MagicMock()
-    mock_loop._cancel_active_tasks = AsyncMock(return_value=1)
-    mock_loop._pending_queues = {}
+@pytest.mark.parametrize("pending_count", [0, 2])
+async def test_cmd_stop_cancels_work_and_next_turn_uses_a_fresh_inbox(tmp_path, pending_count):
+    provider = _Provider()
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path)
+    try:
+        await loop._dispatch_inbound(_message("first turn"))
+        await asyncio.wait_for(provider.started.wait(), 3)
+        for index in range(pending_count):
+            await loop._dispatch_inbound(_message(f"discard followup {index}"))
 
-    pending = asyncio.Queue()
-    await pending.put("msg1")
-    await pending.put("msg2")
-    mock_loop._pending_queues["test-session"] = pending
+        result = await cmd_stop(_context(loop))
 
-    ctx = CommandContext(
-        msg=MagicMock(channel="websocket", chat_id="test-chat", metadata={}),
-        session=None,
-        key="test-session",
-        raw="/stop",
-        loop=mock_loop,
-    )
-
-    result = await cmd_stop(ctx)
-
-    assert isinstance(result, OutboundMessage)
-    assert "Stopped 3 task(s)" in result.content  # 1 cancelled + 2 drained
-    assert "test-session" not in mock_loop._pending_queues
-
-
-@pytest.mark.asyncio
-async def test_cmd_stop_with_empty_pending_queue():
-    """cmd_stop should work correctly when pending queue is empty."""
-    mock_loop = MagicMock()
-    mock_loop._cancel_active_tasks = AsyncMock(return_value=2)
-    mock_loop._pending_queues = {}
-
-    pending = asyncio.Queue()
-    mock_loop._pending_queues["test-session"] = pending
-
-    ctx = CommandContext(
-        msg=MagicMock(channel="websocket", chat_id="test-chat", metadata={}),
-        session=None,
-        key="test-session",
-        raw="/stop",
-        loop=mock_loop,
-    )
-
-    result = await cmd_stop(ctx)
-
-    assert "Stopped 2 task(s)" in result.content
-    assert "test-session" not in mock_loop._pending_queues
+        assert result.content == "Stopped 1 task(s)."
+        assert provider.calls == 1
+        await loop._dispatch_inbound(_message("next turn"))
+        await asyncio.wait_for(asyncio.gather(*tuple(loop._active_tasks["cli:stop-test"])), 3)
+        saved = await loop.sessions.state.read("cli:stop-test")
+        assert saved is not None
+        users = [public_history_message(row)["content"] for row in saved.messages if row["role"] == "user"]
+        assert users == ["first turn", "next turn"]
+        assert provider.calls == 2
+    finally:
+        await loop.aclose()
 
 
 @pytest.mark.asyncio
-async def test_cmd_stop_no_pending_queue():
-    """cmd_stop should work when no pending queue exists."""
-    mock_loop = MagicMock()
-    mock_loop._cancel_active_tasks = AsyncMock(return_value=0)
-    mock_loop._pending_queues = {}
-
-    ctx = CommandContext(
-        msg=MagicMock(channel="websocket", chat_id="test-chat", metadata={}),
-        session=None,
-        key="test-session",
-        raw="/stop",
-        loop=mock_loop,
-    )
-
-    result = await cmd_stop(ctx)
-
-    assert "No active task to stop" in result.content
+async def test_cmd_stop_idle_does_not_create_a_session(tmp_path):
+    loop = AgentLoop(bus=MessageBus(), provider=_Provider(), workspace=tmp_path)
+    try:
+        result = await cmd_stop(_context(loop))
+        assert result.content == "No active task to stop."
+        assert await loop.sessions.state.list_sessions() == []
+    finally:
+        await loop.aclose()

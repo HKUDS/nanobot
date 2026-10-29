@@ -8,6 +8,7 @@ from typing import Any, TypeVar, overload
 
 from loguru import logger
 
+from nanobot.bus.controls import SessionControl
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import outbound_message_for_event
 from nanobot.events import AgentEvent
@@ -31,7 +32,7 @@ class MessageBus:
 
     def __init__(self, *, admission: RuntimeAdmission | None = None):
         self.admission = admission if admission is not None else RuntimeAdmission()
-        self.inbound: asyncio.Queue[InboundMessage] = asyncio.Queue()
+        self.inbound: asyncio.Queue[InboundMessage | SessionControl] = asyncio.Queue()
         self.outbound: asyncio.Queue[OutboundMessage] = asyncio.Queue()
         self._handlers: list[EventHandler] = []
         self._pending: set[asyncio.Task[None]] = set()
@@ -43,8 +44,13 @@ class MessageBus:
         # This queue is unbounded. Admission and enqueue must not yield apart.
         self.inbound.put_nowait(msg)
 
-    async def consume_inbound(self) -> InboundMessage:
-        """Consume the next inbound message (blocks until available)."""
+    def publish_control(self, request: SessionControl) -> None:
+        """Order a control before the caller accepts its next message, without yielding."""
+        self.admission.check()
+        self.inbound.put_nowait(request)
+
+    async def consume_inbound(self) -> InboundMessage | SessionControl:
+        """Consume the next message or runtime control (blocks until available)."""
         return await self.inbound.get()
 
     async def publish_outbound(self, msg: OutboundMessage) -> None:

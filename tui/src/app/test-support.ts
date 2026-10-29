@@ -59,6 +59,17 @@ export function client(
 ) {
   return {
     activeChatId: "chat",
+    supportsRuntimeControls: true,
+    async selectModel(_chatId: string, preset: string) {
+      return { model_preset: preset, model_name: preset, context_window_tokens: 1000 }
+    },
+    async stopSession(_chatId: string, turnId: string | null): Promise<import("../../../packages/client-events/runtime-controls").StopResult> {
+      return { status: "stopped", stopped_tasks: 1, turn_id: turnId }
+    },
+    async sendInitialMessage(content: string, messageOptions: MessageOptions, _turnId?: string, onSubmitted?: () => void) {
+      this.send(content, messageOptions)
+      onSubmitted?.()
+    },
     connect() {},
     close() {},
     send(content: string, messageOptions: MessageOptions = {}) {
@@ -66,8 +77,10 @@ export function client(
       sentOptions.push(messageOptions)
       return "turn"
     },
-    async sendAttachments(content: string, messageOptions: MessageOptions) {
-      return this.send(content, messageOptions)
+    async sendAttachments(content: string, messageOptions: MessageOptions, _turnId?: string, onSubmitted?: () => void) {
+      const turnId = this.send(content, messageOptions)
+      onSubmitted?.()
+      return turnId
     },
     async inspectAttachment(_path: string): Promise<import("../../../packages/client-events/attachments").LocalAttachment> {
       throw new Error("file not found")

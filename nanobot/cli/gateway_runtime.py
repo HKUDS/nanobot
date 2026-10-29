@@ -43,6 +43,7 @@ from nanobot.cli.webui_support import (
 )
 from nanobot.config.paths import get_data_dir, is_default_workspace
 from nanobot.config.schema import Config
+from nanobot.gateway.restart import GatewayRestartPlan, claim_restarted_background
 from nanobot.gateway.runtime import GatewayHealthIdentity, GatewayInstance, GatewayRuntime
 from nanobot.installation_lock import installation_access
 from nanobot.security.network import is_loopback_host
@@ -55,6 +56,7 @@ from nanobot.session.keys import (
 from nanobot.session.manager import SessionManager
 from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt
 from nanobot.utils.helpers import sync_workspace_templates
+from nanobot.utils.restart import ProcessRestart, RestartController
 from nanobot.utils.token_encoding import warmup_token_encoding
 from nanobot.webui.build import BuildMode
 from nanobot.webui.dev import WebUIDevError, WebUIDevServer
@@ -440,11 +442,16 @@ def _run_gateway(
     port = port if port is not None else config.gateway.port
     instance = gateway_instance or GatewayInstance.resolve(config_path=get_config_path())
     gateway_runtime = GatewayRuntime(paths=instance.paths)
+    restart = RestartController()
+    restart_plan: GatewayRestartPlan | None = None
+    options = instance.start_options(port=port, verbose=verbose)
+    working_directory = Path.cwd()
     with installation_access(allow_incomplete=update_startup is not None):
         if update_startup is not None:
             update_startup.validate_installation()
+        claim_restarted_background(gateway_runtime, options)
         with (
-            gateway_runtime.foreground_instance(instance.start_options(port=port, verbose=verbose)),
+            gateway_runtime.foreground_instance(options),
             record_gateway_profile(instance, gateway_runtime, data_dir=get_data_dir(),
                                    workspace=config.workspace_path, port=port, verbose=verbose,
                                    grant=update_startup.grant if update_startup else None,
@@ -455,7 +462,7 @@ def _run_gateway(
             _run_claimed_gateway(
                 config, port=port, gateway_instance=instance, gateway_runtime=gateway_runtime,
                 health_identity=profile.health_identity, update_startup=update_startup,
-                update_profile=profile,
+                update_profile=profile, restart_controller=restart,
                 open_browser_url=open_browser_url, open_browser_ready_url=open_browser_ready_url,
                 webui_static_dist=webui_static_dist, webui_bundle_mode=webui_bundle_mode,
                 webui_runtime_surface=webui_runtime_surface,
@@ -464,6 +471,17 @@ def _run_gateway(
                 unconfigured_provider_error=unconfigured_provider_error,
                 webui_dev_server=webui_dev_server,
             )
+            if restart.committed:
+                status = gateway_runtime.status()
+                restart_plan = GatewayRestartPlan(
+                    options=options, paths=instance.paths, cwd=working_directory,
+                    launch_mode=status.launch_mode, lifetime=status.lifetime,
+                    mode=config.gateway.restart_mode,
+                )
+    if restart_plan is not None:
+        # The CLI entry (or protected update startup) may hold another installation
+        # lease. Unwind that owner too; only the outermost entry executes this plan.
+        raise ProcessRestart(restart_plan.execute)
 
 
 def _run_claimed_gateway(
@@ -473,6 +491,7 @@ def _run_claimed_gateway(
     gateway_instance: GatewayInstance,
     gateway_runtime: GatewayRuntime,
     health_identity: GatewayHealthIdentity,
+    restart_controller: RestartController,
     open_browser_url: str | None,
     open_browser_ready_url: str | None,
     webui_static_dist: bool,
@@ -623,6 +642,7 @@ def _run_claimed_gateway(
         hook_factories=[create_file_edit_activity_hook],
         tool_registry=tools,
         recovery_admission=recovery,
+        restart_request=restart_controller.request,
     )
     def _schedule_webui_background(awaitable: Awaitable[None]) -> None:
         agent.schedule_background(cast(Coroutine[Any, Any, None], awaitable))
@@ -831,6 +851,7 @@ def _run_claimed_gateway(
         cron_service=cron,
         local_trigger_store=trigger_store,
         webui_runtime_model_name=_webui_runtime_model_name,
+        webui_model_runtime=agent.runtime_resolver,
         webui_refresh_runtime_config=_webui_refresh_runtime_config,
         webui_cron_pending_job_ids=agent.pending_cron_job_ids_for_session,
         webui_local_trigger_pending_ids=agent.pending_local_trigger_ids_for_session,
@@ -844,6 +865,7 @@ def _run_claimed_gateway(
         webui_recovery_action=recovery.handle_action,
         webui_subagent_manager=agent.subagents,
         webui_discard_session=agent.discard_session,
+        webui_restart=restart_controller.request,
         config_path=Path(config_path),
     )
 
@@ -1017,7 +1039,7 @@ def _run_claimed_gateway(
         shutdown_task: asyncio.Task[Any] | None = None
         runtime_tasks: asyncio.Future[list[Any]] | None = None
         startup_complete = False
-        shutdown_event = asyncio.Event()
+        shutdown_event = restart_controller.shutdown_event
         cli_terminal._ensure_interactive_tty_mode()
         restore_shutdown_handlers = _install_gateway_shutdown_handlers(
             asyncio.get_running_loop(),
@@ -1152,6 +1174,7 @@ def _run_claimed_gateway(
                     shutdown_task.cancel()
                     with suppress(asyncio.CancelledError):
                         await shutdown_task
+                bus.admission.close()
                 cron.stop()
                 # A gateway exit interrupts ownership of active turns; it is
                 # not the same as the user stopping a turn.  Keep checkpoints

@@ -118,24 +118,39 @@ def agent(
                 raise typer.Exit(exit_code)
             return
 
-    from nanobot.config.home import get_home_path
+    from nanobot.config.home import get_home_path, get_selected_home_path
     from nanobot.config.loader import get_config_path
     from nanobot.config.paths import get_data_dir
     from nanobot.data_access import data_access, profile_data_paths
+    from nanobot.utils.restart import standalone_restart
+
+    restart_args = ["agent", "--classic", "--session", session_id or "cli:direct",
+                    "--markdown" if markdown else "--no-markdown",
+                    "--logs" if logs else "--no-logs"]
+    if home := get_selected_home_path():
+        restart_args = ["--home", str(home), *restart_args]
+    if config:
+        restart_args.extend(["--config", str(get_config_path())])
+    if workspace:
+        restart_args.extend(["--workspace", str(runtime_config.workspace_path)])
 
     paths = profile_data_paths(home=get_home_path(), data_dir=get_data_dir(),
                                config=get_config_path(), workspace=runtime_config.workspace_path)
     with data_access(paths):
-        _run_classic(runtime_config, message=message, session_id=session_id, markdown=markdown, logs=logs)
+        restarting = _run_classic(runtime_config, message=message, session_id=session_id,
+                                  markdown=markdown, logs=logs)
+    if restarting:
+        raise standalone_restart(mode=runtime_config.gateway.restart_mode, args=restart_args)
 
 
 def _run_classic(runtime_config: Config, *, message: str | None, session_id: str | None,
-                 markdown: bool, logs: bool) -> None:
-    """Keep the data lease through writer initialization, execution and cleanup."""
+                 markdown: bool, logs: bool) -> bool:
+    """Run and clean up under the data lease; return whether a restart was committed."""
     from nanobot.agent.hooks import create_file_edit_activity_hook
     from nanobot.agent.tools.image_generation import register_image_generation_tool
     from nanobot.agent.tools.mcp import MCPProvider
     from nanobot.agent.tools.registry import ToolRegistry
+    from nanobot.bus.events import OutboundMessage
     from nanobot.bus.outbound_events import (
         StreamDeltaEvent,
         StreamedResponseEvent,
@@ -148,6 +163,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
     from nanobot.providers.factory import make_provider
     from nanobot.utils.helpers import sanitize_surrogates as _sanitize_surrogates
     from nanobot.utils.restart import (
+        RestartController,
         format_restart_completed_message,
         should_show_cli_restart_notice,
     )
@@ -160,6 +176,10 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
     sync_workspace_templates = _classic_dependency("sync_workspace_templates")
 
     session_id = session_id or "cli:direct"
+    if ":" in session_id:
+        cli_channel, cli_chat_id = session_id.split(":", 1)
+    else:
+        cli_channel, cli_chat_id = "cli", session_id
 
     try:
         provider = make_provider(runtime_config)
@@ -170,6 +190,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
     sync_workspace_templates(runtime_config.workspace_path)
 
     bus = MessageBus()
+    restart = RestartController()
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
     if is_default_workspace(runtime_config.workspace_path):
@@ -192,6 +213,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
             cron_service=cron,
             hook_factories=[create_file_edit_activity_hook],
             tool_registry=tools,
+            restart_request=restart.request,
         )
     except ValueError as exc:
         _print_agent_start_error(exc)
@@ -202,6 +224,11 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
             format_restart_completed_message(restart_notice.started_at_raw),
             render_markdown=False,
         )
+
+    def _after_delivery(message: OutboundMessage) -> None:
+        if message.after_delivery is not None:
+            sys.stdout.flush()
+            message.after_delivery()
 
     async def _close_runtime() -> None:
         try:
@@ -267,6 +294,8 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                 response = await agent_loop.process_direct(
                     message,
                     session_id,
+                    channel=cli_channel,
+                    chat_id=cli_chat_id,
                     on_progress=_make_progress(renderer),
                     on_stream=renderer.on_delta,
                     on_stream_end=renderer.on_end,
@@ -282,6 +311,8 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                         metadata=response.metadata if response else None,
                         **print_kwargs,
                     )
+                if response is not None:
+                    _after_delivery(response)
             finally:
                 await _close_runtime()
 
@@ -298,33 +329,23 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
             "— type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n"
         )
 
-        if ":" in session_id:
-            cli_channel, cli_chat_id = session_id.split(":", 1)
-        else:
-            cli_channel, cli_chat_id = "cli", session_id
-
         def _handle_signal(signum: int, _frame: FrameType | None) -> None:
             sig_name = signal.Signals(signum).name
-            cli_terminal._restore_terminal()
             console.print(f"\nReceived {sig_name}, goodbye!")
-            sys.exit(0)
+            restart.shutdown_event.set()
 
-        signal.signal(signal.SIGINT, _handle_signal)
-        signal.signal(signal.SIGTERM, _handle_signal)
-        # SIGHUP is not available on Windows
+        shutdown_signals = [signal.SIGINT, signal.SIGTERM]
         if hasattr(signal, "SIGHUP"):
-            signal.signal(signal.SIGHUP, _handle_signal)
-        # Ignore SIGPIPE to prevent silent process termination when writing to closed pipes
-        # SIGPIPE is not available on Windows
+            shutdown_signals.append(signal.SIGHUP)
+        previous_handlers = [(sig, signal.signal(sig, _handle_signal)) for sig in shutdown_signals]
+        # Ignore closed pipes on POSIX; Windows has no SIGPIPE.
         if hasattr(signal, "SIGPIPE"):
-            signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+            previous_handlers.append((signal.SIGPIPE, signal.signal(signal.SIGPIPE, signal.SIG_IGN)))
 
         async def run_interactive() -> None:
-            await mcp_provider.connect()
-            bus_task = asyncio.create_task(agent_loop.run())
             turn_done = asyncio.Event()
             turn_done.set()
-            turn_response: list[Any] = []
+            turn_response: list[OutboundMessage] = []
             renderer: Any | None = None
             reasoning_buffer = cli_terminal._ReasoningBuffer()
 
@@ -356,6 +377,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                                     metadata=msg.metadata,
                                     **print_kwargs,
                                 )
+                            _after_delivery(msg)
                             turn_done.set()
                             continue
 
@@ -379,16 +401,16 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                                 render_markdown=markdown,
                                 metadata=msg.metadata,
                             )
+                            _after_delivery(msg)
 
                     except asyncio.TimeoutError:
                         continue
                     except asyncio.CancelledError:
                         break
 
-            outbound_task = asyncio.create_task(_consume_outbound())
-
-            try:
-                while True:
+            async def _interact() -> None:
+                nonlocal renderer
+                while not restart.shutdown_event.is_set():
                     try:
                         cli_terminal._flush_pending_tty_input()
                         # Stop spinner before user input to avoid prompt_toolkit conflicts
@@ -402,7 +424,6 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                             continue
 
                         if cli_terminal._is_exit_command(command):
-                            cli_terminal._restore_terminal()
                             console.print("\nGoodbye!")
                             break
 
@@ -446,20 +467,42 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                                     metadata=meta,
                                     **print_kwargs,
                                 )
+                            _after_delivery(response_msg)
                         elif renderer and not renderer.streamed:
                             await renderer.close()
-                    except KeyboardInterrupt:
-                        cli_terminal._restore_terminal()
+                    except (KeyboardInterrupt, EOFError):
                         console.print("\nGoodbye!")
                         break
-                    except EOFError:
-                        cli_terminal._restore_terminal()
-                        console.print("\nGoodbye!")
-                        break
-            finally:
-                agent_loop.stop()
-                outbound_task.cancel()
-                await asyncio.gather(bus_task, outbound_task, return_exceptions=True)
-                await _close_runtime()
 
-        asyncio.run(run_interactive())
+            tasks: list[asyncio.Task[Any]] = []
+            try:
+                await mcp_provider.connect()
+                tasks = [
+                    asyncio.create_task(agent_loop.run(), name="nanobot-classic-agent"),
+                    asyncio.create_task(_consume_outbound(), name="nanobot-classic-outbound"),
+                    asyncio.create_task(_interact(), name="nanobot-classic-prompt"),
+                    asyncio.create_task(restart.shutdown_event.wait(), name="nanobot-classic-shutdown"),
+                ]
+                done, _pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    await task
+            finally:
+                restart.shutdown_event.set()
+                agent_loop.stop()
+                for task in tasks:
+                    task.cancel()
+                try:
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    if renderer:
+                        await renderer.close()
+                finally:
+                    await _close_runtime()
+
+        try:
+            asyncio.run(run_interactive())
+        finally:
+            cli_terminal._restore_terminal()
+            for sig, handler in previous_handlers:
+                signal.signal(sig, handler)
+
+    return restart.committed

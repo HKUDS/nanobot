@@ -130,7 +130,12 @@ function makeClient() {
       for (const h of sessionUpdateHandlers) h(chatId, scope);
     },
     sendMessage,
-    sendSystemCommand: vi.fn().mockResolvedValue(undefined),
+    supportsRuntimeControls: true,
+    isChatPersisted: vi.fn((chatId: string): boolean | undefined => lifecycle.isChatPersisted(chatId) ?? true),
+    onReady: lifecycle.onReady.bind(lifecycle),
+    selectModel: vi.fn(async (_chatId: string, preset: string) => ({ model_preset: preset, model_name: preset, context_window_tokens: 1000 })),
+    stopSession: vi.fn<import("@/lib/nanobot-client").NanobotClient["stopSession"]>(() => new Promise(() => {})),
+    sendInitialMessage: vi.fn(async (chatId: string, content: string, options: Parameters<typeof lifecycle.sendMessage>[3]) => { sendMessage(chatId, content, undefined, options); }),
     newChat: vi.fn(),
     forkChat: vi.fn(),
     attach: vi.fn(),
@@ -1338,7 +1343,7 @@ describe("ThreadShell", () => {
     expect(screen.queryByLabelText("Default")).not.toBeInTheDocument();
   });
 
-  it("falls back to the current preset while a renamed session reference is stale", async () => {
+  it("keeps a saved preset visible even when it is absent from the current catalog", async () => {
     const client = makeClient();
     const settings = settingsWithFastPreset();
     settings.agent.model_preset = "fast";
@@ -1359,10 +1364,27 @@ describe("ThreadShell", () => {
       ),
     );
 
-    fireEvent.focus(await screen.findByLabelText("fast"));
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("fast gpt-5.5 OpenAI Codex");
-    fireEvent.blur(screen.getByLabelText("fast"));
-    expect(screen.queryByRole("button", { name: "Choose model" })).not.toBeInTheDocument();
+    await screen.findByTestId("thread-welcome-layout");
+    expect(await screen.findByLabelText("old-fast")).toHaveTextContent("old-fast");
+    fireEvent.click(screen.getByRole("button", { name: "old-fast" }));
+    fireEvent.click(await screen.findByRole("option", { name: /^fast\b/i }));
+    expect(client.selectModel).toHaveBeenCalledWith("renamed-preset", "fast");
+    await screen.findByRole("button", { name: "fast" });
+  });
+
+  it("confirms a saved model only after success and shows selection failures", async () => {
+    const client = makeClient();
+    let reject!: (error: Error) => void;
+    client.selectModel.mockImplementation(() => new Promise((_resolve, fail) => { reject = fail; }));
+    render(wrap(client, <ThreadShell session={session("saved", "default")} title="Saved"
+      onToggleSidebar={() => {}} settingsSnapshot={settingsWithFastPreset()} />));
+    await screen.findByTestId("thread-welcome-layout");
+    fireEvent.click(await screen.findByRole("button", { name: "Default" }));
+    fireEvent.click(await screen.findByRole("option", { name: /^fast\b/i }));
+    expect(screen.getByLabelText("Default")).toBeInTheDocument();
+    await act(async () => reject(new Error("Unknown model preset")));
+    expect(screen.getByRole("alert")).toHaveTextContent("Unknown model preset");
+    expect(screen.getByRole("button", { name: "Default" })).toBeInTheDocument();
   });
 
   it("switches through every named preset while preserving call-order priority", async () => {
@@ -1388,26 +1410,22 @@ describe("ThreadShell", () => {
       />
     ));
     const { rerender } = render(view("default"));
+    await screen.findByTestId("thread-welcome-layout");
 
     const badge = await screen.findByRole("button", { name: "Default" });
     expect(badge).toHaveTextContent("Default");
     fireEvent.click(badge);
     fireEvent.click(await screen.findByRole("option", { name: /^fast\b/i }));
 
-    expect(client.sendSystemCommand).toHaveBeenCalledWith(
-      "preset-order",
-      "/model fast",
-    );
+    expect(client.selectModel).toHaveBeenCalledWith("preset-order", "fast");
     expect(await screen.findByLabelText("fast", { selector: "button" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "fast" }));
     fireEvent.click(await screen.findByRole("option", { name: /^extra\b/i }));
-    expect(client.sendSystemCommand).toHaveBeenLastCalledWith(
-      "preset-order",
-      "/model extra",
-    );
+    expect(client.selectModel).toHaveBeenLastCalledWith("preset-order", "extra");
     expect(await screen.findByText("extra")).toBeInTheDocument();
 
     rerender(view("fast"));
+    act(() => client._emitChat("preset-order", { event: "attached", chat_id: "preset-order", model_preset: "fast" }));
     expect(await screen.findByLabelText("fast", { selector: "button" })).toBeInTheDocument();
   });
 
@@ -1552,7 +1570,7 @@ describe("ThreadShell", () => {
     fireEvent.click(within(banner).getByRole("button", { name: "Dismiss" }));
     expect(notice()).not.toBeInTheDocument();
     expect(input).toHaveValue("Keep my draft");
-    expect(client.sendSystemCommand).not.toHaveBeenCalled();
+    expect(client.selectModel).not.toHaveBeenCalled();
     emit("notice-a", true);
     expect(notice()).not.toBeInTheDocument();
     // A new turn can notify again; it does not inherit the previous dismissal.
@@ -1594,7 +1612,7 @@ describe("ThreadShell", () => {
     emit();
     expect(screen.queryByText(/authorization expired/)).not.toBeInTheDocument();
     expect(screen.getByTestId("composer-model-logo-openai_codex")).toBeInTheDocument();
-    expect(client.sendSystemCommand).not.toHaveBeenCalled();
+    expect(client.selectModel).not.toHaveBeenCalled();
   });
 
   it("does not show a live fallback notice just from replayed response attribution", async () => {
@@ -2047,16 +2065,11 @@ describe("ThreadShell", () => {
     expect(onCreateChat).toHaveBeenCalledWith(null, "start for real", null);
   });
 
-  it("applies the selected landing preset before sending the first prompt", async () => {
+  it("sends an explicit landing preset with the first prompt without provisioning a model turn", async () => {
     const client = makeClient();
     const settings = settingsWithFastPreset();
     settings.model_call_order = ["fast"];
-    let resolveModelCommand!: () => void;
-    client.sendSystemCommand.mockImplementation(
-      () => new Promise<void>((resolve) => {
-        resolveModelCommand = resolve;
-      }),
-    );
+    expect(client.selectModel).not.toHaveBeenCalled();
     const onCreateChat = vi.fn().mockResolvedValue("chat-new");
 
     const view = (currentSession: ReturnType<typeof session> | null) => wrap(client, (
@@ -2073,17 +2086,14 @@ describe("ThreadShell", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Default" }));
     fireEvent.click(await screen.findByRole("option", { name: /^fast\b/i }));
     expect(await within(screen.getByTestId("thread-welcome-layout")).findByText("fast")).toBeInTheDocument();
-    expect(client.sendSystemCommand).not.toHaveBeenCalled();
+    expect(client.selectModel).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText("Message input"), {
       target: { value: "use the selected model" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
-    await waitFor(() => expect(client.sendSystemCommand).toHaveBeenCalledWith(
-      "chat-new",
-      "/model fast",
-    ));
+    await waitFor(() => expect(onCreateChat).toHaveBeenCalled());
     expect(onCreateChat).toHaveBeenCalledWith(null, "use the selected model", "fast");
 
     await act(async () => {
@@ -2093,14 +2103,23 @@ describe("ThreadShell", () => {
     expect(await screen.findByRole("tooltip")).toHaveTextContent("fast gpt-5.5 OpenAI Codex");
     fireEvent.blur(screen.getByLabelText("fast"));
     expect(screen.queryByText("Default")).not.toBeInTheDocument();
-    expect(client.sendMessage).not.toHaveBeenCalled();
+    expect(client.sendInitialMessage).toHaveBeenCalledWith("chat-new", "use the selected model", expect.objectContaining({ initialModelPreset: "fast" }));
+    expect(client.sendMessage).toHaveBeenCalledWith("chat-new", "use the selected model", undefined, expect.objectContaining({ initialModelPreset: "fast", turnId: expect.any(String) }));
+  });
 
-    await act(async () => {
-      resolveModelCommand();
-    });
-    await waitFor(() => {
-      expectSendMessageWithTurn(client, "chat-new", "use the selected model");
-    });
+  it("retains a new chat draft and explicit model when first admission rejects its preset", async () => {
+    const client = makeClient();
+    client.sendInitialMessage.mockRejectedValue(new Error("Unknown model preset"));
+    client.isChatPersisted.mockReturnValue(false);
+    render(wrap(client, <ThreadShell session={{ ...session("draft", "fast"), projectLocked: false }} title="Draft"
+      onToggleSidebar={() => {}} settingsSnapshot={settingsWithFastPreset()} />));
+    const input = await screen.findByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "keep this question" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await screen.findByText("Unknown model preset");
+    expect(input).toHaveValue("keep this question");
+    expect(screen.getByRole("button", { name: "fast" })).toBeInTheDocument();
+    expect(client.sendInitialMessage).toHaveBeenCalledWith("draft", "keep this question", expect.objectContaining({ initialModelPreset: "fast" }));
   });
 
   it("binds a pending landing message to the chat created for it", async () => {
@@ -5724,7 +5743,7 @@ describe("ThreadShell", () => {
     expect(screen.getByRole("option", { name: /Other project/i })).toBeInTheDocument();
   });
 
-  it.each([true, undefined])("locks saved topics with projectLocked=%s independently of displayed history", async (projectLocked) => {
+  it.each([true, undefined])("uses attached persistence to lock projects independently of projectLocked=%s and history", async (projectLocked) => {
     const client = makeClient();
     const scope = { project_path: "/srv/alpha", project_name: "alpha", access_mode: "restricted" as const };
     const props = {
@@ -5732,10 +5751,12 @@ describe("ThreadShell", () => {
       workspaceDefaultScope: scope, workspaceControls: { can_change_project: true },
       onWorkspaceScopeChange: vi.fn(),
     };
+    client._emitChat("project-chat", { event: "attached", chat_id: "project-chat", persisted: false });
     const { rerender } = render(wrap(client, <ThreadShell {...props} session={{ ...session("project-chat"), projectLocked: false }} />));
     expect(await screen.findByRole("button", { name: "Switch directory" })).toBeEnabled();
     expect(screen.getByTestId("thread-header")).not.toHaveTextContent("alpha");
 
+    act(() => client._emitChat("project-chat", { event: "attached", chat_id: "project-chat", persisted: true }));
     rerender(wrap(client, <ThreadShell {...props} session={{ ...session("project-chat"), projectLocked }} />));
     expect(screen.queryByRole("button", { name: "Switch directory" })).not.toBeInTheDocument();
     expect(screen.getByTestId("thread-header")).not.toHaveTextContent("alpha");
@@ -5755,6 +5776,7 @@ describe("ThreadShell", () => {
 
     await screen.findByLabelText("Message input");
     act(() => {
+      client._emitChat("resuming-chat", { event: "goal_status", chat_id: "resuming-chat", status: "running", turn_id: "recovered-turn", started_at: 100 });
       client._emitChat("resuming-chat", {
         event: "attached",
         chat_id: "resuming-chat",
@@ -5764,7 +5786,7 @@ describe("ThreadShell", () => {
 
     expect(screen.queryByText("Restoring interrupted task…")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Stop response" }));
-    expect(client.sendMessage).toHaveBeenCalledWith("resuming-chat", "/stop");
+    expect(client.stopSession).toHaveBeenCalledWith("resuming-chat", expect.any(String));
   });
 
   it.each(["awaiting_user", "failed", "recovered"] as const)("allows a new turn after a %s recovery state", async (status) => {

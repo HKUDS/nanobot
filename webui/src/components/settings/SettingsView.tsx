@@ -1,3 +1,4 @@
+import type { ComposerDraftStore } from "@/lib/composer-draft";
 import { SettingsPage } from "@/components/settings/SettingsPage";
 import type { SettingsExitGuard, SettingsSectionKey } from "@/components/settings/contracts";
 import { useSettingsController } from "@/components/settings/useSettingsController";
@@ -34,6 +35,9 @@ interface SettingsViewProps {
   onRestart?: () => void;
   onNativeEngineRestart?: () => Promise<string>;
   isRestarting?: boolean;
+  restartUnavailable?: boolean;
+  runtimeControlsAvailable?: boolean;
+  draftStore?: ComposerDraftStore;
   hostChromeInset?: boolean;
 }
 
@@ -59,6 +63,9 @@ export function SettingsView({
   onRestart,
   onNativeEngineRestart,
   isRestarting = false,
+  restartUnavailable = false,
+  runtimeControlsAvailable = true,
+  draftStore,
   hostChromeInset = false,
 }: SettingsViewProps) {
   const controller = useSettingsController({
@@ -88,6 +95,9 @@ export function SettingsView({
       sessions={sessions}
       onLogout={onLogout}
       isRestarting={isRestarting}
+      restartUnavailable={restartUnavailable}
+      runtimeControlsAvailable={runtimeControlsAvailable}
+      draftStore={draftStore}
       hostChromeInset={hostChromeInset}
     />
   );

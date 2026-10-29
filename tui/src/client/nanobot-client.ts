@@ -1,5 +1,6 @@
 import { uploadAttachments, uploadCapability, isLocalAttachment, type AttachmentReference, type UploadCapability } from "../../../packages/client-events/attachments"
 import { DeliveryReceipts } from "../../../packages/client-events/delivery"
+import { RuntimeControlError, runtimeControlsGateway, parseModelSelection, parseStopResult } from "../../../packages/client-events/runtime-controls"
 import { isRecoveryState } from "../../../packages/client-events/notifications"
 
 import {
@@ -26,6 +27,9 @@ export class NanobotClient {
   private handshakeTimer: ReturnType<typeof setTimeout> | null = null
   private socket: WebSocket | null = null
   private chatId = ""
+  private runtimeGatewayId: string | null = null
+
+  get supportsRuntimeControls(): boolean { return this.runtimeGatewayId !== null }
   private workspaceScope?: WorkspaceScopePayload
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectAttempt = 0
@@ -43,6 +47,7 @@ export class NanobotClient {
     resolve: (value: unknown) => void
     reject: (error: Error) => void
     timer: ReturnType<typeof setTimeout>
+    control: boolean
   }>()
 
   constructor(private readonly options: ClientOptions) {
@@ -67,6 +72,7 @@ export class NanobotClient {
   private async open(): Promise<void> {
     if (this.socket || this.opening || this.closedByClient) return
     this.opening = true
+    this.runtimeGatewayId = null
     this.identityVerified = !this.options.expectedGatewayId
     this.nextRetryAt = 0
     this.connectionAttempt += 1
@@ -137,6 +143,7 @@ export class NanobotClient {
     socket.addEventListener("close", (event) => {
       if (this.socket !== socket) return
       this.socket = null
+      this.runtimeGatewayId = null
       this.upload = null
       this.receipts.close()
       this.lastFailure = event.code
@@ -159,6 +166,7 @@ export class NanobotClient {
   }
 
   close(): void {
+    this.runtimeGatewayId = null
     this.upload = null
     this.receipts.close()
     if (this.handshakeTimer) clearTimeout(this.handshakeTimer)
@@ -173,7 +181,7 @@ export class NanobotClient {
     this.rejectPendingMutations("gateway connection closed")
   }
 
-  async sendAttachments(content: string, options: MessageOptions): Promise<string> {
+  async sendAttachments(content: string, options: MessageOptions, turnId: string = crypto.randomUUID(), onSubmitted?: () => void): Promise<string> {
     const socket = this.socket
     const chatId = this.chatId
     const upload = this.upload
@@ -182,13 +190,16 @@ export class NanobotClient {
     const references = await uploadAttachments(options.media ?? [], upload, this.uploadBase,
       stillConnected)
     if (!stillConnected()) throw new Error("Connection changed during attachment send")
-    const turnId = crypto.randomUUID()
-    await this.receipts.wait(turnId, () => this.send(content, options, references, turnId))
+    await this.receipts.wait(turnId, () => {
+      this.send(content, options, references, turnId)
+      onSubmitted?.()
+    })
     return turnId
   }
 
-  send(content: string, options: MessageOptions = {}, references?: AttachmentReference[], turnId = crypto.randomUUID()): string {
+  send(content: string, options: MessageOptions = {}, references?: AttachmentReference[], turnId: string = crypto.randomUUID()): string {
     if (!this.chatId) throw new Error("chat is not ready")
+    if (options.initialModelPreset !== undefined && !this.supportsRuntimeControls) throw new RuntimeControlError(503, "Runtime controls are unavailable on this connection")
     if (options.media?.length && !references) throw new Error("Attachments require HTTP upload")
     this.write({
       type: "message",
@@ -198,6 +209,7 @@ export class NanobotClient {
       webui: true,
       ...(this.workspaceScope ? { workspace_scope: this.workspaceScope } : {}),
       ...(options.userShell ? { user_shell: true } : {}),
+      ...(options.initialModelPreset !== undefined ? { initial_model_preset: options.initialModelPreset } : {}),
       ...(references?.length ? { media: references } : {}),
       ...(options.cliApps?.length ? { cli_apps: options.cliApps } : {}),
       ...(options.mcpPresets?.length ? { mcp_presets: options.mcpPresets } : {}),
@@ -259,10 +271,32 @@ export class NanobotClient {
     })
   }
 
+  selectModel(chatId: string, preset: string) {
+    return this.requestControl("session.model.select", { chat_id: chatId, preset }).then(parseModelSelection)
+  }
+
+  stopSession(chatId: string, turnId: string | null) {
+    return this.requestControl("session.stop", { chat_id: chatId, turn_id: turnId }).then(parseStopResult)
+  }
+
+  private requestControl(action: string, payload: Record<string, unknown>): Promise<unknown> {
+    if (!this.runtimeGatewayId) return Promise.reject(new RuntimeControlError(503, "Runtime controls are unavailable on this connection"))
+    return this.requestMutation(action, { ...payload, expected_gateway_id: this.runtimeGatewayId }, 20_000, true)
+  }
+
+  sendInitialMessage(content: string, options: MessageOptions, turnId: string, onSubmitted?: () => void): Promise<void> {
+    return this.receipts.wait(turnId, () => {
+      if (!this.supportsRuntimeControls) throw new RuntimeControlError(503, "Runtime controls are unavailable on this connection")
+      this.send(content, options, undefined, turnId)
+      onSubmitted?.()
+    })
+  }
+
   private requestMutation<T>(
     action: string,
     payload: Record<string, unknown> = {},
     timeoutMs = 20_000,
+    control = false,
   ): Promise<T> {
     if (this.options.expectedGatewayId && !this.identityVerified) {
       return Promise.reject(new Error("Desktop identity not verified"))
@@ -280,19 +314,22 @@ export class NanobotClient {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingMutations.delete(requestId)
-        reject(new Error(`gateway request timed out after ${timeoutMs}ms`))
+        reject(control ? new RuntimeControlError(504, "Control result is unconfirmed: response timed out", true)
+          : new Error(`gateway request timed out after ${timeoutMs}ms`))
       }, timeoutMs)
       this.pendingMutations.set(requestId, {
         resolve: (value) => resolve(value as T),
         reject,
         timer,
+        control,
       })
       try {
         this.socket?.send(frame)
       } catch {
         clearTimeout(timer)
         this.pendingMutations.delete(requestId)
-        reject(new Error("could not send gateway request"))
+        reject(control ? new RuntimeControlError(503, "Control result is unconfirmed: could not send request", true)
+          : new Error("could not send gateway request"))
       }
     })
   }
@@ -300,7 +337,7 @@ export class NanobotClient {
   private rejectPendingMutations(message: string): void {
     for (const pending of this.pendingMutations.values()) {
       clearTimeout(pending.timer)
-      pending.reject(new Error(message))
+      pending.reject(pending.control ? new RuntimeControlError(503, `Control result is unconfirmed: ${message}`, true) : new Error(message))
     }
     this.pendingMutations.clear()
   }
@@ -337,7 +374,7 @@ export class NanobotClient {
       clearTimeout(pending.timer)
       this.pendingMutations.delete(response.request_id)
       if (response.ok) pending.resolve(response.result)
-      else pending.reject(new Error(response.error?.message || "gateway request failed"))
+      else pending.reject(new RuntimeControlError(response.error?.status ?? 500, response.error?.message || "gateway request failed"))
       return
     }
     const event = decodeInboundEvent(value)
@@ -349,6 +386,7 @@ export class NanobotClient {
 
     this.receipts.event(event)
     if (event.event === "ready") {
+      this.runtimeGatewayId = runtimeControlsGateway(value)
       this.upload = uploadCapability(isRecord(value) ? value.upload : null)
       const requestedChatId = this.chatId || this.options.chatId
       if (requestedChatId) {

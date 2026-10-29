@@ -1,4 +1,10 @@
 {
+  "runtimeControls": {
+    "unavailable": "현재 연결에서는 실행 제어를 사용할 수 없습니다. 채팅은 계속 사용할 수 있습니다.",
+    "unconfirmed": "결과가 확인되지 않았습니다. 다시 연결하여 현재 상태를 확인한 후 재시도하세요.",
+    "stopping": "중지 중…",
+    "selectingModel": "모델 선택 중…"
+  },
   "updates": {
     "guide": {
       "entry": "{{method}}로 업데이트",

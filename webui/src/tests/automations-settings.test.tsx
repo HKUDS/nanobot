@@ -531,7 +531,7 @@ describe("Automation task list and detail sheet", () => {
       "Every weekday at 9, summarize my open pull requests",
       undefined,
       { intent: "create_automation" },
-      "fast",
+      null,
     );
     await waitFor(() => expect(composer).toHaveValue(""));
   });

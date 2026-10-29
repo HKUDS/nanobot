@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
-import sys
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -18,7 +16,7 @@ from nanobot.session.manager import Session
 from nanobot.session.state import SessionState
 
 
-def _make_loop():
+def _make_loop(*, restart_request=None):
     """Create a minimal AgentLoop with mocked dependencies."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
@@ -36,146 +34,78 @@ def _make_loop():
         mock_sessions.return_value.state.get = AsyncMock(side_effect=lambda key: Session(key))
         mock_sessions.return_value.state.peek.return_value = None
         mock_sub_mgr.return_value.close = AsyncMock()
-        loop = AgentLoop(bus=bus, provider=provider, workspace=workspace)
+        loop = AgentLoop(bus=bus, provider=provider, workspace=workspace, restart_request=restart_request)
     return loop, bus
 
 
 class TestRestartCommand:
 
     @pytest.mark.asyncio
-    async def test_restart_sends_message_and_calls_execv(self):
+    async def test_restart_requests_owner_without_starting_shutdown_before_delivery(self):
         from nanobot.command.builtin import cmd_restart
         from nanobot.command.router import CommandContext
-        from nanobot.utils.restart import (
-            RESTART_NOTIFY_CHANNEL_ENV,
-            RESTART_NOTIFY_CHAT_ID_ENV,
-            RESTART_STARTED_AT_ENV,
-        )
+        from nanobot.utils.restart import RestartController
 
-        loop, _bus = _make_loop()
-        loop.restart_mode = "exec"
+        restart = RestartController()
+        request = MagicMock(wraps=restart.request)
+        loop, _bus = _make_loop(restart_request=request)
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content="/restart")
         ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/restart", loop=loop)
 
-        async def _fast_sleep(_delay: float) -> None:
-            return None
+        out = await cmd_restart(ctx)
 
-        scheduled: list[asyncio.Task] = []
-
-        def _capture_task(coro):
-            task = asyncio.create_task(coro)
-            scheduled.append(task)
-            return task
-
-        fake_asyncio = SimpleNamespace(
-            sleep=_fast_sleep,
-            create_task=_capture_task,
-        )
-
-        with patch.dict(os.environ, {}, clear=False), \
-             patch("nanobot.command.builtin.asyncio", new=fake_asyncio), \
-             patch("nanobot.command.builtin.os.execv") as mock_execv:
-            out = await cmd_restart(ctx)
-            assert "Restarting" in out.content
-            assert os.environ.get(RESTART_NOTIFY_CHANNEL_ENV) == "cli"
-            assert os.environ.get(RESTART_NOTIFY_CHAT_ID_ENV) == "direct"
-            assert os.environ.get(RESTART_STARTED_AT_ENV)
-
-            assert scheduled
-            await scheduled[0]
-            mock_execv.assert_called_once()
+        request.assert_called_once_with()
+        assert "Restarting" in out.content
+        assert not restart.committed
+        assert not restart.shutdown_event.is_set()
 
     @pytest.mark.asyncio
-    async def test_restart_windows_auto_spawns_and_exits(self):
+    async def test_duplicate_restart_does_not_accept_another_intent(self):
         from nanobot.command.builtin import cmd_restart
         from nanobot.command.router import CommandContext
+        from nanobot.utils.restart import RestartController
 
-        loop, _bus = _make_loop()
+        restart = RestartController()
+        loop, _bus = _make_loop(restart_request=restart.request)
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content="/restart")
         ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/restart", loop=loop)
 
-        async def _fast_sleep(_delay: float) -> None:
-            return None
+        accepted = await cmd_restart(ctx)
+        duplicate = await cmd_restart(ctx)
 
-        scheduled: list[asyncio.Task] = []
-        fake_asyncio = SimpleNamespace(
-            sleep=_fast_sleep,
-            create_task=lambda coro: scheduled.append(asyncio.create_task(coro)) or scheduled[-1],
-        )
-
-        with patch("nanobot.command.builtin.asyncio", new=fake_asyncio), \
-             patch("nanobot.command.builtin.sys.platform", "win32"), \
-             patch("nanobot.command.builtin.subprocess.CREATE_NEW_PROCESS_GROUP", 512, create=True), \
-             patch("nanobot.command.builtin.subprocess.Popen") as mock_popen, \
-             patch("nanobot.command.builtin.os._exit") as mock_exit, \
-             patch("nanobot.command.builtin.os.execv") as mock_execv:
-            await cmd_restart(ctx)
-            await scheduled[0]
-
-        mock_popen.assert_called_once_with(
-            [sys.executable, "-m", "nanobot"] + sys.argv[1:],
-            creationflags=512,
-        )
-        mock_exit.assert_called_once_with(0)
-        mock_execv.assert_not_called()
+        assert accepted.content != duplicate.content
+        assert not restart.committed
+        assert restart.request() is None
 
     @pytest.mark.asyncio
-    async def test_restart_exit_mode_does_not_spawn(self):
+    async def test_restart_during_normal_shutdown_is_not_accepted(self):
         from nanobot.command.builtin import cmd_restart
         from nanobot.command.router import CommandContext
+        from nanobot.utils.restart import RestartController
 
-        loop, _bus = _make_loop()
-        loop.restart_mode = "exit"
+        restart = RestartController()
+        restart.shutdown_event.set()
+        loop, _bus = _make_loop(restart_request=restart.request)
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content="/restart")
         ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/restart", loop=loop)
 
-        async def _fast_sleep(_delay: float) -> None:
-            return None
+        out = await cmd_restart(ctx)
 
-        scheduled: list[asyncio.Task] = []
-        fake_asyncio = SimpleNamespace(
-            sleep=_fast_sleep,
-            create_task=lambda coro: scheduled.append(asyncio.create_task(coro)) or scheduled[-1],
-        )
-
-        with patch("nanobot.command.builtin.asyncio", new=fake_asyncio), \
-             patch("nanobot.command.builtin.subprocess.Popen") as mock_popen, \
-             patch("nanobot.command.builtin.os._exit") as mock_exit, \
-             patch("nanobot.command.builtin.os.execv") as mock_execv:
-            await cmd_restart(ctx)
-            await scheduled[0]
-
-        mock_exit.assert_called_once_with(0)
-        mock_popen.assert_not_called()
-        mock_execv.assert_not_called()
+        assert "Restarting" not in out.content
+        assert not restart.committed
 
     @pytest.mark.asyncio
     async def test_restart_intercepted_in_run_loop(self):
-        """Verify /restart is handled at the run-loop level, without starting a session worker."""
-        loop, bus = _make_loop()
-        loop.restart_mode = "exec"
+        """An immediate reply still waits for transport delivery before shutdown."""
+        from nanobot.utils.restart import RestartController
+
+        restart = RestartController()
+        request = MagicMock(wraps=restart.request)
+        loop, bus = _make_loop(restart_request=request)
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/restart")
 
-        async def _fast_sleep(_delay: float) -> None:
-            return None
-
-        scheduled: list[asyncio.Task] = []
-
-        def _capture_task(coro):
-            task = asyncio.create_task(coro)
-            scheduled.append(task)
-            return task
-
-        fake_asyncio = SimpleNamespace(
-            sleep=_fast_sleep,
-            create_task=_capture_task,
-        )
-
-        with patch.object(loop, "_enqueue_session_message", new_callable=MagicMock) as mock_dispatch, \
-             patch("nanobot.command.builtin.asyncio", new=fake_asyncio), \
-             patch("nanobot.command.builtin.os.execv"):
+        with patch.object(loop, "_enqueue_session_message", new_callable=MagicMock) as mock_dispatch:
             await bus.publish_inbound(msg)
-
             loop._running = True
             run_task = asyncio.create_task(loop.run())
             out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
@@ -187,9 +117,9 @@ class TestRestartCommand:
                 pass
 
             mock_dispatch.assert_not_called()
+            request.assert_called_once_with()
             assert "Restarting" in out.content
-            assert scheduled
-            await scheduled[0]
+            assert not restart.committed
 
     @pytest.mark.asyncio
     async def test_status_intercepted_in_run_loop(self):

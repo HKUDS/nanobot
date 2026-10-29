@@ -71,6 +71,66 @@ afterEach(() => {
 });
 
 describe("NanobotClient", () => {
+  it("authorizes controls only from the current ready and never replays them across reconnects", async () => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const first = lastSocket();
+    first.fakeOpen();
+    await expect(client.selectModel("chat", "fast")).rejects.toMatchObject({ status: 503 });
+    for (const metadata of [{}, { gateway_id: "one", capabilities: [42, "webui.runtime-controls.v1"] }, { gateway_id: "one", capabilities: ["webui.core.v1"] }]) {
+      first.fakeMessage({ event: "ready", chat_id: "chat", client_id: "test", ...metadata });
+      await expect(client.restartGateway()).rejects.toMatchObject({ status: 503 });
+    }
+    first.fakeMessage({ event: "ready", chat_id: "chat", client_id: "test", gateway_id: "one", capabilities: ["webui.runtime-controls.v1", "future"] });
+    const control = client.selectModel("chat", "fast");
+    const outcome = expect(control).rejects.toMatchObject({ outcomeUnknown: true });
+    const ordinary = client.requestMutation("sidebar.update", {});
+    const frames = first.sent.map((frame) => JSON.parse(frame));
+    const model = frames.find((frame) => frame.action === "session.model.select");
+    const sidebar = frames.find((frame) => frame.action === "sidebar.update");
+    expect(model.payload).toEqual({ chat_id: "chat", preset: "fast", expected_gateway_id: "one" });
+    first.close();
+    await outcome;
+    await vi.advanceTimersByTimeAsync(1_000);
+    const second = lastSocket();
+    second.fakeOpen();
+    await expect(client.restartGateway()).rejects.toMatchObject({ status: 503 });
+    expect(second.sent.map((frame) => JSON.parse(frame)).filter((frame) => frame.type === "webui_request")).toEqual([sidebar]);
+    second.fakeMessage({ event: "webui_response", request_id: sidebar.request_id, ok: true, result: {} });
+    await ordinary;
+    second.fakeMessage({ event: "ready", chat_id: "chat", client_id: "test", gateway_id: "two", capabilities: ["webui.runtime-controls.v1"] });
+    const restart = client.restartGateway();
+    const request = JSON.parse(second.sent.at(-1)!);
+    expect(request.payload).toEqual({ expected_gateway_id: "two" });
+    second.fakeMessage({ event: "webui_response", request_id: request.request_id, ok: true, result: { status: "accepted", gateway_id: "two" } });
+    await expect(restart).resolves.toEqual({ status: "accepted", gateway_id: "two" });
+    client.close();
+  });
+
+  it("stops the submitted owner before admission without completing a later turn", async () => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    socket.fakeMessage({ event: "ready", chat_id: "chat", client_id: "test", gateway_id: "one", capabilities: ["webui.runtime-controls.v1"] });
+    client.sendMessage("chat", "first", undefined, { turnId: "first" });
+    const stop = client.stopSession("chat", client.getRunTurnId("chat")!);
+    const request = JSON.parse(socket.sent.at(-1)!);
+    expect(request.payload).toEqual({ chat_id: "chat", turn_id: "first", expected_gateway_id: "one" });
+    client.sendMessage("chat", "next", undefined, { turnId: "next" });
+    socket.fakeMessage({ event: "webui_response", request_id: request.request_id, ok: true, result: { status: "stopped", stopped_tasks: 2, turn_id: "first" } });
+    await stop;
+    expect(client.isRunCompleted("chat", "first")).toBe(false);
+    socket.fakeMessage({ event: "turn_end", chat_id: "chat", turn_id: "first", outcome: "cancelled" });
+    expect(client.isRunCompleted("chat", "first")).toBe(true);
+    expect(client.getRunState("chat")).toMatchObject({ active: true, latestTurnId: "next" });
+    const initial = client.sendInitialMessage("draft", "question", { turnId: "draft-turn", initialModelPreset: "default" });
+    expect(JSON.parse(socket.sent.at(-1)!)).toMatchObject({ type: "message", initial_model_preset: "default" });
+    socket.fakeMessage({ event: "error", chat_id: "draft", turn_id: "draft-turn", detail: "message_rejected", reason: "Unknown model preset" });
+    await expect(initial).rejects.toThrow();
+    client.close();
+  });
+
   it("notifies ready consumers after server ready frames, including reconnects", async () => {
     const client = new NanobotClient({ url: "ws://test?token=fixture-token", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
     const ready = vi.fn();
@@ -1624,29 +1684,6 @@ describe("NanobotClient", () => {
     expect(client.hasUnsettledRun("chat-unrelated-scope")).toBe(true);
   });
 
-  it("rejects a correlated system command instead of leaving it pending", async () => {
-    const client = new NanobotClient({
-      url: "ws://test",
-      reconnect: false,
-      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
-    });
-    client.connect();
-    lastSocket().fakeOpen();
-    const pending = client.sendSystemCommand("chat-system-reject", "/model invalid");
-    const sent = JSON.parse(lastSocket().sent.at(-1) ?? "{}") as { turn_id?: string };
-    expect(sent.turn_id).toMatch(/^webui-system:/);
-
-    lastSocket().fakeMessage({
-      event: "error",
-      chat_id: "chat-system-reject",
-      turn_id: sent.turn_id,
-      detail: "message_rejected",
-      reason: "invalid_command",
-    });
-
-    await expect(pending).rejects.toThrow("message_rejected:invalid_command");
-  });
-
   it.each(["progress", "tool_hint", "reasoning"] as const)(
     "delivers a delayed %s message after completion without reopening the turn",
     (kind) => {
@@ -2209,7 +2246,7 @@ describe("NanobotClient", () => {
     });
   });
 
-  it("handles the silent system-command lifecycle without hiding concurrent events", async () => {
+  it("filters legacy system-turn output without hiding concurrent messages", () => {
     const client = new NanobotClient({
       url: "ws://test",
       reconnect: false,
@@ -2219,16 +2256,6 @@ describe("NanobotClient", () => {
     client.onChat("chat-x", chatHandler);
     client.connect();
     lastSocket().fakeOpen();
-
-    const pending = client.sendSystemCommand("chat-x", "  /model fast  ", 1_000);
-    const frame = JSON.parse(lastSocket().sent.at(-1) as string);
-    expect(frame).toMatchObject({
-      type: "message",
-      chat_id: "chat-x",
-      content: "/model fast",
-      webui: true,
-    });
-    expect(frame.turn_id).toMatch(/^webui-system:/);
 
     lastSocket().fakeMessage({
       event: "message",
@@ -2240,18 +2267,15 @@ describe("NanobotClient", () => {
       event: "message",
       chat_id: "chat-x",
       text: "Switched model preset to fast.",
-      turn_id: frame.turn_id,
+      turn_id: "webui-system:legacy-turn",
     });
 
-    await expect(pending).resolves.toBeUndefined();
     expect(chatHandler).toHaveBeenCalledTimes(1);
     expect(chatHandler).toHaveBeenCalledWith(expect.objectContaining({
       text: "normal reply",
       turn_id: "normal-turn",
     }));
-    const interrupted = client.sendSystemCommand("chat-x", "/model fast", 1_000);
-    lastSocket().close();
-    await expect(interrupted).rejects.toThrow("socket closed");
+    client.close();
   });
 
   it("sends selected assistant text as separate quoted context", () => {

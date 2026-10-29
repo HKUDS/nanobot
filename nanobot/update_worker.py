@@ -43,6 +43,7 @@ from nanobot.update_process import (
     initialize_runtime,
     inspect_python_environment,
     run_preparation_child,
+    runtime_restart_scope,
 )
 from nanobot.update_uv import UVPreparation, uv_environment
 from nanobot.utils.atomic_file import atomic_write_lines, io_path, read_atomic_bytes
@@ -883,7 +884,8 @@ def _runtime_child(directory: Path, participant: str | None = None, confirmation
     if participant is None:
         run_restarts(directory)
     else:
-        run_gateway(directory, participant)
+        with runtime_restart_scope():
+            run_gateway(directory, participant)
 
 
 def cancel_job(directory: Path) -> JobStatus:

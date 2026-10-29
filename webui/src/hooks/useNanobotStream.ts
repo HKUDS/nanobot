@@ -63,6 +63,7 @@ export interface SendAttachment {
 
 export interface SendOptions {
   intent?: "create_automation";
+  initialModelPreset?: string;
   cliApps?: OutboundCliAppMention[];
   mcpPresets?: OutboundMcpPresetMention[];
   sessionMentions?: SessionMention[];
@@ -167,6 +168,8 @@ export function useNanobotStream(
   ) => SubmittedTurn | null;
   transcribeAudio: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
   stop: () => void;
+  isStopping: boolean;
+  controlError: Error | null;
   history: ThreadPaging;
   refreshHistory: () => void;
   loadOlder: () => Promise<void>;
@@ -222,6 +225,15 @@ export function useNanobotStream(
   const [goalState, setGoalState] = useState<GoalStateWsPayload | undefined>(undefined);
   const [recoveryState, setRecoveryState] = useState<RecoveryState | null>(null);
   const [streamError, setStreamError] = useState<StreamError | null>(null);
+  const [stopping, setStopping] = useState<{ chatId: string; turnId: string | null } | null>(null);
+  const [controlError, setControlError] = useState<Error | null>(null);
+  const controlScope = useRef({ chatId, client });
+  controlScope.current = { chatId, client };
+  useEffect(() => { setStopping(null); setControlError(null); }, [chatId, client]);
+  useEffect(() => {
+    if (stopping?.turnId && (client.isRunCompleted(stopping.chatId, stopping.turnId)
+      || (runState?.latestTurnId && runState.latestTurnId !== stopping.turnId))) setStopping(null);
+  }, [client, runState, stopping]);
 
   const pendingStreamEventsRef = useRef<PendingStreamEvent[]>([]);
   const streamFrameRef = useRef<number | null>(null);
@@ -1031,7 +1043,9 @@ export function useNanobotStream(
         ? client.sendUserShellCommand(chatId, outboundContent, clientOptions)
         : wireMedia?.length
           ? client.sendAttachments(chatId, outboundContent, wireMedia, clientOptions)
-          : undefined;
+          : options?.initialModelPreset !== undefined
+            ? client.sendInitialMessage(chatId, outboundContent, clientOptions)
+            : undefined;
       if (!delivery) client.sendMessage(chatId, outboundContent, undefined, clientOptions);
       // Every caller may keep this promise to retain its draft until accepted.
       // Also observe it here for queued/landing sends without an active composer.
@@ -1042,17 +1056,26 @@ export function useNanobotStream(
   );
 
   const stop = useCallback(() => {
-    if (!chatId) return;
-    flushPendingStreamEvents();
-    setRetryStatus(null);
-    setMessages((prev) => {
-      const settled = prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m));
-      transcriptRef.current.projection = resetThreadProjectionCursor(transcriptRef.current.projection, settled);
-      return settled;
+    if (!chatId || stopping?.chatId === chatId) return;
+    const turnId = client.getRunState(chatId).active ? client.getRunTurnId(chatId) : null;
+    const target = { chatId, turnId };
+    setStopping(target);
+    setControlError(null);
+    void client.stopSession(chatId, turnId).then((result) => {
+      if (controlScope.current.chatId !== chatId || controlScope.current.client !== client) return;
+      // Cleanup can finish before the queued final deltas and original turn_end
+      // arrive. Only that terminal event may settle the run or transcript.
+      if (result.status !== "stopped" || !turnId) {
+        setStopping((current) => current === target ? null : current);
+        refreshHistory();
+      }
+    }).catch((error: unknown) => {
+      if (controlScope.current.chatId !== chatId || controlScope.current.client !== client) return;
+      if (!turnId || !client.isRunCompleted(chatId, turnId)) setControlError(error instanceof Error ? error : new Error(String(error)));
+      setStopping((current) => current === target ? null : current);
+      refreshHistory();
     });
-    client.finishRunLocally(chatId);
-    client.sendMessage(chatId, "/stop");
-  }, [chatId, clearActivitySegment, client, flushPendingStreamEvents, setMessages]);
+  }, [chatId, client, stopping, refreshHistory]);
 
   const transcribeAudio = useCallback(
     (dataUrl: string, options?: { durationMs?: number }) =>
@@ -1090,6 +1113,8 @@ export function useNanobotStream(
     send,
     transcribeAudio,
     stop,
+    isStopping: stopping?.chatId === chatId && stopping !== null,
+    controlError,
     history: historyState,
     refreshHistory,
     loadOlder,

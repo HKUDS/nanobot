@@ -9,6 +9,7 @@ from loguru import logger as default_logger
 from nanobot.agent.subagent import SubagentControlError
 from nanobot.providers.base import LLMUsage
 from nanobot.session.goal_state import goal_state_ws_blob
+from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.model_selection import model_preset_from_metadata
 from nanobot.session.recovery import recovery_state_from_metadata
 from nanobot.session.state import SessionState
@@ -33,10 +34,12 @@ class WebUISessionProjection:
         sessions: SessionMetadataReader | None,
         *,
         subagent_manager: SubagentManager | None = None,
+        unified_session: bool = False,
         log: Any = default_logger,
     ) -> None:
         self._sessions = sessions
         self._subagents = subagent_manager
+        self._unified_session = unified_session
         self._log = log
 
     def subagent_task(self, session_key: str, task_id: str) -> dict[str, object] | None:
@@ -56,9 +59,14 @@ class WebUISessionProjection:
         raw_metadata = snapshot.get("metadata") if snapshot is not None else None
         metadata = cast(dict[str, object], raw_metadata) if isinstance(raw_metadata, dict) else None
 
-        fields: dict[str, Any] = {}
+        selection_metadata = metadata
+        identity = await self._sessions.state.read_identity(session_key)
+        if self._unified_session and (identity is None or identity.policy.persist):
+            shared = await self._sessions.state.read_metadata(UNIFIED_SESSION_KEY)
+            selection_metadata = shared["metadata"] if shared is not None else None
+        fields: dict[str, Any] = {"persisted": identity is not None and identity.policy.persist}
         try:
-            fields["model_preset"] = model_preset_from_metadata(metadata)
+            fields["model_preset"] = model_preset_from_metadata(selection_metadata)
         except ValueError:
             self._log.warning("ignoring invalid model preset metadata for session_key={}", session_key)
             fields["model_preset"] = None

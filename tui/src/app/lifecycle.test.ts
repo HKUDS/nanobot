@@ -14,8 +14,59 @@ describe("NanobotTui lifecycle", () => {
   })
 
   const createRenderer = (rendererOptions: Parameters<typeof createTestRenderer>[0]) => (
-    createTestRenderer(rendererOptions)
+    createTestRenderer({ exitOnCtrlC: false, ...rendererOptions })
   )
+  test("Ctrl+C and exact /stop target the submitted turn and never finish it on failure", async () => {
+    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
+    const transport = client()
+    const targets: Array<string | null> = []
+    let rejectStop!: (error: Error) => void
+    transport.stopSession = async (_chatId, turnId) => {
+      targets.push(turnId)
+      return new Promise((_resolve, reject) => { rejectStop = reject })
+    }
+    const app = NanobotTui.mount(setup.renderer, options, transport, new MockTreeSitterClient({ autoResolveTimeout: 0 }))
+    app.accept({ event: "attached", chat_id: "chat" })
+    const ui = app as unknown as { ready: boolean; activeTurn: boolean; composer: TextareaRenderable; status: TextRenderable }
+    await waitUntil(() => ui.ready)
+    ui.composer.setText("work")
+    ui.composer.submit()
+    setup.mockInput.pressCtrlC()
+    expect(targets).toEqual(["turn"])
+    expect(ui.activeTurn).toBe(true)
+    expect(ui.status.plainText).toBe("Stopping…")
+    rejectStop(new Error("Control result is unconfirmed"))
+    await Bun.sleep(1)
+    expect(ui.activeTurn).toBe(true)
+    ui.composer.setText("/stop")
+    ui.composer.submit()
+    await waitUntil(() => targets.length === 2)
+    expect(targets).toEqual(["turn", "turn"])
+    app.accept({ event: "turn_end", chat_id: "chat", turn_id: "turn", outcome: "cancelled" })
+    expect(ui.activeTurn).toBe(false)
+    rejectStop(new Error("late connection close"))
+    await Bun.sleep(1)
+  })
+
+  test("keeps final output after a successful Stop response until the original terminal event", async () => {
+    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    app.accept({ event: "attached", chat_id: "chat" })
+    const ui = app as unknown as { ready: boolean; activeTurn: boolean; composer: TextareaRenderable; status: TextRenderable }
+    await waitUntil(() => ui.ready)
+    ui.composer.setText("work")
+    ui.composer.submit()
+    setup.mockInput.pressCtrlC()
+    await Bun.sleep(1)
+    expect(ui.activeTurn).toBe(true)
+    expect(ui.status.plainText).toBe("Stopping…")
+    app.accept({ event: "delta", chat_id: "chat", turn_id: "turn", text: "last partial output" })
+    app.accept({ event: "turn_end", chat_id: "chat", turn_id: "turn", outcome: "cancelled" })
+    await setup.flush()
+    expect(setup.captureCharFrame()).toContain("last partial output")
+    expect(ui.activeTurn).toBe(false)
+  })
+
   test("reconciles active state from attach hydration after reconnect", async () => {
     setup = await createRenderer({ width: 72, height: 20, screenMode: "alternate-screen" })
     const app = mount(setup)

@@ -1,4 +1,10 @@
 {
+  "runtimeControls": {
+    "unavailable": "Không thể dùng điều khiển thực thi trên kết nối này. Bạn vẫn có thể trò chuyện.",
+    "unconfirmed": "Chưa xác nhận được kết quả. Hãy kết nối lại để kiểm tra trạng thái hiện tại trước khi thử lại.",
+    "stopping": "Đang dừng…",
+    "selectingModel": "Đang chọn mô hình…"
+  },
   "updates": {
     "guide": {
       "entry": "Cập nhật qua {{method}}",

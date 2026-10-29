@@ -426,6 +426,16 @@ class TurnDelivery:
                 failure_kind="internal",
             )
 
+    async def cancelled(self) -> None:
+        """Publish the terminal fact after partial output and cancellation persistence."""
+        await self.runtime_event_publisher.turn_completed(
+            channel=self.lifecycle_message.channel,
+            chat_id=self.lifecycle_message.chat_id,
+            session_key=self.session_key,
+            metadata=self.lifecycle_message.metadata,
+            outcome="cancelled",
+        )
+
     async def idle(self) -> None:
         await self.runtime_event_publisher.run_status_changed(
             self.lifecycle_message,

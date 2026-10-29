@@ -42,11 +42,13 @@ from nanobot.security.workspace_access import WorkspaceScopeResolver
 from nanobot.security.workspace_policy import resolve_allowed_path
 from nanobot.utils.restart import (
     RestartNotice,
+    RestartRequest,
     consume_restart_notice_from_env,
     format_restart_completed_message,
 )
 
 if TYPE_CHECKING:
+    from nanobot.agent.model_runtime import ModelRuntimeResolver
     from nanobot.agent.subagent import SubagentManager
     from nanobot.cron.service import CronService
     from nanobot.session.manager import SessionManager
@@ -121,6 +123,8 @@ class ChannelManager:
         ) = None,
         webui_subagent_manager: SubagentManager | None = None,
         webui_discard_session: Callable[[str], Awaitable[None]] | None = None,
+        webui_model_runtime: ModelRuntimeResolver | None = None,
+        webui_restart: RestartRequest | None = None,
         config_path: Path | None = None,
     ):
         if config_path is None:
@@ -147,6 +151,8 @@ class ChannelManager:
         self._webui_recovery_action = webui_recovery_action
         self._webui_subagent_manager = webui_subagent_manager
         self._webui_discard_session = webui_discard_session
+        self._webui_model_runtime = webui_model_runtime
+        self._webui_restart = webui_restart
         self.channels: dict[str, BaseChannel] = {}
         self._channel_owners: dict[str, str] = {}
         self._channel_runtime_specs: dict[str, tuple[str, str]] = {}
@@ -238,6 +244,8 @@ class ChannelManager:
                 recovery_action=self._webui_recovery_action,
                 subagent_manager=self._webui_subagent_manager,
                 discard_session=self._webui_discard_session,
+                model_runtime=self._webui_model_runtime,
+                restart=self._webui_restart,
                 logger=logger,
             )
             kwargs["gateway"] = gateway
@@ -815,14 +823,20 @@ class ChannelManager:
             self._scheduled_deliveries.add(msg.delivery_id)
 
         async def send() -> None:
-            if previous is not None:
-                await asyncio.shield(asyncio.gather(previous, return_exceptions=True))
-            if msg.delivery_id is not None:
-                # Acquire before claiming: queued cancellation must remain pending.
-                async with self._outbound_sends:
-                    await self._send_scheduled(channel, msg)
-            else:
-                await self._send_with_retry(channel, msg)
+            try:
+                if previous is not None:
+                    await asyncio.shield(asyncio.gather(previous, return_exceptions=True))
+                if msg.delivery_id is not None:
+                    # Acquire before claiming: queued cancellation must remain pending.
+                    async with self._outbound_sends:
+                        await self._send_scheduled(channel, msg)
+                else:
+                    await self._send_with_retry(channel, msg)
+            finally:
+                # A lost acknowledgement cannot strand an accepted lifecycle request.
+                # The transport has either written it or exhausted its delivery attempt.
+                if msg.after_delivery is not None:
+                    msg.after_delivery()
 
         task = asyncio.create_task(send(), name=f"outbound-{msg.channel}-{msg.chat_id}")
         self._outbound_tasks[task] = key

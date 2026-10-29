@@ -2495,7 +2495,7 @@ The heartbeat appears as `heartbeat` when you list cron jobs, but cannot be remo
 |--------|---------|-------------|
 | `gateway.heartbeat.enabled` | `true` | Register the built-in heartbeat cron job on gateway startup. |
 | `gateway.heartbeat.intervalS` | `1800` | Seconds between heartbeat checks. |
-| `gateway.restartMode` | `auto` | Restart strategy for `/restart`: `auto` uses `spawn` on Windows foreground runs and `exec` elsewhere. Use `exit` with Windows service wrappers such as WinSW or nssm so the service manager owns the restart. |
+| `gateway.restartMode` | `auto` | Restart strategy shared by `/restart` and the structured gateway restart control: `auto` uses `spawn` on Windows and `exec` elsewhere. The gateway acknowledges the request, shuts down normally while preserving interrupted-turn checkpoints, and releases its lifecycle and installation leases before replacement. Background gateways keep their launch mode and local-client lifetime. Use `exit` with service wrappers such as WinSW or nssm so the service manager owns the restart; nanobot exits normally without spawning a replacement. |
 
 ### Custom heartbeat evaluator prompt
 

@@ -131,6 +131,14 @@ Right-click a file reference or preview tab to copy its absolute or project-rela
 
 File previews follow the active topic's access mode. Restricted workspace access previews only files under the selected workspace. Full Access can preview files outside the workspace when that access mode is allowed by the gateway.
 
+### Models, stopping, and restarting
+
+Choose a model preset from the composer for the current session. An existing session keeps its previous selection if the change fails; a new topic applies your selection with its first message. A running response keeps its current model. With unified sessions enabled, the selection applies to the shared session across channels.
+
+**Stop response** cancels the session's active work, including its subagents and running Shell sessions, and retains partial replies and completed tool results. It does not undo changes already made by tools. The control shows **Stopping…** until the gateway confirms the turn has ended.
+
+**Restart** in Settings restarts the connected gateway, not just the open topic. Interrupted saved topics can offer **Continue** after reconnecting; temporary chats end. If the connection drops before a control result arrives, its result is unconfirmed rather than automatically repeated. If these controls are unavailable on a connected host, update that host; ordinary chat remains available.
+
 ### Model failures
 
 If a model stream fails after producing reply text, the text is retained for reading and follow-up questions. A reply can look complete even when the request ended with a connection error.

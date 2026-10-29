@@ -11,10 +11,11 @@ import os
 import runpy
 import subprocess
 import sys
-from contextlib import ExitStack
+from collections.abc import Generator
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 from uuid import UUID, uuid4
 
 from nanobot.installation_lock import (
@@ -25,10 +26,33 @@ from nanobot.installation_lock import (
 )
 from nanobot.utils.atomic_file import atomic_write_lines, io_path
 
+if TYPE_CHECKING:
+    from nanobot.utils.restart import ProcessRestart
+
 # This stack belongs only to the single-use frozen child. Do not close it on a
 # function return/SystemExit: pip/site atexit cleanup must still hold the leases.
 # Module teardown and process exit release them after Python's exit callbacks.
 child_leases = ExitStack()
+
+
+@contextmanager
+def runtime_restart_scope() -> Generator[None]:
+    """Release this frozen gateway child's leases before its runtime replacement.
+
+    Enter only after initialize_runtime. Older installed/restored runtimes do not
+    expose ProcessRestart; their ordinary returns and errors retain exit protection.
+    """
+    from nanobot.utils import restart as runtime_restart
+
+    restart_signal: type[BaseException] | tuple[type[BaseException], ...] = getattr(
+        runtime_restart, "ProcessRestart", (),
+    )
+    try:
+        yield
+    except restart_signal as restart:
+        child_leases.close()
+        # The installed runtime owns this versioned exception and its execute API.
+        cast("ProcessRestart", restart).execute()
 
 
 def initialize_runtime(python: str, environment: str) -> None:

@@ -1,5 +1,6 @@
 import { uploadAttachments, uploadCapability, type AttachmentReference, type UploadCapability } from "../../../packages/client-events/attachments";
 import { DeliveryReceipts } from "../../../packages/client-events/delivery";
+import { RuntimeControlError, gatewayIdFromReady, runtimeControlsGateway, parseModelSelection, parseStopResult, parseRestartResult } from "../../../packages/client-events/runtime-controls";
 import { decodeNotification } from "../../../packages/client-events/notifications";
 import type {
   ConnectionStatus,
@@ -132,6 +133,7 @@ interface PendingRequest<T> {
 
 interface PendingWebUIRequest extends PendingRequest<unknown> {
   serializedFrame: string;
+  replay: boolean;
 }
 
 class WebUIMutationError extends Error {
@@ -250,6 +252,9 @@ export class NanobotClient {
   private knownChats = new Set<string>();
   /** Temporary chats are connection-owned and intentionally not reattached. */
   private temporaryChatIds = new Set<string>();
+  private chatPersistence = new Map<string, boolean>();
+
+  isChatPersisted(chatId: string): boolean | undefined { return this.chatPersistence.get(chatId); }
   private readonly runs = new ClientRunLedger();
   /** Last tracked application frame written, for conservative transport-error attribution. */
   private lastSocketMessageSend: { chatId: string; turnId: string } | null = null;
@@ -257,7 +262,6 @@ export class NanobotClient {
   private goalStateByChatId = new Map<string, GoalStateWsPayload>();
   private pendingNewChat: PendingChatRequest | null = null;
   private pendingTranscriptions = new Map<string, PendingRequest<string>>();
-  private pendingSystemCommands = new Map<string, PendingRequest<void>>();
   private pendingWebUIRequests = new Map<string, PendingWebUIRequest>();
   // Frames queued while the socket is not yet OPEN
   private sendQueue: Outbound[] = [];
@@ -270,6 +274,11 @@ export class NanobotClient {
   private currentUrl: string;
   private status_: ConnectionStatus = "idle";
   private readyChatId: string | null = null;
+  private runtimeGatewayId: string | null = null;
+  private readyGatewayId: string | null = null;
+
+  get gatewayId(): string | null { return this.readyGatewayId; }
+  get supportsRuntimeControls(): boolean { return this.runtimeGatewayId !== null; }
   // Set by ``close()`` so the onclose handler knows the drop was intentional
   // and must not schedule a reconnect or flip status back to "reconnecting".
   private intentionallyClosed = false;
@@ -550,16 +559,26 @@ export class NanobotClient {
   connect(): void {
     if (this.socket && this.socket.readyState < WS_CLOSING) return;
     this.intentionallyClosed = false;
+    this.runtimeGatewayId = null;
+    this.readyGatewayId = null;
     this.setStatus("connecting");
     const sock = this.socketFactory(this.currentUrl);
     this.socket = sock;
-    sock.onopen = () => this.handleOpen();
-    sock.onmessage = (ev) => this.handleMessage(ev);
-    sock.onerror = () => this.setStatus("error");
-    sock.onclose = (ev) => this.handleClose(ev);
+    sock.onopen = () => { if (this.socket === sock) this.handleOpen(); };
+    sock.onmessage = (ev) => { if (this.socket === sock) this.handleMessage(ev); };
+    sock.onerror = () => { if (this.socket === sock) this.setStatus("error"); };
+    sock.onclose = (ev) => { if (this.socket === sock) this.handleClose(ev); };
   }
 
   close(): void {
+    this.runtimeGatewayId = null;
+    this.readyGatewayId = null;
+    for (const [id, pending] of this.pendingWebUIRequests) {
+      if (pending.replay) continue;
+      clearTimeout(pending.timer);
+      pending.reject(new RuntimeControlError(503, "Control result is unconfirmed: connection closed", true));
+      this.pendingWebUIRequests.delete(id);
+    }
     this.upload = null;
     this.receipts.close();
     this.intentionallyClosed = true;
@@ -568,13 +587,12 @@ export class NanobotClient {
       this.reconnectTimer = null;
     }
     const sock = this.socket;
-    this.socket = null;
     try {
       sock?.close();
     } catch {
       // ignore
     }
-    this.clearTemporaryChats();
+    if (this.socket === sock) this.handleClose();
     this.setStatus("closed");
   }
 
@@ -649,6 +667,7 @@ export class NanobotClient {
     action: string,
     payload: Record<string, unknown> = {},
     timeoutMs: number = 20_000,
+    options: { replay?: boolean } = {},
   ): Promise<T> {
     const socket = this.socket;
     if (!socket || socket.readyState !== WS_OPEN) {
@@ -680,10 +699,9 @@ export class NanobotClient {
       const timer = setTimeout(() => {
         this.pendingWebUIRequests.delete(requestId);
         reject(
-          new WebUIMutationError(
-            504,
-            `WebUI request timed out after ${timeoutMs}ms`,
-          ),
+          options.replay === false
+            ? new RuntimeControlError(504, "Control result is unconfirmed: response timed out", true)
+            : new WebUIMutationError(504, `WebUI request timed out after ${timeoutMs}ms`),
         );
       }, timeoutMs);
       this.pendingWebUIRequests.set(requestId, {
@@ -691,15 +709,37 @@ export class NanobotClient {
         reject,
         timer,
         serializedFrame,
+        replay: options.replay !== false,
       });
       try {
         socket.send(serializedFrame);
       } catch {
         clearTimeout(timer);
         this.pendingWebUIRequests.delete(requestId);
-        reject(new WebUIMutationError(503, "Could not send WebUI request"));
+        reject(options.replay === false
+          ? new RuntimeControlError(503, "Control result is unconfirmed: could not send request", true)
+          : new WebUIMutationError(503, "Could not send WebUI request"));
       }
     });
+  }
+
+  private requestControl(action: string, payload: Record<string, unknown> = {}): Promise<unknown> {
+    if (!this.runtimeGatewayId) {
+      return Promise.reject(new RuntimeControlError(503, "Runtime controls are unavailable on this connection"));
+    }
+    return this.requestMutation(action, { ...payload, expected_gateway_id: this.runtimeGatewayId }, 20_000, { replay: false });
+  }
+
+  selectModel(chatId: string, preset: string) {
+    return this.requestControl("session.model.select", { chat_id: chatId, preset }).then(parseModelSelection);
+  }
+
+  stopSession(chatId: string, turnId: string | null) {
+    return this.requestControl("session.stop", { chat_id: chatId, turn_id: turnId }).then(parseStopResult);
+  }
+
+  restartGateway() {
+    return this.requestControl("gateway.restart").then(parseRestartResult);
   }
 
   /** Ask the server to create a non-destructive fork before a user-message index. */
@@ -766,6 +806,16 @@ export class NanobotClient {
     }
   }
 
+  sendInitialMessage(chatId: string, content: string, options: Parameters<NanobotClient["sendMessage"]>[3]): Promise<void> {
+    const turnId = options?.turnId ?? crypto.randomUUID();
+    return this.receipts.wait(turnId, () => {
+      if (!this.supportsRuntimeControls) throw new RuntimeControlError(503, "Runtime controls are unavailable on this connection");
+      if (!this.sendMessage(chatId, content, undefined, { ...options, turnId })) {
+        throw new Error("Message was not sent; draft retained");
+      }
+    });
+  }
+
   async sendUserShellCommand(
     chatId: string, content: string, options?: Parameters<NanobotClient["sendMessage"]>[3],
   ): Promise<void> {
@@ -795,6 +845,7 @@ export class NanobotClient {
       quotedContext?: string;
       intent?: "create_automation";
       userShell?: boolean;
+      initialModelPreset?: string;
       workspaceScope?: WorkspaceScopePayload | null;
       turnId?: string;
       /** False for side-channel or injected messages that do not own a lifecycle. */
@@ -802,6 +853,7 @@ export class NanobotClient {
     },
   ): boolean {
     if (options?.userShell && this.socket?.readyState !== WS_OPEN) return false;
+    if (options?.initialModelPreset !== undefined && !this.supportsRuntimeControls) return false;
     const temporary = this.temporaryChatIds.has(chatId);
     if (!temporary) this.knownChats.add(chatId);
     const frame: Outbound = {
@@ -817,14 +869,12 @@ export class NanobotClient {
       ...(options?.quotedContext?.trim() ? { quoted_context: options.quotedContext.trim() } : {}),
       ...(options?.intent === "create_automation" ? { intent: options.intent } : {}),
       ...(options?.userShell ? { user_shell: true } : {}),
+      ...(options?.initialModelPreset !== undefined ? { initial_model_preset: options.initialModelPreset } : {}),
       ...(options?.workspaceScope ? { workspace_scope: options.workspaceScope } : {}),
       ...(options?.turnId ? { turn_id: options.turnId } : {}),
       webui: true,
     };
     if (!this.frameFitsTransport(frame)) {
-      if (options?.turnId && isSystemCommandTurnId(options.turnId)) {
-        this.rejectSystemCommand(options.turnId, "message_too_big");
-      }
       this.emitError({
         kind: "message_too_big",
         chatId,
@@ -843,19 +893,6 @@ export class NanobotClient {
     if (options?.userShell) return this.rawSend(frame);
     this.queueSend(frame);
     return true;
-  }
-
-  sendSystemCommand(chatId: string, command: string, timeoutMs = 5_000): Promise<void> {
-    const normalized = command.trim();
-    const turnId = `${SYSTEM_COMMAND_TURN_PREFIX}${crypto.randomUUID()}`;
-    return new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pendingSystemCommands.delete(turnId);
-        reject(new Error("system command timed out"));
-      }, timeoutMs);
-      this.pendingSystemCommands.set(turnId, { resolve, reject, timer });
-      this.sendMessage(chatId, normalized, undefined, { turnId });
-    });
   }
 
   setWorkspaceScope(chatId: string, workspaceScope: WorkspaceScopePayload): void {
@@ -888,7 +925,7 @@ export class NanobotClient {
       this.rawSend({ type: "attach", chat_id: chatId });
     }
     for (const pending of this.pendingWebUIRequests.values()) {
-      this.rawSendSerialized(pending.serializedFrame);
+      if (pending.replay) this.rawSendSerialized(pending.serializedFrame);
     }
     // Flush anything queued during reconnect.
     const queued = this.sendQueue.splice(0);
@@ -968,22 +1005,13 @@ export class NanobotClient {
       }
     }
     if (parsed.event === "message_accepted") {
+      if (!this.temporaryChatIds.has(parsed.chat_id)) this.chatPersistence.set(parsed.chat_id, true);
       if (!isSystemCommandTurnId(turnId)) {
         this.dispatch(parsed.chat_id, parsed);
       }
       return;
     }
-    if (isSystemCommandTurnId(turnId)) {
-      if (parsed.event === "error") {
-        this.rejectSystemCommand(
-          turnId,
-          [parsed.detail, parsed.reason].filter(Boolean).join(":") || "server error",
-        );
-      } else if (parsed.event === "message" || parsed.event === "turn_end") {
-        this.resolveSystemCommand(turnId);
-      }
-      return;
-    }
+    if (isSystemCommandTurnId(turnId)) return;
 
     if (parsed.event === "error" && correlatedChatId && turnId) {
       if (parsed.detail !== "workspace_scope_rejected") {
@@ -998,6 +1026,8 @@ export class NanobotClient {
     }
 
     if (parsed.event === "ready") {
+      this.readyGatewayId = gatewayIdFromReady(parsed);
+      this.runtimeGatewayId = runtimeControlsGateway(parsed);
       this.upload = uploadCapability(parsed.upload);
       this.readyChatId = parsed.chat_id;
       this.knownChats.add(parsed.chat_id);
@@ -1008,7 +1038,9 @@ export class NanobotClient {
     }
 
     if (parsed.event === "attached") {
+      if (typeof parsed.persisted === "boolean") this.chatPersistence.set(parsed.chat_id, parsed.persisted);
       if (parsed.temporary === true) {
+        this.chatPersistence.set(parsed.chat_id, false);
         this.temporaryChatIds.add(parsed.chat_id);
       } else {
         this.knownChats.add(parsed.chat_id);
@@ -1142,6 +1174,8 @@ export class NanobotClient {
   }
 
   private handleClose(event?: { code?: number }): void {
+    this.runtimeGatewayId = null;
+    this.readyGatewayId = null;
     this.upload = null;
     this.receipts.close();
     this.socket = null;
@@ -1153,20 +1187,14 @@ export class NanobotClient {
       this.pendingNewChat = null;
     }
     this.rejectAllTranscriptions("socket closed");
-    if (!willReconnect) {
-      for (const pending of this.pendingWebUIRequests.values()) {
-        clearTimeout(pending.timer);
-        pending.reject(
-          new WebUIMutationError(503, "Socket closed before WebUI response"),
-        );
-      }
-      this.pendingWebUIRequests.clear();
-    }
-    for (const pending of this.pendingSystemCommands.values()) {
+    for (const [id, pending] of this.pendingWebUIRequests) {
+      if (pending.replay && willReconnect) continue;
       clearTimeout(pending.timer);
-      pending.reject(new Error("socket closed"));
+      pending.reject(pending.replay
+        ? new WebUIMutationError(503, "Socket closed before WebUI response")
+        : new RuntimeControlError(503, "Control result is unconfirmed: connection closed", true));
+      this.pendingWebUIRequests.delete(id);
     }
-    this.pendingSystemCommands.clear();
     // Surface structured reasons *before* reconnect logic so the UI can
     // display the error even while the client transparently reconnects.
     // Browsers populate ``CloseEvent.code`` with the wire-level close code;
@@ -1238,22 +1266,6 @@ export class NanobotClient {
     }
   }
 
-  private resolveSystemCommand(turnId: string): void {
-    const pending = this.pendingSystemCommands.get(turnId);
-    if (!pending) return;
-    clearTimeout(pending.timer);
-    this.pendingSystemCommands.delete(turnId);
-    pending.resolve();
-  }
-
-  private rejectSystemCommand(turnId: string, detail: string): void {
-    const pending = this.pendingSystemCommands.get(turnId);
-    if (!pending) return;
-    clearTimeout(pending.timer);
-    this.pendingSystemCommands.delete(turnId);
-    pending.reject(new Error(detail));
-  }
-
   private scheduleReconnect(): void {
     this.setStatus("reconnecting");
     const attempt = this.reconnectAttempts++;
@@ -1289,6 +1301,7 @@ export class NanobotClient {
 
   private forgetTemporaryChat(chatId: string): void {
     this.temporaryChatIds.delete(chatId);
+    this.chatPersistence.delete(chatId);
     this.knownChats.delete(chatId);
     this.chatHandlers.delete(chatId);
     this.transcriptHandlers.delete(chatId);

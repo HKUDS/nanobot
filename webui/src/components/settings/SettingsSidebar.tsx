@@ -56,6 +56,7 @@ interface SettingsSidebarProps {
   hostChromeInset?: boolean;
   onRestart?: () => void;
   isRestarting?: boolean;
+  restartUnavailable?: boolean;
   restartPending?: boolean;
   isNativeHost?: boolean;
 }
@@ -69,6 +70,7 @@ export function SettingsSidebar(props: SettingsSidebarProps) {
     hostChromeInset,
     onRestart,
     isRestarting,
+    restartUnavailable,
     restartPending,
     isNativeHost,
   } = props;
@@ -159,7 +161,8 @@ export function SettingsSidebar(props: SettingsSidebarProps) {
               type="button"
               variant="ghost"
               onClick={onRestart}
-              disabled={isRestarting}
+              disabled={isRestarting || restartUnavailable}
+              title={restartUnavailable ? t("runtimeControls.unavailable") : undefined}
               aria-describedby={restartPending ? "settings-restart-status" : undefined}
               className={cn("h-9 w-full justify-start gap-2 rounded-control px-2.5 text-ui settings-hover",
                 restartPending && !isRestarting
@@ -199,6 +202,7 @@ function MobileSettingsNavigation({
   hostChromeInset,
   onRestart,
   isRestarting,
+  restartUnavailable,
   restartPending,
 }: SettingsSidebarProps & {
   navSection: SettingsSectionKey;
@@ -215,7 +219,8 @@ function MobileSettingsNavigation({
   const restartIcon = isRestarting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
     : <RestartIcon className="h-4 w-4" aria-hidden />;
   const restartAction = onRestart ? (
-    <Button type="button" variant="ghost" disabled={isRestarting}
+    <Button type="button" variant="ghost" disabled={isRestarting || restartUnavailable}
+      title={restartUnavailable ? t("runtimeControls.unavailable") : undefined}
       onClick={restart}
       className={cn("h-11 shrink-0 gap-2 px-3 text-sm font-normal", restartTone)}
     >
@@ -268,7 +273,8 @@ function MobileSettingsNavigation({
             })}
             {onRestart ? <>
               <DropdownMenuSeparator />
-              <DropdownMenuItem disabled={isRestarting} onSelect={restart}
+              <DropdownMenuItem disabled={isRestarting || restartUnavailable} onSelect={restart}
+                title={restartUnavailable ? t("runtimeControls.unavailable") : undefined}
                 className={cn("min-h-11 gap-3 text-sm font-normal", restartTone)}
               >{restartIcon}{restartLabel}</DropdownMenuItem>
             </> : null}

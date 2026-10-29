@@ -143,11 +143,11 @@ def test_interactive_agent_routes_a_complete_user_turn(
     if streamed:
         assert renderer.deltas == ["hello ", "world"]
         assert renderer.ends == [False]
-        assert renderer.closed == 0
+        assert renderer.closed == 1
         print_response.assert_not_called()
     else:
         assert renderer.deltas == []
-        assert renderer.closed == 1
+        assert renderer.closed == 2
         print_response.assert_called_once_with(
             "hello world",
             render_markdown=True,

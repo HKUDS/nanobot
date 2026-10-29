@@ -45,7 +45,9 @@ from nanobot.agent.turn_delivery import (
 )
 from nanobot.agent.turn_delivery import TurnRoute as TurnRoute
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
+from nanobot.bus.controls import SelectSessionModel, SessionControl, SessionStopResult, StopSession
 from nanobot.bus.events import (
+    INBOUND_META_INITIAL_MODEL_PRESET,
     INBOUND_META_LOCAL_MEDIA,
     INBOUND_META_RUNTIME_CONTROL,
     INBOUND_META_TURN_ID,
@@ -117,6 +119,7 @@ from nanobot.utils.document import reference_non_image_attachments
 from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.progress_events import output_events
+from nanobot.utils.restart import RestartRequest
 from nanobot.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
 )
@@ -313,6 +316,7 @@ class AgentLoop:
         turn_delivery_factory: TurnDeliveryFactory | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
         restart_mode: str = "auto",
+        restart_request: RestartRequest | None = None,
         local_trigger_store: LocalTriggerStore | None = None,
         idle_compact_check_interval_seconds: int = 0,
         recovery_admission: RecoveryAdmission | None = None,
@@ -332,6 +336,7 @@ class AgentLoop:
         self.runtime_event_publisher = self.turn_delivery_factory.runtime_event_publisher
         self.channels_config = channels_config
         self.restart_mode = restart_mode
+        self.restart_request = restart_request
         self._runtime_model_publisher = runtime_model_publisher
         self.workspace = workspace
         initial_model = model or provider.get_default_model()
@@ -428,6 +433,10 @@ class AgentLoop:
         # It remains the only admission path until that worker atomically
         # observes the queue empty and removes it.
         self._pending_queues: dict[str, asyncio.Queue[InboundMessage]] = {}
+        self._session_inputs: dict[str, InboundMessage] = {}
+        self._admission_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
+            weakref.WeakValueDictionary()
+        )
         self._preserve_inflight_turns_on_shutdown = False
         self._deferred_automation_turns: dict[str, list[InboundMessage]] = {}
         self._cron_turns = CronTurnCoordinator(
@@ -593,13 +602,16 @@ class AgentLoop:
         self,
         session_key: str,
         name: str,
+        *,
+        expected_generation: str | None = None,
     ) -> LLMRuntime:
         """Validate and persist one session's preset selection without blocking."""
         runtime = self.runtime_resolver.resolve_preset(name)
         await self.sessions.state.update_metadata(
             session_key,
             {SESSION_MODEL_PRESET_METADATA_KEY: runtime.model_preset},
-            create_if_missing=True,
+            expected_generation=expected_generation,
+            create_if_missing=expected_generation is None,
         )
         return runtime
 
@@ -940,11 +952,32 @@ class AgentLoop:
             self._active_tasks.pop(key, None)
 
     async def _cancel_active_tasks(self, key: str) -> int:
-        """Cancel and await all active work for *key*.
+        return (await self.stop_session(key)).stopped_tasks
 
-        Returns the total number of cancelled tasks, subagents, and exec sessions.
-        """
+    async def stop_session(
+        self,
+        key: str,
+        *,
+        expected_turn_id: str | None = None,
+        expected_generation: str | None = None,
+    ) -> SessionStopResult:
+        """Stop the admitted session work without claiming work accepted after it."""
+        async with self._admission_lock(key):
+            return await self._stop_session_work(key, expected_turn_id, expected_generation)
+
+    async def _stop_session_work(
+        self, key: str, expected_turn_id: str | None, expected_generation: str | None,
+    ) -> SessionStopResult:
         journal_session = await self.sessions.state.read(key)
+        current = self._session_inputs.get(key)
+        raw_turn_id = current.metadata.get(INBOUND_META_TURN_ID) if current is not None else None
+        turn_id = raw_turn_id if isinstance(raw_turn_id, str) else None
+        if expected_generation is not None and (
+            journal_session is None or journal_session.generation != expected_generation
+        ):
+            return SessionStopResult("stale", 0, expected_turn_id)
+        if expected_generation is not None and turn_id != expected_turn_id:
+            return SessionStopResult("stale" if current is not None else "idle", 0, expected_turn_id)
         journaled_followup_ids = (
             tuple(
                 followup_id
@@ -959,14 +992,16 @@ class AgentLoop:
         )
         pending = self._pending_queues.get(key)
         tasks = tuple(self._active_tasks.pop(key, set()))
+        queued = pending.qsize() if pending is not None and not tasks else 0
         cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
         for t in tasks:
             with suppress(asyncio.CancelledError, Exception):
                 await t
-        if tasks and pending is not None and self._pending_queues.get(key) is pending:
+        if pending is not None and self._pending_queues.get(key) is pending:
             # A task cancelled before its first step never enters the worker's
             # cleanup handler. Only reclaim that worker's original inbox.
             self._pending_queues.pop(key, None)
+            self._session_inputs.pop(key, None)
             await self._cancel_pending_messages(key, pending, asyncio.CancelledError())
         if journaled_followup_ids and journal_session is not None:
             # Explicit session cancellation owns the follow-ups accepted before
@@ -975,7 +1010,8 @@ class AgentLoop:
             await self.sessions.state.acknowledge_followups(key, journaled_followup_ids)
         sub_cancelled = await self.subagents.cancel_by_session(key)
         exec_cancelled = await self._exec_session_manager.terminate_by_owner(key)
-        return cancelled + sub_cancelled + exec_cancelled
+        total = cancelled + queued + sub_cancelled + exec_cancelled
+        return SessionStopResult("stopped" if total else "idle", total, turn_id)
 
     async def discard_session(self, key: str) -> None:
         """Stop active work for *key* and forget its cached session."""
@@ -1447,6 +1483,9 @@ class AgentLoop:
                     continue
 
                 with self.bus.admission.activity():
+                    if isinstance(msg, StopSession | SelectSessionModel):
+                        await self._dispatch_control(msg)
+                        continue
                     try:
                         await self._dispatch_inbound(msg)
                     except (SessionOperationQueueFullError, SessionConflictError) as exc:
@@ -1457,6 +1496,31 @@ class AgentLoop:
                             await delivery.fail(publish_completion=key not in self._pending_queues)
         finally:
             await self.aclose()
+
+    async def _dispatch_control(self, request: SessionControl) -> None:
+        """Complete a typed request at the same admission boundary as slash commands."""
+        try:
+            if isinstance(request, StopSession):
+                result = await self.stop_session(
+                    request.session_key,
+                    expected_turn_id=request.turn_id,
+                    expected_generation=request.session_generation,
+                )
+                if not request.result.done():
+                    request.result.set_result(result)
+            else:
+                runtime = await self.set_session_model_preset(
+                    request.session_key, request.preset,
+                    expected_generation=request.session_generation,
+                )
+                if not request.result.done():
+                    request.result.set_result(runtime)
+        except asyncio.CancelledError:
+            request.result.cancel()
+            raise
+        except Exception as exc:
+            if not request.result.done():
+                request.result.set_exception(exc)
 
     async def _dispatch_inbound(self, msg: InboundMessage) -> None:
         """Route one input through command and session admission."""
@@ -1470,6 +1534,12 @@ class AgentLoop:
             and await self.sessions.state.read_metadata(effective_key) is None
         ):
             return
+        initial_preset = msg.metadata.pop(INBOUND_META_INITIAL_MODEL_PRESET, None)
+        if isinstance(initial_preset, str):
+            await self.sessions.state.update_metadata(
+                effective_key, {SESSION_MODEL_PRESET_METADATA_KEY: initial_preset},
+                expected_generation=msg.session_generation,
+            )
         if msg.is_user_input:
             await self.runtime_event_publisher.user_input_accepted(msg, effective_key)
         if msg.channel != "system" and self.commands.is_priority(raw):
@@ -1554,8 +1624,19 @@ class AgentLoop:
         )
         return pending_msg
 
+    def _admission_lock(self, key: str) -> asyncio.Lock:
+        lock = self._admission_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._admission_locks[key] = lock
+        return lock
+
     async def _enqueue_session_message(self, msg: InboundMessage) -> None:
-        """Admit session work without waiting for its execution or result."""
+        """Serialize admission with cancellation, never with a running model turn."""
+        async with self._admission_lock(self._effective_session_key(msg)):
+            await self._admit_session_message(msg)
+
+    async def _admit_session_message(self, msg: InboundMessage) -> None:
         self.bus.admission.check()
         session_key = self._effective_session_key(msg)
         if not self.subagents.accepts_result(msg, session_key):
@@ -1581,6 +1662,7 @@ class AgentLoop:
         new_pending: asyncio.Queue[InboundMessage] = asyncio.Queue()
         new_pending.put_nowait(msg)
         self._pending_queues[session_key] = new_pending
+        self._session_inputs[session_key] = msg
         task = asyncio.create_task(self._run_session_queue(session_key, new_pending))
         self._track_active_task(session_key, task)
 
@@ -1607,6 +1689,7 @@ class AgentLoop:
                 log_content = session is None or (
                     session.policy.persist and session.policy.log_content
                 )
+                self._session_inputs[session_key] = msg
                 try:
                     await self._dispatch_one(msg, pending)
                 except asyncio.CancelledError as exc:
@@ -1625,6 +1708,7 @@ class AgentLoop:
             owns_queue = self._pending_queues.get(session_key) is pending
             if owns_queue:
                 self._pending_queues.pop(session_key, None)
+                self._session_inputs.pop(session_key, None)
 
     async def _cancel_pending_messages(
         self,
@@ -1644,7 +1728,9 @@ class AgentLoop:
                 and self.commands.requires_session_queue(command_text(msg))
             ):
                 delivery = self.turn_delivery_factory.unrouted(msg, session_key)
-                await delivery.complete(None, publish_completion=True)
+                await delivery.cancelled()
+            elif msg.is_user_input and not self._preserve_inflight_turns_on_shutdown:
+                await self.turn_delivery_factory.unrouted(msg, session_key).cancelled()
 
     async def _dispatch_one(
         self,
@@ -1732,6 +1818,8 @@ class AgentLoop:
                         session = await self.sessions.state.get(key)
                         restore_runtime_checkpoint(session)
                         await self.sessions.state.finish_turn(session)
+                        await delivery.cancelled()
+                        completion_published = True
                         logger.info("Saved cancelled turn for session {}", key)
                     except Exception:
                         logger.opt(exception=log_content).debug(
@@ -2166,7 +2254,10 @@ class AgentLoop:
             turn_scopes=ctx.turn_scopes,
         )
         command_matched = self.commands.command_name(raw) is not None
-        result = await self.commands.dispatch(cmd_ctx)
+        result = await (
+            self.commands.dispatch_priority(cmd_ctx)
+            if self.commands.is_priority(raw) else self.commands.dispatch(cmd_ctx)
+        )
         if isinstance(result, InboundMessage):
             ctx.msg = result
             result = None

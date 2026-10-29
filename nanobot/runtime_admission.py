@@ -45,6 +45,11 @@ class RuntimeAdmission:
                 "nanobot is preparing an update. Try again after maintenance finishes."
             )
 
+    def close(self) -> None:
+        """Permanently close intake while the application owner tears this runtime down."""
+        self._paused = True
+        self._open.clear()
+
     async def wait_until_open(self) -> None:
         """Pause scheduler intake without consuming or rescheduling pending work."""
         while self._paused:

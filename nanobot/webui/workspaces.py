@@ -484,14 +484,17 @@ class WebUIWorkspaceController:
         *,
         session_key: str | None = None,
         expected_generation: str | None = None,
+        initial_metadata: Mapping[str, Any] | None = None,
     ) -> tuple[str | None, bool]:
         async with self._scope_lock(chat_id):
             return await self._persist_scope(
                 session_key or webui_session_key(chat_id), scope, expected_generation,
+                initial_metadata=initial_metadata,
             )
 
     async def _persist_scope(
         self, session_key: str, scope: WorkspaceScope, expected_generation: str | None = None,
+        *, initial_metadata: Mapping[str, Any] | None = None,
     ) -> tuple[str | None, bool]:
         generation = expected_generation
         created = False
@@ -501,6 +504,7 @@ class WebUIWorkspaceController:
                 {"webui": True, WORKSPACE_SCOPE_METADATA_KEY: scope.metadata()},
                 expected_generation=generation,
                 validate_existing=lambda metadata: self._validate_existing_project(metadata, scope),
+                initial_updates=initial_metadata,
             )
         self._draft_scopes.pop(session_key, None)
         remember_webui_project(scope.project_path)

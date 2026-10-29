@@ -338,6 +338,23 @@ describe("NanobotTui session navigation", () => {
     }
   })
 
+  test("uses the attached persistence fact for an empty saved fork instead of treating it as a draft", async () => {
+    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
+    const transport = client()
+    const selected: Array<{ chatId: string; preset: string }> = []
+    transport.selectModel = async (chatId, preset) => {
+      selected.push({ chatId, preset })
+      return { model_preset: preset, model_name: "fast/model", context_window_tokens: 1000 }
+    }
+    const app = NanobotTui.mount(setup.renderer, options, transport, new MockTreeSitterClient({ autoResolveTimeout: 0 }))
+    app.accept({ event: "attached", chat_id: "chat", persisted: true, model_preset: null })
+    const ui = app as unknown as { ready: boolean; selectModel(preset: string): Promise<void>; draftModelPreset: string | undefined }
+    await waitUntil(() => ui.ready)
+    await ui.selectModel("fast")
+    expect(selected).toEqual([{ chatId: "chat", preset: "fast" }])
+    expect(ui.draftModelPreset).toBeUndefined()
+  })
+
   test("opens composer runtime controls by mouse and applies canonical choices", async () => {
     const original = globalThis.fetch
     const sent: string[] = []
@@ -411,7 +428,8 @@ describe("NanobotTui session navigation", () => {
       ui.composer.blur()
       expect(ui.composer.focused).toBe(false)
       await setup.mockMouse.click(fast.x + 2, fast.y)
-      await waitUntil(() => sent.includes("/model fast"))
+      await waitUntil(() => ui.runtimeControls.modelText.plainText.includes("fast"))
+      expect(sent).toEqual([])
       expect(ui.composer.focused).toBe(true)
 
       await setup.mockMouse.click(
@@ -463,9 +481,10 @@ describe("NanobotTui session navigation", () => {
     }
   })
 
-  test("selects model presets beyond the runtime menu's visible limit", async () => {
+  test("keeps a new-chat preset local and sends it with the first prompt, including off-screen choices", async () => {
     const original = globalThis.fetch
     const sent: string[] = []
+    const sentOptions: import("../client").MessageOptions[] = []
     globalThis.fetch = (async (input: string | URL | Request) => {
       const url = String(input)
       if (url.endsWith("/api/settings")) {
@@ -488,12 +507,13 @@ describe("NanobotTui session navigation", () => {
     const app = NanobotTui.mount(
       setup.renderer,
       { ...options, apiUrl: "http://nanobot.test", apiToken: "secret" },
-      client(sent),
+      client(sent, [], [], sentOptions),
       new MockTreeSitterClient({ autoResolveTimeout: 0 }),
     )
-    app.accept({ event: "attached", chat_id: "chat" })
+    app.accept({ event: "attached", chat_id: "chat", persisted: false })
     const ui = app as unknown as {
       ready: boolean
+      composer: TextareaRenderable
       runtimeControls: {
         modelText: TextRenderable
         visible: boolean
@@ -520,8 +540,14 @@ describe("NanobotTui session navigation", () => {
       expect(setup.captureCharFrame()).toContain("3–10 of 11 ↑↓")
 
       setup.mockInput.pressEnter()
-      await waitUntil(() => sent.includes("/model preset-8"))
+      await waitUntil(() => ui.runtimeControls.modelText.plainText.includes("preset-8"))
+      expect(sent).toEqual([])
       expect(ui.runtimeControls.visible).toBe(false)
+      ui.composer.setText("use this model")
+      ui.composer.submit()
+      await waitUntil(() => sent.length === 1)
+      expect(sent).toEqual(["use this model"])
+      expect(sentOptions[0]?.initialModelPreset).toBe("preset-8")
     } finally {
       globalThis.fetch = original
     }

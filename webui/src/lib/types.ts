@@ -1480,11 +1480,13 @@ interface InboundTurnMetadata {
 
 export type InboundEvent =
   | { event: "subagent_task"; chat_id: string; task: SubagentTaskSnapshot }
-  | { event: "ready"; chat_id: string; client_id: string; upload?: unknown }
+  | ({ event: "ready"; chat_id: string; client_id: string; upload?: unknown } & import("../../../packages/client-events/runtime-controls").RuntimeControlsReady)
   | {
       event: "attached";
       chat_id: string;
       temporary?: boolean;
+      persisted?: boolean;
+      model_preset?: string | null;
       recovery_state?: RecoveryState;
       usage?: TurnUsage;
     }
@@ -1798,6 +1800,7 @@ export type Outbound =
       quoted_context?: string;
       intent?: "create_automation";
       user_shell?: true;
+      initial_model_preset?: string;
       workspace_scope?: WorkspaceScopePayload;
       turn_id?: string;
       /** Marks messages sent by the embedded WebUI, without changing the

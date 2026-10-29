@@ -8,6 +8,7 @@ from contextlib import suppress
 
 from nanobot.cli.process_identity import set_cli_process_identity
 from nanobot.installation_lock import InstallationBusyError, installation_access
+from nanobot.utils.restart import ProcessRestart
 
 _ROOT_OPTIONS = frozenset(
     {
@@ -108,6 +109,8 @@ def main() -> None:
     except InstallationBusyError as exc:
         print(str(exc), file=sys.stderr)
         raise SystemExit(1) from exc
+    except ProcessRestart as restart:
+        restart.execute()
 
 
 def _dispatch() -> None:

@@ -161,7 +161,7 @@ export function decodeInboundEvent(value: unknown): InboundEvent | null | undefi
   if (typeof record.chat_id !== "string") return null
   if (
     name === "attached"
-    && ((record.model_preset !== undefined
+    && (!optional(record.persisted, "boolean") || (record.model_preset !== undefined
       && record.model_preset !== null
       && typeof record.model_preset !== "string")
       || (record.usage !== undefined && !isTokenUsage(record.usage))

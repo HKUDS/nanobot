@@ -81,7 +81,7 @@ export function modelPresetOptionsFromSettings(
     (settings.model_call_order ?? []).map((name, index) => [name.trim(), index]),
   );
   return (settings.model_presets ?? [])
-    .filter((preset) => !preset.is_default && preset.name.trim())
+    .filter((preset) => preset.name.trim())
     .sort((a, b) => (
       (order.get(a.name.trim()) ?? Number.POSITIVE_INFINITY)
       - (order.get(b.name.trim()) ?? Number.POSITIVE_INFINITY)

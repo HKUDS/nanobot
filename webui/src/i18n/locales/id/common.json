@@ -1,4 +1,10 @@
 {
+  "runtimeControls": {
+    "unavailable": "Kontrol eksekusi tidak tersedia pada koneksi ini. Chat masih dapat digunakan.",
+    "unconfirmed": "Hasil belum dikonfirmasi. Hubungkan kembali untuk memeriksa status saat ini sebelum mencoba lagi.",
+    "stopping": "Menghentikan…",
+    "selectingModel": "Memilih model…"
+  },
   "updates": {
     "guide": {
       "entry": "Perbarui melalui {{method}}",

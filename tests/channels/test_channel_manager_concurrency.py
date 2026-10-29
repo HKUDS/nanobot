@@ -373,3 +373,36 @@ async def test_restart_notice_deadline_does_not_cancel_submitted_send(tmp_path):
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.parametrize("delivery_fails", [False, True])
+async def test_restart_intent_finishes_after_ack_delivery_attempt(delivery_fails):
+    from nanobot.utils.restart import RestartController
+
+    manager, channel = make_manager()
+    restart = RestartController()
+    ticket = restart.request()
+    assert ticket is not None
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def send(_message):
+        entered.set()
+        await release.wait()
+        if delivery_fails:
+            raise ValueError("non-retryable acknowledgement failure")
+
+    channel.send.side_effect = send
+    channel.should_retry_send_error.return_value = False
+    await manager._queue_outbound(channel, OutboundMessage(
+        "websocket", "chat", "Restarting...", after_delivery=ticket.commit,
+    ))
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        assert not restart.committed
+        release.set()
+        await wait_until(lambda: not manager._outbound_tasks)
+        assert restart.committed
+        assert restart.shutdown_event.is_set()
+    finally:
+        release.set()
+        await manager.stop_all()

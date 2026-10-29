@@ -1,4 +1,10 @@
 {
+  "runtimeControls": {
+    "unavailable": "Les commandes d’exécution sont indisponibles sur cette connexion. La discussion reste disponible.",
+    "unconfirmed": "Le résultat n’est pas confirmé. Reconnectez-vous pour vérifier l’état actuel avant de réessayer.",
+    "stopping": "Arrêt en cours…",
+    "selectingModel": "Sélection du modèle…"
+  },
   "updates": {
     "guide": {
       "entry": "Mettre à jour via {{method}}",

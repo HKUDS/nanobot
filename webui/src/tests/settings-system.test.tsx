@@ -376,7 +376,7 @@ describe("Settings system domains", () => {
       "Summarize updates every weekday at 9",
       undefined,
       { intent: "create_automation" },
-      "primary",
+      null,
     ));
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
     expect(onBackToChat).toHaveBeenCalledTimes(1);

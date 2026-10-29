@@ -232,8 +232,10 @@ interface ThreadComposerProps {
   modelLabel?: string | null;
   modelDetail?: string | null;
   modelPreset?: string | null;
+  modelSelectionExplicit?: boolean;
   modelPresets?: ModelPresetOption[];
   onModelPresetChange?: (name: string) => void;
+  modelDisabledReason?: string;
   modelProvider?: string | null;
   modelProviderLabel?: string | null;
   modelNeedsSetup?: boolean;
@@ -249,6 +251,8 @@ interface ThreadComposerProps {
   sessions?: ChatSummary[];
   skills?: SkillSummary[];
   onStop?: () => void;
+  stopUnavailable?: boolean;
+  isStopping?: boolean;
   surfaceRef?: Ref<HTMLDivElement>;
   onTranscribeAudio?: (dataUrl: string, options?: { durationMs?: number }) => Promise<string>;
   onInspectAttachment?: (path: string) => Promise<LocalAttachment>;
@@ -1071,8 +1075,10 @@ export function ThreadComposer({
   modelLabel = null,
   modelDetail = null,
   modelPreset = null,
+  modelSelectionExplicit = true,
   modelPresets = [],
   onModelPresetChange,
+  modelDisabledReason,
   modelProvider = null,
   modelProviderLabel = null,
   modelNeedsSetup = false,
@@ -1088,6 +1094,8 @@ export function ThreadComposer({
   sessions = [],
   skills = [],
   onStop,
+  stopUnavailable = false,
+  isStopping = false,
   surfaceRef,
   onTranscribeAudio,
   onInspectAttachment,
@@ -1946,9 +1954,11 @@ export function ThreadComposer({
   }, [onTranscribeAudio, voiceRecorder.beginShortcutHold, voiceRecorder.endShortcutHold]);
 
   const handleStop = useCallback(() => {
+    if (stopUnavailable) { setInlineError(t("runtimeControls.unavailable")); return; }
+    if (isStopping) return;
     setQueuedPrompt((prompt) => prompt ? pauseQueuedPrompt(prompt) : null);
     onStop?.();
-  }, [onStop, setQueuedPrompt]);
+  }, [onStop, setQueuedPrompt, stopUnavailable, isStopping, t]);
 
   const chooseSlashCommand = useCallback(
     (command: SlashPaletteCommand) => {
@@ -2234,8 +2244,9 @@ export function ThreadComposer({
       ? slashCommandLifecycle(content, slashCommands)
       : null;
     if (
-      slashLifecycle === "stop_active_turn"
-      && isStreaming
+      hasPlainTextCommandPayload
+      && content.trim().toLowerCase() === "/stop"
+      && !stopUnavailable
       && onStop
     ) {
       handleStop();
@@ -2325,6 +2336,7 @@ export function ThreadComposer({
     requiresModelSetup,
     onSend,
     onStop,
+    stopUnavailable,
     onQuotedContextChange,
     normalizedQuotedContext,
     readyImages,
@@ -2484,7 +2496,7 @@ export function ThreadComposer({
   const showStopButton = isStreaming && !!onStop && !canSend;
   const actionState: ComposerActionState = showVoiceButton
     ? voiceRecorder.state === "transcribing" ? "busy" : voiceRecorder.isRecording ? "recording" : "voice"
-    : showStopButton ? "stop" : requiresModelSetup ? "setup" : canSend || !isStreaming ? "send" : "busy";
+    : showStopButton ? isStopping ? "busy" : "stop" : requiresModelSetup ? "setup" : canSend || !isStreaming ? "send" : "busy";
   const relaxedHeroInput = isHero && images.length === 0 && !isStreaming;
   const compactIdle = compactWhenIdle && !compactControls && !isHero && !composerFocused
     && value.length === 0 && images.length === 0 && !inlineError
@@ -2539,8 +2551,10 @@ export function ThreadComposer({
       label={modelLabel}
       modelDetail={modelDetail}
       modelPreset={modelPreset}
+      selectionExplicit={modelSelectionExplicit}
       modelPresets={modelPresets}
-      onPresetChange={onModelPresetChange}
+      onPresetChange={modelDisabledReason ? undefined : onModelPresetChange}
+      disabledReason={modelDisabledReason}
       onManageModels={onManageModels}
       onRequestComposerFocus={() => textareaRef.current?.focus()}
       provider={modelProvider}
@@ -2848,12 +2862,13 @@ export function ThreadComposer({
                   <Button
                     type={showVoiceButton || showStopButton || requiresModelSetup ? "button" : "submit"}
                     size="icon"
-                    disabled={showVoiceButton ? voiceRecorder.buttonDisabled : showStopButton ? interactionDisabled : !canSend && !canOpenModelSettings}
+                    disabled={showVoiceButton ? voiceRecorder.buttonDisabled : showStopButton ? interactionDisabled || stopUnavailable || isStopping : !canSend && !canOpenModelSettings}
+                    title={showStopButton && stopUnavailable ? t("runtimeControls.unavailable") : undefined}
                     aria-label={
                       showVoiceButton
                         ? voiceButtonLabel
                         : showStopButton
-                          ? t("thread.composer.stop")
+                          ? isStopping ? t("runtimeControls.stopping") : t("thread.composer.stop")
                           : requiresModelSetup
                             ? t("thread.composer.configureModel", { defaultValue: "Configure model" })
                             : isUserShell ? t("thread.composer.shell.run") : t("thread.composer.send")

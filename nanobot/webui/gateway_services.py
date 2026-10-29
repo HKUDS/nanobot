@@ -13,6 +13,7 @@ from nanobot.channels.websocket.attachment_http import AttachmentHTTP
 from nanobot.channels.websocket.attachment_store import AttachmentStore
 from nanobot.config.loader import get_config_path
 from nanobot.config.paths import get_media_dir
+from nanobot.utils.restart import RestartRequest
 from nanobot.webui.gateway_endpoint import WebUIGatewayEndpoint
 from nanobot.webui.gateway_tokens import GatewayTokenStore
 from nanobot.webui.ingress_policy import DEFAULT_WEBUI_INGRESS_POLICY, WebUIIngressPolicy
@@ -25,6 +26,7 @@ from nanobot.webui.workspaces import WebUIWorkspaceController
 from nanobot.webui.ws_http import GatewayHTTPHandler
 
 if TYPE_CHECKING:
+    from nanobot.agent.model_runtime import ModelRuntimeResolver
     from nanobot.agent.subagent import SubagentManager
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.websocket.runtime import WebSocketConfig
@@ -54,6 +56,8 @@ class GatewayServices:
     cron_pending_job_ids: Callable[[str], set[str]] | None
     local_trigger_pending_ids: Callable[[str], set[str]] | None
     unified_session: bool = False
+    model_runtime: ModelRuntimeResolver | None = None
+    restart: RestartRequest | None = None
 
 
 def build_gateway_services(
@@ -84,6 +88,8 @@ def build_gateway_services(
     recovery_action: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None = None,
     subagent_manager: SubagentManager | None = None,
     discard_session: Callable[[str], Awaitable[None]] | None = None,
+    model_runtime: ModelRuntimeResolver | None = None,
+    restart: RestartRequest | None = None,
     logger: Any = default_logger,
 ) -> GatewayServices:
     settings = WebUISettingsServices.create(
@@ -124,12 +130,15 @@ def build_gateway_services(
         workspaces=workspaces,
         logger=logger,
     )
-    session_projection = WebUISessionProjection(session_manager, subagent_manager=subagent_manager, log=logger)
+    session_projection = WebUISessionProjection(
+        session_manager, subagent_manager=subagent_manager, unified_session=unified_session, log=logger,
+    )
     http = GatewayHTTPHandler(
         config=config,
         session_manager=session_manager,
         static_dist_path=static_dist_path,
         runtime_model_name=runtime_model_name,
+        unified_session=unified_session,
         runtime_surface=runtime_surface,
         runtime_capabilities_overrides=runtime_capabilities_overrides,
         bus=bus,
@@ -174,4 +183,6 @@ def build_gateway_services(
         cron_pending_job_ids=cron_pending_job_ids,
         local_trigger_pending_ids=local_trigger_pending_ids,
         unified_session=unified_session,
+        model_runtime=model_runtime,
+        restart=restart,
     )
