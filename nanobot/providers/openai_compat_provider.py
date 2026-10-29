@@ -1543,6 +1543,10 @@ class OpenAICompatProvider(LLMProvider):
             ))
         if not parsed_tool_calls:
             content, parsed_tool_calls = _extract_text_tool_calls(content)
+        refusal = self._extract_text_content(msg0.get("refusal"))
+        if refusal:
+            content = (content or "") + refusal
+            finish_reason = "refusal"
 
         return LLMResponse(
             content=content,
@@ -1555,6 +1559,7 @@ class OpenAICompatProvider(LLMProvider):
     @classmethod
     def _parse_chunks(cls, chunks: list[Any]) -> LLMResponse:
         content_parts: list[str] = []
+        refusal_parts: list[str] = []
         reasoning_parts: list[str] = []
         tc_bufs: dict[int, dict[str, Any]] = {}
         finish_reason = "stop"
@@ -1629,6 +1634,9 @@ class OpenAICompatProvider(LLMProvider):
             text = cls._extract_text_content(raw_delta_content)
             if text:
                 content_parts.append(text)
+            refusal = cls._extract_text_content(delta.get("refusal"))
+            if refusal:
+                refusal_parts.append(refusal)
             text = cls._extract_text_content(delta.get("reasoning_content"))
             if not text:
                 text = cls._extract_text_content(delta.get("reasoning"))
@@ -1671,6 +1679,9 @@ class OpenAICompatProvider(LLMProvider):
         ]
         if not tool_calls:
             content, tool_calls = _extract_text_tool_calls(content)
+        if refusal_parts:
+            content = (content or "") + "".join(refusal_parts)
+            finish_reason = "refusal"
 
         return LLMResponse(
             content=content,
@@ -1919,6 +1930,9 @@ class OpenAICompatProvider(LLMProvider):
                         text = self._extract_text_content(raw_delta_content)
                         if text:
                             await on_content_delta(text)
+                        refusal = self._extract_text_content(getattr(delta_obj, "refusal", None))
+                        if refusal:
+                            await on_content_delta(refusal)
                     if on_thinking_delta:
                         reasoning = getattr(delta_obj, "reasoning_content", None) or getattr(
                             delta_obj, "reasoning", None,
