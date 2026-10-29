@@ -65,3 +65,24 @@ describe("tool renderers", () => {
     })).toBe("  ✓ Delegated  Simplify the fallback provider implementation")
   })
 })
+
+
+describe("execution observations", () => {
+  test.each([
+    ["running", "Running at last check"], ["stopping", "Stopping at last check"],
+    ["succeeded", "Command completed"], ["failed", "Command failed"],
+    ["cancelled", "Command cancelled"], ["timed_out", "Command timed out"],
+  ] as const)("renders %s from owner facts rather than command output", (state, label) => {
+    const event = {
+      phase: state === "running" || state === "stopping" ? "update" : state === "failed" || state === "timed_out" ? "error" : "end",
+      call_id: "execution:public", name: "exec", arguments: { command: "python work.py" },
+      result: "Process completed; Exit code: 0",
+      execution: { state, observed_at: 2, sequence: 2, exit_code: state === "failed" ? 7 : null,
+        finish_reason: null, truncated_chars: 0, output_incomplete: false },
+    };
+    expect(renderToolEvent(event)).toContain(label);
+    if (state === "cancelled") expect(renderToolEvent(event)).not.toContain("✓");
+    if (state === "failed") expect(renderToolEvent(event)).toContain("exit 7");
+    expect(mergeToolEvent(event, { ...event, execution: { ...event.execution, state: "running", observed_at: 1, sequence: 1 } })).toEqual(event);
+  });
+});

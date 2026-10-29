@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Awaitable, Callable
-from typing import Any, cast
+from typing import Any, Literal, TypedDict, cast
 
 from nanobot.agent.hook import AgentHookContext
+from nanobot.agent.tools.base import ToolResult
+from nanobot.agent.tools.execution_observation import ExecutionFinishReason, ExecutionObservation
 from nanobot.bus.outbound_events import (
     FileEditEvent,
     ProgressEvent,
@@ -113,14 +115,71 @@ def tool_event_result_extras(result: Any) -> tuple[list[Any], list[Any]]:
     return files, embeds
 
 
-def build_tool_event_finish_payloads(context: AgentHookContext) -> list[dict[str, Any]]:
+ExecutionState = Literal["running", "stopping", "succeeded", "cancelled", "timed_out", "failed"]
+
+
+class ExecutionProgress(TypedDict):
+    state: ExecutionState
+    observed_at: float
+    sequence: int
+    exit_code: int | None
+    finish_reason: ExecutionFinishReason | None
+    output_incomplete: bool
+    truncated_chars: int
+
+
+def _execution_payload(observation: ExecutionObservation) -> dict[str, Any]:
+    state: ExecutionState
+    # An observer finishing its wait says nothing about execution success.
+    if not observation.done:
+        state = "stopping" if observation.stopping else "running"
+        phase = "start" if observation.started else "update"
+    elif observation.finish_reason in {"cancelled", "owner_closed", "shutdown"}:
+        state, phase = "cancelled", "end"
+    elif observation.finish_reason in {"max_runtime", "idle_timeout"}:
+        state, phase = "timed_out", "error"
+    elif observation.finish_reason == "exit" and observation.exit_code == 0:
+        state, phase = "succeeded", "end"
+    else:
+        state, phase = "failed", "error"
+    result = observation.output
+    if observation.truncated_chars:
+        result += f"\n({observation.truncated_chars:,} chars truncated from output)"
+    if observation.output_incomplete:
+        result += "\nOutput collection ended before EOF; output may be incomplete."
+    if observation.execution_error:
+        result += f"\nError: {observation.execution_error}"
+    execution: ExecutionProgress = {
+        "state": state, "observed_at": observation.observed_at, "sequence": observation.sequence,
+        "exit_code": observation.exit_code, "finish_reason": observation.finish_reason,
+        "output_incomplete": observation.output_incomplete,
+        "truncated_chars": observation.truncated_chars,
+    }
+    return {
+        "version": 1, "phase": phase, "call_id": f"execution:{observation.activity_id}",
+        "name": "exec", "arguments": {"command": observation.command},
+        "result": result, "error": result if phase == "error" else None,
+        "files": [], "embeds": [],
+        "execution": execution,
+    }
+
+
+def build_tool_event_finish_payloads(
+    context: AgentHookContext, *, result_owned: set[str] | None = None,
+) -> list[dict[str, Any]]:
     payloads: list[dict[str, Any]] = []
     count = min(len(context.tool_calls), len(context.tool_results), len(context.tool_events))
     for idx in range(count):
         tool_call = context.tool_calls[idx]
         result = context.tool_results[idx]
         event = context.tool_events[idx]
+        if isinstance(result, ToolResult) and result.execution is not None:
+            payloads.append(_execution_payload(result.execution))
+            continue
+        deferred = str(tool_call.id) in (result_owned or ())
         status = event.get("status")
+        if deferred and status == "ok":
+            continue
         phase = "end" if status == "ok" else "error"
         files, embeds = tool_event_result_extras(result)
         payload = {
@@ -128,14 +187,18 @@ def build_tool_event_finish_payloads(context: AgentHookContext) -> list[dict[str
             "phase": phase,
             "call_id": str(getattr(tool_call, "id", "") or ""),
             "name": getattr(tool_call, "name", ""),
-            "arguments": _tool_event_arguments(tool_call),
+            "arguments": {} if deferred else _tool_event_arguments(tool_call),
             "result": result if phase == "end" else None,
             "error": None,
             "files": files,
             "embeds": embeds,
         }
+        if deferred:
+            payload["control_error"] = True
         if phase == "error":
-            if isinstance(result, str) and result.strip():
+            if isinstance(result, ToolResult) and result.public_error is not None:
+                payload["error"] = result.public_error
+            elif isinstance(result, str) and result.strip():
                 payload["error"] = result.strip()
             else:
                 payload["error"] = str(event.get("detail") or "Tool execution failed")

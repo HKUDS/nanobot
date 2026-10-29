@@ -9,6 +9,8 @@ from collections.abc import Callable
 from copy import deepcopy
 from typing import Any, TypeVar, cast
 
+from nanobot.agent.tools.execution_observation import ExecutionObservation
+
 if typing.TYPE_CHECKING:
     from pydantic import BaseModel
 
@@ -201,10 +203,17 @@ class ToolResult(str):
     """String-compatible tool output with structured status."""
 
     is_error: bool
+    execution: ExecutionObservation | None
+    public_error: str | None
 
-    def __new__(cls, content: str, *, is_error: bool = False) -> ToolResult:
+    def __new__(
+        cls, content: str, *, is_error: bool = False,
+        execution: ExecutionObservation | None = None, public_error: str | None = None,
+    ) -> ToolResult:
         obj = str.__new__(cls, content)
         obj.is_error = is_error
+        obj.execution = execution
+        obj.public_error = public_error
         return obj
 
     @classmethod
@@ -214,6 +223,10 @@ class ToolResult(str):
 
 class Tool(ABC):
     """Agent capability: read files, run commands, etc."""
+
+    # Observation/control tools report grounded activity in their result, not a
+    # speculative task start for every invocation. Errors remain public.
+    activity_from_result: bool = False
 
     _TYPE_MAP = _JSON_TYPE_MAP
     _BOOL_TRUE = frozenset(("true", "1", "yes"))

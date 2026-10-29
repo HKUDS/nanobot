@@ -1235,3 +1235,47 @@ def test_existing_shell_output_uses_canonical_command_identity_not_bang_text(his
     assert answer.get("render_as") == ("text" if command else None)
     assert history.read(key)[1]["text"] == output
     assert messages[1]["content"] == output
+
+
+@pytest.mark.asyncio
+async def test_execution_observation_summary_detail_and_reopen_agree(history, tmp_path) -> None:
+    from nanobot.session.manager import Session, SessionManager
+    from tests.agent.execution_activity_helpers import observed_command
+
+    progress, result, transcript, session_id = await observed_command(tmp_path, exit_code=7, padding=9000)
+    key = "websocket:execution-observation"
+    history.append(key, {"event": "user", "chat_id": "execution-observation", "text": "observe"})
+    for event in progress:
+        if event.tool_events:
+            history.append(key, {
+                "event": "message", "kind": "tool_hint" if event.tool_hint else "progress",
+                "chat_id": "execution-observation", "text": event.content,
+                "tool_events": event.tool_events,
+            })
+    history.append(key, {"event": "message", "chat_id": "execution-observation", "text": result.final_content})
+    history.append(key, {"event": "turn_end", "chat_id": "execution-observation"})
+    response = history.build(key)
+    summary = next(event for event in response["events"] if "trace_detail" in event)
+    assert summary["trace_detail"]["traceCount"] == 3  # one command, ordinary read, control error
+    assert len(summary["tool_events"]) == 2
+    command = next(tool for tool in summary["tool_events"] if "execution" in tool)
+    assert "not found" in summary["tool_events"][-1]["error"]
+    assert command["execution"]["state"] == "failed"
+    assert command["execution"]["exit_code"] == 7
+    assert command["result"] is None
+    detail = history.trace(key, summary["trace_detail"]["ref"])
+    observations = [tool for event in detail["events"] for tool in event.get("tool_events", []) if "execution" in tool]
+    assert len(observations) == 6
+    assert {tool["call_id"] for tool in observations} == {command["call_id"]}
+    assert observations[-1]["execution"] == command["execution"]
+    assert "initial output" in observations[-1]["result"]
+    assert "final output" in observations[-1]["result"]
+    assert session_id not in json.dumps(response) + json.dumps(detail)
+    reopened = SessionManager(tmp_path)
+    rebuilt = reopened.project_history(key, lambda snapshot: transcript_module.build_webui_thread_response(key, history=snapshot))
+    assert rebuilt == response
+    session = Session(key=key)
+    session.messages = transcript
+    fallback = transcript_module.build_session_thread_response(session)
+    retained = [tool for event in fallback["events"] for tool in event.get("tool_events", []) if "execution" in tool]
+    assert retained == observations

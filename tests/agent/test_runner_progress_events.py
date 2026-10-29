@@ -178,12 +178,16 @@ async def test_batched_file_reads_keep_each_call_and_complete_arguments() -> Non
     ))
 
     assert result.final_content == "Done"
-    assert [(content, hint) for content, hint, _events in progress] == [("", True), ("", False)]
-    for _content, _hint, events in progress:
+    assert [(content, hint) for content, hint, _events in progress] == [
+        ("", True), ("", True), ("", False),
+    ]
+    starts = [item for _content, hint, events in progress if hint for item in events]
+    finishes = progress[-1][2]
+    for events in (starts, finishes):
         assert [(item["call_id"], item["name"], item["arguments"]) for item in events] == [
             (call.id, call.name, call.arguments) for call in calls
         ]
-    assert [item["phase"] for item in progress[0][2]] == ["start", "start"]
-    assert [(item["phase"], item["result"]) for item in progress[1][2]] == [
+    assert [item["phase"] for item in starts] == ["start", "start"]
+    assert [(item["phase"], item["result"]) for item in finishes] == [
         ("end", "file contents"), ("end", "file contents"),
     ]

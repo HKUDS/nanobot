@@ -21,7 +21,13 @@ def with_tool_error_hint(payload: str) -> str:
     """Append tool error guidance exactly once."""
     if payload.endswith(_ERROR_HINT):
         return payload
-    return payload + _ERROR_HINT
+    content = payload + _ERROR_HINT
+    if isinstance(payload, ToolResult):
+        return ToolResult(
+            content, is_error=payload.is_error,
+            execution=payload.execution, public_error=payload.public_error,
+        )
+    return content
 
 
 def is_tool_error_result(result: Any) -> bool:
@@ -206,7 +212,7 @@ class ToolRegistry:
             assert tool is not None  # guarded by prepare_call()
             result = await tool.execute(**params)
             if is_tool_error_result(result):
-                return ToolResult.error(with_tool_error_hint(str(result)))
+                return with_tool_error_hint(result)
             return result
         except Exception as e:
             return ToolResult.error(with_tool_error_hint(f"Error executing {name}: {str(e)}"))

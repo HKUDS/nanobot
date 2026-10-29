@@ -51,8 +51,21 @@ function isToolEvent(value: unknown): value is ToolProgressEvent {
     && optional(value.phase, "string")
     && optional(value.call_id, "string")
     && optional(value.name, "string")
+    && (value.execution === undefined || isExecutionProgress(value.execution))
     && (value.files === undefined || Array.isArray(value.files))
     && (value.embeds === undefined || Array.isArray(value.embeds))
+}
+
+function isExecutionProgress(value: unknown): boolean {
+  return isRecord(value)
+    && typeof value.state === "string"
+    && ["running", "stopping", "succeeded", "failed", "cancelled", "timed_out"].includes(value.state)
+    && typeof value.observed_at === "number" && Number.isFinite(value.observed_at)
+    && typeof value.sequence === "number" && Number.isInteger(value.sequence) && value.sequence >= 1
+    && (value.exit_code === null || typeof value.exit_code === "number" && Number.isInteger(value.exit_code))
+    && (value.finish_reason === null || typeof value.finish_reason === "string")
+    && typeof value.output_incomplete === "boolean"
+    && typeof value.truncated_chars === "number" && Number.isInteger(value.truncated_chars) && value.truncated_chars >= 0
 }
 
 function isFileEdit(value: unknown): value is FileEditEvent {

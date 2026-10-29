@@ -11,6 +11,8 @@ export function mergeToolEvent(
   next: ToolProgressEvent,
 ): ToolProgressEvent {
   if (!previous) return next
+  if (previous.execution && next.execution
+    && next.execution.sequence < previous.execution.sequence) return previous
   return {
     ...previous,
     ...next,
@@ -24,6 +26,18 @@ export function renderToolEvent(
   event: ToolProgressEvent,
   options: ToolRenderOptions = {},
 ): string {
+  if (event.execution) {
+    const facts = event.execution
+    const label = {
+      running: "Running at last check", stopping: "Stopping at last check",
+      succeeded: "Command completed", failed: "Command failed",
+      cancelled: "Command cancelled", timed_out: "Command timed out",
+    }[facts.state]
+    const marker = facts.state === "succeeded" ? "✓"
+      : facts.state === "failed" || facts.state === "timed_out" ? "×" : "›"
+    const exit = facts.exit_code !== null ? ` (exit ${facts.exit_code})` : ""
+    return `  ${marker} ${label}${exit}  ${compact(record(event.arguments).command)}`
+  }
   const phase = event.phase || "start"
   const marker = phase === "error" ? "×" : phase === "end" ? "✓" : "›"
   const name = (event.name || "tool").trim()

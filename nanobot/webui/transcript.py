@@ -1125,7 +1125,7 @@ def tool_trace_lines_from_events(events: Any) -> list[str]:
         if not event or not isinstance(event, dict):
             continue
         tool_event = cast(dict[str, Any], event)
-        if tool_event.get("phase") not in {"start", "end", "error"}:
+        if tool_event.get("phase") not in {"start", "update", "end", "error"}:
             continue
         call_id = tool_event.get("call_id")
         if isinstance(call_id, str) and call_id:
@@ -1146,7 +1146,7 @@ def _normalize_tool_events(events: Any) -> list[dict[str, Any]]:
         if not event or not isinstance(event, dict):
             continue
         tool_event = cast(dict[str, Any], event)
-        if tool_event.get("phase") not in {"start", "end", "error"}:
+        if tool_event.get("phase") not in {"start", "update", "end", "error"}:
             continue
         if not isinstance(tool_event.get("name"), str):
             function = tool_event.get("function")
@@ -1542,6 +1542,7 @@ def _client_projection_deferred_trace_groups(
     start: int | None = None
     detail_bytes = 0
     trace_count = 0
+    seen_calls: set[str] = set()
 
     def flush(stop: int) -> None:
         nonlocal start, detail_bytes, trace_count
@@ -1558,6 +1559,7 @@ def _client_projection_deferred_trace_groups(
         start = None
         detail_bytes = 0
         trace_count = 0
+        seen_calls.clear()
 
     for index, record in enumerate(lines):
         is_activity = (
@@ -1580,10 +1582,14 @@ def _client_projection_deferred_trace_groups(
             start = index
         detail_bytes += len(_record_json_line(event).encode("utf-8"))
         tool_events = _normalize_tool_events(record.get("tool_events"))
-        traces = tool_trace_lines_from_events(tool_events)
-        if traces:
-            trace_count += len(traces)
-        elif not tool_events and isinstance(record.get("text"), str) and record["text"]:
+        for tool in tool_events:
+            call_id = tool.get("call_id")
+            if isinstance(call_id, str) and call_id:
+                if call_id in seen_calls:
+                    continue
+                seen_calls.add(call_id)
+            trace_count += 1
+        if not tool_events and isinstance(record.get("text"), str) and record["text"]:
             trace_count += 1
     flush(len(lines))
     return groups
@@ -1642,8 +1648,28 @@ def _client_projection_events(
                 ),
                 "",
             )
+            # Keep grounded execution state in the collapsed summary. Output is
+            # fetched through the existing detail endpoint, not duplicated here.
+            summary_tools: dict[str, dict[str, Any]] = {}
+            for grouped in lines[group.start:group.stop]:
+                for tool in _normalize_tool_events(grouped.get("tool_events")):
+                    if not tool.get("call_id"):
+                        continue
+                    if isinstance(tool.get("execution"), dict):
+                        arguments = tool.get("arguments")
+                        raw_command = cast(dict[str, Any], arguments).get("command") if isinstance(arguments, dict) else None
+                        command = raw_command if isinstance(raw_command, str) else ""
+                        summary_tools[tool["call_id"]] = {
+                            **tool, "result": None, "error": None,
+                            "arguments": {"command": _truncate_utf8(command, 512)},
+                        }
+                    elif tool.get("control_error"):
+                        summary_tools[tool["call_id"]] = tool
             event["text"] = _trace_summary(last_text)
-            event.pop("tool_events", None)
+            if summary_tools:
+                event["tool_events"] = list(summary_tools.values())
+            else:
+                event.pop("tool_events", None)
             receipts = _projection_receipts(lines[group.start:group.stop])
             if receipts:
                 event["projection_receipts"] = receipts

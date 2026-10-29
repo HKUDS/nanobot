@@ -36,8 +36,8 @@ export function canonicalToolTrace(line: string): string {
   }
 }
 
-const VALID_PHASES = new Set(["start", "end", "error"]);
-const PHASE_RANK: Record<string, number> = { start: 1, end: 2, error: 3 };
+const VALID_PHASES = new Set(["start", "update", "end", "error"]);
+const PHASE_RANK: Record<string, number> = { start: 1, update: 1, end: 2, error: 3 };
 
 export function normalizeToolProgressEvents(events: unknown): ToolProgressEvent[] {
   if (!Array.isArray(events)) return [];
@@ -53,6 +53,17 @@ export function normalizeToolProgressEvents(events: unknown): ToolProgressEvent[
         ? String((record as { function?: { name?: unknown } }).function?.name)
         : "";
     if (!name && !functionName) continue;
+    if (record.execution !== undefined) {
+      const facts = record.execution;
+      if (!facts || typeof facts !== "object"
+        || !["running", "stopping", "succeeded", "failed", "cancelled", "timed_out"].includes(facts.state)
+        || typeof facts.observed_at !== "number" || !Number.isFinite(facts.observed_at)
+        || !Number.isInteger(facts.sequence) || facts.sequence < 1
+        || !(facts.exit_code === null || typeof facts.exit_code === "number" && Number.isInteger(facts.exit_code))
+        || !(facts.finish_reason === null || typeof facts.finish_reason === "string")
+        || typeof facts.output_incomplete !== "boolean"
+        || !Number.isInteger(facts.truncated_chars) || facts.truncated_chars < 0) continue;
+    }
     out.push(record);
   }
   return out;
@@ -82,7 +93,11 @@ export function mergeToolProgressEvents(
     const existing = next[existingIndex];
     const incomingRank = PHASE_RANK[String(event.phase)] ?? 0;
     const existingRank = PHASE_RANK[String(existing.phase)] ?? 0;
-    next[existingIndex] = incomingRank >= existingRank ? { ...existing, ...event } : existing;
+    const olderObservation = existing.execution && event.execution
+      && event.execution.sequence < existing.execution.sequence;
+    next[existingIndex] = !olderObservation && incomingRank >= existingRank
+      ? { ...existing, ...event }
+      : existing;
   }
   return next;
 }

@@ -38,16 +38,44 @@ ToolFormat = tuple[list[str], str, bool, bool]
 
 
 def format_tool_event_hints(events: list[dict[str, Any]], max_length: int = 40) -> str:
-    """Render structured tool starts for channels that choose plain-text hints."""
-    calls = [
-        ToolCallRequest(
-            id=str(event.get("call_id") or ""),
-            name=event.get("name", ""),
-            arguments=event.get("arguments") or {},
-        )
-        for event in events if event.get("phase") == "start"
-    ]
-    return strip_think(format_tool_hints(calls, max_length=max_length))
+    """Render starts and grounded command outcomes, never observer/control chatter."""
+    hints: list[str] = []
+    calls: list[ToolCallRequest] = []
+
+    def flush() -> None:
+        if calls:
+            hints.append(format_tool_hints(calls, max_length=max_length))
+            calls.clear()
+
+    for event in events:
+        phase = event.get("phase")
+        execution = event.get("execution")
+        if isinstance(execution, dict) and phase in {"end", "error"}:
+            flush()
+            facts = cast(dict[str, Any], execution)
+            state = facts["state"]
+            outcome = {
+                "succeeded": "Command completed", "cancelled": "Command cancelled",
+                "timed_out": "Command timed out", "failed": "Command failed",
+            }[state]
+            if state == "failed" and facts.get("exit_code") is not None:
+                outcome += f" (exit {facts['exit_code']})"
+            if state == "timed_out":
+                outcome += f" ({facts['finish_reason']})"
+            command = format_tool_hints([ToolCallRequest(
+                id="", name="exec", arguments=event.get("arguments") or {},
+            )], max_length=max_length)
+            hints.append(f"{outcome}: {command}")
+        elif event.get("control_error") and phase == "error":
+            flush()
+            hints.append(str(event.get("error") or "Command control failed"))
+        elif phase == "start":
+            calls.append(ToolCallRequest(
+                id=str(event.get("call_id") or ""),
+                name=event.get("name", ""), arguments=event.get("arguments") or {},
+            ))
+    flush()
+    return strip_think(", ".join(hints))
 
 
 def format_tool_hints(tool_calls: list[ToolCallRequest], max_length: int = 40) -> str:

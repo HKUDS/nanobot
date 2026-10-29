@@ -24,6 +24,7 @@ import { coalesceActivityMessages } from "@/components/thread/activity/activity-
 import {
   compactActivityPath,
   formatActivityTarget,
+  redactActivityText,
   redactShellCommand,
 } from "@/components/thread/activity/activity-text";
 import { FileEditGroup, type FileEditSummary } from "@/components/thread/activity/FileEditRow";
@@ -803,6 +804,27 @@ function ActivityTraceRow({
   const { t } = useTranslation();
   const status = state?.status ?? (active ? "running" : "done");
   const trace = describeTraceLine(line, status, t, state?.result);
+  if (state?.execution) {
+    const execution = state.execution;
+    const labelKey = {
+      running: "commandObservedRunning", stopping: "commandObservedStopping",
+      succeeded: "ranCommand", failed: "commandFailed", cancelled: "commandCancelled",
+      timed_out: "commandTimedOut",
+    }[execution.state];
+    const tone = execution.state === "succeeded" ? "success"
+      : execution.state === "failed" || execution.state === "timed_out" ? "error" : "neutral";
+    const row = <ActivityStep
+      icon={Terminal}
+      label={formatActivityTarget(t, t(`message.agentActivity.${labelKey}`), trace.detail)}
+      detail={execution.exit_code !== null ? t("message.agentActivity.commandExitCode", { code: execution.exit_code }) : undefined}
+      tone={tone}
+    />;
+    const output = typeof state.result === "string" ? compactActivityPath(redactActivityText(state.result)) : "";
+    return output ? <details className="min-w-0">
+      <summary className="cursor-pointer list-none">{row}</summary>
+      <pre className="ml-7 max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs text-muted-foreground">{output}</pre>
+    </details> : row;
+  }
   const rowActive = status === "running" && active;
   const Icon = trace.icon === "clock" ? Clock3 : (trace.kind === "search"
     ? WebSearchIcon
@@ -836,6 +858,7 @@ function ActivityTraceRow({
 }
 
 interface GenericToolState {
+  execution?: ToolProgressEvent["execution"];
   status: GenericToolStatus;
   error?: string;
   result?: unknown;
@@ -856,6 +879,7 @@ function genericToolStateByTraceLine(message: UIMessage): Map<string, GenericToo
         : "running";
     const next = {
       status,
+      execution: event.execution,
       error: status === "error" ? toolProgressError(event.error) : undefined,
       result: event.result,
     };

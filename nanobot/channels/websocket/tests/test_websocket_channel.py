@@ -6962,3 +6962,72 @@ async def test_webui_commands_keep_session_io_off_event_loop(
         assert "save" in calls or "replace_metadata" in calls
     assert all(json.loads(call.args[0])["event"] != "error" for call in conn.send.await_args_list)
     await channel._cleanup_connection(conn)
+
+
+@pytest.mark.asyncio
+async def test_authenticated_execution_observations_live_reconnect_and_history(
+    history, tmp_path, start_listener,
+) -> None:
+    from urllib.parse import quote
+
+    from nanobot.bus.outbound_events import outbound_message_for_event
+    from tests.agent.execution_activity_helpers import observed_command
+
+    chat_id = "execution-wire"
+    key = f"websocket:{chat_id}"
+    history.append(key, {"event": "user", "chat_id": chat_id, "text": "synthetic observation"})
+    channel = _ch(MessageBus(), session_manager=history.sessions, token="synthetic-token", websocketRequiresToken=True)
+    port, _task = await start_listener(channel)
+    token = channel.gateway.tokens.issue_token(300, audience="webui")
+    api_token = channel.gateway.tokens.issue_api_token(300)
+    uri = f"ws://127.0.0.1:{port}/ws?token={token}&client_id=execution-test"
+    frames = []
+    try:
+        async with websockets.connect(uri) as client:
+            await _recv_ws_event(client, "ready")
+            await client.send(json.dumps({"type": "attach", "chat_id": chat_id}))
+            await _recv_ws_event(client, "attached")
+
+            async def deliver(event: ProgressEvent) -> None:
+                metadata = await history.metadata(chat_id, {WEBUI_TURN_METADATA_KEY: "observed-turn"})
+                await channel.send(outbound_message_for_event(
+                    channel="websocket", chat_id=chat_id, event=event, metadata=metadata,
+                ))
+                frame = await _recv_ws_event(client, "message")
+                assert frame["tool_events"] == event.tool_events
+                frames.append(frame)
+
+            _progress, _result, _transcript, session_id = await observed_command(
+                tmp_path, exit_code=7, padding=9000, deliver=deliver,
+            )
+            metadata = await history.metadata(chat_id, {WEBUI_TURN_METADATA_KEY: "observed-turn"})
+            await channel.send(outbound_message_for_event(
+                channel="websocket", chat_id=chat_id, event=TurnEndEvent(), metadata=metadata,
+            ))
+            await _recv_ws_event(client, "turn_end")
+        reconnect_token = channel.gateway.tokens.issue_token(300, audience="webui")
+        reconnect_uri = f"ws://127.0.0.1:{port}/ws?token={reconnect_token}&client_id=execution-test"
+        async with websockets.connect(reconnect_uri) as reconnected:
+            await _recv_ws_event(reconnected, "ready")
+            await reconnected.send(json.dumps({"type": "attach", "chat_id": chat_id}))
+            await _recv_ws_event(reconnected, "attached")
+            async with httpx.AsyncClient(trust_env=False) as http:
+                url = f"http://127.0.0.1:{port}/api/sessions/{quote(key, safe='')}/webui-thread"
+                denied = await http.get(url)
+                assert denied.status_code == 401
+                response = await http.get(url, headers={"Authorization": f"Bearer {api_token}"})
+                assert response.status_code == 200
+                summary = next(row for row in response.json()["events"] if "trace_detail" in row)
+                assert summary["trace_detail"]["traceCount"] == 3
+                assert summary["tool_events"][0]["execution"]["state"] == "failed"
+                detail = await http.get(url + "/trace-detail", params={"ref": summary["trace_detail"]["ref"]}, headers={"Authorization": f"Bearer {api_token}"})
+                assert detail.status_code == 200
+                live = [tool for frame in frames for tool in frame["tool_events"] if "execution" in tool]
+                replay = [tool for frame in detail.json()["events"] for tool in frame.get("tool_events", []) if "execution" in tool]
+                assert replay == live
+                assert len({tool["call_id"] for tool in live}) == 1
+                assert all(tool["execution"]["state"] == "running" for tool in live[:-1])
+                assert live[-1]["execution"]["exit_code"] == 7
+                assert session_id not in json.dumps(frames) + response.text + detail.text
+    finally:
+        await channel.stop()

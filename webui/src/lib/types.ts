@@ -403,7 +403,18 @@ export interface GoalStateWsPayload {
   recap?: string;
 }
 
+export interface ExecutionProgress {
+  state: "running" | "stopping" | "succeeded" | "failed" | "cancelled" | "timed_out";
+  observed_at: number;
+  sequence: number;
+  exit_code: number | null;
+  finish_reason: string | null;
+  output_incomplete: boolean;
+  truncated_chars: number;
+}
+
 export interface ToolProgressEvent {
+  execution?: ExecutionProgress;
   version?: number;
   phase?: "start" | "end" | "error" | string;
   call_id?: string;

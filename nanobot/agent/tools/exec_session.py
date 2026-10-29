@@ -20,6 +20,7 @@ from nanobot.agent.tools.context import (
     current_request_session_key,
     tool_log_content_allowed,
 )
+from nanobot.agent.tools.execution_observation import ExecutionFinishReason, ExecutionObservation
 from nanobot.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
@@ -38,9 +39,7 @@ DEFAULT_MAX_OUTPUT_CHARS = 10_000
 MAX_OUTPUT_CHARS = 50_000
 
 
-FinishReason = Literal[
-    "exit", "max_runtime", "idle_timeout", "cancelled", "owner_closed", "shutdown", "execution_error",
-]
+FinishReason = ExecutionFinishReason
 
 
 @dataclass(slots=True)
@@ -58,6 +57,7 @@ class _SessionPoll:
     truncated_chars: int = 0
     output_incomplete: bool = False
     execution_error: str | None = None
+    observation: ExecutionObservation | None = None
 
     @property
     def failed(self) -> bool:
@@ -137,9 +137,12 @@ class _BoundedOutputBuffer:
                 self._tail[0] = first[excess:]
                 self._tail_chars -= excess
 
-    def drain(self) -> tuple[str, int]:
+    def snapshot(self) -> tuple[str, int]:
         output = self._content + "".join(self._tail)
-        truncated_chars = self._total_chars - len(output)
+        return output, self._total_chars - len(output)
+
+    def drain(self) -> tuple[str, int]:
+        output, truncated_chars = self.snapshot()
         self._content = ""
         self._tail.clear()
         self._tail_chars = 0
@@ -162,10 +165,12 @@ class _ExecSession:
         idle_timeout: int = 300,
         idle_action: Literal["report", "terminate"] = "report",
         started_at: float | None = None,
+        display_command: str | None = None,
     ) -> None:
         self.session_id = session_id
         self.process = process
         self.command = command
+        self._display_command = command if display_command is None else display_command
         self.cwd = cwd
         self.owner_session_key = owner_session_key
         self._process_tree = process_tree
@@ -185,6 +190,12 @@ class _ExecSession:
         self._execution_error: str | None = None
         self._stdout = _BoundedOutputBuffer(MAX_OUTPUT_CHARS)
         self._stderr = _BoundedOutputBuffer(MAX_OUTPUT_CHARS)
+        # Public snapshots retain earlier output without changing model-facing
+        # drains. This identity is deliberately unrelated to the control handle.
+        self._activity_id = uuid.uuid4().hex
+        self._observation_sequence = 0
+        self._activity_stdout = _BoundedOutputBuffer(DEFAULT_MAX_OUTPUT_CHARS)
+        self._activity_stderr = _BoundedOutputBuffer(DEFAULT_MAX_OUTPUT_CHARS)
         self._lock = asyncio.Lock()
         self._kill_task: asyncio.Task[None] | None = None
         self._stdout_task = asyncio.create_task(self._read_stream(process.stdout, self._stdout))
@@ -310,6 +321,10 @@ class _ExecSession:
                 text = output_filter.feed(decoder.decode(chunk, final=not chunk))
                 async with self._lock:
                     buffer.append(text)
+                    activity_buffer = (
+                        self._activity_stdout if buffer is self._stdout else self._activity_stderr
+                    )
+                    activity_buffer.append(text)
                 if not chunk:
                     break
         except Exception as exc:
@@ -358,7 +373,16 @@ class _ExecSession:
         async with self._lock:
             stdout, stdout_truncated = self._stdout.drain()
             stderr, stderr_truncated = self._stderr.drain()
+            activity_stdout, activity_stdout_truncated = self._activity_stdout.snapshot()
+            activity_stderr, activity_stderr_truncated = self._activity_stderr.snapshot()
+            self._observation_sequence += 1
 
+        activity_parts = [activity_stdout] if activity_stdout else []
+        if activity_stderr:
+            activity_parts.append(f"STDERR:\n{activity_stderr}")
+        activity_output, activity_truncated = _truncate_output(
+            "\n".join(activity_parts), min(max_output_chars, DEFAULT_MAX_OUTPUT_CHARS),
+        )
         output_parts = [stdout] if stdout else []
         if stderr:
             output_parts.append(f"STDERR:\n{stderr}")
@@ -379,6 +403,15 @@ class _ExecSession:
             truncated_chars=stdout_truncated + stderr_truncated + response_truncated,
             output_incomplete=self._output_incomplete,
             execution_error=self._execution_error,
+            observation=ExecutionObservation(
+                activity_id=self._activity_id, command=self._display_command, observed_at=time.time(),
+                sequence=self._observation_sequence,
+                done=self.finished_at is not None, stopping=self.stopping,
+                exit_code=self.process.returncode, finish_reason=self.finish_reason,
+                output=activity_output,
+                truncated_chars=(activity_stdout_truncated + activity_stderr_truncated + activity_truncated),
+                output_incomplete=self._output_incomplete, execution_error=self._execution_error,
+            ),
         )
 
     async def kill(self, reason: FinishReason = "cancelled") -> None:
@@ -456,6 +489,7 @@ class ExecSessionManager:
         idle_action: Literal["report", "terminate"] = "report",
         stdin: int = asyncio.subprocess.PIPE,
         until_exit: bool = False,
+        display_command: str | None = None,
     ) -> tuple[str, _SessionPoll]:
         async with self._lock:
             if self._closed:
@@ -475,7 +509,7 @@ class ExecSessionManager:
                 session_id=session_id, command=command, cwd=cwd, env=env,
                 timeout=timeout, shell_program=shell_program, login=login,
                 owner_session_key=owner_session_key, idle_timeout=idle_timeout,
-                idle_action=idle_action, stdin=stdin,
+                idle_action=idle_action, stdin=stdin, display_command=display_command,
             ))
             self._starting[session_id] = (owner_session_key, launch)
         try:
@@ -502,6 +536,7 @@ class ExecSessionManager:
         env: dict[str, str], timeout: int | None, shell_program: str | None,
         login: bool, owner_session_key: str | None, idle_timeout: int,
         idle_action: Literal["report", "terminate"], stdin: int,
+        display_command: str | None,
     ) -> _ExecSession:
         session: _ExecSession | None = None
         try:
@@ -512,7 +547,7 @@ class ExecSessionManager:
                 command=shlex.join(command) if isinstance(command, list) else command,
                 cwd=cwd, timeout=timeout, owner_session_key=owner_session_key,
                 process_tree=True, idle_timeout=idle_timeout, idle_action=idle_action,
-                started_at=started_at,
+                started_at=started_at, display_command=display_command,
             )
             async with self._lock:
                 if self._closed or session_id not in self._starting:
@@ -777,6 +812,7 @@ def format_session_poll(session_id: str, poll: _SessionPoll) -> str:
 class ExecSessionTool(Tool):
     """Interact with or wait for a running exec session."""
 
+    activity_from_result = True
     _scopes = {"core", "subagent"}
     config_key = "exec"
 
@@ -850,7 +886,7 @@ class ExecSessionTool(Tool):
                     owner_session_key=current_request_session_key(),
                 )
                 result = format_session_poll(session_id, poll)
-                return ToolResult.error(result) if poll.failed else result
+                return ToolResult(result, is_error=poll.failed, execution=poll.observation)
 
             default_timeout_ms = (
                 DEFAULT_UNTIL_EXIT_MS
@@ -873,9 +909,15 @@ class ExecSessionTool(Tool):
                 ),
             )
         except KeyError:
-            return ToolResult.error(f"Error: exec session not found: {session_id!r}")
+            return ToolResult(
+                f"Error: exec session not found: {session_id!r}", is_error=True,
+                public_error="Error: Command session not found or no longer available.",
+            )
         except Exception as exc:
-            return ToolResult.error(f"Error managing exec session: {exc}")
+            content = f"Error managing exec session: {exc}"
+            return ToolResult(
+                content, is_error=True, public_error=content.replace(session_id, "[command]"),
+            )
 
     async def _wait(
         self,
@@ -929,13 +971,14 @@ class ExecSessionTool(Tool):
                         f"\nWait timed out after {timeout_ms / 1000:g}s; "
                         "session remains active."
                     )
-                return ToolResult.error(result) if poll.failed else result
+                return ToolResult(result, is_error=poll.failed, execution=poll.observation)
 
 
 @tool_parameters(tool_parameters_schema())
 class ListExecSessionsTool(Tool):
     """List active exec sessions."""
 
+    activity_from_result = True
     _scopes = {"core", "subagent"}
     config_key = "exec"
 

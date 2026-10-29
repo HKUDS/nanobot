@@ -11,6 +11,7 @@ from typing import Any, cast
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.file_state import file_read_context
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result, with_tool_error_hint
@@ -138,6 +139,7 @@ async def _execute_tool_call(
             if len(prepared_tuple) == 3:
                 tool, params, prep_error = cast(tuple[Any, Any, str | None], prepared_tuple)
     if prep_error:
+        await hook.on_execute_tool_error(context, tool_call, tool, params, prep_error)
         payload = with_tool_error_hint(prep_error)
         event = {
             "name": tool_call.name,
@@ -194,6 +196,8 @@ async def _execute_tool_call(
             "status": "error",
             "detail": result.replace("\n", " ").strip()[:120],
         }
+        if isinstance(result, ToolResult) and result.execution is not None:
+            return payload, event
         handled = _classify_violation(
             raw_text=result,
             soft_payload=payload,

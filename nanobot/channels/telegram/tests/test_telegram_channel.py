@@ -3566,3 +3566,29 @@ async def test_compaction_notices_are_tracked_per_compaction_id() -> None:
         chat_id=999, message_id=101, text="Context compacted.",
     )
     assert channel._compaction_notices == {("999", "c2"): 202}
+
+
+@pytest.mark.asyncio
+async def test_observed_command_activity_at_telegram_adapter_boundary(tmp_path) -> None:
+    """Real execution/events, actual adapter; only the external Telegram app is fake."""
+    from tests.agent.execution_activity_helpers import observed_command
+
+    progress, _result, _transcript, session_id = await observed_command(tmp_path, exit_code=7)
+    channel = TelegramChannel(TelegramConfig(
+        enabled=True, token="123:synthetic", allow_from=["*"], reply_to_message=True,
+    ), MessageBus())
+    app = _install_ready_app(channel)
+    for event in progress:
+        msg = outbound_message_for_event(
+            channel="telegram", chat_id="123", event=event,
+            metadata={"message_id": 10, "message_thread_id": 42},
+        )
+        await ChannelManager._send_once(channel, channel.prepare_tool_events(msg))
+
+    sent = app.bot.sent_messages
+    assert len(sent) == 4  # command launch, ordinary read, actual exit 7, missing-session error
+    assert "Command failed (exit 7)" in sent[-2]["text"]
+    assert "not found" in sent[-1]["text"]
+    assert all(session_id not in message["text"] for message in sent)
+    assert all(message["message_thread_id"] == 42 for message in sent)
+    assert all(message["reply_parameters"].message_id == 10 for message in sent)

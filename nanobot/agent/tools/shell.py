@@ -11,7 +11,7 @@ import signal
 import subprocess
 import sys
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PureWindowsPath
 from typing import Any, Literal, Protocol, cast
 from urllib.parse import unquote
@@ -93,6 +93,7 @@ _WORKSPACE_BOUNDARY_NOTE = (
 @dataclass(slots=True)
 class _PreparedCommand:
     command: str | list[str]
+    display_command: str
     cwd: str
     env: dict[str, str]
     timeout: int | None
@@ -157,6 +158,7 @@ def _exec_parameters(config: ExecToolConfig) -> dict[str, Any]:
 
 class ExecTool(Tool):
     """Tool to execute shell commands."""
+    activity_from_result = True
     _scopes = {"core", "subagent"}
 
     config_key = "exec"
@@ -338,6 +340,7 @@ class ExecTool(Tool):
         try:
             session_id, poll = await self._session_manager.start(
                 command=prepared.command,
+                display_command=prepared.display_command,
                 cwd=prepared.cwd,
                 env=prepared.env,
                 timeout=prepared.timeout,
@@ -361,7 +364,10 @@ class ExecTool(Tool):
             result = format_session_poll(session_id, poll)
             if not poll.done:
                 result += "\nInitial wait ended; session remains active."
-            return ToolResult.error(result) if poll.failed else result
+            return ToolResult(
+                result, is_error=poll.failed,
+                execution=replace(poll.observation, started=True) if poll.observation else None,
+            )
         except Exception as exc:
             return ToolResult.error(f"Error executing command: {exc}")
 
@@ -385,6 +391,7 @@ class ExecTool(Tool):
         shell: str | None = None,
         login: bool | None = None,
     ) -> _PreparedCommand | str:
+        display_command = shlex.join(command) if isinstance(command, list) else command
         access = current_tool_workspace(
             self.working_dir,
             restrict_to_workspace=self.restrict_to_workspace,
@@ -470,6 +477,7 @@ class ExecTool(Tool):
 
         return _PreparedCommand(
             command=command,
+            display_command=display_command,
             cwd=cwd,
             env=env,
             timeout=effective_timeout,

@@ -1111,7 +1111,7 @@ def test_result_retention_only_cleans_completed_sessions(tmp_path, monkeypatch):
         now = time.monotonic()
         monkeypatch.setattr(
             "nanobot.agent.tools.exec_session.time",
-            SimpleNamespace(monotonic=lambda: now),
+            SimpleNamespace(monotonic=lambda: now, time=time.time),
         )
         manager = ExecSessionManager(result_retention=10)
         tool = ExecTool(working_dir=str(tmp_path), max_runtime=0, session_manager=manager)
