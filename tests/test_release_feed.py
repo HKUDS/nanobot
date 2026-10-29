@@ -31,8 +31,8 @@ def checksum_only_fixtures(monkeypatch):
 def wheel_bytes(version):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as wheel:
-        wheel.writestr(f"nanobot_ai-{version}.dist-info/METADATA",
-                       f"Metadata-Version: 2.1\nName: nanobot-ai\nVersion: {version}\n")
+        metadata = zipfile.ZipInfo(f"nanobot_ai-{version}.dist-info/METADATA", date_time=(2020, 1, 1, 0, 0, 0))
+        wheel.writestr(metadata, f"Metadata-Version: 2.1\nName: nanobot-ai\nVersion: {version}\n")
     return buffer.getvalue()
 
 
