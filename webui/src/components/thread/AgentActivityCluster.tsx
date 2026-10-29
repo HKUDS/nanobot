@@ -813,9 +813,11 @@ function ActivityTraceRow({
     }[execution.state];
     const tone = execution.state === "succeeded" ? "success"
       : execution.state === "failed" || execution.state === "timed_out" ? "error" : "neutral";
+    const label = execution.state === "succeeded" || execution.state === "failed"
+      ? trace.label : t(`message.agentActivity.${labelKey}`);
     const row = <ActivityStep
-      icon={Terminal}
-      label={formatActivityTarget(t, t(`message.agentActivity.${labelKey}`), trace.detail)}
+      icon={trace.icon === "clock" ? Clock3 : Terminal}
+      label={formatActivityTarget(t, label, trace.detail)}
       detail={execution.exit_code !== null ? t("message.agentActivity.commandExitCode", { code: execution.exit_code }) : undefined}
       tone={tone}
     />;

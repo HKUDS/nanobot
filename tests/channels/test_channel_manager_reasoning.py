@@ -288,3 +288,35 @@ async def _dispatch_through_final(manager: ChannelManager) -> OutboundMessage:
     assert not manager._outbound_tasks
     assert not manager._outbound_tails
     return final
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("send_tool_hints", [False, True])
+@pytest.mark.parametrize("send_progress", [False, True])
+async def test_command_observations_respect_existing_delivery_switches(
+    manager, tmp_path, send_tool_hints, send_progress,
+):
+    from tests.agent.execution_activity_helpers import observed_command
+
+    progress, _result, _transcript, session_id = await observed_command(tmp_path, exit_code=7)
+    channel = manager.channels["mock"]
+    channel.send_tool_hints = send_tool_hints
+    channel.send_progress = send_progress
+    for event in [ProgressEvent(content="ordinary progress"), *progress]:
+        await manager.bus.publish_outbound(outbound_message_for_event(
+            channel="mock", chat_id="c1", event=event,
+        ))
+    await _dispatch_through_final(manager)
+    delivered = [entry[1] for entry in channel.received if entry[0] == "send"]
+    tool_events = [tool for msg in delivered if isinstance(msg.event, ProgressEvent)
+                   for tool in msg.event.tool_events or []]
+    commands = [tool for tool in tool_events if "execution" in tool]
+    assert len(commands) == (6 if send_tool_hints else 0)
+    if send_tool_hints:
+        assert commands[-1]["execution"]["state"] == "failed"
+        assert commands[-1]["execution"]["exit_code"] == 7
+    visible = [msg.content for msg in delivered if msg.content and isinstance(msg.event, ProgressEvent)]
+    assert ("ordinary progress" in visible) is send_progress
+    assert len([text for text in visible if "Command failed (exit 7)" in text]) == int(send_tool_hints)
+    assert len([text for text in visible if "not found" in text]) == int(send_tool_hints)
+    assert all(session_id not in text for text in visible)

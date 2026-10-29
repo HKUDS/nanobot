@@ -25,7 +25,8 @@ def with_tool_error_hint(payload: str) -> str:
     if isinstance(payload, ToolResult):
         return ToolResult(
             content, is_error=payload.is_error,
-            execution=payload.execution, public_error=payload.public_error,
+            execution=payload.execution,
+            public_error=payload.public_error if payload.public_error is not None else str(payload),
         )
     return content
 

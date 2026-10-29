@@ -90,6 +90,15 @@ describe("public execution observations", () => {
     detailView.unmount();
   });
 
+  it("preserves the existing current-time presentation for an observed successful command", async () => {
+    await setAppLanguage("en");
+    const thread = new ThreadTranscript();
+    thread.project(wire({ ...observation("succeeded", 1), arguments: { command: "date +%Y" } }, 1),
+      { createId: () => "time", now: 10 });
+    show(thread);
+    expect(screen.getByText("Checked current time")).toBeTruthy();
+  });
+
   it("retains legacy history and rejects malformed observation metadata at the wire edge", () => {
     const legacy: ToolProgressEvent = { phase: "end", call_id: "legacy", name: "exec", arguments: { command } };
     expect(normalizeToolProgressEvents([legacy])).toEqual([legacy]);

@@ -169,3 +169,34 @@ async def test_completed_agent_turn_does_not_complete_a_still_running_command(tm
     finally:
         await manager.close_all()
         assert not manager.has_pending_work
+
+
+async def test_invalid_control_parameters_keep_a_public_diagnostic_not_model_guidance():
+    tools = ToolRegistry()
+    tools.register(ExecSessionTool(manager=ExecSessionManager()))
+    provider = MagicMock()
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="", tool_calls=[ToolCallRequest(id="invalid", name="exec_session", arguments={
+            "session_id": "private-control-id", "wait_for": "",
+        })]),
+        LLMResponse(content="Invalid observation parameters."),
+    ])
+    public = []
+
+    async def publish(event):
+        if isinstance(event, ProgressEvent):
+            public.extend(event.tool_events or [])
+
+    result = await AgentRunner().run(make_run_spec(
+        provider, initial_messages=[], tools=tools, model="test", max_iterations=2,
+        max_tool_result_chars=50_000, hook=AgentProgressHook(EventSink(publish=publish)),
+    ))
+    [error] = public
+    assert error["phase"] == "error"
+    assert error["arguments"] == {}
+    diagnostic = "Error: Invalid parameters for tool 'exec_session': wait_for must be at least 1 chars"
+    assert error["error"] == diagnostic
+    assert format_tool_event_hints(public) == diagnostic
+    model_observation = next(row["content"] for row in result.messages if row["role"] == "tool")
+    assert model_observation.startswith(diagnostic)
+    assert "[Consider this result in the context of the user's goal" in model_observation
