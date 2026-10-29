@@ -560,7 +560,7 @@ def test_onboard_rejects_legacy_proxy_without_printing_credentials(tmp_path, sou
 
     result = subprocess.run(
         [sys.executable, "-m", "nanobot", "onboard", "--refresh", "--config", str(config_path)],
-        env=env, text=True, capture_output=True, timeout=30,
+        env=env, text=True, encoding="utf-8", capture_output=True, timeout=30,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
 
@@ -602,7 +602,7 @@ def test_plugins_list_reports_legacy_proxy_without_credentials(tmp_path):
 
     result = subprocess.run(
         [sys.executable, "-m", "nanobot", "plugins", "list", "--config", str(config_path)],
-        env=env, text=True, capture_output=True, timeout=30,
+        env=env, text=True, encoding="utf-8", capture_output=True, timeout=30,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
 
@@ -633,7 +633,7 @@ def test_cli_unhandled_traceback_does_not_show_locals(tmp_path):
     )
     result = subprocess.run(
         [sys.executable, "-c", code, str(config_path)],
-        env=env, text=True, capture_output=True, timeout=30,
+        env=env, text=True, encoding="utf-8", capture_output=True, timeout=30,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
 

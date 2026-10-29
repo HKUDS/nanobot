@@ -214,7 +214,7 @@ def test_unfinished_display_history_blocks_classic_and_sdk_before_reset(tmp_path
     result = subprocess.run(
         [sys.executable, "-m", "nanobot", "agent", "--config", str(config),
          "--session", "websocket:migrated", "--message", "/new"],
-        env=env, text=True, capture_output=True, timeout=30,
+        env=env, text=True, encoding="utf-8", capture_output=True, timeout=30,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode != 0
@@ -383,3 +383,27 @@ def test_global_import_marker_does_not_hide_foreign_pending_history(tmp_path):
         assert db.execute("SELECT count(*) FROM sessions WHERE key='websocket:migrated'").fetchone()[0] == 0
         assert db.execute("SELECT value FROM storage_meta WHERE key='webui_history_import_v1'").fetchone()[0] == "complete"
     assert unconverted.read_bytes() == original
+
+
+
+def test_completed_040_workspace_can_open_same_key_as_foreign_backup(tmp_path):
+    root = tmp_path / "sessions"
+    foreign, local = tmp_path / "foreign", tmp_path / "local"
+    _restore_040_database(foreign, root, display_imported=True)
+    local_db = _restore_040_database(local, root, display_imported=False)
+    with closing(sqlite3.connect(local_db)) as db:
+        db.execute("INSERT INTO storage_meta VALUES ('webui_history_import_v1', 'complete')")
+        db.commit()
+    legacy = tmp_path / "webui" / "websocket_migrated.jsonl"
+    legacy.parent.mkdir()
+    original = b'{"event":"message","chat_id":"migrated","text":"foreign display"}\n'
+    legacy.write_bytes(original)
+
+    manager = SessionManager(local, sessions_root=root)
+    assert manager.read_session_file("websocket:migrated")["messages"][0]["content"] == "first question"
+    assert manager.project_history("websocket:migrated", lambda history: history.all_facts()) == []
+    assert SessionManager(local, sessions_root=root).read_session_file("websocket:migrated") is not None
+    assert legacy.read_bytes() == original
+    legacy.write_bytes(original + b"\n")
+    with pytest.raises(RuntimeError, match=r"0\.4\.0.*"):
+        SessionManager(local, sessions_root=root)

@@ -122,7 +122,11 @@ def check_history_upgrade(store: SqliteSessionStore, directory: Path) -> None:
         previous = cast(dict[str, object], raw_previous)
         local_stems = {SessionLocation.safe_key(str(row[0])) for row in db.execute("SELECT key FROM sessions")}
         for stem, paths in sources.items():
-            if previous.get(stem) != evidence[stem] and stem in local_stems:
+            # A completed 0.4.0 import could skip this foreign source before a
+            # same-key local chat was created. A first admission may trust that
+            # marker, but later changes must not inherit the prior decision.
+            if ((imported is None or checked is not None)
+                    and previous.get(stem) != evidence[stem] and stem in local_stems):
                 _require_040(paths[0])
         # Remember content digests and foreign receipts, not history records.
         # Unchanged foreign backups stay valid even after a new local chat uses the same key.
