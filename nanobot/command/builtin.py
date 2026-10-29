@@ -14,8 +14,9 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from loguru import logger
 
 from nanobot import __version__
-from nanobot.bus.events import INBOUND_META_USER_SHELL, InboundMessage, OutboundMessage
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter, normalize_command_text
+from nanobot.command.user_shell import cmd_user_shell
 from nanobot.providers.base import LLMUsage
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.utils.cancellation import shield_and_drain
@@ -1029,30 +1030,6 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
         content=build_help_text(),
         metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
     )
-
-
-async def cmd_user_shell(ctx: CommandContext) -> OutboundMessage:
-    """Run a trusted local ``!command`` through nanobot's exec policy."""
-    metadata = dict(ctx.msg.metadata or {})
-    if (
-        ctx.msg.channel != "websocket"
-        or metadata.get("webui") is not True
-        or metadata.get(INBOUND_META_USER_SHELL) is not True
-    ):
-        return OutboundMessage(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
-            content="Shell commands are only available from a trusted local client.",
-            metadata={**metadata, "render_as": "text"},
-        )
-    if not ctx.args.strip():
-        return OutboundMessage(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
-            content="Type a command after `!`, for example `!pwd`.",
-            metadata={**metadata, "render_as": "text"},
-        )
-    return await ctx.loop.execute_user_shell_command(ctx)
 
 
 def build_help_text() -> str:
