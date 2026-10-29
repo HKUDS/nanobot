@@ -159,14 +159,14 @@ def test_scheduling_contract_reaches_fresh_and_legacy_workspaces(tmp_path, legac
     messages = builder.build_messages(history=[], current_message="每天早上8点提醒我喝水")
     system = messages[0]["content"]
 
-    assert '"Every day at 8am, remind me to drink water" is a cron task, not a heartbeat task.' in system
-    assert "Heartbeat does not guarantee a requested time or interval." in system
-    assert "background checks with flexible timing" in system
+    assert "Use `cron` for all scheduled work" in system
+    assert "periodic background checks" in system
+    assert "Writing or changing `HEARTBEAT.md`" in system
     assert system.count("## Scheduling") == 1
     if legacy_workspace:
         assert "Reply in Chinese." in system
         assert system.index(legacy_rule) < system.index("## Scheduling")
-        assert "even if workspace guidance describes recurring tasks as heartbeat tasks" in system
+        assert "even if old workspace guidance says otherwise" in system
     else:
         assert "## AGENTS.md" not in system
     assert "每天早上8点提醒我喝水" in messages[-1]["content"]

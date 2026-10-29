@@ -547,10 +547,9 @@ _TELEGRAM_COMMAND_ALIASES = {
     "/dream_log": "/dream-log",
     "/dream_restore": "/dream-restore",
     "/dream_prompt": "/dream-prompt",
-    "/evaluator_prompt": "/evaluator-prompt",
 }
 _TELEGRAM_DISPLAY_COMMAND_RE = re.compile(
-    r"(?<![\w/.-])/(?:dream-log|dream-restore|dream-prompt|evaluator-prompt)(?![\w/.-])"
+    r"(?<![\w/.-])/(?:dream-log|dream-restore|dream-prompt)(?![\w/.-])"
 )
 
 
@@ -570,7 +569,7 @@ def _telegram_command_text(text: str) -> str:
             line = _TELEGRAM_DISPLAY_COMMAND_RE.sub(lambda match: display_names[match[0]], line)
             # Inline code is not tappable as a Telegram command.
             line = re.sub(
-                r"`(/(?:dream_log|dream_restore|dream_prompt|evaluator_prompt)(?: [^`\n]*)?)`",
+                r"`(/(?:dream_log|dream_restore|dream_prompt)(?: [^`\n]*)?)`",
                 r"\1",
                 line,
             )
@@ -608,7 +607,6 @@ class TelegramChannel(BaseChannel):
         BotCommand("dream_log", "Show the latest Dream memory change"),
         BotCommand("dream_restore", "Restore Dream memory to an earlier version"),
         BotCommand("dream_prompt", "Tell Dream how to organize memory"),
-        BotCommand("evaluator_prompt", "Customize the heartbeat evaluator prompt"),
         BotCommand("help", "Show available commands"),
     ]
 
@@ -617,7 +615,7 @@ class TelegramChannel(BaseChannel):
     # Canonical hyphenated commands stay on a separate handler (below).
     TELEGRAM_BUS_SLASH_COMMAND_RE = re.compile(
         r"^/(?:new|compact|stop|restart|status|dream|history|goal|trigger|pairing|model|skill"
-        r"|dream_log|dream_restore|dream_prompt|evaluator_prompt|evaluator-prompt)(?:@\w+)?(?:\s+[\s\S]*)?$"
+        r"|dream_log|dream_restore|dream_prompt)(?:@\w+)?(?:\s+[\s\S]*)?$"
     )
 
     @classmethod

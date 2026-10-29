@@ -151,10 +151,6 @@ def system_settings_payload(
             "workspace_path": str(config.workspace_path),
             "gateway_host": config.gateway.host,
             "gateway_port": config.gateway.port,
-            "heartbeat": {
-                "enabled": config.gateway.heartbeat.enabled,
-                "interval_s": config.gateway.heartbeat.interval_s,
-            },
             "dream": {
                 "schedule": defaults.dream.describe_schedule(),
             },

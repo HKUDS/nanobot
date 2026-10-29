@@ -201,3 +201,4 @@ class CronStore:
     """Persistent store for cron jobs."""
     version: int = 1
     jobs: list[CronJob] = field(default_factory=list)
+    completed_imports: list[str] = field(default_factory=list)

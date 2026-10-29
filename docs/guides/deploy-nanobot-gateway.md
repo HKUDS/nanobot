@@ -1,6 +1,6 @@
 # How to Deploy a Long-Running nanobot AI Agent Gateway
 
-The nanobot gateway is the long-running self-hosted AI agent process that keeps WebUI sessions, chat apps, automations, local triggers, heartbeat jobs, Dream, and WebSocket delivery online.
+The nanobot gateway is the long-running self-hosted AI agent process that keeps WebUI sessions, chat apps, automations, local triggers, Dream, and WebSocket delivery online.
 
 ## What you will build
 

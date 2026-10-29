@@ -2,7 +2,7 @@
 
 import asyncio
 import signal
-from collections.abc import Awaitable, Callable, Coroutine, Iterable
+from collections.abc import Awaitable, Callable, Coroutine
 from contextlib import ExitStack, nullcontext, suppress
 from dataclasses import asdict, replace
 from functools import partial
@@ -46,19 +46,12 @@ from nanobot.config.schema import Config
 from nanobot.gateway.runtime import GatewayHealthIdentity, GatewayInstance, GatewayRuntime
 from nanobot.installation_lock import installation_access
 from nanobot.security.network import is_loopback_host
-from nanobot.session.keys import (
-    HEARTBEAT_SESSION_KEY,
-    UNIFIED_SESSION_KEY,
-    last_channel_from_metadata,
-    session_key_for_channel,
-)
+from nanobot.session.keys import session_key_for_channel
 from nanobot.session.manager import SessionManager
-from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt
 from nanobot.utils.helpers import sync_workspace_templates
 from nanobot.utils.token_encoding import warmup_token_encoding
 from nanobot.webui.build import BuildMode
 from nanobot.webui.dev import WebUIDevError, WebUIDevServer
-from nanobot.webui.sidebar_state import read_webui_sidebar_state
 
 if TYPE_CHECKING:
     from nanobot.update_profiles import ProfileReceipt
@@ -240,70 +233,6 @@ def _commit_dream_changes(memory: Any) -> str | None:
         diff_body,
     )
     return memory.git.auto_commit(message)
-
-
-_HEARTBEAT_PREAMBLE = (
-    "[Your response will be delivered directly to the user's messaging app. "
-    "Output ONLY the final user-facing message. Never reference internal "
-    "files (HEARTBEAT.md, AWARENESS.md, etc.), your instructions, or your "
-    "decision process. If nothing needs reporting, respond with just "
-    "'All clear.' and nothing else.]\n\n"
-)
-
-
-def _heartbeat_has_active_tasks(content: str) -> bool:
-    """True if HEARTBEAT.md has task lines, ignoring headers, blanks and comments."""
-    in_comment = False
-    in_active_section: bool = False
-    for line in content.splitlines():
-        stripped = line.strip()
-        if in_comment:
-            if "-->" in stripped:
-                in_comment = False
-            continue
-        if not stripped or stripped.startswith("#"):
-            if stripped.startswith("##") and not stripped.startswith("###"):
-                heading = stripped.lstrip("#").strip().lower()
-                in_active_section = heading.startswith("active tasks")
-            continue
-        if stripped.startswith("<!--"):
-            if "-->" not in stripped[4:]:
-                in_comment = True
-            continue
-        if in_active_section is False:
-            continue
-        return True
-    return False
-
-
-def _pick_heartbeat_target_from_sessions(
-    *,
-    enabled_channels: Iterable[str],
-    sessions: Iterable[dict[str, Any]],
-    archived_keys: Iterable[str],
-    unified_session_metadata: dict[str, Any] | None = None,
-) -> tuple[str, str]:
-    enabled = set(enabled_channels)
-    archived = set(archived_keys)
-    for item in sessions:
-        key = item.get("key") or ""
-        if key in archived:
-            continue
-        if key == UNIFIED_SESSION_KEY:
-            route = last_channel_from_metadata(unified_session_metadata)
-            if route is not None:
-                channel, chat_id = route
-                if channel not in {"cli", "system"} and channel in enabled:
-                    return channel, chat_id
-            continue
-        if ":" not in key:
-            continue
-        channel, chat_id = key.split(":", 1)
-        if channel in {"cli", "system"}:
-            continue
-        if channel in enabled and chat_id:
-            return channel, chat_id
-    return "cli", "direct"
 
 
 _GATEWAY_HEALTH_MAX_CONNECTIONS = 64
@@ -497,7 +426,6 @@ def _run_claimed_gateway(
     from nanobot.cron.session_turns import is_bound_cron_job
     from nanobot.cron.types import CronJob, CronRunResult
     from nanobot.llm_usage import record_llm_call
-    from nanobot.llm_usage.context import llm_usage_source
     from nanobot.providers.factory import (
         ProviderSnapshot,
         build_provider_snapshot,
@@ -634,13 +562,6 @@ def _run_claimed_gateway(
         schedule_background=_schedule_webui_background,
         recovery=recovery,
     )
-    def _channel_session_key(channel: str, chat_id: str) -> str:
-        return session_key_for_channel(
-            channel,
-            chat_id,
-            unified_session=config.agents.defaults.unified_session,
-        )
-
     deliver_to_channel = partial(
         _deliver_to_channel,
         bus=bus,
@@ -659,7 +580,7 @@ def _run_claimed_gateway(
             pass
 
         # Dream is an internal job — run directly, not through the agent loop.
-        if job.name == "dream":
+        if job.id == "dream" and job.payload.kind == "system_event":
             from nanobot.agent.memory import MemoryStore
 
             dream_session_key = MemoryStore.dream_session_key
@@ -718,80 +639,6 @@ def _run_claimed_gateway(
                 await agent.sessions.state.prune_dream_sessions()
             return None
 
-        # Heartbeat is a system job that checks HEARTBEAT.md for active tasks.
-        if job.name == "heartbeat":
-            heartbeat_file = config.workspace_path / "HEARTBEAT.md"
-            try:
-                content = heartbeat_file.read_text(encoding="utf-8")
-            except OSError:
-                logger.debug("Heartbeat: HEARTBEAT.md missing")
-                return None
-            if not _heartbeat_has_active_tasks(content):
-                logger.debug("Heartbeat: HEARTBEAT.md has no active tasks")
-                return None
-
-            channel, chat_id = await _pick_heartbeat_target()
-            if channel == "cli":
-                return None
-            delivery_key = _channel_session_key(channel, chat_id)
-            delivery_session = await session_manager.state.read(delivery_key)
-            if delivery_session is None:
-                return None
-            delivery_generation = delivery_session.generation
-
-            prompt = (
-                _HEARTBEAT_PREAMBLE
-                + f"You are executing periodic heartbeat tasks. Read the active tasks below, perform each one, and report what you did:\n\n{content}"
-            )
-
-            # Internal check: funnel all output through the post-run gate so the
-            # turn can't deliver directly via the message tool and skip it.
-            suppress_token = None
-            if isinstance(message_tool, MessageTool):
-                suppress_token = message_tool.set_suppress_delivery(True)
-            try:
-                await mcp_provider.connect()
-                resp = await agent.process_direct(
-                    prompt,
-                    session_key=HEARTBEAT_SESSION_KEY,
-                    channel=channel,
-                    chat_id=chat_id,
-                    on_progress=_silent,
-                )
-            finally:
-                if isinstance(message_tool, MessageTool) and suppress_token is not None:
-                    message_tool.reset_suppress_delivery(suppress_token)
-
-            if not resp or not resp.content:
-                return
-
-            response = resp.content
-
-            evaluator_prompt = resolve_evaluator_prompt(config.workspace_path)
-
-            # Fail closed: stay silent on evaluator failure instead of notifying.
-            with llm_usage_source("cron"):
-                should_notify = await evaluate_response(
-                    response=response,
-                    task_context=prompt,
-                    provider=agent.provider,
-                    model=agent.model,
-                    evaluator_prompt=evaluator_prompt,
-                    default_notify=False,
-                )
-
-            if should_notify:
-                logger.info("Heartbeat: completed, delivering response")
-                await deliver_to_channel(
-                    OutboundMessage(channel=channel, chat_id=chat_id, content=response),
-                    record=True,
-                    session_key=delivery_key,
-                    session_generation=delivery_generation,
-                )
-            else:
-                logger.info("Heartbeat: silenced by post-run evaluation")
-            return response
-
         if is_bound_cron_job(job):
             return await run_bound_cron_job(job, agent=agent, cron=cron)
 
@@ -849,31 +696,10 @@ def _run_claimed_gateway(
         config_path=Path(config_path),
     )
 
-    async def _pick_heartbeat_target() -> tuple[str, str]:
-        """Pick a routable channel/chat target for heartbeat-triggered messages."""
-        sidebar_state = await asyncio.to_thread(read_webui_sidebar_state)
-        unified_metadata = None
-        if config.agents.defaults.unified_session:
-            record = await session_manager.state.read_metadata(UNIFIED_SESSION_KEY)
-            if isinstance(record, dict) and isinstance(record.get("metadata"), dict):
-                unified_metadata = record["metadata"]
-        return _pick_heartbeat_target_from_sessions(
-            enabled_channels=channels.enabled_channels,
-            sessions=await session_manager.state.list_sessions(),
-            archived_keys=sidebar_state.get("archived_keys", []),
-            unified_session_metadata=unified_metadata,
-        )
-
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
     else:
         console.print("[yellow]Warning: No channels enabled[/yellow]")
-
-    hb_cfg = config.gateway.heartbeat
-    if hb_cfg.enabled:
-        console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
-    else:
-        console.print("[yellow]✗[/yellow] Heartbeat: disabled")
 
     async def _health_server(host: str, health_port: int) -> None:
         """Lightweight HTTP health endpoint on the gateway port."""
@@ -934,7 +760,7 @@ def _run_claimed_gateway(
         async with server:
             await server.serve_forever()
     # Register Dream system job (idempotent on restart)
-    from nanobot.cron.types import CronJob, CronPayload, CronSchedule
+    from nanobot.cron.types import CronJob, CronPayload
     dream_cfg = config.agents.defaults.dream
     if dream_cfg.enabled:
         cron.register_system_job(CronJob(
@@ -950,25 +776,7 @@ def _run_claimed_gateway(
         _advance_dream_cursor_if_behind(agent.context.memory)
         cron.remove_system_job("dream")
 
-    # Register Heartbeat system job (idempotent on restart)
-    if hb_cfg.enabled:
-        cron.register_system_job(CronJob(
-            id="heartbeat",
-            name="heartbeat",
-            schedule=CronSchedule(
-                kind="every",
-                every_ms=hb_cfg.interval_s * 1000,
-                tz=config.agents.defaults.timezone,
-            ),
-            payload=CronPayload(kind="system_event"),
-        ))
-    else:
-        cron.remove_system_job("heartbeat")
-
-    cron_status = cron.status()
-    cron_job_count = cast(int, cron_status["jobs"])
-    if cron_job_count > 0:
-        console.print(f"[green]✓[/green] Cron: {cron_job_count} scheduled jobs")
+    from nanobot.cli.legacy_heartbeat import import_heartbeat_task
 
     async def _open_browser_when_ready() -> None:
         """Wait for the gateway to bind, then point the user's browser at the webui."""
@@ -1039,6 +847,10 @@ def _run_claimed_gateway(
                 # Recovery may reconstruct queued work, but no consumer or
                 # external listener has started. Keep that work parked too.
                 startup_gate.enter_context(bus.admission.pause_before_start())
+            await import_heartbeat_task(config, Path(config_path), cron, session_manager)
+            cron_job_count = cast(int, cron.status()["jobs"])
+            if cron_job_count > 0:
+                console.print(f"[green]✓[/green] Cron: {cron_job_count} scheduled jobs")
             await cron.start()
             async def _run_agent() -> None:
                 try:

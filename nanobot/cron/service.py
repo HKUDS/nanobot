@@ -10,7 +10,7 @@ from dataclasses import asdict, replace
 from datetime import datetime
 from pathlib import Path
 from types import EllipsisType
-from typing import Any, Callable, Coroutine, Literal
+from typing import Any, Callable, Coroutine, Literal, cast
 
 from filelock import FileLock
 from loguru import logger
@@ -259,12 +259,11 @@ class CronService:
             changed = self._enforce_agent_binding(job) or changed
         return changed
 
-    def _load_jobs(self) -> tuple[list[CronJob], int] | None:
+    def _load_jobs(self) -> CronStore | None:
         """Load jobs from disk.
 
         Returns:
-            ``(jobs, version)`` tuple on success or when no store file exists
-            (in which case an empty list and version 1 are returned).
+            A detached store on success, or an empty store when no file exists.
             ``None`` when the store file exists but cannot be parsed; the
             corrupt file is preserved with a ``.corrupt-<ts>`` suffix so the
             caller can decide whether to overwrite or bail out.  Returning a
@@ -274,11 +273,19 @@ class CronService:
         """
         jobs: list[CronJob] = []
         version = 1
+        completed_imports: list[str] = []
         if self.store_path.exists():
             try:
                 data = json.loads(self.store_path.read_text(encoding="utf-8"))
                 jobs = []
                 version = data.get("version", 1)
+                raw_imports: object = data.get("completedImports", [])
+                if not isinstance(raw_imports, list):
+                    raise ValueError("invalid completed cron imports")
+                for key in cast(list[object], raw_imports):
+                    if not isinstance(key, str):
+                        raise ValueError("invalid completed cron import key")
+                    completed_imports.append(key)
                 for j in data.get("jobs", []):
                     job = CronJob.from_store_dict(j)
                     _normalize_agent_turn_job(job)
@@ -299,7 +306,7 @@ class CronService:
                     backup,
                 )
                 return None
-        return jobs, version
+        return CronStore(version=version, jobs=jobs, completed_imports=completed_imports)
 
     def _merge_action(self) -> None:
         if not self._action_path.exists():
@@ -372,8 +379,7 @@ class CronService:
             if self._store is not None:
                 return self._store
             return None
-        jobs, version = loaded
-        self._store = CronStore(version=version, jobs=jobs)
+        self._store = loaded
         self._merge_action()
         if self._enforce_store_agent_bindings() and self._should_persist_store():
             self._save_store()
@@ -416,6 +422,7 @@ class CronService:
 
         data = {
             "version": store.version,
+            "completedImports": store.completed_imports,
             "jobs": [
                 {
                     "id": j.id,
@@ -725,12 +732,59 @@ class CronService:
                 # Directory fsync can fail after replace. Reconcile that exact
                 # commit instead of claiming that the old binding survived.
                 loaded = self._load_jobs()
-                if loaded is None or loaded[0] != candidate.jobs:
+                if loaded != candidate:
                     raise
                 logger.warning("Cron: binding saved, but directory sync failed for {}", job_id)
             self._store = candidate
             self._arm_timer()
             return moved
+
+    def has_completed_import(self, key: str) -> bool:
+        """Return whether a one-time import has committed, even if its job was deleted."""
+        with self._lock:
+            return key in self._require_store().completed_imports
+
+    def import_job_once(
+        self, key: str, job: CronJob | None, *, replace_system_job_id: str,
+    ) -> bool:
+        """Commit a startup import and retire its old system job in one snapshot.
+
+        The receipt belongs to the store, not the imported job: ordinary edit,
+        disable and delete operations must remain authoritative after restart.
+        """
+        if self._running or self._active_executions or self._store_dirty:
+            raise RuntimeError("cron imports must finish before the scheduler starts")
+        with self._lock:
+            store = self._require_store()
+            if key in store.completed_imports:
+                return False
+            candidate = deepcopy(store)
+            candidate.jobs = [
+                current for current in candidate.jobs
+                if not (current.id == replace_system_job_id and current.payload.kind == "system_event")
+            ]
+            if job is not None:
+                if any(current.id == job.id for current in candidate.jobs):
+                    raise ValueError(f"cron import would overwrite job {job.id}")
+                if not is_bound_cron_job(job):
+                    raise ValueError("imported cron job must have a bound session")
+                _validate_schedule_for_add(job.schedule)
+                imported = deepcopy(job)
+                imported.state.next_run_at_ms = (
+                    _compute_next_run(imported.schedule, _now_ms()) if imported.enabled else None
+                )
+                candidate.jobs.append(imported)
+            candidate.completed_imports.append(key)
+            try:
+                self._write_store(candidate)
+            except OSError:
+                # A directory fsync can fail after replacement. Never replay an
+                # import that is already on disk, but surface the durability error.
+                self._store = self._load_jobs() or store
+                raise
+            self._store = candidate
+            self._action_path.write_text("", encoding="utf-8")
+            return True
 
     def list_jobs(self, include_disabled: bool = False) -> list[CronJob]:
         """List all jobs."""

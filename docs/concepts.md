@@ -26,7 +26,7 @@ The default instance lives under `~/.nanobot/`:
 | Path | Meaning |
 |---|---|
 | `~/.nanobot/config.json` | Instance configuration: providers, model defaults, channels, tools, gateway, API, and runtime options |
-| `~/.nanobot/workspace/` | Agent workspace: memory, heartbeat tasks, cron jobs, skills, and generated artifacts |
+| `~/.nanobot/workspace/` | Agent workspace: memory, cron jobs, skills, and generated artifacts |
 | `~/.nanobot/sessions/<workspace-id>/` | Session history stored outside the agent-accessible workspace; the opaque ID follows workspace moves |
 
 You can override both with command flags:
@@ -75,7 +75,7 @@ That flow is the same whether the message starts in the CLI, WebUI, Telegram, Di
 |---|---|---|
 | CLI one-shot | `nanobot agent -m "..."` | First-run checks, scripts, and quick local questions |
 | CLI interactive | `nanobot agent` | Terminal chat with persistent session history |
-| Gateway | `nanobot gateway` | Chat apps, WebUI, heartbeat, Dream, and long-running service mode |
+| Gateway | `nanobot gateway` | Chat apps, WebUI, scheduled tasks, Dream, and long-running service mode |
 | OpenAI-compatible API | `nanobot serve` | Programmatic access through `/v1/chat/completions` |
 | WebUI | `nanobot webui` | Prepare the local WebUI, start the gateway, and open the browser workbench |
 
@@ -159,7 +159,7 @@ nanobot can use built-in tools and tools enabled through Apps. Common tool group
 - shell execution with configurable sandboxing;
 - web search and web fetch with SSRF checks;
 - MCP servers;
-- cron reminders, local triggers, and heartbeat tasks;
+- cron reminders, periodic checks, and local triggers;
 - image generation;
 - subagents and runtime self-inspection.
 
@@ -181,14 +181,9 @@ See [Delegated work in the WebUI](./webui.md#delegated-work) for progress and ta
 
 ## Background Jobs
 
-When `nanobot gateway` starts, it runs workspace-scoped automations and registers system jobs:
+When `nanobot gateway` starts, it runs workspace-scoped automations and registers the protected `dream` system job when `agents.defaults.dream.enabled` is true.
 
-- `dream`, when `agents.defaults.dream.enabled` is true;
-- `heartbeat`, when `gateway.heartbeat.enabled` is true.
-
-Heartbeat reads `<workspace>/HEARTBEAT.md`. If the file has tasks under `## Active Tasks`, nanobot executes them and sends only useful/actionable results to the most recently active chat target. Routine "nothing changed" results are suppressed.
-
-User-created reminders use the same cron service but are not the same as the protected heartbeat system job. They run as scheduled turns in their origin chat/session and normally deliver the result back to that channel.
+Reminders and periodic checks are ordinary scheduled turns in a linked chat/session. Their results normally return to that chat. Existing Heartbeat instructions are [imported once as an ordinary task](./automations.md#existing-heartbeat-instructions); there is no separate Heartbeat execution or notification rule.
 
 Local triggers are also session-bound, but they do not have their own schedule. Create one from the target chat with `/trigger <name>`, then call `nanobot trigger <id> "<message>"` when a local script or external service wants nanobot to respond in that session. Webhook servers, third-party auth, and event-to-message formatting stay outside nanobot. Trigger deliveries are stored in the workspace until the linked agent turn finishes successfully. If the target session is busy, the trigger waits until that session is idle instead of being injected into the active turn. The message is recorded as an automation turn in that session. Delivery is at-least-once, so external systems should tolerate repeated trigger messages; a delivery that reaches the agent but fails is marked failed rather than retried forever.
 

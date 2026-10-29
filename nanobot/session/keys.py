@@ -6,7 +6,7 @@ from collections.abc import Mapping, MutableMapping
 from typing import Any
 
 UNIFIED_SESSION_KEY = "unified:default"
-HEARTBEAT_SESSION_KEY = "heartbeat"
+HEARTBEAT_SESSION_KEY = "heartbeat"  # Historical maintenance transcripts remain internal.
 LAST_CHANNEL_METADATA_KEY = "last_channel"
 
 

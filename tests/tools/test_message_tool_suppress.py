@@ -95,34 +95,6 @@ class TestMessageToolSuppressLogic:
         assert "Hello" in result.content
 
     @pytest.mark.asyncio
-    async def test_internal_message_check_keeps_final_response(self, tmp_path: Path) -> None:
-        loop = _make_loop(tmp_path)
-        tool_call = ToolCallRequest(
-            id="call1", name="message",
-            arguments={"content": "all clear", "channel": "feishu", "chat_id": "chat123"},
-        )
-        calls = iter([
-            LLMResponse(content="", tool_calls=[tool_call]),
-            LLMResponse(content="Heartbeat summary", tool_calls=[]),
-        ])
-        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
-        loop.tools.get_definitions = MagicMock(return_value=[])
-
-        mt = loop.tools.get("message")
-        assert isinstance(mt, MessageTool)
-        token = mt.set_suppress_delivery(True)
-        try:
-            msg = InboundMessage(
-                channel="feishu", sender_id="user1", chat_id="chat123", content="Check",
-            )
-            result = await loop._process_message(msg)
-        finally:
-            mt.reset_suppress_delivery(token)
-
-        assert result is not None
-        assert result.content == "Heartbeat summary"
-
-    @pytest.mark.asyncio
     async def test_injected_followup_with_message_tool_does_not_emit_empty_fallback(
         self, tmp_path: Path
     ) -> None:

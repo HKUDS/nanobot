@@ -851,10 +851,6 @@ export interface SettingsPayload {
     workspace_path: string;
     gateway_host: string;
     gateway_port: number;
-    heartbeat: {
-      enabled: boolean;
-      interval_s: number;
-    };
     dream: {
       schedule: string;
     };

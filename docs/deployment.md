@@ -1,6 +1,6 @@
 # Deployment
 
-Use this page to keep an already working agent online, or start with the [Docker setup](#docker-compose) on a new headless host. A normal WebUI reply is sufficient to confirm an existing model setup; a CLI check is useful for terminal and container deployments. Deployment keeps long-running surfaces online: WebUI, chat apps, heartbeat, Dream, cron jobs, and channel connections.
+Use this page to keep an already working agent online, or start with the [Docker setup](#docker-compose) on a new headless host. A normal WebUI reply is sufficient to confirm an existing model setup; a CLI check is useful for terminal and container deployments. Deployment keeps long-running surfaces online: WebUI, chat apps, Dream, cron jobs, and channel connections.
 
 ## Before You Deploy
 

@@ -111,38 +111,10 @@ nanobot trigger --workspace ./bot-a/workspace trg_8K4P2Q9X "Nightly report"
 
 Manage triggers from the WebUI Automations view. You can search, pause/resume, rename, delete, and copy the trigger command there. A session may have multiple triggers, just like it may have multiple scheduled automations.
 
-See [Automations](./automations.md) for how local triggers fit with scheduled automations, heartbeat, and gateway delivery.
+See [Automations](./automations.md) for how local triggers fit with scheduled automations and gateway delivery.
 
 ## Periodic Tasks
 
-Periodic background checks are driven by `HEARTBEAT.md` in your workspace (`~/.nanobot/workspace/HEARTBEAT.md`). When `nanobot gateway` starts, it registers a protected heartbeat cron job by default. Every 30 minutes, that job checks the file; if it finds tasks under `## Active Tasks`, the agent executes them and delivers only results that pass the notification gate to your most recently active chat channel. If there are no active tasks, or the result is routine with nothing useful to report, the heartbeat is skipped silently.
+Ask nanobot to create a scheduled task in the chat where you want the result, for example: "Every 30 minutes, check this repository and summarize failures here." Manage the task in **Automations** or ask nanobot to edit, pause, resume, or remove it with `cron`.
 
-Use heartbeat for recurring checks that should usually stay quiet. User-created cron jobs are different: they run as scheduled turns in the chat/session where they were created and normally deliver the result back to that channel.
-
-**Setup:** edit `~/.nanobot/workspace/HEARTBEAT.md` (created automatically by `nanobot onboard`):
-
-```markdown
-## Active Tasks
-
-- Check weather forecast and notify me only if storms are expected
-- Scan inbox for urgent emails and notify me if any are found
-```
-
-The agent can also manage this file itself - ask it to "add a periodic background check" or "check this periodically but only notify me if something changes" and it will update `HEARTBEAT.md` for you. Completed tasks should be deleted from the file, not moved to another section.
-
-You can change the interval or disable the built-in heartbeat in `~/.nanobot/config.json`:
-
-```json
-{
-  "gateway": {
-    "heartbeat": {
-      "enabled": true,
-      "intervalS": 1800
-    }
-  }
-}
-```
-
-The heartbeat job is visible in `cron(action="list")` as `heartbeat`, but it is system-managed and cannot be removed with the `cron` tool. To stop it, set `gateway.heartbeat.enabled` to `false` and restart the gateway.
-
-> **Note:** The gateway must be running (`nanobot gateway`) and you must have chatted with the bot at least once so it knows which channel to deliver to.
+Existing Heartbeat instructions are [imported once as an ordinary half-hour task](./automations.md#existing-heartbeat-instructions). Editing `HEARTBEAT.md` after import does not change that task. Keep the Gateway running for scheduled work.

@@ -11,7 +11,7 @@ Write what to do in `message`. For a normal reminder or report, do not copy the 
 
 If the user asks to send to other chats, preserve those recipients in the task instructions. Use the `message` tool for those sends and for file attachments. Existing tasks that explicitly request a `message` call still use it; changing the task's chat does not change explicit recipients in its instructions.
 
-Choose by timing and notification behavior, not repetition. A specified time or interval uses `cron`, even when it repeats: "every day at 8am, remind me to drink water" is a cron task. Use `HEARTBEAT.md` for background checks with flexible timing that should notify only on actionable changes. Heartbeat does not guarantee a requested time or interval; do not substitute it for an explicit schedule.
+Use `cron` for all scheduled work, including periodic background checks. Choose the user's requested time or interval. Writing `HEARTBEAT.md` does not schedule work; existing Heartbeat instructions are imported once as an ordinary task and should be managed here.
 
 ## Task Types
 
@@ -54,7 +54,7 @@ cron(action="list", include_disabled=True)
 cron(action="enable", job_id="abc123")
 ```
 
-Disabling a task stops future runs; it does not cancel a running task or recall a queued reply. System-managed jobs such as heartbeat and Dream are protected; change their configuration instead.
+Disabling a task stops future runs; it does not cancel a running task or recall a queued reply. The system-managed Dream job is protected; change its configuration instead.
 
 ## Time Expressions
 
