@@ -22,6 +22,9 @@
           "allowlist": "Allowlist"
         }
       },
+      "groupPolicyOverrides": {
+        "label": "Group behavior overrides (JSON)"
+      },
       "mode": {
         "label": "Connection mode",
         "choices": {

@@ -22,6 +22,9 @@
           "allowlist": "Liste d’autorisation"
         }
       },
+      "groupPolicyOverrides": {
+        "label": "Remplacements de comportement de groupe (JSON)"
+      },
       "mode": {
         "label": "Mode de connexion",
         "choices": {
