@@ -151,7 +151,7 @@ def tool_arguments_object_for_replay(arguments: Any) -> dict[str, Any]:
     if arguments is None:
         return {}
     if isinstance(arguments, dict):
-        return cast(dict[str, Any], arguments)
+        return cast(dict[str, Any], sanitize_surrogates_deep(arguments))
     if not isinstance(arguments, str):
         return {}
 
@@ -166,7 +166,7 @@ def tool_arguments_object_for_replay(arguments: Any) -> dict[str, Any]:
             parsed = json_repair.loads(stripped)
         except Exception:
             return {}
-    return cast(dict[str, Any], parsed) if isinstance(parsed, dict) else {}
+    return cast(dict[str, Any], sanitize_surrogates_deep(parsed)) if isinstance(parsed, dict) else {}
 
 
 def tool_arguments_json_for_replay(arguments: Any) -> str:
