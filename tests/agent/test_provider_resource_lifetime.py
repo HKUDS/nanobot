@@ -58,6 +58,8 @@ class HTTPFixture:
 
 @pytest_asyncio.fixture
 async def http_provider(tmp_path, monkeypatch):
+    # Tool descriptions/skill aliases also read instance-wide CLI Apps metadata.
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
     # Use real SDK/httpx clients, but never inherit an external proxy or real data.
     for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
         monkeypatch.delenv(name, raising=False)
