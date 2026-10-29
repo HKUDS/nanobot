@@ -8,7 +8,6 @@ Requests without ``session_id`` share one persistent default session; each
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import hmac
 import json as _json
 import time
@@ -22,6 +21,7 @@ from nanobot.agent.hook import AgentHook, AgentRunHookContext
 from nanobot.config.paths import get_media_dir
 from nanobot.providers.base import LLMUsage
 from nanobot.providers.unconfigured_provider import UnconfiguredProvider
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.media_decode import (
     MAX_FILE_SIZE,
@@ -272,6 +272,14 @@ async def _parse_multipart(request: web.Request) -> tuple[str, list[str], str | 
 # ---------------------------------------------------------------------------
 
 
+async def _cancel_request_work(task: asyncio.Task[object]) -> None:
+    # A request timeout may already be unwinding model/tool resources. Do not
+    # cancel that cleanup a second time when the HTTP connection also goes away.
+    if not task.done() and not task.cancelling():
+        task.cancel()
+    await shield_and_drain(asyncio.gather(task, return_exceptions=True))
+
+
 async def handle_chat_completions(request: web.Request) -> web.Response | web.StreamResponse:
     """POST /v1/chat/completions — supports JSON and multipart/form-data."""
     content_type = _as_str(cast(object, request.content_type or ""))
@@ -384,48 +392,53 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
                     break
                 await resp.write(_sse_chunk(token, model_name, chunk_id))
         finally:
-            if not task.done():
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
+            await _cancel_request_work(task)
 
         if not stream_failed:
             await resp.write(_sse_chunk("", model_name, chunk_id, finish_reason="stop"))
             await resp.write(_SSE_DONE)
         return resp
 
-    # -- non-streaming path (original logic) --
-    usage_capture = _UsageCaptureHook()
+    # -- non-streaming path --
+    async def _run_non_streaming() -> web.Response:
+        usage_capture = _UsageCaptureHook()
+        try:
+            async with session_lock:
+                try:
+                    async with asyncio.timeout(timeout_s):
+                        await _prepare_agent(request.app)
+                        response = await agent_loop.process_direct(
+                            content=text,
+                            media=media_paths if media_paths else None,
+                            session_key=session_key,
+                            channel="api",
+                            chat_id=chat_id,
+                            hooks=[usage_capture],
+                        )
+                    response_text = _response_text(response)
+                    if not response_text or not response_text.strip():
+                        logger.warning("Empty response for session {}, using fallback", session_key)
+                        response_text = EMPTY_FINAL_RESPONSE_MESSAGE
+
+                except asyncio.TimeoutError:
+                    return _error_json(504, f"Request timed out after {timeout_s}s")
+                except Exception:
+                    logger.exception("Error processing request for session {}", session_key)
+                    return _error_json(500, "Internal server error", err_type="server_error")
+        except Exception:
+            logger.exception("Unexpected API lock error for session {}", session_key)
+            return _error_json(500, "Internal server error", err_type="server_error")
+
+        return web.json_response(
+            _chat_completion_response(response_text, model_name, usage_capture.usage)
+        )
+
+    task = asyncio.create_task(_run_non_streaming())
     try:
-        async with session_lock:
-            try:
-                async with asyncio.timeout(timeout_s):
-                    await _prepare_agent(request.app)
-                    response = await agent_loop.process_direct(
-                        content=text,
-                        media=media_paths if media_paths else None,
-                        session_key=session_key,
-                        channel="api",
-                        chat_id=chat_id,
-                        hooks=[usage_capture],
-                    )
-                response_text = _response_text(response)
-                if not response_text or not response_text.strip():
-                    logger.warning("Empty response for session {}, using fallback", session_key)
-                    response_text = EMPTY_FINAL_RESPONSE_MESSAGE
-
-            except asyncio.TimeoutError:
-                return _error_json(504, f"Request timed out after {timeout_s}s")
-            except Exception:
-                logger.exception("Error processing request for session {}", session_key)
-                return _error_json(500, "Internal server error", err_type="server_error")
-    except Exception:
-        logger.exception("Unexpected API lock error for session {}", session_key)
-        return _error_json(500, "Internal server error", err_type="server_error")
-
-    return web.json_response(
-        _chat_completion_response(response_text, model_name, usage_capture.usage)
-    )
+        # Keep repeated handler cancellation out of the owned work's cleanup.
+        return await asyncio.shield(task)
+    finally:
+        await _cancel_request_work(task)
 
 
 async def handle_models(request: web.Request) -> web.Response:
@@ -472,7 +485,10 @@ def create_app(
         api_key: Optional API key for Bearer-token authentication on API routes.
         prepare_agent: Optional application-owned readiness callback run before each turn.
     """
-    app = web.Application(client_max_size=20 * 1024 * 1024)  # 20MB for base64 images
+    app = web.Application(
+        client_max_size=20 * 1024 * 1024,  # 20MB for base64 images
+        handler_args={"handler_cancellation": True},
+    )
     app[_AGENT_LOOP_KEY] = agent_loop
     app[_MODEL_NAME_KEY] = model_name
     app[_REQUEST_TIMEOUT_KEY] = request_timeout

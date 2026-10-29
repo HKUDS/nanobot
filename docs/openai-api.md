@@ -76,7 +76,9 @@ These API error responses use `{"error":{"message":"...","type":"...","code":400
 
 Once an SSE response has started, an execution failure or timeout closes it **without** a final `finish_reason: "stop"` chunk or `data: [DONE]`. There is no separate SSE error event. Treat a stream ending without `[DONE]` as incomplete, even if HTTP status was 200 or some text arrived.
 
-Execution timeout defaults to 120 seconds (`api.timeout`, or `nanobot serve --timeout`). It starts after acquiring the session lock, so waiting behind another request can make total request time longer. A client timeout or disconnect is not a reliable cancellation interface. A failed SSE write cancels its running task, but disconnect detection may wait for output; non-streaming work can continue after a client disconnects. Cancellation and timeout do not undo tool actions already performed.
+Execution timeout defaults to 120 seconds (`api.timeout`, or `nanobot serve --timeout`). It starts after acquiring the session lock, so waiting behind another request can make total request time longer.
+
+When the server detects a closed HTTP connection, it cancels that JSON or SSE request's own work, even before the model produces output, and waits for cleanup before releasing the session to its next request. Disconnecting a queued request does not stop the request currently using that session; other requests are not cancelled. This is request-scoped cancellation, not a session-wide Stop or a way to leave the request running in the background. A client-side timeout that leaves the connection open does not signal cancellation. Cancellation and timeout do not undo tool actions already performed; completed tool results remain available to the conversation.
 
 There is no request idempotency key or automatic deduplication. Retrying can repeat a message, file edit, or external action. Check the result before retrying side-effecting requests, and disable automatic client retries when duplicate actions would matter.
 
