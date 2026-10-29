@@ -1904,10 +1904,8 @@ class OpenAICompatProvider(LLMProvider):
             stream_iter: AsyncIterator[Any] = chat_stream.__aiter__()
             while True:
                 try:
-                    chunk: Any = await asyncio.wait_for(
-                        stream_iter.__anext__(),
-                        timeout=idle_timeout_s,
-                    )
+                    async with asyncio.timeout(idle_timeout_s):
+                        chunk: Any = await stream_iter.__anext__()
                 except StopAsyncIteration:
                     break
                 chunks.append(chunk)

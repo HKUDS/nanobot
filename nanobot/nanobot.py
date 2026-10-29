@@ -89,6 +89,7 @@ class Nanobot:
         self._config = config
         self._mcp_provider = mcp_provider
         self._runs: Counter[asyncio.Task[object]] = Counter()
+        self._streams: dict[asyncio.Task[object], RunStream] = {}
         self._closed = False
         self._close_lock = asyncio.Lock()
         self.sessions = SessionClient(loop)
@@ -112,6 +113,7 @@ class Nanobot:
         self._runs[task] -= 1
         if not self._runs[task]:
             del self._runs[task]
+            self._streams.pop(task, None)
 
     @classmethod
     def from_config(
@@ -337,9 +339,11 @@ class Nanobot:
         task = asyncio.create_task(_run())
         if lease is not None:
             lease.bind(task)
+        stream = RunStream(task, queue)
         self._runs[task] += 1
+        self._streams[task] = stream
         task.add_done_callback(self._execution_finished)
-        return RunStream(task, queue)
+        return stream
 
     async def stream(
         self,
@@ -385,11 +389,16 @@ class Nanobot:
         async with self._close_lock:
             self._closed = True
             tasks = tuple(self._runs)
+            streams = {task: self._streams[task] for task in tasks if task in self._streams}
             for task in tasks:
-                task.cancel()
+                if task not in streams:
+                    task.cancel()
             try:
                 if tasks:
-                    await shield_and_drain(asyncio.gather(*tasks, return_exceptions=True))
+                    await shield_and_drain(asyncio.gather(
+                        *(stream.aclose() for stream in streams.values()),
+                        *tasks, return_exceptions=True,
+                    ))
             finally:
                 try:
                     await self._loop.aclose()

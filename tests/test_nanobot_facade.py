@@ -1783,3 +1783,35 @@ async def test_context_manager_does_not_swallow_exceptions(tmp_path):
             raise ValueError("boom")
 
     bot._loop.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_sdk_close_cancels_full_stream_without_an_event_consumer(tmp_path):
+    config_path = _write_config(tmp_path)
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    blocked = asyncio.Event()
+
+    async def produce(message, *, on_stream, **kwargs):
+        for index in range(256):
+            await on_stream(str(index))
+        blocked.set()
+        await on_stream("one more event")
+
+    bot._loop.process_direct = produce
+    run = await bot.run_streamed("many")
+    close = None
+    try:
+        # Once an event producer blocks, closing the owning SDK must use the
+        # same queue release as closing this stream, not just cancel its task.
+        await asyncio.wait_for(blocked.wait(), 1)
+        assert not run.done
+        close = asyncio.create_task(bot.aclose())
+        done, _ = await asyncio.wait({close}, timeout=1)
+        assert close in done, "SDK close is waiting for an absent stream consumer"
+        await close
+        assert run.done
+    finally:
+        await run.aclose()
+        if close is not None:
+            await asyncio.gather(close, return_exceptions=True)
+        await bot.aclose()

@@ -261,3 +261,30 @@ async def test_chat_only_provider_still_has_a_timeout(monkeypatch, finalize):
     assert result.stop_reason == ("max_iterations" if finalize else "error")
     if finalize:
         assert result.final_content == "Tool budget exhausted."
+
+
+async def test_chat_stream_cancellation_at_ready_chunk_is_not_lost(make_provider, monkeypatch):
+    provider, stream = await make_provider("chat", "content")
+    task = None
+    reached = asyncio.Event()
+
+    async def ready_chunk_then_wait(self):
+        # A caller may cancel as the socket read finishes. Python 3.11's
+        # wait_for can return that ready read while swallowing the cancellation.
+        assert task is not None
+        task.cancel()
+        reached.set()
+        yield f"data: {json.dumps(self.events[0])}\n\n".encode()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(type(stream), "__aiter__", ready_chunk_then_wait)
+    task = asyncio.create_task(provider.chat_stream([{"role": "user", "content": "work"}]))
+    try:
+        await asyncio.wait_for(reached.wait(), 1)
+        done, _ = await asyncio.wait({task}, timeout=0.5)
+        assert task in done, "external cancellation was lost at a ready stream read"
+        assert task.cancelled()
+        assert stream.closed
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
