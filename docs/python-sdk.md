@@ -452,7 +452,7 @@ Run the agent once and return a `RunResult`.
 |-------|------|---------|-------------|
 | `message` | `str` | *(required)* | The user message to process. |
 | `session_key` | `str` | `"sdk:default"` | Session identifier for conversation isolation. Different keys get independent history. |
-| `channel` | `str` | `"cli"` | Logical channel label used in runtime context. |
+| `channel` | `str` | `"cli"` | Logical channel label used in runtime context. Registered channels apply their package-owned reply-format guidance; the SDK default uses generic formatting, not terminal restrictions. |
 | `chat_id` | `str` | `"direct"` | Logical chat identifier used in runtime context. |
 | `sender_id` | `str` | `"user"` | Logical sender identifier used in runtime context. |
 | `media` | `list[str] \| None` | `None` | Optional local media paths attached to the message. |

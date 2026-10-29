@@ -36,6 +36,7 @@ PLUGIN = ChannelPlugin(
     name="mochat",
     display_name="MoChat",
     runtime=f"{__package__}.runtime:MochatChannel",
+    reply_format="Avoid markdown headings and tables. Use plain text with minimal formatting.",
     setup=SETUP_SPEC,
     dependencies=(
         "python-socketio>=5.16.0,<6.0.0",

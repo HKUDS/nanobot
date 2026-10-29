@@ -40,6 +40,8 @@ class ChannelPlugin:
     settings_visible: bool = True
     capabilities: frozenset[str] = frozenset()
     webui: str | None = None
+    # Trusted model guidance, separate from the adapter's local rendering capabilities.
+    reply_format: str = ""
 
     def __post_init__(self) -> None:
         if _CHANNEL_PACKAGE_NAME.fullmatch(self.name) is None:

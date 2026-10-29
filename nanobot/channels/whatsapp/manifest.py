@@ -27,6 +27,7 @@ PLUGIN = ChannelPlugin(
     name="whatsapp",
     display_name="WhatsApp",
     runtime=f"{__package__}.runtime:WhatsAppChannel",
+    reply_format="Use plain text only.",
     connector=f"{__package__}.connect:WhatsAppConnectStore",
     setup=SETUP_SPEC,
     management=ChannelManagementSpec(local_state_present=local_state_present),

@@ -29,6 +29,10 @@ PLUGIN = ChannelPlugin(
     name="discord",
     display_name="Discord",
     runtime=f"{__package__}.runtime:DiscordChannel",
+    reply_format=(
+        "This conversation is on a messaging app. Use short paragraphs. "
+        "Avoid large headings (#, ##). Use **bold** sparingly. No tables — use plain lists."
+    ),
     setup=SETUP_SPEC,
     dependencies=("discord.py>=2.5.2,<3.0.0",),
     webui="webui/index.ts",

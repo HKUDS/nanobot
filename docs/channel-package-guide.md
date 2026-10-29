@@ -19,11 +19,20 @@ If a matching config section has `"enabled": true`, the channel is instantiated 
 | Interactive setup connections and their short-lived state | `ChannelPlugin.connector` backed by package-local `connect.py` |
 | Reusable local login-state detection | `ChannelPlugin.management.local_state_present` backed by package-local code |
 | Discovery metadata and lazy runtime target | `PLUGIN` in `manifest.py` |
+| Model reply-format guidance | Optional `ChannelPlugin.reply_format` in `manifest.py` |
 | WebUI structure, components, URLs, field keys, actions, and preset values | `webui/index.ts` or `webui/index.tsx` |
 | Channel-specific user-facing copy | `webui/locales/<locale>.json` |
 | Generic settings-shell copy shared by every channel | `webui/src/i18n/locales/<locale>/common.json` |
 
 Keep one source of truth for each concern. In particular, the backend setup contract decides what may be written, the TypeScript contribution decides how those fields are presented, and locale JSON supplies the channel-specific words shown to users.
+
+### Reply-format guidance
+
+A channel can declare `reply_format="Use short paragraphs and plain lists."` in its existing `ChannelPlugin` descriptor. This is trusted system-prompt guidance about how the model should write, not a declaration of which Markdown features the platform or adapter can render. Keep local rendering and output conversion in the channel runtime. Leave `reply_format` empty when no medium-specific instruction is needed.
+
+Gateway and SDK assembly snapshot these declarations with `channel_reply_formats()` and pass the string mapping to `AgentLoop(..., reply_formats=...)`. Named runtimes such as `feishu.assistant-2` use their package's declaration. Direct `AgentLoop` or `ContextBuilder` integrations can supply the same mapping explicitly; without one, replies use the generic prompt. CLI assembly adds its own terminal guidance; the SDK's default logical `cli` label does not impose terminal formatting.
+
+Changing a channel's format requires only editing that descriptor and restarting the application. Do not add channel-name branches to the generic identity prompt or read format instructions from inbound message metadata, HTTP fields, or SDK attributes.
 
 ## Quick Start
 

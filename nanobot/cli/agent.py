@@ -142,6 +142,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
         StreamEndEvent,
     )
     from nanobot.bus.queue import MessageBus
+    from nanobot.channels.registry import channel_reply_formats
     from nanobot.cli import terminal as cli_terminal
     from nanobot.cli.stream import ThinkingSpinner
     from nanobot.cron.service import CronService
@@ -192,6 +193,12 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
             cron_service=cron,
             hook_factories=[create_file_edit_activity_hook],
             tool_registry=tools,
+            reply_formats=channel_reply_formats() | {
+                "cli": (
+                    "Output is rendered in a terminal. Avoid markdown headings and tables. "
+                    "Use plain text with minimal formatting."
+                ),
+            },
         )
     except ValueError as exc:
         _print_agent_start_error(exc)

@@ -188,50 +188,18 @@ def test_default_soul_template_keeps_execution_policy_in_tool_contract() -> None
     assert "Ask for confirmation when an irreversible action requires it" in contract
 
 
-def test_channel_format_hint_telegram(tmp_path) -> None:
-    """Telegram channel should get messaging-app format hint."""
+def test_injected_reply_format_applies_to_named_instances_without_shared_state(tmp_path) -> None:
+    """A channel's scoped runtime names use the assembly-owned format snapshot."""
     workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
+    formats = {"teamchat": "Use compact numbered lists."}
+    builder = ContextBuilder(workspace, reply_formats=formats)
+    formats["teamchat"] = "A later assembly's policy."
 
-    prompt = builder.build_system_prompt(channel="telegram")
-    assert "Format Hint" in prompt
-    assert "messaging app" in prompt
-
-
-def test_channel_format_hint_whatsapp(tmp_path) -> None:
-    """WhatsApp should get plain-text format hint."""
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    prompt = builder.build_system_prompt(channel="whatsapp")
-    assert "Format Hint" in prompt
-    assert "plain text only" in prompt
-
-
-def test_channel_format_hint_absent_for_unknown(tmp_path) -> None:
-    """Unknown or None channel should not inject a format hint."""
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    prompt = builder.build_system_prompt(channel=None)
-    assert "Format Hint" not in prompt
-
-    prompt2 = builder.build_system_prompt(channel="feishu")
-    assert "Format Hint" not in prompt2
-
-
-def test_build_messages_passes_channel_to_system_prompt(tmp_path) -> None:
-    """build_messages should pass channel through to build_system_prompt."""
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    messages = builder.build_messages(
-        history=[], current_message="hi",
-        channel="telegram",
-    )
-    system = messages[0]["content"]
-    assert "Format Hint" in system
-    assert "messaging app" in system
+    messages = builder.build_messages(history=[], current_message="hi", channel="teamchat.assistant-2")
+    assert "Use compact numbered lists." in messages[0]["content"]
+    generic = ContextBuilder(workspace).build_system_prompt()
+    assert builder.build_system_prompt(channel="other-teamchat") == generic
+    assert builder.build_system_prompt() == generic
 
 
 def test_memory_skill_is_lazy_loaded_from_skills_index(tmp_path) -> None:

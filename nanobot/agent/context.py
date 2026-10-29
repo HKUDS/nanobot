@@ -78,9 +78,18 @@ class ContextBuilder:
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md"]
     _SKIPPABLE_DEFAULTS = {"AGENTS.md", "USER.md"}
 
-    def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        timezone: str | None = None,
+        disabled_skills: list[str] | None = None,
+        *,
+        reply_formats: Mapping[str, str] | None = None,
+    ):
         self.workspace = workspace
         self.timezone = timezone
+        # Assembly-owned strings only; never read formatting policy from turn metadata.
+        self._reply_formats = dict(reply_formats or {})
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
 
@@ -94,7 +103,11 @@ class ContextBuilder:
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         root = workspace or self.workspace
-        parts = [self._get_identity(channel=channel, workspace=root)]
+        parts = [self._get_identity(workspace=root)]
+        # Named channel instances share their package's format (family.instance).
+        reply_format = self._reply_formats.get(channel.partition(".")[0]) if channel else None
+        if reply_format:
+            parts.append(f"## Reply format\n\n{reply_format}")
 
         bootstrap = self._load_bootstrap_files(root)
         if bootstrap:
@@ -138,7 +151,7 @@ class ContextBuilder:
 
         return "\n\n---\n\n".join(parts)
 
-    def _get_identity(self, channel: str | None = None, workspace: Path | None = None) -> str:
+    def _get_identity(self, workspace: Path | None = None) -> str:
         """Get the core identity section."""
         root = workspace or self.workspace
         workspace_path = str(root.expanduser().resolve())
@@ -152,7 +165,6 @@ class ContextBuilder:
             agent_workspace_path=agent_workspace_path,
             runtime=runtime,
             platform_policy=render_template("agent/platform_policy.md", system=system),
-            channel=channel or "",
         )
 
     @staticmethod

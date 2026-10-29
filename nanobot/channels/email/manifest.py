@@ -56,6 +56,10 @@ PLUGIN = ChannelPlugin(
     name="email",
     display_name="Email",
     runtime=f"{__package__}.runtime:EmailChannel",
+    reply_format=(
+        "This conversation is via email. Structure with clear sections. "
+        "Markdown may not render — keep formatting simple."
+    ),
     setup=SETUP_SPEC,
     webui="webui/index.ts",
 )

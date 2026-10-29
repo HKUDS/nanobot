@@ -37,6 +37,10 @@ PLUGIN = ChannelPlugin(
     name="telegram",
     display_name="Telegram",
     runtime=f"{__package__}.runtime:TelegramChannel",
+    reply_format=(
+        "This conversation is on a messaging app. Use short paragraphs. "
+        "Avoid large headings (#, ##). Use **bold** sparingly. No tables — use plain lists."
+    ),
     setup=SETUP_SPEC,
     dependencies=(
         "python-telegram-bot[socks,webhooks]>=22.6,<23.0",

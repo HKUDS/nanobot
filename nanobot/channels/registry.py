@@ -44,6 +44,15 @@ def discover_plugins(
     return plugins
 
 
+def channel_reply_formats() -> dict[str, str]:
+    """Snapshot package-owned model guidance without importing channel runtimes."""
+    return {
+        name: plugin.reply_format
+        for name, plugin in discover_plugins().items()
+        if plugin.reply_format
+    }
+
+
 def load_channel_plugin(name: str) -> ChannelPlugin:
     """Load one channel package descriptor."""
     plugin = discover_plugins({name}).get(name)
@@ -96,6 +105,7 @@ def discover_all() -> dict[str, type[BaseChannel]]:
 
 __all__ = [
     "channel_default_enabled",
+    "channel_reply_formats",
     "discover_all",
     "discover_enabled",
     "discover_plugins",
