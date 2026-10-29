@@ -45,6 +45,7 @@ from nanobot.config.paths import get_data_dir, is_default_workspace
 from nanobot.config.schema import Config
 from nanobot.gateway.runtime import GatewayHealthIdentity, GatewayInstance, GatewayRuntime
 from nanobot.installation_lock import installation_access
+from nanobot.observability.langfuse import langfuse_runtime_owner
 from nanobot.security.network import is_loopback_host
 from nanobot.session.keys import (
     HEARTBEAT_SESSION_KEY,
@@ -466,6 +467,7 @@ def _run_gateway(
             )
 
 
+@langfuse_runtime_owner()
 def _run_claimed_gateway(
     config: Config,
     *,
@@ -498,6 +500,7 @@ def _run_claimed_gateway(
     from nanobot.cron.types import CronJob, CronRunResult
     from nanobot.llm_usage import record_llm_call
     from nanobot.llm_usage.context import llm_usage_source
+    from nanobot.observability.langfuse import initialize_langfuse
     from nanobot.providers.factory import (
         ProviderSnapshot,
         build_provider_snapshot,
@@ -515,6 +518,7 @@ def _run_claimed_gateway(
     from nanobot.triggers.local_store import LocalTriggerStore
     from nanobot.webui.recovery import RecoveryCoordinator
 
+    initialize_langfuse(config)
     webui_url = _webui_browser_url(config)
     gateway_host_for_browser = _host_for_local_browser(config.gateway.host)
     if health_server_enabled and _tcp_endpoint_reachable(gateway_host_for_browser, port):

@@ -18,6 +18,7 @@ import httpx
 from oauth_cli_kit.models import OAuthToken
 from oauth_cli_kit.storage import FileTokenStorage
 
+from nanobot.observability.langfuse import LangfuseRuntime
 from nanobot.providers.base import LLMResponse, ProviderCallContext
 from nanobot.providers.model_api import ModelAPICapabilities, RequestAPI
 from nanobot.providers.oauth_catalog_cache import (
@@ -214,6 +215,7 @@ class GitHubCopilotProvider(OpenAICompatProvider):
         *,
         provider_name: str = "github_copilot",
         model_api: ModelAPICapabilities | None = None,
+        langfuse: LangfuseRuntime | None = None,
     ):
         self._copilot_access_token: str | None = None
         self._copilot_expires_at: float = 0.0
@@ -230,6 +232,7 @@ class GitHubCopilotProvider(OpenAICompatProvider):
             spec=find_by_name("github_copilot"),
             provider_name=provider_name,
             model_api=model_api,
+            langfuse=langfuse,
         )
 
     def _model_api_capabilities(

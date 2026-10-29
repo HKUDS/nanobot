@@ -16,7 +16,8 @@ import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { isLoopbackHost } from "@/lib/network";
 import { getRuntimeHost, isNativeRuntime } from "@/lib/runtime";
-import type { ApiServicePayload, NanobotFeatureInfo, SettingsPayload } from "@/lib/types";
+import type { ApiServicePayload, NanobotFeatureInfo, ObservabilitySettingsUpdate, SettingsPayload } from "@/lib/types";
+import { LangfuseSettings } from "@/components/settings/system/LangfuseSettings";
 
 export function RuntimeSettings({
   form,
@@ -34,6 +35,7 @@ export function RuntimeSettings({
   capabilityError,
   onApiServiceAction,
   onInstallCapability,
+  onSaveObservability,
 }: {
   form: AgentSettingsDraft;
   settings: SettingsPayload;
@@ -52,7 +54,8 @@ export function RuntimeSettings({
     action: "start" | "stop",
     values?: { host: string; port: number; timeout: number; apiKey?: string },
   ) => void;
-  onInstallCapability: (name: string) => void;
+  onInstallCapability: (name: string, installOnly?: boolean) => void;
+  onSaveObservability?: (draft: ObservabilitySettingsUpdate) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -317,7 +320,12 @@ export function RuntimeSettings({
         </SettingsGroup>
       </section>
 
-      <section>
+      {onSaveObservability && settings.observability ? (
+        <LangfuseSettings settings={settings.observability} feature={langfuseFeature}
+          loading={capabilitiesLoading} action={capabilityAction} installError={capabilityError}
+          onInstallSupport={() => onInstallCapability("langfuse", true)}
+          onSave={onSaveObservability} disabled={isRestarting} />
+      ) : <section>
         <SettingsSectionTitle>{tx("settings.observability.title", "Observability")}</SettingsSectionTitle>
         <SettingsGroup>
           <SettingsRow
@@ -358,7 +366,7 @@ export function RuntimeSettings({
           </SettingsRow>
         </SettingsGroup>
         {capabilityError ? <p className="mt-2 text-[12px] text-destructive">{capabilityError}</p> : null}
-      </section>
+      </section>}
 
       <section>
         <SettingsSectionTitle>{t("settings.sections.system")}</SettingsSectionTitle>

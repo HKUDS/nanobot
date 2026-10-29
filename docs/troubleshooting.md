@@ -165,13 +165,15 @@ Gateway loads the fallback tokenizer in the background, caching it beside the ac
 
 ## Langfuse Problems
 
-Langfuse tracing is optional and controlled by environment variables.
+Langfuse tracing is optional. Configure it in **Settings → System → Tracing**, in `observability.langfuse`, or through the legacy environment-only setup.
 
 | Symptom | Check |
 |---|---|
-| `LANGFUSE_SECRET_KEY is set but langfuse is not installed` | Install `langfuse` in the same Python environment that runs nanobot, then restart the process. |
-| No traces appear | Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_BASE_URL` before starting nanobot. |
-| Wrong Langfuse project or region | Check that the key pair and `LANGFUSE_BASE_URL` come from the same Langfuse project/region. |
+| Tracing support is missing | Install support in the Langfuse dialog or run `nanobot plugins enable langfuse`, then restart nanobot. |
+| No traces appear | Check the running state and pending restart notice, test the URL and keys, then send a supported model request after restarting. A connection test does not create a trace. |
+| Environment changes have no effect | An explicit `observability.langfuse` block takes precedence. Update that configuration or use `${VAR}` references. |
+| Self-hosted connection test is blocked | Add the intended private address to `tools.ssrfWhitelist`; do not disable network protections. |
+| Wrong Langfuse project or region | Check that the key pair and service URL come from the same Langfuse project/region. |
 | Only some providers trace | Langfuse tracing applies to OpenAI-compatible provider calls and the Codex OAuth provider; other native providers may not use either client path. |
 
 See [`configuration.md#langfuse-observability`](./configuration.md#langfuse-observability) for setup commands.

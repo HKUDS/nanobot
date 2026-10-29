@@ -140,7 +140,7 @@ type SettingsViewTestOptions = Partial<Pick<
   | "onStartAutomationChat"
   | "onNativeEngineRestart"
   | "onRestart"
->> & { client?: NanobotClient };
+>> & { client?: NanobotClient; webuiCapabilities?: string[] };
 
 export function renderSettingsView(options: SettingsViewTestOptions = {}) {
   render(
@@ -151,7 +151,7 @@ export function renderSettingsView(options: SettingsViewTestOptions = {}) {
         handler("open");
         return () => {};
       },
-    } as never} token="tok">
+    } as never} token="tok" webuiCapabilities={options.webuiCapabilities}>
       <SettingsView
         themePreference={options.themePreference ?? "light"}
         initialSection={options.initialSection ?? "apps"}

@@ -19,6 +19,7 @@ from nanobot.config.schema import Config
 from nanobot.webui import settings_capabilities as capabilities
 from nanobot.webui import settings_contracts as contracts
 from nanobot.webui import settings_models as models
+from nanobot.webui import settings_observability as observability
 from nanobot.webui import settings_runtime as runtime
 from nanobot.webui import settings_system as system
 from nanobot.webui.settings_contracts import QueryParams, WebUISettingsError
@@ -427,6 +428,17 @@ def update_web_search_settings(
         requires_restart=restart_required,
         config_path=config_path,
     )
+
+
+def update_observability_settings(
+    update: observability.LangfuseSettingsUpdate,
+    *,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    config = _load_settings_config(config_path)
+    if observability.update_observability_settings(config, update):
+        _save_settings_config(config, config_path)
+    return settings_payload(config_path=config_path)
 
 
 def update_api_settings(

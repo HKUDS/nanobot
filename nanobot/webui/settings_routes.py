@@ -55,6 +55,7 @@ from nanobot.webui.settings_api import (
     update_model_call_order,
     update_model_configuration,
     update_network_safety_settings,
+    update_observability_settings,
     update_provider_settings,
     update_runtime_config_settings,
     update_transcription_settings,
@@ -130,6 +131,8 @@ _CAPABILITY_ROUTES = {
     "/api/settings/image-generation/update": "image-update",
     "/api/settings/transcription/update": "transcription-update",
     "/api/settings/network-safety/update": "network-update",
+    "/api/settings/observability/update": "observability-update",
+    "/api/settings/observability/test": "observability-test",
 }
 
 _SYSTEM_ROUTES = {
@@ -188,6 +191,8 @@ _SETTINGS_MUTATION_PATHS = frozenset({
     "/api/settings/image-generation/update",
     "/api/settings/transcription/update",
     "/api/settings/network-safety/update",
+    "/api/settings/observability/update",
+    "/api/settings/observability/test",
     "/api/settings/cli-apps/install",
     "/api/settings/cli-apps/update",
     "/api/settings/cli-apps/uninstall",
@@ -463,7 +468,10 @@ class WebUISettingsRouter:
     ) -> dict[str, Any]:
         if section and payload.get("requires_restart"):
             self._restart_sections.add(section)
-        sections = sorted(self._restart_sections | set(self._restart_changes.values()))
+        sections = self._restart_sections | set(self._restart_changes.values())
+        observability = payload.get("observability")
+        if isinstance(observability, dict) and cast(dict[str, object], observability).get("requires_restart"):
+            sections = sections | {"runtime"}
         updated = dict(payload)
         if sections:
             updated["requires_restart"] = True
@@ -471,7 +479,7 @@ class WebUISettingsRouter:
             updated,
             surface=self._runtime_surface,
             runtime_capability_overrides=self._runtime_capabilities,
-            restart_required_sections=sections,
+            restart_required_sections=sorted(sections),
         )
 
     def _render_result(self, result: SettingsRouteResult) -> Response:
@@ -538,6 +546,7 @@ class WebUISettingsRouter:
             update_image=update_image_generation_settings,
             update_transcription=update_transcription_settings,
             update_network=update_network_safety_settings,
+            update_observability=update_observability_settings,
             nanobot_features_action=nanobot_features_action,
             api_runtime=self._api_runtime,
             reload_image=self._reload_image_generation_runtime,

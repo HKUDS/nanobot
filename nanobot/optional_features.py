@@ -696,7 +696,7 @@ def install_optional_feature_support(
     allow_install: bool = True,
     runner: Any = run_install_command,
 ) -> dict[str, Any]:
-    """Install channel dependencies without enabling or changing configuration."""
+    """Install feature dependencies without enabling or changing configuration."""
     from nanobot.channels.registry import discover_plugins
     from nanobot.config.loader import get_config_path, load_config
 
@@ -709,11 +709,6 @@ def install_optional_feature_support(
         raise OptionalFeatureError(f"Unknown feature: {name}. Available: {available}", status=404)
 
     channel_plugin = channel_plugins.get(name)
-    if channel_plugin is None:
-        raise OptionalFeatureError(
-            "Install-only actions are supported for channel features only.",
-            status=400,
-        )
     dependencies = _feature_dependencies(name, channel_plugin, extras)
     installed_now = _install_feature_dependencies(
         name,
@@ -723,7 +718,7 @@ def install_optional_feature_support(
     )
     if dependencies and not extra_installed(name, dependencies):
         raise OptionalFeatureError(
-            f"Installed support for channel '{name}', but its dependencies are still unavailable.",
+            f"Installed support for '{name}', but its dependencies are still unavailable.",
             status=500,
         )
 
@@ -734,13 +729,13 @@ def install_optional_feature_support(
     )
     if feature is None or not feature.get("installed"):
         raise OptionalFeatureError(
-            f"Channel '{name}' dependencies are still unavailable after installation.",
+            f"Feature '{name}' dependencies are still unavailable after installation.",
             status=500,
         )
     message = (
-        f"Installed support for channel '{name}'"
+        f"Installed support for '{name}'"
         if installed_now
-        else f"Support for channel '{name}' is already installed"
+        else f"Support for '{name}' is already installed"
     )
     payload["last_action"] = {
         "ok": True,
@@ -748,10 +743,10 @@ def install_optional_feature_support(
         "enabled": bool(feature.get("enabled")),
         "installed": True,
     }
-    # A dependency can replace a module that is already imported by the
-    # gateway (for example neonize during WhatsApp setup).  Keep the gateway
-    # running, but require a restart before the channel can use the new code.
-    payload["requires_restart"] = installed_now
+    # Dependencies can replace imported modules; a running engine may need restarting.
+    payload["requires_restart"] = installed_now and _feature_requires_restart(
+        name, is_channel=channel_plugin is not None,
+    )
     return payload
 
 

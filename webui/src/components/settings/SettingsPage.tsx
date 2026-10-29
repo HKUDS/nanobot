@@ -49,6 +49,7 @@ import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
 import type { ThemePreference } from "@/hooks/useTheme";
 import type { ChatSummary, SessionAutomationJob, SkillSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useClient } from "@/providers/ClientProvider";
 
 interface SettingsPageProps {
   registerExitGuard?: (guard: SettingsExitGuard | null) => void;
@@ -92,6 +93,7 @@ export function SettingsPage({
   isRestarting,
   hostChromeInset,
 }: SettingsPageProps) {
+  const { webuiCapabilities } = useClient();
   const [dialogLayoutAnchor, setDialogLayoutAnchor] = useState<HTMLDivElement | null>(null);
   const [mcpSetupName, setMcpSetupName] = useState<string | null>(null);
   const presetDeletedCallback = useRef<(() => void) | null>(null);
@@ -470,7 +472,11 @@ export function SettingsPage({
               capabilityAction={systemState.nanobotFeatureAction}
               capabilityError={systemState.nanobotFeaturesError}
               onApiServiceAction={systemActions.handleApiServiceAction}
-              onInstallCapability={(name) => void systemActions.installCapabilities([name])}
+              onInstallCapability={(name, installOnly) => installOnly
+                ? void systemActions.handleNanobotFeatureAction("enable", name, { installOnly: true })
+                : void systemActions.installCapabilities([name])}
+              onSaveObservability={webuiCapabilities.includes("webui.langfuse-settings.v1")
+                ? controller.saveObservabilitySettings : undefined}
             />
           </div>
         );

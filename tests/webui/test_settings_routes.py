@@ -1143,3 +1143,111 @@ async def test_mcp_proxy_mutation_persists_reloads_and_keeps_oauth_credentials(
         reload.assert_awaited_once()
     finally:
         await gateway.http.settings_routes.close()
+
+
+@pytest.mark.asyncio
+async def test_langfuse_settings_preserve_keys_and_running_state(tmp_path, monkeypatch):
+    import importlib.util
+
+    from nanobot.config.loader import load_config, save_config
+    from nanobot.config.schema import Config
+    from nanobot.observability.config import LangfuseConfig
+    from nanobot.webui import settings_observability as observability
+
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.observability.langfuse = LangfuseConfig(
+        public_key="pk-project", secret_key="sk-saved-secret",
+    )
+    save_config(config, config_path)
+    running = config.observability.langfuse.model_copy(deep=True)
+    monkeypatch.setattr(observability, "get_running_langfuse_config", lambda: running)
+    monkeypatch.setattr(observability, "get_running_langfuse_active", lambda: False)
+    available = importlib.util.find_spec("langfuse") is not None
+    monkeypatch.setattr(observability, "get_running_langfuse_available", lambda: available)
+    monkeypatch.setattr(observability, "langfuse_installed", lambda: True)
+    router = _router(config_path=config_path)
+    path = "/api/settings/observability/update"
+    response = await router.dispatch(None, _mutation_request(path, {
+        "enabled": True, "base_url": "https://cloud.langfuse.com",
+    }), path)
+    assert response.status_code == 200
+    payload = json.loads(response.body)
+    assert payload["observability"]["enabled"] is True
+    assert payload["observability"]["active_enabled"] is False
+    assert payload["observability"]["requires_restart"] is True
+    assert payload["restart_required_sections"] == ["runtime"]
+    assert b"sk-saved-secret" not in response.body
+    assert load_config(config_path).observability.langfuse.secret_key == "sk-saved-secret"
+
+    response = await router.dispatch(None, SimpleNamespace(path="/api/settings", headers=Headers()), "/api/settings")
+    assert json.loads(response.body)["observability"]["requires_restart"] is True
+    # Reverting to the running configuration cancels this setting's restart requirement.
+    response = await router.dispatch(None, _mutation_request(path, {
+        "enabled": False, "base_url": "https://cloud.langfuse.com",
+    }), path)
+    assert json.loads(response.body)["requires_restart"] is False
+
+    response = await router.dispatch(None, _mutation_request(path, {
+        "enabled": False, "base_url": "https://cloud.langfuse.com", "secret_key": "",
+    }), path)
+    assert response.status_code == 200
+    assert load_config(config_path).observability.langfuse.secret_key == ""
+    assert json.loads(response.body)["observability"]["secret_key_hint"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/api/settings/observability/update", "/api/settings/observability/test"])
+async def test_langfuse_operations_require_authenticated_websocket(tmp_path, path):
+    router = _router(config_path=tmp_path / "config.json")
+    response = await router.dispatch(None, SimpleNamespace(path=path, headers=Headers()), path)
+    assert response.status_code == 405
+    unauthorized = _router(authorized=False, config_path=tmp_path / "config.json")
+    response = await unauthorized.dispatch(None, _mutation_request(path, {
+        "enabled": False, "base_url": "https://cloud.langfuse.com",
+    }), path)
+    assert response.status_code == 401
+    assert not (tmp_path / "config.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_langfuse_connection_test_uses_draft_without_saving(tmp_path, monkeypatch):
+    import base64
+
+    import httpx
+
+    from nanobot.config.loader import save_config
+    from nanobot.config.schema import Config
+    from nanobot.observability.config import LangfuseConfig
+    from nanobot.webui import settings_observability as observability
+
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.observability.langfuse = LangfuseConfig(
+        public_key="pk-saved", secret_key="sk-retained",
+    )
+    save_config(config, config_path)
+    before = config_path.read_bytes()
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json={"data": [{"id": "project", "name": "Test project"}]})
+
+    monkeypatch.setattr(observability, "validate_url_target", lambda _url: (True, ""))
+    monkeypatch.setattr(observability, "httpx_env_proxy_mounts", lambda: {})
+    monkeypatch.setattr(observability, "PinnedDNSAsyncTransport", lambda: httpx.MockTransport(respond))
+    router = _router(config_path=config_path)
+    path = "/api/settings/observability/test"
+    response = await router.dispatch(None, _mutation_request(path, {
+        "enabled": True, "base_url": "https://langfuse.example/prefix", "public_key": "pk-draft",
+    }), path)
+    assert response.status_code == 200
+    assert json.loads(response.body) == {"ok": True}
+    assert config_path.read_bytes() == before
+    assert len(requests) == 1
+    assert str(requests[0].url) == "https://langfuse.example/prefix/api/public/projects"
+    assert requests[0].method == "GET"
+    assert requests[0].content == b""
+    assert base64.b64decode(requests[0].headers["authorization"].split()[1]) == b"pk-draft:sk-retained"
+    assert not router._restart_sections

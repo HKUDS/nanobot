@@ -25,6 +25,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
+from nanobot.observability.langfuse import LangfuseRuntime, provider_langfuse_runtime
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
@@ -96,9 +97,11 @@ class AzureOpenAIProvider(LLMProvider):
         default_model: str = "gpt-5.2-chat",
         *,
         provider_name: str = "azure_openai",
+        langfuse: LangfuseRuntime | None = None,
     ):
         super().__init__(api_key, api_base, provider_name=provider_name)
         self.default_model = default_model
+        self._langfuse = langfuse or provider_langfuse_runtime()
         self._responses = ResponsesBackend()
 
         if not api_base:
@@ -308,6 +311,7 @@ class AzureOpenAIProvider(LLMProvider):
             provider_context,
         )
         try:
+            body.update(self._langfuse.openai_options())
             return await self._responses.sdk_request(
                 self._client, body, provider=self._responses_state_provider(),
             )
@@ -336,6 +340,7 @@ class AzureOpenAIProvider(LLMProvider):
         body["stream"] = True
 
         try:
+            body.update(self._langfuse.openai_options())
             return await self._responses.sdk_request(
                 self._client, body, provider=self._responses_state_provider(),
                 on_content_delta=on_content_delta, on_thinking_delta=on_thinking_delta,

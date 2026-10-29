@@ -217,6 +217,8 @@ _WEBUI_MUTATION_PATHS = {
     "settings.transcription.update": "/api/settings/transcription/update",
     "settings.runtime_config.update": "/api/settings/runtime-config/update",
     "settings.network_safety.update": "/api/settings/network-safety/update",
+    "settings.observability.update": "/api/settings/observability/update",
+    "settings.observability.test": "/api/settings/observability/test",
     "settings.cli_app.install": "/api/settings/cli-apps/install",
     "settings.cli_app.update": "/api/settings/cli-apps/update",
     "settings.cli_app.uninstall": "/api/settings/cli-apps/uninstall",
