@@ -1,4 +1,16 @@
 {
+  "mcpApp": {
+    "open": "Open app",
+    "close": "Close app",
+    "loading": "Loading…",
+    "subtitle": "Interactive tool result",
+    "approval": "Allow this tool call?",
+    "approve": "Allow once",
+    "reject": "Reject",
+    "failed": "The app could not connect. Close it and run the tool again.",
+    "unavailable": "This app is unavailable or expired. Run the tool again.",
+    "label": "{{title}} app"
+  },
   "updates": {
     "guide": {
       "entry": "Update via {{method}}",

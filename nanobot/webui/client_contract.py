@@ -27,6 +27,7 @@ UPDATE_SETTLE_HANDOFF_CAPABILITY = "webui.update-jobs.settle-handoff.v1"
 UPDATE_FLOW_CAPABILITY = "webui.update-flow.v1"
 UPDATE_CHANNEL_CAPABILITY = "webui.update-channels.v1"
 PROMPT_NAVIGATION_CAPABILITY = "webui.prompt-navigation.v1"
+MCP_APPS_CAPABILITY = "webui.mcp-apps.v1"
 
 
 class Compatibility(TypedDict):
@@ -35,7 +36,7 @@ class Compatibility(TypedDict):
     host_version: str
 
 
-def webui_contract() -> dict[str, object]:
+def webui_contract(*, mcp_apps: bool = False) -> dict[str, object]:
     return {
         "version": __version__,
         "min_protocol": WEBUI_PROTOCOL,
@@ -47,14 +48,15 @@ def webui_contract() -> dict[str, object]:
             UPDATE_JOB_CAPABILITY, UPDATE_PREPARATION_CAPABILITY, UPDATE_EXECUTION_CAPABILITY,
             UPDATE_RETRY_CAPABILITY, UPDATE_SETTLE_HANDOFF_CAPABILITY, UPDATE_FLOW_CAPABILITY, UPDATE_CHANNEL_CAPABILITY,
             PROMPT_NAVIGATION_CAPABILITY,
+            *([MCP_APPS_CAPABILITY] if mcp_apps else []),
         ],
     }
 
 
-def gateway_identity(gateway_id: str) -> dict[str, object]:
+def gateway_identity(gateway_id: str, *, mcp_apps: bool = False) -> dict[str, object]:
     # protocolVersion belongs to the pre-existing terminal transport contract.
     # Do not overload it with the version of the independently shipped WebUI.
-    return {"protocolVersion": 1, "gatewayId": gateway_id, "webui": webui_contract()}
+    return {"protocolVersion": 1, "gatewayId": gateway_id, "webui": webui_contract(mcp_apps=mcp_apps)}
 
 
 def assess_webui_contract(value: object) -> Compatibility:

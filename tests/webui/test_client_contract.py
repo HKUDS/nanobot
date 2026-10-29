@@ -58,3 +58,11 @@ def test_unknown_optional_capabilities_do_not_break_connection():
     value = webui_contract()
     value["capabilities"] = ["webui.core.v1", "a-future-optional-feature"]
     assert assess_webui_contract(value)["status"] == "compatible"
+
+
+def test_mcp_apps_are_optional_and_do_not_change_the_core_protocol():
+    disabled, enabled = webui_contract(), webui_contract(mcp_apps=True)
+    assert "webui.mcp-apps.v1" not in disabled["capabilities"]
+    assert "webui.mcp-apps.v1" in enabled["capabilities"]
+    assert enabled["min_protocol"] == disabled["min_protocol"] == 1
+    assert assess_webui_contract(enabled)["status"] == "compatible"

@@ -198,13 +198,25 @@ class Schema(ABC):
 
 
 class ToolResult(str):
-    """String-compatible tool output with structured status."""
+    """Model-facing text with optional host-only data and structured status.
+
+    ``data`` is not included in the string or its JSON string representation.
+    Consumers must explicitly opt in to handling or publishing it.
+    """
 
     is_error: bool
+    data: dict[str, Any] | None
 
-    def __new__(cls, content: str, *, is_error: bool = False) -> ToolResult:
+    def __new__(
+        cls,
+        content: str,
+        *,
+        is_error: bool = False,
+        data: dict[str, Any] | None = None,
+    ) -> ToolResult:
         obj = str.__new__(cls, content)
         obj.is_error = is_error
+        obj.data = data
         return obj
 
     @classmethod

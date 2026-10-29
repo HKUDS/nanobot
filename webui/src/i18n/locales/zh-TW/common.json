@@ -1,4 +1,16 @@
 {
+  "mcpApp": {
+    "open": "開啟應用",
+    "close": "關閉應用",
+    "loading": "載入中…",
+    "subtitle": "互動式工具結果",
+    "approval": "允許呼叫此工具？",
+    "approve": "允許一次",
+    "reject": "拒絕",
+    "failed": "應用連線失敗。請關閉後重新執行工具。",
+    "unavailable": "應用已失效或過期，請重新執行工具。",
+    "label": "{{title}} 應用"
+  },
   "updates": {
     "guide": {
       "entry": "透過{{method}}更新",

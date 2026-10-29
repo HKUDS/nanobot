@@ -600,6 +600,15 @@ def _run_claimed_gateway(
     register_image_generation_tool(config, tools, workspace=config.workspace_path)
     mcp_provider = MCPProvider.from_config(config, tools)
 
+    from nanobot.channels.websocket.runtime import WebSocketConfig
+    from nanobot.webui.mcp_apps import WebUIMCPApps
+
+    mcp_apps = WebUIMCPApps()
+    mcp_apps.enabled = WebSocketConfig.model_validate(
+        config.channels.model_dump().get("websocket") or {},
+    ).mcp_apps_enabled
+    mcp_provider.mcp_apps_enabled = mcp_apps.enabled
+
     recovery = RecoveryCoordinator(
         sessions=session_manager,
         bus=bus,
@@ -620,7 +629,7 @@ def _run_claimed_gateway(
         provider_signature=provider_snapshot.signature,
         local_trigger_store=trigger_store,
         hooks=[_MCPReadinessHook(mcp_provider)],
-        hook_factories=[create_file_edit_activity_hook],
+        hook_factories=[create_file_edit_activity_hook, mcp_apps.hook],
         tool_registry=tools,
         recovery_admission=recovery,
     )
@@ -839,6 +848,7 @@ def _run_claimed_gateway(
         webui_runtime_capabilities=webui_runtime_capabilities,
         webui_mcp_runtime_status=mcp_provider.runtime_status,
         webui_mcp_reload=mcp_provider.reload,
+        webui_mcp_apps_action=mcp_apps.action,
         webui_image_generation_reload=_webui_image_generation_reload,
         webui_skill_state_action=_webui_skill_state_action,
         webui_recovery_action=recovery.handle_action,

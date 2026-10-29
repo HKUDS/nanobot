@@ -45,6 +45,7 @@ INTERNAL_CHANNEL_FIELDS = {
         "allowFrom",
         "host",
         "maxMessageBytes",
+        "mcpAppsEnabled",
         "path",
         "pingIntervalS",
         "pingTimeoutS",

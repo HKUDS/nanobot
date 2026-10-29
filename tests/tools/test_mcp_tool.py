@@ -796,6 +796,37 @@ def _make_fake_session(tool_names: list[str]) -> SimpleNamespace:
     return SimpleNamespace(initialize=initialize, list_tools=list_tools)
 
 
+@pytest.mark.parametrize("enabled_tools", [["*"], ["hidden", "visible"], ["mcp_test_hidden"]])
+async def test_mcp_apps_visibility_cannot_be_overridden_by_enabled_tools(
+    fake_mcp_runtime, enabled_tools,
+) -> None:
+    hidden = _make_tool_def("hidden")
+    hidden.meta = {"ui": {"visibility": ["app"]}}
+    visible = _make_tool_def("visible")
+    visible.meta = {"ui": {"visibility": ["model", "app"]}}
+    session = _make_fake_session([])
+    session.list_tools = AsyncMock(return_value=SimpleNamespace(
+        tools=[hidden, visible], nextCursor=None,
+    ))
+    session.call_tool = AsyncMock()
+    fake_mcp_runtime["session"] = session
+    registry = ToolRegistry()
+
+    connections = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake", enabled_tools=enabled_tools)}, registry,
+    )
+    try:
+        definitions = registry.get_definitions()
+        assert all(schema["function"]["name"] != "mcp_test_hidden" for schema in definitions)
+        assert registry.has("mcp_test_visible") is (enabled_tools != ["mcp_test_hidden"])
+        result = await registry.execute("mcp_test_hidden", {})
+        assert is_tool_error_result(result)
+        session.call_tool.assert_not_awaited()
+    finally:
+        for connection in connections.values():
+            await connection.aclose()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("enabled_tools", "expected_names"),

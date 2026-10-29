@@ -63,6 +63,14 @@ Use the text roles in `tailwind.config.js` for shared metrics: `text-ui` for nav
 
 The Composer shares `text-composer` between its textarea and mention overlay, with a 16px minimum and 1.5 line height. Preserve identical text metrics, padding and literal CJK/Latin spacing in both layers. Reading preferences are projected by `useReadingTypography` through document tokens, without changing the root font size, the rem spacing grid or browser zoom.
 
+## MCP App attachments
+
+`thread/activity/McpApp.tsx` owns the optional MCP App card and the official AppBridge integration. `McpAppHostProvider` supplies a host-scoped mutation transport and session key from `ThreadShell`, only when the gateway advertises `webui.mcp-apps.v1`. `AgentActivityCluster` deduplicates attachment handles across progress updates without loading HTML automatically. The existing text activity and results remain available.
+
+The card renders untrusted HTML only inside an opaque-origin `allow-scripts` iframe with restrictive CSP. Approval controls belong to the parent WebUI. The iframe never receives gateway authentication, approval receipts, or a generic mutation transport. Host/session changes invalidate in-flight resource loads and close the old bridge; component unmount resolves a pending local approval as declined. An App cancelling its request before approval also removes the approval panel and prevents dispatch. The official AppBridge module is loaded only after opening a card. The first host intentionally blocks external App assets and fetches, and does not grant requested device permissions. See the [user guide](../docs/webui.md#interactive-mcp-apps-opt-in) for lifecycle and execution limits.
+
+`browser/mcp-apps.html` is a synthetic browser fixture using the actual AppBridge and card, without a model or gateway. It exposes an execution counter so rejection and approval can be checked independently. Backend transport and live authenticated gateway tests are in `tests/webui/test_mcp_apps.py`; fixture-only browser checks are not evidence of a real provider deployment.
+
 ## Choose an existing component
 
 - Check the gallery and current callers before creating a control. Different labels, colors, or sizes usually call for an existing component's options. `Button` already has appearance and size variants; `Input` and `SearchInput` share the input implementation.

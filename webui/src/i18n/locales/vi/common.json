@@ -1,4 +1,16 @@
 {
+  "mcpApp": {
+    "open": "Mở ứng dụng",
+    "close": "Đóng ứng dụng",
+    "loading": "Đang tải…",
+    "subtitle": "Kết quả công cụ tương tác",
+    "approval": "Cho phép gọi công cụ này?",
+    "approve": "Cho phép một lần",
+    "reject": "Từ chối",
+    "failed": "Không thể kết nối. Đóng ứng dụng và chạy lại công cụ.",
+    "unavailable": "Ứng dụng không khả dụng hoặc đã hết hạn. Chạy lại công cụ.",
+    "label": "Ứng dụng {{title}}"
+  },
   "updates": {
     "guide": {
       "entry": "Cập nhật qua {{method}}",

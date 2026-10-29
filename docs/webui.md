@@ -235,6 +235,32 @@ Keyless hosted presets include **Firecrawl** for search, scraping, crawling and 
 
 After a CLI App or MCP server is available, mention it from the composer with `@` to attach that tool to the next message. Plugin-provided skills participate in normal skill discovery and can be invoked with `$skill-name`.
 
+### Interactive MCP Apps (opt-in)
+
+MCP Apps attach an interactive HTML view to a tool result. Ordinary MCP tools previously showed only their text or image artifacts; when this feature is enabled, supported tools also show an **Open app** card in the conversation. Opening the card reads the tool's declared UI through its existing MCP connection. Structured results are delivered to the AppBridge separately from model context.
+
+To enable the initial restricted host, set the following on the gateway that owns your MCP connections, then restart that gateway:
+
+```json
+{
+  "channels": {
+    "websocket": {
+      "mcpAppsEnabled": true
+    }
+  }
+}
+```
+
+The setting defaults to `false`. The gateway advertises the optional `webui.mcp-apps.v1` capability only when enabled; WebUI protocol 1 and ordinary text/tool behavior remain compatible. A newer WebUI connected to a host without this capability keeps the text fallback. Existing clients ignore the optional App attachment. Temporary chats do not render Apps in this first version.
+
+An App runs in an iframe with scripts enabled and an opaque origin, without same-origin access, forms, popups, nested frames, or device permissions. A restrictive content security policy allows inline scripts/styles and data/blob images, and blocks external fetches and external asset loading. This first version supports self-contained Apps; it does not grant a server's requested external domains or browser permissions. An App requiring external scripts or network access may fail to render; its ordinary tool result remains available. Browser sandboxing and CSP are not a general network firewall against iframe navigation.
+
+The shipped WebUI and AppBridge code still come from your local installation. The explicit MCP Apps setting permits server-supplied HTML inside this separate sandbox; it never replaces the WebUI's JavaScript or CSS. Do not paste gateway credentials into an App. A requested tool call appears in a host-owned approval panel outside the iframe, with the exact tool name and arguments. **Reject** sends no call; **Allow once** authorizes only that recorded call. The App cannot approve itself, change arguments after approval, call another MCP server, or bypass `enabledTools` or App visibility restrictions.
+
+App handles are kept in gateway memory for 15 minutes, with at most 32 retained at once. Restarting/reloading an MCP connection revokes its handles; run the tool again if an App is unavailable. Resource HTML is limited to 1 MiB; structured results and App tool messages have a 64 KiB JSON budget. Closing the card tears down its browser bridge. After approving a tool, closing a card or losing the browser connection does not prove that its external action was cancelled; do not repeat it just because its result was lost. This host adds no exactly-once guarantee or durable App session recovery.
+
+Backend details and integration limits are documented in [MCP tools for AI agents](./guides/mcp-tools-for-ai-agents.md#structured-mcp-results-for-backend-integrations). Validation includes a real MCP session, a live authenticated WebSocket approval round trip with replay protection, and Chromium checks for AppBridge initialization, structured data, parent isolation, blocked fetches, rejection without dispatch, and one approved call. No live model credentials or external MCP deployments are needed for these checks.
+
 ## Skills
 
 Open **Skills → Installed** to review built-in and workspace-provided skills. You can search and filter them, inspect their instructions and setup requirements, enable or disable them, and delete workspace skills you no longer want.

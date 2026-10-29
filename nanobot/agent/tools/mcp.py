@@ -12,13 +12,14 @@ import traceback
 import urllib.parse
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
 from contextlib import AsyncExitStack, suppress
-from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict, cast
 
 import httpx
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import tool_log_content_allowed
+from nanobot.agent.tools.mcp_result import mcp_host_data, mcp_model_visible
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.network import NetworkConfig
 from nanobot.security.network import (
@@ -35,6 +36,7 @@ if TYPE_CHECKING:
     from mcp.types import Prompt, Resource
     from mcp.types import Tool as MCPToolDefinition
 
+    from nanobot.agent.tools.mcp_apps import MCPAppAuthorization, MCPAppServer, MCPAppSession
     from nanobot.agent.tools.mcp_oauth import MCPOAuthHandlers
     from nanobot.config.schema import Config, MCPServerConfig
 
@@ -64,6 +66,10 @@ _SANITIZE_RE = re.compile(r"_+")
 _ReconnectCallback = Callable[[str, str, Tool], Awaitable[Tool | None]]
 MCPServerLoader = Callable[[], tuple[Mapping[str, "MCPServerConfig"], NetworkConfig]]
 MCPRuntimeStatus = Literal["connecting", "connected", "failed"]
+
+
+class _MCPConnectOptions(TypedDict, total=False):
+    mcp_apps_enabled: bool
 
 
 class MCPConnection(Protocol):
@@ -631,9 +637,13 @@ class MCPToolWrapper(_MCPWrapperBase):
         server_name: str,
         tool_def: MCPToolDefinition,
         tool_timeout: int = 30,
+        *,
+        app_server: MCPAppServer | None = None,
     ):
         self._set_mcp_connection(session, server_name)
         self._original_name = tool_def.name
+        self._tool_def = tool_def
+        self._app_server = app_server
         self._name = _sanitize_mcp_tool_name(f"mcp_{server_name}_{tool_def.name}")
         self._description = tool_def.description or tool_def.name
         raw_schema = tool_def.inputSchema or {"type": "object", "properties": {}}
@@ -651,6 +661,12 @@ class MCPToolWrapper(_MCPWrapperBase):
     @property
     def parameters(self) -> dict[str, Any]:
         return self._parameters
+
+    def open_app(self, *, authorize: MCPAppAuthorization) -> MCPAppSession:
+        """Explicitly open the declared UI against this tool's allowlisted source."""
+        if self._app_server is None:
+            raise RuntimeError("An MCP app requires a catalog from connection discovery")
+        return self._app_server.open_app(self._original_name, authorize=authorize)
 
     async def execute(self, **kwargs: Any) -> str:
         retried_transient = False
@@ -715,9 +731,11 @@ class MCPToolWrapper(_MCPWrapperBase):
                 # Success — extract text and persist any image content as artifacts.
                 try:
                     rendered = self._render_call_result(result.content, kwargs)
-                    if getattr(result, "isError", False):
-                        return ToolResult.error(rendered)
-                    return rendered
+                    return ToolResult(
+                        rendered,
+                        is_error=bool(getattr(result, "isError", False)),
+                        data=mcp_host_data(self._server_name, self._tool_def, result),
+                    )
                 except Exception as exc:
                     logger.opt(exception=tool_log_content_allowed()).error(
                         "MCP tool '{}' failed while rendering result: {}: {}",
@@ -1031,6 +1049,7 @@ async def connect_mcp_servers(
     *,
     oauth_handlers: Mapping[str, MCPOAuthHandlers] | None = None,
     network: NetworkConfig | None = None,
+    mcp_apps_enabled: bool = False,
 ) -> dict[str, MCPConnection]:
     """Connect to configured MCP servers and register their tools, resources, prompts.
 
@@ -1177,7 +1196,12 @@ async def connect_mcp_servers(
                 return False
 
             read = _filter_malformed_mcp_progress_notifications(read, name)
-            session = await server_stack.enter_async_context(ClientSession(read, write))
+            session_class = ClientSession
+            if mcp_apps_enabled:
+                from nanobot.agent.tools.mcp_apps_session import MCPAppsClientSession
+
+                session_class = MCPAppsClientSession
+            session = await server_stack.enter_async_context(session_class(read, write))
             initialization = await session.initialize()
 
             # Finish discovery before registering tools so a failed page leaves no partial set.
@@ -1196,6 +1220,20 @@ async def connect_mcp_servers(
 
             enabled_tools = set(cfg.enabled_tools)
             allow_all_tools = "*" in enabled_tools
+            from nanobot.agent.tools.mcp_apps import MCPAppServer
+
+            app_server = MCPAppServer(
+                session,
+                name,
+                {
+                    definition.name: definition
+                    for definition in tool_defs
+                    if allow_all_tools or definition.name in enabled_tools
+                    or _sanitize_mcp_tool_name(f"mcp_{name}_{definition.name}") in enabled_tools
+                },
+                timeout=cfg.tool_timeout,
+            )
+            server_stack.callback(app_server.close)
             registered_count = 0
             matched_enabled_tools: set[str] = set()
             available_raw_names = [tool_def.name for tool_def in tool_defs]
@@ -1213,15 +1251,24 @@ async def connect_mcp_servers(
                         name,
                     )
                     continue
-                wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout)
-                registry.register(wrapper)
-                logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
-                registered_count += 1
                 if enabled_tools:
                     if tool_def.name in enabled_tools:
                         matched_enabled_tools.add(tool_def.name)
                     if wrapped_name in enabled_tools:
                         matched_enabled_tools.add(wrapped_name)
+                if not mcp_model_visible(tool_def):
+                    logger.debug(
+                        "MCP: skipping tool '{}' from server '{}' (not model-visible)",
+                        wrapped_name,
+                        name,
+                    )
+                    continue
+                wrapper = MCPToolWrapper(
+                    session, name, tool_def, tool_timeout=cfg.tool_timeout, app_server=app_server,
+                )
+                registry.register(wrapper)
+                logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
+                registered_count += 1
 
             if enabled_tools and not allow_all_tools:
                 unmatched_enabled_tools = sorted(enabled_tools - matched_enabled_tools)
@@ -1441,6 +1488,7 @@ class MCPProvider:
         self._runtime_statuses: dict[str, MCPRuntimeStatus] = {}
         self._lock = asyncio.Lock()
         self._closing = False
+        self.mcp_apps_enabled = False
 
     @classmethod
     def from_config(
@@ -1460,6 +1508,9 @@ class MCPProvider:
     @property
     def configured_server_names(self) -> set[str]:
         return set(self._servers)
+
+    def _connect_options(self) -> _MCPConnectOptions:
+        return {"mcp_apps_enabled": True} if self.mcp_apps_enabled else {}
 
     @property
     def connected_server_names(self) -> set[str]:
@@ -1526,7 +1577,11 @@ class MCPProvider:
                 return
             self._set_runtime_status(missing_servers, "connecting")
             try:
-                connected = await connect_mcp_servers(missing_servers, self._registry, network=self._network)
+                connected = await connect_mcp_servers(
+                    missing_servers, self._registry,
+                    network=self._network,
+                    **self._connect_options(),
+                )
                 if self._closing:
                     await _close_mcp_connections(connected)
                     return
@@ -1618,7 +1673,11 @@ class MCPProvider:
             if to_connect:
                 self._set_runtime_status(to_connect, "connecting")
                 try:
-                    connected = await connect_mcp_servers(to_connect, self._registry, network=self._network)
+                    connected = await connect_mcp_servers(
+                        to_connect, self._registry,
+                        network=self._network,
+                        **self._connect_options(),
+                    )
                 except BaseException:
                     self._set_runtime_status(to_connect, "failed")
                     raise
@@ -1734,6 +1793,7 @@ class MCPProvider:
                 {server_name: cfg},
                 self._registry,
                 network=self._network,
+                **self._connect_options(),
             )
             if self._closing:
                 await _close_mcp_connections(connected)

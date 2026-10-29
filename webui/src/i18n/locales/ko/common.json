@@ -1,4 +1,16 @@
 {
+  "mcpApp": {
+    "open": "앱 열기",
+    "close": "앱 닫기",
+    "loading": "불러오는 중…",
+    "subtitle": "대화형 도구 결과",
+    "approval": "이 도구 호출을 허용할까요?",
+    "approve": "한 번 허용",
+    "reject": "거부",
+    "failed": "앱을 연결하지 못했습니다. 앱을 닫고 도구를 다시 실행하세요.",
+    "unavailable": "앱을 사용할 수 없거나 만료되었습니다. 도구를 다시 실행하세요.",
+    "label": "{{title}} 앱"
+  },
   "updates": {
     "guide": {
       "entry": "{{method}}로 업데이트",
