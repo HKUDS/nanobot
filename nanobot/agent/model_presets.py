@@ -60,6 +60,7 @@ def build_static_preset_snapshot(
         signature=("model_preset", name, preset.model_dump_json()),
         generation=preset.to_generation_settings(),
         model_preset=name,
+        owns_provider=False,
     )
 
 

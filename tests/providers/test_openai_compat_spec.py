@@ -20,6 +20,19 @@ from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.providers.registry import ModelAPICapabilities, find_by_name
 
 
+class _ChatStream:
+    """SDK-shaped stream, including explicit response ownership."""
+
+    def __init__(self, chunks):
+        self.chunks = chunks
+
+    def __aiter__(self):
+        return self.chunks.__aiter__()
+
+    async def close(self):
+        await self.chunks.aclose()
+
+
 def _fake_chat_response(content: str = "ok") -> ChatCompletion:
     """Build a minimal OpenAI chat completion response."""
     return ChatCompletion.model_validate({
@@ -192,7 +205,7 @@ def _fake_chat_stream_legacy_function_call_chunks():
 @pytest.mark.asyncio
 async def test_openai_compat_chat_stream_forwards_reasoning_deltas_deepseek_style() -> None:
     """DeepSeek Chat Completions exposes ``delta.reasoning_content`` while streaming."""
-    mock_chat = AsyncMock(return_value=_fake_chat_stream_reasoning_chunks())
+    mock_chat = AsyncMock(return_value=_ChatStream(_fake_chat_stream_reasoning_chunks()))
     spec = find_by_name("deepseek")
     thinking: list[str] = []
     content: list[str] = []
@@ -313,7 +326,7 @@ async def test_openai_compat_stream_forwards_tool_call_argument_deltas(
     provider_name: str,
     model: str,
 ) -> None:
-    mock_chat = AsyncMock(return_value=_fake_chat_stream_tool_call_chunks())
+    mock_chat = AsyncMock(return_value=_ChatStream(_fake_chat_stream_tool_call_chunks()))
     spec = find_by_name(provider_name)
     deltas: list[dict] = []
 
@@ -356,7 +369,7 @@ async def test_openai_compat_stream_forwards_tool_call_argument_deltas(
 
 @pytest.mark.asyncio
 async def test_openai_compat_stream_forwards_legacy_function_call_argument_deltas() -> None:
-    mock_chat = AsyncMock(return_value=_fake_chat_stream_legacy_function_call_chunks())
+    mock_chat = AsyncMock(return_value=_ChatStream(_fake_chat_stream_legacy_function_call_chunks()))
     deltas: list[dict] = []
 
     async def on_tool_delta(delta: dict) -> None:
@@ -399,6 +412,9 @@ class _FakeResponsesError(Exception):
 
 
 class _StalledStream:
+    async def close(self):
+        pass
+
     def __aiter__(self):
         return self
 
@@ -847,7 +863,7 @@ async def test_direct_openai_open_circuit_skips_responses_api() -> None:
 
 @pytest.mark.asyncio
 async def test_direct_openai_stream_responses_unsupported_param_falls_back() -> None:
-    mock_chat = AsyncMock(return_value=_fake_chat_stream("fallback stream"))
+    mock_chat = AsyncMock(return_value=_ChatStream(_fake_chat_stream("fallback stream")))
     mock_responses = AsyncMock(
         side_effect=_FakeResponsesError(400, "Unknown parameter: max_output_tokens for Responses API")
     )

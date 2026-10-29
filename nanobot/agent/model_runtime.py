@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import math
 from collections.abc import Callable, Mapping
 from copy import deepcopy
@@ -12,7 +11,6 @@ from typing import cast
 
 from nanobot.agent import model_presets as preset_helpers
 from nanobot.config.schema import Config, ModelPresetConfig
-from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import (
     ProviderSnapshot,
     build_isolated_provider_snapshot,
@@ -22,6 +20,7 @@ from nanobot.providers.factory import (
     validate_provider_setup,
 )
 from nanobot.providers.request_overrides import isolate_request_overrides
+from nanobot.providers.resources import ProviderResourcePool
 from nanobot.utils.llm_runtime import LLMRuntime, runtime_from_provider_snapshot
 
 
@@ -82,14 +81,19 @@ class ModelRuntimeResolver:
         self,
         initial_runtime: LLMRuntime,
         *,
+        owns_provider: bool = False,
         model_presets: Mapping[str, ModelPresetConfig] | None = None,
         preset_catalog_loader: preset_helpers.PresetCatalogLoader | None = None,
         configured_default_preset: str | None = None,
         provider_snapshot_loader: Callable[[], ProviderSnapshot] | None = None,
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
     ) -> None:
-        self._runtime = initial_runtime
-        self._providers: set[LLMProvider] = {initial_runtime.provider}
+        self._resources = ProviderResourcePool()
+        self._borrowed_provider = initial_runtime.provider if not owns_provider else None
+        self._runtime = (
+            replace(initial_runtime, resource=self._resources.register(initial_runtime.provider))
+            if owns_provider else initial_runtime
+        )
         self._model_presets = dict(model_presets or {})
         self._preset_catalog_loader = preset_catalog_loader
         self._preset_catalog_refresh_required = False
@@ -102,6 +106,23 @@ class ModelRuntimeResolver:
         self._default_selection_signature = preset_helpers.default_selection_signature(
             initial_runtime.snapshot_signature,
             configured_default_preset,
+        )
+        self._retain_cached_resources()
+
+    def _require_open(self) -> None:
+        if self._resources.closed:
+            raise RuntimeError("model runtime resolver is closed")
+
+    def _cached_runtimes(self) -> list[LLMRuntime]:
+        return [
+            self._runtime,
+            *self._resolved_presets.values(),
+            *([self._recent_override.runtime] if self._recent_override is not None else []),
+        ]
+
+    def _retain_cached_resources(self) -> None:
+        self._resources.retain(
+            runtime.resource for runtime in self._cached_runtimes() if runtime.resource is not None
         )
 
     @property
@@ -134,6 +155,7 @@ class ModelRuntimeResolver:
 
     def admit(self) -> LLMRuntime:
         """Resolve the immutable runtime for the next turn admission."""
+        self._require_open()
         if self._refresh_required:
             self.refresh()
         self._refresh_provider_generation()
@@ -143,50 +165,78 @@ class ModelRuntimeResolver:
         """Refresh configured runtime state on the next admission."""
         self._refresh_required = True
         self._preset_catalog_refresh_required = True
-        self._resolved_presets.clear()
-        self._recent_override = None
 
     def _refresh_preset_catalog(self) -> None:
         if not self._preset_catalog_refresh_required:
             return
         if self._preset_catalog_loader is not None:
             self._model_presets = dict(self._preset_catalog_loader())
+        # Revalidate previously used entries while they still participate in reuse.
+        # Unrequested changed/removed presets must not keep obsolete clients alive.
+        refreshed: dict[str, LLMRuntime] = {}
+        for name in self._resolved_presets:
+            if name in self._model_presets:
+                snapshot = preset_helpers.build_runtime_preset_snapshot(
+                    name=name,
+                    presets=self._model_presets,
+                    provider=self._runtime.provider,
+                    loader=self._preset_snapshot_loader,
+                )
+                refreshed[name] = self.resolve_snapshot(snapshot, reuse=self._resolved_presets[name])
+        self._resolved_presets = refreshed
         self._preset_catalog_refresh_required = False
+        self._retain_cached_resources()
 
     def resolve_snapshot(
         self,
         snapshot: ProviderSnapshot,
+        *,
+        reuse: LLMRuntime | None = None,
     ) -> LLMRuntime:
-        """Resolve a factory snapshot without changing the selected default."""
-        self._providers.add(snapshot.provider)
-        return runtime_from_provider_snapshot(snapshot)
+        """Take ownership of a snapshot and return a borrowed execution value.
+
+        Acquire its lease before awaiting or handing it to queued work. A factory
+        snapshot transfers ownership unless explicitly marked borrowed.
+        """
+        self._require_open()
+        runtime = runtime_from_provider_snapshot(snapshot)
+        resource = self._resources.get(snapshot.provider)
+        if resource is None and snapshot.owns_provider and snapshot.provider is not self._borrowed_provider:
+            resource = self._resources.register(snapshot.provider)
+        runtime = replace(runtime, resource=resource)
+        self._resources.collect()
+        key = _override_key(snapshot.signature)
+        if reuse is not None and key is not None and key == _override_key(reuse.snapshot_signature):
+            # The loader may have constructed a redundant client. Preserve the
+            # existing connection and retire the unused new resource. Override
+            # reuse is handled separately, including its declaration restrictions.
+            return replace(runtime, provider=reuse.provider, resource=reuse.resource)
+        return runtime
 
     async def aclose(self) -> None:
-        """Close all admitted providers, including runtimes replaced by configuration reloads."""
+        """Stop resource admissions and drain leases before closing owned providers."""
+        self._resolved_presets.clear()
         self._recent_override = None
-        providers, self._providers = self._providers, set()
-        results = await asyncio.gather(*(provider.aclose() for provider in providers), return_exceptions=True)
-        errors = [result for result in results if isinstance(result, BaseException)]
-        if errors:
-            raise BaseExceptionGroup("failed to close model providers", errors)
+        await self._resources.aclose()
 
     def adopt_snapshot(
         self,
         snapshot: ProviderSnapshot,
     ) -> LLMRuntime:
         """Select a snapshot as the default for future turns."""
-        self._recent_override = None
-        runtime = self.resolve_snapshot(snapshot)
+        runtime = self.resolve_snapshot(snapshot, reuse=self._runtime)
         self._runtime = runtime
         self._tracks_provider_generation = runtime.model_preset is None
         self._default_selection_signature = preset_helpers.default_selection_signature(
             runtime.snapshot_signature,
             runtime.model_preset,
         )
+        self._retain_cached_resources()
         return runtime
 
     def resolve_preset(self, name: str | None) -> LLMRuntime:
         """Resolve a named preset without changing the selected default."""
+        self._require_open()
         self._refresh_preset_catalog()
         normalized = preset_helpers.normalize_preset_name(name, self._model_presets)
         cached = self._resolved_presets.get(normalized)
@@ -200,6 +250,7 @@ class ModelRuntimeResolver:
         )
         runtime = self.resolve_snapshot(snapshot)
         self._resolved_presets[normalized] = runtime
+        self._retain_cached_resources()
         return runtime
 
     def select_preset(self, name: str | None) -> LLMRuntime:
@@ -207,6 +258,7 @@ class ModelRuntimeResolver:
         runtime = self.resolve_preset(name)
         self._runtime = runtime
         self._tracks_provider_generation = False
+        self._retain_cached_resources()
         return runtime
 
     def select_model(self, model: str) -> LLMRuntime:
@@ -253,13 +305,16 @@ class ModelRuntimeResolver:
 
     def refresh(self) -> LLMRuntime | None:
         """Refresh configured defaults and return the replacement when changed."""
-        self._recent_override = None
+        self._require_open()
+        self._refresh_preset_catalog()
         if self._provider_snapshot_loader is None:
             self._refresh_required = False
             return None
 
-        self._resolved_presets.clear()
         snapshot = self._provider_snapshot_loader()
+        # Register even a snapshot that is not selected (a session-selected preset
+        # can remain the default). Its unused provider must still be disposed of.
+        configured = self.resolve_snapshot(snapshot, reuse=self._runtime)
         default_selection = preset_helpers.default_selection_signature(
             snapshot.signature,
             snapshot.model_preset,
@@ -268,7 +323,7 @@ class ModelRuntimeResolver:
         if active_preset and self._default_selection_signature in (None, default_selection):
             runtime = self.resolve_preset(active_preset)
         else:
-            runtime = self.resolve_snapshot(snapshot)
+            runtime = configured
 
         unchanged = (
             runtime.snapshot_signature == self._runtime.snapshot_signature
@@ -277,6 +332,7 @@ class ModelRuntimeResolver:
         self._refresh_required = False
         if unchanged:
             self._default_selection_signature = default_selection
+            self._retain_cached_resources()
             return None
         (
             self._runtime,
@@ -287,6 +343,7 @@ class ModelRuntimeResolver:
             runtime.model_preset is None,
             default_selection,
         )
+        self._retain_cached_resources()
         return runtime
 
     def resolve_override(
@@ -297,6 +354,7 @@ class ModelRuntimeResolver:
         config: Config | None = None,
     ) -> LLMRuntime | None:
         """Resolve an SDK-style per-run override without mutating the default."""
+        self._require_open()
         if model is not None and model_preset is not None:
             raise ValueError("model and model_preset are mutually exclusive")
         if model_preset is not None:
@@ -304,11 +362,10 @@ class ModelRuntimeResolver:
         if model is None:
             return None
         if config is None:
-            return LLMRuntime(
-                provider=self._runtime.provider,
+            return replace(
+                self._runtime,
                 model=model,
-                generation=self._runtime.generation,
-                context_window_tokens=self._runtime.context_window_tokens,
+                model_preset=None,
                 snapshot_signature=("model_override", model),
             )
 
@@ -321,7 +378,9 @@ class ModelRuntimeResolver:
         declarations = provider_override_declarations(config, preset=preset)
         key = _override_key((provider_signature(config, preset=preset), declarations))
         if key is None:
-            return self.resolve_snapshot(build_provider_snapshot(config, preset=preset))
+            runtime = self.resolve_snapshot(build_provider_snapshot(config, preset=preset))
+            self._retain_cached_resources()
+            return runtime
         if self._recent_override is not None and self._recent_override.key == key:
             # Equivalent wire settings can still contain an unsupported preset override.
             validate_provider_setup(config, preset=preset)
@@ -332,6 +391,6 @@ class ModelRuntimeResolver:
         key = _override_key((snapshot.signature, declarations))
         if key is None:
             return runtime
-        # Replacing lookup eligibility must not close providers still used by active turns.
         self._recent_override = _RecentOverride(key, runtime)
+        self._retain_cached_resources()
         return self._recent_override.borrow()

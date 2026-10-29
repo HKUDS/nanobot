@@ -249,7 +249,7 @@ async def test_gateway_continues_image_then_pdf_attachment_turn(codex_peer, tmp_
     writer.add_blank_page(width=100, height=100)
     writer.write(pdf)
     agent = AgentLoop(
-        bus=MessageBus(), provider=provider, workspace=tmp_path,
+        bus=MessageBus(), provider=provider, workspace=tmp_path, owns_provider=True,
         model=provider.get_default_model(), context_window_tokens=128_000,
     )
     try:
@@ -796,18 +796,19 @@ async def test_codex_idle_socket_eviction_preserves_replay(codex_peer, monkeypat
     assert len(server.requests[-1][1]["input"]) == 3
 
 
-async def test_runtime_shutdown_closes_replaced_codex_providers(codex_peer):
+async def test_runtime_retires_replaced_codex_provider_before_shutdown(codex_peer):
     provider, server, _ = codex_peer
     replacement = OpenAICodexProvider(default_model="gpt-6-astra")
     resolver = ModelRuntimeResolver(LLMRuntime.capture(
         provider, provider.get_default_model(), context_window_tokens=None,
-    ))
+    ), owns_provider=True)
     try:
         await provider.chat(_messages(), provider_context=_context())
         resolver.adopt_snapshot(ProviderSnapshot(
             provider=replacement, model=replacement.get_default_model(),
             context_window_tokens=100_000, signature=("replacement",),
         ))
+        await asyncio.wait_for(server.peers[0].closed.wait(), 2)
         await replacement.chat(_messages(), provider_context=_context(session="session-b"))
         await resolver.aclose()
         await resolver.aclose()

@@ -9,6 +9,7 @@ import json
 import os
 import re
 from collections.abc import Awaitable, Callable, Iterator
+from contextlib import suppress
 from typing import Any, cast
 
 from nanobot.providers.base import (
@@ -21,6 +22,7 @@ from nanobot.providers.base import (
     tool_arguments_object_for_replay,
 )
 from nanobot.providers.images import prepare_message_images
+from nanobot.utils.cancellation import shield_and_drain
 
 _IMAGE_DATA_URL = re.compile(r"^data:image/([a-zA-Z0-9.+-]+);base64,(.*)$", re.DOTALL)
 _TEXT_BLOCK_TYPES = {"text", "input_text", "output_text"}
@@ -69,7 +71,13 @@ class BedrockProvider(LLMProvider):
         self.region = region or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
         self.profile = profile
         self._extra_body = extra_body or {}
+        self._owns_client = client is None
         self._client = client if client is not None else self._make_client()
+
+    async def aclose(self) -> None:
+        if self._owns_client:
+            self._owns_client = False
+            await asyncio.to_thread(self._client.close)
 
     def _make_client(self) -> Any:
         if self.api_key:
@@ -750,7 +758,7 @@ class BedrockProvider(LLMProvider):
             )
             response = cast(
                 dict[str, Any],
-                await asyncio.to_thread(self._client.converse, **kwargs),
+                await shield_and_drain(asyncio.to_thread(self._client.converse, **kwargs)),
             )
             return self._parse_response(response)
         except Exception as e:
@@ -776,22 +784,18 @@ class BedrockProvider(LLMProvider):
         thinking_blocks: list[dict[str, Any]] = []
         tool_buffers: dict[int, dict[str, Any]] = {}
         state: dict[str, Any] = {}
+        stream_request: asyncio.Task[dict[str, Any]] | None = None
 
         try:
             kwargs = self._build_kwargs(
                 await prepare_message_images(messages), tools, model, max_tokens, temperature, reasoning_effort, tool_choice
             )
-            response = cast(
-                dict[str, Any],
-                await asyncio.wait_for(
-                    asyncio.to_thread(self._client.converse_stream, **kwargs),
-                    timeout=idle_timeout_s,
-                ),
-            )
+            stream_request = asyncio.create_task(asyncio.to_thread(self._client.converse_stream, **kwargs))
+            response = await asyncio.wait_for(asyncio.shield(stream_request), timeout=idle_timeout_s)
             stream = cast(Iterator[dict[str, Any]], iter(response.get("stream") or []))
             while True:
                 event = await asyncio.wait_for(
-                    asyncio.to_thread(_next_or_none, stream),
+                    shield_and_drain(asyncio.to_thread(_next_or_none, stream)),
                     timeout=idle_timeout_s,
                 )
                 if event is None:
@@ -826,6 +830,18 @@ class BedrockProvider(LLMProvider):
             )
         except Exception as e:
             return self._handle_error(e)
+        finally:
+            if stream_request is not None:
+                try:
+                    # A timeout/cancellation cannot stop a botocore worker. Keep
+                    # it owned until it settles, including a late stream response.
+                    with suppress(Exception):
+                        await shield_and_drain(stream_request)
+                finally:
+                    if not stream_request.cancelled() and stream_request.exception() is None:
+                        close = getattr(stream_request.result().get("stream"), "close", None)
+                        if callable(close):
+                            await shield_and_drain(asyncio.to_thread(close))
 
     def get_default_model(self) -> str:
         return self.default_model

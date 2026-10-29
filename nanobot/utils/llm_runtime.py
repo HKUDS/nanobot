@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from nanobot.providers.base import GenerationSettings, LLMProvider
+from nanobot.providers.resources import ProviderLease, ProviderResource
 
 if TYPE_CHECKING:
     from nanobot.providers.factory import ProviderSnapshot
@@ -26,6 +27,17 @@ class LLMRuntime:
     context_window_tokens: int
     model_preset: str | None = None
     snapshot_signature: tuple[object, ...] | None = None
+    resource: ProviderResource | None = field(default=None, repr=False, compare=False)
+
+    def lease(self) -> ProviderLease:
+        """Pin this provider before awaiting work that can use it.
+
+        Resolver lookups return borrowed values, not unbounded ownership. Acquire
+        before an await or queued handoff, and release after the entire execution,
+        including tool/retry gaps. Directly constructed runtimes borrow their
+        provider and leave closing to that provider's external owner.
+        """
+        return ProviderLease(self.resource)
 
     @classmethod
     def capture(

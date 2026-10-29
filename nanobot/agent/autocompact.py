@@ -62,7 +62,7 @@ class AutoCompact:
 
     async def check_expired(
         self,
-        schedule_background: Callable[[Coroutine[Any, Any, None]], None],
+        schedule_background: Callable[[Coroutine[Any, Any, None]], asyncio.Task[object]],
         resolve_runtime: Callable[[Session], Awaitable[LLMRuntime]],
         active_session_keys: Collection[str] = (),
     ) -> None:
@@ -88,7 +88,13 @@ class AutoCompact:
             except (KeyError, ValueError):
                 continue
             self._archiving.add(key)
-            schedule_background(self._archive(key, runtime=runtime))
+            lease = runtime.lease()
+            try:
+                lease.bind(schedule_background(self._archive(key, runtime=runtime)))
+            except BaseException:
+                self._archiving.discard(key)
+                await lease.aclose()
+                raise
 
     async def _archive(self, key: str, *, runtime: LLMRuntime) -> None:
         if is_dream_session(key):

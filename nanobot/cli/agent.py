@@ -189,6 +189,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
             runtime_config,
             bus,
             provider=provider,
+            owns_provider=True,
             cron_service=cron,
             hook_factories=[create_file_edit_activity_hook],
             tool_registry=tools,

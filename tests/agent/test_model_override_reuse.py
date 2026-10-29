@@ -39,7 +39,9 @@ def configured_override(monkeypatch):
         return provider
 
     monkeypatch.setattr(factory, "_make_provider_core", construct)
-    resolver = ModelRuntimeResolver(runtime_from_provider_snapshot(factory.build_provider_snapshot(config)))
+    resolver = ModelRuntimeResolver(
+        runtime_from_provider_snapshot(factory.build_provider_snapshot(config)), owns_provider=True,
+    )
     return config, resolver, created
 
 
@@ -126,20 +128,19 @@ async def test_nested_signature_changes_are_typed_and_borrowers_are_detached(con
 async def test_replacement_and_invalidation_do_not_close_active_borrowers(configured_override):
     config, resolver, created = configured_override
     first = resolve(config, resolver)
-    resolve(config, resolver, "tenant/other")
-    before_invalidate = resolve(config, resolver)
-    assert before_invalidate.provider is not first.provider
-    resolver.invalidate()
-    after_invalidate = resolve(config, resolver)
-    assert after_invalidate.provider is not before_invalidate.provider
-    assert resolve(config, resolver).provider is after_invalidate.provider
-    resolver.refresh()  # No loader is also an explicit invalidation boundary.
-    after_refresh = resolve(config, resolver)
-    assert after_refresh.provider is not after_invalidate.provider
-    resolver.adopt_snapshot(factory.build_provider_snapshot(config))
-    assert resolve(config, resolver).provider is not after_refresh.provider
-    assert all(provider.aclose.await_count == 0 for provider in created)
-    assert (await first.provider.chat(messages=[])).content == "ok"
+    async with first.lease():
+        resolve(config, resolver, "tenant/other")
+        current = resolve(config, resolver)
+        assert current.provider is not first.provider
+        resolver.invalidate()
+        assert resolve(config, resolver).provider is current.provider
+        resolver.refresh()
+        assert resolve(config, resolver).provider is current.provider
+        resolver.adopt_snapshot(factory.build_provider_snapshot(config))
+        assert resolve(config, resolver).provider is current.provider
+        assert (await first.provider.chat(messages=[])).content == "ok"
+        first.provider.aclose.assert_not_awaited()
+    first.provider.aclose.assert_awaited_once()
     await resolver.aclose()
     await resolver.aclose()
     assert all(provider.aclose.await_count == 1 for provider in created)
@@ -163,7 +164,9 @@ async def test_late_fallback_keeps_captured_credentials_body_and_proxy(configure
         return LLMResponse(content="temporarily unavailable", finish_reason="error", error_kind="server_error")
 
     created[-1].chat = fail_primary
+    lease = first.lease()
     pending = asyncio.create_task(first.provider.chat(messages=[], model=first.model))
+    lease.bind(pending)
     try:
         await asyncio.wait_for(entered.wait(), timeout=2)
         backup.api_key = "new-backup"
@@ -180,7 +183,7 @@ async def test_late_fallback_keeps_captured_credentials_body_and_proxy(configure
         assert owned.get_provider(preset=preset).extra_body == {"metadata": {"token": "old-body"}}
         assert owned.network.resolve_proxy(True) == "http://old-proxy.test:9000"
         late.aclose.assert_awaited_once()
-        assert all(provider.aclose.await_count == 0 for provider in created[:-1])
+        assert created[0].aclose.await_count == 0  # The configured default remains cached.
     finally:
         release.set()
         if not pending.done():

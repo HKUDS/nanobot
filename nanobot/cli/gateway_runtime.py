@@ -3,7 +3,7 @@
 import asyncio
 import signal
 from collections.abc import Awaitable, Callable, Coroutine, Iterable
-from contextlib import ExitStack, suppress
+from contextlib import ExitStack, nullcontext, suppress
 from dataclasses import asdict, replace
 from functools import partial
 from pathlib import Path
@@ -610,6 +610,7 @@ def _run_claimed_gateway(
     agent = AgentLoop.from_config(
         config, bus,
         provider=provider_snapshot.provider,
+        owns_provider=True,
         model=provider_snapshot.model,
         context_window_tokens=provider_snapshot.context_window_tokens,
         cron_service=cron,
@@ -624,8 +625,8 @@ def _run_claimed_gateway(
         tool_registry=tools,
         recovery_admission=recovery,
     )
-    def _schedule_webui_background(awaitable: Awaitable[None]) -> None:
-        agent.schedule_background(cast(Coroutine[Any, Any, None], awaitable))
+    def _schedule_webui_background(awaitable: Awaitable[None]) -> asyncio.Task[object]:
+        return agent.schedule_background(cast(Coroutine[Any, Any, None], awaitable))
 
     webui_turn_coordinator = WebuiTurnCoordinator(
         bus=bus,
@@ -674,15 +675,16 @@ def _run_claimed_gateway(
                 prompt, last_cursor = result
                 key = dream_session_key()
                 dream_runtime = agent.dream_runtime()
-                await mcp_provider.connect()
-                resp = await agent.process_direct(
-                    prompt,
-                    session_key=key,
-                    ephemeral=True,
-                    tools=store.build_dream_tools(),
-                    on_progress=_silent,
-                    runtime=dream_runtime,
-                )
+                async with (dream_runtime.lease() if dream_runtime is not None else nullcontext()):
+                    await mcp_provider.connect()
+                    resp = await agent.process_direct(
+                        prompt,
+                        session_key=key,
+                        ephemeral=True,
+                        tools=store.build_dream_tools(),
+                        on_progress=_silent,
+                        runtime=dream_runtime,
+                    )
                 # The real file delta grounds the audit record; normal completion
                 # decides whether this history batch has finished processing.
                 diff_body = store.dream_content_diff()

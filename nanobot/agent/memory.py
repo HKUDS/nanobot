@@ -824,6 +824,29 @@ class MemoryArchiver:
         persist: bool = True,
     ) -> str | None:
         """Generate a replacement checkpoint and optionally persist it."""
+        async with runtime.lease():
+            return await self._archive(
+                source_messages, runtime=runtime, session_key=session_key,
+                history=history, request_tools=request_tools,
+                previous_summary=previous_summary, input_token_budget=input_token_budget,
+                fallback_max_tokens=fallback_max_tokens, provider_state=provider_state,
+                persist=persist,
+            )
+
+    async def _archive(
+        self,
+        source_messages: list[dict[str, Any]],
+        *,
+        runtime: LLMRuntime,
+        session_key: str,
+        history: list[dict[str, Any]],
+        request_tools: list[dict[str, Any]],
+        previous_summary: str | None = None,
+        input_token_budget: int | None = None,
+        fallback_max_tokens: int | None = None,
+        provider_state: ProviderConversationState | None = None,
+        persist: bool = True,
+    ) -> str | None:
         if not source_messages:
             return None
 
@@ -1230,7 +1253,7 @@ class Consolidator:
         archived messages. All compaction triggers share checkpoint replay.
         """
         lock = self.get_lock(session_key)
-        async with lock:
+        async with runtime.lease(), lock:
             await self.sessions.state.discard(session_key)
             session = await self.sessions.state.get(session_key)
 

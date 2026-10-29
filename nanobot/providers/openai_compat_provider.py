@@ -43,9 +43,12 @@ from nanobot.providers.model_api import (
 )
 from nanobot.providers.openai_responses import ResponsesBackend, responses_state_matches
 from nanobot.providers.registry import KIMI_K3_MODELS
+from nanobot.utils.cancellation import shield_and_drain
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI as AsyncOpenAIType
+    from openai import AsyncStream
+    from openai.types.chat import ChatCompletionChunk
 
     from nanobot.providers.registry import ProviderSpec
 
@@ -1853,6 +1856,7 @@ class OpenAICompatProvider(LLMProvider):
         client = await self._ensure_client()
         idle_timeout_s = resolve_stream_idle_timeout_s()
         affinity = self._opencode_affinity_headers(provider_context)
+        chat_stream: AsyncStream[ChatCompletionChunk] | None = None
         try:
             if self._should_use_responses_api(model, reasoning_effort):
                 try:
@@ -1892,7 +1896,7 @@ class OpenAICompatProvider(LLMProvider):
             kwargs["timeout"] = idle_timeout_s
             kwargs["stream_options"] = {"include_usage": True}
             chat_stream = cast(
-                Any,
+                "AsyncStream[ChatCompletionChunk]",
                 await client.chat.completions.create(**kwargs),
             )
             chunks: list[Any] = []
@@ -1966,6 +1970,9 @@ class OpenAICompatProvider(LLMProvider):
             )
         except Exception as e:
             return self._handle_error(e, spec=self._spec, api_base=self.api_base)
+        finally:
+            if chat_stream is not None:
+                await shield_and_drain(chat_stream.close())
 
     def get_default_model(self) -> str:
         return self.default_model

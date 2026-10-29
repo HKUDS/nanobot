@@ -7,7 +7,7 @@ import os
 import subprocess
 import sys
 import time
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -332,15 +332,17 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     async def reset_and_schedule_archive() -> None:
         await loop.sessions.state.reset(session.key)
         if archive_snapshot is not None and runtime is not None:
-            loop.schedule_background(
+            archive_task = loop.schedule_background(
                 loop.consolidator.archive_session(  # pyright: ignore[reportUnknownMemberType]
                     archive_snapshot,
                     archive_end=len(snapshot),
                     runtime=runtime,
                 )
             )
+            runtime.lease().bind(archive_task)
 
-    await shield_and_drain(reset_and_schedule_archive())
+    async with (runtime.lease() if runtime is not None else nullcontext()):
+        await shield_and_drain(reset_and_schedule_archive())
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content="New session started.",

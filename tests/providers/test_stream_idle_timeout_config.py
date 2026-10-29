@@ -24,6 +24,9 @@ class _AsyncStream:
         self._chunks = chunks
         self._idx = 0
 
+    async def close(self) -> None:
+        pass
+
     def __aiter__(self) -> _AsyncStream:
         return self
 

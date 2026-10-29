@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 from collections.abc import Awaitable, Callable, Generator
@@ -589,7 +590,7 @@ class WebuiTurnCoordinator:
 
     bus: MessageBus
     sessions: SessionManager
-    schedule_background: Callable[[Awaitable[None]], None]
+    schedule_background: Callable[[Awaitable[None]], asyncio.Future[object]]
     recovery: RecoveryCoordinator | None = None
 
     def subscribe(self) -> Callable[[], None]:
@@ -768,7 +769,7 @@ class WebuiTurnCoordinator:
                     update_star_prompt("completed", turn_id=turn_id)
                 except (OSError, ValueError, TimeoutError):
                     logger.warning("Could not persist Star invitation usage")
-        self._schedule_title_update_from_event(event)
+        await self._schedule_title_update_from_event(event)
 
     async def _handle_goal_state_changed(self, event: GoalStateChanged) -> None:
         if not self._is_websocket_event(event.context):
@@ -850,7 +851,7 @@ class WebuiTurnCoordinator:
             )
         )
 
-    def _schedule_title_update_from_event(self, event: TurnCompleted) -> None:
+    async def _schedule_title_update_from_event(self, event: TurnCompleted) -> None:
         title_context = _validated_llm_runtime(event.runtime)
         if (
             event.context.metadata.get("webui") is not True
@@ -877,7 +878,12 @@ class WebuiTurnCoordinator:
                     metadata=event.context.metadata,
                 )
 
-        self.schedule_background(_generate_title_and_notify())
+        lease = title_context.lease()
+        try:
+            lease.bind(self.schedule_background(_generate_title_and_notify()))
+        except BaseException:
+            await lease.aclose()
+            raise
 
     async def _publish_session_metadata_updated(
         self,

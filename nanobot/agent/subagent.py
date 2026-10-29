@@ -568,28 +568,33 @@ class SubagentManager:
             origin_message_id=origin_message_id,
             origin_turn_id=origin_turn_id,
         )
+        lease = runtime.lease()
         self._admitting += 1
         try:
-            if self.sessions is not None:
-                admission = asyncio.create_task(self.sessions.create(status, policy=session_policy))
-                try:
-                    child = await shield_and_drain(admission)
-                except asyncio.CancelledError:
-                    if not admission.cancelled() and admission.exception() is None:
-                        child = admission.result()
-                        await shield_and_drain(self.sessions.sessions.state.delete(
-                            child.key, expected_generation=child.generation,
-                        ))
-                    raise
-            else:
-                child = Session(key=SubagentSessions.key(task_id), policy=session_policy or SessionPolicy())
-                child.add_message("user", task)
-        finally:
-            self._admitting -= 1
-        if self._closed:
-            if self.sessions is not None:
-                await self.sessions.sessions.state.delete(child.key, expected_generation=child.generation)
-            raise SubagentControlError("subagent manager is closed")
+            try:
+                if self.sessions is not None:
+                    admission = asyncio.create_task(self.sessions.create(status, policy=session_policy))
+                    try:
+                        child = await shield_and_drain(admission)
+                    except asyncio.CancelledError:
+                        if not admission.cancelled() and admission.exception() is None:
+                            child = admission.result()
+                            await shield_and_drain(self.sessions.sessions.state.delete(
+                                child.key, expected_generation=child.generation,
+                            ))
+                        raise
+                else:
+                    child = Session(key=SubagentSessions.key(task_id), policy=session_policy or SessionPolicy())
+                    child.add_message("user", task)
+            finally:
+                self._admitting -= 1
+            if self._closed:
+                if self.sessions is not None:
+                    await self.sessions.sessions.state.delete(child.key, expected_generation=child.generation)
+                raise SubagentControlError("subagent manager is closed")
+        except BaseException:
+            await lease.aclose()
+            raise
         record = _SubagentTask(
             status=status,
             session=child,
@@ -605,6 +610,7 @@ class SubagentManager:
         self._tasks[task_id] = record
         self._publish_status(status)
         execution = asyncio.create_task(self._run_subagent(record))
+        lease.bind(execution)
         self._running_tasks[task_id] = execution
         execution.add_done_callback(partial(self._task_done, record))
         logger.info("Started subagent [{}]: {}", task_id,

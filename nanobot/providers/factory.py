@@ -25,12 +25,19 @@ from nanobot.providers.routing import validate_provider_setup as validate_provid
 
 @dataclass(frozen=True)
 class ProviderSnapshot:
+    """A factory result transferring provider ownership to its runtime resolver.
+
+    Set ``owns_provider=False`` when a loader borrows an externally owned instance.
+    An owned instance must not be returned again after its resolver has retired it.
+    """
+
     provider: LLMProvider
     model: str
     context_window_tokens: int
     signature: tuple[object, ...]
     generation: GenerationSettings | None = None
     model_preset: str | None = None
+    owns_provider: bool = True
 
 
 def _resolve_model_preset(
@@ -308,7 +315,7 @@ def build_provider_snapshot(
         provider=make_provider(config, preset=resolved),
         model=resolved.model,
         context_window_tokens=min([resolved.context_window_tokens, *fallback_windows]),
-        signature=provider_signature(config, preset=resolved),
+        signature=deepcopy(provider_signature(config, preset=resolved)),
         generation=resolved.to_generation_settings(),
         model_preset=selected_preset,
     )

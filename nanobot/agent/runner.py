@@ -306,6 +306,10 @@ class AgentRunner:
         return True
 
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
+        async with spec.runtime.lease():
+            return await self._run_leased(spec)
+
+    async def _run_leased(self, spec: AgentRunSpec) -> AgentRunResult:
         hook = spec.hook or AgentHook()
         has_run_hooks = hook.has_run_hooks()
         messages: list[dict[str, Any]] = []

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Mapping
+from collections import Counter
+from collections.abc import AsyncGenerator, AsyncIterator, Mapping
+from contextlib import asynccontextmanager, nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +42,7 @@ from nanobot.sdk.types import (
     StreamEventType,
     result_from_response,
 )
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.llm_runtime import LLMRuntime
 
 __all__ = [
@@ -85,9 +88,30 @@ class Nanobot:
         self._loop = loop
         self._config = config
         self._mcp_provider = mcp_provider
+        self._runs: Counter[asyncio.Task[object]] = Counter()
+        self._closed = False
+        self._close_lock = asyncio.Lock()
         self.sessions = SessionClient(loop)
         self.memory = MemoryClient(loop)
         self.runtime = RuntimeClient(loop)
+
+    @asynccontextmanager
+    async def _execution(self) -> AsyncGenerator[None, None]:
+        if self._closed:
+            raise RuntimeError("Nanobot is closed")
+        task = asyncio.current_task()
+        if task is not None:
+            self._runs[task] += 1
+        try:
+            yield
+        finally:
+            if task is not None:
+                self._execution_finished(task)
+
+    def _execution_finished(self, task: asyncio.Task[object]) -> None:
+        self._runs[task] -= 1
+        if not self._runs[task]:
+            del self._runs[task]
 
     @classmethod
     def from_config(
@@ -174,6 +198,8 @@ class Nanobot:
             model: Override the model for this run only.
             model_preset: Override the model preset for this run only.
         """
+        if self._closed:
+            raise RuntimeError("Nanobot is closed")
         capture = SDKCaptureHook()
         per_run_hooks = [capture, *(hooks or [])]
         runtime = self._loop.runtime_resolver.resolve_override(
@@ -192,15 +218,16 @@ class Nanobot:
         )
         if runtime is not None:
             kwargs["runtime"] = runtime
-        if self._mcp_provider is not None:
-            await self._mcp_provider.connect()
-        response = await self._loop.process_direct(
-            message,
-            **kwargs,
-            hooks=per_run_hooks,
-        )
+        async with self._execution(), (runtime.lease() if runtime is not None else nullcontext()):
+            if self._mcp_provider is not None:
+                await self._mcp_provider.connect()
+            response = await self._loop.process_direct(
+                message,
+                **kwargs,
+                hooks=per_run_hooks,
+            )
 
-        return result_from_response(response, capture)
+            return result_from_response(response, capture)
 
     async def run_streamed(
         self,
@@ -218,6 +245,8 @@ class Nanobot:
         model_preset: str | None = None,
     ) -> RunStream:
         """Start a streamed run and return a handle for events and final result."""
+        if self._closed:
+            raise RuntimeError("Nanobot is closed")
         override_runtime = self._loop.runtime_resolver.resolve_override(
             model=model,
             model_preset=model_preset,
@@ -304,7 +333,12 @@ class Nanobot:
             finally:
                 await emitter.close()
 
+        lease = override_runtime.lease() if override_runtime is not None else None
         task = asyncio.create_task(_run())
+        if lease is not None:
+            lease.bind(task)
+        self._runs[task] += 1
+        task.add_done_callback(self._execution_finished)
         return RunStream(task, queue)
 
     async def stream(
@@ -345,12 +379,23 @@ class Nanobot:
                 await run.aclose()
 
     async def aclose(self) -> None:
-        """Release resources held by this instance."""
-        try:
-            await self._loop.aclose()
-        finally:
-            if self._mcp_provider is not None:
-                await self._mcp_provider.aclose()
+        """Cancel this SDK instance's runs, drain them, then close owned resources."""
+        if asyncio.current_task() in self._runs:
+            raise RuntimeError("close Nanobot outside an active run")
+        async with self._close_lock:
+            self._closed = True
+            tasks = tuple(self._runs)
+            for task in tasks:
+                task.cancel()
+            try:
+                if tasks:
+                    await shield_and_drain(asyncio.gather(*tasks, return_exceptions=True))
+            finally:
+                try:
+                    await self._loop.aclose()
+                finally:
+                    if self._mcp_provider is not None:
+                        await self._mcp_provider.aclose()
 
     async def __aenter__(self) -> Nanobot:
         return self

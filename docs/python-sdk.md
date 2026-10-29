@@ -534,7 +534,7 @@ Use the exported constants instead of hard-coded strings when possible:
 
 ### `await bot.aclose()`
 
-Release resources held by the SDK instance, including tool connections. The async context manager calls this automatically:
+Cancel this SDK instance's active runs, wait for their cleanup, then release loop-owned resources and MCP connections. Call it from application teardown, not from a hook inside an active run. A closed instance cannot start new runs. The async context manager calls this automatically:
 
 ```python
 async with Nanobot.from_config() as bot:
@@ -552,6 +552,22 @@ async with Nanobot.from_config() as bot:
 | `stop_reason` | `str \| None` | Why the run stopped, such as `"completed"` or `"max_iterations"`. |
 | `error` | `str \| None` | Error text when the run failed inside the agent runtime. |
 | `metadata` | `dict` | Outbound metadata such as latency. |
+
+### Provider resource ownership
+
+Reuse a `Nanobot` instance for related work. Unchanged default/preset configurations and consecutive equivalent model overrides reuse provider clients. When a configuration is replaced, its provider leaves the relevant cache and closes after every execution using it has finished, including queued child work. Closing a streamed request releases that request's response without closing a provider still eligible for reuse.
+
+For low-level integrations, `AgentLoop(provider=..., ...)` and `AgentLoop.from_config(..., provider=...)` borrow the injected provider by default: its external owner must close it. Pass `owns_provider=True` to transfer that responsibility. Providers constructed by `from_config` are owned automatically. Custom snapshot loaders transfer ownership by default; return `ProviderSnapshot(..., owns_provider=False)` for an externally owned provider, and do not return an already retired owned instance again. Bedrock similarly borrows an explicitly supplied SDK client.
+
+Runtime selection values are borrowed, immutable settings, not permanent ownership of a connection. If you retain an `LLMRuntime` from a resolver or `loop.llm_runtime()` across awaits, pin it before yielding and keep the lease for the entire operation:
+
+```python
+runtime = loop.llm_runtime()
+async with runtime.lease():
+    await run_with_captured_runtime(runtime)
+```
+
+Ordinary `bot.run`, `bot.run_streamed`, and `loop.process_direct` callers do not need to manage leases. Runtimes derived with generation overrides share the same provider lifetime.
 
 ## Session, Memory, And Runtime Helpers
 

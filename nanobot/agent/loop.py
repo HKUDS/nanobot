@@ -10,7 +10,7 @@ import os
 import time
 import weakref
 from collections.abc import Coroutine, Iterable, Mapping
-from contextlib import AbstractContextManager, ExitStack, nullcontext, suppress
+from contextlib import AbstractContextManager, AsyncExitStack, ExitStack, nullcontext, suppress
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -156,6 +156,7 @@ class TurnContext:
     delivery: TurnDelivery
     original_user_text: str | None = None
     session: Session | None = None
+    runtime_scope: AsyncExitStack = field(default_factory=AsyncExitStack, repr=False)
 
     history: list[dict[str, Any]] = field(default_factory=list)
     transcript_input: TranscriptInput | None = None
@@ -222,6 +223,10 @@ class AgentLoop:
     3. Calls the LLM
     4. Executes tool calls
     5. Sends responses back
+
+    Directly supplied providers are borrowed unless ``owns_provider=True``.
+    ``from_config`` owns the providers it constructs; custom snapshot loaders
+    transfer ownership through ``ProviderSnapshot.owns_provider``.
     """
 
     @property
@@ -316,6 +321,7 @@ class AgentLoop:
         local_trigger_store: LocalTriggerStore | None = None,
         idle_compact_check_interval_seconds: int = 0,
         recovery_admission: RecoveryAdmission | None = None,
+        owns_provider: bool = False,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -351,6 +357,7 @@ class AgentLoop:
                 context_window_tokens=initial_context_window,
                 snapshot_signature=provider_signature,
             ),
+            owns_provider=owns_provider,
             model_presets=configured_presets,
             preset_catalog_loader=preset_catalog_loader,
             configured_default_preset=model_preset,
@@ -491,7 +498,9 @@ class AgentLoop:
                 config.workspace_path,
                 sessions_root=data_dir / "sessions" if data_dir is not None else None,
             )
-        provider = extra.pop("provider", None) or make_provider(config)
+        provider = extra.pop("provider", None)
+        owns_provider = extra.pop("owns_provider", provider is None)
+        provider = provider or make_provider(config)
         resolved = config.resolve_preset()
         model = extra.pop("model", None) or resolved.model
         context_window_tokens = extra.pop("context_window_tokens", None) or resolved.context_window_tokens
@@ -503,6 +512,7 @@ class AgentLoop:
         return cls(
             bus=bus,
             provider=provider,
+            owns_provider=owns_provider,
             workspace=config.workspace_path,
             model=model,
             max_iterations=defaults.max_tool_iterations,
@@ -1834,7 +1844,7 @@ class AgentLoop:
                 task.get_name(),
             )
 
-    def schedule_background(self, coro: Coroutine[Any, Any, Any]) -> None:
+    def schedule_background(self, coro: Coroutine[Any, Any, Any]) -> asyncio.Task[object]:
         """Schedule a coroutine as a tracked background task (drained on shutdown)."""
         try:
             self.bus.admission.check()
@@ -1844,6 +1854,7 @@ class AgentLoop:
         task = asyncio.create_task(coro)
         self._background_tasks.add(task)
         task.add_done_callback(self._background_task_done)
+        return task
 
     def stop(self) -> None:
         """Stop the agent loop."""
@@ -1950,18 +1961,19 @@ class AgentLoop:
 
             ctx.events = EventSink(track_output, ctx.events.accepts)
 
-        with logger.contextualize(turn_id=ctx.turn_id, session_key=ctx.session_key):
-            await self._run_turn_stage(ctx, "restore", self._restore_turn)
-            await self._run_turn_stage(ctx, "compact", self._compact_session)
-            if await self._run_turn_stage(ctx, "command", self._dispatch_command):
-                self._log_turn_completion(ctx, outcome="command")
+        async with ctx.runtime_scope:
+            with logger.contextualize(turn_id=ctx.turn_id, session_key=ctx.session_key):
+                await self._run_turn_stage(ctx, "restore", self._restore_turn)
+                await self._run_turn_stage(ctx, "compact", self._compact_session)
+                if await self._run_turn_stage(ctx, "command", self._dispatch_command):
+                    self._log_turn_completion(ctx, outcome="command")
+                    return ctx.outbound
+                await self._run_turn_stage(ctx, "build", self._build_turn)
+                await self._run_turn_stage(ctx, "run", self._run_turn)
+                await self._run_turn_stage(ctx, "save", self._persist_turn)
+                await self._run_turn_stage(ctx, "respond", self._prepare_outbound)
+                self._log_turn_completion(ctx)
                 return ctx.outbound
-            await self._run_turn_stage(ctx, "build", self._build_turn)
-            await self._run_turn_stage(ctx, "run", self._run_turn)
-            await self._run_turn_stage(ctx, "save", self._persist_turn)
-            await self._run_turn_stage(ctx, "respond", self._prepare_outbound)
-            self._log_turn_completion(ctx)
-            return ctx.outbound
 
     async def _run_turn_stage(
         self,
@@ -2207,6 +2219,7 @@ class AgentLoop:
         if runtime is None:
             runtime = await self.runtime_for_session(session)
             ctx.runtime = runtime
+        await ctx.runtime_scope.enter_async_context(runtime.lease())
         if ctx.session_key.startswith("dream:"):
             logger.info(
                 "Dream run using model={} (preset={})",
@@ -2698,7 +2711,7 @@ class AgentLoop:
         with self.bus.admission.activity():
             temporary_parent = False
             try:
-                async with lock:
+                async with (runtime.lease() if runtime is not None else nullcontext()), lock:
                     kwargs: dict[str, Any] = {
                         "session_key": session_key,
                         "on_progress": on_progress,

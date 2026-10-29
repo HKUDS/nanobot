@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
 from typing import Any
 
 import pytest
@@ -359,3 +361,69 @@ async def test_chat_error_maps_retry_metadata() -> None:
     assert result.error_should_retry is True
     assert result.error_code == "throttlingexception"
     assert result.retry_after == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["chat", "chat_stream"])
+async def test_cancelled_bedrock_call_drains_worker_and_closes_late_stream(monkeypatch, operation):
+    loop = asyncio.get_running_loop()
+    started = asyncio.Event()
+    release = threading.Event()
+    stream_closed = threading.Event()
+    client_closed = threading.Event()
+
+    class Stream:
+        def __iter__(self):
+            return iter([])
+
+        def close(self):
+            stream_closed.set()
+
+    class Client:
+        def converse(self, **kwargs):
+            loop.call_soon_threadsafe(started.set)
+            assert release.wait(5)
+            assert not client_closed.is_set()
+            return {}
+
+        def converse_stream(self, **kwargs):
+            self.converse(**kwargs)
+            return {"stream": Stream()}
+
+        def close(self):
+            client_closed.set()
+
+    client = Client()
+    monkeypatch.setattr(BedrockProvider, "_make_client", lambda self: client)
+    provider = BedrockProvider()
+    pending = asyncio.create_task(getattr(provider, operation)(messages=[{"role": "user", "content": "fixture"}]))
+    try:
+        await asyncio.wait_for(started.wait(), 5)
+        pending.cancel()
+        checkpoint = loop.create_future()
+        loop.call_soon(checkpoint.set_result, None)
+        await checkpoint
+        assert not pending.done()  # Cancellation must not abandon the running worker.
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(pending, 5)
+        assert stream_closed.is_set() is (operation == "chat_stream")
+        await provider.aclose()
+        assert client_closed.is_set()
+    finally:
+        release.set()
+        await asyncio.gather(pending, return_exceptions=True)
+        await provider.aclose()
+
+
+@pytest.mark.asyncio
+async def test_bedrock_injected_client_is_borrowed():
+    client_closed = threading.Event()
+
+    class Client:
+        def close(self):
+            client_closed.set()
+
+    provider = BedrockProvider(client=Client())
+    await provider.aclose()
+    assert not client_closed.is_set()
