@@ -82,6 +82,13 @@ async def test_real_stop_and_hard_deadline_are_not_observer_success(tmp_path: Pa
         if responses == 2:
             output = next(row["content"] for row in kwargs["messages"] if row["role"] == "tool")
             session_id = output.split("session_id: ")[1].splitlines()[0]
+            if outcome == "cancelled" and "before stop" not in output:
+                # Stop only after this real child produced the partial output we
+                # promise to preserve; a 100ms initial wait is not a readiness gate.
+                ready = await ExecSessionTool(manager=manager).execute(
+                    session_id=session_id, wait_for="before stop", timeout_ms=5000,
+                )
+                assert "before stop" in ready
             action = {"terminate": True} if outcome == "cancelled" else {"until_exit": True, "timeout_ms": 3000}
             return LLMResponse(content="", tool_calls=[ToolCallRequest(id="stop", name="exec_session", arguments={"session_id": session_id, **action})])
         return LLMResponse(content="Observed.")

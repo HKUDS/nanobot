@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 import shlex
-import subprocess
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -30,7 +29,10 @@ from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 def python_command(code: str) -> str:
     argv = [sys.executable, "-u", "-c", code]
-    return subprocess.list2cmdline(argv) if sys.platform == "win32" else shlex.join(argv)
+    if sys.platform == "win32":
+        # ExecTool uses PowerShell, not cmd.exe's list2cmdline quoting rules.
+        return "& " + " ".join("'" + arg.replace("'", "''") + "'" for arg in argv)
+    return shlex.join(argv)
 
 
 async def observed_command(
