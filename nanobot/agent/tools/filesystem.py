@@ -21,6 +21,7 @@ from nanobot.agent.tools.schema import (
     tool_parameters_schema,
 )
 from nanobot.security.workspace_access import current_tool_workspace
+from nanobot.utils.document import decode_saved_text
 from nanobot.utils.file_edit_events import FileDiff, FileEditResult, display_file_edit_path
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 
@@ -970,8 +971,10 @@ class EditFileTool(_FsTool):
                 return self._format_summary(fp, content, fp.read_bytes().decode("utf-8"))
 
             raw = fp.read_bytes()
-            uses_crlf = b"\r\n" in raw
-            content = raw.decode("utf-8").replace("\r\n", "\n")
+            text, encoding = decode_saved_text(raw)
+            # UTF-16 stores CRLF as NUL-separated bytes, so detect it after decoding.
+            uses_crlf = "\r\n" in text
+            content = text.replace("\r\n", "\n")
             norm_old = old_text.replace("\r\n", "\n")
             matches = _find_matches(content, norm_old)
 
@@ -1062,7 +1065,7 @@ class EditFileTool(_FsTool):
             if uses_crlf:
                 new_content = new_content.replace("\n", "\r\n")
 
-            fp.write_bytes(new_content.encode("utf-8"))
+            fp.write_bytes(new_content.encode(encoding))
             self._file_states.record_write(fp)
             return self._format_summary(fp, content, new_content)
         except PermissionError as e:
