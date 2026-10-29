@@ -1,9 +1,17 @@
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 from loguru import logger
 
+from agent.execution_activity_helpers import python_command
+from agent.runner_helpers import make_run_spec
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentTurnHookContext
+from nanobot.agent.runner import AgentRunner
+from nanobot.agent.tools.exec_session import ExecSessionManager
+from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
-from nanobot.providers.base import ToolCallRequest
+from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.utils.progress_events import output_events
 
 
@@ -19,7 +27,7 @@ class RecordingHook(AgentHook):
 
 @pytest.mark.parametrize("ephemeral", [True, False])
 @pytest.mark.parametrize("hosted", [True, False])
-async def test_tool_log_privacy_preserves_user_visible_progress(ephemeral, hosted) -> None:
+async def test_tool_log_privacy_preserves_user_visible_progress(tmp_path, ephemeral, hosted) -> None:
     secret = "synthetic-private-argument-测试"
     events: list[dict] = []
 
@@ -29,9 +37,14 @@ async def test_tool_log_privacy_preserves_user_visible_progress(ephemeral, hoste
     hook = build_agent_turn_hook(AgentTurnHookSpec(
         ephemeral=ephemeral, events=output_events(on_progress=on_progress),
     ))
-    context = AgentHookContext(iteration=1, messages=[], tool_calls=[
-        ToolCallRequest(id="private-call", name="web_search", arguments={"query": secret}),
-    ])
+    command = python_command(f"print({secret!r})")
+    name = "web_search" if hosted else "exec"
+    arguments = {"query": secret} if hosted else {"command": command, "yield_time_ms": 5000}
+    call = ToolCallRequest(id="private-call", name=name, arguments=arguments)
+    context = AgentHookContext(iteration=1, messages=[], tool_calls=[call])
+    manager = ExecSessionManager()
+    tools = ToolRegistry()
+    tools.register(ExecTool(working_dir=str(tmp_path), max_runtime=10, session_manager=manager))
     logs: list[str] = []
     sink = logger.add(lambda message: logs.append(str(message)), format="{message}")
     try:
@@ -41,12 +54,25 @@ async def test_tool_log_privacy_preserves_user_visible_progress(ephemeral, hoste
                 "arguments": {"query": secret},
             })
         else:
-            await hook.before_execute_tools(context)
+            provider = MagicMock()
+            provider.chat_stream_with_retry = AsyncMock(side_effect=[
+                LLMResponse(content="", tool_calls=[call]), LLMResponse(content="Observed."),
+            ])
+            await AgentRunner().run(make_run_spec(
+                provider, initial_messages=[], tools=tools, model="test", max_iterations=2,
+                max_tool_result_chars=50_000, hook=hook,
+            ))
     finally:
         logger.remove(sink)
+        await manager.close_all()
+        assert not manager.has_pending_work
 
-    assert events[0]["arguments"] == {"query": secret}
-    assert "web_search" in "\n".join(logs)
+    assert len(events) == 1
+    assert events[0]["arguments"] == ({"query": secret} if hosted else {"command": command})
+    if not hosted:
+        assert events[0]["execution"]["state"] == "succeeded"
+        assert secret in events[0]["result"]
+    assert name in "\n".join(logs)
     assert (secret in "\n".join(logs)) is not ephemeral
 
 

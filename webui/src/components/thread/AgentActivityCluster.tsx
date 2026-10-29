@@ -128,8 +128,8 @@ function countActivity(
         toolCalls += m.traceDetail.traceCount;
         continue;
       }
-      const lines = traceLines(m);
-      for (const line of lines) {
+      const entries = activityTraceEntries(m);
+      for (const { line } of entries) {
         if (!isCliRunTraceLine(line) && !isMcpRunTraceLine(line)) {
           toolCalls += 1;
         }
@@ -512,6 +512,33 @@ function traceLines(message: UIMessage): string[] {
   return message.content.trim() ? [message.content] : [];
 }
 
+interface ActivityTraceEntry {
+  key: string;
+  line: string;
+  event?: ToolProgressEvent;
+}
+
+function activityTraceEntries(message: UIMessage): ActivityTraceEntry[] {
+  const lines = traceLines(message);
+  const legacyEntries = lines.map((line, index) => ({ key: `trace:${index}`, line }));
+  if (!message.toolEvents?.some((event) => event.execution)) return legacyEntries;
+
+  // Public observations own their rows, state and output by call ID. The string
+  // traces are only display shadows; retain unrelated legacy text as before.
+  const eventEntries: ActivityTraceEntry[] = [];
+  const eventTraceKeys = new Set<string>();
+  for (const [index, event] of (message.toolEvents ?? []).entries()) {
+    const line = formatToolCallTrace(event);
+    if (!line) continue;
+    eventEntries.push({ key: event.call_id ? `call:${event.call_id}` : `event:${index}`, line, event });
+    eventTraceKeys.add(canonicalToolTrace(line));
+  }
+  return [
+    ...legacyEntries.filter(({ line }) => !eventTraceKeys.has(canonicalToolTrace(line))),
+    ...eventEntries,
+  ];
+}
+
 const ActivityMessageTimeline = memo(function ActivityMessageTimeline({
   messages,
   active,
@@ -609,11 +636,11 @@ function ActivityModelMessage({
 }
 
 function ActivityTraceList({
-  lines,
+  entries,
   active,
   stateByLine,
 }: {
-  lines: string[];
+  entries: ActivityTraceEntry[];
   active: boolean;
   stateByLine?: Map<string, GenericToolState>;
 }) {
@@ -631,12 +658,11 @@ function ActivityTraceList({
     genericItems = [];
   };
 
-  lines.forEach((line, index) => {
+  entries.forEach(({ key, line, event }, index) => {
+    const explicitState = event ? genericToolState(event) : stateByLine?.get(canonicalToolTrace(line));
     const trace = parseGenericToolTrace(line);
     if (trace) {
-      const key = canonicalToolTrace(line);
-      const explicitState = stateByLine?.get(key);
-      const fallbackStatus: GenericToolStatus = active && index === lines.length - 1 ? "running" : "done";
+      const fallbackStatus: GenericToolStatus = active && index === entries.length - 1 ? "running" : "done";
       const item: GenericToolRunItem = {
         trace,
         status: explicitState?.status === "running" && !active ? "done" : explicitState?.status ?? fallbackStatus,
@@ -651,10 +677,10 @@ function ActivityTraceList({
     flushGenericItems(String(index));
     items.push(
       <ActivityTraceRow
-        key={`${line}-${index}`}
+        key={key}
         line={line}
-        active={active && index === lines.length - 1}
-        state={stateByLine?.get(canonicalToolTrace(line))}
+        active={active && index === entries.length - 1}
+        state={explicitState}
       />,
     );
   });
@@ -678,29 +704,30 @@ function ActivityTraceTimeline({
   cliAppsByName: Map<string, CliAppInfo>;
   mcpPresetsByName: Map<string, McpPresetInfo>;
 }) {
-  const lines = traceLines(message);
+  const entries = activityTraceEntries(message);
   const cliRunsByLine = cliRunMapByTraceLine(message);
   const mcpRunsByLine = mcpRunMapByTraceLine(message);
   const webSearchRunsByLine = webSearchRunsByTraceLine(message.toolEvents ?? []);
   const genericStateByLine = genericToolStateByTraceLine(message);
   const renderedRunKeys = new Set<string>();
   const items: ReactNode[] = [];
-  let normalLines: string[] = [];
+  let normalEntries: ActivityTraceEntry[] = [];
 
   const flushNormalLines = (suffix: string) => {
-    if (!normalLines.length) return;
+    if (!normalEntries.length) return;
     items.push(
       <ActivityTraceList
         key={`${message.id}:trace:${suffix}`}
-        lines={normalLines}
+        entries={normalEntries}
         active={active}
         stateByLine={genericStateByLine}
       />,
     );
-    normalLines = [];
+    normalEntries = [];
   };
 
-  lines.forEach((line, index) => {
+  entries.forEach((entry, index) => {
+    const { line } = entry;
     const traceKey = canonicalToolTrace(line);
     const webSearchRun = webSearchRunsByLine.get(traceKey);
     if (webSearchRun) {
@@ -746,7 +773,7 @@ function ActivityTraceTimeline({
       return;
     }
 
-    normalLines.push(line);
+    normalEntries.push(entry);
   });
 
   flushNormalLines("tail");
@@ -868,23 +895,28 @@ interface GenericToolState {
 
 const GENERIC_TOOL_STATUS_RANK: Record<GenericToolStatus, number> = { running: 1, done: 2, error: 3 };
 
+function genericToolState(event: ToolProgressEvent): GenericToolState {
+  const status: GenericToolStatus = event.phase === "error"
+    ? "error"
+    : event.phase === "end"
+      ? "done"
+      : "running";
+  return {
+    status,
+    execution: event.execution,
+    error: status === "error" ? toolProgressError(event.error) : undefined,
+    result: event.result,
+  };
+}
+
 function genericToolStateByTraceLine(message: UIMessage): Map<string, GenericToolState> {
   const map = new Map<string, GenericToolState>();
   for (const event of message.toolEvents ?? []) {
+    if (event.execution) continue;
     const line = formatToolCallTrace(event);
     if (!line) continue;
     const key = canonicalToolTrace(line);
-    const status: GenericToolStatus = event.phase === "error"
-      ? "error"
-      : event.phase === "end"
-        ? "done"
-        : "running";
-    const next = {
-      status,
-      execution: event.execution,
-      error: status === "error" ? toolProgressError(event.error) : undefined,
-      result: event.result,
-    };
+    const next = genericToolState(event);
     const previous = map.get(key);
     if (!previous || GENERIC_TOOL_STATUS_RANK[next.status] >= GENERIC_TOOL_STATUS_RANK[previous.status]) {
       map.set(key, next);

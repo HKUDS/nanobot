@@ -3571,7 +3571,7 @@ async def test_compaction_notices_are_tracked_per_compaction_id() -> None:
 @pytest.mark.asyncio
 async def test_observed_command_activity_at_telegram_adapter_boundary(tmp_path) -> None:
     """Real execution/events, actual adapter; only the external Telegram app is fake."""
-    from tests.agent.execution_activity_helpers import observed_command
+    from agent.execution_activity_helpers import observed_command
 
     progress, _result, _transcript, session_id = await observed_command(tmp_path, exit_code=7)
     channel = TelegramChannel(TelegramConfig(

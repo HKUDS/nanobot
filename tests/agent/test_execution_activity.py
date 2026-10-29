@@ -6,17 +6,18 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agent.execution_activity_helpers import observed_command, python_command
 from agent.runner_helpers import make_run_spec
 from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.agent.runner import AgentRunner
 from nanobot.agent.tools.exec_session import ExecSessionManager, ExecSessionTool
+from nanobot.agent.tools.filesystem import ReadFileTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.events import EventSink
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.utils.tool_hints import format_tool_event_hints
-from tests.agent.execution_activity_helpers import observed_command, python_command
 
 
 @pytest.mark.parametrize("exit_code", [0, 7])
@@ -47,7 +48,12 @@ async def test_observations_share_activity_and_preserve_model_and_history(tmp_pa
     assert session_id in model_results[-1]  # Model control diagnostics remain unchanged.
     assert all("tool_events" not in row for row in result.messages)
     retained = [tool for row in transcript for tool in row.get("tool_events", [])]
-    assert retained == [tool for tool in payloads if not (tool["call_id"] == "read" and tool["phase"] == "start")]
+    # History keeps the read at its first appearance, not its deferred completion.
+    assert [tool for tool in retained if "execution" in tool] == executions
+    assert [tool for tool in retained if "execution" not in tool] == [
+        tool for tool in payloads
+        if "execution" not in tool and not (tool["call_id"] == "read" and tool["phase"] == "start")
+    ]
     text = [format_tool_event_hints(event.tool_events or []) for event in progress if event.tool_hint]
     assert len([hint for hint in text if hint]) == 4  # launch, ordinary read, outcome, necessary error
     assert "Command completed" in text[-2] if exit_code == 0 else "Command failed (exit 7)" in text[-2]
@@ -200,3 +206,50 @@ async def test_invalid_control_parameters_keep_a_public_diagnostic_not_model_gui
     model_observation = next(row["content"] for row in result.messages if row["role"] == "tool")
     assert model_observation.startswith(diagnostic)
     assert "[Consider this result in the context of the user's goal" in model_observation
+
+
+@pytest.mark.parametrize("state", ["succeeded", "failed", "running"])
+async def test_serial_execution_fact_precedes_the_next_tool_start(tmp_path: Path, state: str):
+    manager = ExecSessionManager()
+    tools = ToolRegistry()
+    tools.register(ExecTool(working_dir=str(tmp_path), max_runtime=10, session_manager=manager))
+    tools.register(ReadFileTool(workspace=tmp_path))
+    (tmp_path / "ordinary.txt").write_text("ordinary output", encoding="utf-8")
+    code = "import sys; print('command output', flush=True); " + (
+        "sys.stdin.read()" if state == "running" else f"sys.exit({7 if state == 'failed' else 0})"
+    )
+    calls = [
+        ToolCallRequest(id="first-exec", name="exec", arguments={
+            "command": python_command(code), "yield_time_ms": 1000 if state == "running" else 5000,
+        }),
+        ToolCallRequest(id="second-read", name="read_file", arguments={"path": "ordinary.txt"}),
+    ]
+    provider = MagicMock()
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="", tool_calls=calls), LLMResponse(content="Observed."),
+    ])
+    progress = []
+
+    async def publish(event):
+        if isinstance(event, ProgressEvent):
+            progress.append(event)
+
+    try:
+        await AgentRunner().run(make_run_spec(
+            provider, initial_messages=[], tools=tools, model="test", max_iterations=2,
+            concurrent_tools=False, max_tool_result_chars=50_000,
+            hook=AgentProgressHook(EventSink(publish=publish)),
+        ))
+        payloads = [tool for event in progress for tool in event.tool_events or []]
+        assert [(tool["name"], tool["phase"]) for tool in payloads] == [
+            ("exec", {"succeeded": "end", "failed": "error", "running": "start"}[state]),
+            ("read_file", "start"), ("read_file", "end"),
+        ]
+        assert payloads[0]["execution"]["state"] == state
+        assert "command output" in payloads[0]["result"]
+        assert "ordinary output" in payloads[-1]["result"]
+        assert [event.tool_hint for event in progress] == [True, True, False]
+        assert manager.has_pending_work is (state == "running")
+    finally:
+        await manager.close_all()
+        assert not manager.has_pending_work

@@ -90,6 +90,43 @@ describe("public execution observations", () => {
     detailView.unmount();
   });
 
+  it.each([
+    ["failed", "succeeded", "Command failed", "Ran command"],
+    ["succeeded", "running", "Ran command", "Running at last check"],
+  ] as const)("keeps same-command %s and %s identities, states, output and counts in live, summary and detail", async (first, second, firstLabel, secondLabel) => {
+    await setAppLanguage("en");
+    const firstEvent = { ...observation(first, 1), call_id: "execution:first", result: "first output" };
+    const secondEvent = { ...observation(second, 1), call_id: "execution:second", result: "second output" };
+    const events = [wire(firstEvent, 1), wire(secondEvent, 2)];
+    const assertRows = (thread: ThreadTranscript, output: boolean) => {
+      const view = show(thread);
+      const rows = screen.getAllByTestId("activity-step");
+      expect(rows).toHaveLength(2);
+      expect(rows[0].textContent).toContain(firstLabel);
+      expect(rows[1].textContent).toContain(secondLabel);
+      if (output) {
+        expect(rows[0].closest("details")?.querySelector("pre")?.textContent).toBe("first output");
+        expect(rows[1].closest("details")?.querySelector("pre")?.textContent).toBe("second output");
+      }
+      const messages = coalesceActivityMessages(thread.messages);
+      expect(messages.flatMap((message) => message.toolEvents ?? []).map((event) => event.call_id))
+        .toEqual(["execution:first", "execution:second"]);
+      expect(messages.flatMap((message) => message.traces ?? [])).toHaveLength(2);
+      view.unmount();
+    };
+    const live = new ThreadTranscript();
+    for (const event of events) live.project(event, { createId: () => "same-command", now: 10 });
+    assertRows(live, true);
+    const ref = { ref: "same-command-detail", bytes: 40_000, traceCount: 2 };
+    const summary = { ...wire(firstEvent, 1), trace_detail: ref,
+      tool_events: [{ ...firstEvent, result: null }, { ...secondEvent, result: null }] };
+    const refreshed = new ThreadTranscript();
+    expect(refreshed.accept(history([summary]), refreshed.begin("initial"))).toBe(true);
+    assertRows(refreshed, false);
+    refreshed.expandDetail(ref.ref, events);
+    assertRows(refreshed, true);
+  });
+
   it("preserves the existing current-time presentation for an observed successful command", async () => {
     await setAppLanguage("en");
     const thread = new ThreadTranscript();

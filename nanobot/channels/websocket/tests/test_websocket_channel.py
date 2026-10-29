@@ -6970,8 +6970,9 @@ async def test_authenticated_execution_observations_live_reconnect_and_history(
 ) -> None:
     from urllib.parse import quote
 
+    from agent.execution_activity_helpers import observed_command
+
     from nanobot.bus.outbound_events import outbound_message_for_event
-    from tests.agent.execution_activity_helpers import observed_command
 
     chat_id = "execution-wire"
     key = f"websocket:{chat_id}"

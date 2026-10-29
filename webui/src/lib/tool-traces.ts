@@ -150,8 +150,10 @@ export function mergeToolProgressTraceLines(
   const nonEventTraces = candidates.filter(
     (line) => !eventTraceKeys.has(canonicalToolTrace(line)),
   );
-  return mergeUniqueToolTraceLines(
-    nonEventTraces,
-    toolTraceLinesFromEvents(mergedEvents),
-  ).traces;
+  const eventTraces = toolTraceLinesFromEvents(mergedEvents);
+  if (mergedEvents.some((event) => event.execution)) {
+    // Public observation rows were already merged by call ID, not display text.
+    return [...nonEventTraces, ...eventTraces];
+  }
+  return mergeUniqueToolTraceLines(nonEventTraces, eventTraces).traces;
 }

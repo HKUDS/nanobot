@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
+from agent.runner_helpers import make_run_spec
 from nanobot.agent.hook import CompositeHook
 from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.agent.runner import AgentRunner, AgentRunResult
@@ -25,7 +26,6 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.events import AgentEvent, EventSink
 from nanobot.providers.base import LLMResponse, ToolCallRequest
-from tests.agent.runner_helpers import make_run_spec
 
 
 def python_command(code: str) -> str:

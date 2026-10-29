@@ -9,13 +9,13 @@ from typing import Any
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.bus.outbound_events import ProgressEvent, StreamDeltaEvent, StreamEndEvent
 from nanobot.events import NO_EVENTS, EventSink
 from nanobot.providers.base import ToolCallRequest
 from nanobot.utils.helpers import IncrementalThinkExtractor, strip_think
 from nanobot.utils.progress_events import (
-    build_tool_event_finish_payloads,
+    build_tool_event_finish_payload,
     build_tool_event_start_payload,
 )
 
@@ -149,12 +149,32 @@ class AgentProgressHook(AgentHook):
                 tool_hint=True, tool_events=[build_tool_event_start_payload(tool_call)],
             ))
 
+    async def after_execute_tool(
+        self, context: AgentHookContext, tool_call: ToolCallRequest, tool: Any,
+        params: Any, result: Any,
+    ) -> None:
+        if tool_call.id in self._result_owned:
+            await self._emit_result_activity(tool_call, result, is_error=False)
+
     async def on_execute_tool_error(
         self, context: AgentHookContext, tool_call: ToolCallRequest, tool: Any,
         params: Any, error: Any,
     ) -> None:
         if isinstance(tool, Tool) and tool.activity_from_result:
             self._result_owned.add(tool_call.id)
+            if isinstance(error, Exception):
+                error = ToolResult.error(f"Error: {type(error).__name__}: {error}")
+            await self._emit_result_activity(tool_call, error, is_error=True)
+
+    async def _emit_result_activity(
+        self, tool_call: ToolCallRequest, result: Any, *, is_error: bool,
+    ) -> None:
+        if self._publish:
+            payload = build_tool_event_finish_payload(
+                tool_call, result, is_error=is_error, result_owned=True,
+            )
+            if payload is not None:
+                await self._publish(ProgressEvent(tool_hint=True, tool_events=[payload]))
 
     async def emit_reasoning(self, reasoning_content: str | None) -> None:
         """Publish a reasoning chunk; channel plugins decide whether to render."""
@@ -176,13 +196,20 @@ class AgentProgressHook(AgentHook):
             and context.tool_calls
             and context.tool_events
         ):
-            tool_events = build_tool_event_finish_payloads(context, result_owned=self._result_owned)
-            # Keep mixed-tool result order, while text channels receive command
-            # starts/outcomes and necessary control errors through tool-hint policy.
-            for hint, payloads in groupby(
-                tool_events,
-                key=lambda payload: "execution" in payload or payload["call_id"] in self._result_owned,
+            tool_events: list[dict[str, Any]] = []
+            for tool_call, result, event in zip(
+                context.tool_calls, context.tool_results, context.tool_events,
             ):
+                # Result-owned facts were already emitted at the per-tool boundary.
+                if tool_call.id in self._result_owned:
+                    continue
+                payload = build_tool_event_finish_payload(
+                    tool_call, result, is_error=event.get("status") != "ok",
+                    detail=event.get("detail", ""),
+                )
+                if payload is not None:
+                    tool_events.append(payload)
+            for hint, payloads in groupby(tool_events, key=lambda payload: "execution" in payload):
                 await self._publish(ProgressEvent(tool_hint=hint, tool_events=list(payloads)))
         u = context.usage
         logger.debug(

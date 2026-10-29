@@ -1239,8 +1239,9 @@ def test_existing_shell_output_uses_canonical_command_identity_not_bang_text(his
 
 @pytest.mark.asyncio
 async def test_execution_observation_summary_detail_and_reopen_agree(history, tmp_path) -> None:
+    from agent.execution_activity_helpers import observed_command
+
     from nanobot.session.manager import Session, SessionManager
-    from tests.agent.execution_activity_helpers import observed_command
 
     progress, result, transcript, session_id = await observed_command(tmp_path, exit_code=7, padding=9000)
     key = "websocket:execution-observation"

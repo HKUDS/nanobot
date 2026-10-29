@@ -6,7 +6,6 @@ import inspect
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal, TypedDict, cast
 
-from nanobot.agent.hook import AgentHookContext
 from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.execution_observation import ExecutionFinishReason, ExecutionObservation
 from nanobot.bus.outbound_events import (
@@ -16,6 +15,7 @@ from nanobot.bus.outbound_events import (
     StreamEndEvent,
 )
 from nanobot.events import NO_EVENTS, AgentEvent, EventSink
+from nanobot.providers.base import ToolCallRequest
 
 
 def _on_progress_accepts(cb: Callable[..., Any], name: str) -> bool:
@@ -164,43 +164,34 @@ def _execution_payload(observation: ExecutionObservation) -> dict[str, Any]:
     }
 
 
-def build_tool_event_finish_payloads(
-    context: AgentHookContext, *, result_owned: set[str] | None = None,
-) -> list[dict[str, Any]]:
-    payloads: list[dict[str, Any]] = []
-    count = min(len(context.tool_calls), len(context.tool_results), len(context.tool_events))
-    for idx in range(count):
-        tool_call = context.tool_calls[idx]
-        result = context.tool_results[idx]
-        event = context.tool_events[idx]
-        if isinstance(result, ToolResult) and result.execution is not None:
-            payloads.append(_execution_payload(result.execution))
-            continue
-        deferred = str(tool_call.id) in (result_owned or ())
-        status = event.get("status")
-        if deferred and status == "ok":
-            continue
-        phase = "end" if status == "ok" else "error"
-        files, embeds = tool_event_result_extras(result)
-        payload = {
-            "version": 1,
-            "phase": phase,
-            "call_id": str(getattr(tool_call, "id", "") or ""),
-            "name": getattr(tool_call, "name", ""),
-            "arguments": {} if deferred else _tool_event_arguments(tool_call),
-            "result": result if phase == "end" else None,
-            "error": None,
-            "files": files,
-            "embeds": embeds,
-        }
-        if deferred:
-            payload["control_error"] = True
-        if phase == "error":
-            if isinstance(result, ToolResult) and result.public_error is not None:
-                payload["error"] = result.public_error
-            elif isinstance(result, str) and result.strip():
-                payload["error"] = result.strip()
-            else:
-                payload["error"] = str(event.get("detail") or "Tool execution failed")
-        payloads.append(payload)
-    return payloads
+def build_tool_event_finish_payload(
+    tool_call: ToolCallRequest, result: Any, *, is_error: bool,
+    result_owned: bool = False, detail: str = "",
+) -> dict[str, Any] | None:
+    if isinstance(result, ToolResult) and result.execution is not None:
+        return _execution_payload(result.execution)
+    if result_owned and not is_error:
+        return None
+    phase = "error" if is_error else "end"
+    files, embeds = tool_event_result_extras(result)
+    payload = {
+        "version": 1,
+        "phase": phase,
+        "call_id": tool_call.id,
+        "name": tool_call.name,
+        "arguments": {} if result_owned else _tool_event_arguments(tool_call),
+        "result": result if phase == "end" else None,
+        "error": None,
+        "files": files,
+        "embeds": embeds,
+    }
+    if result_owned:
+        payload["control_error"] = True
+    if is_error:
+        if isinstance(result, ToolResult) and result.public_error is not None:
+            payload["error"] = result.public_error
+        elif isinstance(result, str) and result.strip():
+            payload["error"] = result.strip()
+        else:
+            payload["error"] = detail or "Tool execution failed"
+    return payload

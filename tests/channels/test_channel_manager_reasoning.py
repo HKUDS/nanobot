@@ -296,7 +296,7 @@ async def _dispatch_through_final(manager: ChannelManager) -> OutboundMessage:
 async def test_command_observations_respect_existing_delivery_switches(
     manager, tmp_path, send_tool_hints, send_progress,
 ):
-    from tests.agent.execution_activity_helpers import observed_command
+    from agent.execution_activity_helpers import observed_command
 
     progress, _result, _transcript, session_id = await observed_command(tmp_path, exit_code=7)
     channel = manager.channels["mock"]
