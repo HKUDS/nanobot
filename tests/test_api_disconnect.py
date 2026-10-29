@@ -423,25 +423,45 @@ async def test_disconnect_reaps_real_foreground_tool_process(tmp_path, monkeypat
     started = asyncio.Event()
     peer_closed = asyncio.Event()
     peers = []
+    observers = []
     pids = []
+    worker_handle = None
     token = secrets.token_hex(16)
 
+    async def close_peer(writer):
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except ConnectionResetError as exc:
+            if os.name != "nt" or getattr(exc, "winerror", None) != 64:
+                raise
+
     async def observe_process(reader, writer):
-        peers.append(writer)
         try:
             hello = json.loads(await reader.readline())
             assert hello["token"] == token
             pids.append(hello["pid"])
             started.set()
-            # EOF is produced by the actual tool process exiting, not a mock
-            # tool result or a cancellation acknowledgement.
-            assert await reader.read() == b""
+            # Windows Proactor can report a killed peer as WinError 64 instead
+            # of EOF. Neither observation alone proves the process has exited.
+            try:
+                assert await reader.read() == b""
+                record_property("process_transport_close", "eof")
+            except ConnectionResetError as exc:
+                if os.name != "nt" or getattr(exc, "winerror", None) != 64:
+                    raise
+                record_property("process_transport_close", "winerror64")
         finally:
-            writer.close()
-            await writer.wait_closed()
-            peer_closed.set()
+            try:
+                await close_peer(writer)
+            finally:
+                peer_closed.set()
 
-    listener = await asyncio.start_server(observe_process, "127.0.0.1", 0)
+    def accept_process(reader, writer):
+        peers.append(writer)
+        observers.append(asyncio.create_task(observe_process(reader, writer)))
+
+    listener = await asyncio.start_server(accept_process, "127.0.0.1", 0)
     port = listener.sockets[0].getsockname()[1]
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -467,25 +487,44 @@ async def test_disconnect_reaps_real_foreground_tool_process(tmp_path, monkeypat
                 await reached(started)
             except TimeoutError:
                 pytest.fail(f"tool did not start: {provider.messages.get('TOOL', [])[-1:]}")
+            assert len(pids) == 1
+            record_property("owned_tool_pid", pids[0])
+            record_property("loopback_port", port)
+            if os.name == "nt":
+                import _winapi
+
+                # Retain this live worker's identity across exit, avoiding PID
+                # reuse and Windows os.kill(pid, 0)'s termination semantics.
+                worker_handle = _winapi.OpenProcess(_winapi.SYNCHRONIZE, False, pids[0])
+                assert _winapi.WaitForSingleObject(worker_handle, 0) == _winapi.WAIT_TIMEOUT
             assert not peer_closed.is_set()
             await asyncio.wait_for(start_post("BESIDE_TOOL", "independent"), 10)
+            assert not peer_closed.is_set()
             writer.close()
             await writer.wait_closed()
             await reached(finished.setdefault("TOOL", asyncio.Event()))
             await reached(peer_closed)
-            assert len(pids) == 1
-            record_property("owned_tool_pid", pids[0])
-            record_property("loopback_port", port)
-            record_property("process_transport_eof", True)
-            if os.name != "nt":
+            await asyncio.gather(*observers)  # Propagate unexpected observer failures.
+            if worker_handle is not None:
+                assert _winapi.WaitForSingleObject(worker_handle, 0) == _winapi.WAIT_OBJECT_0
+                record_property("worker_handle_signaled", True)
+            else:
                 # After handler settlement, the owned child must be reaped too.
                 with pytest.raises(ProcessLookupError):
                     os.kill(pids[0], 0)
                 record_property("pid_reaped", True)
+            record_property("owned_worker_exited", True)
             await asyncio.wait_for(start_post("AFTER_TOOL", "tool-session"), 10)
+            record_property("following_request_completed", True)
     finally:
-        for peer in peers:
-            peer.close()
-            await peer.wait_closed()
-        listener.close()
-        await listener.wait_closed()
+        try:
+            try:
+                for peer in peers:
+                    await close_peer(peer)
+            finally:
+                await asyncio.gather(*observers)
+        finally:
+            listener.close()
+            await listener.wait_closed()
+            if worker_handle is not None:
+                _winapi.CloseHandle(worker_handle)
