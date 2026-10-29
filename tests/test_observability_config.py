@@ -31,7 +31,7 @@ def test_unrelated_save_keeps_legacy_environment_behavior(tmp_path, observabilit
     config.agents.defaults.bot_name = "renamed"
     save_config(config, path)
 
-    saved = json.loads(path.read_text())
+    saved = json.loads(path.read_text(encoding="utf-8"))
     assert saved["observability"].get("langfuse") is None
     reloaded = load_config(path)
     effective = resolve_langfuse_config(reloaded)
@@ -79,7 +79,7 @@ def test_first_explicit_save_uses_legacy_references_not_resolved_secrets(monkeyp
     config.observability.langfuse = editable
     path = tmp_path / "config.json"
     save_config(config, path)
-    saved = path.read_text()
+    saved = path.read_text(encoding="utf-8")
     assert "legacy-secret" not in saved
     assert "${LANGFUSE_SECRET_KEY}" in saved
     assert resolve_langfuse_config(load_config(path)).base_url == "https://preferred.example"

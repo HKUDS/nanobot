@@ -147,3 +147,14 @@ def test_install_support_preserves_disabled_configuration_and_install_policy(tmp
     assert result["features"][0]["installed"] is True
     assert result["requires_restart"] is True
     assert config_path.read_bytes() == before
+
+
+def test_disabled_save_rejects_unresolved_references_that_would_break_restart(monkeypatch):
+    monkeypatch.delenv("UNSET_TRACE_SECRET", raising=False)
+    config = Config()
+    update = observability.parse_observability_update({
+        "enabled": False, "base_url": "https://langfuse.example", "secret_key": "${UNSET_TRACE_SECRET}",
+    })
+    with pytest.raises(WebUISettingsError, match="langfuse_missing_credentials"):
+        observability.update_observability_settings(config, update)
+    assert config.observability.langfuse is None

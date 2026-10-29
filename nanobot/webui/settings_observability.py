@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import os
+import re
 from typing import Any, Literal, NotRequired, TypedDict, cast
 from urllib.parse import urlsplit
 
@@ -109,6 +111,15 @@ def _valid_base_url(value: str) -> bool:
 
 def update_observability_settings(config: Config, update: LangfuseSettingsUpdate) -> bool:
     candidate, raw = _candidate_config(config, update)
+    # Startup resolves references strictly, including disabled integrations.
+    # Do not persist a draft that would make the next restart fail to load.
+    for value, code in (
+        (raw.base_url, "langfuse_invalid_url"),
+        (raw.public_key, "langfuse_missing_credentials"),
+        (raw.secret_key, "langfuse_missing_credentials"),
+    ):
+        if any(name not in os.environ for name in re.findall(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", value)):
+            raise WebUISettingsError(code)
     effective = resolve_langfuse_config(candidate)
     if raw.enabled:
         if not effective.configured:

@@ -80,7 +80,7 @@ async def test_startup_survives_save_reload_new_session_and_lazy_fallback(monkey
     monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", request)
     try:
         for provider in (before_save.provider, reloaded.provider, new_session):
-            result = await provider.chat([{"role": "user", "content": "hello"}])
+            result = await provider.chat(messages=[{"role": "user", "content": "hello"}])
             assert result.content == "backup answer"
     finally:
         for provider in (before_save.provider, reloaded.provider, new_session):
