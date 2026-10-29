@@ -610,10 +610,9 @@ class GatewayClientLease:
             self.state_path.unlink(missing_ok=True)
 
     def snapshot(self) -> GatewayLeaseSnapshot:
-        """Prune dead clients and return current lifetime state."""
+        """Return current lifetime state without persisting client cleanup."""
         with self.lock:
             state = self._live_state()
-            self._write_or_clear(state)
             return GatewayLeaseSnapshot(
                 auto_stop=bool(state.get("auto_stop")),
                 clients=len(self._clients(state)),
@@ -628,9 +627,11 @@ class GatewayClientLease:
         except Timeout:
             return False
         with transition, self.lifecycle_lock, self.lock:
-            state = self._live_state()
+            state = self._read_state()
+            changed = self._prune_clients(state)
             if not bool(state.get("auto_stop")) or self._clients(state):
-                self._write_or_clear(state)
+                if changed:
+                    self._write_or_clear(state)
                 return False
             state["stopping"] = True
             self._write_state(state)
@@ -708,6 +709,12 @@ class GatewayClientLease:
 
     def _live_state(self) -> dict[str, object]:
         state = self._read_state()
+        self._prune_clients(state)
+        return state
+
+    def _prune_clients(self, state: dict[str, object]) -> bool:
+        """Remove stale clients in memory and report whether the state changed."""
+        normalized = not isinstance(state.get("clients"), dict)
         clients = self._clients(state)
         stale: list[str] = []
         for token, value in clients.items():
@@ -726,7 +733,7 @@ class GatewayClientLease:
                 stale.append(token)
         for token in stale:
             clients.pop(token, None)
-        return state
+        return normalized or bool(stale)
 
     def _process_identity(self, pid: int) -> str | int | None:
         resolver = getattr(self.runtime, "process_identity", None)

@@ -763,7 +763,10 @@ def test_failed_last_client_shutdown_remains_retryable(tmp_path, monkeypatch):
     assert state == {"auto_stop": True, "clients": {}}
 
 
-def test_lease_snapshot_prunes_a_reused_client_pid(tmp_path, monkeypatch):
+@pytest.mark.parametrize("auto_stop", [False, True])
+def test_lease_queries_filter_a_reused_client_pid_without_writing(
+    tmp_path, monkeypatch, auto_stop,
+):
     runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
     identity = "same-pid:first-process"
     monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
@@ -771,16 +774,24 @@ def test_lease_snapshot_prunes_a_reused_client_pid(tmp_path, monkeypatch):
     client = GatewayClientLease(runtime, kind="tui", pid=12345, token="client")
 
     client.acquire()
-    client.mark_ephemeral()
-    identity = "same-pid:replacement-process"
+    if auto_stop:
+        client.mark_ephemeral()
+    original = client.state_path.read_bytes()
+    # An old timestamp detects same-content rewrites without timing sleeps.
+    os.utime(client.state_path, (1, 1))
+    modified_at = client.state_path.stat().st_mtime_ns
 
-    snapshot = client.snapshot()
-    assert snapshot.auto_stop is True
-    assert snapshot.clients == 0
-    assert json.loads(client.state_path.read_text(encoding="utf-8")) == {
-        "auto_stop": True,
-        "clients": {},
-    }
+    for identity, expected_clients in (
+        ("same-pid:first-process", 1),
+        ("same-pid:replacement-process", 0),
+    ):
+        snapshot = client.snapshot()
+        status = runtime.status()
+        assert snapshot.auto_stop is auto_stop
+        assert snapshot.clients == status.clients == expected_clients
+        assert status.lifetime == ("on_demand" if auto_stop else "explicit")
+        assert client.state_path.read_bytes() == original
+        assert client.state_path.stat().st_mtime_ns == modified_at
 
 
 def test_lease_snapshot_keeps_a_legacy_localized_darwin_client(tmp_path, monkeypatch):
@@ -841,6 +852,51 @@ def test_lease_snapshot_keeps_a_client_when_identity_probe_is_unavailable(
 
     assert snapshot.auto_stop is True
     assert snapshot.clients == 1
+
+
+@pytest.mark.parametrize("auto_stop", [False, True])
+def test_client_monitor_persists_only_lease_changes(tmp_path, monkeypatch, auto_stop):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
+    live_pids = {12345, 12346}
+    monkeypatch.setattr(runtime, "_is_pid_running", lambda pid: pid in live_pids)
+    monkeypatch.setattr(runtime, "_process_identity", lambda pid: pid)
+    first = GatewayClientLease(runtime, kind="tui", pid=12345, token="first")
+    second = GatewayClientLease(runtime, kind="webui", pid=12346, token="second")
+    first.acquire()
+    second.acquire()
+    if auto_stop:
+        first.mark_ephemeral()
+    monitor = GatewayClientLease(runtime, kind="gateway-monitor")
+
+    def poll_without_writing():
+        before = monitor.state_path.read_bytes()
+        os.utime(monitor.state_path, (1, 1))
+        modified_at = monitor.state_path.stat().st_mtime_ns
+        assert monitor.begin_orphan_shutdown() is False
+        assert monitor.state_path.read_bytes() == before
+        assert monitor.state_path.stat().st_mtime_ns == modified_at
+
+    poll_without_writing()
+    poll_without_writing()
+    live_pids.remove(first.pid)
+    assert monitor.begin_orphan_shutdown() is False
+    state = json.loads(monitor.state_path.read_text(encoding="utf-8"))
+    assert set(state["clients"]) == {"second"}
+    assert bool(state.get("auto_stop")) is auto_stop
+    poll_without_writing()
+
+    live_pids.remove(second.pid)
+    assert monitor.begin_orphan_shutdown() is auto_stop
+    if auto_stop:
+        assert json.loads(monitor.state_path.read_text(encoding="utf-8")) == {
+            "auto_stop": True,
+            "clients": {},
+            "stopping": True,
+        }
+    else:
+        assert not monitor.state_path.exists()
+        assert monitor.begin_orphan_shutdown() is False
+        assert not monitor.state_path.exists()
 
 
 async def test_client_monitor_stops_an_orphaned_on_demand_gateway(tmp_path):
