@@ -40,6 +40,7 @@ class InboundMessage:
     require_existing_session: bool = False
     input_role: Literal["user", "system"] | None = None
     session_generation: str | None = None  # Trusted identity assigned at session admission
+    input_persisted: bool = False  # Owner already committed this exact input at admission
 
     @property
     def session_key(self) -> str:

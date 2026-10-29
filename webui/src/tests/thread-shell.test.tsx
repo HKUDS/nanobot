@@ -509,6 +509,39 @@ describe("ThreadShell", () => {
     expect(fetch).toHaveBeenCalledTimes(readsBeforeSearch);
   });
 
+  it("edits a saved user message through the full shell", async () => {
+    const revision = "source-snapshot";
+    const requestMutation = vi.fn().mockResolvedValue({ accepted: true });
+    const client = Object.assign(makeClient(), { requestMutation });
+    vi.mocked(fetch).mockImplementation(async (input) => (
+      String(input).includes("/webui-thread")
+        ? httpJson({ ...transcriptFromSimpleMessages([
+            { role: "user", content: "Saved question", turnId: "saved-turn" },
+            { role: "assistant", content: "Saved answer", turnId: "saved-turn" },
+          ]), source_revision: revision })
+        : { ok: false, status: 404, json: async () => ({}) }
+    ) as Response);
+    render(wrap(client, <ThreadShell session={session("editable")} title="Editable history"
+      onToggleSidebar={() => {}} />));
+
+    const actions = await openMessageActions("Saved question");
+    const edit = within(actions).getByRole("button", { name: "Edit message" });
+    expect(edit).toBeEnabled();
+    fireEvent.click(edit);
+    const input = screen.getByRole("textbox", { name: "Edit message" });
+    expect(input).toHaveValue("Saved question");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Resend" })).toBeEnabled());
+    expect(requestMutation).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: "Edited question" } });
+    fireEvent.click(screen.getByRole("button", { name: "Resend" }));
+    await waitFor(() => expect(requestMutation).toHaveBeenCalledWith("chat.fork", {
+      mode: "replace", chat_id: "editable", text: "Edited question", turn_id: expect.any(String),
+      source: { revision, message_id: expect.any(String), turn_id: "saved-turn", text: "Saved question" },
+    }));
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Edit message" })).not.toBeInTheDocument());
+    expect(client.sendMessage).not.toHaveBeenCalled();
+  });
+
   it.each(["callback", "cached return"] as const)("keeps closed answer segments in order after %s", async (path) => {
     const client = makeClient();
     const messageCache = new ThreadMessageCache(() => false);
@@ -861,6 +894,48 @@ describe("ThreadShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Scroll to bottom" }));
     await screen.findByText("latest answer");
     expect(screen.queryByText("old answer")).not.toBeInTheDocument();
+  });
+
+  it("does not hydrate a replacement history with a late trace from the retired generation", async () => {
+    const client = makeClient();
+    let retired = false;
+    const isRetired = vi.fn((_chatId: string, snapshot: { history_generation?: string }) => retired && snapshot.history_generation === "before");
+    Object.assign(client, { isRetiredHistorySnapshot: isRetired, adoptHistorySnapshot: vi.fn(() => false) });
+    let resolveOld!: (value: Response) => void;
+    let resolveNew!: (value: Response) => void;
+    const oldDetail = new Promise<Response>((resolve) => { resolveOld = resolve; });
+    const newDetail = new Promise<Response>((resolve) => { resolveNew = resolve; });
+    const oldThread = { ...traceDetailThread(true, "old answer"), history_generation: "before" };
+    const newThread = { ...traceDetailThread(true, "replacement answer"), history_generation: "after" };
+    let detailCalls = 0;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      if (String(input).includes("/trace-detail?")) return ++detailCalls === 1 ? oldDetail : newDetail;
+      if (String(input).includes("/webui-thread")) return Promise.resolve(httpJson(retired ? newThread : oldThread));
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    }));
+    render(wrap(client, <ThreadShell session={session("trace-replaced")} title="Trace replacement" onToggleSidebar={() => {}} />));
+    fireEvent.click(within(await openMessageActions("old answer")).getByRole("button", { name: /Worked/ }));
+    await waitFor(() => expect(detailCalls).toBe(1));
+    await act(async () => {
+      retired = true;
+      client._emitChat("trace-replaced", { event: "history_replaced", chat_id: "trace-replaced",
+        previous_generation: "before", thread: newThread });
+    });
+    await screen.findByText("replacement answer");
+    await act(async () => resolveOld(httpJson({ message_id: "history-aaaaaaaaaaaaaaaaaaaa", events: [
+      { event: "message", chat_id: "trace-replaced", projection_id: "trace-shared", kind: "progress", text: 'exec({"command":"echo obsolete suffix"})' },
+    ] }) as Response));
+    expect(isRetired).toHaveBeenCalledWith("trace-replaced", { history_generation: "before" });
+    expect(document.body).not.toHaveTextContent("obsolete suffix");
+    if (!screen.queryByRole("button", { name: /Collapse activity details/ })) {
+      fireEvent.click(within(await openMessageActions("replacement answer")).getByRole("button", { name: /Worked/ }));
+    }
+    await waitFor(() => expect(detailCalls).toBe(2));
+    await act(async () => resolveNew(httpJson({ message_id: "history-aaaaaaaaaaaaaaaaaaaa", events: [
+      { event: "message", chat_id: "trace-replaced", projection_id: "trace-shared", kind: "progress", text: 'exec({"command":"echo current details"})' },
+    ] }) as Response));
+    await waitFor(() => expect(document.body).toHaveTextContent("current details"));
+    expect(document.body).not.toHaveTextContent("obsolete suffix");
   });
 
   it("ignores a deferred trace-detail failure after switching sessions", async () => {

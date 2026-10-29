@@ -45,6 +45,7 @@ export interface ThreadPaging {
   completedTurnIds: string[];
   completionIdsProvided: boolean;
   activeTurnId: string | null;
+  historyGeneration: string | null;
 }
 export interface ThreadRead {
   kind: "initial" | "latest" | "older";
@@ -52,6 +53,7 @@ export interface ThreadRead {
   lineage: number;
   before: string | null;
   empty: boolean;
+  historyGeneration: string | null;
 }
 export interface ThreadTranscriptSnapshot extends ThreadCheckpoint {
   units: Unit[];
@@ -96,7 +98,7 @@ function emptyPaging(): ThreadPaging {
   return { loading: false, loadingOlder: false, error: null, olderError: null,
     beforeCursor: null, hasMoreBefore: false, userMessageOffset: 0,
     forkBoundaryMessageCount: null, truncated: false, version: 0, lineage: 0,
-    hasPendingToolCalls: false, completedTurnIds: [], completionIdsProvided: false, activeTurnId: null };
+    hasPendingToolCalls: false, completedTurnIds: [], completionIdsProvided: false, activeTurnId: null, historyGeneration: null };
 }
 function textKey(text: TextSource): string {
   return JSON.stringify([text.turn, text.phase, text.stream,
@@ -348,7 +350,7 @@ export class ThreadTranscript {
       [kind === "older" ? "loadingOlder" : "loading"]: kind === "older" || this.paging.version === 0,
       [kind === "older" ? "olderError" : "error"]: null };
     return { kind, revision: this.revision, lineage: this.paging.lineage,
-      before: this.paging.beforeCursor, empty: this.messages.length === 0 };
+      before: this.paging.beforeCursor, empty: this.messages.length === 0, historyGeneration: this.paging.historyGeneration };
   }
 
   private unitCovered(unit: Unit, candidate: ThreadTranscript): boolean {
@@ -365,7 +367,32 @@ export class ThreadTranscript {
 
   }
 
+  /** A destructive history edit replaces rows, source coverage and paging together. */
+  replace(body: WebuiThreadPersistedPayload): void {
+    const replacement = new ThreadTranscript();
+    replacement.accept(body, replacement.begin("initial"));
+    this.projection = replacement.projection;
+    this.sideChannelTurnIds = replacement.sideChannelTurnIds;
+    this.units = replacement.units;
+    this.byRow = replacement.byRow;
+    this.bySource = replacement.bySource;
+    this.installed = replacement.installed;
+    this.textCoverage = replacement.textCoverage;
+    this.boundaries = replacement.boundaries;
+    this.knownTurns = replacement.knownTurns;
+    this.revision = replacement.revision;
+    this.order = replacement.order;
+    this.paging = { ...replacement.paging, version: this.paging.version + 1, lineage: this.paging.lineage + 1 };
+  }
+
   accept(body: WebuiThreadPersistedPayload | null, read: ThreadRead): boolean {
+    if (read.historyGeneration !== null && read.historyGeneration !== this.paging.historyGeneration) return false;
+    if (body?.history_generation && this.paging.historyGeneration !== null
+      && body.history_generation !== this.paging.historyGeneration) {
+      if (read.kind === "older") { this.finishRead(read); return false; }
+      this.replace(body);
+      return true;
+    }
     if (read.kind === "older" && (read.lineage !== this.paging.lineage || read.before !== this.paging.beforeCursor)) return false;
     if (read.kind === "older" && !body?.page) {
       this.finishRead(read, "Earlier history did not include a page cursor");
@@ -594,12 +621,14 @@ export class ThreadTranscript {
         completedTurnIds: canonical?.completedTurnIds ?? [],
         completionIdsProvided: Array.isArray(body?.completed_turn_ids),
         activeTurnId: body?.active_turn_id ?? null,
+        historyGeneration: body?.history_generation ?? null,
       }),
     };
     return true;
   }
 
   finishRead(read: ThreadRead, error: string | null = null): void {
+    if (read.historyGeneration !== null && read.historyGeneration !== this.paging.historyGeneration) return;
     this.paging = { ...this.paging, [read.kind === "older" ? "loadingOlder" : "loading"]: false,
       [read.kind === "older" ? "olderError" : "error"]: error };
   }

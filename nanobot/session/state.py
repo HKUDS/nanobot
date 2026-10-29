@@ -9,12 +9,18 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from copy import deepcopy
-from dataclasses import fields, replace
+from dataclasses import asdict, fields, replace
 from datetime import datetime
 from typing import Any, TypeVar, cast
 
 from nanobot.bus.events import InboundMessage
 from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind, HistoryReader
+from nanobot.session.history_edit import (
+    HistoryEditError,
+    HistoryEditProjection,
+    HistoryEditSource,
+    ordinary_text_error,
+)
 from nanobot.session.keys import is_dream_session
 from nanobot.session.manager import (
     Session,
@@ -971,6 +977,9 @@ class SessionState:
         *, title: str | None = None,
         history_projection: Callable[[Session], list[HistoryFact]] | None = None,
     ) -> Session | None:
+        if source_key == target_key:
+            raise ValueError("new fork requires a different target session")
+
         def commit() -> Session | None:
             def write() -> Session | None:
                 source = self._load(source_key)
@@ -999,6 +1008,52 @@ class SessionState:
             commit,
             operation_name="fork",
         )
+
+    async def replace_user_input(
+        self, key: str, source: HistoryEditSource, message: InboundMessage,
+        projection: HistoryEditProjection,
+    ) -> Session:
+        """Accept a replacement and its input together; revoke every old draft."""
+        from uuid import uuid4
+
+        if reason := ordinary_text_error({"role": "user", "content": message.content}):
+            raise HistoryEditError(reason)
+
+        def commit() -> Session:
+            def write() -> Session:
+                current = self._load(key)
+                if current is None or not current.policy.persist:
+                    raise HistoryEditError("edit_source_changed")
+                if any(current.metadata.get(name) for name in _RESERVED_KEYS):
+                    raise HistoryEditError("edit_session_busy")
+                target = self._store.project_history(key, lambda history: projection(current, history))
+                previous_generation = current.generation
+                current.retain_history_prefix(target.model_position)
+                for name in ("webui_recovery", "_last_usage", "request_origin", "goal_state", "thread_goal"):
+                    current.metadata.pop(name, None)
+                current.generation = uuid4().hex
+                current.add_message(
+                    "user", message.content, timestamp=message.timestamp.isoformat(),
+                    webui_turn_id=message.metadata["webui_turn_id"],
+                )
+                current.metadata[_PENDING_KEY] = True
+                current.metadata["history_edit_receipt"] = {
+                    "turn_id": message.metadata["webui_turn_id"],
+                    "source": asdict(source),
+                    "text": message.content,
+                }
+                self._store.replace_generation(current, previous_generation=previous_generation)
+                self._store.replace_history_input(
+                    key, target.turn_ordinal, target.position, target.input,
+                    expected_generation=current.generation,
+                )
+                return current
+
+            current = self._store.run_write(write)
+            self._publish(current)
+            return self._draft(current)
+
+        return await self._execute(key, commit, operation_name="replace_user_input")
 
     async def delete(
         self,

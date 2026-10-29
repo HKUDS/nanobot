@@ -458,6 +458,25 @@ def read_transcript_lines(session_key: str, *, history: HistoryReader) -> list[d
     return [record_from_fact(fact, session_key) for fact in history.all_facts()]
 
 
+def transcript_edit_target(
+    session_key: str, message_id: str, turn_id: str | None, *, history: HistoryReader,
+) -> tuple[dict[str, Any], int, int, int] | None:
+    """Resolve persisted input identity independently of the loaded page window."""
+    from nanobot.session.display_history import HistoryKind
+
+    count = 0
+    matches: list[tuple[dict[str, Any], int, int, int]] = []
+    for ordinal, position, fact in history.navigation():
+        if fact.kind is not HistoryKind.INPUT:
+            continue
+        row = {**record_from_fact(fact, session_key),
+               _WEBUI_REPLAY_IDENTITY_KEY: f"turn:{ordinal}:record:{position}"}
+        if _client_projection_event_id(row) == message_id or (turn_id and fact.turn_id == turn_id):
+            matches.append((row, count, ordinal, position))
+        count += 1
+    return matches[0] if len(matches) == 1 else None
+
+
 def _now_ms() -> int:
     return int(time.time() * 1000)
 
@@ -1856,6 +1875,8 @@ def build_webui_thread_response(
         augment_assistant_text=augment_assistant_text,
     )
     replay_stats.replay_ms += int((time.perf_counter() - replay_started) * 1000)
+    if session_version_loader is not None:
+        payload["source_revision"] = prompt_index_revision(session_key, session_version_loader(), history=history)
     payload["projection"] = "events"
     payload["events"] = events
     page["loaded_event_count"] = len(events)

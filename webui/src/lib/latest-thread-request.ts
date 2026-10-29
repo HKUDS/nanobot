@@ -31,6 +31,8 @@ export function fetchLatestWebuiThread(
   requestsByClient.set(client, requests);
   const requestKey = JSON.stringify([token, key]);
   const cached = webuiThreadCache.get(key);
+  const chatId = key.startsWith("websocket:") ? key.slice("websocket:".length) : null;
+  if (chatId && cached?.history_generation) client.adoptHistorySnapshot(chatId, cached);
   let request = requests.get(requestKey);
   if (!request || !request.shareable || request.controller.signal.aborted || request.cached !== cached) {
     const controller = new AbortController();
@@ -101,6 +103,13 @@ export function fetchLatestWebuiThread(
     void current.promise.then((body) => {
       if (!active) return;
       release();
+      if (chatId && body?.history_generation) {
+        if (client.isRetiredHistorySnapshot(chatId, body)) {
+          resolve(fetchLatestWebuiThread(client, token, key, signal));
+          return;
+        }
+        client.adoptHistorySnapshot(chatId, body);
+      }
       resolve(body);
     }, (error: unknown) => {
       if (!active) return;

@@ -377,6 +377,7 @@ class WebSocketChannel(BaseChannel):
         self._uploads = gateway.uploads
         self._outbound = WebUIOutboundDelivery(
             self,
+            sessions=gateway.session_manager,
             media=gateway.media,
             transcripts=gateway.transcripts,
             temporary_chats=gateway.temporary_chats,

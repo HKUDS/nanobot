@@ -42,6 +42,7 @@ def _delivery(history, tmp_path) -> tuple[WebUIOutboundDelivery, _RecordingTrans
     transport = _RecordingTransport()
     outbound = WebUIOutboundDelivery(
         transport,
+        sessions=gateway.session_manager,
         media=gateway.media,
         transcripts=gateway.transcripts,
         temporary_chats=gateway.temporary_chats,

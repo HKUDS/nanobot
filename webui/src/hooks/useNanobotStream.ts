@@ -36,6 +36,7 @@ import type {
   RetryStatus,
   UIMediaAttachment,
   UIMessage,
+  WebuiThreadPersistedPayload,
   WorkspaceScopePayload,
 } from "@/lib/types";
 
@@ -180,6 +181,7 @@ export function useNanobotStream(
 } {
   const { client, getToken } = useClient();
   const historyKey = history?.key ?? null;
+  const historyChatId = historyKey?.startsWith("websocket:") ? historyKey.slice("websocket:".length) : null;
   const messageCache = history?.cache;
   const [initialTranscript] = useState(() => createTranscript(initialMessages,
     chatId ? messageCache?.get(chatId) : undefined, historyKey));
@@ -535,6 +537,43 @@ export function useNanobotStream(
   const latestReadOwnerRef = useRef<ThreadTranscript>();
   const detailRequestsRef = useRef(new Map<string, Promise<{ ref: string; events: ThreadProjectionEvent[] } | null>>());
 
+  const replaceHistory = useCallback((body: WebuiThreadPersistedPayload) => {
+    const previous = transcriptRef.current;
+    if (body.history_generation && previous.paging.historyGeneration === body.history_generation) return;
+    clearPendingStreamWork();
+    cancelOlderRead();
+    detailRequestsRef.current.clear();
+    // A replacement retires the entire received frontier, including protected
+    // live units and cursors that an ordinary overlapping latest page preserves.
+    const owner = createTranscript([], undefined, historyKey);
+    owner.paging = { ...owner.paging, version: previous.paging.version,
+      lineage: previous.paging.lineage + 1, historyGeneration: body.history_generation ?? null };
+    owner.accept(body, owner.begin("initial"));
+    transcriptRef.current = owner;
+    setMessages(owner.messages);
+    setRetryStatus(null);
+    setRecoveryState(null);
+    setGoalState(undefined);
+    setStreamError(null);
+    if (chatId) {
+      messageCache?.set(chatId, owner.save());
+      if (body.has_pending_tool_calls) {
+        client.restorePendingRun(chatId, client.getRunGeneration(chatId), body.active_turn_id ?? null);
+      }
+    }
+    if (historyKey) webuiThreadCache.set(historyKey, body);
+    // Rebind cache/latest reads to the new owner; old reads retain the retired
+    // identity and cannot hydrate this generation or its prompt-navigation pages.
+    refreshHistory();
+  }, [cancelOlderRead, chatId, clearPendingStreamWork, client, historyKey, messageCache, refreshHistory, setMessages]);
+
+  useEffect(() => {
+    if (chatId || !historyChatId) return;
+    return client.onChat(historyChatId, (event) => {
+      if (event.event === "history_replaced") replaceHistory(event.thread);
+    });
+  }, [chatId, client, historyChatId, replaceHistory]);
+
   useEffect(() => {
     if (!historyKey) return;
     const owner = transcriptRef.current;
@@ -548,6 +587,13 @@ export function useNanobotStream(
     let publishing = false;
     const install = (body: Awaited<ReturnType<typeof fetchWebuiThread>>, ownRead: boolean, seed = false) => {
       if (disposed || (ownRead && superseded) || transcriptRef.current !== owner) return;
+      if (body?.history_generation && historyChatId && client.isRetiredHistorySnapshot(historyChatId, body)) return;
+      if (body?.history_generation && owner.paging.historyGeneration !== null
+        && body.history_generation !== owner.paging.historyGeneration) {
+        replaceHistory(body);
+        return;
+      }
+      owner.paging = { ...owner.paging, historyGeneration: body?.history_generation ?? owner.paging.historyGeneration };
       flushPendingStreamEvents();
       const decision = ownRead ? read : owner.begin(seed ? "initial" : "latest");
       const canonical = body ? persistedCanonicalRunState(body) : null;
@@ -587,7 +633,7 @@ export function useNanobotStream(
         else { owner.finishRead(read, (error as Error).message); publishHistory(); }
       });
     return () => { disposed = true; controller.abort(); cancelOlderRead(); unsubscribe(); };
-  }, [cancelOlderRead, chatId, client, flushPendingStreamEvents, getToken, historyKey, messageCache, publishHistory, refreshSeq, setMessages]);
+  }, [cancelOlderRead, chatId, client, flushPendingStreamEvents, getToken, historyChatId, historyKey, messageCache, publishHistory, refreshSeq, replaceHistory, setMessages]);
 
   const loadOlder = useCallback(async () => {
     const owner = transcriptRef.current;
@@ -601,6 +647,12 @@ export function useNanobotStream(
     try {
       const body = await fetchWebuiThread(getToken(), historyKey, { before, limit: 120, signal: controller.signal });
       if (olderReadRef.current !== operation || transcriptRef.current !== owner) return;
+      if (body?.history_generation && body.history_generation !== owner.paging.historyGeneration) {
+        owner.finishRead(read);
+        publishHistory();
+        refreshHistory();
+        return;
+      }
       flushPendingStreamEvents();
       owner.accept(body, read);
       setMessages(owner.messages);
@@ -612,32 +664,44 @@ export function useNanobotStream(
     } finally {
       if (olderReadRef.current === operation) olderReadRef.current = null;
     }
-  }, [flushPendingStreamEvents, getToken, historyKey, publishHistory, setMessages]);
+  }, [flushPendingStreamEvents, getToken, historyKey, publishHistory, refreshHistory, setMessages]);
 
   const loadTraceDetails = useCallback(async (refs: string[]) => {
     const owner = transcriptRef.current;
     if (!historyKey) return [];
+    const generation = owner.paging.historyGeneration;
+    const retired = () => generation && historyChatId
+      && client.isRetiredHistorySnapshot(historyChatId, { history_generation: generation });
     const details = await Promise.all(refs.map((ref) => {
-      const id = `${historyKey}:${ref}`;
+      const id = `${historyKey}:${generation ?? ""}:${ref}`;
       const existing = detailRequestsRef.current.get(id);
       if (existing) return existing;
       const request = fetchWebuiThreadTraceDetail(getToken(), historyKey, ref).then((detail) => {
-        if (transcriptRef.current !== owner) return null;
+        if (retired() || transcriptRef.current !== owner) return null;
         flushPendingStreamEvents();
         owner.expandDetail(ref, detail.events);
         setMessages(owner.messages);
         return { ref, events: detail.events };
-      }).finally(() => detailRequestsRef.current.delete(id));
+      }).catch((error: unknown) => {
+        if (retired() || transcriptRef.current !== owner) return null;
+        throw error;
+      }).finally(() => {
+        if (detailRequestsRef.current.get(id) === request) detailRequestsRef.current.delete(id);
+      });
       detailRequestsRef.current.set(id, request);
       return request;
     }));
     return details.filter((detail) => detail !== null);
-  }, [flushPendingStreamEvents, getToken, historyKey, setMessages]);
+  }, [client, flushPendingStreamEvents, getToken, historyChatId, historyKey, setMessages]);
 
   useEffect(() => {
     if (!chatId) return;
 
     const handle = (ev: InboundEvent) => {
+      if (ev.event === "history_replaced") {
+        replaceHistory(ev.thread);
+        return;
+      }
       if (ev.event === "error") {
         if (ev.detail === "message_too_big") {
           applyStreamError({
@@ -951,6 +1015,7 @@ export function useNanobotStream(
     onTurnEnd,
     onStreamDetach,
     messageCache,
+    replaceHistory,
     schedulePendingStreamFlush,
     setMessages,
   ]);

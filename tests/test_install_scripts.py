@@ -184,6 +184,33 @@ def sandbox(tmp_path):
     return {"root": root, "bin": command_bin, "wheels": wheels, "cwd": checkout, "env": env}
 
 
+@pytest.mark.skipif(not WINDOWS, reason="PowerShell module discovery is Windows-specific")
+@pytest.mark.parametrize("manager", ["uv", "pipx"])
+def test_installer_ignores_powershell_module_package_managers(sandbox, manager):
+    module = sandbox["root"] / "modules" / "UnrelatedManager"
+    module.mkdir(parents=True)
+    (module / "UnrelatedManager.psd1").write_text(
+        "@{ RootModule = 'UnrelatedManager.psm1'; ModuleVersion = '1.0.0'; "
+        f"FunctionsToExport = @('{manager}'); CmdletsToExport = @(); AliasesToExport = @() }}\n",
+        encoding="utf-8",
+    )
+    (module / "UnrelatedManager.psm1").write_text(
+        "[IO.File]::WriteAllText($env:NANOBOT_TEST_MODULE_MARKER, 'imported')\n"
+        f"function {manager} {{ throw 'An unrelated PowerShell module is not the package manager' }}\n",
+        encoding="utf-8",
+    )
+    marker = sandbox["root"] / "module-state.txt"
+    marker.write_text("not imported", encoding="utf-8")
+    sandbox["env"].update(PSModulePath=str(module.parent), NANOBOT_TEST_MODULE_MARKER=str(marker))
+    _wheel(sandbox["wheels"], "0.0.1")
+
+    identity = _identity(_installer(sandbox))
+
+    assert identity["version"] == "0.0.1"
+    assert Path(identity["prefix"]).resolve() == sandbox["root"] / "managed"
+    assert marker.read_text(encoding="utf-8") == "not imported"
+
+
 @pytest.mark.parametrize("manager", ["uv", "pipx"])
 def test_installer_starts_and_upgrades_same_persistent_manager_environment(sandbox, manager):
     executable = _expose(sandbox, manager)

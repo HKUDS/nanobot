@@ -1287,7 +1287,9 @@ class GatewayHTTPHandler:
         if data is None:
             return _http_error(404, "webui thread not found")
         data["workspace_scope"] = scope.payload()
-        revision_variant["session_version"] = self._read_session_version(decoded_key)
+        version = self._read_session_version(decoded_key)
+        data["history_generation"] = version[0] if version is not None else None
+        revision_variant["session_version"] = version
         final_revision = webui_transcript_revision(decoded_key, history=history, variant=revision_variant)
         response_headers = list(_NO_STORE_HEADERS)
         if final_revision is not None and final_revision == initial_revision:

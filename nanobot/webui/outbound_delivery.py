@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias
@@ -27,6 +28,7 @@ from nanobot.bus.outbound_events import (
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import SubagentTaskChanged
 from nanobot.pairing.events import PairingChanged
+from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     mark_websocket_turn_transcript_persistence_failed,
@@ -63,6 +65,8 @@ from nanobot.webui.transcript import WEBUI_TRANSCRIPT_INCOMPLETE_KEY, WebUITrans
 if TYPE_CHECKING:
     from websockets.asyncio.server import ServerConnection
 
+    from nanobot.session.manager import SessionManager
+
 
 @dataclass(frozen=True)
 class ChatAudience:
@@ -89,12 +93,15 @@ class WebUIOutboundDelivery:
         self,
         transport: WebUIOutboundTransport,
         *,
+        sessions: SessionManager | None,
         media: WebUIMediaGateway,
         transcripts: WebUITranscriptRecorder,
         temporary_chats: WebUITemporaryChats,
         session_projection: WebUISessionProjection,
     ) -> None:
         self._transport = transport
+        self._sessions = sessions
+        self._outbound_generation: ContextVar[str | None] = ContextVar("webui_outbound_generation", default=None)
         self._media = media
         self._transcripts = transcripts
         self._temporary_chats = temporary_chats
@@ -141,6 +148,30 @@ class WebUIOutboundDelivery:
             await self._transport.webui_send_raw(connection, raw, label=label)
 
     async def send(self, msg: OutboundMessage) -> None:
+        delivery = msg.delivery
+        if delivery is not None and delivery.session_generation is not None and self._sessions is not None:
+            current = self._sessions.state.peek_identity(delivery.session_key)
+            if current is None:
+                session = await self._sessions.state.read(delivery.session_key)
+                if session is None:
+                    return
+                current = self._sessions.state.peek_identity(delivery.session_key)
+            if current is None or current.generation != delivery.session_generation:
+                return
+        generation = msg.metadata.get(HISTORY_GENERATION_METADATA_KEY)
+        if not isinstance(generation, str) or not generation:
+            generation = (
+                delivery.session_generation
+                if delivery is not None and delivery.session_key == webui_session_key(msg.chat_id)
+                else None
+            )
+        token = self._outbound_generation.set(generation)
+        try:
+            await self._send_event(msg)
+        finally:
+            self._outbound_generation.reset(token)
+
+    async def _send_event(self, msg: OutboundMessage) -> None:
         event = msg.event
         if isinstance(event, PairingChanged):
             await self._fanout(
@@ -176,6 +207,8 @@ class WebUIOutboundDelivery:
                 }
                 if event.provenance:
                     body["provenance"] = event.provenance
+                if generation := self._outbound_generation.get():
+                    body["history_generation"] = generation
                 await self._fanout(recipients, body, label=" user_message ")
             return
         notification = project_notification(msg.chat_id, event, msg.metadata)
@@ -249,6 +282,10 @@ class WebUIOutboundDelivery:
         include_source: bool = False,
         transcript_overrides: dict[str, Any] | None = None,
     ) -> bool:
+        generation = (metadata or {}).get(HISTORY_GENERATION_METADATA_KEY) or self._outbound_generation.get()
+        if isinstance(generation, str) and generation:
+            event["history_generation"] = generation
+            metadata = {**(metadata or {}), HISTORY_GENERATION_METADATA_KEY: generation}
         if (
             (metadata or {}).get(WEBUI_RESTART_CONTROL_METADATA_KEY) is True
             or not self._temporary_chats.should_persist_transcript(chat_id)
@@ -290,6 +327,10 @@ class WebUIOutboundDelivery:
         phase: str,
         include_source: bool = False,
     ) -> bool:
+        generation = (metadata or {}).get(HISTORY_GENERATION_METADATA_KEY) or self._outbound_generation.get()
+        if isinstance(generation, str) and generation:
+            event["history_generation"] = generation
+            metadata = {**(metadata or {}), HISTORY_GENERATION_METADATA_KEY: generation}
         if not self._temporary_chats.should_persist_transcript(chat_id):
             self._transcripts.prepare_event(
                 chat_id, event, metadata=metadata, phase=phase, include_source=include_source,
@@ -441,6 +482,8 @@ class WebUIOutboundDelivery:
     ) -> None:
         recipients = self._transport.webui_recipients(ChatAudience(chat_id))
         body: dict[str, Any] = dict(payload)
+        if generation := (metadata or {}).get(HISTORY_GENERATION_METADATA_KEY) or self._outbound_generation.get():
+            body["history_generation"] = generation
         if persistence == "turn_activity":
             await self._persist_turn_transcript_event(chat_id, body, metadata=metadata, phase="activity")
         elif persistence == "turn_complete":
@@ -462,6 +505,8 @@ class WebUIOutboundDelivery:
         recipients = self._transport.webui_recipients(ChatAudience(chat_id))
         if recipients:
             payload: GoalStateWirePayload = {"event": "goal_state", "chat_id": chat_id, "goal_state": blob}
+            if generation := self._outbound_generation.get():
+                payload["history_generation"] = generation
             await self._fanout(recipients, payload, label=" goal_state ")
 
     async def _send_goal_status(
@@ -475,6 +520,8 @@ class WebUIOutboundDelivery:
             payload["started_at"] = started_at
         if turn_id:
             payload["turn_id"] = turn_id
+        if generation := self._outbound_generation.get():
+            payload["history_generation"] = generation
         await self._fanout(recipients, payload, label=" goal_status ")
 
     async def session_updated(self, chat_id: str, *, scope: str | None = None) -> None:
@@ -504,6 +551,8 @@ class WebUIOutboundDelivery:
         }
         if isinstance(event.model_preset, str) and event.model_preset.strip():
             payload["model_preset"] = event.model_preset.strip()
+        if generation := self._outbound_generation.get():
+            payload["history_generation"] = generation
         if isinstance(event.context_window_tokens, int) and event.context_window_tokens > 0:
             payload["context_window_tokens"] = event.context_window_tokens
         if event.fallback:

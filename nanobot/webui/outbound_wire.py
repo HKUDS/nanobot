@@ -63,6 +63,7 @@ def project_tool_events(events: list[dict[str, Any]]) -> list[dict[str, _JSONVal
 class _ChatWirePayload(TypedDict):
     chat_id: str
     turn_id: NotRequired[str]
+    history_generation: NotRequired[str]
 
 
 class RecoveryStateWirePayload(_ChatWirePayload):

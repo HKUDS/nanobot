@@ -73,6 +73,7 @@ import type {
 import { projectThreadEvents } from "@/lib/thread-event-projection";
 import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
+import { MessageEditingProvider } from "@/components/thread/MessageEditing";
 import { providerDisplayLabel } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
@@ -610,6 +611,7 @@ export function ThreadShell({
       hasPendingToolCalls,
       completedTurnIds,
       activeTurnId: historyActiveTurnId,
+      historyGeneration,
       version: historyVersion,
       forkBoundaryMessageCount,
     },
@@ -626,7 +628,7 @@ export function ThreadShell({
   const initialHistoryLoading = loading;
   const showTemporaryChatControl =
     !hideHeader && !session && !loading && !!onTemporaryChatEnabledChange;
-  const promptNavigation = usePromptHistory(historyKey, historyVersion, displayMessages);
+  const promptNavigation = usePromptHistory(historyKey, historyVersion, displayMessages, historyGeneration);
   const updateNavigationMessages = promptNavigation.updateMessages;
   useEffect(() => {
     if (!chatId || !messagesReady) return;
@@ -1496,6 +1498,12 @@ export function ThreadShell({
           resolve={previewSessionKey ? resolveFilePreviewAvailability : undefined}
         >
           <FileActionsProvider value={previewSessionKey ? fileActions : undefined}>
+          <MessageEditingProvider chatId={chatId} busy={turnActive}
+            onBegin={(messageId) => {
+              viewportRef.current?.cancelAutoScroll();
+              viewportRef.current?.jumpToUserPrompt(messageId);
+            }}
+            enabled={!temporary && messagesReady}>
           <ThreadViewport
             ref={viewportRef}
             messages={displayMessages}
@@ -1528,6 +1536,7 @@ export function ThreadShell({
             onForkFromMessage={onForkChat ? handleForkFromMessage : undefined}
             onQuoteSelection={session ? handleQuoteSelection : undefined}
           />
+          </MessageEditingProvider>
           </FileActionsProvider>
         </FilePreviewAvailabilityProvider>
       </div>

@@ -1,5 +1,6 @@
 import hashlib
 import io
+import struct
 import subprocess
 import zipfile
 from pathlib import Path
@@ -693,6 +694,36 @@ def test_release_tui_rejects_an_archive_without_required_notices(
 
     with pytest.raises(TuiUnavailableError, match="archive is incomplete"):
         _download_release_tui(asset)
+
+
+def test_release_tui_accepts_current_windows_binary_size() -> None:
+    asset = "nanobot-tui-win32-x64.exe"
+    # Pinned Bun 1.3.13 + the supported keypad-Enter fix produces this PE size.
+    size = 150 * 1024 * 1024 + 512
+    payload, _checksum = _release_archive(asset, binary=b"\0" * size)
+
+    files = tui_launcher._verified_release_archive(payload, asset)
+
+    assert len(files[asset]) == size
+
+
+def test_release_tui_rejects_oversized_binary_before_reading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asset = "nanobot-tui-win32-x64.exe"
+    payload, _checksum = _release_archive(asset)
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        directory = archive.start_dir
+    oversized = bytearray(payload)
+    # An untrusted ZIP can declare an excessive decompressed size in its directory.
+    struct.pack_into("<I", oversized, directory + 24, tui_launcher._TUI_BINARY_MAX_BYTES + 1)
+
+    def read(*_args: object, **_kwargs: object) -> bytes:
+        raise AssertionError("oversized entries must be rejected before decompression")
+
+    monkeypatch.setattr(zipfile.ZipFile, "read", read)
+    with pytest.raises(TuiUnavailableError, match="invalid size"):
+        tui_launcher._verified_release_archive(bytes(oversized), asset)
 
 
 def test_release_tui_rejects_an_empty_required_file(
