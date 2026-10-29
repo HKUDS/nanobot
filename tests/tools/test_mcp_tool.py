@@ -1972,6 +1972,7 @@ async def test_resource_wrapper_execute_handles_timeout() -> None:
     wrapper = _make_resource_wrapper(SimpleNamespace(read_resource=read_resource), timeout=0.01)
     result = await wrapper.execute()
     assert result == "(MCP resource read timed out after 0.01s)"
+    assert is_tool_error_result(result)
 
 
 @pytest.mark.asyncio
@@ -1982,6 +1983,7 @@ async def test_resource_wrapper_execute_handles_error() -> None:
     wrapper = _make_resource_wrapper(SimpleNamespace(read_resource=read_resource))
     result = await wrapper.execute()
     assert result == "(MCP resource read failed: RuntimeError)"
+    assert is_tool_error_result(result)
 
 
 # ---------------------------------------------------------------------------
@@ -2058,6 +2060,7 @@ async def test_prompt_wrapper_execute_handles_timeout() -> None:
     wrapper = _make_prompt_wrapper(SimpleNamespace(get_prompt=get_prompt), timeout=0.01)
     result = await wrapper.execute()
     assert result == "(MCP prompt call timed out after 0.01s)"
+    assert is_tool_error_result(result)
 
 
 @pytest.mark.asyncio
@@ -2071,6 +2074,7 @@ async def test_prompt_wrapper_execute_handles_mcp_error() -> None:
     result = await wrapper.execute()
     assert "invalid argument" in result
     assert "code 42" in result
+    assert is_tool_error_result(result)
 
 
 @pytest.mark.asyncio
@@ -2081,6 +2085,42 @@ async def test_prompt_wrapper_execute_handles_error() -> None:
     wrapper = _make_prompt_wrapper(SimpleNamespace(get_prompt=get_prompt))
     result = await wrapper.execute()
     assert result == "(MCP prompt call failed: RuntimeError)"
+    assert is_tool_error_result(result)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("make_wrapper,method", [
+    (_make_resource_wrapper, "read_resource"),
+    (_make_prompt_wrapper, "get_prompt"),
+])
+async def test_resource_and_prompt_mark_sdk_cancellation_as_error(make_wrapper, method):
+    session = SimpleNamespace(**{method: AsyncMock(side_effect=asyncio.CancelledError())})
+
+    result = await make_wrapper(session).execute()
+
+    assert "was cancelled" in result
+    assert is_tool_error_result(result)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("make_wrapper,method", [
+    (_make_resource_wrapper, "read_resource"),
+    (_make_prompt_wrapper, "get_prompt"),
+])
+async def test_resource_and_prompt_propagate_external_cancellation(make_wrapper, method):
+    started = asyncio.Event()
+
+    async def call(*args, **kwargs):
+        started.set()
+        await asyncio.Future()
+
+    wrapper = make_wrapper(SimpleNamespace(**{method: call}), timeout=10)
+    task = asyncio.create_task(wrapper.execute())
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
 
 # ---------------------------------------------------------------------------
