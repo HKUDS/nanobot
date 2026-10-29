@@ -356,3 +356,30 @@ def test_rejected_unconverted_workspace_does_not_block_other_workspace(tmp_path)
     assert fresh_sessions.read_session_file("websocket:migrated") is None
     assert legacy_model.read_bytes() == model_bytes
     assert webui.read_bytes() == display_bytes
+
+
+def test_global_import_marker_does_not_hide_foreign_pending_history(tmp_path):
+    root = tmp_path / "sessions"
+    imported, pending = tmp_path / "imported", tmp_path / "pending"
+    imported_db = _restore_040_database(imported, root, display_imported=True)
+    _restore_040_database(pending, root, display_imported=False)
+    # 0.4.0 marks a workspace complete even when it skips another workspace's source.
+    with closing(sqlite3.connect(imported_db)) as db:
+        db.execute("PRAGMA foreign_keys=ON")
+        db.execute("DELETE FROM sessions WHERE key='websocket:migrated'")
+        db.execute("DELETE FROM storage_meta WHERE key='webui_history_import_v1:websocket:migrated'")
+        db.commit()
+    webui = tmp_path / "webui"
+    webui.mkdir()
+    own = webui / "websocket_display-only.jsonl"
+    own.write_bytes(b'{"event":"message","text":"already imported"}\n')
+    unconverted = webui / "websocket_migrated.jsonl"
+    original = b'{"event":"message","chat_id":"migrated","text":"pending display"}\n'
+    unconverted.write_bytes(original)
+
+    with pytest.raises(RuntimeError, match=r"0\.4\.0.*workspace that owns"):
+        SessionManager(imported, sessions_root=root)
+    with closing(sqlite3.connect(imported_db)) as db:
+        assert db.execute("SELECT count(*) FROM sessions WHERE key='websocket:migrated'").fetchone()[0] == 0
+        assert db.execute("SELECT value FROM storage_meta WHERE key='webui_history_import_v1'").fetchone()[0] == "complete"
+    assert unconverted.read_bytes() == original

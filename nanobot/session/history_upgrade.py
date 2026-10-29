@@ -71,10 +71,19 @@ def check_history_upgrade(store: SqliteSessionStore, directory: Path) -> None:
     namespace = store.path.parent
     with store.transaction() as db:
         imported = db.execute("SELECT value FROM storage_meta WHERE key=?", (_IMPORT_MARKER,)).fetchone()
-        if imported is not None and imported[0] == "complete":
-            return
-        if imported is not None:
+        if imported is not None and imported[0] != "complete":
             raise RuntimeError(f"Invalid legacy WebUI import marker in {store.path}; restore a valid backup.")
+        # 0.4.0 could complete this namespace while skipping a source owned by
+        # another workspace. Only per-chat receipts prove a source was imported here.
+        local_imports: set[str] = {
+            SessionLocation.safe_key(str(row[0])[len(_IMPORT_MARKER) + 1:])
+            for row in db.execute(
+                "SELECT key FROM storage_meta WHERE key LIKE ? AND value='complete'", (_IMPORT_MARKER + ":%",),
+            )
+        } if imported is not None else set()
+        sources = {stem: paths for stem, paths in sources.items() if stem not in local_imports}
+        if not sources:
+            return
 
         owners: dict[str, set[tuple[Path, str]]] = {}
         for database in namespace.parent.glob("*/sessions.sqlite3"):
@@ -125,7 +134,7 @@ def check_history_upgrade(store: SqliteSessionStore, directory: Path) -> None:
 def _require_040(source: Path) -> NoReturn:
     raise RuntimeError(
         f"Legacy WebUI history requires nanobot 0.4.0: {source}. "
-        "Start the 0.4.0 gateway with the same config and workspace to finish migration "
-        "before upgrading; resolve any reported ownership conflict first. "
+        "Start the 0.4.0 gateway with the same config and the workspace that owns this history "
+        "to finish migration before upgrading; resolve any ownership conflict first. "
         "Existing history files have not been changed."
     )
