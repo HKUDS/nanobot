@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import binascii
 import hashlib
@@ -36,7 +35,6 @@ from nanobot.session.manager import Session, SessionManager
 from nanobot.session.sqlite_store import SessionConflictError
 from nanobot.session.state import SessionOperationQueueFullError
 from nanobot.webui.history import (
-    check_history_upgrade,
     fact_from_record,
     record_from_fact,
     turn_records,
@@ -512,11 +510,6 @@ class WebUITranscriptRecorder:
         self.sessions = sessions
         self._log = log
         self._turn_sequences: dict[tuple[str, str], int] = {}
-
-    async def initialize(self) -> None:
-        sessions = self.sessions
-        if sessions is not None:
-            await asyncio.to_thread(check_history_upgrade, sessions.sessions_dir)
 
     def client_turn_metadata(self, value: Any) -> dict[str, str]:
         return {WEBUI_TURN_METADATA_KEY: normalize_webui_turn_id(value)}

@@ -37,6 +37,38 @@ def get_config_path() -> Path:
     return get_home_path() / "config.json"
 
 
+def validate_config(data: dict[str, Any] | None, path: Path) -> Config:
+    """Construct settings with diagnostics that never include rejected inputs."""
+    def environment_error() -> ConfigLoadError:
+        return ConfigLoadError(
+            path,
+            kind="invalid_schema",
+            summary=(
+                "Environment-based configuration could not be parsed. "
+                "Check that complex NANOBOT_* values use valid JSON."
+            ),
+        )
+
+    try:
+        return Config() if data is None else Config.model_validate(data)
+    except SettingsError:
+        error = environment_error()
+    except ValidationError as exc:
+        if any(isinstance(detail.get("ctx", {}).get("error"), SettingsError)
+               for detail in exc.errors(include_input=False)):
+            error = environment_error()
+        else:
+            issues = validation_issues(exc)
+            summary = (
+                "Environment-based configuration is invalid."
+                if data is None else f"Found {len(issues)} invalid setting(s)."
+            )
+            error = ConfigLoadError(path, kind="invalid_schema", summary=summary, issues=issues)
+    # Logging frameworks can display traceback locals even with exception chaining disabled.
+    data = None
+    raise error from None
+
+
 def load_config(config_path: Path | None = None) -> Config:
     """
     Load configuration from file or create default.
@@ -50,24 +82,7 @@ def load_config(config_path: Path | None = None) -> Config:
     path = config_path or get_config_path()
 
     if not path.exists():
-        try:
-            config = Config()
-        except SettingsError as exc:
-            raise ConfigLoadError(
-                path,
-                kind="invalid_schema",
-                summary=(
-                    "Environment-based configuration could not be parsed. "
-                    "Check that complex NANOBOT_* values use valid JSON."
-                ),
-            ) from exc
-        except ValidationError as exc:
-            raise ConfigLoadError(
-                path,
-                kind="invalid_schema",
-                summary="Environment-based configuration is invalid.",
-                issues=validation_issues(exc),
-            ) from exc
+        config = validate_config(None, path)
         config.bind_source_path(path)
         _apply_ssrf_whitelist(config)
         return config
@@ -114,16 +129,10 @@ def load_config(config_path: Path | None = None) -> Config:
 
     data = _migrate_config(cast(dict[str, Any], data))
     try:
-        config = Config.model_validate(data)
-    except ValidationError as exc:
-        issues = validation_issues(exc)
-        raise ConfigLoadError(
-            path,
-            kind="invalid_schema",
-            summary=f"Found {len(issues)} invalid setting(s).",
-            issues=issues,
-        ) from exc
-
+        config = validate_config(data, path)
+    finally:
+        # Do not retain raw configuration in traceback locals on validation failure.
+        data = None
     config.bind_source_path(path)
     _apply_ssrf_whitelist(config)
     return config

@@ -94,6 +94,7 @@ app = typer.Typer(
     ),
     invoke_without_command=True,
     no_args_is_help=False,
+    pretty_exceptions_show_locals=False,
 )
 
 console = Console()
@@ -159,7 +160,9 @@ def onboard(
     non_interactive_refresh: bool = typer.Option(False, "--refresh", help="Refresh config, preserving existing settings without prompting"),
 ):
     """Initialize nanobot configuration and workspace."""
-    from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
+    from nanobot.cli.runtime_config import _load_config_for_cli
+    from nanobot.config.errors import ConfigLoadError
+    from nanobot.config.loader import get_config_path, save_config, set_config_path, validate_config
     from nanobot.config.schema import Config
 
     explicit_config = config is not None
@@ -175,11 +178,18 @@ def onboard(
             loaded.agents.defaults.workspace = workspace
         return loaded
 
+    def _default_config() -> Config:
+        try:
+            return validate_config(None, config_path)
+        except ConfigLoadError as exc:
+            _print_config_error(exc)
+            raise typer.Exit(1) from None
+
     loaded_config: Config | None = None
     # Create or update config
     if config_path.exists():
         if wizard:
-            loaded_config = _apply_workspace_override(load_config(config_path))
+            loaded_config = _apply_workspace_override(_load_config_for_cli(config_path))
         else:
             should_refresh = non_interactive_refresh
             if not non_interactive_refresh:
@@ -191,20 +201,20 @@ def onboard(
                     "  [bold]N[/bold] = refresh config, keeping existing values and adding new fields"
                 )
                 if typer.confirm("Overwrite?"):
-                    loaded_config = _apply_workspace_override(Config())
+                    loaded_config = _apply_workspace_override(_default_config())
                     save_config(loaded_config, config_path)
                     console.print(f"[green]✓[/green] Config reset to defaults at {config_path}")
                 else:
                     should_refresh = True
 
             if should_refresh:
-                loaded_config = _apply_workspace_override(load_config(config_path))
+                loaded_config = _apply_workspace_override(_load_config_for_cli(config_path))
                 save_config(loaded_config, config_path)
                 console.print(
                     f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)"
                 )
     else:
-        loaded_config = _apply_workspace_override(Config())
+        loaded_config = _apply_workspace_override(_default_config())
         # In wizard mode, don't save yet - the wizard will handle saving if should_save=True
         if not wizard:
             save_config(loaded_config, config_path)
@@ -570,7 +580,8 @@ def plugins_list(
 ):
     """List optional nanobot features."""
     from nanobot.channels.registry import discover_plugins
-    from nanobot.config.loader import load_config, set_config_path
+    from nanobot.cli.runtime_config import _load_config_for_cli
+    from nanobot.config.loader import set_config_path
 
     resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
     if resolved_config_path is not None:
@@ -579,7 +590,7 @@ def plugins_list(
     _print_enable_options(
         feature_support.optional_dependency_groups(),
         discover_plugins(),
-        load_config(resolved_config_path),
+        _load_config_for_cli(resolved_config_path),
     )
 
 
@@ -590,6 +601,7 @@ def plugins_enable(
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show optional package install logs"),
 ):
     """Enable a nanobot feature."""
+    from nanobot.config.errors import ConfigLoadError
     from nanobot.config.loader import get_config_path, set_config_path
 
     resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
@@ -604,6 +616,9 @@ def plugins_enable(
             config_path=resolved_config_path,
             runner=feature_support.run_install_command,
         )
+    except ConfigLoadError as exc:
+        _print_config_error(exc)
+        raise typer.Exit(1) from None
     except feature_support.OptionalFeatureError as exc:
         console.print(f"[red]{escape(exc.message)}[/red]")
         raise typer.Exit(1) from exc
@@ -618,6 +633,7 @@ def plugins_disable(
     config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Disable a nanobot channel feature."""
+    from nanobot.config.errors import ConfigLoadError
     from nanobot.config.loader import get_config_path, set_config_path
 
     resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
@@ -627,6 +643,9 @@ def plugins_disable(
 
     try:
         payload = feature_support.disable_optional_feature(name, config_path=resolved_config_path)
+    except ConfigLoadError as exc:
+        _print_config_error(exc)
+        raise typer.Exit(1) from None
     except feature_support.OptionalFeatureError as exc:
         console.print(f"[red]{escape(exc.message)}[/red]")
         raise typer.Exit(1) from exc

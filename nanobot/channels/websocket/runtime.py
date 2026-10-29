@@ -653,7 +653,6 @@ class WebSocketChannel(BaseChannel):
             )
 
     async def start(self) -> None:
-        await self._outbound.initialize()
         self.gateway.http.remote_instances.resume()
         from nanobot.utils.logging_bridge import redirect_lib_logging
 

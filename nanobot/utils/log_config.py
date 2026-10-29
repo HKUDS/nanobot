@@ -50,6 +50,7 @@ def add_console_log_sink(stream: Any, *, level: str = "INFO") -> int:
         format=LOG_FORMAT,
         level=level,
         colorize=None,
+        diagnose=False,
         filter=prepare_log_record,
     )
 

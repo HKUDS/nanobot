@@ -4,8 +4,8 @@ The healthy target is the exact supplied wheel, not a patched application. The
 default baseline is explicitly a version-only fixture with a local feed transport
 and bounded fault injection. It does not stand for an older published release.
 Use --baseline-wheel to exercise an actual earlier updater-enabled package too.
-SQLite-only baselines get native storage fixtures, not migration evidence. Use a
-real 0.4.x baseline to prove JSONL migration before upgrading to 0.5; retained
+SQLite-only baselines get native storage fixtures, not migration evidence. Use the
+real 0.4.0 baseline to prove JSONL migration before upgrading; retained
 source bytes are checked only for the legacy fixture.
 No public feed, user installation, model, credentials or OS service is used.
 """

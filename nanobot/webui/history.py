@@ -2,16 +2,11 @@
 
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Mapping
-from contextlib import closing
-from pathlib import Path
 from typing import Any
 
 from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA
-from nanobot.config.paths import get_webui_dir
 from nanobot.session.display_history import HistoryFact, HistoryKind, HistoryReader
-from nanobot.session.location import SessionLocation
 from nanobot.webui.session_identity import webui_chat_id
 
 _EVENTS = {
@@ -94,50 +89,3 @@ def turn_records(
     return [{**record_from_fact(fact, history.key),
              "_webui_replay_identity": f"turn:{ordinal}:record:{position}"}
             for position, fact in history.read_entries(ordinal, max_records=max_records, max_bytes=max_bytes)]
-
-
-def _has_legacy_content(path: Path) -> bool:
-    # 0.4.x skipped empty files without recording per-chat import ownership.
-    return path.is_symlink() or not path.is_file() or path.stat().st_size > 0
-
-
-def check_history_upgrade(namespace: Path) -> None:
-    """Reject unconverted files without reading or rewriting their history."""
-    directory = get_webui_dir()
-    if directory.is_symlink():
-        raise RuntimeError(f"WebUI history directory must not be a symlink: {directory}")
-    sources = {path.stem: path for path in directory.glob("*.jsonl") if _has_legacy_content(path)}
-    sources.update(
-        (path.stem, path) for path in directory.glob("*.segments")
-        if path.is_symlink() or any(_has_legacy_content(segment) for segment in path.glob(
-            "[0-9][0-9][0-9][0-9][0-9][0-9].jsonl",
-        ))
-    )
-    if not sources:
-        return
-
-    marker = "webui_history_import_v1"
-    # 0.4.x retained per-chat ownership even after deletion. Backups from another
-    # workspace must not prevent a new workspace from starting in this instance.
-    for database in (namespace / "sessions.sqlite3", *(
-        path for path in namespace.parent.glob("*/sessions.sqlite3") if path.parent != namespace
-    )):
-        if database.is_symlink() or database.parent.is_symlink():
-            raise RuntimeError(f"session namespace must not be a symlink: {database}")
-        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as db:
-            if database.parent == namespace and db.execute(
-                "SELECT 1 FROM storage_meta WHERE key=? AND value='complete'", (marker,),
-            ).fetchone() is not None:
-                return
-            for row in db.execute(
-                "SELECT key FROM storage_meta WHERE key LIKE ? AND value='complete'", (marker + ":%",),
-            ):
-                sources.pop(SessionLocation.safe_key(str(row[0])[len(marker) + 1:]), None)
-        if not sources:
-            return
-    source = next(iter(sources.values()))
-    raise RuntimeError(
-        f"Legacy WebUI history requires nanobot 0.4.x: {source}. "
-        "Start the 0.4.x gateway with the same config and workspace to finish migration "
-        "before upgrading to 0.5.0. Existing history files have not been changed."
-    )

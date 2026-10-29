@@ -37,7 +37,7 @@ def test_legacy_proxy_fields_require_explicit_upgrade(tmp_path, group, feature, 
         load_config(path)
 
     message = str(caught.value)
-    assert "0.4.x" in message
+    assert "0.4.0" in message
     assert "network.proxy" in message
     assert "useProxy" in message
     assert "private-password" not in message
@@ -77,7 +77,7 @@ def test_legacy_proxy_environment_is_rejected_after_source_merge(tmp_path, monke
         load_config(path)
 
     message = str(caught.value)
-    assert "0.4.x" in message
+    assert "0.4.0" in message
     assert "NANOBOT_*" in message
     assert "env-secret" not in message
     if file_present:

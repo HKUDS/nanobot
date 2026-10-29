@@ -23,15 +23,6 @@ from nanobot.webui import history as history_module
 from nanobot.webui.recovery import RecoveryActionError, RecoveryCoordinator
 
 
-@pytest.fixture(autouse=True)
-def _isolate_webui_transcripts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Recovery scans must discover only test-owned transcripts, not active user chats."""
-    webui_dir = tmp_path / "isolated-webui"
-    webui_dir.mkdir()
-    monkeypatch.setattr(history_module, "get_webui_dir", lambda: webui_dir)
-    monkeypatch.setattr(history_module, "get_webui_dir", lambda: webui_dir)
-
-
 def _persist(manager: SessionManager, session: Session) -> None:
     session.metadata["webui"] = True
     manager.save(session)

@@ -122,14 +122,15 @@ def _set_oauth_provider_as_main(
     config_path: str | None = None,
 ) -> None:
     """Persist an OAuth provider as the active agent provider."""
-    from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
+    from nanobot.cli.runtime_config import _load_config_for_cli
+    from nanobot.config.loader import get_config_path, save_config, set_config_path
 
     resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
     if resolved_config_path is not None and get_config_path() != resolved_config_path:
         set_config_path(resolved_config_path)
         console.print(f"[dim]Using config: {resolved_config_path}[/dim]")
 
-    config = load_config(resolved_config_path)
+    config = _load_config_for_cli(resolved_config_path)
     selected_model = (model or "").strip() or _OAUTH_PROVIDER_DEFAULT_MODELS[provider_name]
     config.agents.defaults.model_preset = None
     config.agents.defaults.provider = provider_name

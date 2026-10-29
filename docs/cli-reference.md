@@ -135,11 +135,11 @@ Inside the native TUI, `/sessions` switches saved conversations, `/new-chat` sta
 
 ## Session Storage
 
-Model and WebUI chat history live in `<config-dir>/sessions/<workspace-id>/sessions.sqlite3`, outside the agent-readable workspace. **0.5.0 no longer imports old JSONL conversations or WebUI JSONL / segments.**
+Model and WebUI chat history live in `<config-dir>/sessions/<workspace-id>/sessions.sqlite3`, outside the agent-readable workspace. **0.4.0 is the last version that imports old JSONL conversations and WebUI JSONL / segments.**
 
-If you still have old-format history, first install **0.4.x** and start its gateway with the same config and workspace. Complete both model and WebUI history migration and confirm that your conversations are available before upgrading to 0.5.0. If migration was interrupted or reports damaged or ambiguous history, resolve it in 0.4.x first. A direct upgrade with unconverted history stops with an error and leaves the old files unchanged.
+If you still have old-format history, first install **0.4.0** and start its gateway with the same config and workspace. Complete both model and WebUI history migration and confirm that your conversations are available before upgrading. If migration was interrupted or reports damaged or ambiguous history, resolve it in 0.4.0 first. A direct upgrade with unconverted history stops with an error and leaves the old files unchanged.
 
-Keep the backups created by 0.4.x, including `jsonl-backup/` and old files under `<config-dir>/webui/`. They are not imported again; chats deleted from SQLite stay deleted on restart. Do not delete the whole `webui` directory: it still contains sidebar preferences and other saved WebUI state.
+Keep the backups created by 0.4.0, including `jsonl-backup/` and old files under `<config-dir>/webui/`. They are not imported again; chats deleted from SQLite stay deleted on restart. Do not delete the whole `webui` directory: it still contains sidebar preferences and other saved WebUI state.
 
 Before changing versions, stop all nanobot instances using the same config directory and back up that entire directory and the workspace together. Copying only `sessions.sqlite3` while nanobot is running can miss recent messages. To downgrade, restore a complete pre-upgrade backup compatible with the older release. Older releases cannot read newly saved WebUI history; do not combine the current session database with old WebUI history files.
 

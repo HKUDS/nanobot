@@ -548,12 +548,14 @@ class Config(BaseSettings):
                 raise PydanticCustomError(
                     "legacy_proxy_settings",
                     "Legacy proxy settings in {section} are no longer supported. "
-                    "Load and save with nanobot 0.4.x before upgrading, or replace legacy fields "
-                    "with network.proxy and per-feature useProxy. Update legacy NANOBOT_* variables too. "
+                    "Use nanobot 0.4.0 to migrate, or replace legacy fields with network.proxy "
+                    "and per-feature useProxy. Before saving, remove all sensitive NANOBOT_* "
+                    "configuration overrides: 0.4.0 may write them to config.json. "
+                    "Reference proxy credentials using a separate ${ENV_VAR}. "
                     "Include any Discord credentials in the shared proxy URL.",
                     {"section": section_name},
                 )
-        return value
+        return data
 
     @classmethod
     def settings_customise_sources(

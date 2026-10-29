@@ -1,4 +1,5 @@
 import json
+import traceback
 
 import pytest
 
@@ -184,3 +185,33 @@ def test_api_config_allows_wildcard_host_with_key() -> None:
 
     assert config.host == "0.0.0.0"
     assert config.api_key == "secret"
+
+
+@pytest.mark.parametrize("file_present", [False, True])
+def test_legacy_proxy_environment_never_appears_in_exception_chain(tmp_path, monkeypatch, file_present):
+    path = tmp_path / "config.json"
+    if file_present:
+        path.write_text("{}", encoding="utf-8")
+    secret = "synthetic-proxy-password"
+    monkeypatch.setenv("NANOBOT_PROVIDERS__OPENAI__PROXY", f"http://user:{secret}@localhost:8080")
+
+    with pytest.raises(ConfigLoadError) as caught:
+        load_config(path)
+
+    text = "".join(traceback.format_exception(caught.value))
+    assert "Legacy proxy settings" in text and "0.4.0" in text
+    assert secret not in text
+
+
+def test_existing_config_reports_malformed_environment_safely(tmp_path, monkeypatch):
+    path = tmp_path / "config.json"
+    path.write_text("{}", encoding="utf-8")
+    secret = "synthetic-not-json"
+    monkeypatch.setenv("NANOBOT_PROVIDERS", secret)
+
+    with pytest.raises(ConfigLoadError) as caught:
+        load_config(path)
+
+    text = "".join(traceback.format_exception(caught.value))
+    assert "complex NANOBOT_* values use valid JSON" in text
+    assert secret not in text

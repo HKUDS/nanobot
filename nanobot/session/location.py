@@ -27,11 +27,13 @@ class SessionLocation:
     def __init__(self, workspace: Path, *, sessions_root: Path | None = None):
         canonical_workspace = Path(workspace).expanduser().resolve(strict=False)
         ensure_dir(canonical_workspace)
-        root = (
-            Path(sessions_root).expanduser().resolve(strict=False)
+        configured_root = (
+            Path(sessions_root).expanduser()
             if sessions_root is not None
-            else get_runtime_subdir("sessions").resolve(strict=False)
+            else get_runtime_subdir("sessions")
         )
+        self.webui_dir = configured_root.parent.resolve(strict=False) / "webui"
+        root = configured_root.resolve(strict=False)
         if root == canonical_workspace or root.is_relative_to(canonical_workspace):
             raise RuntimeError(
                 "session storage must be outside the agent workspace; "

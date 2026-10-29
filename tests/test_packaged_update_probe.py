@@ -87,22 +87,20 @@ def test_display_owner_addition_does_not_mask_context_loss(tmp_path):
 
 @pytest.fixture
 def history_root(tmp_path, monkeypatch):
-    from nanobot.config.paths import get_runtime_subdir, get_webui_dir
+    from nanobot.config.paths import get_runtime_subdir
 
     monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "account/.nanobot/config.json")
     monkeypatch.setattr("nanobot.session.location.get_runtime_subdir", get_runtime_subdir)
-    monkeypatch.setattr("nanobot.webui.history.get_webui_dir", get_webui_dir)
     return tmp_path
 
 
 async def test_native_history_fixture_reopens_without_mixing_model_and_display_data(history_root):
     from nanobot.session.manager import SessionManager
-    from nanobot.webui.transcript import WebUITranscriptRecorder, build_webui_thread_response
+    from nanobot.webui.transcript import build_webui_thread_response
 
     fixture = probe.seed_history(history_root)
     assert fixture == {"kind": "native-sqlite", "legacy_files": []}
     sessions = SessionManager(history_root / "workspace")
-    await WebUITranscriptRecorder(sessions).initialize()
     assert sessions.sessions_dir.is_relative_to(history_root / "account/.nanobot")
     records = canonical_records(sessions.sessions_dir / "sessions.sqlite3")
     assert len(records["sessions"]) == 3

@@ -61,7 +61,6 @@ async def test_session_tools_find_old_matches_in_full_session(
 @pytest.mark.parametrize("state", ["canonical", "transcript", "mixed"])
 async def test_session_tools_use_canonical_records_after_restart(history, tmp_path, monkeypatch, state):
     webui_dir = tmp_path / "webui"
-    monkeypatch.setattr("nanobot.webui.history.get_webui_dir", lambda: webui_dir)
     manager = history.sessions
     key = "websocket:history"
     if state != "transcript":

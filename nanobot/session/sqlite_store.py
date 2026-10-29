@@ -109,6 +109,15 @@ def _schema_version(db: sqlite3.Connection) -> int:
     return version
 
 
+def _has_legacy_jsonl(directory: Path) -> bool:
+    try:
+        return any(path.match("*.jsonl") for path in directory.iterdir())
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise RuntimeError(f"Cannot inspect legacy session history directory: {directory}") from exc
+
+
 class SessionConflictError(RuntimeError):
     """A command refers to a replaced session or obsolete history."""
 
@@ -218,13 +227,13 @@ class SqliteSessionStore:
                 "SELECT 1 FROM storage_meta WHERE key='jsonl_import' AND value='complete'"
             ).fetchone()
             if pending is not None or (imported is None and any(
-                next(directory.glob("*.jsonl"), None) is not None
+                _has_legacy_jsonl(directory)
                 for directory in (self.path.parent, workspace / "sessions")
             )):
                 raise RuntimeError(
-                    f"Legacy JSONL history requires nanobot 0.4.x: {self.path.parent}. "
-                    "Start 0.4.x with the same config and workspace to finish migration "
-                    "before upgrading to 0.5.0. Existing history files have not been changed."
+                    f"Legacy JSONL history requires nanobot 0.4.0: {self.path.parent}. "
+                    "Start 0.4.0 with the same config and workspace to finish migration "
+                    "before upgrading. Existing history files have not been changed."
                 )
 
     def _metadata(self, db: sqlite3.Connection, key: str, raw: str) -> dict[str, Any]:
