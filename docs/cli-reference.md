@@ -135,13 +135,9 @@ Inside the native TUI, `/sessions` switches saved conversations, `/new-chat` sta
 
 ## Session Storage
 
-Model and WebUI chat history live in `<config-dir>/sessions/<workspace-id>/sessions.sqlite3`, outside the agent-readable workspace. **0.4.0 is the last version that imports old JSONL conversations and WebUI JSONL / segments.**
+Model and WebUI chat history live in `<config-dir>/sessions/<workspace-id>/sessions.sqlite3`, outside the agent-readable workspace. The `webui` directory contains sidebar preferences and other saved WebUI state.
 
-If you still have old-format history, first install **0.4.0** and start its gateway with the same config and workspace. Complete both model and WebUI history migration and confirm that your conversations are available before upgrading. If migration was interrupted or reports damaged or ambiguous history, resolve it in 0.4.0 first. A direct upgrade with unconverted history stops with an error and leaves the old files unchanged.
-
-Keep the backups created by 0.4.0, including `jsonl-backup/` and old files under `<config-dir>/webui/`. They are not imported again; chats deleted from SQLite stay deleted on restart. Do not delete the whole `webui` directory: it still contains sidebar preferences and other saved WebUI state.
-
-Before changing versions, stop all nanobot instances using the same config directory and back up that entire directory and the workspace together. Copying only `sessions.sqlite3` while nanobot is running can miss recent messages. To downgrade, restore a complete pre-upgrade backup compatible with the older release. Older releases cannot read newly saved WebUI history; do not combine the current session database with old WebUI history files.
+Before changing versions, stop all nanobot instances using the same config directory and back up that entire directory and the workspace together. Copying only `sessions.sqlite3` while nanobot is running can miss recent messages. To downgrade, restore a complete pre-upgrade backup compatible with the older release.
 
 Interactive mode uses nanobot's native TypeScript terminal UI. It talks to the same local gateway as the WebUI, so streaming, tool progress, and WebSocket sessions share one protocol instead of maintaining a second agent loop. If no gateway is running, either client starts it on demand. The TUI paints immediately while the local gateway starts, then obtains fresh bootstrap credentials and connects in the background. Exiting one TUI or WebUI launcher releases only that client; the last interactive launcher stops the on-demand gateway. A small gateway watchdog also reclaims an on-demand process if its last client crashes. `/detach` promotes the shared gateway to persistent background mode before closing the TUI, so active agent work continues without a connected client. An explicit `nanobot gateway --background` starts or promotes the gateway the same way before opening a client. `nanobot gateway restart` restarts a detached gateway without changing that lifetime; restart an attached foreground gateway in its owning terminal. `nanobot gateway stop` ends either mode.
 

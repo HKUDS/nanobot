@@ -1,4 +1,4 @@
-"""WebUI projection of durable session facts and history upgrade diagnostics."""
+"""WebUI projection of durable session facts."""
 
 from __future__ import annotations
 

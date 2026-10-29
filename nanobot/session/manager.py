@@ -427,15 +427,13 @@ class SessionManager:
         *,
         sessions_root: Path | None = None,
     ):
-        from nanobot.session.history_upgrade import check_history_upgrade
         from nanobot.session.sqlite_store import SqliteSessionStore
 
         self.workspace = workspace
         self.location = SessionLocation(workspace, sessions_root=sessions_root)
         self.sessions_dir = self.location.sessions_dir
         self._store = SqliteSessionStore(self.sessions_dir)
-        self._store.initialize(workspace)
-        check_history_upgrade(self._store, self.location.webui_dir)
+        self._store.initialize()
         self._delete_observer: Callable[[str], None] | None = None
         self.types = SessionTypes()
         self._state: SessionState | None = None

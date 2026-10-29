@@ -6,7 +6,6 @@ from typing import Any, ClassVar, Literal, cast
 
 from pydantic import AliasChoices, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 from pydantic.fields import FieldInfo
-from pydantic_core import PydanticCustomError
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 from nanobot.agent.tools.cli_apps_config import CliAppsToolConfig
@@ -517,45 +516,6 @@ class Config(BaseSettings):
         validation_alias=AliasChoices("modelPresets", "model_presets"),
         serialization_alias="modelPresets",
     )
-
-    @model_validator(mode="before")
-    @classmethod
-    def _reject_legacy_proxy_fields(cls, value: object) -> object:
-        """Reject obsolete routing settings after all settings sources have merged."""
-        if not isinstance(value, dict):
-            return value
-        data = cast(dict[str, object], value)
-        sections: list[tuple[str, object]] = []
-        providers = data.get("providers")
-        if isinstance(providers, dict):
-            sections.extend(("providers", section) for section in cast(dict[str, object], providers).values())
-        tools = data.get("tools")
-        if isinstance(tools, dict):
-            sections.append(("tools.web", cast(dict[str, object], tools).get("web")))
-        channels = data.get("channels")
-        if isinstance(channels, dict):
-            channels = cast(dict[str, object], channels)
-            sections.extend((f"channels.{name}", channels.get(name)) for name in ("telegram", "discord", "slack", "matrix", "whatsapp"))
-        for section_name, section in sections:
-            if not isinstance(section, dict):
-                continue
-            # Nested environment keys are lowercased by pydantic-settings.
-            keys = {key.lower() for key in cast(dict[str, object], section)}
-            legacy_keys = {"proxy"}
-            if section_name == "channels.discord":
-                legacy_keys.update({"proxyusername", "proxy_username", "proxypassword", "proxy_password"})
-            if keys & legacy_keys:
-                raise PydanticCustomError(
-                    "legacy_proxy_settings",
-                    "Legacy proxy settings in {section} are no longer supported. "
-                    "Use nanobot 0.4.0 to migrate, or replace legacy fields with network.proxy "
-                    "and per-feature useProxy. Before saving, remove all sensitive NANOBOT_* "
-                    "configuration overrides: 0.4.0 may write them to config.json. "
-                    "Reference proxy credentials using a separate ${ENV_VAR}. "
-                    "Include any Discord credentials in the shared proxy URL.",
-                    {"section": section_name},
-                )
-        return data
 
     @classmethod
     def settings_customise_sources(

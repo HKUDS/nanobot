@@ -102,12 +102,6 @@ HTTP, HTTPS, SOCKS5, and SOCKS5H URLs are accepted; individual integrations reta
 
 </details>
 
-**0.4.0 is the last version that accepts old per-feature `proxy` fields and Discord's separate `proxyUsername` / `proxyPassword` fields**, including snake_case spellings. Before upgrading, either use 0.4.0 to migrate and save the configuration, or manually set `network.proxy` and each feature's `useProxy` choice and remove the old fields. Update environment variables that supply the old structure as well; otherwise loading the configuration fails with upgrade guidance instead of silently changing proxy routing.
-
-Saving configuration in 0.4.0 can write values from `NANOBOT_*` configuration environment variables into `config.json`, including proxy credentials. Do not run `nanobot onboard --refresh` with sensitive configuration overrides set. For an environment-supplied legacy proxy, remove the old override and manually configure `network.proxy` as an `${ENV_VAR}` reference to the full proxy URL, then set the corresponding `useProxy` choices. Keep the URL and credentials in that separate environment variable.
-
-Choose one shared address if the old configuration contains different proxy URLs. For Discord, include its credentials in the shared URL. Review enabled and disabled proxy choices before upgrading, and keep the original configuration backup if you may need to downgrade.
-
 ## Environment Variables for Secrets
 
 Instead of storing secrets directly in `config.json`, you can use `${VAR_NAME}` references that are resolved from environment variables at startup:

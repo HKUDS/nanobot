@@ -14,7 +14,6 @@ import tempfile
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from urllib.parse import quote
 
 
 def product_phase(phase: str, version: str) -> None:
@@ -42,36 +41,16 @@ def product_phase(phase: str, version: str) -> None:
             time.sleep(0.2)
         raise RuntimeError("Installed container gateway did not become ready")
 
-    def history(root, key):
-        rows = probe.request(root, "/api/sessions")["sessions"]
-        assert key in {row["key"] for row in rows}
-        response = probe.request(root, "/api/sessions/" + quote(key, safe="") + "/webui-thread")
-        # Released 0.3.5 returns rendered messages; 0.4 returns events. These
-        # command-only fixtures compare visible text plus completed-turn identity.
-        if "messages" in response:
-            events = []
-            for message in response["messages"]:
-                assert message["role"] in {"user", "assistant"}
-                events.append({"event": "user" if message["role"] == "user" else "message",
-                               "text": message["content"]})
-        else:
-            events = [{"event": "user" if event["event"] == "user_message" else event["event"],
-                       "text": event["text"]} for event in response["events"]
-                      if event["event"] in {"user", "user_message", "message"}]
-        assert events
-        return {"events": events, "completed_turn_ids": response["completed_turn_ids"]}
-
-    probe.ready, probe.history = ready, history
+    probe.ready = ready
     try:
         if phase == "seed":
             root.mkdir()
             probe.write(root / "case.json", {"dock": False, "baseline_version": version})
             probe.seed(root)
             probe.snapshot(root)
-            print("HISTORY_FIXTURE=" + probe.read(root / "history-fixture.json")["kind"])
         else:
             probe.gateway(root, "--background")
-            assert probe.verify_data(root, version)
+            probe.verify_data(root, version)
     finally:
         probe.gateway(root, "stop")
 
@@ -81,7 +60,6 @@ def run(args) -> dict:
     images = {key: json.loads(subprocess.check_output(
         ["docker", "image", "inspect", image], text=True,
     ))[0]["Id"] for key, image in (("baseline", args.baseline_image), ("target", args.image))}
-    history_fixture = None
     with tempfile.TemporaryDirectory(prefix="nanobot-docker-upgrade-") as temporary:
         root = Path(temporary)
         volume = root.name
@@ -111,21 +89,14 @@ def run(args) -> dict:
                         frames = [line for line in lines if line.lstrip().startswith('File "')]
                         print("\n".join(frames[-12:]), file=sys.stderr)
                         raise RuntimeError(f"Docker upgrade {phase} failed; container exit {result.returncode}")
-                if phase == "seed":
-                    receipts = [line.removeprefix("HISTORY_FIXTURE=") for line in
-                                (root / "seed.log").read_text().splitlines() if line.startswith("HISTORY_FIXTURE=")]
-                    if len(receipts) != 1 or receipts[0] not in {"legacy-jsonl", "native-sqlite"}:
-                        raise RuntimeError("Docker baseline did not identify its history fixture")
-                    history_fixture = receipts[0]
         finally:
             subprocess.run(["docker", "rm", "-f", container], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             subprocess.run(["docker", "volume", "rm", volume], check=True, capture_output=True)
     return {"source_commit": args.source_commit, "baseline_image": images["baseline"], "target_image": images["target"],
             "baseline_version": args.baseline_version, "target_version": args.version,
             "probe_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-            "same_volume_image_replacement": True, "history_fixture": history_fixture,
-            "config_bytes_preserved": True,
-            "config_and_legacy_bytes_preserved": True if history_fixture == "legacy-jsonl" else None,
+            "same_volume_image_replacement": True, "history_fixture": "native-sqlite",
+            "config_bytes_preserved": True, "sqlite_records_preserved": True, "scheduled_delivery_preserved": True,
             "authenticated_history_preserved": True, "canonical_only_and_display_only_preserved": True,
             "continued_write_and_second_start": True, "non_root": True, "no_external_network": True,
             "container_and_volume_cleaned": True, "in_place_update_or_automatic_rollback": False}

@@ -268,7 +268,8 @@ async def test_child_activity_replays_real_tool_errors_and_file_diffs(tmp_path):
         path = f"/api/sessions/websocket%3Aparent/subagents/{task_id}/webui-thread"
 
         async def assert_activity(gateway, connection, headers):
-            before = {file.name: file.read_bytes() for file in root.glob("*.jsonl")}
+            child_key = SubagentSessions.key(task_id)
+            before = sessions.project_history(child_key, lambda history: history.all_facts())
             response = await gateway.http.dispatch(connection, Request(path, headers))
             assert response.status_code == 200
             thread = json.loads(response.body)
@@ -281,7 +282,7 @@ async def test_child_activity_replays_real_tool_errors_and_file_diffs(tmp_path):
             assert "+after" in completed["diff"]["text"]
             assert "-before" in completed["diff"]["text"]
             assert (workspace / "example.txt").read_text(encoding="utf-8") == "after\n"
-            assert {file.name: file.read_bytes() for file in root.glob("*.jsonl")} == before
+            assert sessions.project_history(child_key, lambda history: history.all_facts()) == before
             return thread
 
         assert (await assert_activity(gateway, connection, headers))["active_turn_id"]

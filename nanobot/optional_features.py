@@ -764,7 +764,7 @@ def enable_optional_feature(
     runner: Any = run_install_command,
 ) -> dict[str, Any]:
     from nanobot.channels.registry import discover_plugins
-    from nanobot.config.loader import get_config_path, load_config
+    from nanobot.config.loader import get_config_path
 
     if name in _BUNDLED_FEATURE_ALIASES:
         payload = optional_features_payload(
@@ -785,8 +785,6 @@ def enable_optional_feature(
         available = ", ".join(sorted(known))
         raise OptionalFeatureError(f"Unknown feature: {name}. Available: {available}", status=404)
 
-    # Reject invalid configuration before installing packages or changing channel settings.
-    load_config(config_path)
     channel_plugin = channel_plugins.get(name)
     dependencies = _feature_dependencies(name, channel_plugin, extras)
     _install_feature_dependencies(
@@ -829,6 +827,8 @@ def enable_optional_feature(
             )
         except Exception as exc:
             logger.warning("Could not refresh {} channel metadata: {}", name, exc)
+
+    from nanobot.config.loader import load_config
 
     payload = optional_features_payload(
         config=load_config(config_path),
@@ -896,8 +896,6 @@ def disable_optional_feature(
         raise OptionalFeatureError(f"Unknown feature: {name}. Available: {available}", status=404)
     if name not in known_channels:
         raise OptionalFeatureError(f"Feature '{name}' cannot be disabled", status=400)
-    # Do not write the channel gate if the existing config requires migration.
-    load_config(config_path)
     channel_plugin = channel_plugins[name]
     target_instance_id = resolve_channel_action_target(requested_instance_id)
     set_channel_config_enabled(

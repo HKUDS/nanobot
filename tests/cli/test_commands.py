@@ -128,12 +128,6 @@ class _GatewayAgentContractStub:
 class _EmptyGatewaySessionManager:
     """Minimal session-manager contract for gateway assembly tests."""
 
-    @property
-    def sessions_dir(self) -> Path:
-        from nanobot.session.location import get_runtime_subdir
-
-        return get_runtime_subdir("sessions")
-
     def list_sessions(self) -> list[dict[str, object]]:
         return []
 

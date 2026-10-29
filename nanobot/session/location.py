@@ -12,10 +12,7 @@ from pathlib import Path
 from filelock import FileLock
 
 from nanobot.config.paths import get_runtime_subdir
-from nanobot.utils.helpers import (
-    ensure_dir,
-    safe_filename,
-)
+from nanobot.utils.helpers import ensure_dir
 
 _WORKSPACE_STATE_DIR = ".nanobot"
 _WORKSPACE_ID_FILE = "workspace-id"
@@ -27,13 +24,11 @@ class SessionLocation:
     def __init__(self, workspace: Path, *, sessions_root: Path | None = None):
         canonical_workspace = Path(workspace).expanduser().resolve(strict=False)
         ensure_dir(canonical_workspace)
-        configured_root = (
-            Path(sessions_root).expanduser()
+        root = (
+            Path(sessions_root).expanduser().resolve(strict=False)
             if sessions_root is not None
-            else get_runtime_subdir("sessions")
+            else get_runtime_subdir("sessions").resolve(strict=False)
         )
-        self.webui_dir = configured_root.parent.resolve(strict=False) / "webui"
-        root = configured_root.resolve(strict=False)
         if root == canonical_workspace or root.is_relative_to(canonical_workspace):
             raise RuntimeError(
                 "session storage must be outside the agent workspace; "
@@ -226,7 +221,3 @@ class SessionLocation:
             cls._replace_workspace_id(workspace, workspace_id)
 
         raise RuntimeError(f"could not allocate an isolated session namespace for {workspace}")
-
-    @staticmethod
-    def safe_key(key: str) -> str:
-        return safe_filename(key.replace(":", "_"))

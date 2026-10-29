@@ -109,15 +109,6 @@ def _schema_version(db: sqlite3.Connection) -> int:
     return version
 
 
-def _has_legacy_jsonl(directory: Path) -> bool:
-    try:
-        return any(path.match("*.jsonl") for path in directory.iterdir())
-    except FileNotFoundError:
-        return False
-    except OSError as exc:
-        raise RuntimeError(f"Cannot inspect legacy session history directory: {directory}") from exc
-
-
 class SessionConflictError(RuntimeError):
     """A command refers to a replaced session or obsolete history."""
 
@@ -192,9 +183,8 @@ class SqliteSessionStore:
             if owned:
                 connection.close()
 
-    def initialize(self, workspace: Path) -> None:
-        """Upgrade the SQLite schema without importing retired history formats."""
-        workspace = workspace.expanduser().resolve(strict=False)
+    def initialize(self) -> None:
+        """Initialize or upgrade the SQLite schema."""
         # WAL is persistent and must be enabled outside a transaction.
         if self.path.is_symlink():
             raise RuntimeError("session database must not be a symlink")
@@ -220,21 +210,6 @@ class SqliteSessionStore:
             for target, migrate in enumerate(_SCHEMA_MIGRATIONS[version:], start=version + 1):
                 migrate(db)
                 db.execute(f"PRAGMA user_version = {target}")
-            pending = db.execute(
-                "SELECT 1 FROM storage_meta WHERE key='jsonl_workspace_sources'"
-            ).fetchone()
-            imported = db.execute(
-                "SELECT 1 FROM storage_meta WHERE key='jsonl_import' AND value='complete'"
-            ).fetchone()
-            if pending is not None or (imported is None and any(
-                _has_legacy_jsonl(directory)
-                for directory in (self.path.parent, workspace / "sessions")
-            )):
-                raise RuntimeError(
-                    f"Legacy JSONL history requires nanobot 0.4.0: {self.path.parent}. "
-                    "Start 0.4.0 with the same config and workspace to finish migration "
-                    "before upgrading. Existing history files have not been changed."
-                )
 
     def _metadata(self, db: sqlite3.Connection, key: str, raw: str) -> dict[str, Any]:
         metadata = _object(raw)

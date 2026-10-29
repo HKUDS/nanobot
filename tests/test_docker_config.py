@@ -71,18 +71,3 @@ def test_failed_write_does_not_leave_an_existing_config(tmp_path):
             initialize_config(path)
     assert not path.exists()
     assert not list(tmp_path.glob("*.tmp"))
-
-
-def test_first_boot_rejects_legacy_proxy_without_printing_credentials(tmp_path, monkeypatch):
-    secret = "synthetic-proxy-password"
-    monkeypatch.setenv("NANOBOT_PROVIDERS__OPENAI__PROXY", f"http://user:{secret}@localhost:8080")
-    path = tmp_path / "instance" / "config.json"
-
-    result = _initialize(path)
-
-    assert result.returncode != 0
-    assert "0.4.0" in result.stdout + result.stderr
-    assert "Legacy proxy settings" in result.stdout + result.stderr
-    assert secret not in result.stdout + result.stderr
-    assert "Traceback" not in result.stdout + result.stderr
-    assert not path.exists()

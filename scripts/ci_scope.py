@@ -38,6 +38,8 @@ RULES = (
     ((".github/workflows/*",), ALL, "unknown workflow"),
     (("pyproject.toml", "uv.lock", "hatch_build.py", "nanobot/webui/build.py", "scripts/install*",
       "scripts/build*"), ALL, "cross-domain dependency, build or installation contract"),
+    (("scripts/verify_packaged_update.py",), PYTHON | DOCKER | NATIVE,
+     "shared packaged and Docker upgrade verification"),
     (("tests/test_docker*.py",), PYTHON | DOCKER, "Docker Python regression tests"),
     (("Dockerfile", "Dockerfile.*", ".dockerignore", "docker-compose*.yml", "entrypoint.sh",
       "render-config.json", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md",

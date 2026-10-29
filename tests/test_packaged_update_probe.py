@@ -20,69 +20,12 @@ from nanobot.release_feed import ReleaseFeed
 from scripts import verify_packaged_update as probe
 from scripts.verify_packaged_update import (
     Timings,
-    assert_canonical_preserved,
-    assert_history_preserved,
     canonical_records,
     digest,
     feed_records,
     fixture_wheel,
     replace_once,
 )
-
-
-def test_historical_projection_defaults_do_not_mask_history_loss():
-    # Real retained packages omit unknown timestamps and an inactive goal from
-    # their public projection, although the latter is already in their JSONL.
-    events = [{"event": "user_message", "projection_id": "input", "text": "Keep this"},
-              {"event": "turn_end", "projection_id": "complete"}]
-    before = {"events": events, "completed_turn_ids": ["turn"]}
-    projected = [{**events[0], "created_at_ms": 0},
-                 {**events[1], "created_at_ms": 0, "goal_state": {"active": False}}]
-    after = {**before, "events": projected}
-    assert_history_preserved(before, after)
-    assert_history_preserved(after, after)
-    for change in ({"text": "Changed"}, {"projection_id": "changed"}, {"created_at_ms": 123}):
-        with pytest.raises(AssertionError):
-            assert_history_preserved(before, {**after, "events": [{**projected[0], **change}, projected[1]]})
-    with pytest.raises(AssertionError):
-        assert_history_preserved(before, {**after, "events": [projected[0], {**projected[1], "goal_state": {"active": True}}]})
-    with pytest.raises(AssertionError):
-        assert_history_preserved(before, {**after, "events": projected[:1]})
-    with pytest.raises(AssertionError):
-        assert_history_preserved(before, {**after, "completed_turn_ids": []})
-    with pytest.raises(AssertionError):
-        assert_history_preserved(after, before)
-
-
-def test_display_owner_addition_does_not_mask_context_loss(tmp_path):
-    from nanobot.session.display_history import HistoryFact, HistoryKind
-    from nanobot.session.manager import Session
-    from nanobot.session.sqlite_store import SqliteSessionStore
-
-    store = SqliteSessionStore(tmp_path)
-    store.initialize(tmp_path)
-    session = Session(key="websocket:canonical-only")
-    session.add_message("user", "Keep this original context")
-    store.save(session)
-    before = canonical_records(store.path)
-    display = Session(key="websocket:display-only")
-    store.save(display)
-    store.append_history(display.key, [HistoryFact(HistoryKind.ANSWER, {"text": "Display only"})],
-                         expected_generation=display.generation)
-    after = canonical_records(store.path)
-    assert_canonical_preserved(before, after)
-    assert_canonical_preserved(after, after)
-    # The real /api/sessions read allocates the new display owner's handle.
-    store.update_metadata("websocket:display-only", {"session_handle": "jeno"})
-    after = canonical_records(store.path)
-    assert_canonical_preserved(before, after)
-    with pytest.raises(AssertionError):
-        assert_canonical_preserved(before, {**after, "messages": []})
-    with pytest.raises(AssertionError):
-        assert_canonical_preserved(before, {**after, "sessions": after["sessions"][1:]})
-    store.update_metadata("websocket:display-only", {"unexpected": "context"})
-    with pytest.raises(AssertionError):
-        assert_canonical_preserved(before, canonical_records(store.path))
 
 
 @pytest.fixture
@@ -98,51 +41,20 @@ async def test_native_history_fixture_reopens_without_mixing_model_and_display_d
     from nanobot.session.manager import SessionManager
     from nanobot.webui.transcript import build_webui_thread_response
 
-    fixture = probe.seed_history(history_root)
-    assert fixture == {"kind": "native-sqlite", "legacy_files": []}
+    probe.seed_history(history_root)
     sessions = SessionManager(history_root / "workspace")
     assert sessions.sessions_dir.is_relative_to(history_root / "account/.nanobot")
     records = canonical_records(sessions.sessions_dir / "sessions.sqlite3")
     assert len(records["sessions"]) == 3
-    for key in ("websocket:legacy-acceptance", "websocket:canonical-only"):
+    for key in ("websocket:mixed-history", "websocket:canonical-only"):
         assert sessions.read_session_file(key)["messages"] == [{"role": "user", "content": "配置和聊天不能丢失"}]
     assert sessions.read_session_file("websocket:display-only")["messages"] == []
     assert sessions.project_history("websocket:canonical-only", lambda history: history.all_facts()) == []
-    for key in ("websocket:legacy-acceptance", "websocket:display-only"):
+    for key in ("websocket:mixed-history", "websocket:display-only"):
         response = sessions.project_history(key, lambda history, key=key: build_webui_thread_response(key, history=history))
         assert response["completed_turn_ids"] == ["fixture-" + key.split(":", 1)[1]]
         assert {event.get("text") for event in response["events"]} >= {"配置和聊天不能丢失", "独立验收数据"}
     assert canonical_records(sessions.sessions_dir / "sessions.sqlite3") == records
-
-
-def test_importer_enabled_baseline_gets_original_jsonl_sources(history_root, monkeypatch):
-    from nanobot.config.paths import get_webui_dir
-    from nanobot.session.location import SessionLocation
-
-    # This checks fixture selection only. Migration proof requires the real
-    # --baseline-wheel journey, not an importer mocked or copied into this test.
-    find_spec = probe.importlib.util.find_spec
-    monkeypatch.setattr(probe.importlib.util, "find_spec", lambda name: (
-        object() if name == "nanobot.session.jsonl_migration" else find_spec(name)))
-    fixture = probe.seed_history(history_root)
-    assert fixture["kind"] == "legacy-jsonl"
-    location = SessionLocation(history_root / "workspace")
-    expected = set()
-    for key in ("websocket:legacy-acceptance", "websocket:canonical-only"):
-        path = location.sessions_dir / (probe.base64.urlsafe_b64encode(key.encode()).decode().rstrip("=") + ".jsonl")
-        expected.add(str(path))
-        header, message = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
-        assert header["key"] == key and header["metadata"] == {"title": "升级前的聊天"}
-        assert message == {"role": "user", "content": "配置和聊天不能丢失"}
-    for chat_id in ("legacy-acceptance", "display-only"):
-        path = get_webui_dir() / f"websocket_{chat_id}.jsonl"
-        expected.add(str(path))
-        events = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
-        assert [event["event"] for event in events] == ["user", "message", "turn_end"]
-        assert {event["chat_id"] for event in events} == {chat_id}
-        assert events[1]["text"] == "独立验收数据"
-    assert len(fixture["legacy_files"]) == 4 and set(fixture["legacy_files"]) == expected
-    assert all(Path(name).is_relative_to(history_root / "account/.nanobot") for name in expected)
 
 
 def wheel(tmp_path, version, *, worker=b"# worker\n", fallback=b"# fallback\n"):
