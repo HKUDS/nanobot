@@ -95,6 +95,7 @@ class _GatewayAgentContractStub:
 
     tools = ToolRegistry()
     subagents = MagicMock(spec=SubagentManager)
+    runtime_resolver = SimpleNamespace(invalidate=lambda: None)
 
     @contextmanager
     def maintenance(self):
@@ -3989,6 +3990,7 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
             return False
 
         async def serve_forever(self) -> None:
+            await _probe_live_health()
             raise _StopGatewayError("stop")
 
     async def _fake_start_server(handler, host: str, port: int):
@@ -4029,6 +4031,96 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCronService)
     monkeypatch.setattr("asyncio.start_server", _fake_start_server)
 
+    async def _probe_live_health() -> None:
+        # Probe while the service is live, not a captured handler after shutdown
+        # has correctly closed admission. Use its owning loop for all requests.
+        health_handler = captured["handler"]
+        assert callable(health_handler)
+
+        async def _call_handler(path: str) -> tuple[str, _FakeWriter]:
+            request = f"GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n".encode()
+            writer = _FakeWriter()
+            await health_handler(_FakeReader(request), writer)
+            return writer.output.decode(), writer
+
+        root_response, root_writer = await _call_handler("/")
+        assert root_writer.closed is True
+        assert "HTTP/1.0 404 Not Found" in root_response
+        assert "Connection: close" in root_response
+        assert root_response.endswith("\r\n\r\nNot Found")
+
+        health_response, health_writer = await _call_handler("/health")
+        assert health_writer.closed is True
+        assert "HTTP/1.0 200 OK" in health_response
+        health_body = json.loads(health_response.split("\r\n\r\n", 1)[1])
+        assert health_body.pop("maintenance") is False
+        identity = health_body.pop("runtime")
+        assert identity["version"] == cli_commands.__version__
+        assert identity["instance_id"] and identity["run_id"]
+        assert health_body == {
+            "status": "ok",
+            "process": "alive",
+            "ready": True,
+            "websocket": "disabled",
+        }
+
+        missing_response, missing_writer = await _call_handler("/missing")
+        assert missing_writer.closed is True
+        assert "HTTP/1.0 404 Not Found" in missing_response
+        assert missing_response.endswith("\r\n\r\nNot Found")
+
+        if host == "127.0.0.1":
+            async def _exercise_connection_limit() -> None:
+                release = asyncio.Event()
+                all_started = asyncio.Event()
+                started = 0
+
+                class _BlockingReader:
+                    async def read(self, _size: int) -> bytes:
+                        nonlocal started
+                        started += 1
+                        if started == cli_gateway_runtime._GATEWAY_HEALTH_MAX_CONNECTIONS:
+                            all_started.set()
+                        await release.wait()
+                        return b"GET /health HTTP/1.1\r\n\r\n"
+
+                active_writers = [
+                    _FakeWriter()
+                    for _ in range(cli_gateway_runtime._GATEWAY_HEALTH_MAX_CONNECTIONS)
+                ]
+                active_tasks = [
+                    asyncio.create_task(health_handler(_BlockingReader(), writer))
+                    for writer in active_writers
+                ]
+                await asyncio.wait_for(all_started.wait(), timeout=1)
+
+                overflow_writer = _FakeWriter()
+                await health_handler(
+                    _FakeReader(b"GET /health HTTP/1.1\r\n\r\n"),
+                    overflow_writer,
+                )
+                assert overflow_writer.closed is True
+                assert overflow_writer.output == b""
+
+                release.set()
+                await asyncio.gather(*active_tasks)
+
+            await _exercise_connection_limit()
+
+            class _NeverRespondingReader:
+                async def read(self, _size: int) -> bytes:
+                    await asyncio.Event().wait()
+
+            monkeypatch.setattr(
+                cli_gateway_runtime,
+                "_GATEWAY_HEALTH_READ_TIMEOUT_SECONDS",
+                0.01,
+            )
+            timed_out_writer = _FakeWriter()
+            await health_handler(_NeverRespondingReader(), timed_out_writer)
+            assert timed_out_writer.closed is True
+            assert timed_out_writer.output == b""
+
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
 
     assert result.exit_code == 0
@@ -4038,93 +4130,6 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
     assert ("unauthenticated health endpoint" in result.stdout) is warns_about_public_bind
     assert ("may be reachable from other devices" in result.stdout) is warns_about_public_bind
     assert ("listening on 0.0.0.0" in result.stdout) is warns_about_public_bind
-
-    health_handler = captured["handler"]
-    assert callable(health_handler)
-
-    def _call_handler(path: str) -> tuple[str, _FakeWriter]:
-        request = f"GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n".encode()
-        writer = _FakeWriter()
-        asyncio.run(health_handler(_FakeReader(request), writer))
-        return writer.output.decode(), writer
-
-    root_response, root_writer = _call_handler("/")
-    assert root_writer.closed is True
-    assert "HTTP/1.0 404 Not Found" in root_response
-    assert "Connection: close" in root_response
-    assert root_response.endswith("\r\n\r\nNot Found")
-
-    health_response, health_writer = _call_handler("/health")
-    assert health_writer.closed is True
-    assert "HTTP/1.0 200 OK" in health_response
-    health_body = json.loads(health_response.split("\r\n\r\n", 1)[1])
-    assert health_body.pop("maintenance") is False
-    identity = health_body.pop("runtime")
-    assert identity["version"] == cli_commands.__version__
-    assert identity["instance_id"] and identity["run_id"]
-    assert health_body == {
-        "status": "ok",
-        "process": "alive",
-        "ready": True,
-        "websocket": "disabled",
-    }
-
-    missing_response, missing_writer = _call_handler("/missing")
-    assert missing_writer.closed is True
-    assert "HTTP/1.0 404 Not Found" in missing_response
-    assert missing_response.endswith("\r\n\r\nNot Found")
-
-    if host == "127.0.0.1":
-        async def _exercise_connection_limit() -> None:
-            release = asyncio.Event()
-            all_started = asyncio.Event()
-            started = 0
-
-            class _BlockingReader:
-                async def read(self, _size: int) -> bytes:
-                    nonlocal started
-                    started += 1
-                    if started == cli_gateway_runtime._GATEWAY_HEALTH_MAX_CONNECTIONS:
-                        all_started.set()
-                    await release.wait()
-                    return b"GET /health HTTP/1.1\r\n\r\n"
-
-            active_writers = [
-                _FakeWriter()
-                for _ in range(cli_gateway_runtime._GATEWAY_HEALTH_MAX_CONNECTIONS)
-            ]
-            active_tasks = [
-                asyncio.create_task(health_handler(_BlockingReader(), writer))
-                for writer in active_writers
-            ]
-            await asyncio.wait_for(all_started.wait(), timeout=1)
-
-            overflow_writer = _FakeWriter()
-            await health_handler(
-                _FakeReader(b"GET /health HTTP/1.1\r\n\r\n"),
-                overflow_writer,
-            )
-            assert overflow_writer.closed is True
-            assert overflow_writer.output == b""
-
-            release.set()
-            await asyncio.gather(*active_tasks)
-
-        asyncio.run(_exercise_connection_limit())
-
-        class _NeverRespondingReader:
-            async def read(self, _size: int) -> bytes:
-                await asyncio.Event().wait()
-
-        monkeypatch.setattr(
-            cli_gateway_runtime,
-            "_GATEWAY_HEALTH_READ_TIMEOUT_SECONDS",
-            0.01,
-        )
-        timed_out_writer = _FakeWriter()
-        asyncio.run(health_handler(_NeverRespondingReader(), timed_out_writer))
-        assert timed_out_writer.closed is True
-        assert timed_out_writer.output == b""
 
 
 def test_gateway_agent_task_owns_initial_mcp_provider_close(
