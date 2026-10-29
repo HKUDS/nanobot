@@ -272,11 +272,16 @@ async def _parse_multipart(request: web.Request) -> tuple[str, list[str], str | 
 # ---------------------------------------------------------------------------
 
 
-async def _cancel_request_work(task: asyncio.Task[object]) -> None:
-    # A request timeout may already be unwinding model/tool resources. Do not
-    # cancel that cleanup a second time when the HTTP connection also goes away.
-    if not task.done() and not task.cancelling():
-        task.cancel()
+async def _cancel_request_work(
+    task: asyncio.Task[object], execution_timeout: asyncio.Timeout | None,
+) -> None:
+    if not task.done():
+        # Disconnect and execution timeout share one cancellation. Disarm a live
+        # deadline before cancelling; an expired timeout has already cancelled work.
+        if execution_timeout is not None and not execution_timeout.expired():
+            execution_timeout.reschedule(None)
+        if not task.cancelling():
+            task.cancel()
     await shield_and_drain(asyncio.gather(task, return_exceptions=True))
 
 
@@ -329,6 +334,8 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
     chat_id = session_key.removeprefix("api:")
     session_locks: dict[str, asyncio.Lock] = request.app[_SESSION_LOCKS_KEY]
     session_lock = session_locks.setdefault(session_key, asyncio.Lock())
+    # Only expose an entered timeout: queued work has none, and exit clears it.
+    execution_timeout: asyncio.Timeout | None = None
 
     logger.info(
         "API request session_key={} media={} text={} stream={}",
@@ -360,20 +367,23 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
             return None
 
         async def _run() -> None:
-            nonlocal stream_failed
+            nonlocal stream_failed, execution_timeout
             try:
                 async with session_lock:
-                    async with asyncio.timeout(timeout_s):
-                        await _prepare_agent(request.app)
-                        response = await agent_loop.process_direct(
-                            content=text,
-                            media=media_paths if media_paths else None,
-                            session_key=session_key,
-                            channel="api",
-                            chat_id=chat_id,
-                            on_stream=_on_stream,
-                            on_stream_end=_on_stream_end,
-                        )
+                    try:
+                        async with asyncio.timeout(timeout_s) as execution_timeout:
+                            await _prepare_agent(request.app)
+                            response = await agent_loop.process_direct(
+                                content=text,
+                                media=media_paths if media_paths else None,
+                                session_key=session_key,
+                                channel="api",
+                                chat_id=chat_id,
+                                on_stream=_on_stream,
+                                on_stream_end=_on_stream_end,
+                            )
+                    finally:
+                        execution_timeout = None
                     if not emitted_content:
                         response_text = _response_text(response)
                         if response_text.strip():
@@ -392,7 +402,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
                     break
                 await resp.write(_sse_chunk(token, model_name, chunk_id))
         finally:
-            await _cancel_request_work(task)
+            await _cancel_request_work(task, execution_timeout)
 
         if not stream_failed:
             await resp.write(_sse_chunk("", model_name, chunk_id, finish_reason="stop"))
@@ -401,20 +411,24 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
 
     # -- non-streaming path --
     async def _run_non_streaming() -> web.Response:
+        nonlocal execution_timeout
         usage_capture = _UsageCaptureHook()
         try:
             async with session_lock:
                 try:
-                    async with asyncio.timeout(timeout_s):
-                        await _prepare_agent(request.app)
-                        response = await agent_loop.process_direct(
-                            content=text,
-                            media=media_paths if media_paths else None,
-                            session_key=session_key,
-                            channel="api",
-                            chat_id=chat_id,
-                            hooks=[usage_capture],
-                        )
+                    try:
+                        async with asyncio.timeout(timeout_s) as execution_timeout:
+                            await _prepare_agent(request.app)
+                            response = await agent_loop.process_direct(
+                                content=text,
+                                media=media_paths if media_paths else None,
+                                session_key=session_key,
+                                channel="api",
+                                chat_id=chat_id,
+                                hooks=[usage_capture],
+                            )
+                    finally:
+                        execution_timeout = None
                     response_text = _response_text(response)
                     if not response_text or not response_text.strip():
                         logger.warning("Empty response for session {}, using fallback", session_key)
@@ -438,7 +452,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
         # Keep repeated handler cancellation out of the owned work's cleanup.
         return await asyncio.shield(task)
     finally:
-        await _cancel_request_work(task)
+        await _cancel_request_work(task, execution_timeout)
 
 
 async def handle_models(request: web.Request) -> web.Response:

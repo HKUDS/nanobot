@@ -336,6 +336,88 @@ async def test_disconnect_during_timeout_does_not_interrupt_owned_cleanup(tmp_pa
         await asyncio.wait_for(start_post("AFTER_TIMEOUT", "timeout-session"), 10)
 
 
+@pytest.mark.parametrize("stream", [False, True], ids=["json", "sse"])
+async def test_disconnect_cleanup_survives_later_execution_deadline(tmp_path, monkeypatch, stream):
+    interrupted = ModelWork(hold=True)
+    following = ModelWork()
+    work = {"DISCONNECTED": interrupted, "FOLLOWING": following}
+    timeout = 1
+    async with runtime(tmp_path, monkeypatch, work, request_timeout=timeout) as (
+        _, connect, start_post, entered, finished,
+    ):
+        _, writer = await connect("DISCONNECTED", "disconnect-first", stream)
+        await reached(interrupted.started)
+        following_request = start_post("FOLLOWING", "disconnect-first")
+        await reached(entered.setdefault("FOLLOWING", asyncio.Event()))
+        assert not following.started.is_set()
+        assert not interrupted.cleanup_started.is_set()
+
+        writer.close()
+        await writer.wait_closed()
+        await reached(interrupted.cleanup_started)
+        assert interrupted.cancelled.is_set()
+        assert not interrupted.exited.is_set()
+        assert not finished.setdefault("DISCONNECTED", asyncio.Event()).is_set()
+
+        # Observe real cleanup across the original execution deadline, without
+        # releasing its gate or cancelling any private task from the test.
+        await asyncio.sleep(timeout + 0.3)
+        assert not interrupted.cleanup_completed.is_set()
+        assert not interrupted.exited.is_set()
+        assert not finished["DISCONNECTED"].is_set()
+        assert not following.started.is_set()
+
+        interrupted.release_cleanup.set()
+        await reached(finished["DISCONNECTED"])
+        assert interrupted.cleanup_completed.is_set()
+        assert interrupted.exited.is_set()
+        await asyncio.wait_for(following_request, 10)
+        assert not following.cancelled.is_set()
+
+
+@pytest.mark.parametrize("stream", [False, True], ids=["json", "sse"])
+async def test_execution_timeout_drains_cleanup_and_preserves_wire_error(tmp_path, monkeypatch, stream):
+    interrupted = ModelWork(hold=True, delta="partial")
+    following = ModelWork()
+    work = {"TIMEOUT": interrupted, "AFTER": following}
+    async with runtime(tmp_path, monkeypatch, work, request_timeout=1) as (
+        _, connect, start_post, entered, finished,
+    ):
+        reader, _ = await connect("TIMEOUT", "ordinary-timeout", stream)
+        await reached(interrupted.started)
+        await reached(interrupted.cleanup_started)
+        assert interrupted.cancelled.is_set()
+        assert not interrupted.exited.is_set()
+        assert not finished.setdefault("TIMEOUT", asyncio.Event()).is_set()
+        following_request = start_post("AFTER", "ordinary-timeout")
+        await reached(entered.setdefault("AFTER", asyncio.Event()))
+        assert not following.started.is_set()
+
+        interrupted.release_cleanup.set()
+        await reached(finished["TIMEOUT"])
+        assert interrupted.cleanup_completed.is_set()
+        assert interrupted.exited.is_set()
+        await asyncio.wait_for(following_request, 10)
+        assert not following.cancelled.is_set()
+
+        if stream:
+            # connect() already consumed the 200 SSE headers. Read through the
+            # HTTP chunked terminator, not EOF on this persistent connection.
+            body = await asyncio.wait_for(reader.readuntil(b"0\r\n\r\n"), 10)
+            assert b'"content": "partial"' in body
+            assert b'"finish_reason": "stop"' not in body
+            assert b"[DONE]" not in body
+        else:
+            headers = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 10)
+            assert headers.startswith(b"HTTP/1.1 504")
+            length = next(int(line.partition(b":")[2]) for line in headers.split(b"\r\n")
+                          if line.lower().startswith(b"content-length:"))
+            body = await asyncio.wait_for(reader.readexactly(length), 10)
+            assert json.loads(body) == {"error": {
+                "message": "Request timed out after 1s", "type": "invalid_request_error", "code": 504,
+            }}
+
+
 @pytest.mark.parametrize("stream", [False, True], ids=["json-foreground-tool", "sse-foreground-tool"])
 async def test_disconnect_reaps_real_foreground_tool_process(tmp_path, monkeypatch, stream, record_property):
     started = asyncio.Event()
