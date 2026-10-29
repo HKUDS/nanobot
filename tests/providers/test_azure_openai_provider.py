@@ -240,6 +240,13 @@ def test_supports_temperature_with_reasoning_effort_none_string():
     assert AzureOpenAIProvider._supports_temperature("gpt-4o", reasoning_effort="none") is True
 
 
+def test_supports_temperature_gpt6_requires_explicit_none_effort():
+    """GPT-6 enables reasoning by default, so omitted effort must suppress temperature."""
+    assert AzureOpenAIProvider._supports_temperature("gpt-6-sol", reasoning_effort=None) is False
+    assert AzureOpenAIProvider._supports_temperature("gpt-6-sol", reasoning_effort="high") is False
+    assert AzureOpenAIProvider._supports_temperature("gpt-6-sol", reasoning_effort="none") is True
+
+
 # ---------------------------------------------------------------------------
 # _build_body — Responses API body construction
 # ---------------------------------------------------------------------------
