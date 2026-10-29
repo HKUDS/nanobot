@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import os
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -84,7 +85,7 @@ class LangfuseRuntime:
         if not self.active:
             return {}
         try:
-            import langfuse.openai  # noqa: F401
+            importlib.import_module("langfuse.openai")
         except Exception:
             logger.warning("Langfuse OpenAI instrumentation unavailable; continuing without tracing")
             return {}
@@ -112,7 +113,7 @@ _running: LangfuseRuntime | None = None
 
 
 @contextmanager
-def langfuse_runtime_owner() -> Iterator[None]:
+def langfuse_runtime_owner() -> Generator[None, None, None]:
     """Bind startup state and the SDK's process flag to a CLI/gateway/API lifetime."""
     global _running
     if _running is not None:
