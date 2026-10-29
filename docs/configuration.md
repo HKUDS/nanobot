@@ -247,7 +247,7 @@ Internal variables such as `NANOBOT_RESTART_*` and `NANOBOT_PATH_*` are set by n
 
 ## Langfuse Observability
 
-Use Langfuse to trace supported OpenAI-compatible model calls and Codex OAuth calls. In **Settings → System → Tracing → Langfuse**, install support if needed, configure the service URL and key pair, enable tracing, and save. Restart nanobot to apply changes; the dialog distinguishes the running state from saved changes.
+Use Langfuse to trace supported OpenAI-compatible model calls and Codex OAuth calls. In **Settings → System → Tracing → Langfuse**, install support if needed, enter the key pair, enable tracing, and save. The service URL is under **Advanced options**. Restart nanobot to apply changes; pending changes show the current running state and a restart notice.
 
 **Test connection** checks the current form's URL and credentials without saving, enabling tracing, or sending conversation content. A successful check does not mean a model call has been traced. For a self-hosted service on a private address, connection checks require the appropriate `tools.ssrfWhitelist` entry.
 

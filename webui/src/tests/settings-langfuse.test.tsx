@@ -5,7 +5,7 @@ import { act, fireEvent, installSettingsViewTestHooks, jsonResponse, renderSetti
 
 const capability = "webui.langfuse-settings.v1";
 const success = "Connection verified.";
-const stale = "Values changed. Test again to check this draft.";
+const stale = "Values changed. Test again.";
 
 function langfuseSettings(observability: Partial<ObservabilitySettingsPayload> = {}): SettingsPayload {
   return {
@@ -46,10 +46,11 @@ function renderLangfuse(options: Parameters<typeof renderSettingsView>[0] = {}) 
   renderSettingsView({ initialSection: "runtime", webuiCapabilities: [capability], ...options });
 }
 
-async function openEditor() {
+async function openEditor(advanced = true) {
   fireEvent.click(await screen.findByRole("button", { name: "Configure Langfuse" }));
-  const dialog = within(screen.getByRole("dialog", { name: "Configure Langfuse" }));
-  await waitFor(() => expect(dialog.queryByText("Checking")).not.toBeInTheDocument());
+  const dialog = within(screen.getByRole("dialog", { name: "Langfuse" }));
+  await waitFor(() => expect(dialog.queryByRole("status", { name: "Checking" })).not.toBeInTheDocument());
+  if (advanced) fireEvent.click(dialog.getByRole("button", { name: "Advanced options" }));
   return dialog;
 }
 
@@ -88,13 +89,13 @@ describe("Langfuse settings", () => {
     stubHost(payload);
     renderLangfuse();
     let dialog = await openEditor();
-    expect(dialog.getByText("When enabled, model inputs and outputs are uploaded to this Langfuse instance.")).toBeVisible();
     expect(dialog.queryByRole("button", { name: "Show new Secret Key" })).not.toBeInTheDocument();
     expect(dialog.getByLabelText("Secret Key", { exact: true })).toHaveValue("");
     expect(dialog.getByLabelText("Secret Key", { exact: true })).toHaveAttribute("placeholder", "••••••••");
     fireEvent.change(dialog.getByLabelText("Base URL"), { target: { value: "https://discarded.example" } });
     replaceKey(dialog, "Secret Key", "discarded-secret");
     fireEvent.click(dialog.getByRole("switch", { name: "Enable tracing" }));
+    expect(dialog.getByText("Sends model inputs and outputs to Langfuse.")).toBeVisible();
     fireEvent.blur(dialog.getByLabelText("Secret Key", { exact: true }));
     if (close === "Escape") await userEvent.setup().keyboard("{Escape}");
     else fireEvent.click(dialog.getByRole("button", { name: close }));
@@ -108,6 +109,33 @@ describe("Langfuse settings", () => {
     expect(dialog.getByRole("switch", { name: "Enable tracing" })).not.toBeChecked();
   });
 
+  it("keeps the default form compact and preserves advanced drafts while folded", async () => {
+    const payload = langfuseSettings({ configured: false, public_key_hint: null, secret_key_hint: null });
+    stubHost(payload);
+    renderLangfuse();
+    const dialog = await openEditor(false);
+    const advanced = dialog.getByRole("button", { name: "Advanced options" });
+    expect(advanced).toHaveAttribute("aria-expanded", "false");
+    expect(dialog.queryByRole("textbox", { name: "Base URL" })).not.toBeInTheDocument();
+    expect(dialog.getByLabelText("Public Key", { exact: true })).toBeVisible();
+    expect(dialog.getByLabelText("Secret Key", { exact: true })).toBeVisible();
+    expect(dialog.getByRole("button", { name: "Test connection" })).toBeDisabled();
+    replaceKey(dialog, "Public Key", "new-public");
+    replaceKey(dialog, "Secret Key", "new-secret");
+    expect(dialog.getByRole("button", { name: "Test connection" })).toBeEnabled();
+    fireEvent.click(advanced);
+    fireEvent.change(dialog.getByRole("textbox", { name: "Base URL" }), { target: { value: "https://self-hosted.example" } });
+    fireEvent.click(advanced);
+    fireEvent.click(advanced);
+    expect(dialog.getByRole("textbox", { name: "Base URL" })).toHaveValue("https://self-hosted.example");
+    fireEvent.click(advanced);
+    requestMutationMock.mockResolvedValueOnce(saveResult(payload, { base_url: "https://self-hosted.example" }));
+    fireEvent.click(dialog.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith("settings.observability.update", {
+      enabled: false, base_url: "https://self-hosted.example", public_key: "new-public", secret_key: "new-secret",
+    }, 20_000));
+  });
+
   it("preserves untouched environment credentials and displays the returned raw URL reference", async () => {
     const payload = langfuseSettings({ source: "environment", uses_environment: true, enabled: true, active_enabled: true });
     const saved = saveResult(payload, { source: "config", base_url: "${LANGFUSE_BASE_URL}" });
@@ -116,7 +144,8 @@ describe("Langfuse settings", () => {
     const onSettingsChange = vi.fn();
     renderLangfuse({ onSettingsChange });
     let dialog = await openEditor();
-    expect(dialog.getByText("From environment. Saving keeps untouched fields as environment references.")).toBeVisible();
+    fireEvent.focus(dialog.getByText("Environment references"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("From environment. Saving keeps untouched fields as environment references.");
     // Opening replacement without typing must not erase the stored reference.
     fireEvent.click(dialog.getByRole("button", { name: "Replace Secret Key" }));
     fireEvent.click(dialog.getByRole("button", { name: "Save" }));
@@ -127,7 +156,7 @@ describe("Langfuse settings", () => {
     expect(onSettingsChange).toHaveBeenLastCalledWith(saved);
     dialog = await openEditor();
     expect(dialog.getByLabelText("Base URL")).toHaveValue("${LANGFUSE_BASE_URL}");
-    expect(dialog.getByText("Uses environment references.")).toBeVisible();
+    expect(dialog.getByText("Environment references")).toBeVisible();
     expect(dialog.getByLabelText("Public Key", { exact: true })).toHaveValue("");
     expect(dialog.getByLabelText("Secret Key", { exact: true })).toHaveValue("");
   });
@@ -251,11 +280,8 @@ describe("Langfuse settings", () => {
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith("settings.feature.enable", {
       name: "langfuse", install_only: true,
     }, 150_000));
-    expect(await dialog.findByText("Tracing support installed")).toBeVisible();
-    expect(dialog.getByRole("button", { name: "Save" })).toBeEnabled();
+    await waitFor(() => expect(dialog.getByRole("button", { name: "Save" })).toBeEnabled());
     expect(requestMutationMock).toHaveBeenCalledTimes(1);
-    expect(dialog.getByText("Running: disabled")).toBeVisible();
-    expect(dialog.getByText("Saved: disabled")).toBeVisible();
   });
 
   it.each(["Base URL", "Public Key", "Secret Key", "enabled"])("tests the unsaved draft and marks the result stale after changing %s", async (field) => {
@@ -279,8 +305,6 @@ describe("Langfuse settings", () => {
     }, 20_000);
     expect(onSettingsChange).not.toHaveBeenCalled();
     expect(onRestart).not.toHaveBeenCalled();
-    expect(dialog.getByText("Running: disabled")).toBeVisible();
-    expect(dialog.getByText("Saved: disabled")).toBeVisible();
     if (field === "enabled") fireEvent.click(dialog.getByRole("switch", { name: "Enable tracing" }));
     else fireEvent.change(dialog.getByLabelText(field, { exact: true }), { target: { value: "${CHANGED}" } });
     expect(dialog.getByText(stale)).toBeVisible();
@@ -306,12 +330,12 @@ describe("Langfuse settings", () => {
   });
 
   it.each([
-    ["missing_credentials", "Provide both keys and check any referenced environment variables on the host."],
-    ["invalid_url", "Enter a valid HTTP or HTTPS base URL, or check its environment reference."],
-    ["blocked_url", "The host's network policy blocks this URL. Use an allowed Langfuse endpoint."],
-    ["invalid_credentials", "Langfuse rejected these credentials. Check both keys for this instance."],
-    ["unreachable", "Could not reach Langfuse. Check the URL and the host's network access."],
-    ["timeout", "The test timed out. Check the host's network access and try again."],
+    ["missing_credentials", "Check both keys or their environment variables."],
+    ["invalid_url", "Check the service URL or its environment variable."],
+    ["blocked_url", "Use a URL allowed by the host's network policy."],
+    ["invalid_credentials", "Check this Langfuse project's key pair."],
+    ["unreachable", "Check the service URL and network connection."],
+    ["timeout", "Connection timed out. Try again."],
   ])("explains the %s probe failure without discarding the draft", async (error, message) => {
     stubHost(langfuseSettings());
     requestMutationMock.mockResolvedValueOnce({ ok: false, error });
@@ -319,9 +343,13 @@ describe("Langfuse settings", () => {
     const dialog = await openEditor();
     const url = error === "invalid_url" ? "not-a-url" : "https://langfuse.example";
     fireEvent.change(dialog.getByLabelText("Base URL"), { target: { value: url } });
-    if (error === "missing_credentials") fireEvent.click(dialog.getByRole("button", { name: "Clear Secret Key" }));
+    if (error === "missing_credentials") replaceKey(dialog, "Secret Key", "${MISSING_SECRET}");
+    fireEvent.click(dialog.getByRole("button", { name: "Advanced options" }));
     fireEvent.click(dialog.getByRole("button", { name: "Test connection" }));
     expect(await dialog.findByText(message)).toBeVisible();
+    if (["invalid_url", "blocked_url", "unreachable", "timeout"].includes(error)) {
+      expect(dialog.getByRole("button", { name: "Advanced options" })).toHaveAttribute("aria-expanded", "true");
+    }
     expect(dialog.getByLabelText("Base URL")).toHaveValue(url);
     expect(dialog.getByRole("button", { name: "Test connection" })).toBeEnabled();
     expect(requestMutationMock).toHaveBeenCalledTimes(1);
@@ -363,8 +391,12 @@ describe("Langfuse settings", () => {
     fireEvent.click(dialog.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(onSettingsChange).toHaveBeenLastCalledWith(saved);
-    expect(screen.getByText("Running: enabled")).toBeVisible();
-    expect(screen.getByText("Saved: disabled")).toBeVisible();
+    expect(screen.getByText("Enabled", { exact: true })).toBeVisible();
+    const pending = await openEditor(false);
+    expect(pending.getByRole("switch", { name: "Enable tracing" })).not.toBeChecked();
+    expect(pending.getByRole("status")).toHaveTextContent("Running: enabled · Saved. Restart to apply changes.");
+    fireEvent.click(pending.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     const restart = screen.getByRole("button", { name: "Restart" });
     expect(restart).toHaveClass("settings-restart-pending");
     expect(restart).toHaveAccessibleDescription("Saved. Restart to apply changes.");
@@ -373,7 +405,7 @@ describe("Langfuse settings", () => {
       observability: { ...saved.observability!, active_enabled: false, requires_restart: false } };
     fireEvent.click(restart);
     await waitFor(() => expect(onNativeEngineRestart).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.getByText("Running: disabled")).toBeVisible());
+    await waitFor(() => expect(screen.getByText("Disabled", { exact: true })).toBeVisible());
     expect(onSettingsChange).toHaveBeenLastCalledWith(current);
     expect(screen.getByRole("button", { name: "Restart" })).not.toHaveClass("settings-restart-pending");
     expect(fetchMock).toHaveBeenCalledWith("/api/settings", expect.objectContaining({ headers: { Authorization: "Bearer fresh-token" } }));

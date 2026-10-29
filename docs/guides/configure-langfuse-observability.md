@@ -14,7 +14,7 @@ Use Langfuse when you need observability for model requests, latency, errors, co
 
 ## Configure in WebUI
 
-Open **Settings → System → Tracing → Langfuse**. Install support if needed, enter the service URL and key pair, enable tracing, and save. Restart nanobot when ready; saving does not immediately start or stop tracing. The dialog shows the running state and any pending changes.
+Open **Settings → System → Tracing → Langfuse**. Install support if needed, enter the key pair, enable tracing, and save. Change the service URL under **Advanced options** for another Cloud region or a self-hosted service. Restart nanobot when ready; saving does not immediately start or stop tracing. Pending changes show the current running state and a restart notice.
 
 **Test connection** uses the unsaved form without sending conversation content. It checks connectivity and credentials, not trace delivery. After restarting, send a model request and check the matching Langfuse project. Connection checks to private self-hosted addresses require an explicit `tools.ssrfWhitelist` entry.
 
