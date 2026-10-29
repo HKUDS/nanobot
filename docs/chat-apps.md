@@ -391,6 +391,7 @@ nanobot plugins enable matrix
 | `groupPolicy` | `open` (default), `mention`, `allowlist`, or `listen`. |
 | `groupAllowFrom` | Room allowlist (used when policy is `allowlist`). |
 | `allowRoomMentions` | Accept `@room` mentions in mention mode. |
+| `replyToMessage` | Quote the user's message in non-threaded replies (default `true`). Set `false` to send without quotes; thread replies are unchanged. |
 | `e2eeEnabled` | E2EE support (default `true`). Set `false` for plaintext-only. |
 | `sasVerification` | Complete Element-initiated SAS device verification for allowed users (default `false`). This does not add cross-signing, clear Element's cross-signing trust warning, or let the bot initiate verification. |
 | `maxMediaBytes` | Max attachment size (default `20MB`). Set `0` to block all media. |

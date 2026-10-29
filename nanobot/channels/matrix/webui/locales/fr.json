@@ -68,6 +68,13 @@
           "false": "Désactivé"
         }
       },
+      "replyToMessage": {
+        "label": "Citer le message",
+        "choices": {
+          "true": "Activé",
+          "false": "Désactivé"
+        }
+      },
       "streaming": {
         "label": "Diffusion en continu",
         "choices": {

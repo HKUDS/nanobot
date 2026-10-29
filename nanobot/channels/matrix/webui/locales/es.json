@@ -68,6 +68,13 @@
           "false": "Apagado"
         }
       },
+      "replyToMessage": {
+        "label": "Citar al responder",
+        "choices": {
+          "true": "Encendido",
+          "false": "Apagado"
+        }
+      },
       "streaming": {
         "label": "Transmisión",
         "choices": {

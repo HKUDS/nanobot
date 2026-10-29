@@ -68,6 +68,13 @@
           "false": "Off"
         }
       },
+      "replyToMessage": {
+        "label": "Quote replies",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
       "streaming": {
         "label": "Streaming",
         "choices": {

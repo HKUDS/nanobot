@@ -68,6 +68,13 @@
           "false": "Desligado"
         }
       },
+      "replyToMessage": {
+        "label": "Citar ao responder",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
       "streaming": {
         "label": "Transmissão",
         "choices": {

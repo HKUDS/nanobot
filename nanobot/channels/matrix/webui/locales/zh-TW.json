@@ -68,6 +68,13 @@
           "false": "關閉"
         }
       },
+      "replyToMessage": {
+        "label": "引用回覆",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
       "streaming": {
         "label": "串流輸出",
         "choices": {

@@ -68,6 +68,13 @@
           "false": "オフ"
         }
       },
+      "replyToMessage": {
+        "label": "引用返信",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
       "streaming": {
         "label": "ストリーミング",
         "choices": {

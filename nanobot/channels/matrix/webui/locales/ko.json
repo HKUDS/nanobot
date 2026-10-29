@@ -68,6 +68,13 @@
           "false": "끄기"
         }
       },
+      "replyToMessage": {
+        "label": "인용 답장",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
       "streaming": {
         "label": "스트리밍",
         "choices": {

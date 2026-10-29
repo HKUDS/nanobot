@@ -68,6 +68,13 @@
           "false": "Tắt"
         }
       },
+      "replyToMessage": {
+        "label": "Trả lời trích dẫn",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
       "streaming": {
         "label": "Truyền phát",
         "choices": {

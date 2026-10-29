@@ -68,6 +68,13 @@
           "false": "Mati"
         }
       },
+      "replyToMessage": {
+        "label": "Kutip pesan",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
       "streaming": {
         "label": "Streaming",
         "choices": {

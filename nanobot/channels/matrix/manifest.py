@@ -23,6 +23,7 @@ SETUP_SPEC = ChannelSetupSpec(
         "maxConcurrentMediaDownloads": field("int", default=2),
         "groupAllowFrom": field("list"),
         "allowRoomMentions": field("bool", default=False),
+        "replyToMessage": field("bool", default=True),
         "streaming": field("bool", default=False),
         "useProxy": field("bool", default=False),
     },

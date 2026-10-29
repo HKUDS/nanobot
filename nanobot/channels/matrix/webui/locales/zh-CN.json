@@ -68,6 +68,13 @@
           "false": "关闭"
         }
       },
+      "replyToMessage": {
+        "label": "引用回复",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
       "streaming": {
         "label": "流式输出",
         "choices": {
