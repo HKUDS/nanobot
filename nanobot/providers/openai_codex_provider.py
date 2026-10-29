@@ -190,20 +190,20 @@ class OpenAICodexProvider(LLMProvider):
         self._responses = ResponsesBackend(websocket_options=ResponsesWebSocketOptions(
             beta_header="responses_websockets=2026-02-06",
         ))
-        self._ssl_contexts: dict[bool, ssl.SSLContext] = {}
+        self._tls_context: ssl.SSLContext | None = None
 
     async def aclose(self) -> None:
         await self._responses.aclose()
 
-    def _ssl_context(self, *, verify: bool) -> ssl.SSLContext:
-        context = self._ssl_contexts.get(verify)
-        if context is None:
-            context = httpx.create_ssl_context(
-                verify=verify,
-                trust_env=self.proxy is None,
+    def _ssl_context(self) -> ssl.SSLContext:
+        """Reuse synchronous TLS setup across requests on the shared event loop."""
+        if self._tls_context is None:
+            self._tls_context = httpx.create_ssl_context(
+                verify=True,
+                # CA trust is independent of explicit proxy routing.
+                trust_env=True,
             )
-            self._ssl_contexts[verify] = context
-        return context
+        return self._tls_context
 
     async def _call_codex(
         self,
@@ -325,39 +325,22 @@ class OpenAICodexProvider(LLMProvider):
                         result = await self._responses.websocket_request(
                             session_id, DEFAULT_CODEX_URL, headers, wire_body,
                             provider=self._responses_state_provider(),
-                            verify=self._ssl_context(verify=True), proxy=self.proxy,
+                            verify=self._ssl_context(), proxy=self.proxy,
                             on_content_delta=on_content_delta if emit_deltas else None,
                             on_thinking_delta=on_thinking_delta if emit_deltas else None,
                             on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
                         )
                     if result is None:
-                        try:
-                            result = await _request_codex(
-                                DEFAULT_CODEX_URL,
-                                headers,
-                                wire_body,
-                                verify=self._ssl_context(verify=True),
-                                proxy=self.proxy,
-                                on_content_delta=on_content_delta if emit_deltas else None,
-                                on_thinking_delta=on_thinking_delta if emit_deltas else None,
-                                on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
-                            )
-                        except Exception as exc:
-                            if "CERTIFICATE_VERIFY_FAILED" not in str(exc):
-                                raise
-                            logger.warning(
-                                "SSL verification failed for Codex API; retrying with verify=False"
-                            )
-                            result = await _request_codex(
-                                DEFAULT_CODEX_URL,
-                                headers,
-                                wire_body,
-                                verify=self._ssl_context(verify=False),
-                                proxy=self.proxy,
-                                on_content_delta=on_content_delta if emit_deltas else None,
-                                on_thinking_delta=on_thinking_delta if emit_deltas else None,
-                                on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
-                            )
+                        result = await _request_codex(
+                            DEFAULT_CODEX_URL,
+                            headers,
+                            wire_body,
+                            verify=self._ssl_context(),
+                            proxy=self.proxy,
+                            on_content_delta=on_content_delta if emit_deltas else None,
+                            on_thinking_delta=on_thinking_delta if emit_deltas else None,
+                            on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
+                        )
                     if validate is not None:
                         validate(result)
                 except Exception as exc:

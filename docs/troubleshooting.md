@@ -159,6 +159,14 @@ If you need a known-good snippet instead of diagnosis, use [`provider-cookbook.m
 | xAI returns 400 `invalid-argument` | Read the bounded `Response body` appended to the provider error. Hosted `x_search` is sent only when xAI's model catalog advertises `supportsBackendSearch`; the model ID `grok-4.5` itself is valid. |
 | xAI model or X Search stops working after an upstream release | The integration follows Grok Build's public OAuth/proxy client contract. Update nanobot if xAI changes that contract. |
 
+### Codex certificate verification errors
+
+Codex model requests fail if the server certificate is untrusted, expired, or does not match the hostname. nanobot does not retry these requests with certificate verification disabled. This also applies when WebSocket falls back to HTTP.
+
+Check the gateway machine's clock and the certificate chain used by your network or proxy. If your organization requires a private CA, obtain its trusted PEM bundle from your administrator and set `SSL_CERT_FILE` in the gateway process environment before restarting. `SSL_CERT_DIR` is also supported for an OpenSSL-compatible certificate directory. For model requests, these CA settings work with or without the explicit Codex proxy; they do not change the selected proxy route. Never trust a certificate supplied by an unknown error page or disable certificate verification.
+
+These model-request CA settings do not change OAuth login or model-catalog transport configuration. If those operations fail through a TLS-inspecting proxy, use an administrator-approved route that preserves the service's trusted certificate chain. Repeated sign-in does not repair a certificate error. Existing chats and credentials are not deleted by this failure.
+
 ### Local Token Estimation
 
 Gateway loads the fallback tokenizer in the background, caching it beside the active config under `cache/tiktoken` unless `TIKTOKEN_CACHE_DIR` or `DATA_GYM_CACHE_DIR` is set; chats use UTF-8 byte estimates while loading or after failure (restart to retry), and token estimates may differ from model usage.

@@ -133,9 +133,9 @@ def test_codex_default_model_matches_curated_flagship() -> None:
 
 
 @pytest.mark.asyncio
-async def test_codex_provider_reuses_tls_context_for_concurrent_requests(monkeypatch) -> None:
+@pytest.mark.parametrize("proxy", [None, "http://127.0.0.1:23458"])
+async def test_codex_provider_reuses_tls_context_for_concurrent_requests(monkeypatch, proxy) -> None:
     _mock_codex_token(monkeypatch)
-    proxy = "http://127.0.0.1:23458"
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context_calls: list[tuple[bool, bool]] = []
     request_contexts: list[object] = []
@@ -168,8 +168,47 @@ async def test_codex_provider_reuses_tls_context_for_concurrent_requests(monkeyp
     ))
 
     assert [response.content for response in responses] == ["ok", "ok", "ok"]
-    assert context_calls == [(True, False)]
+    assert context_calls == [(True, True)]
     assert request_contexts == [context, context, context]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("session_id", [None, "tls-failure"], ids=["http", "websocket-fallback"])
+async def test_codex_certificate_failure_does_not_retry_without_verification(
+    monkeypatch, session_id,
+) -> None:
+    _mock_codex_token(monkeypatch)
+    request_contexts: list[ssl.SSLContext] = []
+    websocket_contexts: list[ssl.SSLContext] = []
+
+    async def fake_connect(_url, **kwargs):
+        websocket_contexts.append(kwargs["ssl"])
+        raise ssl.SSLCertVerificationError("CERTIFICATE_VERIFY_FAILED")
+
+    async def fake_request(_url, headers, _body, *, verify, **_kwargs):
+        request_contexts.append(verify)
+        assert headers["Authorization"] == "Bearer token"
+        if verify.verify_mode == ssl.CERT_NONE:
+            return provider_base.LLMResponse(content="untrusted response")
+        raise httpx.ConnectError("[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed")
+
+    monkeypatch.setattr("nanobot.providers.openai_responses.websocket.connect", fake_connect)
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
+    provider = OpenAICodexProvider()
+    try:
+        response = await provider.chat(
+            [{"role": "user", "content": "private prompt"}],
+            provider_context=provider_base.ProviderCallContext(session_id=session_id),
+        )
+    finally:
+        await provider.aclose()
+
+    assert response.finish_reason == "error"
+    assert "CERTIFICATE_VERIFY_FAILED" in (response.content or "")
+    assert len(request_contexts) == 1
+    assert request_contexts[0].verify_mode == ssl.CERT_REQUIRED
+    assert request_contexts[0].check_hostname is True
+    assert websocket_contexts == (request_contexts if session_id else [])
 
 
 @pytest.fixture
