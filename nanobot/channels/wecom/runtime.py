@@ -27,6 +27,9 @@ WECOM_WEBSOCKET_HOST = "openws.work.weixin.qq.com"
 # Inbound media safety limit (matching QQ channel defaults)
 WECOM_DOWNLOAD_MAX_BYTES = 1024 * 1024 * 200  # 200MB
 
+# Maximum quoted-text length kept as reply context.
+QUOTE_MAX_LEN = 200
+
 # Replace unsafe characters with "_", keep Chinese and common safe punctuation.
 _SAFE_NAME_RE = re.compile(r"[^\w.\-()\[\]（）【】\u4e00-\u9fff]+", re.UNICODE)
 
@@ -47,6 +50,45 @@ def _sanitize_filename(name: str, fallback: str = "unnamed") -> str:
         return _SAFE_NAME_RE.sub("_", value).strip("._ ")
 
     return _clean(name) or _clean(fallback) or "unnamed"
+
+
+def _frame_body(frame: Any) -> dict[str, Any] | None:
+    """Return the raw payload of a WeCom frame, or None when it is not a mapping.
+
+    WeCom frames reach the channel either as a frame object carrying a ``body``
+    mapping or as a plain mapping that already holds the payload.
+    """
+    body: Any
+    if hasattr(frame, "body"):
+        body = frame.body or {}
+    elif isinstance(frame, dict):
+        body = cast(dict[str, Any], frame).get("body", frame)
+    else:
+        body = {}
+    return cast(dict[str, Any], body) if isinstance(body, dict) else None
+
+
+def _quoted_text(body: dict[str, Any]) -> str | None:
+    """Return the text of the message the sender replied to, if any.
+
+    WeCom carries the replied-to message in a ``quote`` object. Only quoted
+    text is readable without another download; quoted media is skipped.
+    """
+    quote = body.get("quote")
+    if not isinstance(quote, dict):
+        return None
+    quote_dict = cast(dict[str, Any], quote)
+    if quote_dict.get("msgtype") != "text":
+        return None
+    text_info = quote_dict.get("text")
+    if not isinstance(text_info, dict):
+        return None
+    text = str(cast(dict[str, Any], text_info).get("content", "")).strip()
+    if not text:
+        return None
+    if len(text) > QUOTE_MAX_LEN:
+        text = text[:QUOTE_MAX_LEN] + "..."
+    return text
 
 
 class WecomConfig(Base):
@@ -130,11 +172,10 @@ class WecomChannel(BaseChannel):
         self._client.on("authenticated", self._on_authenticated)
         self._client.on("disconnected", self._on_disconnected)
         self._client.on("error", self._on_error)
-        self._client.on("message.text", self._on_text_message)
-        self._client.on("message.image", self._on_image_message)
-        self._client.on("message.voice", self._on_voice_message)
-        self._client.on("message.file", self._on_file_message)
-        self._client.on("message.mixed", self._on_mixed_message)
+        # One generic handler: the SDK emits "message" for every inbound
+        # message, and its per-type events only cover a subset of the
+        # message types the platform can deliver (video is missing there).
+        self._client.on("message", self._on_message)
         self._client.on("event.enter_chat", self._on_enter_chat)
 
         self.logger.info("bot starting with WebSocket long connection")
@@ -171,25 +212,17 @@ class WecomChannel(BaseChannel):
         """Handle error event."""
         self.logger.error("error: {}", frame)
 
-    async def _on_text_message(self, frame: Any) -> None:
-        """Handle text message."""
-        await self._process_message(frame, "text")
-
-    async def _on_image_message(self, frame: Any) -> None:
-        """Handle image message."""
-        await self._process_message(frame, "image")
-
-    async def _on_voice_message(self, frame: Any) -> None:
-        """Handle voice message."""
-        await self._process_message(frame, "voice")
-
-    async def _on_file_message(self, frame: Any) -> None:
-        """Handle file message."""
-        await self._process_message(frame, "file")
-
-    async def _on_mixed_message(self, frame: Any) -> None:
-        """Handle mixed content message."""
-        await self._process_message(frame, "mixed")
+    async def _on_message(self, frame: Any) -> None:
+        """Handle an inbound message of any type."""
+        body = _frame_body(frame)
+        if body is None:
+            self.logger.warning("Invalid body type: {}", type(cast(object, frame)))
+            return
+        msg_type = str(body.get("msgtype", "") or "")
+        if not msg_type:
+            self.logger.warning("Inbound message without msgtype")
+            return
+        await self._process_message(frame, msg_type)
 
     async def _on_enter_chat(self, frame: Any) -> None:
         """Handle enter_chat event (user opens chat with bot)."""
@@ -220,20 +253,10 @@ class WecomChannel(BaseChannel):
     async def _process_message(self, frame: Any, msg_type: str) -> None:
         """Process incoming message and forward to bus."""
         try:
-            # Extract body from WsFrame dataclass or dict
-            if hasattr(frame, "body"):
-                body: Any = frame.body or {}
-            elif isinstance(frame, dict):
-                frame_dict = cast(dict[str, Any], frame)
-                body = frame_dict.get("body", frame_dict)
-            else:
-                body = {}
-
-            # Ensure body is a dict
-            if not isinstance(body, dict):
-                self.logger.warning("Invalid body type: {}", type(cast(object, body)))
+            body = _frame_body(frame)
+            if body is None:
+                self.logger.warning("Invalid body type: {}", type(cast(object, frame)))
                 return
-            body = cast(dict[str, Any], body)
 
             # Extract message info
             msg_id = cast(str, body.get("msgid", ""))
@@ -315,6 +338,22 @@ class WecomChannel(BaseChannel):
                 else:
                     content_parts.append(f"[file: {file_name or 'unknown'}: download failed]")
 
+            elif msg_type == "video":
+                video_info = cast(dict[str, Any], body.get("video", {}))
+                file_url = cast(str, video_info.get("url", ""))
+                aes_key = cast(str, video_info.get("aeskey", ""))
+
+                if file_url and aes_key:
+                    file_path = await self._download_and_save_media(file_url, aes_key, "video")
+                    if file_path:
+                        filename = os.path.basename(file_path)
+                        content_parts.append(f"[video: {filename}]")
+                        media_paths.append(file_path)
+                    else:
+                        content_parts.append("[video: download failed]")
+                else:
+                    content_parts.append("[video: download failed]")
+
             elif msg_type == "mixed":
                 # Mixed content contains multiple message items
                 mixed_info = cast(dict[str, Any], body.get("mixed", {}))
@@ -344,6 +383,11 @@ class WecomChannel(BaseChannel):
                 content_parts.append(MSG_TYPE_MAP.get(msg_type, f"[{msg_type}]"))
 
             content = "\n".join(content_parts) if content_parts else ""
+
+            quoted = _quoted_text(body)
+            if quoted:
+                quote_tag = f"[Reply to: {quoted}]"
+                content = f"{quote_tag}\n{content}" if content else quote_tag
 
             if not content:
                 return

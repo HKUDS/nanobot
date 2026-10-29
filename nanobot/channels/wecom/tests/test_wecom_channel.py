@@ -1,8 +1,10 @@
 """Tests for WeCom channel: helpers, download, upload, send, and message processing."""
 
+import asyncio
 import os
 import tempfile
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -62,6 +64,36 @@ class _FakeWeComClient:
 def test_sdk_exposes_media_upload_api() -> None:
     """The declared SDK version provides the public API used by this channel."""
     assert callable(WSClient.upload_media)
+
+
+def test_sdk_routes_video_frames_through_generic_message_event() -> None:
+    """Video frames only reach the generic "message" event, so the channel listens there.
+
+    The SDK's per-type events cover text/image/mixed/voice/file only, while
+    every inbound message — video included — is dispatched as "message".
+    """
+    from wecom_aibot_sdk.message_handler import MessageHandler
+    from wecom_aibot_sdk.types import WsFrame
+
+    handler = MessageHandler()
+    seen: list[str] = []
+
+    async def _record(frame: Any) -> None:
+        seen.append(str(getattr(frame, "body", {}).get("msgtype", "")))
+
+    handler.on("message", _record)
+
+    async def _dispatch() -> None:
+        await handler.handle_frame(
+            WsFrame(
+                headers={"req_id": "r1"},
+                cmd="aibot_msg_callback",
+                body={"msgid": "1", "msgtype": "video", "video": {"url": "u", "aeskey": "k"}},
+            )
+        )
+
+    asyncio.run(_dispatch())
+    assert seen == ["video"]
 
 
 def test_wecom_websocket_bypasses_system_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -547,6 +579,73 @@ async def test_process_file_message_uses_sdk_filename_when_name_missing(tmp_path
     msg = await channel.bus.consume_inbound()
     assert msg.media == [str(tmp_path / "real_name.pdf")]
     assert "[file: real_name.pdf]" in msg.content
+
+
+@pytest.mark.asyncio
+async def test_process_video_message(tmp_path: Path) -> None:
+    """Video message: the media is downloaded and forwarded as an attachment."""
+    channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["user1"]), MessageBus())
+    client = _FakeWeComClient()
+    client.download_file.return_value = (b"fake mp4", "clip.mp4")
+    channel._client = client
+
+    with patch("nanobot.channels.wecom.runtime.get_media_dir", return_value=tmp_path):
+        frame = _FakeFrame(body={
+            "msgid": "msg_video_1",
+            "chatid": "chat1",
+            "msgtype": "video",
+            "from": {"userid": "user1"},
+            "video": {"url": "https://example.com/clip.mp4", "aeskey": "key789"},
+        })
+        await channel._process_message(frame, "video")
+
+    msg = await channel.bus.consume_inbound()
+    assert msg.media == [str(tmp_path / "clip.mp4")]
+    assert "[video: clip.mp4]" in msg.content
+    assert msg.metadata["msg_type"] == "video"
+
+
+@pytest.mark.asyncio
+async def test_process_message_prepends_quoted_text() -> None:
+    """A reply carries the quoted text as context for the model."""
+    channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["user1"]), MessageBus())
+    channel._client = _FakeWeComClient()
+
+    frame = _FakeFrame(body={
+        "msgid": "msg_quote_1",
+        "chatid": "chat1",
+        "msgtype": "text",
+        "from": {"userid": "user1"},
+        "text": {"content": "and tomorrow?"},
+        "quote": {"msgtype": "text", "text": {"content": "what is the plan"}},
+    })
+
+    await channel._process_message(frame, "text")
+
+    msg = await channel.bus.consume_inbound()
+    assert msg.content == "[Reply to: what is the plan]\nand tomorrow?"
+
+
+@pytest.mark.asyncio
+async def test_process_message_truncates_long_quoted_text() -> None:
+    """A very long quoted message is truncated before it reaches the model."""
+    channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["user1"]), MessageBus())
+    channel._client = _FakeWeComClient()
+
+    frame = _FakeFrame(body={
+        "msgid": "msg_quote_2",
+        "chatid": "chat1",
+        "msgtype": "text",
+        "from": {"userid": "user1"},
+        "text": {"content": "ok"},
+        "quote": {"msgtype": "text", "text": {"content": "x" * 500}},
+    })
+
+    await channel._process_message(frame, "text")
+
+    msg = await channel.bus.consume_inbound()
+    assert msg.content.startswith("[Reply to: " + "x" * 200 + "...]")
+    assert len(msg.content) < 260
 
 
 @pytest.mark.asyncio
