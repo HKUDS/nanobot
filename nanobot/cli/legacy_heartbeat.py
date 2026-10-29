@@ -15,6 +15,7 @@ from nanobot.cron.service import CronService
 from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronSchedule
 from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY, default_workspace_scope
 from nanobot.session.manager import SessionManager
+from nanobot.webui.session_identity import webui_session_key
 
 _IMPORT_KEY = "heartbeat-to-scheduled-task-v1"
 
@@ -51,7 +52,7 @@ async def import_heartbeat_task(
         has_instructions = any(line.strip() and not line.lstrip().startswith("#") for line in visible.splitlines())
         enabled = has_instructions and _legacy_enabled(config_path)
         chat_id = str(uuid5(NAMESPACE_URL, f"nanobot:heartbeat-import:{workspace}"))
-        session_key = f"websocket:{chat_id}"
+        session_key = webui_session_key(chat_id)
         scope = default_workspace_scope(
             workspace, config.tools.restrict_to_workspace, source_channel="websocket",
         ).metadata()

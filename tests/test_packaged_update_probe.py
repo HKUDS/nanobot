@@ -578,3 +578,39 @@ def test_serial_lanes_resolve_baseline_dependencies_and_keep_recovery_chains_on_
         interpreters = {python for _, python in rows}
         assert len(interpreters) == 1
         assert Path(next(iter(interpreters))).is_relative_to(case_root.parent / "managed")
+
+
+async def test_upgrade_accepts_only_the_imported_empty_task_topic_and_keeps_old_records(history_root):
+    from copy import deepcopy
+
+    from nanobot.cli.legacy_heartbeat import import_heartbeat_task
+    from nanobot.config.schema import Config
+    from nanobot.cron.service import CronService
+    from nanobot.session.manager import SessionManager
+
+    probe.seed_history(history_root)
+    workspace = history_root / "workspace"
+    source = workspace / "HEARTBEAT.md"
+    source.write_text("# Heartbeat Tasks\n<!-- Add tasks below -->\n## Active Tasks\n", encoding="utf-8")
+    sessions = SessionManager(workspace)
+    before = canonical_records(sessions.sessions_dir / "sessions.sqlite3")
+    config = Config()
+    config.agents.defaults.workspace = str(workspace)
+    cron = CronService(workspace / "cron/jobs.json")
+    try:
+        await import_heartbeat_task(config, history_root / "account/.nanobot/config.json", cron, sessions)
+        current = canonical_records(sessions.sessions_dir / "sessions.sqlite3")
+        assert len(current["sessions"]) == len(before["sessions"]) + 1
+        probe.assert_preserved_canonical(before, current, workspace)
+        changed_message = deepcopy(current)
+        changed_message["messages"][0][2] = '{"role":"user","content":"lost old content"}'
+        with pytest.raises(AssertionError):
+            probe.assert_preserved_canonical(before, changed_message, workspace)
+        unrelated_topic = deepcopy(current)
+        new_row = deepcopy(next(row for row in current["sessions"] if row[0] not in {old[0] for old in before["sessions"]}))
+        new_row[0] = "websocket:unrelated-topic"
+        unrelated_topic["sessions"].append(new_row)
+        with pytest.raises(AssertionError, match="only the imported task"):
+            probe.assert_preserved_canonical(before, unrelated_topic, workspace)
+    finally:
+        await sessions.state.aclose()

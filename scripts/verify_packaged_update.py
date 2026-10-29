@@ -316,6 +316,34 @@ def canonical_records(path: Path, tables: tuple[str, ...] = ("sessions", "messag
                 for table in tables}
 
 
+def assert_preserved_canonical(before: dict, current: dict, workspace: Path) -> None:
+    """Keep old records byte-equivalent while checking the one supported import."""
+    if current == before:
+        return
+    from nanobot.cron.service import CronService
+
+    source = workspace / "HEARTBEAT.md"
+    assert source.exists(), "canonical records changed without legacy instructions"
+    cron = CronService(workspace / "cron/jobs.json")
+    assert cron.has_completed_import("heartbeat-to-scheduled-task-v1")
+    imports = [job for job in cron.list_jobs(include_disabled=True)
+               if job.name == "Imported Heartbeat" and job.id.startswith("import-")]
+    assert len(imports) == 1, "upgrade must create exactly one ordinary imported task"
+    job = imports[0]
+    assert job.payload.kind == "agent_turn" and job.payload.origin_channel == "websocket"
+    assert not job.enabled, "the old bundled empty template must not start model work"
+    assert job.schedule.kind == "every" and job.schedule.every_ms == 1_800_000
+    assert job.payload.message == source.read_text(encoding="utf-8")
+    assert job.payload.origin_metadata["workspace_scope"]["project_path"] == str(workspace.resolve())
+    old_keys = {row[0] for row in before["sessions"]}
+    added_keys = {row[0] for row in current["sessions"]} - old_keys
+    assert added_keys == {job.payload.session_key}, "only the imported task may add a topic"
+    preserved = {**current, "sessions": [row for row in current["sessions"] if row[0] in old_keys]}
+    # No old session/metadata/message/checkpoint/pending input may change, and
+    # the paused import must not add messages or execute on startup.
+    assert preserved == before
+
+
 def canonical_context(root: Path) -> dict:
     context = request(root, "/api/sessions/websocket%3Acanonical-only/context")
     # Tokenizer availability can alter estimates; stored message content is
@@ -547,7 +575,7 @@ def verify_data(root: Path, expected: str) -> None:
     assert canonical_context(root) == before["canonical_only"]
     database = Path(before["database"])
     canonical = canonical_records(database)
-    assert canonical == before["canonical"]
+    assert_preserved_canonical(before["canonical"], canonical, config.workspace_path)
     delivery = root / "account/.nanobot/delivery/outbox.sqlite3"
     assert canonical_records(delivery, ("deliveries",)) == before["delivery"]
     # Display transcripts are not canonical agent context.
