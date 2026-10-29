@@ -983,6 +983,31 @@ class SubagentManager:
         await asyncio.gather(*(self._cancel_task(record, suppress_notice=True) for record in records))
         return len(records)
 
+    async def stop_session(self, session_key: str) -> int:
+        """Confirm session-wide Stop only after execution and cleanup settle.
+
+        Individual task cancellation remains bounded and reports ``stopping``.
+        A session Stop owns the admission barrier, so it must not mistake that
+        intermediate observation for permission to start conflicting work.
+        """
+        records = [record for record in self._tasks.values() if record.status.owner == session_key]
+        await self.cancel_by_session(session_key)
+        while tasks := tuple(
+            task for tid, task in self._running_tasks.items()
+            if self._tasks[tid].status.owner == session_key
+        ):
+            await asyncio.gather(*tasks, return_exceptions=True)
+        cleanups: list[asyncio.Future[int]] = []
+        for record in records:
+            cleanup = record.cleanup_task
+            retry = cleanup is not None and cleanup.done() and (
+                cleanup.cancelled() or cleanup.exception() is not None
+            )
+            cleanups.append(asyncio.shield(self._start_cleanup(record, retry=retry)))
+        if cleanups:
+            await asyncio.gather(*cleanups)
+        return len(records)
+
     async def close(self) -> None:
         """Request cancellation and bounded cleanup, retaining unfinished work."""
         self._closed = True

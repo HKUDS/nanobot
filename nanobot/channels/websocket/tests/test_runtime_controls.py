@@ -83,6 +83,14 @@ async def test_stop_queued_before_consumption_cannot_cancel_the_next_turn(
             "chat_id": "controlled", "turn_id": "old-turn",
         })
         assert (await runtime.response("delayed-old-stop"))["result"]["status"] == "stale"
+        await runtime.request("missing-target-stop", "session.stop", {
+            "chat_id": "controlled", "turn_id": None,
+        })
+        assert (await runtime.response("missing-target-stop"))["result"]["status"] == "stale"
+        await runtime.request("old-gateway-stop", "session.stop", {
+            "chat_id": "controlled", "turn_id": "next-turn", "expected_gateway_id": "previous-instance",
+        })
+        assert (await runtime.response("old-gateway-stop"))["error"]["status"] == 409
         await runtime.request("stop-before-consume", "session.stop", {
             "chat_id": "controlled", "turn_id": "old-turn",
         })
@@ -248,3 +256,231 @@ async def test_slash_like_text_still_executes_as_an_ordinary_message(runtime: _R
     assert saved is not None
     assert [public_history_message(row)["content"] for row in saved.messages if row["role"] == "user"] == [text]
     assert runtime.provider.calls == 1
+
+
+@pytest.mark.parametrize("parent_finishes", [False, True], ids=["active-parent", "finished-parent"])
+async def test_session_stop_waits_for_owned_child_before_reply_or_next_turn(
+    runtime: _Runtime, monkeypatch: pytest.MonkeyPatch, parent_finishes: bool,
+) -> None:
+    child_started, child_cancelled, release_child, parent_answered, next_started, release_next = (
+        asyncio.Event() for _ in range(6)
+    )
+    parent_calls = 0
+    monkeypatch.setattr(runtime.loop.subagents, "CANCEL_WAIT_SECONDS", 0.02)
+    monkeypatch.setattr("nanobot.agent.loop._SUBAGENT_TERMINAL_WAIT_SECONDS", 0.02)
+
+    async def chat(messages: list[dict[str, Any]], **kwargs: Any) -> LLMResponse:
+        nonlocal parent_calls
+        if messages[-1].get("content") == "hold the child":
+            child_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                child_cancelled.set()
+                await release_child.wait()
+                raise
+        if "next turn" in str(messages[-1].get("content")):
+            next_started.set()
+            await release_next.wait()
+            return LLMResponse(content="next turn completed", finish_reason="stop")
+        parent_calls += 1
+        if parent_calls == 1:
+            return LLMResponse(content="Starting background work.", tool_calls=[ToolCallRequest(
+                id="child", name="subagent", arguments={"action": "create", "task": "hold the child"},
+            )])
+        parent_answered.set()
+        if not parent_finishes:
+            await asyncio.Event().wait()
+        return LLMResponse(content="The child continues in the Gateway.", finish_reason="stop")
+
+    monkeypatch.setattr(runtime.provider, "chat", chat)
+    async with _running_loop(runtime):
+        receipt = None
+        try:
+            await _send_turn(runtime, "start child", "parent-turn")
+            await asyncio.wait_for(child_started.wait(), 3)
+            await asyncio.wait_for(parent_answered.wait(), 3)
+            if parent_finishes:
+                await asyncio.wait_for(asyncio.gather(*tuple(
+                    task for tasks in runtime.loop._active_tasks.values() for task in tasks
+                )), 3)
+            assert runtime.loop.subagents.get_running_count() == 1
+            await runtime.request("stop-with-child", "session.stop", {
+                "chat_id": "controlled", "turn_id": "parent-turn",
+            })
+            receipt = asyncio.create_task(runtime.response("stop-with-child"))
+            await asyncio.wait_for(child_cancelled.wait(), 3)
+            await _send_turn(runtime, "next turn", "next-turn")
+            done, _ = await asyncio.wait({receipt}, timeout=0.08)
+            assert not done, "stopped must confirm cleanup, not only a cancellation request"
+            assert not next_started.is_set(), "old session work still owns its cleanup barrier"
+            release_child.set()
+            stopped = await receipt
+            assert stopped["result"]["status"] == "stopped"
+            assert stopped["result"]["turn_id"] == "parent-turn"
+            assert runtime.loop.subagents.get_running_count() == 0
+            await asyncio.wait_for(next_started.wait(), 3)
+            await runtime.request("late-parent-stop", "session.stop", {
+                "chat_id": "controlled", "turn_id": "parent-turn",
+            })
+            assert (await runtime.response("late-parent-stop"))["result"]["status"] == "stale"
+            release_next.set()
+            await asyncio.wait_for(asyncio.gather(*tuple(
+                task for tasks in runtime.loop._active_tasks.values() for task in tasks
+            )), 3)
+            key = session_key_for_channel(
+                "websocket", "controlled", unified_session=runtime.channel.gateway.unified_session,
+            )
+            saved = await runtime.sessions.state.read(key)
+            assert saved is not None
+            assert public_history_message(saved.messages[-1])["content"] == "next turn completed"
+        finally:
+            release_child.set()
+            release_next.set()
+            if receipt is not None:
+                await receipt
+
+
+async def test_stop_owns_followup_while_its_durable_admission_is_saving(
+    runtime: _Runtime, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.session.recovery import pending_followups
+
+    running, saving, release_save, next_answered = (asyncio.Event() for _ in range(4))
+    queue_followup = runtime.sessions.state.queue_followup
+    next_context: list[dict[str, Any]] = []
+    calls = 0
+
+    async def chat(messages: list[dict[str, Any]], **kwargs: Any) -> LLMResponse:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            running.set()
+            await asyncio.Event().wait()
+        next_context.extend(messages)
+        next_answered.set()
+        return LLMResponse(content="fresh answer", finish_reason="stop")
+
+    async def save_followup(key: str, msg: Any) -> str | None:
+        saving.set()
+        await release_save.wait()
+        return await queue_followup(key, msg)
+
+    monkeypatch.setattr(runtime.provider, "chat", chat)
+    monkeypatch.setattr(runtime.sessions.state, "queue_followup", save_followup)
+    async with _running_loop(runtime):
+        try:
+            await _send_turn(runtime, "first turn", "first-turn")
+            await asyncio.wait_for(running.wait(), 3)
+            await _send_turn(runtime, "discard this followup", "followup-turn")
+            await asyncio.wait_for(saving.wait(), 3)
+            await runtime.request("stop-during-save", "session.stop", {
+                "chat_id": "controlled", "turn_id": "first-turn",
+            })
+            await _send_turn(runtime, "next turn", "next-turn")
+            release_save.set()
+            assert (await runtime.response("stop-during-save"))["result"]["status"] == "stopped"
+            await asyncio.wait_for(next_answered.wait(), 3)
+            await asyncio.wait_for(asyncio.gather(*tuple(
+                task for tasks in runtime.loop._active_tasks.values() for task in tasks
+            )), 3)
+            key = session_key_for_channel(
+                "websocket", "controlled", unified_session=runtime.channel.gateway.unified_session,
+            )
+            saved = await runtime.sessions.state.read(key)
+            assert saved is not None and pending_followups(saved) == []
+            assert not any("discard this followup" in str(row.get("content")) for row in next_context)
+            assert public_history_message(saved.messages[-1])["content"] == "fresh answer"
+        finally:
+            release_save.set()
+
+
+async def test_failed_cleanup_is_not_reported_stopped_and_blocks_new_execution_until_retry(
+    runtime: _Runtime, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    running = asyncio.Event()
+    calls = 0
+
+    async def chat(messages: list[dict[str, Any]], **kwargs: Any) -> LLMResponse:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            running.set()
+            await asyncio.Event().wait()
+        return LLMResponse(content="clean next turn", finish_reason="stop")
+
+    terminate = runtime.loop._exec_session_manager.terminate_by_owner
+
+    async def failed_cleanup(key: str) -> int:
+        raise RuntimeError("Process cleanup unavailable")
+
+    monkeypatch.setattr(runtime.provider, "chat", chat)
+    monkeypatch.setattr(runtime.loop._exec_session_manager, "terminate_by_owner", failed_cleanup)
+    completed = asyncio.Queue()
+    runtime.bus.subscribe(completed.put_nowait, TurnCompleted)
+    async with _running_loop(runtime):
+        await _send_turn(runtime, "first turn", "failed-turn")
+        await asyncio.wait_for(running.wait(), 3)
+        await runtime.request("failed-stop", "session.stop", {
+            "chat_id": "controlled", "turn_id": "failed-turn",
+        })
+        assert (await runtime.response("failed-stop"))["error"]["status"] == 500
+        assert (await asyncio.wait_for(completed.get(), 3)).outcome == "cancelled"
+        await _send_turn(runtime, "must not execute", "rejected-turn")
+        assert (await asyncio.wait_for(completed.get(), 3)).outcome == "failed"
+        assert calls == 1
+        monkeypatch.setattr(runtime.loop._exec_session_manager, "terminate_by_owner", terminate)
+        await runtime.request("retry-cleanup", "session.stop", {
+            "chat_id": "controlled", "turn_id": "failed-turn",
+        })
+        assert (await runtime.response("retry-cleanup"))["result"]["status"] == "idle"
+        await _send_turn(runtime, "next turn", "next-turn")
+        assert (await asyncio.wait_for(completed.get(), 3)).outcome == "completed"
+        assert calls == 2
+
+
+async def test_stop_cancels_an_accepted_user_shell_still_preparing_to_launch(
+    runtime: _Runtime, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import shlex
+    import sys
+
+    running, shell_preparing, shell_cancelled, release_shell = (asyncio.Event() for _ in range(4))
+    marker = runtime.sessions.workspace / "shell-must-not-launch.txt"
+    execute_shell = runtime.loop.execute_user_shell_command
+
+    async def chat(messages: list[dict[str, Any]], **kwargs: Any) -> LLMResponse:
+        running.set()
+        await asyncio.Event().wait()
+        raise AssertionError("cancelled model must not resume")
+
+    async def preparing_shell(ctx: Any):
+        shell_preparing.set()
+        try:
+            await release_shell.wait()
+        except asyncio.CancelledError:
+            shell_cancelled.set()
+            raise
+        return await execute_shell(ctx)
+
+    monkeypatch.setattr(runtime.provider, "chat", chat)
+    monkeypatch.setattr(runtime.loop, "execute_user_shell_command", preparing_shell)
+    async with _running_loop(runtime):
+        try:
+            await _send_turn(runtime, "first turn", "parent-turn")
+            await asyncio.wait_for(running.wait(), 3)
+            command = shlex.join([sys.executable, "-c", f"from pathlib import Path; Path({str(marker)!r}).write_text('leaked')"])
+            await runtime.channel._dispatch_envelope(runtime.connection, "webui-client", {
+                "type": "message", "chat_id": "controlled", "content": f"!{command}",
+                "webui": True, "user_shell": True, "turn_id": "shell-turn",
+            })
+            await asyncio.wait_for(shell_preparing.wait(), 3)
+            await runtime.request("stop-preparing-shell", "session.stop", {
+                "chat_id": "controlled", "turn_id": "parent-turn",
+            })
+            assert (await runtime.response("stop-preparing-shell"))["result"]["status"] == "stopped"
+            assert shell_cancelled.is_set(), "accepted shell work must not outlive the Stop receipt"
+            release_shell.set()
+            assert not marker.exists()
+        finally:
+            release_shell.set()

@@ -433,7 +433,10 @@ class AgentLoop:
         # It remains the only admission path until that worker atomically
         # observes the queue empty and removes it.
         self._pending_queues: dict[str, asyncio.Queue[InboundMessage]] = {}
-        self._session_inputs: dict[str, InboundMessage] = {}
+        # Retain only the execution identity after its parent finishes: the
+        # Gateway may still own that turn's background tasks and processes.
+        self._session_turn_ids: dict[str, str | None] = {}
+        self._stopping_sessions: set[str] = set()
         self._admission_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
             weakref.WeakValueDictionary()
         )
@@ -883,7 +886,13 @@ class AgentLoop:
         # A shell command may run for up to the configured exec timeout. Keep
         # the inbound consumer responsive when it runs beside an active turn.
         if (msg.metadata or {}).get(INBOUND_META_USER_SHELL) is True:
-            self.schedule_background(dispatch_and_publish())
+            async with self._admission_lock(key):
+                if key in self._stopping_sessions:
+                    raise SessionConflictError("Session cleanup is unfinished; retry Stop before sending new work")
+                self.bus.admission.check()
+                task = asyncio.create_task(dispatch_and_publish())
+                self._track_active_task(key, task)
+                task.add_done_callback(self._background_task_done)
             return
         await dispatch_and_publish()
 
@@ -969,15 +978,19 @@ class AgentLoop:
         self, key: str, expected_turn_id: str | None, expected_generation: str | None,
     ) -> SessionStopResult:
         journal_session = await self.sessions.state.read(key)
-        current = self._session_inputs.get(key)
-        raw_turn_id = current.metadata.get(INBOUND_META_TURN_ID) if current is not None else None
-        turn_id = raw_turn_id if isinstance(raw_turn_id, str) else None
+        turn_id = self._session_turn_ids.get(key)
         if expected_generation is not None and (
             journal_session is None or journal_session.generation != expected_generation
         ):
             return SessionStopResult("stale", 0, expected_turn_id)
-        if expected_generation is not None and turn_id != expected_turn_id:
-            return SessionStopResult("stale" if current is not None else "idle", 0, expected_turn_id)
+        if expected_generation is not None:
+            if turn_id != expected_turn_id:
+                return SessionStopResult("stale", 0, expected_turn_id)
+            if expected_turn_id is None:
+                # A missing target is an idle probe, never authority to stop
+                # work from an unidentified (or later) execution.
+                return SessionStopResult("idle", 0, None)
+        self._stopping_sessions.add(key)
         journaled_followup_ids = (
             tuple(
                 followup_id
@@ -994,23 +1007,34 @@ class AgentLoop:
         tasks = tuple(self._active_tasks.pop(key, set()))
         queued = pending.qsize() if pending is not None and not tasks else 0
         cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
-        for t in tasks:
-            with suppress(asyncio.CancelledError, Exception):
-                await t
-        if pending is not None and self._pending_queues.get(key) is pending:
-            # A task cancelled before its first step never enters the worker's
-            # cleanup handler. Only reclaim that worker's original inbox.
-            self._pending_queues.pop(key, None)
-            self._session_inputs.pop(key, None)
-            await self._cancel_pending_messages(key, pending, asyncio.CancelledError())
-        if journaled_followup_ids and journal_session is not None:
-            # Explicit session cancellation owns the follow-ups accepted before
-            # it began. Gateway shutdown uses aclose() directly and keeps this
-            # journal intact for startup recovery.
-            await self.sessions.state.acknowledge_followups(key, journaled_followup_ids)
-        sub_cancelled = await self.subagents.cancel_by_session(key)
-        exec_cancelled = await self._exec_session_manager.terminate_by_owner(key)
-        total = cancelled + queued + sub_cancelled + exec_cancelled
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        errors = [result for result in results if isinstance(result, Exception)]
+        try:
+            if pending is not None and self._pending_queues.get(key) is pending:
+                # A task cancelled before its first step never enters the worker's
+                # cleanup handler. Only reclaim that worker's original inbox.
+                self._pending_queues.pop(key, None)
+                await self._cancel_pending_messages(key, pending, asyncio.CancelledError())
+            if journaled_followup_ids and journal_session is not None:
+                # Explicit Stop owns accepted follow-ups. Gateway shutdown
+                # keeps the journal intact for startup recovery instead.
+                await self.sessions.state.acknowledge_followups(key, journaled_followup_ids)
+        except Exception as exc:
+            errors.append(exc)
+        cleanup = await asyncio.gather(
+            self.subagents.stop_session(key),
+            self._exec_session_manager.terminate_by_owner(key),
+            return_exceptions=True,
+        )
+        errors.extend(
+            RuntimeError("Session cleanup was cancelled") if isinstance(result, asyncio.CancelledError) else result
+            for result in cleanup if isinstance(result, Exception | asyncio.CancelledError)
+        )
+        if errors:
+            # Keep admission closed until an explicit Stop retries cleanup.
+            raise ExceptionGroup("session stop did not settle all owned work", errors)
+        total = cancelled + queued + sum(result for result in cleanup if isinstance(result, int))
+        self._stopping_sessions.discard(key)
         return SessionStopResult("stopped" if total else "idle", total, turn_id)
 
     async def discard_session(self, key: str) -> None:
@@ -1027,6 +1051,7 @@ class AgentLoop:
     def discard_session_file_state(self, key: str) -> None:
         """Forget ephemeral file-read state for a reset or removed session."""
         self._file_state_store.discard(key)
+        self._session_turn_ids.pop(key, None)
 
     def _effective_session_key(self, msg: InboundMessage) -> str:
         """Return the session key used for task routing and mid-turn injections."""
@@ -1639,6 +1664,8 @@ class AgentLoop:
     async def _admit_session_message(self, msg: InboundMessage) -> None:
         self.bus.admission.check()
         session_key = self._effective_session_key(msg)
+        if session_key in self._stopping_sessions:
+            raise SessionConflictError("Session cleanup is unfinished; retry Stop before sending new work")
         if not self.subagents.accepts_result(msg, session_key):
             return
         if session_key != msg.session_key:
@@ -1662,9 +1689,13 @@ class AgentLoop:
         new_pending: asyncio.Queue[InboundMessage] = asyncio.Queue()
         new_pending.put_nowait(msg)
         self._pending_queues[session_key] = new_pending
-        self._session_inputs[session_key] = msg
+        self._remember_session_turn(session_key, msg)
         task = asyncio.create_task(self._run_session_queue(session_key, new_pending))
         self._track_active_task(session_key, task)
+
+    def _remember_session_turn(self, key: str, msg: InboundMessage) -> None:
+        turn_id = msg.metadata.get(INBOUND_META_TURN_ID)
+        self._session_turn_ids[key] = turn_id if isinstance(turn_id, str) else None
 
     async def _run_session_queue(
         self,
@@ -1689,7 +1720,7 @@ class AgentLoop:
                 log_content = session is None or (
                     session.policy.persist and session.policy.log_content
                 )
-                self._session_inputs[session_key] = msg
+                self._remember_session_turn(session_key, msg)
                 try:
                     await self._dispatch_one(msg, pending)
                 except asyncio.CancelledError as exc:
@@ -1697,6 +1728,9 @@ class AgentLoop:
                         coordinator.complete(msg, error=exc)
                     raise
                 except Exception:
+                    if task_is_cancelling():
+                        await self._cancel_pending_messages(session_key, pending, asyncio.CancelledError())
+                        raise
                     logger.opt(exception=log_content).error(
                         "Session worker failed one message for {}; continuing FIFO",
                         session_key,
@@ -1708,7 +1742,6 @@ class AgentLoop:
             owns_queue = self._pending_queues.get(session_key) is pending
             if owns_queue:
                 self._pending_queues.pop(session_key, None)
-                self._session_inputs.pop(session_key, None)
 
     async def _cancel_pending_messages(
         self,
@@ -1780,6 +1813,7 @@ class AgentLoop:
                         session_key,
                         enable_stream=True,
                     )
+                    self._session_turn_ids[session_key] = delivery.route.turn_id or self._session_turn_ids.get(session_key)
                     response = await self._process_message(
                         msg,
                         pending_queue=pending,
@@ -1826,6 +1860,7 @@ class AgentLoop:
                             "Could not finalize cancelled turn for session {}",
                             session_key,
                         )
+                        raise
                     raise
                 except Exception as exc:
                     logger.opt(exception=log_content).error(
