@@ -818,8 +818,7 @@ export function ThreadShell({
   const selectedModelPreset = localModelPreset
     ?? (confirmedModelPreset !== undefined ? confirmedModelPreset : sessionModelPreset);
   const activeModelPreset = selectedModelPreset
-    ?? settings?.agent.model_preset
-    ?? "default";
+    ?? (settings?.agent.model_preset || "default");
   useEffect(() => {
     setChatPersisted(chatId ? client.isChatPersisted(chatId) : false);
     if (!chatId) return;

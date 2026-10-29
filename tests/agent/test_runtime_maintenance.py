@@ -394,8 +394,15 @@ async def test_exec_cleanup_is_owned_through_failure_and_retry(agent, tmp_path, 
             with agent.maintenance():
                 pytest.fail("in-flight process cleanup was missed")
         release.set()
-        with pytest.raises(OSError, match="cleanup was not confirmed"):
-            await task
+        if operation == "discard_session":
+            with pytest.raises(ExceptionGroup, match="session stop did not settle") as caught:
+                await task
+            assert len(caught.value.exceptions) == 1
+            assert isinstance(caught.value.exceptions[0], OSError)
+            assert str(caught.value.exceptions[0]) == "cleanup was not confirmed"
+        else:
+            with pytest.raises(OSError, match="cleanup was not confirmed"):
+                await task
         # An exited parent alone cannot prove that failed process-tree cleanup settled.
         assert session.process.returncode is not None
         with pytest.raises(RuntimeBusyError):

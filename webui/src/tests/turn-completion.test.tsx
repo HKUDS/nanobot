@@ -122,8 +122,15 @@ describe("completed turn event ordering", () => {
         () => useNanobotStream(CHAT_ID, EMPTY_MESSAGES), { wrapper },
       );
       act(() => socket.receive(running));
+      if (terminal === "stop") {
+        act(() => result.current.stop());
+        // A Stop request/receipt is not the execution's terminal event.
+        expect(result.current.isStreaming).toBe(true);
+      }
       act(() => {
-        if (terminal === "stop") result.current.stop();
+        if (terminal === "stop") {
+          socket.receive({ event: "turn_end", chat_id: CHAT_ID, turn_id: TURN_ID });
+        }
         else if (terminal === "snapshot") {
           client.reconcileCanonicalCompletion(CHAT_ID, client.getRunGeneration(CHAT_ID), [TURN_ID]);
         } else if (terminal === "idle snapshot") {

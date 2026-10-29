@@ -117,6 +117,7 @@ async def test_recovery_continuation_runs_without_a_sustained_goal(
     loop._unified_session = False
     loop._recovery_admission = recovery
     loop._session_locks = {}
+    loop._session_turn_ids = {}
     loop._concurrency_gate = None
     loop._automation_turn_coordinators = []
     loop._discarding_sessions = set()
