@@ -12,7 +12,7 @@ import traceback
 import urllib.parse
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
 from contextlib import AsyncExitStack, suppress
-from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, cast
 
 import httpx
 from loguru import logger
@@ -62,6 +62,7 @@ _HTTP_READ_TIMEOUT = 300.0
 # Replace anything outside [a-zA-Z0-9_-] with underscore and collapse runs.
 _SANITIZE_RE = re.compile(r"_+")
 _ReconnectCallback = Callable[[str, str, Tool], Awaitable[Tool | None]]
+_MCPResultT = TypeVar("_MCPResultT")
 MCPServerLoader = Callable[[], tuple[Mapping[str, "MCPServerConfig"], NetworkConfig]]
 MCPRuntimeStatus = Literal["connecting", "connected", "failed"]
 
@@ -572,6 +573,75 @@ class _MCPWrapperBase(Tool):
         self._session = refreshed_session
         return True
 
+    async def _request_with_recovery(
+        self,
+        request: Callable[[], Awaitable[_MCPResultT]],
+        timeout: float,
+        capability_kind: Literal["tool", "resource", "prompt"],
+    ) -> _MCPResultT | ToolResult:
+        """Recover requests only; rendering and reconnect/backoff failures stay outside replay."""
+        from mcp.shared.exceptions import McpError
+
+        operation = f"{capability_kind} {'read' if capability_kind == 'resource' else 'call'}"
+        refreshed_session = False
+        retried = False
+        while True:
+            try:
+                return await asyncio.wait_for(request(), timeout=timeout)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "MCP {} '{}' timed out after {}s", capability_kind, self._name, timeout
+                )
+                return ToolResult.error(f"(MCP {operation} timed out after {timeout}s)")
+            except asyncio.CancelledError:
+                # MCP SDK cancel scopes can leak cancellation without cancelling our task.
+                if task_is_cancelling():
+                    raise
+                logger.warning("MCP {} '{}' was cancelled by server/SDK", capability_kind, self._name)
+                return ToolResult.error(f"(MCP {operation} was cancelled)")
+            except Exception as exc:
+                if await self._refresh_session_after_termination(
+                    exc, refreshed_session, capability_kind
+                ):
+                    refreshed_session = True
+                    continue
+                if capability_kind == "prompt" and isinstance(exc, McpError):
+                    logger.opt(exception=exc if tool_log_content_allowed() else False).error(
+                        "MCP prompt '{}' failed: code={} message={}",
+                        self._name,
+                        exc.error.code,
+                        exc.error.message if tool_log_content_allowed() else "[content hidden]",
+                    )
+                    return ToolResult.error(
+                        f"(MCP prompt call failed: {exc.error.message} [code {exc.error.code}])"
+                    )
+                if _is_transient(exc):
+                    if not retried:
+                        logger.warning(
+                            "MCP {} '{}' hit transient error ({}), retrying once...",
+                            capability_kind,
+                            self._name,
+                            type(exc).__name__,
+                        )
+                        retried = True
+                        await asyncio.sleep(1)
+                        continue
+                    logger.opt(exception=exc if tool_log_content_allowed() else False).error(
+                        "MCP {} '{}' failed after retry: {}",
+                        capability_kind,
+                        self._name,
+                        type(exc).__name__,
+                    )
+                    return ToolResult.error(f"(MCP {operation} failed after retry: {type(exc).__name__})")
+                logger.opt(exception=exc if tool_log_content_allowed() else False).error(
+                    "MCP {} '{}' failed: {}: {}",
+                    capability_kind,
+                    self._name,
+                    type(exc).__name__,
+                    exc if tool_log_content_allowed() else "[content hidden]",
+                )
+                return ToolResult.error(f"(MCP {operation} failed: {type(exc).__name__})")
+
 
 def _image_block_data_url(block: Any, types: Any) -> str | None:
     """Return a base64 ``data:`` URL for an MCP image-bearing content block.
@@ -653,81 +723,29 @@ class MCPToolWrapper(_MCPWrapperBase):
         return self._parameters
 
     async def execute(self, **kwargs: Any) -> str:
-        retried_transient = False
-        refreshed_session = False
-        while True:
-            try:
-                result = await asyncio.wait_for(
-                    self._session.call_tool(self._original_name, arguments=kwargs),
-                    timeout=self._tool_timeout,
-                )
-            except asyncio.TimeoutError:
-                logger.warning(
-                    "MCP tool '{}' timed out after {}s", self._name, self._tool_timeout
-                )
-                return ToolResult.error(
-                    f"(MCP tool call timed out after {self._tool_timeout}s)"
-                )
-            except asyncio.CancelledError:
-                # MCP SDK's anyio cancel scopes can leak CancelledError on timeout/failure.
-                # Re-raise only if our task was externally cancelled (e.g. /stop).
-                if task_is_cancelling():
-                    raise
-                logger.warning("MCP tool '{}' was cancelled by server/SDK", self._name)
-                return ToolResult.error("(MCP tool call was cancelled)")
-            except Exception as exc:
-                if await self._refresh_session_after_termination(
-                    exc,
-                    refreshed_session,
-                    "tool",
-                ):
-                    refreshed_session = True
-                    continue
-                if _is_transient(exc):
-                    if not retried_transient:
-                        retried_transient = True
-                        logger.warning(
-                            "MCP tool '{}' hit transient error ({}), retrying once...",
-                            self._name,
-                            type(exc).__name__,
-                        )
-                        await asyncio.sleep(1)  # Brief backoff before retry
-                        continue
-                    # Second transient failure — give up with retry-specific message
-                    logger.opt(exception=tool_log_content_allowed()).error(
-                        "MCP tool '{}' failed after retry: {}",
-                        self._name,
-                        type(exc).__name__,
-                    )
-                    return ToolResult.error(
-                        f"(MCP tool call failed after retry: {type(exc).__name__})"
-                    )
-                logger.opt(exception=tool_log_content_allowed()).error(
-                    "MCP tool '{}' failed: {}: {}",
-                    self._name,
-                    type(exc).__name__,
-                    exc if tool_log_content_allowed() else "[content hidden]",
-                )
-                return ToolResult.error(
-                    f"(MCP tool call failed: {type(exc).__name__})"
-                )
-            else:
-                # Success — extract text and persist any image content as artifacts.
-                try:
-                    rendered = self._render_call_result(result.content, kwargs)
-                    if getattr(result, "isError", False):
-                        return ToolResult.error(rendered)
-                    return rendered
-                except Exception as exc:
-                    logger.opt(exception=tool_log_content_allowed()).error(
-                        "MCP tool '{}' failed while rendering result: {}: {}",
-                        self._name,
-                        type(exc).__name__,
-                        exc if tool_log_content_allowed() else "[content hidden]",
-                    )
-                    return ToolResult.error(
-                        f"(MCP tool returned malformed content: {type(exc).__name__})"
-                    )
+        result = await self._request_with_recovery(
+            lambda: self._session.call_tool(self._original_name, arguments=kwargs),
+            self._tool_timeout,
+            "tool",
+        )
+        if isinstance(result, ToolResult):
+            return result
+        # Success — extract text and persist any image content as artifacts.
+        try:
+            rendered = self._render_call_result(result.content, kwargs)
+            if getattr(result, "isError", False):
+                return ToolResult.error(rendered)
+            return rendered
+        except Exception as exc:
+            logger.opt(exception=tool_log_content_allowed()).error(
+                "MCP tool '{}' failed while rendering result: {}: {}",
+                self._name,
+                type(exc).__name__,
+                exc if tool_log_content_allowed() else "[content hidden]",
+            )
+            return ToolResult.error(
+                f"(MCP tool returned malformed content: {type(exc).__name__})"
+            )
 
     def _render_call_result(self, content: Any, arguments: Mapping[str, Any]) -> str:
         """Turn MCP content blocks into a tool result string.
@@ -825,65 +843,22 @@ class MCPResourceWrapper(_MCPWrapperBase):
     async def execute(self, **kwargs: Any) -> str:
         from mcp import types
 
-        retried_transient = False
-        refreshed_session = False
-        while True:
-            try:
-                result = await asyncio.wait_for(
-                    self._session.read_resource(self._uri),
-                    timeout=self._resource_timeout,
-                )
-            except asyncio.TimeoutError:
-                logger.warning(
-                    "MCP resource '{}' timed out after {}s", self._name, self._resource_timeout
-                )
-                return f"(MCP resource read timed out after {self._resource_timeout}s)"
-            except asyncio.CancelledError:
-                if task_is_cancelling():
-                    raise
-                logger.warning("MCP resource '{}' was cancelled by server/SDK", self._name)
-                return "(MCP resource read was cancelled)"
-            except Exception as exc:
-                if await self._refresh_session_after_termination(
-                    exc,
-                    refreshed_session,
-                    "resource",
-                ):
-                    refreshed_session = True
-                    continue
-                if _is_transient(exc):
-                    if not retried_transient:
-                        retried_transient = True
-                        logger.warning(
-                            "MCP resource '{}' hit transient error ({}), retrying once...",
-                            self._name,
-                            type(exc).__name__,
-                        )
-                        await asyncio.sleep(1)
-                        continue
-                    logger.opt(exception=tool_log_content_allowed()).error(
-                        "MCP resource '{}' failed after retry: {}",
-                        self._name,
-                        type(exc).__name__,
-                    )
-                    return f"(MCP resource read failed after retry: {type(exc).__name__})"
-                logger.opt(exception=tool_log_content_allowed()).error(
-                    "MCP resource '{}' failed: {}: {}",
-                    self._name,
-                    type(exc).__name__,
-                    exc if tool_log_content_allowed() else "[content hidden]",
-                )
-                return f"(MCP resource read failed: {type(exc).__name__})"
+        result = await self._request_with_recovery(
+            lambda: self._session.read_resource(self._uri),
+            self._resource_timeout,
+            "resource",
+        )
+        if isinstance(result, ToolResult):
+            return str(result)
+        parts: list[str] = []
+        for block in result.contents:
+            if isinstance(block, types.TextResourceContents):
+                parts.append(block.text)
+            elif isinstance(cast(object, block), types.BlobResourceContents):
+                parts.append(f"[Binary resource: {len(block.blob)} bytes]")
             else:
-                parts: list[str] = []
-                for block in result.contents:
-                    if isinstance(block, types.TextResourceContents):
-                        parts.append(block.text)
-                    elif isinstance(cast(object, block), types.BlobResourceContents):
-                        parts.append(f"[Binary resource: {len(block.blob)} bytes]")
-                    else:
-                        parts.append(str(block))
-                return "\n".join(parts) or "(no output)"
+                parts.append(str(block))
+        return "\n".join(parts) or "(no output)"
 
 
 class MCPPromptWrapper(_MCPWrapperBase):
@@ -942,87 +917,28 @@ class MCPPromptWrapper(_MCPWrapperBase):
 
     async def execute(self, **kwargs: Any) -> str:
         from mcp import types
-        from mcp.shared.exceptions import McpError
 
-        retried_transient = False
-        refreshed_session = False
-        while True:
-            try:
-                result = await asyncio.wait_for(
-                    self._session.get_prompt(self._prompt_name, arguments=kwargs),
-                    timeout=self._prompt_timeout,
-                )
-            except asyncio.TimeoutError:
-                logger.warning(
-                    "MCP prompt '{}' timed out after {}s", self._name, self._prompt_timeout
-                )
-                return f"(MCP prompt call timed out after {self._prompt_timeout}s)"
-            except asyncio.CancelledError:
-                if task_is_cancelling():
-                    raise
-                logger.warning("MCP prompt '{}' was cancelled by server/SDK", self._name)
-                return "(MCP prompt call was cancelled)"
-            except McpError as exc:
-                if await self._refresh_session_after_termination(
-                    exc,
-                    refreshed_session,
-                    "prompt",
-                ):
-                    refreshed_session = True
-                    continue
-                logger.opt(exception=tool_log_content_allowed()).error(
-                    "MCP prompt '{}' failed: code={} message={}",
-                    self._name,
-                    exc.error.code,
-                    exc.error.message if tool_log_content_allowed() else "[content hidden]",
-                )
-                return f"(MCP prompt call failed: {exc.error.message} [code {exc.error.code}])"
-            except Exception as exc:
-                if await self._refresh_session_after_termination(
-                    exc,
-                    refreshed_session,
-                    "prompt",
-                ):
-                    refreshed_session = True
-                    continue
-                if _is_transient(exc):
-                    if not retried_transient:
-                        retried_transient = True
-                        logger.warning(
-                            "MCP prompt '{}' hit transient error ({}), retrying once...",
-                            self._name,
-                            type(exc).__name__,
-                        )
-                        await asyncio.sleep(1)
-                        continue
-                    logger.opt(exception=tool_log_content_allowed()).error(
-                        "MCP prompt '{}' failed after retry: {}",
-                        self._name,
-                        type(exc).__name__,
-                    )
-                    return f"(MCP prompt call failed after retry: {type(exc).__name__})"
-                logger.opt(exception=tool_log_content_allowed()).error(
-                    "MCP prompt '{}' failed: {}: {}",
-                    self._name,
-                    type(exc).__name__,
-                    exc if tool_log_content_allowed() else "[content hidden]",
-                )
-                return f"(MCP prompt call failed: {type(exc).__name__})"
-            else:
-                parts: list[str] = []
-                for message in result.messages:
-                    content = message.content
-                    if isinstance(content, types.TextContent):
-                        parts.append(content.text)
-                    elif isinstance(content, list):
-                        for block in content:
-                            if isinstance(block, types.TextContent):
-                                parts.append(block.text)
-                            else:
-                                parts.append(str(block))
+        result = await self._request_with_recovery(
+            lambda: self._session.get_prompt(self._prompt_name, arguments=kwargs),
+            self._prompt_timeout,
+            "prompt",
+        )
+        if isinstance(result, ToolResult):
+            return str(result)
+        parts: list[str] = []
+        for message in result.messages:
+            content = message.content
+            if isinstance(content, types.TextContent):
+                parts.append(content.text)
+            elif isinstance(content, list):
+                for block in content:
+                    if isinstance(block, types.TextContent):
+                        parts.append(block.text)
                     else:
-                        parts.append(str(content))
-                return "\n".join(parts) or "(no output)"
+                        parts.append(str(block))
+            else:
+                parts.append(str(content))
+        return "\n".join(parts) or "(no output)"
 
 
 async def connect_mcp_servers(

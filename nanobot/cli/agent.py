@@ -151,6 +151,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
         format_restart_completed_message,
         should_show_cli_restart_notice,
     )
+    from nanobot.utils.tool_hints import format_tool_event_hints
 
     agent_loop_class = _classic_dependency("AgentLoop")
     stream_renderer_class = _classic_dependency("StreamRenderer")
@@ -220,6 +221,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
             content: str,
             *,
             tool_hint: bool = False,
+            tool_events: list[dict[str, Any]] | None = None,
             reasoning: bool = False,
             **_kwargs: Any,
         ) -> None:
@@ -244,6 +246,10 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                 return
             if ch and not tool_hint and not ch.send_progress:
                 return
+            if tool_hint and tool_events:
+                content = format_tool_event_hints(
+                    tool_events, max_length=runtime_config.agents.defaults.tool_hint_max_length,
+                )
             cli_terminal._print_cli_progress_line(content, _thinking, renderer)
 
         return _cli_progress
@@ -359,6 +365,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
                             agent_loop.channels_config,
                             renderer,
                             reasoning_buffer,
+                            tool_hint_max_length=runtime_config.agents.defaults.tool_hint_max_length,
                         ):
                             continue
 

@@ -40,6 +40,7 @@ from nanobot.bus.outbound_events import (
     UserInputEvent,
 )
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.manager import ChannelManager
 from nanobot.channels.websocket import runtime as websocket_runtime
 from nanobot.channels.websocket.runtime import (
     WebSocketChannel,
@@ -2623,18 +2624,17 @@ async def test_send_removes_connection_on_connection_closed() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_progress_includes_structured_tool_events() -> None:
+async def test_send_progress_includes_structured_tool_events(history) -> None:
     bus = MagicMock()
-    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus, session_manager=history.sessions))
     mock_ws = AsyncMock()
     channel._attach(mock_ws, "chat-1")
 
-    await channel.send(OutboundMessage(
+    msg = await history.message(
         channel="websocket",
         chat_id="chat-1",
-        content='search "hermes"',
+        content="",
         event=ProgressEvent(
-            content='search "hermes"',
             tool_hint=True,
             tool_events=[
                 {
@@ -2653,11 +2653,13 @@ async def test_send_progress_includes_structured_tool_events() -> None:
         metadata={
             "webui_turn_id": "turn-1",
         },
-    ))
+    )
+    await ChannelManager._send_once(channel, channel.prepare_tool_events(msg))
 
     payload = json.loads(mock_ws.send.await_args.args[0])
     assert payload["event"] == "message"
     assert payload["kind"] == "tool_hint"
+    assert payload["text"] == ""
     assert payload["turn_id"] == "turn-1"
     assert payload["turn_phase"] == "activity"
     assert payload["turn_seq"] == 1
@@ -2674,6 +2676,15 @@ async def test_send_progress_includes_structured_tool_events() -> None:
             "embeds": [],
         }
     ]
+    [persisted] = history.read("websocket:chat-1")
+    assert persisted["text"] == ""
+    assert persisted["tool_events"] == payload["tool_events"]
+    replay = history.build("websocket:chat-1")
+    assert replay is not None
+    [replayed] = replay["events"]
+    assert replayed["kind"] == "tool_hint"
+    assert replayed["text"] == ""
+    assert replayed["tool_events"] == payload["tool_events"]
 
 
 @pytest.mark.asyncio
@@ -2704,14 +2715,17 @@ async def test_send_progress_omits_binary_tool_results_from_wire_and_transcript(
         }
     ]
 
-    await channel.send(await history.message(
+    msg = await history.message(
         channel="websocket",
         chat_id="chat-binary-tool-result",
-        content="read_file completed",
-        event=ProgressEvent(content="read_file completed", tool_events=tool_events),
-    ))
+        content="",
+        event=ProgressEvent(tool_events=tool_events),
+    )
+    await ChannelManager._send_once(channel, channel.prepare_tool_events(msg))
 
     payload = json.loads(mock_ws.send.await_args.args[0])
+    assert payload["kind"] == "progress"
+    assert payload["text"] == ""
     [wire_event] = payload["tool_events"]
     assert wire_event["result"][0]["image_url"]["url"] == (
         "[binary content omitted from WebUI]"
@@ -2719,8 +2733,14 @@ async def test_send_progress_omits_binary_tool_results_from_wire_and_transcript(
     assert len(mock_ws.send.await_args.args[0].encode("utf-8")) < 4096
 
     [persisted] = history.read("websocket:chat-binary-tool-result")
+    assert persisted["text"] == ""
     assert persisted["tool_events"] == payload["tool_events"]
     assert data_url not in json.dumps(persisted)
+    replay = history.build("websocket:chat-binary-tool-result")
+    assert replay is not None
+    [replayed] = replay["events"]
+    assert replayed["text"] == ""
+    assert replayed["tool_events"] == payload["tool_events"]
 
     # WebUI projection must not alter the result that the runner sends back to the model.
     assert tool_events[0]["result"][0]["image_url"]["url"] == data_url

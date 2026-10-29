@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import inspect
+import random
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Iterable, Mapping
@@ -62,7 +63,7 @@ def _default_webui_dist() -> Path | None:
     return candidate if candidate.is_dir() else None
 
 
-# Retry delays for message sending (exponential backoff: 1s, 2s, 4s)
+# Upper bounds for local equal-jitter send backoff (1s, 2s, then 4s).
 _SEND_RETRY_DELAYS = (1, 2, 4)
 _OUTBOUND_CONCURRENCY = 32
 _OUTBOUND_PENDING_LIMIT = 256
@@ -241,6 +242,7 @@ class ChannelManager:
             )
             kwargs["gateway"] = gateway
         channel = cls(section, self.bus, **kwargs)
+        channel.tool_hint_max_length = self.config.agents.defaults.tool_hint_max_length
         if runtime_name and runtime_name != channel.name:
             channel.name = runtime_name
         progress_default, tool_hints_default = channel.progress_transport_defaults() or (
@@ -796,11 +798,13 @@ class ChannelManager:
     async def _queue_outbound(self, channel: BaseChannel, msg: OutboundMessage) -> None:
         """Bound scheduled sends; preserve FIFO per destination, not across chats.
 
-        Retry waits occupy only their destination and one send slot. Saturation
-        pauses dispatch rather than creating unbounded tasks or dropping messages.
+        Retry waits retain their destination tail and admission, not a send permit.
+        Saturation pauses dispatch rather than creating unbounded tasks or dropping messages.
         """
         if msg.delivery_id in self._scheduled_deliveries:
             return
+        if isinstance(msg.event, ProgressEvent) and msg.event.tool_events:
+            msg = channel.prepare_tool_events(msg)
         await self._outbound_slots.acquire()
         if msg.channel in self._stopping_channels or self.channels.get(msg.channel) is not channel:
             self._outbound_slots.release()
@@ -813,11 +817,12 @@ class ChannelManager:
         async def send() -> None:
             if previous is not None:
                 await asyncio.shield(asyncio.gather(previous, return_exceptions=True))
-            async with self._outbound_sends:
-                if msg.delivery_id is not None:
+            if msg.delivery_id is not None:
+                # Acquire before claiming: queued cancellation must remain pending.
+                async with self._outbound_sends:
                     await self._send_scheduled(channel, msg)
-                else:
-                    await self._send_with_retry(channel, msg)
+            else:
+                await self._send_with_retry(channel, msg)
 
         task = asyncio.create_task(send(), name=f"outbound-{msg.channel}-{msg.chat_id}")
         self._outbound_tasks[task] = key
@@ -1165,9 +1170,22 @@ class ChannelManager:
         attempt = 0
 
         while True:
-            attempt += 1
             try:
-                await self._send_once(channel, msg)
+                async with asyncio.timeout_at(deadline):
+                    await self._outbound_sends.acquire()
+            except TimeoutError:
+                logger.warning("Send to {} deadline expired waiting for a send slot", msg.channel)
+                return
+            try:
+                try:
+                    if deadline is not None and asyncio.get_running_loop().time() >= deadline:
+                        logger.warning("Send to {} deadline expired before submission", msg.channel)
+                        return
+                    attempt += 1
+                    # The deadline bounds admission, not an already-submitted send.
+                    await self._send_once(channel, msg)
+                finally:
+                    self._outbound_sends.release()
                 return  # Send succeeded
             except asyncio.CancelledError:
                 raise  # Propagate cancellation for graceful shutdown
@@ -1192,7 +1210,8 @@ class ChannelManager:
                         msg.channel, attempt,
                     )
                     return
-                delay = _SEND_RETRY_DELAYS[min(attempt - 1, len(_SEND_RETRY_DELAYS) - 1)]
+                base = _SEND_RETRY_DELAYS[min(attempt - 1, len(_SEND_RETRY_DELAYS) - 1)]
+                delay = random.uniform(base / 2, base)
                 if deadline is not None:
                     delay = min(delay, max(0.0, deadline - loop.time()))
                 attempt_label = str(attempt)

@@ -10,8 +10,10 @@ import httpx
 import pytest
 
 from nanobot.bus.delivery import ChannelNotReadyError
+from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.manager import ChannelManager
 from nanobot.channels.weixin import runtime as weixin_mod
 from nanobot.channels.weixin.runtime import (
     ITEM_IMAGE,
@@ -1857,19 +1859,20 @@ async def test_buffer_multiple_tool_hints_flushed_on_final_answer() -> None:
     channel._send_text = AsyncMock()
 
     for hint in ["tool1", "tool2"]:
-        await channel.send(
-            type(
-                "Msg",
-                (),
-                {
-                    "chat_id": "wx-user",
-                    "content": hint,
-                    "media": [],
-                    "event": ProgressEvent(content=hint, tool_hint=True),
-                    "metadata": {},
-                },
-            )()
+        msg = OutboundMessage(
+            channel="weixin",
+            chat_id="wx-user",
+            content="",
+            event=ProgressEvent(tool_hint=True, tool_events=[{
+                "phase": "start", "call_id": f"call-{hint}", "name": hint, "arguments": {},
+            }]),
         )
+        await ChannelManager._send_once(channel, channel.prepare_tool_events(msg))
+        assert msg.content == ""
+        assert msg.event.content == ""
+
+    channel._send_text.assert_not_awaited()
+    assert channel._pending_tool_hints["wx-user"] == ["tool1", "tool2"]
 
     await channel.send(
         type(
@@ -2050,19 +2053,16 @@ async def test_empty_progress_message_does_not_flush_tool_hints() -> None:
     )
 
     # Send an empty progress message (no content, no media)
-    await channel.send(
-        type(
-            "Msg",
-            (),
-            {
-                "chat_id": "wx-user",
-                "content": "",
-                "media": [],
-                "event": ProgressEvent(tool_events=[{"phase": "end"}]),
-                "metadata": {},
-            },
-        )()
+    msg = OutboundMessage(
+        channel="weixin",
+        chat_id="wx-user",
+        content="",
+        event=ProgressEvent(tool_events=[{
+            "phase": "end", "call_id": "call-search", "name": "web_search",
+            "arguments": {"query": "foo"}, "result": "found",
+        }]),
     )
+    await ChannelManager._send_once(channel, channel.prepare_tool_events(msg))
 
     # Nothing should have been sent yet
     channel._send_text.assert_not_awaited()

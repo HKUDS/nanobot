@@ -318,6 +318,7 @@ class MatrixConfig(Base):
     group_policy: MatrixGroupPolicy = "open"
     group_allow_from: list[str] = Field(default_factory=list)
     allow_room_mentions: bool = False
+    reply_to_message: bool = True
     # Per-room policy overrides keyed by room id, e.g. {"!abc:matrix.org": "mention"}.
     # Rooms not listed fall back to `group_policy` (issue #6286).
     group_policy_overrides: dict[str, MatrixGroupPolicy] = Field(default_factory=dict)
@@ -1289,19 +1290,13 @@ class MatrixChannel(BaseChannel):
         return {"rel_type": "m.thread", "event_id": root_id,
                 "m.in_reply_to": {"event_id": reply_to}, "is_falling_back": True}
 
-    @classmethod
     def _build_outbound_relates_to(
-        cls, metadata: dict[str, Any] | None
+        self, metadata: dict[str, Any] | None
     ) -> dict[str, Any] | None:
-        """Build Matrix relation metadata for outbound messages.
-
-        Threaded turns keep the existing ``m.thread`` relation. Non-thread
-        turns attach a plain ``m.in_reply_to`` so room-level responses link
-        back to the user event that started the agent turn (issue #5274).
-        """
-        if thread := cls._build_thread_relates_to(metadata):
+        """Keep thread relations; optionally link room-level replies to the user event."""
+        if thread := self._build_thread_relates_to(metadata):
             return thread
-        if not metadata:
+        if not self.config.reply_to_message or not metadata:
             return None
         reply_to = metadata.get("message_id") or metadata.get("event_id")
         if not isinstance(reply_to, str) or not reply_to:

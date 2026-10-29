@@ -1130,6 +1130,9 @@ class WebSocketChannel(BaseChannel):
     async def send(self, msg: OutboundMessage) -> None:
         await self._outbound.send(msg)
 
+    def prepare_tool_events(self, msg: OutboundMessage) -> OutboundMessage:
+        return msg
+
     async def send_reasoning_delta(
         self,
         chat_id: str,

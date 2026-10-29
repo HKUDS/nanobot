@@ -118,6 +118,9 @@ def test_channel_setup_spec_separates_writable_and_snapshot_fields() -> None:
     assert discord is not None
     assert "allowFrom" in matrix.route_field_types
     assert "allowFrom" in matrix.snapshot_fields
+    assert matrix.route_field_types["replyToMessage"] == "bool"
+    assert "replyToMessage" in matrix.snapshot_fields
+    assert matrix.fields["replyToMessage"].default is True
     assert "allowFrom" in discord.route_field_types
     assert "allowFrom" not in discord.snapshot_fields
 

@@ -1,6 +1,7 @@
 # ruff: noqa: E402
 
 """Tests for Feishu streaming (send_delta) via CardKit streaming API."""
+import json
 import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -10,9 +11,10 @@ import pytest
 pytest.importorskip("lark_oapi")
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.outbound_events import ProgressEvent
+from nanobot.bus.outbound_events import ProgressEvent, outbound_message_for_event
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.feishu.runtime import FeishuChannel, FeishuConfig, _FeishuStreamBuf
+from nanobot.channels.manager import ChannelManager
 
 
 def _make_channel(streaming: bool = True, reply_to_message: bool = False) -> FeishuChannel:
@@ -536,26 +538,35 @@ class TestToolHintInlineStreaming:
     @pytest.mark.asyncio
     async def test_tool_hint_keeps_existing_topic_when_reply_disabled(self):
         ch = _make_channel(reply_to_message=False)
+        ch.tool_hint_max_length = 20
         reply_resp = MagicMock()
         reply_resp.success.return_value = True
         ch._client.im.v1.message.reply.return_value = reply_resp
 
-        msg = OutboundMessage(
+        msg = outbound_message_for_event(
             channel="feishu", chat_id="oc_chat1",
-            content='read_file("path")',
-            event=ProgressEvent(content='read_file("path")', tool_hint=True),
+            event=ProgressEvent(tool_hint=True, tool_events=[{
+                "phase": "start", "call_id": "call-1", "name": "web_search",
+                "arguments": {"query": "abcdefghijklmnopqrstuvwxyz"},
+            }]),
             metadata={
                 "message_id": "om_001",
                 "chat_type": "group",
                 "thread_id": "ot_001",
             },
         )
-        await ch.send(msg)
+        await ChannelManager._send_once(ch, ch.prepare_tool_events(msg))
 
         ch._client.im.v1.message.reply.assert_called_once()
         ch._client.im.v1.message.create.assert_not_called()
         request = ch._client.im.v1.message.reply.call_args[0][0]
+        assert request.message_id == "om_001"
         assert request.request_body.reply_in_thread is not True
+        assert request.request_body.msg_type == "interactive"
+        card = json.loads(request.request_body.content)
+        assert card["elements"][0]["content"] == '🔧 search "abcdefghijklmnopqrs…"'
+        assert msg.content == ""
+        assert msg.event.content == ""
 
     @pytest.mark.asyncio
     async def test_tool_hint_group_replies_when_reply_enabled(self):

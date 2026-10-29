@@ -31,24 +31,27 @@ async def test_session_tools_find_old_matches_in_full_session(
     manager.save(session)
     manager = SessionManager(tmp_path)
 
-    with request_context(RequestContext(
-        channel="sdk", chat_id="current", session_key="sdk:current",
-    )):
-        if tool_name == "search":
-            output = json.loads(await SearchSessionsTool(manager).execute(query="launch decision"))
-            assert [item["session_key"] for item in output["results"]] == [key]
-            matches = output["results"][0]["excerpts"]
-            expected = range(8, 10)
-        else:
-            output = json.loads(await ReadSessionTool(manager).execute(
-                session_key=key, query="launch decision",
-            ))
-            matches = output["messages"]
-            expected = range(2, 10)
-            latest = json.loads(await ReadSessionTool(manager).execute(session_key=key))
-            assert len(latest["messages"]) == 8
-            assert [item["message_index"] for item in latest["messages"]] == list(range(352, 360))
-            assert latest["messages"][-1]["content"] == "acknowledged 179"
+    try:
+        with request_context(RequestContext(
+            channel="sdk", chat_id="current", session_key="sdk:current",
+        )):
+            if tool_name == "search":
+                output = json.loads(await SearchSessionsTool(manager).execute(query="launch decision"))
+                assert [item["session_key"] for item in output["results"]] == [key]
+                matches = output["results"][0]["excerpts"]
+                expected = range(8, 10)
+            else:
+                output = json.loads(await ReadSessionTool(manager).execute(
+                    session_key=key, query="launch decision",
+                ))
+                matches = output["messages"]
+                expected = range(2, 10)
+                latest = json.loads(await ReadSessionTool(manager).execute(session_key=key))
+                assert len(latest["messages"]) == 8
+                assert [item["message_index"] for item in latest["messages"]] == list(range(352, 360))
+                assert latest["messages"][-1]["content"] == "acknowledged 179"
+    finally:
+        await manager.state.aclose()
 
     assert [item["content"] for item in matches] == [f"launch decision {i}" for i in expected]
     assert [item["message_index"] for item in matches] == [i * 2 for i in expected]

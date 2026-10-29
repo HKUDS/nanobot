@@ -14,8 +14,9 @@ except ImportError:
 
 from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.outbound_events import ProgressEvent
+from nanobot.bus.outbound_events import ProgressEvent, outbound_message_for_event
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.manager import ChannelManager
 from nanobot.channels.telegram.runtime import (
     TELEGRAM_MAX_MESSAGE_LEN,
     TELEGRAM_REPLY_CONTEXT_MAX_LEN,
@@ -1907,6 +1908,37 @@ async def test_send_progress_keeps_message_in_topic() -> None:
     )
 
     assert channel._app.bot.sent_messages[0]["message_thread_id"] == 42
+
+
+@pytest.mark.asyncio
+async def test_structured_tool_start_sends_quote_in_topic() -> None:
+    config = TelegramConfig(
+        enabled=True, token="123:abc", allow_from=["*"], reply_to_message=True,
+    )
+    channel = TelegramChannel(config, MessageBus())
+    app = _install_ready_app(channel)
+    channel.tool_hint_max_length = 20
+    msg = outbound_message_for_event(
+        channel="telegram",
+        chat_id="123",
+        event=ProgressEvent(tool_hint=True, tool_events=[{
+            "phase": "start", "call_id": "call-1", "name": "web_search",
+            "arguments": {"query": "abcdefghijklmnopqrstuvwxyz"},
+        }]),
+        metadata={"message_id": 10, "message_thread_id": 42},
+    )
+
+    await ChannelManager._send_once(channel, channel.prepare_tool_events(msg))
+
+    assert len(app.bot.sent_messages) == 1
+    sent = app.bot.sent_messages[0]
+    assert sent["chat_id"] == 123
+    assert sent["text"] == '<blockquote expandable>search "abcdefghijklmnopqrs…"</blockquote>'
+    assert sent["parse_mode"] == "HTML"
+    assert sent["message_thread_id"] == 42
+    assert sent["reply_parameters"].message_id == 10
+    assert msg.content == ""
+    assert msg.event.content == ""
 
 
 @pytest.mark.asyncio

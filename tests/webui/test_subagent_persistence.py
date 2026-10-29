@@ -20,7 +20,7 @@ from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.subagent import SubagentControlError, SubagentManager
 from nanobot.agent.subagent_sessions import SUBAGENT, TASK_METADATA_KEY, SubagentSessions
 from nanobot.agent.tools.context import RequestContext, current_request_context, request_context
-from nanobot.agent.tools.session_messages import ListSessionsTool, SendSessionMessageTool
+from nanobot.agent.tools.session_messages import SendSessionMessageTool
 from nanobot.agent.tools.sessions import ReadSessionTool, SearchSessionsTool
 from nanobot.agent.tools.subagent import SubagentTool
 from nanobot.bus.queue import MessageBus
@@ -548,7 +548,7 @@ async def test_child_preserves_transcript_provider_state_and_summary_in_common_s
         assert request.session_key == spec.session_key
         assert spec.session_key.startswith("subagent:")
         assert spec.initial_messages[-1] == {"role": "user", "content": "Inspect the config"}
-        assert {"subagent", "send_session_message", "list_sessions"}.isdisjoint(
+        assert {"subagent", "send_session_message"}.isdisjoint(
             definition["function"]["name"] for definition in spec.tools.get_definitions()
         )
         return AgentRunResult(
@@ -594,8 +594,6 @@ async def test_child_is_unavailable_to_public_session_tools(tmp_path):
         with request_context(RequestContext(channel="websocket", chat_id="other", session_key="websocket:other")):
             assert json.loads(await SearchSessionsTool(sessions).execute(query="Private investigation"))["results"] == []
             assert "not found" in await ReadSessionTool(sessions).execute(session_key=child_key)
-            handles = json.loads(await ListSessionsTool(sessions).execute())
-            assert len(handles) == 1
             assert "Error:" in await sender.execute(to=child_key, content="bypass parent", expect_reply=False)
         with request_context(RequestContext(channel="websocket", chat_id="parent", session_key=child_key)):
             assert "Error:" in await sender.execute(to=public_handle.name, content="bypass parent", expect_reply=False)

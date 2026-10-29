@@ -197,6 +197,9 @@ class LinearChannel(BaseChannel):
             key="response",
         )
 
+    def prepare_tool_events(self, msg: OutboundMessage) -> OutboundMessage:
+        return msg
+
     async def _attachment_markdown(self, msg: OutboundMessage) -> list[str]:
         client = self._client
         if client is None:

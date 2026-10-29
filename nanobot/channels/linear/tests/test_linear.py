@@ -36,6 +36,7 @@ from nanobot.channels.linear.oauth import OAUTH_FLOWS, authorization_url
 from nanobot.channels.linear.runtime import LinearChannel
 from nanobot.channels.linear.server import LinearServerLease, acquire_http_server
 from nanobot.channels.linear.state import LinearInstallation, LinearStateStore
+from nanobot.channels.manager import ChannelManager
 
 
 def _config(port: int = 3979) -> LinearConfig:
@@ -1148,7 +1149,7 @@ async def test_outbound_response_and_tool_progress_use_native_activity_shapes(
             }]
         ),
     )
-    await channel.send(tool)
+    await ChannelManager._send_once(channel, channel.prepare_tool_events(tool))
 
     assert client.activities[0]["content"] == {"type": "response", "body": "Done"}
     assert client.activities[1]["activity_id"] == activity_id
@@ -1220,19 +1221,22 @@ async def test_tool_activities_redact_credentials_and_make_start_ephemeral(
     metadata = {
         "linear": {"organization_id": "org-1", "agent_session_id": "session-1"}
     }
-    await channel.send(OutboundMessage(
+    send = AsyncMock(wraps=channel.send)
+    channel.send = send
+    msg = OutboundMessage(
         channel="linear",
         chat_id="session-1",
         content="",
         metadata=metadata,
-        event=ProgressEvent(tool_events=[{
+        event=ProgressEvent(tool_hint=True, tool_events=[{
             "phase": "start",
             "call_id": "call-secret",
             "name": "call_api",
             "arguments": {"api_key": "secret-value", "query": "safe"},
         }]),
-    ))
-    await channel.send(OutboundMessage(
+    )
+    await ChannelManager._send_once(channel, channel.prepare_tool_events(msg))
+    msg = OutboundMessage(
         channel="linear",
         chat_id="session-1",
         content="",
@@ -1243,8 +1247,9 @@ async def test_tool_activities_redact_credentials_and_make_start_ephemeral(
             "name": "call_api",
             "error": "Authorization: Bearer plaintext-secret",
         }]),
-    ))
-    await channel.send(OutboundMessage(
+    )
+    await ChannelManager._send_once(channel, channel.prepare_tool_events(msg))
+    msg = OutboundMessage(
         channel="linear",
         chat_id="session-1",
         content="",
@@ -1256,8 +1261,11 @@ async def test_tool_activities_redact_credentials_and_make_start_ephemeral(
             "arguments": {"api_key": "secret-value"},
             "result": {"token": "result-secret", "status": "ok"},
         }]),
-    ))
+    )
+    await ChannelManager._send_once(channel, channel.prepare_tool_events(msg))
 
+    assert send.await_count == 3
+    assert all(call.args[0].content == "" for call in send.await_args_list)
     assert client.activities[0]["ephemeral"] is True
     assert client.activities[0]["content"]["action"] == "Call API"
     assert "secret-value" not in client.activities[0]["content"]["parameter"]

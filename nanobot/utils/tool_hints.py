@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import re
-from typing import cast
+from typing import Any, cast
 
 from nanobot.providers.base import ToolCallRequest
+from nanobot.utils.helpers import strip_think
 from nanobot.utils.path import abbreviate_path
 
 # Registry: tool_name -> (key_args, template, is_path, is_command)
@@ -34,6 +35,19 @@ _PATH_IN_CMD_RE = re.compile(
 
 
 ToolFormat = tuple[list[str], str, bool, bool]
+
+
+def format_tool_event_hints(events: list[dict[str, Any]], max_length: int = 40) -> str:
+    """Render structured tool starts for channels that choose plain-text hints."""
+    calls = [
+        ToolCallRequest(
+            id=str(event.get("call_id") or ""),
+            name=event.get("name", ""),
+            arguments=event.get("arguments") or {},
+        )
+        for event in events if event.get("phase") == "start"
+    ]
+    return strip_think(format_tool_hints(calls, max_length=max_length))
 
 
 def format_tool_hints(tool_calls: list[ToolCallRequest], max_length: int = 40) -> str:

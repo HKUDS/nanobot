@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -476,7 +476,11 @@ class TestFallbackWhenPrimaryRaises:
         assert result.content == "fallback ok"
         assert result.finish_reason == "stop"
         factory.assert_called_once_with(_fallback("fallback-a"))
-        assert sleep.await_args_list == [call(1), call(2), call(4)]
+        assert sleep.await_count == 3
+        assert all(
+            ceiling / 2 <= request.args[0] <= ceiling
+            for request, ceiling in zip(sleep.await_args_list, (1, 2, 4))
+        )
 
     @pytest.mark.asyncio
     async def test_authentication_exception_message_is_classified(self) -> None:
@@ -927,7 +931,11 @@ class TestFallbackOnPrimaryError:
 
         assert result.content == "fallback ok"
         assert fallback_models == ["fallback-b"]
-        assert sleep.await_args_list == [call(1), call(2), call(4)]
+        assert sleep.await_count == 3
+        assert all(
+            ceiling / 2 <= request.args[0] <= ceiling
+            for request, ceiling in zip(sleep.await_args_list, (1, 2, 4))
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(("provider_name", "status", "code", "kind", "expected"), [

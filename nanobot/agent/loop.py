@@ -290,7 +290,6 @@ class AgentLoop:
         context_window_tokens: int | None = None,
         max_tool_result_chars: int | None = None,
         provider_retry_mode: str = "standard",
-        tool_hint_max_length: int | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
@@ -365,10 +364,6 @@ class AgentLoop:
             else defaults.max_tool_result_chars
         )
         self.provider_retry_mode = provider_retry_mode
-        self.tool_hint_max_length = (
-            tool_hint_max_length if tool_hint_max_length is not None
-            else defaults.tool_hint_max_length
-        )
         self.tools_config = _tc
         self.network_config = network_config or NetworkConfig()
         self.web_config = _tc.web
@@ -515,7 +510,6 @@ class AgentLoop:
             context_window_tokens=context_window_tokens,
             max_tool_result_chars=defaults.max_tool_result_chars,
             provider_retry_mode=defaults.provider_retry_mode,
-            tool_hint_max_length=defaults.tool_hint_max_length,
             restrict_to_workspace=config.tools.restrict_to_workspace,
             channels_config=config.channels,
             timezone=defaults.timezone,
@@ -1320,7 +1314,6 @@ class AgentLoop:
                 attributes=dict(request_ctx.attributes),
                 session_key=active_session_key,
                 workspace=effective_scope.project_path,
-                tool_hint_max_length=self.tool_hint_max_length,
                 registered_hook_factories=self._hook_factories,
                 turn_hook_factories=list(hook_factories or []),
                 registered_hooks=self._extra_hooks,

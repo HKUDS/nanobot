@@ -393,6 +393,7 @@ nanobot plugins enable matrix
 | `groupAllowFrom` | Room allowlist (used when policy is `allowlist`). |
 | `groupPolicyOverrides` | Optional per-room overrides for `groupPolicy`, keyed by Matrix room ID (for example, `"!abc123:matrix.org"`). Values mirror `groupPolicy`: `"open"`, `"mention"`, or `"allowlist"` (an `allowlist` override is checked against `groupAllowFrom`). Rooms not listed fall back to `groupPolicy`. |
 | `allowRoomMentions` | Accept `@room` mentions in mention mode. |
+| `replyToMessage` | Quote the user's message in non-threaded replies (default `true`). Set `false` to send without quotes; thread replies are unchanged. |
 | `e2eeEnabled` | E2EE support (default `true`). Set `false` for plaintext-only. |
 | `sasVerification` | Complete Element-initiated SAS device verification for allowed users (default `false`). This does not add cross-signing, clear Element's cross-signing trust warning, or let the bot initiate verification. |
 | `maxMediaBytes` | Max attachment size (default `20MB`). Set `0` to block all media. |
