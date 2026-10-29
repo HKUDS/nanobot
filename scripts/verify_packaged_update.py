@@ -401,7 +401,6 @@ def seed(root: Path) -> None:
     config.network.proxy = "http://127.0.0.1:9"
     config.providers.custom.use_proxy = True
     config.gateway.host, config.gateway.port = "127.0.0.1", free_port()
-    config.gateway.heartbeat.enabled = False
     config.channels.websocket = {"enabled": True, "host": "127.0.0.1", "port": free_port(),
                                  "tokenIssueSecret": secrets.token_urlsafe(32), "websocketRequiresToken": True}
     save_config(config, config_path)
