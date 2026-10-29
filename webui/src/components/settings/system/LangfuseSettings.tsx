@@ -1,10 +1,11 @@
-import { useId, useState } from "react";
-import { Eye, EyeOff, Loader2, SquarePen, X } from "lucide-react";
+import { useId, useRef, useState } from "react";
+import { ChevronDown, Eye, EyeOff, Loader2, SquarePen, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { RestartRequiredNotice, SettingsGroup, SettingsRow, SettingsSectionTitle } from "@/components/settings/shared/SettingsControls";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { DisclosureContent } from "@/components/ui/disclosure";
 import { Input } from "@/components/ui/input";
 import { ToggleButton } from "@/components/ui/toggle-button";
 import { HoverHint } from "@/components/ui/tooltip";
@@ -23,14 +24,6 @@ interface LangfuseSettingsProps {
   onSave: (draft: ObservabilitySettingsUpdate) => Promise<void>;
 }
 
-function TracingStatus({ settings, inline = false }: { settings: ObservabilitySettingsPayload; inline?: boolean }) {
-  const { t } = useTranslation();
-  return <div className={`text-[12px] leading-5 text-muted-foreground ${inline ? "flex flex-wrap gap-x-4" : ""}`}>
-    <p>{t(settings.active_enabled ? "settings.observability.runningEnabled" : "settings.observability.runningDisabled")}</p>
-    <p>{t(settings.enabled ? "settings.observability.savedEnabled" : "settings.observability.savedDisabled")}</p>
-  </div>;
-}
-
 function CredentialField({ label, stored, value, onChange }: {
   label: string;
   stored: boolean;
@@ -44,7 +37,9 @@ function CredentialField({ label, stored, value, onChange }: {
   const canReveal = editing && Boolean(value);
   const help = stored && value === "" ? t("settings.observability.keyCleared") : null;
   return <div className="space-y-1.5">
-    <label htmlFor={id} className="text-[13px] font-medium">{label}</label>
+    <HoverHint content={t("settings.observability.references")}>
+      <label tabIndex={0} htmlFor={id} className="cursor-help text-[13px] font-medium">{label}</label>
+    </HoverHint>
     <div className="flex items-center gap-2">
       <div className="relative min-w-0 flex-1">
         <Input id={id} type={canReveal && visible ? "text" : "password"} value={value ?? ""}
@@ -88,6 +83,9 @@ function LangfuseForm({ settings, feature, loading, action, installError, onInst
     enabled: settings.enabled ?? false,
     baseUrl: settings.base_url,
   }));
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const latestDraft = useRef(draft);
+  latestDraft.current = draft;
   const [saveError, setSaveError] = useState("");
   const [testing, setTesting] = useState(false);
   const [probe, setProbe] = useState<{
@@ -100,7 +98,8 @@ function LangfuseForm({ settings, feature, loading, action, installError, onInst
   };
   const hasPublicKey = draft.publicKey === undefined ? Boolean(settings.public_key_hint) : Boolean(draft.publicKey.trim());
   const hasSecretKey = draft.secretKey === undefined ? Boolean(settings.secret_key_hint) : Boolean(draft.secretKey.trim());
-  const cannotEnable = !feature?.installed || !draft.baseUrl.trim() || !hasPublicKey || !hasSecretKey;
+  const incomplete = !draft.baseUrl.trim() || !hasPublicKey || !hasSecretKey;
+  const cannotEnable = !feature?.installed || incomplete;
   const installing = action === "install:langfuse";
   const stale = probe !== null && probe.draft !== draft;
   const test = async () => {
@@ -109,6 +108,9 @@ function LangfuseForm({ settings, feature, loading, action, installError, onInst
     try {
       const result = await testObservabilitySettings(client, draft);
       setProbe({ draft, result });
+      if (latestDraft.current === draft && !result.ok && ["invalid_url", "blocked_url", "unreachable", "timeout"].includes(result.error)) {
+        setAdvancedOpen(true);
+      }
     } catch {
       setProbe({ draft, result: null });
     } finally {
@@ -126,81 +128,93 @@ function LangfuseForm({ settings, feature, loading, action, installError, onInst
       const code = error instanceof Error ? error.message : "";
       const key = code === "langfuse_missing_credentials" ? "errors.missing_credentials"
         : code === "langfuse_invalid_url" ? "errors.invalid_url"
-          : code === "langfuse_support_required" ? "enableRequirements" : "saveFailed";
+          : code === "langfuse_support_required" ? "installOnHost" : "saveFailed";
       setSaveError(t(`settings.observability.${key}`));
+      if (code === "langfuse_invalid_url") setAdvancedOpen(true);
     } finally {
       setSaving(false);
     }
   };
   return <>
-    <DialogHeader>
-      <DialogTitle className="pr-6 text-base">{t("settings.observability.configure")}</DialogTitle>
-      <DialogDescription>{t("settings.observability.uploadWarning")}</DialogDescription>
+    <DialogHeader className="text-left">
+      <DialogTitle className="pr-6 text-base">Langfuse</DialogTitle>
     </DialogHeader>
-    <TracingStatus settings={settings} inline />
-    {settings.requires_restart ? <RestartRequiredNotice message={t("settings.status.savedRestartApply")} /> : null}
-    <fieldset disabled={saving} className="min-w-0 space-y-3">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <HoverHint content={t("settings.observability.scope")}>
+    <fieldset disabled={saving} className="min-w-0 space-y-4">
+      <div className="space-y-1.5">
+        <div className="flex min-h-9 items-center justify-between gap-4">
+          <HoverHint content={`${t("settings.observability.uploadWarning")} ${t("settings.observability.scope")} ${t("settings.observability.restartHelp")}`}>
             <label tabIndex={0} htmlFor={`${id}-enabled`} className="cursor-help text-[13px] font-medium">{t("settings.observability.enable")}</label>
           </HoverHint>
+          <div className="flex items-center gap-3">
+            {loading ? <Loader2 role="status" aria-label={t("settings.values.checking")} className="h-3.5 w-3.5 animate-spin text-muted-foreground" /> : null}
+            <ToggleButton id={`${id}-enabled`} checked={draft.enabled} disabled={saving}
+              label={t("settings.observability.enable")} onChange={(enabled) => {
+                update({ enabled });
+                if (enabled && !draft.baseUrl.trim()) setAdvancedOpen(true);
+              }} />
+          </div>
         </div>
-        <ToggleButton id={`${id}-enabled`} checked={draft.enabled} disabled={saving}
-          label={t("settings.observability.enable")} onChange={(enabled) => update({ enabled })} />
+        {draft.enabled ? <p className="text-[12px] leading-5 text-muted-foreground">{t("settings.observability.uploadWarning")}</p> : null}
+        {settings.requires_restart ? <p role="status" className="text-[12px] leading-5 text-muted-foreground">
+          {t(settings.active_enabled ? "settings.observability.runningEnabled" : "settings.observability.runningDisabled")}
+          {" · "}{t("settings.status.savedRestartApply")}
+        </p> : null}
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-muted-foreground">
-        <span>{t(loading ? "settings.values.checking" : feature?.installed
-          ? "settings.observability.installed" : "settings.observability.notInstalled")}</span>
-        {!loading && !feature?.installed && feature?.install_supported ? <Button type="button" variant="outline" size="sm"
+      {!loading && !feature?.installed ? (
+        feature?.install_supported ? <Button type="button" variant="outline" size="sm"
           disabled={action !== null} onClick={onInstallSupport}>
           {installing ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
           {t(installing ? "settings.capabilities.installing" : "settings.observability.install")}
-        </Button> : null}
-      </div>
-      {!loading && !feature?.installed && !feature?.install_supported ?
-        <p className="text-[12px] text-muted-foreground">{t("settings.observability.installOnHost")}</p> : null}
+        </Button> : <p className="text-[12px] text-muted-foreground">{t("settings.observability.installOnHost")}</p>
+      ) : null}
       {installError ? <p role="alert" className="text-[12px] text-destructive">{installError}</p> : null}
-      <div className="space-y-1.5">
-        <HoverHint content={`${t("settings.observability.baseUrlHelp")} ${t("settings.observability.references")}`}>
-          <label tabIndex={0} htmlFor={`${id}-url`} className="cursor-help text-[13px] font-medium">{t("settings.observability.baseUrl")}</label>
-        </HoverHint>
-        <Input id={`${id}-url`} type="text" value={draft.baseUrl} spellCheck={false} autoComplete="off"
-          placeholder="https://cloud.langfuse.com"
-          className="h-9 rounded-control text-[13px]" onChange={(event) => update({ baseUrl: event.target.value })} />
-      </div>
       <CredentialField label={t("settings.observability.publicKey")} stored={Boolean(settings.public_key_hint)}
         value={draft.publicKey} onChange={(publicKey) => update({ publicKey })} />
       <CredentialField label={t("settings.observability.secretKey")} stored={Boolean(settings.secret_key_hint)}
         value={draft.secretKey} onChange={(secretKey) => update({ secretKey })} />
-      <div className="space-y-1 text-[12px] text-muted-foreground">
-        {settings.source === "environment" || settings.uses_environment ? <p>
-          {t(settings.source === "environment" ? "settings.observability.fromEnvironment" : "settings.observability.usesEnvironment")}
-        </p> : null}
+      <div>
+        <button type="button" aria-expanded={advancedOpen} aria-controls={`${id}-advanced`}
+          onClick={() => setAdvancedOpen((open) => !open)}
+          className="flex min-h-10 w-full items-center justify-between rounded-control text-[13px] text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          {t("settings.runtimeConfig.advancedOptions")}
+          <ChevronDown aria-hidden className={`h-3.5 w-3.5 transition-transform motion-reduce:transition-none ${advancedOpen ? "rotate-180" : ""}`} />
+        </button>
+        <DisclosureContent open={advancedOpen} id={`${id}-advanced`} className="space-y-3 pt-2">
+          <div className="space-y-1.5">
+            <HoverHint content={`${t("settings.observability.baseUrlHelp")} ${t("settings.observability.references")}`}>
+              <label tabIndex={0} htmlFor={`${id}-url`} className="cursor-help text-[13px] font-medium">{t("settings.observability.baseUrl")}</label>
+            </HoverHint>
+            <Input id={`${id}-url`} type="text" value={draft.baseUrl} spellCheck={false} autoComplete="off"
+              placeholder="https://cloud.langfuse.com"
+              className="h-9 rounded-control text-[13px]" onChange={(event) => update({ baseUrl: event.target.value })} />
+          </div>
+          {settings.source === "environment" || settings.uses_environment ? <HoverHint content={t("settings.observability.fromEnvironment")}>
+            <p tabIndex={0} className="w-fit cursor-help text-[12px] text-muted-foreground">{t("settings.observability.usesEnvironment")}</p>
+          </HoverHint> : null}
+        </DisclosureContent>
       </div>
     </fieldset>
-    {draft.enabled && cannotEnable ? <p className="text-[12px] text-destructive">{t("settings.observability.enableRequirements")}</p> : null}
-    <div className="space-y-1">
-      {probe ? <p role="status" className={`text-[12px] ${stale || probe.result?.ok ? "text-muted-foreground" : "text-destructive"}`}>
-        {stale ? t("settings.observability.testStale") : probe.result === null
-          ? t("settings.observability.testFailed") : probe.result.ok
-            ? t("settings.observability.testSuccess") : t(`settings.observability.errors.${probe.result.error}`)}
-      </p> : null}
-    </div>
-    <p className="text-[12px] text-muted-foreground">{t("settings.observability.restartHelp")}</p>
+    {draft.enabled && feature?.installed && incomplete ? <p className="text-[12px] text-destructive">{t("settings.observability.enableRequirements")}</p> : null}
+    {probe ? <p role="status" className={`text-[12px] ${stale || probe.result?.ok ? "text-muted-foreground" : "text-destructive"}`}>
+      {stale ? t("settings.observability.testStale") : probe.result === null
+        ? t("settings.observability.testFailed") : probe.result.ok
+          ? t("settings.observability.testSuccess") : t(`settings.observability.errors.${probe.result.error}`)}
+    </p> : null}
     {saveError ? <p role="alert" className="text-[13px] text-destructive">{saveError}</p> : null}
     <DialogFooter className="sm:justify-between">
       <HoverHint content={t("settings.observability.testHelp")}>
-        <Button type="button" variant="outline" disabled={testing || saving} onClick={() => void test()}>
+        <Button type="button" variant="outline" disabled={testing || saving || incomplete} onClick={() => void test()}>
           {testing ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
           {t(testing ? "settings.observability.testing" : "settings.observability.test")}
         </Button>
       </HoverHint>
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" disabled={saving} onClick={onClose}>{t("settings.actions.cancel")}</Button>
-        <Button type="button" disabled={saving || testing || (draft.enabled && cannotEnable)} onClick={() => void save()}>
-          {t(saving ? "settings.actions.saving" : "settings.actions.save")}
-        </Button>
+        <HoverHint content={t("settings.observability.restartHelp")}>
+          <Button type="button" disabled={saving || testing || (draft.enabled && cannotEnable)} onClick={() => void save()}>
+            {t(saving ? "settings.actions.saving" : "settings.actions.save")}
+          </Button>
+        </HoverHint>
       </div>
     </DialogFooter>
   </>;
@@ -217,7 +231,9 @@ export function LangfuseSettings(props: LangfuseSettingsProps) {
       <SettingsGroup>
         <SettingsRow title="Langfuse">
           <div className="flex items-center justify-end gap-3">
-            <div className="text-right"><TracingStatus settings={settings} /></div>
+            <span className="text-[12px] text-muted-foreground">
+              {t(settings.active_enabled ? "settings.values.enabled" : "settings.values.disabled")}
+            </span>
             <HoverHint content={t("settings.observability.configure")}>
               <DialogTrigger asChild>
                 <Button type="button" variant="ghost" size="icon" disabled={disabled}
@@ -229,7 +245,7 @@ export function LangfuseSettings(props: LangfuseSettingsProps) {
           </div>
         </SettingsRow>
       </SettingsGroup>
-      <DialogContent className="max-w-xl gap-3" showCloseButton={!saving}
+      <DialogContent aria-describedby={undefined} className="max-w-md" showCloseButton={!saving}
         onEscapeKeyDown={(event) => { if (saving) event.preventDefault(); }}
         onPointerDownOutside={(event) => { if (saving) event.preventDefault(); }}>
         {open ? <LangfuseForm {...props} saving={saving} setSaving={setSaving} onClose={() => setOpen(false)} /> : null}
