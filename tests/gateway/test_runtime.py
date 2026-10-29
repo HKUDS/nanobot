@@ -553,6 +553,32 @@ def test_restart_stops_then_starts_the_background_gateway(tmp_path, monkeypatch)
     assert result.ok is True
 
 
+def test_client_lease_reader_keeps_snapshot_during_replacement(tmp_path, monkeypatch):
+    """A real lease read retains its contents while a writer publishes the next state."""
+    from contextlib import contextmanager
+
+    from nanobot.utils import atomic_file
+
+    runtime = GatewayRuntime(paths=_paths(tmp_path))
+    client = GatewayClientLease(runtime, kind="tui", token="client")
+    client.acquire()
+    previous = client._read_state()
+    current = {**previous, "auto_stop": True}
+    open_snapshot = atomic_file._open_snapshot
+
+    @contextmanager
+    def publish_while_reading(path):
+        with open_snapshot(path) as snapshot:
+            client._write_state(current)
+            yield snapshot
+
+    with monkeypatch.context() as patch:
+        patch.setattr(atomic_file, "_open_snapshot", publish_while_reading)
+        assert client._read_state() == previous
+    assert client._read_state() == current
+    assert list(runtime.paths.run_dir.glob("*.tmp")) == []
+
+
 def test_last_interactive_client_stops_an_on_demand_gateway(tmp_path, monkeypatch):
     runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
     monkeypatch.setattr(runtime, "_process_identity", lambda pid: pid)

@@ -35,6 +35,7 @@ from nanobot.process_runtime import (
     process_identity_record,
     process_is_running,
 )
+from nanobot.utils.atomic_file import read_atomic_bytes, replace_atomic
 
 
 @dataclass(frozen=True)
@@ -772,7 +773,7 @@ class GatewayClientLease:
 
     def _read_state(self) -> dict[str, object]:
         try:
-            payload: object = json.loads(self.state_path.read_text(encoding="utf-8"))
+            payload: object = json.loads(read_atomic_bytes(self.state_path).decode("utf-8"))
         except (OSError, json.JSONDecodeError, ValueError):
             return {"auto_stop": False, "clients": {}}
         if isinstance(payload, dict):
@@ -800,7 +801,7 @@ class GatewayClientLease:
                 handle.write("\n")
                 handle.flush()
                 os.fsync(handle.fileno())
-            temporary.replace(self.state_path)
+            replace_atomic(temporary, self.state_path)
         finally:
             temporary.unlink(missing_ok=True)
 
