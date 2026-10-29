@@ -37,7 +37,9 @@ async def test_tool_log_privacy_preserves_user_visible_progress(tmp_path, epheme
     hook = build_agent_turn_hook(AgentTurnHookSpec(
         ephemeral=ephemeral, events=output_events(on_progress=on_progress),
     ))
-    command = python_command(f"print({secret!r})")
+    command = python_command(
+        f"s={secret!r}; import sys; sys.stdout.reconfigure(encoding='utf-8'); print(s)",
+    )
     name = "web_search" if hosted else "exec"
     arguments = {"query": secret} if hosted else {"command": command, "yield_time_ms": 5000}
     call = ToolCallRequest(id="private-call", name=name, arguments=arguments)
@@ -70,7 +72,7 @@ async def test_tool_log_privacy_preserves_user_visible_progress(tmp_path, epheme
     assert len(events) == 1
     assert events[0]["arguments"] == ({"query": secret} if hosted else {"command": command})
     if not hosted:
-        assert events[0]["execution"]["state"] == "succeeded"
+        assert events[0]["execution"]["state"] == "succeeded", events[0]
         assert secret in events[0]["result"]
     assert name in "\n".join(logs)
     assert (secret in "\n".join(logs)) is not ephemeral
