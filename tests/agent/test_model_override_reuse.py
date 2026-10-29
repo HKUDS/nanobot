@@ -25,7 +25,7 @@ def configured_override(monkeypatch):
     })
     created = []
 
-    def construct(owned, *, preset, model=None):
+    def construct(owned, *, preset, model=None, langfuse=None):
         factory.validate_provider_setup(owned, preset=preset, model=model)
         provider = MagicMock(spec=LLMProvider)
         provider.generation = preset.to_generation_settings()

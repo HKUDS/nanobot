@@ -4796,6 +4796,20 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert network_safety_body["advanced"]["webui_default_access_mode"] == "full"
         assert network_safety_body["advanced"]["private_service_protection_enabled"] is True
 
+        tracing_updated = await _webui_mutate(webui_client, "settings.observability.update", {
+            "enabled": False, "base_url": "https://cloud.langfuse.com",
+            "public_key": "pk-fixture", "secret_key": "sk-tracing-fixture",
+        })
+        assert tracing_updated.status_code == 200
+        assert tracing_updated.json()["observability"]["configured"] is True
+        assert "sk-tracing-fixture" not in tracing_updated.text
+        tracing_test = await _webui_mutate(webui_client, "settings.observability.test", {
+            "enabled": False, "base_url": "https://cloud.langfuse.com", "secret_key": "",
+        })
+        assert tracing_test.status_code == 200
+        assert tracing_test.json() == {"ok": False, "error": "missing_credentials"}
+        assert load_config(config_path).observability.langfuse.secret_key == "sk-tracing-fixture"
+
         image_updated = await _webui_mutate(
             webui_client,
             "settings.image_generation.update",

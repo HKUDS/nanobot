@@ -65,6 +65,7 @@ from nanobot.cli.webui_support import (  # noqa: E402
 )
 from nanobot.config.paths import get_workspace_path  # noqa: E402
 from nanobot.config.schema import Config  # noqa: E402
+from nanobot.observability.langfuse import langfuse_runtime_owner  # noqa: E402
 from nanobot.security.network import is_loopback_host  # noqa: E402
 from nanobot.utils.helpers import sanitize_surrogates as _sanitize_surrogates  # noqa: E402,F401
 from nanobot.utils.helpers import (  # noqa: E402
@@ -355,6 +356,7 @@ def trigger(
 
 
 @app.command()
+@langfuse_runtime_owner()
 def serve(
     port: int | None = typer.Option(None, "--port", "-p", help="API server port"),
     host: str | None = typer.Option(None, "--host", "-H", help="Bind address"),
@@ -374,6 +376,7 @@ def serve(
     from nanobot.agent.tools.image_generation import register_image_generation_tool
     from nanobot.api.server import create_app
     from nanobot.bus.queue import MessageBus
+    from nanobot.observability.langfuse import initialize_langfuse
     from nanobot.session.manager import SessionManager
 
     _set_nanobot_logs(verbose)
@@ -397,6 +400,7 @@ def serve(
     mcp_provider = MCPProvider.from_config(runtime_config, tools)
     from nanobot.providers.factory import build_unconfigured_provider_snapshot
 
+    initialize_langfuse(runtime_config)
     setup_error = _provider_setup_error(runtime_config)
     unconfigured_provider = (
         build_unconfigured_provider_snapshot(runtime_config, setup_error).provider

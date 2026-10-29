@@ -21,6 +21,8 @@ import type {
   ModelConfigurationCreate,
   ModelConfigurationUpdate,
   NetworkSafetySettingsUpdate,
+  ObservabilitySettingsUpdate,
+  ObservabilityTestResult,
   PairingPayload,
   PromptIndex,
   ProviderCreationUpdate,
@@ -1468,6 +1470,29 @@ export async function updateWebSearchSettings(
         : {}),
     },
   );
+}
+
+function observabilityDraftPayload(update: ObservabilitySettingsUpdate): Record<string, unknown> {
+  return {
+    enabled: update.enabled,
+    base_url: update.baseUrl,
+    ...(update.publicKey !== undefined ? { public_key: update.publicKey } : {}),
+    ...(update.secretKey !== undefined ? { secret_key: update.secretKey } : {}),
+  };
+}
+
+export async function updateObservabilitySettings(
+  transport: WebUIMutationTransport,
+  update: ObservabilitySettingsUpdate,
+): Promise<SettingsPayload> {
+  return mutation<SettingsPayload>(transport, "settings.observability.update", observabilityDraftPayload(update));
+}
+
+export async function testObservabilitySettings(
+  transport: WebUIMutationTransport,
+  update: ObservabilitySettingsUpdate,
+): Promise<ObservabilityTestResult> {
+  return mutation<ObservabilityTestResult>(transport, "settings.observability.test", observabilityDraftPayload(update));
 }
 
 export async function updateNetworkSafetySettings(

@@ -184,17 +184,22 @@ async def test_codex_exports_langfuse_usage(codex_peer, reject_upgrade):
             import sys
             from types import SimpleNamespace
 
-            from langfuse import Langfuse
+            from nanobot.config.schema import Config
+            from nanobot.observability.langfuse import initialize_langfuse
             import nanobot.providers.openai_codex_provider as codex
             from nanobot.providers.base import ProviderCallContext
 
             os.environ.pop("OTEL_EXPORTER_OTLP_HEADERS", None)
             os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_HEADERS", None)
-            client = Langfuse(
-                public_key="pk-local", secret_key="sk-local", base_url=sys.argv[2],
-                tracing_enabled=True,
-            )
-            os.environ["LANGFUSE_SECRET_KEY"] = "sk-local"
+            # Explicit enabled config wins over legacy disable and credentials.
+            os.environ["LANGFUSE_TRACING_ENABLED"] = "false"
+            os.environ["LANGFUSE_SECRET_KEY"] = "wrong-env-secret"
+            client = initialize_langfuse(Config.model_validate({
+                "observability": {"langfuse": {
+                    "enabled": True, "publicKey": "pk-local", "secretKey": "sk-local",
+                    "baseUrl": sys.argv[2],
+                }},
+            }))
             codex.DEFAULT_CODEX_URL = sys.argv[1]
             codex.get_codex_token = lambda **_: SimpleNamespace(account_id="acct", access="token")
 

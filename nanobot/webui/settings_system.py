@@ -795,7 +795,9 @@ class SystemSettingsHandler:
                 )
             return SettingsRouteResult.failure(status, message)
         if install_only and payload.get("requires_restart"):
-            self._pending_channel_restarts.add((query_first(request.query, "name") or "").strip())
+            name = (query_first(request.query, "name") or "").strip()
+            if any(feature.get("name") == name and feature.get("type") == "channel" for feature in payload.get("features", [])):
+                self._pending_channel_restarts.add(name)
         if not install_only:
             payload = await self._apply_feature_runtime_change(
                 action,
