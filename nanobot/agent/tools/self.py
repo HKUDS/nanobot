@@ -79,7 +79,7 @@ class MyTool(Tool):
         "request",  # current message routing metadata
     })
 
-    _REQUEST_FIELDS = ("channel", "chat_id", "sender_id")
+    _REQUEST_FIELDS = ("channel", "chat_id", "sender_id", "topic_id")
 
     _DENIED_ATTRS = frozenset({
         "__class__", "__dict__", "__bases__", "__subclasses__", "__mro__",
@@ -153,7 +153,7 @@ class MyTool(Tool):
                 "key": {
                     "type": "string",
                     "description": "Dot-path for check; top-level runtime or scratchpad key for set. "
-                    "Read-only routing metadata: request.channel, request.chat_id, request.sender_id.",
+                    "Read-only routing metadata: request.channel, request.chat_id, request.sender_id, request.topic_id.",
                 },
                 "value": {"description": "New value for set; match the setting's type. Scratchpad accepts JSON values."},
             },
@@ -276,15 +276,19 @@ class MyTool(Tool):
             request_ctx = current_request_context()
             if request_ctx is None:
                 return ToolResult.error("Error: current request context is unavailable")
-            request_values: dict[str, str | None] = {
+            request_values: dict[str, str | int | None] = {
                 "channel": request_ctx.channel,
                 "chat_id": request_ctx.chat_id,
                 "sender_id": request_ctx.sender_id,
             }
+            if request_ctx.topic_id is not None:
+                request_values["topic_id"] = request_ctx.topic_id
             if key == "request":
                 return self._format_value(request_values, key)
             field = key.removeprefix("request.")
             if field not in self._REQUEST_FIELDS:
+                return ToolResult.error(f"Error: '{key}' not found")
+            if field not in request_values:
                 return ToolResult.error(f"Error: '{key}' not found")
             return self._format_value(request_values[field], key)
         if "." not in key:
