@@ -431,10 +431,6 @@ function modelSettings(model: string, provider: string): SettingsPayload {
       workspace_path: "/tmp/workspace",
       gateway_host: "127.0.0.1",
       gateway_port: 18790,
-      heartbeat: {
-        enabled: true,
-        interval_s: 1800,
-      },
       dream: {
         schedule: "every 2h",
       },

@@ -1,6 +1,6 @@
 # Automations
 
-<!-- Meta description: Create, run, and manage nanobot scheduled automations, local triggers, and heartbeat-backed background checks. -->
+<!-- Meta description: Create, run, and manage nanobot scheduled automations, periodic background checks, and local triggers. -->
 
 Automations are agent turns that run later in a linked topic. Use them when nanobot should do work without someone actively typing: reminders, recurring checks, nightly summaries, CI follow-ups, local script reports, or webhook-driven events.
 
@@ -12,13 +12,12 @@ Create automations from the chat channel or WebUI topic where the result should 
 |---|---|---|---|
 | Scheduled automation | Time, interval, or cron expression | Recurring reminders, scheduled summaries, one-time future tasks | Ask nanobot in the target topic to schedule it with the `cron` tool |
 | Local trigger | A local `nanobot trigger ...` command | CI jobs, webhooks, shell scripts, generated reports | `/trigger <name>` in the target topic |
-| Heartbeat | Protected system schedule | Quiet recurring checks that should only report useful results | Edit `<workspace>/HEARTBEAT.md` |
 
-The two user-created automation types are scheduled automations and local triggers. Heartbeat uses the same background service but is system-managed and protected from normal automation edits.
+Scheduled automations also handle periodic background checks. There is no separate Heartbeat service.
 
 ## Before You Create One
 
-Keep the gateway running. Your WebUI or TUI already uses one; you do not need a second gateway. To keep it alive after closing interactive launchers, run `nanobot gateway --background` with the same instance selectors, or use `/detach` in the TUI. The gateway owns background delivery for chat apps, WebUI topics, scheduled automations, local triggers, heartbeat, and Dream jobs.
+Keep the gateway running. Your WebUI or TUI already uses one; you do not need a second gateway. To keep it alive after closing interactive launchers, run `nanobot gateway --background` with the same instance selectors, or use `/detach` in the TUI. The gateway owns background delivery for chat apps, WebUI topics, scheduled automations, local triggers, and Dream jobs.
 
 Use the same workspace and config for the gateway and any process that sends local trigger messages. If you run multiple nanobot instances, pass the matching `--config` or `--workspace` option to `nanobot trigger`.
 
@@ -50,11 +49,7 @@ Writing "send to WhatsApp" in the instructions does not change the task's saved 
 
 If a result does not arrive, check that the task finished, then check its saved chat and destination. For a separate send, review the run's `message` calls and the gateway's channel send errors. `Turn completed` means the task finished; it does not confirm that the chat service delivered the message. A successful `message` result means nanobot accepted it for sending, not that it arrived. Check the destination before trying again to avoid duplicates.
 
-For background checks that should stay quiet unless there is something useful to report, use heartbeat instead of a user-created scheduled automation.
-
-Repetition alone does not select heartbeat. "Every day at 8am, remind me to drink water" needs a cron schedule. "Keep an eye on open issues and tell me when one needs attention" can use heartbeat if the check time is flexible. Heartbeat does not guarantee a requested time or interval.
-
-An upgrade does not overwrite your workspace's `AGENTS.md` or convert existing heartbeat entries into cron jobs. The current scheduling rules are included in the system prompt. If an old workspace rule directs all recurring tasks to heartbeat, update that rule too. To correct an existing reminder, remove its old heartbeat entry and create the cron task once. Check the task list to avoid duplicates.
+Use an ordinary scheduled automation for background checks too, and specify the interval. Its result goes to the linked chat like any other scheduled task. There is no extra notification evaluator that suppresses routine results.
 
 ### Change a Scheduled Task
 
@@ -66,7 +61,7 @@ The task keeps its ID, linked chat, execution history, enabled state, and automa
 
 Ask nanobot to pause a scheduled task instead of removing it. The agent can use `cron(action="disable", job_id="...")`, then `cron(action="enable", job_id="...")` to resume it with the same ID, schedule, chat, and run history. Use `cron(action="list", include_disabled=True)` to find paused tasks; the default list still shows only enabled jobs.
 
-Disabling affects future runs. It does not cancel a running task or recall an already queued result. System-managed heartbeat and Dream jobs remain protected; change their configuration instead.
+Disabling affects future runs. It does not cancel a running task or recall an already queued result. The system-managed Dream job remains protected; change its configuration instead.
 
 ### Inspect Recent Runs
 
@@ -126,13 +121,13 @@ nanobot trigger --workspace ./bot-a/workspace trg_8K4P2Q9X "Nightly report"
 
 nanobot does not provide a built-in public webhook receiver for local triggers. If GitHub, CI, or another external system should wake nanobot, run your own small webhook service and have it call `nanobot trigger` after it builds the final message.
 
-## Heartbeat
+## Existing Heartbeat Instructions
 
-Heartbeat is for recurring workspace checks that should usually stay quiet. It reads `<workspace>/HEARTBEAT.md`, executes active tasks, and sends only useful or actionable results to the most recently active chat target.
+On the first gateway start after upgrading, an existing `<workspace>/HEARTBEAT.md` (or `heartbeat.md`) becomes one ordinary task named **Imported Heartbeat**, scheduled every 30 minutes. Results appear in a dedicated WebUI topic with the workspace's configured permissions, not whichever chat was most recently active. Manage its instructions, interval, enabled state, runs, and deletion in **Automations** like any other task; you can change its linked chat there too.
 
-Use heartbeat for checks such as "watch this repo for important failures" or "periodically inspect this workspace and only tell me when action is needed." Use a scheduled automation instead when every run should produce a visible reminder or report.
+The original file is kept, but later file edits do not update the task. Restarting does not overwrite your edits, re-enable a paused task, or recreate a deleted task. An empty file or old empty template is imported paused; a previously disabled Heartbeat remains paused. With no file, no task is created. If both filename variants exist, keep one before starting the upgrade.
 
-Heartbeat is enabled by default when `nanobot gateway` starts. Configure it in [`configuration.md#gateway-heartbeat`](./configuration.md#gateway-heartbeat).
+`gateway.heartbeat` and `/evaluator-prompt` are retired. There is no separate quiet-result gate: active imported tasks may now produce a result every 30 minutes and incur model usage. Review the task and pause or adjust it if needed.
 
 ## Manage Automations
 
@@ -239,5 +234,5 @@ If you need to edit, pause, resume, rename, delete, or inspect automations, use 
 - [`webui.md#automations`](./webui.md#automations) for the browser management view
 - [`chat-commands.md#local-triggers`](./chat-commands.md#local-triggers) for `/trigger`
 - [`cli-reference.md#local-triggers`](./cli-reference.md#local-triggers) for `nanobot trigger`
-- [`configuration.md#gateway-heartbeat`](./configuration.md#gateway-heartbeat) for heartbeat settings
+- [Existing Heartbeat Instructions](#existing-heartbeat-instructions) for imported tasks
 - [`guides/long-running-ai-agent.md`](./guides/long-running-ai-agent.md) for long-running agent work

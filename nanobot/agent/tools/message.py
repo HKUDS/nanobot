@@ -4,11 +4,9 @@
 
 from collections.abc import Awaitable, Callable, Generator
 from contextlib import contextmanager
-from contextvars import ContextVar, Token
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, cast
-
-from loguru import logger
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import ToolContext, current_request_context
@@ -84,10 +82,6 @@ class MessageTool(Tool):
         self._fallback_chat_id = default_chat_id
         self._fallback_message_id = default_message_id
         self._fallback_metadata: dict[str, Any] = {}
-        self._suppress_delivery_var: ContextVar[bool] = ContextVar(
-            "message_suppress_delivery",
-            default=False,
-        )
 
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
@@ -101,14 +95,6 @@ class MessageTool(Tool):
     def set_send_callback(self, callback: Callable[[OutboundMessage], Awaitable[None]]) -> None:
         """Set the callback for sending messages."""
         self._send_callback = callback
-
-    def set_suppress_delivery(self, active: bool) -> Token[bool]:
-        """Acknowledge but don't deliver tool sends (heartbeat internal check)."""
-        return self._suppress_delivery_var.set(active)
-
-    def reset_suppress_delivery(self, token: Token[bool]) -> None:
-        """Restore previous delivery-suppression state."""
-        self._suppress_delivery_var.reset(token)
 
     @property
     def name(self) -> str:
@@ -241,10 +227,6 @@ class MessageTool(Tool):
                 default_metadata, request_ctx.session_key, request_ctx.session_generation,
             ) if request_ctx is not None else None),
         )
-
-        if self._suppress_delivery_var.get():
-            logger.debug("MessageTool: delivery suppressed during internal check")
-            return f"Message acknowledged for {channel}:{chat_id} (not delivered)"
 
         try:
             await self._send_callback(msg)

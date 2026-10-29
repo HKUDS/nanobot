@@ -63,7 +63,7 @@ export const settings: SettingsPayload = {
   transcription: { enabled: true, provider: "groq", provider_configured: true, model: "whisper-large-v3", language: null,
     max_duration_sec: 120, max_upload_mb: 25, providers: [{ name: "groq", label: "Groq", configured: true }] },
   runtime: { config_path: "config.json", workspace_path: "workspace", gateway_host: "127.0.0.1", gateway_port: 8765,
-    heartbeat: { enabled: true, interval_s: 1800 }, dream: { schedule: "0 3 * * *" }, unified_session: false },
+    dream: { schedule: "0 3 * * *" }, unified_session: false },
   advanced: { restrict_to_workspace: true, ssrf_whitelist_count: 0, webui_allow_local_service_access: true,
     webui_default_access_mode: "default", private_service_protection_enabled: true, mcp_server_count: 0,
     exec_enabled: true, exec_path_prepend_set: false, exec_path_append_set: false },

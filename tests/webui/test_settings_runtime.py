@@ -99,7 +99,6 @@ def test_runtime_patch_persists_and_preserves_other_domains(tmp_path):
     {"agents.defaults.dream.model_override": "missing"},
     {"agents.defaults.timezone_mode": "manual", "agents.defaults.timezone": "Mars/Olympus"},
     {"gateway.port": 65536},
-    {"gateway.heartbeat.interval_s": 0},
     {"api.host": "192.168.1.2"},
     {"api.timeout": float("nan")},
     {"tools.image_generation.save_dir": ""},

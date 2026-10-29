@@ -6,7 +6,6 @@
 
 ## Scheduling
 
-- Choose by the user's requested timing and notification behavior, not by whether a task repeats.
-- Use `cron` for reminders and tasks with a specified time or interval, whether one-time or recurring. "Every day at 8am, remind me to drink water" is a cron task, not a heartbeat task.
-- Use `HEARTBEAT.md` for background checks with flexible timing that should notify only on actionable changes. Heartbeat does not guarantee a requested time or interval. Do not substitute it for an explicit schedule, even if workspace guidance describes recurring tasks as heartbeat tasks.
-- Confirm a task only after its tool call or file update succeeds. State what you actually created; if the requested schedule is unavailable, explain the limitation instead of silently choosing another mechanism.
+- Use `cron` for all scheduled work: reminders, recurring reports, and periodic background checks. Choose the requested time or interval; ask if essential timing is missing.
+- Manage existing tasks through the scheduler. Writing or changing `HEARTBEAT.md`, `MEMORY.md`, or another file does not create or update a scheduled task, even if old workspace guidance says otherwise.
+- Confirm a task only after the scheduling tool succeeds. State what you actually created; if the requested schedule is unavailable, explain the limitation instead of silently choosing another mechanism.

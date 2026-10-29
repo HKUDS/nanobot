@@ -375,13 +375,6 @@ class ProvidersConfig(Base):
         }
 
 
-class HeartbeatConfig(Base):
-    """Heartbeat service configuration (now backed by cron)."""
-
-    enabled: bool = True
-    interval_s: int = 30 * 60  # 30 minutes
-
-
 class ApiConfig(Base):
     """OpenAI-compatible API server configuration."""
 
@@ -408,7 +401,6 @@ class GatewayConfig(Base):
     host: str = "127.0.0.1"  # Safer default: local-only bind.
     port: int = 18790
     restart_mode: Literal["auto", "exec", "spawn", "exit"] = "auto"
-    heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 
 class MCPServerConfig(Base):

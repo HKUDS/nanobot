@@ -106,7 +106,7 @@ Channels are discovered by scanning self-contained packages under `nanobot/chann
 - enabled chat channels;
 - the WebSocket channel when configured;
 - workspace-scoped cron service;
-- system jobs such as Dream and heartbeat;
+- system maintenance jobs such as Dream;
 - the health endpoint on `gateway.port`.
 
 The packaged WebUI is served by the WebSocket channel, not the health endpoint:

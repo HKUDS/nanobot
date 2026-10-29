@@ -254,7 +254,7 @@ There are two user-facing automation types:
 - Scheduled automations, created by the agent's cron tool, run at a time, interval, or cron expression.
 - Local triggers, created with `/trigger <name>`, run when you call a local command such as `nanobot trigger trg_8K4P2Q9X "Review PR #4502"`.
 
-For recurring background checks that should stay quiet unless there is something useful to report, use the protected heartbeat job by editing `HEARTBEAT.md` instead of creating a chat automation.
+Use ordinary scheduled automations for recurring background checks too. Existing Heartbeat instructions are [imported once as a normal task](./automations.md#existing-heartbeat-instructions), then managed here rather than by editing a file.
 
 The Automations view manages user-created jobs and can run scheduled jobs immediately. Protected system jobs are read-only.
 

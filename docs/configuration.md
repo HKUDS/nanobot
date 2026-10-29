@@ -47,7 +47,7 @@ This page is the complete configuration reference. For task-oriented setup, use 
 | Add MCP servers | [MCP](#mcp-model-context-protocol) |
 | Review shell, workspace, and SSRF controls | [Security](#security) |
 | Control access and pairing | [Pairing](#pairing) |
-| Tune gateway jobs, sessions, and tools | [Gateway Heartbeat](#gateway-heartbeat), [Auto Compact](#auto-compact), [Unified Session](#unified-session), [Tool Hint Max Length](#tool-hint-max-length) |
+| Tune gateway jobs, sessions, and tools | [Auto Compact](#auto-compact), [Unified Session](#unified-session), [Tool Hint Max Length](#tool-hint-max-length) |
 
 ## Where a Setting Lives
 
@@ -221,7 +221,7 @@ These variables are process-level switches. Set them in the same terminal, servi
 |----------|---------|-------------|
 | `NANOBOT_MAX_CONCURRENT_REQUESTS` | Unlimited | Maximum concurrently running inbound agent requests. Set a positive integer to apply a cap; unset, `0`, or a negative value means unlimited. |
 | `NANOBOT_LLM_TIMEOUT_S` | Unused | Model calls use streaming idle timeouts instead of a fixed total duration. Use `NANOBOT_STREAM_IDLE_TIMEOUT_S` to control stalled requests. |
-| `NANOBOT_STREAM_IDLE_TIMEOUT_S` | `90` | Maximum idle wait, in seconds, for model streams, including internal tasks such as Dream, memory archiving, title generation, and Heartbeat evaluation. Each stream event renews the wait, including reasoning and tool-call deltas. Invalid or non-positive values are ignored; values above `3600` are clamped. |
+| `NANOBOT_STREAM_IDLE_TIMEOUT_S` | `90` | Maximum idle wait, in seconds, for model streams, including internal tasks such as Dream, memory archiving, and title generation. Each stream event renews the wait, including reasoning and tool-call deltas. Invalid or non-positive values are ignored; values above `3600` are clamped. |
 | `NANOBOT_OPENAI_COMPAT_TIMEOUT_S` | `120` | HTTP request timeout, in seconds, for direct non-streaming OpenAI-compatible provider calls. Streaming calls use `NANOBOT_STREAM_IDLE_TIMEOUT_S`. Invalid or non-positive values are ignored. |
 | `NANOBOT_WORKSPACE_SANDBOX_ENFORCED` | unset | Marks that an external workspace sandbox is already enforced. Truthy values (`1`, `true`, `yes`, `on`, `enabled`) use `NANOBOT_WORKSPACE_SANDBOX_PROVIDER` as the label; any other non-false value is treated as the provider name. |
 | `NANOBOT_WORKSPACE_SANDBOX_PROVIDER` | `unknown` | Display label for the external workspace sandbox when `NANOBOT_WORKSPACE_SANDBOX_ENFORCED` is truthy, for example `macos_app_sandbox` or `bwrap`. |
@@ -2466,38 +2466,11 @@ nanobot agent -m "/pairing approve ABCD-EFGH"
 ```
 
 
-## Gateway Heartbeat
+## Gateway Restart
 
-The WebUI has no control for heartbeat registration or its interval. Configure these fields directly in `config.json` and restart the gateway.
+`gateway.restartMode` defaults to `auto`: `/restart` uses `spawn` on Windows foreground runs and `exec` elsewhere. Use `exit` with Windows service wrappers such as WinSW or nssm so the service manager owns the restart.
 
-The gateway can run a protected heartbeat cron job that periodically checks `HEARTBEAT.md` in the active workspace. This is enabled by default when you run `nanobot gateway`.
-
-```json
-{
-  "gateway": {
-    "heartbeat": {
-      "enabled": true,
-      "intervalS": 1800
-    }
-  }
-}
-```
-
-If `HEARTBEAT.md` has tasks under `## Active Tasks`, the agent executes them and sends only useful/actionable results to the most recently active chat target. If the file has no active tasks, or the result is routine with nothing useful to report, the heartbeat is skipped silently.
-
-Use `HEARTBEAT.md` for recurring background checks that should not notify you on every run. For a scheduled task that normally sends its result back to the chat where it was created, use the `cron` tool.
-
-The heartbeat appears as `heartbeat` when you list cron jobs, but cannot be removed with the `cron` tool. To disable periodic checks, set `gateway.heartbeat.enabled` to `false` and restart the gateway.
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `gateway.heartbeat.enabled` | `true` | Register the built-in heartbeat cron job on gateway startup. |
-| `gateway.heartbeat.intervalS` | `1800` | Seconds between heartbeat checks. |
-| `gateway.restartMode` | `auto` | Restart strategy for `/restart`: `auto` uses `spawn` on Windows foreground runs and `exec` elsewhere. Use `exit` with Windows service wrappers such as WinSW or nssm so the service manager owns the restart. |
-
-### Custom heartbeat evaluator prompt
-
-To customize which heartbeat results trigger a notification, place your prompt at `<workspace>/prompts/evaluator.md`. Start from the bundled `evaluator.md` prompt and keep its instruction to call `evaluate_notification`; without that call, no notification is sent.
+Periodic checks are ordinary tasks managed in **Automations**. Existing Heartbeat instructions are [imported once](./automations.md#existing-heartbeat-instructions); `gateway.heartbeat` no longer controls their schedule or enabled state.
 
 
 ## Subagent Concurrency

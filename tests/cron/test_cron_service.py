@@ -59,8 +59,9 @@ def test_load_jobs_accepts_snake_case_schedule_and_run_history(tmp_path) -> None
         encoding="utf-8",
     )
 
-    jobs, _version = CronService(store_path)._load_jobs()
-    assert jobs is not None
+    store = CronService(store_path)._load_jobs()
+    assert store is not None
+    jobs = store.jobs
     assert jobs[0].schedule.every_ms == 60_000
     assert jobs[0].payload.session_key == "websocket:chat-1"
     assert jobs[0].state.run_history[0].run_at_ms == 1000
@@ -109,8 +110,9 @@ def test_load_jobs_coerces_string_schedule_and_state_ms(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    jobs, _version = CronService(store_path)._load_jobs()
-    assert jobs is not None
+    store = CronService(store_path)._load_jobs()
+    assert store is not None
+    jobs = store.jobs
     assert jobs[0].schedule.every_ms == 60_000
     assert jobs[0].state.next_run_at_ms == 100
     assert jobs[0].state.last_run_at_ms == 50
@@ -1404,8 +1406,9 @@ def test_load_jobs_accepts_null_run_history_ms(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    jobs, _version = CronService(store_path)._load_jobs()
-    assert jobs is not None
+    store = CronService(store_path)._load_jobs()
+    assert store is not None
+    jobs = store.jobs
     assert jobs[0].state.run_history[0].run_at_ms == 0
     assert jobs[0].state.run_history[0].duration_ms == 0
     assert jobs[0].state.run_history[0].status == "ok"
@@ -1445,8 +1448,9 @@ def test_load_jobs_skips_null_run_history_elements(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    jobs, _version = CronService(store_path)._load_jobs()
-    assert jobs is not None
+    store = CronService(store_path)._load_jobs()
+    assert store is not None
+    jobs = store.jobs
     assert len(jobs[0].state.run_history) == 1
     assert jobs[0].state.run_history[0].run_at_ms == 1
     assert jobs[0].state.run_history[0].status == "ok"

@@ -178,7 +178,7 @@ See [`configuration.md#langfuse-observability`](./configuration.md#langfuse-obse
 
 ## Gateway Problems
 
-`nanobot gateway` is required for WebUI, chat apps, heartbeat, Dream, and long-running channel connections.
+`nanobot gateway` is required for WebUI, chat apps, scheduled automations, Dream, and long-running channel connections.
 
 Default ports:
 
@@ -200,7 +200,7 @@ nanobot gateway --verbose
 | WebUI opened on `18790` but shows nothing useful | Open `8765`; `18790` is the health endpoint. |
 | Config changes ignored | Restart the gateway. |
 | Startup pauses at `Installing optional feature` | An enabled channel is missing its Python dependencies. See [Slow Optional Channel Dependency Installation](#slow-optional-channel-dependency-installation). |
-| Heartbeat never runs | Keep the gateway running, add tasks under `<workspace>/HEARTBEAT.md` -> `## Active Tasks`, and make sure `gateway.heartbeat.enabled` is true. |
+| An imported Heartbeat task does not run | Keep the gateway running and check **Imported Heartbeat** in **Automations**. Empty templates and previously disabled checks are imported paused; edit the task's instructions and enable it there. Later edits to `HEARTBEAT.md` do not update the task. |
 | Cron jobs disappeared after switching workspaces | Cron jobs are workspace-scoped at `<workspace>/cron/jobs.json`; check you are using the intended workspace. |
 
 ### Slow Optional Channel Dependency Installation

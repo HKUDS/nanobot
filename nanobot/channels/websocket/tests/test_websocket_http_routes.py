@@ -383,8 +383,8 @@ async def test_session_automations_route_filters_by_webui_session(
     )
     cron.register_system_job(
         CronJob(
-            id="heartbeat",
-            name="heartbeat",
+            id="dream",
+            name="dream",
             schedule=CronSchedule(kind="every", every_ms=60_000),
             payload=CronPayload(kind="system_event"),
         )
@@ -2789,8 +2789,8 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
     )
     cron.register_system_job(
         CronJob(
-            id="heartbeat",
-            name="heartbeat",
+            id="dream",
+            name="dream",
             schedule=CronSchedule(kind="every", every_ms=60_000),
             payload=CronPayload(kind="system_event"),
         )
@@ -2838,7 +2838,7 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         assert "session_key" not in by_id[external_job.id]["origin"]
         assert "chat_id" not in by_id[external_job.id]["origin"]
         assert by_id[external_job.id]["origin"]["preview"] == ""
-        assert by_id["heartbeat"]["protected"] is True
+        assert by_id["dream"]["protected"] is True
 
         updated = await _webui_mutate(
             channel,
@@ -2915,7 +2915,7 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         protected_update = await _webui_mutate(
             channel,
             "automation.update",
-            {"id": "heartbeat", "values": {"name": "bad"}},
+            {"id": "dream", "values": {"name": "bad"}},
         )
         assert protected_update.status_code == 403
 
@@ -2954,19 +2954,19 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         protected_delete = await _webui_mutate(
             channel,
             "automation.delete",
-            {"id": "heartbeat"},
+            {"id": "dream"},
         )
         assert protected_delete.status_code == 403
         protected_disable = await _webui_mutate(
             channel,
             "automation.disable",
-            {"id": "heartbeat"},
+            {"id": "dream"},
         )
         assert protected_disable.status_code == 403
         protected_run = await _webui_mutate(
             channel,
             "automation.run",
-            {"id": "heartbeat"},
+            {"id": "dream"},
         )
         assert protected_run.status_code == 403
 
@@ -2986,7 +2986,7 @@ async def test_webui_automations_route_lists_all_jobs_and_allows_user_actions(
         )
         assert deleted.status_code == 200
         assert user_job.id not in {job["id"] for job in deleted.json()["jobs"]}
-        assert "heartbeat" in {job["id"] for job in deleted.json()["jobs"]}
+        assert "dream" in {job["id"] for job in deleted.json()["jobs"]}
     finally:
         await channel.stop()
         await server_task
