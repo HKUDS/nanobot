@@ -30,6 +30,22 @@ from nanobot.providers.generation import GenerationSettings
 from nanobot.providers.model_api import ModelAPICapabilities, RequestAPI
 
 
+class A2AConfig(Base):
+    """A2A Protocol channel configuration.
+
+    Exposes nanobot as an A2A-compatible agent that other agents can discover
+    and communicate with. See: https://a2a-protocol.org
+    """
+
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = 8080
+    public_host: str | None = None  # Public URL for agent card (e.g., https://myagent.example.com)
+    streaming: bool = True  # Enable streaming responses
+    request_timeout: int = 300  # Timeout for processing requests (seconds)
+    skills: list[dict] = Field(default_factory=list)  # Additional skills to advertise
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels.
 
@@ -39,6 +55,8 @@ class ChannelsConfig(Base):
     """
 
     model_config = ConfigDict(extra="allow")
+
+    a2a: A2AConfig = Field(default_factory=A2AConfig)
 
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = True  # stream tool-call hints (e.g. read_file("…"))

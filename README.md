@@ -450,6 +450,10 @@ For a conversation that should stay out of saved topic history and long-term mem
 
 See the [WebUI guide](./docs/webui.md) for LAN access, background operation, workspace controls, and the full feature tour. Working on the frontend itself? Use [`webui/README.md`](./webui/README.md).
 
+## Agent-to-Agent protocol (optional)
+
+Install with `nanobot-ai[a2a]` and enable `channels.a2a.enabled` in your config to expose an A2A Agent Card and message endpoint. The server listens on `127.0.0.1:8080` by default; put authentication and TLS at a trusted reverse proxy before exposing it publicly. The optional `call_a2a_agent` tool discovers and calls other A2A agents when the SDK is installed.
+
 ## Architecture
 
 <p align="center">
