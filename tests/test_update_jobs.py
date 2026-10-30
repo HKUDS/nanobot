@@ -1,5 +1,3 @@
-"""Real offline pip jobs in disposable venvs; no user installation is mutated."""
-
 import asyncio
 import base64
 import hashlib
@@ -451,7 +449,6 @@ async def test_standalone_repair_survives_missing_dependency_and_expired_approva
         directory = await prepare_job(plan, feed)
         pip_entry = site / "pip/__main__.py"
         original = pip_entry.read_text()
-        # Real interrupted mutation: lose a dependency before pip completes.
         pip_entry.write_text(
             f"from pathlib import Path\nPath({str(site / 'fixture_update_dep/__init__.py')!r}).unlink()\n"
             "raise SystemExit(99)\n")
@@ -466,8 +463,6 @@ async def test_standalone_repair_survives_missing_dependency_and_expired_approva
     write_record(directory / "approval.json", approval)
     launcher = directory.parents[2] / "recover.py"
     command = [sys._base_executable, "-I", "-S", str(launcher), plan.id]
-    # The operator's ordinary terminal need not share the gateway's HOME.
-    # The copied recovery command must retain the original job and lock scope.
     terminal_home = tmp_path / "operator home"
     terminal_home.mkdir()
     terminal_env = dict(os.environ, HOME=str(terminal_home), USERPROFILE=str(terminal_home))
@@ -476,7 +471,6 @@ async def test_standalone_repair_survives_missing_dependency_and_expired_approva
     assert viewed.returncode == 0, viewed.stderr
     assert "Inspection only" in viewed.stdout
     assert JobStatus.read(directory) == status
-    # A still-running installation owner cannot be overridden by local repair.
     with installation_access(environment=plan.installation.environment, allow_incomplete=True):
         refused = await asyncio.to_thread(subprocess.run, [*command, "--repair", "--yes"],
                                           env=terminal_env, capture_output=True, text=True, timeout=40)
@@ -514,7 +508,7 @@ async def wait_for(predicate):
 
 
 @pytest.mark.parametrize("installation", [
-    {"restart_contract": None},  # An older target had the Python file but no startup contract.
+    {"restart_contract": None},
     {"restart_contract": b'{"schema_version":1,"handoff_protocols":[2]}'},
     {"restart_contract": b'{"schema_version":1,"handoff_protocols":[true]}'},
     {"restart_contract": b'{"schema_version":1,"handoff_protocols":['},
@@ -539,8 +533,6 @@ async def test_previously_staged_target_cannot_bypass_restart_contract(installat
     from nanobot import update_jobs
 
     plan, _, _, _, transport = installation
-    # Model a job committed by the older filename-only preparer. Execution must
-    # inspect the real staged wheel rather than trusting a saved READY phase.
     with monkeypatch.context() as patch:
         patch.setattr(update_jobs, "verify_target_handoff", lambda archive: None)
         async with ReleaseFeed(tmp_path / "feed", transport=transport) as feed:
@@ -579,8 +571,6 @@ async def test_confirmed_handoff_is_consumed_once_even_after_failure(installatio
     assert start_handoff(directory, once=True) is None
     assert ExecutionConfirmation.read(directory) == confirmation
     spec = WorkerSpec.read(directory)
-    # A late duplicate process must not retry a failed shutdown, even though
-    # its original approval is still in its launch window.
     replay = subprocess.run([spec.baseline.base_python, "-I", str(directory / "worker.pyz"),
                              "--confirmed-handoff", str(directory), confirmation.id], capture_output=True, timeout=10)
     assert replay.returncode == 0, replay.stderr
@@ -661,7 +651,7 @@ async def test_settled_failed_handoff_rejects_delayed_worker_and_keeps_original_
     late = await asyncio.to_thread(subprocess.run,
         [spec.baseline.base_python, "-I", str(directory / "worker.pyz"),
          "--confirmed-handoff", str(directory), confirmation.id], capture_output=True, timeout=10)
-    assert late.returncode == 0  # Already-claimed duplicate reads the cancelled journal.
+    assert late.returncode == 0
     assert JobStatus.read(directory) == settled
     assert not (directory / "approval.json").exists()
     with pytest.raises(ValueError, match="unmodified"):
@@ -706,8 +696,6 @@ async def test_late_launch_failure_cannot_overwrite_new_retry_confirmation(insta
     def spawn(path, spec, **kwargs):
         launched.append(kwargs["confirmation_id"])
         if len(launched) == 1:
-            # The first requester stalls before process creation. Another
-            # explicit confirmation recovers that gap before it reports failure.
             retry_handoff(path, kwargs["confirmation_id"])
             raise OSError("The superseded launcher failed late")
         return None
@@ -729,14 +717,13 @@ async def test_late_confirmed_children_cannot_use_replaced_approval(installation
     plan, _, _, _, transport = installation
     async with ReleaseFeed(tmp_path / "feed", transport=transport) as feed:
         directory = await prepare_job(plan, feed)
-    # Park before process creation to model a delayed launcher deterministically.
     monkeypatch.setattr(update_jobs, "_spawn_worker", lambda *args, **kwargs: None)
     start_handoff(directory, once=True)
     confirmation = ExecutionConfirmation.read(directory)
     assert confirmation is not None
     spec = WorkerSpec.read(directory)
     replaced = read_record(directory / "handoff-approval.json")
-    replaced.pop("confirmation_id")  # A later explicitly managed recovery approval.
+    replaced.pop("confirmation_id")
     write_record(directory / "handoff-approval.json", replaced)
     write_record(directory / "approval.json", replaced)
     before = JobStatus.read(directory)
@@ -753,7 +740,6 @@ async def test_late_confirmed_children_cannot_use_replaced_approval(installation
 
 @pytest.mark.parametrize("installation", ["handoff"], indirect=True)
 async def test_detached_handoff_outlives_requester_and_installs_after_preflight_exits(installation, tmp_path):
-    """Real frozen worker/pip, synthetic preflight/restart: not a gateway E2E."""
     plan, _, site, _, transport = installation
     async with ReleaseFeed(tmp_path / "feed", transport=transport) as feed:
         directory = await prepare_job(plan, feed)
@@ -766,7 +752,6 @@ async def test_detached_handoff_outlives_requester_and_installs_after_preflight_
     )
     subprocess.run([sys.executable, "-c", launcher], check=True, timeout=10,
                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-    # The caller is gone. The old-runtime child is still alive with its own lease.
     try:
         await wait_for(lambda: (directory / "preflight-entered.json").exists())
         assert JobStatus.read(directory).phase == Phase.CHECKING
@@ -815,8 +800,6 @@ async def test_handoff_reports_writer_that_remains_after_preflight(installation,
     plan, _, _, _, transport = installation
     async with ReleaseFeed(tmp_path / "feed", transport=transport) as feed:
         directory = await prepare_job(plan, feed)
-    # A separate cooperating client still owns this environment. Successful
-    # gateway/preflight exit must not silently leave the UI showing "stopping".
     with installation_access(environment=plan.installation.environment):
         process = start_handoff(directory)
         assert await asyncio.to_thread(process.wait, 40) != 0
@@ -827,7 +810,6 @@ async def test_handoff_reports_writer_that_remains_after_preflight(installation,
     assert inspect_environment(plan.installation.python).app_version == "0.3.4"
     await wait_worker(start_handoff(directory))
     assert JobStatus.read(directory).phase == Phase.SUCCEEDED
-    # Replaying the detached command cannot demote a completed transaction.
     spec = WorkerSpec.read(directory)
     replay = subprocess.run([spec.baseline.base_python, "-I", str(directory / "worker.pyz"),
                              "--handoff", str(directory)], capture_output=True, timeout=10)
@@ -869,7 +851,7 @@ async def test_orphan_preflight_keeps_lease_and_cannot_approve_installation(inst
     assert confirmation is not None
     try:
         await wait_for(lambda: (directory / "preflight-entered.json").exists())
-        process.kill()  # Only this test-owned coordinator, never the old runtime child.
+        process.kill()
         await asyncio.to_thread(process.wait, 10)
         with pytest.raises(BlockingIOError):
             retry_handoff(directory, confirmation.id)
@@ -1029,8 +1011,6 @@ async def test_expanded_profile_request_is_readable_by_the_standalone_worker(ins
     async with ReleaseFeed(tmp_path / "feed", transport=transport) as feed:
         directory = await prepare_job(plan, feed)
     spec = WorkerSpec.read(directory)
-    # A multi-profile inventory expands into many explicit named stores. It may
-    # outgrow the journal limit even when the saved plan is comfortably bounded.
     sources = tuple(BackupSource(str(tmp_path / f"profile-{i}" / ("nested-" * 16) / "sessions")) for i in range(8192))
     expanded = replace(spec, backup_sources=sources)
     expanded.save(directory)
@@ -1040,8 +1020,6 @@ async def test_expanded_profile_request_is_readable_by_the_standalone_worker(ins
                             capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["phase"] == "ready"
-    # Earlier saved requests had no backup contract. Reject them explicitly;
-    # their own immutable worker remains available for inspection/recovery.
     spec.save(directory)
     legacy = read_record(directory / "request.json")
     legacy["schema_version"] = 1
@@ -1083,8 +1061,6 @@ with installation_access():
             ("nanobot-ai", "0.3.5"), ("fixture-update-dep", "2.0.0"),
         }
         assert await prepare_job(plan, feed) == directory
-        # Installer configuration cannot redirect writes or the final dependency
-        # check into another interpreter (and an unprotected pip grandchild).
         unintended = tmp_path / "not-the-approved-environment"
         monkeypatch.setenv("PIP_TARGET", str(unintended))
         monkeypatch.setenv("PIP_PYTHON", str(unintended / "python"))
@@ -1106,8 +1082,6 @@ with installation_access():
         assert archive.read(configs[0]["member"]) == b'{"fixture":"private credential"}'
         assert not any(item["path"].endswith("private-project.py") for item in entries)
     assert not pending_update_path(plan.installation.environment).exists()
-    # Recover the reachable crash gap between saving INSTALLED and clearing the
-    # startup fence. The completed job must verify/clear it, not install again.
     write_record(pending_update_path(plan.installation.environment),
                  {"schema_version": 2, "job_id": plan.id, "version": "0.3.5"})
     result = subprocess.run([spec.baseline.base_python, "-I", str(directory / "worker.pyz"), str(directory)],
@@ -1179,7 +1153,6 @@ async def test_planning_probe_retains_lease_after_caller_loss(installation, tmp_
             pytest.fail("The planning probe did not release its own lease")
         pth.unlink()
         hook.unlink()
-    # Planning neither installs nor leaves update authority/startup fences.
     assert inspect_environment(plan.installation.python).app_version == "0.3.4"
     assert not pending_update_path(plan.installation.environment).exists()
     assert not (installation_state_dir(plan.installation.environment) / "jobs").exists()
@@ -1207,7 +1180,6 @@ async def test_changed_artifact_or_owner_receipt_never_installs(installation, tm
 @pytest.mark.asyncio
 async def test_stale_plan_is_rejected_before_staging(installation, tmp_path):
     plan, _, _, requests, transport = installation
-    # A real environment change, not a hypothetical internal flag.
     receipt = Path(plan.installation.environment) / "pyvenv.cfg"
     receipt.write_text(receipt.read_text() + "\n# changed\n")
     async with ReleaseFeed(tmp_path / "feed", transport=transport) as feed:
@@ -1224,8 +1196,6 @@ async def test_worker_survives_coordinator_loss_without_unlocking_live_pip(insta
         ready, release = tmp_path / "pip-ready", tmp_path / "pip-continue"
         pip_entry = site / "pip/__main__.py"
         original = pip_entry.read_text()
-        # Hold the real pip CLI immediately before it runs; only the disposable
-        # fixture's launcher is wrapped, and its original body still executes.
         wrapper = (
             f"from pathlib import Path\nimport os,time\nPath({str(ready)!r}).write_text(str(os.getpid()))\n"
             f"deadline=time.monotonic()+20\nwhile not Path({str(release)!r}).exists():\n"
@@ -1256,7 +1226,6 @@ async def test_worker_survives_coordinator_loss_without_unlocking_live_pip(insta
             release.touch()
             if process.poll() is None:
                 process.wait(timeout=30)
-        # Wait for the actual pip lease to disappear, not just the dead parent's PID.
         for _ in range(400):
             try:
                 with installation_access(updating=True, environment=plan.installation.environment):
@@ -1270,8 +1239,6 @@ async def test_worker_survives_coordinator_loss_without_unlocking_live_pip(insta
             with data_access([Path(plan.profiles[0].receipt.data_dir) / "sessions"]):
                 pytest.fail("Pip exit lifted the interrupted coordinator's data reservation")
         backup = (directory / "backup/data.zip").read_bytes()
-        # A repair must retain the original data even if a migration or an
-        # operator changed the live profile after the interrupted installation.
         Path(plan.profiles[0].receipt.config).write_text('{"fixture":"changed after install"}')
         pip_entry.write_text(original)
         retained = directory / "retained-original-backup"
@@ -1292,7 +1259,7 @@ async def test_worker_survives_coordinator_loss_without_unlocking_live_pip(insta
     assert JobStatus.read(directory).phase == Phase.INSTALLED
     assert (site / "nanobot/web/dist/index.html").read_text() == "verified UI 0.3.5"
     with data_access([Path(plan.profiles[0].receipt.data_dir) / "sessions"]):
-        pass  # Successful repair releases both the live lease and persistent fence.
+        pass
 
 
 @pytest.mark.asyncio
@@ -1300,7 +1267,6 @@ async def test_other_installation_writer_refuses_job_before_approval_or_backup(i
     plan, _, _, _, transport = installation
     async with ReleaseFeed(tmp_path / "feed", transport=transport) as feed:
         directory = await prepare_job(plan, feed)
-        # This test process uses a different Python environment from the pip job.
         with data_access([Path(plan.profiles[0].receipt.workspace) / "sessions"]):
             with pytest.raises(InstallationBusyError, match="data is in use"):
                 await start_job(directory, feed)
@@ -1386,7 +1352,6 @@ async def test_prepared_worker_has_no_execution_authority(installation, tmp_path
     assert not pending_update_path(plan.installation.environment).exists()
     assert JobStatus.read(directory).phase == Phase.FAILED
     assert not JobStatus.read(directory).mutation_started
-    # A saved but expired approval cannot authorize a delayed launch.
     now = int(time.time())
     write_record(directory / "approval.json", {
         "plan_id": plan.id, "request_sha256": hashlib.sha256((directory / "request.json").read_bytes()).hexdigest(),
@@ -1449,7 +1414,6 @@ async def test_broken_release_keeps_recovery_record_and_never_overwrites_an_exte
         assert "does not import" in state.message
         assert pending_update_path(plan.installation.environment).exists()
         spec = WorkerSpec.read(directory)
-        # The status command is usable even though importing nanobot now fails.
         result = subprocess.run([spec.baseline.base_python, "-I", str(directory / "worker.pyz"), "--status", str(directory)],
                                 capture_output=True, text=True, timeout=20)
         assert result.returncode == 0
@@ -1507,7 +1471,6 @@ async def test_job_recovery_capability_comes_from_its_saved_worker(managed_insta
 
 @pytest.mark.parametrize("installation", ["handoff"], indirect=True)
 async def test_stale_first_supervisor_cannot_take_new_confirmation(managed_installation, tmp_path, monkeypatch):
-    """Real frozen supervisor/worker/pip; synthetic preflight and restart bodies."""
     from nanobot import update_jobs
 
     plan, _, _, _, transport = managed_installation
@@ -1515,7 +1478,6 @@ async def test_stale_first_supervisor_cannot_take_new_confirmation(managed_insta
         directory = await prepare_job(plan, feed)
     spec = WorkerSpec.read(directory)
     assert spec.automatic_recovery
-    # Park both launchers before process creation, then schedule stale A first.
     with monkeypatch.context() as patch:
         patch.setattr(update_jobs, "_spawn_worker", lambda *args, **kwargs: None)
         start_handoff(directory, once=True)
@@ -1578,7 +1540,6 @@ async def test_service_restore_keeps_confirmation_identity_after_expiry(managed_
     retry_handoff(directory, previous.id)
     current = ExecutionConfirmation.read(directory)
     assert current is not None
-    # A long completion may outlive B's launch window, but never borrow its identity.
     now = int(time.time())
     current = replace(current, created_at=now - 1800, expires_at=now - 900)
     current.save(directory)
@@ -1664,7 +1625,6 @@ async def test_program_restore_after_real_broken_install_preserves_user_data(ins
         assert restored.app_version == spec.baseline.app_version
         assert restored.versions == spec.baseline.versions
         assert (config.read_bytes(), chat.read_bytes()) == before
-        # A new conversation write must never be replaced by the old backup.
         chat.write_bytes(before[1] + b'{"content":"new message"}\n')
         with pytest.raises(ValueError, match="User data changed"):
             require_unchanged_user_data(directory, spec)
@@ -1701,7 +1661,6 @@ async def test_supervisor_has_one_repair_budget_and_replays_transient_restore(in
         if len(calls) == 1:
             if confirmed:
                 monkeypatch.setattr(update_fallback.time, "time", lambda: now + 901)
-            # Abrupt worker exit after admission leaves a non-terminal journal.
             write_record(directory / "approval.json", {"admitted": True})
             phase = Phase.INSTALLING
         else:
@@ -1778,8 +1737,6 @@ async def test_service_restore_completes_reservation_after_interrupted_journal(i
         directory = await prepare_job(plan, feed)
     spec = WorkerSpec.read(directory)
     root = installation_state_dir(spec.baseline.environment)
-    # Backup failed before mutation. Original program is intact; restoration
-    # wrote its journal but failed before reserving data and recording restart.
     JobStatus(plan.id, Phase.FAILED, 0, False, "Backup failure", int(time.time())).save(directory)
     write_record(directory / "handoff-approval.json", {
         "plan_id": spec.plan_id, "request_sha256": hashlib.sha256((directory / "request.json").read_bytes()).hexdigest(),
@@ -1826,7 +1783,7 @@ async def test_cancelled_preparation_keeps_lease_until_native_work_exits(install
             assert UpdatePlan.model_validate_json((directory / "plan.json").read_bytes()) == plan
             preparing.cancel()
             await asyncio.sleep(0)
-            preparing.cancel()  # A second shutdown must not release a native writer.
+            preparing.cancel()
             await asyncio.sleep(0)
             assert not preparing.done()
             assert JobStatus.read(directory).phase == Phase.PREPARING
@@ -1882,8 +1839,6 @@ async def test_release_approval_refusal_preserves_original_installation(installa
             await prepare_job(plan, feed)
     directory = installation_state_dir(plan.installation.environment) / "jobs" / plan.id
     assert not (directory / "request.json").exists()
-    # The current-version recovery launcher may already be staged, but no
-    # verified request may authorize it to mutate the installation.
     assert not (directory / "wheels").exists()
     assert inspect_environment(plan.installation.python) == before
 
@@ -1994,7 +1949,6 @@ async def test_orphan_preparation_owns_lease_until_real_native_exit(installation
         if parent.poll() is None:
             parent.kill()
         await asyncio.to_thread(parent.wait, 10)
-        # Wait for the child's actual OS lease, not a stale PID or status file.
         async with asyncio.timeout(15):
             while True:
                 try:
@@ -2005,13 +1959,10 @@ async def test_orphan_preparation_owns_lease_until_real_native_exit(installation
         if stage == "pip":
             launcher.write_text(original)
     if stage == "pip":
-        # Recovery itself can exit between revocation and saving the new phase.
-        # Re-entering it must finish the journal, not revive the old generation.
         with file_access(root / "prepare.lock", exclusive=True), file_access(root / "prepare-native.lock", exclusive=True):
             prior.close()
     assert settle_interrupted_preparation(directory).phase == Phase.PREPARATION_FAILED
     assert not (directory / "approval.json").exists()
-    # A child delayed before locking must not revive after a new generation starts.
     marker = tmp_path / "late-child-must-not-run"
     with file_access(root / "prepare.lock", exclusive=True), file_access(root / "prepare-native.lock", exclusive=True):
         replacement = PreparationProcess.create(directory, plan.installation.environment)
@@ -2063,7 +2014,6 @@ async def test_preparation_lease_covers_site_startup_and_exit_cleanup(installati
 @pytest.mark.parametrize("installation", ["handoff"], indirect=True)
 @pytest.mark.parametrize("refuse", [False, True])
 async def test_execution_leases_cover_site_and_atexit(installation, tmp_path, refuse):
-    """Real frozen children and pip; handoff/restart bodies are routing fixtures."""
     plan, _, site, _, transport = installation
     async with ReleaseFeed(tmp_path / "feed", transport=transport) as feed:
         directory = await prepare_job(plan, feed)
@@ -2106,7 +2056,6 @@ async def test_execution_leases_cover_site_and_atexit(installation, tmp_path, re
         assert {path.name for path in observed.iterdir()} == {
             entry + "." + stage for entry in entries for stage in ("site", "atexit")
         }
-        # Exit cleanup completed and all process-owned leases really released.
         with (installation_access(updating=True, environment=plan.installation.environment),
               data_access((source.path for source in WorkerSpec.read(directory).backup_sources), updating=True),
               file_access(root / "handoff-child.lock", exclusive=True)):
@@ -2117,7 +2066,6 @@ async def test_execution_leases_cover_site_and_atexit(installation, tmp_path, re
 
 @pytest.mark.parametrize("stage", ["site", "atexit"])
 async def test_admission_probe_keeps_its_leases_after_caller_loss(installation, tmp_path, stage):
-    """Kill a disposable start_job caller, not the interpreter doing its probe."""
     plan, _, site, _, transport = installation
     async with ReleaseFeed(tmp_path / "feed", transport=transport) as feed:
         directory = await prepare_job(plan, feed)
@@ -2193,7 +2141,6 @@ async def test_admission_probe_keeps_its_leases_after_caller_loss(installation, 
 
 @pytest.mark.parametrize("stage", ["site", "dependencies", "atexit"])
 async def test_verification_keeps_its_leases_after_coordinator_loss(installation, tmp_path, stage):
-    """Pause actual site/pip/atexit in a disposable target, not a mocked subprocess."""
     plan, _, site, _, transport = installation
     ready, release = tmp_path / "verification-ready", tmp_path / "verification-release"
     hook = site / "verification_lifetime_test.pth"
@@ -2250,7 +2197,6 @@ async def test_verification_keeps_its_leases_after_coordinator_loss(installation
                         await asyncio.sleep(0.01)
             hook.unlink(missing_ok=True)
             launcher.write_text(original)
-        # The orphan does not announce success or release the durable fence.
         assert JobStatus.read(directory).phase == Phase.VERIFYING
         assert pending_update_path(plan.installation.environment).exists()
         backup = (directory / "backup/data.zip").read_bytes()
@@ -2265,8 +2211,6 @@ async def test_verification_requires_its_own_completion_checkpoint(installation,
     async with ReleaseFeed(tmp_path / "feed", transport=transport) as feed:
         directory = await prepare_job(plan, feed)
         hook = site / "verification_exit_test.pth"
-        # A previously successful verification record cannot bless a new
-        # interpreter that exits 0 during site initialization.
         write_record(directory / "verification.json", {"id": uuid4().hex})
         hook.write_text("import sys; sys.exit(0) if '--verify' in sys.argv else None\n")
         try:
@@ -2281,7 +2225,6 @@ async def test_verification_requires_its_own_completion_checkpoint(installation,
 
 
 async def test_installed_cleanup_recovery_reverifies_without_reinstalling(installation, tmp_path, monkeypatch):
-    """Exit after the real result write, before its pending/data fences are removed."""
     plan, _, site, _, transport = installation
     original_popen = subprocess.Popen
     wrapper = """

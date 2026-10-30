@@ -1,5 +1,3 @@
-"""Unit and lightweight integration tests for the WebSocket channel."""
-
 import asyncio
 import json
 import threading
@@ -88,8 +86,6 @@ from nanobot.webui.metadata import (
 from nanobot.webui.settings_api import settings_payload, update_provider_settings
 
 from .ws_test_client import http_get as _http_get
-
-# -- Shared helpers (aligned with test_websocket_integration.py) ---------------
 
 _PORT = 0
 
@@ -887,12 +883,12 @@ def test_parse_inbound_invalid_json_falls_back_to_raw_string() -> None:
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        ('{"content": ""}', None),           # empty string content
-        ('{"content": 123}', None),          # non-string content
-        ('{"content": "  "}', None),         # whitespace-only content
-        ('["hello"]', '["hello"]'),           # JSON array: not a dict, treated as plain text
-        ('{"unknown_key": "val"}', None),    # unrecognized key
-        ('{"content": null}', None),         # null content
+        ('{"content": ""}', None),
+        ('{"content": 123}', None),
+        ('{"content": "  "}', None),
+        ('["hello"]', '["hello"]'),
+        ('{"unknown_key": "val"}', None),
+        ('{"content": null}', None),
     ],
 )
 def test_parse_inbound_payload_edge_cases(raw: str, expected: str | None) -> None:
@@ -944,7 +940,6 @@ def test_issue_route_secret_matches_bearer_and_header() -> None:
 def test_issue_route_secret_matches_empty_secret() -> None:
     from websockets.datastructures import Headers
 
-    # Empty secret always returns True regardless of headers
     assert _issue_route_secret_matches(Headers([]), "") is True
     assert _issue_route_secret_matches(Headers([("Authorization", "Bearer anything")]), "") is True
 
@@ -1721,7 +1716,6 @@ async def test_webui_automation_intent_is_hidden_and_not_inherited_by_cron(histo
     assert "create an automation" in block.content
     assert "not to execute the task immediately" in block.content
 
-    # Model input includes the context; public history strips the exact saved suffix.
     content, marker = append_runtime_context(msg.content, [block])
     assert block.content in content
     assert public_history_message({
@@ -2742,7 +2736,6 @@ async def test_send_progress_omits_binary_tool_results_from_wire_and_transcript(
     assert replayed["text"] == ""
     assert replayed["tool_events"] == payload["tool_events"]
 
-    # WebUI projection must not alter the result that the runner sends back to the model.
     assert tool_events[0]["result"][0]["image_url"]["url"] == data_url
 
 
@@ -3081,7 +3074,6 @@ async def test_send_reasoning_end_emits_close_frame() -> None:
 
 @pytest.mark.asyncio
 async def test_send_reasoning_one_shot_expands_to_delta_plus_end() -> None:
-    """``send_reasoning`` produces one delta and one end."""
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
     mock_ws = AsyncMock()
@@ -3731,8 +3723,6 @@ async def test_durable_incomplete_marker_stays_pending_without_safe_session_reco
         event=GoalStatusEvent(status="idle"),
     ))
 
-    # Simulate a gateway restart: no process-local owner survives, so the
-    # persisted marker must be sufficient to reject canonical completion.
     wth._WEBSOCKET_ACTIVE_TURNS.clear()
     wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
     wth._WEBSOCKET_TURN_IDS.clear()
@@ -3836,7 +3826,6 @@ async def test_http_replay_recovers_marked_answer_from_session_after_gateway_res
     assert persisted_lines[-1]["event"] == "turn_end"
     assert persisted_lines[-1]["transcript_incomplete"] is True
 
-    # Drop all process-local state and construct a fresh HTTP/session layer.
     wth._WEBSOCKET_ACTIVE_TURNS.clear()
     wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
     wth._WEBSOCKET_TURN_IDS.clear()
@@ -4336,7 +4325,6 @@ async def test_send_non_connection_closed_exception_is_isolated() -> None:
 async def test_send_delta_missing_connection_is_noop() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"], "streaming": True}, bus, gateway=_basic_handler(bus))
-    # No exception, no error — just a no-op
     await channel.send_delta("nonexistent", "chunk", stream_id="s1")
     assert channel._subs == {}
 
@@ -4345,7 +4333,6 @@ async def test_send_delta_missing_connection_is_noop() -> None:
 async def test_stop_is_idempotent() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
-    # stop() before start() should not raise
     await channel.stop()
     await channel.stop()
     assert channel._subs == {}
@@ -4544,7 +4531,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         providers = {provider["name"]: provider for provider in body["providers"]}
         assert providers["openai"]["configured"] is True
         assert providers["openai"]["api_key_hint"] == "secr••••-key"
-        assert providers["azure_openai"]["api_key_required"] is False  # AAD auth supported; no static key required
+        assert providers["azure_openai"]["api_key_required"] is False
         assert providers["openrouter"]["configured"] is False
         assert providers["openrouter"]["api_key_required"] is True
         assert providers["orcarouter"]["label"] == "OrcaRouter"
@@ -5191,7 +5178,6 @@ async def test_end_to_end_server_pushes_streaming_deltas_to_client(bus: MagicMoc
             ready = json.loads(ready_raw)
             chat_id = ready["chat_id"]
 
-            # Server pushes deltas directly
             await channel.send_delta(
                 chat_id, "Hello ", stream_id="s1"
             )
@@ -5238,7 +5224,6 @@ async def test_token_issue_rejects_when_at_capacity(bus: MagicMock, start_listen
     port, server_task = await start_listener(channel)
 
     try:
-        # Fill issued tokens to capacity
         channel.gateway.tokens.issued_tokens = {
             f"nbwt_fill_{i}": time.monotonic() + 300
             for i in range(channel.gateway.tokens.max_tokens)
@@ -5523,11 +5508,9 @@ async def test_non_utf8_binary_frame_ignored(bus: MagicMock, start_listener) -> 
 
     try:
         async with websockets.connect(f"ws://127.0.0.1:{port}/ws?client_id=bin-test") as client:
-            await client.recv()  # consume ready
-            # Send non-UTF-8 bytes
+            await client.recv()
             await client.send(b"\xff\xfe\xfd")
             await asyncio.sleep(0.05)
-            # publish_inbound should NOT have been called
             bus.publish_inbound.assert_not_awaited()
     finally:
         await channel.stop()
@@ -5547,7 +5530,6 @@ async def test_static_token_accepts_issued_token_as_fallback(bus: MagicMock, sta
     port, server_task = await start_listener(channel)
 
     try:
-        # Get an issued token
         resp = await _http_get(
             f"http://127.0.0.1:{port}/auth/token",
             headers={"Authorization": "Bearer route-secret"},
@@ -5555,7 +5537,6 @@ async def test_static_token_accepts_issued_token_as_fallback(bus: MagicMock, sta
         assert resp.status_code == 200
         issued_token = resp.json()["token"]
 
-        # Connect using issued token (not the static one)
         async with websockets.connect(f"ws://127.0.0.1:{port}/ws?token={issued_token}&client_id=caller") as client:
             ready = json.loads(await client.recv())
             assert ready["event"] == "ready"
@@ -5583,20 +5564,17 @@ async def test_allow_from_empty_list_denies_all(bus: MagicMock, start_listener) 
 
 @pytest.mark.asyncio
 async def test_websocket_requires_token_without_issue_path(bus: MagicMock, start_listener) -> None:
-    """When websocket_requires_token is True but no token or issue path configured, all connections are rejected."""
     port = 0
     channel = _ch(bus, port=port, websocketRequiresToken=True)
 
     port, server_task = await start_listener(channel)
 
     try:
-        # No token at all → 401
         with pytest.raises(websockets.exceptions.InvalidStatus) as exc_info:
             async with websockets.connect(f"ws://127.0.0.1:{port}/ws?client_id=u"):
                 pass
         assert exc_info.value.response.status_code == 401
 
-        # Wrong token → 401
         with pytest.raises(websockets.exceptions.InvalidStatus) as exc_info:
             async with websockets.connect(f"ws://127.0.0.1:{port}/ws?client_id=u&token=wrong"):
                 pass
@@ -5607,7 +5585,6 @@ async def test_websocket_requires_token_without_issue_path(bus: MagicMock, start
 
 
 # -- Multi-chat multiplexing -------------------------------------------------
-#
 # The multiplex protocol lets one WS connection route N logical chats over
 # typed envelopes (`new_chat` / `attach` / `message`). Legacy frames must keep
 # working on the connection's default chat_id.
@@ -5624,20 +5601,17 @@ async def test_multiplex_legacy_still_works(bus: MagicMock, start_listener) -> N
             ready = json.loads(await client.recv())
             default_chat = ready["chat_id"]
 
-            # Plain text frame routes to default chat_id
             await client.send("hello from legacy")
             await asyncio.sleep(0.1)
             inbound = bus.publish_inbound.call_args[0][0]
             assert inbound.chat_id == default_chat
             assert inbound.content == "hello from legacy"
 
-            # {"content": ...} frame routes to default chat_id
             await client.send(json.dumps({"content": "structured legacy"}))
             await asyncio.sleep(0.1)
             assert bus.publish_inbound.call_args[0][0].chat_id == default_chat
             assert bus.publish_inbound.call_args[0][0].content == "structured legacy"
 
-            # Outbound still reaches the legacy client, with chat_id annotated
             await channel.send(
                 OutboundMessage(channel="websocket", chat_id=default_chat, content="reply")
             )
@@ -5667,7 +5641,6 @@ async def test_multiplex_new_chat_roundtrip(bus: MagicMock, start_listener) -> N
             new_chat = attached["chat_id"]
             assert new_chat and new_chat != default_chat
 
-            # Send on the new chat via typed envelope
             await client.send(
                 json.dumps({"type": "message", "chat_id": new_chat, "content": "hi on new"})
             )
@@ -5676,7 +5649,6 @@ async def test_multiplex_new_chat_roundtrip(bus: MagicMock, start_listener) -> N
             assert inbound.chat_id == new_chat
             assert inbound.content == "hi on new"
 
-            # Server pushes a message back; chat_id must match
             await channel.send(
                 OutboundMessage(channel="websocket", chat_id=new_chat, content="ok")
             )
@@ -5793,7 +5765,7 @@ async def test_multiplex_two_chats_isolated(bus: MagicMock, start_listener) -> N
 
     try:
         async with websockets.connect(f"ws://127.0.0.1:{port}/ws?client_id=two") as client:
-            await client.recv()  # ready
+            await client.recv()
 
             await client.send(json.dumps({"type": "new_chat"}))
             chat_a = (await _recv_ws_event(client, "attached"))["chat_id"]
@@ -5801,7 +5773,6 @@ async def test_multiplex_two_chats_isolated(bus: MagicMock, start_listener) -> N
             chat_b = (await _recv_ws_event(client, "attached"))["chat_id"]
             assert chat_a != chat_b
 
-            # Push A → client sees A only (FIFO over the single WS).
             await channel.send(
                 OutboundMessage(channel="websocket", chat_id=chat_a, content="for-A")
             )
@@ -5809,7 +5780,6 @@ async def test_multiplex_two_chats_isolated(bus: MagicMock, start_listener) -> N
             assert msg_a["chat_id"] == chat_a
             assert msg_a["text"] == "for-A"
 
-            # Push B → client sees B only.
             await channel.send(
                 OutboundMessage(channel="websocket", chat_id=chat_b, content="for-B")
             )
@@ -5829,24 +5799,20 @@ async def test_multiplex_invalid_frames_return_error(bus: MagicMock, start_liste
 
     try:
         async with websockets.connect(f"ws://127.0.0.1:{port}/ws?client_id=bad") as client:
-            await client.recv()  # ready
+            await client.recv()
 
-            # attach with bad chat_id
             await client.send(json.dumps({"type": "attach", "chat_id": "has space"}))
             err1 = json.loads(await client.recv())
             assert err1["event"] == "error"
 
-            # message with missing content
             await client.send(json.dumps({"type": "message", "chat_id": "abc", "content": ""}))
             err2 = json.loads(await client.recv())
             assert err2["event"] == "error"
 
-            # unknown type
             await client.send(json.dumps({"type": "nope"}))
             err3 = json.loads(await client.recv())
             assert err3["event"] == "error"
 
-            # Connection survives: legacy frame still works.
             await client.send("still-alive")
             await asyncio.sleep(0.1)
             bus.publish_inbound.assert_awaited()
@@ -5870,7 +5836,6 @@ async def test_multiplex_cleanup_on_disconnect(bus: MagicMock, start_listener) -
             extra_chat = json.loads(await client.recv())["chat_id"]
             assert default_chat in channel._subs
             assert extra_chat in channel._subs
-        # Client gone. Server-side tracking must be empty.
         await asyncio.sleep(0.2)
         assert default_chat not in channel._subs
         assert extra_chat not in channel._subs
@@ -5888,12 +5853,10 @@ def test_parse_envelope_detects_typed_frames() -> None:
 
 
 def test_parse_envelope_rejects_legacy_and_garbage() -> None:
-    # No `type` field → legacy, caller falls back to _parse_inbound_payload.
     assert _parse_envelope('{"content":"hi"}') is None
     assert _parse_envelope("plain text") is None
     assert _parse_envelope("{broken") is None
     assert _parse_envelope("[1,2,3]") is None
-    # Non-string `type` is not a valid envelope.
     assert _parse_envelope('{"type":123}') is None
 
 

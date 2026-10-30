@@ -1,5 +1,3 @@
-"""Real gateway runtime identities in isolated profile and installation directories."""
-
 import json
 import os
 import signal
@@ -165,8 +163,6 @@ def test_separate_profile_and_environment_cannot_hide_a_shared_workspace_writer(
     with gateway(tmp_path / "profile one", first, workspace=workspace):
         reviewed = inspect_profiles(str(first))
     with gateway(tmp_path / "profile two", other, workspace=workspace):
-        # The first profile is stopped and unchanged: its own inventory alone
-        # cannot prove that no other installation writes this workspace.
         require_stopped_profiles(reviewed, str(first))
         with pytest.raises(InstallationBusyError, match="data is in use"):
             with data_access([workspace / "sessions"], updating=True):
@@ -212,7 +208,6 @@ def test_startup_is_visible_and_protected_before_workspace_writes(startup_profil
         raise RuntimeError("workspace initialization failed")
 
     monkeypatch.setattr(gateway_runtime, "sync_workspace_templates", fail_initialization)
-    # The same public runtime entrypoint can be retried after initialization fails.
     for _ in range(2):
         with pytest.raises(RuntimeError, match="workspace initialization failed"):
             gateway_runtime._run_gateway(config, health_server_enabled=False,
@@ -304,8 +299,6 @@ def test_classic_cli_holds_data_lease_before_writers_and_through_exit(startup_pr
 def test_actual_gateway_startup_records_custom_home_and_graceful_exit(private_home, tmp_path):
     import http.client
 
-    # Run the actual gateway lifecycle with no providers/channels or browser. Only
-    # tokenizer prefetch is disabled so this test cannot download outside localhost.
     source = """
 import sys
 from pathlib import Path
@@ -401,8 +394,6 @@ def test_recorded_launch_restarts_same_actual_gateway(private_home, tmp_path, mo
         set_home_path(profile)
     instance = GatewayInstance.resolve(config_path=config_path,
                                        workspace=str(workspace) if explicit_workspace else None)
-    # Use the actual CLI/runtime from this checkout, even when restarting from a
-    # different cwd. Only tokenizer warmup is disabled (no network download).
     source_root = str(Path(__file__).resolve().parents[1])
     bootstrap = (
         f"import sys; sys.path.insert(0, {source_root!r})\n"
@@ -449,8 +440,6 @@ def test_recorded_launch_restarts_same_actual_gateway(private_home, tmp_path, mo
         stopped = inspect_profiles(sys.prefix)[0].receipt
         assert stopped.launch == before.launch and not stopped.active
 
-        # No --workspace must remain no --workspace, even though config resolves
-        # the same final workspace. Guessing that flag changes the instance key.
         monkeypatch.chdir(tmp_path)
         launch_directory = Path(before.launch.working_directory)
         assert runtime.start_background(before.launch.options(port=before.port)).ok

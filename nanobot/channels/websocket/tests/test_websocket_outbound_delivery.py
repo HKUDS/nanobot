@@ -1,5 +1,3 @@
-"""Connection-local outbound delivery guarantees for the WebSocket channel."""
-
 from __future__ import annotations
 
 import asyncio

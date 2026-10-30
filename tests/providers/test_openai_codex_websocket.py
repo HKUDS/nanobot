@@ -1,5 +1,3 @@
-"""Exercise the Codex provider against local Responses WebSocket and SSE peers."""
-
 from __future__ import annotations
 
 import asyncio
@@ -287,7 +285,6 @@ async def test_gateway_prepares_image_batch_and_preserves_originals(codex_peer, 
     for path in paths:
         image.save(path, "JPEG", quality=95)
     originals = [path.read_bytes() for path in paths]
-    # Each image fits by itself; the combined base64 payload requires preparation.
     original_sizes = [4 * ((len(raw) + 2) // 3) for raw in originals]
     assert max(original_sizes) < 1_000_000 < sum(original_sizes)
     small = tmp_path / "thumbnail.jpg"

@@ -1,5 +1,3 @@
-"""Project selection directory metadata contracts."""
-
 import os
 import stat
 import sys

@@ -1,5 +1,3 @@
-"""Helpers for routing bound cron turns back through their origin session."""
-
 from __future__ import annotations
 
 from typing import Any

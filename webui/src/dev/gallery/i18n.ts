@@ -8,7 +8,6 @@ const bundles = import.meta.glob<{ default: Record<string, unknown> }>(
   { eager: true },
 );
 
-// Gallery copy is a development-only namespace; the application keeps its own bundles.
 export async function initializeGalleryI18n(): Promise<void> {
   await initializeI18n();
   for (const { code } of supportedLocales) {

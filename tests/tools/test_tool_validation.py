@@ -81,7 +81,6 @@ class DecoratedSampleTool(Tool):
 
 
 def test_schema_validate_value_matches_tool_validate_params() -> None:
-    """ObjectSchema.validate_value 与 validate_json_schema_value、Tool.validate_params 一致。"""
     root = tool_parameters_schema(
         query=StringSchema(min_length=2),
         count=IntegerSchema(minimum=1, maximum=10),
@@ -117,7 +116,6 @@ def test_schema_validate_value_matches_tool_validate_params() -> None:
 
 
 def test_schema_classes_equivalent_to_sample_tool_parameters() -> None:
-    """Schema 类生成的 JSON Schema 应与手写 dict 一致，便于校验行为一致。"""
     built = tool_parameters_schema(
         query=StringSchema(min_length=2),
         count=IntegerSchema(minimum=1, maximum=10),
@@ -291,7 +289,6 @@ def test_exec_extract_absolute_paths_keeps_full_windows_path() -> None:
 
 
 def test_exec_extract_absolute_paths_captures_windows_drive_root_path() -> None:
-    """Windows drive root paths like `E:\\` must be extracted for workspace guarding."""
     # Note: raw strings cannot end with a single backslash.
     cmd = "dir E:\\"
     paths = ExecTool._extract_absolute_paths(cmd)
@@ -599,9 +596,6 @@ def test_exec_extract_absolute_paths_ignores_pipe_tilde() -> None:
     assert not any(p.startswith("~") for p in paths)
 
 
-# --- cast_params tests ---
-
-
 class CastTestTool(Tool):
     """Minimal tool for testing cast_params."""
 
@@ -782,7 +776,6 @@ def test_nullable_integer_retains_safe_casts(value, expected) -> None:
 
 
 def test_cast_params_bool_not_cast_to_int() -> None:
-    """Booleans should not be silently cast to integers."""
     tool = CastTestTool(
         {
             "type": "object",
@@ -796,7 +789,6 @@ def test_cast_params_bool_not_cast_to_int() -> None:
 
 
 def test_cast_params_preserves_empty_string() -> None:
-    """Empty strings should be preserved for string type."""
     tool = CastTestTool(
         {
             "type": "object",
@@ -808,7 +800,6 @@ def test_cast_params_preserves_empty_string() -> None:
 
 
 def test_cast_params_bool_string_false() -> None:
-    """Test that 'false', '0', 'no' strings convert to False."""
     tool = CastTestTool(
         {
             "type": "object",
@@ -823,14 +814,12 @@ def test_cast_params_bool_string_false() -> None:
 
 
 def test_cast_params_bool_string_invalid() -> None:
-    """Invalid boolean strings should not be cast."""
     tool = CastTestTool(
         {
             "type": "object",
             "properties": {"flag": {"type": "boolean"}},
         }
     )
-    # Invalid strings should be preserved (validation will catch them)
     result = tool.cast_params({"flag": "random"})
     assert result["flag"] == "random"
     result = tool.cast_params({"flag": "maybe"})
@@ -838,7 +827,6 @@ def test_cast_params_bool_string_invalid() -> None:
 
 
 def test_cast_params_invalid_string_to_int() -> None:
-    """Invalid strings should not be cast to integer."""
     tool = CastTestTool(
         {
             "type": "object",
@@ -846,13 +834,12 @@ def test_cast_params_invalid_string_to_int() -> None:
         }
     )
     result = tool.cast_params({"count": "abc"})
-    assert result["count"] == "abc"  # Original value preserved
+    assert result["count"] == "abc"
     result = tool.cast_params({"count": "12.5.7"})
     assert result["count"] == "12.5.7"
 
 
 def test_cast_params_invalid_string_to_number() -> None:
-    """Invalid strings should not be cast to number."""
     tool = CastTestTool(
         {
             "type": "object",
@@ -868,7 +855,6 @@ def test_cast_params_invalid_string_to_number() -> None:
     [float("nan"), float("inf"), float("-inf"), "NaN", "Infinity", "-Infinity"],
 )
 def test_cast_params_rejects_non_finite_numbers(value: float | str) -> None:
-    """JSON number parameters must remain finite after schema-driven casting."""
     tool = CastTestTool(
         {
             "type": "object",
@@ -882,7 +868,6 @@ def test_cast_params_rejects_non_finite_numbers(value: float | str) -> None:
 
 
 def test_validate_params_bool_not_accepted_as_number() -> None:
-    """Booleans should not pass number validation."""
     tool = CastTestTool(
         {
             "type": "object",
@@ -894,7 +879,6 @@ def test_validate_params_bool_not_accepted_as_number() -> None:
 
 
 def test_cast_params_none_values() -> None:
-    """Test None handling for different types."""
     tool = CastTestTool(
         {
             "type": "object",
@@ -914,7 +898,6 @@ def test_cast_params_none_values() -> None:
             "config": None,
         }
     )
-    # None should be preserved for all types
     assert result["name"] is None
     assert result["count"] is None
     assert result["items"] is None
@@ -922,25 +905,19 @@ def test_cast_params_none_values() -> None:
 
 
 def test_cast_params_single_value_not_auto_wrapped_to_array() -> None:
-    """Single values should NOT be automatically wrapped into arrays."""
     tool = CastTestTool(
         {
             "type": "object",
             "properties": {"items": {"type": "array"}},
         }
     )
-    # Non-array values should be preserved (validation will catch them)
     result = tool.cast_params({"items": 5})
-    assert result["items"] == 5  # Not wrapped to [5]
+    assert result["items"] == 5
     result = tool.cast_params({"items": "text"})
-    assert result["items"] == "text"  # Not wrapped to ["text"]
-
-
-# --- ExecTool enhancement tests ---
+    assert result["items"] == "text"
 
 
 async def test_completed_exec_returns_exit_code() -> None:
-    """Completed output includes the exit code even on success (exit 0)."""
     tool = ExecTool()
     result = await tool.execute(command="echo hello", yield_time_ms=10000)
     assert "Exit code: 0" in result
@@ -948,7 +925,6 @@ async def test_completed_exec_returns_exit_code() -> None:
 
 
 async def test_exec_head_tail_truncation(tmp_path) -> None:
-    """Long output should preserve both head and tail."""
     tool = ExecTool()
     # Generate output that exceeds _MAX_OUTPUT (10_000 chars).
     # Use a temp script file so the output-generating logic lives in a file
@@ -966,15 +942,12 @@ async def test_exec_head_tail_truncation(tmp_path) -> None:
         command = f"{shlex.quote(sys.executable)} {shlex.quote(str(script_file))}"
     result = await tool.execute(command=command, yield_time_ms=10000)
     assert "chars truncated" in result
-    # Head portion should start with As
     assert result.startswith("A")
-    # Tail portion should end with the exit code which comes after Bs
     assert "Exit code:" in result
 
 
 @pytest.mark.parametrize("runtime_parameter", ["timeout", "max_runtime"])
 async def test_exec_timeout_parameter(runtime_parameter) -> None:
-    """Both runtime spellings override the constructor's hard budget."""
     tool = ExecTool(timeout=60)
     started_at = time.monotonic()
     result = await tool.execute(
@@ -993,7 +966,6 @@ async def test_exec_timeout_parameter(runtime_parameter) -> None:
 async def test_exec_runtime_rejects_out_of_range(
     monkeypatch, runtime_parameter, runtime,
 ) -> None:
-    """Invalid budgets fail before spawning instead of being clamped."""
     spawn = AsyncMock(side_effect=AssertionError("Invalid runtime must not start a process"))
     monkeypatch.setattr(ExecTool, "_spawn", spawn)
     tool = ExecTool(max_runtime=301, max_runtime_limit=300)
@@ -1082,16 +1054,11 @@ def test_exec_runtime_schema_matches_configured_limit(limit, runtime_parameter) 
     assert ExecTool().parameters["properties"][runtime_parameter]["maximum"] == 86400
 
 
-# --- _resolve_type and nullable param tests ---
-
-
 def test_resolve_type_simple_string() -> None:
-    """Simple string type passes through unchanged."""
     assert Tool._resolve_type("string") == "string"
 
 
 def test_resolve_type_union_with_null() -> None:
-    """Union type ['string', 'null'] resolves to 'string'."""
     assert Tool._resolve_type(["string", "null"]) == "string"
 
 
@@ -1129,17 +1096,14 @@ def test_nullable_string_schema_enforces_enum() -> None:
 
 
 def test_resolve_type_only_null() -> None:
-    """Union type ['null'] resolves to None (no non-null type)."""
     assert Tool._resolve_type(["null"]) is None
 
 
 def test_resolve_type_none_input() -> None:
-    """None input passes through as None."""
     assert Tool._resolve_type(None) is None
 
 
 def test_validate_nullable_param_accepts_string() -> None:
-    """Nullable string param should accept a string value."""
     tool = CastTestTool(
         {
             "type": "object",
@@ -1151,7 +1115,6 @@ def test_validate_nullable_param_accepts_string() -> None:
 
 
 def test_validate_nullable_param_accepts_none() -> None:
-    """Nullable string param should accept None."""
     tool = CastTestTool(
         {
             "type": "object",
@@ -1163,7 +1126,6 @@ def test_validate_nullable_param_accepts_none() -> None:
 
 
 def test_validate_nullable_flag_accepts_none() -> None:
-    """OpenAI-normalized nullable params should still accept None locally."""
     tool = CastTestTool(
         {
             "type": "object",
@@ -1175,7 +1137,6 @@ def test_validate_nullable_flag_accepts_none() -> None:
 
 
 def test_cast_nullable_param_no_crash() -> None:
-    """cast_params should not crash on nullable type (the original bug)."""
     tool = CastTestTool(
         {
             "type": "object",

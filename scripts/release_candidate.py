@@ -86,7 +86,6 @@ def prepare_preview(root: Path, output: Path, *, source_commit: str, base: str, 
     if Version(base).release < current.release or _git(root, "tag", "--list", f"v{base}"):
         raise ValueError("Preview base must not precede the source or reuse an existing stable tag")
     changes = _version_changes(original["pyproject.toml"], original["nanobot/__init__.py"], version)
-    # A separate clone preserves the source parent without touching the caller's worktree.
     _git(root, "clone", "--shared", "--no-checkout", "-c", "core.autocrlf=false", str(root), str(output))
     hooks = output / ".git" / "candidate-hooks"
     hooks.mkdir()
@@ -156,13 +155,9 @@ def _source_payload(root: Path, source: dict[str, bytes], prefix: str) -> dict[s
     """Bind shipped application files to the clean candidate, not its commit label."""
     tracked = set(_git(root, "ls-files", "-z", trim=False).split("\0")) - {""}
     build = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["tool"]["hatch"]["build"]
-    # The sdist ships the tracked nanobot tree. Read its actual exclusions rather
-    # than maintaining a second list of channel test directories here.
     exclusions = [*build.get("exclude", []), *build["targets"]["sdist"].get("exclude", [])]
     expected = {name: name for name in tracked if name.startswith("nanobot/")
                 and not any(fnmatchcase(name, pattern) for pattern in exclusions)}
-    # The build hook copies tracked docs into the built-in documentation skill.
-    # Verify both copies: rebuilding the sdist must use the same reviewed bytes.
     for name in tracked:
         if (name.startswith("docs/") and name.endswith(".md")
                 and not any(fnmatchcase(name, pattern) for pattern in exclusions)):
@@ -314,8 +309,6 @@ def retain_candidate(root: Path, artifacts: Path, output: Path, *, source_commit
     retained.mkdir()
     for name in sorted(release_filenames(manifest.version) | {"release-manifest.json"}):
         shutil.copyfile(artifacts / name, retained / name)
-    # Check the actual copies, not a report for the source directory. A future
-    # publisher must consume these bytes and verify this manifest again.
     if ((retained / "release-manifest.json").read_bytes() != recorded
             or verify_candidate(root, retained, source_commit=source_commit) != manifest):
         raise ValueError("Retained artifacts differ from the reviewed candidate")

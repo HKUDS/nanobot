@@ -1,5 +1,3 @@
-"""Tests for CommandRouter.is_dispatchable_command and mid-turn command interception."""
-
 from __future__ import annotations
 
 from inspect import Parameter, signature
@@ -22,7 +20,6 @@ def test_command_context_requires_loop_as_keyword_dependency() -> None:
 
 
 class TestIsDispatchableCommand:
-    """Unit tests for the is_dispatchable_command() predicate."""
 
     @pytest.fixture()
     def router(self) -> CommandRouter:
@@ -52,8 +49,6 @@ class TestIsDispatchableCommand:
         assert router.is_dispatchable_command("/__shell pwd")
 
     def test_priority_commands_not_matched(self, router: CommandRouter) -> None:
-        # Priority commands are NOT in the dispatchable tiers — they are
-        # handled by is_priority() separately.
         assert not router.is_dispatchable_command("/stop")
         assert not router.is_dispatchable_command("/restart")
 
@@ -132,7 +127,6 @@ class TestMidTurnCommandDispatchedDirectly:
     async def test_new_dispatched_with_session_none(
         self, router: CommandRouter, fake_loop: MagicMock, fake_msg: MagicMock,
     ) -> None:
-        """cmd_new works when session=None (mid-turn dispatch path)."""
         ctx = CommandContext(
             msg=fake_msg, session=None,
             key="test:chat1", raw="/new", loop=fake_loop,
@@ -161,8 +155,6 @@ class TestMidTurnCommandDispatchedDirectly:
 
     @pytest.mark.asyncio
     async def test_prefix_command_args_populated(self, router: CommandRouter) -> None:
-        """Prefix commands have args populated correctly in mid-turn path."""
-        # Use a custom prefix handler to avoid needing full mock setup.
         custom = CommandRouter()
         captured_args = []
 
@@ -189,7 +181,6 @@ class TestMidTurnCommandDispatchedDirectly:
         self, router: CommandRouter, fake_loop: MagicMock, fake_msg: MagicMock,
         content: str,
     ) -> None:
-        """Regular text returns None from dispatch (not a command)."""
         ctx = CommandContext(
             msg=fake_msg, session=None,
             key="test:chat1", raw=content, loop=fake_loop,
@@ -217,7 +208,6 @@ class TestMidTurnCommandDispatchedDirectly:
         )
 
 class TestPairingCommandDispatch:
-    """Verify /pairing works via CommandRouter."""
 
     @pytest.fixture()
     def router(self) -> CommandRouter:

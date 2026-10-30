@@ -1,5 +1,3 @@
-"""Tests for AgentLoop integration with AgentRunner: streaming, think-filter, error handling, subagent."""
-
 from __future__ import annotations
 
 import asyncio
@@ -512,7 +510,6 @@ async def test_loop_retries_think_only_final_response(tmp_path):
 
 @pytest.mark.asyncio
 async def test_llm_error_returns_regular_response_instead_of_streamed_event(tmp_path):
-    """LLM errors must not produce StreamedResponseEvent, so channels deliver the error."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus

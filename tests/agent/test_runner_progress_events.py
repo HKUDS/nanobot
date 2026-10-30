@@ -1,5 +1,3 @@
-"""Runner-owned tool progress rules, without session or channel setup."""
-
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -87,7 +85,6 @@ async def test_start_and_finish_events_emitted() -> None:
 
 @pytest.mark.asyncio
 async def test_streamed_content_is_not_repeated_before_tool_execution() -> None:
-    """If content was already streamed, tool setup should not repeat it."""
     provider = MagicMock()
     tools = MagicMock()
     tool_call = ToolCallRequest(id="call1", name="custom_tool", arguments={"path": "foo.txt"})

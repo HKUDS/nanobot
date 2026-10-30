@@ -1,5 +1,3 @@
-"""WebUI CLI command."""
-
 import hashlib
 import sys
 from contextlib import ExitStack
@@ -55,7 +53,6 @@ def _wait_with_existing_foreground_gateway(
     gateway_port: int,
     dev_server: WebUIDevServer,
 ) -> None:
-    """Keep a Vite sidecar alive without taking ownership of an external gateway."""
     import time
 
     try:

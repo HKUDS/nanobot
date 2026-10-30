@@ -1,5 +1,3 @@
-"""Vite development-server lifecycle for the WebUI source checkout."""
-
 from __future__ import annotations
 
 import os

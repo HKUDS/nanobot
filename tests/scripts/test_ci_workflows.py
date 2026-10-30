@@ -1,5 +1,3 @@
-"""Producer/consumer artifact wiring must survive failed-jobs-only retries."""
-
 import json
 from pathlib import Path
 

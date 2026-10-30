@@ -1,5 +1,3 @@
-"""Protect the required-check contract when GitHub skips conditional jobs."""
-
 import pytest
 
 from scripts.ci_gate import check_results

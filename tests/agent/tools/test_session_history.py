@@ -1,5 +1,3 @@
-"""Session tools read full canonical history independently of WebUI replay."""
-
 from __future__ import annotations
 
 import json

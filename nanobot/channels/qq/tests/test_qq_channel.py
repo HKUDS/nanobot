@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-# Check optional QQ dependencies before running tests
 try:
     from nanobot.channels.qq import runtime as qq
     QQ_AVAILABLE = getattr(qq, "QQ_AVAILABLE", False)
@@ -220,10 +219,6 @@ async def test_read_media_bytes_missing_file() -> None:
     assert filename is None
 
 
-# -------------------------------------------------------
-# Tests for _send_media exception handling
-# -------------------------------------------------------
-
 def _make_channel_with_local_file(suffix: str = ".png", content: bytes = b"\x89PNG\r\n"):
     """Create a QQChannel with a fake client and a temp file for media."""
     channel = QQChannel(
@@ -241,10 +236,8 @@ def _make_channel_with_local_file(suffix: str = ".png", content: bytes = b"\x89P
 
 @pytest.mark.asyncio
 async def test_send_media_network_error_propagates() -> None:
-    """aiohttp.ClientError (network/transport) should re-raise, not return False."""
     channel, tmp_path = _make_channel_with_local_file()
 
-    # Make the base64 upload raise a network error
     channel._client.api._http = SimpleNamespace()
     channel._client.api._http.request = AsyncMock(
         side_effect=aiohttp.ServerDisconnectedError("connection lost"),
@@ -261,7 +254,6 @@ async def test_send_media_network_error_propagates() -> None:
 
 @pytest.mark.asyncio
 async def test_send_media_client_connector_error_propagates() -> None:
-    """aiohttp.ClientConnectorError (DNS/connection refused) should re-raise."""
     channel, tmp_path = _make_channel_with_local_file()
 
     from aiohttp.client_reqrep import ConnectionKey
@@ -287,7 +279,6 @@ async def test_send_media_client_connector_error_propagates() -> None:
 
 @pytest.mark.asyncio
 async def test_send_media_oserror_propagates() -> None:
-    """OSError (low-level I/O) should re-raise for retry."""
     channel, tmp_path = _make_channel_with_local_file()
 
     channel._client.api._http = SimpleNamespace()
@@ -306,10 +297,8 @@ async def test_send_media_oserror_propagates() -> None:
 
 @pytest.mark.asyncio
 async def test_send_media_api_error_returns_false() -> None:
-    """API-level errors (botpy RuntimeError subclasses) should return False, not raise."""
     channel, tmp_path = _make_channel_with_local_file()
 
-    # Simulate a botpy API error (e.g. ServerError is a RuntimeError subclass)
     from botpy.errors import ServerError
 
     channel._client.api._http = SimpleNamespace()
@@ -328,7 +317,6 @@ async def test_send_media_api_error_returns_false() -> None:
 
 @pytest.mark.asyncio
 async def test_send_media_generic_runtime_error_returns_false() -> None:
-    """Generic RuntimeError (not network) should return False."""
     channel, tmp_path = _make_channel_with_local_file()
 
     channel._client.api._http = SimpleNamespace()
@@ -347,7 +335,6 @@ async def test_send_media_generic_runtime_error_returns_false() -> None:
 
 @pytest.mark.asyncio
 async def test_send_media_value_error_returns_false() -> None:
-    """ValueError (bad API response data) should return False."""
     channel, tmp_path = _make_channel_with_local_file()
 
     channel._client.api._http = SimpleNamespace()
@@ -387,7 +374,6 @@ async def test_send_media_timeout_error_propagates() -> None:
 
 @pytest.mark.asyncio
 async def test_send_fallback_text_on_api_error() -> None:
-    """When _send_media returns False (API error), send() should emit fallback text."""
     channel, tmp_path = _make_channel_with_local_file()
 
     from botpy.errors import ServerError
@@ -407,7 +393,6 @@ async def test_send_fallback_text_on_api_error() -> None:
         )
     )
 
-    # Should have sent a fallback text message
     assert len(channel._client.api.c2c_calls) == 1
     fallback_content = channel._client.api.c2c_calls[0]["content"]
     assert "Attachment send failed" in fallback_content
@@ -415,7 +400,6 @@ async def test_send_fallback_text_on_api_error() -> None:
 
 @pytest.mark.asyncio
 async def test_send_propagates_network_error_no_fallback() -> None:
-    """When _send_media raises a network error, send() should NOT silently fallback."""
     channel, tmp_path = _make_channel_with_local_file()
 
     channel._client.api._http = SimpleNamespace()
@@ -434,5 +418,4 @@ async def test_send_propagates_network_error_no_fallback() -> None:
             )
         )
 
-    # No fallback text should have been sent
     assert len(channel._client.api.c2c_calls) == 0

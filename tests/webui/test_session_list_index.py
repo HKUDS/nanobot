@@ -61,7 +61,6 @@ def test_webui_session_list_surfaces_pending_recovery_state(tmp_path: Path) -> N
         "recovery_id": "recovery-123",
         "reason": "uncertain_tool_state",
         "attempts": 1,
-        # Private checkpoint details must never leak into the sidebar index.
         "checkpoint": {"tool_args": "secret"},
     }
     manager.save(session)

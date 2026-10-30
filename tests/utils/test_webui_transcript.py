@@ -1,5 +1,3 @@
-"""Tests for append-only WebUI transcript replay."""
-
 from __future__ import annotations
 
 import json
@@ -456,7 +454,6 @@ def test_many_short_trace_rows_are_bounded_and_resolved(history, tmp_path, monke
         {"event": "message", "chat_id": "deferred-many-traces", "text": "done"},
         {"event": "turn_end", "chat_id": "deferred-many-traces"},
     ]
-    # Replay needs the full stored input, not one durable append per trace row.
     history.sessions.append_history(
         key,
         [fact_from_record({**row, "created_at_ms": 1_700_000_000_000}) for row in rows],

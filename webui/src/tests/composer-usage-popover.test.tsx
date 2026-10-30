@@ -122,8 +122,8 @@ describe("Mobile context usage sheet", () => {
   });
 
   it.each([
-    [100, 500], // Deliberate pull.
-    [32, 40], // Short, quick downward flick.
+    [100, 500],
+    [32, 40],
   ])("dismisses after dragging %dpx in %dms and opens at the original position", async (distance, duration) => {
     const { user, handle, sheet, trigger } = await openSheet();
     pointer(handle, "pointerDown", { y: 400 });
@@ -155,7 +155,6 @@ describe("Mobile context usage sheet", () => {
     expect(sheet.style.transition).toBe("");
     fireEvent.click(handle, { detail: 1 });
     expect(screen.getByRole("dialog")).toBeVisible();
-    // A real subsequent tap must still close the sheet.
     await user.click(handle);
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(document.body).not.toHaveStyle({ pointerEvents: "none" });

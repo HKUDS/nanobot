@@ -1,5 +1,3 @@
-"""Tools for finding and reading persisted conversations."""
-
 # pyright: reportIncompatibleMethodOverride=false
 
 from __future__ import annotations

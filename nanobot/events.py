@@ -1,5 +1,3 @@
-"""Transport-independent notifications emitted by agent operations."""
-
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable

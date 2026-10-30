@@ -1,5 +1,3 @@
-"""Durable display facts, separate from provider/model messages and transports."""
-
 from __future__ import annotations
 
 import json

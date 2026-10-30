@@ -50,7 +50,6 @@ def _paths(tmp_path: Path) -> GatewayRuntimePaths:
 
 
 def test_runtime_state_publish_keeps_existing_snapshot_readable(tmp_path):
-    """Status polling must not prevent a gateway from publishing readiness."""
     from nanobot.utils.atomic_file import _open_snapshot
 
     runtime = GatewayRuntime(paths=_paths(tmp_path / "网关 home"))
@@ -67,7 +66,6 @@ def test_runtime_state_publish_keeps_existing_snapshot_readable(tmp_path):
 
 
 def test_runtime_state_reader_does_not_block_publish_while_decoding(tmp_path, monkeypatch):
-    """Pause a real status read while a readiness update replaces its record."""
     runtime = GatewayRuntime(paths=_paths(tmp_path))
     previous = {"pid": os.getpid(), "identity": "fixture"}
     current = {**previous, "health_host": "127.0.0.1"}
@@ -554,7 +552,6 @@ def test_restart_stops_then_starts_the_background_gateway(tmp_path, monkeypatch)
 
 
 def test_client_lease_reader_keeps_snapshot_during_replacement(tmp_path, monkeypatch):
-    """A real lease read retains its contents while a writer publishes the next state."""
     from contextlib import contextmanager
 
     from nanobot.utils import atomic_file
@@ -803,7 +800,6 @@ def test_lease_queries_filter_a_reused_client_pid_without_writing(
     if auto_stop:
         client.mark_ephemeral()
     original = client.state_path.read_bytes()
-    # An old timestamp detects same-content rewrites without timing sleeps.
     os.utime(client.state_path, (1, 1))
     modified_at = client.state_path.stat().st_mtime_ns
 
@@ -853,7 +849,7 @@ def test_darwin_lease_keeps_old_readers_compatible_and_detects_pid_reuse(
     state = json.loads(client.state_path.read_text(encoding="utf-8"))
     record = state["clients"]["client"]
 
-    assert record["identity"] is None  # Pre-upgrade lease readers keep the live PID.
+    assert record["identity"] is None
     assert record["stable_identity"] == identity
 
     identity = "darwin:42:1786992348:654321"
@@ -1420,7 +1416,6 @@ def test_terminate_windows_targets_only_the_recorded_process_tree(tmp_path, monk
 
     def fake_wait_for_exit(_pid, _timeout_s):
         wait_timeouts.append(_timeout_s)
-        # Simulate a process that exits only after its tree is forcibly terminated.
         return bool(taskkill_calls)
 
     monkeypatch.setattr(runtime, "_wait_for_exit", fake_wait_for_exit)

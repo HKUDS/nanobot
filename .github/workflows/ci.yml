@@ -376,7 +376,6 @@ jobs:
     timeout-minutes: 1
 
     steps:
-      # Keep the existing check name dependent on every WebUI acceptance check.
       - name: Require both WebUI jobs to pass
         env:
           CHECKS_RESULT: ${{ needs.webui_checks.result }}

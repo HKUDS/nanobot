@@ -1,5 +1,3 @@
-"""Ordered session operations with detached reads and durable acknowledgements."""
-
 from __future__ import annotations
 
 import asyncio
@@ -139,7 +137,6 @@ class SessionState:
         operation_name: str,
         barrier: bool = True,
     ) -> _T:
-        """Admit bounded work with FIFO key affinity or a global barrier."""
         self._bind_loop()
         name = operation_name
         if key is None:

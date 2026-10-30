@@ -1,5 +1,3 @@
-"""WebUI history projection over durable SQLite session facts."""
-
 from __future__ import annotations
 
 import base64
@@ -90,7 +88,6 @@ _SESSION_HANDLE_ID_RE = re.compile(r"^handle_[0-9a-f]{32}$")
 
 
 def _response_sources(value: object) -> list[dict[str, str | bool]]:
-    """Allow only recorded display identity, never settings or credential blobs."""
     if not isinstance(value, list):
         return []
     result: list[dict[str, str | bool]] = []
@@ -250,7 +247,6 @@ def _stream_key(record: dict[str, Any], stream: str) -> tuple[str, str, str]:
 
 
 def _projection_receipts(records: Sequence[Mapping[str, Any]]) -> list[_ProjectionReceipt]:
-    """Compress actual represented facts by turn, without covering missing sequences."""
     members: dict[str, set[int]] = {}
     for record in records:
         turn_id, sequence = record.get("turn_id"), record.get("turn_seq")
@@ -276,7 +272,6 @@ def _compact_completed_stream_deltas(
     *,
     include_projection_receipts: bool = False,
 ) -> tuple[list[dict[str, Any]], int]:
-    """Fold transport deltas into canonical end records for a completed turn."""
     if not turn or turn[-1].get("event") != "turn_end":
         return turn, 0
 
@@ -904,7 +899,6 @@ def _stable_record_digest(record: dict[str, Any]) -> str:
 
 
 def _ensure_replay_identities(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Give backfilled/recovered rows a stable identity beside persisted rows."""
     annotated: list[dict[str, Any]] = []
     for fallback_turn_index, turn in enumerate(_split_transcript_turns(lines)):
         anchor = next(
@@ -945,7 +939,6 @@ def _ensure_replay_identities(lines: list[dict[str, Any]]) -> list[dict[str, Any
 
 
 def _transcript_turn_signature(records: list[dict[str, Any]]) -> tuple[str, ...]:
-    """Return durable assistant answer texts used only for backfill matching."""
     texts: list[str] = []
     stream_parts: list[str] = []
 
@@ -1537,7 +1530,6 @@ def _client_projection_event(
 def _client_projection_deferred_trace_groups(
     lines: list[dict[str, Any]],
 ) -> dict[int, _DeferredTraceGroup]:
-    """Group oversized consecutive activity events behind one stable detail ref."""
     groups: dict[int, _DeferredTraceGroup] = {}
     start: int | None = None
     detail_bytes = 0
@@ -1590,7 +1582,6 @@ def _client_projection_deferred_trace_groups(
 
 
 def _client_projection_page_event_count(turn: list[dict[str, Any]]) -> int:
-    """Apply the soft page limit in canonical protocol events, not UI rows."""
     supported = {
         "user",
         "delta",

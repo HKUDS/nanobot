@@ -1,5 +1,3 @@
-"""Tests for the Mattermost channel implementation."""
-
 from __future__ import annotations
 
 import asyncio
@@ -99,11 +97,6 @@ def _make_channel(
     return channel, fake
 
 
-# ---------------------------------------------------------------------------
-# Config parsing
-# ---------------------------------------------------------------------------
-
-
 def test_config_defaults():
     config = MattermostConfig()
     assert config.enabled is False
@@ -159,11 +152,6 @@ def test_config_default_config_classmethod():
     assert d["token"] == ""
 
 
-# ---------------------------------------------------------------------------
-# Self-identification on start
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_start_identifies_bot():
     channel, fake = _make_channel({"serverUrl": "https://chat.example.com", "token": "tok"})
@@ -199,11 +187,6 @@ async def test_start_missing_config():
     assert channel._self_id is None
 
 
-# ---------------------------------------------------------------------------
-# Server URL normalization
-# ---------------------------------------------------------------------------
-
-
 def test_server_url_normalization():
     config = MattermostConfig.model_validate({
         "serverUrl": "https://chat.example.com/",
@@ -222,11 +205,6 @@ def test_server_url_no_trailing_slash():
     })
     channel = MattermostChannel(config, MessageBus())
     assert channel._server_url == "https://chat.example.com"
-
-
-# ---------------------------------------------------------------------------
-# Inbound routing: posted event
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -303,11 +281,6 @@ async def test_posted_event_channel_type_detection():
                     assert mock_handle.call_args[1]["is_dm"] == expected_dm
 
 
-# ---------------------------------------------------------------------------
-# Bot @mention stripping
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_strip_bot_mention_from_incoming():
     channel, fake = _make_channel()
@@ -331,11 +304,6 @@ async def test_strip_bot_mention_from_incoming():
                 assert mock_handle.call_args[1]["content"] == "hello there"
 
 
-# ---------------------------------------------------------------------------
-# DM policy: open / allowlist
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_dm_policy_open():
     channel, fake = _make_channel({"dm": {"policy": "open"}})
@@ -354,11 +322,6 @@ async def test_dm_policy_allowlist_match():
 async def test_dm_disabled():
     channel, fake = _make_channel({"dm": {"enabled": False}})
     assert await channel._is_allowed("u1", "dm_chan", "dm") is False
-
-
-# ---------------------------------------------------------------------------
-# Group policy: mention / open / allowlist
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -384,33 +347,27 @@ async def test_group_policy_allowlist():
 
 @pytest.mark.asyncio
 async def test_group_policy_in_thread_defaults_to_group_policy():
-    """Existing configs keep their main-channel behavior in threads."""
     channel, fake = _make_channel({"groupPolicy": "mention"})
     channel._self_username = "nanobot"
-    # In a main channel (not thread), mention is required
     assert channel._should_respond_in_channel("hello", "c1", in_thread=False) is False
     assert channel._should_respond_in_channel("@nanobot hello", "c1", in_thread=False) is True
-    # In a thread, the omitted override inherits mention policy.
     assert channel._should_respond_in_channel("hello", "c1", in_thread=True) is False
     assert channel._should_respond_in_channel("@nanobot hello", "c1", in_thread=True) is True
 
 
 @pytest.mark.asyncio
 async def test_group_policy_in_thread_mention():
-    """Thread can also use mention policy when configured."""
     channel, fake = _make_channel({
         "groupPolicy": "mention",
         "groupPolicyInThread": "mention",
     })
     channel._self_username = "nanobot"
-    # In a thread with mention policy, mention is required
     assert channel._should_respond_in_channel("hello", "c1", in_thread=True) is False
     assert channel._should_respond_in_channel("@nanobot hello", "c1", in_thread=True) is True
 
 
 @pytest.mark.asyncio
 async def test_group_policy_in_thread_open():
-    """Thread uses open policy when explicitly configured."""
     channel, fake = _make_channel({
         "groupPolicy": "mention",
         "groupPolicyInThread": "open",
@@ -420,7 +377,6 @@ async def test_group_policy_in_thread_open():
 
 @pytest.mark.asyncio
 async def test_posted_thread_event_uses_thread_policy():
-    """A real posted event derives thread policy from its root_id."""
     channel, fake = _make_channel({
         "groupPolicy": "mention",
         "groupPolicyInThread": "open",
@@ -478,7 +434,6 @@ async def test_posted_event_ignores_system_posts(post_type: str):
 
 @pytest.mark.asyncio
 async def test_group_policy_in_thread_allowlist():
-    """Thread uses allowlist policy when configured."""
     channel, fake = _make_channel({
         "groupPolicy": "mention",
         "groupPolicyInThread": "allowlist",
@@ -486,11 +441,6 @@ async def test_group_policy_in_thread_allowlist():
     })
     assert channel._should_respond_in_channel("msg", "c1", in_thread=True) is True
     assert channel._should_respond_in_channel("msg", "c2", in_thread=True) is False
-
-
-# ---------------------------------------------------------------------------
-# Match mode: id / username / email
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -516,11 +466,6 @@ async def test_match_mode_email():
     assert await channel._match_sender("u2", ["alice@x.com"]) is False
 
 
-# ---------------------------------------------------------------------------
-# Identity cache
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_identity_cache_username():
     channel, fake = _make_channel({"allowFromMatchMode": "username", "allowFrom": ["alice"]})
@@ -532,11 +477,6 @@ async def test_identity_cache_username():
 
     await channel._match_sender("u1", ["alice"])
     assert len(fake.get_calls) == calls_before + 1
-
-
-# ---------------------------------------------------------------------------
-# Send
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -627,11 +567,6 @@ async def test_send_reactions_complete_after_final_reply():
     assert [c["path"] for c in fake.delete_calls] == [
         "/api/v4/users/bot_id/posts/orig_post_1/reactions/eyes",
     ]
-
-
-# ---------------------------------------------------------------------------
-# Streaming
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -775,11 +710,6 @@ async def test_coalesced_stream_end_posts_inline_content():
     assert posts[0]["json"]["root_id"] == "root_1"
 
 
-# ---------------------------------------------------------------------------
-# Reactions
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_reaction_add_on_receipt():
     channel, fake = _make_channel()
@@ -798,11 +728,6 @@ async def test_reaction_remove():
     assert len(fake.delete_calls) >= 1
     assert "post_1" in fake.delete_calls[-1]["path"]
     assert "eyes" in fake.delete_calls[-1]["path"]
-
-
-# ---------------------------------------------------------------------------
-# Team filtering
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -892,11 +817,6 @@ async def test_team_filtering_resolves_missing_broadcast_team_and_rejects_wrong_
         mock_handle.assert_not_awaited()
 
 
-# ---------------------------------------------------------------------------
-# Thread session key
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_thread_session_key():
     channel, fake = _make_channel()
@@ -944,11 +864,6 @@ async def test_top_level_mention_uses_thread_session_key():
             kwargs = mock_handle.call_args[1]
             assert kwargs["session_key"] == "mattermost:c1:post_1"
             assert kwargs["metadata"]["mattermost"]["thread_ts"] == "post_1"
-
-
-# ---------------------------------------------------------------------------
-# Action event (interactive buttons)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -1017,11 +932,6 @@ async def test_action_event_rejects_wrong_team():
         mock_handle.assert_not_awaited()
 
 
-# ---------------------------------------------------------------------------
-# Post deleted event
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_post_deleted_cleans_stream_state():
     channel, fake = _make_channel()
@@ -1041,11 +951,6 @@ async def test_post_deleted_cleans_stream_state():
     assert channel._stream_posts["s2"] == "keep_post_2"
 
 
-# ---------------------------------------------------------------------------
-# Auth failure
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_auth_failure_prevents_start():
     channel, fake = _make_channel()
@@ -1053,11 +958,6 @@ async def test_auth_failure_prevents_start():
     with patch.object(fake, "get", side_effect=Exception("401 Unauthorized")):
         await channel.start()
         assert channel._self_id is None
-
-
-# ---------------------------------------------------------------------------
-# DM allowlist with match mode
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -1076,11 +976,6 @@ async def test_dm_allowlist_accepts_pairing_approval():
     channel, fake = _make_channel({"dm": {"policy": "allowlist", "allowFrom": ["u_allowed"]}})
     with patch("nanobot.channels.mattermost.runtime.is_approved", return_value=True):
         assert await channel._is_allowed("u_paired", "dm_chan", "dm") is True
-
-
-# ---------------------------------------------------------------------------
-# Denied DM sends pairing code (not empty message)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -1116,11 +1011,6 @@ async def test_denied_dm_sends_pairing_not_empty_inbound():
     assert len(inbound_events) == 0
 
 
-# ---------------------------------------------------------------------------
-# Bot mention boundary
-# ---------------------------------------------------------------------------
-
-
 def test_is_mentioned_exact():
     channel, fake = _make_channel({"groupPolicy": "mention"})
     channel._self_username = "nanobot"
@@ -1134,11 +1024,6 @@ def test_is_mentioned_no_username():
     channel, fake = _make_channel({"groupPolicy": "mention"})
     channel._self_username = None
     assert channel._is_mentioned("hello @nanobot") is False
-
-
-# ---------------------------------------------------------------------------
-# split_message helper
-# ---------------------------------------------------------------------------
 
 
 def test_message_splitting():

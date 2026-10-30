@@ -1,5 +1,3 @@
-"""Create LLM providers from config."""
-
 from __future__ import annotations
 
 from copy import deepcopy
@@ -60,7 +58,6 @@ def _make_provider_core(
     preset: ModelPresetConfig,
     model: str | None = None,
 ) -> LLMProvider:
-    """Create a plain LLM provider without failover wrapping."""
     setup = resolve_provider_route(
         config,
         preset=preset,

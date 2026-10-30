@@ -1,5 +1,3 @@
-"""Regression coverage for the executable Python import boundaries."""
-
 from __future__ import annotations
 
 import subprocess

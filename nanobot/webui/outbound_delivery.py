@@ -1,5 +1,3 @@
-"""Own WebUI outbound projection, stream state and durable delivery completion."""
-
 from __future__ import annotations
 
 import json

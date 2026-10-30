@@ -285,7 +285,6 @@ function FoldedAgentActivity({
   const [now, setNow] = useState(() => Date.now());
   const wasTurnStreamingRef = useRef(isTurnStreaming);
   const wasTurnStreaming = wasTurnStreamingRef.current;
-  /** Auto follows execution; expanded keeps details open unless manually collapsed. */
   const outerExpanded = expanded ?? (
     userToggledOuter
       ? outerOpenLocal

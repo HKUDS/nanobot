@@ -29,12 +29,10 @@
   padding-inline: calc(var(--math-tag-width) + 1em);
 }
 
-/* Math-heavy prose uses a tighter reading rhythm than ordinary chat. */
 .markdown-content:has(.math-fit) {
   --cjk-line-height: 1.65;
 }
 
-/* Keep list formulas close to their explanations. */
 .markdown-content li .math-fit {
   margin-block: 0.3em 0.35em;
 }

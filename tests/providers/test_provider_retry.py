@@ -404,7 +404,6 @@ async def test_chat_stream_with_retry_retries_timeout_in_new_stream_segment(
 
 @pytest.mark.asyncio
 async def test_chat_with_retry_uses_provider_generation_defaults() -> None:
-    """When callers omit generation params, provider.generation defaults are used."""
     provider = ScriptedProvider([LLMResponse(content="ok")])
     provider.generation = GenerationSettings(temperature=0.2, max_tokens=321, reasoning_effort="high")
 
@@ -417,7 +416,6 @@ async def test_chat_with_retry_uses_provider_generation_defaults() -> None:
 
 @pytest.mark.asyncio
 async def test_chat_with_retry_explicit_override_beats_defaults() -> None:
-    """Explicit kwargs should override provider.generation defaults."""
     provider = ScriptedProvider([LLMResponse(content="ok")])
     provider.generation = GenerationSettings(temperature=0.2, max_tokens=321, reasoning_effort="high")
 
@@ -431,10 +429,6 @@ async def test_chat_with_retry_explicit_override_beats_defaults() -> None:
     assert provider.last_kwargs["temperature"] == 0.9
     assert provider.last_kwargs["max_tokens"] == 9999
     assert provider.last_kwargs["reasoning_effort"] == "low"
-
-
-# ---------------------------------------------------------------------------
-# Image fallback tests
 
 
 @pytest.mark.asyncio
@@ -465,8 +459,6 @@ async def test_account_failure_does_not_retry_without_images(error: LLMResponse)
     assert LLMProvider.public_error_kind(response) in {"authentication", "billing"}
 
 
-# ---------------------------------------------------------------------------
-
 _IMAGE_MSG = [
     {"role": "user", "content": [
         {"type": "text", "text": "describe this"},
@@ -484,7 +476,6 @@ _IMAGE_MSG_NO_META = [
 
 @pytest.mark.asyncio
 async def test_non_transient_error_with_images_retries_without_images() -> None:
-    """Any non-transient error retries once with images stripped when images are present."""
     provider = ScriptedProvider([
         LLMResponse(content="API调用参数有误,请检查文档", finish_reason="error"),
         LLMResponse(content="ok, no image"),
@@ -504,7 +495,6 @@ async def test_non_transient_error_with_images_retries_without_images() -> None:
 
 @pytest.mark.asyncio
 async def test_successful_image_retry_mutates_original_messages_in_place() -> None:
-    """Successful no-image retry should update the caller's message history."""
     provider = ScriptedProvider([
         LLMResponse(content="model does not support images", finish_reason="error"),
         LLMResponse(content="ok, no image"),
@@ -603,7 +593,6 @@ async def test_image_retry_discards_provider_state_with_images(
 
 @pytest.mark.asyncio
 async def test_non_transient_error_without_images_no_retry() -> None:
-    """Non-transient errors without image content are returned immediately."""
     provider = ScriptedProvider([
         LLMResponse(content="401 unauthorized", finish_reason="error"),
     ])
@@ -618,7 +607,6 @@ async def test_non_transient_error_without_images_no_retry() -> None:
 
 @pytest.mark.asyncio
 async def test_image_fallback_returns_error_on_second_failure() -> None:
-    """If the image-stripped retry also fails, return that error."""
     provider = ScriptedProvider([
         LLMResponse(content="some model error", finish_reason="error"),
         LLMResponse(content="still failing", finish_reason="error"),
@@ -633,7 +621,6 @@ async def test_image_fallback_returns_error_on_second_failure() -> None:
 
 @pytest.mark.asyncio
 async def test_image_fallback_without_meta_uses_default_placeholder() -> None:
-    """When _meta is absent, fallback placeholder is non-descriptive."""
     provider = ScriptedProvider([
         LLMResponse(content="error", finish_reason="error"),
         LLMResponse(content="ok"),
@@ -959,15 +946,12 @@ async def test_chat_with_retry_normalizes_explicit_none_max_tokens() -> None:
     )
 
     assert response.content == "ok"
-    # Generation settings default to 4096 / 0.7; explicit None should
-    # have been replaced before reaching chat().
     assert provider.last_kwargs["max_tokens"] == 4096
     assert provider.last_kwargs["temperature"] == 0.7
 
 
 @pytest.mark.asyncio
 async def test_chat_with_retry_retries_zhipu_1302_rate_limit(monkeypatch) -> None:
-    """ZhiPu returns code 1302 with Chinese rate-limit text instead of HTTP 429."""
     provider = ScriptedProvider([
         LLMResponse(
             content='Error: {\'code\': \'1302\', \'message\': \'您的账户已达到速率限制，请您控制请求频率\'}',
@@ -991,7 +975,6 @@ async def test_chat_with_retry_retries_zhipu_1302_rate_limit(monkeypatch) -> Non
 
 @pytest.mark.asyncio
 async def test_chat_with_retry_retries_zhipu_1302_with_429_status(monkeypatch) -> None:
-    """ZhiPu 1302 error with HTTP 429 status should also retry."""
     provider = ScriptedProvider([
         LLMResponse(
             content='Error: {\'code\': \'1302\', \'message\': \'您的账户已达到速率限制，请您控制请求频率\'}',
@@ -1017,7 +1000,6 @@ async def test_chat_with_retry_retries_zhipu_1302_with_429_status(monkeypatch) -
 
 @pytest.mark.asyncio
 async def test_chat_stream_with_retry_normalizes_explicit_none_max_tokens() -> None:
-    """chat_stream_with_retry must apply the same None-guard as chat_with_retry."""
     provider = ScriptedProvider([LLMResponse(content="ok")])
 
     response = await provider.chat_stream_with_retry(

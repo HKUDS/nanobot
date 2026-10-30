@@ -1,5 +1,3 @@
-"""Acceptance must use the built candidate bytes, not a rebuilt substitute."""
-
 import hashlib
 import json
 from zipfile import ZipFile

@@ -1,5 +1,3 @@
-"""Tests for read-only persisted session tools."""
-
 from __future__ import annotations
 
 import json
@@ -90,7 +88,6 @@ def test_session_tools_do_not_own_runtime_context(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_search_sessions_has_no_hidden_content_scan_cutoff(manager):
-    # Seed offline on this thread; nested saves share the existing store transaction.
     with manager._store.transaction():
         for index in range(200):
             _save_session(

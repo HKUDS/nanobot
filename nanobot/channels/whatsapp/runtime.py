@@ -1,5 +1,4 @@
 # pyright: reportConstantRedefinition=false, reportMissingTypeStubs=false, reportUnusedFunction=false
-"""WhatsApp channel implementation using neonize."""
 
 from __future__ import annotations
 
@@ -649,11 +648,6 @@ class WhatsAppChannel(BaseChannel):
                 self._self_jids.add(_bare_jid(jid))
 
     async def _send_read_receipt(self, client: Any, source: Any, message_id: str) -> None:
-        """Send a read receipt (blue double-check) for an incoming message.
-
-        Best-effort: any failure is logged at debug level and swallowed so it
-        never blocks message processing.
-        """
         if not message_id:
             return
         try:
@@ -669,7 +663,7 @@ class WhatsAppChannel(BaseChannel):
                 sender=sender,
                 receipt=ReceiptType.READ,
             )
-        except Exception as exc:  # noqa: BLE001 - read receipt is best-effort
+        except Exception as exc:
             self.logger.debug("Failed to send WhatsApp read receipt: {}", exc)
 
     async def _handle_neonize_message(self, client: Any, event: Any) -> None:
@@ -706,7 +700,6 @@ class WhatsAppChannel(BaseChannel):
             while len(self._processed_message_ids) > 1000:
                 self._processed_message_ids.popitem(last=False)
 
-        # Mark the incoming message as read (blue double-check). Best-effort.
         await self._send_read_receipt(client, source, message_id)
 
         participant_jid = _normalize_jid(_safe_attr(source, "Sender"))

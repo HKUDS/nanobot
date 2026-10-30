@@ -1,5 +1,3 @@
-"""Explicit goal requests can steer a running session without restarting it."""
-
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 

@@ -1,4 +1,3 @@
-/** Transport notifications shared by the browser and terminal clients. */
 export type RecoveryStatus = "resuming" | "awaiting_user" | "recovered" | "failed"
 
 export interface RecoveryState {

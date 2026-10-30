@@ -1,5 +1,3 @@
-"""WebUI projection of durable session facts."""
-
 from __future__ import annotations
 
 from collections.abc import Mapping

@@ -128,7 +128,6 @@ export interface UIMessage {
   toolEvents?: ToolProgressEvent[];
   /** Oversized persisted trace content that can be fetched when activity is expanded. */
   traceDetail?: UITraceDetail;
-  /** Activity rows: explicit file edits emitted by edit tools. */
   fileEdits?: UIFileEdit[];
   /** Activity rows created during the same agent phase share one collapsible block. */
   activitySegmentId?: string;
@@ -141,7 +140,6 @@ export interface UIMessage {
   compactReply?: "empty" | "failed";
   /** User turn: optimistic blob URLs for preview. Replay: placeholder chips. */
   images?: UIImage[];
-  /** Signed or local UI-renderable media attachments. */
   media?: UIMediaAttachment[];
   /** App-specific CLI adapters explicitly attached to this user turn. */
   cliApps?: UICliAppAttachment[];
@@ -153,8 +151,6 @@ export interface UIMessage {
    * incrementally from ``reasoning_delta`` frames; finalized when
    * ``reasoning_end`` arrives. */
   reasoning?: string;
-  /** True while ``reasoning_delta`` frames are still arriving for this turn.
-   * Drives the shimmer header on ``ReasoningBubble``. */
   reasoningStreaming?: boolean;
   /** End-to-end wall time for this assistant turn (persisted ``latency_ms`` / ``turn_end``). */
   latencyMs?: number;
@@ -181,7 +177,6 @@ export interface UIMessage {
   reasoningStreamId?: string;
   /** Ephemeral delivery lifecycle for optimistic user messages. */
   deliveryStatus?: MessageDeliveryStatus;
-  /** Structured rejection reason shown with a failed optimistic message. */
   deliveryErrorKind?: MessageDeliveryErrorKind;
 }
 
@@ -394,7 +389,6 @@ interface AgentUIBlob {
   data?: unknown;
 }
 
-/** WebSocket snapshot for sustained goals (`goal_state` events; keyed by ``chat_id``). */
 export interface GoalStateWsPayload {
   active: boolean;
   status?: "active" | "blocked";
@@ -1706,7 +1700,6 @@ export interface OutboundMcpPresetMention {
   brand_color?: string | null;
 }
 
-/** Response shape for ``GET .../webui-thread`` (server-built transcript replay). */
 interface WebuiThreadPagePayload {
   before_cursor?: string | null;
   has_more_before?: boolean;

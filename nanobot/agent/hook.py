@@ -1,5 +1,3 @@
-"""Shared lifecycle hook primitives for agent runs."""
-
 from __future__ import annotations
 
 from collections.abc import Callable

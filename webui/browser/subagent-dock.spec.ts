@@ -122,7 +122,6 @@ for (const width of [1440, 390]) {
     const statusSlot = (await row.locator(":scope > span").first().boundingBox())!;
     await page.mouse.move(1, 1);
     await page.screenshot({ path: info.outputPath("one-task-ring-running.png") });
-    // Finish through the existing control without dismissing the reading view.
     await page.getByRole("button", { name: "全部完成", exact: true }).evaluate(node => (node as HTMLButtonElement).click());
     const heading = tree.getByRole("heading", { level: 2, name: "天气结果" });
     await expect(heading).toBeVisible();

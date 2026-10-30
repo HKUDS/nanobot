@@ -1,5 +1,3 @@
-"""Caller-controlled continuation respects live state and the runner budget."""
-
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest

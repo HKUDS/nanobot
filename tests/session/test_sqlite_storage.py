@@ -1,5 +1,3 @@
-"""SQLite durability and asynchronous state ownership contracts."""
-
 import asyncio
 import sqlite3
 import subprocess

@@ -376,7 +376,6 @@ def mock_paths():
 
 
 def test_onboard_fresh_install(mock_paths):
-    """No existing config — should create from scratch."""
     config_file, workspace_dir, mock_ws = mock_paths
 
     result = runner.invoke(app, ["onboard"])
@@ -393,7 +392,6 @@ def test_onboard_fresh_install(mock_paths):
 
 
 def test_onboard_recommends_webui(mock_paths):
-    """Default onboarding should recommend the guided WebUI launcher."""
     result = runner.invoke(app, ["onboard"])
 
     assert result.exit_code == 0
@@ -401,7 +399,6 @@ def test_onboard_recommends_webui(mock_paths):
 
 
 def test_onboard_existing_config_refresh(mock_paths):
-    """Config exists, user declines overwrite — should refresh (load-merge-save)."""
     config_file, workspace_dir, _ = mock_paths
     config_file.write_text('{"existing": true}')
 
@@ -415,7 +412,6 @@ def test_onboard_existing_config_refresh(mock_paths):
 
 
 def test_onboard_existing_config_refresh_non_interactive(mock_paths):
-    """Config exists, user specifies --refresh — should refresh non-interactively (no prompt)."""
     config_file, workspace_dir, _ = mock_paths
     config_file.write_text('{"existing": true}')
 
@@ -429,7 +425,6 @@ def test_onboard_existing_config_refresh_non_interactive(mock_paths):
 
 
 def test_onboard_existing_config_overwrite(mock_paths):
-    """Config exists, user confirms overwrite — should reset to defaults."""
     config_file, workspace_dir, _ = mock_paths
     config_file.write_text('{"existing": true}')
 
@@ -442,7 +437,6 @@ def test_onboard_existing_config_overwrite(mock_paths):
 
 
 def test_onboard_existing_workspace_safe_create(mock_paths):
-    """Workspace exists — should not recreate, but still add missing templates."""
     config_file, workspace_dir, _ = mock_paths
     workspace_dir.mkdir(parents=True)
     config_file.write_text("{}")
@@ -1286,7 +1280,6 @@ def test_config_bare_nemotron_still_auto_routes_to_configured_ollama():
 
 
 def test_config_cloud_nemotron_is_not_hijacked_by_configured_ollama():
-    """An explicit cloud namespace takes precedence over local keywords."""
     config = Config.model_validate(
         {
             "agents": {
@@ -1921,7 +1914,7 @@ def test_agent_workspace_override_wins_over_config_workspace(mock_agent_runtime,
     [
         ("", False),
         ("# Title\n\n## Active Tasks\n", False),
-        ("<!--\nmulti-line\ncomment\n-->\n", False),  # block comment, not tasks
+        ("<!--\nmulti-line\ncomment\n-->\n", False),
         ("<!-- single line -->\n", False),
         ("## Active Tasks\n\n- water the plants\n", True),
         ("## Active Tasks\n\n### Garden\n\n- water the plants\n", True),
@@ -2129,7 +2122,6 @@ def _patch_cli_command_runtime(
 ) -> None:
     from importlib import import_module
 
-    # Load adapter contracts before replacing runtime factories for this invocation.
     import_module("nanobot.session.webui_turns")
     import_module("nanobot.channels.validation")
     import_module("nanobot.channels.websocket.runtime")
@@ -3835,7 +3827,6 @@ def test_gateway_custom_config_workspace_does_not_migrate_legacy_cron(
 
 
 def test_migrate_cron_store_moves_legacy_file(tmp_path: Path) -> None:
-    """Legacy global jobs.json is moved into the workspace on first run."""
     from nanobot.cli.runtime_config import _migrate_cron_store
 
     legacy_dir = tmp_path / "global" / "cron"
@@ -3856,7 +3847,6 @@ def test_migrate_cron_store_moves_legacy_file(tmp_path: Path) -> None:
 
 
 def test_migrate_cron_store_skips_when_workspace_file_exists(tmp_path: Path) -> None:
-    """Migration does not overwrite an existing workspace cron store."""
     from nanobot.cli.runtime_config import _migrate_cron_store
 
     legacy_dir = tmp_path / "global" / "cron"

@@ -24,7 +24,6 @@ _STREAM_REFRESH_INTERVAL = 0.05
 
 
 def _clear_current_line(console: Console) -> None:
-    """Erase a transient status line before printing persistent output."""
     file = console.file
     isatty = getattr(file, "isatty", lambda: False)
     if not isatty():
@@ -118,13 +117,11 @@ class StreamRenderer:
         self._start_spinner()
 
     def _renderable(self) -> Markdown | Text:
-        """Create a renderable from the current buffer."""
         if self._md and self._buf:
             return Markdown(self._buf)
         return Text(self._buf or "")
 
     def _render_str(self) -> str:
-        """Render current buffer to a plain string via Rich."""
         with self._console.capture() as cap:
             self._console.print(self._renderable())
         return cap.get()
@@ -234,7 +231,6 @@ class StreamRenderer:
             self._live = None
         self._stop_spinner()
         if self._buf.strip():
-            # Print final rendered content (persists after Live is gone).
             out = sys.stdout
             out.write(self._render_str())
             out.flush()

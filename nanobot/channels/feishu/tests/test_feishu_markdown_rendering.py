@@ -1,4 +1,3 @@
-# Check optional Feishu dependencies before running tests
 try:
     from nanobot.channels.feishu.runtime import FEISHU_AVAILABLE
 except ImportError:

@@ -1,5 +1,3 @@
-"""Cross-suite test infrastructure."""
-
 from __future__ import annotations
 
 import os

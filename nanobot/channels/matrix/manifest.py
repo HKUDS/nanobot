@@ -1,5 +1,3 @@
-"""Matrix management contract."""
-
 from nanobot.channels._manifest import GROUP_POLICIES, field, one_of, required_fields
 from nanobot.channels.contracts import ChannelSetupSpec
 from nanobot.channels.matrix.validation import validate

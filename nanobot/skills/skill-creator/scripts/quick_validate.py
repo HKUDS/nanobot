@@ -1,7 +1,4 @@
 #!/usr/bin/env python3
-"""
-Minimal validator for nanobot skill folders.
-"""
 
 import re
 import sys
@@ -37,7 +34,6 @@ def _extract_frontmatter(content: str) -> Optional[str]:
 
 
 def _parse_simple_frontmatter(frontmatter_text: str) -> Optional[dict[str, str]]:
-    """Fallback parser for simple frontmatter when PyYAML is unavailable."""
     parsed: dict[str, str] = {}
     current_key: Optional[str] = None
     multiline_key: Optional[str] = None

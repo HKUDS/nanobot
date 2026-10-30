@@ -1,5 +1,3 @@
-"""Public resolution boundary for default and overridden LLM runtimes."""
-
 from __future__ import annotations
 
 import asyncio
@@ -26,7 +24,6 @@ from nanobot.utils.llm_runtime import LLMRuntime, runtime_from_provider_snapshot
 
 
 def _override_key(value: object, active: set[int] | None = None) -> tuple[object, ...] | None:
-    """Detach JSON-like identity without comparing application objects or mixing bool/int."""
     if value is None or type(value) in (str, bool, int):
         return (type(value), value)
     if type(value) is float:
@@ -235,7 +232,6 @@ class ModelRuntimeResolver:
         return self._runtime
 
     def _refresh_provider_generation(self) -> LLMRuntime | None:
-        """Adopt direct provider-default changes only for provider-backed defaults."""
         if not self._tracks_provider_generation:
             return None
         runtime = self._runtime

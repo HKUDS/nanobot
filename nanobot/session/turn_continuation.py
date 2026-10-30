@@ -232,7 +232,6 @@ def _save_skip_for_turn(
     initial_message_count: int,
     input_persisted_early: bool,
 ) -> int:
-    """Return the persisted-message append boundary for this turn."""
     if message_metadata and message_metadata.get(SKIP_USER_PERSIST_META) is True:
         return initial_message_count
     if internal_continuation_inbound(message_metadata):
@@ -306,7 +305,6 @@ def _strip_terminal_assistant(
     messages: list[dict[str, Any]],
     final_content: str | None,
 ) -> list[dict[str, Any]]:
-    """Drop the synthetic max-iteration assistant message before saving history."""
     if not messages:
         return messages
     last = messages[-1]

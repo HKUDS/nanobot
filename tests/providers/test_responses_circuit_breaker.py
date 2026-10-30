@@ -1,5 +1,3 @@
-"""Tests for Responses API circuit breaker in OpenAICompatProvider."""
-
 import time
 
 import pytest
@@ -156,7 +154,6 @@ def test_probe_after_interval(provider, monkeypatch):
         provider._record_responses_failure("gpt-5", None)
     assert provider._should_use_responses_api("gpt-5", None) is False
 
-    # Fast-forward past the probe interval
     key = "gpt-5:"
     provider._responses_tripped_at[key] = time.monotonic() - _RESPONSES_PROBE_INTERVAL_S - 1
     assert provider._should_use_responses_api("gpt-5", None) is True
@@ -179,11 +176,6 @@ def test_reasoning_effort_key_is_case_insensitive(provider):
     for _ in range(_RESPONSES_FAILURE_THRESHOLD):
         provider._record_responses_failure("o3", "High")
     assert provider._should_use_responses_api("o3", "high") is False
-
-
-# ======================================================================
-# _should_fallback_from_responses_error
-# ======================================================================
 
 
 class _FakeAPIError(Exception):
@@ -214,9 +206,7 @@ def test_legacy_compatibility_markers_still_trigger_fallback():
     assert OpenAICompatProvider._should_fallback_from_responses_error(err) is True
 
 
-# ======================================================================
 # DeepSeek Responses wire shape (PR #5214 root cause)
-# ======================================================================
 
 
 def _deepseek_provider(provider):
@@ -316,9 +306,8 @@ def test_deepseek_replay_body_keeps_reasoning_content_as_array(provider):
     )
 
     reasoning_items = [item for item in body["input"] if item.get("type") == "reasoning"]
-    assert len(reasoning_items) == 2  # one replayed from state, one converted
+    assert len(reasoning_items) == 2
     assert isinstance(reasoning_items[0]["content"], list)
-    # Stored replay items keep their original block type.
     assert reasoning_items[0]["content"][0]["type"] == "output_text"
     assert isinstance(reasoning_items[1]["content"], list)
     assert reasoning_items[1]["content"][0]["type"] == "reasoning_text"

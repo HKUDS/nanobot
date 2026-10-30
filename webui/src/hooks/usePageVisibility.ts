@@ -4,7 +4,6 @@ function pageIsVisible(): boolean {
   return typeof document === "undefined" || document.visibilityState !== "hidden";
 }
 
-/** Keep background tabs quiet while resuming work immediately on return. */
 export function usePageVisibility(): boolean {
   const [visible, setVisible] = useState(pageIsVisible);
 

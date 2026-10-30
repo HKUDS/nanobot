@@ -1,5 +1,3 @@
-"""Real listener regressions for peer disconnects while an HTTP route awaits."""
-
 import asyncio
 import json
 import logging
@@ -54,7 +52,6 @@ async def _listener(tmp_path, monkeypatch, caplog, unix, process_request):
         return await dispatch_http(connection, request)
 
     monkeypatch.setattr(channel, "_dispatch_http", dispatch)
-    # Capture independently of logging redirection while retaining the real filter.
     logger = logging.Logger("websockets.eof-regression", level=logging.ERROR)
     logger.addHandler(caplog.handler)
     logger.addFilter(WebSocketHandshakeNoiseFilter())

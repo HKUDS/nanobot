@@ -50,7 +50,7 @@ export function StarPrompt({ ready }: { ready: boolean }) {
         previousFocus.current = document.activeElement instanceof HTMLElement
           ? document.activeElement : null;
         setOpen(true);
-      }).catch(() => { /* Optional invitations stay hidden when storage is unavailable. */ });
+      }).catch(() => {});
     });
     return () => { cancelled = true; unsubscribe(); };
   }, [client, ready]);

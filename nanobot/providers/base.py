@@ -1,5 +1,3 @@
-"""Base LLM provider interface."""
-
 from __future__ import annotations
 
 import asyncio
@@ -296,8 +294,8 @@ class LLMResponse:
     generation_ms: int | None = None
     ttft_ms: int | None = None
     retry_after: float | None = None  # Provider supplied retry wait in seconds.
-    reasoning_content: str | None = None  # Kimi, DeepSeek-R1, MiMo etc.
-    thinking_blocks: list[dict[str, Any]] | None = None  # Anthropic extended thinking
+    reasoning_content: str | None = None
+    thinking_blocks: list[dict[str, Any]] | None = None
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
     # True only when this response installed a new provider-native compaction
     # boundary. Replaying an older compaction item does not set this flag.
@@ -1048,7 +1046,6 @@ class LLMProvider(ABC):
         return found
 
     async def _safe_chat(self, **kwargs: Any) -> LLMResponse:
-        """Call chat() and convert unexpected exceptions to error responses."""
         started_at_ms = time.time_ns() // 1_000_000
         started_at_ns = time.monotonic_ns()
         try:
@@ -1146,7 +1143,6 @@ class LLMProvider(ABC):
         return await self.chat_stream(**kwargs)
 
     async def _safe_chat_stream(self, **kwargs: Any) -> LLMResponse:
-        """Call chat_stream() and convert unexpected exceptions to error responses."""
         started_at_ms = time.time_ns() // 1_000_000
         started_at_ns = time.monotonic_ns()
         first_output_at_ns: int | None = None
@@ -1385,7 +1381,6 @@ class LLMProvider(ABC):
         should_retry_guard: Callable[[], bool] | None = None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
-        """Run one chat entry point through this provider's retry policy."""
         call = self._safe_chat_stream if stream else self._safe_chat
 
         async def attributed_call(**kwargs: Any) -> LLMResponse:
@@ -1719,7 +1714,6 @@ class LLMProvider(ABC):
         original_messages: list[dict[str, Any]],
         response: LLMResponse,
     ) -> LLMResponse:
-        """Try image compatibility repair once, outside transient retries."""
         # Removing the user's images cannot repair account access.
         if (
             (response.error_kind or "").lower() in {"authentication", "oauth_auth_required"}

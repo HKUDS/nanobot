@@ -504,7 +504,6 @@ async def test_process_message_does_not_use_referenced_fallback_when_top_level_m
 @pytest.mark.asyncio
 async def test_process_message_does_not_fallback_when_top_level_media_exists_but_download_fails() -> None:
     channel, bus = _make_channel()
-    # Top-level image download fails (None), referenced image would succeed if fallback were triggered.
     channel._download_media_item = AsyncMock(side_effect=[None, "/tmp/ref.jpg"])
 
     await channel._process_message(
@@ -531,7 +530,6 @@ async def test_process_message_does_not_fallback_when_top_level_media_exists_but
 
     inbound = await asyncio.wait_for(bus.consume_inbound(), timeout=1.0)
 
-    # Should only attempt top-level media item; reference fallback must not activate.
     channel._download_media_item.assert_awaited_once_with(
         {"media": {"encrypt_query_param": "top-enc"}},
         "image",
@@ -1000,7 +998,6 @@ async def test_process_message_skips_bot_messages() -> None:
 
 @pytest.mark.asyncio
 async def test_process_message_starts_typing_on_inbound() -> None:
-    """Typing indicator fires immediately when user message arrives."""
     channel, _bus = _make_channel()
     channel._running = True
     channel._client = object()
@@ -1024,7 +1021,6 @@ async def test_process_message_starts_typing_on_inbound() -> None:
 
 @pytest.mark.asyncio
 async def test_send_final_message_clears_typing_indicator() -> None:
-    """Non-progress send should cancel typing status."""
     channel, _bus = _make_channel()
     channel._client = object()
     channel._token = "token"
@@ -1047,7 +1043,6 @@ async def test_send_final_message_clears_typing_indicator() -> None:
 
 @pytest.mark.asyncio
 async def test_send_progress_message_keeps_typing_indicator() -> None:
-    """Progress messages must not cancel typing status."""
     channel, _bus = _make_channel()
     channel._client = object()
     channel._token = "token"
@@ -1108,7 +1103,6 @@ async def test_send_media_uses_upload_full_url_when_present(tmp_path) -> None:
 
     await channel._send_media_file("wx-user", str(media_file), "ctx-1")
 
-    # first POST call is CDN upload
     cdn_url = cdn_post.await_args_list[0].args[0]
     assert cdn_url == "https://upload-full.example.test/path?foo=bar"
 
@@ -1219,16 +1213,13 @@ async def test_get_typing_ticket_failure_uses_backoff_and_cached_ticket(monkeypa
     first = await channel._get_typing_ticket("wx-user", "ctx-1")
     assert first == "ticket-ok"
 
-    # force refresh window reached
     now["value"] = now["value"] + (12 * 60 * 60) + 1
     channel._api_post = AsyncMock(return_value={"ret": 1, "errmsg": "temporary failure"})
 
-    # On refresh failure, should still return cached ticket and apply backoff.
     second = await channel._get_typing_ticket("wx-user", "ctx-2")
     assert second == "ticket-ok"
     assert channel._api_post.await_count == 1
 
-    # Before backoff expiry, no extra fetch should happen.
     now["value"] += 1
     third = await channel._get_typing_ticket("wx-user", "ctx-3")
     assert third == "ticket-ok"
@@ -1297,7 +1288,7 @@ async def test_qr_login_treats_5xx_gateway_response_error_as_wait_and_recovers(
 
 
 def test_decrypt_aes_ecb_strips_valid_pkcs7_padding() -> None:
-    key_b64 = "MDEyMzQ1Njc4OWFiY2RlZg=="  # base64("0123456789abcdef")
+    key_b64 = "MDEyMzQ1Njc4OWFiY2RlZg=="
     plaintext = b"hello-weixin-padding"
 
     ciphertext = _encrypt_aes_ecb(plaintext, key_b64)
@@ -1466,11 +1457,6 @@ async def test_download_media_item_non_image_requires_aes_key_even_with_full_url
     channel._client.get.assert_not_awaited()
 
 
-# ---------------------------------------------------------------------------
-# Tests for media-send error classification (network vs non-network errors)
-# ---------------------------------------------------------------------------
-
-
 def _make_outbound_msg(chat_id: str = "wx-user", content: str = "", media: list | None = None):
     """Build a minimal OutboundMessage-like object for send() tests."""
     from nanobot.bus.events import OutboundMessage
@@ -1520,13 +1506,11 @@ async def test_send_media_timeout_error_propagates_without_text_fallback() -> No
     with pytest.raises(httpx.TimeoutException, match="timed out"):
         await channel.send(msg)
 
-    # _send_text must NOT have been called as a fallback
     channel._send_text.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_send_media_transport_error_propagates_without_text_fallback() -> None:
-    """httpx.TransportError during media send must re-raise immediately."""
     channel, _bus = _make_channel()
     channel._client = object()
     channel._token = "token"
@@ -1546,7 +1530,6 @@ async def test_send_media_transport_error_propagates_without_text_fallback() -> 
 
 @pytest.mark.asyncio
 async def test_send_media_5xx_http_status_error_propagates_without_text_fallback() -> None:
-    """httpx.HTTPStatusError with a 5xx status must re-raise immediately."""
     channel, _bus = _make_channel()
     channel._client = object()
     channel._token = "token"
@@ -1573,7 +1556,6 @@ async def test_send_media_5xx_http_status_error_propagates_without_text_fallback
 
 @pytest.mark.asyncio
 async def test_send_media_4xx_http_status_error_falls_back_to_text() -> None:
-    """httpx.HTTPStatusError with a 4xx status should fall back to text, not re-raise."""
     channel, _bus = _make_channel()
     channel._client = object()
     channel._token = "token"
@@ -1592,10 +1574,8 @@ async def test_send_media_4xx_http_status_error_falls_back_to_text() -> None:
 
     msg = _make_outbound_msg(chat_id="wx-user", media=["/tmp/photo.jpg"])
 
-    # Should NOT raise — 4xx is a client error, non-retryable
     await channel.send(msg)
 
-    # _send_text should have been called with the fallback message
     channel._send_text.assert_awaited_once_with(
         "wx-user", "[Failed to send: photo.jpg]", "ctx-1"
     )
@@ -1603,7 +1583,6 @@ async def test_send_media_4xx_http_status_error_falls_back_to_text() -> None:
 
 @pytest.mark.asyncio
 async def test_send_media_file_not_found_falls_back_to_text() -> None:
-    """FileNotFoundError (a non-network error) should fall back to text."""
     channel, _bus = _make_channel()
     channel._client = object()
     channel._token = "token"
@@ -1615,7 +1594,6 @@ async def test_send_media_file_not_found_falls_back_to_text() -> None:
 
     msg = _make_outbound_msg(chat_id="wx-user", media=["/tmp/missing.jpg"])
 
-    # Should NOT raise
     await channel.send(msg)
 
     channel._send_text.assert_awaited_once_with(
@@ -1625,7 +1603,6 @@ async def test_send_media_file_not_found_falls_back_to_text() -> None:
 
 @pytest.mark.asyncio
 async def test_send_media_value_error_falls_back_to_text() -> None:
-    """ValueError (e.g. unsupported format) should fall back to text."""
     channel, _bus = _make_channel()
     channel._client = object()
     channel._token = "token"
@@ -1637,7 +1614,6 @@ async def test_send_media_value_error_falls_back_to_text() -> None:
 
     msg = _make_outbound_msg(chat_id="wx-user", media=["/tmp/file.xyz"])
 
-    # Should NOT raise
     await channel.send(msg)
 
     channel._send_text.assert_awaited_once_with(
@@ -1663,14 +1639,8 @@ async def test_send_media_network_error_does_not_double_api_calls() -> None:
     with pytest.raises(httpx.ConnectError):
         await channel.send(msg)
 
-    # _send_media_file called once, _send_text never called
     channel._send_media_file.assert_awaited_once()
     channel._send_text.assert_not_awaited()
-
-
-# ---------------------------------------------------------------------------
-# Tests for _send_text raising on API errors (previously silently swallowed)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -1692,7 +1662,6 @@ async def test_send_text_raises_on_api_error() -> None:
 
 @pytest.mark.asyncio
 async def test_send_text_succeeds_on_zero_errcode() -> None:
-    """_send_text must NOT raise when errcode is 0."""
     channel, _bus = _make_channel()
     channel._client = object()
     channel._token = "token"
@@ -1721,11 +1690,6 @@ async def test_send_text_raises_on_nonzero_ret_even_when_errcode_zero() -> None:
         await channel._send_text("wx-user", "hello", "ctx-ok")
 
     channel._api_post.assert_awaited_once()
-
-
-# ---------------------------------------------------------------------------
-# Tests for _poll_once not silently dropping messages on processing errors
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -1767,11 +1731,8 @@ async def test_poll_once_logs_exception_on_process_message_failure(monkeypatch) 
 
     await channel._poll_once()
 
-    # Both messages should have been attempted
     assert calls == ["msg-1", "msg-2"]
-    # Buffer should still advance (already updated before processing)
     assert channel._get_updates_buf == "new-buf"
-    # Error should be logged
     assert any("Failed to process WeChat message" in m for m in logged_messages)
 
 
@@ -1782,7 +1743,7 @@ async def test_poll_loop_logs_exception_and_continues_on_poll_failure(monkeypatc
     channel, _bus = _make_channel()
     channel._client = object()
     channel._token = "token"
-    channel.config.token = "token"  # skip QR login in start()
+    channel.config.token = "token"
     channel._running = True
 
     call_count = 0
@@ -1793,7 +1754,7 @@ async def test_poll_loop_logs_exception_and_continues_on_poll_failure(monkeypatc
         call_count += 1
         if call_count == 1:
             raise RuntimeError("poll exploded")
-        channel._running = False  # Stop after second call
+        channel._running = False
 
     channel._poll_once = _failing_poll  # type: ignore[method-assign]
 
@@ -1803,7 +1764,6 @@ async def test_poll_loop_logs_exception_and_continues_on_poll_failure(monkeypatc
         lambda message, *args, **kwargs: logged_messages.append(str(message)),
     )
 
-    # Use a tiny retry delay so the test finishes quickly
     original_retry = weixin_mod.RETRY_DELAY_S
     weixin_mod.RETRY_DELAY_S = 0.01
     try:
@@ -1813,11 +1773,6 @@ async def test_poll_loop_logs_exception_and_continues_on_poll_failure(monkeypatc
 
     assert call_count == 2
     assert any("WeChat poll loop error" in m for m in logged_messages)
-
-
-# ---------------------------------------------------------------------------
-# Tool-hint buffering
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -1905,7 +1860,6 @@ async def test_thought_progress_flushes_tool_hints() -> None:
     channel._context_token_at["wx-user"] = time.time()
     channel._send_text = AsyncMock()
 
-    # Buffer a tool hint
     await channel.send(
         type(
             "Msg",
@@ -1920,8 +1874,6 @@ async def test_thought_progress_flushes_tool_hints() -> None:
         )()
     )
 
-    # Send a thought — progress but not a tool_hint.
-    # It must act as a separator and flush the buffered hint.
     await channel.send(
         type(
             "Msg",
@@ -1936,12 +1888,10 @@ async def test_thought_progress_flushes_tool_hints() -> None:
         )()
     )
 
-    # The buffered hint was flushed before the thought was sent.
     channel._send_text.assert_any_await("wx-user", "search 'foo'", "ctx-1")
     channel._send_text.assert_any_await("wx-user", "Let me think...", "ctx-1")
     assert "wx-user" not in channel._pending_tool_hints
 
-    # Final answer arrives with nothing left to flush.
     await channel.send(
         type(
             "Msg",
@@ -1972,7 +1922,6 @@ async def test_reasoning_delta_does_not_flush_tool_hints() -> None:
     channel._context_token_at["wx-user"] = time.time()
     channel._send_text = AsyncMock()
 
-    # Buffer a tool hint
     await channel.send(
         type(
             "Msg",
@@ -1987,7 +1936,6 @@ async def test_reasoning_delta_does_not_flush_tool_hints() -> None:
         )()
     )
 
-    # Send a reasoning delta — invisible in WeChat, must NOT flush
     await channel.send(
         type(
             "Msg",
@@ -2002,11 +1950,9 @@ async def test_reasoning_delta_does_not_flush_tool_hints() -> None:
         )()
     )
 
-    # Reasoning is invisible; hint stays buffered, _send_text not called
     channel._send_text.assert_not_awaited()
     assert channel._pending_tool_hints["wx-user"] == ["search 'foo'"]
 
-    # Final answer flushes the buffered hint
     await channel.send(
         type(
             "Msg",
@@ -2037,7 +1983,6 @@ async def test_empty_progress_message_does_not_flush_tool_hints() -> None:
     channel._context_token_at["wx-user"] = time.time()
     channel._send_text = AsyncMock()
 
-    # Buffer a tool hint
     await channel.send(
         type(
             "Msg",
@@ -2052,7 +1997,6 @@ async def test_empty_progress_message_does_not_flush_tool_hints() -> None:
         )()
     )
 
-    # Send an empty progress message (no content, no media)
     msg = OutboundMessage(
         channel="weixin",
         chat_id="wx-user",
@@ -2064,11 +2008,9 @@ async def test_empty_progress_message_does_not_flush_tool_hints() -> None:
     )
     await ChannelManager._send_once(channel, channel.prepare_tool_events(msg))
 
-    # Nothing should have been sent yet
     channel._send_text.assert_not_awaited()
     assert channel._pending_tool_hints["wx-user"] == ["search 'foo'"]
 
-    # Final answer flushes the buffered hint
     await channel.send(
         type(
             "Msg",

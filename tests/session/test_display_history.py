@@ -1,5 +1,3 @@
-"""One SQLite owner for model messages and durable, generation-bound display facts."""
-
 from __future__ import annotations
 
 import json

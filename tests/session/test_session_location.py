@@ -1,5 +1,3 @@
-"""Session storage location: outside the agent workspace (ADR-0001)."""
-
 from __future__ import annotations
 
 import os
@@ -22,19 +20,15 @@ def test_sessions_are_stored_outside_workspace(tmp_path: Path) -> None:
     session.add_message("user", "hello")
     manager.save(session)
 
-    # The session file must NOT live inside the workspace.
     workspace_sessions = workspace / "sessions"
     assert not workspace_sessions.exists() or not any(workspace_sessions.glob("*.jsonl"))
 
-    # The out-of-workspace store records which workspace it belongs to and the
-    # workspace carries only a non-secret stable identity marker.
     marker = manager.sessions_dir / ".workspace"
     assert marker.read_text(encoding="utf-8").strip() == str(workspace.resolve())
     workspace_id = (workspace / ".nanobot" / "workspace-id").read_text(encoding="utf-8").strip()
     assert manager.sessions_dir.name == workspace_id
     assert manager.sessions_dir.parent.name == "sessions"
 
-    # And it must still round-trip through a fresh manager for the same workspace.
     reloaded = SessionManager(workspace=workspace).get_or_create("telegram:1")
     assert reloaded.messages[-1]["content"] == "hello"
 
@@ -66,7 +60,6 @@ def test_different_workspaces_are_isolated(tmp_path: Path) -> None:
     session.add_message("user", "secret-for-a")
     manager_a.save(session)
 
-    # A second workspace must not see A's session.
     assert manager_a.sessions_dir != SessionManager(workspace=workspace_b).sessions_dir
     in_b = SessionManager(workspace=workspace_b).get_or_create("telegram:1")
     assert in_b.messages == []
@@ -179,7 +172,6 @@ def test_equivalent_workspace_paths_share_one_store(tmp_path: Path) -> None:
         except OSError as exc:
             pytest.skip(f"directory symlink unavailable: {exc}")
 
-    # Save via the real path, then read via an equivalent directory link.
     manager = SessionManager(workspace=real_workspace)
     session = manager.get_or_create("telegram:1")
     session.add_message("user", "via-real")

@@ -1,5 +1,3 @@
-"""Tests for custom provider thinking_style config passthrough."""
-
 from __future__ import annotations
 
 from nanobot.config.schema import Config, ProviderConfig, ProvidersConfig
@@ -8,7 +6,6 @@ from nanobot.providers.registry import create_dynamic_spec
 
 
 class TestCustomProviderThinkingStyle:
-    """Verify that thinking_style flows from config to ProviderSpec."""
 
     def test_default_thinking_style_is_none(self) -> None:
         cfg = ProviderConfig()
@@ -31,12 +28,10 @@ class TestCustomProviderThinkingStyle:
         assert spec.thinking_style == "reasoning_split"
 
     def test_provider_config_accepts_camel_case(self) -> None:
-        """Config JSON uses camelCase: thinkingStyle."""
         cfg = ProviderConfig.model_validate({"thinkingStyle": "thinking_type"})
         assert cfg.thinking_style == "thinking_type"
 
     def test_providers_config_custom_has_thinking_style(self) -> None:
-        """Full providers config round-trip."""
         data = {
             "custom": {
                 "apiKey": "sk-test",

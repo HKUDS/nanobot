@@ -1,5 +1,3 @@
-"""Path policy and real git range regressions for the CI selector."""
-
 import html
 import json
 import os
@@ -77,7 +75,6 @@ def selected(result):
     ],
 )
 def test_existing_path_policy(path, expected):
-    # These are reachable repository inputs, not merely invented glob matches.
     assert (ROOT / path).is_file()
     result = classify_paths([path])
     assert selected(result) == expected

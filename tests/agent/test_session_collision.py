@@ -1,5 +1,3 @@
-"""Session keys with punctuation and Unicode remain distinct in storage."""
-
 from nanobot.session.manager import Session, SessionManager
 
 

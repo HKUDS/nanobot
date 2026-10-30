@@ -175,7 +175,7 @@ def test_cli_plan_is_available_and_never_starts_install(monkeypatch):
     from nanobot import update, update_plan
 
     async def preview(channel):
-        assert channel is None  # The planner owns the saved installation subscription.
+        assert channel is None
         return plan()
 
     monkeypatch.setattr(update_plan, "preview_release_update", preview)

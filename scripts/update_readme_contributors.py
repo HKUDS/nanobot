@@ -55,7 +55,7 @@ def fetch_pages(endpoint: str, **params: str) -> list[object]:
     while True:
         query = urlencode({**params, "per_page": PER_PAGE, "page": page})
         url = f"https://api.github.com/repos/{REPOSITORY}/{endpoint}?{query}"
-        with urlopen(Request(url, headers=headers), timeout=30) as response:  # noqa: S310
+        with urlopen(Request(url, headers=headers), timeout=30) as response:
             batch = json.load(response)
         if not isinstance(batch, list):
             raise ValueError("Expected a GitHub API list response")
@@ -68,7 +68,6 @@ def fetch_pages(endpoint: str, **params: str) -> list[object]:
 
 
 def fetch_contributors(previous_wall: str = "") -> list[Contributor]:
-    # Shapes follow the GitHub contributors and commits REST response schemas.
     entries = cast(list[Contributor], fetch_pages("contributors", anon="1"))
     contributors = {
         c["login"].lower(): c for c in entries

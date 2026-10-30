@@ -1,5 +1,3 @@
-"""Matrix (Element) channel — inbound sync + outbound message/media delivery."""
-
 # pyright: reportMissingTypeStubs=false
 
 import asyncio
@@ -140,7 +138,6 @@ _MXC_PLACEHOLDER_SRC_RE = re.compile(
 
 
 def _filter_matrix_html_attribute(tag: str, attr: str, value: str) -> str | None:
-    """Filter attribute values to a safe Matrix-compatible subset."""
     if tag == "a" and attr == "href":
         return value if value.lower().startswith(("https://", "http://", "matrix:", "mailto:")) else None
     if tag == "img" and attr == "src":
@@ -231,7 +228,6 @@ _LISTEN_LINE_MAX_CHARS = 500
 
 
 def _render_markdown_html(text: str) -> str | None:
-    """Render markdown to sanitized HTML; returns None for plain text."""
     try:
         masked_text = _mask_mxc_markdown_image_sources(text)
         rendered = _mask_mxc_image_sources(cast(str, MATRIX_MARKDOWN(masked_text)))
@@ -240,7 +236,6 @@ def _render_markdown_html(text: str) -> str | None:
         return None
     if not formatted:
         return None
-    # Skip formatted_body for plain <p>text</p> to keep payload minimal.
     if formatted.startswith("<p>") and formatted.endswith("</p>"):
         inner = formatted[3:-4]
         if "<" not in inner and ">" not in inner:
@@ -332,7 +327,7 @@ class MatrixChannel(BaseChannel):
     name = "matrix"
     display_name = "Matrix"
     uses_shared_proxy = True
-    _STREAM_EDIT_INTERVAL = 2 # min seconds between edit_message_text calls
+    _STREAM_EDIT_INTERVAL = 2
     monotonic_time: Callable[[], float] = staticmethod(time.monotonic)
 
     @classmethod
@@ -479,7 +474,6 @@ class MatrixChannel(BaseChannel):
             await self.client.close()
 
     def _write_session_to_disk(self, resp: LoginResponse) -> None:
-        """Save login session to disk for persistence across restarts."""
         session = {
             "access_token": resp.access_token,
             "device_id": resp.device_id,
@@ -492,13 +486,11 @@ class MatrixChannel(BaseChannel):
             self.logger.warning("Failed to save session: {}", e)
 
     def _is_workspace_path_allowed(self, path: Path) -> bool:
-        """Check path is inside workspace (when restriction enabled)."""
         if not self._restrict_to_workspace or not self._workspace:
             return True
         return is_path_within(path, self._workspace)
 
     def _collect_outbound_media_candidates(self, media: list[str]) -> list[Path]:
-        """Deduplicate and resolve outbound attachment paths."""
         seen: set[str] = set()
         candidates: list[Path] = []
         for raw in media:
@@ -541,7 +533,6 @@ class MatrixChannel(BaseChannel):
 
     async def _send_room_content(self, room_id: str,
                                  content: dict[str, Any]) -> None | RoomSendResponse | RoomSendError:
-        """Send m.room.message with E2EE options."""
         if not self.client:
             return None
         kwargs: dict[str, Any] = {"room_id": room_id, "message_type": "m.room.message", "content": content}
@@ -552,7 +543,6 @@ class MatrixChannel(BaseChannel):
         return response
 
     async def _resolve_server_upload_limit_bytes(self) -> int | None:
-        """Query homeserver upload limit once per channel lifecycle."""
         if self._server_upload_limit_checked:
             return self._server_upload_limit_bytes
         self._server_upload_limit_checked = True
@@ -570,7 +560,6 @@ class MatrixChannel(BaseChannel):
         return None
 
     async def _effective_media_limit_bytes(self) -> int:
-        """min(local config, server advertised) — 0 blocks all uploads."""
         local_limit = max(int(self.config.max_media_bytes), 0)
         server_limit = await self._resolve_server_upload_limit_bytes()
         if server_limit is None:
@@ -581,7 +570,6 @@ class MatrixChannel(BaseChannel):
         self, room_id: str, path: Path, limit_bytes: int,
         relates_to: dict[str, Any] | None = None,
     ) -> str | None:
-        """Upload one local file to Matrix and send it as a media message. Returns failure marker or None."""
         if not self.client:
             return _ATTACH_UPLOAD_FAILED.format(path.name or _DEFAULT_ATTACH_NAME)
 
@@ -737,7 +725,6 @@ class MatrixChannel(BaseChannel):
                     raise RuntimeError(f"Matrix stream was not delivered: {response}")
                 buf.last_edit = now
                 if not buf.event_id:
-                    # we are editing the same message all the time, so only the first time the event id needs to be set
                     buf.event_id = cast(RoomSendResponse, response).event_id
             except Exception:
                 buf.text = previous_text
@@ -1012,7 +999,6 @@ class MatrixChannel(BaseChannel):
         return is_auth or bool(getattr(response, "soft_logout", False))
 
     def _log_response_error(self, label: str, response: Any) -> None:
-        """Log Matrix response errors — auth errors at ERROR level, rest at WARNING."""
         is_fatal = self._is_fatal_auth_response(response)
         (self.logger.error if is_fatal else self.logger.warning)("{} failed: {}", label, response)
 
@@ -1079,7 +1065,6 @@ class MatrixChannel(BaseChannel):
         self._log_response_error("send", response)
 
     async def _set_typing(self, room_id: str, typing: bool) -> None:
-        """Best-effort typing indicator update."""
         if not self.client:
             return
         with suppress(Exception):
@@ -1135,7 +1120,6 @@ class MatrixChannel(BaseChannel):
         return isinstance(count, int) and count <= 2
 
     def _is_bot_mentioned(self, event: RoomMessage) -> bool:
-        """Check m.mentions payload for bot mention."""
         source = getattr(event, "source", None)
         if not isinstance(source, dict):
             return False
@@ -1164,7 +1148,6 @@ class MatrixChannel(BaseChannel):
         return isinstance(ts, int) and ts < self._started_at_ms
 
     def _buffer_listen_message(self, room_id: str, sender: str, content: str) -> None:
-        """Record an unanswered room message for listen-mode context."""
         text = " ".join(str(content).split())[:_LISTEN_LINE_MAX_CHARS]
         line = f"{sender}: {text}" if text else f"{sender}: [attachment]"
         buffer = self._listen_buffers.setdefault(room_id, deque())
@@ -1181,7 +1164,6 @@ class MatrixChannel(BaseChannel):
             self._listen_dropped[room_id] = dropped
 
     def _listen_context(self, room_id: str, content: str) -> list[RuntimeContextBlock] | None:
-        """Read pending discussion for agent input, leaving control commands untouched."""
         buffer = self._listen_buffers.get(room_id)
         if not buffer:
             return None
@@ -1215,17 +1197,14 @@ class MatrixChannel(BaseChannel):
     def _consume_listen_context(
         self, room_id: str, content: str, context: list[RuntimeContextBlock] | None,
     ) -> None:
-        """Clear handed-off discussion or an explicit room-session reset."""
         if context or normalize_command_text(content).lower() == "/new":
             self._listen_buffers.pop(room_id, None)
             self._listen_dropped.pop(room_id, None)
 
     def _effective_group_policy(self, room_id: str) -> MatrixGroupPolicy:
-        """Per-room override when present, else the channel-level group policy."""
         return self.config.group_policy_overrides.get(room_id, self.config.group_policy)
 
     def _should_process_message(self, room: MatrixRoom, event: RoomMessage) -> bool:
-        """Apply sender and room policy checks."""
         if not self.is_allowed(event.sender):
             return False
         if self._is_direct_room(room):
@@ -1293,7 +1272,6 @@ class MatrixChannel(BaseChannel):
     def _build_outbound_relates_to(
         self, metadata: dict[str, Any] | None
     ) -> dict[str, Any] | None:
-        """Keep thread relations; optionally link room-level replies to the user event."""
         if thread := self._build_thread_relates_to(metadata):
             return thread
         if not self.config.reply_to_message or not metadata:
@@ -1426,7 +1404,6 @@ class MatrixChannel(BaseChannel):
     async def _fetch_media_attachment(
         self, event: MatrixMediaEvent,
     ) -> tuple[dict[str, Any] | None, str]:
-        """Download, decrypt if needed, and persist a Matrix attachment."""
         atype = self._event_attachment_type(event)
         mime = self._event_mime(event)
         filename = self._event_filename(event, atype)

@@ -2833,7 +2833,6 @@ describe("ThreadComposer", () => {
     expect(screen.queryByText("MCP servers")).not.toBeInTheDocument();
     const gimp = screen.getByRole("option", { name: /@gimp GIMP .* CLI/i });
     const browserbase = screen.getByRole("option", { name: /@browserbase Browserbase .* MCP/i });
-    // Reuse the app's 44px coarse-pointer targets without changing desktop density.
     expect(gimp).toHaveClass("touch-target");
     expect(browserbase).toHaveClass("touch-target");
     expect(within(gimp).getByText("CLI")).toBeInTheDocument();
@@ -3214,7 +3213,6 @@ describe("ThreadComposer", () => {
     expect(palette).toHaveStyle({ maxHeight: "84px" });
     expect(input.closest("form")).toHaveAttribute("data-palette-beside", "true");
 
-    // Rotation restores the ordinary floating menu, without changing the draft.
     landscape = false;
     document.getElementById("root")!.classList.remove("short-visual-viewport");
     Object.assign(window.visualViewport!, { height: 396, offsetTop: 350 });
@@ -3620,7 +3618,6 @@ describe("ThreadComposer", () => {
     const keyEvent = createEvent.keyDown(input, { key: "Enter" });
     fireEvent(input, keyEvent);
 
-    // Enter inserts a newline on touch; the send button is the interject path.
     expect(keyEvent.defaultPrevented).toBe(false);
     expect(onSend).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Send message" })).toBeInTheDocument();

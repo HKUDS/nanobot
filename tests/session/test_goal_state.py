@@ -1,5 +1,3 @@
-"""Tests for ``goal_state`` session metadata helpers."""
-
 from __future__ import annotations
 
 from nanobot.session.goal_state import (

@@ -1,5 +1,3 @@
-"""Transactional SQLite storage for private conversation state."""
-
 from __future__ import annotations
 
 import json
@@ -528,7 +526,6 @@ class SqliteSessionStore:
                     ORDER BY sessions.updated_at DESC
                 )
             """).fetchone()[0]
-            # The SQL projection constructs this list and its dictionary fields.
             rows = cast(list[dict[str, Any]], json.loads(encoded))
             for row in rows:
                 row["path"] = str(self.path)

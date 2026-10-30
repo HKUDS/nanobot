@@ -289,7 +289,6 @@ test("wheel loading hands off to a retained 48px slot; prepend and delayed layou
   await expect(body.locator(".thread-history-slot")).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath("history-prepend-stable.png") });
 
-  // The reclaimed boundary scrolls as ordinary message flow, with no retained spacer.
   const beforeScroll = await body.evaluate((node) => node.scrollTop);
   const anchorBeforeScroll = await anchorTop(body, "Question 40");
   await body.hover();
@@ -953,7 +952,6 @@ test("failed Blocks animate without visible error text; pulling retries once and
   await expectCoordinates(body, "Question 40", held);
   expect(history.reads).toHaveLength(1);
 
-  // This is a fresh pull at the failed boundary, not a ready-button-only path.
   await requestOlderWithWheel(body, history, 2);
   await expect(header).toHaveAttribute("data-state", "loading");
   await page.mouse.wheel(0, -120);
@@ -1127,7 +1125,6 @@ test("bounded navigation retains three pages and reclaims each completed wheel o
   const header = page.locator(".thread-history-status");
   const slot = body.locator(".thread-history-slot");
   const approachNextHead = async (text: string) => {
-    // Real scrolling stops just short of the boundary, before it can request.
     const scrollTop = await body.evaluate((node) => node.scrollTop);
     expect(scrollTop).toBeGreaterThan(120);
     await body.hover();
@@ -1145,7 +1142,6 @@ test("bounded navigation retains three pages and reclaims each completed wheel o
   await stableLayout(body);
   expect(history.reads).toHaveLength(0);
 
-  // An unloaded rail destination replaces latest with P0 (38..49).
   await jumpViaRail(page, 38);
   await expect.poll(() => history.reads.length).toBe(1);
   history.complete();
@@ -1162,7 +1158,6 @@ test("bounded navigation retains three pages and reclaims each completed wheel o
   expect((await historyGeometry(body, "Question 38")).slotBeforeKey).toBeNull();
   await expect(body.locator('[data-thread-display-unit^="u"]')).toHaveCount(24);
 
-  // Reach each prepended page head instead of loading from the old reading slot.
   const atSecondHead = await approachNextHead("Question 26");
   expect(atSecondHead.firstKey).toBe("u26");
   expect(atSecondHead.slotBeforeKey).toBeNull();
@@ -1177,7 +1172,6 @@ test("bounded navigation retains three pages and reclaims each completed wheel o
   expect((await historyGeometry(body, "Question 26")).slotBeforeKey).toBeNull();
   await expect(body.locator('[data-thread-display-unit^="u"]')).toHaveCount(36);
 
-  // Completed feedback is removed and cannot add a fourth cached page.
   await expect(header).toHaveCount(0);
   await stableLayout(body);
   await expect(page.getByText("No earlier messages", { exact: true })).toHaveCount(0);
@@ -1209,7 +1203,6 @@ test("bounded navigation retains three pages and reclaims each completed wheel o
   await expect(page.getByText("No earlier messages", { exact: true })).toHaveCount(0);
   expect(history.reads).toEqual(["?limit=24&after=38", "?limit=24&before=38", "?limit=24&before=26", "?limit=24&before=14"]);
 
-  // A real Home key reaches the next boundary and rebinds without a wheel pull.
   const atKeyboardHead = await approachNextHead("Question 2");
   expect(atKeyboardHead.firstKey).toBe("u2");
   expect(atKeyboardHead.slotBeforeKey).toBeNull();

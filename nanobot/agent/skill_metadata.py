@@ -1,5 +1,3 @@
-"""Skill resource locations and validated YAML identity metadata."""
-
 import re
 from pathlib import Path
 from typing import cast

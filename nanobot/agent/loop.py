@@ -1,7 +1,3 @@
-"""Agent loop: the core processing engine."""
-
-# pyright: reportPrivateUsage=false
-
 from __future__ import annotations
 
 import asyncio
@@ -136,7 +132,6 @@ _SUBAGENT_TERMINAL_WAIT_SECONDS = 300.0
 
 
 def _prompt_scope_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
-    """Detach only the metadata consumed by workspace scope resolution."""
     key = WORKSPACE_SCOPE_METADATA_KEY
     return {key: deepcopy(metadata[key])} if key in metadata else {}
 
@@ -530,7 +525,6 @@ class AgentLoop:
         )
 
     def _sync_subagent_runtime_limits(self) -> None:
-        """Keep subagent runtime limits aligned with mutable loop settings."""
         self.subagents.max_iterations = self.max_iterations
 
     def set_runtime_max_iterations(self, value: int) -> None:
@@ -554,7 +548,6 @@ class AgentLoop:
         *,
         recover_removed: bool,
     ) -> LLMRuntime | None:
-        """Return the selected runtime, or clear a removed preset for persistence."""
         name = model_preset_from_metadata(session.metadata)
         if name is None:
             return self.llm_runtime()
@@ -648,7 +641,6 @@ class AgentLoop:
         *,
         provider_snapshot_loader: Callable[..., ProviderSnapshot] | None,
     ) -> None:
-        """Register the default set of tools via plugin loader."""
         from nanobot.agent.tools.context import ToolContext
         from nanobot.agent.tools.loader import ToolLoader
 
@@ -722,7 +714,6 @@ class AgentLoop:
         runtime_context_blocks: list[RuntimeContextBlock] | None = None,
         **kwargs: Any,
     ) -> bool:
-        """Persist the triggering user message and recovery markers before running the turn."""
         if not turn_continuation.should_persist_user_message(msg.metadata):
             return False
         media_paths = [
@@ -758,7 +749,6 @@ class AgentLoop:
         return False
 
     def _build_transcript_input(self, ctx: TurnContext) -> TranscriptInput:
-        """Capture the persisted history and fresh input as separate transcript parts."""
         assert ctx.session is not None
         return TranscriptInput(
             history=ctx.history,
@@ -847,7 +837,6 @@ class AgentLoop:
         raw: str,
         dispatch_fn: Callable[[CommandContext], Awaitable[InboundMessage | OutboundMessage | None]],
     ) -> None:
-        """Dispatch a command directly from the run() loop and publish the result."""
         if self.commands.requires_session_queue(raw):
             await self._enqueue_session_message(msg)
             return
@@ -924,7 +913,6 @@ class AgentLoop:
         )
 
     def _track_active_task(self, key: str, task: asyncio.Task[Any]) -> None:
-        """Track active session work until its task group becomes empty."""
         tasks = self._active_tasks.setdefault(key, set())
         tasks.add(task)
         task.add_done_callback(partial(self._active_task_done, key, tasks))
@@ -940,10 +928,6 @@ class AgentLoop:
             self._active_tasks.pop(key, None)
 
     async def _cancel_active_tasks(self, key: str) -> int:
-        """Cancel and await all active work for *key*.
-
-        Returns the total number of cancelled tasks, subagents, and exec sessions.
-        """
         journal_session = await self.sessions.state.read(key)
         journaled_followup_ids = (
             tuple(
@@ -993,13 +977,11 @@ class AgentLoop:
         self._file_state_store.discard(key)
 
     def _effective_session_key(self, msg: InboundMessage) -> str:
-        """Return the session key used for task routing and mid-turn injections."""
         if self._unified_session and not msg.session_key_override:
             return UNIFIED_SESSION_KEY
         return msg.session_key
 
     def _can_inject_message(self, msg: InboundMessage) -> bool:
-        """Keep independent turns and controls out of user-input batches."""
         if turn_continuation.internal_continuation_inbound(msg.metadata) or any(
             coordinator.owns_turn(msg) for coordinator in self._automation_turn_coordinators
         ):
@@ -1012,7 +994,6 @@ class AgentLoop:
         self,
         session_key: str,
     ) -> EventSink:
-        """Bind one idle compaction to its current user-facing destination."""
         session = self.sessions.state.peek_header(session_key)
         if session is None:
             return NO_EVENTS
@@ -1028,7 +1009,6 @@ class AgentLoop:
         delivery: TurnDelivery,
         is_user_turn: bool,
     ) -> None:
-        """Remember the latest user-facing destination, including channel threads."""
         if (
             not is_user_turn
             or msg.channel in {"cli", "system"}
@@ -1060,15 +1040,6 @@ class AgentLoop:
         request_context: RequestContext | None = None,
         provider_state: ProviderConversationState | None = None,
     ) -> AgentRunResult:
-        """Run the agent iteration loop.
-
-        *events*: scoped operation and output events.
-        *streaming*: request incremental output from the runner.
-        ``resuming=True`` means the active turn continues. ``merge_next=True`` means
-        the next text segment belongs to the same user-visible assistant message.
-
-        Returns the complete result produced by ``AgentRunner``.
-        """
         self._sync_subagent_runtime_limits()
 
         ephemeral = ephemeral or (session is not None and not session.policy.persist)
@@ -1093,7 +1064,6 @@ class AgentLoop:
             *,
             first_msg: InboundMessage | None = None,
         ) -> list[dict[str, Any]]:
-            """Drain one atomic snapshot of messages already available."""
             if pending_queue is None:
                 return []
 
@@ -1209,7 +1179,6 @@ class AgentLoop:
         terminal_wait_deadline: float | None = None
 
         async def _wait_for_pending() -> list[dict[str, Any]]:
-            """Wait for a pending result only when the runner is ready to exit."""
             nonlocal terminal_wait_deadline
 
             items = await _drain_pending()
@@ -1401,7 +1370,6 @@ class AgentLoop:
         return result
 
     async def _check_expired_sessions_if_due(self) -> None:
-        """Scan idle sessions without blocking the event loop."""
         if self.bus.admission.paused:
             return
         now = time.monotonic()
@@ -1459,7 +1427,6 @@ class AgentLoop:
             await self.aclose()
 
     async def _dispatch_inbound(self, msg: InboundMessage) -> None:
-        """Route one input through command and session admission."""
         raw = command_text(msg)
         effective_key = self._effective_session_key(msg)
         if msg.metadata.get(INBOUND_META_RUNTIME_CONTROL) == RUNTIME_CONTROL_SESSION_DISCARD:
@@ -1539,7 +1506,6 @@ class AgentLoop:
         session_key: str,
         msg: InboundMessage,
     ) -> InboundMessage:
-        """Persist a recoverable WebUI follow-up before adding it to the inbox."""
         if not self._can_inject_message(msg):
             return msg
         followup_id = await self.sessions.state.queue_followup(session_key, msg)
@@ -1555,7 +1521,6 @@ class AgentLoop:
         return pending_msg
 
     async def _enqueue_session_message(self, msg: InboundMessage) -> None:
-        """Admit session work without waiting for its execution or result."""
         self.bus.admission.check()
         session_key = self._effective_session_key(msg)
         if not self.subagents.accepts_result(msg, session_key):
@@ -1589,7 +1554,6 @@ class AgentLoop:
         session_key: str,
         pending: asyncio.Queue[InboundMessage],
     ) -> None:
-        """Run the sole worker for a session until its inbox is empty."""
         try:
             while self._pending_queues.get(session_key) is pending:
                 try:
@@ -1632,7 +1596,6 @@ class AgentLoop:
         pending: asyncio.Queue[InboundMessage],
         error: asyncio.CancelledError,
     ) -> None:
-        """Complete queued independent turns after their session worker stops."""
         for msg in self._deferred_automation_turns.pop(session_key, []):
             pending.put_nowait(msg)
         while not pending.empty():
@@ -1651,7 +1614,6 @@ class AgentLoop:
         msg: InboundMessage,
         pending: asyncio.Queue[InboundMessage],
     ) -> None:
-        """Process one root message while later inputs remain in its session inbox."""
         session_key = self._effective_session_key(msg)
         # The request context is reset before errors reach this boundary, and
         # discard may evict the session while a turn is still unwinding.
@@ -1869,7 +1831,6 @@ class AgentLoop:
         attributes: Mapping[str, Any] | None = None,
         session: Session | None = None,
     ) -> OutboundMessage | None:
-        """Process a single inbound message and return the response."""
         kind = TurnKind.USER if msg.is_user_input else TurnKind.SYSTEM
         if kind is TurnKind.SYSTEM:
             destination = (
@@ -2053,7 +2014,6 @@ class AgentLoop:
         *,
         turn_latency_ms: int | None = None,
     ) -> OutboundMessage | None:
-        """Assemble the final outbound message from turn results."""
         event = None
         meta = dict(msg.metadata or {})
         if streamed_content and stop_reason not in {"error", "tool_error"}:
@@ -2070,7 +2030,6 @@ class AgentLoop:
         )
 
     async def _restore_turn(self, ctx: TurnContext) -> None:
-        """Restore checkpoint / pending user turn; reference non-image attachments."""
         msg = ctx.msg
 
         if ctx.kind is TurnKind.USER and msg.media:
@@ -2436,7 +2395,6 @@ class AgentLoop:
         self,
         content: list[object],
     ) -> list[object]:
-        """Strip volatile multimodal payloads before writing session history."""
         filtered: list[object] = []
         for block in content:
             if not isinstance(block, dict):
@@ -2492,7 +2450,6 @@ class AgentLoop:
         summary_checkpoint: SessionSummaryCheckpoint | None = None,
         input_persisted_early: bool = False,
     ) -> None:
-        """Commit new-turn messages and an optional summary boundary."""
         declared_tool_call_ids = {
             str(tc["id"])
             for m in session.messages
@@ -2610,12 +2567,6 @@ class AgentLoop:
         session.updated_at = datetime.now()
 
     def _persist_subagent_followup(self, session: Session, msg: InboundMessage) -> bool:
-        """Persist subagent follow-ups before prompt assembly so history stays durable.
-
-        Returns True if a new entry was appended; False if the follow-up was
-        deduped (same ``subagent_task_id`` already in session) or carries no
-        content worth persisting.
-        """
         if not msg.content:
             return False
         metadata_value = cast(object, msg.metadata)
@@ -2643,7 +2594,6 @@ class AgentLoop:
         session: Session,
         payload: dict[str, Any],
     ) -> None:
-        """Persist the latest in-flight turn state without blocking the event loop."""
         session.metadata[self._RUNTIME_CHECKPOINT_KEY] = payload
         await self.sessions.state.checkpoint_view(session, payload)
 
@@ -2745,7 +2695,6 @@ class AgentLoop:
                 self.runtime_event_publisher.clear_turn(session_key)
 
     def _get_session_lock(self, session_key: str) -> asyncio.Lock:
-        """Return the shared lock while allowing idle session entries to expire."""
         lock = self._session_locks.get(session_key)
         if lock is None:
             lock = asyncio.Lock()

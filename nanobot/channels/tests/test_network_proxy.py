@@ -1,5 +1,3 @@
-"""Shared proxy ownership at channel construction and setup boundaries."""
-
 from __future__ import annotations
 
 import importlib

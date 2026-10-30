@@ -1,5 +1,3 @@
-"""Tests for multi-provider web search."""
-
 import asyncio
 from contextlib import asynccontextmanager
 
@@ -590,8 +588,6 @@ async def test_deepseek_search_rejects_blank_query(monkeypatch):
     [(0, 1), (100, 50), (50, 50), (1, 1)],
 )
 async def test_deepseek_provider_clamps_count_to_api_range(monkeypatch, requested, expected):
-    # execute() caps tool-level count at 10 for every provider and the schema
-    # advertises the same bound, so the 1-50 API window is only exercised here.
     captured: dict[str, object] = {}
 
     async def mock_post(self, url, **kw):
@@ -732,7 +728,6 @@ async def test_deepseek_search_gives_up_after_retry_budget(
     tool = _tool(provider="deepseek", api_key="deepseek-key")
     result = await tool.execute(query="retry", count=1)
 
-    # One retry after the initial attempt, then a bounded failure.
     assert calls["n"] == 2
     assert sleeps == [1.0]
     assert is_tool_error_result(result)
@@ -819,7 +814,6 @@ async def test_deepseek_whitespace_only_summary_falls_back_to_snippet(monkeypatc
 
 @pytest.mark.asyncio
 async def test_deepseek_caps_oversized_summary(monkeypatch):
-    """Real responses carry summaries far longer than the documented 600-800."""
     async def mock_post(self, url, **kw):
         return _response(json={
             "results": [
@@ -1055,7 +1049,6 @@ async def test_duckduckgo_search(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_duckduckgo_search_passes_proxy(monkeypatch):
-    """DDGS client must receive the configured proxy so search works behind a proxy."""
     captured: dict = {}
     proxy_url = "http://proxy.example:8080"
 
@@ -1300,7 +1293,6 @@ async def test_jina_search_uses_path_encoded_query(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_duckduckgo_timeout_returns_error(monkeypatch):
-    """asyncio.wait_for guard should fire when DDG search hangs."""
     import threading
     gate = threading.Event()
 

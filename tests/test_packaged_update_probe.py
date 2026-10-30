@@ -1,5 +1,3 @@
-"""Keep acceptance evidence honest: real target bytes and fail-closed fixtures."""
-
 import asyncio
 import csv
 import hashlib
@@ -93,7 +91,6 @@ def test_baseline_instrumentation_does_not_modify_the_target(tmp_path):
 def test_local_feed_uses_the_real_resolver_and_exact_target_hash(tmp_path, monkeypatch, version, channel):
     from unittest.mock import AsyncMock
 
-    # The packaged lifecycle fixture is deliberately not a public signed release.
     monkeypatch.setattr(ReleaseFeed, "_authorize", AsyncMock())
     from packaging.tags import Tag
 
@@ -174,7 +171,6 @@ def test_timings_checkpoint_real_fixture_and_keep_result_schema_separate(tmp_pat
     with timings.measure("scenario_total", scenario="upgrade"):
         with timings.measure("fixture", scenario="upgrade", journey=1):
             baseline = fixture_wheel(source, tmp_path / "baseline", "0.3.5", feed=tmp_path / "feed.json")
-        # Evidence is available before the outer context exits.
         checkpoint = json.loads(output.read_text())
         assert checkpoint["clock"] == "perf_counter"
         assert checkpoint["schema_version"] == 1
@@ -215,7 +211,6 @@ def test_timings_persist_failure_and_finally_cleanup_without_exporting_secrets(t
                                    capture_output=True, timeout=0.1 if failure == "timeout" else 10)
             finally:
                 with timings.measure("cleanup", scenario="restart-failure"):
-                    # Read the failed phase from disk before cleanup completes.
                     assert json.loads(output.read_text())["timings"][0]["status"] == "failed"
                     (tmp_path / "cleaned").touch()
     assert (tmp_path / "cleaned").exists()
@@ -421,7 +416,6 @@ def test_exited_controller_cannot_leave_a_descendant_listener_running(tmp_path, 
             probe.run_parallel(args, root, args.wheel, "0.3.6", digest(args.wheel), list(probe.SCENARIOS), timings)
         _wait_for_closed_listeners((json.loads(listener.read_text()),))
     finally:
-        # A red baseline must not leak the process it deliberately exposed.
         (root / "lane-1/stop-listener").touch()
         if listener.exists():
             _wait_for_closed_listeners((json.loads(listener.read_text()),))
@@ -458,7 +452,7 @@ def test_abnormal_lane_cleanup_does_not_depend_on_the_mutable_venv(tmp_path, mon
             probe.cleanup_lane(root, ["upgrade", "worker-exit", "metadata-loss"])
     else:
         probe.cleanup_lane(root, ["upgrade", "worker-exit", "metadata-loss"])
-    assert len(calls) == 2  # Still try the second account if the first stop failed.
+    assert len(calls) == 2
     for (command, options), config in zip(calls, configs, strict=True):
         assert command == [sys.executable, "-I", "-B", "-m", "nanobot", "gateway", "stop", "--config", str(config)]
         assert options["env"]["HOME"] == str(config.parent.parent) and options["cwd"] == config.parents[2]
@@ -560,8 +554,6 @@ def test_serial_lanes_resolve_baseline_dependencies_and_keep_recovery_chains_on_
     assert len(dependencies) == (0 if baseline_version else 2)
     assert len(baselines) == 9 and len(stages) == 9
     for command in baselines:
-        # Actual historical constraints must be resolved again after each
-        # successful upgrade, rather than paired with the target's dependencies.
         assert ("--no-deps" in command) == (baseline_version is None)
         assert ("--only-binary=:all:" in command) == (baseline_version is not None)
     assert sum(1 + ("subsequent_update" in result) for result in results) == 15

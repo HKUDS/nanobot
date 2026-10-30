@@ -1,5 +1,3 @@
-"""Independent turns and internal controls retain their session inbox semantics."""
-
 import asyncio
 import threading
 from unittest.mock import AsyncMock, MagicMock

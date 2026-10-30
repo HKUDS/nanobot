@@ -1,5 +1,3 @@
-"""Typed metadata for self-contained channel packages."""
-
 from __future__ import annotations
 
 import importlib

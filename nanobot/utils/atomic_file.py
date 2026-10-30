@@ -1,5 +1,3 @@
-"""Standard-library atomic record replacement, also used by the update worker."""
-
 from __future__ import annotations
 
 import errno
@@ -118,7 +116,6 @@ def read_atomic_bytes(path: Path, *, max_bytes: int = -1) -> bytes:
 
 
 def _fsync_directory_after_replace(directory: Path) -> None:
-    """Fsync a directory, ignoring only unsupported platforms/filesystems."""
     with suppress(PermissionError):
         fd = os.open(str(directory), os.O_RDONLY)
         try:

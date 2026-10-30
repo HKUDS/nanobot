@@ -1,5 +1,3 @@
-"""Slack channel implementation using Socket Mode."""
-
 import asyncio
 import re
 from pathlib import Path
@@ -33,12 +31,10 @@ from nanobot.utils.helpers import safe_filename, split_message
 
 
 def _as_json_object(value: Any) -> dict[str, Any] | None:
-    """Narrow Slack's untyped Socket Mode payloads at the boundary."""
     return cast(dict[str, Any], value) if isinstance(value, dict) else None
 
 
 def _as_json_list(value: Any) -> list[Any] | None:
-    """Narrow Slack's untyped Socket Mode arrays at the boundary."""
     return cast(list[Any], value) if isinstance(value, list) else None
 
 
@@ -99,7 +95,6 @@ _HTML_DOWNLOAD_PREFIXES = (b"<!doctype html", b"<html")
 
 
 async def _validate_slack_download_request(request: httpx.Request) -> None:
-    """Validate every Slack file request, including redirects, before transport."""
     ok, error = validate_url_target(str(request.url))
     if not ok:
         raise httpx.RequestError(f"unsafe Slack file URL: {error}", request=request)
@@ -163,7 +158,6 @@ class SlackChannel(BaseChannel):
 
         self._socket_client.socket_mode_request_listeners.append(self._on_socket_request)
 
-        # Resolve bot user ID for mention handling
         try:
             web_api = self._require_web_api()
             auth = await web_api.auth_test()
@@ -268,7 +262,6 @@ class SlackChannel(BaseChannel):
                 except Exception:
                     self.logger.exception("Failed to upload file {}", media_path)
 
-            # Update reaction emoji when the final (non-progress) response is sent
             if not is_progress:
                 raw_event = slack_meta.get("event", {})
                 event = (
@@ -286,7 +279,6 @@ class SlackChannel(BaseChannel):
             raise
 
     async def _resolve_target_chat_id(self, target: str) -> str:
-        """Resolve human-friendly Slack targets to concrete IDs when needed."""
         if not self._web_client:
             return target
 
@@ -421,14 +413,12 @@ class SlackChannel(BaseChannel):
         client: AsyncBaseSocketModeClient,
         req: SocketModeRequest,
     ) -> None:
-        """Handle incoming Socket Mode requests."""
         if req.type == "interactive":
             await self._on_block_action(client, req)
             return
         if req.type != "events_api":
             return
 
-        # Acknowledge right away
         await client.send_socket_mode_response(
             SocketModeResponse(envelope_id=req.envelope_id)
         )
@@ -437,7 +427,6 @@ class SlackChannel(BaseChannel):
         event = _as_json_object(payload.get("event")) or {}
         event_type = event.get("type")
 
-        # Handle app mentions or plain messages
         if event_type not in ("message", "app_mention"):
             return
 
@@ -460,7 +449,6 @@ class SlackChannel(BaseChannel):
         if event_type == "message" and self._bot_user_id and f"<@{self._bot_user_id}>" in text:
             return
 
-        # Debug: log basic event shape
         self.logger.debug(
             "event: type={} subtype={} user={} channel={} channel_type={} text={}",
             event_type,
@@ -506,7 +494,6 @@ class SlackChannel(BaseChannel):
             and channel_type != "im"
         ):
             thread_ts = event_ts
-        # Add :eyes: reaction to the triggering message (best-effort)
         try:
             if self._web_client and event_ts:
                 web_api = self._require_web_api()
@@ -567,7 +554,6 @@ class SlackChannel(BaseChannel):
             self.logger.exception("Error handling message from {}", sender_id)
 
     async def _download_slack_file(self, file_info: dict[str, Any]) -> tuple[str | None, str]:
-        """Download a Slack private file to the local media directory."""
         file_id = str(file_info.get("id") or "file")
         name = str(
             file_info.get("name")
@@ -634,7 +620,6 @@ class SlackChannel(BaseChannel):
         client: AsyncBaseSocketModeClient,
         req: SocketModeRequest,
     ) -> None:
-        """Handle button clicks from inline action buttons."""
         await client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
         payload = cast(dict[str, Any], cast(Any, req).payload or {})
         actions = cast(list[Any], payload.get("actions") or [])
@@ -677,7 +662,6 @@ class SlackChannel(BaseChannel):
         raw_thread_ts: str | None,
         current_ts: str | None,
     ) -> str:
-        """Include thread history the first time the bot is pulled into a Slack thread."""
         if (
             not self.config.include_thread_context
             or not self._web_client
@@ -756,7 +740,6 @@ class SlackChannel(BaseChannel):
         return blocks
 
     async def _update_react_emoji(self, chat_id: str, ts: str | None) -> None:
-        """Remove the in-progress reaction and optionally add a done reaction."""
         if not self._web_client or not ts:
             return
         web_api = self._require_web_api()
@@ -786,7 +769,6 @@ class SlackChannel(BaseChannel):
                 return sender_id in self.config.dm.allow_from or is_approved(self.name, sender_id)
             return True
 
-        # Group / channel messages
         if self.config.group_policy == "allowlist":
             return chat_id in self.config.group_allow_from
         return True

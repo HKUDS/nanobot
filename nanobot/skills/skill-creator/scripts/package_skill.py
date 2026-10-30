@@ -44,7 +44,6 @@ def package_skill(skill_path: str | Path, output_dir: str | Path | None = None) 
     """
     skill_path = Path(skill_path).resolve()
 
-    # Validate skill folder exists
     if not skill_path.exists():
         print(f"[ERROR] Skill folder not found: {skill_path}")
         return None
@@ -53,13 +52,11 @@ def package_skill(skill_path: str | Path, output_dir: str | Path | None = None) 
         print(f"[ERROR] Path is not a directory: {skill_path}")
         return None
 
-    # Validate SKILL.md exists
     skill_md = skill_path / "SKILL.md"
     if not skill_md.exists():
         print(f"[ERROR] SKILL.md not found in {skill_path}")
         return None
 
-    # Run validation before packaging
     print("Validating skill...")
     valid, message = validate_skill(skill_path)
     if not valid:
@@ -68,7 +65,6 @@ def package_skill(skill_path: str | Path, output_dir: str | Path | None = None) 
         return None
     print(f"[OK] {message}\n")
 
-    # Determine output location
     skill_name = skill_path.name
     if output_dir:
         output_path = Path(output_dir).resolve()
@@ -106,11 +102,9 @@ def package_skill(skill_path: str | Path, output_dir: str | Path | None = None) 
                 continue
             files_to_package.append(file_path)
 
-    # Create the .skill file (zip format)
     try:
         with zipfile.ZipFile(skill_filename, "w", zipfile.ZIP_DEFLATED) as zipf:
             for file_path in files_to_package:
-                # Calculate the relative path within the zip.
                 arcname = Path(skill_name) / file_path.relative_to(skill_path)
                 zipf.write(file_path, arcname)
                 print(f"  Added: {arcname}")

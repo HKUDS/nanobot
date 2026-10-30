@@ -1,5 +1,3 @@
-"""Provider credentials must not leak through process-global os.environ."""
-
 from __future__ import annotations
 
 import os
@@ -9,7 +7,6 @@ from nanobot.providers.registry import find_by_name
 
 
 def test_provider_init_does_not_mutate_shared_env_keys(monkeypatch) -> None:
-    """Multi-provider setups must not overwrite or pin each other's keys."""
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
 

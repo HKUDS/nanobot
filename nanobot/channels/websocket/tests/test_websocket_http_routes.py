@@ -1,5 +1,3 @@
-"""End-to-end tests for the embedded webui's HTTP routes on the WebSocket channel."""
-
 import asyncio
 import json
 import random
@@ -277,11 +275,9 @@ async def test_sessions_list_requires_bearer_token(
     channel = _ch(bus, session_manager=sm, port=29902)
     server_task = asyncio.create_task(channel.start())
     try:
-        # Unauthenticated → 401.
         deny = await _http_get("http://127.0.0.1:29902/api/sessions")
         assert deny.status_code == 401
 
-        # Directly mint an API token for route-level auth checks.
         token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
@@ -289,7 +285,6 @@ async def test_sessions_list_requires_bearer_token(
         assert listing.status_code == 200
         keys = [s["key"] for s in listing.json()["sessions"]]
         assert "websocket:abc" in keys
-        # Server stays an opaque source: filesystem paths must not leak to the wire.
         assert all("path" not in s for s in listing.json()["sessions"])
 
     finally:
@@ -1502,7 +1497,6 @@ async def test_nanobot_feature_install_only_tracks_pending_restart_without_start
     assert features[0]["enabled"] is False
     assert [feature["restart_pending"] for feature in features] == [installed_now, False]
 
-    # Refreshing the catalog keeps the pending installation tied to its channel.
     refreshed = await _http_get(
         f"http://127.0.0.1:{channel.config.port}/api/settings/nanobot-features",
         headers={"Authorization": f"Bearer {channel.gateway.tokens.issue_api_token(300)}"},
@@ -1512,7 +1506,6 @@ async def test_nanobot_feature_install_only_tracks_pending_restart_without_start
         installed_now, False,
     ]
 
-    # A new gateway owns a fresh runtime; installed support is ready to configure.
     restarted = _ch(bus, session_manager=SessionManager(tmp_path), port=_free_port())
     after_restart = await _http_get(
         f"http://127.0.0.1:{restarted.config.port}/api/settings/nanobot-features",
@@ -2361,8 +2354,6 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
 async def test_sessions_list_only_returns_websocket_sessions_by_default(
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Seed a realistic multi-channel disk state: CLI, Slack, Lark and
-    # websocket sessions all live in the same ``sessions/`` directory.
     sm = _seed_many(
         tmp_path,
         [
@@ -2394,8 +2385,6 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
         assert listing.status_code == 200
         sessions = listing.json()["sessions"]
         keys = {s["key"] for s in sessions}
-        # Only websocket-channel sessions are part of the webui surface; CLI /
-        # Slack / Lark rows would be non-resumable from the browser.
         assert keys == {"websocket:alpha", "websocket:beta"}
         rows = {row["key"]: row for row in sessions}
         handles = {
@@ -3636,8 +3625,6 @@ async def test_session_delete_rejects_invalid_key(
     channel = _ch(bus, session_manager=sm, port=29904)
     server_task = asyncio.create_task(channel.start())
     try:
-        # Invalid characters in the key -> regex match fails -> 404
-        # (route doesn't match, falls through to channel 404).
         resp = await _webui_mutate(
             channel,
             "session.delete",
@@ -3661,15 +3648,12 @@ async def test_static_serves_index_when_dist_present(
     channel = _ch(bus, session_manager=sm, static_dist_path=dist, port=29905)
     server_task = asyncio.create_task(channel.start())
     try:
-        # Bare ``GET /`` is a browser opening the app: it must return the SPA
-        # index.html, not the WS-upgrade handler's 401/426.
         root = await _http_get("http://127.0.0.1:29905/")
         assert root.status_code == 200
         assert "nbweb" in root.text
         asset = await _http_get("http://127.0.0.1:29905/favicon.svg")
         assert asset.status_code == 200
         assert "<svg" in asset.text
-        # Unknown SPA route falls back to index.html.
         spa = await _http_get("http://127.0.0.1:29905/sessions/abc")
         assert spa.status_code == 200
         assert "nbweb" in spa.text
@@ -3714,7 +3698,6 @@ async def test_unknown_route_returns_404(bus: MagicMock) -> None:
 async def test_api_token_pool_purges_expired(bus: MagicMock, tmp_path: Path) -> None:
     sm = _seed_session(tmp_path)
     channel = _ch(bus, session_manager=sm, port=29908)
-    # Don't start a server — directly inject and validate.
     import time as _time
     channel.gateway.tokens.api_tokens["expired"] = _time.monotonic() - 1
     channel.gateway.tokens.api_tokens["live"] = _time.monotonic() + 60
@@ -4074,7 +4057,6 @@ def test_wildcard_ipv6_with_secret_is_valid(bus: MagicMock) -> None:
 
 
 def test_bootstrap_accepts_static_token_as_secret(bus: MagicMock) -> None:
-    """When only token (not token_issue_secret) is set, bootstrap accepts it."""
     channel = _ch(bus, host="0.0.0.0", token="static-tok")
     resp = channel.gateway.http._handle_bootstrap(
         _REMOTE, _FakeReq({"Authorization": "Bearer static-tok"})
@@ -4253,7 +4235,6 @@ def test_bootstrap_accepts_x_nanobot_auth_header(bus: MagicMock) -> None:
 
 
 def test_bootstrap_secret_also_enforced_on_localhost(bus: MagicMock) -> None:
-    """When secret is set, even localhost must provide it (reverse-proxy safety)."""
     channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
     resp = channel.gateway.http._handle_bootstrap(_LOCAL, _NO_HEADERS)
     assert resp.status_code == 401

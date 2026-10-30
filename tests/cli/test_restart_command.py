@@ -1,5 +1,3 @@
-"""Tests for /restart slash command."""
-
 from __future__ import annotations
 
 import asyncio
@@ -151,7 +149,6 @@ class TestRestartCommand:
 
     @pytest.mark.asyncio
     async def test_restart_intercepted_in_run_loop(self):
-        """Verify /restart is handled at the run-loop level, without starting a session worker."""
         loop, bus = _make_loop()
         loop.restart_mode = "exec"
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/restart")
@@ -193,7 +190,6 @@ class TestRestartCommand:
 
     @pytest.mark.asyncio
     async def test_status_intercepted_in_run_loop(self):
-        """Verify /status is handled at the run-loop level for immediate replies."""
         loop, bus = _make_loop()
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/status")
 
@@ -215,7 +211,6 @@ class TestRestartCommand:
 
     @pytest.mark.asyncio
     async def test_run_propagates_external_cancellation(self):
-        """External task cancellation should not be swallowed by the inbound wait loop."""
         loop, _bus = _make_loop()
 
         run_task = asyncio.create_task(loop.run())
@@ -359,7 +354,7 @@ class TestRestartCommand:
         session.get_history.return_value = [
             {"role": "user", "content": "Hello"},
             {"role": "assistant", "content": "Hi there!"},
-            {"role": "tool", "content": "tool result"},  # should be filtered out
+            {"role": "tool", "content": "tool result"},
             {"role": "user", "content": "How are you?"},
             {"role": "assistant", "content": "I am doing well."},
         ]
@@ -371,7 +366,7 @@ class TestRestartCommand:
         assert response is not None
         assert "👤 You: Hello" in response.content
         assert "🤖 Bot: Hi there!" in response.content
-        assert "tool result" not in response.content  # tool messages filtered
+        assert "tool result" not in response.content
         assert response.metadata == {"render_as": "text"}
 
     @pytest.mark.asyncio
@@ -388,8 +383,8 @@ class TestRestartCommand:
 
         assert response is not None
         assert "Last 3 message(s)" in response.content
-        assert "message 19" in response.content  # most recent
-        assert "message 0" not in response.content  # too old
+        assert "message 19" in response.content
+        assert "message 0" not in response.content
 
     @pytest.mark.asyncio
     async def test_history_clamps_count_and_extracts_text_blocks(self):

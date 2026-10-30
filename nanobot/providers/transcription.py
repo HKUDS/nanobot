@@ -60,7 +60,6 @@ def _resolve_transcription_url(api_base: str | None, default_url: str) -> str:
 
 
 def _resolve_chat_completions_url(api_base: str | None, default_url: str) -> str:
-    """Resolve a chat-completions endpoint for ASR providers using chat payloads."""
     if not api_base:
         return default_url
     base = api_base.rstrip("/")
@@ -90,7 +89,6 @@ def _audio_mime_type(path: Path) -> str:
 
 
 def _audio_format(path: Path) -> str:
-    """Map an audio file's extension to an OpenRouter ``format`` value."""
     ext = path.suffix.lstrip(".").lower()
     return _FORMAT_ALIASES.get(ext, ext)
 
@@ -235,7 +233,6 @@ async def _post_json_transcription_with_retry(
     provider_label: str,
     language: str | None = None,
 ) -> str:
-    """POST base64 JSON audio for providers that do not accept multipart uploads."""
     try:
         data = path.read_bytes()
     except OSError as e:
@@ -270,7 +267,6 @@ async def _post_xiaomi_mimo_asr_with_retry(
     provider_label: str,
     language: str | None = None,
 ) -> str:
-    """POST audio to Xiaomi MiMo ASR's chat-completions transcription API."""
     try:
         data = path.read_bytes()
     except OSError as e:
@@ -318,7 +314,6 @@ async def _post_stepfun_asr_with_retry(
     provider_label: str,
     language: str | None = None,
 ) -> str:
-    """POST audio to StepFun ASR SSE endpoint and collect final text."""
     try:
         data = path.read_bytes()
     except OSError as e:

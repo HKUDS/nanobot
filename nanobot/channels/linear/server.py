@@ -1,5 +1,3 @@
-"""Shared local HTTP listener for Linear webhooks and OAuth callbacks."""
-
 from __future__ import annotations
 
 import hashlib

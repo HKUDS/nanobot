@@ -1,5 +1,3 @@
-"""Tests for Dream memory consolidation — build_dream_prompt and cursor management."""
-
 import pytest
 
 from nanobot.agent.memory import MemoryStore
@@ -40,15 +38,11 @@ class TestBuildDreamPrompt:
         assert r1 is not None
         _, c1 = r1
 
-        # Cursor not yet advanced — same entries are still available
         assert store.build_dream_prompt() is not None
 
-        # Advance cursor
         store.set_last_dream_cursor(c1)
-        # Now no new entries
         assert store.build_dream_prompt() is None
 
-        # Add new entry
         store.append_history("second")
         r2 = store.build_dream_prompt()
         assert r2 is not None
@@ -144,7 +138,6 @@ class TestBuildDreamPrompt:
         assert "entry-25" in next_prompt
 
     def test_skips_malformed_history_entries(self, store):
-        """Dream prompt building should tolerate externally corrupted JSONL rows."""
         store.history_file.write_text(
             '{"cursor": 1, "timestamp": "2026-04-01 10:00"}\n'
             '{"cursor": 2, "timestamp": "2026-04-01 10:01", "content": "usable memory"}\n',
@@ -172,7 +165,6 @@ class TestBuildDreamPrompt:
 
 
 class TestDreamRunCompletion:
-    """The runner's terminal state gates Dream cursor advancement."""
 
     class _Resp:
         def __init__(self, stop_reason: str = "completed") -> None:
@@ -376,7 +368,6 @@ class TestDreamTools:
 
 
 class TestEphemeralDirect:
-    """Tests for the ephemeral flag that skips history.jsonl writes for Dream."""
 
     @pytest.fixture
     def _make_loop(self, tmp_path):
@@ -430,7 +421,6 @@ class TestEphemeralDirect:
         assert loop.model_preset is None
 
     async def test_ephemeral_skips_raw_archive(self, tmp_path, _make_loop):
-        """When ephemeral=True, raw_archive must not be called."""
         from unittest.mock import patch
 
         loop, store = _make_loop
@@ -442,7 +432,6 @@ class TestEphemeralDirect:
             mock_archive.assert_not_called()
 
     async def test_non_ephemeral_runs_normally(self, tmp_path, _make_loop):
-        """Without ephemeral, the normal path returns the model response."""
         loop, store = _make_loop
         response = await loop.process_direct("test", session_key="cli:normal")
 
@@ -495,7 +484,6 @@ class TestEphemeralDirect:
         assert len(transcript_copies) == 0
 
     async def test_ephemeral_sets_ctx_flag(self, tmp_path, _make_loop):
-        """Verify that ephemeral=True is forwarded to TurnContext."""
         from unittest.mock import patch
 
         loop, store = _make_loop
@@ -516,7 +504,6 @@ class TestEphemeralDirect:
         assert captured.get("ephemeral") is True
 
     async def test_default_ephemeral_is_false(self, tmp_path, _make_loop):
-        """By default ephemeral is False in TurnContext."""
         from unittest.mock import patch
 
         loop, store = _make_loop
@@ -550,7 +537,6 @@ class TestEphemeralDirect:
         assert MemoryStore.dream_run_completed(resp) is False
 
     async def test_completed_response_after_tool_error_is_success(self, _make_loop):
-        """A soft tool error is model input, not a second run-level failure state."""
         from unittest.mock import AsyncMock
 
         from nanobot.providers.base import ToolCallRequest
@@ -589,7 +575,6 @@ class TestEphemeralDirect:
         assert "Error" in tool_result["content"]
 
     async def test_dream_turn_can_skip_unbatched_recent_history(self, tmp_path):
-        """Dream must only see the batch selected by build_dream_prompt."""
         from unittest.mock import MagicMock
 
         from nanobot.agent.loop import AgentLoop
@@ -639,7 +624,6 @@ class TestEphemeralDirect:
         assert "entry-60" not in request_text
 
     async def test_dream_turn_injects_memory_files_once_and_persists_session(self, tmp_path):
-        """Dream gets durable files from system context without losing its session record."""
         from unittest.mock import MagicMock
 
         from nanobot.agent.loop import AgentLoop
@@ -697,7 +681,6 @@ class TestEphemeralDirect:
 
 
 class TestEphemeralHooks:
-    """When ephemeral=True, extra hooks must not fire."""
 
     @pytest.fixture
     def _make_loop_with_spy(self, tmp_path):
@@ -742,7 +725,6 @@ class TestEphemeralHooks:
         return loop, spy
 
     async def test_extra_hooks_skipped_when_ephemeral(self, tmp_path, _make_loop_with_spy):
-        """When ephemeral=True, extra hooks must not fire."""
         loop, spy = _make_loop_with_spy
 
         await loop.process_direct(
@@ -752,7 +734,6 @@ class TestEphemeralHooks:
         spy.after_iteration.assert_not_called()
 
     async def test_extra_hooks_fire_for_normal_sessions(self, tmp_path, _make_loop_with_spy):
-        """Without ephemeral, extra hooks should fire normally."""
         loop, spy = _make_loop_with_spy
 
         await loop.process_direct("test", session_key="cli:normal")
@@ -774,10 +755,8 @@ class TestDreamCommitMessage:
         store.git.init()
         store.git.auto_commit("initial state")
 
-        # A real edit to a tracked content file.
         store.write_memory("# Memory\n- DMSO research notes")
 
-        # A lying narrative the old code would have appended verbatim.
         lying = "Added a Medical Research section (Mastic Gum, DMSO) to MEMORY.md"
         diff_body = store.dream_content_diff()
         assert diff_body, "real edit must be detected"
@@ -801,14 +780,12 @@ class TestDreamCommitMessage:
         assert lying not in log
 
     def test_commit_message_is_bare_prefix_when_no_changes(self, tmp_path):
-        """A no-op Dream run yields only the prefix — never a narrated summary."""
         store = MemoryStore(tmp_path)
         store.write_soul("# Soul")
         store.write_memory("# Memory")
         store.git.init()
         store.git.auto_commit("initial state")
 
-        # No edits at all.
         assert store.dream_content_diff() == ""
         msg = MemoryStore.build_dream_commit_message(
             "dream: manual run", store.dream_content_diff(),
@@ -826,7 +803,6 @@ class TestDreamCommitMessage:
 
 
 class TestDreamContentDiff:
-    """The ground-truth signal that gates cursor advance and commit messages."""
 
     def test_empty_when_git_not_initialized(self, store):
         assert store.dream_content_diff() == ""
@@ -893,8 +869,7 @@ class TestDreamContentDiff:
         assert "DMSO research notes" in diff
 
     def test_ignores_cursor_only_changes(self, store):
-        """Advancing the cursor must not count as a productive content edit."""
         store.git.init()
         store.git.auto_commit("initial")
-        store.set_last_dream_cursor(99)  # only memory/.dream_cursor changes
+        store.set_last_dream_cursor(99)
         assert store.dream_content_diff() == ""

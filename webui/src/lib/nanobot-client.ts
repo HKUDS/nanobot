@@ -57,7 +57,6 @@ function wsInboundDebugEnabled(): boolean {
   }
 }
 
-/** Shorten streaming text fields so logging stays usable for huge deltas. */
 function summarizeInboundWsPayload(ev: InboundEvent): unknown {
   const kind = (ev as { event?: string }).event;
   if (kind === "ready") return { ...ev, upload: "[redacted]" };
@@ -168,9 +167,7 @@ export interface NanobotClientOptions {
   maxFrameBytes?: number;
   /** Called when a connection drops so the app can refresh its token. */
   onReauth?: () => Promise<string | null>;
-  /** Inject a custom WebSocket factory (used by unit tests). */
   socketFactory?: (url: string) => WebSocket;
-  /** Delay-cap for reconnect backoff (ms). */
   maxBackoffMs?: number;
 }
 
@@ -246,20 +243,17 @@ export class NanobotClient {
   /** Inbound frames received while the transcript owner is absent, regardless of observers. */
   private pendingInboundByChat = new Map<string, InboundEvent[]>();
   private static readonly PENDING_INBOUND_MAX = 2000;
-  // chat_ids we've attached to since connect; re-attached after reconnects
   private knownChats = new Set<string>();
   /** Temporary chats are connection-owned and intentionally not reattached. */
   private temporaryChatIds = new Set<string>();
   private readonly runs = new ClientRunLedger();
   /** Last tracked application frame written, for conservative transport-error attribution. */
   private lastSocketMessageSend: { chatId: string; turnId: string } | null = null;
-  /** Latest ``goal_state`` snapshot per ``chat_id`` (multi-session isolation). */
   private goalStateByChatId = new Map<string, GoalStateWsPayload>();
   private pendingNewChat: PendingChatRequest | null = null;
   private pendingTranscriptions = new Map<string, PendingRequest<string>>();
   private pendingSystemCommands = new Map<string, PendingRequest<void>>();
   private pendingWebUIRequests = new Map<string, PendingWebUIRequest>();
-  // Frames queued while the socket is not yet OPEN
   private sendQueue: Outbound[] = [];
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -353,7 +347,6 @@ export class NanobotClient {
     return () => { this.taskNoticeHandlers.delete(handler); };
   }
 
-  /** Subscribe to transport-level faults (see :type:`StreamError`). */
   onError(handler: ErrorHandler): Unsubscribe {
     this.errorHandlers.add(handler);
     return () => {
@@ -872,7 +865,6 @@ export class NanobotClient {
     return this.requestMutation<SidebarStatePayload>("sidebar.update", { state });
   }
 
-  // -- internals ---------------------------------------------------------
 
   private setStatus(status: ConnectionStatus): void {
     if (this.status_ === status) return;
@@ -883,14 +875,12 @@ export class NanobotClient {
   private handleOpen(): void {
     this.setStatus("open");
     this.reconnectAttempts = 0;
-    // Re-attach every known chat_id so deliveries continue routing after a drop.
     for (const chatId of this.knownChats) {
       this.rawSend({ type: "attach", chat_id: chatId });
     }
     for (const pending of this.pendingWebUIRequests.values()) {
       this.rawSendSerialized(pending.serializedFrame);
     }
-    // Flush anything queued during reconnect.
     const queued = this.sendQueue.splice(0);
     for (const frame of queued) this.rawSend(frame);
   }
@@ -1257,7 +1247,6 @@ export class NanobotClient {
   private scheduleReconnect(): void {
     this.setStatus("reconnecting");
     const attempt = this.reconnectAttempts++;
-    // Exponential backoff: 0.5s, 1s, 2s, 4s, capped.
     const delay = Math.min(500 * 2 ** attempt, this.maxBackoffMs);
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectTimer = null;

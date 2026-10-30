@@ -62,12 +62,10 @@ class _AzureTokenProvider:
         self._credential = DefaultAzureCredential()
 
     async def __call__(self) -> str:
-        """Return a bearer token for the configured scope."""
         access_token = await self._credential.get_token(self._scope)
         return access_token.token
 
     async def aclose(self) -> None:
-        """Release credential resources.  Safe to call multiple times."""
         close = getattr(self._credential, "close", None)
         if close is not None:
             try:
@@ -104,7 +102,6 @@ class AzureOpenAIProvider(LLMProvider):
         if not api_base:
             raise ValueError("Azure OpenAI api_base is required")
 
-        # Normalise: ensure trailing slash
         if not api_base.endswith("/"):
             api_base += "/"
         self.api_base = api_base
@@ -121,7 +118,6 @@ class AzureOpenAIProvider(LLMProvider):
             self._token_provider = _AzureTokenProvider()
             client_api_key = self._token_provider
 
-        # SDK client targeting the Azure Responses API endpoint
         base_url = f"{api_base.rstrip('/')}/openai/v1/"
         self._client = AsyncOpenAI(
             api_key=client_api_key,
@@ -130,9 +126,6 @@ class AzureOpenAIProvider(LLMProvider):
             max_retries=0,
         )
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
 
     async def aclose(self) -> None:
         try:
@@ -185,7 +178,6 @@ class AzureOpenAIProvider(LLMProvider):
         tool_choice: str | dict[str, Any] | None,
         provider_context: ProviderCallContext | None = None,
     ) -> dict[str, Any]:
-        """Build the Responses API request body from Chat-Completions-style args."""
         deployment = model or self.default_model
         sanitized_messages = self._sanitize_empty_content(messages)
         sanitized_state = (
@@ -265,9 +257,6 @@ class AzureOpenAIProvider(LLMProvider):
             error_should_retry=should_retry,
         )
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     async def chat_with_context(
         self,

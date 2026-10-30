@@ -34,7 +34,6 @@ export function QuickPairSetup({ returned, active = true, onSSH, onClose }: { re
 
   useEffect(() => {
     if (!pending) { setBusyVisible(false); return; }
-    // Fast local preparation should not flash a loading label or move the dialog.
     const timer = window.setTimeout(() => setBusyVisible(true), 200);
     return () => window.clearTimeout(timer);
   }, [pending]);

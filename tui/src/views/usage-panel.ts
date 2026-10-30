@@ -35,7 +35,6 @@ function chunk(text: string, color: ColorInput, bold = false): TextChunk {
   }
 }
 
-/** A bounded, read-only view of persisted model-call usage. */
 export class UsagePanel {
   readonly root: BoxRenderable
   private readonly body: TextRenderable

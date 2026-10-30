@@ -76,7 +76,6 @@ async def test_next_turn_is_told_not_to_resume_after_iteration_limit(tmp_path):
         await loop.process_direct("what is 2 + 2?", session_key="cli:limit")
         assert _STOP_MARKER in _last_user_content(requests[-1])
 
-        # Later inputs get no new marker; the earlier marked input stays in history.
         await loop.process_direct("thanks", session_key="cli:limit")
         assert _STOP_MARKER not in _last_user_content(requests[-1])
         assert _STOP_MARKER in json.dumps(requests[-1])
@@ -99,7 +98,6 @@ async def test_stop_survives_restart_and_keeps_history_prefix(tmp_path):
     try:
         await loop.process_direct("what is 2 + 2?", session_key="cli:limit")
         assert _STOP_MARKER in _last_user_content(current[0])
-        # Ordinary prefix and tool schemas are unchanged. Structured failed calls remain.
         assert json.dumps(previous[0]) == json.dumps(current[0][:len(previous[0])])
         assert schemas[0] == loop.provider.schemas[0]
         assert [m for m in previous[-1] if m["role"] == "tool"] == [
@@ -111,7 +109,6 @@ async def test_stop_survives_restart_and_keeps_history_prefix(tmp_path):
         session = await loop.sessions.state.get("cli:limit")
         assert _STOP_MARKER not in json.dumps(public_history_messages(session.messages))
 
-        # Another session must not inherit this stopped turn.
         await loop.process_direct("hello", session_key="cli:other")
         assert _STOP_MARKER not in json.dumps(current[-1])
     finally:
@@ -134,7 +131,6 @@ async def test_goal_budget_handoff_is_not_an_abandoned_turn(tmp_path):
         continuation = pending.get_nowait()
         assert continuation.sender_id == "system:continuation"
 
-        # A new user input can run before the already queued goal continuation.
         next_request = len(requests)
         await loop.process_direct("give me a progress update", session_key="cli:goal")
         assert _STOP_MARKER not in _last_user_content(requests[next_request])

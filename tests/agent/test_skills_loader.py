@@ -1,5 +1,3 @@
-"""Tests for nanobot.agent.skills.SkillsLoader."""
-
 from __future__ import annotations
 
 import json
@@ -541,11 +539,7 @@ def test_prompt_reads_skills_once_and_refreshes_on_next_build(
     assert checks == ["prompt-test-cli"]
 
 
-# -- multiline description tests (YAML folded > and literal |) -----------------
-
-
 def test_build_skills_summary_folded_description(tmp_path: Path) -> None:
-    """description: > (YAML folded scalar) should be parsed correctly."""
     workspace = tmp_path / "ws"
     ws_skills = workspace / "skills"
     ws_skills.mkdir(parents=True)
@@ -571,7 +565,6 @@ def test_build_skills_summary_folded_description(tmp_path: Path) -> None:
 
 
 def test_build_skills_summary_literal_description(tmp_path: Path) -> None:
-    """description: | (YAML literal scalar) should be parsed correctly."""
     workspace = tmp_path / "ws"
     ws_skills = workspace / "skills"
     ws_skills.mkdir(parents=True)
@@ -600,7 +593,6 @@ def test_build_skills_summary_literal_description(tmp_path: Path) -> None:
 
 
 def test_get_skill_metadata_handles_yaml_types(tmp_path: Path) -> None:
-    """yaml.safe_load returns native types; always should be True, not 'true'."""
     workspace = tmp_path / "ws"
     ws_skills = workspace / "skills"
     ws_skills.mkdir(parents=True)
@@ -622,14 +614,11 @@ def test_get_skill_metadata_handles_yaml_types(tmp_path: Path) -> None:
     loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
     meta = loader.get_skill_metadata("typed")
     assert meta is not None
-    # YAML parsed 'true' to Python True
     assert meta.get("always") is True
-    # metadata is a parsed dict, not a JSON string
     assert isinstance(meta.get("metadata"), dict)
 
 
 def test_check_requirements_tolerates_null_requires_and_lists(tmp_path: Path) -> None:
-    """Null requires/bins/env must not crash skill listing (JSON/YAML nulls)."""
     workspace = tmp_path / "ws"
     ws_skills = workspace / "skills"
     ws_skills.mkdir(parents=True)

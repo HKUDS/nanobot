@@ -1,5 +1,3 @@
-"""Black-box smoke test for the real gateway WebUI transport."""
-
 from __future__ import annotations
 
 import asyncio
@@ -32,7 +30,6 @@ _BOOTSTRAP_SECRET = "smoke-secret"
 async def test_remote_proxy_with_real_gateway_chat_settings_and_renewal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The auth proxy must preserve the actual gateway's WebUI mutation audience."""
     # Python CI runs from a clean source tree without a frontend build. Supply
     # this transport smoke's own local shell instead of relying on build leftovers.
     assets = tmp_path / "local-dist"
@@ -354,7 +351,6 @@ async def test_gateway_recovers_private_children_and_deletes_them_with_parent(tm
 
 @pytest.mark.asyncio
 async def test_desktop_terminal_identity_and_independent_client_lifetime(tmp_path: Path) -> None:
-    """Two terminal clients exercise real authentication, framing and gateway lifetime."""
     ws_port, gateway_port = _free_port(), _free_port()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -369,12 +365,11 @@ async def test_desktop_terminal_identity_and_independent_client_lifetime(tmp_pat
         unauthenticated = httpx.get(f"{base_url}/webui/terminal", trust_env=False)
         assert unauthenticated.status_code == 401
         probe = _get_bootstrap(f"{base_url}/webui/terminal")
-        assert probe == terminal  # Contains no token or config information.
+        assert probe == terminal
         second = _get_bootstrap(f"{base_url}/webui/bootstrap")
         assert second["terminal"] == terminal
         identity_query = f'&terminal_protocol=1&terminal_instance={terminal["gatewayId"]}'
         first_url = f'{first["ws_url"]}?token={first["token"]}&client_id=terminal-one'
-        # A rejected wrong-instance upgrade must not consume the one-use WS token.
         with pytest.raises(websockets.exceptions.InvalidStatus) as wrong:
             async with websockets.connect(first_url + "&terminal_protocol=1&terminal_instance=wrong"):
                 pytest.fail("Wrong gateway identity accepted")
@@ -394,7 +389,6 @@ async def test_desktop_terminal_identity_and_independent_client_lifetime(tmp_pat
         assert process.poll() is None
         after = _get_bootstrap(f"{base_url}/webui/bootstrap")
         assert after["terminal"] == terminal
-        # The ordinary WebUI ready frame remains unchanged (no opt-in metadata).
         async with websockets.connect(f'{after["ws_url"]}?token={after["token"]}&client_id=browser') as browser:
             assert "terminal" not in await _recv_until(browser, "ready")
     finally:
@@ -404,7 +398,6 @@ async def test_desktop_terminal_identity_and_independent_client_lifetime(tmp_pat
 def test_gateway_restart_restores_a_completed_answer_without_replaying_model(
     tmp_path: Path,
 ) -> None:
-    """Exercise recovery through two real gateway processes and durable files."""
     ws_port = _free_port()
     gateway_port = _free_port()
     workspace = tmp_path / "workspace"

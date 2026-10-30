@@ -1,5 +1,3 @@
-"""Shared execution loop for tool-using agents."""
-
 from __future__ import annotations
 
 import asyncio
@@ -85,7 +83,6 @@ _PromptResult = TypeVar("_PromptResult")
 
 
 def _restore_outer_whitespace(content: str, original: str | None) -> str:
-    """Restore boundary whitespace stripped while cleaning one recovered segment."""
     if not original:
         return content
     leading_size = len(original) - len(original.lstrip())
@@ -190,7 +187,6 @@ class AgentRunner:
         wait_at_terminal: bool = False,
         drain_callback: bool = True,
     ) -> tuple[bool, int]:
-        """Append one pending-input snapshot and return whether execution continues."""
         injections = await self._drain_injections(spec) if drain_callback else []
         real_injection = bool(injections)
         if not injections and allow_continuation and assistant_message is not None:
@@ -265,7 +261,6 @@ class AgentRunner:
         *,
         terminal: bool = False,
     ) -> list[dict[str, Any]]:
-        """Drain one pending-input snapshot via the injection callback."""
         callback = (
             spec.terminal_injection_callback
             if terminal
@@ -421,7 +416,6 @@ class AgentRunner:
         stop_reason = "completed"
         tool_events: list[dict[str, str]] = []
         external_lookup_counts: dict[str, int] = {}
-        # Per-turn throttle for repeated attempts against the same outside target.
         workspace_violation_counts: dict[str, int] = {}
         empty_content_retries = 0
         # Segments from one uninterrupted length-recovery chain. Tool work or

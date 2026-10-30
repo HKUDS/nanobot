@@ -1,5 +1,3 @@
-"""Gateway-specific configuration for the shared background process runtime."""
-
 # pyright: reportPrivateUsage=false
 
 from __future__ import annotations
@@ -60,7 +58,6 @@ class GatewayHealthIdentity:
 def _gateway_health_ready(host: str, port: int, *, timeout_s: float = 0.4,
                           expected: GatewayHealthIdentity | None = None,
                           maintenance: bool | None = None) -> bool:
-    """Read readiness from the management listener without using proxy settings."""
     connect_host = "127.0.0.1" if host in {"", "0.0.0.0"} else "::1" if host == "::" else host
     connection = http.client.HTTPConnection(connect_host, port, timeout=timeout_s)
     try:
@@ -264,7 +261,6 @@ class GatewayRuntime(ManagedProcessRuntime[GatewayStartOptions]):
         return build_gateway_command(self.python_executable, options)
 
     def _transition_lock(self) -> FileLock:
-        """Serialize long lifecycle transitions without blocking child cleanup."""
         return FileLock(f"{self.paths.state_path}.transition.lock")
 
     def start_background(self, options: GatewayStartOptions) -> RuntimeResult:
@@ -714,7 +710,6 @@ class GatewayClientLease:
         return state
 
     def _prune_clients(self, state: dict[str, object]) -> bool:
-        """Remove stale clients in memory and report whether the state changed."""
         normalized = not isinstance(state.get("clients"), dict)
         clients = self._clients(state)
         stale: list[str] = []

@@ -179,7 +179,6 @@ async def test_pending_and_concurrent_sends_are_bounded_and_cancellable(monkeypa
         assert active == 0
         assert not manager._outbound_tasks
         assert not manager._outbound_tails
-        # Cancellation returns admission permits, including tasks not yet sending.
         for i in range(4):
             await asyncio.wait_for(manager._queue_outbound(
                 channel, OutboundMessage("websocket", str(i), "b"),

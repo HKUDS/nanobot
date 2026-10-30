@@ -1,5 +1,3 @@
-"""Behavioral delegation and executable ownership boundaries for WebSocket."""
-
 from __future__ import annotations
 
 import ast
@@ -144,7 +142,6 @@ def _session_namespace_literal_lines(source: str) -> list[int]:
         if annotation is not None:
             ignored.update(ast.walk(annotation))
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
-            # A standalone string (including a docstring) does not define runtime policy.
             ignored.add(node.value)
     return [
         node.lineno
@@ -157,8 +154,6 @@ def _session_namespace_literal_lines(source: str) -> list[int]:
 
 
 def test_persisted_webui_session_prefix_has_one_production_owner() -> None:
-    # Consumers import session_identity; independent literal keys/prefixes fork its policy.
-    # Exact persisted values and mapping round trips live in test_session_identity.py.
     owners = {}
     for path in (_REPOSITORY_ROOT / "nanobot").rglob("*.py"):
         if "tests" in path.parts:

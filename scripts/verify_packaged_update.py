@@ -192,7 +192,7 @@ def transport():
         for name, content in files.items():
             if name in info:
                 item = info[name]
-                item.filename = name  # Retain native executable permissions.
+                item.filename = name
                 archive.writestr(item, content)
             else:
                 archive.writestr(name, content)
@@ -253,7 +253,6 @@ def _dock_supported(root: Path) -> bool:
 
 
 def _desktop_webui(root: Path) -> None:
-    # The real managed receipt must select automatic detachment, not a test flag.
     subprocess.run([sys.executable, "-I", "-m", "nanobot", "webui", "--yes", "--no-open",
                     "--config", str(root / "account/.nanobot/config.json")], check=True, timeout=60)
 
@@ -406,7 +405,6 @@ def seed(root: Path) -> None:
                                  "tokenIssueSecret": secrets.token_urlsafe(32), "websocketRequiresToken": True}
     save_config(config, config_path)
     seed_history(root)
-    # Keep a real durable result pending without attempting an external send.
     with patch("nanobot.channels.outbox.time.time", return_value=time.time() + 3600):
         DeliveryOutbox(config_path.parent / "delivery/outbox.sqlite3").record(OutboundMessage(
             "whatsapp", "acceptance-offline", "Retain this scheduled result",
@@ -535,8 +533,6 @@ def verify_data(root: Path, expected: str) -> None:
         from nanobot.gateway.runtime import GatewayInstance
 
         instance = GatewayInstance.resolve(config_path=root / "account/.nanobot/config.json")
-        # A historical package without this feature cannot record desktop intent.
-        # After that first upgrade, exercise the real new launcher, then restart.
         if not instance.paths.state_path.with_suffix(".dock").exists():
             _desktop_webui(root)
         _wait_dock(_dock_socket(root), present=True)
@@ -551,7 +547,6 @@ def verify_data(root: Path, expected: str) -> None:
     assert canonical == before["canonical"]
     delivery = root / "account/.nanobot/delivery/outbox.sqlite3"
     assert canonical_records(delivery, ("deliveries",)) == before["delivery"]
-    # Display transcripts are not canonical agent context.
     assert not any(row[0] == "websocket:display-only" for row in canonical["messages"])
     for session_key in ("websocket:mixed-history", "websocket:canonical-only"):
         messages = [json.loads(row[2]) for row in canonical["messages"] if row[0] == session_key]
@@ -661,7 +656,7 @@ def run_parallel(args, root: Path, target: Path, version: str, original_hash: st
             for worker, selected in enumerate(groups, 1):
                 lane = root / f"lane-{worker}"
                 lane.mkdir(mode=0o700)
-                output = lane / "run"  # The child exclusively creates this root.
+                output = lane / "run"
                 env = isolated_environment(lane)
                 # Controller dependencies are shared read-only; do not write
                 # bytecode into their environment from either lane.
@@ -706,8 +701,6 @@ def run_parallel(args, root: Path, target: Path, version: str, original_hash: st
                     print(f"FAIL lane-{worker}: controller exited with status {status}", flush=True)
         finally:
             cleanup_failed = False
-            # Finish or terminate every owned controller before importing JSON.
-            # An ordinary failing lane does not interrupt another lane's cleanup.
             for _, selected, output, process, owner in jobs:
                 try:
                     stop_controller(process, owner)
@@ -747,8 +740,6 @@ def run_serial(args, root: Path, target: Path, version: str, original_hash: str,
     if args.baseline_wheel:
         baseline_version = str(parse_wheel_filename(baseline_source.name)[1])
     else:
-        # A version-only fixture, not a claim about a published predecessor.
-        # Minor/major releases have a zero patch component (e.g. 0.4.0).
         base = list(Version(version).release)
         for index in reversed(range(len(base))):
             if base[index]:
@@ -856,8 +847,6 @@ def run_serial(args, root: Path, target: Path, version: str, original_hash: str,
                         if config_file.exists():
                             config = read(config_file)
                             _wait_for_closed_listeners((config["gateway"]["port"], config["channels"]["websocket"]["port"]))
-                        # No journey result exists on failure; successful journeys
-                        # also retain the existing native Dock shutdown assertion.
                         if results and results[-1]["scenario"] == scenario:
                             results[-1]["gateway_process_stopped"] = True
                             dock_address = results[-1].get("dock_socket")

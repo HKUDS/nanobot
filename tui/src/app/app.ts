@@ -381,9 +381,6 @@ export class NanobotTui {
         onPrimaryMouseDown: () => {
           const restoreComposerFocus = !this.diffViewer.visible && !this.transcript.diagrams.viewer.visible
           if (restoreComposerFocus) this.composer.focus()
-          // Runtime pickers are transient popovers. A primary click anywhere
-          // outside their trigger or body dismisses them; hide() restores the
-          // composer focus through the shared visibility callback.
           this.dismissRuntimeControls()
           if (this.sessionLoading || this.sessionMenu.visible) this.closeSessions()
           return restoreComposerFocus
@@ -2077,7 +2074,6 @@ export class NanobotTui {
       )
       if (this.activeMentionQuery) this.syncComposerMenus()
     } catch {
-      // Mentions are additive; plain text input remains fully functional.
     }
   }
 
@@ -2096,7 +2092,6 @@ export class NanobotTui {
         this.syncComposerMenus()
       }
     } catch {
-      // Skill completion is additive; explicit $skill-name input still works.
     }
   }
 
@@ -2422,7 +2417,6 @@ export class NanobotTui {
       )
       this.status.content = sessions.length ? `${sessions.length} sessions` : "No saved sessions"
     } catch {
-      // Keep the existing picker usable during a transient refresh failure.
     } finally {
       this.sessionRefreshPending = false
     }
@@ -2550,7 +2544,6 @@ export class NanobotTui {
       if (!this.activeTurn) this.status.content = this.readyStatus()
       this.updateMeta()
     } catch {
-      // Keep the last known estimate; it is intentionally informational.
     }
   }
 

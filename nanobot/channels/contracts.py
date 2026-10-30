@@ -1,5 +1,3 @@
-"""Stable contracts shared by channel runtimes and management surfaces."""
-
 from __future__ import annotations
 
 import json

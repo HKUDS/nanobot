@@ -1,5 +1,3 @@
-"""Runtime path helpers derived from the active config context."""
-
 from __future__ import annotations
 
 from pathlib import Path

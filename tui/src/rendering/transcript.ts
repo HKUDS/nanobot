@@ -108,7 +108,6 @@ function projectUserMessage(media: readonly UserMessageMedia[]): UserMessageProj
   return { imageLabels, attachmentNames }
 }
 
-/** Projects gateway events into retained, reflowable conversation cells. */
 export class Transcript {
   readonly root: ScrollBoxRenderable
   readonly diagrams: TranscriptDiagrams
@@ -273,7 +272,7 @@ export class Transcript {
     if (messages.length === 0) return
     const previousTop = this.root.scrollTop
     const previousHeight = this.root.scrollHeight
-    let index = 1 // Keep the launch header first.
+    let index = 1
     for (const message of messages) {
       if (message.compaction) {
         if (this.compaction(message.compaction, index)) index += 1

@@ -1,5 +1,3 @@
-"""Real socket regressions for body-capable HTTP beside bounded WebSockets."""
-
 import asyncio
 
 import aiohttp

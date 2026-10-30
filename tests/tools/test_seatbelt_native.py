@@ -26,7 +26,6 @@ pytestmark = pytest.mark.skipif(
 @pytest.fixture
 def layout(tmp_path, monkeypatch):
     root = tmp_path.resolve()
-    # A separate host /tmp root must not inherit the workspace-parent deny.
     with tempfile.TemporaryDirectory(prefix="nanobot-seatbelt-peer-", dir="/tmp") as peer:
         paths = {
             "workspace": root / 'project with "quotes',
@@ -56,13 +55,10 @@ async def run_script(paths, script):
         working_dir=str(workspace), sandbox="seatbelt",
         sandbox_ro_binds=[str(paths["ro"])], sandbox_rw_binds=[str(paths["rw"])],
     )
-    # Scripts are legitimate exec input; the kernel must enforce their effects.
     return str(await tool.execute(command="sh probe.sh", timeout=5))
 
 
 def completed(result):
-    # Keep output and exit-status assertions exact while checking the current
-    # exec metadata envelope, including its variable wall-clock duration.
     match = re.fullmatch(r"(?:(.*)\n)?Exit code: (-?\d+)\nElapsed: \d+\.\ds", result, re.DOTALL)
     assert match, result
     return match.group(1) or "", int(match.group(2))

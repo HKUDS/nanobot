@@ -1,5 +1,3 @@
-"""Real browser-side HTTP/WS, real gateway auth, and an owned SSH-pipe fixture."""
-
 import asyncio
 import base64
 import json
@@ -431,8 +429,6 @@ async def test_shutdown_replay_contains_only_dead_local_capabilities(remote):
         writer.close()
         await writer.wait_closed()
 
-    # The same browser retries after the local gateway exits. The new process
-    # receives credentials that the actual remote gateway cannot authenticate.
     async with await asyncio.start_server(replacement, "127.0.0.1", remote.proxy.port):
         await remote.client.get(origin + "/webui/bootstrap", headers={"X-Nanobot-Auth": secret})
         await remote.client.get(origin + "/api/fixture", headers={"Authorization": "Bearer " + issued["api_token"]})

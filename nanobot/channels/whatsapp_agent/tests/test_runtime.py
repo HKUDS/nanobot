@@ -1,9 +1,3 @@
-"""Runtime contracts for the WhatsApp Agent Platform channel.
-
-These exercise the paths that protect real invariants: ordered chunked sends,
-cursor durability, dedup across a replayed batch, pacing, and retry safety.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -96,11 +90,6 @@ def _text_message(wamid: str, body: str = "hi", sender: str = "user:55") -> dict
     }
 
 
-# ----------------------------------------------------------------------
-# Retry policy
-# ----------------------------------------------------------------------
-
-
 def test_confirmed_non_delivery_is_retried(tmp_path: Path):
     channel = _channel(tmp_path)
 
@@ -145,11 +134,6 @@ def test_progress_traffic_is_off_by_default(tmp_path: Path):
 
     assert channel.progress_transport_defaults() == (False, False)
     assert channel.config.send_progress is False
-
-
-# ----------------------------------------------------------------------
-# Polling and durable cursor
-# ----------------------------------------------------------------------
 
 
 def test_empty_204_reuses_the_same_offset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -222,8 +206,6 @@ def test_bootstrap_filters_history_across_pages_and_restarts(
         assert batch is not None
         await channel._process_batch(batch)
         assert not channel.bus.inbound_messages
-        # Restart while still scanning the backlog must retain the original
-        # boundary, not skip a message sent since the first process started.
         monkeypatch.setattr(runtime_module.time, "time", lambda: 200)
         restarted = _channel(tmp_path, markRead=False, typingIndicator=False)
         restarted._load_state()
@@ -352,7 +334,6 @@ def test_failed_message_is_not_retried_as_a_duplicate_on_replay(tmp_path: Path, 
     asyncio.run(channel._process_batch(batch))
     asyncio.run(channel._process_batch(batch))
 
-    # The wamid is recorded before handling, so a crash cannot double-answer.
     assert calls == ["wamid.1"]
 
 
@@ -360,11 +341,6 @@ def _parse(body: dict[str, Any]):
     from nanobot.channels.whatsapp_agent.protocol import parse_poll_batch
 
     return parse_poll_batch(body)
-
-
-# ----------------------------------------------------------------------
-# Inbound routing
-# ----------------------------------------------------------------------
 
 
 def test_inbound_text_reaches_the_bus_with_quote_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -415,11 +391,6 @@ def _message(raw: dict[str, Any]):
     return parsed
 
 
-# ----------------------------------------------------------------------
-# Outbound
-# ----------------------------------------------------------------------
-
-
 def test_text_is_chunked_to_the_api_limit_and_sent_in_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     channel = _channel(tmp_path)
     channel._state.note_creator("user:55")
@@ -437,7 +408,6 @@ def test_text_is_chunked_to_the_api_limit_and_sent_in_order(tmp_path: Path, monk
     )
 
     assert [len(chunk["text"]["body"]) for chunk in sent] == [4096, 904]
-    # No inbound message id was supplied, so no quote is attached.
     assert all("context" not in chunk for chunk in sent)
     assert all(chunk["to"] == "user:55" for chunk in sent)
 
@@ -588,7 +558,6 @@ def test_media_uses_the_matching_payload_object_only(tmp_path: Path, monkeypatch
 
     assert sent[0]["type"] == "image"
     assert sent[0]["image"] == {"id": "MEDIA1"}
-    # Extra payload objects are validated by the API, so none are included.
     assert set(sent[0]) == {"messaging_product", "to", "type", "image"}
 
 
@@ -787,8 +756,6 @@ def test_abandoned_or_cancelled_sends_release_retry_progress(
     monkeypatch.setattr(channel, "_request_ok", request)
 
     async def abandon():
-        # No successful retry follows; collecting the envelope must remove its
-        # progress even when the failure was retryable.
         with pytest.raises(WhatsAppAgentAPIError):
             await channel.send(OutboundMessage(channel.name, "creator", "hello"))
 
@@ -850,11 +817,6 @@ async def test_manager_dispatch_respects_progress_opt_ins(
         await asyncio.gather(dispatcher, return_exceptions=True)
 
 
-# ----------------------------------------------------------------------
-# Inbound media
-# ----------------------------------------------------------------------
-
-
 def test_inbound_media_is_downloaded_and_verified(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     channel = _channel(tmp_path)
     content = b"pdf-bytes"
@@ -907,7 +869,6 @@ def test_media_with_a_mismatched_digest_is_discarded(tmp_path: Path, monkeypatch
     monkeypatch.setattr(channel, "_fetch_media_bytes", fake_fetch)
     paths, text = asyncio.run(channel._materialize(_message(raw)))
 
-    # The bytes never reach the agent and no file is written.
     assert paths == []
     assert text == "[image]"
 
@@ -959,11 +920,6 @@ def test_voice_note_is_transcribed_when_a_provider_is_available(tmp_path: Path, 
     assert len(paths) == 1
 
 
-# ----------------------------------------------------------------------
-# Lifecycle and pacing
-# ----------------------------------------------------------------------
-
-
 def test_start_requires_a_token(tmp_path: Path):
     channel = _channel(tmp_path, token="")
 
@@ -997,7 +953,6 @@ def test_invalid_token_during_poll_stops_the_loop(tmp_path: Path, monkeypatch: p
 
     asyncio.run(run())
     assert entered.is_set()
-    # An invalid token cannot recover by retrying, so the channel is not running.
     assert channel._running is False
 
 
@@ -1012,7 +967,6 @@ def test_rolling_window_limiter_paces_a_method(monkeypatch: pytest.MonkeyPatch):
             await limiter.acquire("messages")
         return loop.time() - start
 
-    # The third call must wait for the window rather than exceed the cap.
     assert asyncio.run(run()) >= 0.24
 
 
@@ -1021,7 +975,6 @@ def test_rolling_window_limiter_counts_each_method_separately(monkeypatch: pytes
     limiter = runtime_module._RollingWindowLimiter({"messages": 1, "updates": 1}, margin=0)
 
     async def run() -> None:
-        # A send must not consume the poll budget; both complete immediately.
         await asyncio.wait_for(limiter.acquire("messages"), timeout=0.2)
         await asyncio.wait_for(limiter.acquire("updates"), timeout=0.2)
 
@@ -1029,7 +982,6 @@ def test_rolling_window_limiter_counts_each_method_separately(monkeypatch: pytes
 
 
 def test_restart_resumes_from_the_persisted_offset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    # First process handles one message and advances the cursor.
     first = _channel(tmp_path)
     first._load_state()
 
@@ -1040,7 +992,6 @@ def test_restart_resumes_from_the_persisted_offset(tmp_path: Path, monkeypatch: 
     first._client = object()  # type: ignore[assignment]
     asyncio.run(first._process_batch(_parse(_poll_body([_text_message("wamid.1")], 500))))
 
-    # A new process with the same token must resume, not restart the stream.
     second = _channel(tmp_path)
     second._load_state()
     seen: list[dict[str, Any]] = []
@@ -1054,7 +1005,6 @@ def test_restart_resumes_from_the_persisted_offset(tmp_path: Path, monkeypatch: 
     asyncio.run(second._poll_once())
 
     assert seen[0]["offset"] == 500
-    # The dedup window also survives the restart.
     assert second._state.has_message("wamid.1") is True
 
 
@@ -1078,7 +1028,6 @@ def test_restart_with_a_new_token_does_not_reuse_the_old_cursor(
     replacement._client = object()  # type: ignore[assignment]
     asyncio.run(replacement._poll_once())
 
-    # next_offset belongs to the agent that issued it, so it is not replayed.
     assert seen[0]["offset"] == 0
 
 
@@ -1094,7 +1043,6 @@ def test_the_token_never_appears_in_logs_or_persisted_state(
 
     logger_id = logger.add(lambda message: records.append(message), level="DEBUG")
     try:
-        # A failing poll exercises the error-logging path with a live token.
         async def failing_request(method, path, *, method_key, params=None, **kwargs):
             return 400, {"error": {"code": 100, "message": "(100) invalid"}}
 

@@ -1,5 +1,3 @@
-"""Tests for runner progress hooks and provider event routing."""
-
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 

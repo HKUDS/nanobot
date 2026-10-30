@@ -1,7 +1,3 @@
-"""
-nanobot - A lightweight AI agent framework
-"""
-
 import tomllib
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
@@ -36,7 +32,6 @@ if TYPE_CHECKING:
 
 
 def _read_pyproject_version() -> str | None:
-    """Read the source-tree version when package metadata is unavailable."""
     pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
     if not pyproject.exists():
         return None

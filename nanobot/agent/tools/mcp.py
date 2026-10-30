@@ -1,5 +1,3 @@
-"""MCP client and dynamic tool-provider lifecycle."""
-
 from __future__ import annotations
 
 import asyncio
@@ -119,7 +117,6 @@ def _is_malformed_mcp_progress_notification(message: Any) -> bool:
 
 
 def _mcp_jsonrpc_payload(message: Any) -> Any:
-    """Return the JSON-RPC payload across current and future MCP SDK shapes."""
     envelope = getattr(message, "message", message)
     return getattr(envelope, "root", None) or envelope
 
@@ -182,7 +179,6 @@ def _filter_malformed_mcp_progress_notifications(read_stream: Any, server_name: 
 
 
 def _sanitize_name(name: str) -> str:
-    """Sanitize an MCP-derived name for model API compatibility."""
     return _SANITIZE_RE.sub("_", re.sub(r"[^a-zA-Z0-9_-]", "_", name))
 
 
@@ -191,7 +187,6 @@ _HASH_LENGTH = 8
 
 
 def _limit_tool_name(name: str, max_length: int = _MAX_TOOL_NAME_LENGTH) -> str:
-    """Limit a tool name while keeping short names unchanged."""
     if len(name) <= max_length:
         return name
 
@@ -201,12 +196,10 @@ def _limit_tool_name(name: str, max_length: int = _MAX_TOOL_NAME_LENGTH) -> str:
 
 
 def _sanitize_mcp_tool_name(name: str) -> str:
-    """Sanitize and limit an MCP-derived tool name."""
     return _limit_tool_name(_sanitize_name(name))
 
 
 def _is_transient(exc: BaseException) -> bool:
-    """Check if an exception looks like a transient connection error."""
     return type(exc).__name__ in _TRANSIENT_EXC_NAMES
 
 
@@ -249,7 +242,6 @@ def _log_mcp_connection_failure(
 
 
 def _is_session_terminated(exc: BaseException) -> bool:
-    """Return True when the MCP SDK reports a dead client session."""
     if _is_transient(exc):
         return True
     messages = [str(exc)]
@@ -326,7 +318,6 @@ def _pinned_transport_kwargs(proxy: str | None = None) -> dict[str, Any]:
 
 
 async def _validate_mcp_request_url(request: httpx.Request) -> None:
-    """Validate each outgoing MCP HTTP request, including redirect targets."""
     ok, error = validate_url_target(str(request.url))
     if not ok:
         raise httpx.RequestError(
@@ -336,7 +327,6 @@ async def _validate_mcp_request_url(request: httpx.Request) -> None:
 
 
 def _windows_command_basename(command: str) -> str:
-    """Return the lowercase basename for a Windows command or path."""
     return command.replace("\\", "/").rsplit("/", maxsplit=1)[-1].lower()
 
 
@@ -345,7 +335,6 @@ def _normalize_windows_stdio_command(
     args: list[str] | None,
     env: dict[str, str] | None,
 ) -> tuple[str, list[str], dict[str, str] | None]:
-    """Wrap Windows shell launchers so MCP stdio servers start reliably."""
     normalized_args = list(args or [])
     if os.name != "nt":
         return command, normalized_args, env
@@ -372,7 +361,6 @@ def _normalize_windows_stdio_command(
 
 
 def _extract_nullable_branch(options: Any) -> tuple[dict[str, Any], bool] | None:
-    """Return the single non-null branch for nullable unions."""
     if not isinstance(options, list):
         return None
 
@@ -393,7 +381,6 @@ def _extract_nullable_branch(options: Any) -> tuple[dict[str, Any], bool] | None
 
 
 def _resolve_local_schema_ref(root: dict[str, Any], ref: str) -> Any:
-    """Resolve a local JSON Pointer without accepting remote references."""
     if not ref.startswith("#"):
         raise ValueError("not a local JSON Pointer")
 
@@ -472,7 +459,6 @@ def _rewrite_local_schema_refs(schema: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_nullable_schema(schema: dict[str, Any]) -> dict[str, Any]:
-    """Normalize nullable forms in structural subschemas only."""
     normalized = dict(schema)
     raw_type = normalized.get("type")
     if isinstance(raw_type, list):
@@ -523,7 +509,6 @@ def _normalize_nullable_schema(schema: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_schema_for_openai(schema: Any) -> dict[str, Any]:
-    """Normalize MCP JSON Schema patterns for tool definitions."""
     if not isinstance(schema, dict):
         return {"type": "object", "properties": {}}
     schema_mapping = cast(dict[str, Any], schema)
@@ -579,7 +564,6 @@ class _MCPWrapperBase(Tool):
         timeout: float,
         capability_kind: Literal["tool", "resource", "prompt"],
     ) -> _MCPResultT | ToolResult:
-        """Recover requests only; rendering and reconnect/backoff failures stay outside replay."""
         from mcp.shared.exceptions import McpError
 
         operation = f"{capability_kind} {'read' if capability_kind == 'resource' else 'call'}"
@@ -644,13 +628,6 @@ class _MCPWrapperBase(Tool):
 
 
 def _image_block_data_url(block: Any, types: Any) -> str | None:
-    """Return a base64 ``data:`` URL for an MCP image-bearing content block.
-
-    Handles ``ImageContent`` directly and ``EmbeddedResource`` wrapping a binary
-    blob with an ``image/*`` MIME type. Returns ``None`` for anything else.
-    ``getattr`` guards keep this safe when the installed/faked ``mcp`` SDK does
-    not expose a given type.
-    """
     image_cls = getattr(types, "ImageContent", None)
     if image_cls is not None and isinstance(block, image_cls):
         mime = getattr(block, "mimeType", None) or "image/png"
@@ -669,12 +646,6 @@ def _image_block_data_url(block: Any, types: Any) -> str | None:
 
 
 def _mcp_image_tool_result(text_parts: list[str], artifacts: list[dict[str, Any]]) -> str:
-    """Build the compact tool result for an MCP call that returned image(s).
-
-    The base64 stays out of the model context entirely — only artifact paths and
-    metadata are returned, so the result is small and the channel can deliver the
-    saved file via the message tool.
-    """
     payload: dict[str, Any] = {
         "artifacts": artifacts,
         "next_step": (
@@ -730,7 +701,6 @@ class MCPToolWrapper(_MCPWrapperBase):
         )
         if isinstance(result, ToolResult):
             return result
-        # Success — extract text and persist any image content as artifacts.
         try:
             rendered = self._render_call_result(result.content, kwargs)
             if getattr(result, "isError", False):
@@ -780,7 +750,6 @@ class MCPToolWrapper(_MCPWrapperBase):
     def _store_image_block(
         self, data_url: str, arguments: Mapping[str, Any]
     ) -> dict[str, Any] | None:
-        """Persist one image data URL as an artifact; return its metadata or None."""
         from nanobot.utils.artifacts import ArtifactError, store_generated_image_artifact
 
         try:
@@ -883,7 +852,6 @@ class MCPPromptWrapper(_MCPWrapperBase):
         )
         self._prompt_timeout = prompt_timeout
 
-        # Build parameters from prompt arguments
         properties: dict[str, Any] = {}
         required: list[str] = []
         for arg in prompt_def.arguments or []:

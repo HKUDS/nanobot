@@ -1,5 +1,3 @@
-"""Select local SSH files for the WebUI without reading their contents."""
-
 from __future__ import annotations
 
 import asyncio
@@ -132,7 +130,6 @@ def _picker_command() -> _PickerCommand | None:
 
 
 def _picker_environment() -> dict[str, str]:
-    """Pass only host UI/runtime variables, never provider or gateway secrets."""
     keys: list[str] = list(_COMMON_ENV_KEYS)
     if sys.platform == "darwin":
         keys.extend(_MACOS_GUI_ENV_KEYS)

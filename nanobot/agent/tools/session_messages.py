@@ -1,5 +1,3 @@
-"""Tools for sending bounded messages between persisted sessions."""
-
 # pyright: reportIncompatibleMethodOverride=false
 
 from __future__ import annotations
@@ -235,7 +233,6 @@ class SendSessionMessageTool(Tool):
         return f"@{target.name}"
 
     def _prune_expired_rate_limits(self, cutoff: float) -> None:
-        """Drop sources ordered by their most recent successful send."""
         while self._sent_at:
             _, sent_at = next(iter(self._sent_at.items()))
             if sent_at[-1] > cutoff:

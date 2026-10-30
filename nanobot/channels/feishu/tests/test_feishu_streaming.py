@@ -1,6 +1,5 @@
 # ruff: noqa: E402
 
-"""Tests for Feishu streaming (send_delta) via CardKit streaming API."""
 import json
 import time
 from types import SimpleNamespace
@@ -285,7 +284,7 @@ class TestSendDelta:
         ch._client.cardkit.v1.card_element.content.assert_called_once()
         ch._client.cardkit.v1.card.settings.assert_called_once()
         settings_call = ch._client.cardkit.v1.card.settings.call_args[0][0]
-        assert settings_call.body.sequence == 5  # after final content seq 4
+        assert settings_call.body.sequence == 5
 
     @pytest.mark.asyncio
     async def test_stream_end_merge_next_preserves_buffer(self):
@@ -310,7 +309,6 @@ class TestSendDelta:
 
     @pytest.mark.asyncio
     async def test_stream_end_fallback_when_no_card_id(self):
-        """If card creation failed, stream_end falls back to a plain card message."""
         ch = _make_channel()
         ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
             text="Fallback content", card_id=None, sequence=0, last_edit=0.0,
@@ -391,7 +389,6 @@ class TestSendDelta:
 
     @pytest.mark.asyncio
     async def test_stream_end_fallback_when_final_update_fails(self):
-        """If streaming mode was closed (e.g. Feishu timeout), fall back to a regular card."""
         ch = _make_channel()
         ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
             text="Lost content", card_id="card_1", sequence=3, last_edit=0.0,
@@ -403,7 +400,6 @@ class TestSendDelta:
 
         assert "oc_chat1" not in ch._stream_bufs
         assert ch._client.cardkit.v1.card.settings.call_count == 2
-        # Should fall back to sending a regular interactive card
         ch._client.im.v1.message.create.assert_called_once()
 
     @pytest.mark.asyncio
@@ -456,17 +452,15 @@ class TestSendDelta:
         await ch.send_delta("oc_chat1", "b")
         assert buf.sequence == 6
 
-        buf.last_edit = 0.0  # reset to bypass throttle
+        buf.last_edit = 0.0
         await ch.send_delta("oc_chat1", "c")
         assert buf.sequence == 7
 
 
 class TestToolHintInlineStreaming:
-    """Tool hint messages should be inlined into active streaming cards."""
 
     @pytest.mark.asyncio
     async def test_tool_hint_inlined_when_stream_active(self):
-        """With an active streaming buffer, tool hint appends to the card."""
         ch = _make_channel()
         ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
             text="Partial answer", card_id="card_1", sequence=2, last_edit=0.0,
@@ -488,7 +482,6 @@ class TestToolHintInlineStreaming:
 
     @pytest.mark.asyncio
     async def test_tool_hint_preserved_on_next_delta(self):
-        """When new delta arrives, the tool hint is kept as permanent content and delta appends after it."""
         ch = _make_channel()
         ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
             text="Partial answer\n\n🔧 web_fetch(\"url\")\n\n",
@@ -505,7 +498,6 @@ class TestToolHintInlineStreaming:
 
     @pytest.mark.asyncio
     async def test_tool_hint_fallback_when_no_stream(self):
-        """Without an active buffer, tool hint falls back to a standalone card."""
         ch = _make_channel()
         ch._client.im.v1.message.create.return_value = _mock_send_response("om_hint")
 
@@ -590,7 +582,6 @@ class TestToolHintInlineStreaming:
 
     @pytest.mark.asyncio
     async def test_consecutive_tool_hints_append(self):
-        """When multiple tool hints arrive consecutively, each appends to the card."""
         ch = _make_channel()
         ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
             text="Partial answer", card_id="card_1", sequence=2, last_edit=0.0,
@@ -620,7 +611,6 @@ class TestToolHintInlineStreaming:
 
     @pytest.mark.asyncio
     async def test_tool_hint_preserved_on_final_stream_end(self):
-        """When stream end closes the card, tool hint is kept in the final text."""
         ch = _make_channel()
         ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
             text="Final content\n\n🔧 web_fetch(\"url\")\n\n",
@@ -637,7 +627,6 @@ class TestToolHintInlineStreaming:
 
     @pytest.mark.asyncio
     async def test_empty_tool_hint_is_noop(self):
-        """Empty or whitespace-only tool hint content is silently ignored."""
         ch = _make_channel()
         ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
             text="Partial answer", card_id="card_1", sequence=2, last_edit=0.0,

@@ -1,5 +1,3 @@
-"""Job-store edits must not cancel the timer task executing an agent turn."""
-
 import asyncio
 from pathlib import Path
 
@@ -76,7 +74,6 @@ async def test_edit_during_timer_execution_preserves_turn(
         if not edit_from_callback:
             edit_store()
         release.set()
-        # Rearming cancels the finished tick; the job outcome must still be successful.
         await asyncio.wait((timer,))
         if not timer.cancelled():
             timer.result()

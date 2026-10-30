@@ -1,5 +1,3 @@
-"""Session schema upgrades preserve records and fail atomically."""
-
 import sqlite3
 from contextlib import closing
 from pathlib import Path

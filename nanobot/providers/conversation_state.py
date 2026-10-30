@@ -1,5 +1,3 @@
-"""Provider-owned conversation-state lifecycle coordination."""
-
 from __future__ import annotations
 
 from copy import deepcopy

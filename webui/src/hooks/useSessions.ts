@@ -19,7 +19,6 @@ import type {
 
 const CHAT_CREATE_TIMEOUT_MS = 60_000;
 
-/** Sidebar state: fetches the full session list and exposes create / delete actions. */
 export function useSessions(): {
   sessions: ChatSummary[];
   loading: boolean;
@@ -206,7 +205,6 @@ export function useSessions(): {
   };
 }
 
-/** Read-only history view backed by the conversation owner. */
 export function useSessionHistory(key: string | null) {
   const { messages, history, refreshHistory, loadOlder } = useNanobotStream(
     null, undefined, false, undefined, undefined, undefined, { key },

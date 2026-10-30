@@ -1,5 +1,3 @@
-"""Transport-independent pairing snapshot invalidation."""
-
 from dataclasses import dataclass
 
 from nanobot.events import AgentEvent

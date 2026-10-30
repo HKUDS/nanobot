@@ -1,5 +1,3 @@
-"""CLI-Anything catalog, install state, and safe CLI execution."""
-
 from __future__ import annotations
 
 import asyncio
@@ -209,7 +207,6 @@ def _now() -> float:
 
 
 def _as_object_dict(value: object) -> dict[str, Any] | None:
-    """Narrow a JSON-like object to the string-keyed mapping used by this module."""
     return cast(dict[str, Any], value) if isinstance(value, dict) else None
 
 
@@ -410,7 +407,6 @@ def _truncate(text: str, limit: int = _MAX_TOOL_OUTPUT_CHARS) -> str:
 
 
 def _catalog_description(app: dict[str, Any]) -> str:
-    """Return catalog copy without implying vendor endorsement."""
     description = str(app.get("description") or "")
     return _ENDORSEMENT_WORD_RE.sub("", description).strip()
 

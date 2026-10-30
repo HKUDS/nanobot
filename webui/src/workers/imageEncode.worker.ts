@@ -1,22 +1,11 @@
 /**
- * Off-main-thread image encoder.
- *
- * Accepts a ``File``, validates it via magic bytes (ignoring the extension to
- * defeat rename-based spoofs), and either passes through or *normalizes* the
- * bytes so the resulting base64 data URL stays ≤ ``TARGET_MAX_BYTES``. The
- * normalization path uses ``createImageBitmap`` + ``OffscreenCanvas`` so the
- * full decode/resize/re-encode cycle never blocks the UI thread.
- *
- * Output contract:
- *   ``{ok: true, dataUrl, bytes, normalized}`` on success, or
- *   ``{ok: false, reason}`` for every recoverable failure — magic-bytes
- *   mismatch, unsupported MIME, decode error, or a post-normalization payload
- *   that *still* exceeds the budget (extreme aspect ratios).
+ * Validate image bytes independently of filenames and normalize to TARGET_MAX_BYTES
+ * before base64 encoding. Used by the Worker and the main-thread fallback.
+ * Returns {ok: true, dataUrl, bytes, normalized} or {ok: false, reason}.
  */
 
 /// <reference lib="webworker" />
 
-// --- Types -------------------------------------------------------------------
 
 export type EncodeInput = {
   id: string;
@@ -45,11 +34,8 @@ export type EncodeFailure = {
 
 export type EncodeResponse = EncodeSuccess | EncodeFailure;
 
-// --- Budgets -----------------------------------------------------------------
 
-/** Upper bound for the final base64-decoded payload. Matches the server-side
- * safeguard (8 MB) minus safety margin; anything this function yields should
- * safely pass ``_MAX_IMAGE_BYTES`` on the server. */
+/** Encoded image byte budget before base64; the server's supplied ingress limits still apply. */
 export const TARGET_MAX_BYTES = 6 * 1024 * 1024;
 
 /** Long-edge pixel cap when we resize a large image. 2048 keeps retina UIs
@@ -72,7 +58,6 @@ const SUPPORTED_MIMES = new Set([
   "image/gif",
 ]);
 
-// --- Magic bytes -------------------------------------------------------------
 
 /** Sniff the first 12 bytes; returns the canonical MIME or ``null``.
  *
@@ -116,10 +101,9 @@ export function sniffImageMime(bytes: Uint8Array): string | null {
   return null;
 }
 
-// --- Encoder -----------------------------------------------------------------
 
 function bufferToBase64(buf: ArrayBuffer): string {
-  // ``btoa`` can't take large strings — chunk through 32 KB windows.
+  // Bound fromCharCode's argument list to avoid engine argument-count limits.
   const bytes = new Uint8Array(buf);
   let binary = "";
   const CHUNK = 0x8000;
@@ -150,7 +134,6 @@ async function normalize(
   file: File,
   sourceMime: string,
 ): Promise<{ dataUrl: string; bytes: number } | { error: EncodeFailure["reason"] }> {
-  // Re-encode paths: JPEG/WebP → WebP q=0.85; PNG/GIF → PNG (keep crisp).
   const targetMime = NORMALIZE_LOSSY_MIMES.has(sourceMime)
     ? "image/webp"
     : "image/png";

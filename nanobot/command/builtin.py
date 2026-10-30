@@ -1,5 +1,3 @@
-"""Built-in slash command handlers."""
-
 from __future__ import annotations
 
 import asyncio
@@ -640,7 +638,6 @@ def _format_dream_no_input_message() -> str:
 
 
 def _extract_changed_files(diff: str) -> list[str]:
-    """Extract changed file paths from a unified diff."""
     files: list[str] = []
     seen: set[str] = set()
     for line in diff.splitlines():
@@ -744,7 +741,6 @@ async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
     args = ctx.args.strip()
 
     if args:
-        # Show diff of a specific commit
         sha = args.split()[0]
         result = git.show_commit_diff(sha)
         if not result:
@@ -757,7 +753,6 @@ async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
             commit, diff = result
             content = _format_dream_log_content(commit, diff, requested_sha=sha)
     else:
-        # Default: show the latest Dream commit's diff
         commits = git.log(max_entries=1, message_prefix=_DREAM_COMMIT_PREFIX)
         result = (
             git.show_commit_diff(
@@ -799,7 +794,6 @@ async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
 
     args = ctx.args.strip()
     if not args:
-        # Show recent Dream commits for the user to pick
         commits = git.log(max_entries=10, message_prefix=_DREAM_COMMIT_PREFIX)
         if not commits:
             content = "Dream memory has no saved versions to restore yet."
@@ -841,7 +835,6 @@ _HISTORY_MAX_CONTENT_CHARS = 200
 
 
 def _format_history_message(msg: dict[str, Any]) -> str | None:
-    """Format a single history message for display. Returns None to skip."""
     role = msg.get("role")
     if role not in ("user", "assistant"):
         return None

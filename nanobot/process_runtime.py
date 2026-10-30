@@ -1,5 +1,3 @@
-"""Cross-platform lifecycle management for nanobot background processes."""
-
 from __future__ import annotations
 
 import ctypes
@@ -288,7 +286,6 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
             handle.close()
 
     def _log_file_replaced(self, handle: Any) -> bool:
-        """Return whether rotation replaced or truncated the followed log file."""
         try:
             opened = os.fstat(handle.fileno())
             current = self.paths.log_path.stat()
@@ -582,7 +579,6 @@ def _darwin_identity_match(
     recorded: object,
     current: object,
 ) -> Literal["match", "mismatch", "unknown"]:
-    """Compare the new numeric identity with a pre-upgrade ``ps`` identity."""
     if not isinstance(recorded, str) or not isinstance(current, str):
         return "mismatch"
     current_identity = _parse_darwin_identity(current)
@@ -632,7 +628,6 @@ def process_identity_record(
 
 
 def _legacy_darwin_started_at(value: str) -> int | None:
-    """Parse the English and numeric macOS ``ps lstart`` formats we released."""
     english = re.fullmatch(
         r"[A-Za-z]{3}\s+([A-Za-z]{3})\s+(\d{1,2})\s+"
         r"(\d{2}):(\d{2}):(\d{2})\s+(\d{4})",
@@ -695,7 +690,6 @@ def _darwin_proc_pidinfo() -> Any | None:
 
 
 def _darwin_process_birth(pid: int) -> tuple[int, int, int] | None:
-    """Read PGID and microsecond process birth time from ``proc_bsdinfo``."""
     proc_pidinfo = _darwin_proc_pidinfo()
     if proc_pidinfo is None:
         return None

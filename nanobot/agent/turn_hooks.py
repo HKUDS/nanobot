@@ -1,5 +1,3 @@
-"""Turn-scoped hook assembly for agent runs."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field

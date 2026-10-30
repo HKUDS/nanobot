@@ -1,5 +1,3 @@
-"""Tests for onboard logic and prompt keyboard behavior."""
-
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -27,7 +25,6 @@ from nanobot.utils.helpers import sync_workspace_templates
 
 
 class TestMergeMissingDefaults:
-    """Tests for recursive config default merging."""
 
     def test_adds_missing_top_level_keys(self):
         existing = {"a": 1}
@@ -91,7 +88,6 @@ class TestMergeMissingDefaults:
         assert merge_missing_defaults({}, {}) == {}
 
     def test_backfills_channel_config(self):
-        """Real-world scenario: backfill missing channel fields."""
         existing_channel = {
             "enabled": False,
             "appId": "",
@@ -112,7 +108,6 @@ class TestMergeMissingDefaults:
 
 
 class TestGetFieldTypeInfo:
-    """Tests for _get_field_type_info type extraction."""
 
     def test_extracts_str_type(self):
         class Model(BaseModel):
@@ -155,23 +150,19 @@ class TestGetFieldTypeInfo:
         assert inner is str
 
     def test_extracts_list_type_without_item_type(self):
-        # Plain list without type param falls back to str
         class Model(BaseModel):
             items: list  # type: ignore
 
-        # Plain list annotation doesn't match list check, returns str
         type_name, inner = _get_field_type_info(Model.model_fields["items"])
-        assert type_name == "str"  # Falls back to str for untyped list
+        assert type_name == "str"
         assert inner is None
 
     def test_extracts_dict_type(self):
-        # Plain dict without type param falls back to str
         class Model(BaseModel):
             data: dict  # type: ignore
 
-        # Plain dict annotation doesn't match dict check, returns str
         type_name, inner = _get_field_type_info(Model.model_fields["data"])
-        assert type_name == "str"  # Falls back to str for untyped dict
+        assert type_name == "str"
         assert inner is None
 
     def test_extracts_optional_type(self):
@@ -179,7 +170,6 @@ class TestGetFieldTypeInfo:
             optional: str | None = None
 
         type_name, inner = _get_field_type_info(Model.model_fields["optional"])
-        # Should unwrap Optional and get str
         assert type_name == "str"
         assert inner is None
 
@@ -195,15 +185,12 @@ class TestGetFieldTypeInfo:
         assert inner is Inner
 
     def test_handles_none_annotation(self):
-        """Field with None annotation defaults to str."""
-        # Create a mock field_info with None annotation
         field_info = SimpleNamespace(annotation=None)
         type_name, inner = _get_field_type_info(field_info)
         assert type_name == "str"
         assert inner is None
 
     def test_literal_type_returns_literal_with_choices(self):
-        """Literal["a", "b"] should return ("literal", ["a", "b"])."""
         from typing import Literal
 
         class Model(BaseModel):
@@ -214,7 +201,6 @@ class TestGetFieldTypeInfo:
         assert inner == ["standard", "persistent"]
 
     def test_real_provider_retry_mode_field(self):
-        """Validate against actual AgentDefaults.provider_retry_mode field."""
         from nanobot.config.schema import AgentDefaults
 
         type_name, inner = _get_field_type_info(AgentDefaults.model_fields["provider_retry_mode"])
@@ -223,7 +209,6 @@ class TestGetFieldTypeInfo:
 
 
 class TestGetFieldDisplayName:
-    """Tests for _get_field_display_name human-readable name generation."""
 
     def test_uses_description_if_present(self):
         class Model(BaseModel):
@@ -268,7 +253,6 @@ class TestGetFieldDisplayName:
 
 
 class TestFormatValue:
-    """Tests for _format_value display formatting."""
 
     def test_formats_none_as_not_set(self):
         assert "not set" in _format_value(None)
@@ -308,22 +292,18 @@ class TestFormatValue:
 
 
 class TestSyncWorkspaceTemplates:
-    """Tests for sync_workspace_templates file synchronization."""
 
     def test_does_not_overwrite_existing_files(self, tmp_path):
-        """Should not overwrite files that already exist."""
         workspace = tmp_path / "workspace"
         workspace.mkdir(parents=True)
         (workspace / "AGENTS.md").write_text("existing content")
 
         sync_workspace_templates(workspace, silent=True)
 
-        # Existing file should not be changed
         content = (workspace / "AGENTS.md").read_text()
         assert content == "existing content"
 
     def test_does_not_create_tools_md(self, tmp_path):
-        """Tool contract is injected internally, not copied into user workspaces."""
         workspace = tmp_path / "workspace"
 
         added = sync_workspace_templates(workspace, silent=True)
@@ -332,7 +312,6 @@ class TestSyncWorkspaceTemplates:
         assert not (workspace / "TOOLS.md").exists()
 
     def test_preserves_existing_tools_md_without_overwriting(self, tmp_path):
-        """Legacy user workspaces may have TOOLS.md; sync should leave it untouched."""
         workspace = tmp_path / "workspace"
         workspace.mkdir(parents=True)
         tools_path = workspace / "TOOLS.md"
@@ -343,7 +322,6 @@ class TestSyncWorkspaceTemplates:
         assert tools_path.read_text(encoding="utf-8") == "custom tool notes"
 
     def test_creates_memory_directory(self, tmp_path):
-        """Should create memory directory structure."""
         workspace = tmp_path / "workspace"
 
         sync_workspace_templates(workspace, silent=True)
@@ -360,19 +338,16 @@ class TestSyncWorkspaceTemplates:
         assert not (workspace / "prompts" / "dream.md").exists()
 
     def test_returns_list_of_added_files(self, tmp_path):
-        """Should return list of relative paths for added files."""
         workspace = tmp_path / "workspace"
 
         added = sync_workspace_templates(workspace, silent=True)
 
         assert isinstance(added, list)
-        # All paths should be relative to workspace
         for path in added:
             assert not Path(path).is_absolute()
 
 
 class TestProviderChannelInfo:
-    """Tests for provider and channel info retrieval."""
 
     def test_get_provider_names_returns_dict(self):
         from nanobot.cli.onboard import _get_provider_names
@@ -380,7 +355,6 @@ class TestProviderChannelInfo:
         names = _get_provider_names()
         assert isinstance(names, dict)
         assert len(names) > 0
-        # Should include common providers
         assert "openai" in names or "anthropic" in names
         assert "openai_codex" not in names
         assert "github_copilot" not in names
@@ -401,10 +375,9 @@ class TestProviderChannelInfo:
 
         info = _get_provider_info()
         assert isinstance(info, dict)
-        # Each value should be a tuple with expected structure
         for provider_name, value in info.items():
             assert isinstance(value, tuple)
-            assert len(value) == 4  # (display_name, needs_api_key, needs_api_base, env_var)
+            assert len(value) == 4
 
 
 class _SimpleDraftModel(BaseModel):
@@ -520,10 +493,8 @@ class TestRunOnboardExitBehavior:
 
 
 class TestValidateFieldConstraint:
-    """Tests for _validate_field_constraint schema-aware input validation."""
 
     def test_returns_none_when_no_constraints(self):
-        """Fields without constraints should pass validation."""
         from pydantic import BaseModel
 
         class M(BaseModel):
@@ -535,7 +506,6 @@ class TestValidateFieldConstraint:
         assert _validate_field_constraint("anything", field_info) is None
 
     def test_rejects_value_below_ge_bound(self):
-        """Value below ge (>=) bound should return error."""
         from pydantic import BaseModel, Field
 
         class M(BaseModel):
@@ -549,7 +519,6 @@ class TestValidateFieldConstraint:
         assert "0" in result
 
     def test_accepts_value_at_ge_bound(self):
-        """Value exactly at ge (>=) bound should pass."""
         from pydantic import BaseModel, Field
 
         class M(BaseModel):
@@ -561,7 +530,6 @@ class TestValidateFieldConstraint:
         assert _validate_field_constraint(0, field_info) is None
 
     def test_rejects_value_above_le_bound(self):
-        """Value above le (<=) bound should return error."""
         from pydantic import BaseModel, Field
 
         class M(BaseModel):
@@ -575,7 +543,6 @@ class TestValidateFieldConstraint:
         assert "10" in result
 
     def test_accepts_value_at_le_bound(self):
-        """Value exactly at le (<=) bound should pass."""
         from pydantic import BaseModel, Field
 
         class M(BaseModel):
@@ -587,7 +554,6 @@ class TestValidateFieldConstraint:
         assert _validate_field_constraint(10, field_info) is None
 
     def test_combined_ge_and_le_bounds(self):
-        """Field with both ge and le should validate both."""
         from pydantic import BaseModel, Field
 
         class M(BaseModel):
@@ -601,7 +567,6 @@ class TestValidateFieldConstraint:
         assert _validate_field_constraint(11, field_info) is not None
 
     def test_gt_and_lt_bounds(self):
-        """Strict inequality bounds (gt, lt) should exclude boundary."""
         from pydantic import BaseModel, Field
 
         class M(BaseModel):
@@ -615,7 +580,6 @@ class TestValidateFieldConstraint:
         assert _validate_field_constraint(1.0, field_info) is not None
 
     def test_min_length_constraint(self):
-        """min_length should validate string/list length."""
         from pydantic import BaseModel, Field
 
         class M(BaseModel):
@@ -628,7 +592,6 @@ class TestValidateFieldConstraint:
         assert _validate_field_constraint("", field_info) is not None
 
     def test_max_length_constraint(self):
-        """max_length should validate string/list length."""
         from pydantic import BaseModel, Field
 
         class M(BaseModel):
@@ -641,7 +604,6 @@ class TestValidateFieldConstraint:
         assert _validate_field_constraint("abcdef", field_info) is not None
 
     def test_real_send_max_retries_field(self):
-        """Validate against the actual ChannelsConfig.send_max_retries field."""
         from nanobot.cli.onboard import _validate_field_constraint
         from nanobot.config.schema import ChannelsConfig
 
@@ -654,10 +616,8 @@ class TestValidateFieldConstraint:
 
 
 class TestGetConstraintHint:
-    """Tests for _get_constraint_hint field display suffix."""
 
     def test_no_constraints_returns_empty(self):
-        """Fields without constraints should return empty string."""
         from pydantic import BaseModel
 
         class M(BaseModel):
@@ -667,7 +627,6 @@ class TestGetConstraintHint:
         assert _get_constraint_hint(field_info) == ""
 
     def test_ge_le_range(self):
-        """Field with ge+le should show a min-max suffix."""
         from pydantic import BaseModel, Field
 
         class M(BaseModel):
@@ -681,7 +640,6 @@ class TestGetConstraintHint:
         assert ")" not in hint
 
     def test_ge_only(self):
-        """Field with only ge should show a >= suffix."""
         from pydantic import BaseModel, Field
 
         class M(BaseModel):
@@ -695,7 +653,6 @@ class TestGetConstraintHint:
         assert ")" not in hint
 
     def test_le_only(self):
-        """Field with only le should show a <= suffix."""
         from pydantic import BaseModel, Field
 
         class M(BaseModel):
@@ -709,7 +666,6 @@ class TestGetConstraintHint:
         assert ")" not in hint
 
     def test_real_send_max_retries_hint(self):
-        """Actual ChannelsConfig.send_max_retries should show a 0-10 suffix."""
         from nanobot.config.schema import ChannelsConfig
 
         field_info = ChannelsConfig.model_fields["send_max_retries"]
@@ -721,10 +677,8 @@ class TestGetConstraintHint:
 
 
 class TestInputTextWithValidation:
-    """Tests for _input_text integration with constraint validation."""
 
     def test_rejects_out_of_range_int(self, monkeypatch):
-        """_input_text with field_info should reject values violating ge/le constraints."""
         from pydantic import BaseModel, Field
 
         class M(BaseModel):
@@ -741,7 +695,6 @@ class TestInputTextWithValidation:
         assert result is None
 
     def test_accepts_valid_int(self, monkeypatch):
-        """_input_text with field_info should accept valid constrained values."""
         from pydantic import BaseModel, Field
 
         class M(BaseModel):
@@ -758,7 +711,6 @@ class TestInputTextWithValidation:
         assert result == 5
 
     def test_works_without_field_info(self, monkeypatch):
-        """_input_text without field_info should work as before (no validation)."""
         monkeypatch.setattr(
             onboard_wizard,
             "_get_questionary",
@@ -770,16 +722,13 @@ class TestInputTextWithValidation:
 
 
 class TestChannelCommonRegistration:
-    """Tests for Channel Common menu registration."""
 
     def test_channel_common_in_settings_sections(self):
-        """Channel Common should be registered in _SETTINGS_SECTIONS."""
         from nanobot.cli.onboard import _SETTINGS_SECTIONS
 
         assert "Channel Common" in _SETTINGS_SECTIONS
 
     def test_channel_common_getter_returns_channels(self):
-        """Channel Common getter should return config.channels."""
         from nanobot.cli.onboard import _SETTINGS_GETTER
 
         config = Config()
@@ -787,7 +736,6 @@ class TestChannelCommonRegistration:
         assert result is config.channels
 
     def test_channel_common_setter_writes_channels(self):
-        """Channel Common setter should update config.channels."""
         from nanobot.cli.onboard import _SETTINGS_SETTER
 
         config = Config()
@@ -798,7 +746,6 @@ class TestChannelCommonRegistration:
         assert config.channels.send_tool_hints is True
 
     def test_channel_common_edit_preserves_extras(self):
-        """Editing Channel Common should not lose per-channel extras."""
         config = Config()
         config.channels.feishu = {"enabled": True, "appId": "test123"}
         channels = config.channels.model_copy(deep=True)
@@ -809,16 +756,13 @@ class TestChannelCommonRegistration:
 
 
 class TestApiServerRegistration:
-    """Tests for API Server menu registration."""
 
     def test_api_server_in_settings_sections(self):
-        """API Server should be registered in _SETTINGS_SECTIONS."""
         from nanobot.cli.onboard import _SETTINGS_SECTIONS
 
         assert "API Server" in _SETTINGS_SECTIONS
 
     def test_api_server_getter_returns_api(self):
-        """API Server getter should return config.api."""
         from nanobot.cli.onboard import _SETTINGS_GETTER
 
         config = Config()
@@ -826,7 +770,6 @@ class TestApiServerRegistration:
         assert result is config.api
 
     def test_api_server_setter_writes_api(self):
-        """API Server setter should update config.api."""
         from nanobot.cli.onboard import _SETTINGS_SETTER
 
         config = Config()
@@ -899,10 +842,8 @@ class TestSelectWithBack:
 
 
 class TestMainMenuInteraction:
-    """Main menu navigation, save actions, and terminal input behavior."""
 
     def test_main_menu_hides_save_actions_until_needed(self):
-        """The first screen should not show save or summary actions before edits."""
         from nanobot.cli.onboard import _get_main_menu_choices
 
         clean_choices = _get_main_menu_choices(False)
@@ -919,7 +860,6 @@ class TestMainMenuInteraction:
         assert "[X] Exit Without Saving" in dirty_choices
 
     def test_run_onboard_quick_start_edit(self, monkeypatch):
-        """run_onboard should route [Q] to Quick Start."""
         initial_config = Config()
 
         responses = iter([
@@ -943,7 +883,6 @@ class TestMainMenuInteraction:
         assert result.config.agents.defaults.bot_name == "quickbot"
 
     def test_main_menu_default_resets_after_returning_from_advanced(self, monkeypatch):
-        """Returning from Advanced should not leave its item visually selected."""
         initial_config = Config()
         responses = iter([
             "[A] Advanced Settings",
@@ -967,7 +906,6 @@ class TestMainMenuInteraction:
         assert main_defaults == [None, None]
 
     def test_ask_prompt_shortens_escape_timeout(self):
-        """Questionary text prompts should not wait the default timeout on Escape."""
 
         class FakePrompt:
             def __init__(self):
@@ -983,7 +921,6 @@ class TestMainMenuInteraction:
         assert prompt.application.timeoutlen == onboard_wizard._PROMPT_ESCAPE_TIMEOUT_SECONDS
 
     def test_quick_start_provider_choices_include_all_chat_providers(self):
-        """Quick Start should be driven by the provider registry, not a short allowlist."""
         from nanobot.providers.registry import PROVIDERS
 
         choices = onboard_wizard._get_quick_start_provider_choices()
@@ -1014,7 +951,6 @@ class TestMainMenuInteraction:
         assert choices[onboard_wizard._QUICK_START_CUSTOM_PROVIDER_CHOICE] == "custom"
 
     def test_quick_start_openai_codex_uses_oauth_and_default_model(self, monkeypatch):
-        """Codex should authenticate without asking for an API key."""
         config = Config()
         oauth_calls: list[tuple[Config, str]] = []
         model_prompts: list[tuple[str, str, str]] = []
@@ -1055,7 +991,6 @@ class TestMainMenuInteraction:
         assert config.model_presets["primary"].model == "openai-codex/gpt-5.6-sol"
 
     def test_quick_start_openai_codex_login_failure_does_not_create_preset(self, monkeypatch):
-        """A failed Codex login must not leave a ready-looking model preset."""
         config = Config()
 
         monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
@@ -1075,7 +1010,6 @@ class TestMainMenuInteraction:
         assert "primary" not in config.model_presets
 
     def test_quick_start_openai_codex_login_reuses_existing_token(self, monkeypatch):
-        """Quick Start should not open a new login flow when Codex is already authenticated."""
         import oauth_cli_kit
 
         config = Config()
@@ -1127,7 +1061,6 @@ class TestMainMenuInteraction:
     def test_quick_start_openai_codex_runs_interactive_login_for_bad_cached_token(
         self, monkeypatch
     ):
-        """A malformed cached token should fall back to the interactive OAuth flow."""
         import oauth_cli_kit
 
         config = Config()
@@ -1175,7 +1108,6 @@ class TestMainMenuInteraction:
         assert any(r"\[red]account-123\[/red]" in str(args[0]) for args, _kwargs in printed)
 
     def test_quick_start_codex_auth_check_ignores_unrelated_missing_env(self, monkeypatch):
-        """OAuth readiness should depend only on the Codex proxy and token."""
         import oauth_cli_kit
 
         config = Config()
@@ -1193,7 +1125,6 @@ class TestMainMenuInteraction:
         )
 
     def test_quick_start_codex_auth_check_rejects_malformed_token(self, monkeypatch):
-        """A malformed cached token should report not-ready instead of crashing."""
         import oauth_cli_kit
 
         monkeypatch.setattr(
@@ -1208,7 +1139,6 @@ class TestMainMenuInteraction:
         )
 
     def test_quick_start_summary_reports_missing_codex_oauth(self, monkeypatch):
-        """The review step should distinguish OAuth from an API-key setup."""
         config = Config()
         config.model_presets["primary"] = ModelPresetConfig(
             model="openai-codex/gpt-5.6-sol",
@@ -1235,7 +1165,6 @@ class TestMainMenuInteraction:
         assert rows["WebSocket channel"] == "enabled"
 
     def test_quick_start_provider_choice_skips_advanced_prompts(self, monkeypatch):
-        """The beginner path should ask for provider credentials and model."""
         config = Config()
 
         def fail_websocket_config(*_args, **_kwargs):
@@ -1285,7 +1214,6 @@ class TestMainMenuInteraction:
         assert websocket["tokenIssueSecret"] == "webui-secret"
 
     def test_quick_start_provider_menu_escape_returns_back(self, monkeypatch):
-        """Esc from the first Quick Start menu should return to the main menu."""
         config = Config()
 
         monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
@@ -1299,7 +1227,6 @@ class TestMainMenuInteraction:
         assert "primary" not in config.model_presets
 
     def test_quick_start_provider_back_skips_pause(self, monkeypatch):
-        """Returning from Quick Start should not require an extra Enter key press."""
         config = Config()
         pause_messages: list[str] = []
 
@@ -1324,7 +1251,6 @@ class TestMainMenuInteraction:
         assert pause_messages == []
 
     def test_quick_start_websocket_decline_rolls_back_provider_defaults(self, monkeypatch):
-        """A failed WebSocket step should not leave saveable Quick Start defaults behind."""
         config = Config()
         original = config.model_dump(by_alias=True)
 
@@ -1359,7 +1285,6 @@ class TestMainMenuInteraction:
         assert getattr(config.channels, "websocket", None) is None
 
     def test_quick_start_provider_choice_asks_for_model_id(self, monkeypatch):
-        """Known providers should ask users for the model instead of fetching one."""
         config = Config()
         model_prompts: list[tuple[str, str, str]] = []
 
@@ -1382,7 +1307,6 @@ class TestMainMenuInteraction:
         assert config.model_presets["primary"].model == "openai/gpt-4o-mini"
 
     def test_quick_start_local_provider_skips_api_key(self, monkeypatch):
-        """Local providers should only need a model when they have a default base URL."""
         config = Config()
 
         monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
@@ -1406,7 +1330,6 @@ class TestMainMenuInteraction:
         assert config.model_presets["primary"].model == "llama3.2"
 
     def test_quick_start_openai_stores_key_and_model_without_base(self, monkeypatch):
-        """OpenAI should support key-only setup without storing a default base URL."""
         config = Config()
 
         monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
@@ -1426,7 +1349,6 @@ class TestMainMenuInteraction:
         assert config.model_presets["primary"].model == "gpt-4o-mini"
 
     def test_quick_start_api_key_escape_returns_to_provider_choice(self, monkeypatch):
-        """Esc from an API-key prompt should go back to provider selection."""
         config = Config()
         provider_answers = iter(["DeepSeek", "OpenAI"])
         api_key_answers = iter([onboard_wizard._BACK_PRESSED, "sk-openai-test"])
@@ -1454,7 +1376,6 @@ class TestMainMenuInteraction:
         assert config.model_presets["primary"].provider == "openai"
 
     def test_quick_start_zhipu_coding_plan_uses_coding_base_url(self, monkeypatch):
-        """Zhipu Coding Plan should not use the standard Zhipu base URL."""
         config = Config()
         choices = iter(["Zhipu AI", "Coding Plan"])
 
@@ -1475,7 +1396,6 @@ class TestMainMenuInteraction:
         assert config.model_presets["primary"].model == "glm-4.6"
 
     def test_quick_start_minimax_mainland_token_plan_uses_mainland_base_url(self, monkeypatch):
-        """MiniMax mainland token plan should not use the global MiniMax base URL."""
         config = Config()
         choices = iter(["MiniMax", "Mainland China Token Plan"])
 
@@ -1496,7 +1416,6 @@ class TestMainMenuInteraction:
         assert config.model_presets["primary"].model == "MiniMax-M2"
 
     def test_quick_start_stepfun_step_plan_uses_plan_base_url(self, monkeypatch):
-        """StepFun Step Plan should not use the standard StepFun base URL."""
         config = Config()
         choices = iter(["Step Fun", "Step Plan"])
 
@@ -1517,7 +1436,6 @@ class TestMainMenuInteraction:
         assert config.model_presets["primary"].model == "step-3.5-flash"
 
     def test_quick_start_xiaomi_mimo_token_plan_uses_token_plan_base_url(self, monkeypatch):
-        """Xiaomi MiMo Token Plan should not use the standard MiMo base URL."""
         config = Config()
         choices = iter(["Xiaomi MIMO", "Token Plan"])
 
@@ -1538,7 +1456,6 @@ class TestMainMenuInteraction:
         assert config.model_presets["primary"].model == "mimo-v2.5-pro"
 
     def test_quick_start_custom_base_url_asks_for_model_id(self, monkeypatch):
-        """Custom providers should ask for base URL and model ID."""
         config = Config()
         text_answers = iter(["sk-custom-test", "https://api.example.test/v1"])
 
@@ -1563,7 +1480,6 @@ class TestMainMenuInteraction:
         assert config.model_presets["primary"].model == "custom-model"
 
     def test_quick_start_provider_without_default_base_url_prompts_for_base(self, monkeypatch):
-        """Providers that require an endpoint should ask for a base URL in Quick Start."""
         config = Config()
         text_answers = iter(["azure-key", "https://azure.example.test/openai"])
 
@@ -1584,7 +1500,6 @@ class TestMainMenuInteraction:
         assert config.model_presets["primary"].model == "deployment-name"
 
     def test_quick_start_websocket_step_explains_channel_enablement(self, monkeypatch):
-        """Quick Start should confirm and protect WebSocket for WebUI."""
         config = Config()
         messages: list[str] = []
 
@@ -1616,7 +1531,6 @@ class TestMainMenuInteraction:
         assert websocket["tokenIssueSecret"] == "webui-secret"
 
     def test_quick_start_websocket_step_can_be_declined(self, monkeypatch):
-        """Declining WebSocket should stop Quick Start before changing channel config."""
         config = Config()
 
         class FakePrompt:
@@ -1638,7 +1552,6 @@ class TestMainMenuInteraction:
         assert getattr(config.channels, "websocket", None) is None
 
     def test_quick_start_websocket_requires_password(self, monkeypatch):
-        """Accepting WebSocket with an empty password should not enable the channel."""
         config = Config()
 
         class FakePrompt:
@@ -1663,7 +1576,6 @@ class TestMainMenuInteraction:
         assert getattr(config.channels, "websocket", None) is None
 
     def test_quick_start_requires_api_key_before_setting_defaults(self, monkeypatch):
-        """Quick Start should not create a ready-looking config without an API key."""
         config = Config()
 
         monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
@@ -1679,7 +1591,6 @@ class TestMainMenuInteraction:
         assert "primary" not in config.model_presets
 
     def test_quick_start_requires_model_id_before_setting_defaults(self, monkeypatch):
-        """Quick Start should not create a preset without an explicit model ID."""
         config = Config()
 
         monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
@@ -1694,7 +1605,6 @@ class TestMainMenuInteraction:
         assert "primary" not in config.model_presets
 
     def test_quick_start_summary_calls_out_missing_api_key(self, monkeypatch):
-        """Quick Start summary should retain the missing-key status."""
         config = Config()
         config.model_presets["primary"] = ModelPresetConfig(
             model="deepseek-v4-flash",
@@ -1717,7 +1627,6 @@ class TestMainMenuInteraction:
         assert rows["WebSocket channel"] == "enabled"
 
     def test_configure_login_channel_defaults_to_login(self, monkeypatch):
-        """The channel wizard should start login before exposing advanced fields."""
         from nanobot.channels.base import BaseChannel
 
         config = Config()
@@ -1771,7 +1680,6 @@ class TestMainMenuInteraction:
         assert calls == {"force": False}
 
     def test_run_onboard_channel_common_edit(self, monkeypatch):
-        """run_onboard should handle [H] Channel Common through Advanced Settings."""
         initial_config = Config()
 
         responses = iter([
@@ -1801,7 +1709,6 @@ class TestMainMenuInteraction:
         assert result.config.channels.send_tool_hints is True
 
     def test_run_onboard_api_server_edit(self, monkeypatch):
-        """run_onboard should handle [I] API Server through Advanced Settings."""
         initial_config = Config()
 
         responses = iter([
@@ -1831,7 +1738,6 @@ class TestMainMenuInteraction:
         assert result.config.api.port == 9999
 
     def test_view_summary_calls_pause(self, monkeypatch):
-        """Advanced [V] View Summary should pause before returning to the menu."""
         initial_config = Config()
         pause_called = {"n": 0}
 
@@ -1853,9 +1759,7 @@ class TestMainMenuInteraction:
 
         monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
         monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select_with_back)
-        # _pause is called inside _show_summary, so we patch it there
         monkeypatch.setattr(onboard_wizard, "_pause", fake_pause)
-        # Suppress summary output but still call _pause
         monkeypatch.setattr(onboard_wizard, "_print_summary_panel", lambda *a, **kw: None)
         monkeypatch.setattr(onboard_wizard, "_get_provider_names", lambda: {})
         monkeypatch.setattr(onboard_wizard, "_get_channel_names", lambda: {})
@@ -1867,10 +1771,8 @@ class TestMainMenuInteraction:
 
 
 class TestInputTextEmptyString:
-    """Tests for _input_text empty-string handling bug fix."""
 
     def test_empty_string_returned_not_none(self, monkeypatch):
-        """_input_text should return empty string, not None, when user enters ''."""
         monkeypatch.setattr(
             onboard_wizard,
             "_get_questionary",
@@ -1881,7 +1783,6 @@ class TestInputTextEmptyString:
         assert result == ""
 
     def test_none_still_returns_none(self, monkeypatch):
-        """_input_text should return None when questionary returns None."""
         monkeypatch.setattr(
             onboard_wizard,
             "_get_questionary",
@@ -1892,7 +1793,6 @@ class TestInputTextEmptyString:
         assert result is None
 
     def test_escape_returns_back_pressed(self, monkeypatch):
-        """_input_text should preserve the local back sentinel."""
         monkeypatch.setattr(
             onboard_wizard,
             "_get_questionary",
@@ -1906,7 +1806,6 @@ class TestInputTextEmptyString:
 
 
 class TestIsStrOrNone:
-    """Tests for _is_str_or_none helper."""
 
     def test_str_or_none_true(self):
         from nanobot.cli.onboard import _is_str_or_none
@@ -1932,10 +1831,8 @@ class TestIsStrOrNone:
 
 
 class TestConfigurePydanticModelEmptyString:
-    """Tests that optional string fields are cleared when empty string is entered."""
 
     def test_optional_str_empty_string_becomes_none(self, monkeypatch):
-        """Entering '' for an optional str field should set it to None."""
         from pydantic import BaseModel
 
 
@@ -1948,7 +1845,6 @@ class TestConfigurePydanticModelEmptyString:
 
         def fake_select(_prompt, choices, default=None):
             call_count["select"] += 1
-            # First call: select the api_key field, then Done
             if call_count["select"] == 1:
                 for c in choices:
                     if "Api Key" in c:
@@ -1958,7 +1854,6 @@ class TestConfigurePydanticModelEmptyString:
 
         monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select)
         monkeypatch.setattr(onboard_wizard, "_show_config_panel", lambda *a, **kw: None)
-        # Simulate user entering empty string
         monkeypatch.setattr(
             onboard_wizard, "_input_with_existing", lambda *a, **kw: ""
         )
@@ -1968,7 +1863,6 @@ class TestConfigurePydanticModelEmptyString:
         assert result.api_key is None
 
     def test_required_str_empty_string_kept(self, monkeypatch):
-        """Entering '' for a required str field should keep the empty string."""
         from pydantic import BaseModel
 
         class M(BaseModel):
@@ -1999,10 +1893,8 @@ class TestConfigurePydanticModelEmptyString:
 
 
 class TestModelPresetWizard:
-    """Tests for model preset CRUD in the onboard wizard."""
 
     def test_sync_preset_cache(self):
-        """_sync_preset_cache should populate the module-level cache."""
         from nanobot.cli.onboard import _MODEL_PRESET_CACHE, _sync_preset_cache
         from nanobot.config.schema import ModelPresetConfig
 
@@ -2014,7 +1906,6 @@ class TestModelPresetWizard:
         _MODEL_PRESET_CACHE.clear()
 
     def test_model_preset_add(self, monkeypatch):
-        """_configure_model_presets should add a new preset."""
         from nanobot.cli.onboard import _MODEL_PRESET_CACHE, _configure_model_presets
         from nanobot.config.schema import ModelPresetConfig
 
@@ -2057,7 +1948,6 @@ class TestModelPresetWizard:
         _MODEL_PRESET_CACHE.clear()
 
     def test_model_preset_delete(self, monkeypatch):
-        """_configure_model_presets should delete an existing preset."""
         from nanobot.cli.onboard import _MODEL_PRESET_CACHE, _configure_model_presets
         from nanobot.config.schema import ModelPresetConfig
 
@@ -2105,7 +1995,6 @@ class TestModelPresetWizard:
         _MODEL_PRESET_CACHE.clear()
 
     def test_model_preset_field_handler(self, monkeypatch):
-        """_handle_model_preset_field should set a preset name from choices."""
         from nanobot.cli.onboard import _MODEL_PRESET_CACHE, _handle_model_preset_field
         from nanobot.config.schema import AgentDefaults
 
@@ -2120,7 +2009,6 @@ class TestModelPresetWizard:
         _MODEL_PRESET_CACHE.clear()
 
     def test_model_preset_field_handler_clear(self, monkeypatch):
-        """_handle_model_preset_field should clear preset when Clear value is chosen."""
         from nanobot.cli.onboard import (
             _CLEAR_CHOICE,
             _MODEL_PRESET_CACHE,
@@ -2139,7 +2027,6 @@ class TestModelPresetWizard:
         _MODEL_PRESET_CACHE.clear()
 
     def test_run_onboard_model_presets_edit(self, monkeypatch):
-        """run_onboard should handle [M] Model Presets through Advanced Settings."""
         from nanobot.config.schema import ModelPresetConfig
 
         initial_config = Config()
@@ -2175,7 +2062,6 @@ class TestModelPresetWizard:
         assert "test" in result.config.model_presets
 
     def test_fallback_models_field_add(self, monkeypatch):
-        """_handle_fallback_models_field should add a preset name."""
         from nanobot.cli.onboard import _MODEL_PRESET_CACHE, _handle_fallback_models_field
         from nanobot.config.schema import AgentDefaults
 
@@ -2213,7 +2099,6 @@ class TestModelPresetWizard:
         _MODEL_PRESET_CACHE.clear()
 
     def test_provider_field_handler(self, monkeypatch):
-        """_handle_provider_field should set provider from choices."""
         from nanobot.cli.onboard import _handle_provider_field
         from nanobot.config.schema import AgentDefaults
 
@@ -2224,7 +2109,6 @@ class TestModelPresetWizard:
         assert defaults.provider == "anthropic"
 
     def test_search_provider_field_handler(self, monkeypatch):
-        """_handle_search_provider_field should set the search engine from choices."""
         from nanobot.agent.tools.web import WebSearchConfig
         from nanobot.cli.onboard import _handle_search_provider_field
 
@@ -2235,7 +2119,6 @@ class TestModelPresetWizard:
         assert cfg.provider == "keenable"
 
     def test_provider_field_dispatch_is_model_type_aware(self):
-        """WebSearchConfig.provider must not be hijacked by the LLM provider handler."""
         from nanobot.agent.tools.web import WebSearchConfig
         from nanobot.cli.onboard import (
             _handle_provider_field,

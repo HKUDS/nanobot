@@ -1,5 +1,3 @@
-"""Agent hook that adapts runner events into channel progress UI."""
-
 from __future__ import annotations
 
 import json

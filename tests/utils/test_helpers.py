@@ -211,7 +211,6 @@ def test_atomic_write_text_creates_parent_and_replaces_exact_content(
 
 
 def test_atomic_write_lines_round_trip_replaces_target(tmp_path: Path) -> None:
-    """Missing newline insertion or a non-atomic partial write drops records."""
     target = tmp_path / "history.jsonl"
     target.write_text("old\n", encoding="utf-8")
 
@@ -224,7 +223,6 @@ def test_atomic_write_lines_round_trip_replaces_target(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("name", ["status.json", "更新状态-🐈.json"])
 def test_atomic_record_reader_does_not_block_concurrent_replacement(tmp_path: Path, name: str) -> None:
-    """The update UI can poll while a detached worker commits its next phase."""
     from nanobot.utils.atomic_file import _open_snapshot, read_atomic_bytes
 
     target = tmp_path / name
@@ -256,7 +254,6 @@ def test_atomic_writes_clean_temp_when_replace_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error_type: type[BaseException],
     write: Callable[[Path, str], None],
 ) -> None:
-    """A failed replace must not leave a temp file or change the target."""
     target = tmp_path / "history.jsonl"
     target.write_text("kept\n", encoding="utf-8")
 
@@ -273,7 +270,6 @@ def test_atomic_writes_clean_temp_when_replace_fails(
 
 
 def test_atomic_write_lines_leaves_unrelated_tmp_sibling(tmp_path: Path) -> None:
-    """A unique temp name must not clobber a sibling ``*.tmp`` file."""
     target = tmp_path / "history.jsonl"
     stale = target.with_name(target.name + ".tmp")
     stale.write_text("stale", encoding="utf-8")
@@ -300,7 +296,6 @@ def test_atomic_write_lines_skips_fsync_when_disabled(
 def test_atomic_write_lines_suppresses_directory_permission_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Windows directory open raises PermissionError; the replace must still stick."""
     target = tmp_path / "history.jsonl"
     opened: list[tuple[object, int]] = []
     real_open = atomic_file.os.open

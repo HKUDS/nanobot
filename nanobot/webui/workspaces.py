@@ -1,5 +1,3 @@
-"""Persisted WebUI project workspace state."""
-
 from __future__ import annotations
 
 import asyncio
@@ -41,7 +39,6 @@ _MAX_DRAFT_SCOPES = 128
 
 
 def _scope_change_is_non_escalating(current: WorkspaceScope, requested: WorkspaceScope) -> bool:
-    """Allow a remote request only when it keeps the project and does not add access."""
     return (
         requested.project_path == current.project_path
         and (not current.restrict_to_workspace or requested.restrict_to_workspace)
@@ -230,7 +227,6 @@ class WebUIWorkspaceController:
         self._scope_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
 
     def _scope_lock(self, chat_id: str) -> asyncio.Lock:
-        """Serialize draft edits with message admission, not with agent execution."""
         lock = self._scope_locks.get(chat_id)
         if lock is None:
             lock = asyncio.Lock()

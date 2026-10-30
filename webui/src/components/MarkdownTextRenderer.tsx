@@ -521,10 +521,6 @@ function codeFenceFromPreChild(value: ReactNode): { code: string; language?: str
   };
 }
 
-/**
- * Heavy markdown stack (GFM, math, KaTeX, syntax highlighting) kept in a
- * separate chunk so the app shell can paint sooner on refresh.
- */
 export default function MarkdownTextRenderer({
   children,
   className,
@@ -562,7 +558,6 @@ export default function MarkdownTextRenderer({
             />
           );
         }
-        /** Plain fenced ``` blocks (no language) & wide one-liners: block monospace, not inline pill. */
         const widePlainBlock = raw.includes("\n") || raw.length > 120;
         if (widePlainBlock) {
           return (

@@ -1563,8 +1563,6 @@ describe("ChatList", () => {
     const allRegions = screen.getAllByRole("region");
     const regionNames = allRegions.map((r) => r.getAttribute("aria-label") ?? r.textContent);
 
-    // The most recently updated conversation ("Recent chat" at 12:00) must be
-    // in the first group — Topics should come before both projects.
     const chatsIdx = regionNames.findIndex((n) => n?.includes("Topics"));
     const projAIdx = regionNames.findIndex((n) => n?.includes("project-a"));
     const projBIdx = regionNames.findIndex((n) => n?.includes("project-b"));

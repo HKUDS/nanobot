@@ -1,5 +1,3 @@
-"""Tests for API file upload functionality (JSON base64 + multipart)."""
-
 from __future__ import annotations
 
 import base64
@@ -61,12 +59,7 @@ async def aiohttp_client():
             await client.close()
 
 
-# ---------------------------------------------------------------------------
-# Helper function tests
-# ---------------------------------------------------------------------------
-
 def test_save_base64_data_url_saves_png(tmp_path) -> None:
-    """Saving a base64 data URL creates a file with correct extension."""
     b64_data = base64.b64encode(b"fake png data").decode()
     data_url = f"data:image/png;base64,{b64_data}"
     result = _save_base64_data_url(data_url, tmp_path)
@@ -76,13 +69,11 @@ def test_save_base64_data_url_saves_png(tmp_path) -> None:
 
 
 def test_save_base64_data_url_handles_invalid_b64(tmp_path) -> None:
-    """Invalid base64 returns None."""
     result = _save_base64_data_url("data:image/png;base64,not-valid-base64!!!", tmp_path)
     assert result is None
 
 
 def test_save_base64_data_url_handles_unknown_mime(tmp_path) -> None:
-    """Unknown MIME type defaults to .bin."""
     b64_data = base64.b64encode(b"some data").decode()
     data_url = f"data:unknown/type;base64,{b64_data}"
     result = _save_base64_data_url(data_url, tmp_path)
@@ -91,7 +82,6 @@ def test_save_base64_data_url_handles_unknown_mime(tmp_path) -> None:
 
 
 def test_save_base64_data_url_rejects_oversized_payload(tmp_path) -> None:
-    """Base64 uploads should respect the same per-file limit as multipart."""
     large_payload = base64.b64encode(b"x" * (11 * 1024 * 1024)).decode()
     data_url = f"data:image/png;base64,{large_payload}"
 
@@ -100,7 +90,6 @@ def test_save_base64_data_url_rejects_oversized_payload(tmp_path) -> None:
 
 
 def test_parse_json_content_extracts_text_and_media(tmp_path) -> None:
-    """Parse JSON with text + base64 image saves image and returns paths."""
     b64_data = base64.b64encode(b"img").decode()
     body = {
         "messages": [
@@ -153,7 +142,6 @@ assert list(media_dir.iterdir()) == []
 
 
 def test_parse_json_content_plain_text_only() -> None:
-    """Plain text string content returns no media."""
     body = {"messages": [{"role": "user", "content": "hello"}]}
     text, media_paths = _parse_json_content(body)
     assert text == "hello"
@@ -161,7 +149,6 @@ def test_parse_json_content_plain_text_only() -> None:
 
 
 def test_parse_json_content_validates_single_message() -> None:
-    """Multiple messages raise ValueError."""
     body = {
         "messages": [
             {"role": "user", "content": "first"},
@@ -173,7 +160,6 @@ def test_parse_json_content_validates_single_message() -> None:
 
 
 def test_parse_json_content_validates_user_role() -> None:
-    """Non-user role raises ValueError."""
     body = {"messages": [{"role": "system", "content": "you are a bot"}]}
     with pytest.raises(ValueError, match="single user message"):
         _parse_json_content(body)
@@ -194,7 +180,6 @@ def test_parse_json_content_validates_user_role() -> None:
     ],
 )
 def test_parse_json_content_validates_typed_block_fields(part, field) -> None:
-    """Dynamic content blocks are checked before their values reach typed code."""
     body = {"messages": [{"role": "user", "content": [part]}]}
 
     with pytest.raises(TypeError, match=field):
@@ -202,7 +187,6 @@ def test_parse_json_content_validates_typed_block_fields(part, field) -> None:
 
 
 def test_parse_json_content_rejects_oversized_base64_file(tmp_path) -> None:
-    """Oversized JSON data URLs should fail before writing to disk."""
     large_payload = base64.b64encode(b"x" * (11 * 1024 * 1024)).decode()
     body = {
         "messages": [
@@ -226,14 +210,9 @@ def test_parse_json_content_rejects_oversized_base64_file(tmp_path) -> None:
         os.chdir(original_cwd)
 
 
-# ---------------------------------------------------------------------------
-# Multipart upload tests
-# ---------------------------------------------------------------------------
-
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
 async def test_multipart_upload_saves_file(aiohttp_client, mock_agent, tmp_path) -> None:
-    """Multipart upload saves file to media dir and passes path to process_direct."""
     import os
     original_cwd = os.getcwd()
     os.chdir(tmp_path)
@@ -261,7 +240,6 @@ async def test_multipart_upload_saves_file(aiohttp_client, mock_agent, tmp_path)
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
 async def test_multipart_multiple_files(aiohttp_client, mock_agent, tmp_path, monkeypatch) -> None:
-    """Multipart upload with multiple files saves all and passes paths."""
     import aiohttp
 
     media_dir = tmp_path / "media"
@@ -294,7 +272,6 @@ async def test_multipart_multiple_files(aiohttp_client, mock_agent, tmp_path, mo
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
 async def test_multipart_file_size_limit(aiohttp_client, mock_agent, tmp_path) -> None:
-    """File exceeding MAX_FILE_SIZE returns 413."""
     import os
     original_cwd = os.getcwd()
     os.chdir(tmp_path)
@@ -303,7 +280,6 @@ async def test_multipart_file_size_limit(aiohttp_client, mock_agent, tmp_path) -
         app = create_app(mock_agent, model_name="m", api_key=API_KEY)
         client = await aiohttp_client(app)
 
-        # Create a file larger than 10MB
         large_data = b"x" * (11 * 1024 * 1024)
         data = BytesIO(large_data)
 
@@ -320,7 +296,6 @@ async def test_multipart_file_size_limit(aiohttp_client, mock_agent, tmp_path) -
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
 async def test_multipart_defaults_text_when_missing(aiohttp_client, mock_agent, tmp_path) -> None:
-    """Multipart without message field uses default text."""
     import os
     original_cwd = os.getcwd()
     os.chdir(tmp_path)
@@ -352,7 +327,6 @@ async def test_multipart_defaults_text_when_missing(aiohttp_client, mock_agent, 
 async def test_multipart_with_session_id(
     aiohttp_client, mock_agent, tmp_path, session_id, chat_id,
 ) -> None:
-    """Multipart upload with session_id uses custom session key."""
     import os
     original_cwd = os.getcwd()
     os.chdir(tmp_path)
@@ -377,14 +351,9 @@ async def test_multipart_with_session_id(
         os.chdir(original_cwd)
 
 
-# ---------------------------------------------------------------------------
-# Backward compatibility tests
-# ---------------------------------------------------------------------------
-
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
 async def test_plain_text_backward_compat(aiohttp_client, mock_agent) -> None:
-    """Plain text JSON request (no media) works as before."""
     app = create_app(mock_agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)
     resp = await client.post(
@@ -406,12 +375,10 @@ async def test_plain_text_backward_compat(aiohttp_client, mock_agent) -> None:
 async def test_json_base64_image_upload(
     aiohttp_client, mock_agent, tmp_path, monkeypatch, marker: str,
 ) -> None:
-    """JSON request with base64 data URL saves file and passes path."""
     monkeypatch.setattr("nanobot.api.server.get_media_dir", lambda _channel=None: tmp_path)
     app = create_app(mock_agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)
 
-    # Use valid base64 for a tiny PNG (1x1 transparent pixel)
     tiny_png_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
 
     resp = await client.post(
@@ -438,14 +405,9 @@ async def test_json_base64_image_upload(
     assert Path(saved).read_bytes() == base64.b64decode(tiny_png_b64)
 
 
-# ---------------------------------------------------------------------------
-# DOCX upload test — API saves file for on-demand reading
-# ---------------------------------------------------------------------------
-
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
 async def test_docx_upload_passes_media_path(aiohttp_client, tmp_path) -> None:
-    """Uploaded DOCX is saved to disk and its path is passed through unchanged."""
     agent = _make_mock_agent("report summary")
     import os
     original_cwd = os.getcwd()

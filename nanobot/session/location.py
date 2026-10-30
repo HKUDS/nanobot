@@ -1,5 +1,3 @@
-"""Stable workspace identity and private session storage locations."""
-
 from __future__ import annotations
 
 import errno

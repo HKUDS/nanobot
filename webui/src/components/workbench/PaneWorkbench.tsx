@@ -728,12 +728,8 @@ export function PaneWorkbench({
                 >
                   {renderPane(pane, {
                     active,
-                    // A single conversation owns its header, alongside its preview tabs.
-                    // Multiple conversation panes still share the workbench toolbar.
                     headerPortalTarget: chrome && displayedPanes.length > 1 ? headerPortalTarget : undefined,
                     composerPortalTarget: chrome ? composerPortalTarget : undefined,
-                    // A single chat includes the shared composer in its visual frame.
-                    // Split chats keep navigation centered within their own pane.
                     navigationFrame: displayedPanes.length === 1 ? navigationFrame : undefined,
                     headerActions,
                   })}

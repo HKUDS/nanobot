@@ -333,7 +333,6 @@ export function fileIconForPath(path: string): LucideIcon {
   return FILE_ICONS[fileKindForPath(path)];
 }
 
-/** The same file silhouette and stroke in replies, tabs, and attachment tiles. */
 export function FileReferenceIcon({ kind, className }: { kind: FileReferenceKind; className?: string }) {
   const Icon = FILE_ICONS[kind];
   return <Icon aria-hidden strokeWidth={1.75} className={cn("h-[1em] w-[1em] shrink-0", className)} />;

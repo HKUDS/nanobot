@@ -2,7 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Notices and the input share one width, including the compact screen inset. */
 .thread-composer-stack {
   --composer-content-width: 49.5rem;
 }
@@ -109,7 +108,6 @@
     --temporary-control-active: #ef8e30;
     --temporary-foreground: 17 88% 32%;
     --radius: 0.4375rem;
-    /* Shared shape scale: marks, compact content, controls, and progressively larger surfaces. */
     --radius-mark: 0.25rem;
     --radius-compact: 0.5rem;
     --radius-control: 0.75rem;
@@ -182,7 +180,6 @@
     --muted-foreground: 0 0% 72%;
     --accent: 0 0% 25%;
     --accent-foreground: 0 0% 98%;
-    /* Destructive text needs contrast on dark surfaces; filled controls use a dark label. */
     --destructive: 0 93.5% 81.8%;
     --destructive-foreground: 0 0% 9%;
     --border: 0 0% 28%;
@@ -476,7 +473,6 @@
     height: 0;
   }
 
-  /* Keep the outer document rhythm clean at message boundaries. */
   .markdown-content > :first-child {
     @apply mt-0;
   }
@@ -542,7 +538,6 @@
     --cjk-line-height: 1.8;
   }
 
-  /* Balance short headings; preserve explicit line breaks in chat prose. */
   .markdown-content :is(h1, h2, h3, h4, h5, h6),
   .settings-section-title {
     text-wrap: balance;
@@ -553,8 +548,6 @@
     --activity-animation: 2.8s ease-in-out infinite;
   }
 
-  /* L→R sheen clipped to live activity labels. The highlight lives inside
-     the glyphs, not in the row background, so dark mode stays quiet. */
   @keyframes streaming-text-sheen-ltr {
     0% {
       background-position: 140% 50%;
@@ -794,7 +787,6 @@
     opacity: 1;
     transform: translateY(0);
   }
-  /* Shared in-flow disclosure: animate intrinsic height without measuring it. */
   .inline-disclosure {
     --inline-disclosure-duration: 220ms;
 
@@ -882,7 +874,6 @@
       visibility: hidden;
     }
   }
-  /* Split content leaves no margin for floating conversation controls. */
   .thread-preview-layout[data-preview-open] > .thread-conversation {
     --thread-header-position: relative;
   }
@@ -897,7 +888,6 @@
     transform-origin: top left;
   }
 
-  /* Subtle scrollbar that doesn't fight the dark background. */
   .scrollbar-thin {
     scrollbar-width: thin;
     scrollbar-color: hsl(var(--muted-foreground) / 0.4) transparent;
@@ -928,8 +918,6 @@
    * overflow-x: auto), so clipping the thread column horizontally is safe.
    */
 
-  /* Prose container: allow it to shrink within its column and break long words
-     so long URLs / paths never stretch the conversation wider than 100vw. */
   .markdown-content {
     min-width: 0;
     max-width: 100%;
@@ -937,14 +925,12 @@
     word-wrap: break-word;
   }
 
-  /* Long links and inline code break rather than stretch the column. */
   .markdown-content a,
   .markdown-content code {
     overflow-wrap: anywhere;
     word-wrap: break-word;
   }
 
-  /* Fenced / pre blocks scroll inside their own box, never the page. */
   .markdown-content pre,
   .not-prose pre {
     max-width: 100%;
@@ -960,8 +946,6 @@
      renderer's overflow-x:auto wrapper remains a fallback for content that
      cannot shrink. */
 
-  /* Clip any residual horizontal bleed at the thread column edge. Vertical
-     scrolling and internal code-block scroll are unaffected. */
   .thread-viewport-scrollbar {
     overflow-x: hidden;
   }
@@ -1172,7 +1156,6 @@
   }
 }
 
-/* On phones, actions follow the message instead of taking a separate gutter. */
 @media (max-width: 767px) {
   .thread-message-row {
     padding-inline: 1rem;
@@ -1196,7 +1179,6 @@
   }
 }
 
-/* Composer controls adapt to their actual container, not just the viewport. */
 .thread-composer-surface {
   --composer-shadow-color: 240 10% 16%;
   --tw-shadow: inset 0 0 0 1px hsl(var(--border) / 0.75), 0 4px 18px -8px hsl(var(--composer-shadow-color) / 0.12);
@@ -1355,7 +1337,6 @@
   }
 }
 
-/* Match the directory glyph's start to the attachment glyph, not its hit area. */
 .thread-composer-meta {
   padding-inline-start: calc(var(--composer-footer-inset) + var(--composer-action-margin) + (var(--composer-action-size) - 0.875rem) / 2 - 0.5rem);
 }
@@ -1448,8 +1429,6 @@
   }
 }
 
-/* Settings grid: 4px baseline; 720px frame; 12 columns / 24px gutter on
-   desktop, 4 columns / 16px gutter on mobile. Rows share the same tracks. */
 @layer components {
   .settings-grid {
     --settings-columns: 4;
@@ -1468,7 +1447,6 @@
   .settings-grid.settings-feature-page.settings-automations-grid {
     max-inline-size: calc(60rem + 2 * var(--settings-margin));
   }
-  /* Stack a task's status below its title when the content column is narrow. */
   .automations-page {
     --settings-inset: 1rem;
     container: automations / inline-size;

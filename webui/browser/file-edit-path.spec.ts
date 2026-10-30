@@ -22,7 +22,6 @@ for (const width of [360, 1024]) {
     const longPath = references.first();
     await expect(longPath).toContainText("…");
     await expect(references.nth(1)).not.toContainText("…");
-    // The last filename stays inside the clipping viewport, without reversing text direction.
     const filename = longPath.locator(".font-semibold");
     await expect(filename).toHaveCSS("color", "rgb(3, 105, 161)");
     const tail = await filename.evaluate((element) => {

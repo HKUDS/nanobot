@@ -1,5 +1,3 @@
-"""A restarted host replays task observations without recovering execution."""
-
 import asyncio
 import json
 import subprocess
@@ -247,7 +245,6 @@ async def test_child_activity_replays_real_tool_errors_and_file_diffs(tmp_path):
         await manager.spawn("Edit and inspect files", session_key="websocket:parent", runtime=runtime)
         task_id, = manager.statuses_for_session("websocket:parent")
         task = manager._running_tasks[task_id]
-        # Each tool's persisted activity completes before the next model request.
         for _ in range(4):
             request = asyncio.create_task(model_requests.get())
             try:

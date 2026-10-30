@@ -1,5 +1,4 @@
 # pyright: reportMissingTypeStubs=false
-"""AWS Bedrock Converse provider."""
 
 from __future__ import annotations
 
@@ -166,7 +165,6 @@ class BedrockProvider(LLMProvider):
                     blocks.append(converted)
                 continue
 
-            # Preserve already-Bedrock-shaped content where possible.
             for key in ("text", "image", "document", "video", "json", "searchResult"):
                 if key in item:
                     blocks.append({key: item[key]})

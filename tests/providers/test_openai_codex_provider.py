@@ -356,7 +356,6 @@ async def test_codex_request_marks_rejected_compaction_without_retaining_raw_bod
 
 @pytest.mark.asyncio
 async def test_codex_request_honors_stream_idle_timeout_env(monkeypatch) -> None:
-    """NANOBOT_STREAM_IDLE_TIMEOUT_S overrides the default Codex stream timeout."""
     monkeypatch.setenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", "5")
     original_client = httpx.AsyncClient
     seen: dict[str, int] = {}

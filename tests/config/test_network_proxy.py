@@ -1,5 +1,3 @@
-"""One shared address with explicit feature opt-in."""
-
 import json
 
 import httpx

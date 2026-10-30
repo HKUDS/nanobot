@@ -1,5 +1,3 @@
-"""Reachable manager/adapter ownership contracts for outbound retries."""
-
 import asyncio
 import random
 from types import SimpleNamespace
@@ -7,7 +5,6 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-# Telegram is an optional channel dependency, as in its adapter-owned suite.
 pytest.importorskip("telegram")
 from telegram.error import NetworkError, RetryAfter, TimedOut
 

@@ -878,7 +878,6 @@ async def test_room_invite_respects_allow_list_when_configured() -> None:
 
 @pytest.mark.asyncio
 async def test_on_sync_invite_fallback_joins_pending_invites() -> None:
-    """_on_sync_invite_fallback joins rooms from sync invite_state for allowed senders."""
     channel = MatrixChannel(
         _make_config(allow_from=["@alice:matrix.org"]), MessageBus()
     )
@@ -897,7 +896,6 @@ async def test_on_sync_invite_fallback_joins_pending_invites() -> None:
 
 @pytest.mark.asyncio
 async def test_on_sync_invite_fallback_skips_when_no_invites() -> None:
-    """_on_sync_invite_fallback is a no-op when sync has no invites."""
     channel = MatrixChannel(
         _make_config(allow_from=["@alice:matrix.org"]), MessageBus()
     )
@@ -914,7 +912,6 @@ async def test_on_sync_invite_fallback_skips_when_no_invites() -> None:
 
 @pytest.mark.asyncio
 async def test_on_sync_invite_fallback_skips_denied_sender() -> None:
-    """_on_sync_invite_fallback respects the allow list."""
     channel = MatrixChannel(
         _make_config(allow_from=["@bob:matrix.org"]), MessageBus()
     )
@@ -2146,7 +2143,6 @@ async def test_send_progress_keeps_typing_keepalive_running() -> None:
 
 @pytest.mark.asyncio
 async def test_send_empty_content_does_not_call_room_send() -> None:
-    """Progress messages with empty content must not produce an empty body: '' event."""
     channel = MatrixChannel(_make_config(), MessageBus())
     client = _FakeAsyncClient("", "", "", None)
     channel.client = client
@@ -2165,7 +2161,6 @@ async def test_send_empty_content_does_not_call_room_send() -> None:
 
 @pytest.mark.asyncio
 async def test_send_whitespace_only_content_does_not_call_room_send() -> None:
-    """Progress messages with whitespace-only content must not produce an empty message."""
     channel = MatrixChannel(_make_config(), MessageBus())
     client = _FakeAsyncClient("", "", "", None)
     channel.client = client
@@ -2321,7 +2316,6 @@ async def test_send_keeps_plaintext_only_for_plain_text() -> None:
 
 
 def test_build_matrix_text_content_basic_text() -> None:
-    """Test basic text content without HTML formatting."""
     result = _build_matrix_text_content("Hello, World!")
     expected = {
         "msgtype": "m.text",
@@ -2332,7 +2326,6 @@ def test_build_matrix_text_content_basic_text() -> None:
 
 
 def test_build_matrix_text_content_with_markdown() -> None:
-    """Test text content with markdown that renders to HTML."""
     text = "*Hello* **World**"
     result = _build_matrix_text_content(text)
     assert "msgtype" in result
@@ -2346,7 +2339,6 @@ def test_build_matrix_text_content_with_markdown() -> None:
 
 
 def test_build_matrix_text_content_with_event_id() -> None:
-    """Test text content with event_id for message replacement."""
     event_id = "$8E2XVyINbEhcuAxvxd1d9JhQosNPzkVoU8TrbCAvyHo"
     result = _build_matrix_text_content("Updated message", event_id)
     assert "msgtype" in result
@@ -2358,7 +2350,6 @@ def test_build_matrix_text_content_with_event_id() -> None:
 
 
 def test_build_matrix_text_content_with_event_id_preserves_thread_relation() -> None:
-    """Thread relations for edits should stay inside m.new_content."""
     relates_to = {
         "rel_type": "m.thread",
         "event_id": "$root1",
@@ -2376,7 +2367,6 @@ def test_build_matrix_text_content_with_event_id_preserves_thread_relation() -> 
 
 @pytest.mark.asyncio
 async def test_send_room_content_returns_room_send_response():
-    """Test that _send_room_content returns the response from client.room_send."""
     client = _FakeAsyncClient("", "", "", None)
     channel = MatrixChannel(_make_config(), MessageBus())
     channel.client = client

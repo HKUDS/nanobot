@@ -1,5 +1,3 @@
-"""Borrowed local attachments share ingress policy without taking file ownership."""
-
 from unittest.mock import Mock
 
 import pytest

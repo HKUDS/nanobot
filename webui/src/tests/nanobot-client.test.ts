@@ -3,11 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NanobotClient } from "@/lib/nanobot-client";
 import type { SidebarStatePayload } from "@/lib/types";
 
-/**
- * Minimal fake WebSocket implementing the subset NanobotClient touches.
- * Every instance is retrievable via ``FakeSocket.instances`` so tests can
- * drive open/close/message lifecycles deterministically.
- */
 class FakeSocket {
   static instances: FakeSocket[] = [];
   static readonly CONNECTING = 0;
@@ -37,8 +32,6 @@ class FakeSocket {
     this.onclose?.();
   }
 
-  /** Simulate a server-initiated drop with a specific wire-level close code
-   * (e.g. ``1009`` for Message Too Big). */
   fakeCloseWithCode(code: number) {
     this.readyState = FakeSocket.CLOSED;
     this.onclose?.({ code });
@@ -2433,9 +2426,7 @@ describe("NanobotClient", () => {
     expect(lastSocket().sent).toContain(
       JSON.stringify({ type: "attach", chat_id: "chat-z" }),
     );
-    // Drop the socket.
     lastSocket().close();
-    // Advance the backoff timer.
     await vi.advanceTimersByTimeAsync(20);
     const reconnected = lastSocket();
     expect(reconnected).not.toBe(FakeSocket.instances[0]);
@@ -2471,10 +2462,8 @@ describe("NanobotClient", () => {
     client.connect();
     lastSocket().fakeOpen();
     client.close();
-    // Advance past any possible backoff window to prove no reconnect was scheduled.
     await vi.advanceTimersByTimeAsync(200);
     expect(FakeSocket.instances).toHaveLength(1);
-    // "reconnecting" must never appear after an intentional close.
     expect(seen).not.toContain("reconnecting");
     expect(seen.at(-1)).toBe("closed");
   });
@@ -2529,7 +2518,6 @@ describe("NanobotClient", () => {
     client.onError((e) => errors.push(e));
     client.connect();
     lastSocket().fakeOpen();
-    // Server rejected an outbound frame as too large.
     lastSocket().fakeCloseWithCode(1009);
     expect(errors).toEqual([{ kind: "message_too_big" }]);
   });
@@ -2587,7 +2575,6 @@ describe("NanobotClient", () => {
       maxBackoffMs: 5,
       socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
     });
-    // First handler explodes; subsequent reconnect state must be untouched.
     client.onError(() => {
       throw new Error("subscriber blew up");
     });
@@ -2596,7 +2583,6 @@ describe("NanobotClient", () => {
     client.connect();
     lastSocket().fakeOpen();
     lastSocket().fakeCloseWithCode(1009);
-    // Despite the throwing handler, the client must still schedule a reconnect.
     expect(seenStatuses).toContain("reconnecting");
     await vi.advanceTimersByTimeAsync(20);
     expect(FakeSocket.instances.length).toBeGreaterThan(1);
@@ -2627,7 +2613,6 @@ describe("NanobotClient", () => {
     client.onStatus((s) => seen.push(s));
     client.connect();
     lastSocket().fakeOpen();
-    // Simulate the remote side hanging up (no client.close() call).
     lastSocket().close();
     await vi.advanceTimersByTimeAsync(50);
     expect(seen).toContain("reconnecting");

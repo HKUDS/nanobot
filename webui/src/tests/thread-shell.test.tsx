@@ -1555,7 +1555,6 @@ describe("ThreadShell", () => {
     expect(client.sendSystemCommand).not.toHaveBeenCalled();
     emit("notice-a", true);
     expect(notice()).not.toBeInTheDocument();
-    // A new turn can notify again; it does not inherit the previous dismissal.
     emit("notice-a", false);
     emit("notice-a", true);
     expect(notice()).toBeVisible();
@@ -5157,7 +5156,6 @@ describe("ThreadShell", () => {
       ),
     );
 
-    // No banner yet: only appears once the client emits a matching error.
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
     await act(async () => {});

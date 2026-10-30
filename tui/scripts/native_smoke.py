@@ -24,7 +24,6 @@ from zipfile import ZipFile
 
 REPLY_LIMIT = 16_000_000
 REQUEST = {"kind": "render", "input": {
-    # Exercise real CJK outlines and C4's generated Latin punctuation together.
     "source": 'C4Container\n Person(user, "用户")\n Container(api, "API 服务", "TypeScript")\n Rel(user, api, "调用", "HTTPS")',
     "width": 800, "scale": 2,
     "colors": {"foreground": "#202020", "muted": "#666666", "surface": "#eeeeee",
@@ -128,7 +127,6 @@ def main() -> None:
         worker = Worker(binary, root)
         try:
             renders = [worker.render() for _ in range(5)]
-            # Terminate a submitted request without waiting for its reply.
             worker.send()
         finally:
             worker.close()

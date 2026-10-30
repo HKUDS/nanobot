@@ -1,5 +1,3 @@
-"""Instance-scoped outbound proxy configuration."""
-
 import os
 import re
 from urllib.parse import quote, urlsplit

@@ -1,5 +1,3 @@
-"""Application orchestration for typed WebUI WebSocket commands."""
-
 from __future__ import annotations
 
 import asyncio

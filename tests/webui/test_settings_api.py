@@ -2743,16 +2743,10 @@ def test_create_model_configuration_accepts_configured_oauth_provider(
     assert saved.model_presets["codex"].provider == "openai_codex"
 
 
-# ---------------------------------------------------------------------------
-# Azure OpenAI: settings contract for static-key vs AAD (DefaultAzureCredential)
-# ---------------------------------------------------------------------------
-
-
 def test_settings_payload_azure_openai_with_api_key_is_configured(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Static-key mode: api_key + api_base both set -> configured."""
     config_path = tmp_path / "config.json"
     config = Config()
     config.providers.azure_openai.api_key = "k"
@@ -2773,7 +2767,6 @@ def test_settings_payload_azure_openai_aad_mode_is_configured(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """AAD mode: only api_base set (no api_key) -> still configured."""
     config_path = tmp_path / "config.json"
     config = Config()
     config.providers.azure_openai.api_base = "https://r.openai.azure.com"
@@ -2793,7 +2786,6 @@ def test_settings_payload_azure_openai_missing_base_not_configured(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """api_key alone (no api_base) is NOT a working config -> not configured."""
     config_path = tmp_path / "config.json"
     config = Config()
     config.providers.azure_openai.api_key = "k"
@@ -2810,7 +2802,6 @@ def test_create_model_configuration_accepts_azure_openai_aad_mode(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Provider-validation accepts azure_openai with only api_base (AAD mode)."""
     config_path = tmp_path / "config.json"
     config = Config()
     config.providers.azure_openai.api_base = "https://r.openai.azure.com"

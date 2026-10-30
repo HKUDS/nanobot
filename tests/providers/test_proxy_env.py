@@ -1,5 +1,3 @@
-"""Tests for proxy environment variable handling in OpenAICompatProvider."""
-
 from unittest.mock import MagicMock
 
 import httpx
@@ -16,7 +14,6 @@ def _make_spec(is_local: bool = False) -> MagicMock:
 
 
 class TestLocalEndpointProxyDisabled:
-    """Local endpoints must bypass proxy to avoid routing LAN traffic through it."""
 
     @pytest.mark.parametrize("api_base,is_local", [
         ("http://localhost:11434/v1", True),
@@ -37,7 +34,6 @@ class TestLocalEndpointProxyDisabled:
 
 
 class TestCloudEndpointProxyEnabled:
-    """Cloud endpoints must respect proxy env vars for corporate/VPN proxies."""
 
     async def test_cloud_respects_trust_env(self):
         spec = _make_spec(is_local=False)
@@ -48,7 +44,6 @@ class TestCloudEndpointProxyEnabled:
         )
         await provider._ensure_client()
         client = provider._client._client
-        # trust_env should be True so httpx reads HTTP_PROXY etc.
         assert client._trust_env is True
 
     async def test_explicit_provider_proxy_overrides_env(self, monkeypatch):

@@ -1,5 +1,3 @@
-"""Tests for MCP tool/resource/prompt transient error retry."""
-
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -19,10 +17,6 @@ from nanobot.agent.tools.mcp import (
     _is_transient,
 )
 from nanobot.agent.tools.registry import is_tool_error_result
-
-# ---------------------------------------------------------------------------
-# _is_transient helper
-# ---------------------------------------------------------------------------
 
 
 class _FakeClosedResourceError(Exception):
@@ -87,11 +81,6 @@ def test_is_session_terminated_recognizes_connection_closed_mcp_error():
     assert _is_session_terminated(_connection_closed_error())
 
 
-# ---------------------------------------------------------------------------
-# MCPToolWrapper retry behaviour
-# ---------------------------------------------------------------------------
-
-
 def _make_tool_def(name="test_tool"):
     return SimpleNamespace(
         name=name,
@@ -107,7 +96,6 @@ def _make_tool_result(text):
 
 @pytest.mark.asyncio
 async def test_tool_retries_on_transient_error():
-    """Tool should retry once when a transient error occurs, then succeed."""
     session = AsyncMock()
     result = _make_tool_result("ok")
     exc = _FakeClosedResourceError("connection lost")
@@ -124,7 +112,6 @@ async def test_tool_retries_on_transient_error():
 
 @pytest.mark.asyncio
 async def test_tool_fails_after_retry_exhausted():
-    """Tool should fail with retry message when both attempts hit transient errors."""
     session = AsyncMock()
     exc1 = _FakeClosedResourceError("still dead")
     exc2 = _FakeClosedResourceError("still dead again")
@@ -143,7 +130,6 @@ async def test_tool_fails_after_retry_exhausted():
 
 @pytest.mark.asyncio
 async def test_tool_no_retry_on_non_transient_error():
-    """Tool should NOT retry on non-transient errors like ValueError."""
     session = AsyncMock()
     session.call_tool = AsyncMock(side_effect=ValueError("bad input"))
 
@@ -157,7 +143,6 @@ async def test_tool_no_retry_on_non_transient_error():
 
 @pytest.mark.asyncio
 async def test_tool_no_retry_on_timeout():
-    """Timeouts should not trigger retry (they have their own handling)."""
     session = AsyncMock()
     session.call_tool = AsyncMock(side_effect=asyncio.TimeoutError())
 
@@ -170,7 +155,6 @@ async def test_tool_no_retry_on_timeout():
 
 @pytest.mark.asyncio
 async def test_tool_success_on_first_try_no_retry():
-    """Normal success path — no retry logic involved."""
     session = AsyncMock()
     result = _make_tool_result("hello")
     session.call_tool = AsyncMock(return_value=result)
@@ -208,7 +192,6 @@ async def test_tool_does_not_retry_on_cancelled_error():
 
 @pytest.mark.asyncio
 async def test_tool_retry_on_connection_reset():
-    """ConnectionResetError (a stdlib exception) should also trigger retry."""
     session = AsyncMock()
     result = _make_tool_result("recovered")
     session.call_tool = AsyncMock(
@@ -226,7 +209,6 @@ async def test_tool_retry_on_connection_reset():
 
 @pytest.mark.asyncio
 async def test_tool_retry_on_end_of_stream():
-    """EndOfStream (anyio) should trigger retry."""
     session = AsyncMock()
     result = _make_tool_result("back")
     session.call_tool = AsyncMock(side_effect=[_FakeEndOfStreamError("eof"), result])
@@ -242,7 +224,6 @@ async def test_tool_retry_on_end_of_stream():
 
 @pytest.mark.asyncio
 async def test_tool_reconnects_on_transient_failure():
-    """Tool should reconnect when a stale session reports a transient stream failure."""
     old_session = AsyncMock()
     old_session.call_tool = AsyncMock(side_effect=_FakeClosedResourceError("closed"))
     new_session = AsyncMock()
@@ -268,11 +249,6 @@ async def test_tool_reconnects_on_transient_failure():
     mock_sleep.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
-# MCPResourceWrapper retry behaviour
-# ---------------------------------------------------------------------------
-
-
 def _make_resource_def(name="test_resource"):
     return SimpleNamespace(
         name=name,
@@ -289,7 +265,6 @@ def _make_resource_result(text):
 
 @pytest.mark.asyncio
 async def test_resource_retries_on_transient_error():
-    """Resource should retry once on transient connection error."""
     session = AsyncMock()
     result = _make_resource_result("data")
     exc = _FakeClosedResourceError("gone")
@@ -306,7 +281,6 @@ async def test_resource_retries_on_transient_error():
 
 @pytest.mark.asyncio
 async def test_resource_fails_after_retry_exhausted():
-    """Resource should fail with retry message when both attempts fail."""
     session = AsyncMock()
     exc = _FakeClosedResourceError("dead")
     session.read_resource = AsyncMock(side_effect=[exc, exc])
@@ -322,7 +296,6 @@ async def test_resource_fails_after_retry_exhausted():
 
 @pytest.mark.asyncio
 async def test_resource_no_retry_on_non_transient():
-    """Resource should not retry on non-transient errors."""
     session = AsyncMock()
     session.read_resource = AsyncMock(side_effect=RuntimeError("bad"))
 
@@ -335,7 +308,6 @@ async def test_resource_no_retry_on_non_transient():
 
 @pytest.mark.asyncio
 async def test_resource_reconnects_on_session_terminated():
-    """Resource should reconnect once when the MCP SDK reports a dead session."""
     old_session = AsyncMock()
     old_session.read_resource = AsyncMock(side_effect=_session_terminated_error())
     new_session = AsyncMock()
@@ -359,11 +331,6 @@ async def test_resource_reconnects_on_session_terminated():
     assert new_session.read_resource.call_count == 1
 
 
-# ---------------------------------------------------------------------------
-# MCPPromptWrapper retry behaviour
-# ---------------------------------------------------------------------------
-
-
 def _make_prompt_def(name="test_prompt"):
     return SimpleNamespace(
         name=name,
@@ -384,7 +351,6 @@ def _make_prompt_result(text):
 
 @pytest.mark.asyncio
 async def test_prompt_retries_on_transient_error():
-    """Prompt should retry once on transient connection error."""
     session = AsyncMock()
     result = _make_prompt_result("prompt text")
     exc = _FakeClosedResourceError("gone")
@@ -401,7 +367,6 @@ async def test_prompt_retries_on_transient_error():
 
 @pytest.mark.asyncio
 async def test_prompt_fails_after_retry_exhausted():
-    """Prompt should fail with retry message when both attempts fail."""
     session = AsyncMock()
     exc = _FakeClosedResourceError("dead")
     session.get_prompt = AsyncMock(side_effect=[exc, exc])
@@ -417,7 +382,6 @@ async def test_prompt_fails_after_retry_exhausted():
 
 @pytest.mark.asyncio
 async def test_prompt_no_retry_on_mcp_error():
-    """McpError (application-level) should NOT trigger retry."""
     session = AsyncMock()
     session.get_prompt = AsyncMock(
         side_effect=McpError(ErrorData(code=-1, message="not found"))
@@ -432,7 +396,6 @@ async def test_prompt_no_retry_on_mcp_error():
 
 @pytest.mark.asyncio
 async def test_prompt_no_retry_on_non_transient():
-    """Non-transient errors should not trigger retry for prompts."""
     session = AsyncMock()
     session.get_prompt = AsyncMock(side_effect=RuntimeError("bad"))
 
@@ -445,7 +408,6 @@ async def test_prompt_no_retry_on_non_transient():
 
 @pytest.mark.asyncio
 async def test_prompt_reconnects_on_session_terminated():
-    """Prompt should reconnect once before falling back to McpError handling."""
     old_session = AsyncMock()
     old_session.get_prompt = AsyncMock(side_effect=_session_terminated_error())
     new_session = AsyncMock()
@@ -471,7 +433,6 @@ async def test_prompt_reconnects_on_session_terminated():
 
 @pytest.mark.asyncio
 async def test_prompt_reconnects_on_connection_closed_exception():
-    """Prompt should reconnect when the SDK reports a closed session as a generic exception."""
     old_session = AsyncMock()
     old_session.get_prompt = AsyncMock(side_effect=RuntimeError("Connection closed"))
     new_session = AsyncMock()

@@ -1,5 +1,3 @@
-"""Name discovery is passive; OpenSSH, not our index, interprets connection options."""
-
 import asyncio
 import json
 import subprocess
@@ -103,7 +101,7 @@ def test_include_read_budget_is_bounded_and_reported(ssh_home):
         (ssh_home / f"large-{index}").write_text(f"Host host-{index}\n#" + "x" * 250000)
     result = discover_hosts(str(config))
     assert result["incomplete"]
-    assert len(result["files"]) == 5  # Root plus four complete included files.
+    assert len(result["files"]) == 5
     assert result["hosts"][-1]["host"] == "final"
 
 

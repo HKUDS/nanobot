@@ -1,5 +1,3 @@
-"""Tests for StepFun ASR SSE transcription provider."""
-
 from __future__ import annotations
 
 import asyncio
@@ -25,11 +23,6 @@ def audio_file(tmp_path: Path) -> Path:
     p = tmp_path / "voice.ogg"
     p.write_bytes(b"OggS\x00fake-audio-bytes")
     return p
-
-
-# ---------------------------------------------------------------------------
-# Defaults and base normalization
-# ---------------------------------------------------------------------------
 
 
 def test_stepfun_defaults() -> None:
@@ -59,11 +52,6 @@ def test_stepfun_custom_model() -> None:
     assert provider.model == "stepaudio-2-asr-pro"
 
 
-# ---------------------------------------------------------------------------
-# Short-circuit: missing key / missing file
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_missing_api_key_short_circuits(audio_file: Path) -> None:
     with patch.dict("os.environ", {}, clear=True):
@@ -83,14 +71,8 @@ async def test_missing_file_short_circuits(audio_file: Path) -> None:
     stream_mock.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
-# SSE stream parsing: happy path
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_sse_delta_then_done(audio_file: Path) -> None:
-    """Simulates the real SSE event sequence: delta(s) -> text.done."""
     events = [
         {"type": "transcript.text.delta", "session_id": "s1", "text": "你"},
         {"type": "transcript.text.delta", "session_id": "s1", "text": "你好"},
@@ -109,7 +91,6 @@ async def test_sse_delta_then_done(audio_file: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_sse_only_done_event(audio_file: Path) -> None:
-    """Single transcript.text.done event without deltas."""
     events = [
         {"type": "transcript.text.done", "session_id": "s1", "text": "hello world"},
     ]
@@ -126,7 +107,6 @@ async def test_sse_only_done_event(audio_file: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_sse_error_event(audio_file: Path) -> None:
-    """Error event in SSE stream returns "" immediately."""
     events = [
         {"type": "error", "session_id": "s1", "message": "audio too short"},
     ]
@@ -146,13 +126,12 @@ async def test_sse_error_event(audio_file: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_sse_ignores_non_data_lines(audio_file: Path) -> None:
-    """Empty lines and lines without 'data:' prefix are ignored."""
     events = [
         {"type": "transcript.text.done", "session_id": "s1", "text": "result"},
     ]
     raw_lines = [
-        "",                    # empty line
-        "event: session.start",  # non-data event
+        "",
+        "event: session.start",
         f"data: {json.dumps(events[0])}",
     ]
 
@@ -167,7 +146,6 @@ async def test_sse_ignores_non_data_lines(audio_file: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_sse_malformed_json_skipped(audio_file: Path) -> None:
-    """Malformed JSON in data lines are skipped gracefully."""
     events = [
         {"type": "transcript.text.done", "session_id": "s1", "text": "ok"},
     ]
@@ -183,11 +161,6 @@ async def test_sse_malformed_json_skipped(audio_file: Path) -> None:
         result = await provider.transcribe(audio_file)
 
     assert result == "ok"
-
-
-# ---------------------------------------------------------------------------
-# Retry contract
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -252,7 +225,6 @@ async def test_sse_closes_each_attempt_before_backoff(monkeypatch, audio_file, s
 
 @pytest.mark.asyncio
 async def test_gives_up_after_max_retries(audio_file: Path) -> None:
-    """Persistent 503 returns "" after all retries exhausted."""
     stream_cm = _make_stream_cm(503, [])
 
     provider = StepFunTranscriptionProvider(api_key="sk-test")
@@ -267,7 +239,6 @@ async def test_gives_up_after_max_retries(audio_file: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_sse_empty_text_done_returns_empty(audio_file: Path) -> None:
-    """Empty text in transcript.text.done should return "" immediately, not retry."""
     events = [
         {"type": "transcript.text.done", "session_id": "s1", "text": ""},
     ]
@@ -302,7 +273,6 @@ async def test_non_retryable_status_returns_empty(audio_file: Path, status: int)
 
 @pytest.mark.asyncio
 async def test_retries_on_connect_error(audio_file: Path) -> None:
-    """Network-level transient errors are retried."""
     success_lines = [
         f"data: {json.dumps({'type': 'transcript.text.done', 'session_id': 's1', 'text': 'ok'})}",
     ]
@@ -336,7 +306,6 @@ async def test_unread_503_socket_closes_before_backoff(monkeypatch, audio_file, 
             bodies.append(json.loads(await reader.readexactly(int(headers[b"Content-Length"]))))
             first = len(bodies) == 1
             if first:
-                # The body never finishes: the retry must close it without reading EOF.
                 writer.write(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 1000000\r\n\r\nunread")
             else:
                 payload = b'data: {"type":"transcript.text.done","text":"socket-ok"}\n\n'
@@ -395,11 +364,6 @@ async def test_unread_503_socket_closes_before_backoff(monkeypatch, audio_file, 
         await asyncio.wait_for(asyncio.gather(*pending, return_exceptions=True), timeout=5)
 
 
-# ---------------------------------------------------------------------------
-# Registry integration
-# ---------------------------------------------------------------------------
-
-
 def test_stepfun_in_registry() -> None:
     assert "stepfun" in transcription_provider_names()
     spec = get_transcription_provider("stepfun")
@@ -426,11 +390,6 @@ def test_config_resolves_stepfun() -> None:
     assert resolved.api_key == "step-test"
     assert resolved.api_base == "https://api.stepfun.com/step_plan/v1/audio/asr/sse"
     assert resolved.configured is True
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_stream_cm(status: int, lines: list[str]) -> MagicMock:

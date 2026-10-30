@@ -1,5 +1,3 @@
-"""Test websocket subscribe hydration only replays known active turns."""
-
 import json
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -52,7 +50,6 @@ def _delivery(history, tmp_path) -> tuple[WebUIOutboundDelivery, _RecordingTrans
 
 @pytest.mark.asyncio
 async def test_subscribe_hydration_is_quiet_when_no_turn_active(history, tmp_path):
-    """Subscribe hydration must not inject an idle event into normal message order."""
     outbound, transport = _delivery(history, tmp_path)
 
     with patch("nanobot.webui.session_projection.websocket_turn_wall_started_at", return_value=None):
@@ -63,7 +60,6 @@ async def test_subscribe_hydration_is_quiet_when_no_turn_active(history, tmp_pat
 
 @pytest.mark.asyncio
 async def test_subscribe_hydration_pushes_running_when_turn_active(history, tmp_path):
-    """Reconnecting client should receive running status when turn is active."""
     outbound, transport = _delivery(history, tmp_path)
 
     with (

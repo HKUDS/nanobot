@@ -1,5 +1,3 @@
-"""WS envelope regressions; binary ingress is tested through the HTTP listener."""
-
 from __future__ import annotations
 
 import json
@@ -56,20 +54,17 @@ def isolate_websocket_turn_state() -> None:
 
 
 def test_max_message_bytes_keeps_existing_transport_guard() -> None:
-    """Moving attachments to HTTP does not disable the configurable WS guard."""
     from nanobot.channels.websocket.runtime import WebSocketConfig
 
     default = WebSocketConfig().max_message_bytes
     assert default == 36 * 1024 * 1024
     assert WebSocketConfig(max_message_bytes=1048576).max_message_bytes == 1048576
-    # The existing upper bound remains 40 MB.
     with pytest.raises(Exception):
         WebSocketConfig(max_message_bytes=41_943_040 + 1)
 
 
 @pytest.mark.asyncio
 async def test_message_without_media_backward_compatible(monkeypatch) -> None:
-    """Existing clients that don't send ``media`` keep working unchanged."""
     channel = _make_channel()
     mock_conn = AsyncMock()
     envelope = {"type": "message", "chat_id": "abc123", "content": "hello"}
@@ -81,7 +76,6 @@ async def test_message_without_media_backward_compatible(monkeypatch) -> None:
     call = channel._handle_message.call_args
     assert call.kwargs["chat_id"] == "abc123"
     assert call.kwargs["content"] == "hello"
-    # When no media, we pass ``media=None`` so downstream treats it as absent.
     assert call.kwargs["media"] is None
 
 
@@ -217,7 +211,6 @@ async def test_message_rejected_when_media_item_shape_wrong(tmp_path) -> None:
         "type": "message",
         "chat_id": "abc123",
         "content": "huh",
-        # Not a dict — plain string at the top level.
         "media": ["data:image/png;base64,XXXX"],
     }
 

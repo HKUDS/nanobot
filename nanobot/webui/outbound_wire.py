@@ -1,5 +1,3 @@
-"""Encode typed outbound events for the WebUI wire protocol."""
-
 from __future__ import annotations
 
 import time
@@ -29,7 +27,6 @@ def _is_base64_data_url(value: str) -> bool:
 
 
 def _project_tool_event_value(value: object) -> _JSONValue:
-    """Copy one dynamic value while removing inline binary payloads."""
     if value is None or isinstance(value, bool | int | float):
         return value
     if isinstance(value, str):

@@ -1394,8 +1394,6 @@ def test_delayed_revocation_does_not_remove_new_authorization(tmp_path: Path) ->
     })
     state.save_installation(replace(_installation(), access_token="new-access"))
     state.set_member_access("client-id", "org-1", "user-1", allowed=False)
-    # The channel was stopped during removal, so the old notice is consumed
-    # only after the user has authorized and enabled the channel again.
     event = state.claim_webhooks()[0]
     channel._process_lifecycle_event(event.payload)  # pyright: ignore[reportPrivateUsage]
     current = state.installation("org-1")

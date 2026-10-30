@@ -1,5 +1,4 @@
 # pyright: reportMissingTypeStubs=false
-"""WeCom (Enterprise WeChat) channel implementation using wecom_aibot_sdk."""
 
 import asyncio
 import importlib.util
@@ -24,15 +23,12 @@ from nanobot.events import ContextCompactionEvent
 WECOM_AVAILABLE = importlib.util.find_spec("wecom_aibot_sdk") is not None
 WECOM_WEBSOCKET_HOST = "openws.work.weixin.qq.com"
 
-# Inbound media safety limit (matching QQ channel defaults)
-WECOM_DOWNLOAD_MAX_BYTES = 1024 * 1024 * 200  # 200MB
+WECOM_DOWNLOAD_MAX_BYTES = 1024 * 1024 * 200
 
-# Replace unsafe characters with "_", keep Chinese and common safe punctuation.
 _SAFE_NAME_RE = re.compile(r"[^\w.\-()\[\]（）【】\u4e00-\u9fff]+", re.UNICODE)
 
 
 def _bypass_system_proxy(host: str) -> None:
-    """Keep the WeCom SDK's WebSocket on its direct connection path."""
     for key in ("NO_PROXY", "no_proxy"):
         entries = [entry.strip() for entry in os.environ.get(key, "").split(",") if entry.strip()]
         if host not in entries:
@@ -40,7 +36,6 @@ def _bypass_system_proxy(host: str) -> None:
 
 
 def _sanitize_filename(name: str, fallback: str = "unnamed") -> str:
-    """Sanitize filename to avoid traversal and problematic chars."""
     def _clean(value: str) -> str:
         value = (value or "").strip()
         value = Path(value).name
@@ -59,7 +54,6 @@ class WecomConfig(Base):
     welcome_message: str = ""
 
 
-# Message type display mapping
 MSG_TYPE_MAP = {
     "image": "[image]",
     "voice": "[voice]",
@@ -93,7 +87,6 @@ class WecomChannel(BaseChannel):
         self._client: Any = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()
         self._generate_req_id: Callable[[str], str] | None = None
-        # Store frame headers for each chat to enable replies
         self._chat_frames: dict[str, Any] = {}
 
     async def start(self) -> None:
@@ -115,17 +108,15 @@ class WecomChannel(BaseChannel):
         self._running = True
         self._generate_req_id = generate_req_id
 
-        # Create WebSocket client
         ws_client = cast(Any, WSClient)
         self._client = ws_client({
             "bot_id": self.config.bot_id,
             "secret": self.config.secret,
             "reconnect_interval": 1000,
-            "max_reconnect_attempts": -1,  # Infinite reconnect
+            "max_reconnect_attempts": -1,
             "heartbeat_interval": 30000,
         })
 
-        # Register event handlers
         self._client.on("connected", self._on_connected)
         self._client.on("authenticated", self._on_authenticated)
         self._client.on("disconnected", self._on_disconnected)
@@ -140,10 +131,8 @@ class WecomChannel(BaseChannel):
         self.logger.info("bot starting with WebSocket long connection")
         self.logger.info("No public IP required - using WebSocket to receive events")
 
-        # Connect
         await self._client.connect_async()
 
-        # Keep running until stopped
         while self._running:
             await asyncio.sleep(1)
 
@@ -155,46 +144,35 @@ class WecomChannel(BaseChannel):
         self.logger.info("bot stopped")
 
     async def _on_connected(self, frame: Any) -> None:
-        """Handle WebSocket connected event."""
         self.logger.info("WebSocket connected")
 
     async def _on_authenticated(self, frame: Any) -> None:
-        """Handle authentication success event."""
         self.logger.info("authenticated successfully")
 
     async def _on_disconnected(self, frame: Any) -> None:
-        """Handle WebSocket disconnected event."""
         reason = frame.body if hasattr(frame, 'body') else str(frame)
         self.logger.warning("WebSocket disconnected: {}", reason)
 
     async def _on_error(self, frame: Any) -> None:
-        """Handle error event."""
         self.logger.error("error: {}", frame)
 
     async def _on_text_message(self, frame: Any) -> None:
-        """Handle text message."""
         await self._process_message(frame, "text")
 
     async def _on_image_message(self, frame: Any) -> None:
-        """Handle image message."""
         await self._process_message(frame, "image")
 
     async def _on_voice_message(self, frame: Any) -> None:
-        """Handle voice message."""
         await self._process_message(frame, "voice")
 
     async def _on_file_message(self, frame: Any) -> None:
-        """Handle file message."""
         await self._process_message(frame, "file")
 
     async def _on_mixed_message(self, frame: Any) -> None:
-        """Handle mixed content message."""
         await self._process_message(frame, "mixed")
 
     async def _on_enter_chat(self, frame: Any) -> None:
-        """Handle enter_chat event (user opens chat with bot)."""
         try:
-            # Extract body from WsFrame dataclass or dict
             if hasattr(frame, "body"):
                 body: Any = frame.body or {}
             elif isinstance(frame, dict):
@@ -218,9 +196,7 @@ class WecomChannel(BaseChannel):
             self.logger.exception("Error handling enter_chat")
 
     async def _process_message(self, frame: Any, msg_type: str) -> None:
-        """Process incoming message and forward to bus."""
         try:
-            # Extract body from WsFrame dataclass or dict
             if hasattr(frame, "body"):
                 body: Any = frame.body or {}
             elif isinstance(frame, dict):
@@ -229,18 +205,15 @@ class WecomChannel(BaseChannel):
             else:
                 body = {}
 
-            # Ensure body is a dict
             if not isinstance(body, dict):
                 self.logger.warning("Invalid body type: {}", type(cast(object, body)))
                 return
             body = cast(dict[str, Any], body)
 
-            # Extract message info
             msg_id = cast(str, body.get("msgid", ""))
             if not msg_id:
                 msg_id = f"{body.get('chatid', '')}_{body.get('sendertime', '')}"
 
-            # Extract sender info from "from" field (SDK format)
             from_info = body.get("from", {})
             sender_id = (
                 cast(str, cast(dict[str, Any], from_info).get("userid", "unknown"))
@@ -250,12 +223,10 @@ class WecomChannel(BaseChannel):
             if not self.is_allowed(sender_id):
                 return
 
-            # Deduplication check
             if msg_id in self._processed_message_ids:
                 return
             self._processed_message_ids[msg_id] = None
 
-            # Trim cache
             while len(self._processed_message_ids) > 1000:
                 self._processed_message_ids.popitem(last=False)
 
@@ -316,7 +287,6 @@ class WecomChannel(BaseChannel):
                     content_parts.append(f"[file: {file_name or 'unknown'}: download failed]")
 
             elif msg_type == "mixed":
-                # Mixed content contains multiple message items
                 mixed_info = cast(dict[str, Any], body.get("mixed", {}))
                 msg_items = cast(list[Any], mixed_info.get("msg_item", []))
                 for raw_item in msg_items:
@@ -348,10 +318,8 @@ class WecomChannel(BaseChannel):
             if not content:
                 return
 
-            # Store frame for this chat to enable replies
             self._chat_frames[chat_id] = frame
 
-            # Forward to message bus
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=chat_id,
@@ -374,12 +342,6 @@ class WecomChannel(BaseChannel):
         media_type: str,
         filename: str | None = None,
     ) -> str | None:
-        """
-        Download and decrypt media from WeCom.
-
-        Returns:
-            file_path or None if download failed
-        """
         try:
             data, fname = await self._client.download_file(file_url, aes_key)
 
@@ -421,10 +383,8 @@ class WecomChannel(BaseChannel):
             content = (msg.content or "").strip()
             is_progress = isinstance(msg.event, ProgressEvent)
 
-            # Get the stored frame for this chat
             frame = self._chat_frames.get(msg.chat_id)
 
-            # Send media files via WebSocket upload
             for file_path in msg.media or []:
                 if not os.path.isfile(file_path):
                     self.logger.warning("media file not found: {}", file_path)

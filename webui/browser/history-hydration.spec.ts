@@ -2,8 +2,6 @@ import { expect, test, type Locator, type Page, type Route, type WebSocketRoute 
 
 import type { InboundEvent, ThreadProjectionEvent, UITurnPhase, WebuiThreadPersistedPayload } from "../src/lib/types";
 
-// Controlled synthetic backend traffic, not a replay of an original user recording.
-// Every body assertion goes through the real socket/client/provider/ThreadShell path.
 const A = "nan311-a";
 const B = "nan311-b";
 const TURN = "nan311-active-turn";
@@ -81,7 +79,6 @@ async function installBackend(page: Page) {
     const url = new URL(route.request().url());
     reads.push({ chatId: decodeURIComponent(url.pathname.split("/")[3]!).slice("websocket:".length),
       before: url.searchParams.get("before"), after: url.searchParams.get("after"), route });
-    // Deliberately leave this request pending until the test releases this exact page.
   });
   await page.routeWebSocket((url) => url.pathname === "/nan311-fixture-ws", (wire) => {
     socket = wire;

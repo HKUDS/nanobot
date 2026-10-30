@@ -72,7 +72,6 @@ for (const width of [1440, 390]) {
       const imageBox = (await image.boundingBox())!;
       expect(imageBox.y + imageBox.height).toBeLessThan(bubbleBox.y);
       if (width === 390) {
-        // Narrow screens use a touch action row below the message, not a hover rail.
         await expect(page.locator("[data-message-mobile-actions]")).toBeVisible();
         expect(triggerBox.y).toBeGreaterThanOrEqual(bubbleBox.y + bubbleBox.height);
         expect(triggerBox.height).toBeGreaterThanOrEqual(44);

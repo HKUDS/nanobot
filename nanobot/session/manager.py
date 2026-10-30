@@ -1,5 +1,3 @@
-"""Session management for conversation history."""
-
 from __future__ import annotations
 
 import asyncio
@@ -73,7 +71,6 @@ def _sanitize_assistant_replay_text(content: str) -> str:
 
 
 def _text_preview(content: object) -> str:
-    """Return compact display text for session lists."""
     if isinstance(content, str):
         text = content
     elif isinstance(content, list):
@@ -247,7 +244,6 @@ class Session:
                 sliced = sliced[start:]
                 break
 
-        # Drop orphan tool results at the front.
         start = find_legal_message_start(sliced)
         if start:
             sliced = sliced[start:]

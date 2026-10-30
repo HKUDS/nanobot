@@ -1,5 +1,3 @@
-"""Tests for FallbackProvider model failover."""
-
 from __future__ import annotations
 
 import asyncio
@@ -128,9 +126,6 @@ class _FakeProvider(LLMProvider):
     def supports_native_compaction(self, model: str | None = None) -> bool:
         _ = model
         return self.compact
-
-
-# -- config-level tests --
 
 
 def test_fallback_models_default_empty() -> None:
@@ -358,9 +353,6 @@ def test_inline_fallback_reasoning_effort_does_not_inherit_primary() -> None:
     assert provider_signature(config)[-1] != fallback_signatures
 
 
-# -- FallbackProvider tests --
-
-
 class TestNoFallbackWhenPrimarySucceeds:
     @pytest.mark.asyncio
     async def test(self) -> None:
@@ -412,7 +404,6 @@ class TestFallbackWhenPrimaryRaises:
     )
     @pytest.mark.asyncio
     async def test_transient_exception_triggers_fallback(self, exc: Exception) -> None:
-        """Transient exceptions remain eligible even when their messages are empty."""
         primary = _RaisingProvider("primary", exc)
         fallback = _FakeProvider("fallback", _make_response("fallback ok"))
         factory = MagicMock(return_value=fallback)
@@ -458,7 +449,6 @@ class TestFallbackWhenPrimaryRaises:
         self,
         stream: bool,
     ) -> None:
-        """A retry wrapper must not hide an empty transient exception from failover."""
         primary = _RaisingProvider("primary", TimeoutError())
         fallback = _FakeProvider("fallback", _make_response("fallback ok"))
         factory = MagicMock(return_value=fallback)
@@ -497,7 +487,6 @@ class TestFallbackWhenPrimaryRaises:
 
     @pytest.mark.asyncio
     async def test_non_string_exception_metadata_is_normalized_before_fallback(self) -> None:
-        """Provider exception metadata must be string-like before fallback consumes it."""
 
         class NumericMetadataError(Exception):
             error_type = 429
@@ -529,7 +518,6 @@ class TestFallbackWhenPrimaryRaises:
     async def test_non_fallbackable_primary_exception_does_not_trigger_fallback(
         self, exc: Exception,
     ) -> None:
-        """An unrelated provider bug must not silently switch models."""
         primary = _RaisingProvider("primary", exc)
         factory = MagicMock(
             return_value=_FakeProvider("fallback", _make_response("fallback"))
@@ -552,7 +540,6 @@ class TestFallbackWhenPrimaryRaises:
 
     @pytest.mark.asyncio
     async def test_fallback_exception_advances_to_next_fallback(self) -> None:
-        """A fallback whose chat() raises must advance to the next fallback."""
         primary = _FakeProvider("primary", _error_response())
         raising_fb = _RaisingProvider("fb1")
         ok_fb = _FakeProvider("fb2", _make_response("second fallback ok"))
@@ -570,7 +557,6 @@ class TestFallbackWhenPrimaryRaises:
 
     @pytest.mark.asyncio
     async def test_primary_exception_stream_triggers_fallback(self) -> None:
-        """Streaming path: a raising primary still fails over when nothing streamed."""
         primary = _RaisingProvider("primary")
         fallback = _FakeProvider("fallback", _make_response("fallback ok"))
         factory = MagicMock(return_value=fallback)
@@ -587,7 +573,6 @@ class TestFallbackWhenPrimaryRaises:
 
     @pytest.mark.asyncio
     async def test_primary_exception_after_streaming_does_not_duplicate_output(self) -> None:
-        """Once content was emitted, an exception must not start a replacement stream."""
         primary = _StreamingThenRaisingProvider("primary")
         factory = MagicMock(return_value=_FakeProvider("fallback", _make_response("duplicate")))
         deltas: list[str] = []
@@ -613,7 +598,6 @@ class TestFallbackWhenPrimaryRaises:
 
     @pytest.mark.asyncio
     async def test_primary_cancellation_is_not_converted_to_failover(self) -> None:
-        """Task cancellation must retain asyncio cancellation semantics."""
         primary = _RaisingProvider("primary", asyncio.CancelledError())
         factory = MagicMock(return_value=_FakeProvider("fallback", _make_response("fallback")))
         fb = FallbackProvider(
@@ -1081,11 +1065,9 @@ class TestFallbackOnStreamStalledAfterContent:
 
 
 class TestFailoverOnEmptyChoices:
-    """Fallback should trigger when API returns empty choices (no error metadata)."""
 
     @pytest.mark.asyncio
     async def test_empty_choices_text_fallback(self) -> None:
-        """_should_fallback should return True for 'API returned empty choices'."""
         from nanobot.providers.fallback_provider import FallbackProvider
 
         response = _make_response(
@@ -1093,25 +1075,20 @@ class TestFailoverOnEmptyChoices:
             finish_reason="error",
             error_kind="empty",
         )
-        # error_kind="empty" matches _FALLBACK_ERROR_KINDS via kind check
         assert FallbackProvider._should_fallback(response)
 
     @pytest.mark.asyncio
     async def test_empty_choices_no_error_kind_text_fallback(self) -> None:
-        """_should_fallback should also match via text token when error_kind is None."""
         from nanobot.providers.fallback_provider import FallbackProvider
 
         response = _make_response(
             "Error: API returned empty choices.",
             finish_reason="error",
-            # error_kind=None, no status — pure text matching
         )
-        # "empty" token in _FALLBACK_ERROR_TOKENS matches via text fallback
         assert FallbackProvider._should_fallback(response)
 
     @pytest.mark.asyncio
     async def test_empty_choices_triggers_failover(self) -> None:
-        """End-to-end: empty choices on primary triggers fallback."""
         primary = _FakeProvider(
             "primary",
             _make_response("Error: API returned empty choices.", finish_reason="error"),
@@ -1189,7 +1166,6 @@ class TestRetryBeforeFailover:
         assert result.finish_reason == "error"
         events = [call.args[0] for call in observe.await_args_list]
         notices = [event.content for event in events if isinstance(event, RetryWaitEvent)]
-        # Two candidates, three waits each, for two chains, plus one chain wait.
         assert len(notices) == 14
         assert sum("Persistent retry stopped" in text for text in notices) == 1
         assert not any("giving up" in text for text in notices)
@@ -1312,7 +1288,7 @@ class TestRetryBeforeFailover:
         assert len(fallback.chat_calls) == 1
         assert LLMProvider.public_error_kind(result) == "connection"
         assert result.preserve_provider_state_on_error is True
-        assert not LLMProvider.is_transient_response(result)  # Retry policy is still terminal.
+        assert not LLMProvider.is_transient_response(result)
         assert statuses[-1] == RetryStatusEvent(
             state="exhausted", attempt=4, max_attempts=4, error_kind="connection",
         )
@@ -1506,7 +1482,6 @@ class TestFailoverOnArrearageError:
 
     @pytest.mark.asyncio
     async def test_insufficient_credits_on_400_tries_configured_fallback(self) -> None:
-        """Some OpenAI-compatible gateways report exhausted credits as HTTP 400."""
         arrearage = _make_response(
             "[400]: You have insufficient credits to make this request.",
             finish_reason="error",
@@ -1532,7 +1507,6 @@ class TestFailoverOnArrearageError:
 
     @pytest.mark.asyncio
     async def test_plain_bad_request_still_does_not_fall_back(self) -> None:
-        """A 400 with no billing semantics stays non-fallbackable."""
         bad_request = _make_response(
             "invalid parameter: temperature must be <= 2",
             finish_reason="error",
@@ -1869,7 +1843,6 @@ class TestNoFallbackWhenEmptyList:
 class TestChatStreamFailover:
     @pytest.mark.asyncio
     async def test_fallback_succeeds(self) -> None:
-        # Use empty content so on_content_delta is not triggered on the error
         primary = _FakeProvider("primary", _error_response(""))
         fallback = _FakeProvider("fallback", _make_response("stream ok"))
         factory = MagicMock(return_value=fallback)
@@ -1924,14 +1897,12 @@ class TestCircuitBreaker:
             provider_factory=factory,
         )
 
-        # 3 failures — primary should still be called each time
         for _ in range(3):
             result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
             assert result.content == "fallback ok"
 
         assert len(primary.chat_calls) == 3
 
-        # 4th call — primary circuit is open, should be skipped
         primary.chat_calls.clear()
         result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
         assert result.content == "fallback ok"
@@ -1948,16 +1919,13 @@ class TestCircuitBreaker:
             provider_factory=factory,
         )
 
-        # 2 failures
         for _ in range(2):
             await fb.chat(messages=[{"role": "user", "content": "hi"}])
 
-        # 3rd call: primary succeeds — circuit resets
         primary._response = _make_response("primary ok")
         result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
         assert result.content == "primary ok"
 
-        # 4th call: primary fails again — should still be called (counter reset)
         primary._response = _error_response()
         primary.chat_calls.clear()
         result = await fb.chat(messages=[{"role": "user", "content": "hi"}])

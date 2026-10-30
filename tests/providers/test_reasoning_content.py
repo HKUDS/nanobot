@@ -1,9 +1,3 @@
-"""Tests for reasoning_content extraction in OpenAICompatProvider.
-
-Covers non-streaming (_parse) and streaming (_parse_chunks) paths for
-providers that return a reasoning_content field (e.g. MiMo, DeepSeek-R1).
-"""
-
 from unittest.mock import patch
 
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
@@ -11,11 +5,8 @@ from openai.types.chat import ChatCompletion, ChatCompletionChunk
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.utils.helpers import build_assistant_message
 
-# ── _parse: non-streaming ─────────────────────────────────────────────────
-
 
 def test_parse_dict_extracts_reasoning_content() -> None:
-    """reasoning_content at message level is surfaced in LLMResponse."""
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
@@ -37,7 +28,6 @@ def test_parse_dict_extracts_reasoning_content() -> None:
 
 
 def test_parse_dict_reasoning_content_none_when_absent() -> None:
-    """reasoning_content is None when the response doesn't include it."""
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
@@ -80,7 +70,6 @@ def test_parse_dict_reasoning_content_empty_string_preserved() -> None:
 
 
 def test_parse_sdk_reasoning_content_empty_string_preserved() -> None:
-    """SDK response objects preserve reasoning_content=\"\"."""
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
@@ -103,7 +92,6 @@ def test_parse_sdk_reasoning_content_empty_string_preserved() -> None:
 
 
 def test_tool_call_history_preserves_empty_reasoning_content_after_sanitize() -> None:
-    """Empty reasoning_content survives the tool-call history round trip."""
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
@@ -137,11 +125,7 @@ def test_tool_call_history_preserves_empty_reasoning_content_after_sanitize() ->
     assert sanitized[1]["reasoning_content"] == ""
 
 
-# ── _parse_chunks: streaming dict branch ─────────────────────────────────
-
-
 def test_parse_chunks_dict_accumulates_reasoning_content() -> None:
-    """reasoning_content deltas in dict chunks are joined into one string."""
     chunks = [
         {
             "choices": [{
@@ -170,7 +154,6 @@ def test_parse_chunks_dict_accumulates_reasoning_content() -> None:
 
 
 def test_parse_chunks_dict_reasoning_content_none_when_absent() -> None:
-    """reasoning_content is None when no chunk contains it."""
     chunks = [
         {"choices": [{"finish_reason": "stop", "delta": {"content": "hi"}}]},
     ]
@@ -179,9 +162,6 @@ def test_parse_chunks_dict_reasoning_content_none_when_absent() -> None:
 
     assert result.content == "hi"
     assert result.reasoning_content is None
-
-
-# ── _parse_chunks: streaming SDK objects ──────────────────────────────────
 
 
 def _make_reasoning_chunk(
@@ -201,7 +181,6 @@ def _make_reasoning_chunk(
 
 
 def test_parse_chunks_sdk_accumulates_reasoning_content() -> None:
-    """reasoning_content on SDK delta objects is joined across chunks."""
     chunks = [
         _make_reasoning_chunk("Think… ", None, None),
         _make_reasoning_chunk("Done.", None, None),
@@ -215,7 +194,6 @@ def test_parse_chunks_sdk_accumulates_reasoning_content() -> None:
 
 
 def test_parse_chunks_sdk_reasoning_content_none_when_absent() -> None:
-    """reasoning_content is None when SDK deltas carry no reasoning_content."""
     chunks = [_make_reasoning_chunk(None, "hello", "stop")]
 
     result = OpenAICompatProvider._parse_chunks(chunks)

@@ -1,5 +1,3 @@
-"""Durable session checkpoints and pending-turn recovery state."""
-
 from __future__ import annotations
 
 import asyncio
@@ -186,7 +184,6 @@ def _checkpoint_tool_call_ids(
     *,
     result_rows: bool = False,
 ) -> list[str] | None:
-    """Validate checkpoint tool rows and return their stable IDs."""
     if not isinstance(value, list):
         return None
     ids: list[str] = []

@@ -1,5 +1,3 @@
-"""Connection-local continuation for the Responses WebSocket protocol."""
-
 # pyright: reportPrivateUsage=false
 
 from __future__ import annotations

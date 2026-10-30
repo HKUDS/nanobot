@@ -1,5 +1,3 @@
-"""Follow-up consumption commits against the owner, not an old turn snapshot."""
-
 import sqlite3
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
@@ -95,7 +93,6 @@ async def test_failed_followup_commit_rolls_back_history_and_ack_then_can_retry(
                           BEGIN SELECT RAISE(ABORT, 'failed follow-up commit'); END""")
         with pytest.raises(sqlite3.IntegrityError, match="failed follow-up commit"):
             await state.finish_turn(draft)
-        # Both the durable snapshot and published cache remain at the pre-commit boundary.
         for stored in (sessions.read_session_snapshot(draft.key), state.peek(draft.key)):
             assert [row["content"] for row in stored.messages] == ["initial input"]
             assert [item.content for item in pending_followups(stored)] == ["consumed input"]

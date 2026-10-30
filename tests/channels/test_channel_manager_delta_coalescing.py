@@ -1,5 +1,3 @@
-"""Tests for ChannelManager delta coalescing to reduce streaming latency."""
-
 import asyncio
 from contextlib import suppress
 from copy import deepcopy
@@ -111,7 +109,6 @@ def _end(
 
 
 class TestDeltaCoalescing:
-    """Tests for stream delta message coalescing."""
 
     async def test_response_source_change_is_a_coalescing_boundary(self, manager, bus):
         first, second = _delta("primary"), _delta("backup")
@@ -232,7 +229,6 @@ class TestDeltaCoalescing:
 
 
 class TestDispatchOutboundWithCoalescing:
-    """Tests for the full _dispatch_outbound flow with coalescing."""
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("end_stream", [False, True])
@@ -281,7 +277,6 @@ class TestDispatchOutboundWithCoalescing:
 
 
 class TestProgressFiltering:
-    """Progress filtering should honor per-channel settings."""
 
     def test_progress_visibility_uses_global_defaults(self, manager):
         assert manager._should_send_progress("mock", tool_hint=False) is True
@@ -475,7 +470,6 @@ class TestToolEventDelivery:
 
 
 class TestRetryWaitFiltering:
-    """Internal provider retry heartbeats must never reach channels."""
 
     @pytest.mark.asyncio
     async def test_retry_wait_message_dropped(self, manager, bus):

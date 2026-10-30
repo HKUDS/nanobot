@@ -2889,7 +2889,6 @@ function Shell({
             "relative flex h-full w-full overflow-hidden",
           )}
         >
-          {/* Host sidebar: in normal flow, so the thread area width stays honest. */}
           {showMainSidebar ? (
             <aside
               data-testid="host-sidebar-flow"

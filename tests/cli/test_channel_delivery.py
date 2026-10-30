@@ -1,5 +1,3 @@
-"""Message tools preserve target identity through gateway delivery recording."""
-
 from functools import partial
 
 import pytest
