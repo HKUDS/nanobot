@@ -1,5 +1,3 @@
-"""Exercise request governance through the Codex transport boundary."""
-
 from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -22,7 +20,7 @@ from nanobot.providers.openai_codex_provider import OpenAICodexProvider, _CodexH
 from nanobot.providers.openai_responses import build_responses_state
 
 
-def _request_state(provider, *, prior_tokens=180_000, repetitions=15_000):
+def _request_state(provider, *, prior_tokens=180_000, repetitions=12_000):
     model = "openai-codex/gpt-5.6-sol"
     accepted = [
         {"role": "system", "content": "Continue the coding task."},
@@ -42,6 +40,8 @@ def _request_state(provider, *, prior_tokens=180_000, repetitions=15_000):
         ],
         usage=LLMUsage.reported(input_tokens=prior_tokens, output_tokens=10),
     )
+    # The default delta pressures prior state but fits after compaction, even with
+    # UTF-8 byte estimates while the fallback tokenizer is unavailable.
     delta = {"role": "tool", "name": "read_file", "tool_call_id": "read-1",
              "content": "source_line\n" * repetitions}
     raw = [*deepcopy(accepted), delta]
@@ -193,17 +193,15 @@ async def test_compaction_preserves_parallel_calls_with_reordered_pending_output
 async def test_without_pre_request_compaction_pressure_uses_local_summary(monkeypatch, mode):
     provider = OpenAICodexProvider()
     if mode == "disabled":
-        provider._native_compaction_available = False
+        provider._responses.native_compaction_available = False
     elif mode == "inline_only":
         monkeypatch.setattr(provider, "supports_pre_request_compaction", lambda _model: False)
     else:
         monkeypatch.setattr(provider, "can_resume_conversation_state", lambda *_args: False)
-        # With no replayable state, pressure must come from the actual transcript.
     state, raw, consolidate = _request_state(
         provider, repetitions=70_000 if mode == "incompatible_state" else 15_000,
     )
     if mode == "incompatible_state":
-        # Put the large content in accepted history so its replacement can fit.
         state.compaction.accepted_messages = deepcopy(raw)
         state.compaction.raw_accepted_boundary = len(raw)
     _, context = await ContextGovernor().prepare_request(
@@ -273,7 +271,7 @@ async def test_fallback_cannot_discard_required_compaction(transport, mode):
         "openai-codex/gpt-6-astra" if mode == "incompatible_state" else primary.default_model
     )
     fallback = OpenAICodexProvider(default_model=model)
-    fallback._native_compaction_available = mode != "compaction_unavailable"
+    fallback._responses.native_compaction_available = mode != "compaction_unavailable"
     fallback.chat_with_context = AsyncMock(wraps=fallback.chat_with_context)
     fallback_window = 32_768 if mode == "smaller_window" else 200_000
     provider = FallbackProvider(

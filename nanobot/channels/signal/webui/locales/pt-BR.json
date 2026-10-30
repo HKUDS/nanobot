@@ -16,7 +16,7 @@
         "placeholder": "8080"
       },
       "dm_allowFrom": {
-        "label": "Remetentes de mensagens diretas permitidos",
+        "label": "Usuários de DM permitidos",
         "placeholder": "Números ou UUIDs"
       },
       "group_allowFrom": {
@@ -24,7 +24,7 @@
         "placeholder": "IDs de grupo"
       },
       "groupMessageBufferSize": {
-        "label": "Mensagens de contexto de grupo"
+        "label": "Mensagens de contexto"
       },
       "attachmentsDir": {
         "label": "Diretório de anexos"

@@ -28,6 +28,7 @@ async def test_openai_compat_provider_sets_timeout_on_local_http_client() -> Non
         name="local",
         keywords=(),
         env_key="",
+        request_apis=("chat_completions", "responses"),
         is_local=True,
         default_api_base="http://127.0.0.1:11434/v1",
     )

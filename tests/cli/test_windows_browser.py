@@ -1,5 +1,4 @@
-"""Windows redirect, secret transport and cleanup regressions."""
-
+import base64
 import ctypes
 import io
 import os
@@ -28,13 +27,13 @@ class RecordingInput(io.BytesIO):
 
 
 @pytest.fixture
-def launcher(monkeypatch):
+def launcher(monkeypatch, request):
     process = SimpleNamespace(
         stdin=RecordingInput(), stdout=io.BytesIO(b"1"), kill=MagicMock(), wait=MagicMock(),
     )
     spawn = MagicMock(return_value=process)
     monkeypatch.setattr(subprocess, "Popen", spawn)
-    monkeypatch.setattr(browser.sys, "platform", "win32")
+    monkeypatch.setattr(browser.sys, "platform", getattr(request, "param", "win32"))
     monkeypatch.setenv("BROWSER", "unsafe-browser %s")
     monkeypatch.setattr(
         webui_support.webbrowser, "open", lambda *_a, **_kw: pytest.fail("raw URL fallback"),
@@ -65,6 +64,7 @@ def test_windows_uses_pipe_not_argv_or_browser_override(launcher, capsys, url):
     assert capsys.readouterr() == ("", "")
 
 
+@pytest.mark.parametrize("launcher", ["win32", "linux"], indirect=True)
 @pytest.mark.parametrize("url", [
     "javascript:alert(1)", "file:///tmp/secret", "http:///", "http://[invalid/",
     "http://localhost/\nsecret", "http://localhost/\rsecret", "http://localhost/\x00",
@@ -78,6 +78,7 @@ def test_invalid_input_does_not_spawn_a_helper(launcher, url, capsys):
     assert capsys.readouterr() == ("", "")
 
 
+@pytest.mark.parametrize("launcher", ["win32", "linux"], indirect=True)
 @pytest.mark.parametrize("failure", ["spawn", "eof", "bad_ack", "pipe"])
 def test_launcher_failure_never_logs_url_or_retries(launcher, failure, capsys):
     process, spawn = launcher
@@ -95,6 +96,7 @@ def test_launcher_failure_never_logs_url_or_retries(launcher, failure, capsys):
     assert capsys.readouterr() == ("", "")
 
 
+@pytest.mark.parametrize("launcher", ["win32", "linux"], indirect=True)
 def test_startup_timeout_kills_helper_and_drains_pipe_reader(launcher, monkeypatch):
     process, _ = launcher
     exited = threading.Event()
@@ -401,8 +403,8 @@ def test_private_file_checks_precede_secret_write_and_failures_clean_up(tmp_path
         with browser._private_redirect(b"synthetic-only") as path:
             assert path.read_bytes() == b"synthetic-only"
             assert events.index(("private", path, False)) < events.index(("write", path))
-            assert ("close", path, 0x40020080) in events  # No live write handle for browser.
-            assert ("close", path.parent, 0x20080) not in events  # Directory is pinned.
+            assert ("close", path, 0x40020080) in events
+            assert ("close", path.parent, 0x20080) not in events
         assert not path.exists()
     assert not list(tmp_path.glob("*/*.html"))
     if failure in {"reparse", "filesystem", "root_acl", "file_acl"}:
@@ -449,7 +451,7 @@ def test_stale_cleanup_preserves_active_unsafe_and_unrelated_entries(tmp_path):
     for path in paths:
         path.write_text("synthetic")
         os.utime(path, (0, 0))
-    paths[1].touch()  # fresh / active
+    paths[1].touch()
     (tmp_path / ("d" * 32 + ".html")).mkdir()
 
     @contextmanager
@@ -477,13 +479,57 @@ def test_native_private_file_permissions_sharing_and_cleanup(tmp_path, monkeypat
         with api.opened(path) as handle:
             api.check_private(handle, directory=False)
         with pytest.raises(PermissionError):
-            path.unlink()  # A live handoff cannot be removed by stale cleanup.
+            path.unlink()
     assert not path.exists()
 
 
-def test_linux_browser_behavior_is_unchanged(monkeypatch):
+def test_linux_uses_the_unix_browser_launcher(monkeypatch):
     monkeypatch.setattr(browser.sys, "platform", "linux")
+    monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
     opened = MagicMock(return_value=True)
-    monkeypatch.setattr(webui_support.webbrowser, "open", opened)
+    monkeypatch.setattr(webui_support, "_launch_unix_browser", opened)
     assert webui_support._launch_browser("http://localhost/")
-    opened.assert_called_once_with("http://localhost/", new=2, autoraise=True)
+    opened.assert_called_once_with("http://localhost/")
+
+
+@pytest.mark.parametrize("launcher", ["linux"], indirect=True)
+@pytest.mark.parametrize("url", [
+    "http://localhost:8765/#/?bootstrapSecret=synthetic-only",
+    'http://localhost:5173/#/?bootstrapSecret="/><script>$(test)&中文</script>',
+])
+def test_wsl_default_browser_uses_private_pipe_and_skips_linux_browser(launcher, monkeypatch, url):
+    process, spawn = launcher
+    monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu")
+    monkeypatch.delenv("BROWSER", raising=False)
+    monkeypatch.setattr(
+        webui_support.webbrowser, "get", lambda: pytest.fail("Linux browser selected in WSL"),
+    )
+
+    assert webui_support._open_webui_browser(url, wait=False)
+
+    args, options = spawn.call_args
+    assert args[0][0] == "powershell.exe"
+    assert "-NoProfile" in args[0] and "-NonInteractive" in args[0]
+    assert base64.b64decode(args[0][-1]).decode("utf-16-le") == browser._WSL_OPEN_SCRIPT
+    assert base64.b64decode(process.stdin.payload) == browser._redirect_html(url)
+    assert url not in repr(spawn.call_args)
+    assert options["start_new_session"] is True
+    assert options["stderr"] == subprocess.DEVNULL
+    process.kill.assert_not_called()
+
+
+def test_wsl_without_windows_integration_keeps_the_manual_login_fallback(monkeypatch, capsys):
+    monkeypatch.setattr(browser.sys, "platform", "linux")
+    monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu")
+    monkeypatch.delenv("BROWSER", raising=False)
+    monkeypatch.setattr(subprocess, "Popen", MagicMock(side_effect=FileNotFoundError))
+    monkeypatch.setattr(
+        webui_support, "_launch_unix_browser", lambda _: pytest.fail("unsafe raw URL fallback"),
+    )
+
+    assert not webui_support._open_webui_browser(
+        "http://localhost/#/?bootstrapSecret=synthetic-only", wait=False,
+    )
+    output = capsys.readouterr()
+    assert "Open the link above." in " ".join(output.out.split())
+    assert "synthetic-only" not in output.out + output.err

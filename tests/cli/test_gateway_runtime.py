@@ -177,14 +177,14 @@ async def test_stubborn_task_does_not_block_past_wait_timeout() -> None:
     )
     elapsed = time.monotonic() - start
     for _ in range(10):
-        await asyncio.sleep(0)  # let the swallowed cancellation handler run
+        await asyncio.sleep(0)
 
-    assert "swallowed" in events  # task was cancelled, then refused to die
-    assert task.done()  # the timed-out task received a second cancellation
+    assert "swallowed" in events
+    assert task.done()
     assert runtime_tasks.done()
-    assert agent.close_calls == 1  # resources still closed underneath it
+    assert agent.close_calls == 1
     assert provider.close_calls == 1
-    assert elapsed < 1.0  # bounded, not held open by the stubborn task
+    assert elapsed < 1.0
 
 
 async def test_hanging_close_is_bounded_and_does_not_raise() -> None:
@@ -220,7 +220,7 @@ async def test_failing_close_is_logged_but_shutdown_proceeds() -> None:
 
     assert agent.close_calls == 1
     assert provider.close_calls == 1
-    assert channels.stopped == 1  # teardown continued past the failure
+    assert channels.stopped == 1
 
 
 async def test_duplicate_cleanup_is_idempotent() -> None:
@@ -232,7 +232,7 @@ async def test_duplicate_cleanup_is_idempotent() -> None:
     await _close_gateway_runtime(agent, provider, channels, [task], None)
     await _close_gateway_runtime(agent, provider, channels, [task], None)
 
-    assert agent.close_calls == 2  # second pass is a clean no-op
+    assert agent.close_calls == 2
     assert provider.close_calls == 2
     assert channels.stopped == 2
     assert task.cancelled()
@@ -245,7 +245,7 @@ async def test_finished_runtime_tasks_gather_is_retrieved() -> None:
     finished = asyncio.get_running_loop().create_future()
     finished.set_result(None)
     runtime_tasks = asyncio.gather(finished)
-    await asyncio.sleep(0)  # let the gather observe the finished child
+    await asyncio.sleep(0)
 
     await _close_gateway_runtime(agent, provider, channels, [], runtime_tasks)
 
@@ -263,8 +263,8 @@ async def test_cancelled_runtime_tasks_gather_does_not_raise() -> None:
 
     await _close_gateway_runtime(agent, provider, channels, [], runtime_tasks)
     with suppress(asyncio.CancelledError):
-        await runtime_tasks  # settle the cancelled gather without raising
+        await runtime_tasks
 
-    assert runtime_tasks.done()  # the cancelled gather was awaited without raising
+    assert runtime_tasks.done()
     assert agent.close_calls == 1
     assert provider.close_calls == 1

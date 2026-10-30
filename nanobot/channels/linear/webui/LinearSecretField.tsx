@@ -3,7 +3,7 @@ import { Eye, EyeOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { channelTranslator } from "@/channel-plugins/i18n";
-import type { ChannelConfigField } from "@/components/settings/channels/catalog";
+import type { ChannelConfigField } from "@/channel-plugins/catalog";
 import { channelFieldInputId } from "@/components/settings/channels/CredentialForm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

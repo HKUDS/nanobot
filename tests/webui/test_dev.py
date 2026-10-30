@@ -81,7 +81,6 @@ def test_start_webui_dev_server_uses_vite_directly_and_sets_proxy_target(
 
     server = start_webui_dev_server(
         target_url="http://127.0.0.1:8899",
-        browser_url="http://127.0.0.1:5173/#/?bootstrapSecret=secret",
         source_dir=source,
         runner="bun",
         environ={"EXISTING": "value"},
@@ -93,14 +92,13 @@ def test_start_webui_dev_server_uses_vite_directly_and_sets_proxy_target(
 
     assert server.process is process
     command, kwargs = popen_calls[0]
-    assert command == ["node", str(vite_cli)]
+    assert command == ["node", str(vite_cli), "--logLevel", "warn", "--clearScreen", "false"]
     assert kwargs["cwd"] == source
     assert kwargs["env"] == {
         "EXISTING": "value",
         "NANOBOT_API_URL": "http://127.0.0.1:8899",
     }
-    assert output == ["WebUI dev server: http://127.0.0.1:5173/"]
-    assert "secret" not in output[0]
+    assert output == []
 
 
 def test_dev_server_installs_locked_dependencies_when_vite_is_missing(tmp_path: Path) -> None:
@@ -120,7 +118,6 @@ def test_dev_server_installs_locked_dependencies_when_vite_is_missing(tmp_path: 
 
     start_webui_dev_server(
         target_url="http://127.0.0.1:8765",
-        browser_url="http://127.0.0.1:5173",
         source_dir=source,
         runner="bun",
         popen=lambda *_args, **_kwargs: process,
@@ -136,7 +133,6 @@ def test_dev_server_requires_a_source_checkout(tmp_path: Path) -> None:
     with pytest.raises(WebUIDevError, match="source checkout"):
         start_webui_dev_server(
             target_url="http://127.0.0.1:8765",
-            browser_url="http://127.0.0.1:5173",
             source_dir=tmp_path / "missing",
         )
 
@@ -169,7 +165,7 @@ def test_dev_server_context_stops_the_child(monkeypatch) -> None:
     server.stop = lambda: stopped.append(True)
     monkeypatch.setattr("nanobot.webui.dev.start_webui_dev_server", lambda **_kwargs: server)
 
-    with run_webui_dev_server(target_url="unused", browser_url="unused") as running:
+    with run_webui_dev_server(target_url="unused") as running:
         assert running is server
 
     assert stopped == [True]

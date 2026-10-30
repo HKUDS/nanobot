@@ -1,8 +1,8 @@
 """Sandbox backends for shell command execution.
 
-To add a new backend, implement a function with the signature:
-    _wrap_<name>(command: str, workspace: str, cwd: str) -> str
-and register it in _BACKENDS below.
+To add a backend, match the callable signature of _bwrap and _seatbelt,
+including keyword-only sandbox_ro_binds and sandbox_rw_binds, and register
+it in _BACKENDS below.
 """
 
 import os
@@ -53,12 +53,6 @@ def _bwrap(
     sandbox_ro_binds: Iterable[str] | None = None,
     sandbox_rw_binds: Iterable[str] | None = None,
 ) -> str:
-    """Wrap command in a bubblewrap sandbox (requires bwrap in container).
-
-    Only the workspace is bind-mounted read-write; its parent dir (which holds
-    config.json) is hidden behind a fresh tmpfs.  The media directory is
-    bind-mounted read-only so exec commands can read uploaded attachments.
-    """
     ws = Path(workspace).resolve()
     media = get_media_dir().resolve()
 
@@ -88,10 +82,10 @@ def _bwrap(
         args += ["--ro-bind-try", p, p]
     args += [
         "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
-        "--tmpfs", str(ws.parent),        # mask config dir
-        "--dir", str(ws),                 # recreate workspace mount point
+        "--tmpfs", str(ws.parent),
+        "--dir", str(ws),
         "--bind", str(ws), str(ws),
-        "--ro-bind-try", str(media), str(media),  # read-only access to media
+        "--ro-bind-try", str(media), str(media),
     ]
     for p in _normalize_bind_paths(sandbox_ro_binds, workspace=ws):
         args += ["--ro-bind-try", p, p]

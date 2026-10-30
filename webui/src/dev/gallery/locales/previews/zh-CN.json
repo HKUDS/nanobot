@@ -1,0 +1,431 @@
+{
+  "rename": {
+    "title": "RenameDialog · 分组与项目改名",
+    "description": "预览分组和项目改名；话题在列表行内改名。",
+    "options": "调用方提供 dialogTitle、description 和 placeholder。title 设置初值，onConfirm 接收去除两端空白的标题。空标题无法保存。",
+    "hint": "保存后更新上方标题。"
+  },
+  "delete": {
+    "title": "DeleteConfirm · 删除确认",
+    "description": "比较单个、批量和带自动任务的删除确认。",
+    "options": "count 控制批量文案；automations 展示关联任务、计划和下次运行时间。确认按钮调用 onConfirm。",
+    "scenario": "删除场景",
+    "open": "打开删除确认",
+    "confirmed": "已确认删除示例。",
+    "hint": "选择单个、批量或带自动任务的会话。"
+  },
+  "inlineTokens": {
+    "title": "Inline tokens · 命令与会话标识",
+    "description": "编辑命令与标识，查看高亮和会话颜色。",
+    "options": "SlashCommandText 接收 command；InlineTokenHighlight 接收 color 和内容；SessionHandleLabel 根据 id 生成颜色。",
+    "command": "命令文本",
+    "run": "运行 <command/> 查看状态。",
+    "handle": "会话标识",
+    "continue": "继续 <session/> 中的工作。",
+    "highlight": "共享高亮",
+    "review": "使用 <skill/> 检查修改。",
+    "skill": "技能：{{name}}"
+  },
+  "sessionLinks": {
+    "selected": "已选择会话：{{name}}。",
+    "hint": "选择会话引用查看反馈。"
+  },
+  "userText": {
+    "title": "UserMessageText · 消息引用",
+    "description": "编辑消息中的技能、应用、MCP 和会话引用。",
+    "options": "text 为原始消息；cliApps、mcpPresets 与 sessionMentions 提供可解析引用。技能使用 $name，其他引用使用 @name。",
+    "message": "消息文本"
+  },
+  "capabilityTokens": {
+    "title": "CapabilityMentionToken · 应用引用",
+    "description": "比较输入框和消息中的引用样式。",
+    "options": "segment 指定 cli、mcp 或 session 及其元数据；variant 选择 composer 或 message。示例使用本地品牌图片。",
+    "position": "引用位置"
+  },
+  "productIcons": {
+    "title": "Product icons · 产品图标",
+    "description": "浏览图标，切换尺寸并选择高亮。",
+    "options": "图标接受 LucideProps，如 size、strokeWidth、className。颜色继承 currentColor，按钮提供可访问的动作名称。",
+    "size": "图标尺寸",
+    "selected": "已选择：{{name}}"
+  },
+  "startup": {
+    "title": "StartupShell · 启动占位",
+    "description": "预览应用连接时的安静占位布局。",
+    "options": "embedded 使用 section，其余情况使用 main。组件持续提供 aria-busy 与加载状态；占位样式来自应用入口。"
+  },
+  "fileActions": {
+    "title": "FileActions · 文件菜单",
+    "description": "右键复制完整路径、相对路径或引用文本。",
+    "options": "path 为引用文本；metadata 提供完整路径与可选相对路径。画廊直接提供元数据，无需加载文件。",
+    "scope": "文件范围",
+    "hint": "右键打开复制菜单，也可聚焦文件后按 Shift+F10。"
+  },
+  "workbench": {
+    "title": "PaneWorkbench · 多窗格",
+    "description": "切换布局、激活或添加窗格并调整尺寸。",
+    "options": "panes、activePaneKey、layout 与 splitRatios 由调用方控制。renderPane 提供内容；回调写回本地预览状态。窄屏自动显示当前窗格。",
+    "layout": "窗格布局",
+    "limit": "最多四个窗格",
+    "notes": "{{title}}笔记",
+    "active": "当前窗格",
+    "activate": "选择此窗格以激活",
+    "hint": "当前：{{title}}。拖动底部手柄移动窗格，拖动边界调整尺寸。"
+  },
+  "hostConnection": {
+    "title": "HostConnectionStatus · 连接状态",
+    "description": "比较已连接、断开、连接中和出错状态。",
+    "options": "state 控制图标与文字；compact 隐藏可见文字，保留可访问状态和悬浮标题。",
+    "state": "连接状态",
+    "withText": "状态与文字",
+    "compact": "紧凑显示"
+  },
+  "compatibility": {
+    "title": "HostCompatibilityDialog · 版本兼容",
+    "description": "查看兼容结果、版本和升级指南。",
+    "options": "profile 存在时打开对话框；compatibility 指定结果与版本。onClose 由调用方关闭；此组件只展示信息。",
+    "state": "版本兼容状态",
+    "open": "查看兼容详情"
+  },
+  "composer": {
+    "title": "ThreadComposer · 消息输入",
+    "description": "试用消息、附件、命令和引用等输入状态。",
+    "options": "onSend 返回成功后清空输入；isStreaming 控制停止与排队；variant 切换会话和欢迎页样式。示例提交保存在当前预览。",
+    "statusCommand": "会话状态",
+    "statusDescription": "查看当前会话状态",
+    "compactCommand": "压缩上下文",
+    "compactDescription": "压缩当前会话上下文",
+    "helpCommand": "命令帮助",
+    "helpDescription": "查看可用命令",
+    "state": "输入状态",
+    "addQuote": "加入引用",
+    "input": "示例消息",
+    "placeholder": "输入消息，或输入 / 查看命令",
+    "stopped": "已停止示例任务。",
+    "sent": "提交内容：{{content}}{{attachments}}",
+    "attachments": " · 附件数：{{amount}}",
+    "hint": "试用消息提交、附件选择、模型切换和命令菜单。"
+  },
+  "modelPreset": {
+    "title": "ModelPresetBadge · 模型预设",
+    "description": "试用模型菜单、键盘操作和待配置状态。",
+    "options": "modelPresets 提供预设；modelPreset 与 onPresetChange 控制选择；needsSetup 显示配置入口。",
+    "state": "模型控件状态",
+    "manage": "已打开模型管理。",
+    "settings": "已打开模型设置。",
+    "hint": "当前预设：{{preset}}。打开菜单或用方向键切换。"
+  },
+  "usage": {
+    "title": "ComposerUsagePopover · 上下文用量",
+    "description": "查看上下文、缓存、生成时间和警戒状态。",
+    "options": "context 提供上下文容量；rounds 提供各轮统计；bottomSheet 选择移动端面板。",
+    "state": "用量状态",
+    "hint": "打开用量详情，查看上下文占用、缓存和各轮生成时间。"
+  },
+  "workspace": {
+    "title": "WorkspaceControls · 工作目录",
+    "description": "选择示例项目并切换访问模式。",
+    "options": "scope 与 onChange 控制选择；onLoadProjects 提供示例目录。真实路径解析和权限执行由 gateway 负责。",
+    "state": "工作目录状态"
+  },
+  "navigator": {
+    "title": "PromptNavigator · 问题导航",
+    "description": "搜索历史问题并查看跳转反馈。",
+    "options": "messages 提供完整消息列表，组件提取用户问题；onJumpToPrompt 接收目标消息 ID。",
+    "hint": "打开问题导航，搜索并选择问题。",
+    "empty": "尚未选择问题"
+  },
+  "header": {
+    "title": "ThreadHeader · 会话标题栏",
+    "description": "试用侧栏、主题、临时会话和问题导航。",
+    "options": "title、handle、theme 与 temporaryChatEnabled 提供显示状态；各操作通过回调交给调用方。",
+    "jump": "已跳转到 {{id}}",
+    "sidebar": "已切换侧栏",
+    "hint": "试用标题栏操作",
+    "temporary": "临时会话",
+    "regular": "普通会话"
+  },
+  "messages": {
+    "title": "ThreadMessages · 消息列表",
+    "description": "试用多轮消息、操作菜单、分支和引用。",
+    "options": "messages 为已投影消息；onForkFromMessage 接收用户问题索引，onQuoteSelection 接收所选回复文字。",
+    "quoted": "引用：{{text}}",
+    "forked": "已从第 {{index}} 个问题创建分支",
+    "hint": "打开消息菜单，或选中回复文字后点击引用。"
+  },
+  "viewport": {
+    "title": "ThreadViewport · 会话滚动",
+    "description": "体验长会话滚动、问题导航和返回底部。",
+    "options": "预览容器高度固定；messages 驱动历史显示，ref.jumpToUserPrompt 执行定位；emptyState 提供空会话内容。",
+    "state": "会话视图",
+    "empty": "输入消息开始会话",
+    "hint": "滚动查看问题标记，或用导航跳转并返回底部。"
+  },
+  "history": {
+    "title": "ThreadHistoryStatus · 历史状态",
+    "description": "显示加载、历史起点与失败重试状态。",
+    "options": "loading 表示正在请求，exhausted 表示没有更早消息，error 提供报错信息，onRetry 重试加载。",
+    "state": "历史状态",
+    "error": "示例历史暂不可用。",
+    "retries": "重试次数：{{amount}}"
+  },
+  "recovery": {
+    "title": "RecoveryNotice · 任务恢复",
+    "description": "比较任务恢复状态，试用继续与关闭。",
+    "options": "state 为恢复快照；onContinue 与 onDismiss 返回 Promise。示例回调只更新当前预览。",
+    "state": "恢复状态",
+    "continued": "已继续示例任务。",
+    "dismissed": "已关闭恢复提示。",
+    "reset": "重置预览",
+    "hint": "选择恢复状态，再试用继续或关闭。"
+  },
+  "fallback": {
+    "title": "ModelFallbackNotice · 模型回退",
+    "description": "查看模型回退和授权失效提示。",
+    "options": "model 标识回退模型；reauthProviderLabel 显示授权到期提示；onOpenSettings 和 onDismiss 由调用方提供。",
+    "state": "模型回退状态",
+    "showAgain": "重新显示",
+    "hint": "试用模型设置入口与关闭按钮。"
+  },
+  "compaction": {
+    "title": "ContextCompactionNotice · 上下文压缩",
+    "description": "比较压缩开始、成功、失败和取消状态。",
+    "options": "compaction.phase 决定提示；announce 控制屏幕阅读器播报。",
+    "phase": "上下文压缩阶段"
+  },
+  "streamError": {
+    "title": "StreamErrorNotice · 消息错误",
+    "description": "比较消息大小、权限和请求失败提示。",
+    "options": "error.kind 决定错误文案；onDismiss 关闭提示。",
+    "kind": "消息错误类型"
+  },
+  "cluster": {
+    "title": "AgentActivityCluster · 完整活动",
+    "description": "查看推理、工具记录和各运行状态。",
+    "options": "messages 包含 reasoning 和 trace 投影；isTurnStreaming 控制活动状态；expanded 可由调用方控制。",
+    "state": "活动状态",
+    "error": "未能读取文件。"
+  },
+  "search": {
+    "title": "WebSearchRun · 搜索活动",
+    "description": "查看网页和 X 搜索进度与来源。",
+    "options": "run 包含 query、target、status 和 sources；turnActive 控制运行效果。结果站点图标由共享组件加载。",
+    "state": "搜索状态",
+    "source": "搜索来源"
+  },
+  "responseSources": {
+    "title": "FallbackResponseSources · 响应来源",
+    "description": "查看历史回复使用的预设、模型和供应商。",
+    "options": "sources 保留响应时的模型快照，仅 fallback 为 true 的来源显示标记。",
+    "hint": "点击回退标记查看响应时的预设、模型与供应商。"
+  },
+  "filePreview": {
+    "title": "FilePreviewPanelView · 文件内容",
+    "description": "比较文件显示状态，点击图片试用缩放。",
+    "options": "state 为显示快照；path 决定文件类型和名称；图片打开与失败回调更新当前预览。",
+    "state": "文件预览状态"
+  },
+  "session": {
+    "title": "SessionInfoPopoverView · 会话任务",
+    "description": "查看、编辑、停用和删除会话任务。",
+    "options": "jobs、loading、loadFailed 和 now 来自调用方；onAction 与 onEdit 返回更新后的任务；界面负责弹窗衔接、焦点恢复和操作反馈。",
+    "state": "会话任务状态",
+    "saveError": "示例保存失败，请重试。",
+    "providerError": "示例供应商暂不可用。",
+    "saved": "已保存任务。",
+    "openedChat": "已打开示例聊天。",
+    "openedCalendar": "已打开任务日历。",
+    "actionError": "示例操作失败，请重试。",
+    "delete": "已删除：{{name}}",
+    "run": "已请求运行：{{name}}",
+    "enable": "已启用：{{name}}",
+    "disable": "已停用：{{name}}",
+    "hint": "打开会话详情，试用任务查看、开关、编辑和删除。"
+  },
+  "subagent": {
+    "title": "SubagentThreadView · 子任务消息",
+    "description": "查看子任务消息、活动和重试状态。",
+    "options": "messages 已由运行时投影；loading 和 error 复用历史加载组件；isStreaming 与 activeTurnId 决定活动。界面不获取任务历史。",
+    "state": "子任务会话状态"
+  },
+  "pairRoute": {
+    "title": "PairRouteSettingsView · 配对路由",
+    "description": "选择路由并比较保存与刷新失败状态。",
+    "options": "route 与 original 由调用方管理；routes 提供 SSH 路由。保存成功与目录刷新失败分别呈现；画廊与设置使用同一个视图。",
+    "state": "路由状态"
+  },
+  "quickPair": {
+    "title": "QuickPairSetupView · 快速配对",
+    "description": "试用邀请、回执、访问确认和重试界面。",
+    "options": "state 提供配对和显示状态，回调执行动作，routeSettings 组合路由设置。画廊使用示例数据和本地回调；实际配对由 QuickPairSetup 管理。",
+    "state": "配对阶段",
+    "open": "打开快速配对",
+    "connected": "已选择连接：{{name}}。",
+    "ssh": "已选择 SSH 连接方式。",
+    "hint": "示例邀请与回执仅用于展示；确认动作更新本地反馈。"
+  },
+  "sshHost": {
+    "title": "SSHHostPickerView · SSH 地址",
+    "description": "筛选 SSH 别名并查看导入与读取状态。",
+    "options": "discovery 提供当前配置文件的地址；value、busy、error 与回调由调用方控制。customConfig 保留自定义配置的别名发现行为；inputRef 用于选择后的焦点。",
+    "state": "SSH 地址状态",
+    "refreshed": "已刷新示例地址。",
+    "entered": "已输入：{{value}}",
+    "hint": "输入内容筛选地址；按方向键选择 SSH 别名。"
+  },
+  "connectionBadge": {
+    "title": "ConnectionBadge · 连接指示",
+    "description": "查看连接颜色、动画和可访问状态。",
+    "options": "status 来自调用方；页面容器维护连接订阅。",
+    "state": "连接状态",
+    "idle": "未连接",
+    "connecting": "连接中",
+    "open": "已连接",
+    "reconnecting": "重新连接中",
+    "closed": "已断开",
+    "error": "连接出错"
+  },
+  "hostPicker": {
+    "title": "HostSwitcherView · 主机菜单",
+    "description": "选择主机并比较待连接、断开与收起状态。",
+    "options": "picker 提供主机数据与回调；status 为当前连接状态。生产 HostSwitcher 负责订阅客户端。",
+    "state": "主机菜单状态",
+    "offline": "示例主机已断开。",
+    "manage": "已打开连接管理。",
+    "cancelled": "已取消示例切换。",
+    "selected": "预览中的主机：{{name}}"
+  },
+  "chats": {
+    "title": "ChatList · 会话列表",
+    "description": "选择会话并试用置顶、归档和删除。",
+    "options": "sessions、activeKey 和置顶或归档的 key 由调用方提供；操作回调更新示例列表。",
+    "state": "会话列表状态",
+    "renamed": "已重命名：{{name}}",
+    "selected": "选择的会话：{{name}}",
+    "none": "无"
+  },
+  "sidebarResize": {
+    "title": "SidebarResizeHandle · 侧栏尺寸",
+    "description": "用鼠标或键盘调整、收起和展开侧栏。",
+    "options": "width 与 open 为受控状态；onResize 更新尺寸与展开状态；onDraggingChange 通知拖动状态。",
+    "content": "侧栏内容",
+    "hint": "拖动分隔条，或聚焦后使用方向键、Home、End 和 Enter。",
+    "collapsed": "已收起",
+    "dragging": "正在拖动"
+  },
+  "language": {
+    "title": "LanguageSwitcher · 界面语言",
+    "description": "切换画廊与生产组件的界面语言。",
+    "options": "使用应用已有 i18n 与浏览器语言偏好，不需要 gateway。顶部语言选择器使用同一个组件。"
+  },
+  "channelMarks": {
+    "title": "Channel marks · 频道标识",
+    "description": "查看头像缺省文字、工作区和频道图标。",
+    "options": "LinearAvatar 接收 name、url 和 workspace；无有效图片时显示缺省文字或图标。",
+    "name": "头像名称",
+    "member": "成员头像",
+    "workspace": "工作区图标"
+  },
+  "secret": {
+    "title": "LinearSecretField · 密钥编辑",
+    "description": "编辑、保存密钥并检查失败时的草稿保留。",
+    "options": "configured 为已保存状态；onSave 负责持久化。画廊回调仅更新本地状态。",
+    "state": "密钥状态",
+    "error": "示例保存失败。",
+    "hint": "输入示例文本并保存，或切换错误状态检查草稿保留。"
+  },
+  "channelHelp": {
+    "title": "LinearHelpContent · 频道帮助",
+    "description": "在实际下拉菜单中查看频道帮助。",
+    "options": "内容使用频道的现有翻译；调用方提供菜单容器。",
+    "open": "打开频道帮助"
+  },
+  "channel": {
+    "title": "{{channel}} · 频道配置",
+    "description": "查看真实频道配置表单与状态。",
+    "options": "使用频道注册定义、Python 设置契约快照和生产 ChannelSetupSurfaceView。输入、凭据显示、预设、检查与开关只更新当前预览。",
+    "state": "频道配置状态",
+    "credentialsError": "示例凭据被拒绝。请更新预览中的值后重试。",
+    "validation": "预览配置"
+  },
+  "channelConnect": {
+    "state": "{{channel}} 连接状态",
+    "error": "授权暂不可用，请重试。"
+  },
+  "qqConnect": {
+    "title": "QQConnectFlowView · QQ 扫码连接",
+    "description": "查看 QQ 扫码、重试与 App Secret 替换提示。",
+    "options": "视图接收连接状态和操作回调。预览操作只改变本地状态；会话创建和 QQ 轮询由运行时入口负责。"
+  },
+  "feishuConnect": {
+    "title": "FeishuConnectFlowView · 飞书扫码授权",
+    "description": "试用飞书扫码、成功、过期与错误状态。",
+    "options": "connect、busy 和 error 提供显示状态；二维码在本地生成。开始、取消与轮询由功能入口提供，预览回调只改变当前示例。"
+  },
+  "feishuAssistants": {
+    "title": "FeishuAssistantsPanelView · 飞书助手管理",
+    "description": "查看助手卡片、运行状态和高级设置。",
+    "options": "feature 和 instances 提供助手快照；视图管理草稿与保存反馈。onToggleInstance、onSaveInstance 与 renderConnectFlow 接入运行时操作。",
+    "state": "助手运行状态",
+    "error": "助手已停止。请检查凭据后重新启动。",
+    "on": "{{name}}：已开启",
+    "off": "{{name}}：已关闭",
+    "saved": "{{name}}：已保存 {{amount}} 个预览字段"
+  },
+  "whatsappConnect": {
+    "title": "WhatsAppConnectFlowView · WhatsApp 设备关联",
+    "description": "比较关联、成功、过期和错误界面。",
+    "options": "视图沿用自动开始和极简布局的显示规则；调用方控制状态和重试。真实自动开始、强制重试和轮询由连接功能入口负责。"
+  },
+  "linearPanel": {
+    "title": "LinearPanelView · Linear 配置",
+    "description": "查看应用设置、工作区、成员和浏览器授权。",
+    "options": "state 与 workspaces 提供快照；工作区、保存与 MCP 操作由回调接入。三个插槽组合生产使用的成员、授权和重置视图。",
+    "state": "Linear 配置状态",
+    "runtimeError": "未能启动 Linear webhook。",
+    "saveError": "无法保存设置，已保留草稿。",
+    "inspectionError": "未能检查已连接的工作区。",
+    "refreshed": "已刷新示例工作区。",
+    "removed": "已移除示例工作区：{{name}}",
+    "mcp": "已选择 Linear MCP 配置入口。"
+  },
+  "linearMembers": {
+    "title": "LinearMemberAccessView · 成员访问",
+    "description": "搜索成员、修改权限并比较保存状态。",
+    "options": "snapshot 为已确认的成员状态。onLoad 与 onSetAllowed 交给频道入口；权限校验仍由网关负责。",
+    "state": "成员状态",
+    "loadError": "成员目录暂不可用。",
+    "saveError": "尚未确认访问权限。"
+  },
+  "linearConnect": {
+    "title": "LinearConnectFlowView · Linear 授权",
+    "description": "试用浏览器授权入口和各授权阶段。",
+    "options": "复用 ChannelQrConnectFlowView。Linear 提供浏览器授权展示、标签与焦点处理；会话创建及轮询留在运行时入口。",
+    "state": "授权阶段",
+    "error": "未能完成授权。",
+    "hint": "授权链接与工作区为示例数据；开始、取消只更新预览阶段。"
+  },
+  "linearReset": {
+    "title": "LinearResetConnectionView · 重置连接",
+    "description": "查看清除范围、忙碌和部分完成状态。",
+    "options": "onReset 执行完整撤销与清理事务；视图管理确认、错误、关闭限制与焦点恢复。",
+    "state": "重置结果",
+    "error": "未能停止频道，已保留应用设置。",
+    "completed": "预览工作区及应用设置已清除。"
+  },
+  "weixinPanel": {
+    "title": "WeixinPanelView · 微信设置",
+    "description": "查看微信设置、保存反馈和登录恢复。",
+    "options": "字段来自频道设置契约。视图管理展开和密钥可见状态；运行时入口负责自动保存、草稿合并和登录恢复。",
+    "state": "微信面板状态"
+  },
+  "weixinConnect": {
+    "title": "WeixinConnectFlowView · 微信扫码与验证",
+    "description": "比较扫码、验证、过期和连接错误状态。",
+    "options": "视图接收连接快照与回调，保留验证码草稿。二维码在浏览器中生成；授权启动、轮询暂停、刷新和取消由真实入口负责。",
+    "state": "微信连接状态",
+    "error": "连接中断，请重试。",
+    "refreshed": "已显示新的预览二维码。",
+    "hint": "验证码预览输入 123456 可完成连接；其他输入会保留草稿并显示错误。"
+  }
+}

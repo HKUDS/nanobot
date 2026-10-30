@@ -1,5 +1,3 @@
-"""Configuration and URL validation for the native Linear channel."""
-
 from __future__ import annotations
 
 import ipaddress

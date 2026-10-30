@@ -13,14 +13,17 @@ type AnsiStyle = {
 };
 
 type AnsiState = {
-  backgroundColor?: string;
+  backgroundColor?: AnsiColor;
   bold: boolean;
-  color?: string;
+  color?: AnsiColor;
   dim: boolean;
   inverse: boolean;
   italic: boolean;
   underline: boolean;
 };
+
+type AnsiColor = number | string;
+type AnsiTheme = "light" | "dark";
 
 const ESC = String.fromCharCode(27);
 const ANSI_PATTERN = new RegExp(`${ESC}\\[[0-?]*[ -/]*[@-~]`, "g");
@@ -47,6 +50,22 @@ const ANSI_BRIGHT_COLORS = [
   "#ffffff",
 ];
 
+const ANSI_PALETTE = [...ANSI_COLORS, ...ANSI_BRIGHT_COLORS];
+const ANSI_FOREGROUNDS: Record<AnsiTheme, string[]> = {
+  light: [
+    "#18181b", "#b91c1c", "#166534", "#854d0e",
+    "#1d4ed8", "#7e22ce", "#0e7490", "#52525b",
+    "#62626b", "#b91c1c", "#166534", "#854d0e",
+    "#1d4ed8", "#86198f", "#155e75", "#3f3f46",
+  ],
+  dark: [
+    "#a1a1aa", "#fca5a5", "#86efac", "#fde047",
+    "#93c5fd", "#d8b4fe", "#67e8f9", "#e5e7eb",
+    "#a1a1aa", "#fca5a5", "#86efac", "#fef08a",
+    "#93c5fd", "#e9d5ff", "#a5f3fc", "#ffffff",
+  ],
+};
+
 const RGB_STEPS = [0, 95, 135, 175, 215, 255];
 
 export function hasAnsi(value: string): boolean {
@@ -61,6 +80,8 @@ export function stripAnsi(value: string): string {
 
 function initialState(): AnsiState {
   return {
+    backgroundColor: undefined,
+    color: undefined,
     bold: false,
     dim: false,
     inverse: false,
@@ -69,10 +90,9 @@ function initialState(): AnsiState {
   };
 }
 
-function colorFrom256(value: number): string | undefined {
+function colorFrom256(value: number): AnsiColor | undefined {
   if (value < 0 || value > 255) return undefined;
-  if (value < 8) return ANSI_COLORS[value];
-  if (value < 16) return ANSI_BRIGHT_COLORS[value - 8];
+  if (value < 16) return value;
   if (value < 232) {
     const offset = value - 16;
     const red = RGB_STEPS[Math.floor(offset / 36)];
@@ -110,7 +130,7 @@ function applyExtendedColor(
   const mode = params[index + 1];
   if (mode === 5) {
     const color = colorFrom256(params[index + 2]);
-    if (color) state[key] = color;
+    if (color !== undefined) state[key] = color;
     return index + 2;
   }
   if (mode === 2) {
@@ -152,13 +172,13 @@ function applySgrParams(state: AnsiState, params: number[]): void {
     } else if (code === 49) {
       delete state.backgroundColor;
     } else if (code >= 30 && code <= 37) {
-      state.color = ANSI_COLORS[code - 30];
+      state.color = code - 30;
     } else if (code >= 40 && code <= 47) {
-      state.backgroundColor = ANSI_COLORS[code - 40];
+      state.backgroundColor = code - 40;
     } else if (code >= 90 && code <= 97) {
-      state.color = ANSI_BRIGHT_COLORS[code - 90];
+      state.color = code - 90 + 8;
     } else if (code >= 100 && code <= 107) {
-      state.backgroundColor = ANSI_BRIGHT_COLORS[code - 100];
+      state.backgroundColor = code - 100 + 8;
     } else if (code === 38) {
       index = applyExtendedColor(state, params, index, "color");
     } else if (code === 48) {
@@ -167,12 +187,21 @@ function applySgrParams(state: AnsiState, params: number[]): void {
   }
 }
 
-function styleFromState(state: AnsiState): AnsiStyle | undefined {
-  const foreground = state.inverse ? state.backgroundColor : state.color;
-  const background = state.inverse ? state.color : state.backgroundColor;
+function styleFromState(state: AnsiState, theme: AnsiTheme): AnsiStyle | undefined {
+  // Explicit color pairs retain the output's palette; standalone foregrounds
+  // use colors selected for the UI surface. RGB and extended colors stay literal.
+  const palette = state.backgroundColor === undefined ? ANSI_FOREGROUNDS[theme] : ANSI_PALETTE;
+  const foreground = typeof state.color === "number" ? palette[state.color] : state.color;
+  const background = typeof state.backgroundColor === "number"
+    ? ANSI_PALETTE[state.backgroundColor] : state.backgroundColor;
   const style: AnsiStyle = {};
-  if (foreground) style.color = foreground;
-  if (background) style.backgroundColor = background;
+  if (state.inverse) {
+    style.color = background ?? "hsl(var(--background))";
+    style.backgroundColor = foreground ?? "hsl(var(--foreground))";
+  } else {
+    if (foreground) style.color = foreground;
+    if (background) style.backgroundColor = background;
+  }
   if (state.bold) style.fontWeight = 700;
   if (state.dim) style.opacity = 0.72;
   if (state.italic) style.fontStyle = "italic";
@@ -180,7 +209,7 @@ function styleFromState(state: AnsiState): AnsiStyle | undefined {
   return Object.keys(style).length ? style : undefined;
 }
 
-export function parseAnsiSegments(value: string): AnsiSegment[] {
+export function parseAnsiSegments(value: string, theme: AnsiTheme): AnsiSegment[] {
   const segments: AnsiSegment[] = [];
   const state = initialState();
   let cursor = 0;
@@ -191,7 +220,7 @@ export function parseAnsiSegments(value: string): AnsiSegment[] {
     if (index > cursor) {
       segments.push({
         text: value.slice(cursor, index),
-        style: styleFromState(state),
+        style: styleFromState(state, theme),
       });
     }
     const params = normalizedSgrParams(match[0]);
@@ -202,7 +231,7 @@ export function parseAnsiSegments(value: string): AnsiSegment[] {
   if (cursor < value.length) {
     segments.push({
       text: value.slice(cursor),
-      style: styleFromState(state),
+      style: styleFromState(state, theme),
     });
   }
 

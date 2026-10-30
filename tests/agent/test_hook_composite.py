@@ -1,11 +1,10 @@
-"""Tests for CompositeHook fan-out, error isolation, and integration."""
-
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.session_helpers import mock_session_manager
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.hook import (
     AgentHook,
@@ -13,8 +12,12 @@ from nanobot.agent.hook import (
     AgentRunHookContext,
     AgentTurnHookContext,
     CompositeHook,
+    SDKCaptureHook,
 )
+from nanobot.agent.hooks.file_edit_activity import FileEditActivityHook
+from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.agent.tools.context import RequestContext
+from nanobot.events import NO_EVENTS
 from nanobot.utils.progress_events import output_events
 
 
@@ -26,21 +29,11 @@ def _run_ctx() -> AgentRunHookContext:
     return AgentRunHookContext(messages=[])
 
 
-# ---------------------------------------------------------------------------
-# Base AgentHook emit_reasoning: no-op
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_base_hook_emit_reasoning_is_noop():
     hook = AgentHook()
     result = await hook.emit_reasoning("should not raise")
     assert result is None
-
-
-# ---------------------------------------------------------------------------
-# Fan-out: every hook is called in order
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -63,7 +56,6 @@ async def test_composite_fans_out_before_iteration():
 
 @pytest.mark.asyncio
 async def test_composite_fans_out_all_async_methods():
-    """Verify all async methods fan out to every hook."""
     events: list[str] = []
 
     class RecordingHook(AgentHook):
@@ -146,11 +138,6 @@ async def test_composite_fans_out_all_async_methods():
     ]
 
 
-# ---------------------------------------------------------------------------
-# Error isolation: one hook raises, others still run
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_composite_error_isolation_before_iteration():
     calls: list[str] = []
@@ -187,7 +174,6 @@ async def test_composite_error_isolation_on_stream():
 
 @pytest.mark.asyncio
 async def test_composite_error_isolation_all_async():
-    """Error isolation for on_stream_end, before_execute_tools, after_iteration."""
     calls: list[str] = []
 
     class Bad(AgentHook):
@@ -279,32 +265,12 @@ async def test_composite_error_isolation_all_async():
     ]
 
 
-# ---------------------------------------------------------------------------
-# finalize_content: pipeline semantics (no error isolation)
-# ---------------------------------------------------------------------------
-
-
-def test_composite_finalize_content_pipeline():
-    class Upper(AgentHook):
-        def finalize_content(self, context, content):
-            return content.upper() if content else content
-
-    class Suffix(AgentHook):
-        def finalize_content(self, context, content):
-            return (content + "!") if content else content
-
-    hook = CompositeHook([Upper(), Suffix()])
-    result = hook.finalize_content(_ctx(), "hello")
-    assert result == "HELLO!"
-
-
 def test_composite_finalize_content_none_passthrough():
     hook = CompositeHook([AgentHook()])
     assert hook.finalize_content(_ctx(), None) is None
 
 
 def test_composite_finalize_content_ordering():
-    """First hook transforms first, result feeds second hook."""
     steps: list[str] = []
 
     class H1(AgentHook):
@@ -321,11 +287,6 @@ def test_composite_finalize_content_ordering():
     result = hook.finalize_content(_ctx(), "hi")
     assert result == "HI!"
     assert steps == ["H1:hi", "H2:HI"]
-
-
-# ---------------------------------------------------------------------------
-# wants_streaming: any-semantics
-# ---------------------------------------------------------------------------
 
 
 def test_composite_wants_streaming_any_true():
@@ -351,14 +312,23 @@ def test_composite_wants_streaming_empty():
     assert hook.wants_streaming() is False
 
 
-# ---------------------------------------------------------------------------
-# Empty hooks list: behaves like no-op AgentHook
-# ---------------------------------------------------------------------------
+def test_builtin_hooks_detect_run_snapshot_consumers():
+    assert AgentHook().has_run_hooks() is False
+    assert AgentProgressHook().has_run_hooks() is False
+    assert SDKCaptureHook().has_run_hooks() is True
+    assert FileEditActivityHook(events=NO_EVENTS, workspace=None).has_run_hooks() is True
+
+
+def test_composite_detects_nested_run_snapshot_consumers():
+    progress = AgentProgressHook()
+    assert CompositeHook([AgentHook(), CompositeHook([progress])]).has_run_hooks() is False
+    assert CompositeHook([progress, CompositeHook([SDKCaptureHook()])]).has_run_hooks() is True
 
 
 @pytest.mark.asyncio
 async def test_composite_empty_hooks_no_ops():
     hook = CompositeHook([])
+    assert hook.has_run_hooks() is False
     ctx = _ctx()
     run_ctx = _run_ctx()
     await hook.before_run(run_ctx)
@@ -405,11 +375,6 @@ async def test_composite_can_wrap_another_composite():
     assert calls == ["inner"]
 
 
-# ---------------------------------------------------------------------------
-# Integration: AgentLoop with extra hooks
-# ---------------------------------------------------------------------------
-
-
 def _make_loop(tmp_path, hooks=None, hook_factories=None):
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
@@ -420,7 +385,7 @@ def _make_loop(tmp_path, hooks=None, hook_factories=None):
     provider.generation.max_tokens = 4096
 
     with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager"), \
+         patch("nanobot.agent.loop.SessionManager", side_effect=mock_session_manager), \
          patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr, \
          patch("nanobot.agent.loop.Consolidator"):
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
@@ -436,7 +401,6 @@ def _make_loop(tmp_path, hooks=None, hook_factories=None):
 
 @pytest.mark.asyncio
 async def test_agent_loop_extra_hook_receives_calls(tmp_path):
-    """Extra hook passed to AgentLoop is called alongside core LoopHook."""
     from nanobot.providers.base import LLMResponse
 
     events: list[str] = []
@@ -474,7 +438,6 @@ async def test_agent_loop_extra_hook_receives_calls(tmp_path):
 
 @pytest.mark.asyncio
 async def test_agent_loop_turn_hook_factories_receive_context(tmp_path):
-    """Turn-scoped hooks can be supplied externally and see turn-local context."""
     from nanobot.providers.base import LLMResponse
 
     captured: list[tuple[str, AgentTurnHookContext]] = []
@@ -540,7 +503,6 @@ async def test_agent_loop_turn_hook_factories_receive_context(tmp_path):
 
 @pytest.mark.asyncio
 async def test_agent_loop_extra_hook_error_isolation(tmp_path):
-    """A faulty extra hook does not crash the agent loop."""
     from nanobot.providers.base import LLMResponse
 
     class BadHook(AgentHook):
@@ -563,7 +525,6 @@ async def test_agent_loop_extra_hook_error_isolation(tmp_path):
 
 @pytest.mark.asyncio
 async def test_agent_loop_extra_hooks_do_not_swallow_loop_hook_errors(tmp_path):
-    """Extra hooks must not change the core LoopHook failure behavior."""
     from nanobot.providers.base import LLMResponse, ToolCallRequest
 
     loop = _make_loop(tmp_path, hooks=[AgentHook()])
@@ -588,7 +549,6 @@ async def test_agent_loop_extra_hooks_do_not_swallow_loop_hook_errors(tmp_path):
 
 @pytest.mark.asyncio
 async def test_agent_loop_no_hooks_backward_compat(tmp_path):
-    """Without hooks param, behavior is identical to before."""
     from nanobot.providers.base import LLMResponse, ToolCallRequest
 
     loop = _make_loop(tmp_path)

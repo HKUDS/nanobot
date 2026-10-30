@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Window as HappyWindow } from "happy-dom";
 
 import {
   assistantForkFlags,
@@ -28,8 +29,8 @@ function assistantActionCounts(root: ParentNode = document) {
     const row = body.closest<HTMLElement>("[data-thread-display-unit]")!;
     if (!row.querySelector("[data-message-block-menu-trigger]")) continue;
     const { menu } = openMessageBlockMenu(row);
-    counts.copy += within(menu).queryAllByRole("button", { name: "Copy", exact: true }).length;
-    counts.fork += within(menu).queryAllByRole("button", { name: "Fork", exact: true }).length;
+    counts.copy += within(menu).queryAllByRole("button", { name: "Copy" }).length;
+    counts.fork += within(menu).queryAllByRole("button", { name: "New chat from here" }).length;
     fireEvent.keyDown(menu, { key: "Escape" });
   }
   return counts;
@@ -52,6 +53,94 @@ function openMessageBlockMenu(root: ParentNode): {
 }
 
 describe("ThreadMessages", () => {
+  it("preserves native context menus and navigation on rendered reply links", async () => {
+    await preloadMarkdownText();
+    render(<ThreadMessages messages={[
+      { id: "reply", role: "assistant", content: "[**Website**](https://example.com/?q=one#two)", createdAt: 1 },
+    ]} />);
+    const link = await screen.findByRole("link", { name: "Website" });
+    expect(fireEvent.contextMenu(within(link).getByText("Website"))).toBe(true);
+    link.focus();
+    expect(fireEvent.keyDown(link, { key: "F10", shiftKey: true })).toBe(true);
+    expect(link).toHaveFocus();
+    expect(link).toHaveAttribute("href", "https://example.com/?q=one#two");
+    expect(link).toHaveAttribute("target", "_blank");
+    // Happy DOM follows native links; verify the event without accessing the network.
+    const navigation = (window as unknown as HappyWindow).happyDOM.settings.navigation;
+    const previous = navigation.disableMainFrameNavigation;
+    navigation.disableMainFrameNavigation = true;
+    try {
+      expect(fireEvent.click(link, { ctrlKey: true })).toBe(true);
+    } finally {
+      navigation.disableMainFrameNavigation = previous;
+    }
+  });
+
+  it.each(["diff", "collapsed_diff"] as const)(
+    "keeps completed %s edits visible when answer activity is toggled",
+    (fileEditDisplayMode) => {
+      localStorage.setItem(
+        "nanobot-webui.settings-preferences",
+        JSON.stringify({ fileEditDisplayMode }),
+      );
+      const messages: UIMessage[] = [
+        { id: "user", role: "user", content: "edit the file", createdAt: 1 },
+        { id: "before", role: "assistant", content: "", reasoning: "Before edit", createdAt: 2 },
+        {
+          id: "edit", role: "tool", kind: "trace", content: "edit_file()", createdAt: 3,
+          traces: ["edit_file()"],
+          fileEdits: [{
+            call_id: "edit-call", tool: "edit_file", path: "src/app.tsx", phase: "end",
+            added: 1, deleted: 1, status: "done",
+            diff: {
+              format: "unified", context: 3, truncated: false,
+              text: "--- a/src/app.tsx\n+++ b/src/app.tsx\n@@ -1 +1 @@\n-old\n+new\n",
+            },
+          }],
+        },
+        { id: "after", role: "assistant", content: "", reasoning: "After edit", createdAt: 4 },
+        { id: "answer", role: "assistant", content: "File updated", latencyMs: 5_000, createdAt: 5 },
+      ];
+      try {
+        const { container, rerender } = render(<ThreadMessages messages={messages} isStreaming />);
+        rerender(<ThreadMessages messages={messages} isStreaming={false} />);
+        if (fileEditDisplayMode === "collapsed_diff") {
+          fireEvent.click(screen.getByTestId("file-edit-diff-toggle"));
+        }
+        const assertIndependentDiff = () => {
+          const diff = screen.getByTestId("file-edit-diff");
+          expect(diff).toBeVisible();
+          expect(screen.getByRole("img", { name: "Edited" })).toBeInTheDocument();
+          expect(diff.closest('[aria-hidden="true"], [inert], [data-testid="agent-activity-content"]'))
+            .toBeNull();
+          expect(screen.getByText("File updated")).toBeVisible();
+          return diff;
+        };
+        assertIndependentDiff();
+        openAssistantBlockMenu(container);
+        const disclosure = screen.getByRole("button", { name: "Worked for 5s" });
+        expect(disclosure).toHaveAttribute("aria-expanded", "false");
+        const detailsId = disclosure.getAttribute("aria-controls")!;
+        expect(container.querySelectorAll(`[id="${detailsId}"]`)).toHaveLength(1);
+        fireEvent.click(disclosure);
+        const diff = assertIndependentDiff();
+        expect(screen.getByText("Before edit").compareDocumentPosition(diff)
+          & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(diff.compareDocumentPosition(screen.getByText("After edit"))
+          & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        fireEvent.click(screen.getAllByRole("button", { name: /Worked for 5s.*Collapse activity/ })[0]);
+        assertIndependentDiff();
+        expect(screen.getByText("Before edit").closest('[aria-hidden="true"][inert]')).not.toBeNull();
+        expect(screen.getByText("After edit").closest('[aria-hidden="true"][inert]')).not.toBeNull();
+
+        rerender(<ThreadMessages messages={[messages[0], messages[2], messages[4]]} isStreaming={false} />);
+        assertIndependentDiff();
+      } finally {
+        localStorage.removeItem("nanobot-webui.settings-preferences");
+      }
+    },
+  );
+
   it.each([0, -13_000, -14_000, -15_000, 15_000])(
     "keeps the optimistic timer through acknowledgement and output with %i ms server clock skew",
     (clockSkewMs) => {
@@ -161,7 +250,7 @@ describe("ThreadMessages", () => {
     expect(screen.getByText("latest answer").closest(".thread-render-unit")).toBeNull();
   });
 
-  it("recycles offscreen historical content while preserving its measured space", () => {
+  it("recycles historical content using the latest intersection in each batch", () => {
     let notify: (entries: Array<{ isIntersecting: boolean }>) => void = () => {};
     vi.stubGlobal("IntersectionObserver", class {
       constructor(callback: typeof notify) { notify = callback; }
@@ -178,8 +267,15 @@ describe("ThreadMessages", () => {
     act(() => notify([{ isIntersecting: false }]));
     expect(unit.style.height).toBe("240px");
     expect(unit.childElementCount).toBe(0);
+    act(() => notify([{ isIntersecting: false }, { isIntersecting: true }]));
+    expect(screen.getByText("historical answer")).toBeVisible();
+    expect(unit.style.height).toBe("");
+    act(() => notify([{ isIntersecting: true }, { isIntersecting: false }]));
+    expect(unit.style.height).toBe("240px");
+    expect(unit.childElementCount).toBe(0);
     act(() => notify([{ isIntersecting: true }]));
     expect(screen.getByText("historical answer")).toBeVisible();
+    expect(unit.style.height).toBe("");
     expect(view.container).toHaveTextContent("old question");
   });
 
@@ -195,7 +291,7 @@ describe("ThreadMessages", () => {
         content: "question",
         createdAt: 1,
         turnId,
-        turnPhase: "prompt",
+        turnPhase: "user",
       },
       {
         id: "live-answer",
@@ -248,7 +344,7 @@ describe("ThreadMessages", () => {
             content: "next question",
             createdAt: 3,
             turnId: "turn-2",
-            turnPhase: "prompt",
+            turnPhase: "user",
           },
         ]}
         isStreaming
@@ -269,7 +365,7 @@ describe("ThreadMessages", () => {
       content: "research this",
       createdAt: 1,
       turnId,
-      turnPhase: "prompt",
+      turnPhase: "user",
       turnSeq: 0,
     };
     const commentary: UIMessage = {
@@ -616,7 +712,7 @@ describe("ThreadMessages", () => {
     } as unknown as Selection);
 
     document.dispatchEvent(new Event("selectionchange"));
-    const action = await screen.findByRole("button", { name: "Ask about this" });
+    const action = await screen.findByRole("button", { name: "Ask about selection" });
     fireEvent.click(action);
 
     await waitFor(() => expect(onQuoteSelection).toHaveBeenCalledWith("selected answer"));
@@ -666,7 +762,9 @@ describe("ThreadMessages", () => {
     const rows = Array.from(container.firstElementChild?.children ?? []);
 
     expect(rows).toHaveLength(2);
-    expect(rows[0]).not.toHaveClass("mt-2", "mt-4", "mt-5");
+    for (const className of ["mt-2", "mt-4", "mt-5"]) {
+      expect(rows[0]).not.toHaveClass(className);
+    }
     expect(rows[1]).not.toHaveClass("mt-4");
     const answerRow = screen.getByText("final answer")
       .closest<HTMLElement>("[data-thread-display-unit]")!;
@@ -690,7 +788,6 @@ describe("ThreadMessages", () => {
       "h-[var(--message-block-control-size)]",
       "w-[var(--message-block-action-width)]",
       "rounded-control",
-      "group-hover:bg-muted/70",
     );
     expect(disclosure.querySelector("svg")).toBeInTheDocument();
     const toolbar = menu.querySelector("[data-message-block-toolbar]");
@@ -701,14 +798,16 @@ describe("ThreadMessages", () => {
     const timestamp = menu.querySelector<HTMLElement>("[data-message-timestamp]")!;
     expect(timestamp).toBeInTheDocument();
     expect(timestamp).toHaveClass("min-h-[var(--message-block-control-size)]");
-    expect(timestamp.parentElement).toHaveClass("border-t", "text-muted-foreground/45");
+    expect(timestamp.parentElement).toHaveClass("border-t", "text-muted-foreground");
     expect(toolbar).not.toContainElement(timestamp);
     expect(timestamp).not.toHaveAttribute("tabindex");
     expect(timestamp.querySelector("svg")).not.toBeInTheDocument();
     expect(disclosure.compareDocumentPosition(timestamp) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
     expect(menu).toHaveClass("w-max", "max-w-64", "bg-popover", "rounded-floating", "overflow-y-auto");
-    expect(menu).not.toHaveClass("min-w-[8.5rem]", "bg-popover/95", "rounded-xl");
+    for (const className of ["min-w-[8.5rem]", "bg-popover/95", "rounded-xl"]) {
+      expect(menu).not.toHaveClass(className);
+    }
     const menuButtons = Array.from(menu.querySelectorAll("button"));
     expect(menuButtons.length).toBeGreaterThan(1);
     for (const button of menuButtons) {
@@ -1038,7 +1137,7 @@ describe("ThreadMessages", () => {
     const answer = screen.getByText("automated answer").closest<HTMLElement>("[data-thread-display-unit]")!;
     const { menu } = openMessageBlockMenu(answer);
     const metadata = menu.querySelector<HTMLElement>("[data-message-block-metadata]")!;
-    expect(metadata).toHaveTextContent("Triggered automatically · Review schedule");
+    expect(metadata).toHaveTextContent("Triggered automatically Review schedule");
     expect(metadata.querySelector("time[datetime]")).toBeInTheDocument();
     expect(metadata.querySelector("button, svg, [tabindex]")).toBeNull();
     expect(metadata).toBe(menu.querySelector("[data-message-block-menu-actions]")?.lastElementChild);
@@ -1934,9 +2033,14 @@ describe("ThreadMessages", () => {
     });
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
-    expect(screen.getByText("result.csv")).toBeInTheDocument();
-    const ownerRow = screen.getByText("result.csv")
-      .closest<HTMLElement>("[data-thread-display-unit]")!;
+    const information = screen.getByRole("button", { name: "result.csv" });
+    const download = screen.getByRole("link", { name: "Download result.csv" });
+    expect(information).toBeVisible();
+    expect(download).toHaveAttribute("href", "/api/media/result.csv");
+    expect(download).toHaveAttribute("download", "result.csv");
+    expect(download.closest("[data-testid='activity-model-message'], [data-testid='agent-activity-content']")).toBeNull();
+    const ownerRow = information.closest<HTMLElement>("[data-thread-display-unit]")!;
+    expect(ownerRow).toContainElement(download);
     openAssistantBlockMenu(ownerRow);
     expect(screen.getByRole("button", { name: "Worked" })).toBeInTheDocument();
   });

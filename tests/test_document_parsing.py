@@ -1,5 +1,3 @@
-"""Tests for document text extraction utilities."""
-
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -15,10 +13,8 @@ from nanobot.utils.document import (
 
 
 class TestExtractText:
-    """Test the extract_text function."""
 
     def test_extract_text_unsupported_returns_none(self, tmp_path: Path):
-        """Test that unsupported file types return None."""
         unsupported_file = tmp_path / "file.xyz"
         unsupported_file.write_text("content")
 
@@ -26,7 +22,6 @@ class TestExtractText:
         assert result is None
 
     def test_extract_text_file_not_found(self, tmp_path: Path):
-        """Test that non-existent files return error string."""
         missing_file = tmp_path / "nonexistent.txt"
 
         result = extract_text(missing_file)
@@ -34,7 +29,6 @@ class TestExtractText:
         assert "[error: file not found:" in result
 
     def test_extract_text_txt_file(self, tmp_path: Path):
-        """Test extracting text from a .txt file."""
         txt_file = tmp_path / "test.txt"
         content = "Hello, world!\nThis is a test."
         txt_file.write_text(content, encoding="utf-8")
@@ -51,16 +45,13 @@ class TestExtractText:
         assert extract_text(txt_file) == content
 
     def test_extract_text_accepts_string_path(self, tmp_path: Path):
-        """String paths retain the compatibility behavior of Path inputs."""
         txt_file = tmp_path / "string-path.txt"
         txt_file.write_text("string path", encoding="utf-8")
 
         assert extract_text(str(txt_file)) == "string path"
 
     def test_extract_text_txt_file_with_truncation(self, tmp_path: Path):
-        """Test that large text files are truncated."""
         txt_file = tmp_path / "large.txt"
-        # Create content larger than _MAX_TEXT_LENGTH
         content = "x" * 300_000
         txt_file.write_text(content, encoding="utf-8")
 
@@ -70,7 +61,6 @@ class TestExtractText:
         assert "chars total)" in result
 
     def test_extract_text_md_file(self, tmp_path: Path):
-        """Test extracting text from a .md file."""
         md_file = tmp_path / "test.md"
         content = "# Header\n\nSome markdown content."
         md_file.write_text(content, encoding="utf-8")
@@ -79,7 +69,6 @@ class TestExtractText:
         assert result == content
 
     def test_extract_text_csv_file(self, tmp_path: Path):
-        """Test extracting text from a .csv file."""
         csv_file = tmp_path / "test.csv"
         content = "name,age\nAlice,30\nBob,25"
         csv_file.write_text(content, encoding="utf-8")
@@ -88,7 +77,6 @@ class TestExtractText:
         assert result == content
 
     def test_extract_text_json_file(self, tmp_path: Path):
-        """Test extracting text from a .json file."""
         json_file = tmp_path / "test.json"
         content = '{"key": "value", "number": 42}'
         json_file.write_text(content, encoding="utf-8")
@@ -130,7 +118,6 @@ class TestExtractText:
         assert source.continuation == "pages='201-250'"
 
     def test_extract_text_xlsx(self, tmp_path: Path):
-        """Test extracting text from an .xlsx file."""
         from openpyxl import Workbook
 
         xlsx_file = tmp_path / "test.xlsx"
@@ -144,7 +131,6 @@ class TestExtractText:
         ws["A3"] = "Bob"
         ws["B3"] = 25
 
-        # Add a second sheet
         ws2 = wb.create_sheet("Sheet2")
         ws2["A1"] = "Product"
         ws2["B1"] = "Price"
@@ -163,25 +149,52 @@ class TestExtractText:
         assert "Widget" in result
         assert "9.99" in result
 
+    @pytest.mark.parametrize("chart_index", [0, 1, 2])
+    def test_extract_text_xlsx_with_chartsheet(self, tmp_path: Path, chart_index: int):
+        from openpyxl import Workbook
+        from openpyxl.chart import BarChart, Reference
+
+        xlsx_file = tmp_path / "report.xlsx"
+        workbook = Workbook()
+        first_sheet = workbook.active
+        first_sheet.title = "Sales"
+        first_sheet.append(["Revenue", 42])
+        second_sheet = workbook.create_sheet("Notes")
+        second_sheet.append(["Forecast", 50])
+        chart = BarChart()
+        chart.add_data(Reference(first_sheet, min_col=2, min_row=1))
+        workbook.create_chartsheet("Dashboard", index=chart_index).add_chart(chart)
+        workbook.save(xlsx_file)
+        workbook.close()
+
+        assert extract_text(xlsx_file) == (
+            "--- Sheet: Sales ---\nRevenue\t42\n\n--- Sheet: Notes ---\nForecast\t50"
+        )
+        source = open_document_line_source(xlsx_file)
+        assert source is not None
+        assert [
+            (line.text, line.extracted_line, line.locator)
+            for line in source.lines
+            if line.searchable
+        ] == [
+            ("Revenue\t42", 2, "sheet='Sales',row=1"),
+            ("Forecast\t50", 5, "sheet='Notes',row=1"),
+        ]
+
     def test_extract_text_xlsx_empty_sheet(self, tmp_path: Path):
-        """Test extracting text from an .xlsx file with empty sheets."""
         from openpyxl import Workbook
 
         xlsx_file = tmp_path / "empty.xlsx"
         wb = Workbook()
-        # Clear the default sheet
         wb.remove(wb.active)
-        # Add an empty sheet
         wb.create_sheet("EmptySheet")
         wb.save(xlsx_file)
         wb.close()
 
         result = extract_text(xlsx_file)
-        # Empty sheets should return empty string or header only
         assert result == "--- Sheet: EmptySheet ---" or result == ""
 
     def test_extract_text_docx(self, tmp_path: Path):
-        """Test extracting text from a .docx file."""
         from docx import Document
 
         docx_file = tmp_path / "test.docx"
@@ -198,7 +211,6 @@ class TestExtractText:
         assert "This is paragraph two." in result
 
     def test_extract_text_docx_preserves_paragraph_and_table_order(self, tmp_path: Path):
-        """DOCX forms commonly keep nearly all meaningful content in tables."""
         from docx import Document
 
         docx_file = tmp_path / "form.docx"
@@ -221,7 +233,6 @@ class TestExtractText:
         assert result.index("Analytical Engine") < result.index("End of form")
 
     def test_extract_text_docx_preserves_nested_table_text(self, tmp_path: Path):
-        """Nested layout tables must not silently drop form fields."""
         from docx import Document
 
         docx_file = tmp_path / "nested-form.docx"
@@ -251,7 +262,6 @@ class TestExtractText:
     def test_extract_text_docx_does_not_expand_grid_spans(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
-        """Physical cells avoid python-docx's eager gridSpan expansion."""
         from docx import Document
         from docx.table import _Row
 
@@ -269,7 +279,6 @@ class TestExtractText:
         assert extract_text(docx_file) == "Only once"
 
     def test_extract_text_docx_keeps_vertical_merges_compact(self, tmp_path: Path):
-        """Vertically merged labels appear once without shifting later columns."""
         from docx import Document
 
         docx_file = tmp_path / "vertical-merge.docx"
@@ -285,7 +294,6 @@ class TestExtractText:
     def test_extract_text_docx_bounds_physical_table_cells(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
-        """Large tables fail safely even when their text output would be empty."""
         from docx import Document
 
         from nanobot.utils import document as document_utils
@@ -304,7 +312,6 @@ class TestExtractText:
     def test_extract_text_docx_bounds_table_nesting(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
-        """Deeply nested tables fail safely instead of recursing without a bound."""
         from docx import Document
 
         from nanobot.utils import document as document_utils
@@ -322,7 +329,6 @@ class TestExtractText:
         assert result.startswith("[error: unsafe DOCX:")
 
     def test_extract_text_docx_empty(self, tmp_path: Path):
-        """Test extracting text from an empty .docx file."""
         from docx import Document
 
         docx_file = tmp_path / "empty.docx"
@@ -333,19 +339,16 @@ class TestExtractText:
         assert result == ""
 
     def test_extract_text_pptx(self, tmp_path: Path):
-        """Test extracting text from a .pptx file."""
         from pptx import Presentation
 
         pptx_file = tmp_path / "test.pptx"
         prs = Presentation()
 
-        # Slide 1
         slide1 = prs.slides.add_slide(prs.slide_layouts[0])
         for shape in slide1.shapes:
             if hasattr(shape, "text"):
                 shape.text = "First Slide Title"
 
-        # Slide 2
         slide2 = prs.slides.add_slide(prs.slide_layouts[5])
         left = top = width = height = 1000000
         textbox = slide2.shapes.add_textbox(left, top, width, height)
@@ -362,7 +365,6 @@ class TestExtractText:
         assert len(result) > 0
 
     def test_extract_text_pptx_table(self, tmp_path: Path):
-        """Table cells should be extracted, not silently dropped."""
         from pptx import Presentation
         from pptx.util import Inches
 
@@ -385,8 +387,40 @@ class TestExtractText:
         assert "Alice" in result
         assert "Bob" in result
 
+    @pytest.mark.parametrize(
+        ("cells", "expected"),
+        [
+            (("Alice", "", "100"), "Alice\t\t100"),
+            (("", "10", "100"), "\t10\t100"),
+            (("Alice", "10", ""), "Alice\t10\t"),
+            (("", " ", ""), None),
+        ],
+    )
+    def test_extract_text_pptx_table_preserves_empty_columns(
+        self, tmp_path: Path, cells: tuple[str, ...], expected: str | None
+    ):
+        from pptx import Presentation
+        from pptx.util import Inches
+
+        pptx_file = tmp_path / "empty-columns.pptx"
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        table = slide.shapes.add_table(
+            2, 3, Inches(1), Inches(1), Inches(4), Inches(1)
+        ).table
+        for column, text in enumerate(("Name", "Q1", "Q2")):
+            table.cell(0, column).text = text
+        for column, text in enumerate(cells):
+            table.cell(1, column).text = text
+        prs.save(pptx_file)
+
+        result = extract_text(pptx_file)
+        expected_lines = ["--- Slide 1 ---", "Name\tQ1\tQ2"]
+        if expected is not None:
+            expected_lines.append(expected)
+        assert result == "\n".join(expected_lines)
+
     def test_extract_text_pptx_grouped_shapes(self, tmp_path: Path):
-        """Text inside grouped shapes must be extracted recursively."""
         from pptx import Presentation
         from pptx.util import Inches
 
@@ -475,7 +509,6 @@ class TestExtractText:
             extract_pdf_pages(tmp_path / "large.pdf")
 
     def test_extract_text_pdf_not_found(self, tmp_path: Path):
-        """Test that missing PDF files return error string."""
         missing_pdf = tmp_path / "nonexistent.pdf"
 
         result = extract_text(missing_pdf)
@@ -483,10 +516,7 @@ class TestExtractText:
         assert "[error: file not found:" in result
 
     def test_extract_text_image_files(self, tmp_path: Path):
-        """Test that image files return placeholder text."""
-        # Create a minimal PNG file (1x1 pixel)
         png_file = tmp_path / "test.png"
-        # Minimal valid PNG: 8-byte signature + IHDR + IDAT + IEND
         png_data = (
             b"\x89PNG\r\n\x1a\n"
             b"\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
@@ -503,10 +533,8 @@ class TestExtractText:
 
 
 class TestIsTextExtension:
-    """Test the _is_text_extension helper."""
 
     def test_text_extensions_return_true(self):
-        """Test that known text extensions return True."""
         assert _is_text_extension(".txt") is True
         assert _is_text_extension(".md") is True
         assert _is_text_extension(".csv") is True
@@ -518,7 +546,6 @@ class TestIsTextExtension:
         assert _is_text_extension(".htm") is True
 
     def test_non_text_extensions_return_false(self):
-        """Test that non-text extensions return False."""
         assert _is_text_extension(".pdf") is False
         assert _is_text_extension(".docx") is False
         assert _is_text_extension(".xlsx") is False
@@ -532,7 +559,6 @@ class TestIsTextExtension:
         Note: The main extract_text function handles case-insensitivity by
         converting extensions to lowercase before calling _is_text_extension.
         """
-        # _is_text_extension itself is case-sensitive (lowercase only)
         assert _is_text_extension(".txt") is True
         assert _is_text_extension(".TXT") is False
         assert _is_text_extension(".pdf") is False

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from nanobot.config.schema import Config
 from nanobot.webui.settings_capabilities import (
     capability_settings_payload,
@@ -11,6 +13,50 @@ from nanobot.webui.settings_capabilities import (
     update_transcription_settings,
     update_web_search_settings,
 )
+from nanobot.webui.settings_contracts import WebUISettingsError
+from nanobot.webui.settings_models import create_provider_settings, update_provider_settings
+
+
+def test_dynamic_image_provider_selection_and_private_overrides():
+    config = Config()
+    name = create_provider_settings(config, {
+        "name": ["SenseNova"], "apiBase": ["https://images.test/v1"],
+    })
+    assert update_image_generation_settings(config, {
+        "provider": [name], "model": ["image-model"], "enabled": ["true"],
+        "extraHeaders": ['{"X-Api-Key":"private-key"}'],
+        "extraBody": ['{"watermark":false}'],
+    }, oauth_status=_oauth_status)
+    payload = capability_settings_payload(config, oauth_status=_oauth_status)["image_generation"]
+    assert payload["provider"] == name
+    assert payload["extra_headers"] == {"X-Api-Key": "••••••••"}
+    assert "private-key" not in str(payload)
+    row = next(row for row in payload["providers"] if row["name"] == name)
+    assert row["label"] == "SenseNova" and row["configured"] and row["uses_images_api"]
+    changed, reload_needed = update_provider_settings(config, {
+        "provider": [name], "apiBase": ["https://updated.test/v1"],
+    })
+    assert changed and reload_needed
+    update_image_generation_settings(config, {
+        "extra_headers": ['{"X-Api-Key":"••••••••","X-Route":"images"}'],
+    }, oauth_status=_oauth_status)
+    assert config.tools.image_generation.extra_headers["X-Api-Key"] == "private-key"
+    with pytest.raises(WebUISettingsError, match="JSON object"):
+        update_image_generation_settings(config, {"extra_body": ["[]"]}, oauth_status=_oauth_status)
+    config.providers.openai.api_key = "fixture"
+    update_image_generation_settings(config, {"provider": ["openai"]}, oauth_status=_oauth_status)
+    assert config.tools.image_generation.extra_headers is None
+    assert config.tools.image_generation.extra_body is None
+
+
+def test_image_provider_keeps_dynamic_id_case_and_rejects_missing_connection():
+    config = Config.model_validate({"providers": {"CompanyGateway": {"apiBase": "https://images.test/v1"}}})
+    update_image_generation_settings(config, {
+        "provider": ["CompanyGateway"], "model": ["image"], "enabled": ["true"],
+    }, oauth_status=_oauth_status)
+    assert config.tools.image_generation.provider == "CompanyGateway"
+    with pytest.raises(WebUISettingsError, match="unknown image generation provider"):
+        update_image_generation_settings(config, {"provider": ["missing"]}, oauth_status=_oauth_status)
 
 
 def _oauth_status(_spec: Any) -> dict[str, Any]:

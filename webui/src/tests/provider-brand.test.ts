@@ -9,6 +9,11 @@ import {
 } from "@/lib/provider-brand";
 
 describe("provider brand logos", () => {
+  it.each(["deepseek", "anthropic", "openai", "openai_codex", "gemini"])("bundles %s's primary logo without an external request", (provider) => {
+    expect(providerBrand(provider)?.logoUrl).toMatch(/^\/src\/assets\/providers\/.*\.svg$/);
+    expect(providerBrand(provider)?.logoUrl).toBe(providerBrand(provider)?.logoUrls[0]);
+  });
+
   it("covers Eden AI, OpenCode variants, and Kimi Coding with their official assets", () => {
     expect(providerBrand("edenai")?.logoUrl).toContain("cdn.prod.website-files.com/");
     expect(providerBrand("opencode")?.logoUrl).toBe("https://opencode.ai/favicon-96x96-v3.png");
@@ -121,6 +126,11 @@ describe("provider brand logos", () => {
   it("keeps Bocha web search settings on the first-party brand domain", () => {
     expect(providerBrand("bocha")?.logoUrls).toContain("https://bochaai.com/favicon.ico");
     expect(providerBrand("bocha")?.initials).toBe("B");
+  });
+
+  it("reuses the bundled DeepSeek brand for DeepSeek web search settings", () => {
+    expect(providerBrand("deepseek")?.logoUrl).toMatch(/^\/src\/assets\/providers\/.*\.svg$/);
+    expect(providerBrand("deepseek")?.initials).toBe("DS");
   });
 
   it("keeps Keenable web search settings on the first-party brand domain", () => {

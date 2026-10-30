@@ -1,15 +1,16 @@
-"""Tests for nanobot.security.network — SSRF protection and internal URL detection."""
-
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import socket
 from unittest.mock import patch
 from urllib.request import getproxies_environment
 
+import httpx
 import pytest
 
 from nanobot.security.network import (
+    PinnedDNSAsyncTransport,
     configure_ssrf_whitelist,
     contains_internal_url,
     env_proxy_applies_to_url,
@@ -57,10 +58,6 @@ def _fake_resolve(host: str, results: list[str]):
     return _resolver
 
 
-# ---------------------------------------------------------------------------
-# validate_url_target — scheme / domain basics
-# ---------------------------------------------------------------------------
-
 def test_rejects_non_http_scheme():
     ok, err = validate_url_target("ftp://example.com/file")
     assert not ok
@@ -71,10 +68,6 @@ def test_rejects_missing_domain():
     ok, err = validate_url_target("http://")
     assert not ok
 
-
-# ---------------------------------------------------------------------------
-# validate_url_target — blocked private/internal IPs
-# ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("ip,label", [
     ("127.0.0.1", "loopback"),
@@ -100,10 +93,6 @@ def test_blocks_ipv6_loopback():
         assert not ok
 
 
-# ---------------------------------------------------------------------------
-# validate_url_target — IPv6-mapped IPv4 bypass prevention
-# ---------------------------------------------------------------------------
-
 def _fake_resolve_v6(host: str, results: list[str]):
     """Like _fake_resolve but returns AF_INET6 tuples for IPv6 addresses."""
     def _resolver(hostname, port, family=0, type_=0):
@@ -120,7 +109,6 @@ def _fake_resolve_v6(host: str, results: list[str]):
 
 
 def test_blocks_ipv6_mapped_loopback():
-    """::ffff:127.0.0.1 must be blocked just like 127.0.0.1."""
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_v6("evil.com", ["::ffff:127.0.0.1"])):
         ok, err = validate_url_target("http://evil.com/")
         assert not ok
@@ -128,21 +116,18 @@ def test_blocks_ipv6_mapped_loopback():
 
 
 def test_blocks_ipv6_mapped_metadata():
-    """::ffff:169.254.169.254 must be blocked just like 169.254.169.254."""
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_v6("evil.com", ["::ffff:169.254.169.254"])):
         ok, err = validate_url_target("http://evil.com/")
         assert not ok
 
 
 def test_blocks_ipv6_mapped_rfc1918():
-    """::ffff:10.0.0.1 must be blocked just like 10.0.0.1."""
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_v6("evil.com", ["::ffff:10.0.0.1"])):
         ok, err = validate_url_target("http://evil.com/")
         assert not ok
 
 
 def test_blocks_sampled_addresses_from_internal_networks():
-    """Property-style guard: sampled blocked CIDRs must all fail closed."""
     configure_ssrf_whitelist([])
     blocked_networks = [
         "0.0.0.0/8",
@@ -175,15 +160,10 @@ def test_blocks_sampled_addresses_from_internal_networks():
 
 
 def test_allows_public_ipv6():
-    """Public IPv6 addresses must still be allowed."""
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_v6("example.com", ["2606:4700::6810:84e5"])):
         ok, err = validate_url_target("http://example.com/")
         assert ok, f"Should allow public IPv6, got: {err}"
 
-
-# ---------------------------------------------------------------------------
-# validate_url_target — allows public IPs
-# ---------------------------------------------------------------------------
 
 def test_allows_public_ip():
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("example.com", ["93.184.216.34"])):
@@ -240,15 +220,96 @@ def test_resolve_url_target_does_not_delegate_local_targets(url: str):
     assert not ok
 
 
-def test_pin_resolved_url_dns_prevents_second_resolution_rebind():
-    def _rebinding_resolver(hostname, port, family=0, type_=0):
+@pytest.mark.parametrize("host", ["example.com", b"example.com", "EXAMPLE.COM.", b"EXAMPLE.COM."])
+def test_pin_resolved_url_dns_prevents_second_resolution_rebind(host):
+    def _rebinding_resolver(hostname, port, family=0, type_=0, proto=0, flags=0):
         return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("169.254.169.254", 0))]
 
-    with patch("nanobot.security.network.socket.getaddrinfo", _rebinding_resolver):
+    with patch(
+        "nanobot.security.network.socket.getaddrinfo", side_effect=_rebinding_resolver
+    ) as resolver:
         with pin_resolved_url_dns("http://example.com/page", ("93.184.216.34",)):
-            infos = socket.getaddrinfo("example.com", 80, socket.AF_UNSPEC, socket.SOCK_STREAM)
+            infos = socket.getaddrinfo(host, 80, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        assert socket.getaddrinfo is resolver
+        resolver.assert_not_called()
 
     assert infos[0][4][0] == "93.184.216.34"
+
+
+@pytest.mark.parametrize("host", ["other.example", b"other.example"])
+def test_pin_resolved_url_dns_preserves_other_host_lookups(host):
+    expected = [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.35", 443))]
+    with patch(
+        "nanobot.security.network.socket.getaddrinfo", return_value=expected
+    ) as resolver:
+        with pin_resolved_url_dns("https://example.com/", ("93.184.216.34",)):
+            infos = socket.getaddrinfo(
+                host, 443, socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, socket.AI_CANONNAME
+            )
+        assert socket.getaddrinfo is resolver
+        resolver.assert_called_once_with(
+            host, 443, socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, socket.AI_CANONNAME
+        )
+    assert infos == expected
+
+
+@pytest.mark.asyncio
+async def test_pinned_dns_httpx_does_not_connect_to_rebound_loopback(monkeypatch):
+    public_ip = "93.184.216.34"
+    requests: list[bytes] = []
+    lookups: list[str | bytes] = []
+    connections: list[tuple[str, int]] = []
+
+    async def serve(reader, writer):
+        try:
+            request = await reader.readuntil(b"\r\n\r\n")
+            requests.append(request.split(b"\r\n", 1)[0])
+            writer.write(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 15\r\n"
+                b"Connection: close\r\n\r\ninternal secret"
+            )
+            await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    server = await asyncio.start_server(serve, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    original_getaddrinfo = socket.getaddrinfo
+
+    def rebinding_resolver(host, port, family=0, type_=0, proto=0, flags=0):
+        if host in ("rebind.example", b"rebind.example"):
+            lookups.append(host)
+            ip = public_ip if len(lookups) == 1 else "127.0.0.1"
+            return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (ip, port or 0))]
+        return original_getaddrinfo(host, port, family, type_, proto, flags)
+
+    loop = asyncio.get_running_loop()
+    original_create_connection = loop.create_connection
+
+    async def controlled_connection(protocol_factory, host, port, **kwargs):
+        connections.append((host, port))
+        if host == public_ip:
+            raise OSError("Test stopped the connection to the validated public IP")
+        return await original_create_connection(protocol_factory, host, port, **kwargs)
+
+    monkeypatch.setattr("nanobot.security.network._allowed_networks", [])
+    monkeypatch.setattr(socket, "getaddrinfo", rebinding_resolver)
+    monkeypatch.setattr(loop, "create_connection", controlled_connection)
+    async with server, httpx.AsyncClient(
+        transport=PinnedDNSAsyncTransport(), trust_env=False, timeout=3.0
+    ) as client:
+        response = None
+        try:
+            response = await client.get(f"http://rebind.example:{port}/secret")
+        except httpx.ConnectError:
+            pass
+
+    assert socket.getaddrinfo is rebinding_resolver
+    assert response is None, f"DNS pinning bypass: HTTP {response.status_code}: {response.text}"
+    assert connections == [(public_ip, port)]
+    assert requests == []
+    assert lookups == ["rebind.example"]
 
 
 def test_allows_normal_https():
@@ -268,10 +329,6 @@ def test_env_proxy_helpers_respect_no_proxy(monkeypatch):
     assert any(transport is None for transport in mounts.values())
     assert any(transport is not None for transport in mounts.values())
 
-
-# ---------------------------------------------------------------------------
-# contains_internal_url — shell command scanning
-# ---------------------------------------------------------------------------
 
 def test_detects_curl_metadata():
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("169.254.169.254", ["169.254.169.254"])):
@@ -299,7 +356,6 @@ def test_loopback_exception_rejects_metadata():
 
 
 def test_detects_ipv6_mapped_loopback():
-    """contains_internal_url must catch IPv6-mapped loopback in shell commands."""
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_v6("evil.com", ["::ffff:127.0.0.1"])):
         assert contains_internal_url("curl http://evil.com/secret")
 
@@ -313,19 +369,15 @@ def test_no_urls_returns_false():
     assert not contains_internal_url("echo hello && ls -la")
 
 
-# ---------------------------------------------------------------------------
 # SSRF whitelist — allow specific CIDR ranges (#2669)
-# ---------------------------------------------------------------------------
 
 def test_blocks_cgnat_by_default():
-    """100.64.0.0/10 (CGNAT / Tailscale) is blocked by default."""
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("ts.local", ["100.100.1.1"])):
         ok, _ = validate_url_target("http://ts.local/api")
         assert not ok
 
 
 def test_whitelist_allows_cgnat():
-    """Whitelisting 100.64.0.0/10 lets Tailscale addresses through."""
     configure_ssrf_whitelist(["100.64.0.0/10"])
     try:
         with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("ts.local", ["100.100.1.1"])):
@@ -336,7 +388,6 @@ def test_whitelist_allows_cgnat():
 
 
 def test_whitelist_does_not_affect_other_blocked():
-    """Whitelisting CGNAT must not unblock other private ranges."""
     configure_ssrf_whitelist(["100.64.0.0/10"])
     try:
         with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("evil.com", ["10.0.0.1"])):
@@ -347,7 +398,6 @@ def test_whitelist_does_not_affect_other_blocked():
 
 
 def test_whitelist_invalid_cidr_ignored():
-    """Invalid CIDR entries are silently skipped."""
     configure_ssrf_whitelist(["not-a-cidr", "100.64.0.0/10"])
     try:
         with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("ts.local", ["100.100.1.1"])):
@@ -358,7 +408,6 @@ def test_whitelist_invalid_cidr_ignored():
 
 
 def test_whitelist_allows_ipv6_mapped_cgnat():
-    """Whitelist must work when DNS returns IPv6-mapped CGNAT address."""
     configure_ssrf_whitelist(["100.64.0.0/10"])
     try:
         with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_v6("ts.local", ["::ffff:100.100.1.1"])):

@@ -13,31 +13,31 @@
         "placeholder": "Được lưu khi đăng nhập QR"
       },
       "sendProgress": {
-        "label": "Gửi thông báo tiến độ"
+        "label": "Gửi tiến độ"
       },
       "sendToolHints": {
-        "label": "Gửi tóm tắt hoạt động công cụ"
+        "label": "Gợi ý công cụ"
       },
       "streaming": {
         "label": "Dùng API truyền theo luồng"
       },
       "replyProgressMessages": {
-        "label": "Gửi tiến độ theo từng bước"
+        "label": "Tiến độ chi tiết"
       },
       "replyProgressMaxMessages": {
-        "label": "Số thông báo tiến độ tối đa"
+        "label": "Giới hạn tin nhắn tiến độ"
       },
       "contextMessageBudget": {
-        "label": "Số tin nhắn ngữ cảnh tối đa"
+        "label": "Giới hạn tin nhắn ngữ cảnh"
       },
       "blockStreaming": {
-        "label": "Gửi phản hồi theo khối"
+        "label": "Trả lời theo đoạn"
       },
       "blockStreamingMinChars": {
-        "label": "Số ký tự tối thiểu mỗi phần"
+        "label": "Độ dài đoạn tối thiểu (ký tự)"
       },
       "blockStreamingMaxMessages": {
-        "label": "Giới hạn tin nhắn theo khối"
+        "label": "Giới hạn số đoạn"
       },
       "baseUrl": {
         "label": "URL API"

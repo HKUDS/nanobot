@@ -1,5 +1,4 @@
-"""Tests for ReadFileTool enhancements: description fix, read dedup, PDF support, device blacklist, office docs."""
-
+import base64
 import os
 import sys
 from unittest.mock import patch
@@ -23,10 +22,6 @@ def _document_source(text: str) -> DocumentLineSource:
     return DocumentLineSource(lines)
 
 
-# ---------------------------------------------------------------------------
-# Description fix
-# ---------------------------------------------------------------------------
-
 class TestReadDescriptionFix:
 
     def test_description_mentions_image_support(self):
@@ -34,12 +29,7 @@ class TestReadDescriptionFix:
         assert "image" in tool.description.lower()
 
 
-# ---------------------------------------------------------------------------
-# Read deduplication
-# ---------------------------------------------------------------------------
-
 class TestReadDedup:
-    """Only reads whose original result remains in context may return a stub."""
 
     @pytest.fixture()
     def tool(self, tmp_path):
@@ -59,7 +49,6 @@ class TestReadDedup:
         with file_state.file_read_context("read-2", lambda: {"read-1": first}):
             second = await tool.execute(path=str(f))
         assert "unchanged" in second.lower()
-        # Stub should not contain file content
         assert "line 0" not in second
 
     @pytest.mark.asyncio
@@ -68,7 +57,6 @@ class TestReadDedup:
         f.write_text("original", encoding="utf-8")
         with file_state.file_read_context("read-1", lambda: {}):
             first = await tool.execute(path=str(f))
-        # Modify the file externally
         f.write_text("modified content", encoding="utf-8")
         with file_state.file_read_context("read-2", lambda: {"read-1": first}):
             second = await tool.execute(path=str(f))
@@ -82,7 +70,6 @@ class TestReadDedup:
             first = await tool.execute(path=str(f), offset=1, limit=5)
         with file_state.file_read_context("read-2", lambda: {"read-1": first}):
             second = await tool.execute(path=str(f), offset=6, limit=5)
-        # Different offset → full read, not stub
         assert "line 6" in second
 
     @pytest.mark.asyncio
@@ -95,14 +82,18 @@ class TestReadDedup:
         assert "unchanged" not in read_result.lower()
 
     @pytest.mark.asyncio
-    async def test_dedup_does_not_apply_to_images(self, tool, tmp_path):
+    async def test_repeated_image_reads_return_full_content(self, tool, tmp_path):
         f = tmp_path / "img.png"
         f.write_bytes(b"\x89PNG\r\n\x1a\nfake-png-data")
         first = await tool.execute(path=str(f))
-        assert isinstance(first, list)
         second = await tool.execute(path=str(f))
-        # Images should always return full content blocks, not a stub
-        assert isinstance(second, list)
+
+        assert second == first
+        assert second[0]["type"] == "image_url"
+        encoded = base64.b64encode(f.read_bytes()).decode("ascii")
+        assert second[0]["image_url"]["url"] == f"data:image/png;base64,{encoded}"
+        assert second[0]["_meta"]["path"] == str(f)
+        assert second[1] == {"type": "text", "text": f"(Image file: {f})"}
 
     @pytest.mark.asyncio
     async def test_known_text_extension_falls_back_to_latin1(self, tool, tmp_path):
@@ -142,9 +133,7 @@ class TestReadDedup:
         assert result == f"(Empty file: {f})"
 
 
-# ---------------------------------------------------------------------------
 # Cross-session isolation (issue #3571)
-# ---------------------------------------------------------------------------
 # Each session must keep its own read cache. When session A reads a file,
 # session B reading the same file must still receive the full content, not
 # the "[File unchanged since last read]" dedup stub. Within each session,
@@ -163,8 +152,6 @@ class TestReadDedupSessionIsolation:
         first = await session_a_tool.execute(path=str(f))
         assert "line 0" in first
 
-        # Session B has never read this file before — it must see the full
-        # content, not the dedup stub from session A.
         second = await session_b_tool.execute(path=str(f))
         assert "unchanged" not in second.lower(), (
             "Session B should not inherit session A's read-dedup state. "
@@ -205,15 +192,72 @@ class TestReadDedupSessionIsolation:
         assert "line 0" in second_session_read
 
 
-# ---------------------------------------------------------------------------
-# PDF support
-# ---------------------------------------------------------------------------
-
 class TestReadPdf:
 
     @pytest.fixture()
-    def tool(self, tmp_path):
+    def tool(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
         return ReadFileTool(workspace=tmp_path)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("page_count", [2, 3])
+    async def test_pdf_character_limit_preserves_pages_across_continuation(
+        self, tool, tmp_path, monkeypatch, page_count,
+    ):
+        import re
+
+        fitz = pytest.importorskip("pymupdf")
+        pdf_path = tmp_path / "report.pdf"
+        doc = fitz.open()
+        markers = []
+        for number in range(1, page_count + 1):
+            marker = f"END_OF_PAGE_{number}"
+            markers.append(marker)
+            page = doc.new_page()
+            page.insert_text((72, 72), "Report details " * 4 + "\n" + marker)
+        doc.save(pdf_path)
+        doc.close()
+        monkeypatch.setattr(tool, "_MAX_CHARS", 130)
+
+        outputs = []
+        pages = None
+        for _ in range(page_count):
+            result = await tool.execute(path=str(pdf_path), pages=pages)
+            outputs.append(result)
+            continuation = re.search(r"Use pages='([^']+)'", result)
+            if continuation is None:
+                break
+            pages = continuation[1]
+
+        combined = "\n".join(outputs)
+        for marker in markers:
+            assert combined.count(marker) == 1
+        assert "truncated" not in combined
+        assert "Use pages=" not in outputs[-1]
+
+    @pytest.mark.asyncio
+    async def test_pdf_oversized_page_reports_unreturned_text(
+        self, tool, tmp_path, monkeypatch,
+    ):
+        fitz = pytest.importorskip("pymupdf")
+        pdf_path = tmp_path / "dense.pdf"
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 72), "\n".join(["Dense page content " * 3] * 8))
+        page = doc.new_page()
+        page.insert_text((72, 72), "Second page complete")
+        doc.save(pdf_path)
+        doc.close()
+        monkeypatch.setattr(tool, "_MAX_CHARS", 130)
+
+        result = await tool.execute(path=str(pdf_path))
+
+        assert "Page 1 was truncated" in result
+        assert "remaining text on this page is not shown" in result
+        assert "Use pages='2-2'" in result
+        second = await tool.execute(path=str(pdf_path), pages="2")
+        assert "Second page complete" in second
+        assert "truncated" not in second
 
     @pytest.mark.asyncio
     async def test_pdf_returns_text_content(self, tool, tmp_path):
@@ -270,10 +314,6 @@ class TestReadPdf:
         assert "not found" in result
 
 
-# ---------------------------------------------------------------------------
-# Device path blacklist
-# ---------------------------------------------------------------------------
-
 @pytest.mark.skipif(sys.platform == "win32", reason="/dev directory doesn't exist on Windows")
 class TestReadDeviceBlacklist:
 
@@ -312,12 +352,6 @@ class TestReadDeviceBlacklist:
         assert "blocked" in result.lower() or "device" in result.lower()
 
 
-# ---------------------------------------------------------------------------
-# File changes with preserved mtime
-# ---------------------------------------------------------------------------
-# An editor can preserve mtime while replacing contents. Deduplication must
-# compare the file snapshot even when the original result remains in context.
-
 class TestFileStateHashFallback:
 
     async def test_read_returns_changed_content_when_mtime_same(self, tmp_path):
@@ -338,9 +372,7 @@ class TestFileStateHashFallback:
         assert "unchanged" not in second.lower()
 
 
-# ---------------------------------------------------------------------------
 # Line-ending normalization
-# ---------------------------------------------------------------------------
 # ReadFileTool normalizes CRLF -> LF before line-splitting. This primarily
 # helps Windows users whose checkouts carry CRLF line endings and whose
 # subsequent StrReplace edits would otherwise miss on `\r` boundaries. The
@@ -369,10 +401,6 @@ class TestReadFileLineEndingNormalization:
         assert "\r" not in result
         assert "alpha" in result and "beta" in result and "gamma" in result
 
-
-# ---------------------------------------------------------------------------
-# Office document support (DOCX, XLSX, PPTX)
-# ---------------------------------------------------------------------------
 
 class TestReadOfficeDocuments:
 
@@ -554,7 +582,7 @@ class TestOfficeDocTruncation:
         assert "truncated" not in result
 
 
-class TestReadDescriptionUpdate:
+class TestReadFileDescription:
 
     def test_description_mentions_documents(self):
         tool = ReadFileTool()

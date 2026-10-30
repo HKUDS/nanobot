@@ -36,7 +36,7 @@
       "socketDisableMsgpack": {
         "label": "Désactiver MessagePack",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
@@ -44,7 +44,7 @@
         "label": "Délai de reconnexion"
       },
       "socketMaxReconnectDelayMs": {
-        "label": "Délai de reconnexion maximum"
+        "label": "Délai maximal de reconnexion (ms)"
       },
       "socketConnectTimeoutMs": {
         "label": "Délai de connexion"
@@ -56,26 +56,26 @@
         "label": "Expiration du délai de visionnage"
       },
       "watchLimit": {
-        "label": "Surveiller la taille du lot"
+        "label": "Taille du lot"
       },
       "retryDelayMs": {
         "label": "Délai de nouvelle tentative"
       },
       "maxRetryAttempts": {
-        "label": "Nombre maximal de tentatives"
+        "label": "Limite des tentatives"
       },
       "mention_requireInGroups": {
-        "label": "Exiger des mentions dans les groupes",
+        "label": "Exiger une mention en groupe",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
       "groups": {
-        "label": "Règles de groupe (JSON)"
+        "label": "Règles des groupes (JSON)"
       },
       "replyDelayMode": {
-        "label": "Mode de délai de réponse"
+        "label": "Mode de délai"
       },
       "replyDelayMs": {
         "label": "Délai de réponse"

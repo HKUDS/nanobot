@@ -1,5 +1,3 @@
-"""Dict key helpers for persisted JSON that mixes camelCase and snake_case."""
-
 from __future__ import annotations
 
 from typing import Any

@@ -1,5 +1,3 @@
-"""Provider wrapper that transparently fails over to fallback models on error."""
-
 # pyright: reportIncompatibleMethodOverride=false, reportIncompatibleVariableOverride=false
 
 from __future__ import annotations
@@ -23,10 +21,9 @@ from nanobot.providers.base import (
     RetryEventCallback,
     RetryStatusCallback,
 )
-from nanobot.providers.oauth_model_catalog import oauth_catalog_auth_rejected
+from nanobot.providers.oauth_catalog_cache import oauth_catalog_auth_rejected
 from nanobot.providers.registry import find_by_name
 
-# Circuit breaker tuned to match OpenAICompatProvider's Responses API breaker.
 _PRIMARY_FAILURE_THRESHOLD = 3
 _PRIMARY_COOLDOWN_S = 60
 _FALLBACK_ERROR_KINDS = frozenset({
@@ -169,6 +166,9 @@ class FallbackProvider(LLMProvider):
     def get_default_model(self) -> str:
         return self._primary.get_default_model()
 
+    async def aclose(self) -> None:
+        await self._primary.aclose()
+
     def set_fallback_model_observer(self, observer: FallbackModelObserver | None) -> None:
         """Attach a process-level observer without changing request call signatures."""
         self._fallback_model_observer = observer
@@ -206,11 +206,9 @@ class FallbackProvider(LLMProvider):
         return replace(provider_context, context_window_tokens=context_window_tokens)
 
     def _primary_available(self) -> bool:
-        """Return True if the primary provider is not currently tripped."""
         if self._primary_tripped_at is None:
             return True
         if time.monotonic() - self._primary_tripped_at >= _PRIMARY_COOLDOWN_S:
-            # Half-open: allow one probe attempt.
             return True
         return False
 
@@ -234,7 +232,6 @@ class FallbackProvider(LLMProvider):
         should_retry_guard: Callable[[], bool] | None = None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
-        """Retry each provider before advancing through the fallback chain."""
         call_kwargs = dict(kw)
         provider_context = call_kwargs.get("provider_context")
         if isinstance(provider_context, ProviderCallContext):
@@ -353,11 +350,13 @@ class FallbackProvider(LLMProvider):
         on_stream_recover: Callable[[], Awaitable[None]] | None,
         persistent_retry_guard: Callable[[], bool] | None,
     ) -> LLMResponse:
-        """Retry each candidate, deferring terminal events until the chain fails."""
 
         async def _call_chain(**chain_kwargs: Any) -> LLMResponse:
             last_exhausted_message: str | None = None
             last_exhausted_status: RetryStatusEvent | None = None
+            primary_attempted = False
+            primary_exhausted_message: str | None = None
+            primary_exhausted_status: RetryStatusEvent | None = None
 
             async def _capture_exhaustion(message: str) -> None:
                 nonlocal last_exhausted_message
@@ -385,15 +384,22 @@ class FallbackProvider(LLMProvider):
                 candidate_kwargs: dict[str, Any],
             ) -> LLMResponse:
                 nonlocal last_exhausted_message, last_exhausted_status
+                nonlocal primary_attempted, primary_exhausted_message, primary_exhausted_status
                 last_exhausted_message = None
                 last_exhausted_status = None
-                return await call(provider, {
+                if provider is self._primary:
+                    primary_attempted = True
+                response = await call(provider, {
                     **candidate_kwargs,
                     "retry_mode": "standard",
                     "on_retry_wait": on_retry_wait,
                     "on_retry_exhausted": _capture_exhaustion,
                     "on_retry_status": _capture_status,
                 })
+                if provider is self._primary:
+                    primary_exhausted_message = last_exhausted_message
+                    primary_exhausted_status = last_exhausted_status
+                return response
 
             response = await self._try_with_fallback(
                 _call_candidate,
@@ -403,10 +409,12 @@ class FallbackProvider(LLMProvider):
                 on_fallback_attempt=_clear_status_for_fallback,
             )
             if retry_mode != "persistent" and response.finish_reason == "error":
-                if last_exhausted_message and on_retry_exhausted:
-                    await on_retry_exhausted(last_exhausted_message)
-                if last_exhausted_status and on_retry_status:
-                    await on_retry_status(last_exhausted_status)
+                terminal_message = primary_exhausted_message if primary_attempted else last_exhausted_message
+                terminal_status = primary_exhausted_status if primary_attempted else last_exhausted_status
+                if terminal_message and on_retry_exhausted:
+                    await on_retry_exhausted(terminal_message)
+                if terminal_status and on_retry_status:
+                    await on_retry_status(terminal_status)
             return response
 
         if retry_mode != "persistent":
@@ -612,9 +620,13 @@ class FallbackProvider(LLMProvider):
                 fallback_kwargs.pop("reasoning_effort", None)
             else:
                 fallback_kwargs["reasoning_effort"] = fallback.reasoning_effort
-            fallback_response, fallback_exception = await self._call_provider(
-                call, fallback_provider, fallback_kwargs
-            )
+            try:
+                fallback_response, fallback_exception = await self._call_provider(
+                    call, fallback_provider, fallback_kwargs
+                )
+            finally:
+                await fallback_provider.aclose()
+            fallback_response.is_fallback = True
             if fallback_exception is not None:
                 logger.warning(
                     "Fallback '{}' raised {}",
@@ -644,11 +656,13 @@ class FallbackProvider(LLMProvider):
             "All {} fallback model(s) failed",
             len(self._fallback_presets),
         )
-        # Return the last error response we saw (primary or last fallback).
         if last_response is not None:
             return replace(
                 last_response,
                 preserve_provider_state_on_error=preserve_primary_state,
+                primary_error_kind=(
+                    self.public_error_kind(primary_response) if primary_response is not None else None
+                ),
             )
         # Primary was skipped and no fallback returned a response. Keep the result
         # transient until the primary circuit is eligible for another probe.

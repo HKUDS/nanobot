@@ -4,7 +4,7 @@
     "officialLabel": "Abrir lista de clientes Matrix",
     "fields": {
       "homeserver": {
-        "label": "Servidor da conta",
+        "label": "Homeserver",
         "placeholder": "https://matrix.org"
       },
       "userId": {
@@ -24,12 +24,16 @@
         "placeholder": "Obrigatório com token"
       },
       "groupPolicy": {
-        "label": "Comportamento em grupos",
+        "label": "Regras de grupo",
         "choices": {
           "mention": "Somente menções",
           "open": "Todas as mensagens",
-          "allowlist": "Lista de permissão"
+          "allowlist": "Lista de permissão",
+          "listen": "Ouvir (responder ao mencionar)"
         }
+      },
+      "groupPolicyOverrides": {
+        "label": "Exceções de regras por sala (JSON)"
       },
       "allowFrom": {
         "label": "Usuários permitidos"
@@ -49,19 +53,26 @@
         }
       },
       "syncStopGraceSeconds": {
-        "label": "Período de carência para interrupção da sincronização"
+        "label": "Espera de parada sync (segundos)"
       },
       "maxMediaBytes": {
-        "label": "Tamanho máximo da mídia"
+        "label": "Limite de mídia (bytes)"
       },
       "maxConcurrentMediaDownloads": {
-        "label": "Downloads simultâneos de mídia"
+        "label": "Downloads simultâneos"
       },
       "groupAllowFrom": {
         "label": "Grupos permitidos"
       },
       "allowRoomMentions": {
-        "label": "Permitir menções à sala",
+        "label": "Menções de sala",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "replyToMessage": {
+        "label": "Citar ao responder",
         "choices": {
           "true": "Ligado",
           "false": "Desligado"
@@ -74,9 +85,8 @@
           "false": "Desligado"
         }
       },
-      "proxy": {
-        "label": "Proxy de rede",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "Usar proxy"
       }
     }
   }

@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -8,9 +8,10 @@ from nanobot.session.recovery import RECOVERY_METADATA_KEY
 from nanobot.webui.session_projection import WebUISessionProjection
 
 
-def test_attach_fields_restore_session_runtime_metadata() -> None:
+async def test_attach_fields_restore_session_runtime_metadata() -> None:
     usage = LLMUsage.reported(input_tokens=120, output_tokens=8, total_tokens=175)
     sessions = MagicMock()
+    sessions.state.read_metadata = AsyncMock(side_effect=lambda key: sessions.read_session_metadata(key))
     sessions.read_session_metadata.return_value = {
         "metadata": {
             SESSION_MODEL_PRESET_METADATA_KEY: "Deep Research",
@@ -25,7 +26,7 @@ def test_attach_fields_restore_session_runtime_metadata() -> None:
 
     projection = WebUISessionProjection(sessions)
 
-    assert projection.attach_fields("websocket:chat-1") == {
+    assert await projection.attach_fields("websocket:chat-1") == {
         "model_preset": "Deep Research",
         "recovery_state": {
             "status": "recovered",
@@ -37,23 +38,25 @@ def test_attach_fields_restore_session_runtime_metadata() -> None:
     sessions.read_session_metadata.assert_called_once_with("websocket:chat-1")
 
 
-def test_attach_fields_tolerate_missing_or_invalid_session_metadata() -> None:
+async def test_attach_fields_tolerate_missing_or_invalid_session_metadata() -> None:
     sessions = MagicMock()
+    sessions.state.read_metadata = AsyncMock(side_effect=lambda key: sessions.read_session_metadata(key))
     sessions.read_session_metadata.return_value = {
         "metadata": {SESSION_MODEL_PRESET_METADATA_KEY: 42}
     }
     log = MagicMock()
     projection = WebUISessionProjection(sessions, log=log)
 
-    assert projection.attach_fields("websocket:invalid") == {"model_preset": None}
+    assert await projection.attach_fields("websocket:invalid") == {"model_preset": None}
     log.warning.assert_called_once()
-    assert WebUISessionProjection(None).attach_fields("websocket:missing") == {}
+    assert await WebUISessionProjection(None).attach_fields("websocket:missing") == {}
 
 
-def test_hydration_events_restore_goal_and_running_turn(
+async def test_hydration_events_restore_goal_and_running_turn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sessions = MagicMock()
+    sessions.state.read_metadata = AsyncMock(side_effect=lambda key: sessions.read_session_metadata(key))
     sessions.read_session_metadata.return_value = {
         "metadata": {
             "goal_state": {
@@ -72,7 +75,7 @@ def test_hydration_events_restore_goal_and_running_turn(
         lambda _chat_id: "turn-1",
     )
 
-    events = WebUISessionProjection(sessions).hydration_events(
+    events = await WebUISessionProjection(sessions).hydration_events(
         "websocket:chat-1",
         "chat-1",
     )
@@ -98,17 +101,60 @@ def test_hydration_events_restore_goal_and_running_turn(
     )
 
 
-def test_hydration_events_are_quiet_without_actionable_state(
+async def test_hydration_events_are_quiet_without_actionable_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sessions = MagicMock()
+    sessions.state.read_metadata = AsyncMock(side_effect=lambda key: sessions.read_session_metadata(key))
     sessions.read_session_metadata.return_value = {"metadata": {}}
     monkeypatch.setattr(
         "nanobot.webui.session_projection.websocket_turn_wall_started_at",
         lambda _chat_id: None,
     )
 
-    assert WebUISessionProjection(sessions).hydration_events(
+    assert await WebUISessionProjection(sessions).hydration_events(
         "websocket:chat-1",
         "chat-1",
     ) == ()
+
+
+async def test_hydration_yields_during_metadata_read_and_reads_live_turn_on_loop(
+    tmp_path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    import threading
+
+    loop_thread = threading.get_ident()
+    entered = threading.Event()
+    release = threading.Event()
+    from nanobot.session.manager import SessionManager
+    sessions = SessionManager(tmp_path)
+
+    def read_metadata(_key):
+        assert threading.get_ident() != loop_thread
+        entered.set()
+        assert release.wait(timeout=3)
+        return {"metadata": {}}
+
+    def active_turn(_chat_id):
+        assert threading.get_ident() == loop_thread
+        return 42.5
+
+    monkeypatch.setattr(sessions._store, "read_metadata", read_metadata)
+    monkeypatch.setattr(
+        "nanobot.webui.session_projection.websocket_turn_wall_started_at", active_turn,
+    )
+    projection = WebUISessionProjection(sessions)
+    task = asyncio.create_task(projection.hydration_events("websocket:chat-io", "chat-io"))
+    try:
+        async with asyncio.timeout(2):
+            while not entered.is_set() and not task.done():
+                await asyncio.sleep(0)
+        assert entered.is_set()
+        for _ in range(5):
+            await asyncio.sleep(0)
+            assert not task.done()
+    finally:
+        release.set()
+        events = await task
+    assert events[0]["status"] == "running"

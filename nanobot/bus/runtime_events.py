@@ -1,5 +1,3 @@
-"""Runtime state facts and turn-scoped publication through MessageBus."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -23,6 +21,7 @@ class RuntimeEventContext:
     session_key: str
     metadata: dict[str, Any] = field(default_factory=dict)
     attributes: dict[str, Any] = field(default_factory=dict)
+    session_generation: str | None = None
 
 
 @dataclass(frozen=True)
@@ -91,6 +90,14 @@ class GoalStateChanged(AgentEvent):
 
 
 @dataclass(frozen=True)
+class SubagentTaskChanged(AgentEvent):
+    """A parent-owned task observation changed."""
+
+    context: RuntimeEventContext
+    task_id: str
+
+
+@dataclass(frozen=True)
 class RuntimeModelChanged(AgentEvent):
     """The active runtime model/preset changed."""
 
@@ -120,11 +127,13 @@ class RuntimeEventPublisher:
         session_key: str,
         metadata: dict[str, Any] | None,
         attributes: dict[str, Any] | None = None,
+        session_generation: str | None = None,
     ) -> RuntimeEventContext:
         return RuntimeEventContext(
             channel=channel,
             chat_id=chat_id,
             session_key=session_key,
+            session_generation=session_generation,
             metadata=dict(metadata or {}),
             attributes=dict(attributes or {}),
         )
@@ -172,6 +181,7 @@ class RuntimeEventPublisher:
                     chat_id=msg.chat_id,
                     session_key=session_key,
                     metadata=msg.metadata,
+                    session_generation=msg.session_generation,
                 ),
                 content=msg.content,
             )
@@ -189,6 +199,7 @@ class RuntimeEventPublisher:
                     chat_id=msg.chat_id,
                     session_key=session_key,
                     metadata=msg.metadata,
+                    session_generation=msg.session_generation,
                 ),
             )
         )
@@ -208,6 +219,7 @@ class RuntimeEventPublisher:
                     chat_id=msg.chat_id,
                     session_key=session_key,
                     metadata=msg.metadata,
+                    session_generation=msg.session_generation,
                 ),
                 runtime=runtime,
             )
@@ -228,6 +240,7 @@ class RuntimeEventPublisher:
                     chat_id=msg.chat_id,
                     session_key=session_key,
                     metadata=msg.metadata,
+                    session_generation=msg.session_generation,
                 ),
                 status=status,
                 started_at=started_at,
@@ -249,6 +262,7 @@ class RuntimeEventPublisher:
                     chat_id=msg.chat_id,
                     session_key=session_key,
                     metadata=msg.metadata,
+                    session_generation=msg.session_generation,
                     attributes=attributes,
                 ),
                 turn_id=turn_id,

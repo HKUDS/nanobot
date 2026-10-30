@@ -1,39 +1,43 @@
 import {
+  ArchiveIcon,
+  SkillsIcon,
+  AutomationsIcon,
+  ChannelsIcon,
+  SearchIcon,
+  SettingsIcon,
+  NewChatIcon,
+  ComposeIcon,
+  AppsIcon,
+} from "@/components/icons/product-icons";
+import {
   type ReactNode,
   type RefObject,
   useRef,
   useState,
 } from "react";
-import {
-  Archive,
-  Brain,
-  CalendarClock,
-  MessageCircle,
-  PanelLeftClose,
-  Search,
-  Settings,
-  SquarePen,
-  Blocks,
-} from "lucide-react";
+import { PanelLeftClose } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
   ChatList,
+  type SidebarDeleteDecision,
   type SidebarDeleteItem,
   type SidebarPaneGroup,
 } from "@/components/ChatList";
-import { ConnectionBadge } from "@/components/ConnectionBadge";
+import { HostSwitcher } from "@/components/remote/HostSwitcher";
+import { UpdateNotice } from "@/components/UpdateNotice";
 import {
   SIDEBAR_SELECTION_ACTION_ITEM_CLASS,
   SidebarSelectionHighlight,
 } from "@/components/SidebarSelectionHighlight";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { HoverHint } from "@/components/ui/tooltip";
 import type {
   ChatSummary,
   SidebarViewState,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import type { UpdateMethod } from "@/lib/api";
 import { sidebarShortcutAria, sidebarShortcutLabel } from "@/lib/sidebar-shortcuts";
 
 interface SidebarProps {
@@ -41,16 +45,18 @@ interface SidebarProps {
   temporarySessions?: ChatSummary[];
   activeKey: string | null;
   loading: boolean;
+  initialLoading?: boolean;
   newChatActive: boolean;
   onNewChat: () => void;
   onSelect: (key: string) => void;
   onCloseTemporaryChat?: (key: string) => void;
-  onRequestDelete: (key: string, label: string) => void;
-  onRequestDeleteMany?: (items: SidebarDeleteItem[]) => void;
+  onRequestDelete: (key: string, label: string, onDecision?: SidebarDeleteDecision) => void;
+  onRequestDeleteMany?: (items: SidebarDeleteItem[], onDecision?: SidebarDeleteDecision) => void;
   onTogglePin: (key: string) => void;
-  onRequestRename: (key: string, label: string) => void;
+  onRequestRename: (key: string, title: string) => Promise<void>;
   onRequestRenameTab?: (key: string, label: string) => void;
   onToggleArchive: (key: string) => void;
+  onArchiveMany?: (keys: string[], archive: boolean) => void;
   paneGroups?: Record<string, SidebarPaneGroup>;
   onSelectPane?: (tabKey: string, paneKey: string) => void;
   onCreateTab?: (paneKey: string) => void;
@@ -64,6 +70,8 @@ interface SidebarProps {
   onRequestRenameProject: (projectKey: string, label: string) => void;
   onNewChatInProject: (projectPath: string, projectName: string) => void;
   onOpenSettings: () => void;
+  onOpenUpdates?: () => void;
+  availableUpdate?: { version: string; onDismiss: () => void; onRequestUpdate?: () => void; installationMethod?: UpdateMethod | null };
   onOpenApps: () => void;
   onOpenSkills: () => void;
   onOpenAutomations: () => void;
@@ -125,11 +133,11 @@ export function Sidebar(props: SidebarProps) {
       collapsed={collapsed}
       label={t("sidebar.newChat")}
       iconOnly
-      className={collapsed ? undefined : "rounded-full border border-border/70 bg-background/80 shadow-sm"}
+      className={collapsed ? undefined : "rounded-full border border-border/70 bg-background/80 shadow-sm settings-hover"}
       onClick={props.onNewChat}
       active={props.newChatActive}
       selectionRef={collapsed ? activeActionRef : undefined}
-      icon={<SquarePen className="h-4 w-4" />}
+      icon={collapsed ? <NewChatIcon className="h-4 w-4" /> : <ComposeIcon className="h-4 w-4" />}
       shortcut={sidebarShortcutLabel("newChat", apple)}
       ariaKeyShortcuts={sidebarShortcutAria("newChat")}
     />
@@ -142,14 +150,15 @@ export function Sidebar(props: SidebarProps) {
       ariaKeyShortcuts={sidebarShortcutAria("search")}
       iconOnly
       onClick={props.onOpenSearch}
-      icon={<Search className="h-4 w-4" />}
+      icon={<SearchIcon className="h-4 w-4" />}
     />
   );
 
 
   return (
-    <TooltipProvider>
     <nav
+      data-theme-surface
+      data-theme-ink
       ref={props.containActionMenus ? setMenuPortalContainer : undefined}
       aria-label={t("sidebar.navigation")}
       className={cn(
@@ -173,11 +182,9 @@ export function Sidebar(props: SidebarProps) {
           onClick={collapsed ? props.onExpand : undefined}
           tabIndex={collapsed ? 0 : -1}
           className={cn(
-            "host-no-drag flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-colors",
+            "host-no-drag flex h-8 w-8 shrink-0 items-center justify-center rounded-control transition-colors",
             props.hostChromeInset && "mt-5",
-            collapsed
-              ? "hover:bg-sidebar-accent/60"
-              : "pointer-events-none",
+            !collapsed && "pointer-events-none",
           )}
         >
           <img
@@ -218,7 +225,7 @@ export function Sidebar(props: SidebarProps) {
           onIntent={props.onSettingsIntent}
           active={props.activeUtility === "apps"}
           selectionRef={activeActionRef}
-          icon={<Blocks className="h-4 w-4" />}
+          icon={<AppsIcon className="h-4 w-4" />}
         />
         <SidebarActionButton
           collapsed={collapsed}
@@ -229,7 +236,7 @@ export function Sidebar(props: SidebarProps) {
           onIntent={props.onSettingsIntent}
           active={props.activeUtility === "skills"}
           selectionRef={activeActionRef}
-          icon={<Brain className="h-4 w-4" />}
+          icon={<SkillsIcon className="h-4 w-4" />}
         />
         <SidebarActionButton
           collapsed={collapsed}
@@ -240,7 +247,7 @@ export function Sidebar(props: SidebarProps) {
           onIntent={props.onSettingsIntent}
           active={props.activeUtility === "automations"}
           selectionRef={activeActionRef}
-          icon={<CalendarClock className="h-4 w-4" />}
+          icon={<AutomationsIcon className="h-4 w-4" />}
         />
         <SidebarActionButton
           collapsed={collapsed}
@@ -251,14 +258,14 @@ export function Sidebar(props: SidebarProps) {
           onIntent={props.onSettingsIntent}
           active={props.activeUtility === "channels"}
           selectionRef={activeActionRef}
-          icon={<MessageCircle className="h-4 w-4" />}
+          icon={<ChannelsIcon className="h-4 w-4" />}
         />
         {props.archivedCount ? (
           <SidebarActionButton
             collapsed={collapsed}
             label={props.showArchived ? t("chat.hideArchived") : t("chat.showArchived")}
             onClick={props.onToggleArchived}
-            icon={<Archive className="h-4 w-4" />}
+            icon={<ArchiveIcon className="h-4 w-4" />}
           />
         ) : null}
       </SidebarSelectionHighlight>
@@ -274,6 +281,7 @@ export function Sidebar(props: SidebarProps) {
             temporarySessions={props.temporarySessions}
             activeKey={props.activeKey}
             loading={props.loading}
+            initialLoading={props.initialLoading}
             emptyLabel={t("chat.noSessions")}
             onSelect={props.onSelect}
             onCloseTemporaryChat={props.onCloseTemporaryChat}
@@ -283,6 +291,7 @@ export function Sidebar(props: SidebarProps) {
             onRequestRename={props.onRequestRename}
             onRequestRenameTab={props.onRequestRenameTab}
             onToggleArchive={props.onToggleArchive}
+            onArchiveMany={props.onArchiveMany}
             paneGroups={props.paneGroups}
             onSelectPane={props.onSelectPane}
             onCreateTab={props.onCreateTab}
@@ -304,8 +313,6 @@ export function Sidebar(props: SidebarProps) {
             updatedChatIds={props.updatedChatIds}
             recoveryChatIds={props.recoveryChatIds}
             density={props.viewState?.density}
-            showPreviews={props.viewState?.show_previews}
-            showTimestamps={props.viewState?.show_timestamps}
             sort={props.viewState?.sort}
             showArchived={props.showArchived}
             defaultWorkspacePath={props.defaultWorkspacePath}
@@ -315,9 +322,16 @@ export function Sidebar(props: SidebarProps) {
           />
         )}
       </div>
+      {props.onOpenUpdates && props.availableUpdate && (
+        <UpdateNotice version={props.availableUpdate.version} collapsed={collapsed}
+          onOpen={props.onOpenUpdates} onDismiss={props.availableUpdate.onDismiss}
+          onRequestUpdate={props.availableUpdate.onRequestUpdate} installationMethod={props.availableUpdate.installationMethod} />
+      )}
       <div
+        data-theme-surface
         className={cn(
-          "flex items-center justify-between gap-1 bg-sidebar/55 px-2.5 py-3 text-xs",
+          "flex items-center justify-between gap-1 px-2.5 py-3 text-xs",
+          props.hostChromeInset && "bg-sidebar/55",
           collapsed && "w-14 flex-col px-0",
         )}
       >
@@ -329,13 +343,11 @@ export function Sidebar(props: SidebarProps) {
           ariaKeyShortcuts={sidebarShortcutAria("settings")}
           onClick={props.onOpenSettings}
           onIntent={props.onSettingsIntent}
-          className="w-9"
-          icon={<Settings className="h-4 w-4" />}
+          icon={<SettingsIcon className="h-4 w-4" />}
         />
-        <ConnectionBadge />
+        <HostSwitcher collapsed={collapsed} portalContainer={props.containActionMenus ? menuPortalContainer : undefined} />
       </div>
     </nav>
-    </TooltipProvider>
   );
 }
 
@@ -370,7 +382,7 @@ function SidebarActionButton({
     <Button
       ref={active ? selectionRef : undefined}
       type="button"
-      variant={null}
+      variant={compact ? "icon" : null}
       aria-label={label}
       aria-current={active ? "page" : undefined}
       aria-keyshortcuts={ariaKeyShortcuts}
@@ -378,15 +390,17 @@ function SidebarActionButton({
       onFocus={onIntent}
       onPointerEnter={onIntent}
       className={cn(
-        "touch-target group h-8 min-w-0 gap-2 overflow-hidden rounded-xl font-normal",
+        "touch-target group h-8 min-w-0 gap-2 overflow-hidden rounded-control font-normal",
         SIDEBAR_SELECTION_ACTION_ITEM_CLASS,
         collapsed
           ? "w-8 justify-center gap-0 px-0"
-          : iconOnly ? "w-8 shrink-0 justify-center gap-0 rounded-xl px-0"
-          : "w-full justify-start gap-2 px-2 text-[13px] leading-5 [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:stroke-[1.75]",
+          : iconOnly ? "w-8 shrink-0 justify-center gap-0 rounded-control px-0"
+          : "w-full justify-start gap-2 px-2 text-[13px] leading-5 [&_svg]:h-4 [&_svg]:w-4 [&_svg]:stroke-[1.75]",
         active
           ? "text-sidebar-accent-foreground"
-          : "text-sidebar-content settings-hover hover:text-sidebar-accent-foreground",
+          : compact
+            ? "text-sidebar-content hover:text-sidebar-accent-foreground"
+            : "text-sidebar-content settings-hover hover:text-sidebar-accent-foreground",
         className,
       )}
     >
@@ -399,12 +413,11 @@ function SidebarActionButton({
     </Button>
   );
   return compact || shortcut ? (
-    <Tooltip>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
-      <TooltipContent side={collapsed ? "right" : "bottom"} className="flex items-center gap-4">
-        <span>{label}</span>
-        {shortcut ? <kbd className="whitespace-nowrap font-sans text-muted-foreground">{shortcut}</kbd> : null}
-      </TooltipContent>
-    </Tooltip>
+    <HoverHint side={collapsed ? "right" : "bottom"} contentClassName="flex items-center gap-4" content={<>
+      <span>{label}</span>
+      {shortcut ? <kbd className="whitespace-nowrap font-sans text-muted-foreground">{shortcut}</kbd> : null}
+    </>}>
+      {button}
+    </HoverHint>
   ) : button;
 }

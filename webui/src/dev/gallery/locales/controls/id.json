@@ -1,0 +1,508 @@
+{
+  "common": {
+    "unavailable": "Tidak tersedia",
+    "selected": "Dipilih: {{value}}",
+    "savingPreview": "Menyimpan nilai pratinjau…",
+    "savedPreview": "Nilai pratinjau tersimpan",
+    "providerAction": "Tindakan konfigurasi penyedia dipilih",
+    "reset": "Atur ulang pratinjau"
+  },
+  "button": {
+    "title": "Tombol",
+    "description": "Satu tombol dengan beragam tampilan dan ukuran yang diubah melalui opsi.",
+    "options": "variant mengubah tampilan; size mengubah dimensi; disabled memblokir interaksi; onClick disediakan oleh pemanggil.",
+    "variants": "Varian — berbagai gaya tombol yang sama",
+    "sizes": "Ukuran",
+    "add": "Tambah contoh",
+    "clicks": "Jumlah klik tombol: {{count}}"
+  },
+  "input": {
+    "title": "Kolom teks",
+    "description": "Masukan teks dan varian kolom pencarian bersama.",
+    "options": "Gunakan Input untuk kolom biasa dan SearchInput untuk pencarian. Sediakan label dan jelaskan masukan yang tidak valid.",
+    "name": "Nama contoh",
+    "projectName": "Nama proyek",
+    "search": "Pencarian",
+    "searchName": "Pencarian contoh",
+    "searchProjects": "Cari proyek",
+    "invalid": "Tidak valid",
+    "invalidName": "Nama tidak valid",
+    "required": "Masukkan nama proyek.",
+    "disabledName": "Kolom nama yang dinonaktifkan"
+  },
+  "textarea": {
+    "title": "Masukan multibaris",
+    "description": "Teks multibaris dengan gaya fokus bersama.",
+    "options": "Menerima properti textarea bawaan: value, onChange, rows, dan disabled.",
+    "notes": "Catatan contoh",
+    "disabledNotes": "Catatan yang dinonaktifkan",
+    "readOnly": "Pratinjau hanya baca"
+  },
+  "toggle": {
+    "title": "Sakelar",
+    "description": "Sakelar aktif/nonaktif terkontrol yang digunakan bersama oleh pengaturan, ruang kerja, dan kanal.",
+    "options": "Pemanggil mengelola checked dan onChange. label menyediakan nama aksesibel.",
+    "enable": "Aktifkan contoh",
+    "unavailableOn": "Sakelar aktif yang tidak dapat diubah",
+    "unavailableOff": "Sakelar nonaktif yang tidak dapat diubah"
+  },
+  "select": {
+    "title": "Pemilih",
+    "description": "Pilihan tunggal dengan navigasi keyboard dan opsi yang dinonaktifkan.",
+    "options": "Gabungkan Select, SelectTrigger, SelectValue, SelectContent, dan SelectItem. Komponen akar mengelola value/onValueChange.",
+    "fast": "Cepat",
+    "model": "Model contoh",
+    "disabledModel": "Pemilih model yang dinonaktifkan"
+  },
+  "segmented": {
+    "title": "Pilihan bersegmen",
+    "description": "Sekumpulan kecil pilihan yang selalu terlihat.",
+    "options": "value, options, dan onChange bersifat terkontrol. mode=\"tabs\" menambahkan navigasi tab dengan tombol panah.",
+    "day": "Hari",
+    "week": "Minggu",
+    "month": "Bulan",
+    "period": "Periode contoh",
+    "selected": "Periode dipilih: {{value}}"
+  },
+  "combobox": {
+    "title": "Pilihan dengan pencarian",
+    "description": "Opsi yang dapat dicari dengan navigasi keyboard dan penunjuk bersama.",
+    "options": "useComboboxNavigation menyediakan properti masukan, daftar, dan opsi; pemanggil menyaring nilai dan mengelola pilihan.",
+    "search": "Cari opsi contoh",
+    "placeholder": "Ketik atau gunakan tombol panah",
+    "choices": "Opsi contoh",
+    "empty": "Tidak ada opsi yang cocok",
+    "selected": "Opsi dipilih: {{value}}"
+  },
+  "chevron": {
+    "title": "Panah kontrol",
+    "description": "Ikon panah bersama yang digunakan oleh kontrol pemilihan.",
+    "options": "className dapat menyesuaikan posisi. Ikon hanya bersifat dekoratif; kontrol pemiliknya menyediakan nama aksesibel."
+  },
+  "dialog": {
+    "title": "Dialog",
+    "description": "Editor modal dengan perubahan sementara, pilihan bersarang, dan pengembalian fokus.",
+    "options": "Pemanggil mengelola open/onOpenChange serta perilaku draf dan penyimpanan. Selalu sediakan DialogTitle dan deskripsi bila diperlukan.",
+    "open": "Buka dialog",
+    "edit": "Edit label contoh",
+    "help": "Perubahan hanya berlaku pada pratinjau ini.",
+    "label": "Label contoh",
+    "save": "Simpan label",
+    "saved": "Label tersimpan: {{name}}"
+  },
+  "alert": {
+    "title": "Dialog konfirmasi",
+    "description": "Konfirmasi eksplisit dengan kontrol batal dan tindakan yang terpisah.",
+    "options": "Gabungkan judul, deskripsi, dan bagian bawah; jalankan tindakan dalam penangan AlertDialogAction.",
+    "remove": "Hapus contoh",
+    "confirmTitle": "Hapus contoh ini?",
+    "help": "Ini hanya mengubah status pratinjau.",
+    "confirm": "Konfirmasi penghapusan",
+    "removed": "Contoh dihapus.",
+    "available": "Contoh tersedia."
+  },
+  "sheet": {
+    "title": "Panel samping",
+    "description": "Panel modal yang menempel pada tepi area tampilan.",
+    "options": "SheetContent mendukung side. Sertakan SheetTitle dan SheetDescription.",
+    "open": "Buka panel samping",
+    "panelTitle": "Panel samping contoh",
+    "help": "Kontrol pendukung di samping halaman saat ini.",
+    "notes": "Catatan panel",
+    "placeholder": "Coba edit di sini"
+  },
+  "popover": {
+    "title": "Panel mengambang",
+    "description": "Area interaktif kecil yang ditambatkan ke pemicunya.",
+    "options": "Gabungkan pemicu dan konten; open/onOpenChange dapat dikontrol. Konten mengikuti portal dialog pemiliknya.",
+    "open": "Buka panel mengambang",
+    "note": "Catatan singkat"
+  },
+  "menu": {
+    "title": "Menu tarik-turun",
+    "description": "Tindakan, pilihan tunggal, menu bersarang, dan entri yang dinonaktifkan.",
+    "options": "Gunakan onSelect untuk tindakan dan grup radio untuk pilihan yang dipertahankan.",
+    "view": "Opsi tampilan",
+    "layout": "Tata letak",
+    "comfortable": "Renggang",
+    "compact": "Ringkas",
+    "rename": "Ubah nama",
+    "more": "Tindakan lainnya",
+    "duplicate": "Duplikasikan",
+    "none": "Tidak ada",
+    "status": "Kerapatan: {{density}}. Tindakan: {{action}}."
+  },
+  "tooltip": {
+    "title": "Tooltip dan petunjuk",
+    "description": "HoverHint menggabungkan primitif tooltip bersama; tooltip.tsx adalah jalur impor publiknya.",
+    "options": "Gunakan HoverHint untuk petunjuk biasa. Pastikan kesalahan penting tetap terlihat. Sorotan penunjuk dan fokus keyboard mengikuti aturan waktu produk.",
+    "primitive": "Tooltip dasar",
+    "primitiveHelp": "Jeda penunjuk bersama dan tampilan langsung saat mendapat fokus keyboard.",
+    "hint": "Petunjuk saat disorot",
+    "hintHelp": "Petunjuk gabungan dengan perilaku fokus dan penunjuk yang sama."
+  },
+  "truncated": {
+    "title": "Petunjuk teks terpotong",
+    "description": "Menampilkan petunjuk hanya saat pengukuran menunjukkan teks terpotong.",
+    "options": "Sediakan text dan lebar terbatas. Tambahkan tabIndex jika teks itu sendiri perlu menerima fokus keyboard."
+  },
+  "disclosure": {
+    "title": "Konten lipat",
+    "description": "Konten yang dapat diperluas dan mempertahankan status anak saat dilipat.",
+    "options": "Disclosure mengelola perluasan; DisclosureContent menerima properti open terkontrol untuk pemicu khusus.",
+    "show": "Tampilkan opsi lanjutan",
+    "help": "Draf ini tetap ada setelah ditutup dan dibuka kembali.",
+    "draft": "Draf area lipat"
+  },
+  "expandable": {
+    "title": "Teks yang dapat diperluas",
+    "description": "Pratinjau dengan batas baris dari teks yang sama dan tetap terpasang.",
+    "options": "Pemanggil mengelola expanded. lines menentukan jumlah baris saat dilipat; sediakan kontrol pengalih yang aksesibel.",
+    "less": "Tampilkan lebih sedikit",
+    "more": "Tampilkan lebih banyak"
+  },
+  "imageViewport": {
+    "title": "Area tampilan gambar",
+    "description": "Kontrol penyesuaian, zoom, geser, dan cubit untuk setiap gambar.",
+    "options": "Sediakan className dengan batas area dan pasang ulang untuk identitas gambar yang berbeda. Atur panWithArrows=false jika galeri mengelola navigasi panah."
+  },
+  "loadingRing": {
+    "title": "Cincin aktivitas",
+    "description": "Indikator aktivitas bersama dengan jalur opsional.",
+    "options": "className mengatur ukuran dan warna. track=false menyembunyikan jalur; strokeWidth dan strokeDasharray mengatur busur. Mengikuti preferensi pengurangan gerakan."
+  },
+  "streaming": {
+    "title": "Label beranimasi",
+    "description": "Animasi teks bersama untuk proses berpikir aktif dan label alat.",
+    "options": "active mengontrol animasi. Anak berupa string atau angka menyediakan lapisan glif; pengaturan pengurangan gerakan tetap dihormati.",
+    "animate": "Animasikan label",
+    "working": "Memproses langkah berikutnya…"
+  },
+  "markdown": {
+    "title": "Balasan Markdown",
+    "description": "Perender streaming produksi, termasuk tabel, kode, dan rumus.",
+    "options": "children adalah teks Markdown. streaming mengontrol konten yang belum lengkap; onOpenFilePreview disediakan oleh layar.",
+    "state": "Status Markdown"
+  },
+  "code": {
+    "title": "Tampilan kode",
+    "description": "Penyorotan sintaks, nomor baris, penyalinan, keluaran ANSI, dan baris yang menyesuaikan area terlihat.",
+    "options": "code dan language menyediakan konten; showLineNumbers, wrapLongLines, dan chrome mengontrol tampilan. Penyorotan area terlihat memerlukan nomor baris dan baris tanpa pembungkusan.",
+    "format": "Format kode"
+  },
+  "math": {
+    "title": "Rumus matematika",
+    "description": "Pembungkus bersama untuk menyesuaikan rumus blok yang dirender Markdown.",
+    "options": "Gunakan MarkdownText untuk sumber TeX. DisplayMath menerima simpul rumus yang sudah dirender dan menskalakannya ke lebar yang tersedia."
+  },
+  "message": {
+    "title": "Pesan",
+    "description": "Pesan pengguna dan asisten, termasuk status berpikir dan pengiriman.",
+    "options": "message adalah UIMessage yang diproyeksikan oleh runtime obrolan. Data dan tindakan jaringan tetap berada di luar perender.",
+    "state": "Status pesan"
+  },
+  "activity": {
+    "title": "Aktivitas agen",
+    "description": "Primitif aktivitas digabung menjadi urutan yang sedang berjalan, selesai, atau gagal.",
+    "options": "Berikan teks, status, dan perluasan terkontrol. gateway mengelola eksekusi alat; komponen ini merender proyeksi statusnya.",
+    "state": "Status aktivitas",
+    "working": "Memproses",
+    "details": "Detail aktivitas",
+    "collapse": "Lipat",
+    "readError": "Tidak dapat membaca berkas",
+    "read": "Baca sumber"
+  },
+  "files": {
+    "title": "Perubahan berkas",
+    "description": "Referensi berkas, jumlah baris berubah, dan perbedaan yang dapat diperluas.",
+    "options": "edits berisi ringkasan tampilan; displayMode memilih summary/diff/collapsed_diff; onOpenFilePreview disediakan oleh layar.",
+    "error": "Perubahan contoh tidak dapat diterapkan.",
+    "state": "Status perubahan berkas",
+    "operation": "Operasi berkas",
+    "display": "Tampilan perbedaan",
+    "selected": "Berkas dipilih: {{path}}",
+    "hint": "Pilih referensi berkas untuk mencoba callback-nya."
+  },
+  "media": { "study": "Studi warna {{count}}" },
+  "imageGallery": {
+    "title": "Gambar mini",
+    "description": "Tata letak banyak gambar, pemilihan gambar mini, dan gambar tambahan.",
+    "options": "images menyediakan URL dan nama; size memilih gambar mini besar atau ringkas, align mengontrol perataan. Hanya empat gambar mini ditampilkan; ImageLightbox gabungan memuat semua gambar yang dapat dilihat.",
+    "sixImages": "Enam gambar",
+    "compact": "Gambar mini ringkas",
+    "hint": "Pilih gambar mini atau +2 untuk melihat keenam gambar."
+  },
+  "imageLightbox": {
+    "title": "Penampil gambar layar penuh",
+    "description": "Tampilan layar penuh terkontrol dan navigasi gambar.",
+    "options": "index bernilai null saat ditutup. Pemanggil mengelola index dan callback pembukaan; ImageLightbox menggabungkan ZoomableImage serta mengatur ulang tampilan saat gambar berubah.",
+    "open": "Buka penampil layar penuh",
+    "hint": "Gunakan sebelumnya/berikutnya, ←/→, atau Home/End; tutup dengan × atau Escape."
+  },
+  "zoomableImage": {
+    "title": "Zoom gambar",
+    "description": "Zoom gambar tunggal, geser dalam batas, dan gestur.",
+    "options": "src dan alt menyediakan satu gambar. Tempatkan dalam wadah berposisi dengan tinggi pasti; pasang ulang saat mengganti gambar. Fokuskan area gambar untuk menggunakan +, −, dan 0.",
+    "hint": "Zoom dengan +/−, klik ganda, Ctrl+roda, atau cubit. Seret atau gulir untuk menggeser setelah diperbesar; klik persentase atau tekan 0 untuk mengatur ulang."
+  },
+  "attachment": {
+    "title": "Lampiran",
+    "description": "Pratinjau gambar, pemutaran video, unduhan berkas, dan lampiran tidak tersedia.",
+    "options": "attachment.kind memilih image, video, atau file. Gambar membuka ImageLightbox, video memakai kontrol bawaan, berkas memakai tautan unduhan. URL yang tidak ada atau kegagalan memuat gambar menghasilkan ubin tidak tersedia.",
+    "image": "Gambar",
+    "video": "Video yang dapat diputar",
+    "file": "Unduh berkas",
+    "unavailable": "Lampiran tidak tersedia (tanpa URL)"
+  },
+  "fileReference": {
+    "title": "Referensi berkas",
+    "description": "Referensi berkas dengan tindakan buka yang dikelola pemanggil.",
+    "options": "path menyediakan label; onOpen menyediakan tindakan. Komponen tidak menentukan izin ruang kerja.",
+    "select": "Pilih referensi berkas."
+  },
+  "settingsComposition": {
+    "title": "Komposisi pengaturan",
+    "description": "Komponen baris, grup, dan kapabilitas pengaturan yang sebenarnya, digabung dengan kontrol bersama.",
+    "options": "Pengontrol pengaturan yang membungkusnya mengelola nilai dan penyimpanan permanen. Callback galeri hanya mengubah status pratinjau lokal.",
+    "preferences": "Preferensi contoh",
+    "keepDrafts": "Simpan draf",
+    "switchHint": "Baris pengaturan bersama dengan sakelar terkontrol.",
+    "projectLabel": "Label proyek",
+    "projectName": "Label proyek dalam pengaturan",
+    "capability": "Kapabilitas contoh",
+    "notes": "Catatan",
+    "capabilityNotes": "Catatan kapabilitas",
+    "localOnly": "Hanya pratinjau lokal"
+  },
+  "modelPickers": {
+    "title": "Pemilih model",
+    "description": "Pilih penyedia, cari atau masukkan ID model, lalu sesuaikan tingkat penalaran.",
+    "options": "Pemanggil menyediakan nilai dan tindakan ProviderPicker. models milik ModelIdPicker dapat menyediakan katalog tetap; savedValues milik ReasoningEffortPicker menyediakan opsi yang sudah ada.",
+    "chooseProvider": "Pilih penyedia",
+    "configure": "Konfigurasi {{provider}}"
+  },
+  "providerIcons": {
+    "title": "Ikon penyedia",
+    "description": "Bandingkan ukuran biasa, ringkas, dan penuh serta status pemilih yang belum dikonfigurasi.",
+    "options": "provider memilih ikon yang tersedia; compact dan fill mengontrol ukuran. showBrandLogos=false menggunakan ikon bawaan.",
+    "size": "Ukuran ikon"
+  },
+  "timezone": {
+    "title": "Pemilih zona waktu",
+    "description": "Cari berdasarkan nama zona waktu, nama Tionghoa, atau selisih UTC, lalu lihat saat yang sama dalam waktu lokal.",
+    "options": "value adalah zona waktu IANA; onChange memperbarui nilai pemanggil. Komponen menyediakan pencarian dan navigasi keyboard."
+  },
+  "textEditor": {
+    "title": "Editor teks dan petunjuk",
+    "description": "Buka editor untuk mengubah, menyimpan, atau membatalkan. Kosongkan konten lalu simpan untuk melihat pesan kesalahan.",
+    "options": "SettingsTextEditor menutup setelah onSave berhasil dan menampilkan kesalahan jika gagal; SettingsHint terbuka saat disorot, difokuskan, atau diklik.",
+    "state": "Status pengeditan",
+    "hint": "Buka editor untuk mengubah, menyimpan, atau membatalkan. Kosongkan konten untuk melihat status kesalahan.",
+    "instructions": "Instruksi contoh",
+    "edit": "Edit instruksi contoh",
+    "help": "Setelah disimpan, konten yang diperbarui muncul di bawah.",
+    "required": "Masukkan konten."
+  },
+  "removePreset": {
+    "title": "Hapus preset model",
+    "description": "Hapus preset yang tidak digunakan dan lihat status nonaktif preset yang dipakai model default.",
+    "options": "Ini adalah tombol hapus yang digunakan ModelsSettings; pemanggil menyediakan disabled dan tindakan hapus. Pengelolaan penyedia menggunakan dialog ProvidersSettings.",
+    "defaultModel": "Model default",
+    "codeAssistant": "Asisten pemrograman",
+    "remove": "Hapus {{name}}",
+    "primaryHint": "Preset yang digunakan model default tidak dapat dihapus.",
+    "count": "Jumlah preset pratinjau: {{count}}"
+  },
+  "loading": {
+    "title": "Tata letak pemuatan",
+    "description": "Ganti tata letak pemuatan katalog aplikasi, kanal, dan keterampilan, serta lihat wadah status bersama.",
+    "options": "layout milik CatalogSkeleton memilih tata letak. SkeletonStatus memakai label untuk status pembaca layar dan menandai konten dekoratif sebagai aria-hidden.",
+    "layout": "Tata letak katalog",
+    "catalog": "Memuat katalog pratinjau"
+  },
+  "sidebar": {
+    "title": "Navigasi pengaturan",
+    "description": "Pilih bagian, tangani mulai ulang tertunda, dan persempit browser untuk melihat menu seluler.",
+    "options": "activeSection dan onSelectSection mengontrol pilihan; kembali, keluar, dan mulai ulang merupakan callback pemanggil.",
+    "back": "Kembali ke obrolan",
+    "logout": "Keluar",
+    "restart": "Tindakan mulai ulang pratinjau ditangani",
+    "hint": "Pilih bagian pengaturan atau persempit browser untuk melihat navigasi seluler.",
+    "toggleRestart": "Alihkan status mulai ulang tertunda"
+  },
+  "providerSearch": {
+    "title": "Pencarian penyedia",
+    "description": "Cari penyedia menurut grup OAuth, kunci API, dan akses lokal; pilih entri atau penyedia khusus.",
+    "options": "providers adalah katalog yang ada. query adalah nilai pencarian terkontrol; onSelect dan onCustom meneruskan pilihan ke induk.",
+    "closed": "Pencarian ditutup",
+    "custom": "Penyedia khusus dipilih",
+    "hint": "Cari penyedia atau gunakan tombol panah untuk memilih."
+  },
+  "requestParameters": {
+    "title": "Parameter permintaan",
+    "description": "Edit header, parameter kueri, dan isi permintaan; masukkan JSON tidak valid untuk melihat validasi sebenarnya.",
+    "options": "fields memilih entri yang terlihat; form menyimpan teks JSON. Header dan parameter kueri hanya menerima nilai string; isi permintaan menerima nilai objek JSON apa pun."
+  },
+  "requestAPI": {
+    "title": "Kontrol API permintaan",
+    "description": "Pilih API yang didukung penyedia, API default, penggantian per model, dan opsi cadangan.",
+    "options": "ProviderAPIControl mempertahankan setidaknya satu API. ModelAPIControl mengizinkan null untuk pilihan otomatis dan menampilkan API sesuai kapabilitas penyedia.",
+    "providerAPI": "API penyedia",
+    "modelOverride": "Penggantian model"
+  },
+  "usage": {
+    "title": "Penggunaan token",
+    "description": "Ganti antara data tersedia, catatan kosong, dan tidak tersedia. Sorot batang untuk penggunaan harian; buka detail untuk tren model.",
+    "options": "usage adalah catatan statistik dari pemanggil; timeZone menentukan batas tanggal. Dialog detail dan grafik hanya menampilkan data yang diberikan.",
+    "state": "Status penggunaan"
+  },
+  "overview": {
+    "title": "Ringkasan pengaturan",
+    "description": "Lihat model saat ini, status kapabilitas, dan penggunaan; pilih baris fitur untuk mencoba navigasi bagian.",
+    "options": "settings menyediakan data ringkasan; onSelectSection menerima bagian pengaturan yang dipilih.",
+    "selected": "Bagian dipilih: {{section}}"
+  },
+  "web": {
+    "title": "Pengaturan pencarian web",
+    "description": "Ganti penyedia tanpa kredensial, dengan kunci API, atau URL server; sesuaikan pencarian dan coba penyimpanan otomatis.",
+    "options": "settings menyimpan konfigurasi saat ini; form menyimpan nilai edit. Induk menyediakan penyimpanan, visibilitas kredensial, dan pergantian penyedia.",
+    "unsaved": "Draf pratinjau belum disimpan"
+  },
+  "image": {
+    "title": "Pengaturan pembuatan gambar",
+    "description": "Aktifkan pembuatan gambar, pilih model dari katalog tetap, rasio aspek, dan ukuran; buka opsi lanjutan untuk mengatur jumlah.",
+    "options": "form adalah konfigurasi terkontrol; dirty menandai perubahan. Komponen memakai ulang kredensial penyedia; induk menerapkan penyimpanan."
+  },
+  "voice": {
+    "title": "Pengaturan transkripsi",
+    "description": "Aktifkan transkripsi, edit model, bahasa, batas durasi, dan ukuran unggahan; coba penyimpanan otomatis.",
+    "options": "settings menyediakan informasi penyedia; induk mengelola form dan callback penyimpanan."
+  },
+  "safety": {
+    "title": "Pengaturan akses",
+    "description": "Alihkan akses layanan lokal dan izin default; lihat baris pengaturan, petunjuk, dan umpan balik penyimpanan otomatis.",
+    "options": "form menyediakan nilai tampilan; onSave menangani permintaan simpan. Penegakan izin saat runtime tetap menjadi tanggung jawab gateway."
+  },
+  "channelCatalog": {
+    "title": "Katalog dan identitas kanal",
+    "description": "Ganti status berjalan, memulai, gagal, dan belum terpasang; coba sakelar, pemasangan, dan menu bantuan.",
+    "options": "feature menyediakan status pemasangan dan runtime. Induk menangani onAction dan onSelect; identitas, kesalahan, dan bantuan memakai data kanal yang sama.",
+    "exampleChannel": "Kanal contoh",
+    "state": "Status kanal",
+    "error": "Koneksi contoh gagal.",
+    "stopped": "Dihentikan",
+    "running": "Berjalan",
+    "starting": "Memulai",
+    "failed": "Gagal",
+    "selected": "Pengaturan kanal dipilih",
+    "hint": "Gunakan sakelar atau tombol pasang untuk melihat perubahan status."
+  },
+  "credentials": {
+    "title": "Kredensial kanal",
+    "description": "Masukkan kredensial, tampilkan atau sembunyikan rahasia, terapkan preset koneksi, periksa kolom wajib, dan salin perintah bantuan.",
+    "options": "fields menentukan grup dan kontrol; values dan visibleSecrets bersifat terkontrol. requirements menentukan kombinasi kredensial; callback preset dan simpan hanya memperbarui contoh ini.",
+    "botToken": "Token bot",
+    "tokenPlaceholder": "Token contoh",
+    "serverURL": "URL server",
+    "replyMode": "Mode balasan",
+    "mentions": "Sebutan",
+    "allMessages": "Semua pesan",
+    "allowFrom": "Pengirim yang diizinkan",
+    "local": "Server lokal",
+    "hosted": "Server terhosting",
+    "required": "Masukkan token bot.",
+    "checkSave": "Periksa dan simpan",
+    "command": "Perintah contoh",
+    "applied": "{{name}} diterapkan",
+    "incomplete": "Lengkapi kredensial.",
+    "saved": "Kredensial pratinjau tersimpan.",
+    "hint": "Isi kredensial, alihkan visibilitas rahasia, atau terapkan preset koneksi."
+  },
+  "channelValidation": {
+    "title": "Pemeriksaan koneksi",
+    "description": "Ganti antara memeriksa, berhasil, dan gagal; lihat pemeriksaan muncul berurutan bersama ringkasan identitas.",
+    "options": "validation menyediakan catatan pemeriksaan; validating mengontrol pemuatan. Komponen hanya menampilkan hasil.",
+    "expired": "Token contoh telah kedaluwarsa.",
+    "result": "Hasil pemeriksaan"
+  },
+  "runAt": {
+    "title": "Pemilih waktu terjadwal",
+    "description": "Masukkan tanggal dan waktu atau buka kalender lalu pilih dengan mouse, tombol panah, dan tombol halaman.",
+    "options": "value memakai waktu lokal YYYY-MM-DDTHH:mm; onChange mengembalikan nilai yang diedit. Masukan tidak valid ditampilkan pada kontrol formulir yang ada."
+  },
+  "automationCalendar": {
+    "title": "Kalender otomatisasi",
+    "description": "Ganti bulan, jadwal, dan riwayat, lalu buka hasil catatan berhasil atau gagal. Wadah sempit otomatis menampilkan agenda.",
+    "options": "jobs dan month menentukan konten kalender. onInspect menangani tugas terjadwal; pemanggil menyediakan tampilan hasil melalui renderRunDialog. Kalender tidak membaca layanan.",
+    "providerError": "Penyedia contoh tidak tersedia.",
+    "state": "Status jadwal",
+    "previousMonth": "Bulan sebelumnya",
+    "nextMonth": "Bulan berikutnya",
+    "planned": "Terjadwal",
+    "recorded": "Riwayat eksekusi",
+    "running": "Berjalan",
+    "failed": "Gagal",
+    "completed": "Selesai",
+    "skipped": "Dilewati",
+    "system": "Tugas sistem",
+    "noEntries": "Tidak ada jadwal bulan ini",
+    "more": "{{count}} lainnya",
+    "selected": "Tugas dipilih: {{name}}",
+    "hint": "Pilih catatan eksekusi untuk melihat hasilnya atau pilih tugas terjadwal."
+  },
+  "providers": {
+    "title": "Pengelolaan penyedia",
+    "description": "Lihat dialog pengelolaan penyedia yang sebenarnya dan alur penambahan.",
+    "options": "Memakai ulang ProvidersSettings dari pengaturan. Pemanggil mengontrol katalog, formulir, dan callback simpan; pratinjau ini mengubah data contoh lokal serta mendukung konfigurasi, pencarian, pembuatan, dan pembatalan.",
+    "invalidParameters": "Masukkan JSON parameter permintaan yang valid; nilai header dan parameter kueri harus berupa string.",
+    "saved": "Konfigurasi pratinjau untuk {{name}} tersimpan",
+    "added": "{{name}} ditambahkan",
+    "signedIn": "Otorisasi pratinjau diatur ke sudah masuk",
+    "signedOut": "Otorisasi pratinjau diatur ke belum masuk",
+    "builtInIcons": "Gunakan ikon bawaan",
+    "brandIcons": "Gunakan ikon merek",
+    "configured": "Jumlah penyedia terkonfigurasi: {{count}}",
+    "providerAdded": "Penyedia ditambahkan"
+  },
+  "runResult": {
+    "title": "Hasil eksekusi otomatisasi",
+    "description": "Buka hasil untuk membandingkan balasan Markdown, pemuatan, coba lagi, balasan kosong, dan riwayat yang hilang.",
+    "options": "result menyediakan status pemuatan dan balasan yang diperoleh. Pemanggil menangani onRetry; tampilan ini tidak membaca runtime atau meminta hasil.",
+    "state": "Hasil eksekusi",
+    "view": "Lihat hasil eksekusi"
+  },
+  "chatBinding": {
+    "title": "Obrolan eksekusi",
+    "description": "Pilih obrolan, edit instruksi, konfirmasi, beralih kembali, atau batalkan; bandingkan tugas sibuk, kesalahan pemuatan, dan konflik.",
+    "options": "data dan job menyediakan obrolan yang tersedia dan versi pengikatan. Tampilan mengelola draf konfirmasi; titik masuk fitur menghubungkan onSave, onSaved, dan onReload ke operasi data.",
+    "state": "Status pengikatan obrolan",
+    "setChat": "Atur obrolan eksekusi",
+    "saved": "Eksekusi berikutnya akan berlangsung di {{title}}",
+    "hint": "Pilih obrolan tujuan, lalu konfirmasi atau edit instruksi tugas."
+  },
+  "about": {
+    "title": "Tentang dan versi",
+    "description": "Bandingkan status pemeriksaan versi, tautan commit, pembaruan, dan halaman Tentang; tombol memperbarui tampilan dengan hasil contoh.",
+    "options": "AboutSettingsView menerima gabungan tautan versi dan dukungan. VersionCheckRowView menampilkan checking/result dan meminta pemeriksaan melalui onCheck. Titik masuk fitur mengelola pemeriksaan sebenarnya serta data tautan diagnostik.",
+    "error": "Tidak dapat mengambil informasi versi. Coba lagi.",
+    "state": "Status versi",
+    "selectedLink": "Tautan GitHub dipilih",
+    "preferenceSaved": "Preferensi contoh disimpan; tidak ada yang akan diinstal atau dimulai ulang.",
+    "updateRequested": "Peninjauan pembaruan dipilih; pratinjau ini tidak menginstal atau memulai ulang apa pun.",
+    "dismissed": "Pemberitahuan pembaruan ditutup"
+  },
+  "appearance": {
+    "title": "Preferensi tampilan",
+    "description": "Alihkan tampilan, aktivitas, perbedaan berkas, dan notifikasi; nilai contoh muncul di bawah.",
+    "options": "Pemanggil mengelola tema dan preferensi. onChangeBrowserNotifications menyerahkan permintaan izin ke titik masuk fitur; callback pratinjau hanya mengubah sakelar contoh."
+  },
+  "starInvitation": {
+    "title": "Undangan dukungan",
+    "description": "Buka dialog undangan sebenarnya, bandingkan penyimpanan dan kesalahan, lalu coba tunda, tautan GitHub, dan jangan ingatkan lagi.",
+    "options": "open, saving, dan error adalah status tampilan. Titik masuk StarPrompt yang ada mengelola penerimaan undangan dan penyimpanan preferensi; tampilan hanya memanggil tindakan yang diberikan.",
+    "state": "Status undangan",
+    "view": "Lihat undangan",
+    "dismissed": "Jangan ingatkan lagi dipilih dalam pratinjau",
+    "starred": "Tautan GitHub dipilih dalam pratinjau"
+  }
+}

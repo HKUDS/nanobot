@@ -12,9 +12,9 @@
         "placeholder": "Optional token"
       },
       "groupPolicy": {
-        "label": "Group behavior",
+        "label": "Group rules",
         "choices": {
-          "mention": "Mention only",
+          "mention": "Mentions only",
           "open": "All messages",
           "allowlist": "Allowlist"
         }
@@ -24,7 +24,7 @@
         "placeholder": "QQ IDs, comma separated"
       },
       "groupPolicyOverrides": {
-        "label": "Group behavior overrides (JSON)"
+        "label": "Group exceptions (JSON)"
       },
       "welcomeNewMembers": {
         "label": "Welcome new members",
@@ -34,7 +34,7 @@
         }
       },
       "maxImageBytes": {
-        "label": "Maximum image size"
+        "label": "Image size limit (bytes)"
       }
     }
   }

@@ -1,5 +1,3 @@
-"""Image generation provider helpers."""
-
 from __future__ import annotations
 
 import asyncio
@@ -15,7 +13,7 @@ from urllib.parse import urljoin
 import httpx
 from loguru import logger
 
-from nanobot.config.schema import Config, ProviderConfig
+from nanobot.config.schema import ProviderConfig, ProvidersConfig
 from nanobot.providers.registry import find_by_name
 from nanobot.security.network import (
     PinnedDNSAsyncTransport,
@@ -83,19 +81,16 @@ class GeneratedImageResponse:
 
 
 def _as_json_object(value: object) -> dict[str, Any] | None:
-    """Narrow an untrusted provider response value to a JSON object."""
     return cast(dict[str, Any], value) if isinstance(value, dict) else None
 
 
 def _as_json_objects(value: object) -> list[dict[str, Any]]:
-    """Return object entries from an untrusted provider response array."""
     if not isinstance(value, list):
         return []
     return [cast(dict[str, Any], item) for item in cast(list[object], value) if isinstance(item, dict)]
 
 
 def _read_image_b64(path: str | Path) -> tuple[str, str]:
-    """Return ``(mime, base64)`` for the image at ``path``."""
     p = Path(path).expanduser()
     raw = p.read_bytes()
     mime = detect_image_mime(raw)
@@ -234,10 +229,6 @@ async def _download_image_data_url(
     return f"data:{mime};base64,{encoded}"
 
 
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
-
 _IMAGE_GEN_PROVIDERS: dict[str, type[ImageGenerationProvider]] = {}
 
 
@@ -253,27 +244,38 @@ def register_image_gen_provider(cls: type[ImageGenerationProvider]) -> None:
     _IMAGE_GEN_PROVIDERS[name] = cls
 
 
-def get_image_gen_provider(name: str) -> type[ImageGenerationProvider] | None:
-    return _IMAGE_GEN_PROVIDERS.get(name)
+def get_image_gen_provider(
+    name: str, connection: ProviderConfig | None = None,
+) -> type[ImageGenerationProvider] | None:
+    """Resolve a connection ID to its image adapter, not a display name.
+
+    Selecting a dynamic connection explicitly opts into the OpenAI Images API.
+    Built-in chat-only connections do not acquire image support implicitly.
+    """
+    registered = _IMAGE_GEN_PROVIDERS.get(name)
+    if registered is not None:
+        return registered
+    if find_by_name(name) is None and connection is not None and connection.api_base:
+        return _IMAGE_GEN_PROVIDERS["custom"]
+    return None
 
 
-def image_gen_provider_names() -> tuple[str, ...]:
+def image_gen_provider_names(providers: ProvidersConfig | None = None) -> tuple[str, ...]:
     """Return registered image generation provider names in registry order."""
-    return tuple(_IMAGE_GEN_PROVIDERS)
+    dynamic = (providers.model_extra or {}) if providers is not None else {}
+    return (
+        *tuple(_IMAGE_GEN_PROVIDERS),
+        *(name for name, connection in dynamic.items()
+          if name not in _IMAGE_GEN_PROVIDERS and get_image_gen_provider(name, connection)),
+    )
 
 
-def image_gen_provider_configs(config: Config) -> dict[str, ProviderConfig]:
-    providers_cfg = config.providers
+def image_gen_provider_configs(providers: ProvidersConfig | None) -> dict[str, ProviderConfig]:
     return {
         name: pc
-        for name in _IMAGE_GEN_PROVIDERS
-        if (pc := getattr(providers_cfg, name, None)) is not None
+        for name in image_gen_provider_names(providers)
+        if (pc := getattr(providers, name, None)) is not None
     }
-
-
-# ---------------------------------------------------------------------------
-# Base class
-# ---------------------------------------------------------------------------
 
 
 class ImageGenerationProvider(ABC):
@@ -546,7 +548,6 @@ class AIHubMixImageGenerationClient(ImageGenerationProvider):
 
 
 def _http_error_detail(response: httpx.Response) -> str:
-    """Extract a readable error message from an HTTP error response."""
     try:
         data = _as_json_object(response.json())
         if data is not None:
@@ -888,7 +889,6 @@ def _gemini_flash_image_config(
 
 
 def _gemini_flash_supported_aspect_ratios(model: str) -> set[str]:
-    """Return the documented aspect ratios for a generateContent image model."""
     normalized = model.lower()
     if (
         "gemini-3.1-flash-lite-image" in normalized
@@ -1075,10 +1075,6 @@ class MiniMaxImageGenerationClient(ImageGenerationProvider):
 
 
 def _minimax_images_from_payload(payload: dict[str, Any]) -> list[str]:
-    """Extract base64 images from MiniMax API response.
-
-    MiniMax returns images in ``data.image_base64`` (list of base64 strings).
-    """
     images: list[str] = []
     data = payload.get("data")
     data_object = _as_json_object(data)
@@ -1089,10 +1085,6 @@ def _minimax_images_from_payload(payload: dict[str, Any]) -> list[str]:
             images.append(_b64_image_data_url(b64))
     return images
 
-
-# ---------------------------------------------------------------------------
-# OpenAI image generation
-# ---------------------------------------------------------------------------
 
 _OPENAI_DALLE2_SUPPORTED_SIZES = {"256x256", "512x512", "1024x1024"}
 _OPENAI_DALLE3_SUPPORTED_SIZES = {"1024x1024", "1792x1024", "1024x1792"}
@@ -1363,21 +1355,16 @@ class CustomImageGenerationClient(ImageGenerationProvider):
         return GeneratedImageResponse(images=images, content="", raw=payload)
 
 
-# ---------------------------------------------------------------------------
-# OpenAI Codex image generation
-# ---------------------------------------------------------------------------
-
-
 class CodexImageGenerationClient(ImageGenerationProvider):
     """OpenAI image generation via Codex subscription OAuth.
 
-    Uses the Codex Responses API with the ``image_generation`` tool
-    (the same mechanism ChatGPT uses internally).  No API key required —
-    the Codex OAuth token from ``oauth_cli_kit`` is used instead.
+    Uses the standalone Codex Images API, matching the official Codex
+    image-generation extension. The Codex OAuth token from ``oauth_cli_kit``
+    authenticates requests without an API key.
     """
 
     provider_name = "openai_codex"
-    model_options = ("gpt-5.4",)
+    model_options = ("gpt-image-2",)
     missing_key_message = (
         "Codex OAuth token is unavailable. "
         "Log in with Codex subscription first."
@@ -1387,7 +1374,6 @@ class CodexImageGenerationClient(ImageGenerationProvider):
         return "https://chatgpt.com/backend-api"
 
     def _codex_model(self, model: str) -> str:
-        """Strip the ``openai-codex/`` prefix if present."""
         if model.startswith(("openai-codex/", "openai_codex/")):
             return model.split("/", 1)[1]
         return model
@@ -1417,63 +1403,56 @@ class CodexImageGenerationClient(ImageGenerationProvider):
         if not token or not token.access:
             raise ImageGenerationError(self.missing_key_message)
 
-        logger.info(
-            "Using Codex OAuth token for image generation (account: {})",
-            token.account_id,
-        )
-
-        if reference_images:
-            logger.warning(
-                "Codex image generation does not support reference images; "
-                "ignoring {} reference image(s)",
-                len(reference_images),
-            )
-
         headers: dict[str, str] = {
             "Authorization": f"Bearer {token.access}",
             "chatgpt-account-id": str(token.account_id),
-            "OpenAI-Beta": "responses=experimental",
             "originator": "nanobot",
             "User-Agent": "nanobot (python)",
             "Content-Type": "application/json",
             **self.extra_headers,
         }
-
+        clean_model = self._codex_model(model)
         body: dict[str, Any] = {
-            "model": self._codex_model(model),
-            "instructions": "Generate an image based on the user's request.",
-            "input": [{"role": "user", "content": prompt}],
-            "tools": [{"type": "image_generation"}],
-            "tool_choice": "auto",
-            "stream": True,
-            "store": False,
+            "model": clean_model,
+            "prompt": prompt,
+            "background": "opaque",
+            "quality": "auto",
+            "size": (
+                _openai_size(clean_model, aspect_ratio, image_size)
+                if aspect_ratio or image_size else "auto"
+            ),
         }
         body.update(self.extra_body)
+        body = {key: value for key, value in body.items() if value is not None}
+        endpoint = "generations"
+        if reference_images:
+            endpoint = "edits"
+            body["images"] = [
+                {"image_url": image_path_to_data_url(path)} for path in reference_images
+            ]
 
-        logger.info("Codex Responses API request: POST {}/codex/responses body={}",
-                       self.api_base, {k: v for k, v in body.items() if k != "input"})
-
+        base = self.api_base
+        if not base.endswith("/codex"):
+            base = f"{base}/codex"
         response = await self._http_post(
-            f"{self.api_base}/codex/responses",
+            f"{base}/images/{endpoint}",
             headers=headers,
             body=body,
         )
-
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             detail = response.text[:1000]
-            logger.error("Codex Responses API error ({}): {}", response.status_code, detail)
             raise ImageGenerationError(
                 f"Codex image generation failed (HTTP {response.status_code}): {detail}"
             ) from exc
 
-        images, content_text = await _parse_codex_sse_images(response)
-
-        raw = {"status": "completed"}
-        self._require_images(images, raw)
-
-        return GeneratedImageResponse(images=images, content=content_text, raw=raw)
+        payload = _as_json_object(response.json())
+        if payload is None:
+            raise ImageGenerationError("Codex image generation returned an invalid JSON response")
+        images = await _openai_images_from_payload(payload, proxy=self.proxy)
+        self._require_images(images, payload)
+        return GeneratedImageResponse(images=images, content="", raw=payload)
 
 
 def _openai_size(
@@ -1481,7 +1460,6 @@ def _openai_size(
     aspect_ratio: str | None,
     image_size: str | None,
 ) -> str:
-    """Resolve aspect ratio or image_size to an OpenAI Images API size string."""
     sizes, supported_sizes = _openai_size_options(model)
     explicit_size = _normalize_openai_image_size(image_size)
     if explicit_size and _openai_explicit_size_supported(
@@ -1556,10 +1534,6 @@ async def _openai_images_from_payload(
     *,
     proxy: str | None = None,
 ) -> list[str]:
-    """Extract images from OpenAI Images API response.
-
-    Handles both ``b64_json`` (preferred) and ``url`` (downloaded) formats.
-    """
     images: list[str] = []
     for item in _as_json_objects(payload.get("data")):
         b64 = item.get("b64_json")
@@ -1571,97 +1545,6 @@ async def _openai_images_from_payload(
             images.append(await _download_image_data_url(url, proxy=proxy))
     return images
 
-
-async def _parse_codex_sse_images(
-    response: httpx.Response,
-) -> tuple[list[str], str]:
-    """Parse a Codex Responses API SSE stream for image generation output.
-
-    Returns ``(images, content_text)``.
-    """
-    import json as _json
-
-    images: list[str] = []
-    text_parts: list[str] = []
-
-    buffer: list[str] = []
-    async for line_bytes in response.aiter_lines():
-        line = line_bytes.strip()
-        if line == "":
-            if buffer:
-                data_lines: list[str] = []
-                for bl in buffer:
-                    if bl.startswith("data:"):
-                        data_lines.append(bl[5:].strip())
-                buffer.clear()
-                if data_lines:
-                    raw = "".join(data_lines)
-                    if raw == "[DONE]":
-                        break
-                    try:
-                        event = _as_json_object(_json.loads(raw))
-                    except Exception:
-                        continue
-                    if event is None:
-                        continue
-                    ev_type = event.get("type", "")
-                    if ev_type in ("error", "response.failed"):
-                        logger.error("Codex SSE failure: {}", raw[:2000])
-                    _collect_images_from_sse_event(event, images)
-                    _collect_text_from_sse_event(event, text_parts)
-                    if ev_type == "response.completed":
-                        break
-            continue
-        buffer.append(line)
-
-    # flush remaining
-    if buffer:
-        data_lines = [bl[5:].strip() for bl in buffer if bl.startswith("data:")]
-        raw = "".join(data_lines)
-        if raw and raw != "[DONE]":
-            try:
-                event = _as_json_object(_json.loads(raw))
-            except Exception:
-                pass
-            else:
-                if event is not None:
-                    _collect_images_from_sse_event(event, images)
-                    _collect_text_from_sse_event(event, text_parts)
-
-    return images, "".join(text_parts).strip()
-
-
-def _collect_images_from_sse_event(event: dict[str, Any], images: list[str]) -> None:
-    if event.get("type") != "response.output_item.done":
-        return
-    item = _as_json_object(event.get("item")) or {}
-    if item.get("type") != "image_generation_call":
-        return
-    result = item.get("result")
-    if isinstance(result, str):
-        if result.startswith("data:image/"):
-            images.append(result)
-        else:
-            images.append(_b64_image_data_url(result))
-    elif (result_object := _as_json_object(result)) is not None:
-        image_url = result_object.get("image_url") or result_object.get("image") or ""
-        if isinstance(image_url, str):
-            if image_url.startswith("data:image/"):
-                images.append(image_url)
-            else:
-                images.append(_b64_image_data_url(image_url))
-
-
-def _collect_text_from_sse_event(event: dict[str, Any], text_parts: list[str]) -> None:
-    if event.get("type") == "response.output_text.delta":
-        delta = event.get("delta")
-        if isinstance(delta, str) and delta:
-            text_parts.append(delta)
-
-
-# ---------------------------------------------------------------------------
-# StepFun (阶跃星辰) image generation
-# ---------------------------------------------------------------------------
 
 _STEPFUN_ASPECT_RATIO_SIZES = {
     "1:1": "1024x1024",
@@ -1715,7 +1598,6 @@ class StepFunImageGenerationClient(ImageGenerationProvider):
             "n": 1,
         }
 
-        # Map aspect ratio / image_size to StepFun size string
         size = _stepfun_size(aspect_ratio, image_size)
         if size:
             body["size"] = size
@@ -1769,10 +1651,6 @@ def _stepfun_size(
 
 
 def _stepfun_images_from_payload(payload: dict[str, Any]) -> list[str]:
-    """Extract base64 images from StepFun API response.
-
-    StepFun returns images in ``data[].b64_json`` (base64 strings).
-    """
     images: list[str] = []
     for item in _as_json_objects(payload.get("data")):
         b64 = item.get("b64_json")
@@ -1780,10 +1658,6 @@ def _stepfun_images_from_payload(payload: dict[str, Any]) -> list[str]:
             images.append(_b64_image_data_url(b64))
     return images
 
-
-# ---------------------------------------------------------------------------
-# Zhipu (智谱) image generation
-# ---------------------------------------------------------------------------
 
 _ZHIPU_TIMEOUT_S = 300.0
 
@@ -1924,13 +1798,9 @@ async def _zhipu_images_from_payload(
     return images
 
 
-# ---------------------------------------------------------------------------
-# ModelScope (魔搭) image generation
-# ---------------------------------------------------------------------------
-
 _MODELSCOPE_TIMEOUT_S = 300.0
 _MODELSCOPE_POLL_INTERVAL_S = 5.0
-_MODELSCOPE_POLL_MAX_ATTEMPTS = 60  # 5 min at 5s intervals
+_MODELSCOPE_POLL_MAX_ATTEMPTS = 60
 _MODELSCOPE_ASPECT_RATIOS = {
     "1:1": "1328x1328",
     "16:9": "1664x928",
@@ -1944,7 +1814,6 @@ def _modelscope_size(
     aspect_ratio: str | None,
     image_size: str | None,
 ) -> str:
-    """Resolve aspect ratio / image_size to a ModelScope size string."""
     if image_size and "x" in image_size.lower():
         return image_size
     if aspect_ratio and aspect_ratio in _MODELSCOPE_ASPECT_RATIOS:
@@ -2111,10 +1980,6 @@ class ModelScopeImageGenerationClient(ImageGenerationProvider):
                     )
         return images
 
-
-# ---------------------------------------------------------------------------
-# Provider registration
-# ---------------------------------------------------------------------------
 
 register_image_gen_provider(AIHubMixImageGenerationClient)
 register_image_gen_provider(CodexImageGenerationClient)

@@ -1,0 +1,508 @@
+{
+  "common": {
+    "unavailable": "不可用",
+    "selected": "已选择：{{value}}",
+    "savingPreview": "正在保存预览值…",
+    "savedPreview": "预览值已保存",
+    "providerAction": "选择了服务商配置操作",
+    "reset": "重置预览"
+  },
+  "button": {
+    "title": "按钮",
+    "description": "通过选项调整同一按钮的样式与尺寸。",
+    "options": "variant 改变样式；size 调整尺寸；disabled 禁止交互；onClick 由调用方提供。",
+    "variants": "样式 — 同一按钮的不同外观",
+    "sizes": "尺寸",
+    "add": "添加示例",
+    "clicks": "按钮点击次数：{{count}}"
+  },
+  "input": {
+    "title": "输入框",
+    "description": "文本输入与共用的搜索框变体。",
+    "options": "普通字段使用 Input，搜索使用 SearchInput。须提供标签，并说明无效输入的原因。",
+    "name": "示例名称",
+    "projectName": "项目名称",
+    "search": "搜索",
+    "searchName": "示例搜索",
+    "searchProjects": "搜索项目",
+    "invalid": "无效输入",
+    "invalidName": "无效名称",
+    "required": "请输入项目名称。",
+    "disabledName": "禁用的名称输入框"
+  },
+  "textarea": {
+    "title": "多行输入",
+    "description": "采用共用焦点样式的多行文本框。",
+    "options": "接受原生 textarea 属性：value、onChange、rows 和 disabled。",
+    "notes": "示例笔记",
+    "disabledNotes": "禁用的笔记输入框",
+    "readOnly": "只读预览"
+  },
+  "toggle": {
+    "title": "开关",
+    "description": "设置、工作区与频道共用的受控开关。",
+    "options": "调用方管理 checked 和 onChange；label 提供无障碍名称。",
+    "enable": "启用示例",
+    "unavailableOn": "不可操作的已开启开关",
+    "unavailableOff": "不可操作的已关闭开关"
+  },
+  "select": {
+    "title": "选择器",
+    "description": "支持键盘导航与禁用选项的单选控件。",
+    "options": "组合 Select、SelectTrigger、SelectValue、SelectContent 和 SelectItem。根组件管理 value/onValueChange。",
+    "fast": "快速",
+    "model": "示例模型",
+    "disabledModel": "禁用的模型选择器"
+  },
+  "segmented": {
+    "title": "分段选择",
+    "description": "始终可见的一组简短选项。",
+    "options": "value、options 和 onChange 由调用方控制。mode=\"tabs\" 增加方向键标签页导航。",
+    "day": "日",
+    "week": "周",
+    "month": "月",
+    "period": "示例周期",
+    "selected": "已选周期：{{value}}"
+  },
+  "combobox": {
+    "title": "搜索选择",
+    "description": "可搜索选项，共用键盘与指针导航。",
+    "options": "useComboboxNavigation 提供输入框、列表与选项属性；调用方过滤数据并管理选择。",
+    "search": "搜索示例选项",
+    "placeholder": "输入文字或使用方向键",
+    "choices": "示例选项",
+    "empty": "没有匹配的选项",
+    "selected": "已选选项：{{value}}"
+  },
+  "chevron": {
+    "title": "控件箭头",
+    "description": "选择控件共用的箭头图标。",
+    "options": "可用 className 调整位置。图标仅作装饰，无障碍名称由所属控件提供。"
+  },
+  "dialog": {
+    "title": "对话框",
+    "description": "暂存编辑、嵌套选择与焦点返回。",
+    "options": "调用方管理 open/onOpenChange 及草稿和保存行为。始终提供 DialogTitle，并在需要时提供说明。",
+    "open": "打开对话框",
+    "edit": "编辑示例标签",
+    "help": "修改仅应用于此预览。",
+    "label": "示例标签",
+    "save": "保存标签",
+    "saved": "已保存标签：{{name}}"
+  },
+  "alert": {
+    "title": "确认对话框",
+    "description": "取消与执行操作分开的明确确认。",
+    "options": "组合标题、说明与底部操作区；在 AlertDialogAction 的处理函数中执行操作。",
+    "remove": "移除示例",
+    "confirmTitle": "移除此示例？",
+    "help": "此操作仅改变预览状态。",
+    "confirm": "确认移除",
+    "removed": "示例已移除。",
+    "available": "示例可用。"
+  },
+  "sheet": {
+    "title": "侧边面板",
+    "description": "贴靠视口边缘的模态面板。",
+    "options": "SheetContent 支持 side。须包含 SheetTitle 和 SheetDescription。",
+    "open": "打开侧边面板",
+    "panelTitle": "示例侧边面板",
+    "help": "当前页面旁的辅助控件。",
+    "notes": "面板笔记",
+    "placeholder": "在此尝试编辑"
+  },
+  "popover": {
+    "title": "浮层",
+    "description": "锚定到触发控件的小型交互区域。",
+    "options": "组合触发控件与内容；可控制 open/onOpenChange。内容沿用所属对话框的 portal。",
+    "open": "打开浮层",
+    "note": "随手笔记"
+  },
+  "menu": {
+    "title": "下拉菜单",
+    "description": "操作、单选、嵌套菜单与禁用条目。",
+    "options": "操作使用 onSelect，持久选择使用单选组。",
+    "view": "视图选项",
+    "layout": "布局",
+    "comfortable": "宽松",
+    "compact": "紧凑",
+    "rename": "重命名",
+    "more": "更多操作",
+    "duplicate": "创建副本",
+    "none": "无",
+    "status": "密度：{{density}}。操作：{{action}}。"
+  },
+  "tooltip": {
+    "title": "提示",
+    "description": "HoverHint 组合共用提示基础组件；tooltip.tsx 是公开导入入口。",
+    "options": "普通提示使用 HoverHint；重要错误须保持可见。悬停与键盘焦点遵循产品共用的时序规则。",
+    "primitive": "基础提示",
+    "primitiveHelp": "指针悬停采用共用延迟，键盘聚焦立即显示。",
+    "hint": "悬停提示",
+    "hintHelp": "组合提示采用相同的焦点与指针行为。"
+  },
+  "truncated": {
+    "title": "截断提示",
+    "description": "仅在测得文本被截断时显示提示。",
+    "options": "提供 text 并限制宽度。文本本身需要接受键盘焦点时添加 tabIndex。"
+  },
+  "disclosure": {
+    "title": "折叠内容",
+    "description": "折叠时保留子组件状态的展开区域。",
+    "options": "Disclosure 管理展开状态；自定义触发控件可向 DisclosureContent 传入受控的 open。",
+    "show": "显示高级选项",
+    "help": "关闭再打开后，此草稿仍会保留。",
+    "draft": "折叠区域草稿"
+  },
+  "expandable": {
+    "title": "文本展开",
+    "description": "同一已挂载文本的限行预览。",
+    "options": "调用方管理 expanded。lines 指定折叠行数；须提供可无障碍操作的开关。",
+    "less": "收起",
+    "more": "展开"
+  },
+  "imageViewport": {
+    "title": "图像视口",
+    "description": "单张图片的适应、缩放、平移与双指缩放控件。",
+    "options": "用 className 限定边界；更换图片身份时重新挂载。图库管理方向键导航时设置 panWithArrows=false。"
+  },
+  "loadingRing": {
+    "title": "运行圆环",
+    "description": "可选底环的共享运行指示器。",
+    "options": "className 设置尺寸和颜色。track=false 隐藏底环；strokeWidth 和 strokeDasharray 调整圆弧。遵循减少动态效果设置。"
+  },
+  "streaming": {
+    "title": "流光文字",
+    "description": "思考中与工具标签共用的文字动画。",
+    "options": "active 控制动画。字符串或数字子节点提供字形叠层；遵循减少动态效果设置。",
+    "animate": "启用标签动画",
+    "working": "正在处理下一步…"
+  },
+  "markdown": {
+    "title": "回复排版",
+    "description": "实际流式渲染，支持表格、代码与公式。",
+    "options": "children 为 Markdown 文本。streaming 控制未完成内容；onOpenFilePreview 由页面提供。",
+    "state": "Markdown 状态"
+  },
+  "code": {
+    "title": "代码展示",
+    "description": "语法高亮、行号、复制、ANSI 输出与视口感知代码行。",
+    "options": "code 与 language 提供内容；showLineNumbers、wrapLongLines 和 chrome 控制展示。视口高亮要求显示行号且不换行。",
+    "format": "代码格式"
+  },
+  "math": {
+    "title": "数学公式",
+    "description": "为 Markdown 块级公式提供尺寸适配。",
+    "options": "TeX 源码使用 MarkdownText。DisplayMath 本身接收已渲染的公式节点，并按可用宽度缩放。"
+  },
+  "message": {
+    "title": "消息",
+    "description": "用户与助手消息，含思考及投递状态。",
+    "options": "message 为聊天运行时投影的 UIMessage。数据与网络操作不属于渲染器。",
+    "state": "消息状态"
+  },
+  "activity": {
+    "title": "智能体活动",
+    "description": "组合运行中、已完成或失败的活动序列。",
+    "options": "传入文本、状态及受控的展开值。工具执行由 gateway 负责；这些组件展示其投影状态。",
+    "state": "活动状态",
+    "working": "处理中",
+    "details": "活动详情",
+    "collapse": "收起",
+    "readError": "无法读取文件",
+    "read": "读取源码"
+  },
+  "files": {
+    "title": "文件修改",
+    "description": "文件引用、变更行数与可展开差异。",
+    "options": "edits 包含展示摘要；displayMode 选择 summary/diff/collapsed_diff；onOpenFilePreview 由页面提供。",
+    "error": "无法应用示例修改。",
+    "state": "文件修改状态",
+    "operation": "文件操作",
+    "display": "差异展示",
+    "selected": "已选文件：{{path}}",
+    "hint": "选择文件引用以体验其回调。"
+  },
+  "media": { "study": "色彩练习 {{count}}" },
+  "imageGallery": {
+    "title": "图片缩略图",
+    "description": "多图布局、缩略图选择与更多图片。",
+    "options": "images 提供地址和名称；size 选择大图或紧凑缩略图，align 控制对齐。最多显示四个缩略图，内置 ImageLightbox 可浏览全部有地址的图片。",
+    "sixImages": "六张图片",
+    "compact": "紧凑缩略图",
+    "hint": "点击缩略图或 +2 查看全部六张图片。"
+  },
+  "imageLightbox": {
+    "title": "全屏预览",
+    "description": "受控全屏预览与多图切换。",
+    "options": "index 为 null 时关闭。调用方管理 index 与开关回调；ImageLightbox 内置 ZoomableImage，切图时重置视图。",
+    "open": "打开全屏预览",
+    "hint": "使用前后按钮、←/→ 或 Home/End 切图；点击 × 或按 Escape 关闭。"
+  },
+  "zoomableImage": {
+    "title": "单图缩放",
+    "description": "单图缩放、边界内平移与手势。",
+    "options": "src 和 alt 提供单张图片。容器须有定位和明确高度，换图时重新挂载。聚焦图片区域后可用 +、− 和 0 操作。",
+    "hint": "使用 +/−、双击、Ctrl+滚轮或双指缩放；放大后拖动或滚动平移，点击百分比或按 0 复位。"
+  },
+  "attachment": {
+    "title": "附件",
+    "description": "图片、视频、下载与不可用附件。",
+    "options": "attachment.kind 区分 image、video 与 file。图片打开 ImageLightbox，视频使用原生控件，文件提供下载链接。无地址时显示不可用附件；图片加载失败时也显示不可用附件。",
+    "image": "图片",
+    "video": "可播放视频",
+    "file": "下载文件",
+    "unavailable": "附件不可用（无 URL）"
+  },
+  "fileReference": {
+    "title": "文件引用",
+    "description": "由调用方提供打开操作的文件引用。",
+    "options": "path 提供标签；onOpen 提供操作。组件不决定工作区权限。",
+    "select": "请选择文件引用。"
+  },
+  "settingsComposition": {
+    "title": "设置组件",
+    "description": "实际设置行、分组与能力组件搭配共用控件。",
+    "options": "所在设置控制器管理数值与持久化；图库回调仅更新本地预览状态。",
+    "preferences": "示例偏好",
+    "keepDrafts": "保留草稿",
+    "switchHint": "带受控开关的共用设置行。",
+    "projectLabel": "项目标签",
+    "projectName": "设置中的项目标签",
+    "capability": "示例能力",
+    "notes": "笔记",
+    "capabilityNotes": "能力笔记",
+    "localOnly": "仅用于本地预览"
+  },
+  "modelPickers": {
+    "title": "模型选择",
+    "description": "选择服务商、搜索或输入模型 ID，并调整推理强度。",
+    "options": "ProviderPicker 的值与操作由调用方提供。ModelIdPicker 的 models 参数可提供固定目录；ReasoningEffortPicker 的 savedValues 提供已有选项。",
+    "chooseProvider": "选择服务商",
+    "configure": "配置 {{provider}}"
+  },
+  "providerIcons": {
+    "title": "服务商图标",
+    "description": "比较普通、紧凑与填充尺寸，以及选择器的未配置状态。",
+    "options": "provider 选择已有图标；compact 与 fill 控制尺寸。showBrandLogos=false 使用内置图标。",
+    "size": "图标尺寸"
+  },
+  "timezone": {
+    "title": "时区选择",
+    "description": "按时区名、中文名称或 UTC 偏移搜索，查看同一时刻的当地时间。",
+    "options": "value 是 IANA 时区；onChange 更新调用方的值。搜索与键盘导航由组件提供。"
+  },
+  "textEditor": {
+    "title": "文本编辑",
+    "description": "打开编辑器，修改、保存或取消；清空内容后保存可查看错误反馈。",
+    "options": "SettingsTextEditor 在 onSave 成功后关闭，失败时显示错误；SettingsHint 可通过悬停、焦点或点击打开。",
+    "state": "编辑状态",
+    "hint": "打开编辑器后可以修改、保存或取消。清空内容可查看错误状态。",
+    "instructions": "示例说明",
+    "edit": "编辑示例说明",
+    "help": "保存后，下方显示修改的内容。",
+    "required": "请输入内容。"
+  },
+  "removePreset": {
+    "title": "删除预设",
+    "description": "删除未使用的模型预设，查看默认模型使用中预设的禁用状态。",
+    "options": "这是 ModelsSettings 使用的删除按钮；disabled 与删除动作由调用方提供。服务商管理使用 ProvidersSettings 弹窗。",
+    "defaultModel": "默认模型",
+    "codeAssistant": "代码助手",
+    "remove": "删除 {{name}}",
+    "primaryHint": "默认模型使用中的预设不能删除。",
+    "count": "预览预设数量：{{count}}"
+  },
+  "loading": {
+    "title": "加载占位",
+    "description": "切换应用、频道与技能目录的加载布局，并查看通用状态容器。",
+    "options": "CatalogSkeleton 的 layout 选择布局。SkeletonStatus 用 label 提供读屏状态，将装饰内容标为 aria-hidden。",
+    "layout": "目录布局",
+    "catalog": "正在加载预览目录"
+  },
+  "sidebar": {
+    "title": "设置导航",
+    "description": "选择分类、处理待重启状态，并缩小浏览器查看移动端菜单。",
+    "options": "activeSection 与 onSelectSection 控制选择；返回、退出与重启动作为调用方回调。",
+    "back": "返回聊天",
+    "logout": "退出登录",
+    "restart": "已处理预览重启操作",
+    "hint": "选择设置分类，或缩小浏览器查看移动端导航。",
+    "toggleRestart": "切换待重启状态"
+  },
+  "providerSearch": {
+    "title": "服务商搜索",
+    "description": "搜索按 OAuth、API Key 与本地分组的服务商，选择条目或自定义服务商。",
+    "options": "providers 是已有目录。query 为受控搜索值；onSelect 与 onCustom 将选择交给父组件。",
+    "closed": "已关闭搜索",
+    "custom": "已选择自定义服务商",
+    "hint": "搜索服务商，或用方向键选择。"
+  },
+  "requestParameters": {
+    "title": "请求参数",
+    "description": "编辑请求头、查询参数和请求体；输入无效 JSON 查看真实校验反馈。",
+    "options": "fields 选择显示项，form 保存 JSON 文本。请求头与查询参数只接受字符串值；请求体接受任意 JSON 对象值。"
+  },
+  "requestAPI": {
+    "title": "请求协议",
+    "description": "选择服务商支持的协议、默认协议，以及模型覆盖和回退选项。",
+    "options": "ProviderAPIControl 至少保留一个协议。ModelAPIControl 允许 null 表示自动选择，并按服务商能力显示可用协议。",
+    "providerAPI": "服务商协议",
+    "modelOverride": "模型覆盖"
+  },
+  "usage": {
+    "title": "用量统计",
+    "description": "切换有数据、空记录和不可用状态；悬停柱图查看每日用量，打开详情查看模型趋势。",
+    "options": "usage 是调用方提供的统计记录；timeZone 定义日期范围。详情弹窗与图表只展示传入数据。",
+    "state": "用量状态"
+  },
+  "overview": {
+    "title": "设置概览",
+    "description": "查看当前模型、能力状态和用量统计，点击功能行体验分类选择。",
+    "options": "settings 提供概览数据；onSelectSection 接收选择的设置分类。",
+    "selected": "选择的分类：{{section}}"
+  },
+  "web": {
+    "title": "搜索设置",
+    "description": "切换免凭据、API Key 与服务器地址三种服务商，调整搜索选项并体验自动保存。",
+    "options": "settings 保存当前配置，form 保存编辑值。保存、凭据显示与服务商切换由父组件提供。",
+    "unsaved": "预览草稿尚未保存"
+  },
+  "image": {
+    "title": "图像设置",
+    "description": "开关图像生成，选择固定模型目录、宽高比与图片尺寸，展开高级选项调整数量。",
+    "options": "form 为受控配置，dirty 标记修改。组件复用服务商凭据，保存动作由父组件实现。"
+  },
+  "voice": {
+    "title": "语音设置",
+    "description": "切换转写开关，编辑模型、语言、时长和上传大小限制，体验自动保存。",
+    "options": "settings 提供服务商信息；form 与保存回调由父组件管理。"
+  },
+  "safety": {
+    "title": "访问设置",
+    "description": "切换本地服务访问与默认权限，查看设置行、提示和自动保存反馈。",
+    "options": "form 是显示值；onSave 处理保存请求。运行时的权限执行仍由 gateway 负责。"
+  },
+  "channelCatalog": {
+    "title": "频道条目",
+    "description": "切换运行、启动、失败和未安装状态；操作开关、安装入口与帮助菜单。",
+    "options": "feature 提供安装和运行状态；onAction 与 onSelect 交给父组件处理，标识、错误和帮助使用同一频道数据。",
+    "exampleChannel": "示例频道",
+    "state": "频道状态",
+    "error": "示例连接失败。",
+    "stopped": "已停止",
+    "running": "运行中",
+    "starting": "启动中",
+    "failed": "失败",
+    "selected": "选择了频道设置",
+    "hint": "点击开关或安装按钮，查看状态变化。"
+  },
+  "credentials": {
+    "title": "频道表单",
+    "description": "输入凭据，显示或隐藏密文，应用连接预设，检查必填字段并复制辅助命令。",
+    "options": "fields 定义分组与控件，values 和 visibleSecrets 为受控值。requirements 定义凭据组合；预设与保存回调只更新此示例。",
+    "botToken": "机器人令牌",
+    "tokenPlaceholder": "示例令牌",
+    "serverURL": "服务器 URL",
+    "replyMode": "回复模式",
+    "mentions": "提及消息",
+    "allMessages": "所有消息",
+    "allowFrom": "允许的发送者",
+    "local": "本地服务器",
+    "hosted": "托管服务器",
+    "required": "请输入机器人令牌。",
+    "checkSave": "检查并保存",
+    "command": "示例命令",
+    "applied": "已应用 {{name}}",
+    "incomplete": "请补全凭据。",
+    "saved": "预览凭据已保存。",
+    "hint": "填写凭据、切换密文显示，或应用连接预设。"
+  },
+  "channelValidation": {
+    "title": "连接检查",
+    "description": "切换检查中、成功和失败，观察逐项揭示的检查结果与身份摘要。",
+    "options": "validation 提供检查记录，validating 控制加载状态；组件只负责展示。",
+    "expired": "示例令牌已过期。",
+    "result": "检查结果"
+  },
+  "runAt": {
+    "title": "定时选择",
+    "description": "输入日期时间，或打开日历并用鼠标、方向键和翻页键选择日期。",
+    "options": "value 使用 YYYY-MM-DDTHH:mm 本地时间；onChange 返回编辑值。错误输入显示在现有表单控件上。"
+  },
+  "automationCalendar": {
+    "title": "任务日历",
+    "description": "翻月、切换计划与历史，点击成功或失败记录打开结果弹窗；窄容器自动显示日程列表。",
+    "options": "jobs 与 month 决定日历内容。onInspect 处理计划中的任务；renderRunDialog 由调用方提供结果展示，日历不读取服务。",
+    "providerError": "示例服务商不可用。",
+    "state": "日程状态",
+    "previousMonth": "上个月",
+    "nextMonth": "下个月",
+    "planned": "已计划",
+    "recorded": "运行记录",
+    "running": "正在运行",
+    "failed": "失败",
+    "completed": "完成",
+    "skipped": "已跳过",
+    "system": "系统任务",
+    "noEntries": "本月没有日程",
+    "more": "另外 {{count}} 条",
+    "selected": "选择了任务：{{name}}",
+    "hint": "点击运行记录查看结果，或选择计划中的任务。"
+  },
+  "providers": {
+    "title": "服务商管理",
+    "description": "查看实际服务商管理弹窗与添加流程。",
+    "options": "复用设置中的 ProvidersSettings。目录、表单与保存回调由调用方控制；此处修改本地示例数据，支持配置、搜索、创建与取消。",
+    "invalidParameters": "请输入有效的请求参数 JSON；请求头和查询参数的值须为字符串。",
+    "saved": "已保存 {{name}} 的预览配置",
+    "added": "已添加 {{name}}",
+    "signedIn": "预览授权状态已设为已登录",
+    "signedOut": "预览授权状态已设为未登录",
+    "builtInIcons": "使用内置图标",
+    "brandIcons": "使用品牌图标",
+    "configured": "已配置服务商数量：{{count}}",
+    "providerAdded": "已添加服务商"
+  },
+  "runResult": {
+    "title": "运行结果",
+    "description": "打开运行结果，比较 Markdown 回复、加载、重试、空回复与历史记录缺失状态。",
+    "options": "result 提供加载状态与已取得的回复。onRetry 交给调用方处理；此视图不读取运行时或请求结果。",
+    "state": "运行结果",
+    "view": "查看运行结果"
+  },
+  "chatBinding": {
+    "title": "运行聊天",
+    "description": "选择运行聊天、修改任务说明，确认、更换回来或取消；比较任务占用、加载错误与冲突。",
+    "options": "data 与 job 提供可用聊天和绑定版本。视图管理确认草稿；onSave、onSaved 与 onReload 由功能入口接入数据操作。",
+    "state": "聊天绑定状态",
+    "setChat": "设置运行聊天",
+    "saved": "下次运行将在 {{title}} 中进行",
+    "hint": "选择目标聊天，确认或修改任务说明。"
+  },
+  "about": {
+    "title": "关于与版本",
+    "description": "比较版本检查状态、提交链接、更新入口和关于页面；按钮用示例结果更新显示。",
+    "options": "AboutSettingsView 接受版本与支持链接的组合。VersionCheckRowView 展示 checking/result，并通过 onCheck 请求检查。真实检查与诊断链接数据由功能入口负责。",
+    "error": "无法获取版本信息，请重试。",
+    "state": "版本状态",
+    "selectedLink": "选择了 GitHub 链接",
+    "preferenceSaved": "已保存示例偏好；不会安装或重启。",
+    "updateRequested": "已选择查看更新；组件预览不会安装或重启。",
+    "dismissed": "已收起更新提示"
+  },
+  "appearance": {
+    "title": "外观选项",
+    "description": "切换外观、活动展示、文件差异和通知偏好，下方显示示例值。",
+    "options": "主题和偏好由调用方管理。onChangeBrowserNotifications 将权限申请交给功能入口；预览回调只改变示例开关。"
+  },
+  "starInvitation": {
+    "title": "支持邀请",
+    "description": "打开实际邀请弹窗，比较保存与错误状态，体验暂缓、GitHub 链接和不再提醒的操作。",
+    "options": "open、saving 和 error 是显示状态。领取邀请与持久化偏好由原有 StarPrompt 入口负责；视图只调用传入操作。",
+    "state": "邀请状态",
+    "view": "查看邀请",
+    "dismissed": "预览中选择了不再提醒",
+    "starred": "预览中选择了 GitHub 链接"
+  }
+}

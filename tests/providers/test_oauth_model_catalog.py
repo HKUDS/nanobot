@@ -230,8 +230,7 @@ def test_openai_codex_catalog_uses_account_catalog_and_filters_hidden_models(
     request = captured["request"]
     assert isinstance(request, httpx.Request)
     assert request.url.copy_with(query=None) == httpx.URL(DEFAULT_OPENAI_CODEX_MODELS_URL)
-    # Assert the validated wire version, not the same constant used by the request.
-    assert request.url.params["client_version"] == "0.158.0"
+    assert request.url.params["client_version"] == "99.99.99"
     assert request.headers["Authorization"] == "Bearer secret"
     assert request.headers["chatgpt-account-id"] == "account-42"
 
@@ -259,9 +258,14 @@ def test_xai_inference_classifies_typed_reauth() -> None:
     assert "synthetic-secret" not in str(response)
 
 
-def test_github_copilot_catalog_only_lists_compatible_chat_models(
+@pytest.mark.parametrize(
+    "responses_model",
+    ["gpt-5.4-mini", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"],
+)
+def test_github_copilot_catalog_routes_advertised_model_apis(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    responses_model: str,
 ) -> None:
     original_client = httpx.Client
     captured: list[httpx.Request] = []
@@ -293,8 +297,7 @@ def test_github_copilot_catalog_only_lists_compatible_chat_models(
                         },
                     },
                     {
-                        "id": "gpt-5.4-mini",
-                        "name": "GPT-5.4 Mini",
+                        "id": responses_model,
                         "model_picker_enabled": True,
                         "supported_endpoints": ["/responses"],
                     },
@@ -340,10 +343,28 @@ def test_github_copilot_catalog_only_lists_compatible_chat_models(
     assert catalog.source == "remote"
     assert [model.id for model in catalog.models] == [
         "github-copilot/claude-sonnet",
-        "github-copilot/gpt-5.4-mini",
+        f"github-copilot/{responses_model}",
+        "github-copilot/unknown-responses-only",
     ]
     assert catalog.models[0].context_window == 200_000
     assert catalog.models[0].reasoning_efforts == ("low", "high")
+    assert catalog.models[0].api.supported_apis == ("chat_completions",)
+    assert catalog.models[2].api.supported_apis == ("responses",)
+    from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
+
+    provider = GitHubCopilotProvider(default_model="github-copilot/unknown-responses-only")
+    assert provider._should_use_responses_api(None, None)
+    assert not provider._should_use_responses_api("github-copilot/claude-sonnet", "high")
+    from nanobot.config.schema import Config, ModelPresetConfig
+    from nanobot.providers.factory import resolve_automatic_model_api
+
+    for model, effort, expected in (
+        ("github-copilot/unknown-responses-only", None, "responses"),
+        ("github-copilot/claude-sonnet", "high", "chat_completions"),
+    ):
+        assert resolve_automatic_model_api(Config(), preset=ModelPresetConfig(
+            provider="github_copilot", model=model, reasoning_effort=effort,
+        )) == ("github_copilot", expected)
     assert len(captured) == 2
     assert captured[0].headers["Authorization"] == "token github-secret"
     assert captured[1].headers["Authorization"] == "Bearer copilot-secret"
@@ -354,6 +375,35 @@ def test_github_copilot_catalog_only_lists_compatible_chat_models(
         proxy="http://proxy.example:8080",
     ).source == "remote"
     assert len(captured) == 4
+
+
+def test_explicit_refresh_bypasses_cached_models_and_retry_delay() -> None:
+    calls = 0
+
+    def fetch(_proxy):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            request = httpx.Request("GET", "https://example.com/models")
+            raise httpx.HTTPStatusError("expired", request=request, response=httpx.Response(401))
+        return (ProviderModelSpec(id=f"provider/model-{calls}"),)
+
+    catalog = OAuthModelCatalog(fallback_models=(), fetch=fetch)
+    assert catalog.get(cache_key="account").models[0].id == "provider/model-1"
+    assert catalog.get(cache_key="account").source == "cache"
+    assert calls == 1
+
+    failed = catalog.get(cache_key="account", refresh=True)
+    assert failed.source == "stale"
+    assert failed.error_kind == "auth_required"
+    assert catalog.get(cache_key="account").error_kind == "auth_required"
+    assert calls == 2
+
+    refreshed = catalog.get(cache_key="account", refresh=True)
+    assert refreshed.source == "remote"
+    assert refreshed.error_kind is None
+    assert refreshed.models[0].id == "provider/model-3"
+    assert calls == 3
 
 
 def test_catalog_single_flights_concurrent_refreshes() -> None:
@@ -595,7 +645,6 @@ def test_catalog_retains_safe_error_kind_until_reauthentication(
     assert first.error_kind == second.error_kind == expected
     assert calls == (2 if with_cache else 1)
     assert sentinel not in repr(first) + "".join(logs)
-    # Same account re-login must bypass both the stale list and negative cache.
     failing[0] = False
     catalog.invalidate()
     recovered = catalog.get(cache_key="same-account")

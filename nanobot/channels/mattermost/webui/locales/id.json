@@ -16,23 +16,23 @@
         "placeholder": "ID tim opsional"
       },
       "groupPolicy": {
-        "label": "Perilaku kanal",
+        "label": "Aturan kanal",
         "choices": {
-          "mention": "Hanya saat disebut",
+          "mention": "Hanya mention",
           "open": "Semua pesan",
           "allowlist": "Daftar izin"
         }
       },
       "groupPolicyInThread": {
-        "label": "Perilaku thread",
+        "label": "Aturan thread",
         "choices": {
-          "mention": "Hanya saat disebut",
+          "mention": "Hanya mention",
           "open": "Semua pesan (tanpa sebutan)",
           "allowlist": "Daftar izin"
         }
       },
       "allowFrom": {
-        "label": "Pengguna yang diizinkan",
+        "label": "Pengguna diizinkan",
         "placeholder": "ID pengguna, dipisahkan koma"
       },
       "allowFromMatchMode": {
@@ -44,24 +44,24 @@
         }
       },
       "groupAllowFrom": {
-        "label": "Saluran yang diizinkan"
+        "label": "Kanal diizinkan"
       },
       "replyInThread": {
-        "label": "Balas di thread",
+        "label": "Balasan thread",
         "choices": {
           "true": "Aktif",
           "false": "Mati"
         }
       },
       "includeThreadContext": {
-        "label": "Sertakan konteks thread",
+        "label": "Konteks thread",
         "choices": {
           "true": "Aktif",
           "false": "Mati"
         }
       },
       "threadContextLimit": {
-        "label": "Batas konteks thread"
+        "label": "Batas konteks"
       },
       "streaming": {
         "label": "Streaming",
@@ -77,14 +77,14 @@
         "label": "Selesai emoji"
       },
       "sendProgress": {
-        "label": "Kirim kemajuan",
+        "label": "Kirim progres",
         "choices": {
           "true": "Aktif",
           "false": "Mati"
         }
       },
       "sendToolHints": {
-        "label": "Kirim petunjuk alat",
+        "label": "Petunjuk alat",
         "choices": {
           "true": "Aktif",
           "false": "Mati"
@@ -105,7 +105,7 @@
         }
       },
       "dm_allowFrom": {
-        "label": "Mengizinkan pengguna pesan langsung"
+        "label": "Pengguna DM diizinkan"
       }
     }
   }

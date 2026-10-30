@@ -9,16 +9,15 @@
         "placeholder": "Số điện thoại hoặc ID WhatsApp"
       },
       "groupPolicy": {
-        "label": "Hành vi trong nhóm",
+        "label": "Quy tắc nhóm",
         "choices": {
           "mention": "Chỉ khi được nhắc",
           "open": "Mọi tin nhắn",
           "allowlist": "Danh sách cho phép"
         }
       },
-      "proxy": {
-        "label": "Proxy mạng",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "Dùng proxy"
       }
     }
   },

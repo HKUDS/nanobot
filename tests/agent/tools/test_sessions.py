@@ -1,5 +1,3 @@
-"""Tests for read-only persisted session tools."""
-
 from __future__ import annotations
 
 import json
@@ -11,11 +9,21 @@ import pytest
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.session_messages import SendSessionMessageTool
 from nanobot.agent.tools.sessions import ReadSessionTool, SearchSessionsTool
+from nanobot.bus.queue import MessageBus
 from nanobot.runtime_context import RuntimeContextBlock, append_runtime_context
 from nanobot.session.manager import SessionManager
 from nanobot.session.session_handles import SessionHandleResolver
-from nanobot.webui.transcript import append_transcript_object
+
+
+@pytest.fixture
+async def manager(tmp_path):
+    sessions = SessionManager(tmp_path)
+    try:
+        yield sessions
+    finally:
+        await sessions.state.aclose()
 
 
 def _save_session(
@@ -79,55 +87,26 @@ def test_session_tools_do_not_own_runtime_context(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_search_sessions_reads_the_full_webui_transcript_after_compaction(
-    tmp_path,
-    monkeypatch,
-):
-    webui_dir = tmp_path / "webui"
-    monkeypatch.setattr("nanobot.webui.transcript.get_webui_dir", lambda: webui_dir)
-    monkeypatch.setattr("nanobot.webui.session_list_index.get_webui_dir", lambda: webui_dir)
-    manager = SessionManager(tmp_path)
-    _save_session(
-        manager,
-        "websocket:history",
-        title="History",
-        messages=[{"role": "assistant", "content": "retained suffix"}],
-    )
-    append_transcript_object("websocket:history", {
-        "event": "user",
-        "text": "decision only in the old transcript",
-    })
-
-    with _webui_request():
-        result = _decode(await SearchSessionsTool(manager).execute(query="old transcript"))
-
-    assert [row["session_key"] for row in result["results"]] == ["websocket:history"]
-    assert result["results"][0]["excerpts"][0]["content"] == (
-        "decision only in the old transcript"
-    )
-
-
-@pytest.mark.asyncio
-async def test_search_sessions_has_no_hidden_content_scan_cutoff(tmp_path, monkeypatch):
-    webui_dir = tmp_path / "webui"
-    monkeypatch.setattr("nanobot.webui.transcript.get_webui_dir", lambda: webui_dir)
-    monkeypatch.setattr("nanobot.webui.session_list_index.get_webui_dir", lambda: webui_dir)
-    manager = SessionManager(tmp_path)
-    for index in range(200):
+async def test_search_sessions_has_no_hidden_content_scan_cutoff(manager):
+    with manager._store.transaction():
+        for index in range(200):
+            _save_session(
+                manager,
+                f"websocket:recent-{index:03d}",
+                title=f"Recent {index}",
+                messages=[{"role": "user", "content": "ordinary"}],
+                updated_at=datetime(2025, 1, 1),
+            )
         _save_session(
             manager,
-            f"websocket:recent-{index:03d}",
-            title=f"Recent {index}",
-            messages=[{"role": "user", "content": "ordinary"}],
-            updated_at=datetime(2025, 1, 1),
+            "websocket:old-target",
+            title="Old target",
+            messages=[{"role": "user", "content": "needle after two hundred sessions"}],
+            updated_at=datetime(2024, 1, 1),
         )
-    _save_session(
-        manager,
-        "websocket:old-target",
-        title="Old target",
-        messages=[{"role": "user", "content": "needle after two hundred sessions"}],
-        updated_at=datetime(2024, 1, 1),
-    )
+    persisted = manager.list_sessions()
+    assert len(persisted) == 201
+    assert persisted[-1]["key"] == "websocket:old-target"
 
     with _webui_request():
         result = _decode(await SearchSessionsTool(manager).execute(query="needle"))
@@ -136,11 +115,7 @@ async def test_search_sessions_has_no_hidden_content_scan_cutoff(tmp_path, monke
 
 
 @pytest.mark.asyncio
-async def test_search_sessions_ranks_titles_before_message_matches(tmp_path, monkeypatch):
-    webui_dir = tmp_path / "webui"
-    monkeypatch.setattr("nanobot.webui.transcript.get_webui_dir", lambda: webui_dir)
-    monkeypatch.setattr("nanobot.webui.session_list_index.get_webui_dir", lambda: webui_dir)
-    manager = SessionManager(tmp_path)
+async def test_search_sessions_ranks_titles_before_message_matches(manager):
     _save_session(
         manager,
         "websocket:current",
@@ -162,19 +137,41 @@ async def test_search_sessions_ranks_titles_before_message_matches(tmp_path, mon
         updated_at=datetime(2025, 1, 1),
     )
 
+    handles = SessionHandleResolver(manager).list_all_by_key()
     with _webui_request():
         result = _decode(await SearchSessionsTool(manager).execute(query="pricing"))
 
     rows = result["results"]
     assert isinstance(rows, list)
     assert [row["session_key"] for row in rows] == ["websocket:title", "websocket:body"]
+    assert [row["handle"] for row in rows] == [
+        f"@{handles[key].name}" for key in ("websocket:title", "websocket:body")
+    ]
     assert rows[0]["session_ref"] == "#session/websocket%3Atitle"
     assert rows[1]["excerpts"][0]["content"] == "The pricing model is BYOK."
 
 
 @pytest.mark.asyncio
-async def test_session_tools_hide_private_and_non_conversation_messages(tmp_path):
-    manager = SessionManager(tmp_path)
+async def test_search_keeps_match_if_session_is_deleted_before_handle_lookup(manager, monkeypatch):
+    key = "slack:history"
+    _save_session(manager, key, title="Database notes", messages=[])
+    tool = SearchSessionsTool(manager)
+    lookup = tool._handles.alist_all_by_key
+
+    async def delete_before_lookup():
+        assert await manager.state.delete(key)
+        return await lookup()
+
+    monkeypatch.setattr(tool._handles, "alist_all_by_key", delete_before_lookup)
+    with _webui_request():
+        result = _decode(await tool.execute(query="Database"))
+
+    assert [row["session_key"] for row in result["results"]] == [key]
+    assert result["results"][0]["handle"] is None
+
+
+@pytest.mark.asyncio
+async def test_session_tools_hide_private_and_non_conversation_messages(manager):
     content, marker = append_runtime_context(
         "visible question",
         [RuntimeContextBlock(source="private", content="secret runtime context")],
@@ -182,10 +179,10 @@ async def test_session_tools_hide_private_and_non_conversation_messages(tmp_path
     _save_session(
         manager,
         "websocket:history",
-        title="History",
+        title="",
         messages=[
-            {"role": "user", "content": content, "_runtime_context": marker},
             {"role": "user", "content": "hidden needle", "_hidden_history": True},
+            {"role": "user", "content": content, "_runtime_context": marker},
             {"role": "tool", "content": "tool needle"},
             {"role": "assistant", "content": "visible answer"},
         ],
@@ -203,6 +200,7 @@ async def test_session_tools_hide_private_and_non_conversation_messages(tmp_path
         "visible question",
         "visible answer",
     ]
+    assert [message["message_index"] for message in messages] == [1, 3]
     assert all("secret runtime context" not in message["content"] for message in messages)
 
 
@@ -287,8 +285,7 @@ async def test_read_session_reports_invalid_requests(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_session_tools_read_persisted_sessions_from_any_channel(tmp_path):
-    manager = SessionManager(tmp_path)
+async def test_search_handles_support_reading_and_sending_across_channels(manager):
     _save_session(
         manager,
         "websocket:visible",
@@ -308,6 +305,8 @@ async def test_session_tools_read_persisted_sessions_from_any_channel(tmp_path):
         messages=[{"role": "user", "content": "needle"}],
     )
     tools = SearchSessionsTool(manager), ReadSessionTool(manager)
+    bus = MessageBus()
+    sender = SendSessionMessageTool(sessions=manager, bus=bus)
 
     with request_context(RequestContext(
         channel="telegram",
@@ -315,22 +314,30 @@ async def test_session_tools_read_persisted_sessions_from_any_channel(tmp_path):
         session_key="telegram:external",
     )):
         search = _decode(await tools[0].execute(query="needle"))
-        websocket_read = _decode(await tools[1].execute(session_key="websocket:visible"))
-        slack_read = _decode(await tools[1].execute(session_key="slack:history"))
+        matches = {row["session_key"]: row for row in search["results"]}
+        assert set(matches) == {"websocket:visible", "slack:history"}
+        websocket_handle = matches["websocket:visible"]["handle"]
+        slack_handle = matches["slack:history"]["handle"]
+        websocket_read = _decode(await tools[1].execute(session_key=websocket_handle))
+        slack_read = _decode(await tools[1].execute(session_key=slack_handle))
         current_read = await tools[1].execute(session_key="telegram:external")
+        sent = await sender.execute(
+            to=slack_handle, content="Please follow up on the needle.", expect_reply=False,
+        )
 
-    assert {row["session_key"] for row in search["results"]} == {
-        "websocket:visible",
-        "slack:history",
-    }
-    assert websocket_read["session_key"] == "websocket:visible"
-    assert slack_read["session_key"] == "slack:history"
+    assert websocket_read["handle"] == websocket_handle
+    assert slack_read["handle"] == slack_handle
+    assert [message["content"] for message in slack_read["messages"]] == ["needle"]
     assert current_read.is_error and "session not found" in str(current_read)
+    assert sent == f"Sent to {slack_handle}."
+    assert bus.inbound_size == 1
+    inbound = await bus.consume_inbound()
+    assert inbound.session_key_override == "slack:history"
+    assert inbound.content == "Please follow up on the needle."
 
 
 @pytest.mark.asyncio
-async def test_read_session_accepts_a_persisted_session_handle(tmp_path):
-    manager = SessionManager(tmp_path)
+async def test_read_session_accepts_a_persisted_session_handle(manager):
     _save_session(
         manager,
         "slack:history",
@@ -351,11 +358,7 @@ async def test_read_session_accepts_a_persisted_session_handle(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_session_tools_work_without_request_context(tmp_path, monkeypatch):
-    webui_dir = tmp_path / "webui"
-    monkeypatch.setattr("nanobot.webui.transcript.get_webui_dir", lambda: webui_dir)
-    monkeypatch.setattr("nanobot.webui.session_list_index.get_webui_dir", lambda: webui_dir)
-    manager = SessionManager(tmp_path)
+async def test_session_tools_work_without_request_context(manager):
     _save_session(
         manager,
         "custom:history",

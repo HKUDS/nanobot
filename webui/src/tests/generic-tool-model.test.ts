@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { redactActivityText } from "@/components/thread/activity/activity-text";
 import {
   describeGenericToolRun,
+  canGroupGenericToolRuns,
   parseGenericToolTrace,
   type GenericToolStatus,
 } from "@/components/thread/activity/generic-tool-model";
@@ -15,14 +16,36 @@ function describeRun(line: string, status: GenericToolStatus = "done") {
 }
 
 describe("generic tool activity semantics", () => {
+  it.each(["running", "done", "error"] as const)("shows rg arguments during %s", (status) => {
+    const presentation = describeRun('rg({"args":["-n","hello world","src"]})', status);
+    expect(presentation.detail).toBe('-n "hello world" src');
+    expect(presentation.status).toBe(status);
+  });
+
+  it("bounds and redacts rg argument previews", () => {
+    const presentation = describeRun(`rg(${JSON.stringify({ args: ["sk-proj-abcdefghijklmno", "x".repeat(120)] })})`);
+    expect(presentation.detail).toContain("<redacted>");
+    expect(presentation.detail.length).toBeLessThanOrEqual(88);
+  });
+
+  it("shows rg regex characters and empty arguments", () => {
+    const presentation = describeRun(`rg(${JSON.stringify({ args: [String.raw`resolve\(`, ""] })})`);
+    expect(presentation.detail).toBe('resolve\\( ""');
+  });
+
   it.each([
-    ['find_files({"glob":"*.tsx"})', "Found files", "*.tsx"],
+    ['find_files({"glob":"*.tsx"})', "File search complete", "*.tsx"],
     ['grep({"pattern":"dream_cursor"})', "Searched files", "“dream_cursor”"],
     ['list_dir({"path":"memory"})', "Listed files", "memory"],
     ['read_file({"path":"docs/guide.md"})', "Read file", "docs/guide.md"],
     ['memory_search({"query":"launch date"})', "Searched memory", "“launch date”"],
     ['generate_image({"prompt":"private launch art"})', "Generated image", ""],
-    ['spawn({"label":"Research competitors","task":"private task"})', "Delegated task", "Research competitors"],
+    ['spawn({"label":"Research competitors","task":"private task"})', "Subtask created", "Research competitors"],
+    ['subagent("create")', "Subtask created", ""],
+    ['subagent({"action":"create","label":"Research competitors","task":"private task"})', "Subtask created", "Research competitors"],
+    ['subagent("check")', "Subtask status retrieved", ""],
+    ['subagent("send")', "Message queued for subtask", ""],
+    ['subagent("cancel")', "Stop request processed", ""],
     ['message({"channel":"telegram","content":"private message"})', "Sent message", "telegram"],
     ['my({"action":"check","key":"context_window_tokens"})', "Checked agent settings", "context_window_tokens"],
     ['my({"action":"set","key":"model","value":"private-model"})', "Updated agent settings", "model"],
@@ -90,8 +113,8 @@ describe("generic tool activity semantics", () => {
       { trace: first, status: "done" },
       { trace: second, status: "done" },
     ], i18n.t)).toMatchObject({
-      label: "已搜索文件",
-      aside: "2 次搜索",
+      label: "文件搜索完成",
+      aside: "2 次",
     });
   });
 
@@ -106,6 +129,13 @@ describe("generic tool activity semantics", () => {
         detail: "session…ecret",
       });
     }
+  });
+
+  it("keeps different subtask actions separate while grouping repeated status checks", () => {
+    const item = (action: string) => ({ trace: parseGenericToolTrace(`subagent("${action}")`)!, status: "done" as const });
+    expect(canGroupGenericToolRuns(item("create"), item("check"))).toBe(false);
+    expect(canGroupGenericToolRuns(item("send"), item("cancel"))).toBe(false);
+    expect(canGroupGenericToolRuns(item("check"), item("check"))).toBe(true);
   });
 
   it.each([

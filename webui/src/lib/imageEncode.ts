@@ -38,7 +38,6 @@ function bootWorker(): Worker | null {
       entry.resolve(ev.data);
     });
     worker.addEventListener("error", (ev) => {
-      // Cancel every in-flight request on a Worker crash.
       for (const [, entry] of pending) {
         entry.reject(new Error(`image encoder worker error: ${ev.message}`));
       }
@@ -54,21 +53,18 @@ function bootWorker(): Worker | null {
 }
 
 function newId(): string {
-  // ``crypto.randomUUID`` is widely available; fall back to Math.random if not.
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return (crypto as Crypto).randomUUID();
   }
   return `img-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-/** Encode ``file`` off the main thread when possible. Always resolves — errors
- * are returned as ``{ok: false, reason}`` — so callers can render inline
- * validation without wrapping in try/catch. */
+/** Encode off the main thread when possible. Validation and encoding failures
+ * return ``{ok: false, reason}``; Worker and message-transport failures reject. */
 export async function encodeImage(file: File): Promise<EncodeResponse> {
   const id = newId();
   const w = bootWorker();
   if (!w) {
-    // Inline fallback: same logic, just on the main thread.
     return encodeImageInWorker({ id, file });
   }
   return new Promise<EncodeResponse>((resolve, reject) => {

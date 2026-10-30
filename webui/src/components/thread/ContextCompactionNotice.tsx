@@ -9,13 +9,9 @@ interface ContextCompactionNoticeProps {
 
 export function ContextCompactionNotice({ compaction }: ContextCompactionNoticeProps) {
   const { t } = useTranslation();
-  const title = compaction.phase === "started"
-    ? t("thread.compaction.started", { defaultValue: "Compressing context" })
-    : compaction.phase === "failed"
-      ? t("thread.compaction.failed", { defaultValue: "Context compaction failed" })
-      : compaction.phase === "cancelled"
-        ? t("thread.compaction.cancelled", { defaultValue: "Context compaction cancelled" })
-        : t("thread.compaction.succeeded", { defaultValue: "Context compacted" });
+  const title = t(compaction.reason
+    ? `thread.compaction.reasons.${compaction.reason}.${compaction.phase}`
+    : `thread.compaction.${compaction.phase}`);
 
   return (
     <div

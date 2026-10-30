@@ -38,12 +38,15 @@ def test_file_reference_outside_project_has_no_relative_path(tmp_path) -> None:
 
 
 @pytest.mark.parametrize("target", ["../elsewhere.txt", "linked.txt"])
-def test_file_reference_rejects_traversal_and_symlink_escape(tmp_path, target) -> None:
+def test_file_reference_rejects_traversal_and_symlink_escape(
+    tmp_path, target, create_symlink,
+) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     outside = tmp_path / "elsewhere.txt"
     outside.write_text("example")
-    (workspace / "linked.txt").symlink_to(outside)
+    if target == "linked.txt":
+        create_symlink(workspace / "linked.txt", outside)
     scope = default_workspace_scope(workspace, restrict_to_workspace=True)
     with pytest.raises(WebUIFilePreviewError) as error:
         file_reference_payload(target, scope=scope)
@@ -64,7 +67,6 @@ def test_file_reference_rejects_missing_files_and_directories(tmp_path, target) 
     (b"RIFF\0\0\0\0WEBPexample", "image/webp"),
 ])
 def test_raster_preview_uses_content_signature(tmp_path: Path, data: bytes, mime: str) -> None:
-    # Extension must not determine the rendered MIME type.
     image = tmp_path / "figure.bin"
     image.write_bytes(data)
     scope = default_workspace_scope(tmp_path, restrict_to_workspace=True)
@@ -106,12 +108,12 @@ def test_text_truncation_is_unchanged(tmp_path: Path) -> None:
     assert result["truncated"] is True
 
 
-def test_raster_symlink_cannot_escape_workspace(tmp_path: Path) -> None:
+def test_raster_symlink_cannot_escape_workspace(tmp_path: Path, create_symlink) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     image = tmp_path / "outside.png"
     image.write_bytes(PNG)
-    (workspace / "linked.png").symlink_to(image)
+    create_symlink(workspace / "linked.png", image)
     with pytest.raises(WebUIFilePreviewError) as error:
         file_preview_payload(
             "linked.png", scope=default_workspace_scope(workspace, restrict_to_workspace=True),

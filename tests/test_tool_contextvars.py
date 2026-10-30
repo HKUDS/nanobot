@@ -9,7 +9,7 @@ import pytest
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.message import MessageTool
-from nanobot.agent.tools.spawn import SpawnTool
+from nanobot.agent.tools.subagent import SubagentTool
 from nanobot.cron.service import CronService
 from nanobot.providers.base import GenerationSettings, LLMProvider
 from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META, RuntimeContextBlock
@@ -56,8 +56,8 @@ async def test_message_tool_keeps_task_local_context() -> None:
 
 
 @pytest.mark.asyncio
-async def test_spawn_tool_keeps_task_local_context() -> None:
-    seen: list[tuple[str, str, str]] = []
+async def test_subagent_tool_keeps_task_local_context() -> None:
+    seen: list[tuple[str, str, str, str | None, str | None]] = []
     entered = asyncio.Event()
     release = asyncio.Event()
 
@@ -77,40 +77,46 @@ async def test_spawn_tool_keeps_task_local_context() -> None:
             origin_chat_id: str,
             session_key: str,
             origin_message_id: str | None = None,
+            origin_turn_id: str | None = None,
             temperature: float | None = None,
             workspace_scope=None,
+            session_policy=None,
         ) -> str:
-            seen.append((origin_channel, origin_chat_id, session_key))
+            seen.append((origin_channel, origin_chat_id, session_key, origin_message_id, origin_turn_id))
             return f"{origin_channel}:{origin_chat_id}:{task}"
 
-    tool = SpawnTool(_Manager())
+    tool = SubagentTool(_Manager())
 
     async def task_one() -> str:
         with request_context(RequestContext(
             channel="whatsapp",
             chat_id="chat-a",
+            message_id="msg-a",
+            turn_id="turn-a",
             runtime=_runtime("model-a"),
         )):
             entered.set()
             await release.wait()
-            return await tool.execute(task="one")
+            return await tool.execute(action="create", task="one")
 
     async def task_two() -> str:
         await entered.wait()
         with request_context(RequestContext(
             channel="telegram",
             chat_id="chat-b",
+            message_id="msg-b",
+            turn_id="turn-b",
             runtime=_runtime("model-b"),
         )):
             release.set()
-            return await tool.execute(task="two")
+            return await tool.execute(action="create", task="two")
 
     result_one, result_two = await asyncio.gather(task_one(), task_two())
 
     assert result_one == "whatsapp:chat-a:one"
     assert result_two == "telegram:chat-b:two"
-    assert ("whatsapp", "chat-a", "whatsapp:chat-a") in seen
-    assert ("telegram", "chat-b", "telegram:chat-b") in seen
+    assert ("whatsapp", "chat-a", "whatsapp:chat-a", "msg-a", "turn-a") in seen
+    assert ("telegram", "chat-b", "telegram:chat-b", "msg-b", "turn-b") in seen
 
 
 @pytest.mark.asyncio
@@ -148,12 +154,8 @@ async def test_cron_tool_keeps_task_local_context(tmp_path) -> None:
     }
 
 
-# --- Basic single-task regression tests ---
-
-
 @pytest.mark.asyncio
 async def test_message_tool_basic_request_context_and_execute() -> None:
-    """A bound request context should route a single execution correctly."""
     seen: list[tuple[str, str, str]] = []
 
     async def send_callback(msg):
@@ -170,7 +172,6 @@ async def test_message_tool_basic_request_context_and_execute() -> None:
 
 @pytest.mark.asyncio
 async def test_message_tool_default_values_without_request_context() -> None:
-    """Without a request context, constructor defaults should be used."""
     seen: list[tuple[str, str, str]] = []
 
     async def send_callback(msg):
@@ -188,9 +189,8 @@ async def test_message_tool_default_values_without_request_context() -> None:
 
 
 @pytest.mark.asyncio
-async def test_spawn_tool_basic_request_context_and_execute() -> None:
-    """A bound request context should provide the correct origin."""
-    seen: list[tuple[str, str, str]] = []
+async def test_subagent_tool_basic_request_context_and_execute() -> None:
+    seen: list[tuple[str, str, str, str | None, str | None]] = []
 
     class _Manager:
         max_concurrent_subagents = 1
@@ -208,26 +208,29 @@ async def test_spawn_tool_basic_request_context_and_execute() -> None:
             origin_chat_id,
             session_key,
             origin_message_id=None,
+            origin_turn_id=None,
             temperature=None,
             workspace_scope=None,
+            session_policy=None,
         ):
-            seen.append((origin_channel, origin_chat_id, session_key))
+            seen.append((origin_channel, origin_chat_id, session_key, origin_message_id, origin_turn_id))
             return f"ok: {task}"
 
-    tool = SpawnTool(_Manager())
+    tool = SubagentTool(_Manager())
     with request_context(RequestContext(
         channel="feishu",
         chat_id="chat-abc",
+        message_id="msg-123",
+        turn_id="turn-123",
         runtime=_runtime(),
     )):
-        result = await tool.execute(task="do something")
+        result = await tool.execute(action="create", task="do something")
     assert result == "ok: do something"
-    assert seen == [("feishu", "chat-abc", "feishu:chat-abc")]
+    assert seen == [("feishu", "chat-abc", "feishu:chat-abc", "msg-123", "turn-123")]
 
 
 @pytest.mark.asyncio
-async def test_spawn_tool_rejects_missing_request_runtime() -> None:
-    """Spawning cannot reconstruct a model runtime outside turn admission."""
+async def test_subagent_tool_rejects_missing_request_runtime() -> None:
     seen: list[tuple[str, str, str]] = []
 
     class _Manager:
@@ -248,21 +251,21 @@ async def test_spawn_tool_rejects_missing_request_runtime() -> None:
             origin_message_id=None,
             temperature=None,
             workspace_scope=None,
+            session_policy=None,
         ):
             seen.append((origin_channel, origin_chat_id, session_key))
             return "ok"
 
-    tool = SpawnTool(_Manager())
+    tool = SubagentTool(_Manager())
 
-    result = await tool.execute(task="test")
-    assert result == "Error: spawn requires an active model runtime"
+    result = await tool.execute(action="create", task="test")
+    assert result == "Error: create requires an active model runtime"
     assert result.is_error
     assert seen == []
 
 
 @pytest.mark.asyncio
 async def test_cron_tool_basic_request_context_and_execute(tmp_path) -> None:
-    """A bound request context should provide the correct cron owner."""
     tool = CronTool(CronService(tmp_path / "jobs.json"))
     with request_context(
         RequestContext(channel="wechat", chat_id="user-789", session_key="wechat:user-789")
@@ -279,7 +282,6 @@ async def test_cron_tool_basic_request_context_and_execute(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_webui_cron_tool_uses_origin_session_when_unified_enabled(tmp_path) -> None:
-    """WebUI-created cron jobs stay attached to the creating chat."""
     tool = CronTool(CronService(tmp_path / "jobs.json"))
 
     with request_context(
@@ -303,7 +305,6 @@ async def test_webui_cron_tool_uses_origin_session_when_unified_enabled(tmp_path
 
 @pytest.mark.asyncio
 async def test_cron_tool_snapshots_only_persistable_request_metadata(tmp_path) -> None:
-    """Live runtime context must not poison a persisted WebUI cron job."""
     store_path = tmp_path / "jobs.json"
     service = CronService(store_path)
     tool = CronTool(service)
@@ -338,7 +339,6 @@ async def test_cron_tool_snapshots_only_persistable_request_metadata(tmp_path) -
 
 @pytest.mark.asyncio
 async def test_cron_tool_preserves_thread_scoped_session_key(tmp_path) -> None:
-    """Channel-provided thread session keys should remain the cron owner."""
     tool = CronTool(CronService(tmp_path / "jobs.json"))
     with request_context(
         RequestContext(
@@ -361,7 +361,6 @@ async def test_cron_tool_preserves_thread_scoped_session_key(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_cron_tool_no_context_returns_error(tmp_path) -> None:
-    """Without a request context, add should fail with a clear error."""
     tool = CronTool(CronService(tmp_path / "jobs.json"))
 
     result = await tool.execute(action="add", message="test", every_seconds=60)

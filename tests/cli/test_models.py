@@ -1,5 +1,3 @@
-"""CLI model discovery exercises the same provider boundary as WebUI."""
-
 from types import SimpleNamespace
 
 import httpx

@@ -1,15 +1,12 @@
-"""Shared helpers for decoding ``data:...;base64,...`` URLs to disk.
+"""Data-URL persistence for API uploads and audio transcription.
 
-Historically lived in ``nanobot.api.server``; now shared by the WebSocket
-channel so the ``api`` + ``websocket`` ingress paths apply the same parsing,
-size guard, and filesystem layout.
+Binary WebUI uploads share the media filename layout through ``media_destination``.
 """
 
 from __future__ import annotations
 
 import base64
 import mimetypes
-import re
 import uuid
 from pathlib import Path
 
@@ -18,7 +15,6 @@ from nanobot.utils.helpers import safe_filename
 DEFAULT_MAX_BYTES = 10 * 1024 * 1024
 MAX_FILE_SIZE = DEFAULT_MAX_BYTES
 
-_DATA_URL_RE = re.compile(r"^data:([^;,]+)(?:;[^,]*)*;base64,(.+)$", re.DOTALL)
 _MIME_EXTENSION_OVERRIDES = {
     # Python's ``mimetypes`` maps browser-recorded audio/webm to ``.weba`` and
     # audio/ogg to ``.oga`` on macOS. Some transcription APIs validate by the
@@ -71,10 +67,14 @@ def save_base64_data_url(
     base64 payload itself is malformed. Raises :class:`FileSizeExceeded`
     when the decoded payload is larger than ``max_bytes`` (default 10 MB).
     """
-    m = _DATA_URL_RE.match(data_url)
-    if not m:
+    # Parse delimiters directly so malformed MIME parameters cannot trigger regex backtracking.
+    header, separator, b64_payload = data_url.partition(",")
+    if not separator or header[:5].lower() != "data:" or header[-7:].lower() != ";base64":
         return None
-    mime_type, b64_payload = m.group(1).strip().lower(), m.group(2)
+    mime_type = header[5:-7].partition(";")[0]
+    if not mime_type:
+        return None
+    mime_type = mime_type.strip().lower()
     try:
         raw = base64.b64decode(b64_payload, validate=True)
     except Exception:
@@ -84,10 +84,18 @@ def save_base64_data_url(
     limit = DEFAULT_MAX_BYTES if max_bytes is None else max_bytes
     if len(raw) > limit:
         raise FileSizeExceeded(f"File exceeds {limit // (1024 * 1024)}MB limit")
+    dest = media_destination(media_dir, mime_type, filename=filename)
+    dest.write_bytes(raw)
+    return str(dest)
+
+
+def media_destination(media_dir: Path, mime_type: str, *, filename: str | None = None) -> Path:
+    """Choose the shared media layout for binary and data-URL ingress."""
     ext = _MIME_EXTENSION_OVERRIDES.get(mime_type) or mimetypes.guess_extension(mime_type) or ".bin"
     base = safe_filename(filename or "")
     stem = Path(base).stem[:80] if base else ""
+    # Leave room for the 12-character ID, separator, and extension.
+    max_stem_bytes = 255 - 13 - len(ext.encode("utf-8"))
+    stem = stem.encode("utf-8")[:max_stem_bytes].decode("utf-8", errors="ignore")
     saved_name = f"{uuid.uuid4().hex[:12]}_{stem}{ext}" if stem else f"{uuid.uuid4().hex[:12]}{ext}"
-    dest = media_dir / safe_filename(saved_name)
-    dest.write_bytes(raw)
-    return str(dest)
+    return media_dir / safe_filename(saved_name)

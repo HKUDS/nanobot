@@ -1,5 +1,3 @@
-"""Shared configuration for human-readable nanobot logs."""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -31,6 +29,7 @@ def prepare_log_record(record: "Record") -> bool:
 
     context: list[str] = []
     for label, field in (
+        ("purpose", "purpose"),
         ("request", "request_id"),
         ("turn", "turn_id"),
         ("session", "session_key"),

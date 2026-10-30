@@ -1,3 +1,4 @@
+import i18n from "i18next";
 import { useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -14,7 +15,7 @@ import type {
   ChannelConfigField,
   ChannelFieldPresentation,
   ChannelSetupPresentation,
-} from "@/components/settings/channels/catalog";
+} from "@/channel-plugins/catalog";
 import { channelValidationMessage } from "@/components/settings/channels/validationMessages";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { normalizeLocale } from "@/i18n/config";
@@ -46,9 +47,11 @@ export function channelSetup(
   ): ChannelConfigField => ({
     ...localizeField(field.key),
     section: field.section,
+    control: field.control,
   });
   const presentation: ChannelSetupPresentation = {
     ...definition,
+    privacyNotice: setupMessages?.privacyNotice,
     primaryActionLabel: setupMessages?.primaryAction,
     docsLabel: setupMessages?.docsLabel,
     officialLabel: setupMessages?.officialLabel,
@@ -80,7 +83,9 @@ export function channelSetup(
     const choiceLabels = setupMessages?.fields?.[
       channelFieldMessageKey(feature.name, field.key)
     ]?.choices ?? {};
-    const choices = field.kind === "bool" ? ["true", "false"] : field.choices;
+    const choices = field.kind === "bool"
+      ? (field.inheritable ? ["", "true", "false"] : ["true", "false"])
+      : field.choices;
     return {
       ...copy,
       key: field.key,
@@ -95,7 +100,9 @@ export function channelSetup(
         field.kind === "enum" || field.kind === "bool"
           ? choices.map((choice) => ({
               value: choice,
-              label: choiceLabels[choice] ?? fieldLabel(choice),
+              label: choiceLabels[choice] ?? (choice === ""
+                ? i18n.t("settings.values.default", { lng: locale, ns: "common" })
+                : fieldLabel(choice)),
             }))
           : undefined,
     };

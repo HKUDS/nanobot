@@ -1,8 +1,7 @@
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { MessageBlockMenuActions, MessageBubble, MessageCopyButton } from "@/components/MessageBubble";
-import { MessageLinksMenu, useMessageWebLinks } from "@/components/MessageLinksMenu";
 import { FallbackResponseSources } from "@/components/ResponseSourceBadge";
 import {
   AgentActivityCluster,
@@ -14,13 +13,19 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { fmtDateTime, formatMessageHoverTime } from "@/lib/format";
+import { useLocalPreferences } from "@/hooks/useLocalPreferences";
+import { fmtDateTime, formatMessageHoverTime } from "@/lib/format-time";
 import { projectActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
 import { cn } from "@/lib/utils";
 import type { CliAppInfo, McpPresetInfo, RetryStatus, SlashCommand, UIMessage } from "@/lib/types";
 
 interface ThreadMessagesProps {
   messages: UIMessage[];
+  beforeMessages?: ReactNode;
+  beforeUnit?: { key: string; content: ReactNode };
+  topInset?: number;
+  afterUserMessage?: (message: UIMessage) => ReactNode;
+  afterMessages?: ReactNode;
   temporary?: boolean;
   /** When true, agent turn still in flight — keeps activity timeline expanded. */
   isStreaming?: boolean;
@@ -76,6 +81,11 @@ export function assistantForkFlags(units: DisplayUnit[]): boolean[] {
 
 export function ThreadMessages({
   messages,
+  beforeMessages,
+  beforeUnit,
+  topInset = 0,
+  afterUserMessage,
+  afterMessages,
   temporary = false,
   isStreaming = false,
   activeTurnId = null,
@@ -94,6 +104,7 @@ export function ThreadMessages({
   onActivityToggle,
 }: ThreadMessagesProps) {
   const { t } = useTranslation();
+  const { activityMode } = useLocalPreferences();
   const messageListRef = useRef<HTMLDivElement>(null);
   const mobileActions = useMediaQuery("(max-width: 767px)");
   const units = useMemo(
@@ -135,17 +146,19 @@ export function ThreadMessages({
     ),
     [activeTurnId, currentTurnStartIndex, isStreaming, unitKeys, units],
   );
-  const [expandedActivityKeys, setExpandedActivityKeys] = useState<Set<string>>(() => new Set());
+  const [activityOverrides, setActivityOverrides] = useState<Map<string, boolean>>(() => new Map());
+  useEffect(() => {
+    setActivityOverrides(new Map());
+  }, [activityMode]);
   const [activeContextBlockKey, setActiveContextBlockKey] = useState<string | null>(null);
   const [openContextBlockKey, setOpenContextBlockKey] = useState<string | null>(null);
   const pointedContextBlockRef = useRef<string | null>(null);
   const setActivityExpanded = useCallback((key: string, expanded: boolean) => {
     onActivityToggle?.();
-    setExpandedActivityKeys((current) => {
-      if (current.has(key) === expanded) return current;
-      const next = new Set(current);
-      if (expanded) next.add(key);
-      else next.delete(key);
+    setActivityOverrides((current) => {
+      if (current.get(key) === expanded) return current;
+      const next = new Map(current);
+      next.set(key, expanded);
       return next;
     });
   }, [onActivityToggle]);
@@ -164,6 +177,11 @@ export function ThreadMessages({
     setOpenContextBlockKey((current) => open ? key : current === key ? null : current);
   }, []);
   let nextUserIndex = hiddenUserMessageCount;
+  const preludeIndex = Math.max(0, beforeUnit ? unitKeys.indexOf(beforeUnit.key) : 0);
+  const inset = topInset > 0 ? <div aria-hidden style={{ height: topInset }} /> : null;
+  const preludeInset = preludeIndex === 0 ? inset : null;
+  const renderPrelude = (prefix: ReactNode, marginTop?: string) => prefix || preludeInset || beforeMessages
+    ? <div key="thread-prelude" className={cn("flow-root", marginTop)}>{prefix}{preludeInset}{beforeMessages}</div> : null;
 
   return (
     <div ref={messageListRef} className="flex w-full flex-col">
@@ -171,7 +189,10 @@ export function ThreadMessages({
         containerRef={messageListRef}
         onQuoteSelection={onQuoteSelection}
       />
-      {units.map((unit, index) => {
+      {[
+        preludeIndex > 0 ? <Fragment key="top-inset">{inset}</Fragment> : null,
+        units.length === 0 ? renderPrelude(null) : null,
+        ...units.flatMap((unit, index) => {
         const next = units[index + 1];
         const hasBodyBelow =
           unit.type === "activity"
@@ -193,7 +214,7 @@ export function ThreadMessages({
           : marginAfterPrevUnit(units[previousVisibleIndex]);
         const blockActivityExpanded = showBlockContext
           && contextBlockKey !== undefined
-          && expandedActivityKeys.has(contextBlockKey);
+          && (activityOverrides.get(contextBlockKey) ?? activityMode === "expanded");
         const deferOffscreenRender =
           index < units.length - 1
           && (
@@ -222,13 +243,17 @@ export function ThreadMessages({
           && unit.message.deliveryStatus !== "failed"
         ) nextUserIndex += 1;
 
-        return (
+        const prefix = beforeUnit?.key === unitKeys[index] ? beforeUnit.content : null;
+        const prelude = index === preludeIndex ? renderPrelude(prefix, marginTop) : null;
+        return [
+          prelude,
+          <Fragment key={`unit:${unitKeys[index]}`}>
           <ThreadDisplayUnit
             key={unitKeys[index]}
             unitKey={unitKeys[index]}
             unit={unit}
             mobileActions={mobileActions}
-            marginTop={marginTop}
+            marginTop={prelude ? "" : marginTop}
             userPromptId={userPromptId}
             hasBodyBelow={hasBodyBelow}
             suppressActivity={suppressActivity}
@@ -264,8 +289,13 @@ export function ThreadMessages({
             onContextBlockFocusChange={setContextBlockFocused}
             onContextBlockMenuOpenChange={setContextBlockMenuOpen}
           />
-        );
-      })}
+          {unit.type === "message" && unit.message.role === "user" ? (
+            afterUserMessage?.(unit.message)
+          ) : null}
+          </Fragment>,
+        ];
+      })]}
+      {afterMessages}
       {pendingActivity ? (
         <div className={cn("thread-message-row", units.length > 0 && "mt-5")}>
           <AgentActivityCluster
@@ -364,7 +394,6 @@ interface ThreadDisplayUnitProps {
 
 interface MessageBlockMenuProps {
   mobileActions: boolean;
-  messageRoot: RefObject<HTMLElement>;
   message: UIMessage;
   isTurnStreaming: boolean;
   contextBlockKey: string;
@@ -383,7 +412,6 @@ interface MessageBlockMenuProps {
 
 function MessageBlockMenu({
   mobileActions,
-  messageRoot,
   message,
   isTurnStreaming,
   contextBlockKey,
@@ -397,9 +425,6 @@ function MessageBlockMenu({
   const { t } = useTranslation();
   const contentRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const links = useMessageWebLinks(messageRoot, open);
-  const [linksShown, setLinksShown] = useState(false);
-  useEffect(() => { if (!open) setLinksShown(false); }, [open]);
   const [triggerHeight, setTriggerHeight] = useState(28);
   useLayoutEffect(() => {
     const trigger = triggerRef.current;
@@ -420,16 +445,12 @@ function MessageBlockMenu({
   // Re-evaluated when this message becomes active, including after an overnight idle.
   const shortTime = mobileActions ? "" : formatMessageHoverTime(timestamp);
   const fullTime = shortTime ? fmtDateTime(timestamp) : "";
-  const actions = linksShown && links.length > 0 ? <MessageLinksMenu links={links}
-    expanded={mobileActions}
-    onBack={() => { setLinksShown(false); contentRef.current?.focus({ preventScroll: true }); }}
-    onClose={() => onOpenChange(false)} /> : <MessageBlockMenuActions
+  const actions = <MessageBlockMenuActions
     message={message}
     isTurnStreaming={isTurnStreaming}
     onForkFromHere={onForkFromHere ? () => { if (mobileActions) onOpenChange(false); onForkFromHere(); } : undefined}
     activity={activity}
     sheet={mobileActions}
-    onViewLinks={links.length > 0 ? () => setLinksShown(true) : undefined}
   />;
   if (mobileActions) {
     return <div data-message-mobile-actions className={cn("mt-1 flex items-center", message.role === "user" ? "me-2 justify-end" : "-ms-2")}>
@@ -437,7 +458,7 @@ function MessageBlockMenu({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogTrigger asChild>
           <button ref={triggerRef} type="button" data-message-block-menu-trigger aria-label={label}
-            className="inline-flex h-11 w-8 items-center justify-center rounded-control text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            className="inline-flex h-11 w-8 items-center justify-center rounded-control text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <MoreHorizontal className="h-4 w-4" strokeWidth={1.75} aria-hidden />
           </button>
         </DialogTrigger>
@@ -470,8 +491,7 @@ function MessageBlockMenu({
             data-message-block-menu-highlight
             className={cn(
               "inline-flex h-4 w-7 items-center justify-center rounded-full",
-              "transition-[background-color,box-shadow,scale]",
-              "group-hover:bg-muted/70 group-active:scale-[0.96]",
+              "transition-colors",
               "group-focus-visible:ring-2 group-focus-visible:ring-ring",
               "motion-reduce:transform-none motion-reduce:transition-none",
             )}
@@ -582,7 +602,8 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   useEffect(() => {
     const element = elementRef.current;
     if (!element || !deferOffscreenRender || interacted || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver(([entry]) => {
+    const observer = new IntersectionObserver((entries) => {
+      const entry = entries[entries.length - 1];
       if (!entry) return;
       if (!entry.isIntersecting) {
         const height = element.getBoundingClientRect().height;
@@ -634,7 +655,6 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   const blockMenu = unit.type === "message" && contextBlockKey !== undefined ? (
     <MessageBlockMenu
       mobileActions={mobileActions}
-      messageRoot={elementRef}
       message={unit.message}
       isTurnStreaming={isTurnStreaming}
       contextBlockKey={contextBlockKey}
@@ -908,10 +928,10 @@ export function unitKeysForDisplay(units: DisplayUnit[]): string[] {
   const occurrences = new Map<string, number>();
   return units.map((unit, index) => {
     const base = unitKeyBase(unit, index);
-    if (!base.startsWith("turn-") || base.endsWith("-user")) return base;
+    if (!base.startsWith("turn-")) return base;
     const next = (occurrences.get(base) ?? 0) + 1;
     occurrences.set(base, next);
-    return `${base}-${next}`;
+    return base.endsWith("-user") && next === 1 ? base : `${base}-${next}`;
   });
 }
 

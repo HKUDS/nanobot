@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 
-import type { ChannelPresentation } from "@/components/settings/channels/catalog";
+import type { ChannelPresentation } from "@/channel-plugins/catalog";
 import type {
   NanobotFeatureInfo,
   NanobotFeaturesPayload,
@@ -34,6 +34,7 @@ export type ChannelPluginConnectFlowProps = {
   feature: NanobotFeatureInfo;
   idleLabel?: string;
   connectRequestId?: number;
+  onOpenAdvanced?: () => void;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
 };
 
