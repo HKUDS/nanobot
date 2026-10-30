@@ -2117,7 +2117,7 @@ AnySearch works out of the box with no key, via its anonymous quota (lower rate 
 
 Create a key at [platform.deepseek.com](https://platform.deepseek.com). Set `tools.web.search.apiKey` directly or with a `${VAR_NAME}` reference. Missing credentials cause a configuration error, with no provider fallback.
 
-Queries are limited to 128 Unicode characters after trimming whitespace; longer queries are rejected. Pricing is ¥5 per 1,000 successful requests, with an account-wide limit of 5 QPS across API keys. See the [DeepSeek Search API documentation](https://api-docs.deepseek.com/zh-cn/guides/search/) for search syntax and billing details.
+Queries are limited to 128 Unicode characters after trimming whitespace; longer queries are rejected. See the [DeepSeek Search API documentation](https://api-docs.deepseek.com/zh-cn/guides/search/) for search syntax, pricing, and account-wide rate limits.
 
 #### `tools.web.search`
 

@@ -972,8 +972,8 @@ class WebSearchTool(Tool):
                     )
                 if r.status_code == 429:
                     return ToolResult.error(
-                        "Error: DeepSeek search rate limited after retry. The account "
-                        "limit is 5 QPS; retry later or reduce the frequency of concurrent web_search calls."
+                        "Error: DeepSeek search rate limited after retry. "
+                        "Retry later or reduce the frequency of concurrent web_search calls."
                     )
                 if _deepseek_is_retryable(r.status_code):
                     return ToolResult.error(

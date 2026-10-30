@@ -733,6 +733,11 @@ async def test_deepseek_search_gives_up_after_retry_budget(
     assert is_tool_error_result(result)
     assert expected_text in result
     assert "after retry" in result
+    if status == 429:
+        assert result == (
+            "Error: DeepSeek search rate limited after retry. "
+            "Retry later or reduce the frequency of concurrent web_search calls."
+        )
 
 
 @pytest.mark.asyncio
