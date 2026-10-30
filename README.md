@@ -28,7 +28,8 @@
   <p>
     <a href="https://discord.gg/MnCvHqpUGB">Discord</a> ·
     <a href="https://x.com/nanobot_project">X</a> ·
-    <a href="./COMMUNICATION.md">WeChat / Feishu</a>
+    <a href="./COMMUNICATION.md#wechat">WeChat 微信交流群</a> ·
+    <a href="./COMMUNICATION.md#hkuds-community">Feishu</a>
   </p>
 </div>
 
