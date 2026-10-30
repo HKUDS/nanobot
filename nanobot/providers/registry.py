@@ -301,6 +301,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         name="opper",
         keywords=("opper",),
         env_key="OPPER_API_KEY",
+        request_apis=("chat_completions", "responses"),
         display_name="Opper",
         backend="openai_compat",
         is_gateway=True,
