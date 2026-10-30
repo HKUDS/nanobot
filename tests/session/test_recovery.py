@@ -9,6 +9,7 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import RecoveryStateEvent, SessionUpdatedEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import ProviderConversationState
+from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.recovery import (
     PENDING_FOLLOWUPS_KEY,
@@ -602,9 +603,11 @@ async def test_new_user_message_supersedes_waiting_recovery(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
-async def test_new_user_message_cancels_active_recovery_task(tmp_path: Path) -> None:
+@pytest.mark.parametrize("channel", ["websocket", "discord"])
+async def test_new_input_only_supersedes_recovery_for_websocket(tmp_path: Path, channel: str) -> None:
     coordinator, bus, sessions = _coordinator(tmp_path)
-    session = sessions.get_or_create("websocket:chat")
+    coordinator.unified_session = True
+    session = sessions.get_or_create(UNIFIED_SESSION_KEY)
     session.metadata[RECOVERY_METADATA_KEY] = {
         "status": "resuming",
         "recovery_id": "active",
@@ -620,24 +623,35 @@ async def test_new_user_message_cancels_active_recovery_task(tmp_path: Path) -> 
 
     task = asyncio.create_task(_active_recovery())
     await started.wait()
-    coordinator.register_recovery_task("websocket:chat", task)
+    coordinator.register_recovery_task(session.key, task)
 
     newer = InboundMessage(
-        channel="websocket",
+        channel=channel,
         sender_id="user",
         chat_id="chat",
         content="new request",
+        session_key_override=session.key,
     )
-    assert await coordinator.admit(newer) is True
-    assert task.cancelled()
-    restored = sessions.get_or_create("websocket:chat")
-    assert restored.metadata[RECOVERY_METADATA_KEY]["reason"] == "superseded"
-    assert restored.messages[-1]["_recovery_interrupted"] is True
-    first = bus.outbound.get_nowait().event
-    second = bus.outbound.get_nowait().event
-    assert isinstance(first, RecoveryStateEvent)
-    assert isinstance(second, SessionUpdatedEvent)
-    assert bus.outbound.empty()
+    try:
+        assert await coordinator.admit(newer) is True
+        restored = sessions.get_or_create(session.key)
+        if channel == "websocket":
+            assert task.cancelled()
+            assert restored.metadata[RECOVERY_METADATA_KEY]["reason"] == "superseded"
+            assert restored.messages[-1]["_recovery_interrupted"] is True
+            first = bus.outbound.get_nowait().event
+            second = bus.outbound.get_nowait().event
+            assert isinstance(first, RecoveryStateEvent)
+            assert isinstance(second, SessionUpdatedEvent)
+        else:
+            assert not task.done()
+            assert restored.metadata[RECOVERY_METADATA_KEY] == {
+                "status": "resuming", "recovery_id": "active", "attempts": 1,
+            }
+        assert bus.outbound.empty()
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
 
 @pytest.mark.asyncio

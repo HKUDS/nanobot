@@ -50,7 +50,12 @@ def request_origin_from_metadata(metadata: Mapping[str, Any]) -> RequestOrigin |
 
 
 class RecoveryAdmission(Protocol):
-    """Narrow AgentLoop boundary for explicit recovery validation."""
+    """Own recovery eligibility before queue injection and worker dispatch.
+
+    Messages carry their effective session key and may come from any channel.
+    Implementations must tolerate repeated admission. Admission may cancel an
+    active worker, so callers must re-read queue ownership afterwards.
+    """
 
     async def admit(self, message: InboundMessage) -> bool: ...
 

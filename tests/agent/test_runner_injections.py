@@ -1138,7 +1138,8 @@ async def test_websocket_followup_is_admitted_before_recovery_queue(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_unified_websocket_followup_admits_effective_session(tmp_path):
+@pytest.mark.parametrize("channel", ["websocket", "discord"])
+async def test_unified_followup_admits_effective_session(tmp_path, channel):
     from nanobot.bus.events import InboundMessage
     from nanobot.session.keys import UNIFIED_SESSION_KEY
 
@@ -1151,7 +1152,7 @@ async def test_unified_websocket_followup_admits_effective_session(tmp_path):
     loop._pending_queues[UNIFIED_SESSION_KEY] = pending
 
     msg = InboundMessage(
-        channel="websocket",
+        channel=channel,
         sender_id="u",
         chat_id="chat",
         content="new request",
@@ -1166,7 +1167,10 @@ async def test_unified_websocket_followup_admits_effective_session(tmp_path):
         assert admitted_msg.session_key == UNIFIED_SESSION_KEY
         assert queued_msg.session_key == UNIFIED_SESSION_KEY
         assert queued_msg.content == msg.content
-        assert queued_msg.metadata["_recovery_followup_id"]
+        if channel == "websocket":
+            assert queued_msg.metadata["_recovery_followup_id"]
+        else:
+            assert queued_msg.metadata == msg.metadata
     finally:
         await loop.aclose()
 

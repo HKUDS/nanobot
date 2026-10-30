@@ -1451,13 +1451,10 @@ class AgentLoop:
                 msg,
                 session_key_override=effective_key,
             )
-        # A newer WebUI message must supersede an explicit recovery
-        # before it is injected into that recovery's pending queue.
-        # Without this admission point, a recovered turn could finish
-        # first and only then observe the user's newer request.
+        # Mid-turn injection bypasses _dispatch_one, so admit before joining
+        # an active queue. Admission may cancel its worker and release the queue.
         if (
             effective_key in self._pending_queues
-            and msg.channel == "websocket"
             and self._recovery_admission is not None
             and not await self._recovery_admission.admit(routed_msg)
         ):
