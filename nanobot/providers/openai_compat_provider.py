@@ -1516,9 +1516,8 @@ class OpenAICompatProvider(LLMProvider):
         last_unindexed: int | None = None
 
         def _unindexed_key(tc: Any) -> int:
-            """Slot for a delta without ``index``. Gemini's OpenAI-compatible API omits it and sends
-            each parallel call whole in its own chunk, so a new id (or a name on an id-less call)
-            starts a call and anything else continues the last one."""
+            # Gemini omits index and sends each parallel call whole: a new id (or a name on an
+            # id-less call) starts a call, anything else continues the last one.
             nonlocal last_unindexed
             tc_id = _get(tc, "id")
             fn = _get(tc, "function")
@@ -1536,7 +1535,6 @@ class OpenAICompatProvider(LLMProvider):
             return key
 
         def _accum_tc(tc: Any) -> None:
-            """Accumulate one streaming tool-call delta into *tc_bufs*."""
             tc_index = _get(tc, "index")
             if tc_index is None:
                 tc_index = _unindexed_key(tc)

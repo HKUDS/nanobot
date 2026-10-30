@@ -246,8 +246,7 @@ def test_parse_chunks_dict_preserves_extra_content() -> None:
 
 
 def test_parse_chunks_keeps_parallel_calls_without_index_apart() -> None:
-    """Gemini's OpenAI-compatible stream sends each parallel call whole in its own chunk,
-    without ``index``, and ends the turn with finish_reason "stop"."""
+    # Gemini sends each parallel call whole, without index, and ends with finish_reason "stop".
     def tool_chunk(call: dict) -> dict:
         return {"choices": [{"index": 0, "delta": {"role": "assistant", "tool_calls": [call]}}]}
 
