@@ -32,6 +32,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { CatalogSkeleton } from "@/components/settings/shared/CatalogSkeleton";
+import { ProxySettingsControl } from "@/components/settings/shared/ProxySettingsControl";
 
 import {
   DismissibleStatusMessage,
@@ -84,6 +85,7 @@ export interface CustomMcpForm {
   env: string;
   headers: string;
   toolTimeout: string;
+  useProxy: boolean;
 }
 
 export const DEFAULT_CUSTOM_MCP_FORM: CustomMcpForm = {
@@ -96,11 +98,13 @@ export const DEFAULT_CUSTOM_MCP_FORM: CustomMcpForm = {
   env: "",
   headers: "",
   toolTimeout: "30",
+  useProxy: false,
 };
 
 export function AppsCatalogSettings({
   setupName,
   onSetupOpened,
+  onConfigureProxy,
   cliApps,
   mcpPresets,
   cliAppsLoading,
@@ -146,6 +150,7 @@ export function AppsCatalogSettings({
 }: {
   setupName?: string | null;
   onSetupOpened?: () => void;
+  onConfigureProxy?: () => void;
   cliApps: CliAppsPayload | null;
   mcpPresets: McpPresetsPayload | null;
   cliAppsLoading: boolean;
@@ -172,7 +177,7 @@ export function AppsCatalogSettings({
   onQueryChange: (value: string) => void;
   onFilterChange: (value: AppsKindFilter) => void;
   onCliAction: (action: "install" | "update" | "uninstall" | "test", name: string) => void;
-  onMcpAction: (action: "enable" | "disable" | "remove" | "test" | "reconnect", name: string, values?: Record<string, string>) => void;
+  onMcpAction: (action: "enable" | "disable" | "remove" | "test" | "reconnect" | "proxy", name: string, values?: Record<string, string>) => void;
   onMcpOAuthConnect: (name: string, reset?: boolean, values?: Record<string, string>) => void;
   onMcpOAuthCancel: () => void;
   onMcpOAuthOpen: () => void;
@@ -206,12 +211,12 @@ export function AppsCatalogSettings({
     })),
   ]
     .filter((item) => {
-      if (normalizedQuery) return appsSearchText(item).includes(normalizedQuery);
-      if (filter === "ready") return appsReady(item);
-      if (filter === "cli") {
-        return item.kind === "cli" || item.preset.source === "agent-plugin";
-      }
-      return item.kind === "mcp" && item.preset.source !== "agent-plugin";
+      const matchesFilter = filter === "ready"
+        ? appsReady(item)
+        : filter === "cli"
+          ? item.kind === "cli" || item.preset.source === "agent-plugin"
+          : item.kind === "mcp" && item.preset.source !== "agent-plugin";
+      return matchesFilter && (!normalizedQuery || appsSearchText(item).includes(normalizedQuery));
     })
     .sort((left, right) => {
       const rank = Number(!appsReady(left)) - Number(!appsReady(right));
@@ -221,7 +226,7 @@ export function AppsCatalogSettings({
     ? (cliApps?.apps ?? []).find((app) => app.name === cliFocusName && app.installed)
     : null;
   const loading = (mcpPresetsLoading && !mcpPresets)
-    || ((filter !== "mcp" || Boolean(normalizedQuery)) && cliAppsLoading && !cliApps);
+    || (filter !== "mcp" && cliAppsLoading && !cliApps);
   const cliAppCount = cliApps?.apps.length ?? 0;
   const emptyTitle = normalizedQuery
     ? tx("settings.apps.empty", "No tools match your search.")
@@ -325,6 +330,7 @@ export function AppsCatalogSettings({
                   preset={item.preset}
                   openConnection={setupName === item.preset.name}
                   onConnectionOpened={onSetupOpened}
+                  onConfigureProxy={onConfigureProxy}
                   values={mcpFieldValues[item.preset.name] ?? {}}
                   actionKey={mcpActionKey}
                   oauthFlow={mcpOAuthFlow?.name === item.preset.name ? mcpOAuthFlow : null}
@@ -348,7 +354,8 @@ export function AppsCatalogSettings({
           </div>
         ) : null}
         {loading ? (
-          <CatalogSkeleton label={tx("settings.apps.loading", "Loading apps…")} layout="apps" />
+          <CatalogSkeleton label={tx("settings.apps.loading", "Loading apps…")} layout="apps"
+            appActionLabel={filter === "cli" ? undefined : tx("settings.mcp.manage", "Manage")} />
         ) : !items.length && !statusIsError ? (
           <div className="px-3 py-12 text-center text-sm text-muted-foreground">
             <p>{emptyTitle}</p>
@@ -386,6 +393,7 @@ export function AppsCatalogSettings({
 
       {filter === "mcp" ? (
         <McpCustomServerPanel
+          onConfigureProxy={onConfigureProxy}
           form={customMcpForm}
           configImport={mcpConfigImport}
           actionKey={mcpActionKey}
@@ -493,6 +501,7 @@ function CliAppsCatalogRow({
 function McpAppsCatalogRow({
   openConnection = false,
   onConnectionOpened,
+  onConfigureProxy,
   preset,
   values,
   actionKey,
@@ -514,6 +523,7 @@ function McpAppsCatalogRow({
 }: {
   openConnection?: boolean;
   onConnectionOpened?: () => void;
+  onConfigureProxy?: () => void;
   preset: McpPresetInfo;
   values: Record<string, string>;
   actionKey: string | null;
@@ -525,7 +535,7 @@ function McpAppsCatalogRow({
   showBrandLogos: boolean;
   showTypeBadge: boolean;
   onFieldChange: (presetName: string, fieldName: string, value: string) => void;
-  onAction: (action: "enable" | "disable" | "remove" | "test" | "reconnect", name: string, values?: Record<string, string>) => void;
+  onAction: (action: "enable" | "disable" | "remove" | "test" | "reconnect" | "proxy", name: string, values?: Record<string, string>) => void;
   onOAuthConnect: (name: string, reset?: boolean, values?: Record<string, string>) => void;
   onOAuthCancel: () => void;
   onOAuthOpen: () => void;
@@ -537,6 +547,7 @@ function McpAppsCatalogRow({
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const [managementOpen, setManagementOpen] = useState(false);
   const [managementTab, setManagementTab] = useState<McpManagementTab>("overview");
+  const connectionStatusId = useId();
   useEffect(() => {
     if (!openConnection) return;
     setManagementTab("connection");
@@ -551,7 +562,8 @@ function McpAppsCatalogRow({
   const toolsBusy = actionKey === `tools:${preset.name}`;
   const oauthBusy = actionKey === `oauth:${preset.name}`;
   const anotherOAuthBusy = Boolean(actionKey?.startsWith("oauth:")) && !oauthBusy;
-  const busy = enableBusy || disableBusy || removeBusy || testBusy || reconnectBusy || toolsBusy || oauthBusy;
+  const proxyBusy = actionKey === `proxy:${preset.name}`;
+  const busy = enableBusy || disableBusy || removeBusy || testBusy || reconnectBusy || toolsBusy || oauthBusy || proxyBusy;
   const agentPlugin = preset.source === "agent-plugin";
   const toggleable = preset.enabled !== undefined;
   const isOAuth = preset.auth === "oauth";
@@ -563,6 +575,7 @@ function McpAppsCatalogRow({
   const runtimeConnected = !toggleable && preset.runtime_status === "connected";
   const runtimeConnecting = !toggleable && preset.runtime_status === "connecting";
   const runtimeFailed = !toggleable && preset.installed && preset.runtime_status === "failed";
+  const connecting = Boolean(oauthFlow) || (runtimeConnecting && configuredInstalled);
   const statusLabel = toggleable
     ? tx("settings.nanobotFeatures.enabled", "Enabled")
     : runtimeConnected
@@ -582,7 +595,7 @@ function McpAppsCatalogRow({
   const callbackErrorId = `${callbackInputId}-error`;
 
   const enableOrOpenSetup = () => {
-    if (needsSetupInput || (preset.installed && !preset.configured && hasFields)) {
+    if (preset.transport !== "stdio" || needsSetupInput || (preset.installed && !preset.configured && hasFields)) {
       setManagementTab("connection");
       setManagementOpen(true);
       return;
@@ -601,8 +614,15 @@ function McpAppsCatalogRow({
   return (
     <article className="min-w-0 rounded-control transition-colors settings-hover">
       <div className="group flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-3 py-3">
+        <button
+          type="button"
+          aria-label={preset.display_name}
+          aria-describedby={connecting ? connectionStatusId : undefined}
+          onClick={() => openManagement()}
+          className="flex min-w-0 flex-[1_1_6rem] items-center gap-3 rounded-control text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
         <McpPresetLogo preset={preset} showBrandLogos={showBrandLogos} />
-        <div className="min-w-[8rem] flex-[1_1_8rem]">
+        <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
             <h3 className="truncate text-[14px] font-semibold leading-5 text-foreground">{preset.display_name}</h3>
             {showTypeBadge ? (
@@ -614,57 +634,44 @@ function McpAppsCatalogRow({
             ) : null}
           </div>
           <p
+            id={connectionStatusId}
             className={cn(
               "mt-0.5 flex min-w-0 items-center gap-1.5 text-[12.5px] leading-5 text-muted-foreground",
-              runtimeFailed && "font-medium text-destructive",
+              !connecting && runtimeFailed && "font-medium text-destructive",
             )}
           >
-            {runtimeFailed ? (
+            {connecting ? (
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />
+            ) : runtimeFailed ? (
               <TriangleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden />
             ) : null}
             <span className="truncate">
-              {runtimeFailed ? failureLabel : detail}
+              {connecting ? tx("settings.mcp.connectingLabel", "Connecting…") : runtimeFailed ? failureLabel : detail}
             </span>
-            {!runtimeFailed && agentPlugin && description && preset.requires ? (
+            {!connecting && !runtimeFailed && agentPlugin && description && preset.requires ? (
               <span className="min-w-0 truncate">{preset.requires}</span>
             ) : null}
           </p>
         </div>
+        </button>
         <div className="ml-auto flex shrink-0 items-center gap-1">
           {oauthFlow ? (
-            <>
-              <AppsActionButton
-                ariaLabel={t("settings.mcp.connectingAccount", {
-                  name: preset.display_name,
-                  defaultValue: "Connecting {{name}}",
-                })}
-                visibleLabel={tx("settings.mcp.connectingLabel", "Connecting…")}
-                busy
-              />
-              <AppsActionButton
-                ariaLabel={tx("settings.actions.cancel", "Cancel")}
-                visibleLabel={tx("settings.actions.cancel", "Cancel")}
-                tone="danger"
-                onClick={onOAuthCancel}
-              />
-            </>
+            <AppsActionButton
+              ariaLabel={tx("settings.actions.cancel", "Cancel")}
+              visibleLabel={tx("settings.actions.cancel", "Cancel")}
+              tone="danger"
+              onClick={onOAuthCancel}
+            />
           ) : runtimeConnecting && configuredInstalled ? (
-            <>
-              <AppsActionButton
-                ariaLabel={`${preset.display_name}: ${tx("settings.mcp.connectingLabel", "Connecting…")}`}
-                visibleLabel={tx("settings.mcp.connectingLabel", "Connecting…")}
-                busy
-              />
-              <AppsActionButton
-                ariaLabel={tx("settings.mcp.remove", "Remove")}
-                busy={removeBusy}
-                disabled={busy && !removeBusy}
-                tone="danger"
-                onClick={() => onAction("remove", preset.name)}
-              >
-                <Trash2 className="h-4 w-4" aria-hidden />
-              </AppsActionButton>
-            </>
+            <AppsActionButton
+              ariaLabel={tx("settings.mcp.remove", "Remove")}
+              busy={removeBusy}
+              disabled={busy && !removeBusy}
+              tone="danger"
+              onClick={() => onAction("remove", preset.name)}
+            >
+              <Trash2 className="h-4 w-4" aria-hidden />
+            </AppsActionButton>
           ) : runtimeFailed ? (
             <AppsActionButton
               ariaLabel={t("settings.mcp.manageTitle", {
@@ -708,7 +715,7 @@ function McpAppsCatalogRow({
                   defaultValue: "Manage {{name}}",
                 })}
                 visibleLabel={tx("settings.mcp.manage", "Manage")}
-                busy={testBusy || toolsBusy || removeBusy || reconnectBusy}
+                busy={testBusy || toolsBusy || removeBusy || reconnectBusy || proxyBusy}
                 disabled={busy}
                 tone={runtimeConnected ? "installed" : "default"}
                 onClick={() => openManagement("overview")}
@@ -740,7 +747,7 @@ function McpAppsCatalogRow({
               visibleLabel={hasFields ? tx("settings.mcp.configure", "Connect") : tx("settings.mcp.enable", "Enable")}
               busy={enableBusy}
               onClick={() => {
-                if (hasFields) openManagement("connection");
+                if (hasFields || preset.transport !== "stdio") openManagement("connection");
                 else onAction("enable", preset.name, values);
               }}
             />
@@ -872,6 +879,7 @@ function McpAppsCatalogRow({
 
       {managementOpen ? (
         <McpManagementDialog
+          onConfigureProxy={onConfigureProxy}
           preset={preset}
           values={values}
           actionKey={actionKey}
@@ -993,6 +1001,7 @@ function appsSearchText(item: AppsCatalogItem): string {
 }
 
 function McpCustomServerPanel({
+  onConfigureProxy,
   form,
   configImport,
   actionKey,
@@ -1001,6 +1010,7 @@ function McpCustomServerPanel({
   onSave,
   onImportConfig,
 }: {
+  onConfigureProxy?: () => void;
   form: CustomMcpForm;
   configImport: string;
   actionKey: string | null;
@@ -1157,6 +1167,16 @@ function McpCustomServerPanel({
                 </p>
               ) : null}
             </div>
+          ) : null}
+
+          {remote ? (
+            <ProxySettingsControl
+              className="mt-3 rounded-control bg-background/55 px-3 py-3"
+              checked={form.useProxy}
+              disabled={customBusy}
+              onChange={(useProxy) => update("useProxy", useProxy)}
+              onConfigure={onConfigureProxy}
+            />
           ) : null}
 
           {remote && form.auth === "headers" ? (
@@ -1379,7 +1399,8 @@ function McpPresetLogo({
   return (
     <span
       className={cn(
-        "grid shrink-0 place-items-center font-semibold text-white",
+        "grid shrink-0 place-items-center font-semibold",
+        preset.brand_color ? "text-white" : "text-muted-foreground",
         compact
           ? "h-10 w-10 rounded-control text-[12px]"
           : "h-9 w-9 rounded-[10px] text-[12px]",

@@ -30,7 +30,6 @@ def resolve_path(path: str | Path, workspace: str | Path | None = None, *, stric
 
 
 def _resolve_logical_path(path: str | Path, workspace: str | Path | None = None) -> Path:
-    """Return an absolute normalized path without following symlinks."""
     candidate = Path(path).expanduser()
     if not candidate.is_absolute() and workspace is not None:
         candidate = Path(workspace).expanduser() / candidate
@@ -62,7 +61,6 @@ def _is_path_exactly_allowed(
     resolved_path: Path,
     files: Iterable[str | Path],
 ) -> bool:
-    """Return True when *path* resolves exactly to one of the allowed files."""
     logical_key = _path_key(logical_path)
     if _path_key(resolved_path) != logical_key:
         return False

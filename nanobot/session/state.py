@@ -1,5 +1,3 @@
-"""Ordered session operations with detached reads and durable acknowledgements."""
-
 from __future__ import annotations
 
 import asyncio
@@ -14,8 +12,14 @@ from datetime import datetime
 from typing import Any, TypeVar, cast
 
 from nanobot.bus.events import InboundMessage
+from nanobot.session.display_history import HistoryFact, HistoryKind, HistoryReader
 from nanobot.session.keys import is_dream_session
-from nanobot.session.manager import Session, SessionIdentity, SessionPolicy, fork_session
+from nanobot.session.manager import (
+    Session,
+    SessionIdentity,
+    SessionPolicy,
+    fork_session,
+)
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.session.sqlite_store import SessionConflictError, SqliteSessionStore
 from nanobot.session.types import PARENT_SESSION_KEY, SessionTypes
@@ -133,7 +137,6 @@ class SessionState:
         operation_name: str,
         barrier: bool = True,
     ) -> _T:
-        """Admit bounded work with FIFO key affinity or a global barrier."""
         self._bind_loop()
         name = operation_name
         if key is None:
@@ -504,6 +507,8 @@ class SessionState:
             setattr(draft, item.name, getattr(fresh, item.name))
 
     def _apply_turn(self, draft: Session) -> tuple[Session, int]:
+        from nanobot.session.recovery import PENDING_FOLLOWUPS_KEY, acknowledge_pending_followups
+
         baseline = draft._baseline  # pyright: ignore[reportPrivateUsage]
         if baseline is None:
             raise ValueError("session changes require an owner-issued draft")
@@ -517,20 +522,15 @@ class SessionState:
         ):
             raise SessionConflictError("session was reset")
         for key in baseline.metadata.keys() | draft.metadata.keys():
+            if key == PENDING_FOLLOWUPS_KEY:
+                # queue_followup owns this journal; a draft may predate its inputs.
+                continue
             missing = object()
             before = baseline.metadata.get(key, missing)
             after = draft.metadata.get(key, missing)
             if before == after:
                 continue
             existing = current.metadata.get(key, missing)
-            if key == "pending_user_followups":
-                old_records = cast(list[dict[str, Any]], before) if isinstance(before, list) else []
-                new_records = cast(list[dict[str, Any]], after) if isinstance(after, list) else []
-                removed_ids = {item["id"] for item in old_records} - {item["id"] for item in new_records}
-                from nanobot.session.recovery import acknowledge_pending_followups
-
-                acknowledge_pending_followups(current, removed_ids)
-                continue
             if existing != before and existing != after:
                 raise SessionConflictError(f"turn metadata changed: {key}")
             if after is missing:
@@ -554,6 +554,7 @@ class SessionState:
                 if existing != before and existing != after:
                     raise SessionConflictError(f"session {name} changed")
                 setattr(current, name, deepcopy(after))
+        acknowledge_pending_followups(current, draft.consumed_followup_ids)
         current.policy = draft.policy
         current.updated_at = max(current.updated_at, draft.updated_at)
         return current, self._changed_start(before_messages, current.messages)
@@ -612,8 +613,9 @@ class SessionState:
         updates: Mapping[str, Any],
         *,
         expected_generation: str | None = None,
+        validate_existing: Callable[[Mapping[str, Any]], None] | None = None,
     ) -> tuple[str, bool]:
-        """Open one generation and atomically attach admission metadata."""
+        """Open one generation and atomically validate and attach admission metadata."""
         values = deepcopy(dict(updates))
         if _RESERVED_KEYS.intersection(values):
             raise ValueError("turn state must be changed through turn operations")
@@ -633,6 +635,8 @@ class SessionState:
                     and session.generation != expected_generation
                 ):
                     raise SessionConflictError("session admission belongs to a replaced session")
+                if not created and validate_existing is not None:
+                    validate_existing(session.metadata)
                 session.metadata.update(values)
                 header_only = session.policy.persist and session.persisted
                 if header_only:
@@ -693,6 +697,25 @@ class SessionState:
         if baseline is not None:
             metadata = {**baseline.metadata, _CHECKPOINT_KEY: committed.metadata[_CHECKPOINT_KEY]}
             draft._baseline = replace(baseline, metadata=metadata, provider_state=committed.provider_state)  # pyright: ignore[reportPrivateUsage]
+
+    async def project_history(
+        self, key: str, project: Callable[[HistoryReader], _T],
+    ) -> _T:
+        return await self._execute(
+            key, lambda: self._store.project_history(key, project),
+            operation_name="project_history", write=False,
+        )
+
+    async def append_history(
+        self, key: str, facts: Sequence[HistoryFact], *, expected_generation: str | None,
+    ) -> None:
+        """Append to an existing session; None selects its current generation."""
+        records = list(facts)
+        await self._execute(
+            key,
+            lambda: self._store.append_history(key, deepcopy(records), expected_generation=expected_generation),
+            operation_name="append_history",
+        )
 
     async def record_delivery(
         self,
@@ -935,6 +958,7 @@ class SessionState:
     async def fork(
         self, source_key: str, target_key: str, before_user_index: int,
         *, title: str | None = None,
+        history_projection: Callable[[Session], list[HistoryFact]] | None = None,
     ) -> Session | None:
         def commit() -> Session | None:
             def write() -> Session | None:
@@ -947,6 +971,11 @@ class SessionState:
                 if title:
                     target.metadata["title"] = title
                 self._commit(target)
+                copied = self._store.copy_history_prefix(source_key, target, before_user_index)
+                if not copied and history_projection is not None:
+                    facts = history_projection(target)
+                    facts.append(HistoryFact(HistoryKind.FORK_BOUNDARY, created_at_ms=int(target.created_at.timestamp() * 1000)))
+                    self._store.append_history(target.key, facts, expected_generation=target.generation)
                 return target
 
             target = self._store.run_write(write)
@@ -1082,7 +1111,7 @@ class SessionState:
                 if old is not None:
                     session.policy = old.policy
                     session.metadata = deepcopy(old.metadata)
-                for name in (*_RESERVED_KEYS, "webui_recovery", "_last_summary"):
+                for name in (*_RESERVED_KEYS, "webui_recovery", "_last_summary", "_stopped_at_iteration_limit"):
                     session.metadata.pop(name, None)
                 if session.policy.persist:
                     self._store.delete(key)

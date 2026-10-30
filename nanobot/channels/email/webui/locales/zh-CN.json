@@ -157,8 +157,7 @@
       },
       "trustedAuthservIds": {
         "label": "可信邮件认证服务",
-        "placeholder": "mx.google.com，用逗号分隔",
-        "help": "填写可信的 authserv-id\n\n接收邮件服务添加的准确 authserv-id。启用 SPF 或 DKIM 验证时必填。"
+        "placeholder": "mx.google.com，用逗号分隔"
       }
     }
   },

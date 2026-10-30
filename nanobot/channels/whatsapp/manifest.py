@@ -1,5 +1,3 @@
-"""WhatsApp management contract."""
-
 from nanobot.channels._manifest import DIRECT_GROUP_POLICIES, field
 from nanobot.channels.contracts import ChannelManagementSpec, ChannelSetupSpec
 from nanobot.channels.plugin import ChannelPlugin
@@ -8,7 +6,7 @@ from nanobot.channels.whatsapp.validation import validate
 
 SETUP_SPEC = ChannelSetupSpec(
     fields={
-        "proxy": field(),
+        "useProxy": field("bool", default=False),
         "allowFrom": field("list", snapshot=False),
         "groupPolicy": field(
             "enum",

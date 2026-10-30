@@ -2,7 +2,6 @@ import { useLayoutEffect } from "react";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { isNativeRuntime } from "@/lib/runtime";
 
-/** One viewport owner for navigation, workbench composers and ordinary threads. */
 export function useAppViewport() {
   const touch = useMediaQuery("(any-pointer: coarse)");
   useLayoutEffect(() => {

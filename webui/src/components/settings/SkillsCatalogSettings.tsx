@@ -5,7 +5,6 @@ import {
   CircleAlert,
   Copy,
   KeyRound,
-  Loader2,
   PowerOff,
   RefreshCw,
   Search,
@@ -32,6 +31,7 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { SkillsMarketplace } from "@/components/settings/SkillsMarketplace";
 import { CatalogSkeleton } from "@/components/settings/shared/CatalogSkeleton";
+import { SkeletonStatus } from "@/components/settings/shared/SkeletonStatus";
 import { ToggleButton } from "@/components/ui/toggle-button";
 import { deleteSkill, fetchSkillDetail, updateSkillEnabled } from "@/lib/api";
 import { notifySkillsChanged, requestSkillsRefresh } from "@/lib/skill-events";
@@ -200,6 +200,7 @@ export function SkillsCatalogSettings({ skills, loading = false, error = false }
       )}
 
       <SkillDetailSheet
+        key={selectedSkill ? `${selectedSkill.source}:${selectedSkill.name}` : "closed"}
         skill={selectedSkill}
         open={selectedSkill !== null}
         onOpenChange={(open) => {
@@ -299,7 +300,6 @@ function SkillDetailSheet({
   useEffect(() => {
     if (!open || !skill) return;
     let cancelled = false;
-    setDetail(null);
     setLoading(true);
     setLoadFailed(false);
     setActionError("");
@@ -449,12 +449,22 @@ function SkillDetailSheet({
               </div>
             </div>
 
-            {loading ? (
-              <div className="mt-8 flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                {t("settings.skills.loadingDetail", { defaultValue: "Loading skill details..." })}
+            {loading && !detail ? (
+              <div className="mt-6">
+                <SkeletonStatus label={t("settings.skills.loadingDetail", { defaultValue: "Loading skill details..." })} className="space-y-5">
+                  <div data-skill-toggle-skeleton className="flex min-h-16 items-center justify-between gap-3 border-y border-border/45 px-1 py-3.5">
+                    <div className="h-3 w-28 rounded bg-muted-foreground/20" /><div className="h-5 w-[38px] rounded-full bg-muted-foreground/20" />
+                  </div>
+                  {!skill.available && enabled ? <div className="rounded-floating border border-border/45 p-4">
+                    <div className="h-4 w-28 rounded bg-muted-foreground/20" /><div className="mt-3 h-3 w-4/5 rounded bg-muted-foreground/15" />
+                    <div className="mt-3 h-9 w-24 rounded-full bg-muted-foreground/15" />
+                  </div> : null}
+                  <div data-skill-instructions-skeleton className="flex min-h-[70px] items-center justify-between rounded-floating border border-border/45 bg-muted/20 px-3 py-3">
+                    <div className="h-3 w-32 rounded bg-muted-foreground/20" /><div className="h-2.5 w-12 rounded bg-muted-foreground/15" />
+                  </div>
+                </SkeletonStatus>
               </div>
-            ) : loadFailed ? (
+            ) : loadFailed && !detail ? (
               <div className="mt-8 rounded-floating bg-destructive/10 px-3 py-3 text-sm text-destructive">
                 {t("settings.skills.loadFailed", { defaultValue: "Could not load skill details." })}
               </div>
@@ -477,14 +487,14 @@ function SkillDetailSheet({
                             defaultValue: "Enable {{name}}",
                           })
                     }
-                    disabled={actionBusy}
+                    disabled={actionBusy || loading}
                     onChange={() => void toggleEnabled()}
                   />
                 </div>
 
-                {actionError ? (
-                  <div className="rounded-control bg-destructive/10 px-3 py-2.5 text-[13px] text-destructive">
-                    {actionError}
+                {actionError || loadFailed ? (
+                  <div role="alert" className="rounded-control bg-destructive/10 px-3 py-2.5 text-[13px] text-destructive">
+                    {actionError || t("settings.skills.loadFailed", { defaultValue: "Could not load skill details." })}
                   </div>
                 ) : null}
 
@@ -513,7 +523,7 @@ function SkillDetailSheet({
                       type="button"
                       variant="outline"
                       size="sm"
-                      disabled={actionBusy}
+                      disabled={actionBusy || loading}
                       onClick={() => setDeleteOpen(true)}
                       className={cn(
                         "h-10 w-full shrink-0 rounded-full border-destructive/20 text-destructive",

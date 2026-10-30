@@ -1,5 +1,3 @@
-"""Synthetic privacy regressions for tool diagnostics, without external requests."""
-
 import asyncio
 import sys
 from contextlib import asynccontextmanager

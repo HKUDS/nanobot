@@ -15,8 +15,8 @@ WebUI behavior:
 - Skips when `NANOBOT_SKIP_WEBUI_BUILD=1` is set.
 - Reuses `nanobot/web/dist/` only when it is already fresh, unless
   `NANOBOT_FORCE_WEBUI_BUILD=1` is set.
-- Uses `bun` when available, otherwise falls back to `npm`. The chosen tool
-  performs `install` followed by `run build`.
+- Uses `bun` when available, otherwise falls back to `npm`, or provisions Bun
+  when neither is available. Bun builds use `--bun` so Node is not required.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ def _load_webui_build_module() -> ModuleType:
 class WebUIBuildHook(BuildHookInterface):
     PLUGIN_NAME = "webui-build"
 
-    def initialize(self, version: str, build_data: dict) -> None:  # noqa: D401
+    def initialize(self, version: str, build_data: dict) -> None:
         root = Path(self.root)
         docs_dir = root / "docs"
         references_dir = root / "nanobot" / "skills" / "nanobot-document" / "references"

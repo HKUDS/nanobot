@@ -16,7 +16,7 @@ Use MCP when the capability you need already exists as an MCP server, or when yo
 
 Complete [Quick Start](../quick-start.md) if nanobot is not installed or cannot reply yet. If you already have a working WebUI or CLI session, continue here using that instance; no reinstall or second gateway is needed.
 
-Install the MCP server runtime separately. Many examples use `npx`, `uvx`, or a remote HTTP endpoint.
+Choose a connection type first: use **stdio** for a tool that nanobot starts as a local process (you must install its runtime, such as `npx` or `uvx`); use **HTTP** or **SSE** for a tool available at a remote URL. If the remote server requires sign-in, configure OAuth in Apps and connect it in the browser.
 
 ## Minimal working example
 
@@ -62,7 +62,7 @@ Restart nanobot and ask a question that requires the MCP tool.
 ## Security notes
 
 - Stdio MCP starts a local process; review the command before enabling it.
-- HTTP/SSE MCP uses nanobot's SSRF guard, including OAuth discovery, registration, token exchange, and redirects.
+- HTTP/SSE connections are checked to prevent nanobot from reaching private or internal network addresses. This check also applies during OAuth sign-in and redirects.
 - OAuth credentials live in the nanobot data directory, not in `config.json`.
 - Allow private HTTP MCP hosts only with narrow `tools.ssrfWhitelist` CIDRs.
 - Do not place secrets in command arguments when environment variables or headers can be used.

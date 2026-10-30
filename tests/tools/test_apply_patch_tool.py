@@ -462,7 +462,6 @@ def test_apply_patch_edits_rolls_back_when_later_write_fails(tmp_path, monkeypat
         written = write_text(path, *args, **kwargs)
         if path == second and not failed:
             failed = True
-            # A persistence error can occur after the file has already changed.
             raise OSError("injected second write failure")
         return written
 

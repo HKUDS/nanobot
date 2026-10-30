@@ -28,8 +28,12 @@
         "choices": {
           "mention": "Hanya mention",
           "open": "Semua pesan",
-          "allowlist": "Daftar izin"
+          "allowlist": "Daftar izin",
+          "listen": "Dengar (balas saat disebut)"
         }
+      },
+      "groupPolicyOverrides": {
+        "label": "Pengecualian aturan per ruang (JSON)"
       },
       "allowFrom": {
         "label": "Pengguna diizinkan"
@@ -67,6 +71,13 @@
           "false": "Mati"
         }
       },
+      "replyToMessage": {
+        "label": "Kutip pesan",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
       "streaming": {
         "label": "Streaming",
         "choices": {
@@ -74,9 +85,8 @@
           "false": "Mati"
         }
       },
-      "proxy": {
-        "label": "Proxy jaringan",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "Gunakan proxy"
       }
     }
   }

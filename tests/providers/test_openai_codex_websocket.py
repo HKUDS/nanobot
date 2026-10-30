@@ -1,5 +1,3 @@
-"""Exercise the Codex provider against local Responses WebSocket and SSE peers."""
-
 from __future__ import annotations
 
 import asyncio
@@ -266,6 +264,10 @@ async def test_gateway_continues_image_then_pdf_attachment_turn(codex_peer, tmp_
         assert len(server.requests) == 2
         initial, continued = [body for _, body in server.requests]
         assert "input_image" in json.dumps(initial["input"])
+        assert any(
+            block.get("type") == "input_text" and str(image) in block["text"]
+            for item in initial["input"] for block in item.get("content", [])
+        )
         assert continued["previous_response_id"] == "resp_1"
         assert "input_image" not in json.dumps(continued["input"])
         assert f"[Attachment: {pdf}]" in continued["input"][0]["content"][0]["text"]
@@ -283,7 +285,6 @@ async def test_gateway_prepares_image_batch_and_preserves_originals(codex_peer, 
     for path in paths:
         image.save(path, "JPEG", quality=95)
     originals = [path.read_bytes() for path in paths]
-    # Each image fits by itself; the combined base64 payload requires preparation.
     original_sizes = [4 * ((len(raw) + 2) // 3) for raw in originals]
     assert max(original_sizes) < 1_000_000 < sum(original_sizes)
     small = tmp_path / "thumbnail.jpg"

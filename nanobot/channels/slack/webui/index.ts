@@ -56,6 +56,7 @@ export default {
       fields: [
         { key: "channels.slack.appToken", section: "credentials" },
         { key: "channels.slack.botToken", section: "credentials" },
+        { key: "channels.slack.useProxy", section: "connection", control: "switch" },
         { key: "channels.slack.groupPolicy", section: "behavior" },
       ],
     },

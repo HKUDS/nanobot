@@ -1,6 +1,5 @@
-"""Remote setup discovers metadata, not secrets, and never invents sudo access."""
-
 import asyncio
+import getpass
 import json
 import os
 import subprocess
@@ -17,6 +16,13 @@ from nanobot.webui.remote_ssh import RemoteError, RemoteProfile
 
 if sys.platform != "win32":
     import pwd
+
+
+@pytest.fixture(autouse=True)
+def local_probe_user(monkeypatch):
+    # The probe runs over SSH on Unix in production; its local Windows harness
+    # must not depend on the test runner's optional username environment.
+    monkeypatch.setattr(getpass, "getuser", lambda: "probe-user")
 
 
 def locate(monkeypatch, capsys, path, units="", properties=""):
@@ -38,7 +44,7 @@ def locate(monkeypatch, capsys, path, units="", properties=""):
 
 def test_default_config_found_without_reading_contents(tmp_path, monkeypatch, capsys):
     path = tmp_path / "config.json"
-    path.write_text("model-secret")  # Even invalid config content isn't read by discovery.
+    path.write_text("model-secret")
     result, calls = locate(monkeypatch, capsys, path)
     assert result["candidates"] == [{"config_path": str(path), "runtime_user": "", "service": ""}]
     assert len(calls) == 1

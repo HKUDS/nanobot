@@ -1,5 +1,3 @@
-"""A regular cloud login can complete pairing without guessing a sudo command."""
-
 import json
 import subprocess
 from pathlib import Path

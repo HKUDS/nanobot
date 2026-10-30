@@ -1,5 +1,3 @@
-"""Tests for /stop task cancellation."""
-
 from __future__ import annotations
 
 import asyncio
@@ -513,7 +511,6 @@ class TestSubagentCancellation:
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
             consolidator=MagicMock(spec=Consolidator),
         )
-        # Replace the real exec session manager with a mock
         mock_exec_mgr = AsyncMock(spec=ExecSessionManager)
         mock_exec_mgr.terminate_by_owner = AsyncMock(return_value=0)
         mgr._exec_session_manager = mock_exec_mgr
@@ -727,7 +724,6 @@ class TestSubagentCancellation:
 
 
 class TestSubagentAnnounceSessionKey:
-    """Verify _announce_result uses the effective session key for mid-turn routing."""
 
     def _make_mgr(self):
         """Create a SubagentManager with mocked deps and its bus."""
@@ -758,7 +754,6 @@ class TestSubagentAnnounceSessionKey:
 
     @pytest.mark.asyncio
     async def test_announce_uses_raw_key_in_normal_mode(self):
-        """Without unified sessions, session_key_override is the raw channel:chat_id."""
         mgr, bus = self._make_mgr()
 
         origin = {"channel": "telegram", "chat_id": "222", "session_key": "telegram:222"}
@@ -770,7 +765,6 @@ class TestSubagentAnnounceSessionKey:
 
     @pytest.mark.asyncio
     async def test_announce_falls_back_to_origin_when_no_session_key(self):
-        """When session_key is None, fallback to f'{channel}:{chat_id}'."""
         mgr, bus = self._make_mgr()
 
         origin = {"channel": "discord", "chat_id": "333", "session_key": None}
@@ -783,7 +777,6 @@ class TestSubagentAnnounceSessionKey:
 
     @pytest.mark.asyncio
     async def test_spawn_routes_result_to_parent_session(self):
-        """Background results return to the parent's canonical session."""
 
         mgr, bus = self._make_mgr()
 

@@ -1,0 +1,508 @@
+{
+  "common": {
+    "unavailable": "No disponible",
+    "selected": "Selección: {{value}}",
+    "savingPreview": "Guardando valores de vista previa…",
+    "savedPreview": "Valores de vista previa guardados",
+    "providerAction": "Se seleccionó la configuración del proveedor",
+    "reset": "Restablecer vista previa"
+  },
+  "button": {
+    "title": "Botones",
+    "description": "Un mismo botón con distintas apariencias y tamaños según sus opciones.",
+    "options": "variant cambia la apariencia; size cambia las dimensiones; disabled bloquea la interacción; onClick corresponde al código que lo utiliza.",
+    "variants": "Variantes — distintos estilos del mismo botón",
+    "sizes": "Tamaños",
+    "add": "Añadir ejemplo",
+    "clicks": "Clics en botones: {{count}}"
+  },
+  "input": {
+    "title": "Campos de texto",
+    "description": "Entrada de texto y la variante compartida para búsquedas.",
+    "options": "Usa Input para campos normales y SearchInput para búsquedas. Proporciona una etiqueta y explica las entradas no válidas.",
+    "name": "Nombre de ejemplo",
+    "projectName": "Nombre del proyecto",
+    "search": "Búsqueda",
+    "searchName": "Búsqueda de ejemplo",
+    "searchProjects": "Buscar proyectos",
+    "invalid": "No válido",
+    "invalidName": "Nombre no válido",
+    "required": "Introduce un nombre de proyecto.",
+    "disabledName": "Campo de nombre desactivado"
+  },
+  "textarea": {
+    "title": "Entrada multilínea",
+    "description": "Texto de varias líneas con el estilo de foco compartido.",
+    "options": "Acepta las propiedades nativas de textarea: value, onChange, rows y disabled.",
+    "notes": "Notas de ejemplo",
+    "disabledNotes": "Notas desactivadas",
+    "readOnly": "Vista previa de solo lectura"
+  },
+  "toggle": {
+    "title": "Interruptores",
+    "description": "Un interruptor controlado de encendido y apagado, compartido por ajustes, espacios de trabajo y canales.",
+    "options": "El código que lo utiliza gestiona checked y onChange. label proporciona el nombre accesible.",
+    "enable": "Activar ejemplo",
+    "unavailableOn": "Interruptor encendido no modificable",
+    "unavailableOff": "Interruptor apagado no modificable"
+  },
+  "select": {
+    "title": "Selectores",
+    "description": "Una selección única con navegación por teclado y opciones desactivadas.",
+    "options": "Combina Select, SelectTrigger, SelectValue, SelectContent y SelectItem. La raíz gestiona value/onValueChange.",
+    "fast": "Rápido",
+    "model": "Modelo de ejemplo",
+    "disabledModel": "Selector de modelo desactivado"
+  },
+  "segmented": {
+    "title": "Selección segmentada",
+    "description": "Un pequeño conjunto de opciones siempre visibles.",
+    "options": "value, options y onChange son controlados. mode=\"tabs\" añade navegación entre pestañas con las flechas.",
+    "day": "Día",
+    "week": "Semana",
+    "month": "Mes",
+    "period": "Periodo de ejemplo",
+    "selected": "Periodo seleccionado: {{value}}"
+  },
+  "combobox": {
+    "title": "Selección con búsqueda",
+    "description": "Opciones con búsqueda y navegación compartida por teclado y puntero.",
+    "options": "useComboboxNavigation proporciona propiedades de entrada, lista y opciones; el código que lo utiliza filtra los valores y gestiona la selección.",
+    "search": "Buscar opciones de ejemplo",
+    "placeholder": "Escribe o usa las flechas",
+    "choices": "Opciones de ejemplo",
+    "empty": "No hay opciones coincidentes",
+    "selected": "Opción seleccionada: {{value}}"
+  },
+  "chevron": {
+    "title": "Flecha de control",
+    "description": "La flecha compartida por los controles de selección.",
+    "options": "className permite ajustar la posición. El icono es decorativo; el control al que pertenece proporciona el nombre accesible."
+  },
+  "dialog": {
+    "title": "Diálogos",
+    "description": "Un editor modal con cambios en borrador, selección anidada y restauración del foco.",
+    "options": "El código que lo utiliza gestiona open/onOpenChange y el borrador y guardado. Incluye siempre DialogTitle y una descripción cuando sea útil.",
+    "open": "Abrir diálogo",
+    "edit": "Editar etiqueta de ejemplo",
+    "help": "Los cambios solo se aplican a esta vista previa.",
+    "label": "Etiqueta de ejemplo",
+    "save": "Guardar etiqueta",
+    "saved": "Etiqueta guardada: {{name}}"
+  },
+  "alert": {
+    "title": "Diálogos de confirmación",
+    "description": "Confirmación explícita con controles separados para cancelar y ejecutar.",
+    "options": "Combina título, descripción y pie; ejecuta la acción en el controlador de AlertDialogAction.",
+    "remove": "Eliminar ejemplo",
+    "confirmTitle": "¿Eliminar este ejemplo?",
+    "help": "Esto solo cambia el estado de la vista previa.",
+    "confirm": "Confirmar eliminación",
+    "removed": "Ejemplo eliminado.",
+    "available": "Ejemplo disponible."
+  },
+  "sheet": {
+    "title": "Paneles laterales",
+    "description": "Un panel modal unido a un borde del área visible.",
+    "options": "SheetContent admite side. Incluye SheetTitle y SheetDescription.",
+    "open": "Abrir panel lateral",
+    "panelTitle": "Panel lateral de ejemplo",
+    "help": "Controles auxiliares junto a la página actual.",
+    "notes": "Notas del panel",
+    "placeholder": "Prueba a editar aquí"
+  },
+  "popover": {
+    "title": "Paneles emergentes",
+    "description": "Una pequeña superficie interactiva anclada a su activador.",
+    "options": "Combina el activador y el contenido; open/onOpenChange pueden controlarse. El contenido sigue el portal del diálogo al que pertenece.",
+    "open": "Abrir panel emergente",
+    "note": "Nota rápida"
+  },
+  "menu": {
+    "title": "Menús desplegables",
+    "description": "Acciones, selección única, menús anidados y entradas desactivadas.",
+    "options": "Usa onSelect para acciones y un grupo de opciones excluyentes para una elección persistente.",
+    "view": "Opciones de vista",
+    "layout": "Diseño",
+    "comfortable": "Espacioso",
+    "compact": "Compacto",
+    "rename": "Renombrar",
+    "more": "Más acciones",
+    "duplicate": "Duplicar",
+    "none": "Ninguna",
+    "status": "Densidad: {{density}}. Acción: {{action}}."
+  },
+  "tooltip": {
+    "title": "Consejos y ayudas",
+    "description": "HoverHint combina las primitivas compartidas de ayuda; tooltip.tsx es su punto de importación público.",
+    "options": "Usa HoverHint para consejos normales. Mantén visibles los errores esenciales. El puntero y el foco del teclado siguen las reglas de temporización del producto.",
+    "primitive": "Ayuda básica",
+    "primitiveHelp": "Retardo compartido para el puntero y aparición inmediata con el foco del teclado.",
+    "hint": "Consejo al pasar el puntero",
+    "hintHelp": "Un consejo compuesto con el mismo comportamiento de foco y puntero."
+  },
+  "truncated": {
+    "title": "Ayuda para texto truncado",
+    "description": "Muestra una ayuda solo si el texto medido está truncado.",
+    "options": "Proporciona text y un ancho limitado. Añade tabIndex si el propio texto debe recibir el foco del teclado."
+  },
+  "disclosure": {
+    "title": "Contenido plegable",
+    "description": "Contenido desplegable que conserva el estado de sus hijos al plegarse.",
+    "options": "Disclosure gestiona la expansión; DisclosureContent acepta una propiedad open controlada para activadores personalizados.",
+    "show": "Mostrar opciones avanzadas",
+    "help": "Este borrador se conserva al cerrar y volver a abrir.",
+    "draft": "Borrador del contenido plegable"
+  },
+  "expandable": {
+    "title": "Texto desplegable",
+    "description": "Una vista previa con límite de líneas del mismo texto montado.",
+    "options": "El código que lo utiliza gestiona expanded. lines fija las líneas al plegar; proporciona un control accesible.",
+    "less": "Mostrar menos",
+    "more": "Mostrar más"
+  },
+  "imageViewport": {
+    "title": "Área de imagen",
+    "description": "Ajuste, zoom, desplazamiento y pellizco propios de cada imagen.",
+    "options": "Proporciona una className con límites y vuelve a montar si cambia la identidad de la imagen. Usa panWithArrows=false cuando una galería gestione las flechas."
+  },
+  "loadingRing": {
+    "title": "Anillo de actividad",
+    "description": "Un indicador de actividad compartido con pista opcional.",
+    "options": "className define el tamaño y el color. track=false oculta la pista; strokeWidth y strokeDasharray ajustan el arco. Respeta la preferencia de movimiento reducido."
+  },
+  "streaming": {
+    "title": "Etiquetas animadas",
+    "description": "Una animación de texto compartida para la reflexión activa y las etiquetas de herramientas.",
+    "options": "active controla la animación. Los hijos de tipo texto o número proporcionan la superposición de glifos; se respeta la reducción de movimiento.",
+    "animate": "Animar etiqueta",
+    "working": "Procesando el siguiente paso…"
+  },
+  "markdown": {
+    "title": "Respuestas Markdown",
+    "description": "El renderizador de producción en continuo, con tablas, código y fórmulas.",
+    "options": "children es texto Markdown. streaming controla el contenido incompleto; onOpenFilePreview corresponde a la pantalla.",
+    "state": "Estado de Markdown"
+  },
+  "code": {
+    "title": "Visualización de código",
+    "description": "Resaltado de sintaxis, números de línea, copia, salida ANSI y filas adaptadas al área visible.",
+    "options": "code y language proporcionan el contenido; showLineNumbers, wrapLongLines y chrome controlan la presentación. El resaltado del área visible exige números de línea y líneas sin ajuste.",
+    "format": "Formato del código"
+  },
+  "math": {
+    "title": "Fórmulas matemáticas",
+    "description": "El contenedor compartido que ajusta las fórmulas en bloque renderizadas por Markdown.",
+    "options": "Usa MarkdownText para código TeX. DisplayMath recibe nodos matemáticos ya renderizados y los escala al ancho disponible."
+  },
+  "message": {
+    "title": "Mensajes",
+    "description": "Mensajes del usuario y del asistente, con estados de reflexión y entrega.",
+    "options": "message es un UIMessage proyectado por el entorno de ejecución del chat. Los datos y las acciones de red quedan fuera del renderizador.",
+    "state": "Estado del mensaje"
+  },
+  "activity": {
+    "title": "Actividad del agente",
+    "description": "Primitivas de actividad combinadas en una secuencia en curso, terminada o fallida.",
+    "options": "Pasa texto, estado y expansión controlada. La pasarela ejecuta las herramientas; estos componentes renderizan su estado proyectado.",
+    "state": "Estado de actividad",
+    "working": "Procesando",
+    "details": "Detalles de actividad",
+    "collapse": "Plegar",
+    "readError": "No se pudo leer el archivo",
+    "read": "Leer código fuente"
+  },
+  "files": {
+    "title": "Cambios en archivos",
+    "description": "Referencias de archivos, recuentos de líneas modificadas y diferencias desplegables.",
+    "options": "edits contiene resúmenes para mostrar; displayMode elige summary/diff/collapsed_diff; la pantalla proporciona onOpenFilePreview.",
+    "error": "No se pudo aplicar el cambio de ejemplo.",
+    "state": "Estado del cambio de archivo",
+    "operation": "Operación de archivo",
+    "display": "Visualización de diferencias",
+    "selected": "Archivo seleccionado: {{path}}",
+    "hint": "Selecciona una referencia de archivo para probar su función de retorno."
+  },
+  "media": { "study": "Estudio de color {{count}}" },
+  "imageGallery": {
+    "title": "Miniaturas de imágenes",
+    "description": "Diseño de varias imágenes, selección de miniaturas e imágenes adicionales.",
+    "options": "images proporciona URL y nombres; size elige miniaturas grandes o compactas, align controla la alineación. Solo se muestran cuatro miniaturas; ImageLightbox incluye todas las imágenes que se pueden ver.",
+    "sixImages": "Seis imágenes",
+    "compact": "Miniaturas compactas",
+    "hint": "Selecciona una miniatura o +2 para ver las seis imágenes."
+  },
+  "imageLightbox": {
+    "title": "Visor a pantalla completa",
+    "description": "Visualización controlada a pantalla completa y navegación entre imágenes.",
+    "options": "index es null al cerrar. El código que lo utiliza gestiona index y los eventos de apertura; ImageLightbox combina ZoomableImage y restablece la vista al cambiar de imagen.",
+    "open": "Abrir visor a pantalla completa",
+    "hint": "Usa anterior/siguiente, ←/→ o Home/End; cierra con × o Escape."
+  },
+  "zoomableImage": {
+    "title": "Zoom de imagen",
+    "description": "Zoom de una imagen, desplazamiento limitado y gestos.",
+    "options": "src y alt proporcionan una imagen. Colócala en un contenedor posicionado con altura definida y vuelve a montarla al cambiar de imagen. Enfoca el área para usar +, − y 0.",
+    "hint": "Amplía con +/−, doble clic, Ctrl+rueda o pellizco. Arrastra o desplázate tras ampliar; pulsa el porcentaje o la tecla 0 para restablecer."
+  },
+  "attachment": {
+    "title": "Archivos adjuntos",
+    "description": "Vista previa de imágenes, reproducción de vídeo, descarga y adjuntos no disponibles.",
+    "options": "attachment.kind elige image, video o file. Las imágenes abren ImageLightbox, los vídeos usan controles nativos y los archivos enlaces de descarga. Sin URL, o si falla la carga de una imagen, se muestran tarjetas no disponibles.",
+    "image": "Imagen",
+    "video": "Vídeo reproducible",
+    "file": "Descargar archivo",
+    "unavailable": "Adjuntos no disponibles (sin URL)"
+  },
+  "fileReference": {
+    "title": "Referencias de archivos",
+    "description": "Una referencia de archivo cuya apertura gestiona el código que la utiliza.",
+    "options": "path proporciona la etiqueta; onOpen proporciona la acción. El componente no decide los permisos del espacio de trabajo.",
+    "select": "Selecciona la referencia de archivo."
+  },
+  "settingsComposition": {
+    "title": "Composición de ajustes",
+    "description": "Los componentes reales de filas, grupos y capacidades de ajustes, combinados con controles compartidos.",
+    "options": "El controlador de ajustes que los contiene gestiona valores y persistencia. Una función de retorno de la galería solo actualiza el estado local de la vista previa.",
+    "preferences": "Preferencias de ejemplo",
+    "keepDrafts": "Conservar borradores",
+    "switchHint": "Una fila de ajuste compartida con un interruptor controlado.",
+    "projectLabel": "Etiqueta del proyecto",
+    "projectName": "Etiqueta del proyecto en ajustes",
+    "capability": "Capacidad de ejemplo",
+    "notes": "Notas",
+    "capabilityNotes": "Notas de la capacidad",
+    "localOnly": "Solo vista previa local"
+  },
+  "modelPickers": {
+    "title": "Selección de modelos",
+    "description": "Elige un proveedor, busca o introduce un ID de modelo y ajusta el esfuerzo de razonamiento.",
+    "options": "El código que lo utiliza proporciona valores y acciones de ProviderPicker. models de ModelIdPicker puede aportar un catálogo fijo; savedValues de ReasoningEffortPicker proporciona las opciones existentes.",
+    "chooseProvider": "Elegir proveedor",
+    "configure": "Configurar {{provider}}"
+  },
+  "providerIcons": {
+    "title": "Iconos de proveedores",
+    "description": "Compara los tamaños normal, compacto y de relleno, y el estado sin configurar del selector.",
+    "options": "provider selecciona un icono existente; compact y fill controlan el tamaño. showBrandLogos=false usa iconos integrados.",
+    "size": "Tamaño del icono"
+  },
+  "timezone": {
+    "title": "Selección de zona horaria",
+    "description": "Busca por nombre de zona, nombre en chino o desfase UTC y consulta el mismo instante en hora local.",
+    "options": "value es una zona IANA; onChange actualiza el valor del código que lo utiliza. El componente ofrece búsqueda y navegación por teclado."
+  },
+  "textEditor": {
+    "title": "Editor de texto y consejos",
+    "description": "Abre el editor para modificar, guardar o cancelar. Vacía el contenido y guarda para ver el error.",
+    "options": "SettingsTextEditor se cierra tras un onSave correcto y muestra errores si falla; SettingsHint se abre al pasar el puntero, enfocar o hacer clic.",
+    "state": "Estado de edición",
+    "hint": "Abre el editor para modificar, guardar o cancelar. Vacía el contenido para ver el estado de error.",
+    "instructions": "Instrucciones de ejemplo",
+    "edit": "Editar instrucciones de ejemplo",
+    "help": "Tras guardar, el contenido actualizado aparece debajo.",
+    "required": "Introduce contenido."
+  },
+  "removePreset": {
+    "title": "Eliminar preajustes",
+    "description": "Elimina preajustes de modelo sin usar y observa el estado desactivado del que usa el modelo predeterminado.",
+    "options": "Es el botón de eliminación de ModelsSettings; el código que lo utiliza proporciona disabled y la acción. La gestión de proveedores usa el diálogo ProvidersSettings.",
+    "defaultModel": "Modelo predeterminado",
+    "codeAssistant": "Asistente de programación",
+    "remove": "Eliminar {{name}}",
+    "primaryHint": "No se puede eliminar el preajuste usado por el modelo predeterminado.",
+    "count": "Preajustes de vista previa: {{count}}"
+  },
+  "loading": {
+    "title": "Diseños de carga",
+    "description": "Cambia los diseños de carga de catálogos de apps, canales y habilidades, y observa el contenedor de estado compartido.",
+    "options": "layout de CatalogSkeleton elige el diseño. SkeletonStatus usa label para el estado del lector de pantalla y marca el contenido decorativo con aria-hidden.",
+    "layout": "Diseño del catálogo",
+    "catalog": "Cargando catálogo de vista previa"
+  },
+  "sidebar": {
+    "title": "Navegación de ajustes",
+    "description": "Selecciona secciones, gestiona un reinicio pendiente y estrecha el navegador para ver el menú móvil.",
+    "options": "activeSection y onSelectSection controlan la selección; volver, cerrar sesión y reiniciar son funciones del código que lo utiliza.",
+    "back": "Volver al chat",
+    "logout": "Cerrar sesión",
+    "restart": "Se procesó el reinicio de la vista previa",
+    "hint": "Elige una sección de ajustes o estrecha el navegador para ver la navegación móvil.",
+    "toggleRestart": "Alternar reinicio pendiente"
+  },
+  "providerSearch": {
+    "title": "Búsqueda de proveedores",
+    "description": "Busca proveedores agrupados por OAuth, clave API y acceso local; elige una entrada o un proveedor personalizado.",
+    "options": "providers es el catálogo existente. query es una búsqueda controlada; onSelect y onCustom pasan la selección al padre.",
+    "closed": "Búsqueda cerrada",
+    "custom": "Proveedor personalizado seleccionado",
+    "hint": "Busca proveedores o usa las flechas para elegir."
+  },
+  "requestParameters": {
+    "title": "Parámetros de solicitud",
+    "description": "Edita cabeceras, parámetros de consulta y cuerpo; introduce JSON no válido para ver la validación real.",
+    "options": "fields elige las entradas visibles; form guarda texto JSON. Cabeceras y parámetros de consulta solo aceptan cadenas; el cuerpo acepta cualquier valor de objeto JSON."
+  },
+  "requestAPI": {
+    "title": "API de solicitudes",
+    "description": "Selecciona las API compatibles, la predeterminada, las anulaciones por modelo y las opciones de respaldo.",
+    "options": "ProviderAPIControl conserva al menos una API. ModelAPIControl permite null para selección automática y muestra API disponibles según las capacidades del proveedor.",
+    "providerAPI": "API del proveedor",
+    "modelOverride": "Anulación por modelo"
+  },
+  "usage": {
+    "title": "Uso de tokens",
+    "description": "Alterna entre datos, registros vacíos y no disponible. Pasa el puntero por las barras para el uso diario y abre los detalles para tendencias por modelo.",
+    "options": "usage es un registro estadístico proporcionado por el código que lo utiliza; timeZone define los límites de fecha. El diálogo de detalles y los gráficos solo muestran los datos recibidos.",
+    "state": "Estado de uso"
+  },
+  "overview": {
+    "title": "Resumen de ajustes",
+    "description": "Consulta el modelo actual, las capacidades y el uso; selecciona filas de funciones para probar la navegación por secciones.",
+    "options": "settings proporciona los datos del resumen; onSelectSection recibe la sección de ajustes seleccionada.",
+    "selected": "Sección seleccionada: {{section}}"
+  },
+  "web": {
+    "title": "Ajustes de búsqueda web",
+    "description": "Alterna entre proveedores sin credenciales, con clave API o URL de servidor; ajusta la búsqueda y prueba el guardado automático.",
+    "options": "settings guarda la configuración actual y form los valores editados. El padre proporciona el guardado, la visibilidad de credenciales y el cambio de proveedor.",
+    "unsaved": "Borrador de vista previa sin guardar"
+  },
+  "image": {
+    "title": "Generación de imágenes",
+    "description": "Activa la generación, elige un modelo del catálogo fijo, la relación de aspecto y el tamaño; ajusta la cantidad en opciones avanzadas.",
+    "options": "form es una configuración controlada y dirty marca cambios. El componente reutiliza credenciales del proveedor; el padre implementa el guardado."
+  },
+  "voice": {
+    "title": "Ajustes de transcripción",
+    "description": "Activa la transcripción, edita modelo, idioma y límites de duración y tamaño de carga; prueba el guardado automático.",
+    "options": "settings proporciona información del proveedor; el padre gestiona form y las funciones de guardado."
+  },
+  "safety": {
+    "title": "Ajustes de acceso",
+    "description": "Alterna el acceso a servicios locales y los permisos predeterminados; observa filas, consejos y avisos de guardado automático.",
+    "options": "form proporciona los valores visibles; onSave procesa las solicitudes de guardado. La pasarela sigue aplicando los permisos en ejecución."
+  },
+  "channelCatalog": {
+    "title": "Catálogo e identidad de canales",
+    "description": "Alterna los estados en ejecución, iniciando, fallido y sin instalar; prueba el interruptor, la instalación y la ayuda.",
+    "options": "feature proporciona estados de instalación y ejecución. El padre gestiona onAction y onSelect; identidad, errores y ayuda usan los mismos datos del canal.",
+    "exampleChannel": "Canal de ejemplo",
+    "state": "Estado del canal",
+    "error": "Falló la conexión de ejemplo.",
+    "stopped": "Detenido",
+    "running": "En ejecución",
+    "starting": "Iniciando",
+    "failed": "Fallido",
+    "selected": "Ajustes del canal seleccionados",
+    "hint": "Usa el interruptor o el botón de instalación para ver los cambios de estado."
+  },
+  "credentials": {
+    "title": "Credenciales del canal",
+    "description": "Introduce credenciales, muestra u oculta secretos, aplica preajustes de conexión, verifica campos obligatorios y copia un comando auxiliar.",
+    "options": "fields define grupos y controles; values y visibleSecrets son controlados. requirements define combinaciones de credenciales; los preajustes y el guardado solo actualizan este ejemplo.",
+    "botToken": "Token del bot",
+    "tokenPlaceholder": "Token de ejemplo",
+    "serverURL": "URL del servidor",
+    "replyMode": "Modo de respuesta",
+    "mentions": "Menciones",
+    "allMessages": "Todos los mensajes",
+    "allowFrom": "Remitentes permitidos",
+    "local": "Servidor local",
+    "hosted": "Servidor alojado",
+    "required": "Introduce un token de bot.",
+    "checkSave": "Verificar y guardar",
+    "command": "Comando de ejemplo",
+    "applied": "Se aplicó {{name}}",
+    "incomplete": "Completa las credenciales.",
+    "saved": "Credenciales de vista previa guardadas.",
+    "hint": "Completa las credenciales, alterna la visibilidad de secretos o aplica un preajuste de conexión."
+  },
+  "channelValidation": {
+    "title": "Comprobación de conexión",
+    "description": "Alterna comprobación, éxito y fallo; observa las comprobaciones aparecer en secuencia con un resumen de identidad.",
+    "options": "validation proporciona los registros y validating controla la carga. El componente solo muestra los resultados.",
+    "expired": "El token de ejemplo ha caducado.",
+    "result": "Resultado de comprobación"
+  },
+  "runAt": {
+    "title": "Selección de hora programada",
+    "description": "Introduce fecha y hora o abre el calendario y elige con el ratón, las flechas y las teclas de página.",
+    "options": "value usa la hora local YYYY-MM-DDTHH:mm; onChange devuelve el valor editado. Los datos no válidos se indican en el control existente."
+  },
+  "automationCalendar": {
+    "title": "Calendario de automatizaciones",
+    "description": "Cambia de mes, alterna planes e historial y abre resultados de ejecuciones correctas o fallidas. Los contenedores estrechos muestran una agenda.",
+    "options": "jobs y month definen el contenido. onInspect gestiona tareas programadas; el código que lo utiliza aporta los resultados mediante renderRunDialog. El calendario no consulta servicios.",
+    "providerError": "El proveedor de ejemplo no estaba disponible.",
+    "state": "Estado de programación",
+    "previousMonth": "Mes anterior",
+    "nextMonth": "Mes siguiente",
+    "planned": "Programado",
+    "recorded": "Historial de ejecución",
+    "running": "En ejecución",
+    "failed": "Fallido",
+    "completed": "Completado",
+    "skipped": "Omitido",
+    "system": "Tarea del sistema",
+    "noEntries": "No hay tareas programadas este mes",
+    "more": "{{count}} más",
+    "selected": "Tarea seleccionada: {{name}}",
+    "hint": "Selecciona una ejecución para ver su resultado o elige una tarea programada."
+  },
+  "providers": {
+    "title": "Gestión de proveedores",
+    "description": "Consulta el diálogo real de gestión de proveedores y el proceso para añadirlos.",
+    "options": "Reutiliza ProvidersSettings de los ajustes. El código que lo utiliza controla catálogo, formularios y guardado; esta vista previa modifica datos locales de ejemplo y permite configurar, buscar, crear y cancelar.",
+    "invalidParameters": "Introduce parámetros JSON válidos; los valores de cabeceras y parámetros de consulta deben ser cadenas.",
+    "saved": "Configuración de vista previa guardada para {{name}}",
+    "added": "Se añadió {{name}}",
+    "signedIn": "Autorización de vista previa configurada con sesión iniciada",
+    "signedOut": "Autorización de vista previa configurada sin sesión",
+    "builtInIcons": "Usar iconos integrados",
+    "brandIcons": "Usar iconos de marca",
+    "configured": "Proveedores configurados: {{count}}",
+    "providerAdded": "Proveedor añadido"
+  },
+  "runResult": {
+    "title": "Resultados de automatizaciones",
+    "description": "Abre resultados para comparar respuestas Markdown, carga, reintento, respuestas vacías e historial ausente.",
+    "options": "result proporciona el estado de carga y la respuesta obtenida. El código que lo utiliza gestiona onRetry; esta vista no lee el entorno de ejecución ni solicita resultados.",
+    "state": "Resultado de ejecución",
+    "view": "Ver resultado de ejecución"
+  },
+  "chatBinding": {
+    "title": "Chat de ejecución",
+    "description": "Elige el chat, edita instrucciones, confirma, vuelve al anterior o cancela; compara tareas ocupadas, errores de carga y conflictos.",
+    "options": "data y job proporcionan chats disponibles y versiones de vinculación. La vista gestiona el borrador de confirmación; el punto de entrada conecta onSave, onSaved y onReload con las operaciones de datos.",
+    "state": "Estado del vínculo de chat",
+    "setChat": "Definir chat de ejecución",
+    "saved": "La próxima ejecución tendrá lugar en {{title}}",
+    "hint": "Elige un chat de destino y confirma o edita las instrucciones de la tarea."
+  },
+  "about": {
+    "title": "Acerca de y versión",
+    "description": "Compara estados de versión, enlaces de commits, actualizaciones y la página Acerca de; los botones muestran resultados de ejemplo.",
+    "options": "AboutSettingsView acepta una composición de enlaces de versión y soporte. VersionCheckRowView muestra checking/result y solicita comprobaciones con onCheck. El punto de entrada gestiona las comprobaciones reales y los enlaces de diagnóstico.",
+    "error": "No se pudo obtener la versión. Inténtalo de nuevo.",
+    "state": "Estado de versión",
+    "selectedLink": "Enlace de GitHub seleccionado",
+    "preferenceSaved": "Preferencia de ejemplo guardada; no se instalará ni reiniciará nada.",
+    "updateRequested": "Revisión de la actualización seleccionada; esta vista previa no instala ni reinicia nada.",
+    "dismissed": "Aviso de actualización ocultado"
+  },
+  "appearance": {
+    "title": "Preferencias de apariencia",
+    "description": "Cambia la apariencia, la actividad, las diferencias y las notificaciones; los valores de ejemplo aparecen debajo.",
+    "options": "El código que lo utiliza gestiona tema y preferencias. onChangeBrowserNotifications delega los permisos al punto de entrada; las funciones de vista previa solo cambian interruptores de ejemplo."
+  },
+  "starInvitation": {
+    "title": "Invitación de apoyo",
+    "description": "Abre la invitación real, compara guardado y errores y prueba posponer, el enlace de GitHub y no volver a recordar.",
+    "options": "open, saving y error son estados visuales. El punto de entrada StarPrompt existente gestiona la recepción de invitaciones y la persistencia de preferencias; la vista solo llama a las acciones recibidas.",
+    "state": "Estado de invitación",
+    "view": "Ver invitación",
+    "dismissed": "Se eligió no volver a recordar en la vista previa",
+    "starred": "Se eligió el enlace de GitHub en la vista previa"
+  }
+}

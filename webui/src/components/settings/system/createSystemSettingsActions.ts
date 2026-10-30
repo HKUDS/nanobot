@@ -306,6 +306,20 @@ export function createSystemSettingsActions({
     setAutomations(payload);
   };
 
+  const retireMcpProxyDrafts = (names: string[]) => {
+    setMcpFieldValues((prev) => {
+      const next = { ...prev };
+      for (const name of names) {
+        const key = name.trim().toLowerCase();
+        if (prev[key]?.use_proxy === undefined) continue;
+        const fields = { ...prev[key] };
+        delete fields.use_proxy;
+        next[key] = fields;
+      }
+      return next;
+    });
+  };
+
   const closeMcpOAuthPopup = () => {
     const popup = mcpOAuthPopupRef.current;
     mcpOAuthPopupRef.current = null;
@@ -390,6 +404,7 @@ export function createSystemSettingsActions({
       try {
         const payload = await fetchMcpPresets(getToken());
         setMcpPresets(payload);
+        retireMcpProxyDrafts([flow.name]);
         notifyMcpPresetsChanged(payload);
         setMcpMessage(null);
         setMcpError(null);
@@ -560,7 +575,7 @@ export function createSystemSettingsActions({
   };
 
   const handleMcpPresetAction = async (
-    action: "enable" | "disable" | "remove" | "test" | "reconnect",
+    action: "enable" | "disable" | "remove" | "test" | "reconnect" | "proxy",
     name: string,
     values: Record<string, string> = {},
   ) => {
@@ -577,6 +592,12 @@ export function createSystemSettingsActions({
       }
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
+      }
+      if (
+        (action === "proxy" || action === "remove")
+        && payload.last_action?.ok !== false
+      ) {
+        retireMcpProxyDrafts([name]);
       }
       await maybeRestartHostEngine(payload);
       if (action === "enable") {
@@ -615,6 +636,7 @@ export function createSystemSettingsActions({
             ? customMcpForm.headers
             : "",
         tool_timeout: customMcpForm.toolTimeout,
+        ...(customMcpForm.transport !== "stdio" ? { use_proxy: String(customMcpForm.useProxy) } : {}),
       });
       setMcpPresets(payload);
       applyMcpActionFeedback(
@@ -622,6 +644,9 @@ export function createSystemSettingsActions({
         false,
         expectsOAuthAuthorization ? name : undefined,
       );
+      if (payload.last_action?.ok !== false) {
+        retireMcpProxyDrafts([name]);
+      }
       notifyMcpPresetsChanged(payload);
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
@@ -643,6 +668,11 @@ export function createSystemSettingsActions({
       const payload = await importMcpConfig(client, mcpConfigImport);
       setMcpPresets(payload);
       applyMcpActionFeedback(payload);
+      if (payload.last_action?.ok !== false) {
+        // The accepted import has been validated by the server; its response has no name list.
+        const config: { mcpServers?: object } = JSON.parse(mcpConfigImport);
+        retireMcpProxyDrafts(Object.keys(config.mcpServers ?? config));
+      }
       notifyMcpPresetsChanged(payload);
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));

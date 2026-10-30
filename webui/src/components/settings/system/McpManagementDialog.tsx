@@ -6,6 +6,7 @@ import { Check, ExternalLink, Loader2, RotateCcw, Search, Server, Trash2, X } fr
 import { useTranslation } from "react-i18next";
 
 import { SkeletonStatus } from "@/components/settings/shared/SkeletonStatus";
+import { ProxySettingsControl } from "@/components/settings/shared/ProxySettingsControl";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -20,7 +21,7 @@ import { cn } from "@/lib/utils";
 
 export type McpManagementTab = "overview" | "tools" | "connection";
 
-type McpAction = "enable" | "disable" | "remove" | "test" | "reconnect";
+type McpAction = "enable" | "disable" | "remove" | "test" | "reconnect" | "proxy";
 
 interface McpManagementDialogProps {
   preset: McpPresetInfo;
@@ -36,6 +37,7 @@ interface McpManagementDialogProps {
   onAction: (action: McpAction, name: string, values?: Record<string, string>) => void;
   onOAuthConnect: (name: string, reset?: boolean, values?: Record<string, string>) => void;
   onToolsChange: (name: string, enabledTools: string[]) => void;
+  onConfigureProxy?: () => void;
 }
 
 export function McpManagementDialog({
@@ -52,6 +54,7 @@ export function McpManagementDialog({
   onAction,
   onOAuthConnect,
   onToolsChange,
+  onConfigureProxy,
 }: McpManagementDialogProps) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -68,9 +71,14 @@ export function McpManagementDialog({
   const enableBusy = actionKey === `enable:${preset.name}`;
   const toolsBusy = actionKey === `tools:${preset.name}`;
   const oauthBusy = actionKey === `oauth:${preset.name}`;
-  const busy = testBusy || reconnectBusy || removeBusy || enableBusy || toolsBusy || oauthBusy;
+  const proxyBusy = actionKey === `proxy:${preset.name}`;
+  const busy = testBusy || reconnectBusy || removeBusy || enableBusy || toolsBusy || oauthBusy || proxyBusy;
   const configuredInstalled = preset.installed && preset.configured;
   const isOAuth = preset.auth === "oauth";
+  const remote = preset.transport !== "stdio";
+  const useProxy = values.use_proxy ?? String(preset.use_proxy ?? false);
+  const proxyDirty = remote && useProxy !== String(preset.use_proxy ?? false);
+  const connectionValues = remote ? { ...values, use_proxy: useProxy } : values;
   const inspectionRequestedRef = useRef(false);
   const allowAllTools = draftEnabledTools.includes("*");
   const selectedTools = new Set(allowAllTools ? toolNames : draftEnabledTools);
@@ -115,10 +123,14 @@ export function McpManagementDialog({
   const connect = () => {
     onOpenChange(false);
     if (isOAuth) {
-      onOAuthConnect(preset.name, configuredInstalled, values);
+      onOAuthConnect(preset.name, configuredInstalled, connectionValues);
       return;
     }
-    onAction(configuredInstalled ? "reconnect" : "enable", preset.name, values);
+    if (configuredInstalled && proxyDirty) {
+      onAction("proxy", preset.name, { use_proxy: useProxy });
+      return;
+    }
+    onAction(configuredInstalled ? "reconnect" : "enable", preset.name, configuredInstalled ? values : connectionValues);
   };
 
   const inspectTools = () => {
@@ -219,8 +231,9 @@ export function McpManagementDialog({
             />
           ) : (
             <ConnectionPanel
+              onConfigureProxy={onConfigureProxy}
               preset={preset}
-              values={values}
+              values={connectionValues}
               busy={busy}
               connectBusy={reconnectBusy || enableBusy || oauthBusy}
               removeBusy={removeBusy}
@@ -234,6 +247,23 @@ export function McpManagementDialog({
             />
           )}
         </div>
+
+        {tab === "connection" && preset.installed && proxyDirty ? (
+          <div className="flex shrink-0 items-center justify-end border-t border-border/45 bg-background/95 px-5 py-3 sm:px-6">
+            <Button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                onOpenChange(false);
+                onAction("proxy", preset.name, { use_proxy: useProxy });
+              }}
+              className="h-9 rounded-full px-4 text-[13px] font-semibold"
+            >
+              {proxyBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : null}
+              {tx("settings.mcp.applyChanges", "Apply changes")}
+            </Button>
+          </div>
+        ) : null}
 
         {tab === "tools" && toolsDirty ? (
           <div className="flex shrink-0 items-center justify-end border-t border-border/45 bg-background/95 px-5 py-3 sm:px-6">
@@ -369,10 +399,17 @@ function ToolsPanel({
       <SkeletonStatus label={tx("settings.mcp.loadingTools", "Loading tools…")} className="space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="h-10 min-w-0 rounded-full bg-muted-foreground/20 sm:flex-1" />
-          <div className="flex h-8 items-center justify-between gap-4 sm:justify-end">
-            <div className="mr-auto h-3 w-20 rounded bg-muted-foreground/20 sm:mr-1" />
-            <div className="h-3 w-6 rounded bg-muted-foreground/20" />
-            <div className="h-3 w-9 rounded bg-muted-foreground/20" />
+          <div className="flex items-center justify-between gap-2 sm:justify-end">
+            <div className="relative mr-auto text-[13px] tabular-nums sm:mr-1">
+              <span className="invisible">{tx("settings.mcp.selectedCount", "{{count}} selected").replace("{{count}}", String(selectedToolCount))}</span>
+              <div className="absolute inset-x-0 top-1/2 h-3 -translate-y-1/2 rounded bg-muted-foreground/20" />
+            </div>
+            {[tx("settings.mcp.allTools", "All"), tx("settings.mcp.noTools", "None")].map((label) => (
+              <div key={label} className="relative flex h-8 items-center px-2.5 text-[12.5px] font-semibold">
+                <span className="invisible">{label}</span>
+                <div className="absolute inset-x-2.5 top-1/2 h-3 -translate-y-1/2 rounded bg-muted-foreground/20" />
+              </div>
+            ))}
           </div>
         </div>
         <div className="overflow-hidden rounded-floating border border-border/55">
@@ -496,6 +533,7 @@ function ToolsPanel({
 }
 
 function ConnectionPanel({
+  onConfigureProxy,
   preset,
   values,
   busy,
@@ -512,6 +550,7 @@ function ConnectionPanel({
   connectBusy: boolean;
   removeBusy: boolean;
   requiredFieldsComplete: boolean;
+  onConfigureProxy?: () => void;
   onFieldChange: (presetName: string, fieldName: string, value: string) => void;
   onConnect: () => void;
   onRemove: () => void;
@@ -590,6 +629,16 @@ function ConnectionPanel({
         <div role="alert" className="rounded-control bg-destructive/10 px-3.5 py-3 text-[12.5px] leading-5 text-destructive">
           {preset.error}
         </div>
+      ) : null}
+
+      {preset.transport !== "stdio" ? (
+        <ProxySettingsControl
+          className="rounded-control bg-muted/40 px-4 py-3.5"
+          checked={values.use_proxy === "true"}
+          disabled={busy}
+          onChange={(checked) => onFieldChange(preset.name, "use_proxy", String(checked))}
+          onConfigure={onConfigureProxy}
+        />
       ) : null}
 
       {hasFields ? (

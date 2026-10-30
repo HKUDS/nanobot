@@ -253,7 +253,7 @@ export function SkillsMarketplace({
             ) : null}
           </div>
           {trendingLoading ? (
-            <MarketplaceSkeleton ranked />
+            <MarketplaceSkeleton ranked provider={provider} />
           ) : visibleTrending.length ? (
             <MarketplaceSkillGroups
               skills={visibleTrending}
@@ -281,7 +281,7 @@ export function SkillsMarketplace({
       ) : (
         <div className="overflow-hidden rounded-panel bg-settings-surface">
           {loading && !visibleResults.length ? (
-            <MarketplaceSkeleton />
+            <MarketplaceSkeleton provider={provider} />
           ) : (
             <MarketplaceSkillGroups
               skills={visibleResults}
@@ -674,26 +674,39 @@ function TrendSparkline({ values }: { values?: number[] }) {
   );
 }
 
-function MarketplaceSkeleton({ ranked = false }: { ranked?: boolean }) {
+function MarketplaceSkeleton({ ranked = false, provider }: { ranked?: boolean; provider: MarketplaceProvider }) {
   const { t } = useTranslation();
+  const grouped = provider === "all";
+  const providers: Array<Exclude<MarketplaceProvider, "all">> = grouped ? ["skills_sh", "skillhub"] : [provider];
   return (
     <SkeletonStatus
       label={t("settings.skills.loading")}
-      className="space-y-1 px-3 pb-3 sm:px-4"
+      className={grouped ? "space-y-5 pb-3 pt-2" : ""}
     >
-      {Array.from({ length: 5 }, (_, index) => (
-        <div key={index} className="flex min-w-0 items-center gap-2 px-1 py-3.5 sm:gap-3 sm:px-2">
-          {ranked ? <div className="h-3 w-6 shrink-0 rounded bg-muted-foreground/20 sm:w-7" /> : null}
-          <div className="min-w-0 flex-1">
-            <div className="flex h-7 items-center">
-              <div className="h-3.5 w-48 max-w-[70%] rounded bg-muted-foreground/20" />
-            </div>
-            <div className="mt-1 flex h-5 items-center">
-              <div className="h-3 w-32 max-w-[55%] rounded bg-muted-foreground/20 opacity-60" />
-            </div>
+      {providers.map((source) => (
+        <section key={source} className={grouped ? "space-y-1" : undefined}>
+          {grouped ? <div className="flex items-center justify-between px-5 py-1.5">
+            <ProviderMark provider={source} />
+            <div className="h-3.5 w-3.5 rounded bg-muted-foreground/20" />
+          </div> : null}
+          <div className="space-y-1 px-3 pb-3 sm:px-4">
+            {Array.from({ length: 5 }, (_, index) => (
+              <div key={index} className="flex min-w-0 items-center gap-2 px-1 py-3.5 sm:gap-3 sm:px-2">
+                {ranked ? <div className="h-3 w-6 shrink-0 rounded bg-muted-foreground/20 sm:w-7" /> : null}
+                <div className="min-w-0 flex-1">
+                  <div className="flex h-7 items-center">
+                    <div className="h-3.5 w-48 max-w-[70%] rounded bg-muted-foreground/20" />
+                  </div>
+                  <div className="mt-1 flex h-[1.5em] items-center text-[12px]">
+                    <div className="h-3 w-32 max-w-[55%] rounded bg-muted-foreground/20 opacity-60" />
+                  </div>
+                </div>
+                {source === "skills_sh" ? <div className="hidden h-[30px] w-24 shrink-0 rounded bg-muted-foreground/10 sm:block" /> : null}
+                <div className="h-9 w-9 shrink-0 rounded-full bg-muted-foreground/20" />
+              </div>
+            ))}
           </div>
-          <div className="h-9 w-9 shrink-0 rounded-full bg-muted-foreground/20" />
-        </div>
+        </section>
       ))}
     </SkeletonStatus>
   );

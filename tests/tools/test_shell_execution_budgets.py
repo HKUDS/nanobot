@@ -8,6 +8,7 @@ import sys
 import time
 from contextlib import suppress
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -73,7 +74,7 @@ def _pid_running(pid: int) -> bool:
         kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
         kernel32.WaitForSingleObject.restype = wintypes.DWORD
         kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-        handle = kernel32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+        handle = kernel32.OpenProcess(0x00100000, False, pid)
         if not handle:
             error = ctypes.get_last_error()
             assert error == 87, f"OpenProcess({pid}) failed: {error}"
@@ -81,7 +82,7 @@ def _pid_running(pid: int) -> bool:
         try:
             status = kernel32.WaitForSingleObject(handle, 0)
             assert status in (0, 258), f"WaitForSingleObject({pid}) failed: {status}"
-            return status == 258  # WAIT_TIMEOUT
+            return status == 258
         finally:
             kernel32.CloseHandle(handle)
 
@@ -122,6 +123,20 @@ async def _pid_stopped(pid: int, *, timeout: float = 6) -> None:
     assert not _pid_running(pid), f"subprocess {pid} is still running after {timeout}s"
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux /proc process probe")
+@pytest.mark.parametrize("disappeared", [FileNotFoundError, ProcessLookupError])
+async def test_pid_stopped_tolerates_exit_during_proc_read(monkeypatch, disappeared):
+    stat = Mock()
+    stat.exists.return_value = True
+    stat.read_text.side_effect = disappeared("process exited during stat read")
+    monkeypatch.setattr(sys.modules[__name__], "Path", Mock(return_value=stat))
+    monkeypatch.setattr(os, "kill", Mock(side_effect=[None, ProcessLookupError, ProcessLookupError]))
+
+    await _pid_stopped(123, timeout=1)
+
+    stat.read_text.assert_called_once()
+
+
 async def _cleanup_pidfiles(*paths: Path) -> None:
     pids = [int(path.read_text()) for path in paths if path.exists() and path.read_text()]
     for pid in pids:
@@ -152,9 +167,12 @@ async def test_trusted_default_runtime_can_exceed_model_request_limit():
         max_runtime=12, max_runtime_limit=1, idle_timeout=0, session_manager=manager,
     )
     try:
-        result = await tool.execute(command=_python(
+        initial = await tool.execute(command=_python(
             "import time; time.sleep(1.2); print('trusted default completed')"
         ))
+        result = await ExecSessionTool(manager=manager).execute(
+            session_id=_session_id(initial), until_exit=True, timeout_ms=5000,
+        )
 
         assert not is_tool_error_result(result), result
         assert "trusted default completed" in result
@@ -284,7 +302,6 @@ async def test_partial_stdout_and_stderr_bytes_refresh_idle_without_log_reads(tm
                 info, = await manager.list()
                 assert info.session_id == sid
                 assert info.returncode is None
-                # This anchor stays fixed between bytes, even if observation is delayed.
                 output_at = info.elapsed_s - info.idle_s
                 if output_at > after:
                     return output_at
@@ -331,7 +348,6 @@ async def test_idle_termination_stops_owned_tree_without_tool_activity(tmp_path)
         assert _pid_running(parent_pid)
         assert _pid_running(child_pid)
 
-        # Observe OS process exit before making another tool or manager call.
         await _pid_stopped(parent_pid)
         await _pid_stopped(child_pid, timeout=3)
         final = await session_tool.execute(session_id=sid, until_exit=True, timeout_ms=3000)
@@ -433,7 +449,6 @@ async def test_execution_stop_stops_pipe_inheriting_child_after_root_exits(
     async def spawn_with_exit_order(*args, **kwargs):
         process = await real_spawn(*args, **kwargs)
         if early_root_exit:
-            # Root exit may precede spawn return; inherited pipes must remain intact.
             async with asyncio.timeout(5):
                 while process.returncode is None:
                     await asyncio.sleep(0.005)
@@ -454,7 +469,9 @@ async def test_execution_stop_stops_pipe_inheriting_child_after_root_exits(
     initial_exec_task = None
     try:
         with request_context(owner):
-            initial_exec_task = asyncio.create_task(tool.execute(command=_python(parent_code)))
+            initial_exec_task = asyncio.create_task(tool.execute(
+                command=_python(parent_code), yield_time_ms=10000,
+            ))
         await asyncio.wait_for(spawn_returned.wait(), timeout=5)
         parent_pid = int(await _file_text(parent_pidfile))
         child_pid = int(await _file_text(child_pidfile))
@@ -479,7 +496,7 @@ async def test_execution_stop_stops_pipe_inheriting_child_after_root_exits(
             assert not is_tool_error_result(final), final
             assert "Session terminated. Reason: owner_closed." in final
         assert "worker launched" in final
-        assert _exit_code(final) == 0  # Only the root exited successfully.
+        assert _exit_code(final) == 0
         assert not delayed_effect.exists()
         assert await manager.list(owner_session_key=owner.session_key) == []
     finally:
@@ -494,7 +511,7 @@ async def test_execution_stop_stops_pipe_inheriting_child_after_root_exits(
                     await asyncio.gather(initial_exec_task, return_exceptions=True)
 
 
-async def test_inline_work_reports_silence_then_hits_same_fixed_hard_budget(tmp_path):
+async def test_default_yield_reports_silence_then_hits_same_fixed_hard_budget(tmp_path):
     pidfile = tmp_path / "process.pid"
     gate = tmp_path / "emit-output"
     ticks = tmp_path / "ticks"
@@ -525,13 +542,17 @@ async def test_inline_work_reports_silence_then_hits_same_fixed_hard_budget(tmp_
         assert len(_listed_ids(listing)) == 1, listing
         assert "| running |" in listing
         assert (await manager.list())[0].idle_s >= 1
-        assert not inline_task.done()
+        initial = await asyncio.wait_for(inline_task, timeout=2)
+        sid = _session_id(initial)
+        assert _listed_ids(listing) == [sid]
         assert _pid_running(pid)
 
         gate.write_text("emit")
         assert int(await _file_text(ticks)) >= 1
+        final = await ExecSessionTool(manager=manager).execute(
+            session_id=sid, until_exit=True, timeout_ms=6000,
+        )
         await _pid_stopped(pid)
-        final = await asyncio.wait_for(inline_task, timeout=3)
 
         assert is_tool_error_result(final), final
         assert "inline-progress:" in final
@@ -573,7 +594,7 @@ async def test_owner_close_stops_inline_tree_and_preserves_other_owner_work(tmp_
     try:
         with request_context(owner_a):
             inline_task = asyncio.create_task(tool.execute(
-                command=_python(_waiting_tree(parent_pidfile, child_pidfile)),
+                command=_python(_waiting_tree(parent_pidfile, child_pidfile)), yield_time_ms=10000,
             ))
             parent_pid = int(await _file_text(parent_pidfile))
             child_pid = int(await _file_text(child_pidfile))

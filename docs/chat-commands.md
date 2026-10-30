@@ -58,7 +58,7 @@ Use `/model` to inspect the current runtime model:
 /model
 ```
 
-The response shows the current session's model and preset, plus the available preset names. Each key under the top-level `modelPresets` config is the preset's canonical name everywhere nanobot displays or references it. `default` is always available and represents the model settings from direct `agents.defaults.*` fields.
+The response shows which model this conversation is using and the names of models you can switch to. `default` is also available and uses the instance's default model settings.
 
 To switch presets for future turns:
 
@@ -68,7 +68,7 @@ To switch presets for future turns:
 /model default
 ```
 
-Preset names come from the top-level `modelPresets` config. Switching affects only the current session and persists the selection in that session, so later turns keep using it across process restarts. It does not rewrite `config.json`, does not change other sessions, and does not alter an in-progress turn's captured model. Sessions without a saved selection follow `agents.defaults.modelPreset` (or the implicit `default` preset when it is omitted). See [Configuration: Model presets](./configuration.md#model-presets) for setup details.
+Switching changes the model used for future replies in this conversation and keeps that choice for later turns, including after a restart. It does not change other conversations or interrupt a reply already in progress. To add or configure model choices, see [Configuration: Model presets](./configuration.md#model-presets).
 
 ## Local triggers
 

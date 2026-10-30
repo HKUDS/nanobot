@@ -16,7 +16,7 @@ export function ModelFallbackNotice({ model, reauthProvider, reauthProviderLabel
   return (
     <div
       role="status"
-      className="mx-auto mb-2 flex w-full max-w-[49.5rem] items-center gap-2 rounded-control border border-border/60 bg-muted/40 px-3 py-2 text-xs text-foreground/80 animate-in fade-in-0 slide-in-from-bottom-1 motion-reduce:animate-none"
+      className="thread-composer-notice mb-2 flex items-center gap-2 rounded-control border border-border/60 bg-muted/40 px-3 py-2 text-xs text-foreground/80 animate-in fade-in-0 slide-in-from-bottom-1 motion-reduce:animate-none"
     >
       <PresetProviderIcon
         provider={reauthProvider}

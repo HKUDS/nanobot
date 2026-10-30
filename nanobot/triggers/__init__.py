@@ -1,5 +1,3 @@
-"""Local trigger support."""
-
 from nanobot.triggers.local_store import (
     LocalTriggerStore,
     TriggerDisabledError,

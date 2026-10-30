@@ -1,5 +1,3 @@
-"""Stable mapping between public WebUI chat IDs and persisted session keys."""
-
 from __future__ import annotations
 
 import re

@@ -528,24 +528,6 @@
     "requires": "Whimsical account"
   },
   {
-    "name": "figma-remote",
-    "display_name": "Figma (remote)",
-    "category": "design",
-    "description": "Read design context and work with Figma files through the hosted server.",
-    "docs_url": "https://developers.figma.com/docs/figma-mcp-server/",
-    "transport": "streamableHttp",
-    "install_supported": true,
-    "brand_domain": "figma.com",
-    "brand_color": "#F24E1E",
-    "server": {
-      "type": "streamableHttp",
-      "auth": "oauth",
-      "url": "https://mcp.figma.com/mcp",
-      "tool_timeout": 60
-    },
-    "requires": "Figma account"
-  },
-  {
     "name": "supabase-remote",
     "display_name": "Supabase (remote)",
     "category": "database",

@@ -1,10 +1,9 @@
-"""Base LLM provider interface."""
-
 from __future__ import annotations
 
 import asyncio
 import json
 import os
+import random
 import re
 import time
 from abc import ABC, abstractmethod
@@ -295,12 +294,14 @@ class LLMResponse:
     generation_ms: int | None = None
     ttft_ms: int | None = None
     retry_after: float | None = None  # Provider supplied retry wait in seconds.
-    reasoning_content: str | None = None  # Kimi, DeepSeek-R1, MiMo etc.
-    thinking_blocks: list[dict[str, Any]] | None = None  # Anthropic extended thinking
+    reasoning_content: str | None = None
+    thinking_blocks: list[dict[str, Any]] | None = None
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
     # True only when this response installed a new provider-native compaction
     # boundary. Replaying an older compaction item does not set this flag.
     provider_compaction_applied: bool = field(default=False, repr=False)
+    # Identity of the native lifecycle already reported by its operation owner.
+    provider_compaction_event_id: str | None = field(default=None, repr=False)
     # State immediately after native compaction, before the normal response
     # continues. An archive prompt can resume this state without replaying H.
     provider_compaction_state: ProviderConversationState | None = field(
@@ -324,6 +325,9 @@ class LLMResponse:
     error_code: str | None = None  # Provider/code semantic, e.g. rate_limit_exceeded.
     error_retry_after_s: float | None = None
     error_should_retry: bool | None = None
+    # A failed fallback must not replace the selected model's public diagnosis.
+    # Keep this separate from the last response's retry policy.
+    primary_error_kind: str | None = field(default=None, repr=False)
     is_fallback: bool = field(default=False, repr=False)
 
     @property
@@ -1042,7 +1046,6 @@ class LLMProvider(ABC):
         return found
 
     async def _safe_chat(self, **kwargs: Any) -> LLMResponse:
-        """Call chat() and convert unexpected exceptions to error responses."""
         started_at_ms = time.time_ns() // 1_000_000
         started_at_ns = time.monotonic_ns()
         try:
@@ -1115,7 +1118,7 @@ class LLMProvider(ABC):
             ),
             timeout=resolve_stream_idle_timeout_s(),
         )
-        if on_content_delta and response.content:
+        if on_content_delta and response.content and response.finish_reason != "error":
             await on_content_delta(response.content)
         return response
 
@@ -1140,7 +1143,6 @@ class LLMProvider(ABC):
         return await self.chat_stream(**kwargs)
 
     async def _safe_chat_stream(self, **kwargs: Any) -> LLMResponse:
-        """Call chat_stream() and convert unexpected exceptions to error responses."""
         started_at_ms = time.time_ns() // 1_000_000
         started_at_ns = time.monotonic_ns()
         first_output_at_ns: int | None = None
@@ -1379,7 +1381,6 @@ class LLMProvider(ABC):
         should_retry_guard: Callable[[], bool] | None = None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
-        """Run one chat entry point through this provider's retry policy."""
         call = self._safe_chat_stream if stream else self._safe_chat
 
         async def attributed_call(**kwargs: Any) -> LLMResponse:
@@ -1556,9 +1557,14 @@ class LLMProvider(ABC):
     @classmethod
     def public_error_kind(cls, response: LLMResponse) -> str:
         """Return a stable public category without exposing provider details."""
+        if response.primary_error_kind is not None:
+            return response.primary_error_kind
         if cls.is_arrearage_response(response):
             return "billing"
         kind = (response.error_kind or "").strip().lower()
+        # A plain 403 can be a policy or permission rejection, not bad credentials.
+        if kind in {"authentication", "oauth_auth_required"} or response.error_status_code == 401:
+            return "authentication"
         if kind in {"connection", "timeout"}:
             return kind
         if response.error_status_code == 429:
@@ -1580,34 +1586,29 @@ class LLMProvider(ABC):
         should_retry_guard: Callable[[], bool] | None = None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
-        attempt = 0
-        delays = list(self._CHAT_RETRY_DELAYS)
+        response = await call(**kw)
+        if response.finish_reason != "error":
+            return response
+
+        attempt = 1
+        delays = self._CHAT_RETRY_DELAYS
         persistent = retry_mode == "persistent"
-        last_response: LLMResponse | None = None
+        max_attempts = None if persistent else len(delays) + 1
         last_error_key: str | None = None
         identical_error_count = 0
-
         async def _finish_retry_status(
-            state: Literal["recovered", "cleared"],
-            response: LLMResponse,
+            state: Literal["recovered", "cleared", "exhausted"],
+            result: LLMResponse,
         ) -> None:
-            if attempt > 1 and on_retry_status:
-                await on_retry_status(
-                    RetryStatusEvent(
-                        state=state,
-                        attempt=attempt,
-                        max_attempts=None if persistent else len(delays) + 1,
-                        error_kind=self.public_error_kind(response),
-                    )
-                )
+            if on_retry_status and (attempt > 1 or state == "exhausted"):
+                await on_retry_status(RetryStatusEvent(
+                    state=state,
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    error_kind=self.public_error_kind(result),
+                ))
 
         while True:
-            attempt += 1
-            response = await call(**kw)
-            if response.finish_reason != "error":
-                await _finish_retry_status("recovered", response)
-                return response
-            last_response = response
             if should_retry_guard is not None and not should_retry_guard():
                 is_timeout = (response.error_kind or "").lower() == "timeout"
                 if is_timeout:
@@ -1622,7 +1623,6 @@ class LLMProvider(ABC):
                             "LLM stream stalled after content was emitted; "
                             "suppressing delta callbacks and retrying"
                         )
-                        kw.setdefault("on_content_delta", None)
                         kw["on_content_delta"] = None
                         kw["on_thinking_delta"] = None
                         kw["on_tool_call_delta"] = None
@@ -1641,97 +1641,29 @@ class LLMProvider(ABC):
                 identical_error_count = 1 if error_key else 0
 
             if not self.is_transient_response(response):
-                stripped = self._strip_image_content(kw["messages"])
-                provider_context = kw.get("provider_context")
-                stripped_context: ProviderCallContext | None = None
-                if isinstance(provider_context, ProviderCallContext):
-                    state = provider_context.conversation_state
-                    if state is not None and (
-                        stripped is not None
-                        or self._strip_image_content(state.pending_messages) is not None
-                        or self._contains_image_content(state.payload)
-                    ):
-                        # Provider-owned payloads may retain earlier input_image items.
-                        # Rebuild from the stripped public transcript for this retry.
-                        stripped_context = ProviderCallContext(
-                            context_window_tokens=(
-                                provider_context.context_window_tokens
-                            ),
-                            session_id=provider_context.session_id,
-                            events=provider_context.events,
-                            response_preset=provider_context.response_preset,
-                            response_is_fallback=provider_context.response_is_fallback,
-                        )
-                if stripped is not None or stripped_context is not None:
-                    logger.warning(
-                        "Non-transient LLM error with image content, retrying without images"
-                    )
-                    retry_kw = dict(kw)
-                    if stripped is not None:
-                        retry_kw["messages"] = stripped
-                    if stripped_context is not None:
-                        retry_kw["provider_context"] = stripped_context
-                    result = await call(**retry_kw)
-                    # Permanently strip images from the original messages so
-                    # subsequent iterations do not repeat the error-retry cycle.
-                    if result.finish_reason != "error":
-                        self._strip_image_content_inplace(original_messages)
-                    await _finish_retry_status(
-                        "recovered" if result.finish_reason != "error" else "cleared",
-                        result,
-                    )
-                    return result
-                await _finish_retry_status("cleared", response)
+                response = await self._retry_without_images(
+                    call, kw, original_messages, response,
+                )
+                await _finish_retry_status(
+                    "recovered" if response.finish_reason != "error" else "cleared",
+                    response,
+                )
                 return response
 
-            if persistent and identical_error_count >= self._PERSISTENT_IDENTICAL_ERROR_LIMIT:
-                logger.warning(
-                    "Stopping persistent retry after {} identical transient errors: {}",
-                    identical_error_count,
-                    (response.content or "")[:120].lower(),
-                )
-                if on_retry_exhausted:
-                    await on_retry_exhausted(
-                        f"Persistent retry stopped after {identical_error_count} identical errors."
-                    )
-                if on_retry_status:
-                    await on_retry_status(
-                        RetryStatusEvent(
-                            state="exhausted",
-                            attempt=attempt,
-                            max_attempts=None,
-                            error_kind=self.public_error_kind(response),
-                        )
-                    )
-                return response
-
-            if not persistent and attempt > len(delays):
-                logger.warning(
-                    "LLM request failed after {} attempts, giving up: {}",
-                    attempt,
-                    (response.content or "")[:120].lower(),
-                )
-                if on_retry_exhausted:
-                    await on_retry_exhausted(
-                        f"Model request failed after {attempt} attempts, giving up."
-                    )
-                if on_retry_status:
-                    await on_retry_status(
-                        RetryStatusEvent(
-                            state="exhausted",
-                            attempt=attempt,
-                            max_attempts=len(delays) + 1,
-                            error_kind=self.public_error_kind(response),
-                        )
-                    )
+            if (
+                persistent and identical_error_count >= self._PERSISTENT_IDENTICAL_ERROR_LIMIT
+                or not persistent and attempt > len(delays)
+            ):
                 break
 
             retry_after = self._extract_retry_after_from_response(response)
             base_delay = delays[min(attempt - 1, len(delays) - 1)]
-            delay = retry_after + RETRY_AFTER_BUFFER if retry_after else base_delay
+            delay = (
+                retry_after + RETRY_AFTER_BUFFER
+                if retry_after else random.uniform(base_delay / 2, base_delay)
+            )
             if persistent:
                 delay = min(delay, self._PERSISTENT_MAX_DELAY)
-
             logger.warning(
                 "LLM transient error (attempt {}{}), retrying in {}s: {}",
                 attempt,
@@ -1744,12 +1676,82 @@ class LLMProvider(ABC):
                 attempt=attempt,
                 persistent=persistent,
                 error_kind=self.public_error_kind(response),
-                max_attempts=None if persistent else len(delays) + 1,
+                max_attempts=max_attempts,
                 on_retry_wait=on_retry_wait,
                 on_retry_status=on_retry_status,
             )
+            attempt += 1
+            response = await call(**kw)
+            if response.finish_reason != "error":
+                await _finish_retry_status("recovered", response)
+                return response
 
-        return last_response if last_response is not None else await call(**kw)  # pyright: ignore[reportUnnecessaryComparison]
+        if persistent:
+            logger.warning(
+                "Stopping persistent retry after {} identical transient errors: {}",
+                identical_error_count,
+                (response.content or "")[:120].lower(),
+            )
+            exhausted_message = (
+                f"Persistent retry stopped after {identical_error_count} identical errors."
+            )
+        else:
+            logger.warning(
+                "LLM request failed after {} attempts, giving up: {}",
+                attempt,
+                (response.content or "")[:120].lower(),
+            )
+            exhausted_message = f"Model request failed after {attempt} attempts, giving up."
+        if on_retry_exhausted:
+            await on_retry_exhausted(exhausted_message)
+        await _finish_retry_status("exhausted", response)
+        return response
+
+    async def _retry_without_images(
+        self,
+        call: Callable[..., Awaitable[LLMResponse]],
+        kw: dict[str, Any],
+        original_messages: list[dict[str, Any]],
+        response: LLMResponse,
+    ) -> LLMResponse:
+        # Removing the user's images cannot repair account access.
+        if (
+            (response.error_kind or "").lower() in {"authentication", "oauth_auth_required"}
+            or response.error_status_code in {401, 403}
+            or self.is_arrearage_response(response)
+        ):
+            return response
+        stripped = self._strip_image_content(kw["messages"])
+        provider_context = kw.get("provider_context")
+        stripped_context: ProviderCallContext | None = None
+        if isinstance(provider_context, ProviderCallContext):
+            state = provider_context.conversation_state
+            if state is not None and (
+                stripped is not None
+                or self._strip_image_content(state.pending_messages) is not None
+                or self._contains_image_content(state.payload)
+            ):
+                # Native payloads may retain images: rebuild from the public transcript.
+                stripped_context = ProviderCallContext(
+                    context_window_tokens=provider_context.context_window_tokens,
+                    session_id=provider_context.session_id,
+                    events=provider_context.events,
+                    response_preset=provider_context.response_preset,
+                    response_is_fallback=provider_context.response_is_fallback,
+                )
+        if stripped is None and stripped_context is None:
+            return response
+        logger.warning("Non-transient LLM error with image content, retrying without images")
+        retry_kw = dict(kw)
+        if stripped is not None:
+            retry_kw["messages"] = stripped
+        if stripped_context is not None:
+            retry_kw["provider_context"] = stripped_context
+        result = await call(**retry_kw)
+        # Keep later iterations from repeating the same image repair.
+        if result.finish_reason != "error":
+            self._strip_image_content_inplace(original_messages)
+        return result
 
     async def aclose(self) -> None:
         """Close provider-owned transports after their active requests have stopped."""

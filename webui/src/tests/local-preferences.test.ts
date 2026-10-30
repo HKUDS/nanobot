@@ -26,6 +26,43 @@ describe("local preferences", () => {
     expect(readLocalPreferences().brandLogos).toBe(false);
   });
 
+  it.each([undefined, "obsolete", 24])("defaults missing or invalid reading sizes without resetting other preferences: %s", (readingTextSize) => {
+    localStorage.setItem(LOCAL_PREFS_STORAGE_KEY, JSON.stringify({
+      schemaVersion: 1,
+      readingTextSize,
+      activityMode: "expanded",
+      codeWrap: false,
+      brandLogos: false,
+      notificationSound: true,
+      fileEditDisplayMode: "diff",
+    }));
+    expect(readLocalPreferences()).toEqual({
+      ...DEFAULT_LOCAL_PREFS,
+      readingTextSize: "standard",
+      activityMode: "expanded",
+      codeWrap: false,
+      brandLogos: false,
+      notificationSound: true,
+      fileEditDisplayMode: "diff",
+    });
+  });
+
+  it("round-trips a custom reading size without resetting other preferences", () => {
+    const preferences = { ...DEFAULT_LOCAL_PREFS, readingTextSize: "custom" as const,
+      customReadingTextSize: 24, notificationSound: true, codeWrap: false };
+    writeLocalPreferences(preferences);
+    expect(readLocalPreferences()).toEqual(preferences);
+  });
+
+  it.each([[40, 28], [8, 14], [19.6, 20], ["22", 18], [null, 18]])(
+    "normalizes persisted custom size %j to %s", (stored, expected) => {
+      localStorage.setItem(LOCAL_PREFS_STORAGE_KEY, JSON.stringify({
+        schemaVersion: 1, readingTextSize: "custom", customReadingTextSize: stored, codeWrap: false,
+      }));
+      expect(readLocalPreferences()).toMatchObject({ readingTextSize: "custom", customReadingTextSize: expected, codeWrap: false });
+    },
+  );
+
   it("keeps browser notifications opt-in", () => {
     expect(DEFAULT_LOCAL_PREFS.browserNotifications).toBe(false);
     expect(readLocalPreferences().browserNotifications).toBe(false);

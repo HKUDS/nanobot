@@ -1,5 +1,3 @@
-"""Editing task instructions must not postpone or drop an existing occurrence."""
-
 import asyncio
 from dataclasses import replace
 from pathlib import Path
@@ -49,7 +47,6 @@ async def test_metadata_edit_preserves_due_occurrence(tmp_path, monkeypatch, kin
     async def execute(job):
         calls.append((job.id, job.name, job.payload.message))
 
-    # A separate service consumes the persisted edit, as the gateway does.
     reader = CronService(store_path, on_job=execute)
     loaded = reader.get_job(job.id)
     assert loaded is not None

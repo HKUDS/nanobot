@@ -36,7 +36,7 @@ Concurrent instances need distinct gateway health ports and WebUI/channel ports.
 | Memory, skills, cron jobs | Under the workspace |
 | CLI input history | `<home>/history/cli_history` |
 
-An explicit `--config` also selects the runtime data directory. Keep each config in its own directory and use separate workspaces to isolate memory, skills, and sessions. Selecting a home does not relocate paths saved in an existing config.
+An explicit `--config` also selects the runtime data directory. Keep each config in its own directory and use separate workspaces to isolate memory, skills, and sessions. A new home gets its own config and default workspace; existing paths saved in a config remain unchanged when you select a different `--home`. Check which paths this instance will use with `nanobot --home ~/.nanobot-work status`. Selecting a home does not move or rewrite paths saved in an existing config.
 
 For custom config/workspace locations:
 

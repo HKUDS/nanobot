@@ -1,12 +1,6 @@
 # AI Agent Memory in nanobot
 
-This page explains how nanobot implements long-term AI agent memory: session history, compressed archives, durable knowledge files, Dream consolidation, and Git-backed memory changes.
-
-nanobot's memory is built on a simple belief: memory should feel alive, but it should not feel chaotic.
-
-Good memory is not a pile of notes. It is a quiet system of attention. It notices what is worth keeping, lets go of what no longer needs the spotlight, and turns lived experience into something calm, durable, and useful.
-
-That is the shape of memory in nanobot.
+nanobot keeps recent conversation history separate from longer-term information such as your preferences. Conversations are summarized as they grow or when you run `/compact`; if Dream is enabled, it can use those summaries to update long-term memory on its schedule, or when you run `/dream`. You can inspect and correct saved preferences. A reply saying it understood your preference does not by itself confirm that the preference was saved.
 
 ## The Design
 
@@ -23,7 +17,7 @@ This keeps the system light in the moment, but reflective over time.
 
 ## The Flow
 
-Memory moves through nanobot in two stages.
+Long-term memory is updated in two stages.
 
 ### Stage 1: Consolidator
 
@@ -33,11 +27,7 @@ Compaction also runs after a configured period of inactivity, or when you send `
 
 Automatic compaction does not post lifecycle notices to built-in chat channels by default. This only silences chat messages: compaction still runs, and WebUI/TUI retain structured status and history. Manual `/compact` keeps its start and outcome feedback. Set `channels.showCompactionNotices: true` to enable automatic notices globally, or set `showCompactionNotices` in a channel's configuration to override that default. Omitted or `null` channel overrides inherit the global value; existing explicit QQ overrides are preserved.
 
-This file is:
-
-- appended to as conversations are compacted
-- cursor-based
-- optimized for machine consumption first, human inspection second
+This file is updated as conversations are summarized. It uses one JSON record per line so nanobot can track which summaries have already been processed; it is primarily an internal working history, not a permanent archive.
 
 Each line is a JSON object:
 

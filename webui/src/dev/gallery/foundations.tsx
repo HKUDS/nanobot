@@ -18,83 +18,94 @@ import { HoverHint, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, Tr
 import { Disclosure } from "@/components/ui/disclosure";
 import { ExpandableText } from "@/components/ui/expandable-text";
 import { StreamingLabelSheen } from "@/components/ui/streaming-label-sheen";
+import { LoadingRing } from "@/components/ui/loading-ring";
+import { ImageViewport } from "@/components/ui/image-viewport";
 import { Sample, type ComponentExample } from "./example";
+import { useGalleryTranslation } from "./i18n";
 
 function Buttons() {
+  const { t } = useGalleryTranslation();
   const [clicks, setClicks] = useState(0);
   return <div className="space-y-6">
-    <Sample label="Variants · 同一个按钮的不同样式">
+    <Sample label={t("controls.button.variants")}>
       <div className="flex flex-wrap items-center gap-3">
-        {(["default", "secondary", "outline", "ghost", "destructive", "link"] as const).map((variant) =>
+        {(["default", "accent", "secondary", "outline", "ghost", "destructive", "link"] as const).map((variant) =>
           <Button key={variant} variant={variant} onClick={() => setClicks((value) => value + 1)}>{variant}</Button>)}
-        <Button variant="icon" size="icon" aria-label="Add example" onClick={() => setClicks((value) => value + 1)}><Plus className="h-4 w-4" /></Button>
+        <Button variant="icon" size="icon" aria-label={t("controls.button.add")} onClick={() => setClicks((value) => value + 1)}><Plus className="h-4 w-4" /></Button>
       </div>
     </Sample>
-    <Sample label="Sizes · 尺寸">
+    <Sample label={t("controls.button.sizes")}>
       <div className="flex flex-wrap items-center gap-3">
         {(["sm", "default", "control", "lg"] as const).map((size) =>
           <Button key={size} size={size} variant="outline" onClick={() => setClicks((value) => value + 1)}>{size}</Button>)}
-        <Button disabled>Unavailable</Button>
+        <Button disabled>{t("controls.common.unavailable")}</Button>
       </div>
     </Sample>
-    <p role="status" className="text-sm text-muted-foreground">Button clicks: {clicks}</p>
+    <p role="status" className="text-sm text-muted-foreground">{t("controls.button.clicks", { count: clicks })}</p>
   </div>;
 }
 
 function Inputs() {
+  const { t } = useGalleryTranslation();
   return <div className="grid gap-5 sm:grid-cols-2">
-    <Sample label="Default"><Input aria-label="Example name" placeholder="Project name" /></Sample>
-    <Sample label="Search"><SearchInput aria-label="Example search" placeholder="Search projects" /></Sample>
-    <Sample label="Invalid"><Input aria-label="Invalid name" aria-invalid="true" aria-describedby="gallery-input-error" defaultValue="" />
-      <p id="gallery-input-error" className="text-xs text-destructive">Enter a project name.</p></Sample>
-    <Sample label="Disabled"><Input aria-label="Disabled name" disabled defaultValue="Unavailable" /></Sample>
+    <Sample label={t("settings.values.default", { ns: "common" })}><Input aria-label={t("controls.input.name")} placeholder={t("controls.input.projectName")} /></Sample>
+    <Sample label={t("controls.input.search")}><SearchInput aria-label={t("controls.input.searchName")} placeholder={t("controls.input.searchProjects")} /></Sample>
+    <Sample label={t("controls.input.invalid")}><Input aria-label={t("controls.input.invalidName")} aria-invalid="true" aria-describedby="gallery-input-error" defaultValue="" />
+      <p id="gallery-input-error" className="text-xs text-destructive">{t("controls.input.required")}</p></Sample>
+    <Sample label={t("settings.values.disabled", { ns: "common" })}><Input aria-label={t("controls.input.disabledName")} disabled value={t("controls.common.unavailable")} /></Sample>
   </div>;
 }
 
 function Textareas() {
+  const { t } = useGalleryTranslation();
   return <div className="grid gap-5 sm:grid-cols-2">
-    <Textarea aria-label="Example notes" defaultValue="Write a short note…" />
-    <Textarea aria-label="Disabled notes" disabled defaultValue="Read-only preview" />
+    <Textarea aria-label={t("controls.textarea.notes")} defaultValue="Write a short note…" />
+    <Textarea aria-label={t("controls.textarea.disabledNotes")} disabled value={t("controls.textarea.readOnly")} />
   </div>;
 }
 
 function Switches() {
+  const { t } = useGalleryTranslation();
   const [checked, setChecked] = useState(false);
   return <div className="space-y-5">
-    <div className="flex items-center justify-between gap-4 text-sm"><span>Enable example</span>
-      <ToggleButton checked={checked} onChange={setChecked} label="Enable example" /></div>
-    <p role="status" className="text-sm text-muted-foreground">{checked ? "Enabled" : "Disabled"}</p>
+    <div className="flex items-center justify-between gap-4 text-sm"><span>{t("controls.toggle.enable")}</span>
+      <ToggleButton checked={checked} onChange={setChecked} label={t("controls.toggle.enable")} /></div>
+    <p role="status" className="text-sm text-muted-foreground">{t(checked ? "settings.values.enabled" : "settings.values.disabled", { ns: "common" })}</p>
     <div className="flex gap-8">
-      <ToggleButton checked disabled onChange={() => {}} label="Unavailable enabled switch" />
-      <ToggleButton checked={false} disabled onChange={() => {}} label="Unavailable disabled switch" />
+      <ToggleButton checked disabled onChange={() => {}} label={t("controls.toggle.unavailableOn")} />
+      <ToggleButton checked={false} disabled onChange={() => {}} label={t("controls.toggle.unavailableOff")} />
     </div>
   </div>;
 }
 
 function Selects() {
+  const { t } = useGalleryTranslation();
   const [value, setValue] = useState("default");
+  const labels: Record<string, string> = { default: t("settings.values.default", { ns: "common" }), fast: t("controls.select.fast") };
   return <div className="flex flex-wrap items-center gap-4">
     <Select value={value} onValueChange={setValue}>
-      <SelectTrigger aria-label="Example model" className="min-w-40"><SelectValue /></SelectTrigger>
-      <SelectContent><SelectItem value="default">Default</SelectItem><SelectItem value="fast">Fast</SelectItem>
-        <SelectItem value="offline" disabled>Unavailable</SelectItem></SelectContent>
+      <SelectTrigger aria-label={t("controls.select.model")} className="min-w-40"><SelectValue /></SelectTrigger>
+      <SelectContent><SelectItem value="default">{labels.default}</SelectItem><SelectItem value="fast">{labels.fast}</SelectItem>
+        <SelectItem value="offline" disabled>{t("controls.common.unavailable")}</SelectItem></SelectContent>
     </Select>
-    <Select disabled value="default"><SelectTrigger aria-label="Disabled model"><SelectValue /></SelectTrigger>
-      <SelectContent><SelectItem value="default">Default</SelectItem></SelectContent></Select>
-    <p role="status" className="text-sm text-muted-foreground">Selected: {value}</p>
+    <Select disabled value="default"><SelectTrigger aria-label={t("controls.select.disabledModel")}><SelectValue /></SelectTrigger>
+      <SelectContent><SelectItem value="default">{labels.default}</SelectItem></SelectContent></Select>
+    <p role="status" className="text-sm text-muted-foreground">{t("controls.common.selected", { value: labels[value] })}</p>
   </div>;
 }
 
 function Segments() {
+  const { t } = useGalleryTranslation();
   const [value, setValue] = useState("day");
+  const options = ["day", "week", "month"].map((period) => ({ value: period, label: t(`controls.segmented.${period}`) }));
   return <div className="space-y-4">
-    <SegmentedControl value={value} onChange={setValue} mode="tabs" ariaLabel="Example period"
-      options={[{ value: "day", label: "Day" }, { value: "week", label: "Week" }, { value: "month", label: "Month" }]} />
-    <p role="status" className="text-sm text-muted-foreground">Selected period: {value}</p>
+    <SegmentedControl value={value} onChange={setValue} mode="tabs" ariaLabel={t("controls.segmented.period")} options={options} />
+    <p role="status" className="text-sm text-muted-foreground">{t("controls.segmented.selected", { value: t(`controls.segmented.${value}`) })}</p>
   </div>;
 }
 
 function Comboboxes() {
+  const { t } = useGalleryTranslation();
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState("Alpha");
   const [open, setOpen] = useState(false);
@@ -102,90 +113,96 @@ function Comboboxes() {
   const select = (value: string) => { setSelected(value); setQuery(value); setOpen(false); };
   const navigation = useComboboxNavigation({ open, values, selectedValue: selected, onSelect: select, onClose: () => setOpen(false) });
   return <div className="max-w-sm space-y-3">
-    <Input {...navigation.inputProps} aria-label="Search example options" value={query} placeholder="Type or use arrow keys"
+    <Input {...navigation.inputProps} aria-label={t("controls.combobox.search")} value={query} placeholder={t("controls.combobox.placeholder")}
       onFocus={() => setOpen(true)} onChange={(event) => { setQuery(event.target.value); setOpen(true); }} />
-    {open && values.length > 0 ? <div {...navigation.listProps} aria-label="Example options" className="rounded-control border p-1">
+    {open && values.length > 0 ? <div {...navigation.listProps} aria-label={t("controls.combobox.choices")} className="rounded-control border p-1">
       {values.map((value) => <ComboboxOption key={value} {...navigation.getOptionProps(value)}>{value}</ComboboxOption>)}
     </div> : null}
-    {open && values.length === 0 ? <p role="status" className="text-sm text-muted-foreground">No matching options</p> : null}
-    <p className="text-sm text-muted-foreground">Selected option: {selected}</p>
+    {open && values.length === 0 ? <p role="status" className="text-sm text-muted-foreground">{t("controls.combobox.empty")}</p> : null}
+    <p className="text-sm text-muted-foreground">{t("controls.combobox.selected", { value: selected })}</p>
   </div>;
 }
 
 function Dialogs() {
+  const { t } = useGalleryTranslation();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("Nanobot");
   const [draft, setDraft] = useState(name);
   return <div className="space-y-4">
     <Dialog open={open} onOpenChange={(next) => { setOpen(next); if (next) setDraft(name); }}>
-      <DialogTrigger asChild><Button variant="outline">Open dialog</Button></DialogTrigger>
-      <DialogContent><DialogHeader><DialogTitle>Edit example label</DialogTitle>
-        <DialogDescription>Changes apply only to this preview.</DialogDescription></DialogHeader>
-        <Input aria-label="Example label" value={draft} onChange={(event) => setDraft(event.target.value)} />
+      <DialogTrigger asChild><Button variant="outline">{t("controls.dialog.open")}</Button></DialogTrigger>
+      <DialogContent><DialogHeader><DialogTitle>{t("controls.dialog.edit")}</DialogTitle>
+        <DialogDescription>{t("controls.dialog.help")}</DialogDescription></DialogHeader>
+        <Input aria-label={t("controls.dialog.label")} value={draft} onChange={(event) => setDraft(event.target.value)} />
         <Selects />
-        <DialogFooter><DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
-          <Button onClick={() => { setName(draft); setOpen(false); }}>Save label</Button></DialogFooter>
+        <DialogFooter><DialogClose asChild><Button variant="outline">{t("settings.actions.cancel", { ns: "common" })}</Button></DialogClose>
+          <Button onClick={() => { setName(draft); setOpen(false); }}>{t("controls.dialog.save")}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
-    <p role="status" className="text-sm text-muted-foreground">Saved label: {name}</p>
+    <p role="status" className="text-sm text-muted-foreground">{t("controls.dialog.saved", { name })}</p>
   </div>;
 }
 
 function Alerts() {
+  const { t } = useGalleryTranslation();
   const [removed, setRemoved] = useState(false);
   const [open, setOpen] = useState(false);
   return <div className="space-y-4">
-    <Button variant="destructive" onClick={() => setOpen(true)}>Remove example</Button>
+    <Button variant="destructive" onClick={() => setOpen(true)}>{t("controls.alert.remove")}</Button>
     <AlertDialog open={open} onOpenChange={setOpen}>
-      <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Remove this example?</AlertDialogTitle>
-        <AlertDialogDescription>This changes only the preview state.</AlertDialogDescription></AlertDialogHeader>
-        <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={() => setRemoved(true)}>Confirm removal</AlertDialogAction></AlertDialogFooter>
+      <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>{t("controls.alert.confirmTitle")}</AlertDialogTitle>
+        <AlertDialogDescription>{t("controls.alert.help")}</AlertDialogDescription></AlertDialogHeader>
+        <AlertDialogFooter><AlertDialogCancel>{t("settings.actions.cancel", { ns: "common" })}</AlertDialogCancel>
+          <AlertDialogAction onClick={() => setRemoved(true)}>{t("controls.alert.confirm")}</AlertDialogAction></AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
-    <p role="status" className="text-sm text-muted-foreground">{removed ? "Example removed." : "Example available."}</p>
+    <p role="status" className="text-sm text-muted-foreground">{t(removed ? "controls.alert.removed" : "controls.alert.available")}</p>
   </div>;
 }
 
 function Sheets() {
-  return <Sheet><SheetTrigger asChild><Button variant="outline">Open sheet</Button></SheetTrigger>
-    <SheetContent><SheetTitle>Example side panel</SheetTitle><SheetDescription>Supporting controls beside the current page.</SheetDescription>
-      <div className="mt-6"><Input aria-label="Panel notes" placeholder="Try editing here" /></div></SheetContent>
+  const { t } = useGalleryTranslation();
+  return <Sheet><SheetTrigger asChild><Button variant="outline">{t("controls.sheet.open")}</Button></SheetTrigger>
+    <SheetContent><SheetTitle>{t("controls.sheet.panelTitle")}</SheetTitle><SheetDescription>{t("controls.sheet.help")}</SheetDescription>
+      <div className="mt-6"><Input aria-label={t("controls.sheet.notes")} placeholder={t("controls.sheet.placeholder")} /></div></SheetContent>
   </Sheet>;
 }
 
 function Popovers() {
-  return <Popover><PopoverTrigger asChild><Button variant="outline">Open popover</Button></PopoverTrigger>
-    <PopoverContent className="w-64 p-4"><label className="space-y-2 text-sm"><span>Quick note</span><Input aria-label="Quick note" /></label></PopoverContent>
+  const { t } = useGalleryTranslation();
+  return <Popover><PopoverTrigger asChild><Button variant="outline">{t("controls.popover.open")}</Button></PopoverTrigger>
+    <PopoverContent className="w-64 p-4"><label className="space-y-2 text-sm"><span>{t("controls.popover.note")}</span><Input aria-label={t("controls.popover.note")} /></label></PopoverContent>
   </Popover>;
 }
 
 function Menus() {
+  const { t } = useGalleryTranslation();
   const [density, setDensity] = useState("comfortable");
-  const [action, setAction] = useState("None");
+  const [action, setAction] = useState("none");
   return <div className="space-y-4">
-    <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline">View options</Button></DropdownMenuTrigger>
-      <DropdownMenuContent><DropdownMenuLabel>Layout</DropdownMenuLabel>
+    <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline">{t("controls.menu.view")}</Button></DropdownMenuTrigger>
+      <DropdownMenuContent><DropdownMenuLabel>{t("controls.menu.layout")}</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={density} onValueChange={setDensity}>
-          <DropdownMenuRadioItem value="comfortable">Comfortable</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="compact">Compact</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="comfortable">{t("controls.menu.comfortable")}</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="compact">{t("controls.menu.compact")}</DropdownMenuRadioItem>
         </DropdownMenuRadioGroup><DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => setAction("Rename")}>Rename</DropdownMenuItem>
-        <DropdownMenuSub><DropdownMenuSubTrigger>More actions</DropdownMenuSubTrigger><DropdownMenuSubContent>
-          <DropdownMenuItem onSelect={() => setAction("Duplicate")}>Duplicate</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => setAction("rename")}>{t("controls.menu.rename")}</DropdownMenuItem>
+        <DropdownMenuSub><DropdownMenuSubTrigger>{t("controls.menu.more")}</DropdownMenuSubTrigger><DropdownMenuSubContent>
+          <DropdownMenuItem onSelect={() => setAction("duplicate")}>{t("controls.menu.duplicate")}</DropdownMenuItem>
         </DropdownMenuSubContent></DropdownMenuSub>
-        <DropdownMenuItem disabled>Unavailable</DropdownMenuItem>
+        <DropdownMenuItem disabled>{t("controls.common.unavailable")}</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
-    <p role="status" className="text-sm text-muted-foreground">Density: {density}. Action: {action}.</p>
+    <p role="status" className="text-sm text-muted-foreground">{t("controls.menu.status", { density: t(`controls.menu.${density}`), action: t(`controls.menu.${action}`) })}</p>
   </div>;
 }
 
 function Tooltips() {
+  const { t } = useGalleryTranslation();
   return <div className="flex flex-wrap items-center gap-4">
-    <TooltipProvider><Tooltip><TooltipTrigger asChild><Button variant="outline">Primitive tooltip</Button></TooltipTrigger>
-      <TooltipContent>Shared pointer delay and immediate keyboard focus.</TooltipContent></Tooltip></TooltipProvider>
-    <HoverHint content="A composed hint with the same focus and pointer behavior."><Button variant="outline">Hover hint</Button></HoverHint>
+    <TooltipProvider><Tooltip><TooltipTrigger asChild><Button variant="outline">{t("controls.tooltip.primitive")}</Button></TooltipTrigger>
+      <TooltipContent>{t("controls.tooltip.primitiveHelp")}</TooltipContent></Tooltip></TooltipProvider>
+    <HoverHint content={t("controls.tooltip.hintHelp")}><Button variant="outline">{t("controls.tooltip.hint")}</Button></HoverHint>
   </div>;
 }
 
@@ -197,84 +214,103 @@ function TruncatedText() {
 }
 
 function Disclosures() {
-  return <Disclosure summary={<span className="text-sm font-medium">Show advanced options</span>}
+  const { t } = useGalleryTranslation();
+  return <Disclosure summary={<span className="text-sm font-medium">{t("controls.disclosure.show")}</span>}
     summaryClassName="rounded-control border p-3" contentClassName="space-y-3 p-3">
-    <p className="text-sm text-muted-foreground">This draft survives closing and reopening.</p>
-    <Input aria-label="Disclosure draft" defaultValue="Keep this draft" />
+    <p className="text-sm text-muted-foreground">{t("controls.disclosure.help")}</p>
+    <Input aria-label={t("controls.disclosure.draft")} defaultValue="Keep this draft" />
   </Disclosure>;
 }
 
 function Expandable() {
+  const { t } = useGalleryTranslation();
   const [expanded, setExpanded] = useState(false);
   return <div className="max-w-sm space-y-3">
     <ExpandableText expanded={expanded} lines={2} id="gallery-expandable" className="text-sm leading-6">
       {"A longer activity description can stay compact while preserving its full text. Expand this example to read all of it, then collapse it again. The same paragraph remains mounted throughout the animation, so selection and layout do not jump between duplicate copies."}
     </ExpandableText>
     <Button variant="outline" size="sm" aria-expanded={expanded} aria-controls="gallery-expandable"
-      onClick={() => setExpanded((value) => !value)}>{expanded ? "Show less" : "Show more"}</Button>
+      onClick={() => setExpanded((value) => !value)}>{t(expanded ? "controls.expandable.less" : "controls.expandable.more")}</Button>
   </div>;
 }
 
 function StreamingLabels() {
+  const { t } = useGalleryTranslation();
   const [active, setActive] = useState(true);
   return <div className="space-y-4">
-    <ToggleButton label="Animate label" checked={active} onChange={setActive} />
-    <StreamingLabelSheen active={active}>Working through the next step…</StreamingLabelSheen>
+    <ToggleButton label={t("controls.streaming.animate")} checked={active} onChange={setActive} />
+    <StreamingLabelSheen active={active}>{t("controls.streaming.working")}</StreamingLabelSheen>
+  </div>;
+}
+
+function ImageViewports() {
+  return <div className="flex h-80 max-w-xl flex-col rounded-lg border p-3">
+    <ImageViewport src="/brand/nanobot_icon_512.png" alt="Nanobot" className="flex-1" />
   </div>;
 }
 
 const base = "webui/src/components/ui/";
 export const foundationExamples: ComponentExample[] = [
-  { title: "Button · 按钮", files: ["button"], Preview: Buttons,
-    description: "One button, several appearances and sizes. 同一组件通过选项变化。",
-    options: "variant changes appearance; size changes dimensions; disabled blocks interaction; onClick belongs to the caller.",
+  { title: "controls.button.title", files: ["button"], Preview: Buttons,
+    description: "controls.button.description",
+    options: "controls.button.options",
     code: '<Button variant="destructive" size="sm" onClick={removeItem}>Remove</Button>' },
-  { title: "Input · 输入框", files: ["input"], Preview: Inputs,
-    description: "Text entry and the shared search-field variant.", options: "Use Input for regular fields and SearchInput for search. Supply a label and describe invalid input.",
+  { title: "controls.input.title", files: ["input"], Preview: Inputs,
+    description: "controls.input.description", options: "controls.input.options",
     code: '<Input aria-label="Project name" value={name} onChange={event => setName(event.target.value)} />' },
-  { title: "Textarea · 多行输入", files: ["textarea"], Preview: Textareas,
-    description: "Multiline text using the shared focus treatment.", options: "Accepts native textarea props: value, onChange, rows and disabled.", code: '<Textarea aria-label="Notes" value={notes} onChange={event => setNotes(event.target.value)} />' },
-  { title: "ToggleButton · 开关", files: ["toggle-button"], Preview: Switches,
-    description: "A controlled on/off switch shared by settings, workspaces and channels.", options: "The caller owns checked and onChange. label supplies its accessible name.", code: '<ToggleButton checked={enabled} onChange={setEnabled} label="Enable feature" />' },
-  { title: "Select · 选择器", files: ["select"], Preview: Selects,
-    description: "A single choice with keyboard navigation and disabled options.", options: "Compose Select, SelectTrigger, SelectValue, SelectContent and SelectItem. The root owns value/onValueChange.",
+  { title: "controls.textarea.title", files: ["textarea"], Preview: Textareas,
+    description: "controls.textarea.description", options: "controls.textarea.options", code: '<Textarea aria-label="Notes" value={notes} onChange={event => setNotes(event.target.value)} />' },
+  { title: "controls.toggle.title", files: ["toggle-button"], Preview: Switches,
+    description: "controls.toggle.description", options: "controls.toggle.options", code: '<ToggleButton checked={enabled} onChange={setEnabled} label="Enable feature" />' },
+  { title: "controls.select.title", files: ["select"], Preview: Selects,
+    description: "controls.select.description", options: "controls.select.options",
     code: '<Select value={value} onValueChange={setValue}>\n  <SelectTrigger aria-label="Model"><SelectValue /></SelectTrigger>\n  <SelectContent><SelectItem value="default">Default</SelectItem></SelectContent>\n</Select>' },
-  { title: "SegmentedControl · 分段选择", files: ["segmented-control"], Preview: Segments,
-    description: "A short, always-visible set of choices.", options: 'value, options and onChange are controlled. mode="tabs" adds arrow-key tab navigation.',
+  { title: "controls.segmented.title", files: ["segmented-control"], Preview: Segments,
+    description: "controls.segmented.description", options: "controls.segmented.options",
     code: '<SegmentedControl value={period} onChange={setPeriod} options={[{ value: "day", label: "Day" }, { value: "week", label: "Week" }]} ariaLabel="Period" />' },
-  { title: "Combobox · 搜索选择", files: ["combobox"], Preview: Comboboxes,
-    description: "Searchable options with shared keyboard and pointer navigation.", options: "useComboboxNavigation supplies input/list/option props; the caller filters values and owns selection.",
+  { title: "controls.combobox.title", files: ["combobox"], Preview: Comboboxes,
+    description: "controls.combobox.description", options: "controls.combobox.options",
     code: 'const nav = useComboboxNavigation({ open, values, selectedValue, onSelect, onClose });\n<Input {...nav.inputProps} aria-label="Search" />\n<div {...nav.listProps}>\n  {values.map(value => <ComboboxOption key={value} {...nav.getOptionProps(value)}>{value}</ComboboxOption>)}\n</div>' },
-  { title: "ControlChevron · 控件箭头", files: ["control-chevron"], Preview: () => <ControlChevron />,
-    description: "The shared chevron used by selection controls.", options: "className may adjust placement. The icon is decorative; the owning control supplies its accessible name.", code: '<ControlChevron />' },
-  { title: "Dialog · 对话框", files: ["dialog"], Preview: Dialogs,
-    description: "A modal editor with staged changes, nested selection and focus return.", options: "The caller owns open/onOpenChange and draft/save behavior. Always provide DialogTitle and a description when useful.",
+  { title: "controls.chevron.title", files: ["control-chevron"], Preview: () => <ControlChevron />,
+    description: "controls.chevron.description", options: "controls.chevron.options", code: '<ControlChevron />' },
+  { title: "controls.dialog.title", files: ["dialog"], Preview: Dialogs,
+    description: "controls.dialog.description", options: "controls.dialog.options",
     code: '<Dialog open={open} onOpenChange={setOpen}>\n  <DialogTrigger asChild><Button>Edit</Button></DialogTrigger>\n  <DialogContent><DialogTitle>Edit item</DialogTitle><DialogDescription>Update this item.</DialogDescription>{editor}</DialogContent>\n</Dialog>' },
-  { title: "AlertDialog · 确认对话框", files: ["alert-dialog"], Preview: Alerts,
-    description: "An explicit confirmation with separate cancel and action controls.", options: "Compose title, description and footer; perform the action in AlertDialogAction's handler.",
+  { title: "controls.alert.title", files: ["alert-dialog"], Preview: Alerts,
+    description: "controls.alert.description", options: "controls.alert.options",
     code: '<Button onClick={() => setOpen(true)}>Remove</Button>\n<AlertDialog open={open} onOpenChange={setOpen}>\n  <AlertDialogContent><AlertDialogTitle>Remove item?</AlertDialogTitle><AlertDialogDescription>This removes the item.</AlertDialogDescription><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={removeItem}>Remove</AlertDialogAction></AlertDialogContent>\n</AlertDialog>' },
-  { title: "Sheet · 侧边面板", files: ["sheet"], Preview: Sheets,
-    description: "A modal panel attached to an edge of the viewport.", options: "SheetContent supports side. Include SheetTitle and SheetDescription.",
+  { title: "controls.sheet.title", files: ["sheet"], Preview: Sheets,
+    description: "controls.sheet.description", options: "controls.sheet.options",
     code: '<Sheet><SheetTrigger asChild><Button>Details</Button></SheetTrigger><SheetContent side="right"><SheetTitle>Details</SheetTitle><SheetDescription>Additional information.</SheetDescription>{content}</SheetContent></Sheet>' },
-  { title: "Popover · 浮层", files: ["popover"], Preview: Popovers,
-    description: "A small interactive surface anchored to its trigger.", options: "Compose trigger and content; open/onOpenChange can be controlled. Content follows the owning dialog's portal.",
+  { title: "controls.popover.title", files: ["popover"], Preview: Popovers,
+    description: "controls.popover.description", options: "controls.popover.options",
     code: '<Popover><PopoverTrigger asChild><Button>Note</Button></PopoverTrigger><PopoverContent>{editor}</PopoverContent></Popover>' },
-  { title: "DropdownMenu · 菜单", files: ["dropdown-menu"], Preview: Menus,
-    description: "Actions, radio choices, nested menus and disabled entries.", options: "Use onSelect for actions and a radio group for a persistent choice.",
+  { title: "controls.menu.title", files: ["dropdown-menu"], Preview: Menus,
+    description: "controls.menu.description", options: "controls.menu.options",
     code: '<DropdownMenu><DropdownMenuTrigger asChild><Button>Actions</Button></DropdownMenuTrigger><DropdownMenuContent><DropdownMenuItem onSelect={rename}>Rename</DropdownMenuItem></DropdownMenuContent></DropdownMenu>' },
-  { title: "Tooltip / HoverHint · 提示", files: ["tooltip", "tooltip-primitives", "hover-hint"], Preview: Tooltips,
-    description: "HoverHint composes the shared tooltip primitives; tooltip.tsx is their public import surface.", options: "Use HoverHint for ordinary hints. Keep essential errors visible. Hover and keyboard focus share the product's timing rules.",
+  { title: "controls.tooltip.title", files: ["tooltip", "tooltip-primitives", "hover-hint"], Preview: Tooltips,
+    description: "controls.tooltip.description", options: "controls.tooltip.options",
     code: '<HoverHint content="Add an attachment"><Button size="icon" aria-label="Add attachment"><Plus /></Button></HoverHint>' },
-  { title: "TruncatedTextTooltip · 截断提示", files: ["truncated-text-tooltip"], Preview: TruncatedText,
-    description: "Shows a hint only when the measured text is truncated.", options: "Supply text and a constrained width. Add tabIndex when the text itself should receive keyboard focus.",
+  { title: "controls.truncated.title", files: ["truncated-text-tooltip"], Preview: TruncatedText,
+    description: "controls.truncated.description", options: "controls.truncated.options",
     code: '<TruncatedTextTooltip text={projectName} tabIndex={0} className="block max-w-48" />' },
-  { title: "Disclosure · 折叠内容", files: ["disclosure"], Preview: Disclosures,
-    description: "Expandable content that preserves child state while folded.", options: "Disclosure owns expansion; DisclosureContent accepts a controlled open prop for custom triggers.",
+  { title: "controls.disclosure.title", files: ["disclosure"], Preview: Disclosures,
+    description: "controls.disclosure.description", options: "controls.disclosure.options",
     code: '<Disclosure summary="Advanced options"><Input aria-label="Draft" defaultValue="Preserved" /></Disclosure>' },
-  { title: "ExpandableText · 文本展开", files: ["expandable-text"], Preview: Expandable,
-    description: "A line-limited preview of the same mounted text.", options: "The caller owns expanded. lines sets the collapsed line count; provide an accessible toggle.",
+  { title: "controls.expandable.title", files: ["expandable-text"], Preview: Expandable,
+    description: "controls.expandable.description", options: "controls.expandable.options",
     code: '<ExpandableText expanded={expanded} lines={2} className="text-sm leading-6">{description}</ExpandableText>' },
-  { title: "StreamingLabelSheen · 流光文字", files: ["streaming-label-sheen"], Preview: StreamingLabels,
-    description: "A shared text animation for active thinking and tool labels.", options: "active controls animation. String or number children supply the glyph overlay; reduced-motion settings are respected.",
+  { title: "controls.imageViewport.title", files: ["image-viewport"], Preview: ImageViewports,
+    description: "controls.imageViewport.description", options: "controls.imageViewport.options",
+    code: '<div className="flex h-80 flex-col"><ImageViewport src={url} alt={label} className="flex-1" /></div>' },
+  { title: "controls.loadingRing.title", files: ["loading-ring"],
+    Preview: () => <div className="flex items-center gap-6 text-muted-foreground">
+      <LoadingRing className="h-3 w-3" />
+      <LoadingRing track={false} strokeWidth="1.5" strokeDasharray="12 50.8" className="h-6 w-6" />
+    </div>,
+    description: "controls.loadingRing.description", options: "controls.loadingRing.options",
+    code: '<LoadingRing className="h-3 w-3 text-muted-foreground" />\n<LoadingRing track={false} strokeWidth="1.5" strokeDasharray="12 50.8" className="h-6 w-6" />' },
+  { title: "controls.streaming.title", files: ["streaming-label-sheen"], Preview: StreamingLabels,
+    description: "controls.streaming.description", options: "controls.streaming.options",
     code: '<StreamingLabelSheen active={running}>Working…</StreamingLabelSheen>' },
 ].map((example) => ({ ...example, files: example.files.map((file) => `${base}${file}.tsx`) }));

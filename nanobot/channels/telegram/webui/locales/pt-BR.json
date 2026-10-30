@@ -7,9 +7,8 @@
         "label": "Token do bot",
         "placeholder": "123456:ABC..."
       },
-      "proxy": {
-        "label": "Proxy de rede",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "Usar proxy"
       },
       "allowFrom": {
         "label": "Usuários permitidos",

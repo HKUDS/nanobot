@@ -19,6 +19,15 @@ describe("development overlay dependencies", () => {
   });
 });
 
+describe("development diagram Worker dependencies", () => {
+  it("pre-bundles Worker-only imports without a first-use page reload", () => {
+    const config = webuiConfig({ command: "serve", mode: "test" });
+    expect(config.optimizeDeps?.include).toEqual(expect.arrayContaining([
+      "pele/lazy", "saxes", "css-tree/parser", "css-tree/walker", "css-tree/generator",
+    ]));
+  });
+});
+
 describe("gzipWebuiAssets", () => {
   it("compresses finalized files after Rollup writes the bundle", async () => {
     const plugin = gzipWebuiAssets();
@@ -63,10 +72,12 @@ describe("entryLazyFeatureImports", () => {
       "assets/markdown-vendor-abc.js",
       "assets/syntax-highlight-def.js",
       "assets/katex-ghi.js",
+      "assets/MermaidBlock-jkl.js",
     ])).toEqual([
       "assets/markdown-vendor-abc.js",
       "assets/syntax-highlight-def.js",
       "assets/katex-ghi.js",
+      "assets/MermaidBlock-jkl.js",
     ]);
   });
 });
@@ -102,6 +113,7 @@ describe("webuiManualChunk", () => {
   });
 
   it("keeps Streamdown and its repair helper in the markdown chunk", () => {
+    expect(webuiManualChunk("/repo/webui/src/components/markdown-diagrams/context.tsx")).toBeUndefined();
     expect(webuiManualChunk("/repo/node_modules/streamdown/dist/index.js")).toBe(
       "markdown-vendor",
     );

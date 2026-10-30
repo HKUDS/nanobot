@@ -1,63 +1,66 @@
-"""Test websocket subscribe hydration only replays known active turns."""
-
-from unittest.mock import AsyncMock, MagicMock, patch
+import json
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
+from websockets.asyncio.server import ServerConnection
 
-from nanobot.channels.websocket.runtime import WebSocketChannel
-from nanobot.webui.outbound_projection import WebUIOutboundProjector
-from nanobot.webui.session_projection import WebUISessionProjection
+from nanobot.bus.queue import MessageBus
+from nanobot.channels.websocket.runtime import WebSocketConfig
+from nanobot.webui.gateway_services import build_gateway_services
+from nanobot.webui.outbound_delivery import WebUIOutboundDelivery
+
+
+class _RecordingTransport:
+    def __init__(self) -> None:
+        self.connection = MagicMock(spec=ServerConnection)
+        self.frames: list[dict[str, Any]] = []
+
+    def webui_recipients(self, audience: object) -> tuple[ServerConnection, ...]:
+        return (self.connection,)
+
+    async def webui_send_raw(
+        self, connection: ServerConnection, raw: str, *, label: str = "",
+    ) -> None:
+        self.frames.append(json.loads(raw))
+
+
+def _delivery(history, tmp_path) -> tuple[WebUIOutboundDelivery, _RecordingTransport]:
+    gateway = build_gateway_services(
+        config=WebSocketConfig(allow_from=["*"], websocket_requires_token=False),
+        bus=MessageBus(),
+        session_manager=history.sessions,
+        static_dist_path=None,
+        workspace_path=tmp_path,
+        default_restrict_to_workspace=False,
+        runtime_model_name=None,
+        runtime_surface="browser",
+        runtime_capabilities_overrides=None,
+    )
+    transport = _RecordingTransport()
+    outbound = WebUIOutboundDelivery(
+        transport,
+        media=gateway.media,
+        transcripts=gateway.transcripts,
+        temporary_chats=gateway.temporary_chats,
+        session_projection=gateway.session_projection,
+    )
+    return outbound, transport
 
 
 @pytest.mark.asyncio
-async def test_hydrate_after_subscribe_is_quiet_when_no_turn_active():
-    """Subscribe hydration must not inject an idle event into normal message order."""
-    channel = WebSocketChannel.__new__(WebSocketChannel)
-    channel.gateway = MagicMock()
-    channel.gateway.session_manager = MagicMock()
-    channel.gateway.session_manager.state.read_metadata = AsyncMock(return_value={})
-    channel._session_projection = WebUISessionProjection(channel.gateway.session_manager)
-    channel._outbound = WebUIOutboundProjector(channel, channel._session_projection)
-    channel._turn_models = {}
-
-    sent_events = []
-
-    async def mock_send_goal_state(chat_id, blob):
-        sent_events.append(("goal_state", chat_id, blob))
-
-    async def mock_send_goal_status(chat_id, status, **kwargs):
-        sent_events.append(("goal_status", chat_id, status, kwargs))
-
-    channel.send_goal_state = mock_send_goal_state
-    channel.send_goal_status = mock_send_goal_status
+async def test_subscribe_hydration_is_quiet_when_no_turn_active(history, tmp_path):
+    outbound, transport = _delivery(history, tmp_path)
 
     with patch("nanobot.webui.session_projection.websocket_turn_wall_started_at", return_value=None):
-        await channel._hydrate_after_subscribe("test-chat")
+        await outbound.hydrate("test-chat")
 
-    assert sent_events == []
+    assert transport.frames == []
 
 
 @pytest.mark.asyncio
-async def test_hydrate_after_subscribe_pushes_running_when_turn_active():
-    """Reconnecting client should receive running status when turn is active."""
-    channel = WebSocketChannel.__new__(WebSocketChannel)
-    channel.gateway = MagicMock()
-    channel.gateway.session_manager = MagicMock()
-    channel.gateway.session_manager.state.read_metadata = AsyncMock(return_value={})
-    channel._session_projection = WebUISessionProjection(channel.gateway.session_manager)
-    channel._outbound = WebUIOutboundProjector(channel, channel._session_projection)
-    channel._turn_models = {}
-
-    sent_events = []
-
-    async def mock_send_goal_state(chat_id, blob):
-        sent_events.append(("goal_state", chat_id, blob))
-
-    async def mock_send_goal_status(chat_id, status, **kwargs):
-        sent_events.append(("goal_status", chat_id, status, kwargs))
-
-    channel.send_goal_state = mock_send_goal_state
-    channel.send_goal_status = mock_send_goal_status
+async def test_subscribe_hydration_pushes_running_when_turn_active(history, tmp_path):
+    outbound, transport = _delivery(history, tmp_path)
 
     with (
         patch(
@@ -69,9 +72,12 @@ async def test_hydrate_after_subscribe_pushes_running_when_turn_active():
             return_value="turn-active",
         ),
     ):
-        await channel._hydrate_after_subscribe("test-chat")
+        await outbound.hydrate("test-chat")
 
-    running_events = [e for e in sent_events if e[0] == "goal_status" and e[2] == "running"]
-    assert len(running_events) == 1
-    assert running_events[0][3]["started_at"] == 1234567890.0
-    assert running_events[0][3]["turn_id"] == "turn-active"
+    assert transport.frames == [{
+        "event": "goal_status",
+        "chat_id": "test-chat",
+        "status": "running",
+        "started_at": 1234567890.0,
+        "turn_id": "turn-active",
+    }]

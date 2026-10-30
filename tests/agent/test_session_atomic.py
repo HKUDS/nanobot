@@ -1,5 +1,3 @@
-"""Private continuation state stays outside public conversation history."""
-
 import json
 from pathlib import Path
 

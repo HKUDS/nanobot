@@ -1,20 +1,33 @@
-"""Detached views and transient session lifetime."""
-
 import pytest
 
-from nanobot.session.manager import SessionManager
+from nanobot.session.manager import Session, SessionManager
 from nanobot.session.sqlite_store import SessionConflictError
 
 
 async def test_committed_view_cache_is_bounded(tmp_path):
-    state = SessionManager(tmp_path).state
-    for i in range(140):
-        await state.get(str(i))
-        await state.update_metadata(str(i), {"title": str(i)})
-    assert len(state._snapshots) <= 128
-    assert state.peek("0") is None
-    assert (await state.get("0")).metadata["title"] == "0"
-    await state.aclose()
+    manager = SessionManager(tmp_path)
+    with manager._store.transaction():
+        for i in range(140):
+            manager.save(Session(key=str(i), metadata={"title": str(i)}))
+    state = manager.state
+    try:
+        for i in range(140):
+            await state.get(str(i))
+            assert len(state._snapshots) <= 128
+            if i == 127:
+                assert len(state._snapshots) == 128
+                assert state.peek("0") is not None
+            elif i == 128:
+                assert len(state._snapshots) == 128
+                assert state.peek("0") is None
+        await state.update_metadata("139", {"title": "updated"})
+        assert state.peek("139").metadata["title"] == "updated"
+        assert len(state._snapshots) == 128
+        assert state.peek("0") is None
+        assert (await state.get("0")).metadata["title"] == "0"
+        assert len(state._snapshots) == 128
+    finally:
+        await state.aclose()
 
 
 async def test_cached_views_are_detached(tmp_path):

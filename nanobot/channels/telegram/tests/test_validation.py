@@ -10,11 +10,12 @@ from nanobot.config.loader import save_config
 from nanobot.config.schema import Config
 
 
-def test_telegram_setup_exposes_proxy_as_an_optional_field() -> None:
-    proxy = SETUP_SPEC.fields["proxy"]
+def test_telegram_setup_exposes_proxy_opt_in_as_an_optional_field() -> None:
+    use_proxy = SETUP_SPEC.fields["useProxy"]
 
-    assert proxy.kind == "string"
-    assert "proxy" not in SETUP_SPEC.simple_required_fields
+    assert use_proxy.kind == "bool"
+    assert use_proxy.default is False
+    assert "useProxy" not in SETUP_SPEC.simple_required_fields
 
 
 def test_get_me_builds_http_client_with_explicit_proxy(
@@ -169,7 +170,7 @@ def test_validate_telegram_marks_proxy_transport_failures_without_exposing_proxy
     config_path = tmp_path / "config.json"
     save_config(
         Config.model_validate(
-            {"channels": {"telegram": {"token": token, "proxy": proxy}}}
+            {"network": {"proxy": proxy}, "channels": {"telegram": {"token": token, "useProxy": True}}}
         ),
         config_path,
     )
@@ -197,7 +198,7 @@ def test_validate_telegram_uses_saved_proxy_without_exposing_it(
     config_path = tmp_path / "config.json"
     save_config(
         Config.model_validate(
-            {"channels": {"telegram": {"token": token, "proxy": proxy}}}
+            {"network": {"proxy": proxy}, "channels": {"telegram": {"token": token, "useProxy": True}}}
         ),
         config_path,
     )
@@ -230,7 +231,7 @@ def test_validate_telegram_resolves_saved_secret_env_refs_without_exposing_them(
     config_path = tmp_path / "config.json"
     save_config(
         Config.model_validate(
-            {"channels": {"telegram": {"token": token_ref, "proxy": proxy_ref}}}
+            {"network": {"proxy": proxy_ref}, "channels": {"telegram": {"token": token_ref, "useProxy": True}}}
         ),
         config_path,
     )
@@ -263,7 +264,7 @@ def test_validate_telegram_rejects_unset_proxy_env_ref_without_connecting(
     config_path = tmp_path / "config.json"
     save_config(
         Config.model_validate(
-            {"channels": {"telegram": {"token": token, "proxy": proxy_ref}}}
+            {"network": {"proxy": proxy_ref}, "channels": {"telegram": {"token": token, "useProxy": True}}}
         ),
         config_path,
     )
@@ -279,17 +280,17 @@ def test_validate_telegram_rejects_unset_proxy_env_ref_without_connecting(
     assert result["status"] == "invalid"
     assert result["can_enable"] is False
     assert proxy_ref not in str(result)
-    assert any(check["id"] == "proxy_env" for check in result["checks"])
+    assert any(check["id"] == "network_proxy" for check in result["checks"])
 
 
-def test_validate_telegram_uses_proxy_submitted_with_new_token(
+def test_validate_telegram_uses_shared_proxy_when_opt_in_is_submitted_with_new_token(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     token = "123456:abcdefghijklmnopqrstuvwxyz"
     proxy = "http://127.0.0.1:7890"
     config_path = tmp_path / "config.json"
-    save_config(Config(), config_path)
+    save_config(Config.model_validate({"network": {"proxy": proxy}}), config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     captured: dict[str, str | None] = {}
 
@@ -303,7 +304,7 @@ def test_validate_telegram_uses_proxy_submitted_with_new_token(
         "telegram",
         {
             "channels.telegram.token": token,
-            "channels.telegram.proxy": proxy,
+            "channels.telegram.useProxy": True,
         },
     )
 
@@ -319,7 +320,10 @@ def test_validate_telegram_rejects_invalid_proxy_without_trying_token(
 ) -> None:
     token = "123456:abcdefghijklmnopqrstuvwxyz"
     config_path = tmp_path / "config.json"
-    save_config(Config(), config_path)
+    monkeypatch.setenv("NETWORK_PROXY_TEST", proxy)
+    save_config(
+        Config.model_validate({"network": {"proxy": "${NETWORK_PROXY_TEST}"}}), config_path,
+    )
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
     def fail_get_me(*_args) -> dict:
@@ -331,11 +335,11 @@ def test_validate_telegram_rejects_invalid_proxy_without_trying_token(
         "telegram",
         {
             "channels.telegram.token": token,
-            "channels.telegram.proxy": proxy,
+            "channels.telegram.useProxy": True,
         },
     )
 
     assert result["status"] == "invalid"
     assert result["can_enable"] is False
     assert proxy not in str(result)
-    assert any(check["id"] == "proxy_format" for check in result["checks"])
+    assert any(check["id"] == "network_proxy" for check in result["checks"])

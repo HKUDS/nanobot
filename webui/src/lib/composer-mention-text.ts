@@ -1,5 +1,11 @@
 import type { CliAppInfo, McpPresetInfo, SessionMention } from "@/lib/types";
 
+const MENTION_START_BOUNDARY = /[\s([{,，、;；:：!?！？。]/u;
+
+export function isCapabilityMentionStart(value: string, position: number): boolean {
+  return position === 0 || MENTION_START_BOUNDARY.test(value.charAt(position - 1));
+}
+
 export type CapabilityMentionSegment =
   | { kind: "text"; text: string }
   | { kind: "cli"; text: string; app: CliAppInfo }

@@ -1,5 +1,3 @@
-"""System-level notification for config file changes."""
-
 from __future__ import annotations
 
 from collections.abc import Callable

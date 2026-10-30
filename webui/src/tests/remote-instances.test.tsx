@@ -168,8 +168,8 @@ describe("remote instance UX", () => {
       origin: "http://127.0.0.1:23456", data: { channel: HOST_BRIDGE, type: "hello" } })));
     await openDirectory();
     fireEvent.pointerDown(screen.getByRole("button", { name: "Manage Team server" }), { button: 0, ctrlKey: false });
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename", exact: true }));
-    const input = await screen.findByRole("textbox", { name: "Name", exact: true });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    const input = await screen.findByRole("textbox", { name: "Name" });
     expect(input).toHaveValue("Team server");
     expect(input).toHaveAccessibleName("Name");
     expect(within(screen.getByRole("dialog")).queryByText("Name", { exact: true })).not.toBeInTheDocument();
@@ -207,8 +207,8 @@ describe("remote instance UX", () => {
   it("rejects a blank name, preserves input on failure and lets the user retry or cancel", async () => {
     view(); await openDirectory();
     fireEvent.pointerDown(screen.getByRole("button", { name: "Manage Team server" }), { button: 0, ctrlKey: false });
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename", exact: true }));
-    const input = await screen.findByRole("textbox", { name: "Name", exact: true });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    const input = await screen.findByRole("textbox", { name: "Name" });
     fireEvent.change(input, { target: { value: "   " } });
     expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
     fireEvent.submit(input.closest("form")!);
@@ -220,7 +220,7 @@ describe("remote instance UX", () => {
     expect(input).toHaveAccessibleDescription(i18n.t("remote.errors.local_io_error"));
     expect(input).toHaveValue("Cloud");
     expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByRole("button", { name: "Manage Team server" })).toBeVisible();
     expect(mocks.request).toHaveBeenCalledTimes(1);
   });
@@ -231,8 +231,8 @@ describe("remote instance UX", () => {
     mocks.request.mockResolvedValue({ available: true, profiles: siblings.map((item) => ({ ...item, name: "Cloud" })) });
     view(); await openDirectory();
     fireEvent.pointerDown(screen.getByRole("button", { name: "Manage Team server" }), { button: 0, ctrlKey: false });
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename", exact: true }));
-    fireEvent.change(await screen.findByRole("textbox", { name: "Name", exact: true }), { target: { value: "Cloud" } });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Name" }), { target: { value: "Cloud" } });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await screen.findByRole("button", { name: "Manage Cloud" });
     expect(screen.getAllByRole("button", { name: "Cloud ubuntu@example.test" })).toHaveLength(1);
@@ -253,7 +253,7 @@ describe("remote instance UX", () => {
     expect(await within(dialog).findByRole("button", { name: "Copied" })).toBeVisible();
     expect(copy).toHaveBeenCalledWith(command);
     expect(mocks.request).not.toHaveBeenCalled();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", exact: true }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(mocks.request).not.toHaveBeenCalled();
   });
   it("shows one verified instance in management and the switcher while retaining both grants in details", async () => {
@@ -270,12 +270,12 @@ describe("remote instance UX", () => {
     fireEvent.pointerDown(within(details).getByRole("button", { name: "Manage connection 1" }), { button: 0, ctrlKey: false });
     fireEvent.click(screen.getByRole("menuitem", { name: "Forget connection" }));
     expect(await screen.findByRole("dialog", { name: "Forget this connection?" })).toHaveTextContent(i18n.t("remote.sameInstance.forgetHint"));
-    expect(screen.getByRole("button", { name: "Forget", exact: true })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Forget", exact: true }).firstElementChild).not.toHaveClass("truncate");
-    expect(screen.queryByRole("button", { name: "Remove connection", exact: true })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
+    expect(screen.getByRole("button", { name: "Forget" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Forget" }).firstElementChild).not.toHaveClass("truncate");
+    expect(screen.queryByRole("button", { name: "Remove connection" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(mocks.request).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Back", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
     fireEvent.pointerDown(screen.getByRole("button", { name: "Switch host" }), { button: 0, ctrlKey: false });
     expect(await screen.findAllByRole("menuitem", { name: "Team server ubuntu@example.test" })).toHaveLength(1);
   });
@@ -321,7 +321,7 @@ describe("remote instance UX", () => {
     expect(readSelectedRemote()?.id).toBe(profile.id);
     expect(window.location.hash).toBe(originalHash);
     expect(document.title).toBe(originalTitle);
-    fireEvent.click(within(panel).getByRole("button", { name: "Back", exact: true }));
+    fireEvent.click(within(panel).getByRole("button", { name: "Back" }));
     await waitFor(() => expect(panel).not.toBeInTheDocument());
     expect(screen.getByTitle("nanobot on Team server")).toBe(frame);
     expect(frame).toBeVisible();
@@ -337,7 +337,7 @@ describe("remote instance UX", () => {
     fireEvent.change(draft, { target: { value: "Keep this unsent draft" } });
     await openDirectory();
     expect(screen.queryByRole("textbox", { name: "Local draft" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Back", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
     await waitFor(() => expect(screen.queryByRole("region", { name: "Remote connections" })).not.toBeInTheDocument());
     expect(screen.getByRole("textbox", { name: "Local draft" })).toBe(draft);
     expect(draft).toHaveValue("Keep this unsent draft");
@@ -351,7 +351,7 @@ describe("remote instance UX", () => {
     view();
     await chooseHost("Team server ubuntu@example.test");
     await openDirectory();
-    fireEvent.click(screen.getByRole("button", { name: "Back", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
     await act(async () => finish(connection));
     const frame = await readyRemote();
     expect(frame).toBeVisible();
@@ -381,7 +381,7 @@ describe("remote instance UX", () => {
     const frame = await readyRemote();
     expect(frame).not.toBeVisible();
     expect(screen.getByRole("region", { name: "Remote connections" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Back", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
     expect(frame).toBeVisible();
     expect(readSelectedRemote()?.id).toBe(profile.id);
   });
@@ -410,7 +410,7 @@ describe("remote instance UX", () => {
     const row = screen.getByRole("button", { name: "Team server ubuntu@example.test" });
     expect(row).not.toHaveAttribute("aria-current");
     expect(within(row).getByRole("status")).toHaveTextContent(label);
-    fireEvent.click(screen.getByRole("button", { name: "Back", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
     fireEvent.pointerDown(screen.getByRole("button", { name: "Switch host" }), { button: 0, ctrlKey: false });
     const item = await screen.findByRole("menuitem", { name: "Team server ubuntu@example.test" });
     expect(within(item).getByRole("status")).toHaveTextContent(label);
@@ -1153,7 +1153,7 @@ describe("remote instance UX", () => {
     mocks.request.mockImplementation(() => new Promise<RemoteConnection>((resolve) => { finish = resolve; }));
     view(); await openDirectory();
     fireEvent.click(screen.getByRole("button", { name: "Team server ubuntu@example.test" }));
-    fireEvent.click(screen.getByRole("button", { name: "Back", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
     await act(async () => { finish?.(connection); });
     expect(screen.getByText("Local conversations")).toBeVisible();
     expect(screen.queryByTitle("nanobot on Team server")).not.toBeInTheDocument();
@@ -1170,7 +1170,7 @@ describe("remote instance UX", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "SSH address" }), { target: { value: "ubuntu@example.test" } });
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    fireEvent.click(screen.getByRole("button", { name: "Back", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
     await act(async () => { finish?.({ id: profile.id }); });
     expect(mocks.request).toHaveBeenCalledTimes(1);
     expect(screen.getByText("Local conversations")).toBeVisible();
@@ -1312,7 +1312,13 @@ describe("remote instance UX", () => {
 
   it("tolerates transient health failures and covers, rather than reloads, the remote frame", async () => {
     let tick: (() => void) | undefined;
-    vi.spyOn(window, "setInterval").mockImplementation((callback, delay) => { if (delay === 5_000) tick = callback as () => void; return 1; });
+    const setInterval = globalThis.setInterval;
+    vi.spyOn(window, "setInterval").mockImplementation((callback, delay) => {
+      if (delay === 5_000) tick = callback;
+      const timer = setInterval(callback, delay);
+      globalThis.clearInterval(timer);
+      return timer;
+    });
     view(); await openDirectory();
     fireEvent.click(screen.getByRole("button", { name: "Team server ubuntu@example.test" }));
     const frame = await readyRemote();

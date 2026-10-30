@@ -1,5 +1,3 @@
-"""Shared lifecycle hook primitives for agent runs."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -26,6 +24,8 @@ class AgentHookContext:
     tool_results: list[Any] = field(default_factory=list)
     tool_events: list[dict[str, str]] = field(default_factory=list)
     streamed_content: bool = False
+    # Raw segments observed this round, retained only if its terminal response fails.
+    streamed_content_parts: list[str] = field(default_factory=list, repr=False)
     streamed_reasoning: bool = False
     stream_continues_current_message: bool = False
     final_content: str | None = None

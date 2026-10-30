@@ -1,5 +1,3 @@
-"""Queued delivery of messages and typed events between core and channels."""
-
 import asyncio
 import contextlib
 import inspect
@@ -11,6 +9,7 @@ from loguru import logger
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import outbound_message_for_event
 from nanobot.events import AgentEvent
+from nanobot.runtime_admission import RuntimeAdmission
 
 _EventT = TypeVar("_EventT", bound=AgentEvent)
 EventHandler = Callable[[AgentEvent], Awaitable[None] | None]
@@ -28,7 +27,8 @@ class MessageBus:
     ``publish_event``. Local state transitions never wait for network sends.
     """
 
-    def __init__(self):
+    def __init__(self, *, admission: RuntimeAdmission | None = None):
+        self.admission = admission if admission is not None else RuntimeAdmission()
         self.inbound: asyncio.Queue[InboundMessage] = asyncio.Queue()
         self.outbound: asyncio.Queue[OutboundMessage] = asyncio.Queue()
         self._handlers: list[EventHandler] = []
@@ -37,7 +37,9 @@ class MessageBus:
 
     async def publish_inbound(self, msg: InboundMessage) -> None:
         """Publish a message from a channel to the agent."""
-        await self.inbound.put(msg)
+        self.admission.check()
+        # This queue is unbounded. Admission and enqueue must not yield apart.
+        self.inbound.put_nowait(msg)
 
     async def consume_inbound(self) -> InboundMessage:
         """Consume the next inbound message (blocks until available)."""
@@ -80,6 +82,11 @@ class MessageBus:
     def outbound_size(self) -> int:
         """Number of pending outbound messages."""
         return self.outbound.qsize()
+
+    @property
+    def has_pending_events(self) -> bool:
+        """Scheduled local subscribers may still start agent background work."""
+        return bool(self._pending)
 
     @overload
     def subscribe(

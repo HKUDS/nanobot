@@ -97,7 +97,7 @@ If `nanobot channels status` does not show the channel as enabled, the config sn
 | **Slack** | Bot token + App-Level token |
 | **Matrix** | Homeserver URL + Access token |
 | **Email** | IMAP/SMTP credentials |
-| **QQ** | App ID + App Secret |
+| **QQ** | QR code scan (`nanobot channels login qq`) or App ID + App Secret |
 | **Napcat (QQ)** | Napcat Forward WebSocket URL + access token |
 | **Wecom** | Bot ID + Bot Secret |
 | **Microsoft Teams** | App ID + App Password + public HTTPS endpoint |
@@ -127,7 +127,7 @@ See the [native Linear agent guide](./guides/linear-agent.md) for the complete s
 
 1. Create a bot with `@BotFather` and copy its token.
 2. Run `nanobot webui`, then open **Channels → Telegram**.
-3. Paste the token. If the gateway cannot reach Telegram directly, expand **Advanced** and add an HTTP or SOCKS proxy.
+3. Paste the token. If the gateway cannot reach Telegram directly, set the address in **Settings → Advanced → Shared proxy**, then enable **Use proxy** in Telegram's advanced options.
 4. Save and enable Telegram, then send the bot a direct message.
 
 The configuration badge means nanobot found a saved token. The live connection check is separate, so a temporary Telegram or proxy outage does not make an existing configuration disappear. Saved tokens and proxy URLs remain masked.
@@ -161,13 +161,14 @@ nanobot plugins enable telegram
 }
 ```
 
-If the gateway cannot reach Telegram directly, add a proxy to the same section:
+If the gateway cannot reach Telegram directly, set the shared address and enable it for Telegram:
 
 ```json
 {
+  "network": { "proxy": "http://127.0.0.1:7890" },
   "channels": {
     "telegram": {
-      "proxy": "http://127.0.0.1:7890"
+      "useProxy": true
     }
   }
 }
@@ -315,9 +316,11 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
 ```
 
 > `groupPolicy` controls how the bot responds in group channels:
-> - `"mention"` (default) — Only respond when @mentioned
-> - `"open"` — Respond to all messages DMs always respond when the sender is in `allowFrom`.
-> - If you set group policy to open create new threads as private threads and then @ the bot into it. Otherwise the thread itself and the channel in which you spawned it will spawn a bot session. `allowChannels` restricts the bot to specific Discord channel IDs. Empty (default) means respond in every channel the bot can see. Example: `["1234567890", "0987654321"]`. The filter applies after `allowFrom`, so both must pass. Discord threads under an allowed parent channel are also allowed; for Forum channels, allowing the parent Forum channel allows all threads/posts in that forum. `streaming` defaults to `true`. Disable it only if you explicitly want non-streaming replies. `replyToMessage` defaults to `false`. Enable it to use Discord's native reply UI for responses.
+> - `"mention"` (default) — Reply only when someone @mentions the bot.
+> - `"open"` — Reply to all messages in group channels.
+> - In direct messages, the bot replies only when the sender is listed in `allowFrom`.
+>
+> For open group policy, create a private thread and @mention the bot to start a session there. Otherwise, the bot starts a session in both the thread and the channel where you created it. `allowChannels` restricts the bot to specific Discord channel IDs. The default empty list allows every channel the bot can see. Example: `["1234567890", "0987654321"]`. The `allowFrom` and `allowChannels` filters both apply. Threads under an allowed channel are also allowed; for Forum channels, allowing the parent Forum channel allows all its threads and posts. `streaming` defaults to `true`; disable it only if you want non-streaming replies. `replyToMessage` defaults to `false`; enable it to use Discord's native reply UI for responses.
 
 **5. Invite the bot**
 - OAuth2 → URL Generator
@@ -373,6 +376,7 @@ nanobot plugins enable matrix
       "allowFrom": ["@your_user:matrix.org"],
       "groupPolicy": "open",
       "groupAllowFrom": [],
+      "groupPolicyOverrides": {},
       "allowRoomMentions": false,
       "maxMediaBytes": 20971520
     }
@@ -385,12 +389,16 @@ nanobot plugins enable matrix
 | Option | Description |
 |--------|-------------|
 | `allowFrom` | User IDs allowed to interact. Empty denies all; use `["*"]` to allow everyone. |
-| `groupPolicy` | `open` (default), `mention`, or `allowlist`. |
+| `groupPolicy` | `open` (default), `mention`, `allowlist`, or `listen`. |
 | `groupAllowFrom` | Room allowlist (used when policy is `allowlist`). |
+| `groupPolicyOverrides` | Optional per-room overrides for `groupPolicy`, keyed by Matrix room ID (for example, `"!abc123:matrix.org"`). Values mirror `groupPolicy`: `"open"`, `"mention"`, or `"allowlist"` (an `allowlist` override is checked against `groupAllowFrom`). Rooms not listed fall back to `groupPolicy`. |
 | `allowRoomMentions` | Accept `@room` mentions in mention mode. |
+| `replyToMessage` | Quote the user's message in non-threaded replies (default `true`). Set `false` to send without quotes; thread replies are unchanged. |
 | `e2eeEnabled` | E2EE support (default `true`). Set `false` for plaintext-only. |
 | `sasVerification` | Complete Element-initiated SAS device verification for allowed users (default `false`). This does not add cross-signing, clear Element's cross-signing trust warning, or let the bot initiate verification. |
 | `maxMediaBytes` | Max attachment size (default `20MB`). Set `0` to block all media. |
+
+In `listen` mode the bot reads every message from allowed senders in the room but replies only when mentioned (same mention semantics as `mention`, including `allowRoomMentions`). Unheard messages are kept in a bounded per-room buffer and attached as context to the next mention-triggered reply, so the answer reflects the conversation since its last response. The buffer clears once used, and nothing is ever replied to unheard messages. The buffer is in-memory only — if the bot restarts it starts empty (the bot does not announce the gap). When the buffer cap evicts older messages, the context block notes how many were dropped.
 
 
 
@@ -606,6 +614,14 @@ nanobot plugins enable qq
 - Once added, scan the bot's QR code with mobile QQ → open the bot profile → tap "发消息" to start chatting
 
 **3. Configure**
+
+Run the QR login and scan with mobile QQ to save the AppID and AppSecret automatically. Scanning again replaces the App Secret and stops the previous secret from working:
+
+```bash
+nanobot channels login qq
+```
+
+To enter them yourself, copy **AppID** and **AppSecret** from **开发设置 (Developer Settings)** into `channels.qq`:
 
 > - `allowFrom`: Add your openid (find it in nanobot logs when you message the bot). Use `["*"]` for public access.
 > - `msgFormat`: Optional. Use `"plain"` (default) for maximum compatibility with legacy QQ clients, or `"markdown"` for richer formatting on newer clients.

@@ -1,5 +1,3 @@
-"""Image generation tool."""
-
 from __future__ import annotations
 
 from copy import deepcopy
@@ -17,6 +15,7 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
+from nanobot.config.network import NetworkConfig
 from nanobot.config.paths import get_media_dir
 from nanobot.providers.image_generation import (
     ImageGenerationError,
@@ -81,6 +80,7 @@ class ImageGenerationTool(Tool):
             workspace=ctx.workspace,
             config=ctx.config.image_generation,
             provider_configs=image_gen_provider_configs(ctx.providers_config),
+            network=ctx.network,
         )
 
     def __init__(
@@ -90,9 +90,11 @@ class ImageGenerationTool(Tool):
         config: ImageGenerationToolConfig,
         provider_config: ProviderConfig | None = None,
         provider_configs: dict[str, ProviderConfig] | None = None,
+        network: NetworkConfig | None = None,
     ) -> None:
         self.workspace = Path(workspace).expanduser()
         self.config = config
+        self.network = network or NetworkConfig()
         self.provider_configs = dict(provider_configs or {})
         if provider_config is not None and "openrouter" not in self.provider_configs:
             self.provider_configs["openrouter"] = provider_config
@@ -126,7 +128,7 @@ class ImageGenerationTool(Tool):
             "api_base": provider.api_base if provider and isinstance(provider.api_base, str) else None,
             "extra_headers": headers or None,
             "extra_body": body or None,
-            "proxy": provider.proxy if provider and isinstance(provider.proxy, str) else None,
+            "proxy": self.network.resolve_proxy(provider.use_proxy) if provider else None,
         }
         return cls(**kwargs)
 
@@ -218,6 +220,7 @@ def register_image_generation_tool(
 
     ctx = ToolContext(
         config=config.tools,
+        network=config.network,
         workspace=str(workspace),
         providers_config=config.providers,
     )

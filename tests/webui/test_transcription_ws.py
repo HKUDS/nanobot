@@ -1,5 +1,3 @@
-"""Tests for WebUI transcription envelopes carried over the gateway socket."""
-
 from __future__ import annotations
 
 import base64

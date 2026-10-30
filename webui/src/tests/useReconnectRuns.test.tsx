@@ -299,8 +299,8 @@ describe("durable run recovery", () => {
     running();
     sockets[0].receive({ event: "delta", chat_id: "inactive", turn_id: "turn-old", text: "The" });
     const cachedAtCompletion: WebuiThreadPersistedPayload[] = [];
-    client.onRunStatus((chatId, startedAt) => {
-      if (startedAt === null) cachedAtCompletion.push(webuiThreadCache.get(`websocket:${chatId}`)!);
+    client.onRunStatus((chatId, state) => {
+      if (!state.active) cachedAtCompletion.push(webuiThreadCache.get(`websocket:${chatId}`)!);
     });
 
     await reopen();
@@ -314,7 +314,7 @@ describe("durable run recovery", () => {
     expect(cachedAtCompletion).toEqual([body]);
     expect(projectThreadEvents(cachedAtCompletion[0].events).at(-1)?.content).toBe("The complete answer");
     const delayed = vi.fn();
-    client.onChat("inactive", delayed);
+    client.onTranscript("inactive", delayed);
     expect(delayed).not.toHaveBeenCalled();
     close();
   });
@@ -345,7 +345,7 @@ describe("durable run recovery", () => {
 
   it.each(["failed read", "missing activity state"])("leaves %s unresolved", async (failure) => {
     const body = completedThread();
-    delete body.has_pending_tool_calls;
+    Reflect.deleteProperty(body, "has_pending_tool_calls");
     body.events = body.events.slice(0, 2);
     const fetchMock = failure === "failed read"
       ? vi.fn().mockRejectedValue(new Error("offline"))
@@ -390,7 +390,7 @@ describe("durable run recovery", () => {
 
   it("accepts an explicit completed turn when an older host omits activity metadata", async () => {
     const body = completedThread();
-    delete body.has_pending_tool_calls;
+    Reflect.deleteProperty(body, "has_pending_tool_calls");
     body.completed_turn_ids = ["turn-old"];
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(body)));
     const { client, running, reopen, close } = setup();
@@ -436,7 +436,7 @@ describe("durable run recovery", () => {
     expect(client.hasUnsettledRun("inactive")).toBe(true);
     expect(webuiThreadCache.get("websocket:inactive")).toBeUndefined();
     const resumed = vi.fn();
-    client.onChat("inactive", resumed);
+    client.onTranscript("inactive", resumed);
     resumed.mockClear();
     act(() => {
       running("inactive", "turn-queued", 456);

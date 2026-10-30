@@ -1,5 +1,3 @@
-"""CLI app subprocesses must not inherit API keys from the parent environ."""
-
 from __future__ import annotations
 
 import json

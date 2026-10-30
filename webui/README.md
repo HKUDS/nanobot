@@ -113,13 +113,14 @@ The gateway picks up the new bundle on the next restart.
 ```bash
 cd webui
 bun run lint
+bun run typecheck
 bun run test
 bun x playwright install chromium
 bun run test:browser
 bun run build
 ```
 
-`lint` runs ESLint; `test` runs Vitest, including channel-owned frontend tests; `test:browser` uses Chromium with the real components and stylesheet to check tall-dialog reachability and completed-history motion without a gateway; `build` runs TypeScript checking and produces the production bundle. Keep tests near the changed behavior and exercise settings save/reload in the browser. Browser-only preferences stay in the frontend; persistent configuration and security policy belong to the Python gateway. When changing that boundary, also run the relevant Python tests from [CONTRIBUTING.md](../CONTRIBUTING.md).
+`lint` runs ESLint; `typecheck` checks application and unit-test TypeScript, including channel-owned frontend code and tests; `test` runs Vitest; `test:browser` typechecks and runs Chromium tests with the real components and stylesheet to check tall-dialog reachability and completed-history motion without a gateway; `build` checks production TypeScript and produces the production bundle. Keep tests near the changed behavior and exercise settings save/reload in the browser. Browser-only preferences stay in the frontend; persistent configuration and security policy belong to the Python gateway. When changing that boundary, also run the relevant Python tests from [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Acknowledgements
 

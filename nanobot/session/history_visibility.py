@@ -1,5 +1,3 @@
-"""Visibility helpers for persisted session history messages."""
-
 from __future__ import annotations
 
 from collections.abc import Mapping

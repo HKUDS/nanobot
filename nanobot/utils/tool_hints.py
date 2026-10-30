@@ -1,12 +1,11 @@
-"""Tool hint formatting for concise, human-readable tool call display."""
-
 from __future__ import annotations
 
 import json
 import re
-from typing import cast
+from typing import Any, cast
 
 from nanobot.providers.base import ToolCallRequest
+from nanobot.utils.helpers import strip_think
 from nanobot.utils.path import abbreviate_path
 
 # Registry: tool_name -> (key_args, template, is_path, is_command)
@@ -25,7 +24,6 @@ _TOOL_FORMATS: dict[str, tuple[list[str], str, bool, bool]] = {
     "list_dir":   (["path"],                           "ls {}",       True,  False),
 }
 
-# Matches file paths embedded in shell commands, including quoted paths with spaces.
 _PATH_IN_CMD_RE = re.compile(
     r'"(?P<double>(?:[A-Za-z]:[/\\]|~/|/)[^"]+)"'
     r"|'(?P<single>(?:[A-Za-z]:[/\\]|~/|/)[^']+)'"
@@ -34,6 +32,19 @@ _PATH_IN_CMD_RE = re.compile(
 
 
 ToolFormat = tuple[list[str], str, bool, bool]
+
+
+def format_tool_event_hints(events: list[dict[str, Any]], max_length: int = 40) -> str:
+    """Render structured tool starts for channels that choose plain-text hints."""
+    calls = [
+        ToolCallRequest(
+            id=str(event.get("call_id") or ""),
+            name=event.get("name", ""),
+            arguments=event.get("arguments") or {},
+        )
+        for event in events if event.get("phase") == "start"
+    ]
+    return strip_think(format_tool_hints(calls, max_length=max_length))
 
 
 def format_tool_hints(tool_calls: list[ToolCallRequest], max_length: int = 40) -> str:
@@ -69,7 +80,6 @@ def format_tool_hints(tool_calls: list[ToolCallRequest], max_length: int = 40) -
 
 
 def _get_args(tc: ToolCallRequest) -> dict[str, object]:
-    """Extract args dict from tc.arguments, handling list/dict/None/empty."""
     if tc.arguments is None:
         return {}
     arguments = tc.arguments
@@ -83,7 +93,6 @@ def _get_args(tc: ToolCallRequest) -> dict[str, object]:
 
 
 def _extract_arg(tc: ToolCallRequest, key_args: list[str]) -> str | None:
-    """Extract the first available value from preferred key names."""
     args = _get_args(tc)
     for key in key_args:
         val = args.get(key)
@@ -102,25 +111,21 @@ def _extract_arg(tc: ToolCallRequest, key_args: list[str]) -> str | None:
 
 
 def _fmt_known(tc: ToolCallRequest, fmt: ToolFormat, max_length: int = 40) -> str:
-    """Format a registered tool using its template."""
     if not fmt[0] and "{}" not in fmt[1]:
         return fmt[1]
     val = _extract_arg(tc, fmt[0])
     if val is None:
         return tc.name
-    if fmt[2]:  # is_path
+    if fmt[2]:
         val = abbreviate_path(val, max_len=max_length)
-    elif fmt[3]:  # is_command
+    elif fmt[3]:
         val = _abbreviate_command(val, max_len=max_length)
     elif len(val) > max_length:
-        # Plain values (grep patterns, search queries, ...) have no path or
-        # command structure to fold, so fall back to a hard truncation.
         val = val[:max_length - 1] + "\u2026"
     return fmt[1].format(val)
 
 
 def _abbreviate_command(cmd: str, max_len: int = 40) -> str:
-    """Abbreviate paths in a command string, then truncate."""
     path_max = max(max_len // 2, 25)
 
     def _replace_path(match: re.Match[str]) -> str:
@@ -137,7 +142,6 @@ def _abbreviate_command(cmd: str, max_len: int = 40) -> str:
 
 
 def _fmt_mcp(tc: ToolCallRequest, max_length: int = 40) -> str:
-    """Format MCP tool as server::tool."""
     name = tc.name
     if "__" in name:
         parts = name.split("__", 1)
@@ -158,7 +162,6 @@ def _fmt_mcp(tc: ToolCallRequest, max_length: int = 40) -> str:
 
 
 def _fmt_fallback(tc: ToolCallRequest, max_length: int = 40) -> str:
-    """Original formatting logic for unregistered tools."""
     args = _get_args(tc)
     val = next(iter(args.values()), None)
     if not isinstance(val, str):

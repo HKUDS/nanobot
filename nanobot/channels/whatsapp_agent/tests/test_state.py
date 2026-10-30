@@ -1,5 +1,3 @@
-"""Durable cursor, dedup, and token-rotation contracts for the channel store."""
-
 from __future__ import annotations
 
 import json
@@ -120,7 +118,6 @@ def test_unreadable_state_file_reports_no_local_state(tmp_path: Path):
 
 
 def test_legacy_state_without_creator_id_loads():
-    # A state file written before creator ids were persisted must still load.
     payload = json.dumps({"offset": 5, "initialized": True, "token_fingerprint": "abc"})
     import tempfile
 

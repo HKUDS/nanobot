@@ -6,16 +6,18 @@ import { RUNTIME_CONFIG_FIELDS, RUNTIME_CONFIG_GROUPS } from "@/components/setti
 import runtimeConfigKeys from "../../../tests/webui/fixtures/runtime-config-keys.json";
 import { TimezonePicker } from "@/components/settings/shared/TimezonePicker";
 import { DEFAULT_AGENT_SETTINGS_DRAFT } from "@/components/settings/models/ModelsSettings";
+import type { SettingsPayload } from "@/lib/types";
 import { installSettingsViewTestHooks, jsonResponse, renderSettingsView, requestMutationMock, settingsPayload } from "@/tests/settings-test-utils";
 
 function runtimeSettings() {
   const payload = settingsPayload();
-  return { ...payload, advanced: { ...payload.advanced, exec_max_runtime_limit: 86400 }, runtime_config: {
+  const runtimeConfig: NonNullable<SettingsPayload["runtime_config"]> = {
     "agents.defaults.bot_name": "nanobot",
     "agents.defaults.bot_icon": "🐈",
     "agents.defaults.timezone_mode": "auto",
     "agents.defaults.timezone": "UTC",
     "agents.defaults.dream.enabled": true,
+    "agents.defaults.session_ttl_minutes": 15,
     "gateway.heartbeat.enabled": true,
     "tools.exec.timeout": 60,
     "tools.exec.allowed_env_keys": ["TERM"],
@@ -24,8 +26,10 @@ function runtimeSettings() {
     "tools.exec.sandbox_ro_binds": [],
     "tools.exec.sandbox_rw_binds": [],
     "agents.defaults.max_tool_iterations": 200,
-    "tools.web.proxy": "http://localhost:8080",
-  } };
+    "network.proxy": "http://localhost:8080",
+    "tools.web.use_proxy": false,
+  };
+  return { ...payload, advanced: { ...payload.advanced, exec_max_runtime_limit: 86400 }, runtime_config: runtimeConfig };
 }
 
 describe("Runtime configuration settings", () => {
@@ -40,7 +44,7 @@ describe("Runtime configuration settings", () => {
     expect([...paths, visibilityOnly].sort()).toEqual([...runtimeConfigKeys].sort());
   });
 
-  it("keeps local service controls available when tool families are disabled", () => {
+  it("keeps chat permissions and local services available when tool families are disabled", () => {
     const payload = runtimeSettings();
     renderSettingsView({ initialSection: "advanced", initialSettings: {
       ...payload, runtime_config: {
@@ -49,22 +53,22 @@ describe("Runtime configuration settings", () => {
       },
     } });
     expect(screen.getByRole("switch", { name: "Local services" })).toBeVisible();
-  });
-
-  it("keeps chat permission settings discoverable within the advanced page", () => {
-    renderSettingsView({ initialSection: "advanced", initialSettings: runtimeSettings() });
-    expect(screen.getByRole("switch", { name: "Local services" })).toBeInTheDocument();
+    expect(screen.getByText("Default access")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Default Permission" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Full Access" })).toBeVisible();
   });
 
   it("places common settings in their feature pages and reserves advanced for low-frequency controls", () => {
-    renderSettingsView({ initialSection: "runtime", initialSettings: runtimeSettings() });
+    const payload = runtimeSettings();
+    payload.image_generation.enabled = true;
+    renderSettingsView({ initialSection: "runtime", initialSettings: payload });
     expect(document.getElementById("runtime-tools.exec.enable")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     expect(document.getElementById("runtime-tools.exec.sandbox")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Capabilities" }));
-    fireEvent.click(screen.getByRole("switch", { name: "Image generation" }));
+    fireEvent.click(within(screen.getByRole("region", { name: "Image generation" })).getByRole("button", { name: "Configure" }));
     expect(document.getElementById("runtime-tools.image_generation.save_dir")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.getByRole("switch", { name: "Web access" })).toBeInTheDocument();
   });
 
@@ -90,7 +94,7 @@ describe("Runtime configuration settings", () => {
     requestMutationMock.mockResolvedValue({ ...payload, runtime_config: { ...payload.runtime_config, "tools.exec.sandbox": backend } });
     renderSettingsView({ initialSection: "advanced", initialSettings: payload });
     fireEvent.click(screen.getByRole("combobox", { name: "Command sandbox" }));
-    fireEvent.click(screen.getByRole("option", { name: backend || "None", exact: true }));
+    fireEvent.click(screen.getByRole("option", { name: backend || "None" }));
     if (backend) expect(document.getElementById("runtime-tools.exec.sandbox_ro_binds")).toBeVisible();
     else expect(document.getElementById("runtime-tools.exec.sandbox_ro_binds")).not.toBeInTheDocument();
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith("settings.runtime_config.update", { values: { "tools.exec.sandbox": backend } }, 20_000));
@@ -117,7 +121,7 @@ describe("Runtime configuration settings", () => {
     expect(editor).toHaveValue("TERM");
     fireEvent.change(editor, { target: { value: " TERM \n\n COLORTERM " } });
     requestMutationMock.mockRejectedValueOnce(new Error("Could not save list"));
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save", exact: true }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("Could not save list");
     expect(editor).toHaveValue(" TERM \n\n COLORTERM ");
     expect(requestMutationMock).toHaveBeenLastCalledWith("settings.runtime_config.update", {
@@ -125,7 +129,7 @@ describe("Runtime configuration settings", () => {
     }, 20_000);
     requestMutationMock.mockResolvedValueOnce({ ...payload, requires_restart: true,
       runtime_config: { ...payload.runtime_config, "tools.exec.allowed_env_keys": ["TERM", "COLORTERM"] } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save", exact: true }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(await screen.findByText("Saved. Restart to apply changes.")).toBeVisible();
     fireEvent.click(trigger);
@@ -134,7 +138,7 @@ describe("Runtime configuration settings", () => {
 
   it("starts the API with newly saved advanced settings", async () => {
     const payload = runtimeSettings();
-    payload.api = { ...payload.api, host: "192.168.1.7", timeout: 77.5, api_key_hint: "set" };
+    payload.api = { ...payload.api, host: "192.168.1.7", port: 8900, timeout: 77.5, api_key_hint: "set" };
     const action = vi.fn();
     render(<RuntimeSettings form={DEFAULT_AGENT_SETTINGS_DRAFT} settings={payload}
       requiresRestartPending={false} apiService={{
@@ -212,7 +216,7 @@ describe("Runtime configuration settings", () => {
     expect(control).toHaveTextContent("1 hour");
     expect(screen.getByText("Timed runs: up to 24 hours")).toBeVisible();
     fireEvent.click(control);
-    fireEvent.click(screen.getByRole("option", { name: label, exact: true }));
+    fireEvent.click(screen.getByRole("option", { name: label }));
 
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.runtime_config.update", { values: { "tools.exec.timeout": seconds } }, 20_000,
@@ -227,7 +231,7 @@ describe("Runtime configuration settings", () => {
     } });
     renderSettingsView({ initialSection: "advanced", initialSettings: payload });
     fireEvent.click(screen.getByRole("combobox", { name: "Command runtime" }));
-    fireEvent.click(screen.getByRole("option", { name: "Custom (seconds)", exact: true }));
+    fireEvent.click(screen.getByRole("option", { name: "Custom (seconds)" }));
     const field = screen.getByRole("spinbutton", { name: "Custom runtime (seconds)" });
     expect(field).toHaveAttribute("max", "86400");
     fireEvent.change(field, { target: { value: "86401" } });
@@ -246,8 +250,8 @@ describe("Runtime configuration settings", () => {
     expect(field).toHaveValue(86400);
     expect(screen.getAllByRole("alert")).toHaveLength(1);
     expect(screen.queryByText("Saved.", { exact: true })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "System", exact: true }));
-    fireEvent.click(screen.getByRole("button", { name: "Advanced", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "System" }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     expect(screen.getByRole("spinbutton", { name: "Custom runtime (seconds)" })).toHaveValue(86400);
     expect(screen.getByRole("alert")).toHaveTextContent("1 to 86,400");
   });
@@ -260,7 +264,7 @@ describe("Runtime configuration settings", () => {
     } });
     renderSettingsView({ initialSection: "advanced", initialSettings: payload });
     fireEvent.click(screen.getByRole("combobox", { name: "Command runtime" }));
-    fireEvent.click(screen.getByRole("option", { name: "Custom (seconds)", exact: true }));
+    fireEvent.click(screen.getByRole("option", { name: "Custom (seconds)" }));
     const field = screen.getByRole("spinbutton", { name: "Custom runtime (seconds)" });
     expect(field).toHaveValue(null);
     expect(requestMutationMock).not.toHaveBeenCalled();
@@ -277,8 +281,8 @@ describe("Runtime configuration settings", () => {
     expect(screen.getByText("Timed runs: up to 2 hours")).toBeVisible();
     expect(screen.getByRole("spinbutton", { name: "Custom runtime (seconds)" })).toHaveAttribute("max", "7200");
     fireEvent.click(screen.getByRole("combobox", { name: "Command runtime" }));
-    expect(screen.getByRole("option", { name: "2 hours", exact: true })).toBeVisible();
-    expect(screen.queryByRole("option", { name: "24 hours", exact: true })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "2 hours" })).toBeVisible();
+    expect(screen.queryByRole("option", { name: "24 hours" })).not.toBeInTheDocument();
   });
 
   it("keeps runtime editing available on a host without limit metadata", async () => {
@@ -296,22 +300,47 @@ describe("Runtime configuration settings", () => {
   });
 
   it("preserves drafts when navigating away and supports explicit clearing", async () => {
-    renderSettingsView({ initialSection: "capabilities", initialSettings: runtimeSettings() });
-    const openWebSettings = () => {
-      fireEvent.click(within(screen.getByRole("region", { name: "Web access" })).getByRole("button", { name: "Configure" }));
-      fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
-    };
-    openWebSettings();
-    const proxy = screen.getByRole("textbox", { name: "Web proxy" });
+    let payload = runtimeSettings();
+    requestMutationMock.mockImplementation(async (_method, update) => {
+      payload = { ...payload, runtime_config: { ...payload.runtime_config, ...update.values } };
+      return payload;
+    });
+    renderSettingsView({ initialSection: "advanced", initialSettings: payload });
+    const proxy = screen.getByRole("textbox", { name: "Shared proxy" });
+    expect(proxy).toHaveAttribute("type", "text");
+    expect(proxy).toHaveValue("http://localhost:8080");
     fireEvent.change(proxy, { target: { value: "" } });
-    fireEvent.click(within(screen.getByRole("dialog", { name: "Web access" })).getByRole("button", { name: "Close", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: "System" }));
-    fireEvent.click(screen.getByRole("button", { name: "Capabilities" }));
-    openWebSettings();
-    expect(screen.getByRole("textbox", { name: "Web proxy" })).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    expect(screen.getByLabelText("Shared proxy", { selector: "input" })).toHaveValue("");
+    fireEvent.click(within(screen.getByRole("region", { name: "Shared proxy" })).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
-      "settings.runtime_config.update", { values: { "tools.web.proxy": null } }, 20_000,
+      "settings.runtime_config.update", { values: { "network.proxy": null } }, 20_000,
     ));
+    fireEvent.click(screen.getByRole("button", { name: "System" }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    expect(screen.getByLabelText("Shared proxy", { selector: "input" })).toHaveValue("");
+  });
+
+  it("saves proxy address and authentication together without exposing the password in the address", async () => {
+    const payload = runtimeSettings();
+    payload.runtime_config!["network.proxy"] = "http://old:p%40ss@proxy:8080";
+    requestMutationMock.mockImplementation(async (_method, update) => ({
+      ...payload, runtime_config: { ...payload.runtime_config, ...update.values }, requires_restart: true,
+    }));
+    renderSettingsView({ initialSection: "advanced", initialSettings: payload });
+    const group = within(screen.getByRole("region", { name: "Shared proxy" }));
+    expect(group.getByRole("textbox", { name: "Shared proxy" })).toHaveValue("http://proxy:8080");
+    expect(group.getByLabelText("Password")).toHaveAttribute("type", "password");
+    expect(group.getByLabelText("Password")).toHaveValue("p@ss");
+    fireEvent.change(group.getByLabelText("Username"), { target: { value: "new@user" } });
+    fireEvent.change(group.getByLabelText("Password"), { target: { value: "p:@ %密" } });
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    fireEvent.click(group.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.runtime_config.update", { values: { "network.proxy": "http://new%40user:p%3A%40%20%25%E5%AF%86@proxy:8080" } }, 20_000,
+    ));
+    expect(group.getByRole("textbox", { name: "Shared proxy" })).toHaveValue("http://proxy:8080");
   });
 
   it("keeps an existing timezone alias selectable and accepts only listed search results", () => {

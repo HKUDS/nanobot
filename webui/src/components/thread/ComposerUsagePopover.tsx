@@ -59,11 +59,13 @@ export function ComposerUsagePopover({
   context,
   rounds,
   showLabel = false,
+  compactLabel = false,
   bottomSheet = false,
 }: {
   context: ComposerContextUsage | null;
   rounds: readonly ComposerRoundUsage[];
   showLabel?: boolean;
+  compactLabel?: boolean;
   bottomSheet?: boolean;
 }) {
   const { t, i18n } = useTranslation();
@@ -123,6 +125,7 @@ export function ComposerUsagePopover({
   const RoundTrigger = bottomSheet ? PopoverTrigger : TooltipTrigger;
   const RoundContent = bottomSheet ? PopoverContent : TooltipContent;
   const RoundBar = bottomSheet ? "button" : "span";
+  const showTextLabel = showLabel && (!compactLabel || contextPercentage !== null);
   const trigger = (
     <Trigger asChild>
       <button
@@ -133,7 +136,7 @@ export function ComposerUsagePopover({
           "touch-target inline-flex size-5 shrink-0 items-center justify-center rounded-full",
           "text-muted-foreground transition-colors hover:text-foreground",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          showLabel && "w-auto gap-1.5 px-2 text-xs",
+          showTextLabel && "w-auto gap-1.5 px-2 text-xs",
         )}
       >
         {contextPercentage === null ? (
@@ -179,7 +182,11 @@ export function ComposerUsagePopover({
             />
           </svg>
         )}
-        {showLabel ? <span aria-hidden>{contextDescription}</span> : null}
+        {showTextLabel ? (
+          <span aria-hidden className="whitespace-nowrap tabular-nums">
+            {compactLabel && contextPercentage !== null ? `${contextPercentage}%` : contextDescription}
+          </span>
+        ) : null}
       </button>
     </Trigger>
   );

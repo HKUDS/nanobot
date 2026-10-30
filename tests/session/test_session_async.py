@@ -1,5 +1,3 @@
-"""Admission, ordering, and shutdown at the asynchronous session boundary."""
-
 import asyncio
 import sqlite3
 import threading

@@ -77,7 +77,6 @@ export function preloadMarkdownText(): Promise<void> {
   return loadMarkdownRenderer().then(() => undefined);
 }
 
-/** Lazy boundary for the heavier GFM, math, and code renderer. */
 export function MarkdownText({
   children,
   className,
@@ -96,8 +95,9 @@ export function MarkdownText({
 
   const plainFallback = (
     <div
+      data-theme-ink
       className={cn(
-        "whitespace-pre-wrap break-words leading-relaxed text-foreground/92",
+        "whitespace-pre-wrap break-words text-reading text-foreground/92",
         streaming && "streaming-text-fallback",
         className,
       )}
