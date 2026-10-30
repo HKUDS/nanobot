@@ -6,7 +6,7 @@ import re
 import shutil
 import unicodedata
 from collections import deque
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -634,7 +634,7 @@ class SignalChannel(BaseChannel):
             raise
 
     @asynccontextmanager
-    async def _safe_handle(self, action: str, payload: Any = None) -> AsyncIterator[None]:
+    async def _safe_handle(self, action: str, payload: Any = None) -> AsyncGenerator[None, None]:
         """Swallow and log any exception from a top-level handler block.
 
         Logs `self.logger.error` with the action name, the exception, and a
