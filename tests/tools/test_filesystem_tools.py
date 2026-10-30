@@ -1,7 +1,6 @@
-"""Tests for enhanced filesystem tools: ReadFileTool, EditFileTool, ListDirTool."""
-
 import pytest
 
+from nanobot.agent.tools.file_state import file_read_context
 from nanobot.agent.tools.filesystem import (
     EditFileTool,
     ListDirTool,
@@ -9,9 +8,28 @@ from nanobot.agent.tools.filesystem import (
     WriteFileTool,
 )
 
-# ---------------------------------------------------------------------------
-# ReadFileTool
-# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("newline", ["\n", "\r\n", "\r"])
+@pytest.mark.parametrize("operation", ["write", "edit_new", "edit_empty"])
+async def test_file_creation_preserves_provided_newlines(tmp_path, newline, operation):
+    target = tmp_path / "nested" / "script.py"
+    content = f"first = 1{newline}second = 2{newline}"
+    if operation == "write":
+        result = await WriteFileTool(workspace=tmp_path).execute(
+            path=str(target), content=content,
+        )
+    else:
+        if operation == "edit_empty":
+            target.parent.mkdir()
+            target.touch()
+        result = await EditFileTool(workspace=tmp_path).execute(
+            path=str(target), old_text="", new_text=content,
+        )
+
+    assert "Error" not in result
+    assert target.read_bytes() == content.encode("utf-8")
+
 
 class TestReadFileTool:
 
@@ -90,13 +108,73 @@ class TestReadFileTool:
 
     @pytest.mark.asyncio
     async def test_char_budget_trims(self, tool, tmp_path):
-        """When the selected slice exceeds _MAX_CHARS the output is trimmed."""
         f = tmp_path / "big.txt"
-        # Each line is ~110 chars, 2000 lines ≈ 220 KB > 128 KB limit
         f.write_text("\n".join("x" * 110 for _ in range(2000)), encoding="utf-8")
         result = await tool.execute(path=str(f))
-        assert len(result) <= ReadFileTool._MAX_CHARS + 500  # small margin for footer
+        assert len(result) <= ReadFileTool._MAX_CHARS + 500
         assert "Use offset=" in result
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("following", ["", "\nsecond line"])
+    async def test_oversized_first_line_is_explicitly_truncated(self, tool, tmp_path, following):
+        f = tmp_path / "minified.txt"
+        original = "界" * (ReadFileTool._MAX_CHARS + 100) + "OMITTED" + following
+        f.write_text(original, encoding="utf-8")
+
+        with file_read_context("read-1", lambda: {}):
+            first = await tool.execute(path=str(f), limit=1)
+
+        assert first.startswith("1| 界")
+        assert "OMITTED" not in first
+        assert len(first) <= ReadFileTool._MAX_CHARS + 500
+        assert "Line 1 truncated; its remaining characters are not shown" in first
+        assert "Use exec" in first
+        assert "column" not in tool.parameters["properties"]
+        assert f.read_text(encoding="utf-8") == original
+
+        with file_read_context("read-2", lambda: {"read-1": first}):
+            repeated = await tool.execute(path=str(f), limit=1)
+        assert "File unchanged" in repeated
+
+        if following:
+            assert "Use offset=2 to continue" in first
+            with file_read_context("read-3", lambda: {"read-1": first}):
+                second = await tool.execute(path=str(f), offset=2, limit=1)
+            assert "2| second line" in second
+            assert "End of file" in second
+        else:
+            assert "End of file" in first
+            assert "Use offset=" not in first
+
+    @pytest.mark.asyncio
+    async def test_long_middle_line_advances_to_following_content(self, tool, tmp_path):
+        f = tmp_path / "bundle.txt"
+        f.write_text("first\n" + "z" * (ReadFileTool._MAX_CHARS * 2) + "\nlast\n")
+
+        first = await tool.execute(path=str(f))
+        assert "Use offset=2 to continue" in first
+        assert "truncated" not in first
+
+        second = await tool.execute(path=str(f), offset=2)
+        assert second.startswith("2| z")
+        assert len(second) <= ReadFileTool._MAX_CHARS + 500
+        assert "Line 2 truncated" in second
+        assert "Use offset=3 to continue" in second
+
+        third = await tool.execute(path=str(f), offset=3)
+        assert "3| last" in third
+        assert "End of file" in third
+
+    @pytest.mark.asyncio
+    async def test_line_exactly_fitting_budget_is_not_truncated(self, tool, tmp_path):
+        f = tmp_path / "exact.txt"
+        line = "x" * (ReadFileTool._MAX_CHARS - len("1| "))
+        f.write_text(line + "\nlast")
+
+        first = await tool.execute(path=str(f))
+        assert first.split("\n\n")[0] == "1| " + line
+        assert "truncated" not in first
+        assert "Use offset=2 to continue" in first
 
     @pytest.mark.asyncio
     async def test_oversized_file_is_rejected_before_read(self, tool, tmp_path, monkeypatch):
@@ -114,10 +192,6 @@ class TestReadFileTool:
         assert "File too large to read" in result
         assert "Maximum is 100 MiB" in result
 
-
-# ---------------------------------------------------------------------------
-# EditFileTool
-# ---------------------------------------------------------------------------
 
 class TestEditFileTool:
 
@@ -153,7 +227,6 @@ class TestEditFileTool:
         assert "Patch applied:" in result
         raw = f.read_bytes()
         assert b"LINE1" in raw
-        # CRLF line endings should be preserved throughout the file
         assert b"\r\n" in raw
 
     @pytest.mark.asyncio
@@ -199,10 +272,6 @@ class TestEditFileTool:
         assert result == "Error editing file: Unknown new_text"
 
 
-# ---------------------------------------------------------------------------
-# ListDirTool
-# ---------------------------------------------------------------------------
-
 class TestListDirTool:
 
     @pytest.fixture()
@@ -226,21 +295,36 @@ class TestListDirTool:
         result = await tool.execute(path=str(populated_dir))
         assert "README.md" in result
         assert "src" in result
-        # .git and node_modules should be ignored
         assert ".git" not in result
         assert "node_modules" not in result
 
     @pytest.mark.asyncio
     async def test_recursive(self, tool, populated_dir):
         result = await tool.execute(path=str(populated_dir), recursive=True)
-        # Normalize path separators for cross-platform compatibility
         normalized = result.replace("\\", "/")
         assert "src/main.py" in normalized
         assert "src/utils.py" in normalized
         assert "README.md" in result
-        # Ignored dirs should not appear
         assert ".git" not in result
         assert "node_modules" not in result
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("relative_root", ["build", "build/project"])
+    async def test_recursive_ignores_only_descendants(self, tool, tmp_path, relative_root):
+        root = tmp_path / relative_root
+        (root / "src").mkdir(parents=True)
+        (root / "src" / "main.py").write_text("pass")
+        (root / "README.md").write_text("hi")
+        (root / ".git").mkdir()
+        (root / ".git" / "config").write_text("ignored")
+        (root / "src" / "node_modules").mkdir()
+        (root / "src" / "node_modules" / "package.json").write_text("{}")
+
+        result = await tool.execute(path=str(root), recursive=True)
+
+        assert set(result.replace("\\", "/").splitlines()) == {
+            "README.md", "src/", "src/main.py",
+        }
 
     @pytest.mark.asyncio
     async def test_max_entries_truncation(self, tool, tmp_path):
@@ -268,10 +352,6 @@ class TestListDirTool:
         result = await tool.execute()
         assert result == "Error listing directory: Unknown path"
 
-
-# ---------------------------------------------------------------------------
-# Workspace restriction + extra read/write allowed dirs
-# ---------------------------------------------------------------------------
 
 class TestWorkspaceRestriction:
 
@@ -416,7 +496,6 @@ class TestWorkspaceRestriction:
 
     @pytest.mark.asyncio
     async def test_workspace_file_still_readable_with_extra_dirs(self, tmp_path):
-        """Adding extra_allowed_dirs must not break normal workspace reads."""
         workspace = tmp_path / "ws"
         workspace.mkdir()
         ws_file = workspace / "README.md"
@@ -434,7 +513,6 @@ class TestWorkspaceRestriction:
 
     @pytest.mark.asyncio
     async def test_edit_blocked_in_extra_dir(self, tmp_path):
-        """edit_file must not be able to modify files in extra_allowed_dirs."""
         workspace = tmp_path / "ws"
         workspace.mkdir()
         skills_dir = tmp_path / "skills"

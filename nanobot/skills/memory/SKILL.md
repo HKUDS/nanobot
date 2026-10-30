@@ -7,14 +7,8 @@ description: Search past conversations in the agent's history log.
 
 ## Search Past Events
 
-Search the exact `History log` path from the system prompt with `grep`; a project-relative
-`memory/history.jsonl` may belong to a different workspace. The log is append-only JSONL,
-with `cursor`, `timestamp`, and `content` per entry, and is not loaded into context.
+Search the exact `History log` path from the system prompt using an available text-search
+tool. This path belongs to the agent workspace, which can differ from the current project.
 
-Start broad searches with `output_mode="count"`, then narrow by topic or date and request
-matching content. Use `fixed_strings=true` for literal timestamps or JSON fragments.
-Page long results with `head_limit` / `offset` and use `context_before` / `context_after`
-when nearby entries matter.
-
-Example (replace `<history-log-path>` with the path from the system prompt):
-`grep(pattern="project-name", path="<history-log-path>", output_mode="content", case_insensitive=true, head_limit=20)`
+The append-only JSONL log stores `cursor`, `timestamp`, and `content` per entry. Retrieve
+entries on demand by topic or date, and inspect neighboring entries when context matters.

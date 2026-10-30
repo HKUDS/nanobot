@@ -92,5 +92,4 @@ jobs:
           if [[ "$TARGET" == win32-* ]]; then asset="${asset}.exe"; fi
           gh release upload "$TAG" \
             "tui/dist/${asset}.zip" \
-            "tui/dist/${asset}.zip.sha256" \
-            --clobber
+            "tui/dist/${asset}.zip.sha256"

@@ -1,5 +1,3 @@
-"""Tests for FallbackProvider model failover."""
-
 from __future__ import annotations
 
 import asyncio
@@ -128,9 +126,6 @@ class _FakeProvider(LLMProvider):
     def supports_native_compaction(self, model: str | None = None) -> bool:
         _ = model
         return self.compact
-
-
-# -- config-level tests --
 
 
 def test_fallback_models_default_empty() -> None:
@@ -321,7 +316,7 @@ def test_factory_injects_configured_identity_into_primary_and_fallback_leaves() 
 
 
 def test_inline_fallback_reasoning_effort_does_not_inherit_primary() -> None:
-    from nanobot.config.schema import Config
+    from nanobot.config.schema import Config, InlineFallbackConfig
     from nanobot.providers.factory import provider_signature
 
     config = Config.model_validate({
@@ -349,10 +344,13 @@ def test_inline_fallback_reasoning_effort_does_not_inherit_primary() -> None:
     signature = provider_signature(config)
     fallback_signatures = signature[-1]
 
-    assert fallback_signatures[0][13] is None
+    config.model_presets["fast"].reasoning_effort = "low"
+    assert provider_signature(config)[-1] == fallback_signatures
 
-
-# -- FallbackProvider tests --
+    config.agents.defaults.fallback_models = [
+        InlineFallbackConfig(provider="openai", model="gpt-4.1", reasoning_effort="low")
+    ]
+    assert provider_signature(config)[-1] != fallback_signatures
 
 
 class TestNoFallbackWhenPrimarySucceeds:
@@ -406,7 +404,6 @@ class TestFallbackWhenPrimaryRaises:
     )
     @pytest.mark.asyncio
     async def test_transient_exception_triggers_fallback(self, exc: Exception) -> None:
-        """Transient exceptions remain eligible even when their messages are empty."""
         primary = _RaisingProvider("primary", exc)
         fallback = _FakeProvider("fallback", _make_response("fallback ok"))
         factory = MagicMock(return_value=fallback)
@@ -452,7 +449,6 @@ class TestFallbackWhenPrimaryRaises:
         self,
         stream: bool,
     ) -> None:
-        """A retry wrapper must not hide an empty transient exception from failover."""
         primary = _RaisingProvider("primary", TimeoutError())
         fallback = _FakeProvider("fallback", _make_response("fallback ok"))
         factory = MagicMock(return_value=fallback)
@@ -464,11 +460,17 @@ class TestFallbackWhenPrimaryRaises:
         )
 
         retry = fb.chat_stream_with_retry if stream else fb.chat_with_retry
-        result = await retry(messages=[{"role": "user", "content": "hi"}], model="primary-model")
+        with patch("nanobot.providers.base.asyncio.sleep", new_callable=AsyncMock) as sleep:
+            result = await retry(messages=[{"role": "user", "content": "hi"}], model="primary-model")
 
         assert result.content == "fallback ok"
         assert result.finish_reason == "stop"
         factory.assert_called_once_with(_fallback("fallback-a"))
+        assert sleep.await_count == 3
+        assert all(
+            ceiling / 2 <= request.args[0] <= ceiling
+            for request, ceiling in zip(sleep.await_args_list, (1, 2, 4))
+        )
 
     @pytest.mark.asyncio
     async def test_authentication_exception_message_is_classified(self) -> None:
@@ -485,7 +487,6 @@ class TestFallbackWhenPrimaryRaises:
 
     @pytest.mark.asyncio
     async def test_non_string_exception_metadata_is_normalized_before_fallback(self) -> None:
-        """Provider exception metadata must be string-like before fallback consumes it."""
 
         class NumericMetadataError(Exception):
             error_type = 429
@@ -517,7 +518,6 @@ class TestFallbackWhenPrimaryRaises:
     async def test_non_fallbackable_primary_exception_does_not_trigger_fallback(
         self, exc: Exception,
     ) -> None:
-        """An unrelated provider bug must not silently switch models."""
         primary = _RaisingProvider("primary", exc)
         factory = MagicMock(
             return_value=_FakeProvider("fallback", _make_response("fallback"))
@@ -540,7 +540,6 @@ class TestFallbackWhenPrimaryRaises:
 
     @pytest.mark.asyncio
     async def test_fallback_exception_advances_to_next_fallback(self) -> None:
-        """A fallback whose chat() raises must advance to the next fallback."""
         primary = _FakeProvider("primary", _error_response())
         raising_fb = _RaisingProvider("fb1")
         ok_fb = _FakeProvider("fb2", _make_response("second fallback ok"))
@@ -558,7 +557,6 @@ class TestFallbackWhenPrimaryRaises:
 
     @pytest.mark.asyncio
     async def test_primary_exception_stream_triggers_fallback(self) -> None:
-        """Streaming path: a raising primary still fails over when nothing streamed."""
         primary = _RaisingProvider("primary")
         fallback = _FakeProvider("fallback", _make_response("fallback ok"))
         factory = MagicMock(return_value=fallback)
@@ -575,7 +573,6 @@ class TestFallbackWhenPrimaryRaises:
 
     @pytest.mark.asyncio
     async def test_primary_exception_after_streaming_does_not_duplicate_output(self) -> None:
-        """Once content was emitted, an exception must not start a replacement stream."""
         primary = _StreamingThenRaisingProvider("primary")
         factory = MagicMock(return_value=_FakeProvider("fallback", _make_response("duplicate")))
         deltas: list[str] = []
@@ -601,7 +598,6 @@ class TestFallbackWhenPrimaryRaises:
 
     @pytest.mark.asyncio
     async def test_primary_cancellation_is_not_converted_to_failover(self) -> None:
-        """Task cancellation must retain asyncio cancellation semantics."""
         primary = _RaisingProvider("primary", asyncio.CancelledError())
         factory = MagicMock(return_value=_FakeProvider("fallback", _make_response("fallback")))
         fb = FallbackProvider(
@@ -911,13 +907,19 @@ class TestFallbackOnPrimaryError:
             fallback_model_observer=_observe,
         )
 
-        result = await fb.chat_with_retry(
-            messages=[{"role": "user", "content": "hi"}],
-            model="primary-model",
-        )
+        with patch("nanobot.providers.base.asyncio.sleep", new_callable=AsyncMock) as sleep:
+            result = await fb.chat_with_retry(
+                messages=[{"role": "user", "content": "hi"}],
+                model="primary-model",
+            )
 
         assert result.content == "fallback ok"
         assert fallback_models == ["fallback-b"]
+        assert sleep.await_count == 3
+        assert all(
+            ceiling / 2 <= request.args[0] <= ceiling
+            for request, ceiling in zip(sleep.await_args_list, (1, 2, 4))
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(("provider_name", "status", "code", "kind", "expected"), [
@@ -1063,11 +1065,9 @@ class TestFallbackOnStreamStalledAfterContent:
 
 
 class TestFailoverOnEmptyChoices:
-    """Fallback should trigger when API returns empty choices (no error metadata)."""
 
     @pytest.mark.asyncio
     async def test_empty_choices_text_fallback(self) -> None:
-        """_should_fallback should return True for 'API returned empty choices'."""
         from nanobot.providers.fallback_provider import FallbackProvider
 
         response = _make_response(
@@ -1075,25 +1075,20 @@ class TestFailoverOnEmptyChoices:
             finish_reason="error",
             error_kind="empty",
         )
-        # error_kind="empty" matches _FALLBACK_ERROR_KINDS via kind check
         assert FallbackProvider._should_fallback(response)
 
     @pytest.mark.asyncio
     async def test_empty_choices_no_error_kind_text_fallback(self) -> None:
-        """_should_fallback should also match via text token when error_kind is None."""
         from nanobot.providers.fallback_provider import FallbackProvider
 
         response = _make_response(
             "Error: API returned empty choices.",
             finish_reason="error",
-            # error_kind=None, no status — pure text matching
         )
-        # "empty" token in _FALLBACK_ERROR_TOKENS matches via text fallback
         assert FallbackProvider._should_fallback(response)
 
     @pytest.mark.asyncio
     async def test_empty_choices_triggers_failover(self) -> None:
-        """End-to-end: empty choices on primary triggers fallback."""
         primary = _FakeProvider(
             "primary",
             _make_response("Error: API returned empty choices.", finish_reason="error"),
@@ -1171,7 +1166,6 @@ class TestRetryBeforeFailover:
         assert result.finish_reason == "error"
         events = [call.args[0] for call in observe.await_args_list]
         notices = [event.content for event in events if isinstance(event, RetryWaitEvent)]
-        # Two candidates, three waits each, for two chains, plus one chain wait.
         assert len(notices) == 14
         assert sum("Persistent retry stopped" in text for text in notices) == 1
         assert not any("giving up" in text for text in notices)
@@ -1270,6 +1264,34 @@ class TestRetryBeforeFailover:
         )
         assert "cleared" in [status.state for status in retry_statuses]
         assert retry_statuses[-1].state == "exhausted"
+
+    @pytest.mark.asyncio
+    async def test_fallback_auth_error_preserves_primary_diagnosis_and_exhaustion(self) -> None:
+        primary = _FakeProvider("primary", _make_response(
+            "private network detail", finish_reason="error", error_kind="connection",
+        ))
+        fallback = _FakeProvider("fallback", _make_response(
+            "private auth detail", finish_reason="error", error_status_code=401,
+        ))
+        provider = FallbackProvider(primary, [_fallback("backup")], MagicMock(return_value=fallback))
+        statuses: list[RetryStatusEvent] = []
+
+        async def record(status: RetryStatusEvent) -> None:
+            statuses.append(status)
+
+        with patch("nanobot.providers.base.asyncio.sleep", new_callable=AsyncMock):
+            result = await provider.chat_with_retry(
+                [{"role": "user", "content": "hello"}], on_retry_status=record,
+            )
+
+        assert len(primary.chat_calls) == 4
+        assert len(fallback.chat_calls) == 1
+        assert LLMProvider.public_error_kind(result) == "connection"
+        assert result.preserve_provider_state_on_error is True
+        assert not LLMProvider.is_transient_response(result)
+        assert statuses[-1] == RetryStatusEvent(
+            state="exhausted", attempt=4, max_attempts=4, error_kind="connection",
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("factory_fails", [False, True])
@@ -1459,6 +1481,54 @@ class TestFailoverOnArrearageError:
         factory.assert_called_once_with(fallback_preset)
 
     @pytest.mark.asyncio
+    async def test_insufficient_credits_on_400_tries_configured_fallback(self) -> None:
+        arrearage = _make_response(
+            "[400]: You have insufficient credits to make this request.",
+            finish_reason="error",
+            error_status_code=400,
+            error_code="BAD_REQUEST",
+            error_type="invalid_request_error",
+            error_should_retry=False,
+        )
+        primary = _FakeProvider("primary", arrearage)
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        fallback_preset = _fallback("fallback-a")
+        factory = MagicMock(return_value=fallback)
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[fallback_preset],
+            provider_factory=factory,
+        )
+
+        result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
+
+        assert result.content == "fallback ok"
+        factory.assert_called_once_with(fallback_preset)
+
+    @pytest.mark.asyncio
+    async def test_plain_bad_request_still_does_not_fall_back(self) -> None:
+        bad_request = _make_response(
+            "invalid parameter: temperature must be <= 2",
+            finish_reason="error",
+            error_status_code=400,
+            error_code="BAD_REQUEST",
+            error_type="invalid_request_error",
+            error_should_retry=False,
+        )
+        primary = _FakeProvider("primary", bad_request)
+        factory = MagicMock()
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=factory,
+        )
+
+        result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
+
+        assert result is bad_request
+        factory.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_without_fallback_presets_returns_original_error(self) -> None:
         arrearage = _make_response(
             "payment required",
@@ -1557,7 +1627,7 @@ class TestFailoverOnAuthenticationError:
         factory.assert_called_once_with(fallback_preset)
 
 
-class TestNoFallbackOnNonRetryableError:
+class TestFallbackErrorClassification:
     @pytest.mark.asyncio
     async def test_bad_request(self) -> None:
         primary = _FakeProvider(
@@ -1606,7 +1676,7 @@ class TestNoFallbackOnNonRetryableError:
         factory.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_timeout(self) -> None:
+    async def test_timeout_triggers_fallback(self) -> None:
         primary = _FakeProvider(
             "primary",
             _make_response("timed out", finish_reason="error", error_kind="timeout"),
@@ -1773,7 +1843,6 @@ class TestNoFallbackWhenEmptyList:
 class TestChatStreamFailover:
     @pytest.mark.asyncio
     async def test_fallback_succeeds(self) -> None:
-        # Use empty content so on_content_delta is not triggered on the error
         primary = _FakeProvider("primary", _error_response(""))
         fallback = _FakeProvider("fallback", _make_response("stream ok"))
         factory = MagicMock(return_value=fallback)
@@ -1800,6 +1869,22 @@ class TestGetDefaultModel:
         assert fb.get_default_model() == "primary/model"
 
 
+async def test_fallback_closes_temporary_provider_and_owns_primary_shutdown() -> None:
+    primary = _FakeProvider("primary", _error_response())
+    fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+    primary.aclose = AsyncMock()
+    fallback.aclose = AsyncMock()
+    wrapper = FallbackProvider(primary, [_fallback("backup")], MagicMock(return_value=fallback))
+
+    result = await wrapper.chat(messages=[{"role": "user", "content": "hi"}])
+
+    assert result.content == "fallback ok"
+    fallback.aclose.assert_awaited_once()
+    primary.aclose.assert_not_awaited()
+    await wrapper.aclose()
+    primary.aclose.assert_awaited_once()
+
+
 class TestCircuitBreaker:
     @pytest.mark.asyncio
     async def test_skips_primary_after_three_failures(self) -> None:
@@ -1812,14 +1897,12 @@ class TestCircuitBreaker:
             provider_factory=factory,
         )
 
-        # 3 failures — primary should still be called each time
         for _ in range(3):
             result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
             assert result.content == "fallback ok"
 
         assert len(primary.chat_calls) == 3
 
-        # 4th call — primary circuit is open, should be skipped
         primary.chat_calls.clear()
         result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
         assert result.content == "fallback ok"
@@ -1836,16 +1919,13 @@ class TestCircuitBreaker:
             provider_factory=factory,
         )
 
-        # 2 failures
         for _ in range(2):
             await fb.chat(messages=[{"role": "user", "content": "hi"}])
 
-        # 3rd call: primary succeeds — circuit resets
         primary._response = _make_response("primary ok")
         result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
         assert result.content == "primary ok"
 
-        # 4th call: primary fails again — should still be called (counter reset)
         primary._response = _error_response()
         primary.chat_calls.clear()
         result = await fb.chat(messages=[{"role": "user", "content": "hi"}])

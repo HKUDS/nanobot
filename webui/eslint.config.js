@@ -13,8 +13,15 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    files: ["scripts/check_client_import_boundaries*.mjs"],
+    languageOptions: {
+      globals: { ...globals.node, Bun: "readonly" },
+    },
+  },
+  {
     files: [
       "webui/src/**/*.{ts,tsx}",
+      "webui/browser/**/*.{ts,tsx}",
       "nanobot/channels/*/webui/**/*.{ts,tsx}",
       "nanobot/channels/*/tests/webui/**/*.{ts,tsx}",
     ],

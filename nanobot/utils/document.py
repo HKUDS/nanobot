@@ -1,5 +1,4 @@
-"""Document text extraction utilities for nanobot."""
-
+import codecs
 import mimetypes
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -12,13 +11,13 @@ from loguru import logger
 from nanobot.utils.helpers import detect_image_mime
 
 _MAX_TEXT_LENGTH = 200_000
-_MAX_EXTRACT_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+_MAX_EXTRACT_FILE_SIZE = 50 * 1024 * 1024
 _MAX_OFFICE_ARCHIVE_MEMBERS = 10_000
-_MAX_OFFICE_UNCOMPRESSED_SIZE = 256 * 1024 * 1024  # 256 MB
-_MAX_OFFICE_MEMBER_SIZE = 128 * 1024 * 1024  # 128 MB
+_MAX_OFFICE_UNCOMPRESSED_SIZE = 256 * 1024 * 1024
+_MAX_OFFICE_MEMBER_SIZE = 128 * 1024 * 1024
 _MAX_DOCX_TABLE_CELLS = 100_000
 _MAX_DOCX_TABLE_DEPTH = 8
-_MAX_PDF_CONTENT_STREAM_SIZE = 32 * 1024 * 1024  # 32 MB per page
+_MAX_PDF_CONTENT_STREAM_SIZE = 32 * 1024 * 1024
 _MAX_PDF_ATTACHMENT_PAGES = 100
 
 
@@ -76,6 +75,7 @@ class PdfExtraction:
     total_pages: int
     start_page: int
     end_page: int
+    truncated: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +86,8 @@ class LocatedDocumentLine:
     extracted_line: int
     locator: str
     searchable: bool = True
+    # XLSX cell offsets in text: a tab inside a cell is not a column separator.
+    column_starts: tuple[int, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,10 +127,8 @@ def extract_text(path: str | Path) -> str | None:
     elif _is_text_extension(ext):
         return _extract_text_file(path)
     elif ext in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
-        # Image files - for future OCR support
         return f"[image: {path.name}]"
     else:
-        # Unsupported extension
         return None
 
 
@@ -250,15 +250,21 @@ def _open_xlsx_line_source(path: Path) -> DocumentLineSource:
         extracted_line = 0
         wrote_document_content = False
         try:
-            for sheet_name in workbook.sheetnames:
-                worksheet = workbook[sheet_name]
+            for worksheet in workbook.worksheets:
+                sheet_name = worksheet.title
+                # Producer-supplied dimensions can omit cells that are present in the XML.
+                worksheet.reset_dimensions()
                 wrote_header = False
                 for row_index, row in enumerate(worksheet.iter_rows(values_only=True), 1):
-                    row_text = "\t".join(
-                        str(cell) if cell is not None else "" for cell in row
-                    )
+                    cells = [str(cell) if cell is not None else "" for cell in row]
+                    row_text = "\t".join(cells)
                     if not row_text.strip():
                         continue
+                    column_starts: list[int] = []
+                    offset = 0
+                    for cell in cells:
+                        column_starts.append(offset)
+                        offset += len(cell) + 1
                     if not wrote_header:
                         if wrote_document_content:
                             extracted_line += 1
@@ -279,6 +285,7 @@ def _open_xlsx_line_source(path: Path) -> DocumentLineSource:
                         row_text,
                         extracted_line,
                         f"sheet={sheet_name!r},row={row_index}",
+                        column_starts=tuple(column_starts),
                     )
         finally:
             workbook.close()
@@ -430,7 +437,6 @@ def _extraction_path_error(path: Path) -> str | None:
 
 
 def _extract_pdf(path: Path) -> str:
-    """Extract text from PDF using pypdf."""
     try:
         result = extract_pdf_pages(
             path,
@@ -475,10 +481,17 @@ def extract_pdf_pages(
                     f"{_MAX_PDF_CONTENT_STREAM_SIZE // (1024 * 1024)} MB limit"
                 )
         text = (page.extract_text() or "").strip()
-        if text and not collector.add(f"--- Page {index + 1} ---\n{text}", separator="\n\n"):
+        if not text:
+            continue
+        page_text = f"--- Page {index + 1} ---\n{text}"
+        if collector.parts and collector.length + 2 + len(page_text) > max_chars:
+            # Leave this page for the next read instead of returning only its prefix.
+            end = index - 1
+            break
+        if not collector.add(page_text, separator="\n\n"):
             end = index
             break
-    return PdfExtraction(collector.render(), total_pages, start, end)
+    return PdfExtraction(collector.render(), total_pages, start, end, truncated=collector.truncated)
 
 
 def _parse_pdf_page_range(pages: str | None, total_pages: int) -> tuple[int, int]:
@@ -503,7 +516,6 @@ def _parse_pdf_page_range(pages: str | None, total_pages: int) -> tuple[int, int
 
 
 def _render_document_preview(source: DocumentLineSource) -> str:
-    """Render a bounded attachment preview from the canonical line stream."""
     collector = _TextCollector(_MAX_TEXT_LENGTH)
     iterator = source.lines
     first_line = True
@@ -522,7 +534,6 @@ def _render_document_preview(source: DocumentLineSource) -> str:
 
 
 def _extract_docx(path: Path) -> str:
-    """Extract a bounded DOCX attachment preview."""
     try:
         return _render_document_preview(_open_docx_line_source(path))
     except DocxSafetyError as e:
@@ -535,7 +546,6 @@ def _extract_docx(path: Path) -> str:
 
 
 def _extract_xlsx(path: Path) -> str:
-    """Extract a bounded XLSX attachment preview."""
     try:
         return _render_document_preview(_open_xlsx_line_source(path))
     except DocumentExtractionError as e:
@@ -546,7 +556,6 @@ def _extract_xlsx(path: Path) -> str:
 
 
 def _extract_pptx(path: Path) -> str:
-    """Extract a bounded PPTX attachment preview."""
     try:
         return _render_document_preview(_open_pptx_line_source(path))
     except DocumentExtractionError as e:
@@ -571,9 +580,8 @@ def _collect_pptx_shape_text(shape: Any, out: list[str]) -> None:
     if getattr(shape, "has_table", False):
         for row in shape.table.rows:
             cells = [cell.text.strip() for cell in row.cells]
-            line = "\t".join(cell for cell in cells if cell)
-            if line:
-                out.append(line)
+            if any(cells):
+                out.append("\t".join(cells))
         return
 
     text = getattr(shape, "text", "")
@@ -582,7 +590,6 @@ def _collect_pptx_shape_text(shape: Any, out: list[str]) -> None:
 
 
 def _office_archive_error(path: Path) -> str | None:
-    """Reject oversized or encrypted OOXML containers before parsing XML."""
     try:
         with ZipFile(path) as archive:
             members = archive.infolist()
@@ -603,14 +610,27 @@ def _office_archive_error(path: Path) -> str | None:
     return None
 
 
+def _decode_bom_text(raw: bytes) -> str | None:
+    if raw.startswith(codecs.BOM_UTF8):
+        return raw.decode("utf-8-sig")
+    # UTF-32 LE starts with the UTF-16 LE BOM, so check UTF-32 first.
+    if raw.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)):
+        return raw.decode("utf-32")
+    if raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        return raw.decode("utf-16")
+    return None
+
+
 def _extract_text_file(path: Path) -> str:
-    """Extract text from a plain text file."""
     try:
-        # Try UTF-8 first, then latin-1 fallback
-        try:
-            content = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            content = path.read_text(encoding="latin-1")
+        raw = path.read_bytes()
+        content = _decode_bom_text(raw)
+        if content is None:
+            try:
+                content = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                content = raw.decode("latin-1")
+        content = content.replace("\r\n", "\n").replace("\r", "\n")
         return _truncate(content, _MAX_TEXT_LENGTH)
     except Exception as e:
         logger.exception("Failed to read text file {}", path)
@@ -618,14 +638,12 @@ def _extract_text_file(path: Path) -> str:
 
 
 def _truncate(text: str, max_length: int) -> str:
-    """Truncate text with a suffix indicating truncation."""
     if len(text) <= max_length:
         return text
     return text[:max_length] + f"... (truncated, {len(text)} chars total)"
 
 
 def _is_text_extension(ext: str) -> bool:
-    """Check if extension is a text format."""
     return ext in {
         ".txt",
         ".md",
@@ -641,11 +659,6 @@ def _is_text_extension(ext: str) -> bool:
         ".ini",
         ".cfg",
     }
-
-
-# ---------------------------------------------------------------------------
-# High-level helper: split images from on-demand attachment references
-# ---------------------------------------------------------------------------
 
 
 def is_image_file(path: str) -> bool:
@@ -668,7 +681,6 @@ def is_image_file(path: str) -> bool:
 
 
 def _canonical_local_media_path(path: str) -> str:
-    """Return an existing local media file as an absolute path."""
     try:
         candidate = Path(path).expanduser()
         if candidate.is_file():

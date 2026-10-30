@@ -1,7 +1,7 @@
 import { useEffect, type Dispatch, type SetStateAction } from "react";
 
 import type { ApplySettingsPayload } from "@/components/settings/contracts";
-import { providerFormFromRow } from "@/components/settings/models/ProviderSettings";
+import { providerFormFromRow } from "@/components/settings/models/providerForm";
 import type { ModelSettingsState } from "@/components/settings/models/useModelSettingsState";
 import { cancelProviderOAuth, completeProviderOAuth } from "@/lib/api";
 import type { NanobotClient } from "@/lib/nanobot-client";
@@ -56,7 +56,7 @@ export function useProviderOAuthPolling({
           timer = window.setTimeout(() => void poll(), 1000);
           return;
         }
-        applyPayload(payload, { preserveAgentForm: true });
+        applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
         setError(null);
         closeProviderOAuthFlow(false);
       } catch (err) {
@@ -91,9 +91,9 @@ export function useProviderFormsSync(
   useEffect(() => {
     if (!settings) return;
     setProviderForms((prev) => {
-      const next = { ...prev };
+      const next: typeof prev = {};
       for (const provider of settings.providers) {
-        next[provider.name] = next[provider.name] ?? providerFormFromRow(provider);
+        next[provider.name] = prev[provider.name] ?? providerFormFromRow(provider);
       }
       return next;
     });

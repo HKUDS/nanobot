@@ -7,19 +7,18 @@
         "label": "ボットトークン",
         "placeholder": "123456:ABC..."
       },
-      "proxy": {
-        "label": "ネットワークプロキシ",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "プロキシを使う"
       },
       "allowFrom": {
-        "label": "許可するユーザー",
+        "label": "許可ユーザー",
         "placeholder": "* または Telegram ユーザー ID"
       },
       "groupPolicy": {
-        "label": "グループでの動作",
+        "label": "グループのルール",
         "choices": {
           "mention": "メンションのみ",
-          "open": "すべてのメッセージ",
+          "open": "全メッセージ",
           "allowlist": "許可リスト"
         }
       },
@@ -54,7 +53,7 @@
         }
       },
       "inlineKeyboards": {
-        "label": "インラインキーボード",
+        "label": "メッセージのボタン",
         "choices": {
           "true": "オン",
           "false": "オフ"
@@ -68,7 +67,7 @@
         }
       },
       "streamEditInterval": {
-        "label": "ストリーム更新間隔"
+        "label": "更新間隔（秒）"
       },
       "webhookUrl": {
         "label": "Webhook URL"
@@ -86,7 +85,7 @@
         "label": "Webhook シークレット トークン"
       },
       "webhookMaxConnections": {
-        "label": "Webhook 接続の最大数"
+        "label": "Webhook 接続の上限"
       }
     }
   }

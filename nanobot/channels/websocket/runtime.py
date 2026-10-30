@@ -1,5 +1,3 @@
-"""WebSocket server channel: nanobot acts as a WebSocket server and serves connected clients."""
-
 from __future__ import annotations
 
 import asyncio
@@ -12,7 +10,7 @@ import uuid
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Self, TypeGuard, cast
+from typing import Any, Self, TypeGuard, cast
 from urllib.parse import urlsplit, urlunsplit
 from weakref import WeakSet
 
@@ -20,19 +18,15 @@ from pydantic import Field, PrivateAttr, field_validator, model_validator
 from websockets.asyncio.server import Server, ServerConnection, serve, unix_serve
 from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest
+from websockets.http11 import Response as WsResponse
+from websockets.protocol import CONNECTING
 
-from nanobot.bus.events import (
-    OUTBOUND_META_AGENT_UI,
-    OutboundMessage,
-)
+from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import Base
-from nanobot.session.webui_turns import (
-    clear_websocket_turn_if_current,
-    mark_websocket_turn_transcript_persistence_failed,
-    websocket_turn_transcript_persistence_failed,
-)
+from nanobot.channels.websocket.binary_http import BinaryHTTPBridge
+from nanobot.config_base import Base
+from nanobot.runtime_admission import RuntimeMaintenanceError
 from nanobot.webui.gateway_services import GatewayServices
 from nanobot.webui.http_utils import (
     normalize_config_path as _normalize_config_path,
@@ -44,22 +38,9 @@ from nanobot.webui.http_utils import (
     query_first as _query_first,
 )
 from nanobot.webui.inbound_commands import WebUICommandRouter
-from nanobot.webui.metadata import (
-    WEBSOCKET_TURN_OWNER_METADATA_KEY,
-    WEBUI_TURN_METADATA_KEY,
-)
-from nanobot.webui.outbound_projection import WebUIOutboundProjector
-from nanobot.webui.outbound_wire import (
-    WebUIWirePayload,
-    WebUIWirePersistence,
-    project_tool_events,
-)
+from nanobot.webui.outbound_delivery import ChatAudience, WebUIAudience, WebUIOutboundDelivery
 from nanobot.webui.session_identity import is_valid_webui_chat_id
-from nanobot.webui.transcript import WEBUI_TRANSCRIPT_INCOMPLETE_KEY
 from nanobot.webui.websocket_logging import websockets_server_logger
-
-if TYPE_CHECKING:
-    from nanobot.bus.outbound_events import ProgressEvent
 
 # Plain HTTP WebUI routes also run through websockets.process_request.
 _WEBUI_HTTP_OPEN_TIMEOUT_S = 360.0
@@ -207,10 +188,8 @@ class WebSocketConfig(Base):
     websocket_requires_token: bool = True
     allow_from: list[str] = Field(default_factory=lambda: ["*"])
     streaming: bool = True
-    # Default 36 MB, upper 40 MB: supports up to 4 images at ~6 MB each after
-    # client-side Worker normalization (see webui Composer). 4 × 6 MB × 1.37
-    # (base64 overhead) + envelope framing stays under 36 MB; the 40 MB ceiling
-    # leaves a small margin for sender slop without opening a DoS avenue.
+    # Keep the existing configurable guard (also used for non-attachment
+    # frames and older clients). HTTP attachments are outside this limit.
     max_message_bytes: int = Field(default=37_748_736, ge=1024, le=41_943_040)
     ping_interval_s: float = Field(default=20.0, ge=5.0, le=300.0)
     ping_timeout_s: float = Field(default=20.0, ge=5.0, le=300.0)
@@ -294,7 +273,6 @@ class WebSocketConfig(Base):
 
 
 def _parse_inbound_payload(raw: str) -> str | None:
-    """Parse a client frame into text; return None for empty or unrecognized content."""
     text = raw.strip()
     if not text:
         return None
@@ -319,12 +297,6 @@ def _is_valid_chat_id(value: Any) -> TypeGuard[str]:  # pyright: ignore[reportUn
 
 
 def _parse_envelope(raw: str) -> dict[str, Any] | None:
-    """Return a typed envelope dict if the frame is a new-style JSON envelope, else None.
-
-    A frame qualifies when it parses as a JSON object with a string ``type`` field.
-    Legacy frames (plain text, or ``{"content": ...}`` without ``type``) return None;
-    callers should fall back to :func:`_parse_inbound_payload` for those.
-    """
     text = raw.strip()
     if not text.startswith("{"):
         return None
@@ -377,7 +349,6 @@ class WebSocketChannel(BaseChannel):
             config = WebSocketConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: WebSocketConfig = config
-        # chat_id -> connections subscribed to it (fan-out target).
         self._subs: dict[str, set[ServerConnection]] = {}
         # connection -> chat_ids it is subscribed to (O(1) cleanup on disconnect).
         self._conn_chats: dict[ServerConnection, set[str]] = {}
@@ -393,24 +364,31 @@ class WebSocketChannel(BaseChannel):
         self._retired_connections: WeakSet[ServerConnection] = WeakSet()
 
         self.gateway = gateway
-        self._media = gateway.media
-        self._transcripts = gateway.transcripts
-        self._temporary_chats = gateway.temporary_chats
-        self._session_projection = gateway.session_projection
-        self._commands = WebUICommandRouter(self, gateway)
+        self._uploads = gateway.uploads
+        self._outbound = WebUIOutboundDelivery(
+            self,
+            media=gateway.media,
+            transcripts=gateway.transcripts,
+            temporary_chats=gateway.temporary_chats,
+            session_projection=gateway.session_projection,
+        )
+        self._commands = WebUICommandRouter(self, gateway, outbound=self._outbound)
         self._webui_request_tasks = self._commands.request_tasks
         self._webui_request_operations = self._commands.request_operations
         self._webui_request_locks = self._commands.request_locks
-        self._outbound = WebUIOutboundProjector(self, self._session_projection)
 
-        self._stream_text_buffers: dict[tuple[str, str], list[str]] = {}
-        self._reasoning_text_buffers: dict[tuple[str, str], list[str]] = {}
-
-    # -- Subscription bookkeeping -------------------------------------------
 
     def webui_subscribers(self, chat_id: str) -> tuple[ServerConnection, ...]:
         """Return a stable snapshot of one chat's transport subscribers."""
         return tuple(self._subs.get(chat_id, ()))
+
+    def webui_recipients(self, audience: WebUIAudience) -> tuple[ServerConnection, ...]:
+        """Snapshot the selected audience without interpreting its public frames."""
+        if isinstance(audience, ChatAudience):
+            return self.webui_subscribers(audience.chat_id)
+        if audience == "authenticated_webui":
+            return tuple(self._webui_connections)
+        return tuple(self._conn_chats)
 
     def webui_connection_chats(self, connection: ServerConnection) -> tuple[str, ...]:
         return tuple(self._conn_chats.get(connection, ()))
@@ -423,12 +401,6 @@ class WebSocketChannel(BaseChannel):
 
     def webui_clear_connection_default(self, connection: ServerConnection) -> None:
         self._conn_default.pop(connection, None)
-
-    def webui_clear_stream_buffers(self, chat_id: str) -> None:
-        self._clear_stream_buffers(chat_id)
-
-    async def webui_hydrate(self, chat_id: str) -> None:
-        await self._hydrate_after_subscribe(chat_id)
 
     async def webui_send_event(
         self,
@@ -458,6 +430,7 @@ class WebSocketChannel(BaseChannel):
         is_dm: bool,
         session_key: str | None,
         require_existing_session: bool,
+        session_generation: str | None,
     ) -> None:
         await self._handle_message(
             sender_id=sender_id,
@@ -468,10 +441,10 @@ class WebSocketChannel(BaseChannel):
             is_dm=is_dm,
             session_key=session_key,
             require_existing_session=require_existing_session,
+            session_generation=session_generation,
         )
 
     def _attach(self, connection: ServerConnection, chat_id: str) -> None:
-        """Idempotently subscribe *connection* to *chat_id*."""
         if not self._register_connection_outbound(connection):
             return
         self._subs.setdefault(chat_id, set()).add(connection)
@@ -498,17 +471,9 @@ class WebSocketChannel(BaseChannel):
             if not subscribers:
                 self._subs.pop(chat_id, None)
 
-    def _clear_stream_buffers(self, chat_id: str) -> None:
-        for key in tuple(self._stream_text_buffers):
-            if key[0] == chat_id:
-                self._stream_text_buffers.pop(key, None)
-        for key in tuple(self._reasoning_text_buffers):
-            if key[0] == chat_id:
-                self._reasoning_text_buffers.pop(key, None)
-
     async def _cleanup_connection(self, connection: ServerConnection) -> None:
-        """Remove *connection* from every subscription set; safe to call multiple times."""
         self._retired_connections.add(connection)
+        self._uploads.revoke(connection)
         state = self._connection_outbound.get(connection)
         if state is not None:
             state.closing = True
@@ -523,17 +488,12 @@ class WebSocketChannel(BaseChannel):
             if self._connection_outbound.get(connection) is state:
                 self._connection_outbound.pop(connection, None)
 
-    async def _hydrate_after_subscribe(self, chat_id: str) -> None:
-        """Replay persisted or actively running per-chat state after subscribe."""
-        await self._outbound.hydrate(chat_id)
-
     async def _send_event(
         self,
         connection: ServerConnection,
         event: str,
         **fields: Any,
     ) -> None:
-        """Send a control event (attached, error, ...) to a single connection."""
         payload: dict[str, Any] = {"event": event}
         payload.update(fields)
         raw = json.dumps(payload, ensure_ascii=False)
@@ -557,7 +517,6 @@ class WebSocketChannel(BaseChannel):
         ctx.load_cert_chain(certfile=cert, keyfile=key)
         return ctx
 
-    # -- HTTP dispatch ------------------------------------------------------
 
     async def _dispatch_http(self, connection: ServerConnection, request: WsRequest) -> Any:
         """Compatibility proxy for the externally composed gateway endpoint."""
@@ -580,7 +539,6 @@ class WebSocketChannel(BaseChannel):
             headers,
         )
 
-    # -- Server lifecycle and connection ingress ---------------------------
 
     @staticmethod
     def _socket_is_accepting(sock: socket.socket) -> bool:
@@ -628,7 +586,6 @@ class WebSocketChannel(BaseChannel):
         )
 
     async def _wait_for_listener_loss(self, server: Server) -> None:
-        """Wait for shutdown or raise when the serving socket disappears."""
         assert self._stop_event is not None
         while not self._stop_event.is_set():
             try:
@@ -642,9 +599,12 @@ class WebSocketChannel(BaseChannel):
                         "WebSocket listener is no longer accepting connections"
                     )
 
-    async def _close_server(self, server: Server, socket_path: str) -> None:
+    async def _close_server(
+        self, server: Server, socket_path: str, bridge: BinaryHTTPBridge,
+    ) -> None:
         server.close()
         try:
+            await bridge.shutdown()
             await server.wait_closed()
         except OSError as exc:
             self.logger.warning("WebSocket server close failed: {}", exc)
@@ -676,6 +636,7 @@ class WebSocketChannel(BaseChannel):
             )
 
     async def start(self) -> None:
+        self.gateway.http.remote_instances.resume()
         from nanobot.utils.logging_bridge import redirect_lib_logging
 
         redirect_lib_logging("websockets", level="WARNING")
@@ -693,14 +654,48 @@ class WebSocketChannel(BaseChannel):
         ) -> Any:
             return await self._dispatch_http(connection, request)
 
+        def process_response(
+            connection: ServerConnection, _request: WsRequest, response: WsResponse,
+        ) -> WsResponse:
+            # Stay synchronous: websockets sends immediately after this hook returns.
+            if connection.state is not CONNECTING:
+                exc = connection.protocol.handshake_exc
+                if exc is not None:
+                    connection.logger.error(
+                        "opening handshake failed", exc_info=(type(exc), exc, exc.__traceback__),
+                    )
+                # The request callback finished; cancel only this connection's handshake.
+                raise asyncio.CancelledError("Peer disconnected before handshake response")
+            return response
+
         async def handler(connection: ServerConnection) -> None:
             await self._connection_loop(connection)
+
+        from aiohttp import web
+
+        async def handle_binary(request: web.BaseRequest) -> web.StreamResponse:
+            try:
+                with self.bus.admission.activity():
+                    return await self._uploads.handle(request)
+            except RuntimeMaintenanceError:
+                return web.json_response({"error": "Gateway update is being verified"}, status=503)
+
+        async def prune_uploads() -> None:
+            while not stop_event.is_set():
+                self._uploads.store.prune()
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=30)
+                except TimeoutError:
+                    pass
+
+        prune_task = asyncio.create_task(prune_uploads())
 
         async def runner() -> None:
             socket_path = self.config.unix_socket_path
             failures = 0
             while not stop_event.is_set():
                 server: Server | None = None
+                bridge = BinaryHTTPBridge(handle_binary)
                 was_serving = False
                 started_at = 0.0
                 try:
@@ -713,6 +708,8 @@ class WebSocketChannel(BaseChannel):
                             handler,
                             socket_path,
                             process_request=process_request,
+                            process_response=process_response,
+                            create_connection=bridge.connection_factory,
                             open_timeout=_WEBUI_HTTP_OPEN_TIMEOUT_S,
                             max_size=self.config.max_message_bytes,
                             ping_interval=self.config.ping_interval_s,
@@ -727,6 +724,8 @@ class WebSocketChannel(BaseChannel):
                             self.config.host,
                             self.config.port,
                             process_request=process_request,
+                            process_response=process_response,
+                            create_connection=bridge.connection_factory,
                             open_timeout=_WEBUI_HTTP_OPEN_TIMEOUT_S,
                             max_size=self.config.max_message_bytes,
                             ping_interval=self.config.ping_interval_s,
@@ -778,15 +777,22 @@ class WebSocketChannel(BaseChannel):
                 finally:
                     self._running = False
                     if server is not None:
-                        await self._close_server(server, socket_path)
+                        await self._close_server(server, socket_path, bridge)
+                    else:
+                        await bridge.shutdown()
                     if self._server is server:
                         self._server = None
 
+        disconnect_pairing = self._outbound.bind_pairing(self.bus, channel=self.name)
         task = asyncio.create_task(runner())
         self._server_task = task
         try:
             await task
         finally:
+            disconnect_pairing()
+            prune_task.cancel()
+            await asyncio.gather(prune_task, return_exceptions=True)
+            self._uploads.store.clear()
             self._running = False
             if self._server_task is task:
                 self._server_task = None
@@ -805,6 +811,7 @@ class WebSocketChannel(BaseChannel):
             client_id = client_id[:128]
 
         default_chat_id = str(uuid.uuid4())
+        from nanobot.webui.client_contract import gateway_identity
 
         try:
             await connection.send(
@@ -813,9 +820,10 @@ class WebSocketChannel(BaseChannel):
                         "event": "ready",
                         "chat_id": default_chat_id,
                         "client_id": client_id,
-                        **({"terminal": {
-                            "protocolVersion": 1, "gatewayId": self.gateway.tokens.instance_id,
-                        }} if _query_first(query, "terminal_protocol") == "1" else {}),
+                        **({"upload": self._uploads.issue(connection)}
+                           if self.is_allowed(client_id) else {}),
+                        **({"terminal": gateway_identity(self.gateway.tokens.instance_id)}
+                           if _query_first(query, "terminal_protocol") == "1" else {}),
                     },
                     ensure_ascii=False,
                 )
@@ -823,7 +831,7 @@ class WebSocketChannel(BaseChannel):
             # Register only after ready is successfully sent to avoid out-of-order sends
             self._conn_default[connection] = default_chat_id
             self._attach(connection, default_chat_id)
-            await self._hydrate_after_subscribe(default_chat_id)
+            await self._outbound.hydrate(default_chat_id)
 
             async for raw in connection:
                 if isinstance(raw, bytes):
@@ -856,7 +864,6 @@ class WebSocketChannel(BaseChannel):
         finally:
             await self._cleanup_connection(connection)
 
-    # -- Inbound WebSocket envelopes ---------------------------------------
 
     async def _dispatch_envelope(
         self,
@@ -864,7 +871,6 @@ class WebSocketChannel(BaseChannel):
         client_id: str,
         envelope: dict[str, Any],
     ) -> None:
-        """Delegate one typed envelope to the WebUI application router."""
         await self._dispatch_active_envelope(connection, client_id, envelope)
 
     async def _dispatch_active_envelope(
@@ -877,13 +883,9 @@ class WebSocketChannel(BaseChannel):
             return
         await self._commands.dispatch(connection, client_id, envelope)
 
-    def _prune_webui_request_operations(self) -> None:
-        """Compatibility hook for request-cache boundary tests."""
-        self._commands.prune_request_operations()
-
-    # -- Outbound WebSocket events -----------------------------------------
 
     async def stop(self) -> None:
+        await self.gateway.http.remote_instances.close()
         server_task = self._server_task
         if (
             not self._running
@@ -941,6 +943,16 @@ class WebSocketChannel(BaseChannel):
         state.writer = asyncio.create_task(
             self._drain_connection_outbound(connection, state),
             name=f"websocket-outbound-{id(connection):x}",
+        )
+
+    @property
+    def has_pending_delivery(self) -> bool:
+        # send() only enqueues a frame. buffered_bytes includes the frame that
+        # a writer has removed from its queue but has not finished transmitting.
+        return bool(self._outbound_retire_tasks) or any(
+            state.buffered_bytes or not state.queue.empty()
+            or (state.writer is not None and not state.writer.done())
+            for state in self._connection_outbound.values()
         )
 
     async def _drain_connection_outbound(
@@ -1056,7 +1068,6 @@ class WebSocketChannel(BaseChannel):
         *,
         label: str = "",
     ) -> None:
-        """Queue one frame without letting this connection block other clients."""
         state = self._connection_outbound.get(connection)
         if state is None or state.closing:
             return
@@ -1094,144 +1105,11 @@ class WebSocketChannel(BaseChannel):
         # Give an idle writer a chance to start without waiting for physical I/O.
         await asyncio.sleep(0)
 
-    def _persist_turn_transcript_event(
-        self,
-        chat_id: str,
-        event: dict[str, Any],
-        *,
-        metadata: dict[str, Any] | None,
-        phase: str,
-        include_source: bool = False,
-        transcript_overrides: dict[str, Any] | None = None,
-    ) -> bool:
-        """Persist one canonical turn event and retain unsafe owners on failure."""
-        if not self._temporary_chats.should_persist_transcript(chat_id):
-            self._transcripts.prepare_event(
-                chat_id, event, metadata=metadata, phase=phase, include_source=include_source,
-            )
-            return True
-        persisted = self._transcripts.prepare_and_append(
-            chat_id,
-            event,
-            metadata=metadata,
-            phase=phase,
-            include_source=include_source,
-            transcript_overrides=transcript_overrides,
-        )
-        return self._retain_turn_on_transcript_failure(
-            chat_id,
-            persisted=persisted,
-            metadata=metadata,
-            phase=phase,
-        )
-
-    @staticmethod
-    def _retain_turn_on_transcript_failure(
-        chat_id: str,
-        *,
-        persisted: bool,
-        metadata: dict[str, Any] | None,
-        phase: str,
-    ) -> bool:
-        if not persisted and phase in {"answer", "complete"} and (metadata or {}).get("webui") is True:
-            owner = (metadata or {}).get(WEBSOCKET_TURN_OWNER_METADATA_KEY)
-            mark_websocket_turn_transcript_persistence_failed(
-                chat_id,
-                owner if isinstance(owner, str) else None,
-            )
-        return persisted
-
-    def _persist_turn_stream_event(
-        self,
-        chat_id: str,
-        event: dict[str, Any],
-        *,
-        completed_text: str | None,
-        metadata: dict[str, Any] | None,
-        phase: str,
-        include_source: bool = False,
-    ) -> bool:
-        """Persist the canonical end of a live stream, never its wire chunks."""
-        if not self._temporary_chats.should_persist_transcript(chat_id):
-            self._transcripts.prepare_event(
-                chat_id, event, metadata=metadata, phase=phase, include_source=include_source,
-            )
-            return True
-        persisted = self._transcripts.prepare_and_append_stream_event(
-            chat_id,
-            event,
-            completed_text=completed_text,
-            metadata=metadata,
-            phase=phase,
-            include_source=include_source,
-        )
-        return self._retain_turn_on_transcript_failure(
-            chat_id,
-            persisted=persisted,
-            metadata=metadata,
-            phase=phase,
-        )
-
     async def send(self, msg: OutboundMessage) -> None:
         await self._outbound.send(msg)
 
-    async def send_projected_message(
-        self,
-        msg: OutboundMessage,
-        progress_event: ProgressEvent | None,
-    ) -> None:
-        """Serialize one ordinary outbound message selected by the projector."""
-        conns = list(self._subs.get(msg.chat_id, ()))
-        text = msg.content
-        wire_text = self._media.rewrite_local_markdown_images(text)
-        payload: dict[str, Any] = {
-            "event": "message",
-            "chat_id": msg.chat_id,
-            "text": wire_text,
-        }
-        turn_id = msg.metadata.get(WEBUI_TURN_METADATA_KEY)
-        if isinstance(turn_id, str) and turn_id:
-            payload["turn_id"] = turn_id
-        if msg.media:
-            payload["media"] = msg.media
-            urls: list[dict[str, str]] = []
-            for entry in msg.media:
-                signed = self._media.sign_or_stage_media_path(Path(entry))
-                if signed is not None:
-                    urls.append(signed)
-            if urls:
-                payload["media_urls"] = urls
-        if msg.reply_to:
-            payload["reply_to"] = msg.reply_to
-        lat = msg.metadata.get("latency_ms")
-        if isinstance(lat, (int, float)):
-            payload["latency_ms"] = int(lat)
-        if progress_event and progress_event.tool_events:
-            payload["tool_events"] = project_tool_events(progress_event.tool_events)
-        agent_ui = msg.metadata.get(OUTBOUND_META_AGENT_UI)
-        if agent_ui is not None:
-            payload["agent_ui"] = agent_ui
-        # Mark intermediate agent breadcrumbs (tool-call hints, generic
-        # progress strings) so WS clients can render them as subordinate
-        # trace rows rather than conversational replies.
-        if progress_event and progress_event.tool_hint:
-            payload["kind"] = "tool_hint"
-        elif progress_event:
-            payload["kind"] = "progress"
-        phase = "activity" if payload.get("kind") in ("tool_hint", "progress") else "answer"
-        self._persist_turn_transcript_event(
-            msg.chat_id,
-            payload,
-            metadata=msg.metadata,
-            phase=phase,
-            include_source=True,
-            transcript_overrides={"text": text},
-        )
-        raw = json.dumps(payload, ensure_ascii=False)
-        if not conns:
-            return
-        for connection in conns:
-            await self._safe_send_to(connection, raw, label=" ")
+    def prepare_tool_events(self, msg: OutboundMessage) -> OutboundMessage:
+        return msg
 
     async def send_reasoning_delta(
         self,
@@ -1241,36 +1119,7 @@ class WebSocketChannel(BaseChannel):
         *,
         stream_id: str | None = None,
     ) -> None:
-        """Push one chunk of model reasoning. Mirrors ``send_delta`` shape so
-        clients receive a stream that opens, updates in place, and closes —
-        rendered above the active assistant bubble with a shimmer header
-        until the matching ``reasoning_end`` arrives.
-        """
-        conns = list(self._subs.get(chat_id, ()))
-        if not delta:
-            return
-        meta = metadata or {}
-        body: dict[str, Any] = {
-            "event": "reasoning_delta",
-            "chat_id": chat_id,
-            "text": delta,
-        }
-        if stream_id is not None:
-            body["stream_id"] = stream_id
-        stream_key = (chat_id, str(stream_id or ""))
-        self._reasoning_text_buffers.setdefault(stream_key, []).append(delta)
-        self._persist_turn_stream_event(
-            chat_id,
-            body,
-            completed_text=None,
-            metadata=meta,
-            phase="reasoning",
-        )
-        raw = json.dumps(body, ensure_ascii=False)
-        if not conns:
-            return
-        for connection in conns:
-            await self._safe_send_to(connection, raw, label=" reasoning ")
+        await self._outbound.send_reasoning_delta(chat_id, delta, metadata, stream_id=stream_id)
 
     async def send_reasoning_end(
         self,
@@ -1279,29 +1128,7 @@ class WebSocketChannel(BaseChannel):
         *,
         stream_id: str | None = None,
     ) -> None:
-        """Close the current reasoning stream segment for in-place renderers."""
-        conns = list(self._subs.get(chat_id, ()))
-        meta = metadata or {}
-        body: dict[str, Any] = {
-            "event": "reasoning_end",
-            "chat_id": chat_id,
-        }
-        if stream_id is not None:
-            body["stream_id"] = stream_id
-        stream_key = (chat_id, str(stream_id or ""))
-        reasoning_text = "".join(self._reasoning_text_buffers.pop(stream_key, []))
-        self._persist_turn_stream_event(
-            chat_id,
-            body,
-            completed_text=reasoning_text or None,
-            metadata=meta,
-            phase="reasoning",
-        )
-        raw = json.dumps(body, ensure_ascii=False)
-        if not conns:
-            return
-        for connection in conns:
-            await self._safe_send_to(connection, raw, label=" reasoning_end ")
+        await self._outbound.send_reasoning_end(chat_id, metadata, stream_id=stream_id)
 
     async def send_file_edit_events(
         self,
@@ -1309,23 +1136,7 @@ class WebSocketChannel(BaseChannel):
         edits: list[dict[str, Any]],
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        conns = list(self._subs.get(chat_id, ()))
-        payload: dict[str, Any] = {
-            "event": "file_edit",
-            "chat_id": chat_id,
-            "edits": edits,
-        }
-        self._persist_turn_transcript_event(
-            chat_id,
-            payload,
-            metadata=metadata,
-            phase="activity",
-        )
-        raw = json.dumps(payload, ensure_ascii=False)
-        if not conns:
-            return
-        for connection in conns:
-            await self._safe_send_to(connection, raw, label=" file_edit ")
+        await self._outbound.send_file_edit_events(chat_id, edits, metadata)
 
     async def send_delta(
         self,
@@ -1338,222 +1149,7 @@ class WebSocketChannel(BaseChannel):
         resuming: bool = False,
         merge_next: bool = False,
     ) -> None:
-        conns = list(self._subs.get(chat_id, ()))
-        meta = metadata or {}
-        stream_key = (chat_id, str(stream_id or ""))
-        completed_text: str | None = None
-        if stream_end:
-            body: dict[str, Any] = {"event": "stream_end", "chat_id": chat_id}
-            buffered = (
-                self._stream_text_buffers.setdefault(stream_key, [])
-                if merge_next
-                else self._stream_text_buffers.pop(stream_key, [])
-            )
-            if delta:
-                buffered.append(delta)
-            full_text = "".join(buffered)
-            rewritten = self._media.rewrite_local_markdown_images(full_text)
-            completed_text = rewritten
-            if delta or rewritten != full_text:
-                body["text"] = rewritten
-        else:
-            body = {
-                "event": "delta",
-                "chat_id": chat_id,
-                "text": delta,
-            }
-            self._stream_text_buffers.setdefault(stream_key, []).append(delta)
-        if stream_id is not None:
-            body["stream_id"] = stream_id
-        if stream_end and resuming:
-            body["resuming"] = True
-        if stream_end and merge_next:
-            body["merge_next"] = True
-        self._persist_turn_stream_event(
-            chat_id,
-            body,
-            completed_text=completed_text,
-            metadata=meta,
-            phase="answer",
-            include_source=True,
+        await self._outbound.send_delta(
+            chat_id, delta, metadata, stream_id=stream_id,
+            stream_end=stream_end, resuming=resuming, merge_next=merge_next,
         )
-        raw = json.dumps(body, ensure_ascii=False)
-        if not conns:
-            return
-        for connection in conns:
-            await self._safe_send_to(connection, raw, label=" stream ")
-
-    async def send_payload(
-        self,
-        chat_id: str,
-        payload: WebUIWirePayload,
-        *,
-        persistence: WebUIWirePersistence,
-        metadata: dict[str, Any] | None = None,
-        turn_owner: str | None = None,
-    ) -> None:
-        """Persist as requested, frame, and fan out one encoded WebUI payload."""
-        conns = list(self._subs.get(chat_id, ()))
-        body: dict[str, Any] = dict(payload)
-        if persistence == "turn_activity":
-            self._persist_turn_transcript_event(
-                chat_id,
-                body,
-                metadata=metadata,
-                phase="activity",
-            )
-        elif persistence == "turn_complete":
-            canonical_webui_turn = (metadata or {}).get("webui") is True
-            prior_persistence_failure = (
-                canonical_webui_turn
-                and websocket_turn_transcript_persistence_failed(chat_id, turn_owner)
-            )
-            persisted = self._persist_turn_transcript_event(
-                chat_id,
-                body,
-                metadata=metadata,
-                phase="complete",
-                transcript_overrides=(
-                    {WEBUI_TRANSCRIPT_INCOMPLETE_KEY: True}
-                    if prior_persistence_failure
-                    else None
-                ),
-            )
-            if persisted:
-                # A successful completion either has a complete transcript or now
-                # carries a durable incomplete marker. The HTTP replay path can
-                # recover the latter from session history after a gateway restart.
-                clear_websocket_turn_if_current(chat_id, turn_owner)
-            self._clear_stream_buffers(chat_id)
-        raw = json.dumps(body, ensure_ascii=False)
-        if not conns:
-            return
-        for connection in conns:
-            await self._safe_send_to(connection, raw, label=f" {body['event']} ")
-
-    async def send_goal_state(self, chat_id: str, blob: dict[str, Any]) -> None:
-        """Push persisted goal-state snapshot for *chat_id* (multi-chat isolation)."""
-        conns = list(self._subs.get(chat_id, ()))
-        if not conns:
-            return
-        body = {"event": "goal_state", "chat_id": chat_id, "goal_state": blob}
-        raw = json.dumps(body, ensure_ascii=False)
-        for connection in conns:
-            await self._safe_send_to(connection, raw, label=" goal_state ")
-
-    async def send_goal_status(
-        self,
-        chat_id: str,
-        status: str,
-        *,
-        started_at: float | None = None,
-        turn_id: str | None = None,
-    ) -> None:
-        """Notify subscribed clients that a turn started or finished (wall-clock hint)."""
-        conns = list(self._subs.get(chat_id, ()))
-        if not conns:
-            return
-        body: dict[str, Any] = {
-            "event": "goal_status",
-            "chat_id": chat_id,
-            "status": status,
-        }
-        if status == "running" and started_at is not None:
-            body["started_at"] = started_at
-        if turn_id:
-            body["turn_id"] = turn_id
-        raw = json.dumps(body, ensure_ascii=False)
-        for connection in conns:
-            await self._safe_send_to(connection, raw, label=" goal_status ")
-
-    async def send_session_updated(self, chat_id: str, *, scope: str | None = None) -> None:
-        """Notify WebUI clients that a session row should refresh."""
-        conns = list(self._conn_chats)
-        if not conns:
-            return
-        body: dict[str, Any] = {"event": "session_updated", "chat_id": chat_id}
-        if scope:
-            body["scope"] = scope
-        raw = json.dumps(body, ensure_ascii=False)
-        for connection in conns:
-            await self._safe_send_to(connection, raw, label=" session_updated ")
-
-    async def send_user_input(
-        self,
-        chat_id: str,
-        *,
-        content: str,
-        created_at_ms: int,
-        provenance: dict[str, Any],
-    ) -> None:
-        """Project user input produced outside a WebSocket connection."""
-        conns = list(self._subs.get(chat_id, ()))
-        if not conns:
-            return
-        body: dict[str, Any] = {
-            "event": "user_message",
-            "chat_id": chat_id,
-            "text": content,
-            "created_at_ms": created_at_ms,
-            "starts_turn": False,
-        }
-        if provenance:
-            body["provenance"] = provenance
-        raw = json.dumps(body, ensure_ascii=False)
-        for connection in conns:
-            await self._safe_send_to(connection, raw, label=" user_message ")
-
-    async def send_runtime_model_updated(
-        self,
-        *,
-        model_name: Any,
-        model_preset: Any = None,
-    ) -> None:
-        """Broadcast runtime model changes to every open websocket connection."""
-        conns = list(self._conn_chats)
-        if not conns or not isinstance(model_name, str) or not model_name.strip():
-            return
-        body: dict[str, Any] = {
-            "event": "runtime_model_updated",
-            "model_name": model_name.strip(),
-        }
-        if isinstance(model_preset, str) and model_preset.strip():
-            body["model_preset"] = model_preset.strip()
-        raw = json.dumps(body, ensure_ascii=False)
-        for connection in conns:
-            await self._safe_send_to(connection, raw, label=" runtime_model_updated ")
-
-    async def send_turn_model_updated(
-        self,
-        chat_id: str,
-        *,
-        model_name: Any,
-        model_preset: Any = None,
-        context_window_tokens: Any = None,
-        fallback: bool = False,
-        reauth_provider: str | None = None,
-    ) -> None:
-        """Notify one chat's subscribers which model is handling its current request."""
-        conns = list(self._subs.get(chat_id, ()))
-        if (
-            not conns
-            or not isinstance(model_name, str)
-            or not model_name.strip()
-        ):
-            return
-        body: dict[str, Any] = {
-            "event": "turn_model_updated",
-            "chat_id": chat_id,
-            "model_name": model_name.strip(),
-        }
-        if isinstance(model_preset, str) and model_preset.strip():
-            body["model_preset"] = model_preset.strip()
-        if isinstance(context_window_tokens, int) and context_window_tokens > 0:
-            body["context_window_tokens"] = context_window_tokens
-        if fallback:
-            body["fallback"] = True
-            if reauth_provider:
-                body["reauth_provider"] = reauth_provider
-        raw = json.dumps(body, ensure_ascii=False)
-        for connection in conns:
-            await self._safe_send_to(connection, raw, label=" turn_model_updated ")

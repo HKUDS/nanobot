@@ -1,1 +1,0 @@
-"""NapCat channel package."""

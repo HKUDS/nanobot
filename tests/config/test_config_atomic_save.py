@@ -1,5 +1,3 @@
-"""Tests for atomic config.json writes."""
-
 from __future__ import annotations
 
 import json
@@ -15,9 +13,11 @@ from nanobot.config.schema import Config
 
 def test_save_config_round_trips(tmp_path: Path) -> None:
     path = tmp_path / "config.json"
-    save_config(Config(), path)
+    config = Config()
+    config.agents.defaults.model = "saved-model"
+    save_config(config, path)
     loaded = load_config(path)
-    assert loaded.agents.defaults.model
+    assert loaded.agents.defaults.model == "saved-model"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows does not expose POSIX file modes")
@@ -46,4 +46,4 @@ def test_save_config_preserves_existing_file_when_write_fails(
         save_config(Config(), path)
 
     assert path.read_text(encoding="utf-8") == before
-    assert json.loads(before)  # still valid JSON
+    assert json.loads(before)

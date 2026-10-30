@@ -1,7 +1,8 @@
-"""OpenAI-compatible HTTP API server for a fixed nanobot session.
+"""OpenAI-compatible HTTP API server for nanobot sessions.
 
 Provides /v1/chat/completions and /v1/models endpoints.
-All requests route to a single persistent API session.
+Requests without ``session_id`` share one persistent default session; each
+``session_id`` owns an isolated session with its own chat route.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from loguru import logger
 from nanobot.agent.hook import AgentHook, AgentRunHookContext
 from nanobot.config.paths import get_media_dir
 from nanobot.providers.base import LLMUsage
+from nanobot.providers.unconfigured_provider import UnconfiguredProvider
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.media_decode import (
     MAX_FILE_SIZE,
@@ -51,7 +53,7 @@ _MODEL_NAME_KEY = web.AppKey[str]("model_name")
 _REQUEST_TIMEOUT_KEY = web.AppKey[float]("request_timeout")
 _SESSION_LOCKS_KEY = web.AppKey[dict[str, asyncio.Lock]]("session_locks")
 _PREPARE_AGENT_KEY = web.AppKey[Callable[[], Awaitable[None]] | None]("prepare_agent")
-_MISSING = object()
+_REQUEST_ID_KEY = web.RequestKey[str]("request_id")
 
 
 class _UsageCaptureHook(AgentHook):
@@ -65,35 +67,10 @@ class _UsageCaptureHook(AgentHook):
         self.usage = context.usage
 
 
-def _app_value(
-    app: Any,
-    key: web.AppKey[Any],
-    legacy_key: str,
-    default: Any = _MISSING,
-) -> Any:
-    """Read typed aiohttp state while accepting lightweight dict test doubles."""
-    try:
-        return app[key]
-    except KeyError:
-        if default is _MISSING:
-            return app[legacy_key]
-        return app.get(legacy_key, default)
-
-
-async def _prepare_agent(app: Any) -> None:
-    prepare: Callable[[], Awaitable[None]] | None = _app_value(
-        app,
-        _PREPARE_AGENT_KEY,
-        "prepare_agent",
-        None,
-    )
+async def _prepare_agent(app: web.Application) -> None:
+    prepare = app[_PREPARE_AGENT_KEY]
     if prepare is not None:
         await prepare()
-
-
-# ---------------------------------------------------------------------------
-# Response helpers
-# ---------------------------------------------------------------------------
 
 
 def _error_json(status: int, message: str, err_type: str = "invalid_request_error") -> web.Response:
@@ -132,7 +109,6 @@ def _chat_completion_response(
 
 
 def _response_text(value: Any) -> str:
-    """Normalize process_direct output to plain assistant text."""
     if value is None:
         return ""
     if hasattr(value, "content"):
@@ -141,31 +117,22 @@ def _response_text(value: Any) -> str:
 
 
 def _as_str(value: object) -> str:
-    """Return *value* when it is text, otherwise an empty string."""
     return value if isinstance(value, str) else ""
 
 
 def _require_json_object(value: object, field: str) -> dict[str, Any]:
-    """Validate an object-valued field from an untrusted JSON request."""
     if not isinstance(value, dict):
         raise TypeError(f"{field} must be an object")
     return cast(dict[str, Any], value)
 
 
 def _require_json_string(value: object, field: str) -> str:
-    """Validate a string-valued field from an untrusted JSON request."""
     if not isinstance(value, str):
         raise TypeError(f"{field} must be a string")
     return value
 
 
-# ---------------------------------------------------------------------------
-# SSE helpers
-# ---------------------------------------------------------------------------
-
-
 def _sse_chunk(delta: str, model: str, chunk_id: str, finish_reason: str | None = None) -> bytes:
-    """Format a single OpenAI-compatible SSE chunk."""
     payload = {
         "id": chunk_id,
         "object": "chat.completion.chunk",
@@ -184,13 +151,8 @@ def _sse_chunk(delta: str, model: str, chunk_id: str, finish_reason: str | None 
 
 _SSE_DONE = b"data: [DONE]\n\n"
 
-# ---------------------------------------------------------------------------
-# Upload helpers
-# ---------------------------------------------------------------------------
-
 
 def _parse_json_content(body: dict[str, Any]) -> tuple[str, list[str]]:
-    """Parse JSON request body. Returns (text, media_paths)."""
     messages_value = cast(object, body.get("messages"))
     if not isinstance(messages_value, list):
         raise ValueError("Only a single user message is supported")
@@ -249,7 +211,6 @@ def _parse_json_content(body: dict[str, Any]) -> tuple[str, list[str]]:
 
 
 async def _parse_multipart(request: web.Request) -> tuple[str, list[str], str | None, str | None]:
-    """Parse multipart/form-data. Returns (text, media_paths, session_id, model)."""
     media_dir = get_media_dir("api")
     reader = await request.multipart()
     text = ""
@@ -285,23 +246,19 @@ async def _parse_multipart(request: web.Request) -> tuple[str, list[str], str | 
     return text, media_paths, session_id, model
 
 
-# ---------------------------------------------------------------------------
-# Route handlers
-# ---------------------------------------------------------------------------
-
-
 async def handle_chat_completions(request: web.Request) -> web.Response | web.StreamResponse:
     """POST /v1/chat/completions — supports JSON and multipart/form-data."""
     content_type = _as_str(cast(object, request.content_type or ""))
 
-    agent_loop = _app_value(request.app, _AGENT_LOOP_KEY, "agent_loop")
-    timeout_s: float = _app_value(
-        request.app,
-        _REQUEST_TIMEOUT_KEY,
-        "request_timeout",
-        120.0,
-    )
-    model_name: str = _app_value(request.app, _MODEL_NAME_KEY, "model_name", "nanobot")
+    agent_loop = request.app[_AGENT_LOOP_KEY]
+    if isinstance(agent_loop.provider, UnconfiguredProvider):
+        return _error_json(
+            503,
+            "Model is not configured. Open Settings → Models to configure a provider and model, then restart the API server.",
+            err_type="configuration_error",
+        )
+    timeout_s: float = request.app[_REQUEST_TIMEOUT_KEY]
+    model_name: str = request.app[_MODEL_NAME_KEY]
 
     stream = False
     try:
@@ -322,7 +279,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
             requested_model = body.get("model")
             text, media_paths = _parse_json_content(body)
             session_id = body.get("session_id")
-    except ValueError as e:
+    except (TypeError, ValueError) as e:
         return _error_json(400, str(e))
     except _FileSizeExceeded as e:
         return _error_json(413, str(e), err_type="invalid_request_error")
@@ -334,18 +291,15 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
         return _error_json(400, f"Only configured model '{model_name}' is available")
 
     session_key = f"api:{session_id}" if session_id else API_SESSION_KEY
-    session_locks: dict[str, asyncio.Lock] = _app_value(
-        request.app,
-        _SESSION_LOCKS_KEY,
-        "session_locks",
-    )
+    # Keep the existing history identity; derive its route without normalizing the ID.
+    chat_id = session_key.removeprefix("api:")
+    session_locks: dict[str, asyncio.Lock] = request.app[_SESSION_LOCKS_KEY]
     session_lock = session_locks.setdefault(session_key, asyncio.Lock())
 
     logger.info(
         "API request session_key={} media={} text={} stream={}",
         session_key, len(media_paths), text[:80], stream,
     )
-    # -- streaming path --
     if stream:
         resp = web.StreamResponse()
         resp.content_type = "text/event-stream"
@@ -381,7 +335,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
                             media=media_paths if media_paths else None,
                             session_key=session_key,
                             channel="api",
-                            chat_id=API_CHAT_ID,
+                            chat_id=chat_id,
                             on_stream=_on_stream,
                             on_stream_end=_on_stream_end,
                         )
@@ -413,7 +367,6 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
             await resp.write(_SSE_DONE)
         return resp
 
-    # -- non-streaming path (original logic) --
     usage_capture = _UsageCaptureHook()
     try:
         async with session_lock:
@@ -425,7 +378,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
                         media=media_paths if media_paths else None,
                         session_key=session_key,
                         channel="api",
-                        chat_id=API_CHAT_ID,
+                        chat_id=chat_id,
                         hooks=[usage_capture],
                     )
                 response_text = _response_text(response)
@@ -449,7 +402,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
 
 async def handle_models(request: web.Request) -> web.Response:
     """GET /v1/models"""
-    model_name = _app_value(request.app, _MODEL_NAME_KEY, "model_name", "nanobot")
+    model_name = request.app[_MODEL_NAME_KEY]
     return web.json_response(
         {
             "object": "list",
@@ -470,11 +423,6 @@ async def handle_health(request: web.Request) -> web.Response:
     return web.json_response({"status": "ok"})
 
 
-# ---------------------------------------------------------------------------
-# App factory
-# ---------------------------------------------------------------------------
-
-
 def create_app(
     agent_loop: "AgentLoop",
     model_name: str = "nanobot",
@@ -491,12 +439,66 @@ def create_app(
         api_key: Optional API key for Bearer-token authentication on API routes.
         prepare_agent: Optional application-owned readiness callback run before each turn.
     """
-    app = web.Application(client_max_size=20 * 1024 * 1024)  # 20MB for base64 images
+    app = web.Application(client_max_size=20 * 1024 * 1024)
     app[_AGENT_LOOP_KEY] = agent_loop
     app[_MODEL_NAME_KEY] = model_name
     app[_REQUEST_TIMEOUT_KEY] = request_timeout
-    app[_SESSION_LOCKS_KEY] = {}  # per-user locks, keyed by session_key
+    app[_SESSION_LOCKS_KEY] = {}
     app[_PREPARE_AGENT_KEY] = prepare_agent
+
+    @web.middleware
+    async def request_logging_middleware(
+        request: web.Request,
+        handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
+    ) -> web.StreamResponse:
+        request_id = uuid.uuid4().hex[:16]
+        request[_REQUEST_ID_KEY] = request_id
+        started_at = time.perf_counter()
+        with logger.contextualize(request_id=request_id):
+            try:
+                response = await handler(request)
+            except Exception:
+                duration_ms = round((time.perf_counter() - started_at) * 1000, 1)
+                logger.opt(exception=True).bind(
+                    event="http_request",
+                    outcome="error",
+                    duration_ms=duration_ms,
+                    method=request.method,
+                    path=request.path,
+                ).error(
+                    "HTTP request failed method={} path={} duration_ms={}",
+                    request.method,
+                    request.path,
+                    duration_ms,
+                )
+                raise
+
+            duration_ms = round((time.perf_counter() - started_at) * 1000, 1)
+            request_log = logger.bind(
+                event="http_request",
+                outcome="success" if response.status < 400 else "error",
+                duration_ms=duration_ms,
+                method=request.method,
+                path=request.path,
+                status_code=response.status,
+            )
+            log_method = request_log.debug if request.path == "/health" else request_log.info
+            log_method(
+                "HTTP request completed method={} path={} status={} duration_ms={}",
+                request.method,
+                request.path,
+                response.status,
+                duration_ms,
+            )
+            return response
+
+    async def add_request_id_header(
+        request: web.Request,
+        response: web.StreamResponse,
+    ) -> None:
+        request_id = request.get(_REQUEST_ID_KEY)
+        if request_id:
+            response.headers["X-Request-ID"] = request_id
 
     @web.middleware
     async def auth_middleware(
@@ -515,7 +517,8 @@ def create_app(
             return _error_json(401, "Invalid API key")
         return await handler(request)
 
-    app.middlewares.append(auth_middleware)
+    app.middlewares.extend((request_logging_middleware, auth_middleware))
+    app.on_response_prepare.append(add_request_id_header)
 
     app.router.add_post("/v1/chat/completions", handle_chat_completions)
     app.router.add_get("/v1/models", handle_models)

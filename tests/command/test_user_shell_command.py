@@ -6,6 +6,7 @@ import pytest
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.context import current_request_context
+from nanobot.agent.tools.shell import ExecTool
 from nanobot.bus.events import INBOUND_META_USER_SHELL, InboundMessage, OutboundMessage
 from nanobot.command.builtin import cmd_user_shell
 from nanobot.command.router import CommandContext
@@ -58,13 +59,13 @@ async def test_user_shell_uses_exec_tool_with_workspace_scope(
         assert request.workspace == tmp_path
         return f"{tmp_path}\n\nExit code: 0"
 
-    tool = MagicMock()
-    tool.execute = AsyncMock(side_effect=execute)
+    tool = MagicMock(spec=ExecTool)
+    tool.execute_to_completion = AsyncMock(side_effect=execute)
     session = Session(key="websocket:chat", policy=SessionPolicy(log_content=log_content))
     scope = SimpleNamespace(project_path=tmp_path)
     loop = MagicMock()
     loop.tools.get.return_value = tool
-    loop.sessions.get_or_create.return_value = session
+    loop.sessions.state.get = AsyncMock(return_value=session)
     loop.workspace_scopes.for_turn.return_value = scope
     ctx = _context(loop, trusted=True)
     if context_session:
@@ -72,7 +73,7 @@ async def test_user_shell_uses_exec_tool_with_workspace_scope(
 
     response = await AgentLoop.execute_user_shell_command(loop, ctx)
 
-    tool.execute.assert_awaited_once_with(command="pwd", working_dir=str(tmp_path))
+    tool.execute_to_completion.assert_awaited_once_with(command="pwd", working_dir=str(tmp_path))
     assert response.content.endswith("Exit code: 0")
     assert response.metadata["render_as"] == "text"
     assert current_request_context() is None

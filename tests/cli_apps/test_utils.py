@@ -1,5 +1,3 @@
-"""Tests for CLI Apps loop helpers."""
-
 from nanobot.apps.cli.service import CliAppManager
 from nanobot.apps.cli.utils import runtime_lines_for_request, session_extra
 

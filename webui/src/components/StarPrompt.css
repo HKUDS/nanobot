@@ -1,0 +1,70 @@
+.star-prompt-decoration {
+  position: absolute;
+  top: -12px;
+  right: 16px;
+  width: 23px;
+  height: 23px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(12px) rotate(-125deg) scale(.25);
+  transform-origin: 50% 85%;
+  color: #f7c955;
+  transition: opacity 120ms ease-out, transform 180ms ease-out;
+}
+
+.star-prompt-star {
+  display: block;
+  stroke: #c68718;
+  filter: drop-shadow(0 2px 3px rgb(122 75 8 / .16));
+}
+
+.star-prompt-sparkle { position: absolute; opacity: 0; color: #efb840; }
+.star-prompt-sparkle-first { top: -6px; right: -9px; }
+.star-prompt-sparkle-second { bottom: -3px; left: -7px; }
+
+.star-prompt-action:focus-visible .star-prompt-decoration {
+  opacity: 1;
+  transform: rotate(8deg);
+  animation: star-prompt-pop 640ms cubic-bezier(.22, 1, .36, 1) both;
+}
+.star-prompt-action:focus-visible .star-prompt-sparkle {
+  animation: star-prompt-twinkle 420ms ease-out 250ms both;
+}
+.star-prompt-action:focus-visible .star-prompt-sparkle-second { animation-delay: 370ms; }
+
+@media (hover: hover) and (pointer: fine) {
+  .star-prompt-action:hover .star-prompt-decoration {
+    opacity: 1;
+    transform: rotate(8deg);
+    animation: star-prompt-pop 640ms cubic-bezier(.22, 1, .36, 1) both;
+  }
+  .star-prompt-action:hover .star-prompt-sparkle {
+    animation: star-prompt-twinkle 420ms ease-out 250ms both;
+  }
+  .star-prompt-action:hover .star-prompt-sparkle-second { animation-delay: 370ms; }
+}
+
+@keyframes star-prompt-pop {
+  0% { opacity: 0; transform: translateY(12px) rotate(-125deg) scale(.25); }
+  18% { opacity: 1; }
+  48% { opacity: 1; transform: translateY(-6px) rotate(23deg) scale(1.18); }
+  70% { transform: translateY(2px) rotate(-8deg) scale(.93); }
+  86% { transform: translateY(-1px) rotate(11deg) scale(1.04); }
+  100% { opacity: 1; transform: translateY(0) rotate(8deg) scale(1); }
+}
+
+@keyframes star-prompt-twinkle {
+  0%, 100% { opacity: 0; transform: scale(.35) rotate(-15deg); }
+  45% { opacity: 1; transform: scale(1.15) rotate(10deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .star-prompt-action .star-prompt-decoration,
+  .star-prompt-action .star-prompt-sparkle {
+    /* Override the more specific hover and focus-visible rules above. */
+    animation: none !important;
+    transition: none;
+    transform: none !important;
+  }
+  .star-prompt-action .star-prompt-sparkle { display: none; }
+}

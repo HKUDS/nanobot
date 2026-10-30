@@ -1,5 +1,3 @@
-"""Small constructors shared by declarative channel manifests."""
-
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -18,6 +16,7 @@ def field(
     default: Any = None,
     writable: bool = True,
     snapshot: bool = True,
+    inheritable: bool = False,
 ) -> ChannelFieldSpec:
     return ChannelFieldSpec(
         kind=kind,
@@ -25,6 +24,7 @@ def field(
         default=default,
         writable=writable,
         snapshot=snapshot,
+        inheritable=inheritable,
     )
 
 

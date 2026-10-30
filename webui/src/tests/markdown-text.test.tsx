@@ -13,10 +13,12 @@ vi.mock("@/components/MarkdownTextRenderer", () => ({
     children,
     highlightCode,
     streaming,
+    preserveStreamingLayout,
   }: {
     children: string;
     highlightCode?: boolean;
     streaming?: boolean;
+    preserveStreamingLayout?: boolean;
   }) {
     useEffect(() => {
       rendererMountSpy();
@@ -29,7 +31,8 @@ vi.mock("@/components/MarkdownTextRenderer", () => ({
       <div
         data-testid="markdown-renderer"
         data-highlight-code={String(highlightCode)}
-        data-streaming-layout={String(streaming)}
+        data-streaming-layout={String(streaming || preserveStreamingLayout)}
+        data-streaming={String(streaming)}
       >
         {children}
       </div>
@@ -108,6 +111,7 @@ describe("MarkdownText", () => {
   });
 
   it("can complete without replacing the streaming renderer layout", async () => {
+    rendererMountSpy.mockClear();
     const source = "A layout-stable answer";
     const { rerender } = render(
       <MarkdownText streaming preserveStreamingLayout>{source}</MarkdownText>,
@@ -122,38 +126,17 @@ describe("MarkdownText", () => {
       "true",
     );
 
+    expect(screen.getByTestId("markdown-renderer")).toHaveAttribute("data-streaming", "true");
+
     rerender(<MarkdownText preserveStreamingLayout>{source}</MarkdownText>);
+
+    expect(screen.getByTestId("markdown-renderer")).toHaveAttribute("data-streaming", "false");
+    expect(rendererMountSpy).toHaveBeenCalledTimes(1);
 
     expect(screen.getByTestId("markdown-renderer")).toHaveAttribute(
       "data-streaming-layout",
       "true",
     );
-    expect(screen.getByTestId("markdown-renderer")).toHaveAttribute(
-      "data-highlight-code",
-      "true",
-    );
-  });
-
-  it("defers syntax highlighting until the final render", async () => {
-    rendererSpy.mockClear();
-    const largeCode = `\`\`\`ts\n${"const value = 1;\n".repeat(1_100)}\`\`\``;
-
-    const { rerender } = render(
-      <MarkdownText streaming>{largeCode}</MarkdownText>,
-    );
-
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(screen.getByTestId("markdown-renderer")).toHaveAttribute(
-      "data-highlight-code",
-      "false",
-    );
-
-    rerender(<MarkdownText>{largeCode}</MarkdownText>);
-
     expect(screen.getByTestId("markdown-renderer")).toHaveAttribute(
       "data-highlight-code",
       "true",

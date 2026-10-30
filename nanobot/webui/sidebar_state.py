@@ -50,8 +50,6 @@ def default_webui_sidebar_state() -> dict[str, Any]:
         "workbench": {"version": 1, "tabs": {}},
         "view": {
             "density": "comfortable",
-            "show_previews": False,
-            "show_timestamps": False,
             "show_archived": False,
             "sort": "updated_desc",
         },
@@ -144,8 +142,6 @@ def _clean_view(value: Any) -> dict[str, Any]:
     sort = view.get("sort")
     return {
         "density": density if density in _ALLOWED_DENSITIES else default["density"],
-        "show_previews": bool(view.get("show_previews", default["show_previews"])),
-        "show_timestamps": bool(view.get("show_timestamps", default["show_timestamps"])),
         "show_archived": bool(view.get("show_archived", default["show_archived"])),
         "sort": sort if sort in _ALLOWED_SORTS else default["sort"],
     }

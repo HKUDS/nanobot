@@ -1,11 +1,9 @@
-"""Shared metadata helpers for scheduled cron session turns."""
-
 from __future__ import annotations
 
 from typing import Any, Mapping
 
 from nanobot.cron.types import CronJob
-from nanobot.session.automation_turns import (
+from nanobot.session.automation_spec import (
     AutomationTurnSpec,
     automation_trigger,
 )

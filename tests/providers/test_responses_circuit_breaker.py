@@ -1,5 +1,3 @@
-"""Tests for Responses API circuit breaker in OpenAICompatProvider."""
-
 import time
 
 import pytest
@@ -11,17 +9,21 @@ from nanobot.providers.openai_compat_provider import (
     OpenAICompatProvider,
 )
 from nanobot.providers.openai_responses.state import build_responses_state
-from nanobot.providers.registry import find_by_name
+from nanobot.providers.registry import (
+    ModelAPICapabilities,
+    ProviderSpec,
+    ResponsesCapabilities,
+    find_by_name,
+)
 
 
 @pytest.fixture()
 def provider():
     """A direct-OpenAI provider with Responses API support."""
-    p = OpenAICompatProvider.__new__(OpenAICompatProvider)
+    p = OpenAICompatProvider(api_key="fixture", spec=find_by_name("openai"))
     p.default_model = "gpt-5"
-    p._spec = type("Spec", (), {"name": "openai"})()
+    p._spec = find_by_name("openai")
     p._effective_base = "https://api.openai.com/v1"
-    p._api_type = "auto"
     p._responses_failures = {}
     p._responses_tripped_at = {}
     return p
@@ -33,7 +35,7 @@ def test_responses_api_available_by_default(provider):
 
 @pytest.mark.parametrize(
     "model",
-    ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"],
+    ["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"],
 )
 def test_deepseek_v4_models_use_responses_by_model(provider, model):
     provider._spec = find_by_name("deepseek")
@@ -46,13 +48,53 @@ def test_deepseek_v4_models_use_responses_by_model(provider, model):
 
 @pytest.mark.parametrize(
     "model",
-    ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"],
+    ["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"],
 )
 def test_deepseek_v4_models_match_provider_prefixed_model(provider, model):
     provider._spec = find_by_name("deepseek")
     provider._effective_base = "https://api.deepseek.com"
 
     assert provider._should_use_responses_api(f"deepseek/{model}", None) is True
+
+
+def test_responses_behavior_is_declared_by_capabilities(provider):
+    provider._spec = ProviderSpec(
+        name="example",
+        keywords=("example",),
+        env_key="EXAMPLE_API_KEY",
+        request_apis=("chat_completions", "responses"),
+        responses=ResponsesCapabilities(
+            models=("example-o3",),
+            reasoning_replay="plaintext",
+        ),
+    )
+    provider._effective_base = "https://example.test"
+
+    assert provider._should_use_responses_api("example-o3", None) is True
+
+    body = provider._build_responses_body(
+        messages=[
+            {"role": "user", "content": "question"},
+            {
+                "role": "assistant",
+                "reasoning_content": "think first",
+                "content": "answer",
+            },
+            {"role": "user", "content": "follow-up"},
+        ],
+        tools=None,
+        model="example-o3",
+        max_tokens=100,
+        temperature=0.1,
+        reasoning_effort="high",
+        tool_choice=None,
+    )
+
+    assert {
+        "type": "reasoning",
+        "content": [{"type": "reasoning_text", "text": "think first"}],
+    } in body["input"]
+    assert "include" not in body
 
 
 def test_direct_openai_enables_server_compaction(provider):
@@ -73,33 +115,18 @@ def test_direct_openai_enables_server_compaction(provider):
         "type": "compaction",
         "compact_threshold": 70_000,
     }]
+    assert body["include"] == ["reasoning.encrypted_content"]
 
 
-def test_api_type_chat_completions_disables_responses(provider):
-    provider._api_type = "chat_completions"
+def test_chat_declaration_disables_responses(provider):
+    provider._preset_model_api = ModelAPICapabilities(("chat_completions",), "chat_completions")
     assert provider._should_use_responses_api("gpt-5", None) is False
 
 
-def test_api_type_responses_forces_responses_for_openai(provider):
+def test_responses_declaration_routes_other_models(provider):
     provider.default_model = "gpt-4o"
-    provider._api_type = "responses"
+    provider._preset_model_api = ModelAPICapabilities(("responses",), "responses")
     assert provider._should_use_responses_api("gpt-4o", None) is True
-
-
-def test_api_type_responses_ignores_circuit_breaker(provider):
-    provider.default_model = "gpt-4o"
-    provider._api_type = "responses"
-    provider._responses_failures = {"gpt-4o|gpt-4o|": _RESPONSES_FAILURE_THRESHOLD}
-    provider._responses_tripped_at = {"gpt-4o|gpt-4o|": 0.0}
-
-    assert provider._should_use_responses_api("gpt-4o", None) is True
-
-
-def test_api_type_responses_does_not_force_non_openai(provider):
-    provider._spec = type("Spec", (), {"name": "custom"})()
-    provider._api_type = "responses"
-
-    assert provider._should_use_responses_api("gpt-4o", None) is False
 
 
 def test_circuit_opens_after_threshold(provider):
@@ -127,7 +154,6 @@ def test_probe_after_interval(provider, monkeypatch):
         provider._record_responses_failure("gpt-5", None)
     assert provider._should_use_responses_api("gpt-5", None) is False
 
-    # Fast-forward past the probe interval
     key = "gpt-5:"
     provider._responses_tripped_at[key] = time.monotonic() - _RESPONSES_PROBE_INTERVAL_S - 1
     assert provider._should_use_responses_api("gpt-5", None) is True
@@ -150,11 +176,6 @@ def test_reasoning_effort_key_is_case_insensitive(provider):
     for _ in range(_RESPONSES_FAILURE_THRESHOLD):
         provider._record_responses_failure("o3", "High")
     assert provider._should_use_responses_api("o3", "high") is False
-
-
-# ======================================================================
-# _should_fallback_from_responses_error
-# ======================================================================
 
 
 class _FakeAPIError(Exception):
@@ -185,18 +206,20 @@ def test_legacy_compatibility_markers_still_trigger_fallback():
     assert OpenAICompatProvider._should_fallback_from_responses_error(err) is True
 
 
-# ======================================================================
 # DeepSeek Responses wire shape (PR #5214 root cause)
-# ======================================================================
 
 
 def _deepseek_provider(provider):
-    provider._spec = type("Spec", (), {
-        "name": "deepseek",
-        "responses_models": ("deepseek-v4-flash",),
-        "strip_model_prefix": False,
-        "strip_model_prefixes": (),
-    })()
+    provider._spec = ProviderSpec(
+        name="deepseek",
+        keywords=("deepseek",),
+        env_key="DEEPSEEK_API_KEY",
+        request_apis=("chat_completions", "responses"),
+        responses=ResponsesCapabilities(
+            models=("deepseek-v4-flash",),
+            reasoning_replay="plaintext",
+        ),
+    )
     provider._effective_base = "https://api.deepseek.com"
     provider.default_model = "deepseek-v4-flash"
     provider._extra_body = {}
@@ -229,7 +252,7 @@ def test_deepseek_full_history_body_keeps_reasoning_content_as_array(provider):
     reasoning_items = [item for item in body["input"] if item.get("type") == "reasoning"]
     assert len(reasoning_items) == 1
     assert reasoning_items[0]["content"] == [
-        {"type": "output_text", "text": "Michael topped up DeepSeek with $10."},
+        {"type": "reasoning_text", "text": "Michael topped up DeepSeek with $10."},
     ]
 
 
@@ -283,7 +306,8 @@ def test_deepseek_replay_body_keeps_reasoning_content_as_array(provider):
     )
 
     reasoning_items = [item for item in body["input"] if item.get("type") == "reasoning"]
-    assert len(reasoning_items) == 2  # one replayed from state, one converted
-    for item in reasoning_items:
-        assert isinstance(item["content"], list)
-        assert item["content"][0]["type"] == "output_text"
+    assert len(reasoning_items) == 2
+    assert isinstance(reasoning_items[0]["content"], list)
+    assert reasoning_items[0]["content"][0]["type"] == "output_text"
+    assert isinstance(reasoning_items[1]["content"], list)
+    assert reasoning_items[1]["content"][0]["type"] == "reasoning_text"

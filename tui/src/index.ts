@@ -1,10 +1,19 @@
-import { NanobotTui, sessionExitMessage, type AppOptions } from "./app"
-import { desktopConnectionSource } from "./desktop"
+import type { NanobotTui as App, AppOptions } from "./app"
+import { desktopConnectionSource } from "./platform/desktop"
 
+if (process.argv.slice(2).join(" ") === "--render-mermaid") {
+  const { runDiagramWorker } = await import("./rendering/mermaid/worker")
+  await runDiagramWorker()
+  process.exit(0)
+}
 if (process.argv.slice(2).join(" ") === "--desktop-protocol") {
   process.stdout.write("1\n")
   process.exit(0)
 }
+// Initialize OpenTUI before the UI graph: compiled async cycles otherwise expose an
+// uninitialized CliRenderer binding. Raster children never enter this graph.
+await import("@opentui/core")
+const { NanobotTui, sessionExitMessage } = await import("./app")
 const desktop = desktopConnectionSource()
 
 // Keep in sync with _TUI_DETACH_EXIT_CODE in nanobot/cli/tui_launcher.py.
@@ -53,7 +62,7 @@ const options: AppOptions = {
   },
 }
 
-let app: NanobotTui | undefined
+let app: App | undefined
 let shuttingDown = false
 
 const shutdown = (code = 0) => {

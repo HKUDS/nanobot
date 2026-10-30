@@ -1,5 +1,4 @@
 # pyright: reportMissingTypeStubs=false
-"""AWS Bedrock Converse provider."""
 
 from __future__ import annotations
 
@@ -20,6 +19,7 @@ from nanobot.providers.base import (
     resolve_stream_idle_timeout_s,
     tool_arguments_object_for_replay,
 )
+from nanobot.providers.images import prepare_message_images
 
 _IMAGE_DATA_URL = re.compile(r"^data:image/([a-zA-Z0-9.+-]+);base64,(.*)$", re.DOTALL)
 _TEXT_BLOCK_TYPES = {"text", "input_text", "output_text"}
@@ -89,7 +89,10 @@ class BedrockProvider(LLMProvider):
 
         idle_timeout_s = resolve_stream_idle_timeout_s()
         client_kwargs: dict[str, Any] = {
-            "config": Config(connect_timeout=idle_timeout_s, read_timeout=idle_timeout_s),
+            "config": Config(
+                connect_timeout=idle_timeout_s, read_timeout=idle_timeout_s,
+                retries={"total_max_attempts": 1},
+            ),
         }
         if self.region:
             client_kwargs["region_name"] = self.region
@@ -162,7 +165,6 @@ class BedrockProvider(LLMProvider):
                     blocks.append(converted)
                 continue
 
-            # Preserve already-Bedrock-shaped content where possible.
             for key in ("text", "image", "document", "video", "json", "searchResult"):
                 if key in item:
                     blocks.append({key: item[key]})
@@ -742,7 +744,7 @@ class BedrockProvider(LLMProvider):
     ) -> LLMResponse:
         try:
             kwargs = self._build_kwargs(
-                messages, tools, model, max_tokens, temperature, reasoning_effort, tool_choice
+                await prepare_message_images(messages), tools, model, max_tokens, temperature, reasoning_effort, tool_choice
             )
             response = cast(
                 dict[str, Any],
@@ -775,7 +777,7 @@ class BedrockProvider(LLMProvider):
 
         try:
             kwargs = self._build_kwargs(
-                messages, tools, model, max_tokens, temperature, reasoning_effort, tool_choice
+                await prepare_message_images(messages), tools, model, max_tokens, temperature, reasoning_effort, tool_choice
             )
             response = cast(
                 dict[str, Any],

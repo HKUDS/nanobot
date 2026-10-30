@@ -1,10 +1,8 @@
-"""Dependency-free Feishu configuration model shared by management and runtime."""
-
 from typing import Literal
 
 from pydantic import Field
 
-from nanobot.config.schema import Base
+from nanobot.config_base import Base
 
 
 class FeishuConfig(Base):

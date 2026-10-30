@@ -1,9 +1,3 @@
-"""Regression tests for GitHub Copilot /responses routing.
-
-Covers the Copilot-specific branches added to route GPT-5 / o-series models
-through the /responses endpoint without falling back to /chat/completions.
-"""
-
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -17,25 +11,23 @@ from nanobot.providers.registry import find_by_name
 
 def _make_copilot_provider() -> OpenAICompatProvider:
     """Build a bare provider with the real github_copilot spec (no network)."""
-    p = OpenAICompatProvider.__new__(OpenAICompatProvider)
+    p = OpenAICompatProvider(api_key="fixture", spec=find_by_name("github_copilot"))
     p.default_model = "github_copilot/gpt-5.4-mini"
     p._spec = find_by_name("github_copilot")
     p._effective_base = "https://api.githubcopilot.com"
-    p._api_type = "auto"
     p._responses_failures = {}
     p._responses_tripped_at = {}
     return p
 
 
 def test_should_use_responses_api_allows_github_copilot_non_openai_base():
-    """github_copilot bypasses the direct-OpenAI base check and still opts in for GPT-5."""
     provider = _make_copilot_provider()
     assert provider._should_use_responses_api("github_copilot/gpt-5.4-mini", None) is True
+    assert provider._should_use_responses_api("github_copilot/gpt-6-astra", None) is True
     assert provider._should_use_responses_api("github_copilot/o3", None) is True
 
 
 def test_build_responses_body_strips_github_copilot_prefix():
-    """/responses body must send the bare model name; gateway rejects routing prefixes."""
     provider = _make_copilot_provider()
     body = provider._build_responses_body(
         messages=[{"role": "user", "content": "hi"}],
@@ -48,12 +40,12 @@ def test_build_responses_body_strips_github_copilot_prefix():
         provider_context=ProviderCallContext(context_window_tokens=128_000),
     )
     assert body["model"] == "gpt-5.4-mini"
+    assert body["include"] == ["reasoning.encrypted_content"]
     assert "context_management" not in body
 
 
 @pytest.mark.asyncio
 async def test_github_copilot_does_not_fall_back_from_responses_error():
-    """On /responses failure, github_copilot must re-raise instead of hitting /chat/completions."""
     from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
 
     mock_client = MagicMock()

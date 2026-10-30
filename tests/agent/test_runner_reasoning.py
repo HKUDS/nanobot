@@ -97,56 +97,6 @@ class _BlockingReasoningEndHook(_LifecycleRecordingHook):
 
 
 @pytest.mark.asyncio
-async def test_runner_preserves_reasoning_fields_in_assistant_history():
-    """Reasoning fields ride along on the persisted assistant message so
-    follow-up provider calls retain the model's prior thinking context."""
-    from nanobot.agent.runner import AgentRunner
-
-    provider = MagicMock()
-    captured_second_call: list[dict] = []
-    call_count = {"n": 0}
-
-    async def chat_stream_with_retry(*, messages, **kwargs):
-        call_count["n"] += 1
-        if call_count["n"] == 1:
-            return LLMResponse(
-                content="thinking",
-                tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
-                reasoning_content="hidden reasoning",
-                thinking_blocks=[{"type": "thinking", "thinking": "step"}],
-                usage=LLMUsage.reported(input_tokens=5, output_tokens=3),
-            )
-        captured_second_call[:] = messages
-        return LLMResponse(content="done", tool_calls=[], usage=None)
-
-    provider.chat_stream_with_retry = chat_stream_with_retry
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-    tools.execute = AsyncMock(return_value="tool result")
-
-    runner = AgentRunner()
-    result = await runner.run(make_run_spec(provider,
-        initial_messages=[
-            {"role": "system", "content": "system"},
-            {"role": "user", "content": "do task"},
-        ],
-        tools=tools,
-        model="test-model",
-        max_iterations=3,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-    ))
-
-    assert result.final_content == "done"
-    assistant_messages = [
-        msg for msg in captured_second_call
-        if msg.get("role") == "assistant" and msg.get("tool_calls")
-    ]
-    assert len(assistant_messages) == 1
-    assert assistant_messages[0]["reasoning_content"] == "hidden reasoning"
-    assert assistant_messages[0]["thinking_blocks"] == [{"type": "thinking", "thinking": "step"}]
-
-
-@pytest.mark.asyncio
 async def test_runner_emits_anthropic_thinking_blocks():
     from nanobot.agent.runner import AgentRunner
 

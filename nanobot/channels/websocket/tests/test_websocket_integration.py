@@ -1,9 +1,3 @@
-"""Integration tests for the WebSocket channel using WsTestClient.
-
-Complements the unit/lightweight tests in test_websocket_channel.py by covering
-multi-client scenarios, edge cases, and realistic usage patterns.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -16,6 +10,7 @@ import websockets
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
+from nanobot.channels.manager import ChannelManager
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
 from nanobot.webui.gateway_services import build_gateway_services
 
@@ -52,9 +47,6 @@ def bus() -> MagicMock:
     b = MagicMock()
     b.publish_inbound = AsyncMock()
     return b
-
-
-# -- Connection basics ----------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -96,9 +88,6 @@ async def test_each_connection_unique_chat_id(bus: MagicMock) -> None:
     finally:
         await ch.stop()
         await t
-
-
-# -- Inbound messages (client -> server) ----------------------------------
 
 
 @pytest.mark.asyncio
@@ -184,9 +173,6 @@ async def test_messages_preserve_order(bus: MagicMock) -> None:
         await t
 
 
-# -- Outbound messages (server -> client) ---------------------------------
-
-
 @pytest.mark.asyncio
 async def test_server_send_message(bus: MagicMock) -> None:
     ch = _ch(bus, 29909)
@@ -206,30 +192,44 @@ async def test_server_send_message(bus: MagicMock) -> None:
 
 @pytest.mark.asyncio
 async def test_server_send_tags_tool_hint_with_kind(bus: MagicMock) -> None:
-    """Tool-hint progress events surface as ``kind: "tool_hint"``."""
     ch = _ch(bus, 29919)
     t = asyncio.create_task(ch.start())
     try:
         async with WsTestClient("ws://127.0.0.1:29919/", client_id="h") as c:
             ready = await c.recv_ready()
-            # Plain reply: no "kind" field.
             await ch.send(OutboundMessage(
                 channel="websocket", chat_id=ready.chat_id, content="hi",
             ))
             plain = await c.recv_message()
             assert plain.raw.get("kind") is None
 
-            # Tool-hint breadcrumb: kind == "tool_hint".
-            await ch.send(OutboundMessage(
+            tool_start = {
+                "phase": "start", "call_id": "call-weather", "name": "weather",
+                "arguments": {"action": "get"},
+            }
+            msg = OutboundMessage(
                 channel="websocket", chat_id=ready.chat_id,
-                content='weather("get")',
-                event=ProgressEvent(content='weather("get")', tool_hint=True),
-            ))
+                content="",
+                event=ProgressEvent(tool_hint=True, tool_events=[tool_start]),
+            )
+            await ChannelManager._send_once(ch, ch.prepare_tool_events(msg))
             hint = await c.recv_message()
             assert hint.raw.get("kind") == "tool_hint"
-            assert hint.text == 'weather("get")'
+            assert hint.text == ""
+            assert hint.raw["tool_events"] == [tool_start]
 
-            # Generic progress (non-tool-hint) gets the softer "progress" label.
+            tool_end = {**tool_start, "phase": "end", "result": "sunny"}
+            msg = OutboundMessage(
+                channel="websocket", chat_id=ready.chat_id,
+                content="",
+                event=ProgressEvent(tool_events=[tool_end]),
+            )
+            await ChannelManager._send_once(ch, ch.prepare_tool_events(msg))
+            result = await c.recv_message()
+            assert result.raw.get("kind") == "progress"
+            assert result.text == ""
+            assert result.raw["tool_events"] == [tool_end]
+
             await ch.send(OutboundMessage(
                 channel="websocket", chat_id=ready.chat_id,
                 content="thinking…",
@@ -260,9 +260,6 @@ async def test_server_send_with_media_and_reply(bus: MagicMock) -> None:
     finally:
         await ch.stop()
         await t
-
-
-# -- Streaming ------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -308,9 +305,6 @@ async def test_interleaved_streams(bus: MagicMock) -> None:
     finally:
         await ch.stop()
         await t
-
-
-# -- Multi-client ---------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -391,7 +385,6 @@ async def test_disconnected_client_cleanup(bus: MagicMock) -> None:
     try:
         async with WsTestClient("ws://127.0.0.1:29914/", client_id="tmp") as c:
             chat_id = (await c.recv_ready()).chat_id
-        # disconnected
         await asyncio.sleep(0.1)
         await ch.send(OutboundMessage(
             channel="websocket", chat_id=chat_id, content="orphan",
@@ -400,9 +393,6 @@ async def test_disconnected_client_cleanup(bus: MagicMock) -> None:
     finally:
         await ch.stop()
         await t
-
-
-# -- Authentication -------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -438,24 +428,19 @@ async def test_token_issue_full_flow(bus: MagicMock) -> None:
              websocketRequiresToken=True)
     t = asyncio.create_task(ch.start())
     try:
-        # no secret -> 401
         _, status = await issue_token(port=29917, issue_path="/auth/token")
         assert status == 401
 
-        # with secret -> token
         token = await issue_token_ok(port=29917, issue_path="/auth/token", secret="s")
 
-        # no token -> 401
         with pytest.raises(websockets.exceptions.InvalidStatus) as exc:
             async with WsTestClient("ws://127.0.0.1:29917/ws", client_id="x"):
                 pass
         assert exc.value.response.status_code == 401
 
-        # valid token -> ok
         async with WsTestClient("ws://127.0.0.1:29917/ws", client_id="ok", token=token) as c:
             assert (await c.recv_ready()).client_id == "ok"
 
-        # reuse -> 401
         with pytest.raises(websockets.exceptions.InvalidStatus) as exc:
             async with WsTestClient("ws://127.0.0.1:29917/ws", client_id="r", token=token):
                 pass
@@ -463,9 +448,6 @@ async def test_token_issue_full_flow(bus: MagicMock) -> None:
     finally:
         await ch.stop()
         await t
-
-
-# -- Path routing ---------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -504,9 +486,6 @@ async def test_trailing_slash_normalized(bus: MagicMock) -> None:
     finally:
         await ch.stop()
         await t
-
-
-# -- Edge cases -----------------------------------------------------------
 
 
 @pytest.mark.asyncio

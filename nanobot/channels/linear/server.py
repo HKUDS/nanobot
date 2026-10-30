@@ -1,5 +1,3 @@
-"""Shared local HTTP listener for Linear webhooks and OAuth callbacks."""
-
 from __future__ import annotations
 
 import hashlib
@@ -37,7 +35,8 @@ class LinearWebhookError(ValueError):
 
 class _ReusableThreadingHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
-    daemon_threads = True
+    # server_close() must join request writers, not only stop accepting sockets.
+    daemon_threads = False
 
 
 class SharedLinearHttpServer:
@@ -64,6 +63,10 @@ class SharedLinearHttpServer:
 
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
+
+            def setup(self) -> None:
+                super().setup()
+                self.connection.settimeout(5)
 
             def do_GET(self) -> None:  # noqa: N802
                 parsed = urlparse(self.path)
@@ -99,6 +102,7 @@ class SharedLinearHttpServer:
                 self.send_response(status.value)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(len(body)))
+                self.send_header("Connection", "close")
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("X-Content-Type-Options", "nosniff")
                 self.end_headers()
@@ -124,7 +128,7 @@ class SharedLinearHttpServer:
             self._server.server_close()
             self._server = None
         if self._thread is not None and self._thread.is_alive():
-            self._thread.join(timeout=2)
+            self._thread.join()
         self._thread = None
 
     def _handle_oauth_callback(
@@ -136,13 +140,13 @@ class SharedLinearHttpServer:
         code = _query_first(query, "code")
         error = _query_first(query, "error")
         if not state or (not code and not error):
-            _handler_response(handler, HTTPStatus.BAD_REQUEST, _oauth_html(False))
+            _handler_response(handler, HTTPStatus.BAD_REQUEST, _oauth_html("invalid"))
             return
         completed = OAUTH_FLOWS.complete(state, code=code, error=error)
         _handler_response(
             handler,
             HTTPStatus.OK if completed else HTTPStatus.BAD_REQUEST,
-            _oauth_html(completed),
+            _oauth_html("cancelled" if error and completed else "received" if completed else "invalid"),
         )
 
     def _handle_webhook(self, handler: BaseHTTPRequestHandler) -> None:
@@ -192,10 +196,11 @@ class LinearServerLease:
         self._closed = False
 
     def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        _release_server(self._server)
+        with _SERVER_GUARD:
+            if self._closed:
+                return
+            _release_server(self._server)
+            self._closed = True
 
 
 _SERVER_GUARD = threading.RLock()
@@ -222,10 +227,10 @@ def _release_server(server: SharedLinearHttpServer) -> None:
     with _SERVER_GUARD:
         if _shared_server is not server:
             return
-        server._references -= 1  # pyright: ignore[reportPrivateUsage]
-        if server._references <= 0:  # pyright: ignore[reportPrivateUsage]
+        if server._references == 1:  # pyright: ignore[reportPrivateUsage]
             server.close()
             _shared_server = None
+        server._references -= 1  # pyright: ignore[reportPrivateUsage]
 
 
 def _handler_response(
@@ -237,19 +242,29 @@ def _handler_response(
     handler.send_response(status.value)
     handler.send_header("Content-Type", content_type)
     handler.send_header("Content-Length", str(len(body)))
+    handler.send_header("Connection", "close")
     handler.send_header("Cache-Control", "no-store")
     handler.send_header("X-Content-Type-Options", "nosniff")
     handler.end_headers()
     handler.wfile.write(body)
 
 
-def _oauth_html(success: bool) -> bytes:
-    title = "Linear connected" if success else "Linear connection failed"
-    detail = (
-        "Authorization received. You can close this window and return to nanobot."
-        if success
-        else "The authorization request is invalid or expired. Return to nanobot and try again."
-    )
+def _oauth_html(status: str) -> bytes:
+    messages = {
+        "received": (
+            "Authorization received",
+            "Return to nanobot while it verifies the Linear workspace. You can close this window.",
+        ),
+        "cancelled": (
+            "Authorization not completed",
+            "Existing workspace connections are unchanged. Return to nanobot to try again.",
+        ),
+        "invalid": (
+            "Linear connection failed",
+            "This authorization request is invalid or expired. Return to nanobot and try again.",
+        ),
+    }
+    title, detail = messages.get(status, messages["invalid"])
     return (
         "<!doctype html><html><head><meta charset=utf-8><title>"
         + title

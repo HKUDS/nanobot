@@ -1,5 +1,3 @@
-"""Shared file handling for workspace-local prompt overrides."""
-
 from __future__ import annotations
 
 from contextlib import suppress

@@ -21,7 +21,14 @@ from nanobot.gateway import (
     RuntimeResult,
 )
 from nanobot.gateway.runtime import monitor_gateway_clients
-from nanobot.process_runtime import process_is_running
+from nanobot.process_runtime import ManagedProcessRuntime, process_is_running
+from nanobot.utils.rotating_output import (
+    BACKGROUND_LOG_BACKUP_COUNT_ENV,
+    BACKGROUND_LOG_MAX_BYTES_ENV,
+    BACKGROUND_LOG_PATH_ENV,
+    DEFAULT_BACKUP_COUNT,
+    DEFAULT_MAX_BYTES,
+)
 
 
 class FakeProcess:
@@ -40,6 +47,39 @@ class PollableProcess(FakeProcess):
 
 def _paths(tmp_path: Path) -> GatewayRuntimePaths:
     return GatewayRuntimePaths.for_instance(data_dir=tmp_path)
+
+
+def test_runtime_state_publish_keeps_existing_snapshot_readable(tmp_path):
+    from nanobot.utils.atomic_file import _open_snapshot
+
+    runtime = GatewayRuntime(paths=_paths(tmp_path / "网关 home"))
+    previous = {"pid": os.getpid(), "identity": "fixture", "command": ["nanobot", "gateway"]}
+    current = {**previous, "health_host": "127.0.0.1"}
+    runtime._write_state(previous)
+    with _open_snapshot(runtime.paths.state_path) as snapshot:
+        runtime._write_state(current)
+        assert json.loads(snapshot.read()) == previous
+        assert runtime._read_state() == current
+    assert list(runtime.paths.run_dir.glob("*.tmp")) == []
+    if os.name != "nt":
+        assert runtime.paths.state_path.stat().st_mode & 0o777 == 0o600
+
+
+def test_runtime_state_reader_does_not_block_publish_while_decoding(tmp_path, monkeypatch):
+    runtime = GatewayRuntime(paths=_paths(tmp_path))
+    previous = {"pid": os.getpid(), "identity": "fixture"}
+    current = {**previous, "health_host": "127.0.0.1"}
+    runtime._write_state(previous)
+    decode = json.loads
+
+    def publish_during_decode(value, **kwargs):
+        runtime._write_state(current)
+        return decode(value, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr("nanobot.process_runtime.json.loads", publish_during_decode)
+        assert runtime._read_state() == previous
+    assert runtime._read_state() == current
 
 
 _FOREGROUND_CHILD = r"""
@@ -61,6 +101,11 @@ duration = float(sys.argv[2])
 marker = Path(sys.argv[3])
 runtime = GatewayRuntime(paths=GatewayRuntimePaths.for_instance(data_dir=root))
 
+def publish_marker(detail):
+    pending = marker.with_suffix(".tmp")
+    pending.write_text(detail, encoding="utf-8")
+    pending.replace(marker)
+
 def stop(*_args):
     raise SystemExit(0)
 
@@ -68,13 +113,13 @@ try:
     if os.name != "nt":
         signal.signal(signal.SIGTERM, stop)
     with runtime.foreground_instance(GatewayStartOptions(port=18790)):
-        marker.write_text(f"claimed:{os.getpid()}", encoding="utf-8")
+        publish_marker(f"claimed:{os.getpid()}")
         time.sleep(duration)
 except GatewayAlreadyRunningError:
-    marker.write_text("occupied", encoding="utf-8")
+    publish_marker("occupied")
     raise SystemExit(17)
 except BaseException as exc:
-    marker.write_text(f"error:{type(exc).__name__}:{exc}", encoding="utf-8")
+    publish_marker(f"error:{type(exc).__name__}:{exc}")
     raise
 """
 
@@ -234,12 +279,36 @@ def test_start_background_writes_state_and_child_command(tmp_path, monkeypatch):
         "/tmp/config.json",
     ]
     assert calls[0]["kwargs"]["start_new_session"] is True
+    child_env = calls[0]["kwargs"]["env"]
+    assert child_env[BACKGROUND_LOG_PATH_ENV] == str(runtime.paths.log_path)
+    assert child_env[BACKGROUND_LOG_MAX_BYTES_ENV] == str(DEFAULT_MAX_BYTES)
+    assert child_env[BACKGROUND_LOG_BACKUP_COUNT_ENV] == str(DEFAULT_BACKUP_COUNT)
     state = json.loads(runtime.paths.state_path.read_text(encoding="utf-8"))
     assert state["pid"] == 12345
     assert state["identity"] == 12345
     assert state["port"] == 18790
     assert state["launch_mode"] == "background"
     assert result.status.launch_mode == "background"
+
+
+def test_read_log_tail_spans_rotated_files(tmp_path: Path) -> None:
+    runtime = GatewayRuntime(paths=_paths(tmp_path))
+    runtime.paths.logs_dir.mkdir(parents=True)
+    runtime.paths.log_path.write_text("current-1\ncurrent-2\n", encoding="utf-8")
+    runtime.paths.log_path.with_name("gateway.log.1").write_text(
+        "backup-1\nbackup-2\n", encoding="utf-8"
+    )
+    runtime.paths.log_path.with_name("gateway.log.2").write_text(
+        "oldest\n", encoding="utf-8"
+    )
+
+    assert runtime.read_log_tail(tail=5) == [
+        "oldest",
+        "backup-1",
+        "backup-2",
+        "current-1",
+        "current-2",
+    ]
 
 
 def test_foreground_gateway_claim_is_discoverable_and_released(tmp_path, monkeypatch):
@@ -482,6 +551,31 @@ def test_restart_stops_then_starts_the_background_gateway(tmp_path, monkeypatch)
     assert result.ok is True
 
 
+def test_client_lease_reader_keeps_snapshot_during_replacement(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+
+    from nanobot.utils import atomic_file
+
+    runtime = GatewayRuntime(paths=_paths(tmp_path))
+    client = GatewayClientLease(runtime, kind="tui", token="client")
+    client.acquire()
+    previous = client._read_state()
+    current = {**previous, "auto_stop": True}
+    open_snapshot = atomic_file._open_snapshot
+
+    @contextmanager
+    def publish_while_reading(path):
+        with open_snapshot(path) as snapshot:
+            client._write_state(current)
+            yield snapshot
+
+    with monkeypatch.context() as patch:
+        patch.setattr(atomic_file, "_open_snapshot", publish_while_reading)
+        assert client._read_state() == previous
+    assert client._read_state() == current
+    assert list(runtime.paths.run_dir.glob("*.tmp")) == []
+
+
 def test_last_interactive_client_stops_an_on_demand_gateway(tmp_path, monkeypatch):
     runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
     monkeypatch.setattr(runtime, "_process_identity", lambda pid: pid)
@@ -692,7 +786,10 @@ def test_failed_last_client_shutdown_remains_retryable(tmp_path, monkeypatch):
     assert state == {"auto_stop": True, "clients": {}}
 
 
-def test_lease_snapshot_prunes_a_reused_client_pid(tmp_path, monkeypatch):
+@pytest.mark.parametrize("auto_stop", [False, True])
+def test_lease_queries_filter_a_reused_client_pid_without_writing(
+    tmp_path, monkeypatch, auto_stop,
+):
     runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
     identity = "same-pid:first-process"
     monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
@@ -700,16 +797,23 @@ def test_lease_snapshot_prunes_a_reused_client_pid(tmp_path, monkeypatch):
     client = GatewayClientLease(runtime, kind="tui", pid=12345, token="client")
 
     client.acquire()
-    client.mark_ephemeral()
-    identity = "same-pid:replacement-process"
+    if auto_stop:
+        client.mark_ephemeral()
+    original = client.state_path.read_bytes()
+    os.utime(client.state_path, (1, 1))
+    modified_at = client.state_path.stat().st_mtime_ns
 
-    snapshot = client.snapshot()
-    assert snapshot.auto_stop is True
-    assert snapshot.clients == 0
-    assert json.loads(client.state_path.read_text(encoding="utf-8")) == {
-        "auto_stop": True,
-        "clients": {},
-    }
+    for identity, expected_clients in (
+        ("same-pid:first-process", 1),
+        ("same-pid:replacement-process", 0),
+    ):
+        snapshot = client.snapshot()
+        status = runtime.status()
+        assert snapshot.auto_stop is auto_stop
+        assert snapshot.clients == status.clients == expected_clients
+        assert status.lifetime == ("on_demand" if auto_stop else "explicit")
+        assert client.state_path.read_bytes() == original
+        assert client.state_path.stat().st_mtime_ns == modified_at
 
 
 def test_lease_snapshot_keeps_a_legacy_localized_darwin_client(tmp_path, monkeypatch):
@@ -745,7 +849,7 @@ def test_darwin_lease_keeps_old_readers_compatible_and_detects_pid_reuse(
     state = json.loads(client.state_path.read_text(encoding="utf-8"))
     record = state["clients"]["client"]
 
-    assert record["identity"] is None  # Pre-upgrade lease readers keep the live PID.
+    assert record["identity"] is None
     assert record["stable_identity"] == identity
 
     identity = "darwin:42:1786992348:654321"
@@ -770,6 +874,51 @@ def test_lease_snapshot_keeps_a_client_when_identity_probe_is_unavailable(
 
     assert snapshot.auto_stop is True
     assert snapshot.clients == 1
+
+
+@pytest.mark.parametrize("auto_stop", [False, True])
+def test_client_monitor_persists_only_lease_changes(tmp_path, monkeypatch, auto_stop):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
+    live_pids = {12345, 12346}
+    monkeypatch.setattr(runtime, "_is_pid_running", lambda pid: pid in live_pids)
+    monkeypatch.setattr(runtime, "_process_identity", lambda pid: pid)
+    first = GatewayClientLease(runtime, kind="tui", pid=12345, token="first")
+    second = GatewayClientLease(runtime, kind="webui", pid=12346, token="second")
+    first.acquire()
+    second.acquire()
+    if auto_stop:
+        first.mark_ephemeral()
+    monitor = GatewayClientLease(runtime, kind="gateway-monitor")
+
+    def poll_without_writing():
+        before = monitor.state_path.read_bytes()
+        os.utime(monitor.state_path, (1, 1))
+        modified_at = monitor.state_path.stat().st_mtime_ns
+        assert monitor.begin_orphan_shutdown() is False
+        assert monitor.state_path.read_bytes() == before
+        assert monitor.state_path.stat().st_mtime_ns == modified_at
+
+    poll_without_writing()
+    poll_without_writing()
+    live_pids.remove(first.pid)
+    assert monitor.begin_orphan_shutdown() is False
+    state = json.loads(monitor.state_path.read_text(encoding="utf-8"))
+    assert set(state["clients"]) == {"second"}
+    assert bool(state.get("auto_stop")) is auto_stop
+    poll_without_writing()
+
+    live_pids.remove(second.pid)
+    assert monitor.begin_orphan_shutdown() is auto_stop
+    if auto_stop:
+        assert json.loads(monitor.state_path.read_text(encoding="utf-8")) == {
+            "auto_stop": True,
+            "clients": {},
+            "stopping": True,
+        }
+    else:
+        assert not monitor.state_path.exists()
+        assert monitor.begin_orphan_shutdown() is False
+        assert not monitor.state_path.exists()
 
 
 async def test_client_monitor_stops_an_orphaned_on_demand_gateway(tmp_path):
@@ -869,6 +1018,32 @@ def test_managed_background_hands_off_virtualenv_launcher_pid(tmp_path: Path) ->
         if runtime.status().running:
             runtime.stop(timeout_s=3)
         launcher.wait(timeout=3)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires Windows process identity APIs")
+def test_windows_identity_polling_reuses_pointer_types(tmp_path, monkeypatch):
+    import ctypes
+
+    pointer_types = set()
+    pointer = ctypes.POINTER
+
+    def record_pointer_type(cls):
+        result = pointer(cls)
+        pointer_types.add(result)
+        return result
+
+    monkeypatch.setattr(ctypes, "POINTER", record_pointer_type)
+    runtime = GatewayRuntime(paths=_paths(tmp_path))
+    pid = os.getpid()
+    identity = runtime.process_identity(pid)
+    assert isinstance(identity, str) and identity.isdecimal()
+    warmed_types = pointer_types.copy()
+
+    for _ in range(100):
+        assert runtime.process_identity(pid) == identity
+
+    # Fresh pointer types remain cached on Python versions before 3.14.
+    assert pointer_types == warmed_types
 
 
 def test_windows_process_probe_never_sends_ctrl_c(monkeypatch):
@@ -1227,7 +1402,7 @@ def test_terminate_windows_targets_only_the_recorded_process_tree(tmp_path, monk
     def fake_run(command, **kwargs):
         taskkill_calls.append({"command": command, "kwargs": kwargs})
 
-    runtime = GatewayRuntime(
+    runtime = ManagedProcessRuntime(
         paths=_paths(tmp_path),
         platform_name="Windows",
         subprocess_run=fake_run,
@@ -1241,23 +1416,60 @@ def test_terminate_windows_targets_only_the_recorded_process_tree(tmp_path, monk
 
     def fake_wait_for_exit(_pid, _timeout_s):
         wait_timeouts.append(_timeout_s)
-        # Simulate a process that only exits after the taskkill fallback runs.
         return bool(taskkill_calls)
 
     monkeypatch.setattr(runtime, "_wait_for_exit", fake_wait_for_exit)
 
     assert runtime._terminate_windows(12345, timeout_s=20) is True
-    assert wait_timeouts == [20]
+    assert wait_timeouts == [2]
     assert taskkill_calls == [
         {
-            "command": ["taskkill", "/PID", "12345", "/T"],
+            "command": ["taskkill", "/PID", "12345", "/T", "/F"],
             "kwargs": {
                 "check": False,
                 "stdout": subprocess.DEVNULL,
                 "stderr": subprocess.DEVNULL,
+                "timeout": 2,
             },
         }
     ]
+
+
+def test_orphan_shutdown_yields_to_an_explicit_lifecycle_transition(tmp_path):
+    runtime = GatewayRuntime(paths=_paths(tmp_path))
+    lease = GatewayClientLease(runtime, kind="gateway-monitor")
+    lease.mark_ephemeral()
+
+    with runtime._transition_lock():
+        assert lease.begin_orphan_shutdown() is False
+        assert "stopping" not in json.loads(lease.state_path.read_text(encoding="utf-8"))
+
+    assert lease.begin_orphan_shutdown() is True
+
+
+def test_windows_stop_does_not_force_a_pid_reused_during_grace(tmp_path, monkeypatch):
+    killed = []
+    runtime = GatewayRuntime(
+        paths=_paths(tmp_path), platform_name="Windows",
+        subprocess_run=lambda *args, **kwargs: killed.append(args),
+    )
+    identity = "original-process"
+    runtime._write_state({"pid": 12345, "identity": identity, "shutdown_token": "a" * 32})
+    monkeypatch.setattr(runtime, "_process_identity", lambda _pid: identity)
+    monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
+    monkeypatch.setattr("nanobot.gateway.runtime.request_windows_shutdown", lambda *_args: True)
+
+    def exit_and_reuse_pid(_pid, _timeout):
+        nonlocal identity
+        identity = "replacement-process"
+        return False
+
+    monkeypatch.setattr(runtime, "_wait_for_exit", exit_and_reuse_pid)
+
+    result = runtime.stop(timeout_s=1)
+
+    assert result.status.running is False
+    assert killed == []
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups are unavailable")

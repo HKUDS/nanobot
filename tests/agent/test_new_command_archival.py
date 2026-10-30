@@ -1,5 +1,3 @@
-"""Test /new archival behavior."""
-
 import asyncio
 from collections.abc import Coroutine
 from pathlib import Path
@@ -14,7 +12,6 @@ _ARCHIVE_PROMPT = render_template("agent/consolidator_archive.md", strip=True)
 
 
 class TestNewCommandArchival:
-    """Test /new archival behavior with the structured archive flow."""
 
     @staticmethod
     def _make_loop(tmp_path: Path):
@@ -23,7 +20,7 @@ class TestNewCommandArchival:
         from nanobot.providers.base import GenerationSettings, LLMResponse
 
         bus = MessageBus()
-        provider = MagicMock()
+        provider = MagicMock(aclose=AsyncMock())
         provider.get_default_model.return_value = "test-model"
         provider.estimate_prompt_tokens.return_value = (10_000, "test")
         provider.generation = GenerationSettings(max_tokens=100)
@@ -45,7 +42,6 @@ class TestNewCommandArchival:
         self,
         tmp_path: Path,
     ) -> None:
-        """/new clears session immediately; archive is fire-and-forget."""
         from nanobot.bus.events import InboundMessage
 
         loop = self._make_loop(tmp_path)
@@ -146,7 +142,6 @@ class TestNewCommandArchival:
 
     @pytest.mark.asyncio
     async def test_aclose_drains_background_tasks(self, tmp_path: Path) -> None:
-        """aclose waits for background tasks to complete."""
         from nanobot.bus.events import InboundMessage
 
         loop = self._make_loop(tmp_path)

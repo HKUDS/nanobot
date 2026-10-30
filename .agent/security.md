@@ -1,6 +1,6 @@
 # Security Boundaries
 
-The agent operates with significant power (file system, shell, web). The following guards must not be bypassed when modifying related code.
+Consult this document when changing path access, outbound HTTP/MCP, or shell execution. The agent operates with filesystem, shell, and network access; preserve the guards below on every affected path.
 
 ## Workspace Restriction
 
@@ -16,7 +16,7 @@ Shell execution (`ExecTool`, `agent/tools/shell.py`) also respects `restrict_to_
 
 All outbound HTTP requests from agent tools must pass through the shared URL guards in `security/network.py` (`validate_url_target` or `resolve_url_target`). By default they block loopback, RFC1918 private addresses, CGNAT ranges, link-local ranges, and cloud metadata endpoints (including `169.254.169.254`).
 
-For direct requests, the only escape hatch is `configure_ssrf_whitelist(cidrs)`, which reads from `config.tools.ssrf_whitelist` at load time. An explicitly configured `providers.<name>.proxy` is a separate user-authorized trust boundary for provider requests and provider-returned image URL downloads. Those downloads still reject malformed URLs and locally identifiable private/internal targets on every redirect, but hostnames unavailable to local DNS are delegated to the trusted proxy. The user-selected proxy owns final DNS resolution and network egress policy.
+For direct requests, the only escape hatch is `configure_ssrf_whitelist(cidrs)`, which reads from `config.tools.ssrf_whitelist` at load time. The shared `network.proxy` address enabled by `providers.<name>.useProxy` is a separate user-authorized trust boundary for provider requests and provider-returned image URL downloads. Those downloads still reject malformed URLs and locally identifiable private/internal targets on every redirect, but hostnames unavailable to local DNS are delegated to the trusted proxy. The user-selected proxy owns final DNS resolution and network egress policy.
 
 HTTP/SSE MCP transports are part of this boundary: validate configured MCP URLs before probing or constructing clients, and validate each outgoing HTTP request before redirects are followed. Local/private HTTP MCP endpoints are allowed only through the explicit SSRF whitelist. Stdio MCP servers are not part of the HTTP SSRF path.
 
@@ -26,4 +26,4 @@ HTTP/SSE MCP transports are part of this boundary: validate configured MCP URLs 
 
 `tools/sandbox.py` provides optional command wrapping: `bwrap` (bubblewrap) on Linux and `seatbelt` (`sandbox-exec`) on macOS. Seatbelt must not expose shared host temporary directories; scratch stays in the workspace. On Windows a configured backend warns and leaves only the application guard. On Unix a configured backend that cannot start must fail, not silently execute without isolation.
 
-**Rule**: If adding a new sandbox backend, implement `_wrap_<name>(command, workspace, cwd) -> str` and register it in `_BACKENDS`.
+**Rule**: If adding a sandbox backend, match the backend callable contract in `nanobot/agent/tools/sandbox.py` and register it in `_BACKENDS`. Preserve read/write root handling and the configured backend's failure behavior.

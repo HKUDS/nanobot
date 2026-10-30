@@ -57,46 +57,28 @@
         color: #fafafa;
       }
 
-      .boot-splash {
-        display: flex;
-        height: 100%;
-        align-items: center;
-        justify-content: center;
-      }
-
-      .boot-splash-inner {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        color: rgba(255, 255, 255, 0.74);
-        font-size: 14px;
-      }
-
-      html:not(.dark) .boot-splash-inner {
-        color: rgba(10, 10, 10, 0.64);
-      }
-
-      .boot-dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 9999px;
-        background: currentColor;
-        opacity: 0.75;
-        animation: boot-pulse 1s ease-in-out infinite;
-      }
-
-      @keyframes boot-pulse {
-        0%,
-        100% {
-          transform: scale(0.9);
-          opacity: 0.45;
-        }
-        50% {
-          transform: scale(1);
-          opacity: 0.85;
+      /* Work around iOS standalone's scroll-edge blur with a fixed color surface.
+         Keep this outside React's root for cold starts and route changes.
+         See docs/guides/ios-pwa-status-bar.md for the WebKit sampling contract. */
+      .pwa-status-bar-surface { display: none; }
+      @supports (-webkit-touch-callout: none) and (background-clip: text) {
+        @media (display-mode: standalone) {
+          .pwa-status-bar-surface {
+            display: block;
+            position: fixed;
+            inset: 0 0 auto;
+            height: 11px; /* Must exceed WebKit's 10px thin-border threshold. */
+            z-index: 100;
+            pointer-events: none;
+            background-color: inherit;
+            -webkit-background-clip: text;
+            background-clip: text; /* Empty text paints nothing over the controls. */
+          }
         }
       }
+
     </style>
+    <!--startup-style-->
     <script>
       (function () {
         try {
@@ -123,14 +105,9 @@
     <title>nanobot</title>
   </head>
   <body class="bg-background text-foreground antialiased">
-    <div id="root">
-      <div class="boot-splash">
-        <div class="boot-splash-inner">
-          <span class="boot-dot" aria-hidden="true"></span>
-          <span data-boot-copy>Loading nanobot…</span>
-        </div>
-      </div>
-    </div>
+    <div class="pwa-status-bar-surface" aria-hidden="true"></div>
+    <div id="root"><!--startup-shell--></div>
+    <!--startup-script-->
     <script>
       (function () {
         var localeKey = "nanobot.locale";

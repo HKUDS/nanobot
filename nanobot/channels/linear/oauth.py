@@ -1,5 +1,3 @@
-"""PKCE OAuth flow state for Linear app installations."""
-
 from __future__ import annotations
 
 import base64
@@ -13,7 +11,7 @@ from urllib.parse import urlencode
 from nanobot.channels.linear.config import LinearConfig
 
 LINEAR_AUTHORIZE_URL = "https://linear.app/oauth/authorize"
-LINEAR_SCOPES = ("read", "write", "app:mentionable")
+LINEAR_SCOPES = ("read", "write", "app:mentionable", "app:assignable")
 FLOW_TTL_SECONDS = 600
 
 

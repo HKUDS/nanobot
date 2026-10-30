@@ -1,5 +1,3 @@
-"""Pairing module for DM sender approval."""
-
 from nanobot.pairing.store import (
     approve_code,
     clear_channel,
@@ -11,11 +9,11 @@ from nanobot.pairing.store import (
     handle_pairing_command,
     is_approved,
     list_pending,
+    record_delivery,
     revoke,
     revoke_channel,
 )
 
-# Metadata keys used by channels and commands to tag pairing-related messages.
 PAIRING_CODE_META_KEY = "_pairing_code"
 PAIRING_COMMAND_META_KEY = "_pairing_command"
 
@@ -30,6 +28,7 @@ __all__ = [
     "handle_pairing_command",
     "is_approved",
     "list_pending",
+    "record_delivery",
     "revoke",
     "revoke_channel",
     "PAIRING_CODE_META_KEY",

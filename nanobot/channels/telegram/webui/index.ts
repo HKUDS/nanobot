@@ -1,5 +1,5 @@
 import type { ChannelUiContribution } from "@/channel-plugins/types";
-import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
+import { chatAppGuideUrl } from "@/channel-plugins/catalog";
 
 export default {
   presentation: {
@@ -12,7 +12,7 @@ export default {
       docsUrl: chatAppGuideUrl("telegram"),
       fields: [
         { key: "channels.telegram.token", section: "credentials" },
-        { key: "channels.telegram.proxy", section: "connection" },
+        { key: "channels.telegram.useProxy", section: "connection", control: "switch" },
         { key: "channels.telegram.allowFrom", section: "access" },
         { key: "channels.telegram.groupPolicy", section: "behavior" },
       ],

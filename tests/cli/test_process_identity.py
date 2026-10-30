@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import os
+import sys
+import types
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from nanobot.cli.commands import app
-from nanobot.cli.process_identity import named_executable, set_cli_process_identity
+from nanobot.cli.process_identity import (
+    _set_process_title,
+    named_executable,
+    set_cli_process_identity,
+)
 
 
 @pytest.mark.parametrize(
@@ -44,6 +50,25 @@ def test_cli_process_identity_keeps_windows_launcher_name(
     set_cli_process_identity(["agent"])
 
     assert titles == []
+
+
+@pytest.mark.parametrize(("platform", "noenv"), [("linux", "1"), ("darwin", None)])
+def test_process_title_keeps_environment_only_on_linux(
+    monkeypatch: pytest.MonkeyPatch,
+    platform: str,
+    noenv: str | None,
+) -> None:
+    titles: list[str] = []
+    monkeypatch.setattr("nanobot.cli.process_identity.sys.platform", platform)
+    monkeypatch.delenv("SPT_NOENV", raising=False)
+    monkeypatch.setitem(
+        sys.modules, "setproctitle", types.SimpleNamespace(setproctitle=titles.append)
+    )
+
+    _set_process_title("nanobot-agent")
+
+    assert os.environ.get("SPT_NOENV") == noenv
+    assert titles == ["nanobot-agent"]
 
 
 def test_legacy_console_entrypoint_still_sets_subcommand_identity(

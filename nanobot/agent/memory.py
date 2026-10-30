@@ -1,5 +1,3 @@
-"""Memory storage, transcript archiving, and session checkpoint consolidation."""
-
 # Tool schemas are installed by the ``@tool_parameters`` class decorator at
 # runtime; static analyzers cannot observe that it clears ``parameters`` from
 # ``__abstractmethods__`` before these classes are instantiated.
@@ -9,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
 import threading
 import weakref
@@ -21,7 +18,7 @@ from uuid import uuid4
 
 from loguru import logger
 
-from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
+from nanobot.events import NO_EVENTS, CompactionReason, ContextCompactionEvent, EventSink
 from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import LLMResponse, ProviderConversationState
 from nanobot.providers.conversation_state import ProviderConversationStateController
@@ -30,6 +27,7 @@ from nanobot.session.manager import Session, SessionManager
 from nanobot.session.summary import is_summary_checkpoint, session_summary_from_metadata
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
+    atomic_write_lines,
     build_assistant_message,
     content_with_media_breadcrumbs,
     ensure_dir,
@@ -49,10 +47,6 @@ from nanobot.utils.workspace_prompts import (
 if TYPE_CHECKING:
     from nanobot.agent.tools.registry import ToolRegistry
     from nanobot.utils.llm_runtime import LLMRuntime
-
-# ---------------------------------------------------------------------------
-# MemoryStore — pure file I/O layer
-# ---------------------------------------------------------------------------
 
 
 class MemoryStore:
@@ -80,11 +74,11 @@ class MemoryStore:
         self.user_file = workspace / "USER.md"
         self._cursor_file = self.memory_dir / ".cursor"
         self._dream_cursor_file = self.memory_dir / ".dream_cursor"
-        self._corruption_logged = False  # rate-limit invalid cursor warning
-        self._malformed_entry_logged = False  # rate-limit bad history shape warning
-        self._oversize_logged = False  # rate-limit oversized-entry warning
+        self._corruption_logged = False
+        self._malformed_entry_logged = False
+        self._oversize_logged = False
         self._dream_prompt_oversize_logged = False
-        self._append_lock = threading.Lock()  # serialize cursor allocation + append
+        self._append_lock = threading.Lock()
         self._git = GitStore(workspace, tracked_files=[
             "SOUL.md", "USER.md", "memory/MEMORY.md", "memory/.dream_cursor",
         ])
@@ -94,7 +88,6 @@ class MemoryStore:
     def git(self) -> GitStore:
         return self._git
 
-    # -- generic helpers -----------------------------------------------------
 
     @staticmethod
     def read_file(path: Path) -> str:
@@ -224,7 +217,6 @@ class MemoryStore:
             suffix += 1
         return candidate
 
-    # -- MEMORY.md (long-term facts) -----------------------------------------
 
     def read_memory(self) -> str:
         return self.read_file(self.memory_file)
@@ -232,7 +224,6 @@ class MemoryStore:
     def write_memory(self, content: str) -> None:
         self.memory_file.write_text(content, encoding="utf-8")
 
-    # -- SOUL.md -------------------------------------------------------------
 
     def read_soul(self) -> str:
         return self.read_file(self.soul_file)
@@ -240,7 +231,6 @@ class MemoryStore:
     def write_soul(self, content: str) -> None:
         self.soul_file.write_text(content, encoding="utf-8")
 
-    # -- USER.md -------------------------------------------------------------
 
     def read_user(self) -> str:
         return self.read_file(self.user_file)
@@ -248,13 +238,11 @@ class MemoryStore:
     def write_user(self, content: str) -> None:
         self.user_file.write_text(content, encoding="utf-8")
 
-    # -- context injection (used by context.py) ------------------------------
-
     def get_memory_context(self) -> str:
+        """Return long-term memory formatted for context injection."""
         long_term = self.read_memory()
         return f"## Long-term Memory\n{long_term}" if long_term else ""
 
-    # -- history.jsonl — append-only, JSONL format ---------------------------
 
     def _normalize_history_entry(
         self,
@@ -262,7 +250,6 @@ class MemoryStore:
         *,
         max_chars: int | None = None,
     ) -> str:
-        """Return the exact bounded, model-safe text accepted by the journal."""
         limit = max_chars if max_chars is not None else _HISTORY_ENTRY_HARD_CAP
         raw = entry.rstrip()
         content = strip_think(raw)
@@ -331,7 +318,6 @@ class MemoryStore:
         return value
 
     def _iter_valid_entries(self) -> Iterator[tuple[dict[str, Any], int]]:
-        """Yield ``(entry, cursor)`` for well-formed entries; warn once on corruption."""
         poisoned: Any = None
         malformed_cursor: int | None = None
         for entry in self._read_entries():
@@ -371,7 +357,6 @@ class MemoryStore:
         return session_key is None or isinstance(session_key, str)
 
     def _read_cursor_counter(self) -> int | None:
-        """Return the persisted cursor counter when it is usable."""
         if not self._cursor_file.exists():
             return None
         with suppress(ValueError, OSError):
@@ -381,7 +366,6 @@ class MemoryStore:
         return None
 
     def _next_cursor(self) -> int:
-        """Read the current cursor counter and return the next value."""
         cursor_counter = self._read_cursor_counter()
         last = self._read_last_entry() or {}
         last_cursor = self._valid_cursor(last.get("cursor"))
@@ -432,10 +416,8 @@ class MemoryStore:
             )
         self._write_entries(kept)
 
-    # -- JSONL helpers -------------------------------------------------------
 
     def _read_entries(self) -> list[dict[str, Any]]:
-        """Read all entries from history.jsonl."""
         entries: list[dict[str, Any]] = []
         with suppress(FileNotFoundError):
             with open(self.history_file, "r", encoding="utf-8") as f:
@@ -452,7 +434,6 @@ class MemoryStore:
         return entries
 
     def _read_last_entry(self) -> dict[str, Any] | None:
-        """Read the last entry from the JSONL file efficiently."""
         try:
             with open(self.history_file, "rb") as f:
                 f.seek(0, 2)
@@ -471,31 +452,11 @@ class MemoryStore:
             return None
 
     def _write_entries(self, entries: list[dict[str, Any]]) -> None:
-        """Overwrite history.jsonl with the given entries (atomic write)."""
-        tmp_path = self.history_file.with_suffix(self.history_file.suffix + ".tmp")
-        try:
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                for entry in entries:
-                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_path, self.history_file)
+        atomic_write_lines(
+            self.history_file,
+            (json.dumps(entry, ensure_ascii=False) for entry in entries),
+        )
 
-            # fsync the directory so the rename is durable.
-            # On Windows, opening a directory with O_RDONLY raises
-            # PermissionError — skip the dir sync there (NTFS
-            # journals metadata synchronously).
-            with suppress(PermissionError):
-                fd = os.open(str(self.history_file.parent), os.O_RDONLY)
-                try:
-                    os.fsync(fd)
-                finally:
-                    os.close(fd)
-        except BaseException:
-            tmp_path.unlink(missing_ok=True)
-            raise
-
-    # -- dream cursor --------------------------------------------------------
 
     def get_last_dream_cursor(self) -> int:
         if self._dream_cursor_file.exists():
@@ -518,7 +479,7 @@ class MemoryStore:
 
     @staticmethod
     def default_dream_prompt() -> str:
-        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+        from nanobot.agent.skill_metadata import BUILTIN_SKILLS_DIR
 
         return render_template(
             "agent/dream.md",
@@ -576,7 +537,7 @@ class MemoryStore:
 
     def build_dream_tools(self) -> ToolRegistry:
         """Build the restricted tool registry used by Dream runs."""
-        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+        from nanobot.agent.skill_metadata import BUILTIN_SKILLS_DIR
         from nanobot.agent.tools.apply_patch import ApplyPatchTool
         from nanobot.agent.tools.file_state import FileStates
         from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool, WriteFileTool
@@ -639,7 +600,6 @@ class MemoryStore:
             stop_reason = "missing response metadata"
         return f"stop_reason: {stop_reason}"
 
-    # -- message formatting utility ------------------------------------------
 
     @staticmethod
     def _format_messages(messages: list[dict[str, Any]]) -> str:
@@ -705,7 +665,6 @@ class MemoryStore:
         *,
         max_chars: int | None = None,
     ) -> str:
-        """Build the same bounded checkpoint as :meth:`raw_archive` without writing it."""
         limit = max_chars if max_chars is not None else _RAW_ARCHIVE_MAX_CHARS
         checkpoint = (
             f"[RAW] {len(messages)} messages\n"
@@ -713,9 +672,6 @@ class MemoryStore:
         )
         return self._normalize_history_entry(checkpoint, max_chars=limit)
 
-    # ------------------------------------------------------------------
-    # Dream helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def dream_session_key() -> str:
@@ -740,37 +696,12 @@ class MemoryStore:
             return prefix
         return f"{prefix}\n\n{diff_body}"
 
-    @staticmethod
-    def prune_dream_sessions(sessions: SessionManager, *, keep: int = 10) -> None:
-        """Remove the oldest Dream session files, keeping only the N most recent.
-
-        Only current base64url-encoded Dream session keys are considered.
-        Non-dream session files are never touched.
-        """
-        with sessions.locked_session_files() as sessions_dir:
-            dream_files: list[tuple[Path, str]] = []
-            for path in sessions_dir.glob("*.jsonl"):
-                decoded_key = SessionManager.decode_storage_key(path.stem)
-                if decoded_key is not None and decoded_key.startswith("dream:"):
-                    dream_files.append((path, decoded_key))
-            dream_files.sort(key=lambda item: item[0].stat().st_mtime)
-
-            for path, key in dream_files[: max(0, len(dream_files) - keep)]:
-                if sessions.delete_session(key):
-                    logger.debug("Pruned old dream session: {}", path.stem)
-                else:
-                    logger.warning("Failed to prune dream session {}", path)
-
-
-# ---------------------------------------------------------------------------
-# Memory ingestion and context-pressure coordination
-# ---------------------------------------------------------------------------
 
 # Raw fallbacks use a tighter cap. Completed model summaries may scale with the
 # configured generation budget, while append_history() still enforces the
 # emergency hard cap against pathological provider output.
-_RAW_ARCHIVE_MAX_CHARS = 16_000   # fallback dump (LLM failed)
-_HISTORY_ENTRY_HARD_CAP = 64_000  # emergency cap in append_history
+_RAW_ARCHIVE_MAX_CHARS = 16_000
+_HISTORY_ENTRY_HARD_CAP = 64_000
 _ARCHIVE_TOOL_RESULT = (
     "Session archival does not execute tools. Use only the supplied conversation and "
     "return the requested compact checkpoint now; do not call another tool."
@@ -806,7 +737,6 @@ class MemoryArchiver:
         max_tokens: int,
         persist: bool = True,
     ) -> str:
-        """Return a bounded raw checkpoint, optionally persisting its source."""
         raw = (
             self.store.raw_archive(messages, session_key=session_key)
             if persist
@@ -1233,7 +1163,6 @@ class Consolidator:
         )
 
     def _input_token_budget(self, runtime: LLMRuntime) -> int:
-        """Available input token budget for consolidation LLM."""
         return (
             runtime.context_window_tokens
             - runtime.generation.max_tokens
@@ -1262,6 +1191,8 @@ class Consolidator:
         runtime: LLMRuntime,
         max_suffix: int = 0,
         events: EventSink = NO_EVENTS,
+        notify: bool = False,
+        reason: CompactionReason | None = None,
     ) -> str | None:
         """Replace archived history with a summary checkpoint.
 
@@ -1270,8 +1201,8 @@ class Consolidator:
         """
         lock = self.get_lock(session_key)
         async with lock:
-            self.sessions.invalidate(session_key)
-            session = self.sessions.get_or_create(session_key)
+            await self.sessions.state.discard(session_key)
+            session = await self.sessions.state.get(session_key)
 
             archive_start = session.last_archived
             messages_to_archive = list(session.messages[archive_start:])
@@ -1284,33 +1215,30 @@ class Consolidator:
 
             compaction_id = uuid4().hex
             await events.emit(
-                ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
+                ContextCompactionEvent(compaction_id=compaction_id, phase="started", notify=notify, reason=reason),
             )
-            last_active = session.updated_at
             archive_end = archive_start + len(messages_to_archive)
             try:
                 summary = await self.archive_session(
                     session, archive_end=archive_end, runtime=runtime,
                 )
                 if summary:
-                    # Concurrent appends remain after the captured boundary.
-                    session.commit_summary_checkpoint(
-                        summary, insert_at=archive_end, last_active=last_active,
+                    await self.sessions.state.commit_summary(
+                        session, summary, archive_end=archive_end,
                     )
-                    # Resume from the summary and retained transcript, not the old provider history.
-                    session.provider_state = None
-                    self.sessions.save(session)
             except (Exception, asyncio.CancelledError) as exc:
                 await events.emit(
                     ContextCompactionEvent(
                         compaction_id=compaction_id,
                         phase="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
+                        notify=notify,
+                        reason=reason,
                     ),
                 )
                 raise
             if not summary:
                 await events.emit(
-                    ContextCompactionEvent(compaction_id=compaction_id, phase="failed"),
+                    ContextCompactionEvent(compaction_id=compaction_id, phase="failed", notify=notify, reason=reason),
                 )
                 return None
 
@@ -1318,6 +1246,8 @@ class Consolidator:
                 ContextCompactionEvent(
                     compaction_id=compaction_id,
                     phase="succeeded",
+                    notify=notify,
+                    reason=reason,
                 ),
             )
 

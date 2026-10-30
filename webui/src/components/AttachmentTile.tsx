@@ -1,58 +1,45 @@
 import { useState, type ReactNode } from "react";
-import { FileIcon, ImageIcon, PlaySquare } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { Download } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { UIMediaAttachment } from "@/lib/types";
+import { ImageThumbnail } from "@/components/ImageGallery";
+import { ImageLightbox } from "@/components/ImageLightbox";
+import { useRegisterInlineImage } from "@/components/InlineImageContext";
+import { AttachmentCard, AttachmentTypeFace, attachmentCardActionClassName } from "@/components/AttachmentCard";
 
 interface AttachmentTileProps {
   attachment: UIMediaAttachment;
   className?: string;
   inline?: boolean;
   variant?: "default" | "compact";
+  pending?: boolean;
 }
 
-export function AttachmentTile({ attachment, className, inline = false, variant = "default" }: AttachmentTileProps) {
+export function AttachmentTile({ attachment, className, inline = false, variant = "default", pending = false }: AttachmentTileProps) {
   const { t } = useTranslation();
-  const [failed, setFailed] = useState(false);
+  const videoUrl = attachment.url;
+  const [failedUrl, setFailedUrl] = useState<string | undefined>(undefined);
+  const failed = !!videoUrl && failedUrl === videoUrl;
+  const [imageOpen, setImageOpen] = useState(false);
   const hasUrl = typeof attachment.url === "string" && attachment.url.length > 0;
   const label = attachmentLabel(attachment, t);
+  useRegisterInlineImage(inline && attachment.kind === "image" && hasUrl && !failed ? attachment.url : undefined);
 
   if (attachment.kind === "image" && hasUrl && !failed) {
     return (
-      <AttachmentFrame
-        attachment={attachment}
-        className={className}
-        inline={inline}
-        variant={variant}
-      >
-        <a
-          href={attachment.url}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="block bg-muted/20"
-          aria-label={attachment.name
-            ? t("message.openAttachment", { name: attachment.name })
-            : t("lightbox.open", { defaultValue: "Open image" })}
-        >
-          <img
-            src={attachment.url}
-            alt={attachment.name ?? ""}
-            loading="lazy"
-            decoding="async"
-            draggable={false}
-            onError={() => setFailed(true)}
-            className={cn(
-              "block h-auto max-w-full bg-background object-contain",
-              variant === "compact" ? "max-h-40" : "max-h-[34rem]",
-            )}
-          />
-        </a>
-      </AttachmentFrame>
+      <span className={cn("not-prose my-3 block max-w-full", className)}>
+        <ImageThumbnail key={attachment.url} image={attachment}
+          size={variant === "compact" ? "compact" : "large"}
+          onOpen={() => setImageOpen(true)} onError={() => setFailedUrl(attachment.url)} />
+        <ImageLightbox images={[attachment]} index={imageOpen ? 0 : null}
+          onIndexChange={() => {}} onOpenChange={setImageOpen} />
+      </span>
     );
   }
 
-  if (attachment.kind === "video" && hasUrl) {
+  if (attachment.kind === "video" && hasUrl && !failed) {
     return (
       <AttachmentFrame
         attachment={attachment}
@@ -61,9 +48,10 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
         variant={variant}
       >
         <video
-          src={attachment.url}
+          src={videoUrl}
           controls
           preload="metadata"
+          onError={() => setFailedUrl(videoUrl)}
           className={cn(
             "block w-full bg-black",
             variant === "compact" ? "max-h-40" : "max-h-[26rem]",
@@ -74,55 +62,28 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
     );
   }
 
-  const Icon = attachment.kind === "video"
-    ? PlaySquare
-    : attachment.kind === "image"
-      ? ImageIcon
-      : FileIcon;
-  const body = (
-    <>
-      <Icon className="h-4 w-4 flex-none" aria-hidden />
-      <span className="min-w-0 truncate">{attachment.name ?? label}</span>
-    </>
-  );
+  const filePath = attachment.name || attachment.url?.split(/[?#]/, 1)[0] || "";
+  const name = attachment.name || label;
+  const available = hasUrl && !failed;
+  const status = available ? undefined : pending ? t("message.delivery.sending") : t("message.attachmentUnavailable");
+  const download = available ? <a href={attachment.url} download={name} title={name}
+    aria-label={t("message.downloadAttachment", { name })}
+    className={cn(attachmentCardActionClassName, "text-muted-foreground hover:text-foreground")}>
+    <Download aria-hidden strokeWidth={1.75} className="size-4" />
+  </a> : undefined;
 
-  if (hasUrl && !failed) {
-    return (
-      <a
-        href={attachment.url}
-        download={attachment.name ?? label}
-        title={attachment.name ?? undefined}
-        aria-label={label}
-        className={cn(
-          "flex max-w-[18rem] items-center gap-2 rounded-control",
-          "border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground",
-          "transition-colors hover:bg-muted/55 hover:text-foreground",
-          variant === "compact" && "max-w-[14rem] rounded-xl px-2.5 py-1.5 text-[11.5px]",
-          className,
-        )}
-      >
-        {body}
-      </a>
-    );
-  }
-
-  return (
-    <div
-      className={cn(
-        "flex max-w-[18rem] items-center gap-2 rounded-control",
-        "border border-border/60 bg-muted/35 px-3 py-2 text-xs text-muted-foreground",
-        variant === "compact" && "max-w-[14rem] rounded-xl px-2.5 py-1.5 text-[11.5px]",
-        className,
-      )}
-      title={attachment.name ?? undefined}
-      aria-label={label}
-    >
-      {body}
-      <span className="sr-only">
-        {t("message.attachmentUnavailable", { defaultValue: "Attachment unavailable" })}
-      </span>
-    </div>
-  );
+  return <span data-file-attachment className={cn("not-prose inline-flex w-24 max-w-full shrink-0 flex-col gap-1 align-top", className)}>
+    <AttachmentCard name={name} description={status} action={download}>
+      <AttachmentTypeFace name={filePath} kind={attachment.kind} />
+    </AttachmentCard>
+    {status ? <span className="break-words text-center text-[11px] leading-4 text-muted-foreground">{status}</span> : null}
+    {attachment.kind === "video" && failed && !pending ? (
+      <button type="button" onClick={() => setFailedUrl(undefined)}
+        className="min-h-11 rounded-sm px-1 text-xs text-foreground underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2">
+        {t("common.retry")}
+      </button>
+    ) : null}
+  </span>;
 }
 
 function AttachmentFrame({

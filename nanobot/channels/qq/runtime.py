@@ -27,6 +27,7 @@ import os
 import re
 import time
 from collections import deque
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, BinaryIO, Literal, cast
@@ -36,11 +37,12 @@ import aiohttp
 from loguru import logger
 from pydantic import Field
 
+from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ContextCompactionEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import Base
+from nanobot.config_base import Base
 from nanobot.security.network import validate_url_target
 from nanobot.utils.logging_bridge import redirect_lib_logging
 
@@ -79,12 +81,10 @@ _IMAGE_EXTS = {
     ".svg",
 }
 
-# Replace unsafe characters with "_", keep Chinese and common safe punctuation.
 _SAFE_NAME_RE = re.compile(r"[^\w.\-()\[\]（）【】\u4e00-\u9fff]+", re.UNICODE)
 
 
 def _sanitize_filename(name: str) -> str:
-    """Sanitize filename to avoid traversal and problematic chars."""
     name = (name or "").strip()
     name = Path(name).name
     name = _SAFE_NAME_RE.sub("_", name).strip("._ ")
@@ -96,7 +96,6 @@ def _is_image_name(name: str) -> bool:
 
 
 def _guess_send_file_type(filename: str) -> int:
-    """Conservative send type: images -> 1, else -> 4."""
     ext = Path(filename).suffix.lower()
     mime, _ = mimetypes.guess_type(filename)
     if ext in _IMAGE_EXTS or (mime and mime.startswith("image/")):
@@ -109,7 +108,6 @@ _RECONNECT_BACKOFF_MAX = 300
 
 
 def _is_network_error(exc: BaseException) -> bool:
-    """Check whether an exception is a transient network/DNS error."""
     return isinstance(
         exc,
         (aiohttp.ClientConnectorError, OSError),
@@ -117,7 +115,6 @@ def _is_network_error(exc: BaseException) -> bool:
 
 
 def _make_bot_class(channel: QQChannel) -> type[Any]:
-    """Create a botpy client with per-session reconnect backoff."""
     botpy_sdk = cast(Any, botpy)
     intents = botpy_sdk.Intents(public_messages=True, direct_message=True)
 
@@ -144,7 +141,6 @@ def _make_bot_class(channel: QQChannel) -> type[Any]:
             await channel._on_message(message, is_group=False)
 
         async def bot_connect(self, session: object) -> None:
-            """Connect a botpy session with exponential retry backoff."""
             session_id = id(session)
             retry_at = self._ws_retry_at.pop(session_id, None)
             if retry_at is not None:
@@ -176,6 +172,113 @@ def _make_bot_class(channel: QQChannel) -> type[Any]:
     return _Bot
 
 
+# QQ's C2C/group events do not carry ``message_reference``; botpy models that
+# field because the object is shared with guild messages, but QQ never sends it
+# here.  The quoted original arrives in ``msg_elements``, linked from
+# ``message_scene.ext`` by ``ref_msg_idx``.  botpy parses neither field, and
+# ``BaseMessage.__slots__`` drops the raw payload, so
+# ``_install_qq_payload_capture`` keeps the payload from the constructor before
+# it is discarded.  If a future botpy exposes those fields on the message
+# object, ``_quoted_content_for`` prefers that copy and the hook becomes dead
+# weight rather than a correctness dependency.
+
+QQ_QUOTED_CONTEXT_MAX_CHARS = 4_000
+QQ_RAW_PAYLOAD_CACHE = 200
+
+_qq_raw_payloads: dict[str, dict[str, Any]] = {}
+
+
+def _flatten_scene_ext(scene: Any) -> dict[str, str]:
+    if not isinstance(scene, Mapping):
+        return {}
+    ext = cast("Mapping[str, Any]", scene).get("ext")
+    if not isinstance(ext, list):
+        return {}
+    flattened: dict[str, str] = {}
+    for item in cast("list[Any]", ext):
+        if isinstance(item, str) and "=" in item:
+            key, _, value = item.partition("=")
+            flattened[key] = value
+    return flattened
+
+
+def extract_quoted_content(raw: Mapping[str, Any] | None) -> str | None:
+    """Return the text of the message the sender quoted, if any.
+
+    QQ points at the quoted message from ``message_scene.ext``: ``ref_msg_idx=X``
+    matches the ``msg_elements`` entry whose ``msg_idx`` is ``X``, and that
+    entry's ``content`` is the original text.  Matching on the index instead of
+    taking the first element keeps this correct if QQ ever sends more than one.
+    """
+    if not isinstance(raw, Mapping):
+        return None
+
+    ref_idx = _flatten_scene_ext(raw.get("message_scene")).get("ref_msg_idx")
+    if not ref_idx:
+        return None
+
+    elements = raw.get("msg_elements")
+    if not isinstance(elements, list):
+        return None
+
+    for element in cast("list[Any]", elements):
+        if not isinstance(element, Mapping):
+            continue
+        entry = cast("Mapping[str, Any]", element)
+        if entry.get("msg_idx") != ref_idx:
+            continue
+        text = entry.get("content")
+        if not isinstance(text, str) or not text.strip():
+            return None
+        text = text.strip()
+        if len(text) > QQ_QUOTED_CONTEXT_MAX_CHARS:
+            text = text[:QQ_QUOTED_CONTEXT_MAX_CHARS] + "..."
+        return text
+    return None
+
+
+def _install_qq_payload_capture() -> None:
+    """Keep raw QQ payloads that botpy would otherwise discard (idempotent)."""
+    if not QQ_AVAILABLE:
+        return
+    try:
+        from botpy import message as botpy_message
+
+        for message_cls in (botpy_message.C2CMessage, botpy_message.GroupMessage):
+            original_init = cast("Callable[..., Any]", message_cls.__init__)
+            if getattr(original_init, "_nanobot_qq_capture", False):
+                continue
+
+            def _capture(
+                self: Any,
+                api: Any,
+                event_id: Any,
+                data: Any,
+                _original: Callable[..., Any] = original_init,
+            ) -> Any:
+                if isinstance(data, Mapping):
+                    payload = cast("Mapping[str, Any]", data)
+                    message_id = payload.get("id")
+                    if isinstance(message_id, str):
+                        _qq_raw_payloads[message_id] = dict(payload)
+                        while len(_qq_raw_payloads) > QQ_RAW_PAYLOAD_CACHE:
+                            _qq_raw_payloads.pop(next(iter(_qq_raw_payloads)))
+                return _original(self, api, event_id, data)
+
+            setattr(_capture, "_nanobot_qq_capture", True)
+            setattr(message_cls, "__init__", _capture)
+    except Exception:  # pragma: no cover - optional dependency shape may vary
+        logger.debug("QQ quoted-message payload capture unavailable")
+
+
+def _quoted_content_for(message: Any) -> str | None:
+    scene = getattr(message, "message_scene", None)
+    elements = getattr(message, "msg_elements", None)
+    if scene is not None or elements is not None:
+        return extract_quoted_content({"message_scene": scene, "msg_elements": elements})
+    return extract_quoted_content(_qq_raw_payloads.get(str(getattr(message, "id", ""))))
+
+
 class QQConfig(Base):
     """QQ channel configuration using botpy SDK."""
 
@@ -189,14 +292,13 @@ class QQConfig(Base):
     # Optional: directory to save inbound attachments. If empty, use nanobot get_media_dir("qq").
     media_dir: str = ""
 
-    # Download tuning
-    download_chunk_size: int = 1024 * 256  # 256KB
-    download_max_bytes: int = 1024 * 1024 * 200  # 200MB safety limit
+    download_chunk_size: int = 1024 * 256
+    download_max_bytes: int = 1024 * 1024 * 200
 
-    # QQ's C2C/group message API has no edit or recall endpoint, so compaction
-    # notices would land as separate permanent messages (#5784). Off by default;
-    # set showCompactionNotices: true to post them anyway.
-    show_compaction_notices: bool = False
+    # QQ's C2C/group message API has no edit or recall endpoint, so automatic
+    # notices would land as separate permanent messages (#5784). Unset inherits
+    # the global policy (off by default); explicit legacy true/false still override it.
+    show_compaction_notices: bool | None = None
 
 
 class QQChannel(BaseChannel):
@@ -207,13 +309,16 @@ class QQChannel(BaseChannel):
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
-        return QQConfig().model_dump(by_alias=True)
+        return QQConfig().model_dump(by_alias=True, exclude_none=True)
 
     def __init__(self, config: Any, bus: MessageBus):
         if isinstance(config, dict):
             config = QQConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: QQConfig = config
+        # Preserve explicitly configured notices for standalone channel callers.
+        # ChannelManager resolves global inheritance from the original section.
+        self.show_compaction_notices = bool(config.show_compaction_notices)
 
         self._client: Any | None = None
         self._http: aiohttp.ClientSession | None = None
@@ -222,14 +327,12 @@ class QQChannel(BaseChannel):
         self._msg_seq: int = 1  # used to avoid QQ API dedup
         self._chat_type_cache: dict[str, str] = {}
 
+        _install_qq_payload_capture()
+
         self._media_root: Path = self._init_media_root()
 
-    # ---------------------------
-    # Lifecycle
-    # ---------------------------
 
     def _init_media_root(self) -> Path:
-        """Choose a directory for saving inbound attachments."""
         if self.config.media_dir:
             root = Path(self.config.media_dir).expanduser()
         elif get_media_dir:
@@ -243,6 +346,18 @@ class QQChannel(BaseChannel):
         root.mkdir(parents=True, exist_ok=True)
         self.logger.info("media directory: {}", str(root))
         return root
+
+    async def login(self, force: bool = False) -> bool:
+        """Scan a QQ Bot QR code and save the AppID/secret it returns."""
+        from nanobot.channels.qq.connect import QQConnectStore
+
+        if not force and self.config.app_id and self.config.secret:
+            return True
+        credentials = await QQConnectStore().login()
+        if credentials is None:
+            return False
+        self.config.app_id, self.config.secret = credentials
+        return True
 
     async def start(self) -> None:
         """Start the QQ bot with auto-reconnect loop."""
@@ -263,7 +378,6 @@ class QQChannel(BaseChannel):
         await self._run_bot()
 
     async def _run_bot(self) -> None:
-        """Run botpy with fallback backoff for errors escaping start()."""
         backoff = 5
         max_backoff = 300
         while self._running:
@@ -298,32 +412,23 @@ class QQChannel(BaseChannel):
 
         self.logger.info("bot stopped")
 
-    # ---------------------------
-    # Outbound (send)
-    # ---------------------------
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send attachments first, then text."""
-        # Compaction notices assume the channel can update one message in place
-        # (Telegram/Discord edit their notice; WebSocket projects it as status).
-        # QQ's C2C/group API has no edit or recall endpoint, so by default the
-        # lifecycle is dropped here instead of posting two permanent messages
-        # (#5784); showCompactionNotices: true restores them.
         if (
             isinstance(msg.event, ContextCompactionEvent)
-            and not self.config.show_compaction_notices
+            and not (msg.event.notify or self.show_compaction_notices)
         ):
             return
 
         try:
             if not self._client:
-                raise RuntimeError("QQ client not initialized")
+                raise ChannelNotReadyError("QQ client not initialized")
 
             msg_id = msg.metadata.get("message_id")
             chat_type = self._chat_type_cache.get(msg.chat_id, "c2c")
             is_group = chat_type == "group"
 
-            # 1) Send media
             for media_ref in msg.media or []:
                 ok = await self._send_media(
                     chat_id=msg.chat_id,
@@ -344,7 +449,6 @@ class QQChannel(BaseChannel):
                         content=f"[Attachment send failed: {filename}]",
                     )
 
-            # 2) Send text
             if msg.content and msg.content.strip():
                 await self._send_text_only(
                     chat_id=msg.chat_id,
@@ -366,7 +470,6 @@ class QQChannel(BaseChannel):
         msg_id: str | None,
         content: str,
     ) -> None:
-        """Send a plain/markdown text message."""
         if not self._client:
             return
 
@@ -394,7 +497,6 @@ class QQChannel(BaseChannel):
         msg_id: str | None,
         is_group: bool,
     ) -> bool:
-        """Read bytes -> base64 upload -> msg_type=7 send."""
         if not self._client:
             return False
 
@@ -448,12 +550,10 @@ class QQChannel(BaseChannel):
             return False
 
     async def _read_media_bytes(self, media_ref: str) -> tuple[bytes | None, str | None]:
-        """Read bytes from http(s) or local file path; return (data, filename)."""
         media_ref = (media_ref or "").strip()
         if not media_ref:
             return None, None
 
-        # Local file: plain path or file:// URI
         if not media_ref.startswith("http://") and not media_ref.startswith("https://"):
             try:
                 if media_ref.startswith("file://"):
@@ -474,7 +574,6 @@ class QQChannel(BaseChannel):
                 self.logger.warning("outbound media read error ref={} err={}", media_ref, e)
                 return None, None
 
-        # Remote URL
         ok, err = validate_url_target(media_ref)
         if not ok:
             self.logger.warning("outbound media URL validation failed url={} err={}", media_ref, err)
@@ -511,7 +610,6 @@ class QQChannel(BaseChannel):
         file_name: str | None = None,
         srv_send_msg: bool = False,
     ) -> dict[str, Any]:
-        """Upload base64-encoded file and return Media object."""
         if not self._client:
             raise RuntimeError("QQ client not initialized")
 
@@ -546,12 +644,8 @@ class QQChannel(BaseChannel):
             return {"file_info": result_data["file_info"]}
         return cast(dict[str, Any], result)
 
-    # ---------------------------
-    # Inbound (receive)
-    # ---------------------------
 
     async def _on_message(self, data: object, is_group: bool = False) -> None:
-        """Parse inbound message, download attachments, and publish to the bus."""
         try:
             message = cast(Any, data)
             if is_group:
@@ -587,15 +681,19 @@ class QQChannel(BaseChannel):
                     )
                 return
 
-            # the data used by tests don't contain attachments property
-            # so we use getattr with a default of [] to avoid AttributeError in tests
+            # Resolve the quote before attachment downloads let newer messages
+            # evict this message's captured payload.
+            quoted = _quoted_content_for(message)
+            if quoted:
+                quote_tag = f"[Reply to: {quoted}]"
+                content = f"{quote_tag}\n{content}" if content else quote_tag
+
             attachments = cast(
                 list[object],
                 getattr(message, "attachments", None) or [],
             )
             media_paths, recv_lines, att_meta = await self._handle_attachments(attachments)
 
-            # Compose content that always contains actionable saved paths
             if recv_lines:
                 tag = (
                     "[Image]"
@@ -642,7 +740,6 @@ class QQChannel(BaseChannel):
         self,
         attachments: list[object],
     ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
-        """Extract, download (chunked), and format attachments for agent consumption."""
         media_paths: list[str] = []
         recv_lines: list[str] = []
         att_meta: list[dict[str, Any]] = []
@@ -682,13 +779,6 @@ class QQChannel(BaseChannel):
         url: str,
         filename_hint: str = "",
     ) -> str | None:
-        """Download an inbound attachment using streaming chunk write.
-
-        Uses chunked streaming to avoid loading large files into memory.
-        Enforces a max download size and writes to a .part temp file
-        that is atomically renamed on success.
-        """
-        # Handle protocol-relative URLs (e.g. "//multimedia.nt.qq.com/...")
         if url.startswith("//"):
             url = f"https:{url}"
 
@@ -720,7 +810,6 @@ class QQChannel(BaseChannel):
 
                 ctype = (resp.headers.get("Content-Type") or "").lower()
 
-                # Infer extension: url -> filename_hint -> content-type -> fallback
                 ext = Path(urlparse(url).path).suffix
                 if not ext:
                     ext = Path(filename_hint).suffix
@@ -751,7 +840,6 @@ class QQChannel(BaseChannel):
 
                 tmp_path = target.with_suffix(target.suffix + ".part")
 
-                # Stream write
                 downloaded = 0
                 chunk_size = max(1024, int(self.config.download_chunk_size or 262144))
                 max_bytes = max(
@@ -762,7 +850,7 @@ class QQChannel(BaseChannel):
 
                 def _open_tmp() -> BinaryIO:
                     active_tmp_path.parent.mkdir(parents=True, exist_ok=True)
-                    return active_tmp_path.open("wb")  # noqa: SIM115
+                    return active_tmp_path.open("wb")
 
                 f = await asyncio.to_thread(_open_tmp)
                 try:
@@ -781,9 +869,8 @@ class QQChannel(BaseChannel):
                 finally:
                     await asyncio.to_thread(f.close)
 
-                # Atomic rename
                 await asyncio.to_thread(os.replace, active_tmp_path, target)
-                tmp_path = None  # mark as moved
+                tmp_path = None
                 self.logger.info("file saved: {}", str(target))
                 return str(target)
 
@@ -791,7 +878,6 @@ class QQChannel(BaseChannel):
             self.logger.exception("download error")
             return None
         finally:
-            # Cleanup partial file
             if tmp_path is not None:
                 with suppress(Exception):
                     tmp_path.unlink(missing_ok=True)

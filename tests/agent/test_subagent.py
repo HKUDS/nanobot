@@ -1,13 +1,12 @@
-"""Tests for SubagentManager."""
-
 import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from nanobot.agent.memory import Consolidator
 from nanobot.agent.runner import AgentRunResult
-from nanobot.agent.subagent import SubagentManager, SubagentStatus
+from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.filesystem import FileToolsConfig
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ToolsConfig
@@ -24,24 +23,27 @@ def _runtime(provider: LLMProvider) -> LLMRuntime:
 
 @pytest.mark.asyncio
 async def test_subagent_uses_tool_loader():
-    """Verify subagent registers tools via ToolLoader, not hard-coded imports."""
     provider = MagicMock(spec=LLMProvider)
     provider.get_default_model.return_value = "test"
     sm = SubagentManager(
         workspace=Path("/tmp"),
         bus=MessageBus(),
         max_tool_result_chars=16_000,
+        consolidator=MagicMock(spec=Consolidator),
     )
     tools = sm._build_tools()
     assert tools.has("read_file")
     assert tools.has("write_file")
     assert not tools.has("message")
     assert not tools.has("spawn")
+    assert not tools.has("subagent")
+    assert not tools.has("send_session_message")
+    assert not tools.has("read_session")
+    assert not tools.has("my")
 
 
 @pytest.mark.asyncio
 async def test_subagent_build_tools_isolates_file_read_state(tmp_path):
-    """Each spawned subagent needs a fresh file-state cache."""
     (tmp_path / "note.txt").write_text("hello\n", encoding="utf-8")
     provider = MagicMock(spec=LLMProvider)
     provider.get_default_model.return_value = "test"
@@ -49,6 +51,7 @@ async def test_subagent_build_tools_isolates_file_read_state(tmp_path):
         workspace=tmp_path,
         bus=MessageBus(),
         max_tool_result_chars=16_000,
+        consolidator=MagicMock(spec=Consolidator),
     )
 
     first_read = sm._build_tools().get("read_file")
@@ -68,6 +71,7 @@ def test_subagent_respects_file_tool_toggle(tmp_path):
         workspace=tmp_path,
         bus=MessageBus(),
         max_tool_result_chars=16_000,
+        consolidator=MagicMock(spec=Consolidator),
         tools_config=ToolsConfig(file=FileToolsConfig(enable=False)),
     )
 
@@ -98,6 +102,7 @@ def test_subagent_prompt_keeps_agent_paths_for_selected_project(tmp_path):
         workspace=agent_workspace,
         bus=MessageBus(),
         max_tool_result_chars=16_000,
+        consolidator=MagicMock(spec=Consolidator),
     )
 
     prompt = manager._build_subagent_prompt(workspace=project)
@@ -119,6 +124,7 @@ def test_subagent_prompt_uses_relative_paths_in_agent_workspace(tmp_path):
         workspace=tmp_path,
         bus=MessageBus(),
         max_tool_result_chars=16_000,
+        consolidator=MagicMock(spec=Consolidator),
     )
 
     prompt = manager._build_subagent_prompt()
@@ -140,27 +146,22 @@ async def test_subagent_keeps_project_runtime_scope_with_agent_owned_tools(tmp_p
         workspace=agent_workspace,
         bus=MessageBus(),
         max_tool_result_chars=16_000,
+        consolidator=MagicMock(spec=Consolidator),
     )
     manager.runner.run = AsyncMock(
         return_value=AgentRunResult(final_content="ok", messages=[], stop_reason="completed")
     )
     manager._announce_result = AsyncMock()
-    status = SubagentStatus(
-        task_id="t1",
-        label="label",
-        task_description="task",
-        started_at=0.0,
-    )
 
-    await manager._run_subagent(
-        "t1",
-        "task",
-        "label",
-        {"channel": "websocket", "chat_id": "direct"},
-        status,
-        _runtime(provider),
+    await manager.spawn(
+        task="task",
+        label="label",
+        origin_channel="websocket",
+        origin_chat_id="direct",
+        runtime=_runtime(provider),
         workspace_scope=build_workspace_scope(project, "restricted"),
     )
+    await asyncio.gather(*manager._running_tasks.values(), return_exceptions=True)
 
     spec = manager.runner.run.call_args.args[0]
     assert spec.workspace == project
@@ -270,6 +271,7 @@ async def test_spawned_subagent_inherits_llm_usage_source(tmp_path):
         workspace=tmp_path,
         bus=MessageBus(),
         max_tool_result_chars=16_000,
+        consolidator=MagicMock(spec=Consolidator),
     )
     sm.runner.run = AsyncMock(
         return_value=AgentRunResult(final_content="ok", messages=[], stop_reason="completed")

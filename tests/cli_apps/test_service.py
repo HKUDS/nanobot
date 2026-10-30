@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from nanobot.agent import plugins as agent_plugins
 from nanobot.agent.skills import SkillsLoader
+from nanobot.apps.cli import service as cli_service
 from nanobot.apps.cli.service import CliAppError, CliAppManager, CliAppsRuntimeConfig
 
 
@@ -363,6 +367,64 @@ def test_catalog_cache_fresh_can_include_optional_sources(tmp_path: Path) -> Non
 
     assert manager.catalog_cache_fresh() is True
     assert manager.catalog_cache_fresh(include_optional=True) is False
+
+
+def test_fetch_registry_async_offloads_cache_io_and_preserves_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _manager(tmp_path)
+    cache_path = manager._cache_path("harness")
+    _write_cache(cache_path, {"meta": {"updated": "old"}, "clis": []})
+    fetched = {"meta": {"updated": "2026-10-17"}, "clis": [{"name": "gimp"}]}
+    loop_thread = threading.get_ident()
+    io_threads: list[tuple[str, int]] = []
+    network_threads: list[int] = []
+    real_cached_registry = manager._cached_registry
+    real_write = cli_service._write_json
+    real_client = httpx.AsyncClient
+
+    def read(path: Path):
+        io_threads.append(("read", threading.get_ident()))
+        return real_cached_registry(path)
+
+    def write(path: Path, data: dict) -> None:
+        io_threads.append(("write", threading.get_ident()))
+        real_write(path, data)
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        network_threads.append(threading.get_ident())
+        await asyncio.sleep(0)
+        if len(network_threads) == 1:
+            return httpx.Response(200, json=fetched)
+        raise httpx.ConnectError("offline registry", request=request)
+
+    def no_sync_network(*args, **kwargs):
+        raise AssertionError("registry refresh must keep asynchronous HTTP")
+
+    monkeypatch.setattr(manager, "_cached_registry", read)
+    monkeypatch.setattr(cli_service, "_write_json", write)
+    monkeypatch.setattr(cli_service.httpx, "get", no_sync_network)
+    monkeypatch.setattr(
+        cli_service.httpx, "AsyncClient",
+        lambda **kwargs: real_client(transport=httpx.MockTransport(respond), **kwargs),
+    )
+
+    async def check() -> None:
+        url = "https://registry.invalid/catalog.json"
+        assert await manager._fetch_registry_async(url, cache_path, force_refresh=True) == fetched
+        writes_before_failure = [item for item in io_threads if item[0] == "write"]
+        assert writes_before_failure
+        assert await manager._fetch_registry_async(url, cache_path, force_refresh=True) == fetched
+        assert [item for item in io_threads if item[0] == "write"] == writes_before_failure
+
+    asyncio.run(check())
+
+    assert json.loads(cache_path.read_text(encoding="utf-8"))["data"] == fetched
+    assert not list(cache_path.parent.glob(f".{cache_path.name}.*.tmp"))
+    assert network_threads == [loop_thread, loop_thread]
+    assert {operation for operation, _ in io_threads} == {"read", "write"}
+    assert all(thread != loop_thread for _, thread in io_threads), io_threads
 
 
 def test_payload_cache_only_without_cache_returns_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
