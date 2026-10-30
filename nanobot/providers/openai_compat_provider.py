@@ -1409,6 +1409,27 @@ class OpenAICompatProvider(LLMProvider):
         except (TypeError, ValueError):
             return None
 
+    def _interrupted_chat_response(
+        self, finish_reason: str, usage: LLMUsage | None,
+    ) -> LLMResponse | None:
+        if not (
+            self._spec and self._spec.name == "deepseek"
+            and finish_reason in {"insufficient_system_resource", "aborted"}
+        ):
+            return None
+        # The reply may already have streamed, but it is not an error diagnostic
+        # and its unfinished tool calls must not be executed or retried.
+        return LLMResponse(
+            content=f"Error: DeepSeek generation was interrupted ({finish_reason}).",
+            finish_reason="error",
+            usage=usage,
+            # A failed stateless Chat request did not advance prior Responses state.
+            preserve_provider_state_on_error=True,
+            error_kind="generation_interrupted",
+            error_code=finish_reason,
+            error_should_retry=False,
+        )
+
     def _parse(self, response: Any) -> LLMResponse:
         if isinstance(response, str):
             return LLMResponse(content=response, finish_reason="stop")
@@ -1444,6 +1465,10 @@ class OpenAICompatProvider(LLMProvider):
         msg0 = self._maybe_mapping(choice0.get("message")) or {}
         content = self._extract_text_content(msg0.get("content"))
         finish_reason = str(choice0.get("finish_reason") or "stop")
+        usage = self._extract_usage(response_map)
+        interrupted = self._interrupted_chat_response(finish_reason, usage)
+        if interrupted is not None:
+            return interrupted
 
         raw_tool_calls: list[object] = []
         # StepFun: fallback to reasoning field when content is empty
@@ -1501,7 +1526,7 @@ class OpenAICompatProvider(LLMProvider):
             content=content,
             tool_calls=parsed_tool_calls,
             finish_reason=finish_reason,
-            usage=self._extract_usage(response_map),
+            usage=usage,
             reasoning_content=reasoning_content if isinstance(reasoning_content, str) else None,
         )
 
@@ -1902,7 +1927,8 @@ class OpenAICompatProvider(LLMProvider):
                             })
             if not completed:
                 raise ConnectionError("Model stream ended before a finish reason was received")
-            return self._parse_chunks(chunks)
+            result = self._parse_chunks(chunks)
+            return self._interrupted_chat_response(result.finish_reason, result.usage) or result
         except asyncio.TimeoutError:
             return LLMResponse(
                 content=(

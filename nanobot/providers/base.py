@@ -1714,9 +1714,11 @@ class LLMProvider(ABC):
         original_messages: list[dict[str, Any]],
         response: LLMResponse,
     ) -> LLMResponse:
-        # Removing the user's images cannot repair account access.
+        # Neither account failures nor interrupted generation indicate an image problem.
         if (
-            (response.error_kind or "").lower() in {"authentication", "oauth_auth_required"}
+            (response.error_kind or "").lower() in {
+                "authentication", "oauth_auth_required", "generation_interrupted",
+            }
             or response.error_status_code in {401, 403}
             or self.is_arrearage_response(response)
         ):
