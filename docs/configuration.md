@@ -314,6 +314,43 @@ A Base URL is the service address nanobot sends model requests to. Change it onl
 
 </details>
 
+### Structured Decision Client
+
+The optional structured decision client sends all typed questions in one System One request. Its settings are separate from the model-provider settings:
+
+```json
+{
+  "structuredDecision": {
+    "enabled": false,
+    "provider": "openrouter",
+    "protocol": "system_one",
+    "model": "~typesafe/jev-latest",
+    "timeoutS": 15
+  },
+  "providers": {
+    "openrouter": {
+      "apiKey": "${OPENROUTER_API_KEY}"
+    }
+  }
+}
+```
+
+`enabled` defaults to `false`; it is an opt-in setting for a future caller and does not send a request by itself. `provider` defaults to `openrouter`, `protocol` is currently `system_one`, `model` defaults to `~typesafe/jev-latest`, and `timeoutS` defaults to 15 seconds (allowed range: greater than 0 and at most 120 seconds).
+
+OpenRouter is the only registered structured-decision provider initially. Its API key comes from `providers.openrouter`, with `OPENROUTER_API_KEY` as the environment fallback. Proxy traffic uses the shared `network.proxy` only when `providers.openrouter.useProxy` is true. The decision URL is fixed at `https://openrouter.ai/api/alpha/decisions` and does not use `providers.openrouter.apiBase`. Custom or local decision endpoints and `baseUrl` overrides are not supported. Additional providers must be explicitly registered and support the System One decision API. Confidence thresholds belong to the calling policy, not this provider configuration.
+
+Image input is available to callers using the structured decision client with these OpenRouter models:
+
+| Model | Maximum images | Client per-image size limit |
+|-------|----------------|-----------------------------|
+| `cloudflare/clef` | 4 | About 300 KB |
+| `cloudflare/clef-flash` | 4 | About 300 KB |
+| `cloudflare/clef-omni` | 4 | Not specified by OpenRouter |
+| `openai/gpt-6-luna-decisions` | 128 | No additional client limit |
+| `~typesafe/jev-latest` | 16 | 16 MiB |
+
+Image bytes are sent as inline PNG, JPEG, or WebP data URLs. Remote URLs are not supported. OpenRouter recommends keeping Clef and Clef Flash images under about 300 KB each before base64 encoding because its token estimator counts encoded input against a 65,536-token window; the client enforces this per-image guidance. OpenRouter does not document a per-image byte limit for Clef Omni, so the client only enforces its four-image count and does not apply Cloudflare Workers AI's direct-API byte caps. For JEv, OpenRouter allows decoded image files up to 16 MiB each and TypeSafe separately limits the full request body, all processed images together, and the expanded request to 32 MiB; those combined limits are enforced upstream. Resize or recompress images if a request approaches these limits.
+
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
 | `custom` | Any OpenAI-compatible endpoint | — |
