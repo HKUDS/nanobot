@@ -703,6 +703,33 @@ class TestAttachmentsDir:
         assert ch._signal_attachments_dir() == Path.home() / "signal-attachments"
 
 
+@pytest.mark.parametrize(
+    "filenames", [("report.txt", "report.txt"), ("report?.txt", "report:.txt")]
+)
+@pytest.mark.parametrize("content_type", ["text/plain", ""])
+async def test_inbound_attachments_do_not_overwrite_previous_files(tmp_path, monkeypatch, filenames, content_type):
+    source_dir = tmp_path / "incoming"
+    source_dir.mkdir()
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    monkeypatch.setattr("nanobot.channels.signal.runtime.get_media_dir", lambda _channel: media_dir)
+    channel, handled = _make_channel_with_capture(attachments_dir=str(source_dir))
+
+    for index, filename in enumerate(filenames):
+        attachment_id = f"attachment-{index}"
+        (source_dir / attachment_id).write_bytes(f"report {index}".encode())
+        await channel._handle_receive_notification(_dm_envelope(
+            timestamp=1000 + index,
+            attachments=[{"id": attachment_id, "filename": filename, "contentType": content_type}],
+        ))
+
+    assert len(handled) == 2
+    saved = [Path(message["media"][0]) for message in handled]
+    assert saved[0] != saved[1]
+    assert [path.read_bytes() for path in saved] == [b"report 0", b"report 1"]
+    assert all(path.parent == media_dir and path.suffix == ".txt" for path in saved)
+
+
 class TestHandleDataMessageDM:
     def _make_dm_channel(self, policy="open", allow_from=None) -> tuple[SignalChannel, list]:
         return _make_channel_with_capture(
