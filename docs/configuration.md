@@ -2181,6 +2181,69 @@ Image generation is configured under `tools.imageGeneration` and uses credential
 
 See [Image Generation](./image-generation.md) for WebUI usage, provider examples, artifact storage, and troubleshooting.
 
+## Google Drive
+
+The `google_drive` tool reads files from Drive folders shared with a Google service account. It can list a folder, search, read file metadata and download a file into the workspace. Google Docs, Sheets and Slides are exported as text, CSV and PDF. The tool uses the `drive.readonly` scope and only reaches files under the configured folders.
+
+Install the Google client libraries with `nanobot plugins enable drive` (or `pip install "nanobot-ai[drive]"`). Then:
+
+1. Create a service account in Google Cloud, enable the Drive API for its project and download a JSON key.
+2. Share each folder the agent may read with the key's `client_email`.
+3. Save the key next to `config.json` and add the folder IDs from the folder URLs (`/folders/<ID>`):
+
+```json
+{
+  "tools": {
+    "drive": {
+      "enabled": true,
+      "credentialsPath": "secrets/drive-service-account.json",
+      "rootFolderIds": ["1AbCdEfGh..."]
+    }
+  }
+}
+```
+
+Restart nanobot after changing this section.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | boolean | `false` | Register the `google_drive` tool |
+| `credentialsPath` | string | `""` | Service account JSON key. Relative paths resolve from the config directory. Falls back to `GOOGLE_APPLICATION_CREDENTIALS` when empty |
+| `rootFolderIds` | string[] | `[]` | Folders the agent may read, including their subfolders. The tool stays off while this is empty |
+| `downloadSubdir` | string | `"drive"` | Workspace subfolder that downloads go to |
+| `maxDownloadSizeMb` | integer | `50` | Largest file the tool will download |
+
+Keep the key file private (for example `chmod 600`). It grants access to everything shared with the service account.
+
+## Google Sheets
+
+The `google_sheets` tool reads and updates spreadsheets shared with a Google service account. It can list the configured spreadsheets and their tabs, read a range, update a range and append rows. Only the configured spreadsheet IDs are reachable.
+
+Ranges must be bounded A1 ranges such as `Sheet1!A1:C20`; append also accepts `Sheet1!A:C`. Writes use Google's `USER_ENTERED` input mode, so numbers stay numbers and a value starting with `=` becomes a formula.
+
+Install the libraries with `nanobot plugins enable sheets` (it installs the same packages as `drive`), enable the Google Sheets API for the service account's project, share each spreadsheet with the key's `client_email`, then add the IDs from the sheet URLs (`/spreadsheets/d/<ID>`):
+
+```json
+{
+  "tools": {
+    "sheets": {
+      "enabled": true,
+      "spreadsheetIds": ["1AbCdEfGh..."]
+    }
+  }
+}
+```
+
+When `credentialsPath` is empty, Sheets uses the Drive key from `tools.drive.credentialsPath`, so one service account can serve both tools. Restart nanobot after changing this section.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | boolean | `false` | Register the `google_sheets` tool |
+| `credentialsPath` | string | `""` | Service account JSON key. Falls back to the Drive key when empty |
+| `spreadsheetIds` | string[] | `[]` | Spreadsheets the agent may read and write. The tool stays off while this is empty |
+| `maxReadRows` | integer | `200` | Most rows a read or append can cover |
+| `maxWriteCells` | integer | `2000` | Most cells a read range or write can cover |
+
 ## MCP (Model Context Protocol)
 
 Open **Apps → MCP**, choose a preset or **Add MCP server**, and enter the stdio command or HTTP/SSE endpoint. Configure authentication and enabled tools in the server editor, save, and follow any connection or restart prompt.
