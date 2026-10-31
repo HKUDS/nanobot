@@ -249,6 +249,52 @@ class TestRevert:
     def test_returns_none_when_not_initialized(self, git):
         assert git.revert("abc") is None
 
+    @pytest.mark.parametrize("relative", ["SOUL.md", "memory/MEMORY.md"])
+    def test_revert_restores_absence_before_recreated_file(self, git_ready, relative):
+        # 2026-10-12: Restoring a recreated file must recover its absent parent state.
+        path = git_ready._workspace / relative
+        path.write_text("earlier memory", encoding="utf-8")
+        assert git_ready.auto_commit("memory: earlier content") is not None
+        path.unlink()
+        assert git_ready.auto_commit("memory: remove file") is not None
+        path.write_text("recreated memory", encoding="utf-8")
+        recreated = git_ready.auto_commit("dream: recreate memory")
+        assert recreated is not None
+
+        restored = git_ready.revert(recreated, message_prefix="dream:")
+
+        assert not path.exists()
+        assert restored is not None
+        assert git_ready.log()[0].sha == restored
+
+    @pytest.mark.parametrize(
+        "tracked",
+        [["SOUL.md"], ["SOUL.md", "USER.md", "memory/MEMORY.md", "memory/.dream_cursor"]],
+    )
+    def test_revert_stages_parent_absence_when_worktree_already_missing(self, tmp_path, tracked):
+        # 2026-10-12: An already missing worktree file may still need a deletion commit.
+        from dulwich import porcelain
+
+        store = GitStore(tmp_path, tracked_files=tracked)
+        assert store.init()
+        for relative in tracked:
+            (tmp_path / relative).unlink()
+        assert store.auto_commit("memory: remove all") is not None
+        path = tmp_path / "SOUL.md"
+        path.write_text("dream recreated", encoding="utf-8")
+        recreated = store.auto_commit("dream: recreate soul")
+        assert recreated is not None
+        path.unlink()
+
+        restored = store.revert(recreated, message_prefix="dream:")
+
+        assert restored is not None
+        assert store.log()[0].sha == restored
+        assert not path.exists()
+        status = porcelain.status(str(tmp_path))
+        assert not status.unstaged
+        assert not any(status.staged.values())
+
     def test_undoes_commit_changes(self, git_ready):
         ws = git_ready._workspace
         (ws / "SOUL.md").write_text("v2 content", encoding="utf-8")

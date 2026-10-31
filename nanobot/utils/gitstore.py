@@ -477,8 +477,12 @@ class GitStore:
                 restored: list[str] = []
                 for filepath in self._tracked_files:
                     content = self._read_blob_from_tree(repo, tree, filepath)
-                    if content is not None:
-                        dest = self._workspace / filepath
+                    # 2026-10-12: Stage parent absence even if the worktree file is missing.
+                    dest = self._workspace / filepath
+                    if content is None:
+                        dest.unlink(missing_ok=True)
+                        restored.append(filepath)
+                    else:
                         dest.write_text(content, encoding="utf-8")
                         restored.append(filepath)
 
