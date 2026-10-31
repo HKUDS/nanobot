@@ -604,12 +604,9 @@ async def test_goal_continuation_after_followup_keeps_control_identity(loop, com
     async def chat(*, messages, **kwargs):
         requests.append([dict(message) for message in messages])
         if len(requests) == 1:
-            await loop.bus.publish_inbound(InboundMessage(
+            await loop._enqueue_session_message(InboundMessage(
                 channel="cli", sender_id="u", chat_id="test", content="Inspect file B first",
             ))
-            async with asyncio.timeout(3):
-                while loop._pending_queues["cli:test"].empty():
-                    await asyncio.sleep(0)
         elif complete_on_followup or len(requests) == 3:
             await loop.sessions.state.update_metadata(session.key, {
                 GOAL_STATE_KEY: {"status": "complete", "objective": "Finish the long goal"},
@@ -621,27 +618,19 @@ async def test_goal_continuation_after_followup_keeps_control_identity(loop, com
         )
 
     loop.provider.chat_stream_with_retry = chat
-    run_task = asyncio.create_task(loop.run())
-    try:
-        await loop.bus.publish_inbound(InboundMessage(
-            channel="cli", sender_id="u", chat_id="test", content="Start the goal",
-        ))
-        async with asyncio.timeout(5):
-            while not requests or "cli:test" in loop._pending_queues:
-                await asyncio.sleep(0.01)
-        assert len(requests) == (2 if complete_on_followup else 3)
-        continuation_text = "Continue the active sustained goal after the previous turn"
-        assert continuation_text not in str(requests[1])
-        if not complete_on_followup:
-            assert continuation_text in str(requests[2])
-        loop.sessions.invalidate("cli:test")
-        history = public_history_messages(loop.sessions.get_or_create("cli:test").messages)
-        assert [message["content"] for message in history if message["role"] == "user"] == [
-            "Start the goal", "Inspect file B first",
-        ]
-    finally:
-        loop.stop()
-        await asyncio.wait_for(run_task, timeout=3)
+    await run_session(loop, InboundMessage(
+        channel="cli", sender_id="u", chat_id="test", content="Start the goal",
+    ))
+    assert len(requests) == (2 if complete_on_followup else 3)
+    continuation_text = "Continue the active sustained goal after the previous turn"
+    assert continuation_text not in str(requests[1])
+    if not complete_on_followup:
+        assert continuation_text in str(requests[2])
+    loop.sessions.invalidate("cli:test")
+    history = public_history_messages(loop.sessions.get_or_create("cli:test").messages)
+    assert [message["content"] for message in history if message["role"] == "user"] == [
+        "Start the goal", "Inspect file B first",
+    ]
 
 
 async def test_queued_continuation_keeps_its_origin_after_another_chat_runs(loop):
