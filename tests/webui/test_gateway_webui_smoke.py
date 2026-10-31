@@ -1,9 +1,8 @@
-"""Black-box smoke test for the real gateway WebUI transport."""
-
 from __future__ import annotations
 
 import asyncio
 import json
+import signal
 import socket
 import subprocess
 import sys
@@ -31,7 +30,6 @@ _BOOTSTRAP_SECRET = "smoke-secret"
 async def test_remote_proxy_with_real_gateway_chat_settings_and_renewal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The auth proxy must preserve the actual gateway's WebUI mutation audience."""
     # Python CI runs from a clean source tree without a frontend build. Supply
     # this transport smoke's own local shell instead of relying on build leftovers.
     assets = tmp_path / "local-dist"
@@ -144,6 +142,7 @@ def _start_gateway(config_path: Path, log_path: Path) -> subprocess.Popen[bytes]
             cwd=Path(__file__).resolve().parents[2],
             stdout=log_file,
             stderr=subprocess.STDOUT,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
         )
     finally:
         log_file.close()
@@ -153,12 +152,19 @@ def _start_gateway(config_path: Path, log_path: Path) -> subprocess.Popen[bytes]
 def _stop_gateway(process: subprocess.Popen[bytes]) -> None:
     if process.poll() is not None:
         return
-    process.terminate()
+    if sys.platform == "win32":
+        # Target only this gateway's console group and let it close its SQLite worker.
+        # TerminateProcess also races the child behind a venv's Python launcher.
+        process.send_signal(signal.CTRL_BREAK_EVENT)
+    else:
+        process.terminate()
     try:
-        process.wait(timeout=10)
+        returncode = process.wait(timeout=30)
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait(timeout=10)
+        pytest.fail("gateway did not shut down gracefully within 30s")
+    assert returncode == 0, f"gateway shutdown failed with exit code {returncode}"
 
 
 def _get_json(url: str, *, token: str | None = None) -> dict:
@@ -195,13 +201,14 @@ def _wait_for_bootstrap(base_url: str, process: subprocess.Popen[bytes], log_pat
 
 
 async def _recv_until(ws: websockets.WebSocketClientProtocol, event: str) -> dict:
-    deadline = time.monotonic() + 20
-    while time.monotonic() < deadline:
-        raw = await asyncio.wait_for(ws.recv(), timeout=5)
-        payload = json.loads(raw)
-        if payload.get("event") == event:
-            return payload
-    raise AssertionError(f"websocket event {event!r} was not received")
+    try:
+        async with asyncio.timeout(20):
+            while True:
+                payload = json.loads(await ws.recv())
+                if payload.get("event") == event:
+                    return payload
+    except TimeoutError as exc:
+        raise AssertionError(f"websocket event {event!r} was not received within 20s") from exc
 
 
 @pytest.mark.asyncio
@@ -249,13 +256,15 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
             await ws.send(json.dumps({
                 "type": "message",
                 "chat_id": chat_id,
-                "content": "!printf shell-ok",
+                "content": "!echo shell-ok",
                 "webui": True,
                 "user_shell": True,
                 "turn_id": "shell-turn",
             }))
             shell = await _recv_until(ws, "message")
-            assert "shell-ok" in shell["text"]
+            assert shell["text"].splitlines()[0] == "shell-ok"
+            assert "Exit code: 0" in shell["text"]
+            assert shell["render_as"] == "text"
             assert shell["turn_id"] == "shell-turn"
             await _recv_until(ws, "turn_end")
 
@@ -276,8 +285,12 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
         ]
         assert "/model" in contents
         assert any("Current model: `custom/smoke-model`" in text for text in contents)
-        assert "!printf shell-ok" in contents
-        assert any("shell-ok" in text for text in contents)
+        assert "!echo shell-ok" in contents
+        assert shell["text"] in contents
+        [shell_history] = [event for event in thread["events"] if event.get("event") == "message"
+                           and event.get("turn_id") == "shell-turn"]
+        assert shell_history["text"] == shell["text"]
+        assert shell_history["render_as"] == shell["render_as"]
     finally:
         _stop_gateway(process)
 
@@ -295,11 +308,11 @@ async def test_gateway_recovers_private_children_and_deletes_them_with_parent(tm
     sessions.save(parent)
     children = SubagentSessions(sessions)
     now = time.monotonic()
-    children.create(SubagentStatus(
+    await children.create(SubagentStatus(
         task_id="finished", label="Finished", task_description="inspect", owner=parent.key,
         started_at=now, finished_at=now, completed_at=time.time(), state="done", phase="done", result="Verified",
     ))
-    children.create(SubagentStatus(
+    await children.create(SubagentStatus(
         task_id="abandoned", label="Abandoned", task_description="inspect", owner=parent.key,
         started_at=now, state="running", phase="thinking", result="Partial findings", partial=True,
         receipts={"follow-up": "accepted"},
@@ -338,7 +351,6 @@ async def test_gateway_recovers_private_children_and_deletes_them_with_parent(tm
 
 @pytest.mark.asyncio
 async def test_desktop_terminal_identity_and_independent_client_lifetime(tmp_path: Path) -> None:
-    """Two terminal clients exercise real authentication, framing and gateway lifetime."""
     ws_port, gateway_port = _free_port(), _free_port()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -353,12 +365,11 @@ async def test_desktop_terminal_identity_and_independent_client_lifetime(tmp_pat
         unauthenticated = httpx.get(f"{base_url}/webui/terminal", trust_env=False)
         assert unauthenticated.status_code == 401
         probe = _get_bootstrap(f"{base_url}/webui/terminal")
-        assert probe == terminal  # Contains no token or config information.
+        assert probe == terminal
         second = _get_bootstrap(f"{base_url}/webui/bootstrap")
         assert second["terminal"] == terminal
         identity_query = f'&terminal_protocol=1&terminal_instance={terminal["gatewayId"]}'
         first_url = f'{first["ws_url"]}?token={first["token"]}&client_id=terminal-one'
-        # A rejected wrong-instance upgrade must not consume the one-use WS token.
         with pytest.raises(websockets.exceptions.InvalidStatus) as wrong:
             async with websockets.connect(first_url + "&terminal_protocol=1&terminal_instance=wrong"):
                 pytest.fail("Wrong gateway identity accepted")
@@ -378,7 +389,6 @@ async def test_desktop_terminal_identity_and_independent_client_lifetime(tmp_pat
         assert process.poll() is None
         after = _get_bootstrap(f"{base_url}/webui/bootstrap")
         assert after["terminal"] == terminal
-        # The ordinary WebUI ready frame remains unchanged (no opt-in metadata).
         async with websockets.connect(f'{after["ws_url"]}?token={after["token"]}&client_id=browser') as browser:
             assert "terminal" not in await _recv_until(browser, "ready")
     finally:
@@ -388,7 +398,6 @@ async def test_desktop_terminal_identity_and_independent_client_lifetime(tmp_pat
 def test_gateway_restart_restores_a_completed_answer_without_replaying_model(
     tmp_path: Path,
 ) -> None:
-    """Exercise recovery through two real gateway processes and durable files."""
     ws_port = _free_port()
     gateway_port = _free_port()
     workspace = tmp_path / "workspace"
@@ -425,7 +434,7 @@ def test_gateway_restart_restores_a_completed_answer_without_replaying_model(
         "completed_tool_results": [],
         "pending_tool_calls": [],
     }
-    sessions.save(session, fsync=True)
+    sessions.save(session)
 
     second = _start_gateway(config_path, second_log)
     try:

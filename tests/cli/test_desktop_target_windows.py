@@ -1,5 +1,3 @@
-"""Win32 boundary tests; native pipe integration additionally runs on Windows."""
-
 import ctypes
 import os
 import threading
@@ -48,11 +46,10 @@ def test_windows_pipe_authenticates_before_io(monkeypatch, kernel):
 def test_windows_pending_io_is_drained_before_buffers_are_freed(monkeypatch, kernel, failure):
     lifecycle = []
     kernel.WriteFile.return_value = False
-    kernel.WaitForSingleObject.return_value = 258  # WAIT_TIMEOUT
+    kernel.WaitForSingleObject.return_value = 258
     if failure == "interrupt":
         kernel.WaitForSingleObject.side_effect = KeyboardInterrupt
     elif failure == "deadline":
-        # Whole request budget: wait-pipe, pre-transfer, then pending wait.
         monkeypatch.setattr(
             desktop_target, "_remaining_seconds",
             MagicMock(side_effect=[1.0, 0.5, DesktopTargetError("timed out")]),
@@ -132,7 +129,7 @@ def test_native_windows_pipe_roundtrip():
     handle = winapi.CreateNamedPipe(
         rf"\\.\pipe\{address}",
         winapi.PIPE_ACCESS_DUPLEX | winapi.FILE_FLAG_OVERLAPPED,
-        0,  # PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT
+        0,
         1, 8192, 8192, 1000, 0,
     )
     connected = winapi.ConnectNamedPipe(handle, overlapped=True)

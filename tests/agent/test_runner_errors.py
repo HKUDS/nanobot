@@ -1,6 +1,3 @@
-"""Tests for AgentRunner error handling: tool errors, LLM errors,
-session message isolation, and tool result preservation."""
-
 from __future__ import annotations
 
 import json
@@ -56,16 +53,22 @@ async def test_runner_returns_tool_exception_to_model_for_recovery():
         {"name": "list_dir", "status": "error", "detail": "boom"}
     ]
     tool_message = next(message for message in result.messages if message.get("role") == "tool")
-    retry_hint = "[Analyze the error above and try a different approach.]"
+    error_hint = (
+        "[Consider this result in the context of the user's goal "
+        "and decide whether and how to proceed.]"
+    )
     assert "Error: RuntimeError: boom" in tool_message["content"]
-    assert tool_message["content"].count(retry_hint) == 1
+    assert tool_message["content"].count(error_hint) == 1
 
 
 @pytest.mark.asyncio
-async def test_tool_execution_does_not_duplicate_existing_retry_hint():
-    retry_hint = "\n\n[Analyze the error above and try a different approach.]"
+async def test_tool_execution_does_not_duplicate_existing_error_hint():
+    error_hint = (
+        "\n\n[Consider this result in the context of the user's goal "
+        "and decide whether and how to proceed.]"
+    )
     tools = SimpleNamespace(
-        execute=AsyncMock(return_value=ToolResult.error("Error: boom" + retry_hint)),
+        execute=AsyncMock(return_value=ToolResult.error("Error: boom" + error_hint)),
     )
 
     results, events = await execute_tool_calls(
@@ -78,8 +81,8 @@ async def test_tool_execution_does_not_duplicate_existing_retry_hint():
         context=AgentHookContext(iteration=0, messages=[]),
     )
 
-    assert results == ["Error: boom" + retry_hint]
-    assert results[0].count(retry_hint) == 1
+    assert results == ["Error: boom" + error_hint]
+    assert results[0].count(error_hint) == 1
     assert events[0]["status"] == "error"
 
 
@@ -177,7 +180,6 @@ async def test_runner_ignores_tool_calls_when_finish_reason_blocks_execution(
     finish_reason: str,
     expected_stop_reason: str,
 ):
-    """Provider/gateway-injected tool calls under terminal block reasons must not run."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
@@ -300,15 +302,18 @@ async def test_runner_recognizes_web_fetch_errors(monkeypatch, url, ssrf):
     content = tool_message["content"]
     assert content.startswith(str(raw_error) + "\n\n")
     assert json.JSONDecoder().raw_decode(content)[0] == raw_payload
-    retry_hint = "[Analyze the error above and try a different approach.]"
+    error_hint = (
+        "[Consider this result in the context of the user's goal "
+        "and decide whether and how to proceed.]"
+    )
     if ssrf:
         assert result.tool_events[0]["detail"].startswith("ssrf_violation:")
         assert "non-bypassable security boundary" in content
         assert "Do not retry" in content
         assert "tools.ssrfWhitelist" in content
-        assert retry_hint not in content
+        assert error_hint not in content
     else:
-        assert content.count(retry_hint) == 1
+        assert content.count(error_hint) == 1
 
 
 @pytest.mark.asyncio
@@ -392,12 +397,10 @@ async def test_runner_preserves_tool_error_results_in_messages():
     ))
 
     assert result.stop_reason == "max_iterations"
-    # Both tool results must be in messages even though tc2 returned an error.
     tool_msgs = [m for m in result.messages if m.get("role") == "tool"]
     assert len(tool_msgs) == 2
     assert tool_msgs[0]["tool_call_id"] == "tc1"
     assert tool_msgs[1]["tool_call_id"] == "tc2"
-    # The assistant message with tool_calls must precede the tool results.
     asst_tc_idx = next(
         i for i, m in enumerate(result.messages)
         if m.get("role") == "assistant" and m.get("tool_calls")
@@ -422,8 +425,6 @@ async def test_length_finish_with_blank_content_routes_to_length_recovery():
     from nanobot.utils.runtime import LENGTH_RECOVERY_PROMPT
 
     provider = MagicMock(spec=LLMProvider)
-    # First call: truncated (length) with blank content and a dropped tool call.
-    # Second call: normal completion so the loop can terminate.
     provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(
             content="",
@@ -445,8 +446,6 @@ async def test_length_finish_with_blank_content_routes_to_length_recovery():
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
-    # The runner must have injected a length-recovery prompt and continued,
-    # rather than exhausting empty-response retries into a generic apology.
     user_msgs = [m.get("content") or "" for m in result.messages if m.get("role") == "user"]
     assert any(LENGTH_RECOVERY_PROMPT in c for c in user_msgs), (
         "expected a length-recovery message to be appended for a "

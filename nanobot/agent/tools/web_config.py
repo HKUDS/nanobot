@@ -1,5 +1,3 @@
-"""Web configuration shared by search/fetch tools and the root schema."""
-
 from pydantic import Field
 
 from nanobot.config_base import Base
@@ -22,7 +20,7 @@ class WebFetchConfig(Base):
 class WebToolsConfig(Base):
     """Web tools configuration."""
     enable: bool = True
-    proxy: str | None = None
+    use_proxy: bool = False
     user_agent: str | None = None
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
     fetch: WebFetchConfig = Field(default_factory=WebFetchConfig)

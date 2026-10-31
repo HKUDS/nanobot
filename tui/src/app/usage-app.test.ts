@@ -25,7 +25,6 @@ async function waitUntil(predicate: () => boolean): Promise<void> {
   expect(predicate()).toBe(true)
 }
 
-// The mounted app owns these retained renderables; assertions exercise keyboard input and frames.
 interface MountedUI {
   composer: TextareaRenderable
   usagePanel: UsagePanel
@@ -47,6 +46,7 @@ describe("TUI /usage", () => {
       activeChatId: "chat", connect() {}, close() {},
       send(content: string) { sent.push(content); return "turn" },
       async sendAttachments(content: string) { return this.send(content) },
+      async inspectAttachment(): Promise<never> { throw new Error("file not found") },
       attach(chatId: string) { this.activeChatId = chatId },
       newChat() { this.activeChatId = "new-chat" },
       setWorkspaceScope() {},

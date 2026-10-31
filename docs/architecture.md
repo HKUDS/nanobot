@@ -55,6 +55,12 @@ MCP connections are application-owned infrastructure. Composition roots create a
 
 Keep this split in mind when debugging. If a problem is about channel routing, session keys, workspace selection, or outbound delivery, start in `agent/loop.py`. If it is about provider calls, tool calls, streaming, or iteration limits, start in `agent/runner.py`.
 
+After a terminal tool-iteration limit, the next ordinary turn receives a short runtime-context note to follow the current request and resume unfinished work only when asked. `session/turn_continuation.py` owns this budget-stop context; a queued Goal continuation is not a terminal stop. The note is stored with that input for stable model-history replay but is hidden from display history. Tool calls and results remain intact. New or forked histories do not inherit the pending note. This is model guidance, not a tool-execution ban or a fix for sudo authentication.
+
+## Context Budgets
+
+When file reads make a request exceed the context budget, the runner first summarizes history that the model has already received. If the new file results still do not fit, it replaces only the necessary unread text results with a budget error that asks the model to read a smaller range. It saves that same error for replay; it does not restore the oversized result on the next turn. Source files, accepted history, tool call IDs, and tool schemas stay unchanged. This recovery does not bypass the budget limit or offload `read_file` results to more files.
+
 ## Providers
 
 Provider metadata is centralized in `nanobot/providers/registry.py`. Configuration fields live in `nanobot/config/schema.py`.
@@ -138,6 +144,8 @@ Important files:
 
 Tool behavior is part of the model contract. Keep user-visible tool names, schemas, and error messages stable unless a change is intentional.
 
+Before tool execution, schema-guided casting can decode a nested JSON string when the declared type requires an object or array. Simple container-only unions are supported without selecting a preferred branch. String-accepting unions, malformed JSON, mismatched values, and schemas without an explicit container type stay unchanged. This step does not infer types through references or composition rules. The model-facing schema and original tool-call arguments in history remain unchanged.
+
 ## Config and Paths
 
 The config schema lives in `nanobot/config/schema.py`. Loading and saving live in `nanobot/config/loader.py`. Runtime path helpers live in `nanobot/config/paths.py`.
@@ -148,7 +156,7 @@ Defaults:
 |---|---|
 | Config | `~/.nanobot/config.json` |
 | Workspace | `~/.nanobot/workspace/` |
-| Sessions | `<config-dir>/sessions/<workspace-id>/*.jsonl` (default: `~/.nanobot/sessions/...`) |
+| Sessions | `<config-dir>/sessions/<workspace-id>/sessions.sqlite3` (default: `~/.nanobot/sessions/...`) |
 | Memory | `<workspace>/memory/` |
 | Cron store | `<workspace>/cron/jobs.json` |
 | WebUI/media/log runtime data | config directory subdirectories such as `webui/`, `media/`, and `logs/` |
@@ -171,11 +179,17 @@ Runtime code distinguishes the configured agent workspace from the effective pro
 
 Session history is the near-term conversation replay. Memory is the longer-term workspace state.
 
-`nanobot/session/history.py` reads full persisted session records for `search_sessions` and `read_session`, including messages before summary checkpoints. Tool results contain public user and assistant text with indexes into the original session messages. WebUI transcript events and replay pagination are owned by the display adapter and do not supply tool history.
+`nanobot/session/history.py` reads full persisted model history for `search_sessions` and `read_session`, including messages before summary checkpoints. Tool results contain public user and assistant text with indexes into the original session messages. Display facts are stored separately from those messages in the same SQLite database; they never become provider context or session-tool history.
+
+`SessionState` owns both logical histories. `history_entries` stores transport-neutral inputs, completed answer/reasoning segments, activity, historical file diffs, response sources, and completion statistics/outcomes; `history_turns` and `history_heads` provide bounded paging and revision/sidebar projections. WebUI converts these facts into its existing transcript protocol inside an owner-managed read snapshot. Delta frames remain transient. A turn may commit facts as it progresses; this is not a transaction held across a model request or network delivery.
+
+Every append carries the generation admitted before execution, including a distinct display destination under unified-session routing. A missing or replaced session rejects the append instead of creating a new row. Delete/reset cascades through both logical histories; fork copies its canonical and display prefixes in one SQLite transaction. Future in-place history replacement should use that same owner transaction rather than file journals or replay-cache writes.
+
+SQLite schema upgrades preserve the stored model and display histories.
 
 | Store | File area |
 |---|---|
-| Session JSONL files | `<config-dir>/sessions/<workspace-id>/` |
+| SQLite conversation state | `<config-dir>/sessions/<workspace-id>/sessions.sqlite3` |
 | Long-term memory | `<workspace>/memory/MEMORY.md` |
 | Consolidation source history | `<workspace>/memory/history.jsonl` |
 | Bootstrap identity files | `<workspace>/SOUL.md`, `<workspace>/USER.md`, templates under `nanobot/templates/` |

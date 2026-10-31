@@ -1,3 +1,4 @@
+import { pastedFilePath, PastedPathRange } from "../../../packages/client-events/attachments"
 import {
   BoxRenderable,
   CliRenderEvents,
@@ -90,6 +91,7 @@ import {
 } from "../views/footer-hints"
 import { copyWithSystemClipboard } from "../platform/clipboard"
 import { configureOpenTuiEnvironment, createTuiHost, type TuiHost } from "../platform/host"
+import { applySelectionColors } from "../platform/selection"
 import { LOCAL_COMMANDS } from "./commands"
 import { CooperativeEventQueue } from "./event-queue"
 import {
@@ -220,6 +222,8 @@ export class NanobotTui {
   private apiRefreshPromise: Promise<GatewayApiConnection> | null = null
   private skillLoadId = 0
   private clipboardImagePending = false
+  private pathInspection: PastedPathRange | null = null
+  private get pathInspectionPending(): boolean { return this.pathInspection !== null }
   private clipboardPasteGeneration = 0
   private composerValue = ""
   private composerCursor = 0
@@ -375,11 +379,8 @@ export class NanobotTui {
       },
       {
         onPrimaryMouseDown: () => {
-          const restoreComposerFocus = !this.diffViewer.visible
+          const restoreComposerFocus = !this.diffViewer.visible && !this.transcript.diagrams.viewer.visible
           if (restoreComposerFocus) this.composer.focus()
-          // Runtime pickers are transient popovers. A primary click anywhere
-          // outside their trigger or body dismisses them; hide() restores the
-          // composer focus through the shared visibility callback.
           this.dismissRuntimeControls()
           if (this.sessionLoading || this.sessionMenu.visible) this.closeSessions()
           return restoreComposerFocus
@@ -404,6 +405,20 @@ export class NanobotTui {
     this.status = layout.status
     this.meta = layout.meta
     this.renderer.root.add(this.shell)
+    this.renderer.root.add(this.transcript.diagrams.viewer.root)
+    this.transcript.diagrams.onOpen = () => {
+      this.composer.blur()
+    }
+    this.transcript.diagrams.viewer.onClose = () => {
+      this.composer.focus()
+      if (this.activeTurn) this.renderActiveStatus()
+      else this.status.content = this.readyStatus()
+      this.updateMeta()
+    }
+    this.shell.renderBefore = () => {
+      const selection = this.renderer.getSelection()
+      if (selection) applySelectionColors(selection, this.palette.selection)
+    }
 
     this.renderer.keyInput.on("keypress", this.handleKey)
     this.renderer.on(CliRenderEvents.THEME_MODE, this.handleTheme)
@@ -493,6 +508,10 @@ export class NanobotTui {
   private submit(): void {
     if (this.quitting || this.composer.isDestroyed) return
     const visibleContent = this.composer.plainText.trim()
+    if (this.pathInspectionPending) {
+      this.status.content = "Checking local attachment…"
+      return
+    }
     if (this.sessionLoading) {
       this.status.content = "Loading sessions…"
       return
@@ -549,7 +568,7 @@ export class NanobotTui {
     }
     const command = this.commandMenu.resolve(visibleContent)
     if ((command || visibleContent.startsWith("!")) && this.draft.media(visibleContent).length) {
-      this.status.content = "Remove the image before running a command."
+      this.status.content = "Remove attachments before running a command."
       return
     }
     if (command?.source === "tui") {
@@ -557,6 +576,7 @@ export class NanobotTui {
       else if (command.command.action === "context") void this.openContext()
       else if (command.command.action === "usage") this.openUsage()
       else if (command.command.action === "diff") this.openDiff()
+      else if (command.command.action === "diagrams") { this.clearComposer(); this.transcript.diagrams.open() }
       else if (command.command.action === "branch") void this.openBranch()
       else if (command.command.action === "detach") this.quit(true)
       else if (command.command.action === "exit") this.quit()
@@ -591,7 +611,7 @@ export class NanobotTui {
       this.attachmentSendPending = true
       const originalText = this.composer.plainText
       const chatId = this.client.activeChatId
-      this.status.content = "Uploading attachments…"
+      this.status.content = "Sending attachments…"
       void this.client.sendAttachments(prompt.content, prompt.options).then((turnId) => {
         if (this.client.activeChatId !== chatId || this.composer.plainText !== originalText) return
         this.sendPrompt(prompt, steering, turnId)
@@ -747,7 +767,7 @@ export class NanobotTui {
             if (this.modelCommandTurns.delete(event.turn_id)) {
               void this.refreshSessionMetadata(event.chat_id)
             }
-            if (!silent) this.transcript.assistant(event.text)
+            if (!silent) this.transcript.assistant(event.text, event.render_as)
             if (!this.activeTurn) this.status.content = "Ready"
             return
           }
@@ -757,6 +777,8 @@ export class NanobotTui {
           this.activeLabel = event.kind === "tool_hint" ? "Working" : "Thinking"
           this.transcript.progress(event.text, event.tool_events)
           this.setActive(true)
+        } else if (event.render_as === "text") {
+          this.transcript.assistant(event.text, event.render_as)
         } else {
           this.finalMessage = event.text
         }
@@ -1230,10 +1252,7 @@ export class NanobotTui {
       this.status.content = "Duplicate image placeholder. Rename or remove it before sending."
       return false
     }
-    if (!this.hasPrompt(prompt)) return false
-    if ((prompt.options.media?.length || 0) <= MAX_DRAFT_IMAGES) return true
-    this.status.content = `Remove images until ${MAX_DRAFT_IMAGES} or fewer remain`
-    return false
+    return this.hasPrompt(prompt)
   }
 
   private restoreQueuedPrompts(): void {
@@ -1248,7 +1267,7 @@ export class NanobotTui {
     if (!this.activeTurn || !this.ready) return
     const visibleContent = this.composer.plainText.trim()
     if (this.draft.media(visibleContent).length) {
-      this.status.content = "Images cannot be queued. Press Enter to send now."
+      this.status.content = "Attachments cannot be queued. Press Enter to send now."
       return
     }
     if (this.commandMenu.resolve(visibleContent)?.source === "tui") {
@@ -1307,6 +1326,17 @@ export class NanobotTui {
         key.preventDefault()
         return
       }
+    }
+    if (this.transcript.diagrams.viewer.visible) {
+      this.transcript.diagrams.viewer.handleKey(key)
+      key.preventDefault()
+      return
+    }
+    if (key.ctrl && key.name === "g") {
+      this.commandMenu.hide()
+      this.transcript.diagrams.open()
+      key.preventDefault()
+      return
     }
     if (this.diffViewer.visible) {
       if (key.ctrl && key.name === "c") {
@@ -1657,8 +1687,6 @@ export class NanobotTui {
       mode,
       this.renderer.width,
       footerHintTheme(this.palette),
-      process.platform,
-      Boolean(this.renderer.capabilities?.kitty_keyboard),
     )
   }
 
@@ -1729,6 +1757,8 @@ export class NanobotTui {
     this.composerFrame.borderColor = this.palette.accent
     this.composer.backgroundColor = surface
     this.composer.focusedBackgroundColor = surface
+    this.composer.selectionBg = this.palette.selection.background
+    this.composer.selectionFg = this.palette.selection.foreground
     this.composer.placeholderColor = this.palette.muted
   }
 
@@ -1845,6 +1875,11 @@ export class NanobotTui {
       value = edit.value
       cursor = edit.cursor
     }
+    if (this.pathInspection && !this.pathInspection.update(value)) {
+      this.pathInspection = null
+      if (this.activeTurn) this.renderActiveStatus()
+      else this.status.content = this.ready ? this.readyStatus() : this.connectionMessage
+    }
     this.composerValue = value
     this.composerCursor = cursor
     this.draft.prune(value)
@@ -1904,6 +1939,7 @@ export class NanobotTui {
 
   private setComposer(content: string): void {
     this.clipboardPasteGeneration += 1
+    this.pathInspection = null
     this.draft.clear()
     this.composer.setText(content)
     this.composer.cursorOffset = content.length
@@ -1916,10 +1952,6 @@ export class NanobotTui {
 
   private async pasteClipboardImage(): Promise<void> {
     if (this.clipboardImagePending) return
-    if (this.draft.imageCount >= MAX_DRAFT_IMAGES) {
-      this.status.content = `A message can include up to ${MAX_DRAFT_IMAGES} images`
-      return
-    }
     const generation = this.clipboardPasteGeneration
     this.clipboardImagePending = true
     this.status.content = "Reading clipboard image…"
@@ -1928,7 +1960,7 @@ export class NanobotTui {
       if (this.quitting || generation !== this.clipboardPasteGeneration) return
       const insertion = this.draft.image(image, this.composer.plainText)
       if (!insertion) {
-        this.status.content = `A message can include up to ${MAX_DRAFT_IMAGES} images`
+        this.status.content = `A message can include up to ${MAX_DRAFT_IMAGES} images or files`
         return
       }
       this.composer.insertText(insertion.text)
@@ -1952,6 +1984,41 @@ export class NanobotTui {
   private handlePaste(event: PasteEvent): void {
     event.preventDefault()
     const value = stripAnsiSequences(decodePasteBytes(event.bytes))
+    const path = pastedFilePath(value)
+    if (path && !this.pathInspectionPending) {
+      this.composer.insertText(value)
+      const pasted = this.composer.plainText
+      const cursor = this.composerStringCursor()
+      const generation = this.clipboardPasteGeneration
+      const chatId = this.client.activeChatId
+      const range = new PastedPathRange(pasted, cursor - value.length, cursor)
+      this.pathInspection = range
+      this.status.content = "Checking local attachment…"
+      void this.client.inspectAttachment(path).then((file) => {
+        if (this.quitting || this.composer.isDestroyed || generation !== this.clipboardPasteGeneration
+          || chatId !== this.client.activeChatId || this.pathInspection !== range) return
+        if (!range.update(this.composer.plainText)) return
+        const insertion = this.draft.localFile(file, this.composer.plainText)
+        if (!insertion) throw new Error("Too many attachments; remove one and paste the path again")
+        const edited = range.replace(insertion.text, this.composerStringCursor())!
+        this.pathInspection = null
+        this.composer.setText(edited.value)
+        this.setComposerStringCursor(edited.value, edited.cursor)
+        this.status.content = `Attached ${file.name}. Review before sending.`
+      }).catch((error: unknown) => {
+        if (generation !== this.clipboardPasteGeneration || this.quitting || this.pathInspection !== range) return
+        this.pathInspection = null
+        this.status.content = error instanceof Error ? error.message : "Attachment unavailable; path retained"
+      }).finally(() => {
+        if (this.pathInspection !== range) return
+        this.pathInspection = null
+        if (!this.quitting && !this.composer.isDestroyed) {
+          if (this.activeTurn) this.renderActiveStatus()
+          else this.status.content = this.ready ? this.readyStatus() : this.connectionMessage
+        }
+      })
+      return
+    }
     const insertion = this.draft.paste(value)
     if (!insertion.text) return
     this.composer.insertText(insertion.text)
@@ -2007,7 +2074,6 @@ export class NanobotTui {
       )
       if (this.activeMentionQuery) this.syncComposerMenus()
     } catch {
-      // Mentions are additive; plain text input remains fully functional.
     }
   }
 
@@ -2026,7 +2092,6 @@ export class NanobotTui {
         this.syncComposerMenus()
       }
     } catch {
-      // Skill completion is additive; explicit $skill-name input still works.
     }
   }
 
@@ -2352,7 +2417,6 @@ export class NanobotTui {
       )
       this.status.content = sessions.length ? `${sessions.length} sessions` : "No saved sessions"
     } catch {
-      // Keep the existing picker usable during a transient refresh failure.
     } finally {
       this.sessionRefreshPending = false
     }
@@ -2480,7 +2544,6 @@ export class NanobotTui {
       if (!this.activeTurn) this.status.content = this.readyStatus()
       this.updateMeta()
     } catch {
-      // Keep the last known estimate; it is intentionally informational.
     }
   }
 

@@ -1,5 +1,3 @@
-"""Keep QQ channel tests out of the user's configured media directory."""
-
 import pytest
 
 

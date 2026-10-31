@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { StarLink, StarPrompt } from "@/components/StarPrompt";
+import { StarPromptView } from "@/components/StarPromptView";
 import { starPromptAction } from "@/lib/api";
 import i18n from "@/i18n";
 import { supportedLocales } from "@/i18n/config";
@@ -33,6 +34,18 @@ async function clickStarLink(link: HTMLElement) {
   link.addEventListener("click", (event) => event.preventDefault(), { once: true });
   await act(async () => fireEvent.click(link));
 }
+
+it("renders an invitation from caller-owned state and delegates actions without claiming it", async () => {
+  const star = vi.fn();
+  const dismiss = vi.fn();
+  render(<StarPromptView open saving={false} error={false} onOpenChange={vi.fn()}
+    onStar={star} onDismissForever={dismiss} />);
+  await clickStarLink(screen.getByRole("link", { name: "Star on GitHub" }));
+  expect(star).toHaveBeenCalledTimes(1);
+  await userEvent.click(screen.getByRole("button", { name: "Don't ask again" }));
+  expect(dismiss).toHaveBeenCalledTimes(1);
+  expect(action).not.toHaveBeenCalled();
+});
 
 it("claims once on entry and lets users skip without permanently dismissing", async () => {
   const view = render(<StarPrompt ready />);
@@ -131,7 +144,7 @@ it.each(supportedLocales.map(({ code }) => code))("localizes the complete invita
   ].join(" "));
   expect(screen.getByRole("button", { name: i18n.t("starPrompt.later") })).toBeVisible();
   expect(screen.getByRole("button", { name: i18n.t("starPrompt.never") })).toBeVisible();
-  expect(screen.getByRole("button", { name: i18n.t("common.close"), exact: true })).toBeVisible();
+  expect(screen.getByRole("button", { name: i18n.t("common.close") })).toBeVisible();
   expect(screen.getByRole("link", { name: i18n.t("starPrompt.action") })).toHaveAttribute("rel", "noopener noreferrer");
 });
 
@@ -143,7 +156,7 @@ it.each(["close button", "Escape"])("restores focus after %s without permanently
   await enter();
   expect(screen.getByRole("heading", { name: "Glad we could help." })).toHaveFocus();
   if (method === "Escape") await user.keyboard("{Escape}");
-  else await user.click(screen.getByRole("button", { name: "Close", exact: true }));
+  else await user.click(screen.getByRole("button", { name: "Close" }));
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Previous control" })).toHaveFocus();
   expect(action).toHaveBeenCalledTimes(1);

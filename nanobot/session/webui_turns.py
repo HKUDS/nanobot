@@ -1,5 +1,3 @@
-"""Session turn helpers for WebUI-capable WebSocket sessions."""
-
 from __future__ import annotations
 
 import re
@@ -41,6 +39,7 @@ from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import LLMProvider, LLMUsage
 from nanobot.providers.fallback_provider import FallbackModelObserver, FallbackModelSelection
 from nanobot.runtime_context import public_history_message
+from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
@@ -49,6 +48,7 @@ from nanobot.session.session_messages import (
     SessionMessageEnvelope,
     session_message_envelope,
 )
+from nanobot.session.sqlite_store import SessionConflictError
 from nanobot.utils.helpers import strip_think, truncate_text
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.webui.metadata import (
@@ -99,7 +99,6 @@ def _session_message_public_metadata(
 
 
 def _validated_llm_runtime(value: object) -> LLMRuntime | None:
-    """Keep runtime-event consumers defensive if an external publisher violates the contract."""
     return value if isinstance(value, LLMRuntime) else None
 
 
@@ -170,7 +169,6 @@ def _title_inputs(session: Session) -> tuple[str, str]:
 
 
 def _latest_title_inputs(session: Session) -> tuple[str, str]:
-    """Latest user/assistant texts, for turns executed on a shared session."""
     user_text = ""
     assistant_text = ""
     for message in reversed(session.messages):
@@ -210,12 +208,14 @@ async def maybe_generate_webui_title(
     so pass ``target_session_key`` to project the title onto that per-chat
     session instead of storing it on the shared one.
     """
-    routed_session = sessions.get_or_create(session_key)
+    routed_session = await sessions.state.read(session_key)
+    if routed_session is None:
+        return False
     target_is_routed = target_session_key is None or target_session_key == session_key
     if target_is_routed or target_session_key is None:
         target_session = routed_session
     else:
-        target_session = sessions.get_or_create(target_session_key)
+        target_session = await sessions.state.get(target_session_key)
     if (
         routed_session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
         and target_session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
@@ -228,8 +228,13 @@ async def maybe_generate_webui_title(
         cleaned_current_title = clean_generated_title(current_title)
         if cleaned_current_title:
             if cleaned_current_title != current_title:
-                target_session.metadata[WEBUI_TITLE_METADATA_KEY] = cleaned_current_title
-                sessions.save(target_session)
+                def clean_title(metadata: dict[str, Any]) -> None:
+                    if (metadata.get(WEBUI_TITLE_METADATA_KEY) == current_title
+                            and metadata.get(WEBUI_TITLE_USER_EDITED_METADATA_KEY) is not True):
+                        metadata[WEBUI_TITLE_METADATA_KEY] = cleaned_current_title
+                await sessions.state.mutate_metadata(
+                    target_session.key, clean_title, expected_generation=target_session.generation,
+                )
             return False
         target_session.metadata.pop(WEBUI_TITLE_METADATA_KEY, None)
 
@@ -292,9 +297,20 @@ async def maybe_generate_webui_title(
             response.finish_reason,
         )
         return False
-    target_session.metadata[WEBUI_TITLE_METADATA_KEY] = title
-    sessions.save(target_session)
-    return True
+    def set_title(metadata: dict[str, Any]) -> bool:
+        if metadata.get(WEBUI_TITLE_USER_EDITED_METADATA_KEY) is True:
+            return False
+        if metadata.get(WEBUI_TITLE_METADATA_KEY) != current_title:
+            return False
+        metadata[WEBUI_TITLE_METADATA_KEY] = title
+        return True
+    try:
+        changed, _ = await sessions.state.mutate_metadata(
+            target_session.key, set_title, expected_generation=target_session.generation,
+        )
+    except SessionConflictError:
+        return False
+    return changed
 
 
 async def maybe_generate_webui_title_after_turn(
@@ -473,8 +489,8 @@ class WebuiTurnRoutePolicy:
             )
             and route.channel == "websocket"
         ):
-            session = self.sessions.get_or_create(session_key)
-            if session.metadata.get(WEBUI_SESSION_METADATA_KEY) is True:
+            metadata_snapshot = self.sessions.state.peek_metadata(session_key)
+            if metadata_snapshot is not None and metadata_snapshot.get(WEBUI_SESSION_METADATA_KEY) is True:
                 metadata = dict(route.metadata)
                 turn_prefix = "session-input" if internal_user_input else "subagent"
                 metadata.update({
@@ -511,6 +527,25 @@ class WebuiTurnRoutePolicy:
                 msg.metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = owner
 
         return routed
+
+    async def admit(self, route: TurnRoute, session_key: str, generation: str | None) -> TurnRoute:
+        """Bind replies to the display destination's admitted lifetime."""
+        if route.channel != "websocket":
+            return route
+        target_key = webui_session_key(route.chat_id)
+        metadata = dict(route.metadata)
+        if target_key == session_key and generation is not None:
+            metadata.setdefault(HISTORY_GENERATION_METADATA_KEY, generation)
+            return replace(route, metadata=metadata)
+        revision = await self.sessions.state.project_history(target_key, lambda history: history.revision)
+        if revision is None:
+            raise SessionConflictError("display destination is no longer active")
+        admitted = metadata.get(HISTORY_GENERATION_METADATA_KEY)
+        # A distinct alias admitted by the WebSocket edge must still be current.
+        if admitted not in (None, generation, revision[0]):
+            raise SessionConflictError("display destination generation was replaced")
+        metadata[HISTORY_GENERATION_METADATA_KEY] = revision[0]
+        return replace(route, metadata=metadata)
 
 
 def build_webui_fallback_model_observer(bus: MessageBus) -> FallbackModelObserver:
@@ -552,6 +587,7 @@ class WebuiTurnCoordinator:
     sessions: SessionManager
     schedule_background: Callable[[Awaitable[None]], None]
     recovery: RecoveryCoordinator | None = None
+
     def subscribe(self) -> Callable[[], None]:
         """Subscribe this coordinator to runtime events."""
         unsubscribe = [
@@ -610,6 +646,7 @@ class WebuiTurnCoordinator:
             content="",
             metadata=dict(ctx.metadata or {}),
             session_key_override=ctx.session_key,
+            session_generation=ctx.session_generation,
         )
 
     @staticmethod
@@ -626,7 +663,7 @@ class WebuiTurnCoordinator:
             or not is_webui_session_key(session_key)
         ):
             return
-        persisted = self.sessions.read_session_metadata(session_key)
+        persisted = await self.sessions.state.read_metadata(session_key)
         metadata_value: object = persisted.get("metadata") if persisted is not None else None
         metadata = (
             cast(dict[str, Any], metadata_value)
@@ -637,17 +674,19 @@ class WebuiTurnCoordinator:
             return
         public_metadata = _session_message_public_metadata(envelope)
         try:
-            append_session_message_input(
+            await append_session_message_input(
                 session_key,
+                sessions=self.sessions,
                 content=event.content,
                 created_at_ms=envelope["created_at_ms"],
                 session_message=public_metadata,
             )
-        except (OSError, TypeError, ValueError):
+        except (OSError, TypeError, ValueError, SessionConflictError):
             logger.opt(exception=True).warning(
                 "Failed to persist session input {}",
                 envelope["message_id"],
             )
+            return
         await self.bus.publish_outbound(outbound_message_for_event(
             channel="websocket",
             chat_id=session_key.split(":", 1)[1],
@@ -658,11 +697,15 @@ class WebuiTurnCoordinator:
             ),
         ))
 
-    def _handle_session_turn_started(self, event: SessionTurnStarted) -> None:
-        if not self._is_websocket_event(event.context):
-            return
-        session = self.sessions.get_or_create(event.context.session_key)
-        mark_webui_session(session, event.context.metadata)
+    async def _handle_session_turn_started(self, event: SessionTurnStarted) -> None:
+        if (self._is_websocket_event(event.context)
+                and event.context.metadata.get(WEBUI_SESSION_METADATA_KEY) is True):
+            await self.sessions.state.update_metadata(
+                event.context.session_key,
+                {WEBUI_SESSION_METADATA_KEY: True},
+                expected_generation=event.context.session_generation,
+                create_if_missing=False,
+            )
 
     async def _handle_run_status_changed(self, event: TurnRunStatusChanged) -> None:
         if not self._is_websocket_event(event.context):
@@ -709,7 +752,11 @@ class WebuiTurnCoordinator:
             failure_attempts=event.failure_attempts,
         )
         if self.recovery is not None:
-            await self.recovery.turn_completed(event.context.session_key)
+            await self.recovery.turn_completed(
+                event.context.session_key,
+                failure_kind=event.failure_kind,
+                failure_error_kind=event.failure_error_kind,
+            )
         if event.outcome == "completed" and is_webui_session_key(event.context.session_key):
             turn_id = event.context.metadata.get(WEBUI_TURN_METADATA_KEY)
             if isinstance(turn_id, str) and turn_id:
@@ -771,7 +818,7 @@ class WebuiTurnCoordinator:
         if msg.channel != "websocket":
             return
 
-        session = self.sessions.get_or_create(session_key)
+        session = await self.sessions.state.get_header(session_key)
         await self.bus.publish_outbound(
             outbound_message_for_event(
                 channel=msg.channel,

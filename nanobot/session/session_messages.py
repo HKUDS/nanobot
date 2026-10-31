@@ -1,5 +1,3 @@
-"""Metadata carried by user input sent between persisted sessions."""
-
 from __future__ import annotations
 
 import re

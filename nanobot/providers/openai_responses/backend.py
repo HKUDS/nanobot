@@ -1,5 +1,3 @@
-"""Responses request construction, transport dispatch, and replay state ownership."""
-
 from __future__ import annotations
 
 import asyncio
@@ -36,6 +34,7 @@ from nanobot.providers.openai_responses.state import (
     is_compaction_compatibility_error,
     prepare_responses_input,
     resolve_compact_threshold,
+    responses_compaction_items,
     responses_state_context_tokens,
     responses_state_items,
 )
@@ -173,14 +172,7 @@ class ResponsesBackend:
         history, delta = split_compaction_input(history, items[len(history):])
         try:
             compacted = await send({**body, "input": [*history, {"type": "compaction_trigger"}]})
-            compact_items = (
-                responses_state_items(compacted.provider_state)
-                if compacted.provider_state is not None else None
-            )
-            if not compact_items or compact_items[-1].get("type") not in {
-                "compaction", "compaction_summary", "context_compaction",
-            }:
-                raise RuntimeError("Responses compaction returned no compaction item")
+            compact_items = responses_compaction_items(compacted)
             body["input"] = [*retained_compaction_messages(history), *compact_items, *delta]
             return build_responses_compaction_state(
                 provider=provider, model=model, output_items=compact_items,
@@ -279,13 +271,18 @@ class ResponsesBackend:
         idle_timeout = resolve_stream_idle_timeout_s()
         if body.get("stream"):
             options["timeout"] = idle_timeout
+        # Older supported SDKs accept server compaction through extra_body.
+        sdk_body = dict(body)
+        if "context_management" in sdk_body:
+            options["extra_body"] = {"context_management": sdk_body.pop("context_management")}
         try:
-            response = await client.responses.create(**body, **options)
+            response = await client.responses.create(**sdk_body, **options)
         except Exception as exc:
             if "context_management" not in body or not is_compaction_compatibility_error(exc):
                 raise
             self.native_compaction_available = False
             body.pop("context_management")
+            options.pop("extra_body")
             logger.warning(
                 "Responses server compaction unsupported; disabled for {} (status={})",
                 provider, getattr(exc, "status_code", None),

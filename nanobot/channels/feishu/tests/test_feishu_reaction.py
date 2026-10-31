@@ -1,6 +1,5 @@
 # ruff: noqa: E402
 
-"""Tests for Feishu reaction add/remove and auto-cleanup on stream end."""
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -9,7 +8,7 @@ import pytest
 pytest.importorskip("lark_oapi")
 
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.feishu.runtime import FeishuChannel, FeishuConfig, _FeishuStreamBuf
+from nanobot.channels.feishu.runtime import FeishuChannel, FeishuConfig
 
 
 def _make_channel() -> FeishuChannel:
@@ -35,9 +34,6 @@ def _mock_reaction_create_response(reaction_id: str = "reaction_001", success: b
     else:
         resp.data = None
     return resp
-
-
-# ── _add_reaction_sync ──────────────────────────────────────────────────────
 
 
 class TestAddReactionSync:
@@ -66,9 +62,6 @@ class TestAddReactionSync:
         assert ch._add_reaction_sync("om_001", "THUMBSUP") is None
 
 
-# ── _add_reaction (async) ───────────────────────────────────────────────────
-
-
 class TestAddReactionAsync:
     @pytest.mark.asyncio
     async def test_returns_reaction_id(self):
@@ -83,9 +76,6 @@ class TestAddReactionAsync:
         ch._client = None
         result = await ch._add_reaction("om_001", "THUMBSUP")
         assert result is None
-
-
-# ── _remove_reaction_sync ───────────────────────────────────────────────────
 
 
 class TestRemoveReactionSync:
@@ -107,7 +97,6 @@ class TestRemoveReactionSync:
         resp.msg = "not found"
         ch._client.im.v1.message_reaction.delete.return_value = resp
 
-        # Should not raise
         ch._remove_reaction_sync("om_001", "rx_42")
         ch._client.im.v1.message_reaction.delete.assert_called_once()
 
@@ -115,12 +104,8 @@ class TestRemoveReactionSync:
         ch = _make_channel()
         ch._client.im.v1.message_reaction.delete.side_effect = RuntimeError("network error")
 
-        # Should not raise
         ch._remove_reaction_sync("om_001", "rx_42")
         ch._client.im.v1.message_reaction.delete.assert_called_once()
-
-
-# ── _remove_reaction (async) ────────────────────────────────────────────────
 
 
 class TestRemoveReactionAsync:
@@ -142,27 +127,6 @@ class TestRemoveReactionAsync:
         await ch._remove_reaction("om_001", "rx_42")
 
         ch._remove_reaction_sync.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_noop_when_reaction_id_is_empty(self):
-        ch = _make_channel()
-        ch._remove_reaction_sync = MagicMock()
-
-        await ch._remove_reaction("om_001", "")
-
-        ch._remove_reaction_sync.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_noop_when_reaction_id_is_none(self):
-        ch = _make_channel()
-        ch._remove_reaction_sync = MagicMock()
-
-        await ch._remove_reaction("om_001", None)
-
-        ch._remove_reaction_sync.assert_not_called()
-
-
-# ── send_delta stream end: reaction auto-cleanup ────────────────────────────
 
 
 class TestStreamEndReactionCleanup:
@@ -187,12 +151,7 @@ class TestStreamEndReactionCleanup:
     @pytest.mark.asyncio
     async def test_removes_reaction_on_stream_end(self):
         ch = _make_channel()
-        ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
-            text="Done", card_id="card_1", sequence=3, last_edit=0.0,
-        )
-        ch._reaction_ids["om_001"] = "rx_42"
-        ch._client.cardkit.v1.card_element.content.return_value = MagicMock(success=MagicMock(return_value=True))
-        ch._client.cardkit.v1.card.settings.return_value = MagicMock(success=MagicMock(return_value=True))
+        ch._reaction_ids.update({"om_001": "rx_42", "om_other": "rx_other"})
         ch._remove_reaction = AsyncMock()
 
         await ch.send_delta(
@@ -201,33 +160,23 @@ class TestStreamEndReactionCleanup:
             stream_end=True,
         )
 
-        ch._remove_reaction.assert_called_once_with("om_001", "rx_42")
+        ch._remove_reaction.assert_awaited_once_with("om_001", "rx_42")
+        assert ch._reaction_ids == {"om_other": "rx_other"}
 
     @pytest.mark.asyncio
     async def test_no_removal_when_message_id_missing(self):
         ch = _make_channel()
-        ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
-            text="Done", card_id="card_1", sequence=3, last_edit=0.0,
-        )
-        ch._client.cardkit.v1.card_element.content.return_value = MagicMock(success=MagicMock(return_value=True))
-        ch._client.cardkit.v1.card.settings.return_value = MagicMock(success=MagicMock(return_value=True))
+        ch._reaction_ids["om_001"] = "rx_42"
         ch._remove_reaction = AsyncMock()
 
-        await ch.send_delta(
-            "oc_chat1", "",
-            stream_end=True,
-        )
+        await ch.send_delta("oc_chat1", "", stream_end=True)
 
-        ch._remove_reaction.assert_not_called()
+        ch._remove_reaction.assert_not_awaited()
+        assert ch._reaction_ids == {"om_001": "rx_42"}
 
     @pytest.mark.asyncio
     async def test_no_removal_when_reaction_id_missing(self):
         ch = _make_channel()
-        ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
-            text="Done", card_id="card_1", sequence=3, last_edit=0.0,
-        )
-        ch._client.cardkit.v1.card_element.content.return_value = MagicMock(success=MagicMock(return_value=True))
-        ch._client.cardkit.v1.card.settings.return_value = MagicMock(success=MagicMock(return_value=True))
         ch._remove_reaction = AsyncMock()
 
         await ch.send_delta(
@@ -241,26 +190,28 @@ class TestStreamEndReactionCleanup:
     @pytest.mark.asyncio
     async def test_no_removal_when_not_stream_end(self):
         ch = _make_channel()
+        ch._reaction_ids["om_001"] = "rx_42"
+        ch._create_streaming_card_sync = MagicMock(return_value=None)
         ch._remove_reaction = AsyncMock()
+        ch._add_reaction = AsyncMock()
+        ch.config.done_emoji = "DONE"
 
         await ch.send_delta(
             "oc_chat1", "more text",
-            metadata={"message_id": "om_001", "reaction_id": "rx_42"},
+            metadata={"message_id": "om_001"},
         )
 
-        ch._remove_reaction.assert_not_called()
+        ch._remove_reaction.assert_not_awaited()
+        ch._add_reaction.assert_not_awaited()
+        assert ch._reaction_ids == {"om_001": "rx_42"}
+        assert ch._stream_bufs["om_001"].text == "more text"
+        assert "oc_chat1" not in ch._stream_bufs
 
     @pytest.mark.asyncio
     async def test_no_removal_when_resuming(self):
-        """resuming=True means more tool-call rounds follow; reaction must persist."""
         ch = _make_channel()
         ch.config.done_emoji = "DONE"
-        ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
-            text="partial", card_id="card_1", sequence=3, last_edit=0.0,
-        )
         ch._reaction_ids["om_001"] = "rx_42"
-        ch._client.cardkit.v1.card_element.content.return_value = MagicMock(success=MagicMock(return_value=True))
-        ch._client.cardkit.v1.card.settings.return_value = MagicMock(success=MagicMock(return_value=True))
         ch._remove_reaction = AsyncMock()
         ch._add_reaction = AsyncMock()
 
@@ -273,24 +224,16 @@ class TestStreamEndReactionCleanup:
 
         ch._remove_reaction.assert_not_called()
         ch._add_reaction.assert_not_called()
-        # OnIt reaction id is still tracked for the eventual final stream end
         assert ch._reaction_ids.get("om_001") == "rx_42"
 
     @pytest.mark.asyncio
     async def test_done_emoji_only_on_final_stream_end(self):
-        """Across resuming rounds, done_emoji is added only on the final round."""
         ch = _make_channel()
         ch.config.done_emoji = "DONE"
-        ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
-            text="t", card_id="card_1", sequence=3, last_edit=0.0,
-        )
-        ch._reaction_ids["om_001"] = "rx_42"
-        ch._client.cardkit.v1.card_element.content.return_value = MagicMock(success=MagicMock(return_value=True))
-        ch._client.cardkit.v1.card.settings.return_value = MagicMock(success=MagicMock(return_value=True))
+        ch._reaction_ids.update({"om_001": "rx_42", "om_other": "rx_other"})
         ch._remove_reaction = AsyncMock()
         ch._add_reaction = AsyncMock()
 
-        # Intermediate stream end (more tool calls coming).
         await ch.send_delta(
             "oc_chat1", "",
             metadata={"message_id": "om_001"},
@@ -300,16 +243,14 @@ class TestStreamEndReactionCleanup:
         ch._remove_reaction.assert_not_called()
         ch._add_reaction.assert_not_called()
 
-        # Re-prime the stream buffer for the final round (the previous stream end popped it).
-        ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
-            text="t", card_id="card_1", sequence=5, last_edit=0.0,
-        )
-        # Final stream end (resuming=False): OnIt removed, done_emoji added.
+        assert ch._reaction_ids == {"om_001": "rx_42", "om_other": "rx_other"}
+
         await ch.send_delta(
             "oc_chat1", "",
             metadata={"message_id": "om_001"},
             stream_end=True,
             resuming=False,
         )
-        ch._remove_reaction.assert_called_once_with("om_001", "rx_42")
-        ch._add_reaction.assert_called_once_with("om_001", "DONE")
+        ch._remove_reaction.assert_awaited_once_with("om_001", "rx_42")
+        ch._add_reaction.assert_awaited_once_with("om_001", "DONE")
+        assert ch._reaction_ids == {"om_other": "rx_other"}

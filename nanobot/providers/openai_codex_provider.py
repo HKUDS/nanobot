@@ -1,16 +1,17 @@
-"""OpenAI Codex Responses Provider."""
-
 # pyright: reportMissingTypeStubs=false, reportPrivateUsage=false
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib.util
 import json
+import os
 import re
 import ssl
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
+from uuid import uuid4
 
 import httpx
 from loguru import logger
@@ -19,10 +20,12 @@ from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
 from oauth_cli_kit.storage import FileTokenStorage
 
 from nanobot import __version__
+from nanobot.events import NO_EVENTS, ContextCompactionEvent
 from nanobot.providers.base import (
     CONTEXT_SAFETY_BUFFER,
     LLMProvider,
     LLMResponse,
+    LLMUsage,
     ProviderCallContext,
     ProviderConversationState,
 )
@@ -38,9 +41,17 @@ from nanobot.providers.openai_responses import (
     ResponsesWebSocketOptions,
     responses_state_matches,
 )
-from nanobot.providers.openai_responses.state import without_response_item_ids
+from nanobot.providers.openai_responses.errors import (
+    COMPACTION_FEATURES,
+    is_unsupported_feature_error,
+)
+from nanobot.providers.openai_responses.state import (
+    responses_compaction_items,
+    without_response_item_ids,
+)
 from nanobot.providers.openai_responses.websocket import ResponsesWebSocketError
 from nanobot.providers.registry import ProviderModelSpec, find_by_name
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import estimate_prompt_tokens
 
 DEFAULT_CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
@@ -48,6 +59,114 @@ DEFAULT_OPENAI_CODEX_MODELS_URL = "https://chatgpt.com/backend-api/codex/models"
 # Avoid restricting model discovery to a pinned Codex client release.
 OPENAI_CODEX_CATALOG_CLIENT_VERSION = "99.99.99"
 DEFAULT_ORIGINATOR = "nanobot"
+
+
+_LANGFUSE_TRACE_WARNING = "Langfuse tracing failed for Codex request: {}"
+
+
+def _usage_details(usage: LLMUsage | None) -> dict[str, int] | None:
+    """Split inclusive input usage into Langfuse's exclusive token buckets."""
+    if usage is None:
+        return None
+    cached_tokens = (usage.cache_read_tokens or 0) + (usage.cache_write_tokens or 0)
+    details = {
+        "input": usage.input_tokens - cached_tokens,
+        "output": usage.output_tokens,
+        "total": usage.total_tokens,
+    }
+    if usage.cache_read_tokens is not None:
+        details["input_cached_tokens"] = usage.cache_read_tokens
+    if usage.cache_write_tokens is not None:
+        details["input_cache_creation"] = usage.cache_write_tokens
+    return details
+
+
+class _CodexGenerationTracer:
+    """Best-effort Langfuse updates; the request owns generation closure."""
+
+    def __init__(self, generation: Any | None) -> None:
+        self._generation = generation
+
+    def record_success(self, result: LLMResponse) -> None:
+        output: Any = result.content
+        if result.tool_calls:
+            output = {
+                "content": result.content,
+                "tool_calls": [
+                    {"name": call.name, "arguments": call.arguments} for call in result.tool_calls
+                ],
+            }
+        self._update(output=output, usage_details=_usage_details(result.usage))
+
+    def record_error(self, response: LLMResponse) -> None:
+        self._update(
+            output=response.content,
+            level="ERROR",
+            status_message=response.content,
+        )
+
+    def _update(self, **kwargs: Any) -> None:
+        generation = self._generation
+        filtered = {k: v for k, v in kwargs.items() if v is not None}
+        if generation is None or not filtered:
+            return
+        try:
+            generation.update(**filtered)
+        except Exception as exc:
+            logger.warning(_LANGFUSE_TRACE_WARNING, exc)
+
+    def close(self) -> None:
+        generation = self._generation
+        if generation is None:
+            return
+        try:
+            generation.end()
+        except Exception as exc:
+            logger.warning(_LANGFUSE_TRACE_WARNING, exc)
+
+
+def _start_codex_langfuse_generation(
+    *,
+    name: str,
+    model: str,
+    body: dict[str, Any],
+) -> _CodexGenerationTracer:
+    """Start a Langfuse generation for a Codex request, or a no-op tracer.
+
+    Detection and the SDK call share one try/except so a broken
+    ``find_spec`` can't fail the Codex request itself.
+    """
+    try:
+        if os.environ.get("LANGFUSE_SECRET_KEY") and importlib.util.find_spec("langfuse"):
+            from langfuse import get_client
+
+            langfuse = get_client()
+            generation = langfuse.start_observation(
+                name=name,
+                as_type="generation",
+                model=model,
+                input={
+                    "instructions": body.get("instructions"),
+                    "input": body.get("input"),
+                    "tools": body.get("tools"),
+                },
+                model_parameters={
+                    key: body[key]
+                    for key in ("reasoning", "tool_choice", "text", "parallel_tool_calls")
+                    if key in body
+                },
+            )
+            return _CodexGenerationTracer(generation)
+
+        if os.environ.get("LANGFUSE_SECRET_KEY"):
+            logger.warning(
+                "LANGFUSE_SECRET_KEY is set but langfuse is not installed; "
+                "run `nanobot plugins enable langfuse` to enable tracing"
+            )
+        return _CodexGenerationTracer(None)
+    except Exception as exc:
+        logger.warning(_LANGFUSE_TRACE_WARNING, exc)
+        return _CodexGenerationTracer(None)
 
 
 class OpenAICodexProvider(LLMProvider):
@@ -74,7 +193,6 @@ class OpenAICodexProvider(LLMProvider):
         await self._responses.aclose()
 
     def _ssl_context(self, *, verify: bool) -> ssl.SSLContext:
-        """Reuse synchronous TLS setup across requests on the shared event loop."""
         context = self._ssl_contexts.get(verify)
         if context is None:
             context = httpx.create_ssl_context(
@@ -97,7 +215,6 @@ class OpenAICodexProvider(LLMProvider):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         provider_context: ProviderCallContext | None = None,
     ) -> LLMResponse:
-        """Shared request logic for both chat() and chat_stream()."""
         model = model or self.default_model
         sanitized_messages = self._sanitize_empty_content(messages)
         sanitized_state = (
@@ -144,8 +261,18 @@ class OpenAICodexProvider(LLMProvider):
         )
 
         stage = "oauth_token"
-        native_compaction_applied = False
         native_compaction_state: ProviderConversationState | None = None
+        native_compaction_event_id: str | None = None
+        events = provider_context.events if provider_context is not None else NO_EVENTS
+
+        def finish_compaction(result: LLMResponse) -> LLMResponse:
+            if native_compaction_state is not None and not result.provider_compaction_applied:
+                result.provider_compaction_applied = True
+                result.provider_compaction_state = native_compaction_state
+                result.provider_compaction_scope = "prior_context"
+                result.provider_compaction_event_id = native_compaction_event_id
+            return result
+
         input_budget = (
             provider_context.compaction_input_budget if provider_context is not None else None
         )
@@ -176,52 +303,89 @@ class OpenAICodexProvider(LLMProvider):
                 request_body: dict[str, Any],
                 *,
                 emit_deltas: bool,
+                trace_name: str,
+                validate: Callable[[LLMResponse], object] | None = None,
             ) -> LLMResponse:
                 wire_body = await prepare_inline_images(without_response_item_ids(request_body))
-                if session_id:
-                    websocket_result = await self._responses.websocket_request(
-                        session_id, DEFAULT_CODEX_URL, headers, wire_body,
-                        provider=self._responses_state_provider(),
-                        verify=self._ssl_context(verify=True), proxy=self.proxy,
-                        on_content_delta=on_content_delta if emit_deltas else None,
-                        on_thinking_delta=on_thinking_delta if emit_deltas else None,
-                        on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
-                    )
-                    if websocket_result is not None:
-                        return websocket_result
+                tracer = _start_codex_langfuse_generation(
+                    name=trace_name,
+                    model=_strip_model_prefix(str(wire_body.get("model") or model)),
+                    body=wire_body,
+                )
                 try:
-                    return await _request_codex(
-                        DEFAULT_CODEX_URL,
-                        headers,
-                        wire_body,
-                        verify=self._ssl_context(verify=True),
-                        proxy=self.proxy,
-                        on_content_delta=on_content_delta if emit_deltas else None,
-                        on_thinking_delta=on_thinking_delta if emit_deltas else None,
-                        on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
-                    )
+                    result = None
+                    if session_id:
+                        result = await self._responses.websocket_request(
+                            session_id, DEFAULT_CODEX_URL, headers, wire_body,
+                            provider=self._responses_state_provider(),
+                            verify=self._ssl_context(verify=True), proxy=self.proxy,
+                            on_content_delta=on_content_delta if emit_deltas else None,
+                            on_thinking_delta=on_thinking_delta if emit_deltas else None,
+                            on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
+                        )
+                    if result is None:
+                        try:
+                            result = await _request_codex(
+                                DEFAULT_CODEX_URL,
+                                headers,
+                                wire_body,
+                                verify=self._ssl_context(verify=True),
+                                proxy=self.proxy,
+                                on_content_delta=on_content_delta if emit_deltas else None,
+                                on_thinking_delta=on_thinking_delta if emit_deltas else None,
+                                on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
+                            )
+                        except Exception as exc:
+                            if "CERTIFICATE_VERIFY_FAILED" not in str(exc):
+                                raise
+                            logger.warning(
+                                "SSL verification failed for Codex API; retrying with verify=False"
+                            )
+                            result = await _request_codex(
+                                DEFAULT_CODEX_URL,
+                                headers,
+                                wire_body,
+                                verify=self._ssl_context(verify=False),
+                                proxy=self.proxy,
+                                on_content_delta=on_content_delta if emit_deltas else None,
+                                on_thinking_delta=on_thinking_delta if emit_deltas else None,
+                                on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
+                            )
+                    if validate is not None:
+                        validate(result)
                 except Exception as exc:
-                    if "CERTIFICATE_VERIFY_FAILED" not in str(exc):
-                        raise
-                    logger.warning(
-                        "SSL verification failed for Codex API; retrying with verify=False"
-                    )
-                    return await _request_codex(
-                        DEFAULT_CODEX_URL,
-                        headers,
-                        wire_body,
-                        verify=self._ssl_context(verify=False),
-                        proxy=self.proxy,
-                        on_content_delta=on_content_delta if emit_deltas else None,
-                        on_thinking_delta=on_thinking_delta if emit_deltas else None,
-                        on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
-                    )
+                    tracer.record_error(_codex_error_response(exc))
+                    raise
+                else:
+                    tracer.record_success(result)
+                    return result
+                finally:
+                    tracer.close()
 
             if self.supports_native_compaction(model) and replayed and sanitized_state is not None:
                 stage = "codex_compaction"
 
                 async def send_compaction(request: dict[str, Any]) -> LLMResponse:
-                    return await _send(request, emit_deltas=False)
+                    nonlocal native_compaction_event_id
+                    compaction_id = uuid4().hex
+                    try:
+                        await events.emit(ContextCompactionEvent(compaction_id, "started", reason="provider_native"))
+                        compacted = await _send(
+                            request,
+                            emit_deltas=False,
+                            trace_name="codex_compaction",
+                            validate=responses_compaction_items,
+                        )
+                    except (Exception, asyncio.CancelledError) as exc:
+                        await shield_and_drain(events.emit(ContextCompactionEvent(
+                            compaction_id,
+                            "cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
+                            reason="provider_native",
+                        )))
+                        raise
+                    native_compaction_event_id = compaction_id
+                    await shield_and_drain(events.emit(ContextCompactionEvent(compaction_id, "succeeded", reason="provider_native")))
+                    return compacted
 
                 native_compaction_state = await self._responses.compact_before_request(
                     body, state=sanitized_state,
@@ -232,14 +396,13 @@ class OpenAICodexProvider(LLMProvider):
                     max_output_tokens=max_tokens, input_budget=input_budget,
                     send=send_compaction,
                 )
-                native_compaction_applied = native_compaction_state is not None
 
             if input_budget is not None:
                 estimated = estimate_prompt_tokens([{
                     "role": "user", "content": json.dumps(body, ensure_ascii=False),
                 }])
                 if input_budget <= 0 or estimated > input_budget:
-                    return LLMResponse(
+                    return finish_compaction(LLMResponse(
                         content=(
                             "Codex input still exceeds the local budget after native compaction "
                             f"({estimated}/{input_budget} estimated tokens); request not sent."
@@ -247,16 +410,10 @@ class OpenAICodexProvider(LLMProvider):
                         finish_reason="error", error_kind="context_window_exceeded",
                         error_should_retry=False,
                         preserve_provider_state_on_error=True,
-                    )
+                    ))
             stage = "codex_request"
-            result = await _send(body, emit_deltas=True)
-            result.provider_compaction_applied = (
-                result.provider_compaction_applied or native_compaction_applied
-            )
-            if native_compaction_state is not None:
-                result.provider_compaction_state = native_compaction_state
-                result.provider_compaction_scope = "prior_context"
-            return result
+            result = await _send(body, emit_deltas=True, trace_name="codex_request")
+            return finish_compaction(result)
         except Exception as e:
             response = _codex_error_response(e)
             if input_budget is not None and stage != "codex_request":
@@ -279,12 +436,12 @@ class OpenAICodexProvider(LLMProvider):
                 request_model,
                 request_effort,
                 replayed,
-                native_compaction_applied,
+                native_compaction_state is not None,
                 getattr(e, "error_param", None),
                 getattr(e, "error_message", None),
                 getattr(e, "request_id", None),
             )
-            return response
+            return finish_compaction(response)
 
     async def chat(
         self,
@@ -390,7 +547,6 @@ def _strip_model_prefix(model: str) -> str:
 
 
 def _build_reasoning_options(reasoning_effort: str | None) -> dict[str, str] | None:
-    """Opt in to visible summaries without changing provider-default effort."""
     if reasoning_effort and reasoning_effort.lower() == "none":
         return {"effort": "none"}
     options = {"summary": "auto"}
@@ -468,12 +624,9 @@ def _build_codex_http_error(status_code: int, headers: httpx.Headers, raw: str) 
     retry_after = LLMProvider._extract_retry_after_from_headers(headers)
     error_type, error_code = LLMProvider._extract_error_type_code(raw)
     error_param, error_message = _codex_error_details(raw)
-    compaction_unsupported = status_code in {400, 404, 422} and any(
-        marker in raw.lower()
-        for marker in ("context_management", "compact_threshold", "compaction_trigger")
-    )
+    compaction_unsupported = is_unsupported_feature_error(status_code, raw, COMPACTION_FEATURES)
     return _CodexHTTPError(
-        _friendly_error(status_code, raw), status_code=status_code,
+        _friendly_error(status_code), status_code=status_code,
         retry_after=retry_after, error_type=error_type, error_code=error_code,
         should_retry=_should_retry_status(status_code, error_type, error_code, raw),
         compaction_unsupported=compaction_unsupported,
@@ -486,8 +639,7 @@ def _prompt_cache_key(session_id: str) -> str:
     return hashlib.sha256(session_id.encode("utf-8")).hexdigest()
 
 
-def _friendly_error(status_code: int, raw: str) -> str:
-    _ = raw
+def _friendly_error(status_code: int) -> str:
     if status_code == 429:
         return "ChatGPT usage quota exceeded or rate limit triggered. Please try again later."
     return f"HTTP {status_code}: Codex API request failed"
@@ -500,7 +652,6 @@ def _diagnostic_token(value: object) -> str | None:
 
 
 def _codex_error_details(raw: str) -> tuple[str | None, str | None]:
-    """Retain parameter paths and known enum errors without upstream prompt echoes."""
     try:
         payload = json.loads(raw)
     except ValueError:
@@ -529,7 +680,6 @@ def _codex_error_details(raw: str) -> tuple[str | None, str | None]:
 
 
 def _codex_error_response(exc: Exception) -> LLMResponse:
-    """Convert Codex transport/API failures into actionable, retryable metadata."""
     if isinstance(exc, RuntimeError) and _codex_login_required(exc):
         return LLMResponse(
             content="OpenAI Codex authorization expired. Please sign in again.",
@@ -589,7 +739,6 @@ def _codex_error_response(exc: Exception) -> LLMResponse:
 
 
 def _codex_log_summary(exc_type: str, response: LLMResponse) -> str:
-    """Return a bounded diagnostic summary without request body or raw upstream payload."""
     if response.error_status_code is not None:
         parts = [f"HTTP {response.error_status_code}"]
         if response.error_type:

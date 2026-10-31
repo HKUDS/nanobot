@@ -172,7 +172,6 @@ class WsTestClient:
         assert self._ws is not None, "Client is not connected"
         return self._ws
 
-    # -- Receiving --------------------------------------------------------
 
     async def recv_raw(self, timeout: float = 10.0) -> dict[str, Any]:
         """Receive and parse one raw JSON message with timeout."""
@@ -216,7 +215,6 @@ class WsTestClient:
         """Receive exactly *n* messages."""
         return [await self.recv(timeout) for _ in range(n)]
 
-    # -- Sending ----------------------------------------------------------
 
     async def send_text(self, text: str) -> None:
         """Send a plain text frame."""
@@ -226,14 +224,10 @@ class WsTestClient:
         """Send a JSON frame."""
         await self.ws.send(json.dumps(data, ensure_ascii=False))
 
-    # -- Connection introspection -----------------------------------------
 
     @property
     def closed(self) -> bool:
         return self._ws is None or self._ws.closed
-
-
-# -- Token issuance helpers -----------------------------------------------
 
 
 async def http_get(

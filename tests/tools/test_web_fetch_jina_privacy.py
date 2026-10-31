@@ -1,5 +1,3 @@
-"""Tests that the Jina Reader path never discloses credential-bearing URLs."""
-
 from __future__ import annotations
 
 import json
@@ -215,7 +213,6 @@ async def test_execute_fetches_credential_urls_locally(monkeypatch) -> None:
 
 
 async def test_execute_does_not_send_redirected_credential_url_to_jina(monkeypatch) -> None:
-    """A plain short URL that redirects through a signed URL must stay local."""
 
     tool = WebFetchTool()
     requested: list[str] = []

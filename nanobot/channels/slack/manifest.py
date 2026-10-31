@@ -1,5 +1,3 @@
-"""Slack management contract."""
-
 from nanobot.channels._manifest import GROUP_POLICIES, field, required_fields
 from nanobot.channels.contracts import ChannelSetupSpec
 from nanobot.channels.plugin import ChannelPlugin
@@ -23,7 +21,7 @@ SETUP_SPEC = ChannelSetupSpec(
         "dm.enabled": field("bool", default=True),
         "dm.policy": field("enum", choices={"open", "allowlist"}, default="open"),
         "dm.allowFrom": field("list"),
-        "proxy": field(),
+        "useProxy": field("bool", default=False),
     },
     required=required_fields("appToken", "botToken"),
     official_url="https://api.slack.com/apps",

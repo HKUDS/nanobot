@@ -1,5 +1,3 @@
-"""Read-only projection of the session material available to the agent."""
-
 from __future__ import annotations
 
 from typing import Any, cast

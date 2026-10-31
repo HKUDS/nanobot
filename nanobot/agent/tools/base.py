@@ -1,6 +1,6 @@
-"""Base class for agent tools."""
 from __future__ import annotations
 
+import json
 import math
 import typing
 from abc import ABC, abstractmethod
@@ -16,7 +16,6 @@ if typing.TYPE_CHECKING:
 
 _ToolT = TypeVar("_ToolT", bound="Tool")
 
-# Matches :meth:`Tool._cast_value` / :meth:`Schema.validate_json_schema_value` behavior
 _JSON_TYPE_MAP: dict[str, type | tuple[type, ...]] = {
     "string": str,
     "integer": int,
@@ -25,6 +24,31 @@ _JSON_TYPE_MAP: dict[str, type | tuple[type, ...]] = {
     "array": list,
     "object": dict,
 }
+
+
+def _is_json_integer(value: object) -> bool:
+    return not isinstance(value, bool) and (
+        isinstance(value, int) or (isinstance(value, float) and value.is_integer())
+    )
+
+
+def _json_values_equal(left: Any, right: Any) -> bool:
+    if isinstance(left, bool) or isinstance(right, bool):
+        return left is right
+    if isinstance(left, list) and isinstance(right, list):
+        left_items = cast(list[Any], left)
+        right_items = cast(list[Any], right)
+        return len(left_items) == len(right_items) and all(
+            _json_values_equal(a, b) for a, b in zip(left_items, right_items)
+        )
+    if isinstance(left, dict) and isinstance(right, dict):
+        left_object = cast(dict[str, Any], left)
+        right_object = cast(dict[str, Any], right)
+        return left_object.keys() == right_object.keys() and all(
+            _json_values_equal(value, right_object[key])
+            for key, value in left_object.items()
+        )
+    return left == right
 
 
 class Schema(ABC):
@@ -51,6 +75,8 @@ class Schema(ABC):
                 continue
             if t in ("integer", "number") and isinstance(val, bool):
                 continue
+            if t == "integer" and _is_json_integer(val):
+                return t
             if isinstance(val, _JSON_TYPE_MAP[t]):
                 return t
         return None
@@ -87,7 +113,7 @@ class Schema(ABC):
                 t = Schema.match_json_schema_type(val, types)
                 if t is None:
                     return [f"{label} should match one of the types {types}"]
-        if t == "integer" and (not isinstance(val, int) or isinstance(val, bool)):
+        if t == "integer" and not _is_json_integer(val):
             return [f"{label} should be integer"]
         if t == "number" and (
             not isinstance(val, _JSON_TYPE_MAP["number"]) or isinstance(val, bool)
@@ -99,7 +125,7 @@ class Schema(ABC):
             return [f"{label} must be finite"]
 
         errors: list[str] = []
-        if "enum" in schema and val not in schema["enum"]:
+        if "enum" in schema and not any(_json_values_equal(val, item) for item in schema["enum"]):
             errors.append(f"{label} must be one of {schema['enum']}")
         if t in ("integer", "number"):
             if "minimum" in schema and val < schema["minimum"]:
@@ -228,7 +254,6 @@ class Tool(ABC):
         """Whether this tool should run alone even if concurrency is enabled."""
         return False
 
-    # --- Plugin metadata ---
 
     config_key: str = ""
     _plugin_discoverable: bool = True
@@ -282,9 +307,51 @@ class Tool(ABC):
             return params
         return self._cast_object(params, schema)
 
+    @staticmethod
+    def _container_types(schema: dict[str, Any]) -> set[str]:
+        """Recognize explicit container-only types, without choosing a union branch."""
+        options = [schema] if "type" in schema else schema.get("oneOf", schema.get("anyOf"))
+        if not isinstance(options, list) or not options:
+            return set()
+        types: set[str] = set()
+        for option in cast(list[Any], options):
+            if not isinstance(option, dict):
+                return set()
+            raw_type = cast(dict[str, Any], option).get("type")
+            members = cast(list[Any], raw_type) if isinstance(raw_type, list) else [raw_type]
+            for member in members:
+                if not isinstance(member, str) or member not in {"object", "array", "null"}:
+                    return set()
+                if member != "null":
+                    types.add(member)
+        return types
+
+    @classmethod
+    def _decode_json_container(cls, value: Any, schema: dict[str, Any]) -> Any:
+        """Decode a JSON string only when it contains the expected container type."""
+        if not isinstance(value, str):
+            return value
+
+        stripped = value.strip()
+        expected_type = "object" if stripped.startswith("{") else "array"
+        if not stripped.startswith(("{", "[")) or expected_type not in cls._container_types(schema):
+            return value
+
+        try:
+            parsed = json.loads(stripped)
+        except (TypeError, ValueError):
+            return value
+
+        if expected_type == "object" and isinstance(parsed, dict):
+            return cast(dict[str, Any], parsed)
+        if expected_type == "array" and isinstance(parsed, list):
+            return cast(list[Any], parsed)
+        return value
+
     def _cast_value(self, val: Any, schema: dict[str, Any] | bool) -> Any:
         if isinstance(schema, bool):
             return val
+        val = self._decode_json_container(val, schema)
         raw_type = schema.get("type")
         t = self._resolve_type(raw_type)
         if isinstance(raw_type, list):
@@ -297,8 +364,8 @@ class Tool(ABC):
 
         if t == "boolean" and isinstance(val, bool):
             return val
-        if t == "integer" and isinstance(val, int) and not isinstance(val, bool):
-            return val
+        if t == "integer" and _is_json_integer(val):
+            return int(val) if isinstance(val, float) else val
         if t in self._TYPE_MAP and t not in ("boolean", "integer", "array", "object"):
             expected = self._TYPE_MAP[t]
             if isinstance(val, expected):

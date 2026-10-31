@@ -1,5 +1,3 @@
-"""Resolve per-model request differences without changing shared connections."""
-
 from copy import deepcopy
 
 from nanobot.config.schema import ModelPresetConfig, ProviderConfig, RequestOverrides

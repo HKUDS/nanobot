@@ -1,10 +1,10 @@
-"""Channel manager for coordinating chat channels."""
-
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import inspect
+import random
+import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from contextlib import suppress
@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
+from nanobot.bus.delivery import ChannelNotReadyError, DeliveryRejectedError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import (
     ProgressEvent,
@@ -32,8 +33,11 @@ from nanobot.channels.contracts import (
     channel_runtime_name,
     resolve_channel_action_target,
 )
+from nanobot.channels.outbox import RETRY_SECONDS, DeliveryOutbox
 from nanobot.channels.registry import channel_default_enabled
 from nanobot.config.schema import Config
+from nanobot.security.workspace_access import WorkspaceScopeResolver
+from nanobot.security.workspace_policy import resolve_allowed_path
 from nanobot.utils.restart import (
     RestartNotice,
     consume_restart_notice_from_env,
@@ -48,7 +52,6 @@ if TYPE_CHECKING:
 
 
 def _default_webui_dist() -> Path | None:
-    """Return the absolute path to the bundled webui dist directory if it exists."""
     try:
         import nanobot.web as web_pkg  # type: ignore[import-not-found]
     except ImportError:
@@ -57,7 +60,6 @@ def _default_webui_dist() -> Path | None:
     return candidate if candidate.is_dir() else None
 
 
-# Retry delays for message sending (exponential backoff: 1s, 2s, 4s)
 _SEND_RETRY_DELAYS = (1, 2, 4)
 _OUTBOUND_CONCURRENCY = 32
 _OUTBOUND_PENDING_LIMIT = 256
@@ -147,15 +149,24 @@ class ChannelManager:
         self._channel_errors: dict[str, str] = {}
         self._channel_tasks: dict[str, asyncio.Task[None]] = {}
         self._dispatch_task: asyncio.Task[None] | None = None
+        self._restart_notice_task: asyncio.Task[None] | None = None
         self._outbound_tasks: dict[asyncio.Task[None], tuple[str, str]] = {}
         self._outbound_tails: dict[tuple[str, str], asyncio.Task[None]] = {}
+        self._outbound_pending: list[OutboundMessage] = []
+        self._outbound_dispatching = False
         self._outbound_slots = asyncio.Semaphore(_OUTBOUND_PENDING_LIMIT)
         self._outbound_sends = asyncio.Semaphore(_OUTBOUND_CONCURRENCY)
         self._stopping_channels: set[str] = set()
         self._started = False
         self._origin_reply_fingerprints: OrderedDict[tuple[str, str, str], str] = OrderedDict()
+        self._outbox = DeliveryOutbox(self._config_path.parent / "delivery" / "outbox.sqlite3")
+        self._scheduled_deliveries: set[str] = set()
+        self.bus.outbound_recorder = self._record_scheduled
 
         self._init_channels()
+        self._remove_delivery_check: Callable[[], None] | None = (
+            self.bus.admission.register_pending_work(lambda: self.has_pending_delivery)
+        )
 
     def _channel_section(
         self,
@@ -181,13 +192,14 @@ class ChannelManager:
 
     def _build_channel(
         self,
-        name: str,
         cls: type[BaseChannel],
         section: Any,
         *,
         runtime_name: str | None = None,
     ) -> BaseChannel:
         kwargs: dict[str, Any] = {}
+        if cls.uses_shared_proxy:
+            kwargs["network"] = self.config.network
         if cls.name == "websocket":
             from nanobot.channels.websocket.runtime import WebSocketConfig
             from nanobot.webui.gateway_services import build_gateway_services
@@ -202,6 +214,7 @@ class ChannelManager:
                 static_dist_path=static_path,
                 workspace_path=workspace,
                 default_restrict_to_workspace=self.config.tools.restrict_to_workspace,
+                unified_session=self.config.agents.defaults.unified_session,
                 config_path=self._config_path,
                 disabled_skills=set(self.config.agents.defaults.disabled_skills),
                 runtime_model_name=self._webui_runtime_model_name,
@@ -225,6 +238,7 @@ class ChannelManager:
             )
             kwargs["gateway"] = gateway
         channel = cls(section, self.bus, **kwargs)
+        channel.tool_hint_max_length = self.config.agents.defaults.tool_hint_max_length
         if runtime_name and runtime_name != channel.name:
             channel.name = runtime_name
         progress_default, tool_hints_default = channel.progress_transport_defaults() or (
@@ -250,7 +264,6 @@ class ChannelManager:
         return channel
 
     def _init_channels(self) -> None:
-        """Initialize enabled runtimes from dependency-free channel descriptors."""
         from nanobot.channels.registry import discover_plugins
         from nanobot.optional_features import ensure_enabled_channel_dependencies
 
@@ -307,7 +320,6 @@ class ChannelManager:
                     (
                         runtime_name,
                         self._build_channel(
-                            name,
                             cls,
                             spec.config,
                             runtime_name=runtime_name,
@@ -363,7 +375,6 @@ class ChannelManager:
                 )
 
     def _should_send_progress(self, channel_name: str, *, tool_hint: bool = False) -> bool:
-        """Return whether progress (or tool-hints) may be sent to *channel_name*."""
         ch = self.channels.get(channel_name)
         if ch is None:
             logger.debug("Progress check for unknown channel: {}", channel_name)
@@ -371,12 +382,6 @@ class ChannelManager:
         return ch.send_tool_hints if tool_hint else ch.send_progress
 
     def _resolve_bool_override(self, section: Any, key: str, default: bool) -> bool:
-        """Return *key* from *section* if it is a bool, otherwise *default*.
-
-        For dict configs also checks the camelCase alias (e.g. ``sendProgress``
-        for ``send_progress``) so raw JSON/TOML configs work alongside
-        Pydantic models.
-        """
         if isinstance(section, dict):
             section_data = cast(dict[str, Any], section)
             value = section_data.get(key)
@@ -389,12 +394,13 @@ class ChannelManager:
         return value if isinstance(value, bool) else default
 
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
-        """Start a channel and log any exceptions."""
         errors = getattr(self, "_channel_errors", None)
         if errors is None:
             errors = self._channel_errors = {}
         errors.pop(name, None)
         try:
+            if name != "websocket":
+                await self.bus.admission.wait_until_open()
             await channel.start()
         except asyncio.CancelledError:
             raise
@@ -559,7 +565,6 @@ class ChannelManager:
                 (
                     runtime_name,
                     self._build_channel(
-                        name,
                         cls,
                         spec.config,
                         runtime_name=runtime_name,
@@ -615,30 +620,31 @@ class ChannelManager:
 
     async def start_all(self) -> None:
         """Start all channels and the outbound dispatcher."""
+        if self._remove_delivery_check is None:
+            self._remove_delivery_check = self.bus.admission.register_pending_work(
+                lambda: self.has_pending_delivery,
+            )
         if not self.channels:
             logger.warning("No channels enabled")
             return
 
         self._started = True
-        # Start outbound dispatcher
         self._dispatch_task = asyncio.create_task(self._dispatch_outbound())
 
-        # Start channels
         tasks: list[asyncio.Task[None]] = []
         for name, channel in self.channels.items():
             tasks.append(self._start_channel_task(name, channel))
 
         self._notify_restart_done_if_needed()
 
-        # Wait for all to complete (they should run forever)
         await asyncio.gather(*tasks, return_exceptions=True)
 
     def _notify_restart_done_if_needed(self) -> asyncio.Task[None] | None:
-        """Schedule restart completion after the target channel starts."""
         notice = consume_restart_notice_from_env()
         if not notice:
             return None
-        return asyncio.create_task(self._send_restart_notice_when_started(notice))
+        self._restart_notice_task = asyncio.create_task(self._send_restart_notice_when_started(notice))
+        return self._restart_notice_task
 
     async def _send_restart_notice_when_started(
         self,
@@ -647,7 +653,7 @@ class ChannelManager:
         timeout_s: float = _RESTART_NOTICE_START_TIMEOUT_S,
         poll_s: float = _RESTART_NOTICE_START_POLL_S,
     ) -> None:
-        """Deliver a restart notice after the target channel starts."""
+        await self.bus.admission.wait_until_open()
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout_s
         target = self.channels.get(notice.channel)
@@ -688,15 +694,22 @@ class ChannelManager:
         logger.info("Stopping all channels...")
         self._started = False
 
-        # Stop dispatcher
         if self._dispatch_task:
             self._dispatch_task.cancel()
             with suppress(asyncio.CancelledError):
                 await self._dispatch_task
 
-        # Stop all channels
+        if self._restart_notice_task:
+            self._restart_notice_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._restart_notice_task
+            self._restart_notice_task = None
+
         for name in list(self.channels):
             await self._stop_channel(name)
+        if self._remove_delivery_check is not None:
+            self._remove_delivery_check()
+            self._remove_delivery_check = None
 
     @staticmethod
     def _fingerprint_content(content: str) -> str:
@@ -736,6 +749,25 @@ class ChannelManager:
 
         return False
 
+    def _record_scheduled(self, msg: OutboundMessage) -> None:
+        if msg.delivery is not None:
+            with self.bus.admission.activity():
+                self._outbox.record(msg)
+
+    @property
+    def has_pending_delivery(self) -> bool:
+        """A synchronous idle check, including channel-owned transport queues.
+
+        Read on the gateway event loop immediately before closing admission.
+        This is delivery liveness, not proof that every channel writer stopped.
+        """
+        return bool(
+            self.bus.outbound_size or self._outbound_pending or self._outbound_dispatching
+            or self._outbound_tasks
+            or (self._restart_notice_task is not None and not self._restart_notice_task.done())
+            or any(channel.has_pending_delivery for channel in self.channels.values())
+        )
+
     async def _cancel_outbound(self, channel: str | None = None) -> None:
         tasks = [task for task, key in self._outbound_tasks.items()
                  if channel is None or key[0] == channel]
@@ -746,20 +778,30 @@ class ChannelManager:
     async def _queue_outbound(self, channel: BaseChannel, msg: OutboundMessage) -> None:
         """Bound scheduled sends; preserve FIFO per destination, not across chats.
 
-        Retry waits occupy only their destination and one send slot. Saturation
-        pauses dispatch rather than creating unbounded tasks or dropping messages.
+        Retry waits retain their destination tail and admission, not a send permit.
+        Saturation pauses dispatch rather than creating unbounded tasks or dropping messages.
         """
+        if msg.delivery_id in self._scheduled_deliveries:
+            return
+        if isinstance(msg.event, ProgressEvent) and msg.event.tool_events:
+            msg = channel.prepare_tool_events(msg)
         await self._outbound_slots.acquire()
         if msg.channel in self._stopping_channels or self.channels.get(msg.channel) is not channel:
             self._outbound_slots.release()
             return
         key = (msg.channel, msg.chat_id)
         previous = self._outbound_tails.get(key)
+        if msg.delivery_id is not None:
+            self._scheduled_deliveries.add(msg.delivery_id)
 
         async def send() -> None:
             if previous is not None:
                 await asyncio.shield(asyncio.gather(previous, return_exceptions=True))
-            async with self._outbound_sends:
+            if msg.delivery_id is not None:
+                # Acquire before claiming: queued cancellation must remain pending.
+                async with self._outbound_sends:
+                    await self._send_scheduled(channel, msg)
+            else:
                 await self._send_with_retry(channel, msg)
 
         task = asyncio.create_task(send(), name=f"outbound-{msg.channel}-{msg.chat_id}")
@@ -768,6 +810,8 @@ class ChannelManager:
 
         def finished(done: asyncio.Task[None]) -> None:
             self._outbound_tasks.pop(done, None)
+            if msg.delivery_id is not None:
+                self._scheduled_deliveries.discard(msg.delivery_id)
             if self._outbound_tails.get(key) is done:
                 self._outbound_tails.pop(key, None)
             self._outbound_slots.release()
@@ -776,30 +820,95 @@ class ChannelManager:
 
         task.add_done_callback(finished)
 
+    async def _send_scheduled(self, channel: BaseChannel, msg: OutboundMessage) -> None:
+        request = msg.delivery
+        if request is not None and request.session_generation is not None and self._session_manager:
+            session = await self._session_manager.state.read(request.session_key)
+            if session is None or session.generation != request.session_generation:
+                self._outbox.finish(msg, "failed", "session_replaced")
+                return
+            if msg.media:
+                # An accepted local path can become a symlink during an outage.
+                # Recheck the current source policy before the adapter opens it.
+                scope = WorkspaceScopeResolver(
+                    self.config.workspace_path, self.config.tools.restrict_to_workspace,
+                ).for_turn(channel=request.session_key.split(":", 1)[0],
+                           message_metadata={}, session_metadata=session.metadata)
+                try:
+                    for path in msg.media:
+                        if not path.startswith(("http://", "https://")):
+                            resolve_allowed_path(
+                                path, workspace=scope.project_path,
+                                allowed_root=scope.project_path if scope.restrict_to_workspace else None,
+                                extra_allowed_roots=[self._config_path.parent / "media"],
+                            )
+                except (OSError, ValueError):
+                    self._outbox.finish(msg, "failed", "attachment_access_denied")
+                    return
+        if not self._outbox.claim(msg):
+            return
+        try:
+            await self._send_once(channel, msg)
+        except ChannelNotReadyError:
+            # The adapter guarantees that no part of the message was submitted.
+            self._outbox.finish(msg, "pending", "channel_not_ready")
+        except DeliveryRejectedError:
+            self._outbox.finish(msg, "failed", "delivery_rejected")
+        except asyncio.CancelledError:
+            self._outbox.finish(msg, "unknown", "interrupted_send")
+            raise
+        except Exception as error:
+            # A timeout can follow an accepted send, including a partial multi-part send.
+            # Retrying the whole result here could deliver it twice.
+            self._outbox.finish(msg, "unknown", type(error).__name__)
+        else:
+            self._outbox.finish(msg, "sent")
+
+    async def _recover_scheduled(self) -> None:
+        with self.bus.admission.activity():
+            for msg in self._outbox.ready():
+                channel = self.channels.get(msg.channel)
+                if channel is None:
+                    self._outbox.finish(msg, "failed", "channel_disabled")
+                else:
+                    await self._queue_outbound(channel, msg)
+
     async def _dispatch_outbound(self) -> None:
         try:
+            await self.bus.admission.wait_until_open()
             await self._dispatch_outbound_loop()
         finally:
             await self._cancel_outbound()
 
     async def _dispatch_outbound_loop(self) -> None:
-        """Dispatch outbound messages to the appropriate channel."""
         logger.info("Outbound dispatcher started")
 
         # Buffer for messages that couldn't be processed during delta coalescing
         # (since asyncio.Queue doesn't support push_front)
-        pending: list[OutboundMessage] = []
+        pending = self._outbound_pending
+        next_recovery = 0.0
 
         while True:
             try:
-                # First check pending buffer before waiting on queue
+                await self.bus.admission.wait_until_open()
+                if time.monotonic() >= next_recovery:
+                    next_recovery = time.monotonic() + RETRY_SECONDS
+                    try:
+                        await self._recover_scheduled()
+                    except Exception:
+                        logger.exception("Scheduled delivery recovery failed; check the instance delivery store")
                 if pending:
                     msg = pending.pop(0)
                 else:
-                    msg = await asyncio.wait_for(
-                        self.bus.consume_outbound(),
-                        timeout=1.0
-                    )
+                    # wait_for creates a child task: it can remove the last
+                    # queued message before this dispatcher records ownership.
+                    # Keep dequeue and the busy claim in the same task.
+                    async with asyncio.timeout(1.0):
+                        msg = await self.bus.consume_outbound()
+                self._outbound_dispatching = True
+                # Intake can close while an empty queue is awaited. Retain the
+                # message, but do not start another transport write while paused.
+                await self.bus.admission.wait_until_open()
 
                 event = msg.event
                 progress_event = event if isinstance(event, ProgressEvent) else None
@@ -838,8 +947,6 @@ class ChannelManager:
                 ):
                     continue
 
-                # Coalesce consecutive stream delta messages for the same (channel, chat_id)
-                # to reduce API calls and improve streaming latency
                 if isinstance(event, StreamDeltaEvent):
                     msg, extra_pending = self._coalesce_stream_deltas(msg)
                     pending.extend(extra_pending)
@@ -855,17 +962,21 @@ class ChannelManager:
                             StreamDeltaEvent | StreamEndEvent | StreamedResponseEvent,
                         )
                     ):
-                        if self._should_suppress_outbound(msg):
+                        if msg.delivery_id is None and self._should_suppress_outbound(msg):
                             logger.info("Suppressing duplicate outbound message to {}:{}", msg.channel, msg.chat_id)
                             continue
                     await self._queue_outbound(channel, msg)
                 else:
                     logger.warning("Unknown channel: {}", msg.channel)
+                    if msg.delivery_id is not None:
+                        self._outbox.finish(msg, "failed", "channel_disabled")
 
             except asyncio.TimeoutError:
                 continue
             except asyncio.CancelledError:
                 break
+            finally:
+                self._outbound_dispatching = False
 
     @staticmethod
     async def _send_reasoning_delta(
@@ -951,14 +1062,6 @@ class ChannelManager:
     def _coalesce_stream_deltas(
         self, first_msg: OutboundMessage
     ) -> tuple[OutboundMessage, list[OutboundMessage]]:
-        """Merge consecutive stream deltas for the same (channel, chat_id, stream_id).
-
-        This reduces the number of API calls when the queue has accumulated multiple
-        deltas, which happens when LLM generates faster than the channel can process.
-
-        Returns:
-            tuple of (merged_message, list_of_non_matching_messages)
-        """
         first_event = first_msg.event
         first_stream_id = first_event.stream_id if isinstance(first_event, StreamDeltaEvent) else None
         target_key = (first_msg.channel, first_msg.chat_id, first_stream_id)
@@ -978,7 +1081,6 @@ class ChannelManager:
             except asyncio.QueueEmpty:
                 break
 
-            # Check if this message belongs to the same stream
             next_event = next_msg.event
             next_stream_id = (
                 next_event.stream_id
@@ -998,19 +1100,15 @@ class ChannelManager:
                 == first_msg.metadata.get("response_sources")
             )
             if same_target and same_response_sources and (is_delta or (is_end and next_msg.content)):
-                # Accumulate content
                 combined_content += next_msg.content
-                # If we see stream_end, remember it and stop coalescing this stream
                 if isinstance(next_event, StreamEndEvent):
                     final_event = StreamEndEvent(
                         stream_id=next_stream_id,
                         resuming=next_event.resuming,
                         merge_next=next_event.merge_next,
                     )
-                    # Stream ended - stop coalescing this stream
                     break
             else:
-                # First non-matching message defines the coalescing boundary.
                 non_matching.append(next_msg)
                 break
 
@@ -1024,25 +1122,31 @@ class ChannelManager:
         *,
         deadline: float | None = None,
     ) -> None:
-        """Send a message with retry on failure using exponential backoff.
-
-        When deadline is provided, retry until that monotonic time instead of
-        stopping at the configured attempt limit.
-
-        Note: CancelledError is re-raised to allow graceful shutdown.
-        """
         max_attempts = max(self.config.channels.send_max_retries, 1)
         attempt = 0
 
         while True:
-            attempt += 1
             try:
-                await self._send_once(channel, msg)
-                return  # Send succeeded
+                async with asyncio.timeout_at(deadline):
+                    await self._outbound_sends.acquire()
+            except TimeoutError:
+                logger.warning("Send to {} deadline expired waiting for a send slot", msg.channel)
+                return
+            try:
+                try:
+                    if deadline is not None and asyncio.get_running_loop().time() >= deadline:
+                        logger.warning("Send to {} deadline expired before submission", msg.channel)
+                        return
+                    attempt += 1
+                    # The deadline bounds admission, not an already-submitted send.
+                    await self._send_once(channel, msg)
+                finally:
+                    self._outbound_sends.release()
+                return
             except asyncio.CancelledError:
                 raise  # Propagate cancellation for graceful shutdown
             except Exception as e:
-                if not channel.should_retry_send_error(e):
+                if isinstance(e, DeliveryRejectedError) or not channel.should_retry_send_error(e):
                     logger.error(
                         "Send to {} failed with a non-retryable {}: {}",
                         msg.channel,
@@ -1062,7 +1166,8 @@ class ChannelManager:
                         msg.channel, attempt,
                     )
                     return
-                delay = _SEND_RETRY_DELAYS[min(attempt - 1, len(_SEND_RETRY_DELAYS) - 1)]
+                base = _SEND_RETRY_DELAYS[min(attempt - 1, len(_SEND_RETRY_DELAYS) - 1)]
+                delay = random.uniform(base / 2, base)
                 if deadline is not None:
                     delay = min(delay, max(0.0, deadline - loop.time()))
                 attempt_label = str(attempt)
@@ -1075,7 +1180,7 @@ class ChannelManager:
                 try:
                     await asyncio.sleep(delay)
                 except asyncio.CancelledError:
-                    raise  # Propagate cancellation during sleep
+                    raise
 
     def get_channel(self, name: str) -> BaseChannel | None:
         """Get a channel by name."""

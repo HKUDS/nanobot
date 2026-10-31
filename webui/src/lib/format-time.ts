@@ -2,9 +2,9 @@ import i18n from "i18next";
 
 import { normalizeLocale } from "@/i18n/config";
 
-/** Loose ISO-or-epoch parser; returns ``null`` for missing/invalid input. */
+/** Loose ISO-or-epoch parser; zero denotes an unknown persisted message time. */
 function parseDate(value: string | number | null | undefined): Date | null {
-  if (value === null || value === undefined || value === "") return null;
+  if (value === null || value === undefined || value === "" || value === 0) return null;
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? null : d;
 }

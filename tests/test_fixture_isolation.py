@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.llm_usage import LLMCallRecord, get_llm_usage_store
+from nanobot.pairing import store as pairing_store
 from nanobot.session.manager import SessionManager
 from nanobot.webui import star_prompt
 
@@ -18,7 +19,7 @@ def test_runtime_stores_are_isolated_between_parameter_cases(
     session.add_message("user", "isolated message")
     sessions.save(session)
 
-    usage = get_llm_usage_store(tmp_path / "usage.sqlite3")
+    usage = get_llm_usage_store()
     assert usage.recent_calls() == []
     usage.record(LLMCallRecord(
         started_at_ms=int(time.time() * 1000), duration_ms=1, provider="test", model="test",
@@ -30,3 +31,8 @@ def test_runtime_stores_are_isolated_between_parameter_cases(
     assert not state_path.exists()
     star_prompt.update_star_prompt("completed", turn_id="fixture-isolation")
     assert state_path.exists()
+
+    assert not pairing_store.is_approved("test", "isolated-user")
+    code = pairing_store.generate_code("test", "isolated-user")
+    assert pairing_store.approve_code(code) is not None
+    assert pairing_store.is_approved("test", "isolated-user")

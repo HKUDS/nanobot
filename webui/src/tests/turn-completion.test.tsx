@@ -45,6 +45,75 @@ function setup() {
 }
 
 describe("completed turn event ordering", () => {
+  it("does not restore busy state from pending history delivered after completion", () => {
+    const { socket, client, wrapper, running } = setup();
+    const staleHistory: UIMessage[] = [{
+      id: "persisted-user", role: "user", content: "original request", turnId: TURN_ID, createdAt: 0,
+    }];
+    const { result, rerender, unmount } = renderHook(
+      ({ pending, history, active }: { pending: boolean; history: UIMessage[]; active: string | null }) =>
+        useNanobotStream(CHAT_ID, history, pending, undefined, undefined, [], undefined, active),
+      { wrapper, initialProps: { pending: false, history: EMPTY_MESSAGES, active: null as string | null } },
+    );
+    act(() => {
+      socket.receive(running);
+      socket.receive({ event: "stream_end", chat_id: CHAT_ID, turn_id: TURN_ID, text: "done" });
+      socket.receive({ event: "turn_end", chat_id: CHAT_ID, turn_id: TURN_ID });
+    });
+    expect(result.current.isStreaming).toBe(false);
+    rerender({ pending: true, history: staleHistory, active: TURN_ID });
+    expect(result.current.isStreaming).toBe(false);
+    expect(client.hasUnsettledRun(CHAT_ID)).toBe(false);
+    act(() => socket.receive({
+      ...running, turn_id: "next-turn", started_at: 1_700_000_100,
+    }));
+    rerender({ pending: false, history: staleHistory, active: null });
+    expect(result.current.isStreaming).toBe(true);
+    expect(client.getRunTurnId(CHAT_ID)).toBe("next-turn");
+    unmount();
+    client.close();
+  });
+
+  it("shares optimistic activity before a gateway start clock exists", () => {
+    const { socket, client, wrapper } = setup();
+    const status = vi.fn();
+    client.onRunStatus(status);
+    const { result, unmount } = renderHook(
+      () => useNanobotStream(CHAT_ID, EMPTY_MESSAGES), { wrapper },
+    );
+    act(() => { result.current.send("new request"); });
+    expect(result.current.isStreaming).toBe(true);
+    expect(result.current.runStartedAt).toBeNull();
+    expect(status).toHaveBeenLastCalledWith(CHAT_ID,
+      expect.objectContaining({ active: true, startedAt: null }));
+    const turnId = client.getRunTurnId(CHAT_ID)!;
+    act(() => socket.receive({
+      event: "turn_end", chat_id: CHAT_ID, turn_id: turnId,
+    }));
+    expect(result.current.isStreaming).toBe(false);
+    expect(status).toHaveBeenLastCalledWith(CHAT_ID,
+      expect.objectContaining({ active: false, startedAt: null }));
+    unmount();
+    client.close();
+  });
+
+  it("restores the canonical owner rather than a steering input at the history tail", () => {
+    const { socket, client, wrapper } = setup();
+    const initial: UIMessage[] = [{
+      id: "steering", role: "user", content: "additional guidance", turnId: "input-2", createdAt: Date.now(),
+    }];
+    const { result, unmount } = renderHook(
+      () => useNanobotStream(CHAT_ID, initial, true, undefined, undefined, [], undefined, TURN_ID), { wrapper },
+    );
+    expect(result.current.isStreaming).toBe(true);
+    expect(client.getRunTurnId(CHAT_ID)).toBe(TURN_ID);
+    act(() => socket.receive({ event: "turn_end", chat_id: CHAT_ID, turn_id: TURN_ID }));
+    expect(result.current.isStreaming).toBe(false);
+    expect(client.hasUnsettledRun(CHAT_ID)).toBe(false);
+    unmount();
+    client.close();
+  });
+
   it.each(["turn_end", "idle", "stop", "snapshot", "idle snapshot"] as const)(
     "keeps %s terminal despite late lifecycle and ownership frames",
     (terminal) => {

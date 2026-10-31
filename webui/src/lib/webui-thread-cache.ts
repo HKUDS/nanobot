@@ -5,6 +5,8 @@ import type { WebuiThreadPersistedPayload } from "./types";
 
 /** Bounded canonical replay cache; the most recent snapshot also survives tab reloads. */
 export class WebuiThreadCache extends MemoryLruCache<WebuiThreadPersistedPayload> {
+  private readonly listeners = new Map<string, Set<(body: WebuiThreadPersistedPayload) => void>>();
+
   constructor(
     maxBytes = 16 * 1024 * 1024,
     maxEntries = 12,
@@ -31,6 +33,17 @@ export class WebuiThreadCache extends MemoryLruCache<WebuiThreadPersistedPayload
   override set(key: string, body: WebuiThreadPersistedPayload): void {
     super.set(key, body);
     if (super.get(key)) writeReloadCache("thread", { key, body });
+    for (const listener of this.listeners.get(key) ?? []) listener(body);
+  }
+
+  subscribe(key: string, listener: (body: WebuiThreadPersistedPayload) => void): () => void {
+    const listeners = this.listeners.get(key) ?? new Set();
+    listeners.add(listener);
+    this.listeners.set(key, listeners);
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) this.listeners.delete(key);
+    };
   }
 
   override delete(key: string): void {

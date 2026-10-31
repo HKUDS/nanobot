@@ -20,10 +20,12 @@ import { useTranslation } from "react-i18next";
 
 import {
   ChatList,
+  type SidebarDeleteDecision,
   type SidebarDeleteItem,
   type SidebarPaneGroup,
 } from "@/components/ChatList";
 import { HostSwitcher } from "@/components/remote/HostSwitcher";
+import { UpdateNotice } from "@/components/UpdateNotice";
 import {
   SIDEBAR_SELECTION_ACTION_ITEM_CLASS,
   SidebarSelectionHighlight,
@@ -35,6 +37,7 @@ import type {
   SidebarViewState,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import type { UpdateMethod } from "@/lib/api";
 import { sidebarShortcutAria, sidebarShortcutLabel } from "@/lib/sidebar-shortcuts";
 
 interface SidebarProps {
@@ -42,16 +45,18 @@ interface SidebarProps {
   temporarySessions?: ChatSummary[];
   activeKey: string | null;
   loading: boolean;
+  initialLoading?: boolean;
   newChatActive: boolean;
   onNewChat: () => void;
   onSelect: (key: string) => void;
   onCloseTemporaryChat?: (key: string) => void;
-  onRequestDelete: (key: string, label: string) => void;
-  onRequestDeleteMany?: (items: SidebarDeleteItem[]) => void;
+  onRequestDelete: (key: string, label: string, onDecision?: SidebarDeleteDecision) => void;
+  onRequestDeleteMany?: (items: SidebarDeleteItem[], onDecision?: SidebarDeleteDecision) => void;
   onTogglePin: (key: string) => void;
-  onRequestRename: (key: string, label: string) => void;
+  onRequestRename: (key: string, title: string) => Promise<void>;
   onRequestRenameTab?: (key: string, label: string) => void;
   onToggleArchive: (key: string) => void;
+  onArchiveMany?: (keys: string[], archive: boolean) => void;
   paneGroups?: Record<string, SidebarPaneGroup>;
   onSelectPane?: (tabKey: string, paneKey: string) => void;
   onCreateTab?: (paneKey: string) => void;
@@ -65,6 +70,8 @@ interface SidebarProps {
   onRequestRenameProject: (projectKey: string, label: string) => void;
   onNewChatInProject: (projectPath: string, projectName: string) => void;
   onOpenSettings: () => void;
+  onOpenUpdates?: () => void;
+  availableUpdate?: { version: string; onDismiss: () => void; onRequestUpdate?: () => void; installationMethod?: UpdateMethod | null };
   onOpenApps: () => void;
   onOpenSkills: () => void;
   onOpenAutomations: () => void;
@@ -150,6 +157,8 @@ export function Sidebar(props: SidebarProps) {
 
   return (
     <nav
+      data-theme-surface
+      data-theme-ink
       ref={props.containActionMenus ? setMenuPortalContainer : undefined}
       aria-label={t("sidebar.navigation")}
       className={cn(
@@ -272,6 +281,7 @@ export function Sidebar(props: SidebarProps) {
             temporarySessions={props.temporarySessions}
             activeKey={props.activeKey}
             loading={props.loading}
+            initialLoading={props.initialLoading}
             emptyLabel={t("chat.noSessions")}
             onSelect={props.onSelect}
             onCloseTemporaryChat={props.onCloseTemporaryChat}
@@ -281,6 +291,7 @@ export function Sidebar(props: SidebarProps) {
             onRequestRename={props.onRequestRename}
             onRequestRenameTab={props.onRequestRenameTab}
             onToggleArchive={props.onToggleArchive}
+            onArchiveMany={props.onArchiveMany}
             paneGroups={props.paneGroups}
             onSelectPane={props.onSelectPane}
             onCreateTab={props.onCreateTab}
@@ -302,8 +313,6 @@ export function Sidebar(props: SidebarProps) {
             updatedChatIds={props.updatedChatIds}
             recoveryChatIds={props.recoveryChatIds}
             density={props.viewState?.density}
-            showPreviews={props.viewState?.show_previews}
-            showTimestamps={props.viewState?.show_timestamps}
             sort={props.viewState?.sort}
             showArchived={props.showArchived}
             defaultWorkspacePath={props.defaultWorkspacePath}
@@ -313,9 +322,16 @@ export function Sidebar(props: SidebarProps) {
           />
         )}
       </div>
+      {props.onOpenUpdates && props.availableUpdate && (
+        <UpdateNotice version={props.availableUpdate.version} collapsed={collapsed}
+          onOpen={props.onOpenUpdates} onDismiss={props.availableUpdate.onDismiss}
+          onRequestUpdate={props.availableUpdate.onRequestUpdate} installationMethod={props.availableUpdate.installationMethod} />
+      )}
       <div
+        data-theme-surface
         className={cn(
-          "flex items-center justify-between gap-1 bg-sidebar/55 px-2.5 py-3 text-xs",
+          "flex items-center justify-between gap-1 px-2.5 py-3 text-xs",
+          props.hostChromeInset && "bg-sidebar/55",
           collapsed && "w-14 flex-col px-0",
         )}
       >
@@ -379,7 +395,7 @@ function SidebarActionButton({
         collapsed
           ? "w-8 justify-center gap-0 px-0"
           : iconOnly ? "w-8 shrink-0 justify-center gap-0 rounded-control px-0"
-          : "w-full justify-start gap-2 px-2 text-[13px] leading-5 [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:stroke-[1.75]",
+          : "w-full justify-start gap-2 px-2 text-[13px] leading-5 [&_svg]:h-4 [&_svg]:w-4 [&_svg]:stroke-[1.75]",
         active
           ? "text-sidebar-accent-foreground"
           : compact

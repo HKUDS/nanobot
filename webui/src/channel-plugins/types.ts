@@ -34,6 +34,7 @@ export type ChannelPluginConnectFlowProps = {
   feature: NanobotFeatureInfo;
   idleLabel?: string;
   connectRequestId?: number;
+  onOpenAdvanced?: () => void;
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
 };
 

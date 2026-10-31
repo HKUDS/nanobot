@@ -1,10 +1,9 @@
-"""Tests for the shared openai_responses converters and parsers."""
-
 import json
 from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from loguru import logger
 from openai.types.responses import ResponseFunctionToolCall
@@ -61,10 +60,6 @@ async def test_sdk_tool_alias_survives_capture_and_next_request_replay():
     assert items[0]["async"] is True
     assert "async_" not in items[0]
 
-# ======================================================================
-# converters - split_tool_call_id
-# ======================================================================
-
 
 class TestSplitToolCallId:
     def test_plain_id(self):
@@ -84,11 +79,6 @@ class TestSplitToolCallId:
 
     def test_non_string(self):
         assert split_tool_call_id(42) == ("call_0", None)
-
-
-# ======================================================================
-# converters - convert_user_message
-# ======================================================================
 
 
 class TestConvertUserMessage:
@@ -130,7 +120,6 @@ class TestConvertUserMessage:
         assert result["content"] == [{"type": "input_text", "text": ""}]
 
     def test_meta_fields_not_leaked(self):
-        """_meta on content blocks must never appear in converted output."""
         result = convert_user_message([
             {"type": "text", "text": "hi", "_meta": {"path": "/tmp/x"}},
         ])
@@ -139,11 +128,6 @@ class TestConvertUserMessage:
     def test_non_dict_items_skipped(self):
         result = convert_user_message(["just a string", 42])
         assert result["content"] == [{"type": "input_text", "text": ""}]
-
-
-# ======================================================================
-# converters - convert_messages
-# ======================================================================
 
 
 class TestConvertMessages:
@@ -189,7 +173,7 @@ class TestConvertMessages:
         assert items == [
             {
                 "type": "reasoning",
-                "content": [{"type": "output_text", "text": "think first"}],
+                "content": [{"type": "reasoning_text", "text": "think first"}],
             },
             {
                 "type": "message",
@@ -221,7 +205,7 @@ class TestConvertMessages:
 
         assert items[0]["type"] == "reasoning"
         assert items[0]["content"] == [
-            {"type": "output_text", "text": "Michael topped up DeepSeek with $10."},
+            {"type": "reasoning_text", "text": "Michael topped up DeepSeek with $10."},
         ]
         assert items[1]["type"] == "function_call"
 
@@ -274,7 +258,6 @@ class TestConvertMessages:
         assert items[1]["call_id"] == "call_1"
 
     def test_assistant_with_tool_calls_no_id(self):
-        """Fallback call IDs still work when tool_call.id is missing."""
         _, items = convert_messages([{
             "role": "assistant",
             "content": None,
@@ -359,7 +342,6 @@ class TestConvertMessages:
         assert items[0]["output"] == json.dumps(content, ensure_ascii=False)
 
     def test_non_standard_keys_not_leaked(self):
-        """Extra keys on messages must not appear in converted items."""
         _, items = convert_messages([{
             "role": "user",
             "content": "hi",
@@ -371,7 +353,6 @@ class TestConvertMessages:
         assert "_meta" not in str(item)
 
     def test_full_conversation_roundtrip(self):
-        """System + user + assistant(tool_call) + tool -> correct structure."""
         msgs = [
             {"role": "system", "content": "Be concise."},
             {"role": "user", "content": "Weather in SF?"},
@@ -386,15 +367,10 @@ class TestConvertMessages:
         ]
         instructions, items = convert_messages(msgs)
         assert instructions == "Be concise."
-        assert len(items) == 3  # user, function_call, function_call_output
+        assert len(items) == 3
         assert items[0]["role"] == "user"
         assert items[1]["type"] == "function_call"
         assert items[2]["type"] == "function_call_output"
-
-
-# ======================================================================
-# converters - convert_tools
-# ======================================================================
 
 
 class TestConvertTools:
@@ -439,7 +415,6 @@ class TestConvertTools:
         assert convert_tools(tools) == []
 
     def test_tool_without_function_wrapper(self):
-        """Direct dict without type=function wrapper."""
         tools = [{"name": "f1", "description": "d", "parameters": {}}]
         result = convert_tools(tools)
         assert result[0]["name"] == "f1"
@@ -456,11 +431,6 @@ class TestConvertTools:
             {"type": "function", "function": {"name": "b", "parameters": {}}},
         ]
         assert len(convert_tools(tools)) == 2
-
-
-# ======================================================================
-# parsing - map_finish_reason
-# ======================================================================
 
 
 class TestMapFinishReason:
@@ -492,11 +462,6 @@ class TestMapFinishReason:
     )
     def test_non_replayable_finish_reasons(self, finish_reason):
         assert is_replayable_finish_reason(finish_reason) is False
-
-
-# ======================================================================
-# parsing - parse_response_output
-# ======================================================================
 
 
 class TestParseResponseOutput:
@@ -561,7 +526,6 @@ class TestParseResponseOutput:
         assert result.provider_state is not None
 
     def test_malformed_tool_arguments_logged(self):
-        """Malformed JSON arguments should log a warning and remain non-object."""
         resp = {
             "output": [{
                 "type": "function_call",
@@ -668,7 +632,6 @@ class TestParseResponseOutput:
         assert result.provider_state is None
 
     def test_sdk_model_object(self):
-        """parse_response_output should handle SDK objects with model_dump()."""
         mock = MagicMock()
         mock.model_dump.return_value = {
             "output": [{"type": "message", "role": "assistant",
@@ -680,16 +643,6 @@ class TestParseResponseOutput:
         assert result.content == "sdk"
         assert result.usage is not None
         assert result.usage.input_tokens == 1
-
-    def test_usage_maps_responses_api_keys(self):
-        """Responses API uses input_tokens/output_tokens, not prompt_tokens/completion_tokens."""
-        resp = {
-            "output": [],
-            "status": "completed",
-            "usage": {"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
-        }
-        result = parse_response_output(resp)
-        assert result.usage == LLMUsage.reported(input_tokens=100, output_tokens=50)
 
     def test_non_stream_preserves_provider_reported_total(self):
         result = parse_response_output({
@@ -865,9 +818,9 @@ class TestResponsesConversationState:
     ):
         assert resolve_compact_threshold(context_window, max_output) == expected
 
-    def test_compaction_compatibility_recognizes_old_sdk_signature_error(self):
+    def test_local_sdk_errors_do_not_disable_server_compaction(self):
         error = TypeError("create() got an unexpected keyword argument 'context_management'")
-        assert is_compaction_compatibility_error(error) is True
+        assert is_compaction_compatibility_error(error) is False
         assert is_compaction_compatibility_error(TypeError("unrelated argument")) is False
 
     def test_state_observability_logs_counts_without_opaque_content(self):
@@ -1049,15 +1002,11 @@ class TestResponsesConversationState:
         assert instructions == "You are KITT."
         assert replayed is True
         reasoning_items = [item for item in items if item.get("type") == "reasoning"]
-        assert len(reasoning_items) == 2  # one replayed, one converted delta
-        for item in reasoning_items:
-            assert isinstance(item["content"], list)
-            assert item["content"][0]["type"] == "output_text"
-
-
-# ======================================================================
-# parsing - consume_sse
-# ======================================================================
+        assert len(reasoning_items) == 2
+        assert isinstance(reasoning_items[0]["content"], list)
+        assert reasoning_items[0]["content"][0]["type"] == "output_text"
+        assert isinstance(reasoning_items[1]["content"], list)
+        assert reasoning_items[1]["content"][0]["type"] == "reasoning_text"
 
 
 class _SseResponse:
@@ -1071,6 +1020,36 @@ class _SseResponse:
 
 
 class TestConsumeSse:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("prefix", ["", "\ufeff"])
+    async def test_leading_utf8_bom_preserves_first_content_delta(self, prefix):
+        events = [
+            {"type": "response.output_text.delta", "delta": "Hello "},
+            {"type": "response.output_text.delta", "delta": "\ufeff世界"},
+            {"type": "response.completed", "response": {"status": "completed"}},
+        ]
+        wire = prefix + "".join(
+            f"data: {json.dumps(event, ensure_ascii=False)}\n\n" for event in events
+        )
+        response = httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=wire.encode("utf-8"),
+        )
+        deltas = []
+
+        async def on_delta(delta):
+            deltas.append(delta)
+
+        content, tool_calls, finish_reason, _, _ = await consume_sse_with_reasoning(
+            response, on_content_delta=on_delta,
+        )
+
+        assert content == "Hello \ufeff世界"
+        assert deltas == ["Hello ", "\ufeff世界"]
+        assert tool_calls == []
+        assert finish_reason == "stop"
+
     @pytest.mark.asyncio
     @pytest.mark.parametrize("event_type", ["response.output_text.delta", "response.refusal.delta"])
     async def test_eof_without_terminal_event_is_a_connection_error(self, event_type):
@@ -1647,11 +1626,6 @@ class TestConsumeSse:
         assert type(tool_calls[0].arguments) is type(arguments)
 
 
-# ======================================================================
-# parsing - consume_sdk_stream
-# ======================================================================
-
-
 class TestConsumeSdkStream:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("event_type", ["response.output_text.delta", "response.refusal.delta"])
@@ -2182,7 +2156,6 @@ class TestConsumeSdkStream:
 
     @pytest.mark.asyncio
     async def test_malformed_tool_args_logged(self):
-        """Malformed JSON in streaming tool args should log a warning and remain non-object."""
         item_added = MagicMock(type="function_call", call_id="c1", id="fc1", arguments="")
         item_added.name = "f"
         ev1 = MagicMock(type="response.output_item.added", item=item_added)

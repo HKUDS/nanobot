@@ -158,8 +158,7 @@
       },
       "trustedAuthservIds": {
         "label": "Services d’authentification approuvés",
-        "placeholder": "mx.google.com, séparés par des virgules",
-        "help": "Saisissez les valeurs authserv-id de confiance.\n\nValeurs authserv-id exactes ajoutées par le service de réception. Requis si SPF ou DKIM est vérifié."
+        "placeholder": "mx.google.com, séparés par des virgules"
       }
     }
   }

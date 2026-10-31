@@ -1,1 +1,0 @@
-"""DingTalk channel package."""

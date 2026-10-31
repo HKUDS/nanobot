@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+
+import { preloadMarkdownText } from "@/components/MarkdownText";
 
 import { ImageGallery } from "@/components/ImageGallery";
 import { MessageBubble } from "@/components/MessageBubble";
@@ -13,6 +15,8 @@ const message: UIMessage = { id: "images", role: "assistant", content: "", creat
   media: [{ kind: "image", url: "/api/media/sign/chart", name: "chart.png" }] };
 
 describe("image presentation", () => {
+  beforeAll(preloadMarkdownText);
+
   it("bounds a large collection to four thumbnails and keeps every image in the viewer", async () => {
     const user = userEvent.setup();
     const { container } = render(<ImageGallery images={images} />);
@@ -66,12 +70,59 @@ describe("image presentation", () => {
     expect(within(screen.getByRole("dialog")).getByRole("img", { name: "0.png" })).toBeVisible();
   });
 
-  it("replaces a broken thumbnail with a quiet named placeholder", () => {
+  it("shows an explicit failure without painting a filename across the thumbnail", () => {
     render(<ImageGallery images={[images[0]]} />);
     fireEvent.error(screen.getByRole("img"));
-    expect(screen.queryByRole("img")).not.toBeInTheDocument();
-    expect(screen.getByText("0.png")).toBeVisible();
+    expect(screen.getByText("Attachment unavailable")).toBeVisible();
+    expect(screen.getByLabelText("Attachment unavailable: 0.png")).toHaveAttribute("title", "0.png");
+    expect(screen.queryByText("0.png")).not.toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("uses the loaded picture's shape for a sent user image and retains its accessible viewer action", async () => {
+    const user = userEvent.setup();
+    render(<MessageBubble message={{ id: "portrait", role: "user", content: "", createdAt: 1,
+      images: [{ url: "/portrait.png", name: "portrait.png" }] }} />);
+    const image = screen.getByRole("img", { name: "portrait.png" });
+    Object.defineProperties(image, { naturalWidth: { value: 600 }, naturalHeight: { value: 900 } });
+    fireEvent.load(image);
+    const open = screen.getByRole("button", { name: "View image: portrait.png" });
+    expect(Number.parseFloat(open.style.width)).toBeCloseTo(320 * 2 / 3);
+    expect(open.style.height).toBe("320px");
+    expect(screen.queryByText("portrait.png")).not.toBeInTheDocument();
+    await user.click(open);
+    expect(within(screen.getByRole("dialog")).getByRole("img", { name: "portrait.png" })).toBeVisible();
+  });
+
+  it("settles a mixed gallery together after loading and preserves click order through regrouping", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<ImageGallery images={images.slice(0, 4)} size="compact" />);
+    for (const image of screen.getAllByRole("img")) {
+      Object.defineProperties(image, { naturalWidth: { value: 800 }, naturalHeight: { value: 800 } });
+      fireEvent.load(image);
+    }
+    const tiles = Array.from(container.querySelectorAll<HTMLElement>("[data-image-gallery] > button"));
+    expect(tiles.map((tile) => Number.parseFloat(tile.style.top))).toEqual([0, 0, 184, 184]);
+    expect(screen.getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(
+      [0, 1, 2, 3].map((index) => `View image: ${index}.png`));
+    await user.click(screen.getByRole("button", { name: "View image: 2.png" }));
+    expect(screen.getByText("3 / 4")).toBeVisible();
+    expect(within(screen.getByRole("dialog")).getByRole("img", { name: "2.png" })).toBeVisible();
+  });
+
+  it("returns focus to the same thumbnail when late image loads change the row grouping", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<ImageGallery images={images.slice(0, 4)} size="compact" />);
+    const thumbnails = container.querySelectorAll("[data-image-gallery] img");
+    const opener = screen.getByRole("button", { name: "View image: 2.png" });
+    await user.click(opener);
+    for (const image of thumbnails) {
+      Object.defineProperties(image, { naturalWidth: { value: 600 }, naturalHeight: { value: 900 } });
+      fireEvent.load(image);
+    }
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "View image: 2.png" })).toBe(opener);
+    expect(opener).toHaveFocus();
   });
 });
 
@@ -93,7 +144,9 @@ describe("file quick look", () => {
     const quickLook = screen.getByTestId("file-image-quick-look");
     expect(quickLook.textContent).toBe("");
     expect(quickLook).toHaveClass("w-max");
-    expect(quickLook).not.toHaveClass("h-36", "w-full");
+    for (const className of ["h-36", "w-full"]) {
+      expect(quickLook).not.toHaveClass(className);
+    }
     expect(quickLook.querySelector("img")).toHaveClass("rounded-mark", "object-contain");
     expect(quickLook.querySelector("img")).toHaveClass("h-auto", "w-auto", "max-h-36");
     expect(screen.getByRole("tooltip")).toHaveTextContent("File preview");

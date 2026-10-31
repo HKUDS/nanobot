@@ -1,5 +1,3 @@
-"""Shared SSH errors and owned subprocess shutdown."""
-
 from __future__ import annotations
 
 import asyncio

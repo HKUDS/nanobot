@@ -1,5 +1,3 @@
-"""Tests for the mid-turn injection system: drain, checkpoints, pending queues, error paths."""
-
 from __future__ import annotations
 
 import asyncio
@@ -37,7 +35,6 @@ def _make_loop(tmp_path, *, recovery_admission=None):
     provider.get_default_model.return_value = "test-model"
 
     with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager"), \
          patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         mock_sub_mgr.return_value.close = AsyncMock()
@@ -51,7 +48,6 @@ def _make_loop(tmp_path, *, recovery_admission=None):
 
 @pytest.mark.asyncio
 async def test_drain_injections_returns_empty_when_no_callback():
-    """No injection_callback → empty list."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock()
@@ -69,7 +65,6 @@ async def test_drain_injections_returns_empty_when_no_callback():
 
 @pytest.mark.asyncio
 async def test_drain_injections_extracts_content_from_inbound_messages():
-    """Should extract .content from InboundMessage objects."""
     from nanobot.agent.runner import AgentRunner
     from nanobot.bus.events import InboundMessage
 
@@ -100,7 +95,6 @@ async def test_drain_injections_extracts_content_from_inbound_messages():
 
 @pytest.mark.asyncio
 async def test_drain_injections_keeps_entire_callback_snapshot():
-    """A callback snapshot is never split by an arbitrary message count."""
     from nanobot.agent.runner import AgentRunner
     from nanobot.bus.events import InboundMessage
 
@@ -130,7 +124,6 @@ async def test_drain_injections_keeps_entire_callback_snapshot():
 
 @pytest.mark.asyncio
 async def test_drain_injections_skips_empty_content():
-    """Messages with blank content should be filtered out."""
     from nanobot.agent.runner import AgentRunner
     from nanobot.bus.events import InboundMessage
 
@@ -159,7 +152,6 @@ async def test_drain_injections_skips_empty_content():
 
 @pytest.mark.asyncio
 async def test_drain_injections_filters_empty_dict_payloads():
-    """Pre-normalized dict injections should obey the same empty-content guard."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock()
@@ -195,7 +187,6 @@ async def test_drain_injections_filters_empty_dict_payloads():
 
 @pytest.mark.asyncio
 async def test_drain_injections_skips_objects_with_none_content():
-    """Objects exposing content=None should be skipped rather than stringified."""
     from types import SimpleNamespace
 
     from nanobot.agent.runner import AgentRunner
@@ -223,7 +214,6 @@ async def test_drain_injections_skips_objects_with_none_content():
 
 @pytest.mark.asyncio
 async def test_drain_injections_handles_callback_exception():
-    """If the callback raises, return empty list (error is logged)."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock()
@@ -245,7 +235,6 @@ async def test_drain_injections_handles_callback_exception():
 
 @pytest.mark.asyncio
 async def test_checkpoint1_injects_after_tool_execution():
-    """Follow-up messages are injected after tool execution, before next LLM call."""
     from nanobot.agent.runner import AgentRunner
     from nanobot.bus.events import InboundMessage
 
@@ -292,7 +281,6 @@ async def test_checkpoint1_injects_after_tool_execution():
 
     assert result.had_injections is True
     assert result.final_content == "final answer"
-    # The second call should have the injected user message
     assert call_count["n"] == 2
     last_messages = captured_messages[-1]
     injected = [m for m in last_messages if m.get("role") == "user" and m.get("content") == "follow-up question"]
@@ -301,7 +289,6 @@ async def test_checkpoint1_injects_after_tool_execution():
 
 @pytest.mark.asyncio
 async def test_terminal_wait_does_not_block_next_iteration_after_tools():
-    """Background waits begin only after a no-tool response is ready to finish."""
     from nanobot.agent.runner import AgentRunner
     from nanobot.bus.events import InboundMessage
 
@@ -380,7 +367,6 @@ async def test_terminal_wait_does_not_block_next_iteration_after_tools():
 
 @pytest.mark.asyncio
 async def test_goal_continuation_precedes_terminal_wait():
-    """An active sustained goal keeps running without joining background work."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock()
@@ -393,7 +379,7 @@ async def test_goal_continuation_precedes_terminal_wait():
     continuation_checks = 0
     terminal_waits = 0
 
-    def continue_goal() -> str | None:
+    async def continue_goal() -> str | None:
         nonlocal continuation_checks
         continuation_checks += 1
         return "Continue the active goal." if continuation_checks == 1 else None
@@ -425,7 +411,6 @@ async def test_goal_continuation_precedes_terminal_wait():
 
 @pytest.mark.asyncio
 async def test_checkpoint2_injects_after_final_response_with_resuming_stream():
-    """After final response, if injections exist, stream_end should get resuming=True."""
     from nanobot.agent.hook import AgentHook, AgentHookContext
     from nanobot.agent.runner import AgentRunner
     from nanobot.bus.events import InboundMessage
@@ -476,15 +461,12 @@ async def test_checkpoint2_injects_after_final_response_with_resuming_stream():
     assert result.had_injections is True
     assert result.final_content == "second answer"
     assert call_count["n"] == 2
-    # First stream_end should have resuming=True (because injections found)
     assert stream_end_calls[0] is True
-    # Second (final) stream_end should have resuming=False
     assert stream_end_calls[-1] is False
 
 
 @pytest.mark.asyncio
 async def test_injected_followup_starts_new_length_recovery_chain():
-    """A follow-up gets a fresh recovery budget and no content from the prior answer."""
     from nanobot.agent.runner import AgentRunner
     from nanobot.bus.events import InboundMessage
 
@@ -589,7 +571,6 @@ async def test_truncated_answer_followup_requires_remaining_iteration(max_iterat
 
 @pytest.mark.asyncio
 async def test_checkpoint2_preserves_final_response_in_history_before_followup():
-    """A follow-up injected after a final answer must still see that answer in history."""
     from nanobot.agent.runner import AgentRunner
     from nanobot.bus.events import InboundMessage
 
@@ -645,7 +626,6 @@ async def test_checkpoint2_preserves_final_response_in_history_before_followup()
 
 @pytest.mark.asyncio
 async def test_loop_injected_followup_preserves_image_media(tmp_path):
-    """Mid-turn follow-ups with images should keep multimodal content."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
@@ -749,7 +729,7 @@ async def test_pending_injection_resolves_its_own_runtime_context(tmp_path):
         )
 
     loop.register_runtime_context_provider(provide_identity)
-    session = loop.sessions.get_or_create("telegram:group-1")
+    session = await loop.sessions.state.get("telegram:group-1")
     pending_queue = asyncio.Queue()
     await pending_queue.put(InboundMessage(
         channel="telegram",
@@ -902,7 +882,6 @@ async def test_subagent_pending_injection_is_hidden_history_and_not_merged(tmp_p
 
 @pytest.mark.asyncio
 async def test_model_request_merges_injected_user_messages_without_losing_media():
-    """The model copy may merge follow-ups while the raw transcript keeps each event."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock()
@@ -971,7 +950,6 @@ async def test_model_request_merges_injected_user_messages_without_losing_media(
 
 
 def test_runner_append_keeps_recovery_followups_separate() -> None:
-    """Each raw follow-up keeps its own recovery identity."""
     from nanobot.agent.runner import AgentRunner
     from nanobot.session.recovery import PENDING_FOLLOWUP_ID_KEY
 
@@ -1041,7 +1019,6 @@ def test_model_request_merge_preserves_runtime_markers_with_media() -> None:
 
 @pytest.mark.asyncio
 async def test_injection_cycles_are_not_stopped_by_an_arbitrary_cap():
-    """Every pending snapshot runs until the normal iteration budget is reached."""
     from nanobot.agent.runner import AgentRunner
     from nanobot.bus.events import InboundMessage
 
@@ -1082,7 +1059,6 @@ async def test_injection_cycles_are_not_stopped_by_an_arbitrary_cap():
 
 @pytest.mark.asyncio
 async def test_no_injections_flag_is_false_by_default():
-    """had_injections should be False when no injection callback or no messages."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock()
@@ -1108,7 +1084,6 @@ async def test_no_injections_flag_is_false_by_default():
 
 @pytest.mark.asyncio
 async def test_followup_routed_to_pending_queue(tmp_path):
-    """Unified-session follow-ups should route into the active pending queue."""
     from nanobot.bus.events import InboundMessage
     from nanobot.session.keys import UNIFIED_SESSION_KEY
 
@@ -1134,7 +1109,6 @@ async def test_followup_routed_to_pending_queue(tmp_path):
 
 @pytest.mark.asyncio
 async def test_websocket_followup_is_admitted_before_recovery_queue(tmp_path):
-    """Recovery admission runs before a newer WebUI message is injected."""
     from nanobot.bus.events import InboundMessage
 
     admission = MagicMock()
@@ -1164,8 +1138,8 @@ async def test_websocket_followup_is_admitted_before_recovery_queue(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_unified_websocket_followup_admits_effective_session(tmp_path):
-    """Recovery admission and the pending queue must use the same session key."""
+@pytest.mark.parametrize("channel", ["websocket", "discord"])
+async def test_unified_followup_admits_effective_session(tmp_path, channel):
     from nanobot.bus.events import InboundMessage
     from nanobot.session.keys import UNIFIED_SESSION_KEY
 
@@ -1177,27 +1151,32 @@ async def test_unified_websocket_followup_admits_effective_session(tmp_path):
     pending = asyncio.Queue(maxsize=20)
     loop._pending_queues[UNIFIED_SESSION_KEY] = pending
 
-    run_task = asyncio.create_task(loop.run())
     msg = InboundMessage(
-        channel="websocket",
+        channel=channel,
         sender_id="u",
         chat_id="chat",
         content="new request",
     )
-    await loop.bus.publish_inbound(msg)
-
-    queued_msg = await asyncio.wait_for(pending.get(), timeout=2)
-    admitted_msg = admission.admit.await_args.args[0]
-    assert admitted_msg.session_key == UNIFIED_SESSION_KEY
-    assert queued_msg.session_key == UNIFIED_SESSION_KEY
-
-    loop.stop()
-    await asyncio.wait_for(run_task, timeout=2)
+    try:
+        # Exercise the real routing/journaling boundary to completion. This is
+        # a session-key contract, not a two-second SQLite fsync benchmark.
+        await loop._dispatch_inbound(msg)
+        queued_msg = pending.get_nowait()
+        admission.admit.assert_awaited_once()
+        admitted_msg = admission.admit.await_args.args[0]
+        assert admitted_msg.session_key == UNIFIED_SESSION_KEY
+        assert queued_msg.session_key == UNIFIED_SESSION_KEY
+        assert queued_msg.content == msg.content
+        if channel == "websocket":
+            assert queued_msg.metadata["_recovery_followup_id"]
+        else:
+            assert queued_msg.metadata == msg.metadata
+    finally:
+        await loop.aclose()
 
 
 @pytest.mark.asyncio
 async def test_mid_turn_subagent_result_does_not_resolve_a_new_turn_route(tmp_path):
-    """Injected results stay inside the active turn instead of opening a side turn."""
     from nanobot.bus.events import InboundMessage
 
     loop = _make_loop(tmp_path)
@@ -1234,7 +1213,6 @@ async def test_mid_turn_subagent_result_does_not_resolve_a_new_turn_route(tmp_pa
 
 @pytest.mark.asyncio
 async def test_pending_queue_batches_full_snapshot_before_first_model_call(tmp_path):
-    """All messages waiting at the checkpoint enter one model request in order."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
@@ -1295,7 +1273,6 @@ async def test_pending_queue_batches_full_snapshot_before_first_model_call(tmp_p
 
 @pytest.mark.asyncio
 async def test_pending_queue_snapshot_excludes_messages_arriving_during_conversion(tmp_path):
-    """A checkpoint is a finite snapshot even when message conversion awaits."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
@@ -1444,9 +1421,9 @@ async def test_persistent_conversion_error_does_not_drop_later_session_inputs(tm
         calls += 1
         if calls == 1:
             for content in ["before", "bad", "after"]:
-                loop._enqueue_session_message(InboundMessage(
+                (await loop._enqueue_session_message(InboundMessage(
                     channel="cli", sender_id="u", chat_id="c", content=content,
-                ))
+                )))
         return LLMResponse(content="answer", finish_reason="stop")
 
     async def context_provider(request):
@@ -1472,16 +1449,24 @@ async def test_persistent_conversion_error_does_not_drop_later_session_inputs(tm
 
 
 @pytest.mark.asyncio
-async def test_session_inbox_is_installed_before_worker_start(tmp_path):
-    """A preloaded burst has one FIFO path before the worker can be scheduled."""
+async def test_session_inbox_is_installed_before_worker_start(tmp_path, monkeypatch):
     from nanobot.bus.events import InboundMessage, OutboundMessage
 
     loop = _make_loop(tmp_path)
     first_started = asyncio.Event()
+    all_enqueued = asyncio.Event()
     release_first = asyncio.Event()
     all_processed = asyncio.Event()
     processed: list[str] = []
     followups = [f"follow-up-{index}" for index in range(40)]
+    enqueue = loop._enqueue_session_message
+
+    async def capture_enqueue(msg):
+        await enqueue(msg)
+        if msg.content == followups[-1]:
+            all_enqueued.set()
+
+    monkeypatch.setattr(loop, "_enqueue_session_message", capture_enqueue)
 
     async def _process_message(msg, **_kwargs):
         processed.append(msg.content)
@@ -1502,14 +1487,11 @@ async def test_session_inbox_is_installed_before_worker_start(tmp_path):
         )
 
     run_task = asyncio.create_task(loop.run())
-    await asyncio.wait_for(first_started.wait(), timeout=2)
+    await asyncio.wait_for(
+        asyncio.gather(first_started.wait(), all_enqueued.wait()), timeout=30,
+    )
 
     session_key = "cli:c"
-    for _ in range(200):
-        pending = loop._pending_queues.get(session_key)
-        if pending is not None and pending.qsize() == len(followups):
-            break
-        await asyncio.sleep(0.01)
     assert len(loop._active_tasks[session_key]) == 1
     assert loop._pending_queues[session_key].qsize() == len(followups)
 
@@ -1524,9 +1506,8 @@ async def test_session_inbox_is_installed_before_worker_start(tmp_path):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("log_content", [True, False])
 async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(
-    tmp_path, request, log_content,
+    tmp_path, request, monkeypatch, log_content,
 ):
-    """Messages accumulated during a model call share its next request snapshot."""
     from loguru import logger
 
     from nanobot.agent.loop import AgentLoop
@@ -1542,7 +1523,7 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(
     provider.get_default_model.return_value = "test-model"
     first_request_started = asyncio.Event()
     release_first_request = asyncio.Event()
-    second_request_started = asyncio.Event()
+    all_enqueued = asyncio.Event()
     captured_messages: list[list[dict]] = []
 
     async def chat_stream_with_retry(*, messages, **kwargs):
@@ -1551,7 +1532,6 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(
             first_request_started.set()
             await release_first_request.wait()
             return LLMResponse(content="first answer", tool_calls=[], usage=None)
-        second_request_started.set()
         return LLMResponse(content="batch answer", tool_calls=[], usage=None)
 
     provider.chat_stream_with_retry = chat_stream_with_retry
@@ -1562,39 +1542,46 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(
         model="test-model",
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
-    loop.sessions.get_or_create("cli:c").policy = SessionPolicy(log_content=log_content)
+    await loop.sessions.state.get("cli:c")
+    await loop.sessions.state.set_policy("cli:c", SessionPolicy(log_content=log_content))
     followups = [f"follow-up-{index:02}" for index in range(12)]
+    enqueue = loop._enqueue_session_message
+
+    async def capture_enqueue(msg):
+        await enqueue(msg)
+        if msg.content == followups[-1]:
+            all_enqueued.set()
+
+    monkeypatch.setattr(loop, "_enqueue_session_message", capture_enqueue)
 
     run_task = asyncio.create_task(loop.run())
-    await loop.bus.publish_inbound(InboundMessage(
-        channel="cli",
-        sender_id="u",
-        chat_id="c",
-        content="initial",
-    ))
-    await asyncio.wait_for(first_request_started.wait(), timeout=2)
-    for content in followups:
+    try:
         await loop.bus.publish_inbound(InboundMessage(
             channel="cli",
             sender_id="u",
             chat_id="c",
-            content=content,
+            content="initial",
         ))
-    for _ in range(200):
-        pending = loop._pending_queues.get("cli:c")
-        if pending is not None and pending.qsize() == len(followups):
-            break
-        await asyncio.sleep(0.01)
-    assert loop._pending_queues["cli:c"].qsize() == len(followups)
+        await asyncio.wait_for(first_request_started.wait(), timeout=30)
+        for content in followups:
+            await loop.bus.publish_inbound(InboundMessage(
+                channel="cli",
+                sender_id="u",
+                chat_id="c",
+                content=content,
+            ))
+        await asyncio.wait_for(all_enqueued.wait(), timeout=30)
+        assert loop._pending_queues["cli:c"].qsize() == len(followups)
+        workers = list(loop._active_tasks["cli:c"])
 
-    release_first_request.set()
-    await asyncio.wait_for(second_request_started.wait(), timeout=2)
-    for _ in range(200):
-        if "cli:c" not in loop._pending_queues:
-            break
-        await asyncio.sleep(0.01)
-    loop.stop()
-    await asyncio.wait_for(run_task, timeout=2)
+        release_first_request.set()
+        # Wait for the real worker, including durable writes, not a disk-speed SLA.
+        await asyncio.wait_for(asyncio.gather(*workers), timeout=30)
+        assert "cli:c" not in loop._pending_queues
+    finally:
+        release_first_request.set()
+        loop.stop()
+        await asyncio.wait_for(run_task, timeout=30)
 
     assert len(captured_messages) == 2
     second_request = "\n".join(
@@ -1621,7 +1608,6 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(
 
 @pytest.mark.asyncio
 async def test_session_worker_processes_leftovers_without_republishing(tmp_path):
-    """Messages left by one turn stay on the same FIFO worker."""
     from nanobot.bus.events import InboundMessage, OutboundMessage
 
     loop = _make_loop(tmp_path)
@@ -1652,7 +1638,6 @@ async def test_session_worker_processes_leftovers_without_republishing(tmp_path)
 
 @pytest.mark.asyncio
 async def test_drain_injections_after_recoverable_tool_error():
-    """A tool error and injected follow-up continue in the same runner conversation."""
     from nanobot.agent.runner import AgentRunner
     from nanobot.bus.events import InboundMessage
 
@@ -1673,7 +1658,6 @@ async def test_drain_injections_after_recoverable_tool_error():
                 tool_calls=[ToolCallRequest(id="c1", name="exec", arguments={"cmd": "bad"})],
                 usage=None,
             )
-        # Third call: respond normally to the injected follow-up.
         return LLMResponse(content="reply to follow-up", tool_calls=[], usage=None)
 
     provider.chat_stream_with_retry = chat_stream_with_retry
@@ -1701,7 +1685,6 @@ async def test_drain_injections_after_recoverable_tool_error():
     assert result.had_injections is True
     assert result.final_content == "reply to follow-up"
     assert call_count["n"] == 3
-    # The injection should be in the messages history
     injected = [
         m for m in result.messages
         if m.get("role") == "user" and m.get("content") == "follow-up after error"
@@ -1711,7 +1694,6 @@ async def test_drain_injections_after_recoverable_tool_error():
 
 @pytest.mark.asyncio
 async def test_drain_injections_on_llm_error():
-    """A follow-up after an error stays raw and reaches the next model request."""
     from nanobot.agent.runner import AgentRunner
     from nanobot.bus.events import InboundMessage
 
@@ -1737,7 +1719,6 @@ async def test_drain_injections_on_llm_error():
                 finish_reason="error",
                 usage=None,
             )
-        # Second call: respond normally to the injected follow-up
         return LLMResponse(content="recovered answer", tool_calls=[], usage=None)
 
     provider.chat_stream_with_retry = chat_stream_with_retry
@@ -1785,7 +1766,6 @@ async def test_drain_injections_on_llm_error():
 
 @pytest.mark.asyncio
 async def test_drain_injections_on_empty_final_response():
-    """Pending injections should be drained when the runner exits due to empty response."""
     from nanobot.agent.runner import _MAX_EMPTY_RETRIES, AgentRunner
     from nanobot.bus.events import InboundMessage
 
@@ -1803,7 +1783,6 @@ async def test_drain_injections_on_empty_final_response():
                     content="follow-up after empty",
                 ))
             return LLMResponse(content="", tool_calls=[], usage=None)
-        # After retries exhausted + injection drain, respond normally
         return LLMResponse(content="answer after empty", tool_calls=[], usage=None)
 
     provider.chat_stream_with_retry = chat_stream_with_retry
@@ -1839,7 +1818,6 @@ async def test_drain_injections_on_empty_final_response():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failed_stop_reason", ["error", "empty_final_response"])
 async def test_late_injection_recovery_completes_and_delivers_reply(failed_stop_reason):
-    """Input arriving after failure bookkeeping must not poison a recovered turn."""
     from nanobot.agent.hook import AgentHook
     from nanobot.agent.runner import _MAX_EMPTY_RETRIES, AgentRunner
     from nanobot.agent.tools.registry import ToolRegistry
@@ -1866,8 +1844,6 @@ async def test_late_injection_recovery_completes_and_delivers_reply(failed_stop_
         async def after_iteration(self, context) -> None:
             if context.stop_reason == failed_stop_reason and context.error is not None:
                 observed_failures.append(context.error)
-                # The earlier final-response drain has already run. Inject at
-                # the late drain, after the runner has recorded the failure.
                 await injection_queue.put(InboundMessage(
                     channel="websocket",
                     sender_id="user",
@@ -1918,7 +1894,6 @@ async def test_late_injection_recovery_completes_and_delivers_reply(failed_stop_
 
 @pytest.mark.asyncio
 async def test_max_iterations_without_finalization_keeps_late_injection_queued():
-    """Never consume a user message when no later model request can observe it."""
     from nanobot.agent.hook import AgentHook
     from nanobot.agent.runner import AgentRunner
     from nanobot.bus.events import InboundMessage
@@ -1972,7 +1947,6 @@ async def test_max_iterations_without_finalization_keeps_late_injection_queued()
 
 @pytest.mark.asyncio
 async def test_max_iterations_finalization_keeps_late_injection_queued():
-    """New input waits for a turn with tools instead of entering no-tools finalization."""
     from nanobot.agent.hook import AgentHook
     from nanobot.agent.runner import AgentRunner
     from nanobot.bus.events import InboundMessage
@@ -2042,7 +2016,6 @@ async def test_max_iterations_finalization_keeps_late_injection_queued():
 
 @pytest.mark.asyncio
 async def test_error_path_is_not_stopped_by_an_arbitrary_injection_cap():
-    """Error recovery consumes every arrived snapshot until no follow-up remains."""
     from nanobot.agent.runner import AgentRunner
     from nanobot.bus.events import InboundMessage
 

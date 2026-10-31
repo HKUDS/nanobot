@@ -86,7 +86,7 @@ def test_legacy_provider_api_migrates_and_saves_current_format(tmp_path, field, 
     save_config(config, path)
     saved = json.loads(path.read_text(encoding="utf-8"))["providers"]["openai"]
     assert saved.get("api") == expected
-    assert field not in saved  # The seeded legacy field must not survive a save.
+    assert field not in saved
     assert load_config(path).providers.openai.api == config.providers.openai.api
 
 

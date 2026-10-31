@@ -1,5 +1,3 @@
-"""Capability settings domain logic for Web, media, network, and API features."""
-
 from __future__ import annotations
 
 import asyncio
@@ -186,7 +184,7 @@ def capability_settings_payload(
         },
         "web": {
             "enable": config.tools.web.enable,
-            "proxy": config.tools.web.proxy,
+            "use_proxy": config.tools.web.use_proxy,
             "user_agent": config.tools.web.user_agent,
             "search": {
                 "max_results": search_config.max_results,

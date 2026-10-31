@@ -1,5 +1,3 @@
-"""Tests for nanobot.agent.skills.SkillsLoader."""
-
 from __future__ import annotations
 
 import json
@@ -7,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from nanobot.agent import skills as agent_skills
+from nanobot.agent.context import ContextBuilder
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools.filesystem import ListDirTool, WriteFileTool
 from nanobot.agent.tools.search import GrepTool
@@ -369,24 +369,11 @@ def test_build_skills_summary_keeps_absolute_roots_for_selected_project(tmp_path
     assert str(project.resolve()) not in summary
 
 
-def test_bundled_update_setup_description_is_valid_yaml(tmp_path: Path) -> None:
-    metadata = SkillsLoader(tmp_path).get_skill_metadata("update-setup")
-
-    assert metadata is not None
-    assert metadata["description"].startswith("One-time setup wizard")
-    assert "Triggers:" in metadata["description"]
-
-
-def test_bundled_skills_use_agent_owned_paths(tmp_path: Path) -> None:
-    loader = SkillsLoader(tmp_path)
-    memory = loader.load_skill("memory")
-    update_setup = loader.load_skill("update-setup")
+def test_bundled_memory_skill_uses_agent_owned_path(tmp_path: Path) -> None:
+    memory = SkillsLoader(tmp_path).load_skill("memory")
 
     assert memory is not None
     assert "`History log` path from the system prompt" in memory
-    assert update_setup is not None
-    assert "<agent-workspace>/skills/update/SKILL.md" in update_setup
-    assert "Never substitute a project-relative" in update_setup
 
 
 def test_disabled_skills_excluded_from_get_always_skills(tmp_path: Path) -> None:
@@ -507,11 +494,94 @@ def test_manual_only_skill_is_hidden_from_model_but_explicitly_invocable(
     assert loader.get_explicitly_invoked_skills("Please $deploy now.") == ["deploy"]
 
 
-# -- multiline description tests (YAML folded > and literal |) -----------------
+def test_plain_message_skips_explicit_skill_discovery(tmp_path: Path, monkeypatch) -> None:
+    loader = SkillsLoader(tmp_path)
+
+    def unexpected_discovery():
+        pytest.fail("ordinary chat must not scan skills for explicit references")
+
+    monkeypatch.setattr(loader, "_discover_skills", unexpected_discovery)
+    assert loader.build_explicit_skill_runtime_context("Explain this project") is None
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_prompt_reads_skills_once_and_refreshes_on_next_build(
+    tmp_path: Path, monkeypatch, explicit: bool,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+    skills = workspace / "skills"
+    alpha = _write_skill(skills, "alpha", metadata_json={"always": True}, body="First instructions")
+    beta = _write_skill(skills, "beta", metadata_json={"requires": {"bins": ["prompt-test-cli"]}})
+    builder = ContextBuilder(workspace)
+    builder.skills = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    documents = {alpha, beta}
+    reads: list[Path] = []
+    parses: list[str] = []
+    original_read = Path.read_text
+    original_parse = agent_skills.parse_skill_metadata
+    original_discover = builder.skills._discover_skills
+    discoveries = 0
+    command_available = False
+    checks: list[str] = []
+
+    def discover():
+        nonlocal discoveries
+        discoveries += 1
+        return original_discover()
+
+    def read(path, *args, **kwargs):
+        if path in documents:
+            reads.append(path)
+        return original_read(path, *args, **kwargs)
+
+    def parse(content):
+        parses.append(content)
+        return original_parse(content)
+
+    def which(command):
+        checks.append(command)
+        return "installed-command" if command_available else None
+
+    def build_prompt():
+        if explicit:
+            messages = builder.build_messages(history=[], current_message="Use $alpha and $beta")
+            return "\n".join(message["content"] for message in messages)
+        return builder.build_system_prompt()
+
+    monkeypatch.setattr(builder.skills, "_discover_skills", discover)
+    monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.setattr(agent_skills, "parse_skill_metadata", parse)
+    monkeypatch.setattr("nanobot.agent.skills.shutil.which", which)
+    first = build_prompt()
+    assert "First instructions" in first
+    assert "**beta**" not in first
+    assert discoveries == 1
+    assert all(reads.count(path) == 1 for path in documents)
+    assert len(parses) == len(documents)
+    assert checks == ["prompt-test-cli"]
+
+    alpha.write_text(original_read(alpha).replace("First instructions", "Updated instructions"), encoding="utf-8")
+    beta.write_text(original_read(beta).replace("---\n", "---\ndescription: Updated description\n", 1), encoding="utf-8")
+    command_available = True
+    documents.add(_write_skill(skills, "gamma", body="New skill"))
+    reads.clear()
+    parses.clear()
+    checks.clear()
+    second = build_prompt()
+    assert "Updated instructions" in second and "First instructions" not in second
+    assert "Updated description" in second
+    assert "**beta**" in second
+    assert "**gamma**" in second
+    assert discoveries == 2
+    assert all(reads.count(path) == 1 for path in documents)
+    assert len(parses) == len(documents)
+    assert checks == ["prompt-test-cli"]
 
 
 def test_build_skills_summary_folded_description(tmp_path: Path) -> None:
-    """description: > (YAML folded scalar) should be parsed correctly."""
     workspace = tmp_path / "ws"
     ws_skills = workspace / "skills"
     ws_skills.mkdir(parents=True)
@@ -537,7 +607,6 @@ def test_build_skills_summary_folded_description(tmp_path: Path) -> None:
 
 
 def test_build_skills_summary_literal_description(tmp_path: Path) -> None:
-    """description: | (YAML literal scalar) should be parsed correctly."""
     workspace = tmp_path / "ws"
     ws_skills = workspace / "skills"
     ws_skills.mkdir(parents=True)
@@ -566,7 +635,6 @@ def test_build_skills_summary_literal_description(tmp_path: Path) -> None:
 
 
 def test_get_skill_metadata_handles_yaml_types(tmp_path: Path) -> None:
-    """yaml.safe_load returns native types; always should be True, not 'true'."""
     workspace = tmp_path / "ws"
     ws_skills = workspace / "skills"
     ws_skills.mkdir(parents=True)
@@ -588,14 +656,11 @@ def test_get_skill_metadata_handles_yaml_types(tmp_path: Path) -> None:
     loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
     meta = loader.get_skill_metadata("typed")
     assert meta is not None
-    # YAML parsed 'true' to Python True
     assert meta.get("always") is True
-    # metadata is a parsed dict, not a JSON string
     assert isinstance(meta.get("metadata"), dict)
 
 
 def test_check_requirements_tolerates_null_requires_and_lists(tmp_path: Path) -> None:
-    """Null requires/bins/env must not crash skill listing (JSON/YAML nulls)."""
     workspace = tmp_path / "ws"
     ws_skills = workspace / "skills"
     ws_skills.mkdir(parents=True)

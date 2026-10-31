@@ -1,5 +1,3 @@
-"""Git-backed version control for memory files, using dulwich."""
-
 from __future__ import annotations
 
 import io
@@ -29,7 +27,7 @@ class GitStoreError(RuntimeError):
 class CommitInfo:
     sha: str  # Short SHA (8 chars)
     message: str
-    timestamp: str  # Formatted datetime
+    timestamp: str
 
     def subject(self) -> str:
         """First line of the commit message, or a placeholder if empty."""
@@ -55,7 +53,6 @@ class GitStore:
         """Check if the git repo has been initialized."""
         return (self._workspace / ".git").is_dir()
 
-    # -- init ------------------------------------------------------------------
 
     def init(self) -> bool:
         """Initialize a git repo if not already initialized.
@@ -79,7 +76,6 @@ class GitStore:
 
             porcelain.init(str(self._workspace))
 
-            # Write .gitignore (merge with existing if present)
             gitignore = self._workspace / ".gitignore"
             dream_entries = self._build_gitignore()
             if gitignore.exists():
@@ -96,15 +92,12 @@ class GitStore:
             else:
                 gitignore.write_text(dream_entries, encoding="utf-8")
 
-            # Ensure tracked files exist (touch them if missing) so the initial
-            # commit has something to track.
             for rel in self._tracked_files:
                 p = self._workspace / rel
                 p.parent.mkdir(parents=True, exist_ok=True)
                 if not p.exists():
                     p.write_text("", encoding="utf-8")
 
-            # Initial commit
             porcelain.add(
                 str(self._workspace),
                 paths=self._staging_paths(".gitignore", *self._tracked_files),
@@ -120,7 +113,6 @@ class GitStore:
         except Exception as exc:
             raise GitStoreError(f"Git store init failed for {self._workspace}") from exc
 
-    # -- daily operations ------------------------------------------------------
 
     def auto_commit(self, message: str) -> str | None:
         """Stage tracked memory files and commit if there are changes.
@@ -165,14 +157,11 @@ class GitStore:
         except Exception as exc:
             raise GitStoreError(f"Git auto-commit failed: {message}") from exc
 
-    # -- internal helpers ------------------------------------------------------
 
     def _staging_paths(self, *paths: str) -> list[str]:
-        """Return absolute paths without resolving tracked-file symlinks."""
         return [str((self._workspace / path).absolute()) for path in paths]
 
     def _resolve_sha(self, short_sha: str) -> bytes | None:
-        """Resolve a short SHA prefix to the full SHA bytes."""
         try:
             from dulwich.repo import Repo
 
@@ -211,7 +200,6 @@ class GitStore:
         return False
 
     def _build_gitignore(self) -> str:
-        """Generate .gitignore content from tracked files."""
         dirs: set[str] = set()
         for f in self._tracked_files:
             parent = str(Path(f).parent)
@@ -225,7 +213,6 @@ class GitStore:
         lines.append("!.gitignore")
         return "\n".join(lines) + "\n"
 
-    # -- query -----------------------------------------------------------------
 
     def log(
         self,
@@ -439,7 +426,6 @@ class GitStore:
         except Exception as exc:
             raise GitStoreError(f"Git commit display failed for {short_sha}") from exc
 
-    # -- restore ---------------------------------------------------------------
 
     def revert(self, commit: str, *, message_prefix: str | None = None) -> str | None:
         """Revert (undo) the changes introduced by the given commit.
@@ -485,7 +471,6 @@ class GitStore:
                     logger.warning("Git revert: cannot revert root commit {}", commit)
                     return None
 
-                # Use the parent's tree — this undoes the commit's changes
                 parent_obj = cast("Commit", repo[typed_commit.parents[0]])
                 tree = cast("Tree", repo[parent_obj.tree])
 
@@ -500,7 +485,6 @@ class GitStore:
             if not restored:
                 return None
 
-            # Commit the restored state
             msg = f"revert: undo {commit}"
             return self.auto_commit(msg)
         except Exception as exc:

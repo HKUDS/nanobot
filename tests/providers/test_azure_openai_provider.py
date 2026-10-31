@@ -1,11 +1,12 @@
-"""Test Azure OpenAI provider (Responses API via OpenAI SDK)."""
-
+import json
 import sys
 import time
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
+import httpx
 import pytest
+from openai import AsyncOpenAI
 
 from nanobot.providers.azure_openai_provider import (
     AzureOpenAIProvider,
@@ -13,13 +14,8 @@ from nanobot.providers.azure_openai_provider import (
 )
 from nanobot.providers.base import LLMResponse, ProviderCallContext
 
-# ---------------------------------------------------------------------------
-# Init & validation
-# ---------------------------------------------------------------------------
-
 
 def test_init_creates_sdk_client():
-    """Provider creates an AsyncOpenAI client with correct base_url."""
     provider = AzureOpenAIProvider(
         api_key="test-key",
         api_base="https://test-resource.openai.azure.com",
@@ -28,14 +24,11 @@ def test_init_creates_sdk_client():
     assert provider.api_key == "test-key"
     assert provider.api_base == "https://test-resource.openai.azure.com/"
     assert provider.default_model == "gpt-4o-deployment"
-    # SDK client base_url ends with /openai/v1/
     assert str(provider._client.base_url).rstrip("/").endswith("/openai/v1")
-    # Static-key path must NOT construct an AAD token provider
     assert provider._token_provider is None
 
 
 def test_init_base_url_no_trailing_slash():
-    """Trailing slashes are normalised before building base_url."""
     provider = AzureOpenAIProvider(
         api_key="k", api_base="https://res.openai.azure.com",
     )
@@ -55,15 +48,9 @@ def test_init_validation_missing_base():
 
 
 def test_no_api_version_in_base_url():
-    """The /openai/v1/ path should NOT contain an api-version query param."""
     provider = AzureOpenAIProvider(api_key="k", api_base="https://res.openai.azure.com")
     base = str(provider._client.base_url)
     assert "api-version" not in base
-
-
-# ---------------------------------------------------------------------------
-# AAD / DefaultAzureCredential fallback
-# ---------------------------------------------------------------------------
 
 
 def _install_fake_azure_identity(monkeypatch, credential_factory):
@@ -79,85 +66,103 @@ def _install_fake_azure_identity(monkeypatch, credential_factory):
     monkeypatch.setitem(sys.modules, "azure.identity.aio", aio_mod)
 
 
-def test_init_missing_key_uses_aad_token_provider(monkeypatch):
-    """Empty api_key falls back to DefaultAzureCredential via _AzureTokenProvider."""
-    credential_instance = MagicMock()
-    credential_factory = MagicMock(return_value=credential_instance)
-    _install_fake_azure_identity(monkeypatch, credential_factory)
+@pytest.fixture
+async def azure_wire_requests(monkeypatch):
+    """Inject only the HTTP transport; keep the SDK's request/auth path real."""
+    requests: list[httpx.Request] = []
 
-    provider = AzureOpenAIProvider(
-        api_key="", api_base="https://res.openai.azure.com",
-    )
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        body = json.loads(request.content)
+        return httpx.Response(200, json={
+            "id": f"resp_{len(requests)}", "object": "response", "created_at": 1,
+            "status": "completed", "model": body["model"],
+            "output": [{
+                "type": "message", "id": f"msg_{len(requests)}",
+                "role": "assistant", "status": "completed",
+                "content": [{
+                    "type": "output_text", "text": f"reply {len(requests)}", "annotations": [],
+                }],
+            }],
+            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+        })
 
-    assert provider._token_provider is not None
-    assert isinstance(provider._token_provider, _AzureTokenProvider)
-    # DefaultAzureCredential must have been instantiated exactly once
-    credential_factory.assert_called_once_with()
-    assert provider._token_provider._credential is credential_instance
-    # The token provider must be wired into the OpenAI SDK as its
-    # ``_api_key_provider`` callable — that's what the SDK invokes per
-    # request to refresh the bearer token.
-    assert provider._client._api_key_provider is provider._token_provider
-    # Static api_key starts empty until the first refresh.
-    assert provider._client.api_key == ""
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        def create_client(**kwargs):
+            return AsyncOpenAI(http_client=http_client, **kwargs)
+
+        monkeypatch.setattr("nanobot.providers.azure_openai_provider.AsyncOpenAI", create_client)
+        yield requests
 
 
 @pytest.mark.asyncio
-async def test_aad_token_provider_wires_into_sdk_auth_headers(monkeypatch):
-    """Regression guard: the token provider must be wired into the
-    OpenAI SDK so ``_refresh_api_key`` pulls a fresh token and the
-    bearer ends up in ``auth_headers``.  Without this, a refactor that
-    constructs ``_AzureTokenProvider`` but forgets to pass it to
-    ``AsyncOpenAI`` would silently send unauthenticated requests.
-    """
-    access_token = SimpleNamespace(token="token-A", expires_on=time.time() + 3600)
+async def test_aad_token_provider_sends_rotating_bearer_tokens_on_chat_requests(
+    monkeypatch, azure_wire_requests,
+):
     credential_instance = MagicMock()
-    credential_instance.get_token = AsyncMock(return_value=access_token)
+    credential_instance.get_token = AsyncMock(side_effect=[
+        SimpleNamespace(token="token-A", expires_on=time.time() + 3600),
+        SimpleNamespace(token="token-B", expires_on=time.time() + 3600),
+    ])
+    credential_instance.close = AsyncMock()
     credential_factory = MagicMock(return_value=credential_instance)
     _install_fake_azure_identity(monkeypatch, credential_factory)
-
     provider = AzureOpenAIProvider(
-        api_key="", api_base="https://res.openai.azure.com",
+        api_key="", api_base="https://res.openai.azure.com", default_model="gpt-4o-deployment",
     )
+    try:
+        responses = [
+            await provider.chat([{"role": "user", "content": f"turn {turn}"}])
+            for turn in (1, 2)
+        ]
+    finally:
+        await provider.aclose()
 
-    assert provider._client.api_key == ""
-    assert provider._client.auth_headers == {}
-
-    await provider._client._refresh_api_key()
-
-    assert provider._client.api_key == "token-A"
-    assert provider._client.auth_headers == {"Authorization": "Bearer token-A"}
-    credential_instance.get_token.assert_awaited_with(
-        "https://cognitiveservices.azure.com/.default"
+    assert [response.content for response in responses] == ["reply 1", "reply 2"]
+    assert all(response.finish_reason == "stop" for response in responses)
+    assert len(azure_wire_requests) == 2
+    assert [request.headers.get("Authorization") for request in azure_wire_requests] == [
+        "Bearer token-A", "Bearer token-B",
+    ]
+    assert all(request.method == "POST" for request in azure_wire_requests)
+    assert all(
+        str(request.url) == "https://res.openai.azure.com/openai/v1/responses"
+        for request in azure_wire_requests
     )
-
-    # Rotated token on second refresh proves per-request delegation (no client-side caching).
-    credential_instance.get_token = AsyncMock(
-        return_value=SimpleNamespace(token="token-B", expires_on=time.time() + 3600)
-    )
-    await provider._client._refresh_api_key()
-    assert provider._client.auth_headers == {"Authorization": "Bearer token-B"}
+    bodies = [json.loads(request.content) for request in azure_wire_requests]
+    assert [body["model"] for body in bodies] == ["gpt-4o-deployment", "gpt-4o-deployment"]
+    assert [body["input"][0]["content"][0]["text"] for body in bodies] == ["turn 1", "turn 2"]
     credential_factory.assert_called_once_with()
+    assert credential_instance.get_token.await_args_list == [
+        call("https://cognitiveservices.azure.com/.default"),
+        call("https://cognitiveservices.azure.com/.default"),
+    ]
 
 
-def test_init_explicit_key_does_not_construct_credential(monkeypatch):
-    """Explicit api_key wins; DefaultAzureCredential must never be touched."""
+@pytest.mark.asyncio
+async def test_explicit_key_sends_bearer_without_constructing_credential(
+    monkeypatch, azure_wire_requests,
+):
     credential_factory = MagicMock(side_effect=AssertionError(
         "DefaultAzureCredential must not be constructed when api_key is set"
     ))
     _install_fake_azure_identity(monkeypatch, credential_factory)
-
     provider = AzureOpenAIProvider(
         api_key="real-key", api_base="https://res.openai.azure.com",
     )
+    try:
+        response = await provider.chat([{"role": "user", "content": "hello"}])
+    finally:
+        await provider.aclose()
 
-    assert provider._token_provider is None
+    assert response.content == "reply 1"
+    assert response.finish_reason == "stop"
+    assert len(azure_wire_requests) == 1
+    assert azure_wire_requests[0].headers["Authorization"] == "Bearer real-key"
     credential_factory.assert_not_called()
 
 
 def test_init_missing_key_without_azure_identity_raises(monkeypatch):
-    """Clear RuntimeError with install hint when azure-identity is missing."""
-    # Force the import inside _AzureTokenProvider to fail.
     real_import = __builtins__["__import__"] if isinstance(__builtins__, dict) else __builtins__.__import__
 
     def fake_import(name, *args, **kwargs):
@@ -172,7 +177,6 @@ def test_init_missing_key_without_azure_identity_raises(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_token_provider_returns_credential_token(monkeypatch):
-    """Token callback delegates to DefaultAzureCredential.get_token with the AOAI scope."""
     access_token = SimpleNamespace(token="token-A", expires_on=time.time() + 3600)
     credential_instance = MagicMock()
     credential_instance.get_token = AsyncMock(return_value=access_token)
@@ -192,11 +196,6 @@ async def test_token_provider_returns_credential_token(monkeypatch):
     assert credential_instance.get_token.await_count == 2
 
 
-# ---------------------------------------------------------------------------
-# _supports_temperature
-# ---------------------------------------------------------------------------
-
-
 def test_supports_temperature_standard_model():
     assert AzureOpenAIProvider._supports_temperature("gpt-4o") is True
 
@@ -212,13 +211,7 @@ def test_supports_temperature_with_reasoning_effort():
 
 
 def test_supports_temperature_with_reasoning_effort_none_string():
-    """reasoning_effort='none' must NOT suppress temperature — it means thinking is off."""
     assert AzureOpenAIProvider._supports_temperature("gpt-4o", reasoning_effort="none") is True
-
-
-# ---------------------------------------------------------------------------
-# _build_body — Responses API body construction
-# ---------------------------------------------------------------------------
 
 
 def test_build_body_basic():
@@ -235,7 +228,6 @@ def test_build_body_basic():
     assert body["store"] is False
     assert "reasoning" not in body
     assert "include" not in body
-    # input should contain the converted user message only (system extracted)
     assert any(
         item.get("role") == "user"
         for item in body["input"]
@@ -267,7 +259,6 @@ def test_build_body_enables_server_compaction():
 
 
 def test_build_body_max_tokens_minimum():
-    """max_output_tokens should never be less than 1."""
     provider = AzureOpenAIProvider(api_key="k", api_base="https://r.com", default_model="gpt-4o")
     body = provider._build_body([{"role": "user", "content": "x"}], None, None, 0, 0.7, None, None)
     assert body["max_output_tokens"] == 1
@@ -290,12 +281,10 @@ def test_build_body_with_reasoning():
     )
     assert body["reasoning"] == {"effort": "medium"}
     assert "reasoning.encrypted_content" in body.get("include", [])
-    # temperature omitted for reasoning models
     assert "temperature" not in body
 
 
 def test_build_body_reasoning_effort_none_string_omits_reasoning():
-    """reasoning_effort='none' must not inject a reasoning body and must allow temperature."""
     provider = AzureOpenAIProvider(api_key="k", api_base="https://r.com", default_model="gpt-4o")
     body = provider._build_body(
         [{"role": "user", "content": "hi"}], None, "gpt-4o", 4096, 0.7, "none", None,
@@ -305,7 +294,6 @@ def test_build_body_reasoning_effort_none_string_omits_reasoning():
 
 
 def test_build_body_image_conversion():
-    """image_url content blocks should be converted to input_image."""
     provider = AzureOpenAIProvider(api_key="k", api_base="https://r.com", default_model="gpt-4o")
     messages = [{
         "role": "user",
@@ -324,7 +312,6 @@ def test_build_body_image_conversion():
 
 
 def test_build_body_sanitizes_single_dict_content_block():
-    """Single content dicts should be preserved via shared message sanitization."""
     provider = AzureOpenAIProvider(api_key="k", api_base="https://r.com", default_model="gpt-4o")
     messages = [{
         "role": "user",
@@ -334,11 +321,6 @@ def test_build_body_sanitizes_single_dict_content_block():
     body = provider._build_body(messages, None, None, 4096, 0.7, None, None)
 
     assert body["input"][0]["content"] == [{"type": "input_text", "text": "Hi from dict content"}]
-
-
-# ---------------------------------------------------------------------------
-# chat() — non-streaming
-# ---------------------------------------------------------------------------
 
 
 def _make_sdk_response(
@@ -411,7 +393,7 @@ async def test_chat_retries_without_unsupported_server_compaction():
     assert result.content == "compaction fallback"
     assert result.provider_state is not None
     assert create.await_count == 2
-    assert "context_management" in create.call_args_list[0].kwargs
+    assert "context_management" in create.call_args_list[0].kwargs["extra_body"]
     assert "context_management" not in create.call_args_list[1].kwargs
     assert provider.supports_native_compaction() is False
 
@@ -489,7 +471,6 @@ async def test_chat_error_handling():
 
 @pytest.mark.asyncio
 async def test_chat_reasoning_param_format():
-    """reasoning_effort should be sent as reasoning={effort: ...} not a flat string."""
     provider = AzureOpenAIProvider(
         api_key="k", api_base="https://test.openai.azure.com", default_model="gpt-5-chat",
     )
@@ -506,19 +487,12 @@ async def test_chat_reasoning_param_format():
     assert "reasoning_effort" not in call_kwargs
 
 
-# ---------------------------------------------------------------------------
-# chat_stream()
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_chat_stream_success():
-    """Streaming should call on_content_delta and return combined response."""
     provider = AzureOpenAIProvider(
         api_key="test-key", api_base="https://test.openai.azure.com", default_model="gpt-4o",
     )
 
-    # Build mock SDK stream events
     events = []
     ev1 = MagicMock(type="response.output_text.delta", delta="Hello")
     ev2 = MagicMock(type="response.output_text.delta", delta=" world")
@@ -552,7 +526,6 @@ async def test_chat_stream_success():
 
 @pytest.mark.asyncio
 async def test_chat_stream_with_tool_calls():
-    """Streaming tool calls should be accumulated correctly."""
     provider = AzureOpenAIProvider(
         api_key="k", api_base="https://test.openai.azure.com", default_model="gpt-4o",
     )
@@ -597,7 +570,6 @@ async def test_chat_stream_with_tool_calls():
 
 @pytest.mark.asyncio
 async def test_chat_stream_error():
-    """Streaming should return error when SDK raises."""
     provider = AzureOpenAIProvider(
         api_key="k", api_base="https://test.openai.azure.com", default_model="gpt-4o",
     )
@@ -608,11 +580,6 @@ async def test_chat_stream_error():
 
     assert "Connection failed" in result.content
     assert result.finish_reason == "error"
-
-
-# ---------------------------------------------------------------------------
-# get_default_model
-# ---------------------------------------------------------------------------
 
 
 def test_get_default_model():

@@ -3,6 +3,7 @@ from __future__ import annotations
 import builtins
 import json
 import time
+from datetime import date
 from types import SimpleNamespace
 
 import httpx
@@ -22,7 +23,6 @@ from nanobot.webui.settings_api import (
     _docs_version,
     _model_catalog_kind,
     _oauth_provider_status,
-    _reasoning_effort_values_for,
     complete_oauth_provider,
     create_model_configuration,
     create_provider_settings,
@@ -42,10 +42,20 @@ from nanobot.webui.settings_api import (
     update_transcription_settings,
     update_web_search_settings,
 )
+from nanobot.webui.settings_models import (
+    _extract_model_rows,
+    _model_catalog_row_active,
+)
 from nanobot.webui.settings_services import WebUIOAuthFlowRegistry
 
 DYNAMIC_PROVIDER_NAME = "my-company-api"
 DYNAMIC_PROVIDER_API_BASE = "https://example.test/v1"
+
+
+@pytest.fixture(autouse=True)
+def isolate_settings_config(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Settings tests must never fall through to a user's default config."""
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
 
 
 @pytest.fixture
@@ -75,8 +85,23 @@ def test_docs_version_uses_released_versions_and_falls_back_for_dev() -> None:
     assert _docs_version("0.2.3+editable") == "latest"
 
 
-def test_kimi_k3_only_offers_supported_reasoning_effort_values() -> None:
-    assert _reasoning_effort_values_for("moonshot", "kimi-k3") == ["", "max"]
+@pytest.mark.parametrize("model", ["kimi-k3", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"])
+def test_kimi_k3_only_offers_supported_reasoning_effort_values(
+    model: str, tmp_path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.agents.defaults.model = model
+    config.agents.defaults.provider = "moonshot"
+    config.providers.moonshot.api_key = "moonshot-test-key"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+
+    preset = next(row for row in payload["model_presets"] if row["name"] == "default")
+    assert preset["model"] == model
+    assert preset["reasoning_effort_values"] == ["", "low", "high", "max"]
 
 
 def test_settings_payload_includes_versioned_docs(
@@ -901,7 +926,8 @@ def test_create_provider_settings_persists_custom_advanced_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = tmp_path / "config.json"
-    save_config(Config(), config_path)
+    config = Config.model_validate({"network": {"proxy": "http://127.0.0.1:7890"}})
+    save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
     payload = create_provider_settings(
@@ -909,7 +935,7 @@ def test_create_provider_settings_persists_custom_advanced_options(
             "name": ["Company Gateway"],
             "apiBase": ["https://gateway.example/v1"],
             "apiKey": ["sk-company"],
-            "proxy": ["http://127.0.0.1:7890"],
+            "use_proxy": ["true"],
             "extraHeaders": [json.dumps({"X-Tenant": "engineering"})],
             "extraBody": [json.dumps({"service_tier": "priority"})],
             "extraQuery": [json.dumps({"api-version": "2026-01-01"})],
@@ -925,7 +951,7 @@ def test_create_provider_settings_persists_custom_advanced_options(
         "extra_headers",
         "extra_body",
         "extra_query",
-        "proxy",
+        "use_proxy",
         "thinking_style",
     ]
     assert row["extra_headers"] == {"X-Tenant": "engineering"}
@@ -936,7 +962,8 @@ def test_create_provider_settings_persists_custom_advanced_options(
     assert saved.display_name == "Company Gateway"
     assert saved.api_key == "sk-company"
     assert saved.api_base == "https://gateway.example/v1"
-    assert saved.proxy == "http://127.0.0.1:7890"
+    assert saved.use_proxy is True
+    assert load_config(config_path).network.proxy == "http://127.0.0.1:7890"
     assert saved.extra_headers == {"X-Tenant": "engineering"}
     assert saved.extra_body == {"service_tier": "priority"}
     assert saved.extra_query == {"api-version": "2026-01-01"}
@@ -1018,6 +1045,7 @@ def test_update_provider_settings_persists_provider_specific_advanced_options(
     config_path = tmp_path / "config.json"
     config = Config()
     config.providers.openai.api_key = "sk-openai"
+    config.network.proxy = "http://127.0.0.1:7890"
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
@@ -1025,7 +1053,7 @@ def test_update_provider_settings_persists_provider_specific_advanced_options(
         {
             "provider": ["openai"],
             "apiType": ["responses"],
-            "proxy": ["http://127.0.0.1:7890"],
+            "use_proxy": ["true"],
             "extraHeaders": [json.dumps({"X-Trace": "enabled"})],
             "extraBody": [json.dumps({"service_tier": "priority"})],
             "extraQuery": [json.dumps({"trace": "true"})],
@@ -1042,7 +1070,8 @@ def test_update_provider_settings_persists_provider_specific_advanced_options(
 
     saved = load_config(config_path)
     assert saved.providers.openai.api.to_capabilities().preferred_api == "responses"
-    assert saved.providers.openai.proxy == "http://127.0.0.1:7890"
+    assert saved.providers.openai.use_proxy is True
+    assert saved.network.proxy == "http://127.0.0.1:7890"
     assert saved.providers.openai.extra_headers == {"X-Trace": "enabled"}
     assert saved.providers.openai.extra_body == {"service_tier": "priority"}
     assert saved.providers.openai.extra_query == {"trace": "true"}
@@ -1066,7 +1095,7 @@ def test_update_provider_settings_updates_and_clears_oauth_proxy(
 ) -> None:
     config_path = tmp_path / "config.json"
     config = Config()
-    getattr(config.providers, config_attr).proxy = "http://127.0.0.1:7000"
+    config.network.proxy = "http://127.0.0.1:7890"
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     monkeypatch.setattr(
@@ -1082,24 +1111,24 @@ def test_update_provider_settings_updates_and_clears_oauth_proxy(
     payload = update_provider_settings(
         {
             "provider": [provider_name],
-            "proxy": [" http://127.0.0.1:7890 "],
+            "use_proxy": ["true"],
             "extraBody": [json.dumps({"tools": []})],
         }
     )
 
     providers = {row["name"]: row for row in payload["providers"]}
-    assert providers[provider_name]["proxy"] == "http://127.0.0.1:7890"
-    assert getattr(load_config(config_path).providers, config_attr).proxy == (
-        "http://127.0.0.1:7890"
-    )
+    assert providers[provider_name]["use_proxy"] is True
+    assert getattr(load_config(config_path).providers, config_attr).use_proxy is True
+    assert load_config(config_path).network.proxy == "http://127.0.0.1:7890"
     assert providers[provider_name]["extra_body"] == {"tools": []}
     assert getattr(load_config(config_path).providers, config_attr).extra_body == {"tools": []}
 
-    cleared = update_provider_settings({"provider": [provider_name], "proxy": ["  "]})
+    cleared = update_provider_settings({"provider": [provider_name], "use_proxy": ["false"]})
 
     providers = {row["name"]: row for row in cleared["providers"]}
-    assert providers[provider_name]["proxy"] is None
-    assert getattr(load_config(config_path).providers, config_attr).proxy is None
+    assert providers[provider_name]["use_proxy"] is False
+    assert getattr(load_config(config_path).providers, config_attr).use_proxy is False
+    assert load_config(config_path).network.proxy == "http://127.0.0.1:7890"
 
 
 def test_update_provider_settings_keeps_oauth_credentials_read_only(
@@ -1110,7 +1139,7 @@ def test_update_provider_settings_keeps_oauth_credentials_read_only(
     save_config(Config(), config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
-    with pytest.raises(WebUISettingsError, match="only supports proxy and extra_body settings"):
+    with pytest.raises(WebUISettingsError, match="only supports use_proxy and extra_body settings"):
         update_provider_settings({"provider": ["openai_codex"], "apiKey": ["not-allowed"]})
 
 
@@ -1410,6 +1439,73 @@ def test_update_web_search_settings_can_clear_optional_api_key(
     saved = load_config(config_path)
     assert saved.tools.web.search.provider == "keenable"
     assert saved.tools.web.search.api_key == ""
+
+
+def test_update_web_search_settings_accepts_deepseek_with_api_key(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.tools.web.search.provider = "duckduckgo"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = update_web_search_settings(
+        {"provider": ["deepseek"], "api_key": ["sk-deepseek-search"]}
+    )
+
+    saved = load_config(config_path)
+    assert saved.tools.web.search.provider == "deepseek"
+    assert saved.tools.web.search.api_key == "sk-deepseek-search"
+    option = next(item for item in payload["web_search"]["providers"] if item["name"] == "deepseek")
+    assert option["label"] == "DeepSeek"
+    assert option["credential"] == "api_key"
+
+
+@pytest.mark.parametrize("environment_key", [None, "ambient-deepseek-key"])
+def test_update_web_search_settings_requires_deepseek_api_key(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    environment_key,
+) -> None:
+    if environment_key is None:
+        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("DEEPSEEK_API_KEY", environment_key)
+    config_path = tmp_path / "config.json"
+    config = Config()
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    with pytest.raises(WebUISettingsError, match="api_key is required"):
+        update_web_search_settings({"provider": ["deepseek"]})
+
+    assert load_config(config_path).tools.web.search.provider == "duckduckgo"
+
+
+def test_deepseek_explicit_env_reference_survives_settings_updates(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DEEPSEEK_SEARCH_KEY", "private-deepseek-environment-key")
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.tools.web.search.provider = "deepseek"
+    config.tools.web.search.api_key = "${DEEPSEEK_SEARCH_KEY}"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    for timeout in (30, 45):
+        payload = update_web_search_settings({
+            "provider": ["deepseek"], "timeout": [str(timeout)],
+        })
+        saved = load_config(config_path).tools.web.search
+        assert saved.provider == "deepseek"
+        assert saved.api_key == "${DEEPSEEK_SEARCH_KEY}"
+        assert saved.timeout == timeout
+        assert payload["web_search"]["api_key_hint"]
+        assert "private-deepseek-environment-key" not in str(payload)
 
 
 def test_settings_payload_includes_effective_transcription_config(
@@ -1858,7 +1954,7 @@ def test_openai_codex_oauth_login_passes_configured_proxy(
     proxy = "http://127.0.0.1:23458"
     config_path = tmp_path / "config.json"
     save_config(
-        Config.model_validate({"providers": {"openaiCodex": {"proxy": "${CODEX_PROXY_TEST}"}}}),
+        Config.model_validate({"network": {"proxy": "${CODEX_PROXY_TEST}"}, "providers": {"openaiCodex": {"useProxy": True}}}),
         config_path,
     )
     monkeypatch.setenv("CODEX_PROXY_TEST", proxy)
@@ -1869,6 +1965,13 @@ def test_openai_codex_oauth_login_passes_configured_proxy(
         authorization_url = "https://auth.openai.com/oauth/authorize?state=test"
         remaining_seconds = 600
         expired = False
+        has_pending_work = False
+
+        def start(self):
+            pass
+
+        def wait_closed(self):
+            pass
 
         def cancel(self) -> None:
             captured["cancelled"] = True
@@ -1882,7 +1985,7 @@ def test_openai_codex_oauth_login_passes_configured_proxy(
         return FakeFlow()
 
     monkeypatch.setattr(
-        "nanobot.providers.openai_codex_oauth.start_openai_codex_oauth_login",
+        "nanobot.providers.openai_codex_oauth.OpenAICodexOAuthLoginFlow",
         fake_start,
     )
 
@@ -1909,10 +2012,7 @@ def test_openai_codex_oauth_login_passes_configured_proxy(
             return None
         return SimpleNamespace(access="access-token")
 
-    monkeypatch.setattr(
-        "nanobot.providers.openai_codex_oauth.complete_openai_codex_oauth_login",
-        fake_complete,
-    )
+    monkeypatch.setattr(FakeFlow, "complete", fake_complete, raising=False)
     monkeypatch.setattr(
         "nanobot.webui.settings_api.settings_payload",
         lambda **_kwargs: {"settings": "ready"},
@@ -1954,6 +2054,13 @@ def test_openai_codex_remote_login_uses_headless_dependency_mode(
         authorization_url = "https://auth.openai.com/oauth/authorize?state=test"
         remaining_seconds = 600
         expired = False
+        has_pending_work = False
+
+        def start(self):
+            pass
+
+        def wait_closed(self):
+            pass
 
         def cancel(self) -> None:
             captured["cancelled"] = True
@@ -1963,7 +2070,7 @@ def test_openai_codex_remote_login_uses_headless_dependency_mode(
         return FakeFlow()
 
     monkeypatch.setattr(
-        "nanobot.providers.openai_codex_oauth.start_openai_codex_oauth_login",
+        "nanobot.providers.openai_codex_oauth.OpenAICodexOAuthLoginFlow",
         fake_start,
     )
 
@@ -2029,7 +2136,7 @@ def test_xai_grok_login_starts_fresh_browser_flow_with_proxy(
 ) -> None:
     proxy = "http://127.0.0.1:23458"
     config_path = tmp_path / "config.json"
-    save_config(Config.model_validate({"providers": {"xaiGrok": {"proxy": proxy}}}), config_path)
+    save_config(Config.model_validate({"network": {"proxy": proxy}, "providers": {"xaiGrok": {"useProxy": True}}}), config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     captured: dict[str, object] = {}
 
@@ -2037,6 +2144,13 @@ def test_xai_grok_login_starts_fresh_browser_flow_with_proxy(
         authorization_url = "https://auth.x.ai/oauth2/authorize?state=test"
         remaining_seconds = 600
         expired = False
+        has_pending_work = False
+
+        def start(self):
+            pass
+
+        def wait_closed(self):
+            pass
 
         def cancel(self) -> None:
             captured["cancelled"] = True
@@ -2045,7 +2159,7 @@ def test_xai_grok_login_starts_fresh_browser_flow_with_proxy(
         captured.update(proxy=proxy, timeout_s=timeout_s)
         return FakeFlow()
 
-    monkeypatch.setattr("nanobot.providers.xai_oauth.start_xai_oauth_login", fake_start)
+    monkeypatch.setattr("nanobot.providers.xai_oauth.create_xai_oauth_login", fake_start)
 
     payload = login_oauth_provider(
         {"provider": ["xai-grok"]},
@@ -2068,10 +2182,7 @@ def test_xai_grok_login_starts_fresh_browser_flow_with_proxy(
             return None
         return SimpleNamespace(access="access-token")
 
-    monkeypatch.setattr(
-        "nanobot.providers.xai_oauth.complete_xai_oauth_login",
-        fake_complete,
-    )
+    monkeypatch.setattr(FakeFlow, "complete", fake_complete, raising=False)
     monkeypatch.setattr(
         "nanobot.webui.settings_api.settings_payload",
         lambda **_kwargs: {"settings": "ready"},
@@ -2109,7 +2220,7 @@ def test_xai_grok_login_reports_upstream_failure_as_bad_gateway(
     def fake_start(**_kwargs):
         raise failure
 
-    monkeypatch.setattr("nanobot.providers.xai_oauth.start_xai_oauth_login", fake_start)
+    monkeypatch.setattr("nanobot.providers.xai_oauth.create_xai_oauth_login", fake_start)
 
     with pytest.raises(WebUISettingsError) as exc:
         login_oauth_provider(
@@ -2182,6 +2293,74 @@ def test_provider_models_payload_fetches_openai_compatible_models(
     assert payload["models"][1]["context_window"] == 65536
 
 
+def test_model_catalog_row_active_respects_openai_shutdown_date() -> None:
+    ref = date(2026, 9, 29)
+    live = {"id": "gpt-5-nano", "shutdown_date": None}
+    retired = {"id": "gpt-5-chat-latest", "shutdown_date": "2026-07-23"}
+    scheduled = {"id": "gpt-5.9-chat-latest", "shutdown_date": "2026-12-01"}
+
+    assert _model_catalog_row_active(live, on=ref)
+    assert not _model_catalog_row_active(retired, on=ref)
+    assert _model_catalog_row_active(scheduled, on=ref)
+    assert not _model_catalog_row_active(retired, on=date(2026, 7, 23))
+    assert _model_catalog_row_active(retired, on=date(2026, 7, 22))
+
+
+def test_extract_model_rows_skips_shut_down_openai_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "nanobot.webui.settings_models._model_catalog_row_active",
+        lambda row, *, on=None: _model_catalog_row_active(row, on=date(2026, 9, 29)),
+    )
+    body = {
+        "data": [
+            {"id": "gpt-5-nano", "shutdown_date": None},
+            {"id": "gpt-5-chat-latest", "shutdown_date": "2026-07-23"},
+            {"id": "chat-latest", "shutdown_date": None},
+        ]
+    }
+    rows = _extract_model_rows(body)
+    ids = [row["id"] for row in rows]
+    assert ids == ["gpt-5-nano", "chat-latest"]
+
+
+def test_provider_models_payload_omits_openai_models_past_shutdown_date(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "sk-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    def fake_get(url: str, **kwargs):
+        assert url == "https://api.openai.com/v1/models"
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"id": "gpt-5-nano", "owned_by": "system", "shutdown_date": None},
+                    {"id": "gpt-5-chat-latest", "owned_by": "system", "shutdown_date": "2026-07-23"},
+                ]
+            },
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr("nanobot.webui.settings_api.httpx.get", fake_get)
+    monkeypatch.setattr(
+        "nanobot.webui.settings_models._model_catalog_row_active",
+        lambda row, *, on=None: _model_catalog_row_active(row, on=date(2026, 9, 29)),
+    )
+
+    payload = provider_models_payload({"provider": ["openai"]})
+
+    assert payload["status"] == "available"
+    assert payload["model_count"] == 1
+    assert payload["models"][0]["id"] == "gpt-5-nano"
+
+
 def test_provider_models_payload_returns_online_openai_codex_models(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2251,7 +2430,7 @@ def test_copilot_explicit_login_does_not_reuse_revoked_credentials(monkeypatch, 
         lambda: SimpleNamespace(access="revoked-token"),
     )
     monkeypatch.setattr(GitHubCopilotOAuthFlow, "start", start)
-    monkeypatch.setattr(GitHubCopilotOAuthFlow, "complete", lambda _: SimpleNamespace(access="new-token"))
+    monkeypatch.setattr(GitHubCopilotOAuthFlow, "complete", lambda *_: SimpleNamespace(access="new-token"))
     monkeypatch.setattr("nanobot.webui.settings_models.invalidate_oauth_model_catalog", invalidate)
     monkeypatch.setattr("nanobot.webui.settings_api.settings_payload", lambda **_: {"ready": True})
     payload = login_oauth_provider({"provider": ["github-copilot"]}, oauth_flows=oauth_flows)
@@ -2289,17 +2468,18 @@ def test_oauth_completion_clears_same_account_catalog_failure(monkeypatch, oauth
 
     class Flow:
         expired = False
+        has_pending_work = False
 
         def cancel(self):
             pass
 
-    def complete(*_args):
-        signed_in[0] = True
-        return SimpleNamespace(access="fixture")
+        def wait_closed(self):
+            pass
 
-    owner = "openai_codex_oauth" if provider == "openai_codex" else "xai_oauth"
-    completion = "complete_openai_codex_oauth_login" if provider == "openai_codex" else "complete_xai_oauth_login"
-    monkeypatch.setattr(f"nanobot.providers.{owner}.{completion}", complete)
+        def complete(self, _response=None):
+            signed_in[0] = True
+            return SimpleNamespace(access="fixture")
+
     oauth_flows.register(provider, "flow-test", Flow())
     before = provider_models_payload({"provider": [provider]})
     assert before["error_kind"] == "auth_required"
@@ -2563,16 +2743,10 @@ def test_create_model_configuration_accepts_configured_oauth_provider(
     assert saved.model_presets["codex"].provider == "openai_codex"
 
 
-# ---------------------------------------------------------------------------
-# Azure OpenAI: settings contract for static-key vs AAD (DefaultAzureCredential)
-# ---------------------------------------------------------------------------
-
-
 def test_settings_payload_azure_openai_with_api_key_is_configured(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Static-key mode: api_key + api_base both set -> configured."""
     config_path = tmp_path / "config.json"
     config = Config()
     config.providers.azure_openai.api_key = "k"
@@ -2593,7 +2767,6 @@ def test_settings_payload_azure_openai_aad_mode_is_configured(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """AAD mode: only api_base set (no api_key) -> still configured."""
     config_path = tmp_path / "config.json"
     config = Config()
     config.providers.azure_openai.api_base = "https://r.openai.azure.com"
@@ -2613,7 +2786,6 @@ def test_settings_payload_azure_openai_missing_base_not_configured(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """api_key alone (no api_base) is NOT a working config -> not configured."""
     config_path = tmp_path / "config.json"
     config = Config()
     config.providers.azure_openai.api_key = "k"
@@ -2630,7 +2802,6 @@ def test_create_model_configuration_accepts_azure_openai_aad_mode(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Provider-validation accepts azure_openai with only api_base (AAD mode)."""
     config_path = tmp_path / "config.json"
     config = Config()
     config.providers.azure_openai.api_base = "https://r.openai.azure.com"
@@ -2650,15 +2821,6 @@ def test_create_model_configuration_accepts_azure_openai_aad_mode(
     saved = load_config(config_path)
     assert saved.model_presets["azure-aad"].provider == "azure_openai"
     assert saved.model_presets["azure-aad"].model == "my-deployment"
-
-
-def test_azure_openai_spec_no_longer_requires_api_key() -> None:
-    """Contract guard: api_key is optional for azure_openai (AAD fallback)."""
-    from nanobot.webui.settings_api import _provider_requires_api_key
-
-    spec = find_by_name("azure_openai")
-    assert spec is not None
-    assert _provider_requires_api_key(spec) is False
 
 
 @pytest.mark.parametrize("protocol", ["chat_completions", "responses", "anthropic_messages"])

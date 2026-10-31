@@ -52,7 +52,13 @@ def test_sidebar_state_normalizes_partial_payload(tmp_path, monkeypatch) -> None
                         },
                     },
                 },
-                "view": {"density": "tiny", "show_archived": True, "sort": "nope"},
+                "view": {
+                    "density": "tiny",
+                    "show_archived": True,
+                    "sort": "nope",
+                    "show_previews": True,
+                    "show_timestamps": True,
+                },
             }
         ),
         encoding="utf-8",
@@ -83,8 +89,6 @@ def test_sidebar_state_normalizes_partial_payload(tmp_path, monkeypatch) -> None
     }
     assert state["view"] == {
         "density": "comfortable",
-        "show_previews": False,
-        "show_timestamps": False,
         "show_archived": True,
         "sort": "updated_desc",
     }
@@ -100,7 +104,7 @@ def test_sidebar_state_write_is_scoped_to_config_data_dir(tmp_path, monkeypatch)
             "session_order": ["websocket:b", "websocket:a"],
             "title_overrides": {"websocket:a": "Release"},
             "project_name_overrides": {"/repo": "Core"},
-            "view": {"density": "compact", "show_previews": True, "sort": "manual"},
+            "view": {"density": "compact", "sort": "manual"},
         }
     )
 
@@ -110,10 +114,9 @@ def test_sidebar_state_write_is_scoped_to_config_data_dir(tmp_path, monkeypatch)
     assert state["title_overrides"] == {"websocket:a": "Release"}
     assert state["project_name_overrides"] == {"/repo": "Core"}
     assert state["view"]["density"] == "compact"
-    assert state["view"]["show_previews"] is True
     assert state["view"]["sort"] == "manual"
     assert webui_sidebar_state_path().is_file()
-    assert read_webui_sidebar_state()["pinned_keys"] == ["websocket:a"]
+    assert read_webui_sidebar_state() == state
 
 
 def test_sidebar_state_persists_only_visible_workbench_groups(tmp_path, monkeypatch) -> None:

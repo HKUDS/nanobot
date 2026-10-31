@@ -1,5 +1,3 @@
-"""Path abbreviation utilities for display."""
-
 from __future__ import annotations
 
 import os
@@ -19,38 +17,30 @@ def abbreviate_path(path: str, max_len: int = 40) -> str:
     if not path:
         return path
 
-    # Handle URLs: preserve scheme://domain + filename
     if re.match(r"https?://", path):
         return _abbreviate_url(path, max_len)
 
-    # Normalize separators to /
     normalized = path.replace("\\", "/")
 
-    # Replace home directory
     home = os.path.expanduser("~").replace("\\", "/")
     if normalized.startswith(home + "/"):
         normalized = "~" + normalized[len(home):]
     elif normalized == home:
         normalized = "~"
 
-    # Return early only after normalization and home replacement
     if len(normalized) <= max_len:
         return normalized
 
-    # Split into segments
     parts = normalized.rstrip("/").split("/")
     if len(parts) <= 1:
         return normalized[:max_len - 1] + "\u2026"
 
-    # Always keep the basename
     basename = parts[-1]
-    # Budget: max_len minus "…/" prefix (2 chars) minus "/" separator minus basename
-    budget = max_len - len(basename) - 3  # -3 for "…/" + final "/"
+    budget = max_len - len(basename) - 3
 
-    # Walk backwards from parent, collecting segments
     kept: list[str] = []
     for seg in reversed(parts[:-1]):
-        needed = len(seg) + 1  # segment + "/"
+        needed = len(seg) + 1
         if not kept and needed <= budget:
             kept.append(seg)
             budget -= needed
@@ -71,28 +61,24 @@ def abbreviate_path(path: str, max_len: int = 40) -> str:
 
 
 def _abbreviate_url(url: str, max_len: int = 40) -> str:
-    """Abbreviate a URL keeping domain and filename."""
     if len(url) <= max_len:
         return url
 
     parsed = urlparse(url)
-    domain = parsed.netloc  # e.g. "example.com"
-    path_part = parsed.path  # e.g. "/api/v2/resource.json"
+    domain = parsed.netloc
+    path_part = parsed.path
 
-    # Extract filename from path
     segments = path_part.rstrip("/").split("/")
     basename = segments[-1] if segments else ""
 
     if not basename:
-        # No filename, truncate URL
         return url[: max_len - 1] + "\u2026"
 
-    budget = max_len - len(domain) - len(basename) - 4  # "…/" + "/"
+    budget = max_len - len(domain) - len(basename) - 4
     if budget < 0:
-        trunc = max_len - len(domain) - 5  # "…/" + "/"
+        trunc = max_len - len(domain) - 5
         return domain + "/\u2026/" + (basename[:trunc] if trunc > 0 else "")
 
-    # Build abbreviated path
     kept: list[str] = []
     for seg in reversed(segments[:-1]):
         if len(seg) + 1 <= budget:

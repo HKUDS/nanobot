@@ -1,5 +1,3 @@
-"""Binary staging regressions; these do not exercise the gateway HTTP listener."""
-
 import asyncio
 import re
 from pathlib import Path
@@ -28,10 +26,10 @@ async def test_binary_larger_than_websocket_limit_preserves_layout(tmp_path):
     paths = store.resolve([ref], owner="owner")
     assert re.fullmatch(r"[0-9a-f]{12}\.png", Path(paths[0]).name)
     assert Path(paths[0]).read_bytes() == raw
-    assert store.resolve([ref], owner="owner") == paths  # a failed send is retryable
+    assert store.resolve([ref], owner="owner") == paths
     assert store.commit([ref], owner="owner") == paths
     store.clear()
-    assert Path(paths[0]).read_bytes() == raw  # cleanup must not delete session media
+    assert Path(paths[0]).read_bytes() == raw
     with pytest.raises(AttachmentUploadError):
         store.resolve([ref], owner="owner")
 
@@ -255,3 +253,19 @@ async def test_filename_collision_preserves_another_uploads_crash_marker(tmp_pat
     assert (tmp_path / ".pending-attachments" / path.name).exists()
     assert path.read_bytes() == b"attachment"
     store.clear()
+
+
+async def test_video_upload_limit_explains_size_before_reading_body(tmp_path):
+    from nanobot.channels.websocket.attachment_policy import MAX_VIDEO_BYTES
+
+    async def unread():
+        pytest.fail("oversized upload body must not be consumed")
+        yield b""
+
+    with pytest.raises(AttachmentUploadError) as error:
+        await AttachmentStore(tmp_path).upload(
+            unread(), owner="owner", mime="video/mp4", size=MAX_VIDEO_BYTES + 1,
+        )
+    assert "20 MiB" in str(error.value)
+    assert "20,971,521" in str(error.value)
+    assert not list(tmp_path.iterdir())

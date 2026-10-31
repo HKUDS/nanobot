@@ -1,12 +1,11 @@
-"""Scheduled replies and explicit sends share the normal agent delivery path."""
-
 import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from nanobot.agent.loop import AgentLoop
-from nanobot.agent.tools.context import current_request_context
+from nanobot.agent.tools.context import RequestContext, current_request_context, request_context
+from nanobot.agent.tools.cron import CronTool
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import Config
 from nanobot.cron.binding import CronBinding, binding_revision
@@ -49,7 +48,6 @@ async def test_moved_cron_keeps_reply_send_and_prompt_prefix_contract(tmp_path, 
         ctx = current_request_context()
         assert ctx is not None
         trigger = ctx.metadata.get(CRON_TRIGGER_META)
-        # Serialize at the provider boundary, before the runner appends tool results.
         requests.append(json.loads(json.dumps({
             "tools": kwargs["tools"], "messages": kwargs["messages"],
             "run": trigger["run_id"] if trigger else None,
@@ -97,7 +95,6 @@ async def test_moved_cron_keeps_reply_send_and_prompt_prefix_contract(tmp_path, 
                 if message.event is None and message.content:
                     outbound.append(message)
             normal = [m for m in outbound if (m.channel, m.chat_id) == ("telegram", "new")]
-            # Normal backend replies and legacy same-chat sends each arrive once.
             assert [m.content for m in normal] == ["Drink water"]
             assert normal[0].metadata["message_thread_id"] == 42
             extra = [m for m in outbound if m not in normal]
@@ -107,8 +104,6 @@ async def test_moved_cron_keeps_reply_send_and_prompt_prefix_contract(tmp_path, 
             assert all(m.media == [str(attachment)] for m in extra)
             assert all("message_thread_id" not in m.metadata for m in extra)
 
-        # Ordinary turns, separate cron runs and tool continuations use the same
-        # system/tools prefix. Per-run instructions and runtime data stay at the end.
         def stable(row):
             return json.dumps([row["tools"], row["messages"][0]], ensure_ascii=False)
 
@@ -128,6 +123,71 @@ async def test_moved_cron_keeps_reply_send_and_prompt_prefix_contract(tmp_path, 
         assert sessions.read_session_file("telegram:old") is None
         history = sessions.read_session_file("telegram:new")
         assert "Drink water" in json.dumps(history)
+    finally:
+        cron.stop()
+        await agent.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("origin", ["websocket", "whatsapp"])
+@pytest.mark.parametrize("explicit_send", [False, True])
+async def test_saved_cron_separates_source_chat_from_explicit_recipient(tmp_path, origin, explicit_send):
+    workspace = tmp_path / "workspace"
+    sessions = SessionManager(workspace)
+    bus = MessageBus()
+    cron = CronService(tmp_path / "cron" / "jobs.json")
+    chat_id = "source" if origin == "websocket" else "target"
+    session_key = f"{origin}:{chat_id}"
+    instructions = "Prepare a report and use message to send it to whatsapp:target."
+    with request_context(RequestContext(origin, chat_id, session_key=session_key)):
+        created = await CronTool(cron).execute(action="add", message=instructions, every_seconds=86400)
+    assert "Created job" in created
+    cron = CronService(cron.store_path)
+    job = cron.list_jobs()[0]
+    assert job.payload.session_key == session_key
+    assert (job.payload.origin_channel, job.payload.origin_chat_id) == (origin, chat_id)
+    assert job.payload.message == instructions
+
+    provider = MagicMock(aclose=AsyncMock())
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings(max_tokens=100)
+    provider.can_resume_conversation_state.return_value = False
+    provider.estimate_prompt_tokens.return_value = (100, "test")
+    requests = []
+
+    async def reply(**kwargs):
+        requests.append(json.loads(json.dumps({"messages": kwargs["messages"], "tools": kwargs["tools"]})))
+        if explicit_send and len(requests) == 1:
+            return LLMResponse(content=None, tool_calls=[ToolCallRequest(
+                id="send", name="message", arguments={
+                    "content": "Report", "channel": "whatsapp", "chat_id": "target",
+                },
+            )], finish_reason="tool_calls")
+        return LLMResponse(content="Report")
+
+    provider.chat_stream_with_retry = reply
+    agent = AgentLoop(bus=bus, provider=provider, workspace=workspace, model="test-model",
+                      session_manager=sessions, tools_config=Config().tools, cron_service=cron)
+    try:
+        await run_bound_cron_job(job, agent=agent, cron=cron)
+        messages = []
+        while bus.outbound_size:
+            message = await bus.consume_outbound()
+            if message.event is None and message.content:
+                messages.append(message)
+        expected = [(origin, chat_id)]
+        if explicit_send and origin == "websocket":
+            expected.insert(0, ("whatsapp", "target"))
+        assert [(message.channel, message.chat_id) for message in messages] == expected
+        assert all(message.content == "Report" for message in messages)
+        assert len(requests) == (2 if explicit_send else 1)
+        if explicit_send:
+            assert requests[1]["tools"] == requests[0]["tools"]
+            prefix = requests[0]["messages"]
+            assert requests[1]["messages"][:len(prefix)] == prefix
+        assert "Report" in json.dumps(sessions.read_session_file(session_key))
+        if origin == "websocket":
+            assert sessions.read_session_file("whatsapp:target") is None
     finally:
         cron.stop()
         await agent.aclose()

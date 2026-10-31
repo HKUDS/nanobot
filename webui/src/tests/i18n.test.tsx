@@ -1,12 +1,14 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { runInNewContext } from "node:vm";
+import { Window } from "happy-dom";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { StartupSkeleton } from "@/components/StartupSkeleton";
 import { MessageBubble } from "@/components/MessageBubble";
 import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
@@ -176,6 +178,35 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.help.codeWrap",
   "settings.help.brandLogos",
   "settings.help.browserNotifications",
+  "settings.nav.notifications",
+  "settings.notifications.scope",
+  "settings.notifications.intro",
+  "settings.notifications.pageRequired",
+  "settings.notifications.revoked",
+  "settings.notifications.retry",
+  "settings.notifications.statusOff",
+  "settings.notifications.statusPermission",
+  "settings.notifications.statusOn",
+  "settings.notifications.statusBlocked",
+  "settings.notifications.statusRevoked",
+  "settings.notifications.statusUnavailable",
+  "settings.notifications.statusWorker",
+  "settings.notifications.statusBusy",
+  "settings.notifications.statusError",
+  "settings.notifications.test",
+  "settings.notifications.testBody",
+  "settings.notifications.waiting",
+  "settings.notifications.insecure",
+  "settings.notifications.unsupported",
+  "settings.notifications.denied",
+  "settings.notifications.dismissed",
+  "settings.notifications.permissionFailed",
+  "settings.notifications.workerUnavailable",
+  "settings.notifications.displayFailed",
+  "settings.notifications.submitted",
+  "settings.notifications.completed",
+  "settings.notifications.failed",
+  "settings.notifications.interrupted",
   "settings.help.notificationSound",
   "settings.help.currentModel",
   "settings.help.localServiceAccess",
@@ -338,44 +369,26 @@ const ACCIDENTALLY_SPANISH_SETTINGS_KEYS = [
   "settings.image.missingCredential",
   "settings.oauth.signInHelp",
 ];
-const INDEX_HTML = readFileSync(resolve(process.cwd(), "index.html"), "utf8");
-const PREBOOT_SCRIPT = INDEX_HTML.match(
-  /<script>\s*(\(function \(\) \{\s*var localeKey = "nanobot\.locale";[\s\S]*?\}\)\(\);)\s*<\/script>/,
-)?.[1];
-const BOOT_COPY_MARKUP = '<span data-boot-copy>Loading nanobot…</span>';
-
-function runPrebootLocale(storedLocale: string) {
-  if (!PREBOOT_SCRIPT) throw new Error("Could not find the preboot locale script in index.html");
-
-  const documentElement = { lang: "" };
-  const meta = {
-    content: "",
-    setAttribute(name: string, value: string) {
-      if (name === "content") this.content = value;
-    },
-  };
-  const boot = { textContent: "" };
-
-  runInNewContext(PREBOOT_SCRIPT, {
-    localStorage: {
-      getItem: (key: string) => key === LOCALE_STORAGE_KEY ? storedLocale : null,
-    },
-    navigator: { languages: [], language: "en" },
-    document: {
-      documentElement,
-      querySelector: (selector: string) => {
-        if (selector === '[data-i18n-meta="description"]') return meta;
-        if (selector === "[data-boot-copy]") return boot;
-        return null;
-      },
-    },
+const INDEX_HTML = readFileSync(resolve(process.cwd(), "index.html"), "utf8")
+  .replace("<!--startup-shell-->", renderToStaticMarkup(<StartupSkeleton />));
+async function runPrebootLocale(storedLocale: string) {
+  const preboot = new Window({
+    url: "http://preboot.test",
+    settings: { disableJavaScriptFileLoading: true, disableCSSFileLoading: true },
   });
-
-  return {
-    lang: documentElement.lang,
-    boot: boot.textContent,
-    description: meta.content,
-  };
+  try {
+    preboot.localStorage.setItem(LOCALE_STORAGE_KEY, storedLocale);
+    // Parse the shipped document and execute inline scripts in parser order.
+    // External/module loading stays disabled: React must not repair the splash.
+    preboot.document.write(INDEX_HTML);
+    return {
+      lang: preboot.document.documentElement.lang,
+      boot: preboot.document.querySelector('[role="status"]')?.textContent.trim(),
+      description: preboot.document.querySelector('meta[name="description"]')?.getAttribute("content"),
+    };
+  } finally {
+    await preboot.happyDOM.close();
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -406,13 +419,6 @@ function interpolationKeys(value: unknown): string[] {
 }
 
 describe("webui i18n", () => {
-  it("runs preboot localization after the splash copy exists", () => {
-    expect(INDEX_HTML.indexOf(BOOT_COPY_MARKUP)).toBeGreaterThan(-1);
-    expect(INDEX_HTML.indexOf(PREBOOT_SCRIPT ?? "")).toBeGreaterThan(
-      INDEX_HTML.indexOf(BOOT_COPY_MARKUP),
-    );
-  });
-
   it.each(supportedLocales)("localizes compaction states in $code", async ({ code }) => {
     await setAppLanguage(code);
     const copy = resources[code].common.thread.compaction;
@@ -428,6 +434,15 @@ describe("webui i18n", () => {
       expect(notice?.textContent).toBe(copy[phase]);
       expect(notice).toHaveAttribute("aria-busy", String(phase === "started"));
     }
+    for (const reason of ["idle", "context_pressure", "manual", "provider_native"] as const) {
+      for (const phase of ["started", "succeeded", "failed", "cancelled"] as const) {
+        rerender(<ContextCompactionNotice compaction={{ id: "compact-1", reason, phase, announce: true }} />);
+        const notice = container.querySelector("[data-context-compaction]");
+        expect(copy.reasons[reason][phase]).toBeTruthy();
+        expect(notice?.textContent).toBe(copy.reasons[reason][phase]);
+        expect(notice).toHaveAttribute("aria-busy", String(phase === "started"));
+      }
+    }
     for (const compactReply of ["empty", "failed"] as const) {
       rerender(<MessageBubble message={{
         id: "reply", role: "assistant", content: "original command reply",
@@ -437,9 +452,9 @@ describe("webui i18n", () => {
     }
   });
 
-  it("keeps preboot copy aligned with every registered locale", () => {
+  it("localizes the parsed splash in document order for every registered locale", async () => {
     for (const { code } of supportedLocales) {
-      const result = runPrebootLocale(code);
+      const result = await runPrebootLocale(code);
       const expected = resources[code].common.app;
 
       expect({ code, ...result }).toEqual({
@@ -451,11 +466,11 @@ describe("webui i18n", () => {
     }
   });
 
-  it("normalizes Portuguese locales before the app bundle loads", () => {
+  it("normalizes Portuguese locales before the app bundle loads", async () => {
     const expected = resources["pt-BR"].common.app;
 
     for (const locale of ["pt", "pt-PT"]) {
-      expect(runPrebootLocale(locale)).toEqual({
+      expect(await runPrebootLocale(locale)).toEqual({
         lang: "pt-BR",
         boot: expected.loading.boot,
         description: expected.meta.description,
@@ -648,7 +663,9 @@ describe("webui i18n", () => {
         ...LOCALIZED_CHANNEL_SHELL_KEYS,
         ...LOCALIZED_NEW_SURFACE_KEYS,
       ].filter(
-        (key) => current.get(key) === english.get(key),
+        // “Notifications” is also the native French label.
+        (key) => current.get(key) === english.get(key)
+          && !(locale === "fr" && key === "settings.nav.notifications"),
       );
 
       expect({ locale, leaked }).toEqual({ locale, leaked: [] });

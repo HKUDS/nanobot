@@ -1,5 +1,3 @@
-"""Connection boundaries: no deployment, copied model keys or remote shutdown."""
-
 import asyncio
 import json
 import socket
@@ -99,7 +97,6 @@ async def test_server_upgrade_rechecks_compatibility_without_new_pairing(manager
     ssh.state["identity"]["webui"] = {**webui_contract(), "version": "9.0.0"}
     await manager.action("connect", {"id": key})
     assert manager.snapshot()["profiles"][0]["compatibility"]["status"] == "compatible"
-    # The stable saved host remains; only its reserved local origin is added.
     assert set(json.loads(manager.path.read_text(encoding="utf-8"))) == set(json.loads(saved))
 
 
@@ -343,7 +340,6 @@ async def test_aliases_cannot_open_duplicate_views_but_distinct_instances_can(ma
     await manager.action("connect", {"id": first})
     first_connection = manager.connections[first]
     alias = await save(manager, host="another-alias", config_path="/srv/bot/config.json")
-    # A genuinely separate tunnel/proxy, rather than the shared fixture handle.
     second_tunnel = SimpleNamespace(active=True, error="", port=23457, close=AsyncMock())
     second_proxy = SimpleNamespace(port=23458, origin="http://127.0.0.1:23458", secret="local-two")
     monkeypatch.setattr(remote_ssh, "open_tunnel", AsyncMock(return_value=second_tunnel))
@@ -386,8 +382,8 @@ async def test_offline_alias_does_not_block_replacement_connection(manager, ssh,
     assert first not in manager.connections
     assert manager.connections[alias].proxy is second_proxy
     ssh.tunnel.pause.assert_awaited_once()
-    ssh.tunnel.close.assert_not_awaited()  # Keep the old browser origin reserved.
-    assert len(manager.snapshot()["profiles"]) == 2  # No saved routes/drafts were deleted.
+    ssh.tunnel.close.assert_not_awaited()
+    assert len(manager.snapshot()["profiles"]) == 2
 
 
 async def test_closing_local_manager_reaps_ssh(manager, ssh):
@@ -486,8 +482,6 @@ async def test_reconnect_keeps_origin_and_changing_target_does_not(manager, ssh)
     await manager.action("disconnect", {"id": key})
     await manager.action("save", {"id": key, "profile": {"name": "Renamed", "host": "ubuntu@example.test"}})
     assert json.loads(manager.path.read_text())[key]["local_port"] == 23456
-    # Editing display metadata must preserve the local-client origin marker,
-    # not just its port: otherwise reconnect silently retires that origin.
     assert json.loads(manager.path.read_text())[key]["local_client_origin"] is True
     second = await manager.action("connect", {"id": key})
     assert second["url"] == first["url"]
@@ -587,7 +581,7 @@ async def test_old_profile_origin_is_remembered_before_first_edit(manager, ssh):
     key = await save(manager)
     old = json.loads(manager.path.read_text())
     old[key]["local_port"] = 23456
-    manager.path.write_text(json.dumps(old))  # Pre-ledger profile created by the previous build.
+    manager.path.write_text(json.dumps(old))
     await manager.action("save", {"id": key, "profile": {
         "name": "Other", "host": "ubuntu@example.test", "runtime_user": "other-user",
     }})

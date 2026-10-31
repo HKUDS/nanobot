@@ -30,7 +30,7 @@ describe("Token usage card", () => {
     const plot = container.querySelector("[data-model-usage-plot]")!;
     const bars = within(screen.getByRole("group", { name: "Model trends" })).getAllByRole("img");
     expect(plot).toContainElement(bars[0]);
-    const baseline = container.querySelector('[data-model-usage-gridline="2"]')!;
+    const baseline = container.querySelector<HTMLElement>('[data-model-usage-gridline="2"]')!;
     expect(plot).toContainElement(baseline);
     expect(baseline.parentElement).toHaveStyle({ top: "100%" });
     expect(plot).not.toContainElement(screen.getByText("09-01"));

@@ -57,7 +57,7 @@ describe("catalog loading", () => {
     expect(screen.queryByRole("status", { name: "Loading apps…" })).not.toBeInTheDocument();
   });
 
-  it("finishes an empty MCP category independently but waits for Apps when searching", async () => {
+  it("searches MCP independently and waits for Apps only after switching tabs", async () => {
     const cli = deferred<Response>();
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
@@ -76,6 +76,9 @@ describe("catalog loading", () => {
     expect(screen.getByText("No MCP tools available.")).toBeInTheDocument();
     expect(screen.queryByRole("status", { name: "Loading apps…" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText("Search tools"), { target: { value: "AnyGen" } });
+    expect(screen.getByText("No tools match your search.")).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Loading apps…" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Apps" }));
     expect(screen.getByRole("status", { name: "Loading apps…" })).toBeInTheDocument();
     expect(screen.queryByText("No tools match your search.")).not.toBeInTheDocument();
     await act(async () => { cli.resolve(jsonResponse({ apps: [app], installed_count: 1 })); });

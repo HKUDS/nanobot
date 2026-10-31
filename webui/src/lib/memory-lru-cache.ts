@@ -1,4 +1,4 @@
-/** Byte- and entry-bounded in-memory LRU for JSON-shaped WebUI state. */
+/** Byte- and entry-bounded in-memory LRU for WebUI state. */
 export class MemoryLruCache<T> {
   private entries = new Map<string, { value: T; bytes: number }>();
   private sizes = new WeakMap<object, number>();
@@ -16,6 +16,11 @@ export class MemoryLruCache<T> {
     this.entries.delete(key);
     this.entries.set(key, entry);
     return entry.value;
+  }
+
+  /** Read without making a background observer retain an otherwise old entry. */
+  peek(key: string): T | undefined {
+    return this.entries.get(key)?.value;
   }
 
   set(key: string, value: T): void {
@@ -46,7 +51,9 @@ export class MemoryLruCache<T> {
     if (!value || typeof value !== "object") return 8;
     const cached = this.sizes.get(value);
     if (cached !== undefined) return cached;
-    const size = 32 + Object.values(value).reduce<number>(
+    const values = value instanceof Map ? Array.from(value.entries())
+      : value instanceof Set ? Array.from(value) : Object.values(value);
+    const size = 32 + values.reduce<number>(
       (total, item) => total + this.estimate(item),
       0,
     );

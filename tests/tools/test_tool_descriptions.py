@@ -16,7 +16,7 @@ def test_coding_tool_descriptions_steer_editing_priority() -> None:
 
     assert "default tool for code edits" in apply_patch
     assert "multi-file" in apply_patch
-    assert "dry_run=true" in apply_patch
+    assert "without writing files" in ApplyPatchTool().parameters["properties"]["dry_run"]["description"]
     assert "edit_file only for small exact replacements" in apply_patch
 
     assert "small, exact replacement" in edit_file
@@ -55,12 +55,24 @@ def test_coding_tool_descriptions_steer_discovery() -> None:
 
 
 def test_exec_tool_descriptions_are_concise() -> None:
-    assert ExecTool().description == "Execute a shell command."
+    exec_description = ExecTool().description
+    assert exec_description.startswith("Execute a shell command.")
+    assert "timeout" in exec_description
+    assert "max_runtime" in exec_description
+    assert "mutually exclusive" in exec_description
+    assert len(exec_description) < 160
     assert ExecSessionTool().description == "Manage a session returned by exec."
     assert ListExecSessionsTool().description == "List active exec sessions."
 
     exec_parameters = ExecTool().parameters["properties"]
-    assert "omit to wait for exit" in exec_parameters["yield_time_ms"]["description"]
+    assert "default 1000" in exec_parameters["yield_time_ms"]["description"]
+    assert "execution continues" in exec_parameters["yield_time_ms"]["description"]
+    runtime_description = exec_parameters["max_runtime"]["description"].lower()
+    assert "hard" in runtime_description
+    assert "seconds" in runtime_description
+    timeout_description = exec_parameters["timeout"]["description"].lower()
+    assert "alias" in timeout_description
+    assert "max_runtime" in timeout_description
 
     session_parameters = ExecSessionTool().parameters["properties"]
     assert set(session_parameters) == {
@@ -72,7 +84,7 @@ def test_exec_tool_descriptions_are_concise() -> None:
         "until_exit",
         "timeout_ms",
     }
-    assert session_parameters["until_exit"]["description"] == "Wait for the process to exit."
+    assert "within timeout_ms" in session_parameters["until_exit"]["description"]
     assert "wait_for" in session_parameters["timeout_ms"]["description"]
     assert "until_exit" in session_parameters["timeout_ms"]["description"]
 

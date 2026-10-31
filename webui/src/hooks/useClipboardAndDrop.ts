@@ -26,7 +26,6 @@ function extractImageFilesFromPaste(
   return files;
 }
 
-/** Extract dropped attachment files, mirroring ``extractImageFilesFromPaste``. */
 function extractImageFilesFromDrop(
   event: DragEvent | React.DragEvent,
 ): File[] {
@@ -41,7 +40,6 @@ function extractImageFilesFromDrop(
 }
 
 export interface UseClipboardAndDropApi {
-  /** Whether a drag is currently hovering the drop zone (toggle dragover UI). */
   isDragging: boolean;
   onPaste: (
     event: React.ClipboardEvent,

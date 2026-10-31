@@ -1,4 +1,3 @@
-"""Runtime context for tool construction."""
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -6,6 +5,8 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Protocol, runtime_checkable
+
+from nanobot.config.network import NetworkConfig
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
@@ -33,6 +34,7 @@ class RequestContext:
     chat_id: str
     message_id: str | None = None
     session_key: str | None = None
+    session_generation: str | None = field(default=None, kw_only=True)
     original_user_text: str | None = None
     runtime: LLMRuntime | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -91,6 +93,7 @@ def current_request_session_key() -> str | None:
 class ToolContext:
     config: ToolsConfig
     workspace: str
+    network: NetworkConfig = field(default_factory=NetworkConfig)
     bus: MessageBus | None = None
     subagent_manager: SubagentManager | None = None
     cron_service: CronService | None = None

@@ -1,5 +1,3 @@
-"""Source revision of the running installation and built distributions."""
-
 from __future__ import annotations
 
 import re

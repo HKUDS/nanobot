@@ -1,5 +1,3 @@
-"""Normalized usage values shared by providers and usage records."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass

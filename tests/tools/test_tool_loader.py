@@ -1,4 +1,3 @@
-"""Tests for tool plugin architecture: ToolLoader, ToolContext, metadata."""
 from __future__ import annotations
 
 import shutil
@@ -51,9 +50,6 @@ def test_tool_plugin_discoverable_default_is_true():
     assert _MinimalTool._plugin_discoverable is True
 
 
-# --- ToolContext tests ---
-
-
 def test_tool_context_has_required_fields():
     field_names = {f.name for f in fields(ToolContext)}
     required = {
@@ -75,9 +71,6 @@ def test_tool_context_defaults():
     assert ctx.providers_config is None
     assert ctx.runtime_control is None
     assert ctx.timezone == "UTC"
-
-
-# --- ToolLoader tests ---
 
 
 def test_skip_modules_excludes_infrastructure():
@@ -118,7 +111,6 @@ def test_discover_skips_private_classes():
 
 
 def test_loader_registers_exec_with_real_tools_config(tmp_path):
-    """Real config objects catch bad ctx.config attribute paths that mocks hide."""
     from types import SimpleNamespace
 
     from nanobot.agent.tools.registry import ToolRegistry
@@ -192,9 +184,6 @@ def test_loader_preserves_caller_supplied_tool(tmp_path):
     assert "read_file" not in registered
 
 
-# --- Task 4: _FsTool.create() ---
-
-
 def test_fs_tool_create_builds_from_context():
     from nanobot.agent.tools.filesystem import ReadFileTool
     mock_config = MagicMock()
@@ -224,9 +213,6 @@ def test_fs_tool_create_respects_sandbox():
     ctx = ToolContext(config=mock_config, workspace="/tmp/test")
     tool = ReadFileTool.create(ctx)
     assert tool._allowed_dir == Path("/tmp/test")
-
-
-# --- Message, subagent, and cron tool factories ---
 
 
 async def test_message_tool_create():
@@ -274,9 +260,6 @@ def test_cron_tool_create():
     assert isinstance(tool, CronTool)
 
 
-# --- Task 6: ExecTool, WebTools, ImageGenerationTool ---
-
-
 def test_exec_tool_config_cls():
     from nanobot.agent.tools.shell import ExecTool, ExecToolConfig
     assert ExecTool.config_cls() is ExecToolConfig
@@ -294,21 +277,24 @@ def test_exec_tool_enabled():
 
 
 def test_exec_tool_create():
-    from nanobot.agent.tools.shell import ExecTool
-    mock_config = MagicMock()
-    mock_config.exec.enable = True
-    mock_config.exec.timeout = 120
-    mock_config.exec.sandbox = ""
-    mock_config.exec.path_prepend = "/venv/bin"
-    mock_config.exec.path_append = ""
-    mock_config.exec.allowed_env_keys = []
-    mock_config.exec.allow_patterns = []
-    mock_config.exec.deny_patterns = []
-    mock_config.restrict_to_workspace = False
-    ctx = ToolContext(config=mock_config, workspace="/tmp")
+    from nanobot.agent.tools.shell import ExecTool, ExecToolConfig
+    from nanobot.config.schema import ToolsConfig
+
+    config = ToolsConfig(exec=ExecToolConfig(
+        max_runtime=120,
+        max_runtime_limit=900,
+        idle_timeout=15,
+        idle_action="terminate",
+        path_prepend="/venv/bin",
+    ))
+    ctx = ToolContext(config=config, workspace="/tmp")
     tool = ExecTool.create(ctx)
+
     assert isinstance(tool, ExecTool)
     assert tool.path_prepend == "/venv/bin"
+    assert tool._resolve_timeout(None) == 120
+    for name in ("max_runtime", "timeout"):
+        assert tool.parameters["properties"][name]["maximum"] == 900
 
 
 def test_web_tools_config_cls():
@@ -334,7 +320,7 @@ def test_web_search_tool_create():
     mock_config = MagicMock()
     mock_config.web.enable = True
     mock_config.web.search = MagicMock()
-    mock_config.web.proxy = None
+    mock_config.web.use_proxy = False
     mock_config.web.user_agent = None
     ctx = ToolContext(config=mock_config, workspace="/tmp")
     tool = WebSearchTool.create(ctx)
@@ -346,7 +332,7 @@ def test_web_fetch_tool_create():
     mock_config = MagicMock()
     mock_config.web.enable = True
     mock_config.web.fetch = MagicMock()
-    mock_config.web.proxy = None
+    mock_config.web.use_proxy = False
     mock_config.web.user_agent = None
     ctx = ToolContext(config=mock_config, workspace="/tmp")
     tool = WebFetchTool.create(ctx)
@@ -382,9 +368,6 @@ def test_image_gen_tool_create():
     tool = ImageGenerationTool.create(ctx)
     assert isinstance(tool, ImageGenerationTool)
     assert tool.provider_configs["openrouter"].api_key == "image-key"
-
-
-# --- Task 7: MyToolConfig + MCP wrappers ---
 
 
 def test_my_tool_config_cls():
@@ -424,28 +407,18 @@ def test_mcp_wrappers_not_discoverable():
     assert MCPPromptWrapper._plugin_discoverable is False
 
 
-# --- Task 10: Integration test ---
-
-
 def test_loader_registers_builtin_tools():
-    """Verify the loader produces the same tool set as the old _register_default_tools."""
     from nanobot.agent.tools.loader import ToolLoader
     from nanobot.agent.tools.registry import ToolRegistry
+    from nanobot.agent.tools.shell import ExecToolConfig
 
     mock_config = MagicMock()
-    mock_config.exec.enable = True
-    mock_config.exec.timeout = 60
-    mock_config.exec.sandbox = ""
-    mock_config.exec.path_prepend = ""
-    mock_config.exec.path_append = ""
-    mock_config.exec.allowed_env_keys = []
-    mock_config.exec.allow_patterns = []
-    mock_config.exec.deny_patterns = []
+    mock_config.exec = ExecToolConfig(max_runtime=60)
     mock_config.restrict_to_workspace = False
     mock_config.web.enable = True
     mock_config.web.search = MagicMock()
     mock_config.web.fetch = MagicMock()
-    mock_config.web.proxy = None
+    mock_config.web.use_proxy = False
     mock_config.web.user_agent = None
     mock_config.image_generation.enabled = False
     mock_config.my.enable = True
