@@ -146,7 +146,6 @@ async def test_recovery_continuation_runs_without_a_sustained_goal(
 async def test_recovery_preserves_turn_origin_until_the_next_user_turn(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, late_result: bool,
 ) -> None:
-    monkeypatch.setattr("nanobot.webui.history.get_webui_dir", lambda: tmp_path / "webui")
     bus = MessageBus()
     provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"

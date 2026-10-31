@@ -1,5 +1,3 @@
-"""Identity-bound local HTTP readiness; ordinary legacy health remains compatible."""
-
 import json
 import threading
 from dataclasses import asdict, replace
@@ -49,7 +47,7 @@ def test_restart_requires_identity_while_legacy_health_still_works(tmp_path, hea
     with runtime.foreground_instance(GatewayStartOptions(port=port)):
         runtime.publish_health_host("127.0.0.1")
         assert _gateway_health_ready("127.0.0.1", port)
-        assert not runtime.verify_ready(identity)  # Older / unrelated HTTP 200.
+        assert not runtime.verify_ready(identity)
         reply["body"] = json.dumps({
             "status": "ok", "ready": True,
             "runtime": {**asdict(identity), "future_optional_field": "ignored"},
@@ -61,7 +59,7 @@ def test_restart_requires_identity_while_legacy_health_still_works(tmp_path, hea
             replace(identity, version="0.3.5"),
         ):
             assert not runtime.verify_ready(wrong)
-    assert not runtime.verify_ready(identity)  # Port alone outlives its owner.
+    assert not runtime.verify_ready(identity)
 
 
 @pytest.mark.parametrize("status,body", [

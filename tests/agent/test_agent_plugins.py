@@ -186,8 +186,6 @@ async def test_prompt_snapshot_uses_approved_plugin_bytes_after_replacement(
                 pause_for_replacement()
             return content
 
-        # Both boundaries retain the approved bytes: after discovery returns,
-        # and while the fingerprint scan still holds bytes read before an edit.
         with monkeypatch.context() as race:
             if boundary == "after-verification":
                 race.setattr(Path, "iterdir", iterdir)

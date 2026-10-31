@@ -44,6 +44,8 @@ const sessionUpdateHandlers = new Set<(
   workspaceScope?: WorkspaceScopePayload,
 ) => void>();
 const sidebarStateUpdateHandlers = new Set<(state: SidebarStatePayload) => void>();
+const pairingChangeHandlers = new Set<() => void>();
+const readyHandlers = new Set<() => void>();
 let mockSessions: ChatSummary[] = [];
 const HERO_GREETING_PATTERN =
   /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
@@ -222,6 +224,8 @@ vi.mock("@/hooks/useTheme", async () => {
       React.createElement(React.Fragment, null, children),
     useTheme: () => ({
       theme: "light" as const,
+      preference: "light" as const,
+      setTheme: vi.fn(),
       toggle: toggleThemeSpy,
     }),
     useThemeValue: () => "light" as const,
@@ -261,6 +265,14 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
       return () => statusHandlers.delete(handler);
     };
     onRuntimeModelUpdate = () => () => {};
+    onPairingChange = (handler: () => void) => {
+      pairingChangeHandlers.add(handler);
+      return () => pairingChangeHandlers.delete(handler);
+    };
+    onReady = (handler: () => void) => {
+      readyHandlers.add(handler);
+      return () => readyHandlers.delete(handler);
+    };
     onError = () => () => {};
     onChat = () => () => {};
     onTranscript = () => () => {};
@@ -348,6 +360,8 @@ describe("App layout", () => {
     runStatusHandlers.clear();
     sessionUpdateHandlers.clear();
     sidebarStateUpdateHandlers.clear();
+    pairingChangeHandlers.clear();
+    readyHandlers.clear();
     window.history.replaceState(null, "", "/");
     sessionStorage.removeItem("nanobot.remote-instance");
     Reflect.deleteProperty(window, "nanobotHost");
@@ -413,8 +427,12 @@ describe("App layout", () => {
     // capability contract exercised by the timed DOM assertions below.
     await act(async () => { await import("@/components/thread/ThreadShell"); });
     await screen.findByRole("textbox", {}, { timeout: 5_000 });
-    if (supported) await screen.findByRole("button", { name: /Config check Running/ });
-    else expect(screen.queryByText("Config check")).not.toBeInTheDocument();
+    if (supported) {
+      const trigger = await screen.findByRole("button", { name: "Subtasks · Running: 1" });
+      expect(trigger).toHaveAttribute("aria-expanded", "false");
+      await userEvent.setup().click(trigger);
+      expect(await screen.findByRole("button", { name: /Config check Running/ })).toBeVisible();
+    } else expect(screen.queryByRole("button", { name: /Subtasks/ })).not.toBeInTheDocument();
     const reads = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith("/subagents"));
     expect(reads).toHaveLength(supported ? 1 : 0);
     expect(requestMutationSpy).not.toHaveBeenCalled();
@@ -1116,7 +1134,6 @@ describe("App layout", () => {
     window.history.replaceState(null, "", "/#/chat/websocket%3Aexisting-chat");
     render(<App />);
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    // Wait for the existing chat's lazy composer before opening its sidebar menu.
     await screen.findByRole("button", { name: "Workspace access mode: Full Access" });
     const projectSection = screen.getByRole("region", { name: "selected-project" });
     fireEvent.contextMenu(within(projectSection).getByRole("button", { name: "selected-project" }));
@@ -2201,12 +2218,7 @@ describe("App layout", () => {
       expect(highlight).not.toHaveClass(
         "group-data-[resizing=true]/sidebar:transition-none",
       );
-      expect(highlight).toHaveClass(
-        "transition-[transform,width,height]",
-        "duration-300",
-        "ease-out",
-        "motion-reduce:transition-none",
-      );
+      expect(highlight).toHaveClass("sidebar-selection-highlight");
     }
     fireEvent.pointerDown(handle, { button: 0, pointerId: 1, clientX: 272 });
     fireEvent.pointerMove(handle, { pointerId: 1, clientX: 400 });
@@ -2362,6 +2374,40 @@ describe("App layout", () => {
     expect(document.body.style.pointerEvents).not.toBe("none");
   }, 15_000);
 
+  it("archives selected topics in one sidebar update and navigates outside the full selection", async () => {
+    mockSessions = ["a", "b", "c"].map((id) => ({
+      key: `websocket:chat-${id}`, channel: "websocket", chatId: `chat-${id}`,
+      createdAt: "2026-04-16T10:00:00Z", updatedAt: "2026-04-16T10:00:00Z",
+      title: `Topic ${id}`, preview: `Message ${id}`,
+    }));
+    mockFetchRoutes({
+      "/api/webui/sidebar-state": { pinned_keys: ["websocket:chat-a", "websocket:chat-b"] },
+    });
+    window.history.replaceState(null, "", "/#/chat/websocket%3Achat-a");
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    await within(sidebar).findByRole("button", { name: "Topic a" });
+    fireEvent.pointerDown(within(sidebar).getByLabelText("Topic actions for Topic a"), { button: 0 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Topic b" }));
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Archive" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Archive 2 topics?" });
+    expect(setSidebarStateSpy).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Archive" }));
+
+    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenCalledTimes(1));
+    expect(setSidebarStateSpy).toHaveBeenCalledWith(expect.objectContaining({
+      archived_keys: ["websocket:chat-a", "websocket:chat-b"], pinned_keys: [],
+    }));
+    expect(window.location.hash).toBe("#/chat/websocket%3Achat-c");
+    expect(within(sidebar).getByRole("button", { name: "Topic c" })).toBeInTheDocument();
+    expect(within(sidebar).queryByRole("button", { name: "Topic a" })).not.toBeInTheDocument();
+    expect(within(sidebar).queryByRole("button", { name: "Topic b" })).not.toBeInTheDocument();
+    expect(deleteChatSpy).not.toHaveBeenCalled();
+  });
+
   it("deletes multiple selected topics through one confirmation", async () => {
     mockSessions = [
       {
@@ -2401,9 +2447,23 @@ describe("App layout", () => {
     fireEvent.click(within(sidebar).getByRole("button", { name: "Second chat" }));
     expect(within(sidebar).getByText("2 selected")).toBeInTheDocument();
 
+    const automationReads: Array<(jobs: SessionAutomationJob[]) => void> = [];
+    getSessionAutomationsSpy.mockImplementation(() => new Promise((resolve) => automationReads.push(resolve)));
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Delete" }));
+    fireEvent.click(document.body);
+    expect(screen.getByTestId("delete-selection-bar")).toHaveTextContent("2 selected");
+    expect(deleteChatSpy).not.toHaveBeenCalled();
+    await act(async () => automationReads.forEach((resolve) => resolve([])));
+    expect(await screen.findByText("Delete 2 conversations?")).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("alertdialog"), { key: "Escape" });
+    expect(screen.getByTestId("delete-selection-bar")).toHaveTextContent("2 selected");
+    expect(deleteChatSpy).not.toHaveBeenCalled();
+
+    getSessionAutomationsSpy.mockResolvedValue([]);
     fireEvent.click(within(sidebar).getByRole("button", { name: "Delete" }));
     expect(await screen.findByText("Delete 2 conversations?")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.queryByTestId("delete-selection-bar")).not.toBeInTheDocument();
 
     await waitFor(() => expect(deleteChatSpy).toHaveBeenCalledTimes(2));
     expect(deleteChatSpy.mock.calls.map(([key]) => key)).toEqual([
@@ -4373,7 +4433,7 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
 
-    fireEvent.click(screen.getByRole("button", { name: "Toggle theme from header" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Toggle theme from header" }));
     expect(toggleThemeSpy).toHaveBeenCalledTimes(1);
 
     fireEvent.keyDown(screen.getByRole("separator", { name: "Resize sidebar" }), { key: "Enter" });
@@ -4433,6 +4493,141 @@ describe("App layout", () => {
     expect(fetchBootstrap).toHaveBeenCalledTimes(2);
     expect(updateUrlSpy).toHaveBeenCalledWith("ws://test?token=tok-2");
     unmount();
+  });
+
+  it("refreshes pairing immediately on notices and ready, only while visible", async () => {
+    vi.useFakeTimers();
+    let requests: Record<string, unknown>[] = [];
+    mockFetchRoutes({ "/api/settings/pairing": () => ({ requests }) });
+    const { unmount } = render(<App />);
+    await act(async () => {});
+    const pairingReads = () => vi.mocked(fetch).mock.calls.filter(([input]) => String(input) === "/api/settings/pairing").length;
+    expect(pairingReads()).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    requests = [{ code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status: "sent" }];
+    await act(async () => { for (const handler of pairingChangeHandlers) handler(); });
+    expect(screen.getByRole("dialog", { name: "Pair account" })).toBeVisible();
+    expect(pairingReads()).toBe(2);
+    requests = [];
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(pairingReads()).toBe(3);
+    expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
+
+    const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
+    const setVisibility = (state: DocumentVisibilityState) => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: state });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+    try {
+      act(() => setVisibility("hidden"));
+      requests = [];
+      await act(async () => {
+        for (const handler of pairingChangeHandlers) handler();
+        for (const handler of readyHandlers) handler();
+        await vi.advanceTimersByTimeAsync(15_000);
+      });
+      expect(pairingReads()).toBe(3);
+      await act(async () => setVisibility("visible"));
+      expect(pairingReads()).toBe(4);
+      expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
+
+      requests = [{ code: "IJKL-MNOP", channel: "feishu", sender_id: "bob", delivery_status: "sent" }];
+      await act(async () => { for (const handler of readyHandlers) handler(); });
+      expect(screen.getByRole("dialog", { name: "Pair account" })).toBeVisible();
+      expect(pairingReads()).toBe(5);
+      unmount();
+      await act(async () => {
+        for (const handler of pairingChangeHandlers) handler();
+        for (const handler of readyHandlers) handler();
+        await vi.advanceTimersByTimeAsync(15_000);
+      });
+      expect(pairingReads()).toBe(5);
+    } finally {
+      if (visibilityDescriptor) Object.defineProperty(document, "visibilityState", visibilityDescriptor);
+      else Reflect.deleteProperty(document, "visibilityState");
+    }
+  });
+
+  it("polls for cross-process pairing changes and expiry without a notice", async () => {
+    vi.useFakeTimers();
+    let requests: Record<string, unknown>[] = [];
+    mockFetchRoutes({ "/api/settings/pairing": () => ({ requests }) });
+    render(<App />);
+    await act(async () => {});
+    requests = [{ code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", expires_in_seconds: 5 }];
+    await act(async () => { await vi.advanceTimersByTimeAsync(14_999); });
+    expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(screen.getByRole("dialog", { name: "Pair account" })).toHaveTextContent("Code expires 5s.");
+    requests = [];
+    await act(async () => { await vi.advanceTimersByTimeAsync(4_999); });
+    expect(screen.getByRole("dialog", { name: "Pair account" })).toBeVisible();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
+  });
+
+  it.each([false, true])("coalesces notices during an older pairing read and pauses while hidden (%s)", async (hide) => {
+    let finishOldRead!: (value: unknown) => void;
+    const oldSnapshot = new Promise((resolve) => { finishOldRead = resolve; });
+    let reads = 0;
+    mockFetchRoutes({ "/api/settings/pairing": () => ++reads === 1 ? oldSnapshot : { requests: [{
+      code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status: "sent",
+    }] } });
+    const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
+    const setVisibility = (state: DocumentVisibilityState) => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: state });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+    const { unmount } = render(<App />);
+    try {
+      await waitFor(() => expect(reads).toBe(1));
+      act(() => {
+        for (let notice = 0; notice < 3; notice += 1) {
+          for (const handler of pairingChangeHandlers) handler();
+        }
+        if (hide) setVisibility("hidden");
+      });
+      expect(reads).toBe(1);
+      await act(async () => { finishOldRead({ requests: [] }); });
+      if (hide) {
+        expect(reads).toBe(1);
+        await act(async () => setVisibility("visible"));
+      }
+      expect(screen.getByRole("dialog", { name: "Pair account" })).toBeVisible();
+      expect(reads).toBe(2);
+    } finally {
+      unmount();
+      if (visibilityDescriptor) Object.defineProperty(document, "visibilityState", visibilityDescriptor);
+      else Reflect.deleteProperty(document, "visibilityState");
+    }
+  });
+
+  it.each(["success", "failure"])("reconciles a late pairing mutation after a notice shows a newer request (%s)", async (outcome) => {
+    let requests = [{
+      code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", expires_in_seconds: 120,
+    }];
+    mockFetchRoutes({ "/api/settings/pairing": () => ({ requests }) });
+    let reply!: (payload: unknown) => void;
+    let fail!: (error: Error) => void;
+    requestMutationSpy.mockImplementationOnce(() => new Promise((resolve, reject) => { reply = resolve; fail = reject; }));
+    render(<App />);
+    const popup = await screen.findByRole("dialog", { name: "Pair account" });
+    fireEvent.change(within(popup).getByRole("textbox", { name: "Pairing code" }), {
+      target: { value: "ABCD-EFGH" },
+    });
+    expect(requestMutationSpy).toHaveBeenCalledWith("settings.pairing.approve", { code: "ABCD-EFGH" }, expect.any(Number));
+    requests = [{
+      code: "IJKL-MNOP", channel: "feishu.second", sender_id: "bob", expires_in_seconds: 240,
+    }];
+    await act(async () => { for (const handler of pairingChangeHandlers) handler(); });
+    expect(popup).toHaveTextContent("Code expires 4 min.");
+    await act(async () => {
+      if (outcome === "success") reply({ requests: [] });
+      else fail(new Error("Approval unavailable"));
+    });
+    expect(screen.getByRole("dialog", { name: "Pair account" })).toHaveTextContent("Code expires 4 min.");
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input) === "/api/settings/pairing")).toHaveLength(3);
+    expect(requestMutationSpy).toHaveBeenCalledTimes(1);
   });
 
   it.each(["sending", "failed"])("explains an undelivered pairing reply (%s) without empty code slots", async (delivery_status) => {
@@ -4511,16 +4706,18 @@ describe("App layout", () => {
     expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
   });
 
-  it("reuses an in-flight pairing poll when the page becomes visible again", async () => {
+  it("reuses an in-flight pairing poll then reads current requests on visible return", async () => {
     let resolvePairing!: (response: Response) => void;
     const pendingPairing = new Promise<Response>((resolve) => {
       resolvePairing = resolve;
     });
-    const fetchMock = vi.fn((input: RequestInfo | URL) => (
-      String(input) === "/api/settings/pairing"
-        ? pendingPairing
-        : Promise.resolve({ ok: false, status: 404 } as Response)
-    ));
+    let reads = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      if (String(input) !== "/api/settings/pairing") return Promise.resolve({ ok: false, status: 404 } as Response);
+      return ++reads === 1 ? pendingPairing : Promise.resolve(jsonResponse({ requests: [{
+        code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status: "sent",
+      }] }));
+    });
     vi.stubGlobal("fetch", fetchMock);
     const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
 
@@ -4550,6 +4747,8 @@ describe("App layout", () => {
         resolvePairing(jsonResponse({ requests: [] }));
         await pendingPairing;
       });
+      expect(screen.getByRole("dialog", { name: "Pair account" })).toBeVisible();
+      expect(reads).toBe(2);
     } finally {
       if (visibilityDescriptor) {
         Object.defineProperty(document, "visibilityState", visibilityDescriptor);

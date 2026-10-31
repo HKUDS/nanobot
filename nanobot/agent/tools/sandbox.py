@@ -53,13 +53,6 @@ def _bwrap(
     sandbox_ro_binds: Iterable[str] | None = None,
     sandbox_rw_binds: Iterable[str] | None = None,
 ) -> str:
-    """Wrap command in a bubblewrap sandbox (requires bwrap in container).
-
-    The workspace is bind-mounted read-write; its parent directory is hidden
-    behind a fresh tmpfs. Media is mounted read-only for uploaded attachments.
-    Explicit sandbox_ro_binds and sandbox_rw_binds add read-only and read-write
-    roots, respectively.
-    """
     ws = Path(workspace).resolve()
     media = get_media_dir().resolve()
 
@@ -89,10 +82,10 @@ def _bwrap(
         args += ["--ro-bind-try", p, p]
     args += [
         "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
-        "--tmpfs", str(ws.parent),        # mask config dir
-        "--dir", str(ws),                 # recreate workspace mount point
+        "--tmpfs", str(ws.parent),
+        "--dir", str(ws),
         "--bind", str(ws), str(ws),
-        "--ro-bind-try", str(media), str(media),  # read-only access to media
+        "--ro-bind-try", str(media), str(media),
     ]
     for p in _normalize_bind_paths(sandbox_ro_binds, workspace=ws):
         args += ["--ro-bind-try", p, p]

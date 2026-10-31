@@ -1,5 +1,3 @@
-"""Terminal input and rendering helpers for the interactive CLI."""
-
 from __future__ import annotations
 
 import os
@@ -30,6 +28,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
 from nanobot.utils.helpers import sanitize_surrogates as _sanitize_surrogates
+from nanobot.utils.tool_hints import format_tool_event_hints
 
 __all__ = [
     "_ReasoningBuffer",
@@ -96,7 +95,6 @@ class SafeFileHistory(FileHistory):
 
 
 def _flush_pending_tty_input() -> None:
-    """Drop unread keypresses typed while the model was generating output."""
     try:
         fd = sys.stdin.fileno()
         if not os.isatty(fd):
@@ -120,7 +118,6 @@ def _flush_pending_tty_input() -> None:
 
 
 def _restore_terminal() -> None:
-    """Restore terminal to its original state (echo, line buffering, etc.)."""
     if _saved_term_attrs is None:
         return
     with suppress(Exception):
@@ -170,10 +167,8 @@ def _build_cli_key_bindings() -> KeyBindings:
 
 
 def _init_prompt_session() -> None:
-    """Create the prompt_toolkit session with persistent file history."""
     global _prompt_session, _saved_term_attrs
 
-    # Save terminal state so we can restore it on exit
     with suppress(Exception):
         import termios
 
@@ -199,7 +194,6 @@ def _make_console() -> Console:
 
 
 def _render_interactive_ansi(render_fn: Callable[[Console], None]) -> str:
-    """Render Rich output to ANSI so prompt_toolkit can print it safely."""
     ansi_console = Console(
         force_terminal=sys.stdout.isatty(),
         color_system=cast(
@@ -219,7 +213,6 @@ def _print_agent_response(
     metadata: dict[str, Any] | None = None,
     show_header: bool = True,
 ) -> None:
-    """Render assistant response with consistent terminal styling."""
     console = _make_console()
     content = response or ""
     body = _response_renderable(content, render_markdown, metadata)
@@ -233,7 +226,6 @@ def _print_agent_response(
 def _response_renderable(
     content: str, render_markdown: bool, metadata: dict[str, Any] | None = None
 ) -> Text | Markdown:
-    """Render plain-text command output without markdown collapsing newlines."""
     if not render_markdown:
         return Text(content)
     if (metadata or {}).get("render_as") == "text":
@@ -242,7 +234,6 @@ def _response_renderable(
 
 
 async def _print_interactive_line(text: str) -> None:
-    """Print async interactive updates with prompt_toolkit-safe Rich styling."""
 
     def _write() -> None:
         ansi = _render_interactive_ansi(lambda c: c.print(f"  [dim]↳ {text}[/dim]"))
@@ -256,7 +247,6 @@ async def _print_interactive_response(
     render_markdown: bool,
     metadata: dict[str, Any] | None = None,
 ) -> None:
-    """Print async interactive replies with prompt_toolkit-safe Rich styling."""
 
     def _write() -> None:
         content = response or ""
@@ -278,7 +268,6 @@ def _print_cli_progress_line(
     thinking: ThinkingSpinner | None,
     renderer: StreamRenderer | None = None,
 ) -> None:
-    """Print a CLI progress line, pausing the spinner if needed."""
     if not text.strip():
         return
     target = renderer.console if renderer else console
@@ -323,7 +312,6 @@ def _print_cli_reasoning(
     thinking: ThinkingSpinner | None,
     renderer: StreamRenderer | None = None,
 ) -> None:
-    """Print reasoning/thinking content in a distinct style."""
     if not text.strip():
         return
     target = renderer.console if renderer else console
@@ -349,7 +337,6 @@ async def _print_interactive_progress_line(
     thinking: ThinkingSpinner | None,
     renderer: StreamRenderer | None = None,
 ) -> None:
-    """Print an interactive progress line, pausing the spinner if needed."""
     if not text.strip():
         return
     if renderer:
@@ -367,6 +354,8 @@ async def _maybe_print_interactive_progress(
     channels_config: Any,
     renderer: StreamRenderer | None = None,
     reasoning_buffer: _ReasoningBuffer | None = None,
+    *,
+    tool_hint_max_length: int = 40,
 ) -> bool:
     event = msg.event
     if isinstance(event, ContextCompactionEvent):
@@ -403,23 +392,18 @@ async def _maybe_print_interactive_progress(
     if channels_config and not is_tool_hint and not channels_config.send_progress:
         return True
 
-    await _print_interactive_progress_line(msg.content, thinking, renderer)
+    content = msg.content
+    if is_tool_hint and event.tool_events:
+        content = format_tool_event_hints(event.tool_events, max_length=tool_hint_max_length)
+    await _print_interactive_progress_line(content, thinking, renderer)
     return True
 
 
 def _is_exit_command(command: str) -> bool:
-    """Return True when input should end interactive chat."""
     return command.lower() in EXIT_COMMANDS
 
 
 async def _read_interactive_input_async() -> str:
-    """Read user input using prompt_toolkit (handles paste, history, display).
-
-    prompt_toolkit natively handles:
-    - Multiline paste (bracketed paste mode)
-    - History navigation (up/down arrows)
-    - Clean display (no ghost characters or artifacts)
-    """
     if _prompt_session is None:
         raise RuntimeError("Call _init_prompt_session() first")
     try:

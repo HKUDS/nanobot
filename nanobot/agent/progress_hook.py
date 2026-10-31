@@ -1,5 +1,3 @@
-"""Agent hook that adapts runner events into channel progress UI."""
-
 from __future__ import annotations
 
 import json
@@ -10,13 +8,11 @@ from loguru import logger
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.bus.outbound_events import ProgressEvent, StreamDeltaEvent, StreamEndEvent
 from nanobot.events import NO_EVENTS, EventSink
-from nanobot.providers.base import ToolCallRequest
 from nanobot.utils.helpers import IncrementalThinkExtractor, strip_think
 from nanobot.utils.progress_events import (
     build_tool_event_finish_payloads,
     build_tool_event_start_payload,
 )
-from nanobot.utils.tool_hints import format_tool_hints
 
 
 class AgentProgressHook(AgentHook):
@@ -28,14 +24,12 @@ class AgentProgressHook(AgentHook):
         *,
         streaming: bool = False,
         session_key: str | None = None,
-        tool_hint_max_length: int = 40,
         log_content: bool = True,
     ) -> None:
         super().__init__(reraise=True)
         self._publish = events.publish
         self._streaming = streaming
         self._session_key = session_key
-        self._tool_hint_max_length = tool_hint_max_length
         self._log_content = log_content
         self._stream_buf = ""
         self._think_extractor = IncrementalThinkExtractor()
@@ -49,9 +43,6 @@ class AgentProgressHook(AgentHook):
         if not text:
             return None
         return strip_think(text) or None
-
-    def _tool_hint(self, tool_calls: list[Any]) -> str:
-        return format_tool_hints(tool_calls, max_length=self._tool_hint_max_length)
 
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
         prev_clean = strip_think(self._stream_buf)
@@ -118,11 +109,7 @@ class AgentProgressHook(AgentHook):
         }
         if phase == "start":
             await self.on_stream_end(context, resuming=True)
-            tool_call = ToolCallRequest(id=str(call_id), name=name, arguments=arguments)
-            tool_hint = self._strip_think(self._tool_hint([tool_call])) or name
-            await self._publish(ProgressEvent(
-                content=tool_hint, tool_hint=True, tool_events=[payload],
-            ))
+            await self._publish(ProgressEvent(tool_hint=True, tool_events=[payload]))
             logger.info(
                 "Provider-hosted tool call: {}({})",
                 name,
@@ -138,11 +125,8 @@ class AgentProgressHook(AgentHook):
                 thought = self._strip_think(context.response.content if context.response else None)
                 if thought:
                     await self._publish(ProgressEvent(content=thought))
-            tool_hint = self._strip_think(self._tool_hint(context.tool_calls))
             tool_events = [build_tool_event_start_payload(tc) for tc in context.tool_calls]
-            await self._publish(ProgressEvent(
-                content=tool_hint or "", tool_hint=True, tool_events=tool_events,
-            ))
+            await self._publish(ProgressEvent(tool_hint=True, tool_events=tool_events))
         for tc in context.tool_calls:
             args_str = (
                 json.dumps(tc.arguments, ensure_ascii=False)[:200]

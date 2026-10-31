@@ -1,5 +1,3 @@
-"""Resolve authenticated WebUI choices to existing, same-scope session routes."""
-
 from collections import Counter
 from dataclasses import dataclass, replace
 from typing import Any, cast

@@ -1,5 +1,3 @@
-"""Cron tool for scheduling reminders and tasks."""
-
 # pyright: reportIncompatibleMethodOverride=false
 
 from __future__ import annotations
@@ -100,7 +98,6 @@ class CronTool(Tool):
         return None
 
     def _display_timezone(self, schedule: CronSchedule) -> str:
-        """Pick the most human-meaningful timezone for display."""
         return schedule.tz or self._default_timezone
 
     @staticmethod
@@ -278,7 +275,6 @@ class CronTool(Tool):
         return f"Updated job '{result.name}' (id: {result.id})"
 
     def _format_timing(self, schedule: CronSchedule) -> str:
-        """Format schedule as a human-readable timing string."""
         if schedule.kind == "cron":
             tz = f" ({schedule.tz})" if schedule.tz else ""
             return f"cron: {schedule.expr}{tz}"
@@ -296,7 +292,6 @@ class CronTool(Tool):
         return schedule.kind
 
     def _format_state(self, state: CronJobState, schedule: CronSchedule) -> list[str]:
-        """Format job run state as display lines."""
         lines: list[str] = []
         display_tz = self._display_timezone(schedule)
         if state.last_run_at_ms:

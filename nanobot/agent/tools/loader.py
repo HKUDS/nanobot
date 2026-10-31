@@ -1,5 +1,3 @@
-"""Tool discovery and registration via package scanning."""
-
 # pyright: reportIncompatibleVariableOverride=false
 
 from __future__ import annotations
@@ -66,7 +64,6 @@ class ToolLoader:
         return results
 
     def _discover_plugins(self) -> dict[str, type[Tool]]:
-        """Discover external tool plugins registered via entry_points."""
         if self._plugins is not None:
             return self._plugins
         plugins: dict[str, type[Tool]] = {}

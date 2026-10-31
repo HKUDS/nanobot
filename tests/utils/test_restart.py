@@ -1,5 +1,3 @@
-"""Tests for restart notice helpers."""
-
 from __future__ import annotations
 
 import os
@@ -28,7 +26,6 @@ def test_set_and_consume_restart_notice_env_roundtrip(monkeypatch):
     assert notice.started_at_raw
     assert notice.metadata == {}
 
-    # Consumed values should be cleared from env.
     assert consume_restart_notice_from_env() is None
     assert "NANOBOT_RESTART_NOTIFY_CHANNEL" not in os.environ
     assert "NANOBOT_RESTART_NOTIFY_CHAT_ID" not in os.environ

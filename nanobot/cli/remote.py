@@ -1,5 +1,3 @@
-"""Server-console commands for explicit remote WebUI device authorization."""
-
 from __future__ import annotations
 
 import http.client
@@ -68,7 +66,6 @@ def _tencent_public_host() -> str:
 
 
 def _ssh_login_users() -> list[str]:
-    """List regular interactive accounts, not root or service identities."""
     import pwd
 
     return sorted(u.pw_name for u in pwd.getpwall()
@@ -76,7 +73,6 @@ def _ssh_login_users() -> list[str]:
 
 
 def _cloud_ssh_user() -> str | None:
-    """Read only cloud-init's configured login name, never its full instance data."""
     cloud_init = shutil.which("cloud-init")
     if not cloud_init:
         return None
@@ -89,7 +85,6 @@ def _cloud_ssh_user() -> str | None:
 
 
 def _default_ssh_user() -> str | None:
-    """Prefer the current login, then the cloud image's existing default account."""
     import pwd
 
     current = pwd.getpwuid(os.getuid())
@@ -109,7 +104,6 @@ def _default_ssh_user() -> str | None:
 
 
 def _choose_number(prompt: str, count: int) -> int:
-    """Keep invalid selections in the current step, including across Typer versions."""
     while True:
         choice = int(typer.prompt(prompt, type=int))
         if 1 <= choice <= count:
@@ -118,7 +112,6 @@ def _choose_number(prompt: str, count: int) -> int:
 
 
 def _choose_ssh_user() -> str:
-    """Ask only when discovery is ambiguous; never make the user invent a name."""
     user = _default_ssh_user()
     if user:
         return user
@@ -138,7 +131,6 @@ def _choose_ssh_user() -> str:
 
 
 def _pair_as_administrator(request: str, config: Path, host: str, ssh_user: str, port: int) -> NoReturn:
-    """Continue the same request only with the operator's explicit sudo consent."""
     typer.echo("\nnanobot's configuration is protected by another server account.")
     typer.echo(f"Config: {config}\nAdministrator access is needed to continue. File permissions will not change.")
     # Keep the installed environment (resolving a venv Python symlink loses it).

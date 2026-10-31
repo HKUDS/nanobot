@@ -1,5 +1,3 @@
-"""Ordinary Windows path inputs at the update record and lease I/O boundaries."""
-
 import stat
 import sys
 from pathlib import Path

@@ -1,5 +1,3 @@
-"""An owned OpenSSH master, never a user's shared control socket."""
-
 from __future__ import annotations
 
 import asyncio

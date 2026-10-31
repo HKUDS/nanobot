@@ -1,5 +1,3 @@
-"""Typed loader for the bundled MCP service catalogue."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass

@@ -15,7 +15,6 @@ import {
   MemoryIcon,
   HelpIcon,
   HistoryIcon,
-  ConversationIcon,
   AttachIcon,
   RestartIcon,
   RestrictedAccessIcon,
@@ -46,18 +45,21 @@ import {
   splitCapabilityMentionSegments,
 } from "@/components/CliAppMentionText";
 import {
+  SkillReferenceToken,
+  withSkillReferences,
+  type InlineReferenceSegment,
+} from "@/components/SkillReferenceText";
+import {
   composerMentionText,
   isCapabilityMentionStart,
   type CapabilityMentionSegment,
 } from "@/lib/composer-mention-text";
-import { INLINE_TOKEN_HIGHLIGHT_COLOR } from "@/components/InlineTokenHighlight";
+import { INLINE_REFERENCE_HIGHLIGHT_COLOR, INLINE_TOKEN_HIGHLIGHT_COLOR, InlineTokenHighlight } from "@/components/InlineTokenHighlight";
+import { SlashCommandText } from "@/components/SlashCommandText";
 import {
   ChevronDown,
   ChevronUp,
   CornerDownRight,
-  FileText,
-  Video,
-  ImageIcon,
   Loader2,
   Quote,
   Trash2,
@@ -67,6 +69,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { AttachmentCard, AttachmentTypeFace, attachmentCardActionClassName } from "@/components/AttachmentCard";
 import { ComposerActionIcon, type ComposerActionState } from "@/components/thread/ComposerActionIcon";
 import {
   floatingItemClassName,
@@ -136,6 +139,7 @@ import { requestSkillsRefresh } from "@/lib/skill-events";
 import {
   isRegisteredSlashCommand,
   isSideChannelLifecycle,
+  matchingSlashCommand,
   slashCommandLifecycle,
 } from "@/lib/slash-command";
 import {
@@ -1156,7 +1160,7 @@ export function ThreadComposer({
   // keyboard still get the newline-on-Enter behavior.
   const hasCoarsePointer = useMediaQuery("(pointer: coarse)");
   const mobileWorkspaceControls = useMediaQuery("(max-width: 639px)");
-  const { readingTextSize } = useLocalPreferences();
+  const { readingTextSize, customReadingTextSize } = useLocalPreferences();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionOverlayRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -1186,8 +1190,6 @@ export function ThreadComposer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
   const queuedPromptCounterRef = useRef(0);
-  // A fresh queue submission arms Enter for the complete pending message.
-  const secondEnterPromptIdRef = useRef<string | null>(null);
   const previousPendingQueueKeyRef = useRef(pendingQueueKey);
   const previousQueueRunRef = useRef({ key: pendingQueueKey, isStreaming });
   const voiceShortcutDownRef = useRef(false);
@@ -1204,10 +1206,6 @@ export function ThreadComposer({
     && !!onFavoriteWorkspaceProject
     && workspaceControls?.can_change_project !== false;
   const showProjectPicker = projectPickerAvailable && !workspaceControlsHidden;
-
-  useEffect(() => {
-    secondEnterPromptIdRef.current = null;
-  }, [pendingQueueKey, queuedPromptStorageKey]);
 
   useEffect(() => {
     if (!isStreaming || !activeTurnId) return;
@@ -1274,7 +1272,6 @@ export function ThreadComposer({
   const addFiles = useCallback(
     (files: File[]) => {
       if (interactionDisabled || files.length === 0) return;
-      secondEnterPromptIdRef.current = null;
       const { rejected } = enqueue(files);
       if (rejected.length > 0) {
         const { reason, file } = rejected[0];
@@ -1327,18 +1324,21 @@ export function ThreadComposer({
   );
   const hasErrors = images.some((img) => img.status === "error");
 
+  const isUserShell = value.trimStart().startsWith("!");
+  const requiresModelSetup = modelNeedsSetup && !isUserShell;
   const hasComposerContent = value.trim().length > 0 || readyImages.length > 0;
   const canSend =
     !interactionDisabled
-    && !modelNeedsSetup
+    && !requiresModelSetup
     && !encoding
     && !hasErrors
     && hasComposerContent;
   const canOpenModelSettings = Boolean(
-    modelNeedsSetup && onModelBadgeClick && !interactionDisabled,
+    requiresModelSetup && onModelBadgeClick && !interactionDisabled,
   );
   const canQueueGuidance =
     isStreaming
+    && !isUserShell
     && !interactionDisabled
     && !modelNeedsSetup
     && !encoding
@@ -1357,7 +1357,7 @@ export function ThreadComposer({
   }, [interactionDisabled, slashMenuDismissed, value]);
 
   const skillQuery = useMemo(() => {
-    if (interactionDisabled || slashMenuDismissed) return null;
+    if (interactionDisabled || isUserShell || slashMenuDismissed) return null;
     const caret = Math.min(Math.max(cursorPosition, 0), value.length);
     const beforeCaret = value.slice(0, caret);
     const match = /\$([A-Za-z0-9_-]*)$/i.exec(beforeCaret);
@@ -1367,7 +1367,7 @@ export function ThreadComposer({
       start: match.index,
       text: match[1].toLowerCase(),
     };
-  }, [cursorPosition, interactionDisabled, slashMenuDismissed, value]);
+  }, [cursorPosition, interactionDisabled, isUserShell, slashMenuDismissed, value]);
 
   const skillMenuActive = skillQuery !== null;
   useEffect(() => {
@@ -1501,7 +1501,7 @@ export function ThreadComposer({
 
   const showSlashMenu = filteredSlashCommands.length > 0;
   const cliAppMention = useMemo<CliAppMentionQuery | null>(() => {
-    if (interactionDisabled || cliAppMenuDismissed) return null;
+    if (interactionDisabled || isUserShell || cliAppMenuDismissed) return null;
     const caret = Math.min(Math.max(cursorPosition, 0), value.length);
     const beforeCaret = value.slice(0, caret);
     const match = /@([\p{L}\p{N}_-]*)$/iu.exec(beforeCaret);
@@ -1512,7 +1512,7 @@ export function ThreadComposer({
       start: match.index,
       end: caret,
     };
-  }, [cliAppMenuDismissed, cursorPosition, interactionDisabled, value]);
+  }, [cliAppMenuDismissed, cursorPosition, interactionDisabled, isUserShell, value]);
 
   const mentionSearchActive = cliAppMention !== null;
   useEffect(() => {
@@ -1527,12 +1527,12 @@ export function ThreadComposer({
     () => [...availableSessionMentions, ...boundSessionMentions],
     [availableSessionMentions, boundSessionMentions],
   );
-  const mentionSegments = useMemo(
-    () => splitCapabilityMentionSegments(value, cliApps, mcpPresets, sessionMentionCatalog),
-    [cliApps, mcpPresets, sessionMentionCatalog, value],
+  const mentionSegments = useMemo<CapabilityMentionSegment[]>(
+    () => isUserShell ? [{ kind: "text", text: value }]
+      : splitCapabilityMentionSegments(value, cliApps, mcpPresets, sessionMentionCatalog),
+    [cliApps, isUserShell, mcpPresets, sessionMentionCatalog, value],
   );
   const editMentionInput = useCallback((next: string, cursor: number) => {
-    secondEnterPromptIdRef.current = null;
     setValue(next);
     setSlashMenuDismissed(false);
     setCliAppMenuDismissed(false);
@@ -1547,7 +1547,7 @@ export function ThreadComposer({
   const { rawSelection, replace: replaceMentionInput } = mentionInput;
   const onPaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
     onAttachmentPaste(event);
-    if (event.defaultPrevented || interactionDisabled || !onInspectAttachment) return;
+    if (event.defaultPrevented || interactionDisabled || isUserShell || !onInspectAttachment) return;
     const raw = event.clipboardData.getData("text/plain");
     const path = pastedFilePath(raw);
     if (!path) return;
@@ -1566,11 +1566,11 @@ export function ThreadComposer({
       if (error instanceof Error && "status" in error && error.status === 404) return;
       setInlineError(error instanceof Error ? error.message : t("message.attachmentUnavailable"));
     });
-  }, [interactionDisabled, onAttachmentPaste, onInspectAttachment, rawSelection, replaceMentionInput, scopeIdentity, t, value]);
+  }, [interactionDisabled, isUserShell, onAttachmentPaste, onInspectAttachment, rawSelection, replaceMentionInput, scopeIdentity, t, value]);
 
   useLayoutEffect(() => {
     if (!pathInspection) return;
-    if (pathInspection.scope !== scopeIdentity || !pathInspection.range.update(value)) {
+    if (isUserShell || pathInspection.scope !== scopeIdentity || !pathInspection.range.update(value)) {
       pathCheckGeneration.current += 1;
       setPathInspection(null);
       return;
@@ -1587,7 +1587,7 @@ export function ThreadComposer({
       }
     }
     setPathInspection(null);
-  }, [addLocal, formatRejection, mentionInput.isComposing, pathInspection, rawSelection, replaceMentionInput, scopeIdentity, value]);
+  }, [addLocal, formatRejection, isUserShell, mentionInput.isComposing, pathInspection, rawSelection, replaceMentionInput, scopeIdentity, value]);
 
   const draftText = composerMentionText(mentionInput.segments).raw;
   const sessionDragInsertion = sessionDragPreview
@@ -1723,9 +1723,12 @@ export function ThreadComposer({
 
   const showCliAppMenu = filteredMentionCandidates.length > 0;
   const showAnyPalette = showSlashMenu || showCliAppMenu;
-  const hasMentionDecorations = displayMentionSegments.some(
-    (segment) => segment.kind !== "text",
+  const inlineSegments = useMemo(
+    () => isUserShell ? displayMentionSegments : withSkillReferences(displayMentionSegments),
+    [displayMentionSegments, isUserShell],
   );
+  const slashCommand = matchingSlashCommand(sessionDragInsertion?.value ?? draftText, slashCommands);
+  const hasInlineDecorations = isUserShell || slashCommand !== null || inlineSegments.some((segment) => segment.kind !== "text");
   const activeCliMentionApps = useMemo(() => {
     const seen = new Set<string>();
     return mentionSegments.flatMap((segment) => {
@@ -1848,13 +1851,12 @@ export function ThreadComposer({
     // The parent projects typography tokens in its layout effect; measure after it.
     const input = textareaRef.current;
     if (input) autosizeTextarea(input);
-  }, [readingTextSize]);
+  }, [readingTextSize, customReadingTextSize]);
 
   // Runs before paint so switching sessions never flashes stale draft text.
   useLayoutEffect(() => {
     if (previousPendingQueueKeyRef.current === pendingQueueKey) return;
     previousPendingQueueKeyRef.current = pendingQueueKey;
-    secondEnterPromptIdRef.current = null;
     setValue("");
     setInlineError(null);
     setSlashMenuDismissed(false);
@@ -1866,7 +1868,6 @@ export function ThreadComposer({
   const appendTranscription = useCallback((text: string) => {
     const transcript = text.trim();
     if (!transcript) return;
-    secondEnterPromptIdRef.current = null;
     setValue((current) => {
       if (!current.trim()) return transcript;
       const separator = /[\s\n]$/.test(current) ? "" : " ";
@@ -1917,7 +1918,6 @@ export function ThreadComposer({
     function onKeyDown(event: KeyboardEvent): void {
       if (!isVoiceShortcutDown(event) || event.repeat || voiceShortcutDownRef.current) return;
       event.preventDefault();
-      secondEnterPromptIdRef.current = null;
       voiceShortcutDownRef.current = true;
       voiceRecorder.beginShortcutHold();
     }
@@ -1946,7 +1946,6 @@ export function ThreadComposer({
   }, [onTranscribeAudio, voiceRecorder.beginShortcutHold, voiceRecorder.endShortcutHold]);
 
   const handleStop = useCallback(() => {
-    secondEnterPromptIdRef.current = null;
     setQueuedPrompt((prompt) => prompt ? pauseQueuedPrompt(prompt) : null);
     onStop?.();
   }, [onStop, setQueuedPrompt]);
@@ -2116,7 +2115,6 @@ export function ThreadComposer({
       setInlineError(error);
       return;
     }
-    secondEnterPromptIdRef.current = prompt.id;
     setQueuedPrompt(prompt);
     clear();
     clearComposerText();
@@ -2124,14 +2122,12 @@ export function ThreadComposer({
   }, [canQueueGuidance, clear, clearComposerText, collectGuidancePrompt, onQuotedContextChange, queuedPromptError, setQueuedPrompt]);
 
   const removeQueuedPrompt = useCallback(() => {
-    secondEnterPromptIdRef.current = null;
     setQueuedPrompt(null);
     requestAnimationFrame(() => textareaRef.current?.focus());
   }, [setQueuedPrompt]);
 
   const editQueuedPrompt = useCallback((pending: QueuedPrompt) => {
     const prompt = hasComposerContent || normalizedQuotedContext ? collectGuidancePrompt() : pending;
-    secondEnterPromptIdRef.current = null;
     setQueuedPrompt(null);
     replaceMentionInput(prompt.text, prompt.text.length);
     setBoundSessionMentions(prompt.sessionMentions ?? []);
@@ -2150,7 +2146,6 @@ export function ThreadComposer({
   const sendQueuedPrompt = useCallback(
     (prompt: QueuedPrompt, extraOptions?: SendOptions) => {
       if (interactionDisabled) return;
-      secondEnterPromptIdRef.current = null;
       const error = queuedPromptError(prompt);
       if (error) {
         setQueuedPrompt(pauseQueuedPrompt(prompt));
@@ -2182,7 +2177,6 @@ export function ThreadComposer({
   useEffect(() => {
     const previous = previousQueueRunRef.current;
     previousQueueRunRef.current = { key: pendingQueueKey, isStreaming };
-    if (!isStreaming) secondEnterPromptIdRef.current = null;
     // Switching to an idle session is not completion of the previous session's run.
     if (previous.key !== pendingQueueKey) return;
     if (isStreaming || interactionDisabled || !queuedPrompt || !canAutoSendQueuedPrompt(queuedPrompt)) return;
@@ -2194,13 +2188,17 @@ export function ThreadComposer({
   }, [completedTurnIds, interactionDisabled, sendQueuedPrompt, isStreaming, pendingQueueKey, queuedPrompt, queuedPromptStorageKey]);
 
   const submit = useCallback(() => {
-    if (modelNeedsSetup) {
+    if (requiresModelSetup) {
       if (hasComposerContent) {
         setModelSetupAttentionRequest((request) => request + 1);
       }
       return;
     }
     if (!canSend) return;
+    if (isUserShell && (images.length > 0 || normalizedQuotedContext)) {
+      setInlineError(t("thread.composer.shell.removeContext"));
+      return;
+    }
     const trimmed = value.trim();
     const content = trimmed;
     if (utf8Bytes(formatQuotedUserMessage(content, normalizedQuotedContext)) > maxTextBytes) {
@@ -2212,11 +2210,12 @@ export function ThreadComposer({
     const payload = queuedImagesToSendImages(readyImagesToQueuedImages(readyImages));
     const attachedCliApps = activeCliMentionApps.map(cliAppMentionPayload);
     const attachedMcpPresets = activeMcpPresetMentions.map(mcpPresetMentionPayload);
-    const options: SendOptions | undefined =
+    const options: SendOptions | undefined = !isUserShell && (
       attachedCliApps.length > 0
       || attachedMcpPresets.length > 0
       || activeSessionMentions.length > 0
       || normalizedQuotedContext
+    )
         ? {
             ...(attachedCliApps.length > 0 ? { cliApps: attachedCliApps } : {}),
             ...(attachedMcpPresets.length > 0 ? { mcpPresets: attachedMcpPresets } : {}),
@@ -2245,10 +2244,10 @@ export function ThreadComposer({
       onQuotedContextChange?.(null);
       return;
     }
-    const isSlashSideChannel = isSideChannelLifecycle(slashLifecycle);
+    const isSideChannel = isUserShell || isSideChannelLifecycle(slashLifecycle);
     const finalizeActiveTurn =
       slashLifecycle === "finalize_active_turn";
-    if (!slashLifecycle) {
+    if (!isUserShell && !slashLifecycle) {
       const prompt = collectGuidancePrompt();
       const error = queuedPromptError(prompt);
       if (error) {
@@ -2270,7 +2269,7 @@ export function ThreadComposer({
       if (draftKey && draftStore && draftStore.get(draftKey) !== submittedDraft) return;
       if (draftKey) draftStore?.delete(draftKey);
       if (hasTouchPrimaryPointer) textareaRef.current?.blur();
-      if (!isStreaming || finalizeActiveTurn) setQueuedPrompt(null);
+      if ((!isStreaming && !isUserShell) || finalizeActiveTurn) setQueuedPrompt(null);
       // Bubble owns the data URL copy; safe to revoke every staged blob
       // preview here without affecting the rendered message.
       clear();
@@ -2280,10 +2279,11 @@ export function ThreadComposer({
     const result = onSend(
       content,
       payload,
-      isSlashSideChannel
+      isSideChannel
         ? {
             ...options,
             sideChannel: true,
+            ...(isUserShell ? { userShell: true } : {}),
             ...(finalizeActiveTurn ? { finalizeActiveTurn } : {}),
           }
         : isStreaming ? { ...options, continueActiveTurn: true } : options,
@@ -2318,15 +2318,18 @@ export function ThreadComposer({
     hasTouchPrimaryPointer,
     hasComposerContent,
     handleStop,
+    images.length,
     isStreaming,
+    isUserShell,
     maxTextBytes,
-    modelNeedsSetup,
+    requiresModelSetup,
     onSend,
     onStop,
     onQuotedContextChange,
     normalizedQuotedContext,
     readyImages,
     slashCommands,
+    t,
     textTooLargeMessage,
     value,
   ]);
@@ -2401,20 +2404,20 @@ export function ThreadComposer({
         if (!e.repeat) queueGuidancePrompt();
         return;
       }
-      const secondEnterPrompt = queuedPrompt?.id === secondEnterPromptIdRef.current ? queuedPrompt : null;
+      // Empty Enter explicitly sends the visible pending message, including restored drafts.
       if (
-        isStreaming
+        queuedPrompt
         && value.length === 0
         && images.length === 0
         && !e.altKey
         && !e.ctrlKey
         && !e.metaKey
-        && secondEnterPrompt
       ) {
-        if (!e.repeat) sendQueuedPrompt(secondEnterPrompt);
+        if (!e.repeat && voiceRecorder.state === "idle" && !voiceShortcutDownRef.current) {
+          sendQueuedPrompt(queuedPrompt);
+        }
         return;
       }
-      secondEnterPromptIdRef.current = null;
       submit();
     }
   };
@@ -2481,7 +2484,7 @@ export function ThreadComposer({
   const showStopButton = isStreaming && !!onStop && !canSend;
   const actionState: ComposerActionState = showVoiceButton
     ? voiceRecorder.state === "transcribing" ? "busy" : voiceRecorder.isRecording ? "recording" : "voice"
-    : showStopButton ? "stop" : modelNeedsSetup ? "setup" : canSend || !isStreaming ? "send" : "busy";
+    : showStopButton ? "stop" : requiresModelSetup ? "setup" : canSend || !isStreaming ? "send" : "busy";
   const relaxedHeroInput = isHero && images.length === 0 && !isStreaming;
   const compactIdle = compactWhenIdle && !compactControls && !isHero && !composerFocused
     && value.length === 0 && images.length === 0 && !inlineError
@@ -2513,6 +2516,7 @@ export function ThreadComposer({
       scope={workspaceScope}
       disabled={interactionDisabled || workspaceScopeDisabled}
       onChange={onWorkspaceScopeChange}
+      hintBoundaryRef={formRef}
     />
   ) : null;
   const workspaceControl = showProjectPicker ? (
@@ -2722,10 +2726,11 @@ export function ThreadComposer({
         ) : null}
         <GoalStateStrip goalState={goalState} />
         <div className="thread-composer-input relative min-w-0">
-          {hasMentionDecorations ? (
-            <ComposerCliMentionOverlay
+          {hasInlineDecorations ? (
+            <ComposerInlineReferenceOverlay
               overlayRef={mentionOverlayRef}
-              segments={displayMentionSegments}
+              segments={inlineSegments}
+              slashCommand={slashCommand?.command ?? null}
               isHero={isHero}
               isComposing={mentionInput.isComposing}
               className={inputTextClasses}
@@ -2743,9 +2748,6 @@ export function ThreadComposer({
             onChange={mentionInput.onChange}
             onCompositionStart={mentionInput.onCompositionStart}
             onCompositionEnd={mentionInput.onCompositionEnd}
-            onBlur={() => {
-              secondEnterPromptIdRef.current = null;
-            }}
             onKeyDown={onKeyDown}
             onKeyUp={() => setCursorPosition(rawSelection().start)}
             onSelect={() => setCursorPosition(rawSelection().start)}
@@ -2766,7 +2768,7 @@ export function ThreadComposer({
               "relative z-10 block caret-foreground placeholder:text-muted-foreground",
               "focus:outline-none focus-visible:outline-none",
               "disabled:cursor-not-allowed",
-              hasMentionDecorations && "text-transparent selection:bg-primary/20",
+              hasInlineDecorations && "text-transparent selection:bg-primary/20",
             )}
           />
         </div>
@@ -2844,7 +2846,7 @@ export function ThreadComposer({
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
-                    type={showVoiceButton || showStopButton || modelNeedsSetup ? "button" : "submit"}
+                    type={showVoiceButton || showStopButton || requiresModelSetup ? "button" : "submit"}
                     size="icon"
                     disabled={showVoiceButton ? voiceRecorder.buttonDisabled : showStopButton ? interactionDisabled : !canSend && !canOpenModelSettings}
                     aria-label={
@@ -2852,9 +2854,9 @@ export function ThreadComposer({
                         ? voiceButtonLabel
                         : showStopButton
                           ? t("thread.composer.stop")
-                          : modelNeedsSetup
+                          : requiresModelSetup
                             ? t("thread.composer.configureModel", { defaultValue: "Configure model" })
-                            : t("thread.composer.send")
+                            : isUserShell ? t("thread.composer.shell.run") : t("thread.composer.send")
                     }
                     aria-keyshortcuts={showVoiceButton ? VOICE_SHORTCUT_ARIA : undefined}
                     onPointerDown={showVoiceButton ? voiceRecorder.beginPress : undefined}
@@ -2865,7 +2867,7 @@ export function ThreadComposer({
                       event.preventDefault();
                       event.stopPropagation();
                     }}
-                    onClick={showVoiceButton ? voiceRecorder.handleClick : showStopButton ? handleStop : modelNeedsSetup ? onModelBadgeClick : undefined}
+                    onClick={showVoiceButton ? voiceRecorder.handleClick : showStopButton ? handleStop : requiresModelSetup ? onModelBadgeClick : undefined}
                     className={cn(
                       "composer-primary-action thread-composer-action thread-composer-round-action touch-target rounded-full bg-clip-padding",
                       actionState === "stop"
@@ -2878,7 +2880,9 @@ export function ThreadComposer({
                       isHero ? "h-8 w-8" : "h-9 w-9",
                     )}
                   >
-                    <ComposerActionIcon state={actionState} />
+                    {isUserShell && actionState === "send"
+                      ? <ToolRunIcon className="h-4 w-4" />
+                      : <ComposerActionIcon state={actionState} />}
                   </Button>
                 </TooltipTrigger>
                 {showVoiceButton ? (
@@ -2894,6 +2898,8 @@ export function ThreadComposer({
                       </kbd>
                     ) : null}
                   </TooltipContent>
+                ) : isUserShell ? (
+                  <TooltipContent>{t("thread.composer.shell.run")}</TooltipContent>
                 ) : null}
               </Tooltip>
             </TooltipProvider>
@@ -3009,16 +3015,18 @@ function QueuedPromptPreview({
   );
 }
 
-function ComposerCliMentionOverlay({
+function ComposerInlineReferenceOverlay({
   overlayRef,
   segments,
+  slashCommand,
   isHero,
   isComposing,
   className,
   ghostRange,
 }: {
   overlayRef: Ref<HTMLDivElement>;
-  segments: CapabilityMentionSegment[];
+  segments: InlineReferenceSegment[];
+  slashCommand: string | null;
   isHero: boolean;
   isComposing: boolean;
   className: string;
@@ -3041,7 +3049,24 @@ function ComposerCliMentionOverlay({
         const start = offset;
         offset += segment.text.length;
         if (segment.kind === "text") {
-          return <span key={`text-${index}`}>{segment.text}</span>;
+          const bangPrefix = index === 0 ? /^(\s*)!/.exec(segment.text) : null;
+          return <span key={`text-${index}`}>{bangPrefix ? <>
+            {bangPrefix[1]}
+            <InlineTokenHighlight testId="composer-shell-prefix" className="font-normal" color={INLINE_REFERENCE_HIGHLIGHT_COLOR}>
+              <span className="opacity-90">!</span>
+            </InlineTokenHighlight>
+            {segment.text.slice(bangPrefix[0].length)}
+          </> : start === 0 && slashCommand ? <>
+            <SlashCommandText command={slashCommand} testId="composer-slash-command" />
+            {segment.text.slice(slashCommand.length)}
+          </> : segment.text}</span>;
+        }
+        if (segment.kind === "skill") {
+          return <SkillReferenceToken
+            key={`skill-${segment.name}-${index}`}
+            name={segment.name}
+            testId={`composer-skill-reference-${segment.name.toLowerCase()}`}
+          />;
         }
         const isGhost = ghostRange?.start === start && ghostRange.end === offset;
         const identity = `${segment.kind}-${segment.kind === "cli"
@@ -3152,6 +3177,9 @@ function CliAppMentionPalette({
             {group.items.map(({ candidate, index }) => {
               const selected = index === selectedIndex;
               const name = candidate.name;
+              const handleColor = candidate.kind === "session"
+                ? candidate.mention.id ? sessionHandleColor(candidate.mention.id) : INLINE_TOKEN_HIGHLIGHT_COLOR
+                : undefined;
               const typeLabel = candidate.kind === "cli"
                 ? t("thread.composer.mentions.cliBadge")
                 : candidate.kind === "mcp"
@@ -3169,7 +3197,7 @@ function CliAppMentionPalette({
                   role="option"
                   data-palette-index={index}
                   aria-selected={selected}
-                  aria-label={`${candidate.displayName} @${name} ${ariaDescription} ${typeLabel}`}
+                  aria-label={`@${name} ${candidate.displayName} ${ariaDescription} ${typeLabel}`}
                   onMouseEnter={() => onHover(index)}
                   onMouseDown={(e) => {
                     e.preventDefault();
@@ -3178,33 +3206,39 @@ function CliAppMentionPalette({
                   className={cn(
                     floatingItemClassName,
                     floatingItemFocusClassName,
-                    "touch-target flex min-h-10 w-full items-center gap-2.5 px-2.5 py-1.5 text-left transition-colors",
+                    "touch-target flex min-h-10 w-full flex-wrap items-center gap-x-2.5 gap-y-1 px-2.5 py-1.5 text-left transition-colors",
                     selected
-                      ? "bg-foreground/[0.055] text-foreground"
+                      ? "bg-foreground/[0.055] text-foreground dark:bg-black/[0.12]"
                       : "text-foreground/90 hover:bg-foreground/[0.04]",
                   )}
                 >
-                  <MentionCandidateLogo candidate={candidate} selected={selected} />
-                  <span className="flex min-w-0 flex-1 items-baseline gap-2">
-                    <span className="min-w-0 truncate text-[15px] font-medium tracking-normal text-foreground">
+                  <span
+                    className="max-w-full shrink-0 truncate text-[15px] font-normal tracking-normal text-muted-foreground/72"
+                    style={{ color: handleColor }}
+                  >
+                    @{name}
+                  </span>
+                  <span className={cn(
+                    "flex max-w-full flex-1 flex-wrap items-center gap-x-2.5 gap-y-1",
+                    candidate.kind === "session" ? "min-w-[min(4rem,100%)]" : "min-w-[min(8rem,100%)]",
+                  )}>
+                    {candidate.kind !== "session" ? <MentionCandidateLogo candidate={candidate} selected={selected} /> : null}
+                    <span className="min-w-[min(4rem,100%)] flex-1 truncate text-[15px] font-medium tracking-normal text-foreground">
                       {candidate.displayName}
                     </span>
-                    <span className="truncate text-[15px] font-normal tracking-normal text-muted-foreground/72">
-                      @{name}
-                    </span>
+                    {candidate.kind !== "session" ? (
+                      <span
+                        className={cn(
+                          "ml-2 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold tracking-normal",
+                          candidate.kind === "cli"
+                            ? "bg-orange-500/10 text-orange-600 dark:text-orange-300"
+                            : "bg-sky-500/10 text-sky-600 dark:text-sky-300",
+                        )}
+                      >
+                        {typeLabel}
+                      </span>
+                    ) : null}
                   </span>
-                  {candidate.kind !== "session" ? (
-                    <span
-                      className={cn(
-                        "ml-2 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold tracking-normal",
-                        candidate.kind === "cli"
-                          ? "bg-orange-500/10 text-orange-600 dark:text-orange-300"
-                          : "bg-sky-500/10 text-sky-600 dark:text-sky-300",
-                      )}
-                    >
-                      {typeLabel}
-                    </span>
-                  ) : null}
                 </button>
               );
             })}
@@ -3219,28 +3253,13 @@ function MentionCandidateLogo({
   candidate,
   selected,
 }: {
-  candidate: MentionCandidate;
+  candidate: Extract<MentionCandidate, { kind: "cli" | "mcp" }>;
   selected: boolean;
 }) {
-  const color = candidate.kind === "session"
-    ? candidate.mention.id
-      ? sessionHandleColor(candidate.mention.id)
-      : INLINE_TOKEN_HIGHLIGHT_COLOR
-    : candidate.brandColor || INLINE_TOKEN_HIGHLIGHT_COLOR;
-  const rawLogoUrl = candidate.kind === "session" ? null : candidate.logoUrl;
-  const logoUrls = useMemo(() => logoFallbackUrls(rawLogoUrl), [rawLogoUrl]);
+  const color = candidate.brandColor || INLINE_TOKEN_HIGHLIGHT_COLOR;
+  const logoUrls = useMemo(() => logoFallbackUrls(candidate.logoUrl), [candidate.logoUrl]);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
 
-  if (candidate.kind === "session") {
-    return (
-      <span
-        className="flex h-5 w-5 shrink-0 items-center justify-center"
-        style={{ color }}
-      >
-        <ConversationIcon className="h-4 w-4" aria-hidden />
-      </span>
-    );
-  }
   if (logoUrl) {
     return (
       <span
@@ -3404,85 +3423,25 @@ function AttachmentChip({
       ? normalizedHint(image.file.size, image.encodedBytes)
       : formatBytes(image.file.size);
   const isThumbnail = image.kind === "image" && image.status !== "error";
-  const tone =
-    image.status === "error"
-      ? "border-destructive/40 bg-destructive/5 text-destructive"
-      : "border-border/70 bg-muted/60";
+  const error = image.status === "error" && image.error ? formatError(image.error) : null;
 
   return (
-    <div
-      className={cn(
-        "group relative flex max-w-full shrink-0 items-center rounded-control border",
-        "transition-colors motion-reduce:transition-none",
-        isThumbnail ? "h-24 w-24" : "gap-2 px-2 py-1.5",
-        tone,
-      )}
-      title={isThumbnail ? `${image.file.name}\n${sizeLabel}` : undefined}
-      data-testid="composer-chip"
-    >
-      <div className={cn(
-        "relative shrink-0 overflow-hidden bg-background",
-        isThumbnail ? "h-full w-full rounded-[inherit]" : "h-10 w-10 rounded-md",
-      )}>
-        {image.kind === "image" && image.previewUrl ? (
-          <img
-            src={image.previewUrl}
-            alt={isThumbnail ? image.file.name : ""}
-            loading="eager"
-            draggable={false}
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center">
-            {image.kind === "image" ? (
-              <ImageIcon className="h-4 w-4 text-muted-foreground" aria-hidden />
-            ) : image.kind === "video" ? (
-              <Video className="h-4 w-4 text-muted-foreground" aria-hidden />
-            ) : (
-              <FileText className="h-4 w-4 text-muted-foreground" aria-hidden />
-            )}
-          </div>
-        )}
-        {image.status === "encoding" ? (
-          <div
-            className="absolute inset-0 flex items-center justify-center bg-background/60"
-            aria-label={labelEncoding}
-          >
-            <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
-          </div>
-        ) : null}
-      </div>
-      {!isThumbnail ? (
-        <div className="flex min-w-0 flex-col text-[11.5px] leading-4">
-          <span className="max-w-[min(14rem,calc(100vw-8rem))] truncate font-medium" title={image.file.name}>
-            {image.file.name}
+    <div className="flex w-24 max-w-full shrink-0 flex-col gap-1" data-testid="composer-chip">
+      <AttachmentCard name={image.file.name} description={sizeLabel} invalid={!!error}
+        action={<button type="button" ref={registerRef} onClick={onRemove} onKeyDown={onKeyDown}
+          aria-label={labelRemove} aria-description={image.file.name} title={labelRemove}
+          className={cn(attachmentCardActionClassName, "group/remove focus-visible:bg-black/50 focus-visible:ring-white")}>
+          <span className="grid h-5 w-5 place-items-center rounded-full bg-black/65 text-white group-hover/remove:bg-black/80">
+            <X className="h-3 w-3" aria-hidden />
           </span>
-          <span className="truncate text-muted-foreground">
-            {image.status === "error" && image.error
-              ? formatError(image.error)
-              : sizeLabel}
-          </span>
-        </div>
-      ) : null}
-      <button
-        type="button"
-        ref={registerRef}
-        onClick={onRemove}
-        onKeyDown={onKeyDown}
-        aria-label={labelRemove}
-        aria-description={image.file.name}
-        title={labelRemove}
-        className={cn(
-          "grid flex-none place-items-center rounded-full focus-visible:outline-none focus-visible:ring-2",
-          isThumbnail
-            ? "group/remove absolute right-0 top-0 h-11 w-11 focus-visible:bg-black/50 focus-visible:ring-inset focus-visible:ring-white"
-            : "ml-1 h-5 w-5 text-muted-foreground/80 hover:text-foreground focus-visible:ring-foreground/30",
-        )}
-      >
-        <span className={cn(isThumbnail && "grid h-5 w-5 place-items-center rounded-full bg-black/65 text-white group-hover/remove:bg-black/80")}>
-          <X className={isThumbnail ? "h-3 w-3" : "h-3.5 w-3.5"} aria-hidden />
-        </span>
-      </button>
+        </button>}>
+        {isThumbnail && image.previewUrl ? <img src={image.previewUrl} alt={image.file.name} loading="eager" draggable={false}
+          className="h-full w-full object-cover" /> : <AttachmentTypeFace name={image.file.name} kind={image.kind} />}
+        {image.status === "encoding" ? <span className="absolute inset-0 flex items-center justify-center bg-background/60" aria-label={labelEncoding}>
+          <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
+        </span> : null}
+      </AttachmentCard>
+      {error ? <span className="break-words text-center text-[11px] leading-4 text-destructive">{error}</span> : null}
     </div>
   );
 }

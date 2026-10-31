@@ -1,5 +1,3 @@
-"""Install and manage OS-level gateway services."""
-
 from __future__ import annotations
 
 import os

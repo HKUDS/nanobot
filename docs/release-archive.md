@@ -6,6 +6,44 @@ For tagged releases, see [GitHub Releases](https://github.com/HKUDS/nanobot/rele
 
 ## Highlights
 
+- **2026-10-28** 🚀 Released [v0.4.0](https://github.com/HKUDS/nanobot/releases/tag/v0.4.0), with remote WebUI connections, SQLite conversation storage, richer attachments and diagrams, and expanded channel support.
+- **2026-10-27** 🗂️ Batch topic archiving and clearer WebUI mentions; reply text streamed before model failures is retained for later context.
+- **2026-10-26** 🧰 WebUI `!` shell-command completion and literal output; delegated tasks and their details stay within reach.
+- **2026-10-25** ⏰ Agent tools can edit, enable or disable scheduled tasks and inspect recent runs; Ctrl+K searches loaded message text and session handles.
+- **2026-10-24** ⚡ Smaller target-specific terminal builds, Kimi K3.1 Pro parameter support, and corrected API session routing.
+- **2026-10-23** 🧭 Compact WebUI workspace toolbar, MiniMax-M3.1-Flash support, and corrected DeepSeek Responses reasoning replay.
+- **2026-10-22** 📎 Local-file attachments and video playback in WebUI, shared proxy settings for remote MCP, and UI controls for idle-compaction timing.
+- **2026-10-21** 🔄 WebUI history joins the shared SQLite store; About adds update review and installation-owner guidance, with in-app installation gated on verified release approval.
+- **2026-10-20** 🖼️ Mermaid diagrams as terminal images, QQ QR-code setup, and WebUI reading-size preferences.
+- **2026-10-19** 🔍 DeepSeek Search, WebUI Mermaid diagrams, and Docker Compose first-run onboarding without a preconfigured model.
+- **2026-10-18** 📬 WhatsApp Agent Platform channel, complete prompt-history navigation, and Markdown file previews with a source toggle.
+- **2026-10-17** 📬 Scheduled channel results gain bounded retry after confirmed pre-send failures; context compaction considers provider-reported token usage.
+- **2026-10-16** 🗃️ SQLite-backed session state with legacy JSONL import, separate shell wait/inactivity/runtime limits, and more reliable WebUI reconnection and queued prompts.
+- **2026-10-15** 🔐 Plugin skills load from approved content snapshots, and context compaction is serialized with turns in the same session.
+- **2026-10-14** 🔌 Expanded MCP service presets, streamed bounded file-diff previews, and correct handling of supported Kimi K3 reasoning efforts.
+- **2026-10-13** 📚 Bundled documentation helps nanobot answer usage and setup questions, and PPTX extraction retains empty table columns.
+- **2026-10-12** ⚙️ Per-preset request overrides, plus reusable named custom connections and separate headers/body settings for image generation.
+- **2026-10-11** 🧭 Model/provider setup is integrated into preset editing, and model requests receive current workspace-access context.
+- **2026-10-10** ⚙️ Explicit request API choices for presets and custom providers, plus `--home` to select an instance directory.
+- **2026-10-09** 💬 QQ quoted-message context, slash-prefixed paths kept in normal chat, and simpler interface wording across locales.
+- **2026-10-08** 🗂️ WebUI host directory picker, binary HTTP attachment uploads, and Codex Responses WebSocket continuation.
+- **2026-10-07** ⏰ Scheduled-task chat changes can be reviewed before saving, and run history links to the conversation used for each run.
+- **2026-10-06** 🐛 Improved layouts for wide equations, plus source-commit links and prefilled bug-report diagnostics in About.
+- **2026-10-05** 🤝 Session-owned subtask messaging and cancellation, plus XLSX reads beyond incorrect declared dimensions.
+- **2026-10-04** 📱 Touch-keyboard Enter inserts a newline, send-button guidance can interject into active replies, and mobile composer menus stay within the viewport.
+- **2026-10-03** 📝 File creation preserves supplied newlines, Telegram links retain their URLs, and shell hard timeouts are enforced without polling.
+- **2026-10-02** 🌐 Connect the WebUI to existing remote nanobot instances, with host identity, pairing, connection management and recovery.
+- **2026-09-30** 🔔 Global context-compaction notice settings with per-channel overrides, and configured provider fallbacks for insufficient-credit errors.
+- **2026-09-29** 🖥️ Terminal-default colors keep unknown themes readable, and keyboard navigation reaches overflow choices in pickers.
+- **2026-09-28** 🔎 File search uses ripgrep when installed, terminal history restores from canonical events, and WebUI Codex title generation is restored.
+- **2026-09-27** 📜 Earlier WebUI history loading gains retry states, and Responses streams stop on terminal events.
+- **2026-09-26** 🔌 Linear member access management and browser authorization improvements, plus complete paginated MCP tool discovery.
+- **2026-09-25** 💬 WebUI restores text drafts in saved chats across navigation and reloads, and localizes agent activity.
+- **2026-09-24** 🔔 Opt-in completion sounds, custom context-window budgets, and restored session-scoped file previews in WebUI.
+- **2026-09-23** 🔗 Linear acknowledges sessions before downloading attachments; file searches stay scoped and resumable, and BOM-marked text is decoded correctly.
+- **2026-09-22** 🔗 Clickable Markdown links in the terminal, contextual WebUI message controls, and wrapping Markdown table content.
+- **2026-09-21** 💬 Temporary chats retain state during WebUI navigation, fallback replies are labeled, and Copilot device sign-in completes in the browser.
+- **2026-09-20** 💬 WebUI replies identify the fallback preset used; stopped follow-ups stay canceled after restarts, and local context-tail truncation is removed.
 - **2026-09-19** 🔌 Native Linear agent channel support, searchable provider setup, and consistent provider and channel identities across the WebUI.
 - **2026-09-18** ♻️ Explicit recovery continuations, Discord reply-context support, and clearer channel setup before model configuration is complete.
 - **2026-09-17** 📬 Per-session inbox serialization preserves message order and queued-turn completion; stale compaction continuations and canceled automations no longer leak into later work.

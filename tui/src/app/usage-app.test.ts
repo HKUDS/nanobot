@@ -25,7 +25,6 @@ async function waitUntil(predicate: () => boolean): Promise<void> {
   expect(predicate()).toBe(true)
 }
 
-// The mounted app owns these retained renderables; assertions exercise keyboard input and frames.
 interface MountedUI {
   composer: TextareaRenderable
   usagePanel: UsagePanel

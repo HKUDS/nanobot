@@ -153,7 +153,6 @@ export class NanobotClient {
         this.reconnectAttempt = 0
         this.retryStartedAt = Date.now()
       }
-      if (!this.lastFailure) this.lastFailure = "connection closed"
       this.reportRetryState()
       void this.checkHealthAndScheduleReconnect()
     })

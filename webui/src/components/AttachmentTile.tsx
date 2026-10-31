@@ -7,7 +7,7 @@ import type { UIMediaAttachment } from "@/lib/types";
 import { ImageThumbnail } from "@/components/ImageGallery";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { useRegisterInlineImage } from "@/components/InlineImageContext";
-import { FileReferenceIcon, fileKindForPath } from "@/components/FileReferenceChip";
+import { AttachmentCard, AttachmentTypeFace, attachmentCardActionClassName } from "@/components/AttachmentCard";
 
 interface AttachmentTileProps {
   attachment: UIMediaAttachment;
@@ -63,61 +63,27 @@ export function AttachmentTile({ attachment, className, inline = false, variant 
   }
 
   const filePath = attachment.name || attachment.url?.split(/[?#]/, 1)[0] || "";
-  const fileKind = attachment.kind === "file" ? fileKindForPath(filePath) : attachment.kind;
   const name = attachment.name || label;
   const available = hasUrl && !failed;
-  const extension = attachment.name?.match(/\.(tar\.(?:gz|bz2|xz)|[a-z0-9]{1,12})$/i)?.[1];
-  const details = available ? extension?.toUpperCase() || label
-    : pending ? t("message.delivery.sending") : t("message.attachmentUnavailable", { defaultValue: "Attachment unavailable" });
-  const cardClassName = cn(
-    "not-prose flex w-72 min-w-0 max-w-full items-center gap-3 rounded-control",
-    "border border-border/60 bg-muted/40 px-3 py-2.5 text-sm text-muted-foreground",
-    variant === "compact" && "w-56 gap-2 px-2.5 py-2 text-xs",
-    className,
-  );
-  const body = (
-    <>
-      <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-compact bg-background/70", variant === "compact" && "size-8")}>
-        <FileReferenceIcon kind={fileKind} className={variant === "compact" ? "size-4" : "size-5"} />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate font-medium text-foreground">{name}</span>
-        <span className="block break-words text-xs leading-4">{details}</span>
-      </span>
-    </>
-  );
+  const status = available ? undefined : pending ? t("message.delivery.sending") : t("message.attachmentUnavailable");
+  const download = available ? <a href={attachment.url} download={name} title={name}
+    aria-label={t("message.downloadAttachment", { name })}
+    className={cn(attachmentCardActionClassName, "text-muted-foreground hover:text-foreground")}>
+    <Download aria-hidden strokeWidth={1.75} className="size-4" />
+  </a> : undefined;
 
-  if (available) {
-    return (
-      <a
-        href={attachment.url}
-        download={name}
-        title={name}
-        aria-label={t("message.downloadAttachment", { name })}
-        className={cn(
-          cardClassName,
-          "transition-colors hover:bg-muted/55 hover:text-foreground",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-        )}
-      >
-        {body}
-        <Download aria-hidden strokeWidth={1.75} className="size-4 shrink-0" />
-      </a>
-    );
-  }
-
-  const Frame = inline ? "span" : "div";
-  return (
-    <Frame className={cardClassName} title={name} aria-label={attachment.name ? `${label}: ${name}` : label}>
-      {body}
-      {attachment.kind === "video" && failed && !pending ? (
-        <button type="button" onClick={() => setFailedUrl(undefined)}
-          className="shrink-0 rounded-sm px-1 text-foreground underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2">
-          {t("common.retry")}
-        </button>
-      ) : null}
-    </Frame>
-  );
+  return <span data-file-attachment className={cn("not-prose inline-flex w-24 max-w-full shrink-0 flex-col gap-1 align-top", className)}>
+    <AttachmentCard name={name} description={status} action={download}>
+      <AttachmentTypeFace name={filePath} kind={attachment.kind} />
+    </AttachmentCard>
+    {status ? <span className="break-words text-center text-[11px] leading-4 text-muted-foreground">{status}</span> : null}
+    {attachment.kind === "video" && failed && !pending ? (
+      <button type="button" onClick={() => setFailedUrl(undefined)}
+        className="min-h-11 rounded-sm px-1 text-xs text-foreground underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2">
+        {t("common.retry")}
+      </button>
+    ) : null}
+  </span>;
 }
 
 function AttachmentFrame({

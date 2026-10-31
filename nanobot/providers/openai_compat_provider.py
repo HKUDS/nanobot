@@ -1,5 +1,3 @@
-"""Shared provider for OpenAI-compatible Chat Completions and Responses APIs."""
-
 # pyright: reportPrivateImportUsage=false
 
 from __future__ import annotations
@@ -58,7 +56,6 @@ _GEMINI_SKIP_THOUGHT_SIGNATURE = "skip_thought_signature_validator"
 
 
 def _is_named_function_tool(tool: object, name: str) -> bool:
-    """Return whether a Responses tool is a function with the given name."""
     if not isinstance(tool, dict):
         return False
     record = cast(dict[object, object], tool)
@@ -149,7 +146,6 @@ def _model_slug(model_name: str) -> str:
 
 
 def _requires_max_completion_tokens(model_name: str) -> bool:
-    """Return True for models that require ``max_completion_tokens``."""
     slug = _model_slug(model_name)
     return slug in KIMI_K3_MODELS or "gpt-5" in slug or any(
         slug == p or slug.startswith((p + "-", p + ".")) for p in ("o1", "o3", "o4")
@@ -188,7 +184,6 @@ def _gateway_reasoning_extra_body(style: str, effort: str | None) -> dict[str, A
 
 
 def _openai_compat_timeout_s() -> float:
-    """Return the bounded request timeout used for OpenAI-compatible providers."""
     return _float_env("NANOBOT_OPENAI_COMPAT_TIMEOUT_S", _OPENAI_COMPAT_REQUEST_TIMEOUT_S)
 
 
@@ -223,7 +218,6 @@ def _strip_json_fence(text: str) -> str:
 
 
 def _extract_text_tool_calls(content: str | None) -> tuple[str | None, list[ToolCallRequest]]:
-    """Normalize common text-format tool call blocks into structured calls."""
     if not content or "<tool_call>" not in content:
         return content, []
 
@@ -276,14 +270,12 @@ def _extract_text_tool_calls(content: str | None) -> tuple[str | None, list[Tool
 
 
 def _get(obj: object, key: str) -> Any:
-    """Get a value from dict or object attribute, returning None if absent."""
     if isinstance(obj, dict):
         return cast(dict[str, Any], obj).get(key)
     return getattr(obj, key, None)
 
 
 def _coerce_dict(value: object) -> dict[str, Any] | None:
-    """Try to coerce *value* to a dict; return None if not possible or empty."""
     if value is None:
         return None
     if isinstance(value, dict):
@@ -301,11 +293,6 @@ def _extract_tc_extras(tc: Any) -> tuple[
     dict[str, Any] | None,
     dict[str, Any] | None,
 ]:
-    """Extract (extra_content, provider_specific_fields, fn_provider_specific_fields).
-
-    Works for both SDK objects and dicts.  Captures Gemini ``extra_content``
-    verbatim and any non-standard keys on the tool-call / function.
-    """
     extra_content = _coerce_dict(_get(tc, "extra_content"))
 
     tc_dict = _coerce_dict(tc)
@@ -332,7 +319,6 @@ def _extract_tc_extras(tc: Any) -> tuple[
 
 
 def _uses_openrouter_attribution(spec: "ProviderSpec | None", api_base: str | None) -> bool:
-    """Apply Nanobot attribution headers to OpenRouter requests by default."""
     if spec and spec.name == "openrouter":
         return True
     return bool(api_base and "openrouter" in api_base.lower())
@@ -346,19 +332,13 @@ def _uses_opencode_affinity(spec: ProviderSpec | None, api_base: str | None) -> 
 
 
 _RESPONSES_FAILURE_THRESHOLD = 3
-_RESPONSES_PROBE_INTERVAL_S = 300  # 5 minutes
+_RESPONSES_PROBE_INTERVAL_S = 300
 
 
 def _is_local_endpoint(
     spec: "ProviderSpec | None",
     api_base: str | None,
 ) -> bool:
-    """Return True when the endpoint is a local or LAN model server.
-
-    Matches either the provider spec's ``is_local`` flag or common private-
-    network patterns in the base URL (localhost, 127.x, 192.168.x, 10.x,
-    172.16-31.x, Docker ``host.docker.internal``).
-    """
     if spec and spec.is_local:
         return True
     if not api_base:
@@ -391,11 +371,6 @@ def _responses_circuit_key(
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    """Recursively merge *override* into *base*, returning a new dict.
-
-    Nested dicts are merged key-by-key; all other types in *override*
-    replace the corresponding key in *base*.
-    """
     merged = dict(base)
     for key, value in override.items():
         if (
@@ -413,7 +388,6 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
 
 
 def _merge_unique_list(base: object, override: object) -> object:
-    """Append list values while preserving order and removing duplicates."""
     if not isinstance(base, list) or not isinstance(override, list):
         return override
     result: list[object] = []
@@ -437,7 +411,6 @@ def _merge_chat_extra_body(
     kwargs: dict[str, Any],
     extra_body: dict[str, Any],
 ) -> dict[str, Any]:
-    """Merge configured Chat Completions fields without clobbering tools."""
     regular_extra = {key: value for key, value in extra_body.items() if key != "tools"}
     merged = dict(kwargs)
     if regular_extra:
@@ -459,7 +432,6 @@ def _merge_responses_extra_body(
     body: dict[str, Any],
     extra_body: dict[str, Any],
 ) -> dict[str, Any]:
-    """Merge configured Responses API body fields without clobbering tools."""
     reserved = {"include", "tools"}
     regular_extra = {key: value for key, value in extra_body.items() if key not in reserved}
     merged = _deep_merge(body, regular_extra)
@@ -538,7 +510,6 @@ class OpenAICompatProvider(LLMProvider):
         self._responses_tripped_at: dict[str, float] = {}
 
     def _build_client(self) -> None:
-        """Create the OpenAI client using the current module-level AsyncOpenAI."""
         import httpx
 
         timeout_s = _openai_compat_timeout_s()
@@ -559,7 +530,6 @@ class OpenAICompatProvider(LLMProvider):
             # opening a fresh connection for each request, which is cheap on a
             # LAN. Cloud providers benefit from keepalive, so we leave the
             # default pool settings for them.
-            #
             # Also disable proxy for local endpoints: when the host has
             # HTTP_PROXY / HTTPS_PROXY / ALL_PROXY set, httpx would try to
             # route local traffic through the proxy, which typically cannot
@@ -584,7 +554,6 @@ class OpenAICompatProvider(LLMProvider):
         )
 
     async def _ensure_client(self) -> AsyncOpenAIType:
-        """Return the shared OpenAI client, creating it on first call."""
         if self._client is not None:
             return self._client
         async with self._client_lock:
@@ -660,7 +629,6 @@ class OpenAICompatProvider(LLMProvider):
         return hashlib.sha1(tool_call_id.encode()).hexdigest()[:9]
 
     def _should_normalize_tool_call_ids(self) -> bool:
-        """Return True for providers that reject normal OpenAI tool call IDs."""
         return bool(self._spec and self._spec.name == "mistral")
 
     @staticmethod
@@ -682,7 +650,6 @@ class OpenAICompatProvider(LLMProvider):
         messages: list[dict[str, Any]],
         model: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Strip non-standard keys, normalize tool_call IDs."""
         sanitized = LLMProvider._sanitize_request_messages(messages, _ALLOWED_MSG_KEYS)
         id_map: dict[str, str] = {}
         pending_tool_ids: dict[str, deque[str]] = {}
@@ -848,9 +815,6 @@ class OpenAICompatProvider(LLMProvider):
             kept.append(msg)
         return kept
 
-    # ------------------------------------------------------------------
-    # Build kwargs
-    # ------------------------------------------------------------------
 
     def _request_model_name(self, model_name: str) -> str:
         return self._spec.request_model_name(model_name) if self._spec else model_name
@@ -877,7 +841,6 @@ class OpenAICompatProvider(LLMProvider):
         self,
         provider_context: "ProviderCallContext | None",
     ) -> dict[str, str] | None:
-        """Override the instance fallback with an opaque, ASCII-safe conversation key."""
         if (
             not self._opencode_session_affinity
             or provider_context is None
@@ -1074,7 +1037,6 @@ class OpenAICompatProvider(LLMProvider):
         model: str | None,
         reasoning_effort: str | None,
     ) -> bool:
-        """Choose Responses for providers/models that explicitly support it."""
         api = self._model_api_capabilities(model, reasoning_effort)
         if self._hosted_web_search_enabled() and "responses" in api.supported_apis:
             return True
@@ -1087,7 +1049,6 @@ class OpenAICompatProvider(LLMProvider):
     def _model_api_capabilities(
         self, model: str | None = None, reasoning_effort: str | None = None,
     ) -> ModelAPICapabilities:
-        """Apply a preset's declaration before the provider's curated defaults."""
         if self._preset_model_api is not None:
             return self._preset_model_api
         if self._spec is None:
@@ -1159,14 +1120,12 @@ class OpenAICompatProvider(LLMProvider):
         model: str | None,
         reasoning_effort: str | None,
     ) -> bool:
-        """Return False when the Responses API circuit breaker is open."""
         key = _responses_circuit_key(model, self.default_model, reasoning_effort)
         failures = self._responses_failures.get(key, 0)
         if failures >= _RESPONSES_FAILURE_THRESHOLD:
             tripped = self._responses_tripped_at.get(key, 0.0)
             if (time.monotonic() - tripped) < _RESPONSES_PROBE_INTERVAL_S:
                 return False
-            # Half-open: allow one probe attempt
         return True
 
     def _record_responses_failure(self, model: str | None, reasoning_effort: str | None) -> None:
@@ -1225,7 +1184,6 @@ class OpenAICompatProvider(LLMProvider):
         tool_choice: str | dict[str, Any] | None,
         provider_context: ProviderCallContext | None = None,
     ) -> dict[str, Any]:
-        """Build a Responses API body for direct OpenAI requests."""
         model_name = model or self.default_model
         model_name = self._request_model_name(model_name)
         sanitized_messages = self._sanitize_messages(
@@ -1309,9 +1267,6 @@ class OpenAICompatProvider(LLMProvider):
 
         return body
 
-    # ------------------------------------------------------------------
-    # Response parsing
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _maybe_mapping(value: object) -> dict[str, Any] | None:
@@ -1385,7 +1340,6 @@ class OpenAICompatProvider(LLMProvider):
         responses. Provider-specific cache fields are normalized once at
         this Chat Completions wire boundary.
         """
-        # --- resolve usage object ---
         usage_obj = None
         response_map = cls._maybe_mapping(response)
         if response_map is not None:
@@ -1406,7 +1360,6 @@ class OpenAICompatProvider(LLMProvider):
         wire_total = cls._get_nested_int(usage_obj, ("total_tokens",))
 
         cache_read: int | None = None
-        # --- cached_tokens (normalised across Chat-compatible providers) ---
         # Try nested paths first (dict), fall back to attribute (SDK object).
         # Priority order ensures the most specific field wins.
         for path in (
@@ -1561,7 +1514,6 @@ class OpenAICompatProvider(LLMProvider):
         usage: LLMUsage | None = None
 
         def _accum_tc(tc: Any, idx_hint: int) -> None:
-            """Accumulate one streaming tool-call delta into *tc_bufs*."""
             tc_index: int = _get(tc, "index") if _get(tc, "index") is not None else idx_hint
             buf = tc_bufs.setdefault(tc_index, {
                 "id": "", "name": "", "arguments": "",
@@ -1587,7 +1539,6 @@ class OpenAICompatProvider(LLMProvider):
                 buf["fn_prov"] = fn_prov
 
         def _accum_legacy_function_call(function_call: Any) -> None:
-            """Accumulate legacy ``delta.function_call`` streaming chunks."""
             if not function_call:
                 return
             buf = tc_bufs.setdefault(0, {
@@ -1762,9 +1713,6 @@ class OpenAICompatProvider(LLMProvider):
             **OpenAICompatProvider._extract_error_metadata(e),
         )
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     async def chat_with_context(
         self,

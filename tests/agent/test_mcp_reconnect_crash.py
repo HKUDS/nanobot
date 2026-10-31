@@ -166,7 +166,6 @@ def allow_loopback_mcp_urls(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.mark.asyncio
 async def test_mcp_reconnect_after_session_timeout(tmp_path, mcp_server_url):
-    """Reconnect to a real MCP server after its idle timeout kills the session."""
     cfg = MCPServerConfig(
         type="streamableHttp",
         url=mcp_server_url,
@@ -184,12 +183,11 @@ async def test_mcp_reconnect_after_session_timeout(tmp_path, mcp_server_url):
     output = await asyncio.create_task(tool.execute(name="first"))
     assert "Hello, first" in output
 
-    # Wait for the server-side idle timeout to terminate the session.
     await asyncio.sleep(_IDLE_TIMEOUT_SECONDS + _IDLE_EXPIRY_GRACE_SECONDS)
 
     output = await asyncio.create_task(tool.execute(name="second"))
     assert "Hello, second" in output
-    assert registry.get("mcp_repro_greet") is not tool  # Recovery must replace the session's wrapper.
+    assert registry.get("mcp_repro_greet") is not tool
 
     await asyncio.create_task(provider.aclose())
 
@@ -200,7 +198,6 @@ async def test_mcp_reconnect_during_shutdown_does_not_crash(
     mcp_server_url,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Simulate the production crash: shutdown while reconnect is in flight."""
     cfg = MCPServerConfig(
         type="streamableHttp",
         url=mcp_server_url,

@@ -1,5 +1,3 @@
-"""Shared cache seam for OAuth provider model discovery."""
-
 from __future__ import annotations
 
 import threading

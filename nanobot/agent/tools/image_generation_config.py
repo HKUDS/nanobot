@@ -1,5 +1,3 @@
-"""Image generation configuration shared by the tool and root schema."""
-
 from typing import Any
 
 from pydantic import Field

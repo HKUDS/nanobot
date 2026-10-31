@@ -1,5 +1,3 @@
-"""Regression coverage for the executable Python import boundaries."""
-
 from __future__ import annotations
 
 import subprocess
@@ -119,19 +117,24 @@ def test_storage_and_security_do_not_depend_on_adapters(module: str, rule: str) 
     ]
 
 
-def test_websocket_only_permits_progress_event_as_a_type_dependency() -> None:
-    source = (
-        "from typing import TYPE_CHECKING\n"
-        "if TYPE_CHECKING:\n"
-        "    from nanobot.bus.outbound_events import ProgressEvent\n"
-        "    from nanobot.command import router\n"
-        "else:\n"
-        "    from nanobot.bus.outbound_events import ProgressEvent\n"
-    )
+@pytest.mark.parametrize(
+    "dependency",
+    [
+        "nanobot.bus.outbound_events.ProgressEvent",
+        "nanobot.command.router",
+        "nanobot.pairing.events.PairingChanged",
+        "nanobot.session.webui_turns.clear_websocket_turn_if_current",
+        "nanobot.webui.transcript.WebUITranscriptRecorder",
+        "nanobot.webui.outbound_wire.project_notification",
+    ],
+)
+def test_websocket_transport_leaves_event_and_history_policy_to_delivery(dependency: str) -> None:
+    module, name = dependency.rsplit(".", 1)
+    source = f"from {module} import {name}\n"
     assert find_violations(source, "nanobot.channels.websocket.runtime") == [
-        Violation("websocket-transport", "nanobot.command.router", 4),
-        Violation("websocket-transport", "nanobot.bus.outbound_events.ProgressEvent", 6),
+        Violation("websocket-transport", dependency, 1),
     ]
+    assert find_violations(source, "nanobot.webui.outbound_delivery") == []
 
 
 @pytest.mark.parametrize(

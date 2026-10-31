@@ -1,5 +1,3 @@
-"""Agent-facing controls for existing scheduled jobs."""
-
 import json
 from dataclasses import asdict
 from pathlib import Path

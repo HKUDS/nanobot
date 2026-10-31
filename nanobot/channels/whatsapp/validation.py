@@ -1,5 +1,3 @@
-"""WhatsApp setup validation owned by the channel package."""
-
 from typing import Any
 
 from nanobot.channels.contracts import ChannelValidationContext

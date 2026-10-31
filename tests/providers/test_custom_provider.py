@@ -1,5 +1,3 @@
-"""Tests for OpenAICompatProvider handling custom/direct endpoints."""
-
 from unittest.mock import patch
 
 import pytest

@@ -1,5 +1,3 @@
-"""Update scheduled tasks through the public tool boundary."""
-
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path

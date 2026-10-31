@@ -1,5 +1,3 @@
-"""Public LLM usage records and persistence services."""
-
 from __future__ import annotations
 
 from importlib import import_module

@@ -36,6 +36,7 @@ from nanobot.channels.linear.oauth import OAUTH_FLOWS, authorization_url
 from nanobot.channels.linear.runtime import LinearChannel
 from nanobot.channels.linear.server import LinearServerLease, acquire_http_server
 from nanobot.channels.linear.state import LinearInstallation, LinearStateStore
+from nanobot.channels.manager import ChannelManager
 
 
 def _config(port: int = 3979) -> LinearConfig:
@@ -353,46 +354,66 @@ async def test_successful_authorization_survives_repeated_polls(
 async def test_connect_shutdown_joins_real_webhook_writer(tmp_path, monkeypatch) -> None:
     port = _free_port()
     state = LinearStateStore(tmp_path / "linear.sqlite3")
-    write_entered, allow_write, listener_stopped = threading.Event(), threading.Event(), threading.Event()
+    loop = asyncio.get_running_loop()
+    write_entered, writer_join_entered = asyncio.Event(), asyncio.Event()
+    allow_write = threading.Event()
+    writer_thread: threading.Thread | None = None
     enqueue = state.enqueue_webhook
     monkeypatch.setattr(linear_connect, "_load_linear_config", lambda: _config(port))
     monkeypatch.setattr(linear_connect, "LinearStateStore", lambda: state)
 
     def enqueue_after_release(delivery, payload):
-        write_entered.set()
-        assert allow_write.wait(3)
+        nonlocal writer_thread
+        writer_thread = threading.current_thread()
+        loop.call_soon_threadsafe(write_entered.set)
+        allow_write.wait()
         return enqueue(delivery, payload)
 
     monkeypatch.setattr(state, "enqueue_webhook", enqueue_after_release)
     store = linear_connect.LinearConnectStore()
-    started = await store.start()
-    lease = store._sessions[started["session_id"]].server
-    server = lease._server._server
-    shutdown_listener = server.shutdown
+    await store.start()
+    raw = json.dumps(_agent_webhook(), separators=(",", ":")).encode()
+    signature = hmac.new(b"webhook-secret", raw, hashlib.sha256).hexdigest()
+    # The request must not expire while the test deliberately holds its writer.
+    async with httpx.AsyncClient(timeout=None, trust_env=False) as client:
+        request = asyncio.create_task(client.post(
+            f"http://127.0.0.1:{port}/linear/webhook",
+            content=raw,
+            headers={
+                "Content-Type": "application/json",
+                "Linear-Signature": signature,
+                "Linear-Delivery": "delivery-1",
+            },
+        ))
+        closing = None
+        try:
+            async with asyncio.timeout(10):
+                await write_entered.wait()
+                assert writer_thread is not None
+                writer_join = writer_thread.join
 
-    def shutdown_and_signal():
-        shutdown_listener()
-        listener_stopped.set()
+                def join_and_signal(timeout=None):
+                    loop.call_soon_threadsafe(writer_join_entered.set)
+                    writer_join(timeout)
 
-    monkeypatch.setattr(server, "shutdown", shutdown_and_signal)
-    request = asyncio.create_task(asyncio.to_thread(_post_webhook, port, _agent_webhook()))
-    closing = None
-    try:
-        assert await asyncio.to_thread(write_entered.wait, 1)
-        closing = asyncio.create_task(store.close())
-        assert await asyncio.to_thread(listener_stopped.wait, 1)
-        assert not closing.done()
-        assert store.has_pending_work is True
-    finally:
-        allow_write.set()
-        response = await request
-        if closing is not None:
-            await closing
-        else:
-            await store.close()
-    assert response[0] == 200
+                monkeypatch.setattr(writer_thread, "join", join_and_signal)
+                closing = asyncio.create_task(store.close())
+                await writer_join_entered.wait()
+                assert not closing.done()
+                assert store.has_pending_work is True
+        finally:
+            allow_write.set()
+            try:
+                response = await asyncio.wait_for(request, timeout=10)
+            finally:
+                if closing is not None:
+                    await closing
+                else:
+                    await store.close()
+    assert response.status_code == 200
     assert store.has_pending_work is False
     assert not store._sessions
+    assert [event.delivery_id for event in state.claim_webhooks()] == ["delivery-1"]
 
 
 @pytest.mark.asyncio
@@ -1128,7 +1149,7 @@ async def test_outbound_response_and_tool_progress_use_native_activity_shapes(
             }]
         ),
     )
-    await channel.send(tool)
+    await ChannelManager._send_once(channel, channel.prepare_tool_events(tool))
 
     assert client.activities[0]["content"] == {"type": "response", "body": "Done"}
     assert client.activities[1]["activity_id"] == activity_id
@@ -1200,19 +1221,22 @@ async def test_tool_activities_redact_credentials_and_make_start_ephemeral(
     metadata = {
         "linear": {"organization_id": "org-1", "agent_session_id": "session-1"}
     }
-    await channel.send(OutboundMessage(
+    send = AsyncMock(wraps=channel.send)
+    channel.send = send
+    msg = OutboundMessage(
         channel="linear",
         chat_id="session-1",
         content="",
         metadata=metadata,
-        event=ProgressEvent(tool_events=[{
+        event=ProgressEvent(tool_hint=True, tool_events=[{
             "phase": "start",
             "call_id": "call-secret",
             "name": "call_api",
             "arguments": {"api_key": "secret-value", "query": "safe"},
         }]),
-    ))
-    await channel.send(OutboundMessage(
+    )
+    await ChannelManager._send_once(channel, channel.prepare_tool_events(msg))
+    msg = OutboundMessage(
         channel="linear",
         chat_id="session-1",
         content="",
@@ -1223,8 +1247,9 @@ async def test_tool_activities_redact_credentials_and_make_start_ephemeral(
             "name": "call_api",
             "error": "Authorization: Bearer plaintext-secret",
         }]),
-    ))
-    await channel.send(OutboundMessage(
+    )
+    await ChannelManager._send_once(channel, channel.prepare_tool_events(msg))
+    msg = OutboundMessage(
         channel="linear",
         chat_id="session-1",
         content="",
@@ -1236,8 +1261,11 @@ async def test_tool_activities_redact_credentials_and_make_start_ephemeral(
             "arguments": {"api_key": "secret-value"},
             "result": {"token": "result-secret", "status": "ok"},
         }]),
-    ))
+    )
+    await ChannelManager._send_once(channel, channel.prepare_tool_events(msg))
 
+    assert send.await_count == 3
+    assert all(call.args[0].content == "" for call in send.await_args_list)
     assert client.activities[0]["ephemeral"] is True
     assert client.activities[0]["content"]["action"] == "Call API"
     assert "secret-value" not in client.activities[0]["content"]["parameter"]
@@ -1366,8 +1394,6 @@ def test_delayed_revocation_does_not_remove_new_authorization(tmp_path: Path) ->
     })
     state.save_installation(replace(_installation(), access_token="new-access"))
     state.set_member_access("client-id", "org-1", "user-1", allowed=False)
-    # The channel was stopped during removal, so the old notice is consumed
-    # only after the user has authorized and enabled the channel again.
     event = state.claim_webhooks()[0]
     channel._process_lifecycle_event(event.payload)  # pyright: ignore[reportPrivateUsage]
     current = state.installation("org-1")

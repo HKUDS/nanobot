@@ -2,13 +2,11 @@
   "setup": {
     "docsLabel": "Buka panduan penyiapan agen",
     "officialLabel": "Buka bantuan agen WhatsApp",
-    "summary": "Hubungkan nanobot melalui API WhatsApp Agent Platform. Hanya Anda yang dapat mengobrol dengannya, dan agen tidak dapat mengakses obrolan WhatsApp Anda yang lain.",
     "privacyNotice": "Obrolan dengan agen tidak dienkripsi secara menyeluruh. Pesan diproses oleh nanobot dan penyedia model yang Anda konfigurasikan.",
     "fields": {
       "token": {
         "label": "Token API",
-        "placeholder": "Di WhatsApp, buka Setelan → Agen, buat agen, lalu salin kunci dari obrolan agen → Info obrolan → Kunci API.",
-        "help": "Di WhatsApp, buka Setelan → Agen, buat agen, lalu salin kunci dari obrolan agen → Info obrolan → Kunci API."
+        "placeholder": "Di WhatsApp, buka Setelan → Agen, buat agen, lalu salin kunci dari obrolan agen → Info obrolan → Kunci API."
       },
       "allowFrom": {
         "label": "Pengirim yang diizinkan",

@@ -416,16 +416,12 @@ async function convertBlobToWav(blob: Blob): Promise<string> {
   }
 }
 
-/**
- * Encode an AudioBuffer as a 16-bit PCM WAV Blob.
- */
 function audioBufferToWav(buffer: AudioBuffer): Blob {
   const numChannels = buffer.numberOfChannels;
   const sampleRate = buffer.sampleRate;
   const format = 1; // PCM
   const bitsPerSample = 16;
 
-  // Interleave channels
   const channels: Float32Array[] = [];
   for (let ch = 0; ch < numChannels; ch++) {
     channels.push(buffer.getChannelData(ch));
@@ -450,12 +446,10 @@ function audioBufferToWav(buffer: AudioBuffer): Blob {
   const buffer2 = new ArrayBuffer(totalSize);
   const view = new DataView(buffer2);
 
-  // RIFF header
   writeString(view, 0, "RIFF");
   view.setUint32(4, totalSize - 8, true);
   writeString(view, 8, "WAVE");
 
-  // fmt sub-chunk
   writeString(view, 12, "fmt ");
   view.setUint32(16, 16, true); // sub-chunk size
   view.setUint16(20, format, true);
@@ -465,7 +459,6 @@ function audioBufferToWav(buffer: AudioBuffer): Blob {
   view.setUint16(32, blockAlign, true);
   view.setUint16(34, bitsPerSample, true);
 
-  // data sub-chunk
   writeString(view, 36, "data");
   view.setUint32(40, dataSize, true);
 

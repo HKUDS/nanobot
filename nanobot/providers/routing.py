@@ -1,5 +1,3 @@
-"""Resolve provider connections and request APIs without creating SDK clients."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass

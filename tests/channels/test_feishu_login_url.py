@@ -1,5 +1,3 @@
-"""Feishu/Lark QR onboarding: verification URL handling."""
-
 from __future__ import annotations
 
 from unittest.mock import patch

@@ -128,7 +128,8 @@ def test_ensure_webui_bundle_auto_builds_stale_dist(tmp_path: Path, monkeypatch)
     )
 
     assert status.stale is False
-    assert commands == [("bun", "install", "--frozen-lockfile"), ("bun", "--bun", "run", "build")]
+    assert commands == [("bun", "install", "--frozen-lockfile", "--force"),
+                        ("bun", "--bun", "run", "build")]
 
 
 def test_pick_webui_build_runner_returns_resolved_executable(monkeypatch) -> None:

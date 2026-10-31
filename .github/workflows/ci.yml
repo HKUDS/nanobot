@@ -74,8 +74,9 @@ jobs:
             coverage: false
             # Process identities run serially; isolated update jobs use case-level
             # scheduling below so one file cannot serialize all real venv work.
-            # Double the prior three-worker budget; keep native-process checks separate.
-            pytest_args: "-n 6 --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/cli/test_cli_input.py --ignore=tests/cli/test_desktop_target.py --ignore=tests/cli/test_desktop_target_entrypoints.py --ignore=tests/tools/test_exec_platform.py --ignore=tests/cli/test_wsl_browser.py --ignore=tests/test_install_scripts.py --ignore=tests/test_update_jobs.py --ignore=tests/test_update_profiles.py"
+            # Bound real persistence contention: six workers can delay session
+            # startup beyond its watchdog. Keep every assertion and test enabled.
+            pytest_args: "-n 4 --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/cli/test_cli_input.py --ignore=tests/cli/test_desktop_target.py --ignore=tests/cli/test_desktop_target_entrypoints.py --ignore=tests/tools/test_exec_platform.py --ignore=tests/cli/test_wsl_browser.py --ignore=tests/test_install_scripts.py --ignore=tests/test_update_jobs.py --ignore=tests/test_update_profiles.py"
 
     steps:
       - uses: actions/checkout@v4
@@ -101,6 +102,14 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --all-extras --dev
+
+      # Feishu selects websockets<16. Check the default transport before the
+      # all-channel suite exercises the older compatible resolution.
+      - name: Test default WebSocket transport
+        run: >-
+          uv run --no-sync python -m pytest -q
+          nanobot/channels/websocket/tests/test_handshake_disconnect.py
+          nanobot/channels/websocket/tests/test_binary_http.py
 
       - name: Install channel dependencies
         run: uv run --no-sync python -m scripts.install_channel_dependencies --all-channels
@@ -204,10 +213,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.14
+      # Keep this focused job on the affected pre-3.14 ctypes runtime family;
+      # the full Windows suite above continues to cover the latest Python.
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: "3.14"
+          python-version: "3.12"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -229,6 +240,7 @@ jobs:
           uv run --no-sync python -m pytest
           tests/tools/test_exec_platform.py
           tests/cli/test_wsl_browser.py
+          tests/gateway/test_runtime.py
           --junitxml=test-results/process.xml --timing-report=test-results/process.json
           --durations=25 --durations-min=1.0
 
@@ -364,7 +376,6 @@ jobs:
     timeout-minutes: 1
 
     steps:
-      # Keep the existing check name dependent on every WebUI acceptance check.
       - name: Require both WebUI jobs to pass
         env:
           CHECKS_RESULT: ${{ needs.webui_checks.result }}
@@ -472,7 +483,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.docker_required == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
 
     steps:
       - uses: actions/checkout@v4
@@ -482,6 +493,29 @@ jobs:
 
       - name: Verify first-boot WebUI and API
         run: python scripts/docker_compose_smoke.py --image nanobot:test
+
+      - name: Check out the real previous release for retained-volume acceptance
+        uses: actions/checkout@v4
+        with:
+          ref: 8f7a7d17590de7ab187650381894dba2b9e060ab # v0.4.0
+          path: .docker-baseline
+          persist-credentials: false
+
+      - name: Verify old-image upgrade without replacing user data
+        run: |
+          docker build -t nanobot:baseline .docker-baseline
+          python scripts/docker_upgrade_smoke.py --baseline-image nanobot:baseline \
+            --image nanobot:test --version "$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')" \
+            --source-commit "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/docker-upgrade-report.json"
+
+      - name: Retain Docker upgrade acceptance report
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-upgrade-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/docker-upgrade-report.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Verify Docker Compose startup and privilege boundary
         env:

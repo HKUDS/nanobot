@@ -1,0 +1,73 @@
+:root[data-theme-transition="dark"] {
+  --theme-ink-delay: 180ms;
+}
+
+:root[data-theme-transition="light"] {
+  --theme-ink-delay: 100ms;
+}
+
+/* Paint owners opt in; components with local motion compose these lists instead. */
+:root[data-theme-transition] {
+  --theme-paint-duration: 280ms;
+  --theme-paint-transition: background-color var(--theme-paint-duration) linear, border-color var(--theme-paint-duration) linear, box-shadow var(--theme-paint-duration) linear;
+  --theme-ink-transition: color 0s linear var(--theme-ink-delay);
+}
+
+:root[data-theme-transition] [data-theme-surface] {
+  transition: var(--theme-paint-transition);
+}
+
+/* Delay only explicitly colored ink, not every inheriting layout wrapper. */
+:root[data-theme-transition] [data-theme-ink] {
+  transition: var(--theme-ink-transition);
+}
+
+:root[data-theme-transition] :is(body, [data-theme-surface][data-theme-ink]) {
+  transition: var(--theme-paint-transition), var(--theme-ink-transition);
+}
+
+:root[data-theme-transition] .thread-composer-surface textarea::placeholder {
+  transition: color 0s linear var(--theme-ink-delay);
+}
+
+/* Blend complete palettes, without a second layer of per-surface paint interpolation. */
+:root[data-theme-snapshot] {
+  --theme-paint-duration: 0s;
+  --theme-ink-delay: 0s;
+}
+
+:root[data-theme-snapshot]::view-transition {
+  pointer-events: none;
+}
+
+:root[data-theme-snapshot]::view-transition-group(root) {
+  animation: none;
+}
+
+/* Complementary alpha adds to one, rather than exposing an empty frame between themes. */
+:root[data-theme-snapshot]::view-transition-image-pair(root) {
+  isolation: isolate;
+}
+
+:root[data-theme-snapshot]::view-transition-old(root),
+:root[data-theme-snapshot]::view-transition-new(root) {
+  mix-blend-mode: plus-lighter;
+}
+
+:root[data-theme-snapshot]::view-transition-old(root) {
+  animation: theme-crossfade-out 200ms ease-in-out both;
+}
+
+:root[data-theme-snapshot]::view-transition-new(root) {
+  animation: theme-crossfade-in 200ms ease-in-out both;
+}
+
+@keyframes theme-crossfade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes theme-crossfade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

@@ -65,7 +65,6 @@ def _directory(instance: Path, url: str) -> Path:
 
 
 def _bundle(directory: Path) -> Path:
-    """Give the existing interpreter a Dock identity, without copying its runtime."""
     contents = directory / "nanobot.app" / "Contents"
     executable = contents / "MacOS" / "nanobot"
     executable.parent.mkdir(parents=True, exist_ok=True)
@@ -186,7 +185,6 @@ def request_gateway_icon(instance: Path, *, enabled: bool) -> None:
 
 
 def _watch_gateway_icon(url: str, instance: Path, stopped: threading.Event) -> None:
-    """One bounded native handshake off the event loop for each explicit request."""
     selected = ""
     presence = ExitStack()
     try:

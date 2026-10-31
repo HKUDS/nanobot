@@ -86,7 +86,6 @@ def prepare_preview(root: Path, output: Path, *, source_commit: str, base: str, 
     if Version(base).release < current.release or _git(root, "tag", "--list", f"v{base}"):
         raise ValueError("Preview base must not precede the source or reuse an existing stable tag")
     changes = _version_changes(original["pyproject.toml"], original["nanobot/__init__.py"], version)
-    # A separate clone preserves the source parent without touching the caller's worktree.
     _git(root, "clone", "--shared", "--no-checkout", "-c", "core.autocrlf=false", str(root), str(output))
     hooks = output / ".git" / "candidate-hooks"
     hooks.mkdir()
@@ -104,6 +103,32 @@ def prepare_preview(root: Path, output: Path, *, source_commit: str, base: str, 
          "commit", "-m", f"Prepare {version} from {source_commit}", env=env)
     return {"version": version, "source_commit": source_commit,
             "candidate_commit": _git(output, "rev-parse", "HEAD")}
+
+
+def prepare_stable(root: Path, output: Path, *, source_commit: str, version: str) -> dict[str, str]:
+    """Copy an already versioned final commit without relabelling Preview bytes."""
+    source_commit = _commit(source_commit)
+    release_version(version)
+    parsed = Version(version)
+    if parsed.is_prerelease or parsed.is_postrelease:
+        raise ValueError("Stable preparation requires a final version")
+    root, output = root.resolve(), output.resolve()
+    if output.exists() or output == root or root in output.parents:
+        raise ValueError("Candidate output must be a new directory outside the source checkout")
+    if _git(root, "rev-parse", f"{source_commit}^{{commit}}") != source_commit:
+        raise ValueError("Source commit is not available in this repository")
+    original = {name: _git(root, "show", f"{source_commit}:{name}", trim=False) for name in VERSION_FILES}
+    if tomllib.loads(original["pyproject.toml"])["project"]["version"] != version:
+        raise ValueError("Stable source must already declare the requested final version")
+    if _version_changes(original["pyproject.toml"], original["nanobot/__init__.py"], version) != original:
+        raise ValueError("Stable version declarations need maintainer review")
+    if _git(root, "tag", "--list", f"v{version}"):
+        raise ValueError("Stable preparation must not reuse an existing stable tag")
+    _git(root, "clone", "--shared", "--no-checkout", "-c", "core.autocrlf=false", str(root), str(output))
+    hooks = output / ".git" / "candidate-hooks"
+    hooks.mkdir()
+    _git(output, "-c", f"core.hooksPath={hooks}", "checkout", "--detach", source_commit)
+    return {"version": version, "source_commit": source_commit, "candidate_commit": source_commit}
 
 
 def _candidate_identity(root: Path, source_commit: str) -> tuple[str, str, str]:
@@ -130,13 +155,9 @@ def _source_payload(root: Path, source: dict[str, bytes], prefix: str) -> dict[s
     """Bind shipped application files to the clean candidate, not its commit label."""
     tracked = set(_git(root, "ls-files", "-z", trim=False).split("\0")) - {""}
     build = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["tool"]["hatch"]["build"]
-    # The sdist ships the tracked nanobot tree. Read its actual exclusions rather
-    # than maintaining a second list of channel test directories here.
     exclusions = [*build.get("exclude", []), *build["targets"]["sdist"].get("exclude", [])]
     expected = {name: name for name in tracked if name.startswith("nanobot/")
                 and not any(fnmatchcase(name, pattern) for pattern in exclusions)}
-    # The build hook copies tracked docs into the built-in documentation skill.
-    # Verify both copies: rebuilding the sdist must use the same reviewed bytes.
     for name in tracked:
         if (name.startswith("docs/") and name.endswith(".md")
                 and not any(fnmatchcase(name, pattern) for pattern in exclusions)):
@@ -288,8 +309,6 @@ def retain_candidate(root: Path, artifacts: Path, output: Path, *, source_commit
     retained.mkdir()
     for name in sorted(release_filenames(manifest.version) | {"release-manifest.json"}):
         shutil.copyfile(artifacts / name, retained / name)
-    # Check the actual copies, not a report for the source directory. A future
-    # publisher must consume these bytes and verify this manifest again.
     if ((retained / "release-manifest.json").read_bytes() != recorded
             or verify_candidate(root, retained, source_commit=source_commit) != manifest):
         raise ValueError("Retained artifacts differ from the reviewed candidate")
@@ -300,6 +319,9 @@ def retain_candidate(root: Path, artifacts: Path, output: Path, *, source_commit
         _git(root, "-c", f"init.templateDir={template}", "clone", "--bare", "--depth", "2",
              "--single-branch", "--no-tags", root.as_uri(), str(source))
     (source / "config").write_text("[core]\nrepositoryformatversion = 0\nbare = true\n", encoding="utf-8")
+    # Artifact transport keeps files, not empty directories. A bare clone can
+    # have only packed refs; retain a loose ref so the downloaded Git tree works.
+    _git(source, "update-ref", "refs/retained/candidate", manifest.candidate_commit)
     _git(source, "fsck", "--full")
     if _git(source, "rev-parse", "HEAD") != manifest.candidate_commit:
         raise ValueError("Retained source differs from the candidate")
@@ -322,6 +344,10 @@ def main() -> None:
     prepare.add_argument("--base", required=True)
     prepare.add_argument("--sequence", type=int, required=True)
     prepare.add_argument("--output", type=Path, required=True)
+    stable = commands.add_parser("prepare-stable")
+    stable.add_argument("--source-commit", required=True)
+    stable.add_argument("--version", required=True)
+    stable.add_argument("--output", type=Path, required=True)
     verify = commands.add_parser("verify")
     verify.add_argument("--source-commit", required=True)
     verify.add_argument("--artifacts", type=Path, required=True)
@@ -343,6 +369,9 @@ def main() -> None:
     if args.command == "prepare":
         print(json.dumps(prepare_preview(args.root, args.output, source_commit=args.source_commit,
                                          base=args.base, sequence=args.sequence)))
+    elif args.command == "prepare-stable":
+        print(json.dumps(prepare_stable(args.root, args.output, source_commit=args.source_commit,
+                                       version=args.version)))
     elif args.command == "verify":
         manifest = verify_candidate(args.root, args.artifacts, source_commit=args.source_commit)
         write_manifest(manifest, args.artifacts / "release-manifest.json")

@@ -1,5 +1,3 @@
-"""Create one self-contained, licensed native TUI release archive."""
-
 from __future__ import annotations
 
 import hashlib

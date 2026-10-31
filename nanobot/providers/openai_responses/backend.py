@@ -1,5 +1,3 @@
-"""Responses request construction, transport dispatch, and replay state ownership."""
-
 from __future__ import annotations
 
 import asyncio

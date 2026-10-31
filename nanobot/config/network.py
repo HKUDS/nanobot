@@ -1,12 +1,8 @@
-"""Instance-scoped outbound proxy configuration."""
-
 import os
 import re
-from typing import Any, cast
 from urllib.parse import quote, urlsplit
 
 from pydantic import Field, field_validator
-from pydantic_core import PydanticCustomError
 
 from nanobot.config_base import Base
 
@@ -70,59 +66,3 @@ class NetworkConfig(Base):
         if not proxy:
             raise ValueError("Configure the shared proxy in Advanced before enabling it")
         return proxy
-
-
-def _config_object(value: object) -> dict[str, Any] | None:
-    return cast(dict[str, Any], value) if isinstance(value, dict) else None
-
-
-def migrate_legacy_proxy_config(value: Any) -> Any:
-    """Consolidate legacy addresses after settings sources have been merged."""
-    if not isinstance(value, dict):
-        return value
-    data = cast(dict[str, Any], value)
-    sections: list[dict[str, Any]] = []
-    providers = _config_object(data.get("providers")) or {}
-    sections.extend(section for value in providers.values() if (section := _config_object(value)) is not None)
-    tools = _config_object(data.get("tools")) or {}
-    if (web := _config_object(tools.get("web"))) is not None:
-        sections.append(web)
-    channels = _config_object(data.get("channels")) or {}
-    sections.extend(section for name in ("telegram", "discord", "slack", "matrix", "whatsapp") if (section := _config_object(channels.get(name))) is not None)
-
-    network = data.get("network")
-    explicit_proxy = isinstance(network, NetworkConfig) or isinstance(network, dict) and "proxy" in network
-    addresses: set[str] = set()
-    migrated: list[dict[str, Any]] = []
-    for section in sections:
-        raw = section.get("proxy")
-        if isinstance(raw, str) and raw.strip():
-            if not explicit_proxy:
-                proxy = NetworkConfig.normalize_proxy(raw)
-                assert proxy is not None
-                username = section.get("proxyUsername", section.get("proxy_username"))
-                password = section.get("proxyPassword", section.get("proxy_password"))
-                if isinstance(username, str) and username and isinstance(password, str) and password:
-                    if _ENV_REF_PATTERN.fullmatch(proxy):
-                        raise PydanticCustomError("proxy_credential_migration", "Combine the Discord proxy URL and credentials into one full URL environment variable, or set network.proxy before upgrading.")
-                    scheme, host = proxy.split("://", 1)
-                    host = host.rsplit("@", 1)[-1]
-                    credentials = f"{quote(username, safe='${}')}:{quote(password, safe='${}')}"
-                    proxy = f"{scheme}://{credentials}@{host}"
-                addresses.add(proxy)
-            migrated.append(section)
-
-    if addresses:
-        if len(addresses) > 1:
-            raise PydanticCustomError("proxy_address_migration", "Multiple legacy proxy addresses are no longer supported. Set network.proxy to one address before upgrading.")
-        if not isinstance(network, dict):
-            network = {}
-            data["network"] = network
-        network["proxy"] = next(iter(addresses))
-    for section in sections:
-        for key in ("proxy", "proxyUsername", "proxy_username", "proxyPassword", "proxy_password"):
-            section.pop(key, None)
-    for section in migrated:
-        if "useProxy" not in section and "use_proxy" not in section:
-            section["useProxy"] = True
-    return data

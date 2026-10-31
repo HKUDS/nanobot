@@ -798,7 +798,7 @@ async def test_unauthorized_voice_message_does_not_download_or_transcribe(
 @pytest.mark.asyncio
 async def test_unauthorized_dm_uses_base_pairing_flow(monkeypatch) -> None:
     _patch_neonize_api(monkeypatch)
-    monkeypatch.setattr("nanobot.channels.base.generate_code", lambda _ch, _sid: "ABCD-EFGH")
+    monkeypatch.setattr("nanobot.channels.base.generate_code", lambda _ch, _sid, *, on_change=None: "ABCD-EFGH")
     monkeypatch.setattr("nanobot.channels.base.is_approved", lambda _ch, _sid: False)
     client = SimpleNamespace(send_message=AsyncMock(), download_any=AsyncMock())
     ch = WhatsAppChannel({"enabled": True, "allowFrom": []}, MagicMock())

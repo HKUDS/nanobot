@@ -17,8 +17,6 @@ from nanobot.providers.registry import ProviderSpec
 GEMINI_EXTRA = {"google": {"thought_signature": "sig-abc-123"}}
 
 
-# ── ToolCallRequest serialization ──────────────────────────────────────
-
 def test_tool_call_request_serializes_extra_content() -> None:
     tc = ToolCallRequest(
         id="abc123xyz",
@@ -56,8 +54,6 @@ def test_tool_call_request_omits_absent_extras() -> None:
     assert "provider_specific_fields" not in payload
     assert "provider_specific_fields" not in payload["function"]
 
-
-# ── _parse: SDK objects ────────────────────────────────────────────────
 
 def _make_sdk_response_with_extra_content() -> ChatCompletion:
     return ChatCompletion.model_validate({
@@ -104,8 +100,6 @@ def test_parse_sdk_object_preserves_extra_content() -> None:
     assert payload["provider_specific_fields"] == {"provider_tag": "opaque"}
     assert payload["function"]["provider_specific_fields"] == {"inner": "value"}
 
-
-# ── _parse: dict/mapping branch ───────────────────────────────────────
 
 def test_parse_dict_preserves_extra_content() -> None:
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
@@ -189,8 +183,6 @@ def test_parse_deduplicates_duplicate_tool_call_ids(as_sdk: bool) -> None:
     assert [tc.arguments for tc in result.tool_calls] == [{"path": "a.txt"}, {"path": "b.txt"}]
 
 
-# ── _parse_chunks: streaming round-trip ───────────────────────────────
-
 def test_parse_chunks_sdk_preserves_extra_content() -> None:
     chunk = ChatCompletionChunk.model_validate({
         "id": "chatcmpl-gemini",
@@ -253,8 +245,6 @@ def test_parse_chunks_dict_preserves_extra_content() -> None:
     assert payload["extra_content"] == GEMINI_EXTRA
 
 
-# ── Model switching: stale extras shouldn't break other providers ─────
-
 def test_stale_extra_content_in_tool_calls_survives_sanitize() -> None:
     """When switching from Gemini to OpenAI, extra_content inside tool_calls
     should survive message sanitization (it lives inside the tool_call dict,
@@ -283,8 +273,6 @@ def test_stale_extra_content_in_tool_calls_survives_sanitize() -> None:
     assert sanitized[1]["tool_calls"][0]["extra_content"] == GEMINI_EXTRA
 
 
-# ── Replay to Gemini: preserve or backfill thought signatures ─────────
-
 def _gemini_provider() -> OpenAICompatProvider:
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         return OpenAICompatProvider(
@@ -307,7 +295,6 @@ def _tool_call(tc_id: str, name: str, *, signed: bool = False) -> dict:
 
 
 def test_gemini_backfills_unsigned_tool_calls_and_keeps_results() -> None:
-    """Cross-provider history stays intact and receives the documented fallback."""
     provider = _gemini_provider()
     messages = [
         {"role": "user", "content": "check the sensor"},
@@ -332,7 +319,6 @@ def test_gemini_backfills_unsigned_tool_calls_and_keeps_results() -> None:
 
 
 def test_gemini_preserves_parallel_calls_when_only_first_is_signed() -> None:
-    """Gemini signs only the first native parallel call; all calls must replay."""
     provider = _gemini_provider()
     messages = [
         {"role": "user", "content": "do both"},
@@ -421,7 +407,6 @@ def test_gemini_requires_signature_on_first_parallel_call() -> None:
 
 
 def test_gemini_replay_preserves_signed_tool_calls() -> None:
-    """A pure Gemini-origin history replays unchanged (signature intact)."""
     provider = _gemini_provider()
     messages = [
         {"role": "user", "content": "hi"},
@@ -444,7 +429,6 @@ def test_gemini_replay_preserves_signed_tool_calls() -> None:
 
 
 def test_non_gemini_provider_keeps_unsigned_tool_calls() -> None:
-    """The filter is Gemini-scoped: other providers still replay unsigned calls."""
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 

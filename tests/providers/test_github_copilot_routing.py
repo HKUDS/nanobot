@@ -1,9 +1,3 @@
-"""Regression tests for GitHub Copilot /responses routing.
-
-Covers the Copilot-specific branches added to route GPT-5 / o-series models
-through the /responses endpoint without falling back to /chat/completions.
-"""
-
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -27,7 +21,6 @@ def _make_copilot_provider() -> OpenAICompatProvider:
 
 
 def test_should_use_responses_api_allows_github_copilot_non_openai_base():
-    """github_copilot bypasses the direct-OpenAI base check and still opts in for GPT-5."""
     provider = _make_copilot_provider()
     assert provider._should_use_responses_api("github_copilot/gpt-5.4-mini", None) is True
     assert provider._should_use_responses_api("github_copilot/gpt-6-astra", None) is True
@@ -35,7 +28,6 @@ def test_should_use_responses_api_allows_github_copilot_non_openai_base():
 
 
 def test_build_responses_body_strips_github_copilot_prefix():
-    """/responses body must send the bare model name; gateway rejects routing prefixes."""
     provider = _make_copilot_provider()
     body = provider._build_responses_body(
         messages=[{"role": "user", "content": "hi"}],
@@ -54,7 +46,6 @@ def test_build_responses_body_strips_github_copilot_prefix():
 
 @pytest.mark.asyncio
 async def test_github_copilot_does_not_fall_back_from_responses_error():
-    """On /responses failure, github_copilot must re-raise instead of hitting /chat/completions."""
     from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
 
     mock_client = MagicMock()

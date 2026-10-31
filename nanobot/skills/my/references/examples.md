@@ -8,7 +8,7 @@ Concrete scenarios showing when and how to use the my tool effectively.
 ```
 → my(action="check", key="web_config.enable")
   → False
-→ "Web search is disabled. Add web.enable: true to your config to enable it."
+→ "Web search is disabled. Set tools.web.enable: true in your config to enable it."
 ```
 
 ### "Why did you stop?"
@@ -25,6 +25,16 @@ Concrete scenarios showing when and how to use the my tool effectively.
 → my(action="check", key="model_preset")
   → 'deep'
 ```
+
+### "Which project can you access?"
+```
+→ my(action="check", key="workspace_sandbox.workspace_root")
+  → workspace_sandbox.workspace_root: '/projects/nanobot'
+→ my(action="check", key="workspace_sandbox.restrict_to_workspace")
+  → workspace_sandbox.restrict_to_workspace: True
+```
+
+`workspace` is a legacy agent-directory display. Setting it does not switch the project or change file permissions.
 
 ## Adaptive Behavior
 
@@ -44,9 +54,11 @@ Concrete scenarios showing when and how to use the my tool effectively.
 → "Selected the fast preset for this session's next turn."
 ```
 
-## Cross-Turn Memory
+## Temporary Runtime Notes
 
-### Remembering user preferences
+Scratchpad values survive across turns until the runtime restarts and are shared by its sessions. Use them only for non-sensitive temporary notes, not private per-session state or durable preferences.
+
+### Keeping a temporary style preference
 ```
 # Turn 1: user says "keep it brief"
 → my(action="set", key="user_style", value="concise")

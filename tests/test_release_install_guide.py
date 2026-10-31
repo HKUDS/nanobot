@@ -1,5 +1,3 @@
-"""The manual handoff binds commands to the verified version and platform bytes."""
-
 import hashlib
 import shlex
 
@@ -56,8 +54,6 @@ def test_verified_handoff_only_offers_bootstrap_supported_by_candidate(tmp_path,
         for name in ("install.sh", "install.ps1"):
             contents = b"current implementation" if directory == generator or recognized else b"older implementation"
             (directory / "scripts" / name).write_bytes(contents)
-    # Packaging is covered by the real archive test. Here the public writer must
-    # preserve the exact serialized manifest hash and inspect both candidate scripts.
     payload = (manifest.model_dump_json(indent=2) + "\n").encode()
     (artifacts / "release-manifest.json").write_bytes(payload)
     monkeypatch.setattr(release_candidate, "ROOT", generator)
@@ -73,4 +69,4 @@ def test_verified_handoff_only_offers_bootstrap_supported_by_candidate(tmp_path,
         for name in ("install.sh", "install.ps1"):
             assert f"/{manifest.candidate_commit}/scripts/{name}" in text
         assert "<summary>Manual platform and manager commands</summary>" in text
-    assert manifest.artifacts[0].sha256 in text  # The explicit manual path remains available.
+    assert manifest.artifacts[0].sha256 in text

@@ -554,7 +554,6 @@ describe("Workspace project picker", () => {
     await waitFor(() => expect(input).toHaveValue("/srv/alpha/"));
     expect(screen.getAllByRole("listbox")).toHaveLength(1);
     await screen.findByRole("option", { name: "/srv/alpha/docs" });
-    // Once the address is complete, Tab leaves the input instead of entering docs.
     await user.tab();
     expect(input).not.toHaveFocus();
     expect(input).toHaveValue("/srv/alpha/");

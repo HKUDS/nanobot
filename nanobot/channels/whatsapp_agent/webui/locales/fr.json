@@ -2,13 +2,11 @@
   "setup": {
     "docsLabel": "Ouvrir le guide de configuration de l'agent",
     "officialLabel": "Ouvrir l'aide des agents WhatsApp",
-    "summary": "Connectez nanobot via l'API WhatsApp Agent Platform. Vous seul pouvez lui écrire, et il ne peut pas accéder à vos autres conversations WhatsApp.",
     "privacyNotice": "Les conversations avec l'agent ne sont pas chiffrées de bout en bout. Les messages sont traités par nanobot et le fournisseur de modèles que vous avez configuré.",
     "fields": {
       "token": {
         "label": "Jeton d'API",
-        "placeholder": "Dans WhatsApp, ouvrez Réglages → Agents, créez l'agent, puis copiez la clé depuis la conversation de l'agent → Infos de la discussion → Clé API.",
-        "help": "Dans WhatsApp, ouvrez Réglages → Agents, créez l'agent, puis copiez la clé depuis la conversation de l'agent → Infos de la discussion → Clé API."
+        "placeholder": "Dans WhatsApp, ouvrez Réglages → Agents, créez l'agent, puis copiez la clé depuis la conversation de l'agent → Infos de la discussion → Clé API."
       },
       "allowFrom": {
         "label": "Expéditeurs autorisés",

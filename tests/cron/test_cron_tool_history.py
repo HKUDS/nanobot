@@ -1,5 +1,3 @@
-"""Inspect persisted cron executions through the agent tool."""
-
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo

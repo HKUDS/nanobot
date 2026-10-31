@@ -1,5 +1,3 @@
-"""Sidebar projection from session headers and SQLite display summaries."""
-
 from __future__ import annotations
 
 import json

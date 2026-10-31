@@ -1,5 +1,3 @@
-"""Tests for the application-owned MCP provider lifecycle."""
-
 from __future__ import annotations
 
 import asyncio
@@ -777,7 +775,6 @@ async def test_shared_proxy_snapshot_survives_reconnect_and_reloads_only_opted_i
             ("independent", "http://proxy-a.example:8080", None),
         ]
 
-        # Mutating the caller's config must not reroute a live provider's reconnect.
         config.network.proxy = "http://not-live.example:8080"
         sessions["proxied"].expired = True
         old_tool = registry.get("mcp_proxied_echo")
@@ -798,7 +795,6 @@ async def test_shared_proxy_snapshot_survives_reconnect_and_reloads_only_opted_i
         assert closed == ["proxied", "proxied"]
         assert registry.get("mcp_independent_echo") is independent_tool
 
-        # Reload also captures a copy, rather than retaining the loader's mutable model.
         next_network.proxy = "http://proxy-c.example:8080"
         sessions["proxied"].expired = True
         current_tool = registry.get("mcp_proxied_echo")

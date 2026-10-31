@@ -1,5 +1,3 @@
-"""Publication authority is distinct from index/download integrity and recovery."""
-
 import hashlib
 import re
 from importlib.resources import as_file, files
@@ -146,8 +144,6 @@ async def test_download_and_handoff_require_approval_before_any_staging(tmp_path
         if url == base + ".sigstore.json":
             return httpx.Response(404 if change == "missing" else 200, content=b"proof")
         pytest.fail("Unapproved package download attempted")
-    # Only the crypto boundary is substituted for synthetic manifests; use the
-    # real feed, HTTP parsing, identity comparison and pre-staging admission.
     verifier = Mock(side_effect=ValueError("forged approval") if change == "forged" else None)
     monkeypatch.setattr(release_feed, "verify_release_approval", verifier)
     async with ReleaseFeed(tmp_path / "cache", transport=httpx.MockTransport(respond),
@@ -160,8 +156,6 @@ async def test_download_and_handoff_require_approval_before_any_staging(tmp_path
         if change == "valid":
             await feed.revalidate(target)
             verifier.assert_called_once_with(payload, b"proof")
-            # A previous successful check is not a reusable authorization when
-            # the proof disappears or changes before handoff/retry.
             verifier.side_effect = ValueError("approval revoked or replaced")
             with pytest.raises(ValueError, match="revoked or replaced"):
                 await feed.revalidate(target)

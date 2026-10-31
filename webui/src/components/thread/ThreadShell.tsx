@@ -14,6 +14,8 @@ import { usePromptHistory } from "@/hooks/usePromptHistory";
 import { ModelFallbackNotice } from "@/components/thread/ModelFallbackNotice";
 import { RecoveryNotice } from "@/components/thread/RecoveryNotice";
 import { SubagentTasksProvider } from "@/components/thread/SubagentTasks";
+import { SubagentTaskDock } from "@/components/thread/SubagentTaskDock";
+import { latestSubagentInputKey } from "@/lib/subagent-tasks";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import type { ComposerDraft, ComposerDraftStore } from "@/lib/composer-draft";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
@@ -227,8 +229,6 @@ interface ThreadShellProps {
   temporaryChatEnabled?: boolean;
   onTemporaryChatEnabledChange?: (enabled: boolean) => void;
   onToggleSidebar: () => void;
-  onGoHome?: () => void;
-  onNewChat?: () => void;
   onCreateChat?: (
     workspaceScope?: WorkspaceScopePayload | null,
     initialMessage?: string,
@@ -335,6 +335,7 @@ function HeroGreeting({ text }: { text: string }) {
       <h1
         ref={headingRef}
         data-testid="hero-greeting"
+        data-theme-ink
         className="select-none whitespace-nowrap text-[34px] font-normal leading-[1.08] tracking-normal text-foreground sm:text-[48px] sm:leading-tight"
       >
         {text}
@@ -627,6 +628,15 @@ export function ThreadShell({
     !hideHeader && !session && !loading && !!onTemporaryChatEnabledChange;
   const promptNavigation = usePromptHistory(historyKey, historyVersion, displayMessages);
   const updateNavigationMessages = promptNavigation.updateMessages;
+  useEffect(() => {
+    if (!chatId || !messagesReady) return;
+    messageCacheRef.current.setLoadedMessages(chatId, promptNavigation.window
+      ? [displayMessages, promptNavigation.window.messages] : [displayMessages]);
+  }, [chatId, messagesReady, displayMessages, promptNavigation.window]);
+  useEffect(() => {
+    const cache = messageCacheRef.current;
+    return () => { if (chatId) cache.deleteLoadedMessages(chatId); };
+  }, [chatId]);
 
   const loadTraceDetails = useCallback(async (refs: string[]) => {
     const details = await loadBodyTraceDetails(refs);
@@ -781,10 +791,8 @@ export function ThreadShell({
 
   const showHeroComposer = displayMessages.length === 0 && !initialHistoryLoading;
   const composerVariant = showHeroComposer ? emptyComposerVariant : "thread";
-  // The server owns the project lock. Old servers have no marker, so an existing
-  // user turn is read-only here too; the gateway remains the editing authority.
-  const projectLocked = session?.projectLocked === true
-    || (session?.projectLocked === undefined && displayMessages.some((message) => message.role === "user" && message.deliveryStatus !== "failed"));
+  // Only unpersisted drafts can choose a project; history pages do not own this state.
+  const projectLocked = !!session && session.projectLocked !== false;
   const wasShowingHeroComposerRef = useRef(showHeroComposer);
   const sessionModelPreset = session?.modelPreset?.trim() || null;
   const [localModelPreset, setLocalModelPreset] = useState<string | null>(null);
@@ -1294,6 +1302,7 @@ export function ThreadShell({
       {restoredFirstDraft?.chatId === chatId && restoredFirstDraft.error ? (
         <p role="alert" className="px-3 text-sm text-destructive">{restoredFirstDraft.error}</p>
       ) : null}
+      <SubagentTaskDock inputKey={latestSubagentInputKey(displayMessages)} />
       {session ? (
         <ThreadComposer
           key={`${draftKey}:${restoredFirstDraft?.chatId === chatId ? restoredFirstDraft.revision : 0}`}

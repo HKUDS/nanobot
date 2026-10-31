@@ -20,7 +20,7 @@ function prepareMessage(original: UIMessage): PreparedMessage {
     message,
     hidden: isSystemCommandTurnId(message.turnId)
       || (message.role === "user" && isModelCommandText(message.content))
-      || (message.role === "assistant" && isModelCommandResponseText(message.content)),
+      || (message.role === "assistant" && message.renderAs !== "text" && isModelCommandResponseText(message.content)),
     compact: message.role === "user" && message.content.trim().toLowerCase() === "/compact",
   };
   preparedMessages.set(original, prepared);
@@ -47,7 +47,7 @@ export function projectWebuiThreadMessages(messages: UIMessage[]): UIMessage[] {
       latestStart = message.createdAt;
       if (message.turnId) starts.set(message.turnId, message.createdAt);
     }
-    if (message.role === "assistant" && !message.kind && !message.isStreaming
+    if (message.role === "assistant" && message.renderAs !== "text" && !message.kind && !message.isStreaming
       && message.turnId && compactTurns.has(message.turnId)) {
       if (message.content === "Nothing to compact.") message = { ...message, compactReply: "empty" };
       if (message.content === "Unable to compact context. Check the logs and try again.") {

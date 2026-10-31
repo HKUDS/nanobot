@@ -1,5 +1,3 @@
-"""LLM provider abstraction module."""
-
 from __future__ import annotations
 
 from importlib import import_module

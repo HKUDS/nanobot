@@ -3,14 +3,15 @@ import { homedir } from "node:os"
 import { isAbsolute } from "node:path"
 import type { DiagramFont, DiagramInput } from "./types"
 
-// Ask CoreText for installed font URLs: recent macOS versions manage PingFang
-// under versioned Assets directories. No app automation or development toolchain is used.
+// Resolve installed CJK faces with OpenType outlines that fontkit can read.
+// macOS 15 can map public PingFang names to private HVGL-only UI fonts instead.
+// No app automation, font download or development toolchain is used.
 const query = `
 ObjC.import("CoreText");
-JSON.stringify(["PingFangSC-Regular", "PingFangSC-Semibold"].map(function(name) {
+JSON.stringify(["STHeitiSC-Light", "STHeitiSC-Medium"].map(function(name) {
   const font = $.CTFontCreateWithName($(name), 12, null);
   const actual = ObjC.unwrap(ObjC.castRefToObject($.CTFontCopyPostScriptName(font)));
-  if (actual !== name) throw new Error("PingFang font unavailable");
+  if (actual !== name) throw new Error("Heiti SC font unavailable");
   const url = $.CTFontCopyAttribute(font, $.kCTFontURLAttribute);
   return { path: ObjC.unwrap(url.path), postscriptName: actual };
 }));
@@ -33,6 +34,6 @@ export function macOSFonts(): NonNullable<DiagramInput["fonts"]> {
     const regular = fonts[0]!, bold = fonts[1]!
     return { regular, bold, mono: regular }
   } catch (cause) {
-    throw new Error("Diagram font unavailable (check PingFang in macOS Font Book)", { cause })
+    throw new Error("Diagram font unavailable (check Heiti SC in macOS Font Book)", { cause })
   }
 }

@@ -9,7 +9,6 @@ import { isVerificationChallenge, WEIXIN_AUTH_EXPIRED_MESSAGE } from "./presenta
 export { WEIXIN_AUTH_EXPIRED_MESSAGE } from "./presentation";
 
 export function WeixinConnectFlow({
-  token,
   feature,
   authRecoveryActive = false,
   idleLabel,
@@ -27,7 +26,6 @@ export function WeixinConnectFlow({
 
   return (
     <ChannelQrConnectFlow
-      token={token}
       channelName="weixin"
       startParams={authExpired ? { force: true } : {}}
       idleLabel={authExpired ? scanAgainLabel : idleLabel}

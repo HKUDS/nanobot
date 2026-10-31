@@ -1,5 +1,3 @@
-"""Connection-owned Temporary Chat behavior for the WebUI."""
-
 from __future__ import annotations
 
 import uuid

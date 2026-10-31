@@ -292,7 +292,6 @@ class MSTeamsChannel(BaseChannel):
             raise
 
     async def _handle_activity(self, activity: dict[str, Any]) -> None:
-        """Handle inbound Teams/Bot Framework activity."""
         if activity.get("type") != "message":
             return
 
@@ -320,7 +319,6 @@ class MSTeamsChannel(BaseChannel):
         if recipient.get("id") and from_user.get("id") == recipient.get("id"):
             return
 
-        # DM-only MVP: ignore group/channel traffic for now
         if conversation_type and conversation_type not in ("personal", ""):
             self.logger.debug("Ignoring non-DM conversation {}", conversation_type)
             return
@@ -376,7 +374,6 @@ class MSTeamsChannel(BaseChannel):
         )
 
     def _sanitize_inbound_text(self, activity: dict[str, Any]) -> str:
-        """Extract the user-authored text from a Teams activity."""
         text = str(activity.get("text") or "")
         text = self._strip_possible_bot_mention(text)
         text = self._normalize_html_whitespace(text)
@@ -398,20 +395,17 @@ class MSTeamsChannel(BaseChannel):
         return text.strip()
 
     def _strip_possible_bot_mention(self, text: str) -> str:
-        """Remove simple Teams mention markup from message text."""
         cleaned = re.sub(r"<at\b[^>]*>.*?</at>", " ", text, flags=re.IGNORECASE | re.DOTALL)
         cleaned = re.sub(r"[^\S\r\n]+", " ", cleaned)
         cleaned = re.sub(r"(?:\r?\n){3,}", "\n\n", cleaned)
         return cleaned.strip()
 
     def _normalize_html_whitespace(self, text: str) -> str:
-        """Normalize common HTML whitespace/entities from Teams into plain text spacing."""
         normalized = html.unescape(text).replace("&rsquo", "’")
         normalized = normalized.replace("\xa0", " ")
         return normalized
 
     def _normalize_teams_reply_quote(self, text: str) -> str:
-        """Normalize Teams quoted replies into a compact structured form."""
         cleaned = self._normalize_html_whitespace(text).strip()
         if not cleaned:
             return ""
@@ -466,7 +460,6 @@ class MSTeamsChannel(BaseChannel):
         return cleaned
 
     def _format_reply_with_quote(self, quoted: str, reply: str) -> str:
-        """Format a reply-with-context message for the model without Teams wrapper noise."""
         quoted = quoted.strip()
         reply = reply.strip()
         if quoted and reply:
@@ -476,7 +469,6 @@ class MSTeamsChannel(BaseChannel):
         return quoted
 
     async def _validate_inbound_auth(self, auth_header: str, activity: dict[str, Any]) -> None:
-        """Validate inbound Bot Framework bearer token."""
         if not MSTEAMS_AVAILABLE:
             raise RuntimeError("PyJWT not installed. Run: nanobot plugins enable msteams")
 
@@ -518,7 +510,6 @@ class MSTeamsChannel(BaseChannel):
             raise ValueError("serviceUrl claim mismatch")
 
     async def _get_botframework_openid_config(self) -> dict[str, Any]:
-        """Fetch and cache Bot Framework OpenID configuration."""
 
         now = time.time()
         if self._botframework_openid_config and now < self._botframework_openid_config_expires_at:
@@ -535,7 +526,6 @@ class MSTeamsChannel(BaseChannel):
         return openid_config
 
     async def _get_botframework_jwks(self) -> dict[str, Any]:
-        """Fetch and cache Bot Framework JWKS."""
 
         now = time.time()
         if self._botframework_jwks and now < self._botframework_jwks_expires_at:
@@ -567,7 +557,6 @@ class MSTeamsChannel(BaseChannel):
         return None
 
     def _normalize_ref_record(self, value: object) -> ConversationRef | None:
-        """Normalize a stored ref record from legacy/current schema."""
         if not isinstance(value, dict):
             return None
         record = cast(dict[str, Any], value)
@@ -586,7 +575,6 @@ class MSTeamsChannel(BaseChannel):
         )
 
     def _load_refs_raw(self) -> tuple[dict[str, Any], dict[str, Any], bool]:
-        """Load raw refs/main+meta JSON payloads."""
         main_data: dict[str, Any] = {}
         meta_data: dict[str, Any] = {}
         meta_exists = self._refs_meta_path.exists()
@@ -612,7 +600,6 @@ class MSTeamsChannel(BaseChannel):
         return main_data, meta_data, meta_exists
 
     def _load_refs_from_disk(self) -> dict[str, ConversationRef]:
-        """Load refs from disk with compatibility fallback for legacy layouts."""
         main_data, meta_data, meta_exists = self._load_refs_raw()
         if not main_data:
             return {}
@@ -645,7 +632,6 @@ class MSTeamsChannel(BaseChannel):
         return out
 
     def _load_refs(self) -> dict[str, ConversationRef]:
-        """Load stored conversation references."""
         return self._load_refs_from_disk()
 
     @contextmanager
@@ -665,7 +651,6 @@ class MSTeamsChannel(BaseChannel):
                 lock_fp.close()
 
     def _is_webchat_service_url(self, service_url: str) -> bool:
-        """Return True when service URL points to unsupported Bot Framework Web Chat."""
         normalized = service_url.strip()
         if not normalized:
             return False
@@ -675,7 +660,6 @@ class MSTeamsChannel(BaseChannel):
         return MSTEAMS_WEBCHAT_HOST in normalized.lower()
 
     def _is_trusted_service_url(self, service_url: str) -> bool:
-        """Return True for HTTPS Bot Framework service URLs trusted for bearer replies."""
         parsed = urlparse(service_url.strip())
         if parsed.scheme.lower() != "https":
             return False
@@ -698,7 +682,6 @@ class MSTeamsChannel(BaseChannel):
         return False
 
     def _prune_conversation_refs(self, *, now: float | None = None) -> bool:
-        """Remove stale and unsupported conversation refs from memory."""
         if not self._conversation_refs:
             return False
 
@@ -754,7 +737,6 @@ class MSTeamsChannel(BaseChannel):
                 self._conversation_refs[key] = disk_ref
 
     def _touch_conversation_ref(self, chat_id: str, *, persist: bool = False) -> None:
-        """Refresh updated_at for an active ref to keep it from expiring while used."""
         with self._refs_guard:
             ref = self._conversation_refs.get(str(chat_id))
             if not ref:
@@ -769,7 +751,6 @@ class MSTeamsChannel(BaseChannel):
                 self._save_refs_locked()
 
     def _write_json_atomically(self, path: Path, data: dict[str, Any]) -> None:
-        """Write refs JSON atomically to reduce corruption risk during crashes."""
         payload = json.dumps(data, indent=2)
         tmp_path: str | None = None
         try:
@@ -818,7 +799,6 @@ class MSTeamsChannel(BaseChannel):
             self.logger.warning("Failed to save conversation refs: {}", e)
 
     async def _get_access_token(self) -> str:
-        """Fetch an access token for Bot Framework / Azure Bot auth."""
 
         now = time.time()
         if self._token and now < self._token_expires_at - 60:

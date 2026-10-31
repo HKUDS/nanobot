@@ -121,7 +121,6 @@ async def test_new_internal_event_needs_explicit_audience(monkeypatch):
     monkeypatch.setitem(NOTIFICATION_AUDIENCES, RetryStatus, "interactive")
     await delivery.events.emit(event)
     assert bus.outbound.get_nowait().event is event
-    # Routing registration alone does not authorize serialization of private fields.
     assert project_notification("chat", event) is None
 
 

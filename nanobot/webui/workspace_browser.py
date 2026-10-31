@@ -1,5 +1,3 @@
-"""Directory metadata for the authenticated WebUI project selector."""
-
 from __future__ import annotations
 
 import heapq

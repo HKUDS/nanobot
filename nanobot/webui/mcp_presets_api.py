@@ -1,5 +1,3 @@
-"""MCP preset helpers for the WebUI settings and message surfaces."""
-
 from __future__ import annotations
 
 import asyncio
@@ -920,7 +918,7 @@ def _normalize_transport(value: str | None, *, command: str = "", url: str = "")
         if url.rstrip("/").endswith("/sse"):
             return "sse"
         return "streamableHttp"
-    aliases = {
+    aliases: dict[str, Literal["stdio", "sse", "streamableHttp"]] = {
         "stdio": "stdio",
         "sse": "sse",
         "streamableHttp": "streamableHttp",
@@ -931,7 +929,7 @@ def _normalize_transport(value: str | None, *, command: str = "", url: str = "")
     normalized = aliases.get(raw)
     if normalized is None:
         raise McpPresetError("unsupported MCP transport")
-    return normalized  # type: ignore[return-value]
+    return normalized
 
 
 def _normalize_auth(

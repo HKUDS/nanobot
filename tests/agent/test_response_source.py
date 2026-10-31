@@ -1,5 +1,3 @@
-"""Actual invocation identity survives delivery and the display transcript."""
-
 import asyncio
 import json
 from copy import deepcopy
@@ -105,7 +103,6 @@ async def test_actual_candidate_is_delivered_and_replayed(history,
         }
         recorder.prepare_event("chat", record, metadata=msg.metadata, phase="answer", include_source=True)
         records.append(record)
-    # Completed segment is the durable record; token-sized deltas aren't needed on replay.
     for record in (r for r in records if r["event"] != "delta"):
         history.append("websocket:chat", record)
     replay = history.build("websocket:chat")
@@ -169,7 +166,6 @@ async def test_auxiliary_calls_do_not_publish_response_identity():
 @pytest.mark.parametrize("with_images", [False, True])
 @pytest.mark.parametrize("fallback", [False, True])
 async def test_attribution_does_not_change_provider_requests(with_tools, with_images, fallback):
-    """Display metadata must not modify the cacheable prompt or generation payload."""
     requests = []
 
     class CapturingProvider(AnswerProvider):
@@ -345,18 +341,18 @@ async def test_runner_records_each_provider_when_streaming_times_out_and_recover
     assert [m.metadata["response_sources"][0]["preset"] for m in ends if m.metadata["response_sources"]] == ["codex", "grok"]
     assert [m.metadata["response_sources"][0]["fallback"] for m in ends if m.metadata["response_sources"]] == [False, True]
     assert len({m.event.stream_id for m in ends}) == len(ends)
-    # Display provenance stays out of canonical model input/history.
     assert all("response_sources" not in message for message in result.messages)
 
 
 @pytest.mark.parametrize("temporary", [False, True])
 async def test_websocket_wire_and_disk_replay_preserve_sources(history, tmp_path, monkeypatch, temporary):
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    channel = WebSocketChannel({"allowFrom": ["*"]}, MessageBus(), gateway=MagicMock())
-    channel._media.rewrite_local_markdown_images.side_effect = lambda text: text
-    channel._transcripts = WebUITranscriptRecorder(history.sessions)
+    gateway = MagicMock()
+    gateway.media.rewrite_local_markdown_images.side_effect = lambda text: text
+    gateway.transcripts = WebUITranscriptRecorder(history.sessions)
+    gateway.temporary_chats.should_persist_transcript = lambda _: not temporary
+    channel = WebSocketChannel({"allowFrom": ["*"]}, MessageBus(), gateway=gateway)
     generation, _ = await history.sessions.state.open_with_metadata("websocket:source-chat", {})
-    channel._temporary_chats.should_persist_transcript = lambda _: not temporary
     channel._safe_send_to = AsyncMock()
     channel._subs["source-chat"] = {MagicMock()}
     sources = [{"provider": "xai", "model": "grok", "preset": "snapshot name", "fallback": True}]
@@ -369,7 +365,6 @@ async def test_websocket_wire_and_disk_replay_preserve_sources(history, tmp_path
     if temporary:
         assert history.read("websocket:source-chat") == []
     else:
-        # A fresh reader after an unrelated preset rename/delete sees the saved snapshot.
         sources[0]["preset"] = "renamed later"
         replay = history.build("websocket:source-chat")
         assert replay is not None
