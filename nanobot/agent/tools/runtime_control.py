@@ -267,6 +267,7 @@ def _snapshot_model_presets(
     return {
         name: {
             "model": preset.model,
+            "description": preset.description,
             "provider": preset.provider,
             "max_tokens": preset.max_tokens,
             "context_window_tokens": preset.context_window_tokens,

@@ -4,6 +4,7 @@ import {
 } from "@/components/icons/product-icons";
 import {
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -80,6 +81,7 @@ function compactModelName(model?: string | null): string | null {
 
 export interface ModelPresetOption {
   name: string;
+  description?: string;
   contextWindowTokens?: number;
   reasoningEffort?: string | null;
   model?: string | null;
@@ -488,11 +490,14 @@ function PresetOption({
   onSelect: (name: string) => void;
 }) {
   const detail = compactModelName(preset.model);
+  const descriptionId = useId();
+  const hasDescription = Boolean(preset.description?.trim());
   return (
     <button
       type="button"
       role="option"
       aria-label={label}
+      aria-describedby={hasDescription ? descriptionId : undefined}
       aria-selected={selected}
       onClick={() => onSelect(preset.name)}
       className={cn(
@@ -508,10 +513,17 @@ function PresetOption({
         provider={preset.provider}
         isHero={false}
       />
-      <span className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden whitespace-nowrap max-sm:flex-col max-sm:items-start max-sm:gap-0.5 max-sm:whitespace-normal">
-        <span className="shrink-0 text-[13px] font-medium text-foreground max-sm:max-w-full max-sm:break-words">{label}</span>
-        {detail && detail !== label ? (
-          <span className="truncate text-[12px] text-muted-foreground">{detail}</span>
+      <span className="min-w-0 flex-1">
+        <span className="flex min-w-0 items-baseline gap-1.5 overflow-hidden whitespace-nowrap max-sm:flex-col max-sm:items-start max-sm:gap-0.5 max-sm:whitespace-normal">
+          <span className="shrink-0 text-[13px] font-medium text-foreground max-sm:max-w-full max-sm:break-words">{label}</span>
+          {detail && detail !== label ? (
+            <span className="truncate text-[12px] text-muted-foreground">{detail}</span>
+          ) : null}
+        </span>
+        {hasDescription ? (
+          <span id={descriptionId} className="mt-0.5 line-clamp-2 whitespace-pre-wrap break-words text-[12px] leading-4 text-muted-foreground">
+            {preset.description}
+          </span>
         ) : null}
       </span>
       {selected ? <Check className="h-4 w-4 shrink-0 text-foreground/80" aria-hidden /> : null}

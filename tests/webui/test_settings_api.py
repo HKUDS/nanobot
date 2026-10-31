@@ -312,6 +312,52 @@ def test_create_model_configuration_accepts_legacy_label_without_changing_call_o
     assert duplicate.value.status == 409
 
 
+def test_model_preset_description_round_trips_and_can_be_cleared(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "sk-test"
+    save_config(config, config_path)
+    description = '跨模块根因分析\nReview <details> & "trade-offs".'
+
+    created = create_model_configuration(
+        {
+            "name": ["review.v1"],
+            "provider": ["openai"],
+            "model": ["gpt-4.1"],
+            "description": [description],
+        },
+        config_path=config_path,
+    )
+    rows = {row["name"]: row for row in created["model_presets"]}
+    assert created["model_preset_descriptions_supported"] is True
+    assert rows["review.v1"]["description"] == description
+    assert rows["default"]["description"] == ""
+    assert load_config(config_path).model_presets["review.v1"].description == description
+
+    unchanged = update_model_configuration(
+        {"name": ["review.v1"], "temperature": ["0.2"]}, config_path=config_path,
+    )
+    rows = {row["name"]: row for row in unchanged["model_presets"]}
+    assert rows["review.v1"]["description"] == description
+    assert load_config(config_path).model_presets["review.v1"].description == description
+
+    updated = update_model_configuration(
+        {"name": ["review.v1"], "description": ["Independent code review"]},
+        config_path=config_path,
+    )
+    rows = {row["name"]: row for row in updated["model_presets"]}
+    assert rows["review.v1"]["description"] == "Independent code review"
+    assert load_config(config_path).model_presets["review.v1"].description == "Independent code review"
+
+    update_model_configuration(
+        {"name": ["review.v1"], "description": [""]}, config_path=config_path,
+    )
+    reloaded = settings_payload(config_path=config_path)
+    rows = {row["name"]: row for row in reloaded["model_presets"]}
+    assert rows["review.v1"]["description"] == ""
+    assert load_config(config_path).model_presets["review.v1"].description == ""
+
+
 def test_first_model_configuration_replaces_unused_schema_default(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

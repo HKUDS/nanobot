@@ -105,6 +105,7 @@ class ModelSettingsPayload(TypedDict):
     model_api_resolution_supported: bool
     provider_api_configuration_supported: bool
     model_request_overrides_supported: bool
+    model_preset_descriptions_supported: bool
     providers: list[dict[str, Any]]
 
 
@@ -1090,6 +1091,7 @@ def model_settings_payload(
             # Kept on the wire for older WebUI clients. It is no longer a
             # separate product concept and always mirrors the canonical name.
             "label": "Default",
+            "description": "",
             "active": active_preset_name == "default",
             "is_default": True,
             "model": defaults.model,
@@ -1121,6 +1123,7 @@ def model_settings_payload(
             {
                 "name": name,
                 "label": name,
+                "description": preset.description,
                 "active": active_preset_name == name,
                 "is_default": False,
                 "model": preset.model,
@@ -1165,6 +1168,7 @@ def model_settings_payload(
         },
         "model_presets": model_presets,
         "model_request_overrides_supported": True,
+        "model_preset_descriptions_supported": True,
         "model_call_order": model_call_order,
         "model_call_order_editable": model_call_order_editable,
         "model_configuration_migratable": _legacy_model_configuration_migratable(
@@ -1337,6 +1341,7 @@ def create_model_configuration(
         ).strip() or None
     candidate = ModelPresetConfig(
         model=model,
+        description=query_first(query, "description") or "",
         provider=provider,
         max_tokens=max_tokens if max_tokens is not None else base.max_tokens,
         context_window_tokens=(
@@ -1382,6 +1387,11 @@ def update_model_configuration(
         changed = _rename_model_configuration(config, name, new_name) or changed
         name = new_name
         preset = config.model_presets[name]
+
+    description = query_first(query, "description")
+    if description is not None and preset.description != description:
+        preset.description = description
+        changed = True
 
     model = query_first(query, "model")
     if model is not None:

@@ -1367,7 +1367,7 @@ Contributor notes for adding new providers live in [`development.md`](./developm
 
 ## Model Presets
 
-Open **Settings → Models → New preset**, give the preset a unique name, select its provider and model, and save. Use **Advanced options** for generation settings and request API selection. Select the saved preset in the chat composer.
+Open **Settings → Models → New preset**, give the preset a unique name, select its provider and model, and save. Add an optional **Description** to explain when to use it or note known limitations. Descriptions appear alongside presets in the WebUI and are available to the agent through `my(action="check", key="model_presets")`. Description editing is available when the connected host supports it. Use **Advanced options** for generation settings and request API selection. Select the saved preset in the chat composer.
 
 Model presets let you name a complete model configuration and select one per session with `/model <preset>`. They are the recommended way to configure models because the same names can be reused for new-session defaults, chat-command switching, and fallback chains.
 
@@ -1383,6 +1383,7 @@ Existing configs do not need to change. Direct `agents.defaults.model`, `provide
   "modelPresets": {
     "fast": {
       "model": "gpt-4.1-mini",
+      "description": "Everyday coding, tests, and documentation.",
       "provider": "openai",
       "maxTokens": 4096,
       "contextWindowTokens": 128000,
@@ -1422,6 +1423,7 @@ Older configs may still contain a `label` inside a preset. It is accepted when l
 | Field | Description |
 |-------|-------------|
 | `model` | Model name to use for this preset. |
+| `description` | Optional usage notes for people and the agent; defaults to an empty string. It does not change generation settings, grant capabilities, or automatically select the preset. |
 | `provider` | Provider name, or `"auto"` to use provider auto-detection. |
 | `maxTokens` | Maximum completion/output tokens. |
 | `contextWindowTokens` | Context window size used by prompt building and consolidation decisions. |

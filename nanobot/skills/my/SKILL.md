@@ -35,6 +35,7 @@ description: Inspect or troubleshoot the agent's runtime state, adjust runtime s
 | Situation | Command |
 |-----------|---------|
 | Check capacity for a large task | `my(action="check", key="context_window_tokens")` |
+| Compare configured presets and their usage descriptions | `my(action="check", key="model_presets")` |
 | Switch model or context capacity | `my(action="set", key="model_preset", value="<preset-name>")` |
 | Long multi-step task | `my(action="set", key="max_iterations", value=80)` |
 

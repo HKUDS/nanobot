@@ -986,6 +986,8 @@
       "newPresetHelp": "Simpan model dan pengaturan untuk digunakan kembali.",
       "presets": "Prasetel model",
       "presetName": "Nama prasetel",
+      "presetDescription": "Deskripsi",
+      "presetDescriptionHelp": "Catatan opsional tentang kapan menggunakan prasetel ini.",
       "presetNameHelp": "Nama harus unik; juga digunakan oleh /model.",
       "presetNameDuplicate": "Prasetel dengan nama ini sudah ada.",
       "presetNamePlaceholder": "mis. Menulis cepat",
