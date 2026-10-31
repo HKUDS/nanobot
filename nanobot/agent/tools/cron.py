@@ -221,6 +221,7 @@ class CronTool(Tool):
         elif cron_expr:
             schedule = CronSchedule(kind="cron", expr=cron_expr, tz=tz)
         elif at:
+            from datetime import timezone
             from zoneinfo import ZoneInfo
 
             try:
@@ -230,7 +231,18 @@ class CronTool(Tool):
             if dt.tzinfo is None:
                 if err := self._validate_timezone(self._default_timezone):
                     return err
-                dt = dt.replace(tzinfo=ZoneInfo(self._default_timezone))
+                zone = ZoneInfo(self._default_timezone)
+                aware = dt.replace(tzinfo=zone)
+                # A spring-forward gap has no local instant. replace(tzinfo=...)
+                # still builds a datetime, but its UTC instant is a different
+                # wall time, so the job would run an hour away from the request.
+                restored = aware.astimezone(timezone.utc).astimezone(zone)
+                if restored.replace(tzinfo=None) != dt:
+                    return ToolResult.error(
+                        f"Error: '{at}' does not exist in timezone '{self._default_timezone}'. "
+                        "Clocks skip that local time. Retry with a valid local time."
+                    )
+                dt = aware
             at_ms = int(dt.timestamp() * 1000)
             if at_ms <= int(time.time() * 1000):
                 return ToolResult.error(
