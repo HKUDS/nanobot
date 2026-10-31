@@ -13,6 +13,7 @@ from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.file_state import file_read_context
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result, with_tool_error_hint
 from nanobot.providers.base import ToolCallRequest
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.runtime import (
     repeated_external_lookup_error,
     repeated_workspace_violation_error,
@@ -70,18 +71,37 @@ async def execute_tool_calls(
     tool_results: list[tuple[Any, dict[str, str]]] = []
     for batch in _partition_tool_batches(tools, tool_calls, concurrent=concurrent):
         if concurrent and len(batch) > 1:
-            batch_results = await asyncio.gather(*(
-                _execute_tool_call(
-                    tools,
-                    tool_call,
-                    external_lookup_counts,
-                    workspace_violation_counts,
-                    hook,
-                    context,
-                    read_results,
+            tasks = [
+                asyncio.create_task(
+                    _execute_tool_call(
+                        tools,
+                        tool_call,
+                        external_lookup_counts,
+                        workspace_violation_counts,
+                        hook,
+                        context,
+                        read_results,
+                    )
                 )
                 for tool_call in batch
-            ))
+            ]
+            batch_task = asyncio.create_task(_collect_tool_batch(tasks))
+            try:
+                batch_results = await asyncio.shield(batch_task)
+                if isinstance(batch_results, BaseException):
+                    raise batch_results
+            except BaseException:
+                # Own cancellation once; repeated stop requests must not interrupt
+                # tool cleanup or let the runner finalize before the batch settles.
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                try:
+                    await shield_and_drain(asyncio.gather(batch_task, *tasks, return_exceptions=True))
+                except asyncio.CancelledError:
+                    # Propagate the original failure after cleanup has drained.
+                    pass
+                raise
             tool_results.extend(batch_results)
         else:
             for tool_call in batch:
@@ -99,6 +119,17 @@ async def execute_tool_calls(
     results = [result for result, _event in tool_results]
     events = [event for _result, event in tool_results]
     return results, events
+
+
+async def _collect_tool_batch(
+    tasks: list[asyncio.Task[tuple[Any, dict[str, str]]]],
+) -> list[tuple[Any, dict[str, str]]] | BaseException:
+    # Return failures to the owner: Python 3.14 shield reports exceptions in
+    # an abandoned inner future even when the owner subsequently observes them.
+    try:
+        return await asyncio.gather(*tasks)
+    except BaseException as exc:
+        return exc
 
 
 async def _execute_tool_call(
