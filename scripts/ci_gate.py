@@ -1,5 +1,3 @@
-"""Require success for selected jobs; never confuse a broken selector with no work."""
-
 from __future__ import annotations
 
 import json

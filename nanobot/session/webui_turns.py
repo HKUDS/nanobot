@@ -1,5 +1,3 @@
-"""Session turn helpers for WebUI-capable WebSocket sessions."""
-
 from __future__ import annotations
 
 import re
@@ -101,7 +99,6 @@ def _session_message_public_metadata(
 
 
 def _validated_llm_runtime(value: object) -> LLMRuntime | None:
-    """Keep runtime-event consumers defensive if an external publisher violates the contract."""
     return value if isinstance(value, LLMRuntime) else None
 
 
@@ -172,7 +169,6 @@ def _title_inputs(session: Session) -> tuple[str, str]:
 
 
 def _latest_title_inputs(session: Session) -> tuple[str, str]:
-    """Latest user/assistant texts, for turns executed on a shared session."""
     user_text = ""
     assistant_text = ""
     for message in reversed(session.messages):
@@ -822,7 +818,7 @@ class WebuiTurnCoordinator:
         if msg.channel != "websocket":
             return
 
-        session = await self.sessions.state.get(session_key)
+        session = await self.sessions.state.get_header(session_key)
         await self.bus.publish_outbound(
             outbound_message_for_event(
                 channel=msg.channel,

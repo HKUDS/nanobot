@@ -1,5 +1,3 @@
-"""WebUI session read models exposed to interactive clients."""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol, cast

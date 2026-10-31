@@ -2,18 +2,19 @@ import { SettingsPage } from "@/components/settings/SettingsPage";
 import type { SettingsExitGuard, SettingsSectionKey } from "@/components/settings/contracts";
 import { useSettingsController } from "@/components/settings/useSettingsController";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
+import type { ThemePreference } from "@/hooks/useTheme";
 import type { ChatSummary, SettingsPayload, SkillSummary } from "@/lib/types";
 
 export type { SettingsSectionKey } from "@/components/settings/contracts";
 
 interface SettingsViewProps {
   registerExitGuard?: (guard: SettingsExitGuard | null) => void;
-  theme: "light" | "dark";
+  themePreference: ThemePreference;
   initialSection?: SettingsSectionKey;
   initialSettings?: SettingsPayload | null;
   showSidebar?: boolean;
   mainNavigationExpanded?: boolean;
-  onToggleTheme: () => void;
+  onChangeTheme: (value: ThemePreference) => void;
   onBackToChat: () => void;
   onModelNameChange: (modelName: string | null) => void;
   onSettingsChange?: (payload: SettingsPayload) => void;
@@ -38,12 +39,12 @@ interface SettingsViewProps {
 
 export function SettingsView({
   registerExitGuard,
-  theme,
+  themePreference,
   initialSection = "overview",
   initialSettings = null,
   showSidebar = true,
   mainNavigationExpanded = false,
-  onToggleTheme,
+  onChangeTheme,
   onBackToChat,
   onModelNameChange,
   onSettingsChange,
@@ -74,10 +75,10 @@ export function SettingsView({
     <SettingsPage
       registerExitGuard={registerExitGuard}
       controller={controller}
-      theme={theme}
+      themePreference={themePreference}
       showSidebar={showSidebar}
       mainNavigationExpanded={mainNavigationExpanded}
-      onToggleTheme={onToggleTheme}
+      onChangeTheme={onChangeTheme}
       onBackToChat={onBackToChat}
       skills={skills}
       skillsLoading={skillsLoading}

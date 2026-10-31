@@ -17,9 +17,23 @@ Maintainers are community stewards who help review, organize, and maintain the p
 
 ## Contribution Flow
 
-### What Should I Open a PR For?
+### Discuss the Problem First
 
-PRs are welcome for:
+We currently accept pull requests only from repository collaborators. [Issues](https://github.com/HKUDS/nanobot/issues) remain open to everyone: bug reports, clear reproduction steps, feature suggestions, and design discussions are all welcome.
+
+Generating code is becoming easier, but understanding changes, verifying correctness, and maintaining them still take substantial effort. Please start by discussing the problem, use case, and requirements in an issue before moving to implementation.
+
+### Recognition and Collaborator Invitations
+
+Contributing is not limited to submitting code. Finding a bug we missed, providing a key reproduction, or describing a valuable real-world use case all deserve acknowledgement.
+
+For accepted issues, the issue author will also be credited as a co-author of the corresponding PR when it is merged.
+
+Through these discussions and contributions, we hope to get to know people interested in long-term involvement and gradually invite them to become collaborators.
+
+### Pull Requests from Collaborators
+
+Collaborators can open PRs for:
 
 - New features or functionality
 - Bug fixes with no behavior changes
@@ -28,7 +42,7 @@ PRs are welcome for:
 - Refactoring that is clearly scoped and easy to review
 - Changes to APIs or configuration, when the impact is documented
 
-For riskier or larger changes, please open an issue or draft PR early so the shape of the work can be discussed before the implementation grows too large.
+For riskier or larger changes, collaborators are encouraged to open a draft PR early after discussing the scope and approach in an issue.
 
 WebUI and remote-host interface changes must follow the [client/host compatibility review checklist](.agent/review-guide.md), including independent client/server upgrades, host isolation, and actionable update guidance.
 

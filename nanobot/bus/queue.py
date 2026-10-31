@@ -1,5 +1,3 @@
-"""Queued delivery of messages and typed events between core and channels."""
-
 import asyncio
 import contextlib
 import inspect

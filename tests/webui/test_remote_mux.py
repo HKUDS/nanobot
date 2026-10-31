@@ -1,5 +1,3 @@
-"""Private SSH master lifetime and guarded-bridge compatibility."""
-
 import asyncio
 import os
 import sys

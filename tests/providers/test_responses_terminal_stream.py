@@ -1,5 +1,3 @@
-"""Responses terminal events must not depend on the transport reaching EOF."""
-
 import asyncio
 import json
 from contextlib import asynccontextmanager

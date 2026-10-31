@@ -175,7 +175,7 @@ function projectOrderedTurn(
   };
 
   for (const message of messages) {
-    if (message.kind === "compaction") {
+    if (message.kind === "compaction" || message.renderAs === "text") {
       flushActivity();
       flushAnswers();
       units.push({

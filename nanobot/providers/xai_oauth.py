@@ -556,7 +556,7 @@ def _make_callback_server(
                 self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Private-Network", "true")
 
-        def log_message(self, format: str, *_args: Any) -> None:  # noqa: A002
+        def log_message(self, format: str, *_args: Any) -> None:
             # Callback query strings contain an authorization code.
             return
 

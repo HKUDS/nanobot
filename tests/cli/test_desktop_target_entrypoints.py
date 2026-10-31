@@ -1,5 +1,3 @@
-"""The picker covers retained launchers without intercepting explicit commands."""
-
 import pytest
 from prompt_toolkit.application import create_app_session
 from prompt_toolkit.input import create_pipe_input
@@ -19,7 +17,6 @@ def test_retained_launcher_attaches_without_starting_python(monkeypatch, args):
 
     monkeypatch.setattr(desktop_target, "dispatch_bare_desktop_target", dispatch)
     monkeypatch.setattr(entry, "_run_agent", lambda *_a, **_kw: pytest.fail("agent started"))
-    # Callback exits before webui can inspect/load config or start its runtime.
     monkeypatch.setattr(
         "nanobot.cli.webui._resolve_webui_config_path",
         lambda *_a, **_kw: pytest.fail("Python WebUI started"),

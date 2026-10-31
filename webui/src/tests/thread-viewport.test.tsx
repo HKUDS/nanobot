@@ -12,6 +12,7 @@ import {
 } from "@/components/thread/ThreadViewport";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
 import { ThreadMotionCoordinator } from "@/components/thread/thread-motion";
+import type { PromptHistoryNavigation } from "@/hooks/usePromptHistory";
 import type { UIMessage } from "@/lib/types";
 
 const messages: UIMessage[] = [
@@ -2026,6 +2027,56 @@ describe("ThreadViewport", () => {
     expect(latest).toHaveBeenCalledOnce();
     view.rerender(<ThreadViewport ref={viewportRef} messages={messages} isStreaming={false} composer={<div />} navigation={{ ...navigation, window: null }} />);
     await waitFor(() => expect(screen.getByText("hello")).toBeInTheDocument());
+  });
+
+  it.each(["wheel", "touch", "keyboard"] as const)("loads newer history after one %s input reaches the page bottom", async (input) => {
+    const history = makePromptExchangeMessages(5);
+    const newer = vi.fn();
+    const navigation: PromptHistoryNavigation = {
+      prompts: [], window: { messages: history, userMessageOffset: 0,
+        hasMoreBefore: false, hasMoreAfter: true, forkBoundaryMessageCount: null },
+      target: null, operation: null, loading: false, error: null,
+      jump: vi.fn(), older: vi.fn(), newer, cancel: vi.fn(), latest: vi.fn(), retry: vi.fn(), updateMessages: vi.fn(),
+    };
+    const view = render(<ThreadViewport messages={messages} isStreaming={false} composer={<div />} navigation={navigation} />);
+    await flushAnimationFrame();
+    const scroller = view.getByTestId("thread-message-region");
+    mockScrollGeometry(scroller, 2000, 500, 100);
+
+    const forward = () => {
+      if (input === "wheel") fireEvent.wheel(scroller, { deltaY: 10000 });
+      if (input === "keyboard") fireEvent.keyDown(scroller, { key: "End" });
+      if (input === "touch") {
+        fireEvent.touchStart(scroller, { touches: [{ clientX: 100, clientY: 400 }] });
+        fireEvent.touchMove(scroller, { touches: [{ clientX: 100, clientY: 200 }] });
+        fireEvent.touchEnd(scroller);
+      }
+    };
+    // A large input can cross the entire prefetch range in one native scroll.
+    forward();
+    expect(newer).not.toHaveBeenCalled();
+    act(() => {
+      scroller.scrollTop = 1500;
+      fireEvent.scroll(scroller);
+    });
+    expect(newer).toHaveBeenCalledOnce();
+
+    // Appending a page must preserve the reader's position, not follow its tail.
+    mockScrollGeometry(scroller, 2800, 500, 1500);
+    view.rerender(<ThreadViewport messages={messages} isStreaming={false} composer={<div />}
+      navigation={{ ...navigation, window: { ...navigation.window!, messages: makePromptExchangeMessages(10) } }} />);
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(1500);
+
+    // At the existing page boundary, forward input cannot produce a scroll event.
+    mockScrollGeometry(scroller, 2800, 500, 2300);
+    forward();
+    expect(newer).toHaveBeenCalledTimes(2);
+    mockScrollGeometry(scroller, 3600, 500, 2300);
+    view.rerender(<ThreadViewport messages={messages} isStreaming={false} composer={<div />}
+      navigation={{ ...navigation, window: { ...navigation.window!, messages: makePromptExchangeMessages(15) } }} />);
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(2300);
   });
 
   it("includes the selected prompt when one server turn exceeds the local render window", async () => {

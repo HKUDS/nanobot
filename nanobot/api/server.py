@@ -1,7 +1,8 @@
-"""OpenAI-compatible HTTP API server for a fixed nanobot session.
+"""OpenAI-compatible HTTP API server for nanobot sessions.
 
 Provides /v1/chat/completions and /v1/models endpoints.
-All requests route to a single persistent API session.
+Requests without ``session_id`` share one persistent default session; each
+``session_id`` owns an isolated session with its own chat route.
 """
 
 from __future__ import annotations
@@ -72,11 +73,6 @@ async def _prepare_agent(app: web.Application) -> None:
         await prepare()
 
 
-# ---------------------------------------------------------------------------
-# Response helpers
-# ---------------------------------------------------------------------------
-
-
 def _error_json(status: int, message: str, err_type: str = "invalid_request_error") -> web.Response:
     return web.json_response(
         {"error": {"message": message, "type": err_type, "code": status}},
@@ -113,7 +109,6 @@ def _chat_completion_response(
 
 
 def _response_text(value: Any) -> str:
-    """Normalize process_direct output to plain assistant text."""
     if value is None:
         return ""
     if hasattr(value, "content"):
@@ -122,31 +117,22 @@ def _response_text(value: Any) -> str:
 
 
 def _as_str(value: object) -> str:
-    """Return *value* when it is text, otherwise an empty string."""
     return value if isinstance(value, str) else ""
 
 
 def _require_json_object(value: object, field: str) -> dict[str, Any]:
-    """Validate an object-valued field from an untrusted JSON request."""
     if not isinstance(value, dict):
         raise TypeError(f"{field} must be an object")
     return cast(dict[str, Any], value)
 
 
 def _require_json_string(value: object, field: str) -> str:
-    """Validate a string-valued field from an untrusted JSON request."""
     if not isinstance(value, str):
         raise TypeError(f"{field} must be a string")
     return value
 
 
-# ---------------------------------------------------------------------------
-# SSE helpers
-# ---------------------------------------------------------------------------
-
-
 def _sse_chunk(delta: str, model: str, chunk_id: str, finish_reason: str | None = None) -> bytes:
-    """Format a single OpenAI-compatible SSE chunk."""
     payload = {
         "id": chunk_id,
         "object": "chat.completion.chunk",
@@ -165,13 +151,8 @@ def _sse_chunk(delta: str, model: str, chunk_id: str, finish_reason: str | None 
 
 _SSE_DONE = b"data: [DONE]\n\n"
 
-# ---------------------------------------------------------------------------
-# Upload helpers
-# ---------------------------------------------------------------------------
-
 
 def _parse_json_content(body: dict[str, Any]) -> tuple[str, list[str]]:
-    """Parse JSON request body. Returns (text, media_paths)."""
     messages_value = cast(object, body.get("messages"))
     if not isinstance(messages_value, list):
         raise ValueError("Only a single user message is supported")
@@ -230,7 +211,6 @@ def _parse_json_content(body: dict[str, Any]) -> tuple[str, list[str]]:
 
 
 async def _parse_multipart(request: web.Request) -> tuple[str, list[str], str | None, str | None]:
-    """Parse multipart/form-data. Returns (text, media_paths, session_id, model)."""
     media_dir = get_media_dir("api")
     reader = await request.multipart()
     text = ""
@@ -264,11 +244,6 @@ async def _parse_multipart(request: web.Request) -> tuple[str, list[str], str | 
         text = "请分析上传的文件"
 
     return text, media_paths, session_id, model
-
-
-# ---------------------------------------------------------------------------
-# Route handlers
-# ---------------------------------------------------------------------------
 
 
 async def handle_chat_completions(request: web.Request) -> web.Response | web.StreamResponse:
@@ -316,6 +291,8 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
         return _error_json(400, f"Only configured model '{model_name}' is available")
 
     session_key = f"api:{session_id}" if session_id else API_SESSION_KEY
+    # Keep the existing history identity; derive its route without normalizing the ID.
+    chat_id = session_key.removeprefix("api:")
     session_locks: dict[str, asyncio.Lock] = request.app[_SESSION_LOCKS_KEY]
     session_lock = session_locks.setdefault(session_key, asyncio.Lock())
 
@@ -323,7 +300,6 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
         "API request session_key={} media={} text={} stream={}",
         session_key, len(media_paths), text[:80], stream,
     )
-    # -- streaming path --
     if stream:
         resp = web.StreamResponse()
         resp.content_type = "text/event-stream"
@@ -359,7 +335,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
                             media=media_paths if media_paths else None,
                             session_key=session_key,
                             channel="api",
-                            chat_id=API_CHAT_ID,
+                            chat_id=chat_id,
                             on_stream=_on_stream,
                             on_stream_end=_on_stream_end,
                         )
@@ -391,7 +367,6 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
             await resp.write(_SSE_DONE)
         return resp
 
-    # -- non-streaming path (original logic) --
     usage_capture = _UsageCaptureHook()
     try:
         async with session_lock:
@@ -403,7 +378,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
                         media=media_paths if media_paths else None,
                         session_key=session_key,
                         channel="api",
-                        chat_id=API_CHAT_ID,
+                        chat_id=chat_id,
                         hooks=[usage_capture],
                     )
                 response_text = _response_text(response)
@@ -448,11 +423,6 @@ async def handle_health(request: web.Request) -> web.Response:
     return web.json_response({"status": "ok"})
 
 
-# ---------------------------------------------------------------------------
-# App factory
-# ---------------------------------------------------------------------------
-
-
 def create_app(
     agent_loop: "AgentLoop",
     model_name: str = "nanobot",
@@ -469,11 +439,11 @@ def create_app(
         api_key: Optional API key for Bearer-token authentication on API routes.
         prepare_agent: Optional application-owned readiness callback run before each turn.
     """
-    app = web.Application(client_max_size=20 * 1024 * 1024)  # 20MB for base64 images
+    app = web.Application(client_max_size=20 * 1024 * 1024)
     app[_AGENT_LOOP_KEY] = agent_loop
     app[_MODEL_NAME_KEY] = model_name
     app[_REQUEST_TIMEOUT_KEY] = request_timeout
-    app[_SESSION_LOCKS_KEY] = {}  # per-user locks, keyed by session_key
+    app[_SESSION_LOCKS_KEY] = {}
     app[_PREPARE_AGENT_KEY] = prepare_agent
 
     @web.middleware

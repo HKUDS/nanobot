@@ -1,28 +1,14 @@
 import { readdir, readFile, writeFile } from "node:fs/promises"
 import { basename, join } from "node:path"
+import { nativePackages, targetPlan } from "./targets"
 
 const target = process.argv[2]
 if (!target) throw new Error("target is required")
-const supportedTargets = new Set([
-  "darwin-arm64",
-  "darwin-x64",
-  "linux-arm64",
-  "linux-x64",
-  "win32-x64",
-])
-if (!supportedTargets.has(target)) throw new Error(`unsupported target: ${target}`)
-const nativePackagesByTarget: Record<string, string[]> = {
-  "darwin-arm64": ["@opentui/core-darwin-arm64", "@resvg/resvg-js-darwin-arm64"],
-  "darwin-x64": ["@opentui/core-darwin-x64", "@resvg/resvg-js-darwin-x64"],
-  "linux-arm64": ["@opentui/core-linux-arm64", "@opentui/core-linux-arm64-musl", "@resvg/resvg-js-linux-arm64-gnu", "@resvg/resvg-js-linux-arm64-musl"],
-  "linux-x64": ["@opentui/core-linux-x64", "@opentui/core-linux-x64-musl", "@resvg/resvg-js-linux-x64-gnu", "@resvg/resvg-js-linux-x64-musl"],
-  "win32-x64": ["@opentui/core-win32-x64", "@resvg/resvg-js-win32-x64-msvc"],
-}
+const plan = targetPlan(target)
 
 const root = join(import.meta.dir, "..")
 const projectRoot = join(root, "..")
-const extension = target.startsWith("win32-") ? ".exe" : ""
-const asset = `nanobot-tui-${target}${extension}`
+const asset = plan.executable
 const output = join(root, "dist", `${asset}.THIRD_PARTY_NOTICES.txt`)
 
 type PackageNotice = {
@@ -112,7 +98,7 @@ const notices = await Promise.all(
   (await runtimePackageRoots(root)).map(readPackageNotice),
 )
 const packagedNames = new Set(notices.map((notice) => notice.name))
-for (const name of nativePackagesByTarget[target] ?? []) {
+for (const name of nativePackages(plan)) {
   if (!packagedNames.has(name)) throw new Error(`target runtime package is missing: ${name}`)
 }
 const sections = [
@@ -122,7 +108,7 @@ const sections = [
   "Runtime: Bun 1.3.13",
   "The release archive also contains SOURCE_OFFER.md, RELINKING.md, and the complete TUI application source.",
   "fontkit 2.0.4, dfa 1.2.0 and brotli 1.3.3 declare MIT in their included README notices.",
-  "resvg's unmodified native binding includes its upstream MPL-2.0 text; source is listed in RELINKING.md.",
+  "resvg's public wrapper and native binding are unmodified; its internal loader is target-selected. MPL-2.0 source is listed in RELINKING.md.",
   "",
   "===== nanobot project license =====",
   "",

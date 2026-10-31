@@ -1,5 +1,3 @@
-"""Tests for web_fetch URL sanitization (backtick/quote stripping)."""
-
 from __future__ import annotations
 
 import json
@@ -52,8 +50,6 @@ def _patched_web_fetch():
         yield
 
 
-# --- urlparse / _validate_url level tests ---
-
 @pytest.mark.parametrize("dirty_url", [
     "`https://example.com/page`",
     " `https://example.com/page` ",
@@ -70,8 +66,6 @@ def test_clean_url_passes_validation():
     is_valid, msg = _validate_url("https://example.com/page")
     assert is_valid
 
-
-# --- WebFetchTool.execute integration tests ---
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
@@ -92,8 +86,6 @@ async def test_execute_accepts_cleanable_http_urls(url):
     data = json.loads(result)
     assert data["status"] == 200
 
-
-# --- startswith guard tests ---
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(

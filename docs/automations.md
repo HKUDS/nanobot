@@ -56,6 +56,24 @@ Repetition alone does not select heartbeat. "Every day at 8am, remind me to drin
 
 An upgrade does not overwrite your workspace's `AGENTS.md` or convert existing heartbeat entries into cron jobs. The current scheduling rules are included in the system prompt. If an old workspace rule directs all recurring tasks to heartbeat, update that rule too. To correct an existing reminder, remove its old heartbeat entry and create the cron task once. Check the task list to avoid duplicates.
 
+### Change a Scheduled Task
+
+Ask nanobot, "Move my daily report from 9am to 10am." The agent can use `cron(action="update", job_id="...", cron_expr="0 10 * * *")` without deleting and recreating the task. It can also update `name` or `message` independently. Supply one complete schedule when changing its timing; omitted fields keep their values. Cron edits retain the existing timezone unless another `tz` is supplied with the expression. Naive `at` values use the runtime default timezone.
+
+The task keeps its ID, linked chat, execution history, enabled state, and automatic-deletion setting. A paused task stays paused. Changing only the name or instruction preserves the next run time. Existing tasks configured to delete after a one-time run still do so; tasks configured to remain keep that behavior. System-managed tasks remain protected. Invalid updates leave the task unchanged.
+
+### Pause and Resume a Scheduled Task
+
+Ask nanobot to pause a scheduled task instead of removing it. The agent can use `cron(action="disable", job_id="...")`, then `cron(action="enable", job_id="...")` to resume it with the same ID, schedule, chat, and run history. Use `cron(action="list", include_disabled=True)` to find paused tasks; the default list still shows only enabled jobs.
+
+Disabling affects future runs. It does not cancel a running task or recall an already queued result. System-managed heartbeat and Dream jobs remain protected; change their configuration instead.
+
+### Inspect Recent Runs
+
+Ask nanobot, "Show the last five runs of my daily report." The agent can use `cron(action="history", job_id="...", limit=5)` to read the retained execution time, status, duration, and error for that task. Results are newest first, using the task's timezone or the runtime default. The default is five records; `limit` accepts 1–20.
+
+This also works for disabled tasks and does not change their schedule or state. Only retained execution records are available: deleted jobs and automatically deleted one-time tasks cannot be queried. Run history does not include the generated reply or confirm message delivery.
+
 ### Scheduled Result Delivery
 
 The gateway saves final scheduled messages before it accepts them into the outgoing queue. This includes explicit `message` calls in existing tasks. Each recipient has a separate delivery record. Progress, reasoning, and streaming events do not enter this queue. WebUI streaming and saved chat history keep their existing behavior. External channels receive a complete scheduled reply instead of a streamed reply. Ordinary chat streaming is unchanged.

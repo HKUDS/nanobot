@@ -1,5 +1,3 @@
-"""Tests for ReadFileTool enhancements: description fix, read dedup, PDF support, device blacklist, office docs."""
-
 import base64
 import os
 import sys
@@ -24,10 +22,6 @@ def _document_source(text: str) -> DocumentLineSource:
     return DocumentLineSource(lines)
 
 
-# ---------------------------------------------------------------------------
-# Description fix
-# ---------------------------------------------------------------------------
-
 class TestReadDescriptionFix:
 
     def test_description_mentions_image_support(self):
@@ -35,12 +29,7 @@ class TestReadDescriptionFix:
         assert "image" in tool.description.lower()
 
 
-# ---------------------------------------------------------------------------
-# Read deduplication
-# ---------------------------------------------------------------------------
-
 class TestReadDedup:
-    """Only reads whose original result remains in context may return a stub."""
 
     @pytest.fixture()
     def tool(self, tmp_path):
@@ -60,7 +49,6 @@ class TestReadDedup:
         with file_state.file_read_context("read-2", lambda: {"read-1": first}):
             second = await tool.execute(path=str(f))
         assert "unchanged" in second.lower()
-        # Stub should not contain file content
         assert "line 0" not in second
 
     @pytest.mark.asyncio
@@ -69,7 +57,6 @@ class TestReadDedup:
         f.write_text("original", encoding="utf-8")
         with file_state.file_read_context("read-1", lambda: {}):
             first = await tool.execute(path=str(f))
-        # Modify the file externally
         f.write_text("modified content", encoding="utf-8")
         with file_state.file_read_context("read-2", lambda: {"read-1": first}):
             second = await tool.execute(path=str(f))
@@ -83,7 +70,6 @@ class TestReadDedup:
             first = await tool.execute(path=str(f), offset=1, limit=5)
         with file_state.file_read_context("read-2", lambda: {"read-1": first}):
             second = await tool.execute(path=str(f), offset=6, limit=5)
-        # Different offset → full read, not stub
         assert "line 6" in second
 
     @pytest.mark.asyncio
@@ -147,9 +133,7 @@ class TestReadDedup:
         assert result == f"(Empty file: {f})"
 
 
-# ---------------------------------------------------------------------------
 # Cross-session isolation (issue #3571)
-# ---------------------------------------------------------------------------
 # Each session must keep its own read cache. When session A reads a file,
 # session B reading the same file must still receive the full content, not
 # the "[File unchanged since last read]" dedup stub. Within each session,
@@ -168,8 +152,6 @@ class TestReadDedupSessionIsolation:
         first = await session_a_tool.execute(path=str(f))
         assert "line 0" in first
 
-        # Session B has never read this file before — it must see the full
-        # content, not the dedup stub from session A.
         second = await session_b_tool.execute(path=str(f))
         assert "unchanged" not in second.lower(), (
             "Session B should not inherit session A's read-dedup state. "
@@ -209,10 +191,6 @@ class TestReadDedupSessionIsolation:
         assert "unchanged" not in second_session_read.lower()
         assert "line 0" in second_session_read
 
-
-# ---------------------------------------------------------------------------
-# PDF support
-# ---------------------------------------------------------------------------
 
 class TestReadPdf:
 
@@ -336,10 +314,6 @@ class TestReadPdf:
         assert "not found" in result
 
 
-# ---------------------------------------------------------------------------
-# Device path blacklist
-# ---------------------------------------------------------------------------
-
 @pytest.mark.skipif(sys.platform == "win32", reason="/dev directory doesn't exist on Windows")
 class TestReadDeviceBlacklist:
 
@@ -378,12 +352,6 @@ class TestReadDeviceBlacklist:
         assert "blocked" in result.lower() or "device" in result.lower()
 
 
-# ---------------------------------------------------------------------------
-# File changes with preserved mtime
-# ---------------------------------------------------------------------------
-# An editor can preserve mtime while replacing contents. Deduplication must
-# compare the file snapshot even when the original result remains in context.
-
 class TestFileStateHashFallback:
 
     async def test_read_returns_changed_content_when_mtime_same(self, tmp_path):
@@ -404,9 +372,7 @@ class TestFileStateHashFallback:
         assert "unchanged" not in second.lower()
 
 
-# ---------------------------------------------------------------------------
 # Line-ending normalization
-# ---------------------------------------------------------------------------
 # ReadFileTool normalizes CRLF -> LF before line-splitting. This primarily
 # helps Windows users whose checkouts carry CRLF line endings and whose
 # subsequent StrReplace edits would otherwise miss on `\r` boundaries. The
@@ -435,10 +401,6 @@ class TestReadFileLineEndingNormalization:
         assert "\r" not in result
         assert "alpha" in result and "beta" in result and "gamma" in result
 
-
-# ---------------------------------------------------------------------------
-# Office document support (DOCX, XLSX, PPTX)
-# ---------------------------------------------------------------------------
 
 class TestReadOfficeDocuments:
 

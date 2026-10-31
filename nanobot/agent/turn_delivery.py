@@ -1,5 +1,3 @@
-"""Route and publish the user-visible lifecycle of an agent turn."""
-
 from __future__ import annotations
 
 import dataclasses
@@ -207,6 +205,7 @@ class TurnDelivery:
     route: TurnRoute
     route_admission: TurnRouteAdmission | None = None
     enable_stream: bool = False
+    continuation_pending: bool = field(init=False, default=False)
     delivery_message: InboundMessage = field(init=False)
     lifecycle_message: InboundMessage = field(init=False)
     _stream_base_id: str | None = field(init=False, default=None)

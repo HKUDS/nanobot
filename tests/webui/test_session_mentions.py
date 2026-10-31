@@ -8,7 +8,6 @@ import pytest
 
 from nanobot.session.manager import SessionManager
 from nanobot.session.session_handles import (
-    SessionHandle,
     SessionHandleResolver,
     session_handle_for_name,
 )
@@ -24,12 +23,6 @@ def _save_session(manager: SessionManager, key: str, title: str) -> None:
     session.metadata.update({"title": title, "title_user_edited": True})
     session.add_message("user", "hello")
     manager.save(session)
-
-
-def _handle(manager: SessionManager, key: str) -> SessionHandle:
-    handle = SessionHandleResolver(manager).handle_for_session(key)
-    assert handle is not None
-    return handle
 
 
 @pytest.mark.parametrize("raw", [None, []], ids=["missing", "empty"])
@@ -123,9 +116,7 @@ def test_session_mention_context_treats_titles_as_data() -> None:
 
 
 @pytest.mark.asyncio
-async def test_session_mentions_do_not_isolate_workspaces(tmp_path, monkeypatch) -> None:
-    webui_dir = tmp_path / "webui"
-    monkeypatch.setattr("nanobot.webui.history.get_webui_dir", lambda: webui_dir)
+async def test_session_mentions_do_not_isolate_workspaces(tmp_path) -> None:
     manager = SessionManager(tmp_path)
     project_b = tmp_path / "b"
     project_b.mkdir()

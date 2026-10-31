@@ -1,5 +1,3 @@
-"""Discover and attach to an already-running Nanobot Desktop instance."""
-
 from __future__ import annotations
 
 import ctypes
@@ -454,7 +452,6 @@ def _named_pipe_exchange(address: str, payload: bytes) -> bytes:
 
 
 def _windows_pipe_request(address: str, payload: bytes) -> bytes:
-    """Exchange one line over a bounded overlapped Windows named pipe."""
     from ctypes import wintypes
 
     loader = getattr(ctypes, "WinDLL", None)

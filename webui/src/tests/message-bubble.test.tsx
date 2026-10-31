@@ -1,17 +1,24 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import { MessageBlockMenuActions, MessageBubble } from "@/components/MessageBubble";
+import { preloadMarkdownText } from "@/components/MarkdownText";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { setAppLanguage } from "@/i18n";
+import { parseWebuiThreadPayload } from "@/lib/api";
 import * as clipboard from "@/lib/clipboard";
 import { formatMessageEndTime } from "@/lib/format-time";
+import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
+import { projectThreadEvents } from "@/lib/thread-event-projection";
+import { ThreadTranscript } from "@/lib/thread-transcript";
 import type {
   CliAppInfo,
   McpPresetInfo,
   SlashCommand,
+  ThreadProjectionEvent,
   UIMessage,
 } from "@/lib/types";
+import { createStreamClient } from "./stream-client";
 
 const CLI_APPS: CliAppInfo[] = [
   {
@@ -104,6 +111,92 @@ function menuActions(root: ParentNode = document): HTMLElement {
 }
 
 describe("MessageBubble", () => {
+  beforeAll(preloadMarkdownText);
+
+  it.each(["live", "paged history"] as const)("renders and copies literal output unchanged through %s, alongside ordinary Markdown", async (source) => {
+    const raw = [
+      "  Switched model preset to `raw`.",
+      "__pycache__ <script>alert(\"raw\")</script>",
+      "![capture](https://example.invalid/output.png)",
+      "```mermaid",
+      "graph TD; A-->B",
+      "```",
+      "$$x^2$$",
+      "\x1b[31mred\x1b[0m",
+      "[Subagent task completed]",
+      "Task: print this",
+      "Result:",
+      "  literal result\t",
+      "Summarize this naturally",
+      "",
+      "",
+    ].join("\n");
+    const shellEvents: ThreadProjectionEvent[] = [
+      { event: "user_message", chat_id: "literal-chat", turn_id: "shell", turn_seq: 1, starts_turn: false, text: "!printf output" },
+      { event: "message", chat_id: "literal-chat", turn_id: "shell", turn_seq: 2, render_as: "text", text: raw },
+    ];
+    const normalEvents: ThreadProjectionEvent[] = [
+      { event: "user_message", chat_id: "literal-chat", turn_id: "normal", turn_seq: 1, starts_turn: true, text: "Explain the output" },
+      { event: "message", chat_id: "literal-chat", turn_id: "normal", turn_seq: 2, text: "**Normal reply** [docs](https://example.invalid/docs)" },
+      { event: "turn_end", chat_id: "literal-chat", turn_id: "normal", turn_seq: 3 },
+    ];
+    const transcript = new ThreadTranscript();
+    if (source === "live") {
+      const { client, receive } = createStreamClient();
+      const unsubscribe = client.onTranscript("literal-chat", (event) => {
+        if (event.event === "user_message" || event.event === "message" || event.event === "turn_end") {
+          transcript.project(event, { createId: () => crypto.randomUUID(), now: 1_800_000_000_000 });
+        }
+      });
+      try {
+        [...shellEvents, ...normalEvents].forEach(receive);
+      } finally {
+        unsubscribe();
+        client.close();
+      }
+    } else {
+      expect(transcript.accept(parseWebuiThreadPayload({
+        schemaVersion: 3, projection: "events", events: normalEvents, completed_turn_ids: ["normal"],
+        page: { before_cursor: "before-normal", has_more_before: true, user_message_offset: 1 },
+      }), transcript.begin("initial"))).toBe(true);
+      expect(transcript.accept(parseWebuiThreadPayload({
+        schemaVersion: 3, projection: "events", events: shellEvents,
+        page: { before_cursor: null, has_more_before: false, user_message_offset: 0 },
+      }), transcript.begin("older"))).toBe(true);
+    }
+    const writeText = vi.spyOn(clipboard, "copyTextToClipboard").mockResolvedValue(true);
+    try {
+      const { container } = render(<ThreadMessages messages={projectWebuiThreadMessages(transcript.messages)} />);
+      const output = screen.getByTestId("plain-code-fallback");
+      expect(output.textContent).toBe(raw);
+      expect(output).toHaveClass("whitespace-pre-wrap");
+      expect(output.querySelector("code")!.childNodes).toHaveLength(1);
+      expect(output.querySelector("code")!.firstChild!.nodeType).toBe(Node.TEXT_NODE);
+      expect((await screen.findByText("Normal reply")).tagName).toBe("STRONG");
+      expect(container.querySelector("img, script, .katex, [data-testid='mermaid-block']")).toBeNull();
+      expect(screen.getByRole("link", { name: "docs" })).toHaveAttribute("href", "https://example.invalid/docs");
+      fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
+      await waitFor(() => expect(writeText).toHaveBeenNthCalledWith(1, raw));
+      fireEvent.click(within(output.closest<HTMLElement>("[data-thread-display-unit]")!).getByRole("button", { name: "Message actions" }));
+      fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+      await waitFor(() => expect(writeText).toHaveBeenNthCalledWith(2, raw));
+    } finally {
+      writeText.mockRestore();
+    }
+  });
+
+  it.each([undefined, "TEXT"])("keeps Markdown after bang input unless render_as is literally text (%s)", async (render_as) => {
+    const payload = parseWebuiThreadPayload({
+      schemaVersion: 3, projection: "events", events: [
+        { event: "user_message", chat_id: "chat", text: "!echo **ordinary output**", starts_turn: true, turn_id: "bang" },
+        { event: "message", chat_id: "chat", text: "**ordinary output**", render_as, turn_id: "bang" },
+      ],
+    });
+    const { container } = render(<ThreadMessages messages={projectWebuiThreadMessages(projectThreadEvents(payload.events))} />);
+    await waitFor(() => expect(container.querySelector("[data-assistant-message] strong")?.textContent).toBe("ordinary output"));
+    expect(screen.queryByTestId("plain-code-fallback")).not.toBeInTheDocument();
+  });
+
   it.each([false, undefined])("keeps normal sources out of the block menu (fallback: %s)", (fallback) => {
     const message: UIMessage = { id: "primary", role: "assistant", content: "Hello", createdAt: 0,
       responseSources: [{ provider: "openai_codex", model: "gpt", preset: "codex", fallback }] };
@@ -331,7 +424,7 @@ describe("MessageBubble", () => {
 
     const { rerender } = render(<MessageBubble message={message} />);
 
-    expect(screen.getByRole("status")).toHaveTextContent("Sending…");
+    expect(screen.getByRole("status")).toHaveTextContent("Sending");
 
     rerender(<MessageBubble message={{ ...message, deliveryStatus: "accepted" }} />);
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
@@ -434,13 +527,15 @@ describe("MessageBubble", () => {
     const command = screen.getByTestId("message-slash-command");
     expect(command).toHaveTextContent("/model");
     expect(command).toHaveClass(
-      "font-[550]",
+      "font-normal",
       "transition-colors",
       "duration-150",
     );
     expect(command).not.toHaveClass("font-mono");
     expect(command.getAttribute("style")).not.toContain("text-shadow");
-    expect(command.getAttribute("style")).toContain("var(--inline-token-highlight)");
+    expect(command.getAttribute("style")).toContain("var(--inline-reference-highlight)");
+    expect(command.firstElementChild).toHaveTextContent(/^\/$/);
+    expect(command.firstElementChild).toHaveClass("opacity-90");
     expect(command.className).not.toMatch(/(?:^|\s)(?:bg-|border|ring|rounded)/);
     expect(command.parentElement).toHaveTextContent("/model gpt-5");
     expect(command.parentElement).toHaveClass("rounded-floating", "bg-secondary/70");
@@ -475,7 +570,7 @@ describe("MessageBubble", () => {
     const message: UIMessage = {
       id: "u-command-mention",
       role: "user",
-      content: "/goal ask @zoom to schedule the review",
+      content: "/goal ask $github and @zoom to schedule the review",
       createdAt: Date.now(),
     };
 
@@ -487,8 +582,27 @@ describe("MessageBubble", () => {
       />,
     );
 
-    expect(screen.getByTestId("message-slash-command")).toHaveTextContent("/goal");
+    const command = screen.getByTestId("message-slash-command");
+    const skill = screen.getByTestId("message-skill-reference-github");
+    expect(command).toHaveTextContent("/goal");
+    expect(skill).toHaveTextContent("$github");
+    expect(command.className).toBe(skill.className);
+    expect(command.getAttribute("style")).toBe(skill.getAttribute("style"));
     expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@Zoom");
+  });
+
+  it.each(["! ls", "  !pwd", '!echo "$github" @zoom\nWrite-Output "hello!"'])("highlights a sent bang prefix while preserving the command literally: %s", (content) => {
+    const message: UIMessage = { id: "u-shell", role: "user", content, createdAt: Date.now() };
+    const { container, rerender } = render(<MessageBubble message={message} cliApps={CLI_APPS} />);
+    const prefix = screen.getByTestId("message-shell-prefix");
+    expect(prefix).toHaveTextContent(/^!$/);
+    expect(prefix).toHaveClass("font-normal");
+    expect(prefix.style.color).toBe("var(--inline-reference-highlight)");
+    expect(container.querySelector("[data-user-text-bubble] p")?.textContent).toBe(content);
+
+    rerender(<MessageBubble message={{ ...message, content: "Explain !pwd, please!" }} />);
+    expect(screen.queryByTestId("message-shell-prefix")).not.toBeInTheDocument();
+    expect(container.querySelector("[data-user-text-bubble] p")?.textContent).toBe("Explain !pwd, please!");
   });
 
   it("highlights skill references without a live skill catalog", () => {
@@ -509,13 +623,14 @@ describe("MessageBubble", () => {
     const skill = screen.getByTestId("message-skill-reference-github");
     expect(skill).toHaveTextContent(/^\$github$/);
     expect(skill).toHaveClass(
-      "font-[550]",
+      "font-normal",
       "transition-colors",
       "duration-150",
     );
     expect(skill.getAttribute("style")).not.toContain("text-shadow");
-    expect(skill.getAttribute("style")).toContain("var(--inline-token-highlight)");
+    expect(skill.getAttribute("style")).toContain("var(--inline-reference-highlight)");
     expect(skill.className).not.toMatch(/(?:^|\s)(?:bg-|border|ring|rounded)/);
+    expect(skill).not.toHaveAttribute("title");
     expect(screen.getByTestId("message-cli-mention-zoom")).toHaveTextContent("@Zoom");
     expect(skill.parentElement).toHaveTextContent("Ask $github to review this with @Zoom");
   });
@@ -1237,18 +1352,15 @@ describe("MessageBubble", () => {
 
     const { container } = render(<MessageBubble message={message} />);
 
+    const image = container.querySelector("img")!;
+    Object.defineProperties(image, { naturalWidth: { value: 1600 }, naturalHeight: { value: 900 } });
+    fireEvent.load(image);
     const imageButton = screen.getByRole("button", { name: /view image/i });
-    expect(imageButton).toHaveClass("w-[min(100%,28rem)]", "rounded-control");
-    expect(imageButton).toHaveClass(
-      "border",
-      "border-border/60",
-      "focus-visible:ring-2",
-    );
-    expect(imageButton).not.toHaveClass("hover:scale-[1.01]");
-    expect(imageButton).not.toHaveClass("hover:ring-2");
-    expect(imageButton).not.toHaveClass("hover:ring-primary/25");
+    expect(imageButton).toHaveClass("rounded-control", "focus-visible:ring-2");
+    expect(imageButton.style.width).toBe("448px");
+    expect(imageButton.style.height).toBe("252px");
     expect(imageButton).not.toHaveAttribute("title");
-    expect(container.querySelector("img")).toHaveClass("h-auto", "w-full", "object-contain");
+    expect(image).toHaveClass("object-contain");
   });
 
   it("renders mislabeled html assistant media as a file attachment", () => {
@@ -1268,7 +1380,8 @@ describe("MessageBubble", () => {
 
     const { container } = render(<MessageBubble message={message} />);
 
-    expect(screen.getByLabelText("File attachment")).toHaveTextContent("index.html");
+    expect(screen.getByRole("link", { name: "Download index.html" })).toHaveAttribute("download", "index.html");
+    expect(screen.getByRole("button", { name: "index.html" })).toBeVisible();
     expect(container.querySelector("img")).not.toBeInTheDocument();
   });
 
@@ -1291,7 +1404,7 @@ describe("MessageBubble", () => {
 
     expect(screen.getByRole("button", { name: /view image: growth.svg/i })).toBeInTheDocument();
     expect(container.querySelector('img[src="/api/media/sig/svg"]')).toBeInTheDocument();
-    expect(screen.queryByLabelText("File attachment")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Download growth.svg" })).not.toBeInTheDocument();
   });
 
 });

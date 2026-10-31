@@ -502,6 +502,8 @@ describe("gateway protocol", () => {
         starts_turn: true,
         media_urls: [{ kind: "file", url: "/api/media/sig/file", name: "report.pdf" }],
       },
+      { event: "message", chat_id: "one", text: "  __pycache__ `ticks`\n", render_as: "text" },
+      { event: "message", chat_id: "one", text: "**Markdown reply**" },
       { event: "delta", chat_id: "one", text: "hello" },
       { event: "stream_end", chat_id: "one", resuming: false },
       { event: "turn_end", chat_id: "one", latency_ms: 12 },
@@ -522,6 +524,10 @@ describe("gateway protocol", () => {
         socket.emit("message", { data: JSON.stringify(frame) })
       }
       expect(delivered).toEqual(frames)
+      socket.emit("message", { data: JSON.stringify({
+        event: "message", chat_id: "one", text: "**Markdown reply**", render_as: true,
+      }) })
+      expect(delivered.at(-1)).toEqual({ event: "message", chat_id: "one", text: "**Markdown reply**" })
     } finally {
       client.close()
       Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: original })
@@ -1319,6 +1325,7 @@ describe("gateway protocol", () => {
         sessions: [
           {
             key: "websocket:chat-1",
+            handle: { id: "handle_plan", name: "luma" },
             title: "Release plan",
             preview: "Prepare the release",
             created_at: "2026-08-12T10:00:00Z",
@@ -1334,6 +1341,8 @@ describe("gateway protocol", () => {
 
     try {
       expect(await fetchSessions("http://nanobot.test", "secret")).toEqual([{
+        key: "websocket:chat-1",
+        handle: { id: "handle_plan", name: "luma" },
         chatId: "chat-1",
         title: "Pinned release",
         preview: "Prepare the release",
@@ -1371,7 +1380,12 @@ describe("gateway protocol", () => {
       }
       if (url.includes("sidebar-state")) return Promise.resolve(new Response("{}"))
       return Promise.resolve(new Response(JSON.stringify({
-        sessions: [{ key: "websocket:plan", title: "Release plan", preview: "Ship it" }],
+        sessions: [{
+          key: "websocket:plan",
+          handle: { id: "handle_plan", name: "luma" },
+          title: "Release plan",
+          preview: "Ship it",
+        }],
       })))
     }) as typeof fetch
 
@@ -1391,16 +1405,87 @@ describe("gateway protocol", () => {
         },
         {
           kind: "session",
-          name: "Release-plan",
+          name: "luma",
           displayName: "Release plan",
           description: "Ship it",
           session: {
-            name: "Release-plan",
+            id: "handle_plan",
+            name: "luma",
             session_key: "websocket:plan",
             title: "Release plan",
           },
         },
       ])
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  test("reserves canonical session names across tools, renames, and list reordering", async () => {
+    const original = globalThis.fetch
+    let renamed = false
+    const sessions = [
+      { key: "websocket:plan", handle: { id: "handle_plan", name: "luma" }, title: "Same title" },
+      { key: "websocket:notes", handle: { id: "handle_notes", name: "bime" }, title: "Same title" },
+    ]
+    globalThis.fetch = ((input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes("cli-apps")) return Promise.resolve(Response.json({
+        apps: [{ name: "luma", installed: true }],
+      }))
+      if (url.includes("mcp-presets")) return Promise.resolve(Response.json({
+        presets: [{ name: "LUMA", installed: true, configured: true }],
+      }))
+      if (url.includes("sidebar-state")) return Promise.resolve(Response.json({
+        title_overrides: renamed ? { "websocket:plan": "Renamed chat" } : {},
+      }))
+      return Promise.resolve(Response.json({ sessions: renamed ? [...sessions].reverse() : sessions }))
+    }) as typeof fetch
+
+    try {
+      const before = await fetchMentionCandidates("http://nanobot.test", "secret")
+      expect(before.map(({ kind, name, targetName }) => ({ kind, name, targetName }))).toEqual([
+        { kind: "cli", name: "luma-2", targetName: "luma" },
+        { kind: "mcp", name: "LUMA-3", targetName: "LUMA" },
+        { kind: "session", name: "luma", targetName: undefined },
+        { kind: "session", name: "bime", targetName: undefined },
+      ])
+      expect(before.filter((item) => item.kind === "session").map((item) => item.displayName))
+        .toEqual(["Same title", "Same title"])
+
+      renamed = true
+      const after = await fetchMentionCandidates("http://nanobot.test", "secret")
+      expect(after.filter((item) => item.kind === "session").map((item) => item.session)).toEqual([
+        { id: "handle_notes", name: "bime", session_key: "websocket:notes", title: "Same title" },
+        { id: "handle_plan", name: "luma", session_key: "websocket:plan", title: "Renamed chat" },
+      ])
+      expect(after.find((item) => item.name === "luma")?.displayName).toBe("Renamed chat")
+      expect(after.slice(0, 2)).toEqual(before.slice(0, 2))
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  test("keeps sessions navigable without inventing handles for missing or malformed API identities", async () => {
+    const original = globalThis.fetch
+    globalThis.fetch = ((input: string | URL | Request) => Promise.resolve(Response.json(
+      String(input).endsWith("/api/sessions") ? {
+        sessions: [
+          { key: "websocket:missing", title: "Missing handle" },
+          { key: "websocket:invalid", handle: { id: 42, name: "luma" }, title: "Invalid handle" },
+          { key: "websocket:alias", handle: { id: "handle_alias", name: "Release-plan" }, title: "Old alias" },
+        ],
+      } : {},
+    ))) as typeof fetch
+
+    try {
+      const sessions = await fetchSessions("http://nanobot.test", "secret")
+      expect(sessions.map((session) => [session.key, session.title, session.handle])).toEqual([
+        ["websocket:missing", "Missing handle", undefined],
+        ["websocket:invalid", "Invalid handle", undefined],
+        ["websocket:alias", "Old alias", undefined],
+      ])
+      expect(await fetchMentionCandidates("http://nanobot.test", "secret")).toEqual([])
     } finally {
       globalThis.fetch = original
     }

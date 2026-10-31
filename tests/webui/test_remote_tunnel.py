@@ -1,5 +1,3 @@
-"""Real loopback sockets and subprocess pipes; no external host or credentials."""
-
 import asyncio
 import contextlib
 import socket

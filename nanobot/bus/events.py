@@ -1,5 +1,3 @@
-"""Event types for the message bus."""
-
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
@@ -29,13 +27,13 @@ INBOUND_META_LOCAL_MEDIA = "local_media_paths"
 class InboundMessage:
     """Message received from a chat channel."""
 
-    channel: str  # telegram, discord, slack, whatsapp
-    sender_id: str  # User identifier
-    chat_id: str  # Chat/channel identifier
-    content: str  # Message text
+    channel: str
+    sender_id: str
+    chat_id: str
+    content: str
     timestamp: datetime = field(default_factory=datetime.now)
     media: list[str] = field(default_factory=list)  # Media paths or URLs
-    metadata: dict[str, Any] = field(default_factory=dict)  # Channel-specific data
+    metadata: dict[str, Any] = field(default_factory=dict)
     session_key_override: str | None = None  # Optional override for thread-scoped sessions
     require_existing_session: bool = False
     input_role: Literal["user", "system"] | None = None

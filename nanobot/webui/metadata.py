@@ -1,5 +1,3 @@
-"""Shared WebUI metadata keys."""
-
 from nanobot.bus.events import INBOUND_META_TURN_ID
 
 WEBUI_TURN_METADATA_KEY = INBOUND_META_TURN_ID

@@ -1,10 +1,13 @@
 import {
   act,
+  createEvent,
   fireEvent,
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
@@ -34,14 +37,12 @@ function csvFile(name = "report.csv", type = "application/vnd.ms-excel") {
   return new File(["name,value\nnanobot,1"], name, { type });
 }
 
-function resolveReady(file: File): EncodeResponse {
+function resolveReady(file: File): Extract<EncodeResponse, { ok: true }> {
   return {
     id: "stub",
     ok: true,
     dataUrl: `data:image/png;base64,${btoa(file.name)}`,
-    mime: "image/png",
     bytes: file.size,
-    origBytes: file.size,
     normalized: false,
   };
 }
@@ -86,9 +87,10 @@ beforeEach(() => {
 });
 
 describe("ThreadComposer — attachments", () => {
-  it("attaches a picked image and includes its data url on send", async () => {
-    const file = pngFile("a.png");
-    encodeImage.mockResolvedValueOnce(resolveReady(file));
+  it("previews a picked image with size details on hover and includes its data url on send", async () => {
+    const user = userEvent.setup();
+    const file = pngFile("a.png", 100);
+    encodeImage.mockResolvedValueOnce({ ...resolveReady(file), normalized: true, bytes: 50 });
     const onSend = vi.fn();
 
     render(<ThreadComposer onSend={onSend} />);
@@ -102,9 +104,12 @@ describe("ThreadComposer — attachments", () => {
       fireEvent.change(input, { target: { files: [file] } });
     });
 
-    await waitFor(() =>
-      expect(screen.getByTestId("composer-chip")).toBeInTheDocument(),
-    );
+    expect(screen.getByRole("img", { name: "a.png" })).toHaveAttribute("src", expect.stringContaining("blob:"));
+    await user.hover(screen.getByRole("button", { name: "a.png" }));
+    const details = await screen.findByRole("tooltip");
+    expect(details).toHaveTextContent("a.png");
+    expect(details).toHaveTextContent("100 B → 50 B (auto)");
+    expect(screen.getByRole("button", { name: "Remove attachment" })).toHaveAccessibleDescription("a.png");
 
     const textarea = screen.getByLabelText(/message input/i);
     fireEvent.change(textarea, { target: { value: "hi" } });
@@ -116,6 +121,32 @@ describe("ThreadComposer — attachments", () => {
     expect(images).toHaveLength(1);
     expect(images[0].media.data_url).toContain("data:image/png;base64,");
     expect(images[0].media.name).toBe("a.png");
+  });
+
+  it("identifies same-type files through focus/tap details and removes only the chosen attachment", async () => {
+    const user = userEvent.setup();
+    const first = new File(['{"theme":"light"}'], "render-config.json", { type: "application/json" });
+    const second = new File(['{"theme":"dark"}'], "another-config.json", { type: "application/json" });
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} />);
+    const textarea = screen.getByLabelText(/message input/i);
+    const input = textarea.closest("form")!.querySelector('input[type="file"]')!;
+    await act(async () => fireEvent.change(input, { target: { files: [first, second] } }));
+    const cards = screen.getAllByTestId("composer-chip");
+    expect(cards.map((card) => card.textContent)).toEqual(["JSON", "JSON"]);
+    const firstInfo = within(cards[0]).getByRole("button", { name: first.name });
+    act(() => firstInfo.focus());
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(first.name);
+    expect(screen.getByRole("tooltip")).toHaveTextContent(`${first.size} B`);
+    await user.keyboard("{Escape}");
+    await user.click(within(cards[1]).getByRole("button", { name: second.name }));
+    expect(await screen.findByRole("dialog", { name: second.name })).toHaveTextContent(second.name);
+    await user.keyboard("{Escape}");
+    await user.click(within(cards[1]).getByRole("button", { name: "Remove attachment" }));
+    expect(screen.getAllByTestId("composer-chip")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: first.name })).toBeVisible();
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSend.mock.calls[0][1].map((attachment: { media: { name: string } }) => attachment.media.name)).toEqual([first.name]);
   });
 
   it("attaches a picked PDF and includes its data url on send", async () => {
@@ -134,7 +165,7 @@ describe("ThreadComposer — attachments", () => {
     });
 
     await waitFor(() =>
-      expect(screen.getByTestId("composer-chip")).toHaveTextContent("report.pdf"),
+      expect(screen.getByTestId("composer-chip")).toHaveTextContent("PDF"),
     );
 
     const textarea = screen.getByLabelText(/message input/i);
@@ -168,7 +199,7 @@ describe("ThreadComposer — attachments", () => {
       });
 
       await waitFor(() =>
-        expect(screen.getByTestId("composer-chip")).toHaveTextContent("report.csv"),
+        expect(screen.getByRole("button", { name: "report.csv" })).toHaveAccessibleDescription(expect.stringContaining("B")),
       );
 
       const textarea = screen.getByLabelText(/message input/i);
@@ -242,8 +273,8 @@ describe("ThreadComposer — attachments", () => {
 
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getAllByTestId("composer-chip")).toHaveLength(2);
-    expect(screen.getByText("first.pdf")).toBeInTheDocument();
-    expect(screen.getByText("second.pdf")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "first.pdf" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "second.pdf" })).toBeInTheDocument();
   });
 
   it("enforces the decoded attachment-total policy independently", async () => {
@@ -317,7 +348,7 @@ describe("ThreadComposer — attachments", () => {
     });
 
     await waitFor(() =>
-      expect(screen.getByText("pasted.pdf")).toBeInTheDocument(),
+      expect(screen.getByRole("button", { name: "pasted.pdf" })).toBeInTheDocument(),
     );
 
     await act(async () => {
@@ -332,7 +363,7 @@ describe("ThreadComposer — attachments", () => {
     });
 
     await waitFor(() =>
-      expect(screen.getByText("dropped.pdf")).toBeInTheDocument(),
+      expect(screen.getByRole("button", { name: "dropped.pdf" })).toBeInTheDocument(),
     );
     expect(screen.getAllByTestId("composer-chip")).toHaveLength(2);
     expect(encodeImage).not.toHaveBeenCalled();
@@ -359,6 +390,8 @@ describe("ThreadComposer — attachments", () => {
       fireEvent.change(fileInput, { target: { files: [file] } });
     });
 
+    expect(screen.getByRole("img", { name: "slow.png" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Encoding…")).toBeInTheDocument();
     const textarea = screen.getByLabelText(/message input/i);
     fireEvent.change(textarea, { target: { value: "hello" } });
     fireEvent.keyDown(textarea, { key: "Enter" });
@@ -400,6 +433,9 @@ describe("ThreadComposer — attachments", () => {
     fireEvent.change(textarea, { target: { value: "hi" } });
     fireEvent.keyDown(textarea, { key: "Enter" });
     expect(onSend).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Remove attachment" }));
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith("hi", undefined, undefined);
   });
 });
 
@@ -407,6 +443,31 @@ describe("ThreadComposer — attachments", () => {
 describe("local attachment paths and video ingress", () => {
   const local = { path: "C:\\project\\my clip.mp4", name: "my clip.mp4", size: 12,
     mime: "video/mp4", kind: "video" as const, url: "/api/media/sig/local" };
+
+  it("leaves a path pasted into a bang command as Shell text", () => {
+    const inspect = vi.fn().mockResolvedValue(local);
+    render(<ThreadComposer onSend={vi.fn()} onInspectAttachment={inspect} />);
+    const input = screen.getByLabelText(/message input/i) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "!cat " } });
+    input.setSelectionRange(5, 5);
+    const event = createEvent.paste(input, { clipboardData: { items: [], getData: () => local.path } });
+    fireEvent(input, event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(inspect).not.toHaveBeenCalled();
+  });
+
+  it("keeps a pending path literal when its draft becomes a bang command", async () => {
+    let complete!: (attachment: typeof local) => void;
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} onInspectAttachment={() => new Promise((resolve) => { complete = resolve; })} />);
+    const input = screen.getByLabelText(/message input/i);
+    fireEvent.paste(input, { clipboardData: { items: [], getData: () => local.path } });
+    fireEvent.change(input, { target: { value: `!${local.path}` } });
+    await act(async () => complete(local));
+    expect(input).toHaveValue(`!${local.path}`);
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith(`!${local.path}`, undefined, { sideChannel: true, userShell: true });
+  });
 
   it("confirms a large pasted video path and sends only the borrowed reference", async () => {
     const inspect = vi.fn().mockResolvedValue({ ...local, size: 64 * 1024 * 1024 + 1 });
@@ -416,7 +477,7 @@ describe("local attachment paths and video ingress", () => {
     fireEvent.change(input, { target: { value: "keep this " } });
     (input as HTMLTextAreaElement).setSelectionRange(10, 10);
     fireEvent.paste(input, { clipboardData: { items: [], getData: () => '"C:\\project\\my clip.mp4"' } });
-    await waitFor(() => expect(screen.getByTestId("composer-chip")).toHaveTextContent("my clip.mp4"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "my clip.mp4" })).toBeInTheDocument());
     expect(input).toHaveValue("keep this ");
     expect(inspect).toHaveBeenCalledWith(local.path);
     fireEvent.keyDown(input, { key: "Enter" });
@@ -505,15 +566,15 @@ describe("local attachment paths and video ingress", () => {
     const view = render(composer());
     const input = screen.getByLabelText(/message input/i);
     fireEvent.paste(input, { clipboardData: { items: [], getData: () => firstLocal.path } });
-    await screen.findByText(firstLocal.name);
+    await screen.findByRole("img", { name: firstLocal.name });
     fireEvent.change(input.closest("form")!.querySelector('input[type="file"]')!, { target: { files: [pngFile("middle.png")] } });
-    await screen.findByText("middle.png");
+    await screen.findByRole("img", { name: "middle.png" });
     fireEvent.paste(input, { clipboardData: { items: [], getData: () => lastLocal.path } });
-    await screen.findByText(lastLocal.name);
+    await screen.findByRole("img", { name: lastLocal.name });
     fireEvent.change(input, { target: { value: "compare the first, second and third images" } });
     await waitFor(() => expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled());
-    expect(screen.getAllByTestId("composer-chip").map((chip) => chip.textContent)).toEqual([
-      expect.stringContaining("first.png"), expect.stringContaining("middle.png"), expect.stringContaining("last.png"),
+    expect(screen.getAllByRole("img").map((image) => image.getAttribute("alt"))).toEqual([
+      "first.png", "middle.png", "last.png",
     ]);
     view.unmount();
     render(composer());
@@ -563,7 +624,7 @@ describe("local attachment paths and video ingress", () => {
     render(<ThreadComposer onSend={onSend} onInspectAttachment={vi.fn().mockResolvedValue(document)} ingressLimits={ingressLimits({ maxFileBytes: 8, maxTotalBytes: 8 })} />);
     const input = screen.getByLabelText(/message input/i);
     fireEvent.paste(input, { clipboardData: { items: [], getData: () => document.path } });
-    await screen.findByText(document.name);
+    await screen.findByRole("button", { name: document.name });
     const picker = input.closest("form")!.querySelector('input[type="file"]')!;
     fireEvent.change(picker, { target: { files: [pdfFile("upload.pdf", 8)] } });
     await waitFor(() => expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled());

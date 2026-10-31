@@ -120,10 +120,7 @@ def test_get_history_drops_orphan_tool_results_when_window_cuts_tool_calls():
     assert history[-1]["content"] == "new telegram question"
 
 
-# --- Positive test: legitimate pairs survive trimming ---
-
 def test_legitimate_tool_pairs_preserved_after_trim():
-    """Complete tool-call groups within the window must not be dropped."""
     session = Session(key="test:positive")
     session.messages.append({"role": "user", "content": "hello"})
     for i in range(5):
@@ -137,10 +134,7 @@ def test_legitimate_tool_pairs_preserved_after_trim():
     assert history[0]["role"] == "user"
 
 
-# --- last_archived > 0 ---
-
 def test_orphan_trim_with_last_archived():
-    """Orphan trimming works correctly when a session is partially archived."""
     session = Session(key="test:consolidated")
     for i in range(10):
         session.messages.append({"role": "user", "content": f"old {i}"})
@@ -241,8 +235,6 @@ def test_archived_tool_turn_stays_out_of_replay():
     assert len(session.messages) > 8
 
 
-# --- Edge: no tool messages at all ---
-
 def test_no_tool_messages_unchanged():
     session = Session(key="test:plain")
     for i in range(5):
@@ -254,10 +246,7 @@ def test_no_tool_messages_unchanged():
     _assert_no_orphans(history)
 
 
-# --- Edge: all leading messages are orphan tool results ---
-
 def test_all_orphan_prefix_stripped():
-    """If the window starts with orphan tool results and nothing else, they're all dropped."""
     session = Session(key="test:all-orphan")
     session.messages.append({"role": "tool", "tool_call_id": "gone_1", "name": "x", "content": "ok"})
     session.messages.append({"role": "tool", "tool_call_id": "gone_2", "name": "y", "content": "ok"})
@@ -269,8 +258,6 @@ def test_all_orphan_prefix_stripped():
     assert history[0]["role"] == "user"
     assert len(history) == 2
 
-
-# --- Edge: empty session ---
 
 def test_empty_session_history():
     session = Session(key="test:empty")
@@ -306,7 +293,6 @@ def test_get_history_preserves_reasoning_content():
 
 
 def test_get_history_does_not_inject_persisted_timestamps_into_replay_content():
-    """Persisted timestamps are session metadata, not prompt content."""
     session = Session(key="test:timestamps")
     session.messages.append({
         "role": "user",
@@ -336,7 +322,6 @@ def test_get_history_does_not_inject_persisted_timestamps_into_replay_content():
 
 
 def test_get_history_keeps_proactive_delivery_timestamps_out_of_replay_content():
-    """Timestamp metadata remains persisted without becoming prompt text."""
     session = Session(key="test:proactive-timestamps")
     session.messages.append({
         "role": "assistant",
@@ -379,10 +364,7 @@ def test_get_history_does_not_inject_tool_result_timestamps():
     assert tool_result["content"] == "ok"
 
 
-# --- Window cuts mid-group: assistant present but some tool results orphaned ---
-
 def test_window_cuts_mid_tool_group():
-    """If the window starts between an assistant's tool results, the partial group is trimmed."""
     session = Session(key="test:mid-cut")
     session.messages.append({"role": "user", "content": "setup"})
     session.messages.append({
@@ -398,14 +380,9 @@ def test_window_cuts_mid_tool_group():
     session.messages.extend(_tool_turn("intact", 0))
     session.messages.append({"role": "assistant", "content": "final"})
 
-    # Window of 6 should cut off the "setup" user msg and the assistant with split_a/split_b,
-    # leaving orphan tool results for split_a at the front.
     history = session.get_history(max_messages=6)
     _assert_no_orphans(history)
     assert history[0]["role"] == "user"
-
-
-# --- Image breadcrumbs: media kwarg is synthesized into content for replay ---
 
 
 def test_get_history_synthesizes_image_breadcrumb_from_media_kwarg():
@@ -671,12 +648,10 @@ def test_get_history_ignores_media_kwarg_on_non_user_rows():
         {
             "role": "assistant",
             "content": [{"type": "text", "text": "structured"}],
-            "media": ["/m/x.png"],  # nonsense but shouldn't crash
+            "media": ["/m/x.png"],
         }
     )
     history = session.get_history(max_messages=500)
-    # List content is passed through verbatim — the synthesizer only
-    # rewrites plain-string content.
     assert history[0]["content"] == [{"type": "text", "text": "structured"}]
 
 

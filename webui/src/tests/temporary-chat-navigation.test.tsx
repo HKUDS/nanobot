@@ -21,7 +21,6 @@ vi.mock("@/lib/bootstrap", async (importOriginal) => ({
   deriveWsUrl: () => "ws://test",
 }));
 
-// Only the network is fake: App, the workbench, stream hook and multiplexed client are real.
 class TestSocket {
   static current: TestSocket;
   readyState = 0;

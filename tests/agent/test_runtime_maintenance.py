@@ -1,5 +1,3 @@
-"""Gateway task admission, without installing packages or contacting a model."""
-
 import asyncio
 import inspect
 import json
@@ -74,7 +72,6 @@ async def test_idle_maintenance_refuses_new_work_and_abort_restores_it(agent):
             assert agent.bus.inbound_size == 0
             assert not agent._pending_queues
             assert agent.sessions.get_existing("cli:direct") is None
-            # A duplicate attempt must not reopen the first maintenance window.
             with pytest.raises(RuntimeMaintenanceError):
                 with agent.maintenance():
                     pytest.fail("duplicate maintenance was admitted")
@@ -396,7 +393,6 @@ async def test_exec_cleanup_is_owned_through_failure_and_retry(agent, tmp_path, 
         release.set()
         with pytest.raises(OSError, match="cleanup was not confirmed"):
             await task
-        # An exited parent alone cannot prove that failed process-tree cleanup settled.
         assert session.process.returncode is not None
         with pytest.raises(RuntimeBusyError):
             with agent.maintenance():
@@ -517,14 +513,12 @@ async def test_cron_timer_waits_without_consuming_and_manual_run_is_refused(agen
         if stop:
             assert not ran.is_set()
         else:
-            # A user may abort and immediately retry before this waiter resumes.
             with agent.maintenance():
                 await asyncio.sleep(0)
                 assert not ran.is_set() and not timer.done()
                 assert cron.store_path.read_bytes() == before
             async with asyncio.timeout(3):
                 await ran.wait()
-            # The scheduler cancels its previous timer when rearming itself.
             await asyncio.gather(timer, return_exceptions=True)
             assert len(cron.get_job(job.id).state.run_history) == 1
             assert cron._timer_task is not timer and not cron._timer_task.done()

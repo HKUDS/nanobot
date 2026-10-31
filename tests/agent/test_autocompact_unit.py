@@ -1,5 +1,3 @@
-"""Direct unit tests for AutoCompact class methods in isolation."""
-
 import asyncio
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -15,6 +13,7 @@ from nanobot.session.manager import Session, SessionManager
 def _mock_sessions():
     sessions = MagicMock(spec=SessionManager)
     sessions.state.get = AsyncMock(side_effect=lambda key: sessions.get_or_create(key))
+    sessions.state.get_header = AsyncMock(side_effect=lambda key: sessions.get_or_create(key))
     sessions.state.list_sessions = AsyncMock(side_effect=lambda: sessions.list_sessions())
     sessions.state.has_unarchived_messages = AsyncMock(return_value=True)
     return sessions
@@ -95,59 +94,44 @@ async def test_default_ttl_disables_idle_compaction():
     assert schedule.call_count == 0
 
 
-# ---------------------------------------------------------------------------
-# _is_expired
-# ---------------------------------------------------------------------------
-
-
 class TestIsExpired:
-    """Test AutoCompact._is_expired edge cases."""
 
     def test_ttl_zero_always_false(self):
-        """TTL=0 means auto-compact is disabled; always returns False."""
         ac = _make_autocompact(ttl=0)
         old = datetime.now() - timedelta(days=365)
         assert ac._is_expired(old) is False
 
     def test_none_timestamp_returns_false(self):
-        """None timestamp should return False."""
         ac = _make_autocompact(ttl=15)
         assert ac._is_expired(None) is False
 
     def test_empty_string_timestamp_returns_false(self):
-        """Empty string timestamp should return False (falsy)."""
         ac = _make_autocompact(ttl=15)
         assert ac._is_expired("") is False
 
     def test_exactly_at_boundary_is_expired(self):
-        """Timestamp exactly at TTL boundary should be expired (>=)."""
         ac = _make_autocompact(ttl=15)
         now = datetime(2026, 1, 1, 12, 0, 0)
         ts = now - timedelta(minutes=15)
         assert ac._is_expired(ts, now=now) is True
 
     def test_just_under_boundary_not_expired(self):
-        """Timestamp just under TTL boundary should NOT be expired."""
         ac = _make_autocompact(ttl=15)
         now = datetime(2026, 1, 1, 12, 0, 0)
         ts = now - timedelta(minutes=14, seconds=59)
         assert ac._is_expired(ts, now=now) is False
 
     def test_iso_string_parses_correctly(self):
-        """ISO format string timestamp should be parsed and evaluated."""
         ac = _make_autocompact(ttl=15)
         now = datetime(2026, 1, 1, 12, 0, 0)
         ts = (now - timedelta(minutes=20)).isoformat()
         assert ac._is_expired(ts, now=now) is True
 
     def test_custom_now_parameter(self):
-        """Custom 'now' parameter should override datetime.now()."""
         ac = _make_autocompact(ttl=10)
         ts = datetime(2026, 1, 1, 10, 0, 0)
-        # 9 minutes later → not expired
         now_under = datetime(2026, 1, 1, 10, 9, 0)
         assert ac._is_expired(ts, now=now_under) is False
-        # 10 minutes later → expired
         now_over = datetime(2026, 1, 1, 10, 10, 0)
         assert ac._is_expired(ts, now=now_over) is True
 
@@ -162,7 +146,6 @@ class TestIsExpired:
         assert ac._is_expired("not-a-timestamp") is False
 
     def test_tz_aware_string_timestamp_is_compared_by_instant(self):
-        """A valid timestamp with an offset remains eligible for expiry."""
         ac = _make_autocompact(ttl=15)
         now = datetime(2026, 1, 1, 12, 0, 0)
         recent = (now - timedelta(minutes=10)).astimezone().isoformat()
@@ -172,16 +155,9 @@ class TestIsExpired:
         assert ac._is_expired(expired, now=now) is True
 
 
-# ---------------------------------------------------------------------------
-# check_expired
-# ---------------------------------------------------------------------------
-
-
 class TestCheckExpired:
-    """Test AutoCompact.check_expired scheduling logic."""
 
     async def test_empty_sessions_list(self):
-        """No sessions → schedule_background should never be called."""
         ac = _make_autocompact(ttl=15)
         mock_sm = _mock_sessions()
         mock_sm.list_sessions.return_value = []
@@ -191,7 +167,6 @@ class TestCheckExpired:
         scheduler.assert_not_called()
 
     async def test_expired_session_schedules_background(self):
-        """Expired session should trigger schedule_background."""
         ac = _make_autocompact(ttl=15)
         mock_sm = _mock_sessions()
         old_dt = datetime.now() - timedelta(minutes=20)
@@ -247,6 +222,7 @@ class TestCheckExpired:
         old_dt = datetime.now() - timedelta(minutes=20)
         session = _make_session("cli:old", updated_at=old_dt)
         _add_turns(session, 5)
+        session.updated_at = old_dt
         ac.sessions.list_sessions.return_value = [
             {"key": "cli:old", "updated_at": old_dt.isoformat()}
         ]
@@ -318,7 +294,6 @@ class TestCheckExpired:
             await ac.check_expired(MagicMock(), fail)
 
     async def test_active_session_key_skips(self):
-        """Session in active_session_keys should be skipped."""
         ac = _make_autocompact(ttl=15)
         mock_sm = _mock_sessions()
         old_ts = (datetime.now() - timedelta(minutes=20)).isoformat()
@@ -329,7 +304,6 @@ class TestCheckExpired:
         scheduler.assert_not_called()
 
     async def test_session_already_in_archiving_skips(self):
-        """Session already in _archiving set should be skipped."""
         ac = _make_autocompact(ttl=15)
         mock_sm = _mock_sessions()
         old_ts = (datetime.now() - timedelta(minutes=20)).isoformat()
@@ -341,7 +315,6 @@ class TestCheckExpired:
         scheduler.assert_not_called()
 
     async def test_dream_session_skips(self):
-        """Internal Dream sessions should not be scheduled for idle compact."""
         ac = _make_autocompact(ttl=15)
         mock_sm = _mock_sessions()
         old_ts = (datetime.now() - timedelta(minutes=20)).isoformat()
@@ -357,7 +330,6 @@ class TestCheckExpired:
         assert "dream:20260602-155256" not in ac._archiving
 
     async def test_short_unarchived_session_schedules(self):
-        """A short idle session still needs an archive entry for Dream."""
         ac = _make_autocompact(ttl=15)
         mock_sm = _mock_sessions()
         last_active = datetime(2026, 1, 1, 10, 0, 0)
@@ -401,19 +373,13 @@ class TestCheckExpired:
         mock_sm.state.get.assert_not_awaited()
 
 
-# ---------------------------------------------------------------------------
-# _archive
-# ---------------------------------------------------------------------------
-
-
 class TestArchiveDelegates:
-    """_archive should delegate all session mutation to Consolidator."""
 
     @pytest.mark.asyncio
     async def test_calls_compact_idle_session(self):
         ac = _make_autocompact()
         mock_sm = _mock_sessions()
-        mock_sm.get_or_create.return_value = Session(key="cli:test")
+        mock_sm.get_or_create.return_value = _make_session(updated_at=datetime.now() - timedelta(minutes=20))
         ac.sessions = mock_sm
         ac.consolidator.compact_idle_session = AsyncMock(return_value="Summary.")
 
@@ -430,7 +396,7 @@ class TestArchiveDelegates:
     @pytest.mark.asyncio
     async def test_forwards_timeout_compaction_events_with_session_key(self):
         sessions = _mock_sessions()
-        sessions.get_or_create.return_value = Session(key="cli:test")
+        sessions.get_or_create.return_value = _make_session(updated_at=datetime.now() - timedelta(minutes=20))
         consolidator = MagicMock()
         observed: list[tuple[str, ContextCompactionEvent]] = []
 
@@ -475,6 +441,7 @@ class TestArchiveDelegates:
         ac = _make_autocompact()
         mock_sm = _mock_sessions()
         session = _make_session(
+            updated_at=datetime.now() - timedelta(minutes=20),
             metadata={"_last_summary": {"text": "Hello.", "last_active": "2026-05-13T10:00:00"}}
         )
         mock_sm.get_or_create.return_value = session
@@ -490,7 +457,7 @@ class TestArchiveDelegates:
     @pytest.mark.asyncio
     async def test_no_summary_when_compact_returns_empty(self):
         mock_sm = _mock_sessions()
-        mock_sm.get_or_create.return_value = _make_session(metadata={
+        mock_sm.get_or_create.return_value = _make_session(updated_at=datetime.now() - timedelta(minutes=20), metadata={
             "_last_summary": {"text": "Previous checkpoint.", "last_active": "2026-05-13T10:00:00"},
         })
         ac = _make_autocompact(sessions=mock_sm)
@@ -498,28 +465,27 @@ class TestArchiveDelegates:
 
         await ac._archive("cli:test", runtime=_runtime())
 
+        ac.consolidator.compact_idle_session.assert_awaited_once()
         assert "cli:test" not in ac._summaries
 
     @pytest.mark.asyncio
     async def test_exception_still_removes_from_archiving(self):
         ac = _make_autocompact()
         mock_sm = _mock_sessions()
+        mock_sm.get_or_create.return_value = _make_session(
+            updated_at=datetime.now() - timedelta(minutes=20),
+        )
         ac.sessions = mock_sm
         ac.consolidator.compact_idle_session = AsyncMock(side_effect=RuntimeError("fail"))
 
         ac._archiving.add("cli:test")
         await ac._archive("cli:test", runtime=_runtime())
 
+        ac.consolidator.compact_idle_session.assert_awaited_once()
         assert "cli:test" not in ac._archiving
 
 
-# ---------------------------------------------------------------------------
-# prepare_session
-# ---------------------------------------------------------------------------
-
-
 class TestPrepareSession:
-    """Test AutoCompact.prepare_session logic."""
 
     @pytest.mark.parametrize("archiving", [False, True])
     async def test_preparing_idle_session_preserves_turn_metadata(self, archiving):
@@ -536,7 +502,6 @@ class TestPrepareSession:
         assert prepared.metadata["last_channel"] == "discord:new"
 
     async def test_hot_path_summary_from_summaries(self):
-        """Summary from _summaries dict should be returned (hot path)."""
         ac = _make_autocompact()
         session = _make_session()
         last_active = datetime(2026, 5, 13, 14, 0, 0)
@@ -555,7 +520,6 @@ class TestPrepareSession:
         }
 
     async def test_hot_path_pops_summary_one_shot(self):
-        """Hot path should pop the summary (one-shot; second call returns None)."""
         ac = _make_autocompact()
         session = _make_session()
         last_active = datetime(2026, 1, 1)
@@ -566,12 +530,10 @@ class TestPrepareSession:
 
         _, summary1 = await ac.prepare_session(session, "cli:test")
         assert summary1 is not None
-        # Second call: hot path entry was popped
         _, summary2 = await ac.prepare_session(session, "cli:test")
         assert summary2 is None
 
     async def test_cold_path_summary_from_metadata(self):
-        """When _summaries is empty, summary should come from metadata (cold path)."""
         ac = _make_autocompact()
         last_active = datetime(2026, 5, 13, 14, 0, 0)
         session = _make_session(metadata={
@@ -614,7 +576,6 @@ class TestPrepareSession:
         }
 
     async def test_cold_path_tolerates_missing_last_active(self):
-        """A _last_summary dict without last_active must not raise."""
         ac = _make_autocompact(ttl=0)
         fallback = datetime(2026, 1, 2, 3, 4, 5)
         session = _make_session(
@@ -632,7 +593,6 @@ class TestPrepareSession:
         }
 
     async def test_cold_path_missing_text_returns_none(self):
-        """A _last_summary without a non-empty string text yields no summary."""
         ac = _make_autocompact()
         session = _make_session(metadata={
             "_last_summary": {"last_active": datetime(2026, 1, 1).isoformat()},
@@ -644,7 +604,6 @@ class TestPrepareSession:
         assert summary is None
 
     async def test_no_summary_available_returns_none(self):
-        """When no summary is available, should return (session, None)."""
         ac = _make_autocompact()
         session = _make_session()
 
@@ -654,7 +613,6 @@ class TestPrepareSession:
         assert summary is None
 
     async def test_dream_session_skips_reload_and_summaries(self):
-        """Internal Dream sessions should not reload or receive compact summaries."""
         ac = _make_autocompact(ttl=15)
         mock_sm = _mock_sessions()
         ac.sessions = mock_sm
@@ -684,7 +642,6 @@ class TestPrepareSession:
         assert key not in ac._summaries
 
     async def test_cold_path_metadata_not_dict_returns_none(self):
-        """If metadata _last_summary is not a dict, should return None summary."""
         ac = _make_autocompact()
         session = _make_session(metadata={"_last_summary": "not a dict"})
 
@@ -694,7 +651,6 @@ class TestPrepareSession:
         assert summary is None
 
     async def test_hot_path_takes_priority_over_metadata(self):
-        """Hot path (_summaries) should take priority over metadata."""
         ac = _make_autocompact()
         session = _make_session(metadata={
             "_last_summary": {
@@ -711,4 +667,3 @@ class TestPrepareSession:
         _, summary = await ac.prepare_session(session, "cli:test")
         assert summary is not None
         assert summary["text"] == "Hot summary."
-        # After hot path pops, cold path would kick in on next call

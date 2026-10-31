@@ -1,6 +1,3 @@
-"""Tests for AgentRunner hook lifecycle: ordering, streaming deltas,
-cached-token propagation, and hook context."""
-
 from __future__ import annotations
 
 from copy import deepcopy
@@ -243,7 +240,6 @@ async def test_runner_length_recovery_streams_segments_once_and_returns_all_cont
 
 @pytest.mark.asyncio
 async def test_runner_passes_cache_read_tokens_to_hook_context():
-    """Hook context usage preserves a reported cache-read count."""
     from nanobot.agent.hook import AgentHook, AgentHookContext
     from nanobot.agent.runner import AgentRunner
 

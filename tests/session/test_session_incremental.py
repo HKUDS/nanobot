@@ -1,5 +1,3 @@
-"""Incremental storage must preserve snapshot isolation and cross-process conflicts."""
-
 import asyncio
 import sqlite3
 import threading
@@ -76,7 +74,6 @@ async def test_nested_draft_edits_and_failed_commits_remain_private(tmp_path, tr
     draft.messages[0]["content"][0]["text"] = "edited"
     assert state.peek(draft.key).messages[0]["content"][0]["text"] == "original"
     await state.finish_turn(draft)
-    # Previously issued drafts still represent their old revision.
     assert peer.messages[0]["content"][0]["text"] == "original"
     peer.add_message("assistant", "stale append")
     with pytest.raises(SessionConflictError):
@@ -114,7 +111,6 @@ async def test_external_append_merges_and_external_edit_conflicts(tmp_path):
     external = other.get_or_create(draft.key)
     external.messages[0]["content"] = "replaced"
     other.save(external)
-    # A metadata-only command must not revalidate stale cached history accidentally.
     await state.update_metadata(draft.key, {"title": "new"})
     draft.add_message("assistant", "stale")
     with pytest.raises(SessionConflictError):

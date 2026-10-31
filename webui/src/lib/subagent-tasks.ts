@@ -1,7 +1,21 @@
-import type { SubagentTaskSnapshot } from "./types";
+import type { SubagentTaskSnapshot, UIMessage } from "./types";
 
 export interface ObservedSubagentTask extends SubagentTaskSnapshot {
   observedAtMs: number;
+}
+
+export function isActiveSubagentTask(task: SubagentTaskSnapshot): boolean {
+  return task.state === "queued" || task.state === "running" || task.state === "stopping";
+}
+
+export function latestSubagentInputKey(messages: readonly UIMessage[]): string | null {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (message.role === "user" && !message.sessionMessage) {
+      return message.turnId ? `user:${message.turnId}` : `replay:${message.id}`;
+    }
+  }
+  return null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -28,7 +42,6 @@ export function isSubagentTask(value: unknown): value is SubagentTaskSnapshot {
     && (value.usage === null || (isRecord(value.usage) && Object.values(value.usage).every((entry) => entry === null || typeof entry === "string" || (typeof entry === "number" && Number.isFinite(entry)))));
 }
 
-/** Merge observations from initial reads, live events and control replies. */
 export function mergeSubagentTasks(
   current: ObservedSubagentTask[], incoming: SubagentTaskSnapshot[],
 ): ObservedSubagentTask[] {

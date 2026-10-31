@@ -41,7 +41,6 @@ export function ChannelQrConnectFlow({
   renderActions,
   renderView,
 }: {
-  token: string;
   channelName: string;
   startParams?: Readonly<Record<string, string | boolean>>;
   idleLabel?: string;

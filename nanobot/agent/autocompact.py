@@ -1,5 +1,3 @@
-"""Auto compact: proactive compression of idle sessions to reduce token cost and latency."""
-
 from __future__ import annotations
 
 import asyncio
@@ -96,6 +94,10 @@ class AutoCompact:
             return
         try:
             async with self._session_lock(key):
+                # A turn may have refreshed activity while this archive waited.
+                session = await self.sessions.state.get_header(key)
+                if not self._is_expired(session.updated_at):
+                    return
                 # Idle compaction and turns share one transcript boundary.
                 summary = await self.consolidator.compact_idle_session(
                     key,
@@ -126,11 +128,9 @@ class AutoCompact:
             self._archiving.discard(key)
             self._summaries.pop(key, None)
             return session, None
-        # Hot path: summary from in-memory dict (process hasn't restarted).
         entry = self._summaries.pop(key, None)
         if entry:
             return session, entry
-        # Cold path: summary persisted in session metadata (process restarted).
         # Persisted metadata may outlive schema changes; a malformed summary must
         # not abort turn preparation.
         return session, session_summary_from_metadata(

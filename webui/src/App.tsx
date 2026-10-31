@@ -8,18 +8,19 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ArrowRight, ChevronDown, Eye, EyeOff, Moon, ShieldCheck, Sun, X } from "lucide-react";
+import { ArrowRight, ChevronDown, Eye, EyeOff, ShieldCheck, X } from "lucide-react";
+import { ThemeToggleIcon } from "@/components/icons/ThemeToggleIcon";
 import { Trans, useTranslation } from "react-i18next";
 import { channelUiPresentation } from "@/channel-plugins/registry";
 import { StarPrompt } from "@/components/StarPrompt";
 import { Sidebar } from "@/components/Sidebar";
 import { RemoteInstances } from "@/components/remote/RemoteInstances";
 import { useRemoteConnections } from "@/components/remote/remote-context";
-import { RemoteConnectionsPage } from "@/components/remote/RemoteConnectionsPage";
+import { LazyRemoteConnectionsPage } from "@/components/remote/LazyRemoteConnectionsPage";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SidebarResizeHandle, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "@/components/SidebarResizeHandle";
 import { matchSidebarShortcut } from "@/lib/sidebar-shortcuts";
-import type { SidebarDeleteItem } from "@/components/ChatList";
+import type { SidebarDeleteDecision, SidebarDeleteItem } from "@/components/ChatList";
 import type { SettingsSectionKey } from "@/components/settings/SettingsView";
 import { StartupShell } from "@/components/StartupShell";
 import { ComposerDraftStore, clearStoredComposerDrafts } from "@/lib/composer-draft";
@@ -1176,7 +1177,7 @@ function Shell({
   const updateFlow = useUpdateFlow();
   const localActive = remoteConnections?.localActive !== false;
   const managingConnections = remoteConnections?.managing === true && !remoteConnections?.activeHostId;
-  const { theme, toggle } = useTheme();
+  const { theme, preference: themePreference, toggle, setTheme } = useTheme();
   const managementMain = useRef<HTMLElement>(null);
   const reportManagementSurface = remoteConnections?.reportManagementSurface;
   useEffect(() => {
@@ -1263,6 +1264,7 @@ function Shell({
   const [pendingDelete, setPendingDelete] = useState<{
     items: SidebarDeleteItem[];
     automations?: SessionAutomationJob[];
+    onDecision?: SidebarDeleteDecision;
   } | null>(null);
   const [pendingTabRename, setPendingTabRename] = useState<{
     key: string;
@@ -1280,6 +1282,7 @@ function Shell({
   const [pairingBusyCode, setPairingBusyCode] = useState<string | null>(null);
   const [pairingError, setPairingError] = useState<string | null>(null);
   const pairingRefreshRef = useRef<Promise<number> | null>(null);
+  const pairingRefreshPendingRef = useRef(false);
   const [snoozedPairingCodes, setSnoozedPairingCodes] = useState<Map<string, {
     until: number;
     deliveryStatus: PairingRequestInfo["delivery_status"];
@@ -1472,32 +1475,41 @@ function Shell({
   }, [updatedChatIds]);
 
   const refreshPairingRequests = useCallback((): Promise<number> => {
-    if (pairingRefreshRef.current) return pairingRefreshRef.current;
+    if (pairingRefreshRef.current) {
+      // An earlier snapshot may predate the notice or completed mutation.
+      pairingRefreshPendingRef.current = true;
+      return pairingRefreshRef.current;
+    }
 
     const request = (async () => {
-      try {
-        const payload = await fetchPairingRequests(getToken());
-        const requests = Array.isArray(payload.requests) ? payload.requests : [];
-        setPairingRequests(requests);
-        setSnoozedPairingCodes((current) => {
-          if (current.size === 0) return current;
-          const activeRequests = new Map(requests.map((request) => [request.code, request]));
-          const now = Date.now();
-          const next = new Map(
-            Array.from(current).filter(
-              ([code, snooze]) => activeRequests.has(code)
-                && snooze.until > now
-                && activeRequests.get(code)?.delivery_status === snooze.deliveryStatus,
-            ),
-          );
-          return next.size === current.size ? current : next;
-        });
-        return requests.length;
-      } catch {
-        // Pairing is an opportunistic WebUI affordance. The slash command path
-        // remains available if this polling request fails.
-        return 0;
-      }
+      let requestCount: number;
+      do {
+        pairingRefreshPendingRef.current = false;
+        try {
+          const payload = await fetchPairingRequests(getToken());
+          const requests = Array.isArray(payload.requests) ? payload.requests : [];
+          setPairingRequests(requests);
+          setSnoozedPairingCodes((current) => {
+            if (current.size === 0) return current;
+            const activeRequests = new Map(requests.map((request) => [request.code, request]));
+            const now = Date.now();
+            const next = new Map(
+              Array.from(current).filter(
+                ([code, snooze]) => activeRequests.has(code)
+                  && snooze.until > now
+                  && activeRequests.get(code)?.delivery_status === snooze.deliveryStatus,
+              ),
+            );
+            return next.size === current.size ? current : next;
+          });
+          requestCount = requests.length;
+        } catch {
+          // Pairing is an opportunistic WebUI affordance. The slash command path
+          // remains available if this polling request fails.
+          requestCount = 0;
+        }
+      } while (pairingRefreshPendingRef.current);
+      return requestCount;
     })();
     const clearRequest = () => {
       if (pairingRefreshRef.current === request) pairingRefreshRef.current = null;
@@ -1515,17 +1527,24 @@ function Shell({
     const poll = async () => {
       const requestCount = await refreshPairingRequests();
       if (disposed) return;
+      if (timer !== null) window.clearTimeout(timer);
       timer = window.setTimeout(
         () => void poll(),
         requestCount > 0 ? PAIRING_POLL_INTERVAL_MS : PAIRING_IDLE_POLL_INTERVAL_MS,
       );
     };
+    const requestRefresh = () => { void poll(); };
+    const unsubscribePairing = client.onPairingChange(requestRefresh);
+    const unsubscribeReady = client.onReady(requestRefresh);
     void poll();
     return () => {
       disposed = true;
+      pairingRefreshPendingRef.current = false;
       if (timer !== null) window.clearTimeout(timer);
+      unsubscribePairing();
+      unsubscribeReady();
     };
-  }, [pageVisible, refreshPairingRequests]);
+  }, [client, pageVisible, refreshPairingRequests]);
 
   const activeSession = useMemo<ChatSummary | null>(() => {
     if (!activeKey) return null;
@@ -2051,24 +2070,23 @@ function Shell({
     [pendingProjectRename, updateSidebarState],
   );
 
-  const onToggleArchive = useCallback(
-    (key: string) => {
+  const onArchiveMany = useCallback(
+    (keys: string[], archive: boolean) => {
+      const selected = new Set(keys);
       void updateSidebarState((current) => {
         const archived = new Set(current.archived_keys);
-        const pinned = current.pinned_keys.filter((item) => item !== key);
-        if (archived.has(key)) {
-          archived.delete(key);
-        } else {
-          archived.add(key);
+        for (const key of selected) {
+          if (archive) archived.add(key);
+          else archived.delete(key);
         }
         return {
           ...current,
-          pinned_keys: pinned,
+          pinned_keys: current.pinned_keys.filter((key) => !selected.has(key)),
           archived_keys: Array.from(archived),
         };
       });
-      if (activeKey === key && !sidebarState.archived_keys.includes(key)) {
-        const archived = new Set([...sidebarState.archived_keys, key]);
+      if (archive && activeKey && selected.has(activeKey)) {
+        const archived = new Set([...sidebarState.archived_keys, ...selected]);
         const next = topicSessions.find((session) => !archived.has(session.key));
         navigate({
           view: "chat",
@@ -2079,6 +2097,10 @@ function Shell({
     },
     [activeKey, navigate, sidebarState.archived_keys, topicSessions, updateSidebarState],
   );
+
+  const onToggleArchive = useCallback((key: string) => {
+    onArchiveMany([key], !sidebarState.archived_keys.includes(key));
+  }, [onArchiveMany, sidebarState.archived_keys]);
 
   const onToggleArchived = useCallback(() => {
     void updateSidebarState((current) => ({
@@ -2369,6 +2391,7 @@ function Shell({
 
   const onConfirmDelete = useCallback(async () => {
     if (!pendingDelete) return;
+    pendingDelete.onDecision?.(true);
     const items = pendingDelete.items;
     const deletingKeys = new Set(items.map((item) => item.key));
     const hasAutomations = (pendingDelete.automations?.length ?? 0) > 0;
@@ -2422,7 +2445,7 @@ function Shell({
     }
   }, [pendingDelete, deleteChat, activeKey, activeTabState, navigate, topicSessions, filePreviewStore, draftStore]);
 
-  const onRequestDeleteMany = useCallback(async (items: SidebarDeleteItem[]) => {
+  const onRequestDeleteMany = useCallback(async (items: SidebarDeleteItem[], onDecision?: SidebarDeleteDecision) => {
     const uniqueItems = Array.from(new Map(items.map((item) => [item.key, item])).values());
     if (uniqueItems.length === 0) return;
     const automationResults = await Promise.allSettled(
@@ -2431,11 +2454,20 @@ function Shell({
     const automations = automationResults.flatMap((result) => (
       result.status === "fulfilled" ? result.value : []
     ));
-    setPendingDelete({ items: uniqueItems, automations });
+    let decision = onDecision;
+    setPendingDelete({
+      items: uniqueItems,
+      automations,
+      onDecision: (confirmed) => {
+        const notify = decision;
+        decision = undefined;
+        notify?.(confirmed);
+      },
+    });
   }, [getSessionAutomations]);
 
-  const onRequestDelete = useCallback((key: string, label: string) => {
-    void onRequestDeleteMany([{ key, label }]);
+  const onRequestDelete = useCallback((key: string, label: string, onDecision?: SidebarDeleteDecision) => {
+    void onRequestDeleteMany([{ key, label }], onDecision);
   }, [onRequestDeleteMany]);
 
   const visiblePairingRequests = useMemo(
@@ -2464,9 +2496,10 @@ function Shell({
         });
       } catch (e) {
         setPairingError((e as Error).message);
-        void refreshPairingRequests();
       } finally {
         setPairingBusyCode(null);
+        // A mutation reply can be older than an already-delivered notification.
+        void refreshPairingRequests();
       }
     },
     [client, refreshPairingRequests],
@@ -2773,6 +2806,7 @@ function Shell({
     onTogglePin,
     onRequestRename,
     onToggleArchive,
+    onArchiveMany,
     onRequestRenameTab,
     paneGroups: sidebarPaneGroups,
     onSelectPane: onSelectSidebarPane,
@@ -2844,11 +2878,7 @@ function Shell({
                   onClick={toggle}
                   className="h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
                 >
-                  {theme === "dark" ? (
-                    <Sun className="h-4 w-4" />
-                  ) : (
-                    <Moon className="h-4 w-4" />
-                  )}
+                  <ThemeToggleIcon theme={theme} />
                 </Button>
               )
             }
@@ -2859,7 +2889,6 @@ function Shell({
             "relative flex h-full w-full overflow-hidden",
           )}
         >
-          {/* Host sidebar: in normal flow, so the thread area width stays honest. */}
           {showMainSidebar ? (
             <aside
               data-testid="host-sidebar-flow"
@@ -2874,6 +2903,7 @@ function Shell({
               }}
             >
               <div
+                data-theme-surface
                 className={cn(
                   "absolute inset-y-0 left-0 h-full w-full overflow-hidden",
                   showHostChrome
@@ -2943,11 +2973,13 @@ function Shell({
                 activeKey={activeKey}
                 loading={loading}
                 titleOverrides={sidebarState.title_overrides}
+                messageCache={threadMessageCache}
                 onSelect={onSelectSearchResult}
               />
             </Suspense>
           ) : null}
         <main ref={managementMain}
+          data-theme-surface
           aria-hidden={managingConnections && remoteConnections?.embeddedManagement || undefined}
           {...(managingConnections && remoteConnections?.embeddedManagement ? { inert: "" } : {})}
           className={cn(
@@ -3015,7 +3047,6 @@ function Shell({
                               !activeKey ? onTemporaryChatEnabledChange : undefined
                             }
                             onToggleSidebar={toggleSidebar}
-                            onNewChat={onNewChat}
                             onCreateChat={
                               temporaryChatEnabled ? onCreateTemporaryChat : onCreateChat
                             }
@@ -3061,7 +3092,6 @@ function Shell({
                           filePreviewStore={filePreviewStore}
                           draftStore={draftStore}
                           onToggleSidebar={toggleSidebar}
-                          onNewChat={onNewChat}
                           onCreateChat={onCreateChat}
                           pendingFirstMessage={pendingAutomationMessage}
                           onPendingFirstMessageConsumed={onPendingAutomationMessageConsumed}
@@ -3112,19 +3142,19 @@ function Shell({
             </div>}
             {view !== "chat" && (
               <div className="absolute inset-0 flex flex-col">
-                {view === "remote" ? <RemoteConnectionsPage
+                {view === "remote" ? <LazyRemoteConnectionsPage
                   mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
                   hostChromeInset={showHostChrome}
                   onBackToChat={onBackToChat}
                 /> : <Suspense fallback={<StartupShell embedded surface={view} sidebarExpanded={hostSidebarOpen} />}>
                   <SettingsView
                     registerExitGuard={registerSettingsExitGuard}
-                    theme={theme}
+                    themePreference={themePreference}
                     initialSection={settingsInitialSection}
                     initialSettings={settingsSnapshot}
                     showSidebar={view === "settings"}
                     mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
-                    onToggleTheme={toggle}
+                    onChangeTheme={setTheme}
                     onBackToChat={onBackToChat}
                     onModelNameChange={onModelNameChange}
                     onSettingsChange={setSettingsSnapshot}
@@ -3146,7 +3176,7 @@ function Shell({
             )}
           </div>
           {managingConnections && !remoteConnections?.embeddedManagement && <div className="absolute inset-0 flex flex-col">
-            <RemoteConnectionsPage
+            <LazyRemoteConnectionsPage
               mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
               hostChromeInset={showHostChrome}
               onBackToChat={() => remoteConnections?.closeManagement()}
@@ -3162,7 +3192,10 @@ function Shell({
               title={pendingDelete.items[0]?.label ?? ""}
               count={pendingDelete.items.length}
               automations={pendingDelete.automations}
-              onCancel={() => setPendingDelete(null)}
+              onCancel={() => {
+                pendingDelete.onDecision?.(false);
+                setPendingDelete(null);
+              }}
               onConfirm={onConfirmDelete}
             />
           </Suspense>

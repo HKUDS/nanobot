@@ -1,5 +1,3 @@
-"""One SQLite owner for model messages and durable, generation-bound display facts."""
-
 from __future__ import annotations
 
 import json
@@ -13,19 +11,11 @@ from nanobot.session.display_history import HistoryFact, HistoryKind
 from nanobot.session.manager import SessionManager
 from nanobot.session.sqlite_store import SessionConflictError
 from nanobot.webui.forking import create_webui_chat_fork
-from nanobot.webui.history import HISTORY_IMPORT_MARKER, collect_legacy_history
 from nanobot.webui.transcript import WebUITranscriptRecorder, build_webui_thread_response
 
 
 def _manager(tmp_path: Path) -> SessionManager:
     return SessionManager(tmp_path / "workspace", sessions_root=tmp_path / "sessions")
-
-
-def _legacy(directory: Path, key: str, records: list[dict]) -> Path:
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{SessionManager.safe_key(key)}.jsonl"
-    path.write_text("".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records), encoding="utf-8")
-    return path
 
 
 async def test_display_facts_survive_reopen_without_entering_model_history(tmp_path):
@@ -121,73 +111,6 @@ async def test_fork_rolls_back_both_histories_if_display_copy_fails(tmp_path, mo
     await sessions.state.aclose()
 
 
-async def test_legacy_import_is_atomic_repeatable_and_deletion_cannot_resurrect_backup(tmp_path):
-    sessions = _manager(tmp_path)
-    directory = tmp_path / "legacy"
-    path = _legacy(directory, "websocket:imported", [
-        {"event": "user", "chat_id": "imported", "text": "hello", "created_at_ms": 1000},
-        {"event": "delta", "chat_id": "imported", "text": "an"},
-        {"event": "delta", "chat_id": "imported", "text": "swer"},
-        {"event": "stream_end", "chat_id": "imported"},
-        {"event": "turn_end", "chat_id": "imported"},
-    ])
-    before = path.read_bytes()
-    def collect(rows):
-        return collect_legacy_history(rows, directory=directory)
-    await sessions.state.migrate_history(HISTORY_IMPORT_MARKER, collect)
-    facts = await sessions.state.project_history("websocket:imported", lambda history: history.all_facts())
-    assert [fact.kind for fact in facts] == [HistoryKind.INPUT, HistoryKind.ANSWER_SEGMENT, HistoryKind.COMPLETION]
-    assert facts[1].content["text"] == "answer"
-    assert path.read_bytes() == before
-    await sessions.state.migrate_history(HISTORY_IMPORT_MARKER, collect)
-    assert await sessions.state.project_history("websocket:imported", lambda history: history.all_facts()) == facts
-    assert await sessions.state.delete("websocket:imported")
-    await sessions.state.aclose()
-    reopened = _manager(tmp_path)
-    await reopened.state.migrate_history(HISTORY_IMPORT_MARKER, collect)
-    assert await reopened.state.read_metadata("websocket:imported") is None
-    await reopened.state.aclose()
-
-
-async def test_corrupt_legacy_input_rolls_back_import_marker_and_all_records(tmp_path):
-    sessions = _manager(tmp_path)
-    directory = tmp_path / "legacy"
-    _legacy(directory, "websocket:first", [{"event": "user", "chat_id": "first", "text": "safe"}])
-    corrupt = _legacy(directory, "websocket:second", [{"event": "user", "chat_id": "second", "text": "also safe"}])
-    with corrupt.open("a", encoding="utf-8") as handle:
-        handle.write('{"event":\n')
-    with pytest.raises(ValueError, match="cannot import history"):
-        await sessions.state.migrate_history(HISTORY_IMPORT_MARKER, lambda rows: collect_legacy_history(rows, directory=directory))
-    assert await sessions.state.list_sessions() == []
-    with closing(sqlite3.connect(sessions.sessions_dir / "sessions.sqlite3")) as db:
-        assert db.execute("SELECT value FROM storage_meta WHERE key=?", (HISTORY_IMPORT_MARKER,)).fetchone() is None
-    _legacy(directory, "websocket:second", [{"event": "user", "chat_id": "second", "text": "fixed"}])
-    await sessions.state.migrate_history(HISTORY_IMPORT_MARKER, lambda rows: collect_legacy_history(rows, directory=directory))
-    assert {row["key"] for row in await sessions.state.list_sessions()} == {"websocket:first", "websocket:second"}
-    await sessions.state.aclose()
-
-
-async def test_segments_import_in_order_without_trusting_damaged_manifest(tmp_path):
-    sessions = _manager(tmp_path)
-    directory = tmp_path / "legacy"
-    segments = directory / "websocket_order.segments"
-    segments.mkdir(parents=True)
-    for number in (2, 1):
-        (segments / f"{number:06}.jsonl").write_text(json.dumps({"event": "message", "chat_id": "order", "text": str(number)}) + "\n", encoding="utf-8")
-    (segments / "manifest.json").write_text("broken cached manifest", encoding="utf-8")
-    _legacy(directory, "websocket:order", [{"event": "message", "chat_id": "order", "text": "3"}])
-    await sessions.state.migrate_history(HISTORY_IMPORT_MARKER, lambda rows: collect_legacy_history(rows, directory=directory))
-    assert await sessions.state.project_history("websocket:order", lambda history: [fact.content["text"] for fact in history.all_facts()]) == ["1", "2", "3"]
-    await sessions.state.aclose()
-
-
-def test_orphan_lossy_filename_requires_recorded_identity(tmp_path):
-    directory = tmp_path / "legacy"
-    _legacy(directory, "websocket:a_b", [{"event": "message", "text": "unknown whether a_b or a:b"}])
-    with pytest.raises(ValueError, match="ambiguous legacy history identity"):
-        collect_legacy_history([], directory=directory)
-
-
 async def test_recorder_keeps_completed_segments_not_every_transport_delta(tmp_path):
     sessions = _manager(tmp_path)
     key = "websocket:stream"
@@ -249,31 +172,6 @@ asyncio.run(run())
     assert reopened.read_session_file(source.key)["messages"] == source.messages
 
 
-@pytest.mark.asyncio
-async def test_legacy_import_owner_survives_delete_and_new_workspace(tmp_path):
-    from nanobot.webui.history import collect_legacy_history
-
-    root = tmp_path / "sessions"
-    legacy = tmp_path / "webui"
-    legacy.mkdir()
-    key = "websocket:owned"
-    (legacy / f"{SessionManager.safe_key(key)}.jsonl").write_text(
-        '{"event":"user","chat_id":"owned","text":"keep ownership"}\n', encoding="utf-8",
-    )
-    first = SessionManager(tmp_path / "first", sessions_root=root)
-    await first.state.migrate_history(HISTORY_IMPORT_MARKER, lambda rows: collect_legacy_history(
-        rows, directory=legacy, namespace=first.sessions_dir,
-    ))
-    await first.state.delete(key)
-    await first.state.aclose()
-    second = SessionManager(tmp_path / "second", sessions_root=root)
-    await second.state.migrate_history(HISTORY_IMPORT_MARKER, lambda rows: collect_legacy_history(
-        rows, directory=legacy, namespace=second.sessions_dir,
-    ))
-    assert await second.state.read(key) is None
-    await second.state.aclose()
-
-
 async def test_large_display_fact_serialization_and_copy_stay_off_runtime_loop(tmp_path, monkeypatch):
     import threading
 
@@ -315,29 +213,6 @@ def test_message_projection_adapter_preserves_reply_and_agent_activity():
     }
     fact = HistoryFact.decode(fact_from_record(record).encode())
     assert record_from_fact(fact, "websocket:activity") == record
-
-
-async def test_legacy_activity_without_record_timestamps_preserves_file_time(tmp_path):
-    import os
-
-    from nanobot.webui.session_list_index import list_webui_sessions
-
-    sessions = _manager(tmp_path)
-    session = await sessions.state.get_header("websocket:old-activity")
-    directory = tmp_path / "legacy"
-    path = _legacy(directory, session.key, [{
-        "event": "message", "chat_id": "old-activity", "text": "historical display activity",
-    }])
-    os.utime(path, (1760000000, 1760000000))
-    await sessions.state.migrate_history(HISTORY_IMPORT_MARKER, lambda rows: collect_legacy_history(
-        rows, directory=directory,
-    ))
-    rows = list_webui_sessions(sessions, await sessions.state.list_metadata())
-    from datetime import datetime
-
-    assert datetime.fromisoformat(rows[0]["updated_at"]).timestamp() == 1760000000
-    assert rows[0]["preview"] == "historical display activity"
-    await sessions.state.aclose()
 
 
 @pytest.mark.parametrize("stored_display", [False, True])

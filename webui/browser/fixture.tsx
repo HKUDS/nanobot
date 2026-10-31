@@ -15,7 +15,8 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, Dia
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { SettingsIcon } from "@/components/icons/product-icons";
-import { initializeI18n } from "@/i18n";
+import { initializeI18n, setAppLanguage } from "@/i18n";
+import { normalizeLocale } from "@/i18n/config";
 import type { McpPresetInfo, UIMessage } from "@/lib/types";
 import { SkeletonFixture } from "./skeleton-fixture";
 import { installSkeletonPreviewApi, SkeletonAdditionsFixture } from "./skeleton-additions-fixture";
@@ -23,18 +24,27 @@ import { NewChatSkeletonFixture } from "./new-chat-skeleton-fixture";
 import "../src/globals.css";
 import { DiagramFixture } from "./diagram-fixture";
 import { TypographyFixture } from "./typography-fixture";
-import { MarkdownEmphasisFixture } from "./markdown-emphasis-fixture";
+import { CodeWrappingFixture } from "./code-wrapping-fixture";
+import { InlineReferencesFixture } from "./inline-references-fixture";
 import { HistoryBoundaryFixture } from "./history-boundary-fixture";
 import { ChatFailureFixture } from "./chat-failure-fixture";
 import { ThreadLoadingFixture } from "./thread-loading-fixture";
 import { AnswerOrderFixture } from "./answer-order-fixture";
 import { SidebarActivityFixture } from "./sidebar-activity-fixture";
+import { ActivityLogosFixture } from "./activity-logos-fixture";
 import { HistoryHydrationFixture } from "./history-hydration-fixture";
 import { IdleCompactionFixture, installIdleCompactionApi } from "./idle-compaction-fixture";
 import { FileEditPathFixture } from "./file-edit-path-fixture";
 import { QueuedGuidanceFixture } from "./queued-guidance-fixture";
 import { WorkspaceAlignmentFixture } from "./workspace-alignment-fixture";
 import { ComposerActionFixture } from "./composer-action-fixture";
+import { MobileChatLayoutFixture } from "./mobile-chat-layout-fixture";
+import { ThemeToggleFixture } from "./theme-toggle-fixture";
+import { DisplayMathFixture } from "./display-math-fixture";
+import { AttachmentLayoutFixture } from "./attachment-layout-fixture";
+import { LoadedSessionSearchFixture } from "./loaded-session-search-fixture";
+import { AppearanceFixture } from "./appearance-fixture";
+import { installSubagentDockApi, SubagentDockFixture } from "./subagent-dock-fixture";
 
 const history: UIMessage[] = [
   { id: "question", role: "user", content: "Earlier question", createdAt: 1_700_000_000_000 },
@@ -152,8 +162,25 @@ const unbrandedPlugin: McpPresetInfo = {
 function AppsFixture() {
   const noop = () => {};
   const managing = parameters.has("manage");
+  const connectionLayout = parameters.has("connection-layout");
+  const [connecting, setConnecting] = useState(false);
   const [actions, setActions] = useState<unknown[]>([]);
-  const presets: McpPresetInfo[] = managing ? [{
+  const presets: McpPresetInfo[] = connectionLayout ? [
+    {
+      name: "linear", display_name: "Linear", category: "productivity", description: "Manage issues and projects",
+      docs_url: "", transport: "streamableHttp", auth: "oauth", requires: "Linear account", note: "",
+      install_supported: true, installed: parameters.has("runtime"), configured: parameters.has("runtime"),
+      available: true, status: parameters.has("runtime") ? "configured" : "not_installed",
+      required_fields: [], connection_summary: "", source: "preset",
+      brand_color: "#5E6AD2", runtime_status: parameters.has("runtime") ? "connecting" : undefined,
+    },
+    ...["Notion", "GitHub", "Xmind"].map((name): McpPresetInfo => ({
+      name: name.toLowerCase(), display_name: name, category: "productivity", description: `Connect your ${name} workspace`,
+      docs_url: "", transport: "streamableHttp", auth: "oauth", requires: "", note: "",
+      install_supported: true, installed: false, configured: false, available: true,
+      status: "not_installed", required_fields: [], connection_summary: "", source: "preset",
+    })),
+  ] : managing ? [{
     name: "design", display_name: "Design MCP", category: "design", description: "Read design context",
     docs_url: "", transport: "streamableHttp", auth: "oauth", requires: "", note: "",
     install_supported: true, installed: false, configured: false, available: true,
@@ -163,19 +190,24 @@ function AppsFixture() {
     { ...unbrandedPlugin, name: "test-mcp", display_name: "Test MCP", source: "builtin", logo_url: "/missing-app-icon.svg" },
     { ...unbrandedPlugin, name: "brand-example", display_name: "Brand Example", source: "builtin", brand_color: "#5E6AD2" },
   ];
-  return <main className="mx-auto max-w-4xl p-6"><AppsCatalogSettings
+  return <main className="mx-auto max-w-4xl p-6" style={connectionLayout ? { maxWidth: 800 } : undefined}><AppsCatalogSettings
     cliApps={{ apps: [], installed_count: 0 }}
-    mcpPresets={{ presets, installed_count: managing ? 0 : 3 }}
-    cliAppsLoading={false} mcpPresetsLoading={false} query="" filter={managing ? "mcp" : "ready"}
-    cliActionKey={null} mcpActionKey={null} mcpOAuthFlow={null} mcpOAuthPopupBlocked={false}
+    mcpPresets={{ presets, installed_count: connectionLayout ? Number(parameters.has("runtime")) : managing ? 0 : 3 }}
+    cliAppsLoading={false} mcpPresetsLoading={false} query="" filter={managing || connectionLayout ? "mcp" : "ready"}
+    cliActionKey={null} mcpActionKey={null}
+    mcpOAuthFlow={connecting ? { flow_id: "fixture", name: "linear", status: "authorization_required", expires_in: 300 } : null}
+    mcpOAuthPopupBlocked={false}
     mcpOAuthCallbackUrl="" mcpOAuthCompleting={false} mcpOAuthCallbackError={null}
     cliMessage={null} cliError={null} cliFocusName={null} mcpMessage={null} mcpError={null}
     mcpFieldValues={{}} customMcpForm={DEFAULT_CUSTOM_MCP_FORM} mcpConfigImport=""
     showBrandLogos={parameters.get("logos") !== "hidden"} requiresRestartPending={false}
     onQueryChange={noop} onFilterChange={noop} onCliAction={noop}
     onMcpAction={(action, name, values) => setActions((prev) => [...prev, { action, name, values }])}
-    onMcpOAuthConnect={(name, reset, values) => setActions((prev) => [...prev, { action: "oauth", name, reset, values }])}
-    onMcpOAuthCancel={noop} onMcpOAuthOpen={noop}
+    onMcpOAuthConnect={(name, reset, values) => {
+      setActions((prev) => [...prev, { action: "oauth", name, reset, values }]);
+      if (connectionLayout) setConnecting(true);
+    }}
+    onMcpOAuthCancel={() => setConnecting(false)} onMcpOAuthOpen={noop}
     onMcpOAuthCallbackUrlChange={noop} onMcpOAuthComplete={noop} onDismissStatus={noop}
     onBackToChat={noop} onMcpFieldChange={noop} onCustomMcpFormChange={noop}
     onMcpConfigImportChange={noop} onSaveCustomMcp={noop} onImportMcpConfig={noop}
@@ -184,9 +216,25 @@ function AppsFixture() {
 }
 if (parameters.get("case") === "skeleton-additions") installSkeletonPreviewApi();
 if (parameters.get("case") === "idle-compaction") installIdleCompactionApi();
+if (parameters.get("case") === "subagent-dock") installSubagentDockApi();
 await initializeI18n();
+if (parameters.get("case") === "appearance" && parameters.has("lang")) {
+  await setAppLanguage(normalizeLocale(parameters.get("lang")));
+}
 createRoot(document.getElementById("root")!).render(<TooltipProvider>
-  {parameters.get("case") === "composer-action"
+  {parameters.get("case") === "appearance"
+    ? <AppearanceFixture />
+    : parameters.get("case") === "loaded-session-search"
+    ? <LoadedSessionSearchFixture />
+    : parameters.get("case") === "subagent-dock"
+    ? <SubagentDockFixture parameters={parameters} />
+    : parameters.get("case") === "attachments"
+    ? <AttachmentLayoutFixture />
+    : parameters.get("case") === "theme-toggle"
+    ? <ClientProvider client={railClient} token="fixture"><ThemeToggleFixture /></ClientProvider>
+    : parameters.get("case") === "mobile-chat-layout"
+    ? <ClientProvider client={railClient} token="fixture"><MobileChatLayoutFixture parameters={parameters} /></ClientProvider>
+    : parameters.get("case") === "composer-action"
     ? <ComposerActionFixture parameters={parameters} />
     : parameters.get("case") === "workspace-alignment"
     ? <WorkspaceAlignmentFixture parameters={parameters} />
@@ -196,14 +244,20 @@ createRoot(document.getElementById("root")!).render(<TooltipProvider>
     ? <FileEditPathFixture />
     : parameters.get("case") === "answer-order"
     ? <AnswerOrderFixture />
+    : parameters.get("case") === "activity-logos"
+    ? <ActivityLogosFixture parameters={parameters} />
     : parameters.get("case") === "sidebar-activity"
     ? <SidebarActivityFixture />
     : parameters.get("case") === "chat-failure"
     ? <ChatFailureFixture parameters={parameters} />
-    : parameters.get("case") === "markdown-emphasis"
-    ? <MarkdownEmphasisFixture />
+    : parameters.get("case") === "display-math"
+    ? <DisplayMathFixture />
+    : parameters.get("case") === "code-wrapping"
+    ? <CodeWrappingFixture />
     : parameters.get("case") === "typography"
     ? <ClientProvider client={railClient} token="fixture"><TypographyFixture /></ClientProvider>
+    : parameters.get("case") === "inline-references"
+    ? <ClientProvider client={railClient} token="fixture"><InlineReferencesFixture /></ClientProvider>
     : parameters.get("case") === "idle-compaction"
     ? <IdleCompactionFixture />
     : parameters.get("case") === "history-hydration"

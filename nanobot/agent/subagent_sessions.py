@@ -1,5 +1,3 @@
-"""Private child sessions for subagent transcripts and task observations."""
-
 from __future__ import annotations
 
 import math

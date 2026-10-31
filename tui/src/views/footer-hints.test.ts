@@ -6,7 +6,6 @@ const theme = {
   accent: "#EF8E30",
   danger: "#F87171",
   muted: "#A1A1AA",
-  separator: "#71717A",
 }
 
 describe("footerHints", () => {
@@ -22,8 +21,8 @@ describe("footerHints", () => {
   })
 
   test("keeps passive composer modes free of permanent instructions", () => {
-    const ready = contextualFooterHints("ready", 100, theme, "linux")
-    const active = contextualFooterHints("active", 100, theme, "darwin")
+    const ready = contextualFooterHints("ready", 100, theme)
+    const active = contextualFooterHints("active", 100, theme)
 
     expect(ready.chunks).toHaveLength(0)
     expect(active.chunks).toHaveLength(0)

@@ -18,13 +18,13 @@ describe("MarkdownTextRenderer", () => {
 
     const link = screen.getByRole("link", { name: "local server" });
     expect(link).toHaveAttribute("href", "http://127.0.0.1:7891/");
-    expect(link).toHaveClass("text-blue-500", "dark:text-blue-300");
+    expect(link).toHaveClass("text-content-link");
   });
 
-  it("renders canonical session references as same-tab links", () => {
+  it.each(["#session/", "#/chat/"])("renders %s session references as same-tab links", (prefix) => {
     render(
       <MarkdownTextRenderer>
-        {"We discussed this in [收费设计](#session/websocket%3Apricing)."}
+        {`We discussed this in [收费设计](${prefix}websocket%3Apricing).`}
       </MarkdownTextRenderer>,
     );
 
@@ -32,7 +32,10 @@ describe("MarkdownTextRenderer", () => {
     expect(link).toHaveAttribute("href", "#/chat/websocket%3Apricing");
     expect(link).not.toHaveAttribute("target");
     expect(link.getAttribute("style")).toContain(
-      "text-decoration-color: var(--inline-token-highlight)",
+      "text-decoration-color: var(--inline-reference-highlight)",
+    );
+    expect(link.firstElementChild?.getAttribute("style")).toContain(
+      "color: var(--inline-reference-highlight)",
     );
   });
 
@@ -133,20 +136,26 @@ describe("MarkdownTextRenderer", () => {
     );
   });
 
-  it("keeps unavailable inferred inline file paths non-interactive", async () => {
+  it.each([
+    { kind: "inferred", markdown: "Future file: `notes/missing.md`", path: "notes/missing.md", label: "missing.md" },
+    { kind: "explicit", markdown: "[Future report](notes/missing.md)", path: "notes/missing.md", label: "Future report" },
+    { kind: "malformed explicit", markdown: "[Python code](／home/example/workspace/model_check.py)", path: "／home/example/workspace/model_check.py", label: "Python code" },
+  ])("keeps unavailable $kind file references non-interactive", async ({ markdown, path, label }) => {
     const onOpenFilePreview = vi.fn();
     const resolve = vi.fn().mockResolvedValue(false);
     render(
       <FilePreviewAvailabilityProvider resolve={resolve}>
         <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>
-          {"Future file: `notes/missing.md`"}
+          {markdown}
         </MarkdownTextRenderer>
       </FilePreviewAvailabilityProvider>,
     );
 
     const reference = screen.getByTestId("inline-file-path");
-    expect(reference).toHaveTextContent("missing.md");
-    await waitFor(() => expect(resolve).toHaveBeenCalledWith("notes/missing.md"));
+    expect(reference).toHaveTextContent(label);
+    expect(reference).not.toHaveAttribute("role");
+    expect(reference).toHaveClass("text-muted-foreground");
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith(path));
     expect(reference).not.toHaveAttribute("role");
     expect(reference).not.toHaveAttribute("tabindex");
 
@@ -155,7 +164,7 @@ describe("MarkdownTextRenderer", () => {
     expect(onOpenFilePreview).not.toHaveBeenCalled();
   });
 
-  it("keeps inferred inline file paths non-interactive when availability lookup fails", async () => {
+  it.each(["inferred", "explicit"])("keeps %s file references non-interactive when availability lookup fails", async (kind) => {
     const onOpenFilePreview = vi.fn();
     let rejectAvailability!: (reason?: unknown) => void;
     const resolve = vi.fn(() => new Promise<boolean>((_resolve, reject) => {
@@ -164,7 +173,7 @@ describe("MarkdownTextRenderer", () => {
     render(
       <FilePreviewAvailabilityProvider resolve={resolve}>
         <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>
-          {"Unreadable file: `notes/locked.md`"}
+          {kind === "inferred" ? "Unreadable file: `notes/locked.md`" : "[Unreadable report](notes/locked.md)"}
         </MarkdownTextRenderer>
       </FilePreviewAvailabilityProvider>,
     );
@@ -182,18 +191,25 @@ describe("MarkdownTextRenderer", () => {
     expect(onOpenFilePreview).not.toHaveBeenCalled();
   });
 
-  it("makes available inferred inline file paths previewable", async () => {
+  it.each(["inferred", "explicit"])("makes available %s file references previewable after the probe succeeds", async (kind) => {
     const onOpenFilePreview = vi.fn();
-    const resolve = vi.fn().mockResolvedValue(true);
+    let resolveAvailability!: (available: boolean) => void;
+    const resolve = vi.fn(() => new Promise<boolean>((settle) => {
+      resolveAvailability = settle;
+    }));
     render(
       <FilePreviewAvailabilityProvider resolve={resolve}>
         <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>
-          {"Existing file: `notes/ready.md`"}
+          {kind === "inferred" ? "Existing file: `notes/ready.md`" : "[Existing report](notes/ready.md)"}
         </MarkdownTextRenderer>
       </FilePreviewAvailabilityProvider>,
     );
 
     const reference = screen.getByTestId("inline-file-path");
+    expect(reference).not.toHaveAttribute("role");
+    expect(reference).toHaveClass("text-muted-foreground");
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith("notes/ready.md"));
+    await act(async () => resolveAvailability(true));
     await waitFor(() => expect(reference).toHaveAttribute("role", "button"));
     expect(reference).toHaveAttribute("tabindex", "0");
 
@@ -291,7 +307,8 @@ describe("MarkdownTextRenderer", () => {
   it("renders markdown links with file-looking names as file attachments", () => {
     render(<MarkdownTextRenderer>![index.html](/api/media/sig/html)</MarkdownTextRenderer>);
 
-    expect(screen.getByLabelText("File attachment")).toHaveTextContent("index.html");
+    expect(screen.getByRole("link", { name: "Download index.html" })).toHaveAttribute("download", "index.html");
+    expect(screen.getByRole("button", { name: "index.html" })).toBeVisible();
     expect(screen.queryByRole("img", { name: "index.html" })).not.toBeInTheDocument();
   });
 
@@ -317,6 +334,7 @@ describe("MarkdownTextRenderer", () => {
         name: "Open link: Polymarket — GPT-5.6 released by...?",
       }),
     ).toHaveAttribute("href", "https://polymarket.com/event/gpt-5pt6-released-by");
+    expect(screen.getByRole("link", { name: "Open link: Polymarket — GPT-5.6 released by...?" })).toHaveClass("text-content-link");
     expect(screen.queryByText("Polymarket · polymarket.com")).not.toBeInTheDocument();
   });
 
@@ -347,6 +365,7 @@ describe("MarkdownTextRenderer", () => {
     expect(container.querySelector("li.list-none, img")).toBeNull();
     expect(screen.getByRole("link", { name: "https://example.com/source" }))
       .toHaveAttribute("href", "https://example.com/source");
+    expect(screen.getByRole("link", { name: "https://example.com/source" })).toHaveClass("text-content-link");
   });
 
   it("falls back through favicon sources before showing a globe for compact link rows", () => {

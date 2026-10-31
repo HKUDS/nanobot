@@ -1,5 +1,3 @@
-"""Apply file edits by providing structured edit instructions."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -31,7 +29,6 @@ def _validate_patch_path(path: str) -> str:
 
 
 def _append_text(content: str, addition: str) -> str:
-    """Append text without merging it into an unterminated final line."""
     base = content.replace("\r\n", "\n")
     extra = addition.replace("\r\n", "\n")
     if base and extra and not base.endswith("\n") and not extra.startswith("\n"):

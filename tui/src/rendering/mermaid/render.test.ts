@@ -12,7 +12,8 @@ import { SOURCE_LIMIT, type DiagramInput } from "./types"
 const input: DiagramInput = {
   source: "graph TD\n A[中文：开始处理长标签] --> B{检查数据}\n B -->|通过| C[完成]",
   width: 800, scale: 2,
-  fonts: {
+  // macOS must discover its system-managed font location, not use a test override.
+  fonts: process.platform === "darwin" ? undefined : {
     regular: { path: "C:/Windows/Fonts/msyh.ttc", postscriptName: "MicrosoftYaHei" },
     bold: { path: "C:/Windows/Fonts/msyhbd.ttc", postscriptName: "MicrosoftYaHei-Bold" },
     mono: { path: "C:/Windows/Fonts/consola.ttf", postscriptName: "Consolas" },
@@ -47,7 +48,7 @@ test("worker records preserve split UTF-8 and multiple replies across pipe reads
   expect(records).toEqual([{ label: "中文" }, { width: 9 }])
 })
 
-describe.skipIf(!existsSync(input.fonts!.regular.path))("Windows raster integration", () => {
+describe.skipIf(process.platform !== "darwin" && !existsSync(input.fonts!.regular.path))("Native raster integration", () => {
   test("Pele renders Chinese flowchart and sequence diagram to bounded PNGs", async () => {
     for (const source of [input.source, "sequenceDiagram\n participant A as 用户\n participant B as 服务\n A->>B: 长标签消息\n B-->>A: 完成"]) {
       const image = await renderDiagram({ ...input, source })

@@ -1,5 +1,3 @@
-"""Session management for conversation history."""
-
 from __future__ import annotations
 
 import asyncio
@@ -40,9 +38,8 @@ _MESSAGE_TIME_PREFIX_RE = re.compile(r"^\[Message Time: [^\]]+\]\n?")
 _LOCAL_IMAGE_BREADCRUMB_RE = re.compile(r"^\[image: (?:/|~)[^\]]+\]\s*$")
 _TOOL_CALL_ECHO_RE = re.compile(r'^\s*(?:generate_image|message)\([^)]*\)\s*$')
 _SESSION_PREVIEW_MAX_CHARS = 120
-_SESSION_LIST_PREVIEW_MAX_RECORDS = 200
-_SESSION_LIST_PREVIEW_MAX_CHARS = 1_000_000
 _FORK_VOLATILE_METADATA_KEYS = {
+    "_stopped_at_iteration_limit",
     PARENT_SESSION_KEY,
     SESSION_TYPE_KEY,
     "goal_state",
@@ -74,7 +71,6 @@ def _sanitize_assistant_replay_text(content: str) -> str:
 
 
 def _text_preview(content: object) -> str:
-    """Return compact display text for session lists."""
     if isinstance(content, str):
         text = content
     elif isinstance(content, list):
@@ -248,7 +244,6 @@ class Session:
                 sliced = sliced[start:]
                 break
 
-        # Drop orphan tool results at the front.
         start = find_legal_message_start(sliced)
         if start:
             sliced = sliced[start:]
@@ -353,6 +348,7 @@ class Session:
         self.provider_state = None
         self.updated_at = datetime.now()
         self.metadata.pop("_last_summary", None)
+        self.metadata.pop("_stopped_at_iteration_limit", None)
 
 class SessionPayload(TypedDict):
     key: str
@@ -433,7 +429,7 @@ class SessionManager:
         self.location = SessionLocation(workspace, sessions_root=sessions_root)
         self.sessions_dir = self.location.sessions_dir
         self._store = SqliteSessionStore(self.sessions_dir)
-        self._store.initialize(workspace)
+        self._store.initialize()
         self._delete_observer: Callable[[str], None] | None = None
         self.types = SessionTypes()
         self._state: SessionState | None = None
@@ -461,31 +457,6 @@ class SessionManager:
     def set_delete_observer(self, observer: Callable[[str], None]) -> None:
         """Observe explicit session deletion for process-local state cleanup."""
         self._delete_observer = observer
-
-    @staticmethod
-    def safe_key(key: str) -> str:
-        """Public helper used by HTTP handlers to map an arbitrary key to a stable filename stem."""
-        return SessionLocation.safe_key(key)
-
-    @staticmethod
-    def _storage_key(key: str) -> str:
-        """Collision-resistant encoding for internal session storage filenames."""
-        return SessionLocation.storage_key(key)
-
-    @staticmethod
-    def _decode_storage_key(stem: str) -> str | None:
-        """Reverse _storage_key(): decode a base64url (no-padding) stem back to the original key."""
-        return SessionLocation.decode_storage_key(stem)
-
-    @staticmethod
-    def decode_storage_key(stem: str) -> str | None:
-        """Public decoder for components that inspect canonical session filenames."""
-        return SessionManager._decode_storage_key(stem)
-
-    @classmethod
-    def _session_key_from_path(cls, path: Path) -> str | None:
-        """Decode a session key only from a canonical collision-resistant filename."""
-        return SessionLocation.session_key_from_path(path)
 
     def _require_offline_mutation(self) -> None:
         if self._state is not None and self._state.is_bound:

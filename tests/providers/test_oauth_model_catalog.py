@@ -230,7 +230,6 @@ def test_openai_codex_catalog_uses_account_catalog_and_filters_hidden_models(
     request = captured["request"]
     assert isinstance(request, httpx.Request)
     assert request.url.copy_with(query=None) == httpx.URL(DEFAULT_OPENAI_CODEX_MODELS_URL)
-    # Assert the release-independent wire version, not the constant used by the request.
     assert request.url.params["client_version"] == "99.99.99"
     assert request.headers["Authorization"] == "Bearer secret"
     assert request.headers["chatgpt-account-id"] == "account-42"
@@ -646,7 +645,6 @@ def test_catalog_retains_safe_error_kind_until_reauthentication(
     assert first.error_kind == second.error_kind == expected
     assert calls == (2 if with_cache else 1)
     assert sentinel not in repr(first) + "".join(logs)
-    # Same account re-login must bypass both the stale list and negative cache.
     failing[0] = False
     catalog.invalidate()
     recovered = catalog.get(cache_key="same-account")

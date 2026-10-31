@@ -35,7 +35,7 @@
     "micromark-factory-space": "^2.0.1",
     "micromark-util-decode-string": "^2.0.1",
     "motion": "^14.4.0",
-    "pele": "1.6.0",
+    "pele": "1.9.0",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

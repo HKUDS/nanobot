@@ -1,12 +1,19 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const cases = [
-  { name: "desktop", width: 1280, touch: false, extra: "" },
-  { name: "tablet", width: 1280, touch: true, extra: "" },
-  { name: "small desktop", width: 600, touch: false, extra: "" },
-  { name: "phone", width: 390, touch: true, extra: "" },
-  { name: "narrow desktop pane", width: 1024, touch: false, extra: "&containerWidth=480" },
+  { name: "tablet", width: 1280, touch: true },
+  { name: "small desktop", width: 600, touch: false },
 ];
+
+async function expectAlignedWorkspaceGlyph(page: Page) {
+  const attachment = page.getByRole("button", { name: "Attach files" }).locator("svg");
+  const workspace = page.getByRole("button", { name: "Switch directory" }).locator('[data-product-icon="workspace"]');
+  await expect(workspace).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
+  const attachmentBox = (await attachment.boundingBox())!;
+  const workspaceBox = (await workspace.boundingBox())!;
+  expect(workspaceBox.x).toBeCloseTo(attachmentBox.x, 1);
+}
 
 for (const variant of ["hero", "thread"]) for (const c of cases) {
   test.describe(`${variant} ${c.name}`, () => {
@@ -14,14 +21,8 @@ for (const variant of ["hero", "thread"]) for (const c of cases) {
     test("aligns the directory glyph with the attachment glyph", async ({ page }) => {
       await page.addInitScript(() => localStorage.setItem("nanobot.locale", "en"));
       await page.route("**/api/commands", route => route.fulfill({ json: { commands: [] } }));
-      await page.goto(`/browser/fixture.html?case=workspace-alignment&composerVariant=${variant}${c.extra}`);
-      const attachment = page.getByRole("button", { name: "Attach files" }).locator("svg");
-      const workspace = page.getByRole("button", { name: "Switch directory" }).locator('[data-product-icon="workspace"]');
-      await expect(workspace).toBeVisible();
-      await page.evaluate(() => document.fonts.ready);
-      const attachmentBox = (await attachment.boundingBox())!;
-      const workspaceBox = (await workspace.boundingBox())!;
-      expect(workspaceBox.x).toBeCloseTo(attachmentBox.x, 1);
+      await page.goto(`/browser/fixture.html?case=workspace-alignment&composerVariant=${variant}`);
+      await expectAlignedWorkspaceGlyph(page);
       expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
     });
   });
@@ -34,6 +35,7 @@ for (const variant of ["hero", "thread"]) for (const width of [280, 320, 390, 60
       await page.addInitScript(() => localStorage.setItem("nanobot.locale", "en"));
       await page.route("**/api/commands", route => route.fulfill({ json: { commands: [] } }));
       await page.goto(`/browser/fixture.html?case=workspace-alignment&composerVariant=${variant}${width === 1024 ? "&containerWidth=480" : ""}`);
+      if ([390, 1024, 1280].includes(width)) await expectAlignedWorkspaceGlyph(page);
       const workspace = page.getByRole("button", { name: "Switch directory" });
       const access = page.getByRole("button", { name: "Workspace access mode: Full Access" });
       await expect(access).toBeVisible();
@@ -58,9 +60,9 @@ for (const variant of ["hero", "thread"]) for (const width of [280, 320, 390, 60
   });
 }
 
-for (const variant of ["hero", "thread"]) {
-  test.describe(`${variant} mobile permission with usage`, () => {
-    test.use({ viewport: { width: 320, height: 900 }, hasTouch: true, reducedMotion: "reduce" });
+for (const variant of ["hero", "thread"]) for (const width of [320, 600]) {
+  test.describe(`${variant} mobile permission with usage at ${width}px`, () => {
+    test.use({ viewport: { width, height: 900 }, hasTouch: true, reducedMotion: "reduce" });
     test("keeps access on the lower right when context usage appears", async ({ page }) => {
       await page.addInitScript(() => localStorage.setItem("nanobot.locale", "en"));
       await page.route("**/api/commands", route => route.fulfill({ json: { commands: [] } }));
@@ -69,11 +71,14 @@ for (const variant of ["hero", "thread"]) {
       const access = (await page.getByRole("button", { name: "Workspace access mode: Full Access" }).boundingBox())!;
       const usage = (await page.getByTestId("composer-context-usage").boundingBox())!;
       expect(Math.abs(access.y - workspace.y)).toBeLessThan(1);
-      expect(usage.y + usage.height).toBeLessThanOrEqual(access.y);
-      expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
-      await page.getByTestId("composer-context-usage").focus();
+      expect(Math.abs(usage.y - access.y)).toBeLessThan(1);
+      expect(workspace.x + workspace.width).toBeLessThanOrEqual(usage.x);
+      expect(usage.x + usage.width).toBeLessThanOrEqual(access.x);
+      expect(access.x + access.width).toBeLessThanOrEqual(width);
+      expect(await page.getByTestId("composer-context-usage").textContent()).toBe("50%");
+      await page.getByRole("button", { name: "Switch directory" }).focus();
       await page.keyboard.press("Tab");
-      await expect(page.getByRole("button", { name: "Switch directory" })).toBeFocused();
+      await expect(page.getByTestId("composer-context-usage")).toBeFocused();
       await page.keyboard.press("Tab");
       await expect(page.getByRole("button", { name: "Workspace access mode: Full Access" })).toBeFocused();
     });

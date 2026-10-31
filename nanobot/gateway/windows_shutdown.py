@@ -1,5 +1,3 @@
-"""User-private, process-bound Windows gateway shutdown signals."""
-
 from __future__ import annotations
 
 import ctypes

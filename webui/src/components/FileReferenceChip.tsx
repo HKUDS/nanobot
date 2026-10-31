@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type HTMLAttributes } from "react";
-import { File, FileCode2, FileImage, FileJson2, FileText, FileVideo2, type LucideIcon } from "lucide-react";
+import { File, FileArchive, FileAudio, FileChartColumn, FileCode2, FileImage, FileJson2, FileSpreadsheet, FileText, FileVideo2, type LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { FileActions, useFilePreviewLoader } from "@/components/FileActions";
 import { inferMediaKind } from "@/lib/media";
@@ -14,15 +14,20 @@ import { cn } from "@/lib/utils";
 
 export type FileReferenceKind =
   | "default"
+  | "archive"
+  | "audio"
   | "css"
+  | "document"
   | "html"
   | "image"
   | "javascript"
   | "json"
   | "markdown"
   | "notebook"
+  | "presentation"
   | "python"
   | "react"
+  | "spreadsheet"
   | "text"
   | "typescript"
   | "video";
@@ -95,7 +100,7 @@ export function FileReferenceChip({
                 "inline-flex max-w-full items-baseline gap-[0.28em] font-medium leading-[inherit]",
                 truncateFromStart && "min-w-0",
                 interactive
-                  ? "text-sky-600 transition-colors hover:text-sky-700 dark:text-sky-300 dark:hover:text-sky-200"
+                  ? "text-content-link transition-colors hover:text-content-link-hover"
                   : "text-muted-foreground",
                 interactive && [
                   "cursor-pointer rounded-compact",
@@ -116,7 +121,7 @@ export function FileReferenceChip({
                 {display === "path" && directory ? (
                   <>
                     <span className="text-muted-foreground">{directory}</span>
-                    <span className={cn("font-semibold", interactive && "text-sky-700 dark:text-sky-200")}>{name}</span>
+                    <span className="font-semibold">{name}</span>
                   </>
                 ) : (
                   displayText
@@ -232,6 +237,38 @@ export function fileKindForPath(path: string): FileReferenceKind {
     return "default";
   }
   switch (ext) {
+    case "zip":
+    case "7z":
+    case "rar":
+    case "tar":
+    case "gz":
+    case "bz2":
+    case "xz":
+    case "tgz":
+      return "archive";
+    case "mp3":
+    case "wav":
+    case "ogg":
+    case "m4a":
+    case "flac":
+    case "aac":
+      return "audio";
+    case "pdf":
+    case "doc":
+    case "docx":
+    case "odt":
+    case "rtf":
+      return "document";
+    case "xls":
+    case "xlsx":
+    case "csv":
+    case "tsv":
+    case "ods":
+      return "spreadsheet";
+    case "ppt":
+    case "pptx":
+    case "odp":
+      return "presentation";
     case "avif":
       return "image";
     case "py":
@@ -273,15 +310,20 @@ export function fileKindForPath(path: string): FileReferenceKind {
 
 const FILE_ICONS = {
   default: File,
+  archive: FileArchive,
+  audio: FileAudio,
   css: FileCode2,
+  document: FileText,
   html: FileCode2,
   image: FileImage,
   javascript: FileCode2,
   json: FileJson2,
   markdown: FileText,
   notebook: FileCode2,
+  presentation: FileChartColumn,
   python: FileCode2,
   react: FileCode2,
+  spreadsheet: FileSpreadsheet,
   text: FileText,
   typescript: FileCode2,
   video: FileVideo2,
@@ -291,7 +333,6 @@ export function fileIconForPath(path: string): LucideIcon {
   return FILE_ICONS[fileKindForPath(path)];
 }
 
-/** The same file silhouette and stroke in replies, tabs, and attachment tiles. */
 export function FileReferenceIcon({ kind, className }: { kind: FileReferenceKind; className?: string }) {
   const Icon = FILE_ICONS[kind];
   return <Icon aria-hidden strokeWidth={1.75} className={cn("h-[1em] w-[1em] shrink-0", className)} />;

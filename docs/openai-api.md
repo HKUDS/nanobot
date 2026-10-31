@@ -44,7 +44,7 @@ curl http://127.0.0.1:8900/v1/models \
 
 ## Behavior
 
-- Conversation history: pass `"session_id"` in the request body to select a conversation; omit for a shared default session (`api:default`). This is not user authentication or a separate workspace.
+- Conversation history: pass `"session_id"` in the request body to select a conversation; omit for a shared default session (`api:default`). The request's chat route matches that session for both JSON replies and SSE. This is not user authentication or a separate workspace.
 - Single-message input: each request must contain exactly one `user` message
 - Fixed model: omit `model`, or pass the same model shown by `/v1/models`
 - Streaming: set `stream=true` to receive Server-Sent Events (`text/event-stream`) with OpenAI-compatible delta chunks, terminated by `data: [DONE]`; omit or set `stream=false` for a single JSON response
@@ -58,6 +58,8 @@ The API can start before provider/model setup is complete. Health checks remain 
 ## Sessions, failures, and retries
 
 All callers use the same configured API key, agent, workspace, long-term memory, and tool permissions. Any authorized caller can select any `session_id`; the server does not bind it to a user identity. A distinct ID separates conversation history, not access to files or memory. Use [separate instances](./multiple-instances.md) for separate trust boundaries, or enforce user-to-session authorization in your own application before forwarding requests.
+
+Send a stable, non-empty string ID for each conversation. JSON IDs retain surrounding spaces, so `"chat-a"` and `" chat-a "` select different histories. Multipart IDs retain their existing whitespace trimming. Omitted or empty IDs use `api:default`, as does the explicit ID `"default"`. Existing session keys and stored histories are unchanged; no migration is required.
 
 Requests with the same session ID are serialized within one API process. Different sessions can run concurrently and share workspace files; session locking does not make file changes transactional. Send one turn at a time per conversation when ordering matters.
 

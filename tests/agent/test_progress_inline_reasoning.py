@@ -1,5 +1,3 @@
-"""Inline reasoning should not change when a provider splits its stream."""
-
 import pytest
 
 from nanobot.agent.hook import AgentHookContext

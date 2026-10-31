@@ -1,5 +1,3 @@
-"""Transport-independent notifications emitted by agent operations."""
-
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
@@ -70,6 +68,7 @@ class RecoveryStateEvent(AgentEvent):
     attempts: int = 0
     can_continue: bool | None = None
     failure_error_kind: str | None = None
+    reply_preserved: bool | None = None
 
 
 @dataclass(frozen=True)

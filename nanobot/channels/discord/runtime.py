@@ -1,4 +1,3 @@
-"""Discord channel implementation using discord.py."""
 # pyright: reportPrivateUsage=false, reportUnusedFunction=false
 
 from __future__ import annotations
@@ -36,7 +35,7 @@ if DISCORD_AVAILABLE:
     from discord import app_commands
     from discord.abc import Messageable
 
-MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
+MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 MAX_MESSAGE_LEN = 2000  # Discord message character limit
 TYPING_INTERVAL_S = 8
 
@@ -110,7 +109,6 @@ if DISCORD_AVAILABLE:
                 self._channel._remember_channel(after)
 
         async def _reply_ephemeral(self, interaction: discord.Interaction, text: str) -> bool:
-            """Send an ephemeral interaction response and report success."""
             try:
                 await interaction.response.send_message(text, ephemeral=True)
                 return True
@@ -323,7 +321,6 @@ if DISCORD_AVAILABLE:
                     )
 
         async def _edit_compaction_notice(self, notice: discord.Message, content: str) -> bool:
-            """Replace a start notice's text with the outcome; False when Discord refused."""
             if not content:
                 return False
             try:
@@ -341,7 +338,6 @@ if DISCORD_AVAILABLE:
             reference: discord.MessageReference | None,
             mention_settings: discord.AllowedMentions,
         ) -> bool:
-            """Send a file attachment via discord.py."""
             path = Path(file_path)
             if not path.is_file():
                 self._channel.logger.warning("file not found, skipping: {}", file_path)
@@ -415,7 +411,6 @@ class DiscordChannel(BaseChannel):
         *,
         explicit: str | None = None,
     ) -> str | None:
-        """Choose an explicit reply target, or the triggering message when enabled."""
         if explicit:
             return explicit
         if not self.config.reply_to_message or not metadata:
@@ -430,7 +425,6 @@ class DiscordChannel(BaseChannel):
         *,
         fail_if_not_exists: bool,
     ) -> tuple[discord.MessageReference | None, discord.AllowedMentions]:
-        """Build a native Discord reply without pinging the replied-to user."""
         mention_settings = discord.AllowedMentions(replied_user=False)
         if not reply_to:
             return None, mention_settings
@@ -454,7 +448,7 @@ class DiscordChannel(BaseChannel):
         self._client: DiscordBotClient | None = None
         self._typing_tasks: dict[str, asyncio.Task[None]] = {}
         self._bot_user_id: str | None = None
-        self._pending_reactions: dict[str, Any] = {}  # chat_id -> message object
+        self._pending_reactions: dict[str, Any] = {}
         self._compaction_notices: dict[tuple[str, str], discord.Message] = {}
         self._working_emoji_tasks: dict[str, set[asyncio.Task[None]]] = {}
         self._inbound_tasks: set[asyncio.Task[Any]] = set()
@@ -516,7 +510,6 @@ class DiscordChannel(BaseChannel):
         compaction_id: str,
         message: discord.Message,
     ) -> None:
-        """Keep a start notice until its matching outcome consumes it."""
         self._compaction_notices[(chat_id, compaction_id)] = message
 
     async def send(self, msg: OutboundMessage) -> None:
@@ -616,7 +609,6 @@ class DiscordChannel(BaseChannel):
             raise
 
     async def _handle_discord_message(self, message: discord.Message) -> None:
-        """Own in-flight callbacks until they finish or runtime reset drains them."""
         task = asyncio.current_task()
         if task is not None:
             self._inbound_tasks.add(task)
@@ -661,7 +653,6 @@ class DiscordChannel(BaseChannel):
 
         await self._start_typing(message.channel)
 
-        # Add read receipt reaction immediately, working emoji after delay
         try:
             await message.add_reaction(self.config.read_receipt_emoji)
             self._pending_reactions[channel_id] = message
@@ -706,7 +697,6 @@ class DiscordChannel(BaseChannel):
         await self._handle_discord_message(message)
 
     async def _resolve_channel(self, chat_id: str) -> Any | None:
-        """Resolve a Discord channel from cache first, then network fetch."""
         client = self._client
         if client is None or not client.is_ready():
             return None
@@ -729,7 +719,6 @@ class DiscordChannel(BaseChannel):
         buf: _StreamBuf,
         message: discord.Message,
     ) -> None:
-        """Commit the final streamed content and flush overflow chunks."""
         chunks = DiscordBotClient._build_chunks(buf.text, [], False)
         if not chunks:
             self._stream_bufs.pop(chat_id, None)
@@ -756,12 +745,10 @@ class DiscordChannel(BaseChannel):
         sender_id: str,
         content: str,
     ) -> bool:
-        """Check if inbound Discord message should be processed."""
         # Reject unauthorized guild messages before any side effects, but let DMs
         # reach BaseChannel._handle_message so it can issue a pairing code.
         if message.guild is not None and not self.is_allowed(sender_id):
             return False
-        # Channel-based filtering: only respond in allowed channels
         allow_channels = self.config.allow_channels
         if allow_channels:
             channel_ids = self._channel_allow_keys(message.channel)
@@ -775,7 +762,6 @@ class DiscordChannel(BaseChannel):
         self,
         attachments: list[discord.Attachment],
     ) -> tuple[list[str], list[str]]:
-        """Download supported attachments and return paths + display markers."""
         media_paths: list[str] = []
         markers: list[str] = []
         media_dir = get_media_dir("discord")
@@ -826,7 +812,6 @@ class DiscordChannel(BaseChannel):
         }
 
     def _should_respond_in_group(self, message: discord.Message, content: str) -> bool:
-        """Check if the bot should respond in a guild channel based on policy."""
         if self.config.group_policy == "open":
             return True
 
@@ -867,7 +852,6 @@ class DiscordChannel(BaseChannel):
         return str(getattr(author, "id", "")) == bot_user_id
 
     async def _start_typing(self, channel: Messageable) -> None:
-        """Start periodic typing indicator for a channel."""
         channel_id = self._channel_key(channel)
         await self._stop_typing(channel_id)
 
@@ -885,7 +869,6 @@ class DiscordChannel(BaseChannel):
         self._typing_tasks[channel_id] = asyncio.create_task(typing_loop())
 
     async def _stop_typing(self, channel_id: str) -> None:
-        """Stop typing indicator for a channel."""
         task = self._typing_tasks.pop(self._channel_key(channel_id), None)
         if task is None:
             return
@@ -894,7 +877,6 @@ class DiscordChannel(BaseChannel):
             await task
 
     async def _clear_reactions(self, chat_id: str) -> None:
-        """Remove all pending reactions after bot replies."""
         # Keep tasks owned until done, so a concurrent reset can drain them too.
         tasks = tuple(self._working_emoji_tasks.get(chat_id, ()))
         # Snapshot before yielding; a newer receipt must survive this cleanup.
@@ -912,13 +894,11 @@ class DiscordChannel(BaseChannel):
                 await msg_obj.remove_reaction(emoji, bot_user)
 
     async def _cancel_all_typing(self) -> None:
-        """Stop all typing tasks."""
         channel_ids = list(self._typing_tasks)
         for channel_id in channel_ids:
             await self._stop_typing(channel_id)
 
     async def _cancel_all_reactions(self) -> None:
-        """Stop delayed reactions and release their retained messages."""
         tasks = tuple(task for group in self._working_emoji_tasks.values() for task in group)
         self._pending_reactions.clear()
         for task in tasks:
@@ -928,7 +908,6 @@ class DiscordChannel(BaseChannel):
         self._working_emoji_tasks.clear()
 
     async def _reset_runtime_state(self, close_client: bool) -> None:
-        """Reset client and transient runtime state."""
         self._running = False
         # Drain callbacks before clearing the state they can still create after an await.
         current = asyncio.current_task()

@@ -1,5 +1,3 @@
-"""PKCE OAuth flow state for Linear app installations."""
-
 from __future__ import annotations
 
 import base64

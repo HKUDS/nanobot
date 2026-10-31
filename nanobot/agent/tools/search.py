@@ -1,5 +1,3 @@
-"""Search tools: file discovery and grep."""
-
 # pyright: reportIncompatibleMethodOverride=false, reportPrivateUsage=false
 
 from __future__ import annotations
@@ -131,7 +129,6 @@ def _match_path_glob(rel_path: str, name: str, normalized: str) -> bool:
         matched = [True] + [False] * len(path_parts)
         for part in pattern_parts:
             if part == "**":
-                # A globstar consumes zero or more complete path segments.
                 for index in range(1, len(matched)):
                     matched[index] = matched[index] or matched[index - 1]
             else:

@@ -1,5 +1,3 @@
-"""Configuration loading and diagnostics shared by CLI commands."""
-
 from pathlib import Path
 
 import typer
@@ -28,7 +26,6 @@ console = Console()
 
 
 def _model_display(config: Config) -> tuple[str, str]:
-    """Return (resolved_model_name, preset_tag) for display strings."""
     resolved = config.resolve_preset()
     name = config.agents.defaults.model_preset
     tag = f" (preset: {name})" if name else ""
@@ -36,7 +33,6 @@ def _model_display(config: Config) -> tuple[str, str]:
 
 
 def _print_config_error(error: Exception) -> None:
-    """Render a configuration failure without exposing traceback internals."""
     from nanobot.config.errors import ConfigLoadError
 
     console.print(Text(str(error), style="red"))
@@ -53,7 +49,6 @@ def _print_runtime_config_validation_error(
     path_prefix: tuple[str | int, ...],
     retry_command: str,
 ) -> None:
-    """Render a runtime-owned Pydantic config error without exposing input values."""
     from nanobot.config.errors import ConfigIssue, ConfigLoadError, validation_issues
 
     issues = tuple(
@@ -78,7 +73,6 @@ def _status_command(config_path: Path) -> str:
 
 
 def _print_model_setup_steps(config_path: Path) -> None:
-    """Show the shortest setup routes shared by Status and Agent startup."""
     config_arg = f'--config "{config_path}"'
     console.print(
         f"  WebUI: run [cyan]nanobot webui {escape(config_arg)}[/cyan], "
@@ -101,7 +95,6 @@ def _load_config_for_cli(
     *,
     resolve_env: bool = False,
 ) -> Config:
-    """Load CLI configuration and turn expected failures into a clean exit."""
     from nanobot.config.errors import ConfigLoadError
     from nanobot.config.loader import load_config, resolve_config_env_vars
 
@@ -116,7 +109,6 @@ def _load_config_for_cli(
 
 
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
-    """Load config and optionally override the active workspace."""
     from nanobot.config.loader import set_config_path
 
     config_path = None
@@ -136,7 +128,6 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
 
 
 def _validate_session_storage(config: Config, *, workspace_override: str | None = None) -> None:
-    """Reject overlapping session storage before startup creates workspace files."""
     from nanobot.config.loader import get_config_path
 
     config_path = get_config_path().expanduser().resolve(strict=False)
@@ -164,7 +155,6 @@ def _load_inspection_config(
     config: str | None = None,
     workspace: str | None = None,
 ) -> tuple[Path, Config]:
-    """Load config for diagnostic commands without resolving secret env refs."""
     from nanobot.config.errors import ConfigLoadError
     from nanobot.config.loader import get_config_path, load_config, set_config_path
 
@@ -189,7 +179,6 @@ def _load_inspection_config(
 
 
 def _migrate_cron_store(config: "Config") -> None:
-    """One-time migration: move legacy global cron store into the workspace."""
     from nanobot.config.paths import get_cron_dir
 
     legacy_path = get_cron_dir() / "jobs.json"
@@ -202,7 +191,6 @@ def _migrate_cron_store(config: "Config") -> None:
 
 
 def _provider_setup_error(config: Config) -> str | None:
-    """Return a local provider/model configuration error, or None."""
     from nanobot.providers.factory import validate_provider_setup
 
     try:

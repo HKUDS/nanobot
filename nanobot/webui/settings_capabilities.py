@@ -1,5 +1,3 @@
-"""Capability settings domain logic for Web, media, network, and API features."""
-
 from __future__ import annotations
 
 import asyncio

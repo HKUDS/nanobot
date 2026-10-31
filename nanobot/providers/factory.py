@@ -1,8 +1,7 @@
-"""Create LLM providers from config."""
-
 from __future__ import annotations
 
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from nanobot.config.schema import (
@@ -10,6 +9,7 @@ from nanobot.config.schema import (
     InlineFallbackConfig,
     ModelPresetConfig,
     ProviderConfig,
+    RequestOverrides,
 )
 from nanobot.providers.base import GenerationSettings, LLMProvider
 from nanobot.providers.fallback_provider import FallbackProvider
@@ -58,7 +58,6 @@ def _make_provider_core(
     preset: ModelPresetConfig,
     model: str | None = None,
 ) -> LLMProvider:
-    """Create a plain LLM provider without failover wrapping."""
     setup = resolve_provider_route(
         config,
         preset=preset,
@@ -310,6 +309,30 @@ def build_provider_snapshot(
         generation=resolved.to_generation_settings(),
         model_preset=selected_preset,
     )
+
+
+def provider_override_declarations(
+    config: Config, *, preset: ModelPresetConfig,
+) -> tuple[tuple[bool, ...], ...]:
+    """Distinguish input restrictions hidden by merged wire settings, including lazy fallbacks."""
+    return tuple(
+        tuple(bool(getattr(item, field)) for field in RequestOverrides.model_fields)
+        for item in [preset, *_resolve_fallback_presets(config, preset)]
+    )
+
+
+def build_isolated_provider_snapshot(
+    config: Config, *, preset: ModelPresetConfig,
+) -> ProviderSnapshot:
+    """Capture SDK override inputs, including credentials used by lazy fallback clients."""
+    owned = config.model_copy(deep=True)
+    resolved = preset.model_copy(deep=True)
+    chain = [resolved, *_resolve_fallback_presets(owned, resolved)]
+    if any((provider := owned.get_provider(preset=item)) and provider.use_proxy for item in chain):
+        owned.network.proxy = owned.network.resolve_proxy(True)
+    snapshot = build_provider_snapshot(owned, preset=resolved)
+    # Runtime metadata must not alias the inputs captured by the fallback factory.
+    return replace(snapshot, signature=deepcopy(snapshot.signature))
 
 
 def load_provider_snapshot(

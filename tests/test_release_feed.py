@@ -1,5 +1,3 @@
-"""Exact selection and staging through real HTTP parsing, without public mutations."""
-
 import hashlib
 import io
 import zipfile
@@ -23,8 +21,6 @@ PLATFORM = "macosx_13_0_arm64"
 
 @pytest.fixture(autouse=True)
 def checksum_only_fixtures(monkeypatch):
-    # These synthetic packages exercise selection/download integrity, not
-    # publication authority. The real approval boundary is tested separately.
     monkeypatch.setattr(ReleaseFeed, "_authorize", AsyncMock())
 
 
@@ -84,7 +80,6 @@ async def test_new_catalogue_generation_cannot_rewrite_observed_release_history(
             selected = old.model_copy(update={"generation": 2, "withdrawn": {}})
         with pytest.raises(ReleaseFeedError):
             await client.catalogue()
-        # A rejected response must not poison a later valid publication.
         newer = preview("0.3.7" if channel == "stable" else "0.3.7.dev1")[0]
         selected = old.model_copy(update={"generation": 2, channel: newer})
         assert getattr(await client.catalogue(), channel) == newer
@@ -176,7 +171,6 @@ async def test_cache_survives_new_process_etag_and_rejects_rollback_or_equivocat
         async with feed(tmp_path, lambda _: httpx.Response(200, content=changed.model_dump_json())) as client:
             with pytest.raises(ReleaseFeedError, match="generation"):
                 await client.catalogue()
-    # A failed check cannot be converted into a successful cached result.
     async with feed(tmp_path, lambda _: httpx.Response(503)) as client:
         with pytest.raises(httpx.HTTPStatusError):
             await client.catalogue()
@@ -219,7 +213,7 @@ async def test_stages_actual_wheel_and_reuses_only_verified_bytes(tmp_path):
         wheel.write_bytes(b"0" * len(data))
         with pytest.raises(ReleaseFeedError, match="checksum"):
             await client.download(target, wheel.parent)
-        assert wheel.read_bytes() != data  # No clobber to hide the corrupt file.
+        assert wheel.read_bytes() != data
 
 
 @pytest.mark.asyncio

@@ -75,7 +75,7 @@ describe("preview tabs", () => {
     const highlight = screen.getByTestId("preview-tabs-selection-highlight");
     expect(highlight).toHaveAttribute("data-active-id", "file:data.json");
     expect(highlight.className).toContain("bg-sidebar-foreground/[0.055]");
-    expect(highlight.className).toContain("motion-reduce:transition-none");
+    expect(highlight).toHaveClass("sidebar-selection-highlight");
     await waitFor(() => expect(shell.style.getPropertyValue("--file-preview-slot-width")).toBe("544px"));
     fireEvent.click(screen.getByRole("tab", { name: "chart.png" }));
     expect(screen.getByTestId("preview-pane")).toBe(shell);

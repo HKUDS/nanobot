@@ -342,13 +342,14 @@ export class ThreadMotionCoordinator {
    * A scroll event reports geometry; it does not prove user intent. Explicit
    * input handlers call takeUserControl() before the browser scrolls. Layout,
    * sticky positioning, and camera writes therefore remain automatic even
-   * when the browser emits an intermediate scroll event for them.
+   * when the browser emits an intermediate scroll event for them. Proximity
+   * to a detached history page's bottom must not count as near the live tail.
    */
-  observeScroll(nearBottom: boolean): ThreadScrollOwner {
+  observeScroll(nearLiveTail: boolean): ThreadScrollOwner {
     switch (this.mode) {
       case "navigating-latest":
         if (!this.camera.isFollowing()) {
-          if (nearBottom) {
+          if (nearLiveTail) {
             this.settleLatestNavigation();
           } else {
             this.invalidateGeometry();
@@ -358,7 +359,7 @@ export class ThreadMotionCoordinator {
       case "navigating-history":
         if (!this.camera.isFollowing()) {
           this.transition("navigation-settled");
-          if (nearBottom) {
+          if (nearLiveTail) {
             this.resumeAutoFollow();
           } else {
             this.resumeFollowArmed = true;
@@ -366,7 +367,7 @@ export class ThreadMotionCoordinator {
         }
         return "navigation";
       case "browsing-history":
-        if (!nearBottom) {
+        if (!nearLiveTail) {
           this.resumeFollowArmed = true;
           return "user";
         }
@@ -374,7 +375,7 @@ export class ThreadMotionCoordinator {
         this.resumeAutoFollow();
         return "automatic";
       default:
-        if (!nearBottom) this.invalidateGeometry();
+        if (!nearLiveTail) this.invalidateGeometry();
         return "automatic";
     }
   }

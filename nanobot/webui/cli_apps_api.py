@@ -1,5 +1,3 @@
-"""CLI Apps helpers for the WebUI HTTP and message surfaces."""
-
 from __future__ import annotations
 
 import asyncio

@@ -1,5 +1,3 @@
-"""Manual context compaction command behavior."""
-
 import asyncio
 import sqlite3
 import threading
@@ -165,6 +163,9 @@ async def test_compacted_session_waits_for_new_input_without_continuation(
     session = loop.sessions.get_or_create(key)
     session.add_message("user", "Inspect the checkpoint")
     session.add_message("assistant", "Inspection complete.")
+    if trigger == "idle":
+        loop.auto_compact._ttl = 15
+        session.updated_at = datetime.now() - timedelta(minutes=20)
     loop.sessions.save(session)
     loop.provider.estimate_prompt_tokens.return_value = (100, "test")
     loop.provider.chat_stream_with_retry.return_value = LLMResponse(content=summary)

@@ -1,5 +1,3 @@
-"""Track file reads whose original results may still be in model context."""
-
 from __future__ import annotations
 
 import hashlib

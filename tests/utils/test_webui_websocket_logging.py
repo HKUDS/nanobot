@@ -1,5 +1,3 @@
-"""Tests for WebUI websocket logging helpers."""
-
 from __future__ import annotations
 
 import logging
@@ -37,7 +35,6 @@ def test_websocket_handshake_noise_filter_suppresses_disconnects() -> None:
 
 
 def test_websocket_handshake_noise_filter_suppresses_non_get_probes() -> None:
-    """HEAD probes reach the WS port as InvalidMessage wrapping a ValueError."""
     filter_ = WebSocketHandshakeNoiseFilter()
     head_probe = InvalidMessage("did not receive a valid HTTP request")
     head_probe.__cause__ = ValueError("unsupported HTTP method; expected GET; got HEAD")
@@ -46,7 +43,6 @@ def test_websocket_handshake_noise_filter_suppresses_non_get_probes() -> None:
 
 
 def test_websocket_handshake_noise_filter_suppresses_malformed_requests() -> None:
-    """Port scanners / TLS-to-plain-port probes raise a bare InvalidMessage."""
     filter_ = WebSocketHandshakeNoiseFilter()
     malformed = InvalidMessage("did not receive a valid HTTP request")
 

@@ -1,5 +1,4 @@
 import { useEffect, useState, type ReactNode } from "react";
-import QRCode from "qrcode";
 import { Check, CircleAlert, Clock, Loader2, RotateCcw, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -77,17 +76,20 @@ export function ChannelQrConnectFlowView({
     : undefined;
 
   useEffect(() => {
-    if (!showQrCode || !connect?.qr_url) {
+    const qrUrl = connect?.qr_url;
+    if (!showQrCode || !qrUrl) {
       setQrDataUrl("");
       return;
     }
     let cancelled = false;
-    void QRCode.toDataURL(connect.qr_url, {
-      width: 184,
-      margin: 1,
-      color: { dark: "#111827", light: "#ffffff" },
-    })
-      .then((url) => {
+    void import("qrcode")
+      .then(async ({ default: QRCode }) => {
+        if (cancelled) return;
+        const url = await QRCode.toDataURL(qrUrl, {
+          width: 184,
+          margin: 1,
+          color: { dark: "#111827", light: "#ffffff" },
+        });
         if (!cancelled) setQrDataUrl(url);
       })
       .catch(() => {

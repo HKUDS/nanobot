@@ -28,8 +28,12 @@
         "choices": {
           "mention": "Somente menções",
           "open": "Todas as mensagens",
-          "allowlist": "Lista de permissão"
+          "allowlist": "Lista de permissão",
+          "listen": "Ouvir (responder ao mencionar)"
         }
+      },
+      "groupPolicyOverrides": {
+        "label": "Exceções de regras por sala (JSON)"
       },
       "allowFrom": {
         "label": "Usuários permitidos"
@@ -62,6 +66,13 @@
       },
       "allowRoomMentions": {
         "label": "Menções de sala",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "replyToMessage": {
+        "label": "Citar ao responder",
         "choices": {
           "true": "Ligado",
           "false": "Desligado"

@@ -1,5 +1,3 @@
-"""Validate WebUI session references against persisted session metadata."""
-
 from __future__ import annotations
 
 import json

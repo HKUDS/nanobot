@@ -1,4 +1,5 @@
-"""Tests for multi-provider web search."""
+import asyncio
+from contextlib import asynccontextmanager
 
 import httpx
 import pytest
@@ -97,7 +98,9 @@ async def test_brave_search_retries_rate_limit_once(monkeypatch):
     async def mock_get(self, url, **kw):
         calls["n"] += 1
         if calls["n"] == 1:
-            return _response(status=429, json={"error": "rate limit"})
+            response = _response(status=429, json={"error": "rate limit"})
+            response.headers["Retry-After"] = "3600"
+            return response
         return _response(json={
             "web": {"results": [{"title": "Recovered", "url": "https://example.com", "description": "ok"}]}
         })
@@ -585,8 +588,6 @@ async def test_deepseek_search_rejects_blank_query(monkeypatch):
     [(0, 1), (100, 50), (50, 50), (1, 1)],
 )
 async def test_deepseek_provider_clamps_count_to_api_range(monkeypatch, requested, expected):
-    # execute() caps tool-level count at 10 for every provider and the schema
-    # advertises the same bound, so the 1-50 API window is only exercised here.
     captured: dict[str, object] = {}
 
     async def mock_post(self, url, **kw):
@@ -683,7 +684,9 @@ async def test_deepseek_search_retries_transient_errors_then_succeeds(
     async def mock_post(self, url, **kw):
         calls["n"] += 1
         if calls["n"] == 1:
-            return _response(status=status, json={"error": {"message": "transient"}})
+            response = _response(status=status, json={"error": {"message": "transient"}})
+            response.headers["Retry-After"] = "3600"
+            return response
         return _response(json={
             "results": [{"title": "Recovered", "url": "https://example.com/ok", "snippet": "ok"}]
         })
@@ -725,12 +728,16 @@ async def test_deepseek_search_gives_up_after_retry_budget(
     tool = _tool(provider="deepseek", api_key="deepseek-key")
     result = await tool.execute(query="retry", count=1)
 
-    # One retry after the initial attempt, then a bounded failure.
     assert calls["n"] == 2
     assert sleeps == [1.0]
     assert is_tool_error_result(result)
     assert expected_text in result
     assert "after retry" in result
+    if status == 429:
+        assert result == (
+            "Error: DeepSeek search rate limited after retry. "
+            "Retry later or reduce the frequency of concurrent web_search calls."
+        )
 
 
 @pytest.mark.asyncio
@@ -812,7 +819,6 @@ async def test_deepseek_whitespace_only_summary_falls_back_to_snippet(monkeypatc
 
 @pytest.mark.asyncio
 async def test_deepseek_caps_oversized_summary(monkeypatch):
-    """Real responses carry summaries far longer than the documented 600-800."""
     async def mock_post(self, url, **kw):
         return _response(json={
             "results": [
@@ -1048,7 +1054,6 @@ async def test_duckduckgo_search(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_duckduckgo_search_passes_proxy(monkeypatch):
-    """DDGS client must receive the configured proxy so search works behind a proxy."""
     captured: dict = {}
     proxy_url = "http://proxy.example:8080"
 
@@ -1293,7 +1298,6 @@ async def test_jina_search_uses_path_encoded_query(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_duckduckgo_timeout_returns_error(monkeypatch):
-    """asyncio.wait_for guard should fire when DDG search hangs."""
     import threading
     gate = threading.Event()
 
@@ -1396,3 +1400,71 @@ async def test_olostep_package_missing_returns_install_hint(monkeypatch):
     assert result == (
         "Error: Olostep support is not installed. Run `nanobot plugins enable olostep`."
     )
+
+
+@pytest.mark.parametrize("provider,outcome", [
+    ("brave", 500),
+    ("brave", httpx.ReadTimeout("slow")),
+    ("deepseek", httpx.ConnectError("offline")),
+])
+async def test_search_does_not_retry_unclassified_failures(monkeypatch, provider, outcome):
+    calls = []
+
+    async def request(*args, **kwargs):
+        calls.append(args)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return _response(status=outcome)
+
+    method = "get" if provider == "brave" else "post"
+    monkeypatch.setattr(httpx.AsyncClient, method, request)
+    result = await _tool(provider=provider, api_key="test-key").execute(query="failure")
+    assert is_tool_error_result(result)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("provider", ["brave", "deepseek"])
+@pytest.mark.parametrize("phase", ["request", "backoff"])
+async def test_search_task_cancellation_closes_client_without_replay(monkeypatch, provider, phase):
+    entered, closed = asyncio.Event(), asyncio.Event()
+    calls = []
+    real_client = httpx.AsyncClient
+
+    async def block():
+        entered.set()
+        await asyncio.Event().wait()
+
+    async def handle(request):
+        calls.append(request)
+        if phase == "request":
+            await block()
+        return httpx.Response(429, json={})
+
+    @asynccontextmanager
+    async def client(**kwargs):
+        instance = real_client(transport=httpx.MockTransport(handle), **kwargs)
+        try:
+            async with instance:
+                yield instance
+        finally:
+            assert instance.is_closed
+            closed.set()
+
+    async def sleep(delay):
+        assert delay == 1.0
+        await block()
+
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", client)
+    monkeypatch.setattr("nanobot.agent.tools.web.asyncio.sleep", sleep)
+    task = asyncio.create_task(_tool(provider=provider, api_key="test-key").execute(query="cancel"))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    assert len(calls) == 1
+    assert closed.is_set()

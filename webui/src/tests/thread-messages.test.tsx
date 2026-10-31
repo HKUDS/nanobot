@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Window as HappyWindow } from "happy-dom";
 
 import {
   assistantForkFlags,
@@ -62,7 +63,17 @@ describe("ThreadMessages", () => {
     link.focus();
     expect(fireEvent.keyDown(link, { key: "F10", shiftKey: true })).toBe(true);
     expect(link).toHaveFocus();
-    expect(fireEvent.click(link, { ctrlKey: true })).toBe(true);
+    expect(link).toHaveAttribute("href", "https://example.com/?q=one#two");
+    expect(link).toHaveAttribute("target", "_blank");
+    // Happy DOM follows native links; verify the event without accessing the network.
+    const navigation = (window as unknown as HappyWindow).happyDOM.settings.navigation;
+    const previous = navigation.disableMainFrameNavigation;
+    navigation.disableMainFrameNavigation = true;
+    try {
+      expect(fireEvent.click(link, { ctrlKey: true })).toBe(true);
+    } finally {
+      navigation.disableMainFrameNavigation = previous;
+    }
   });
 
   it.each(["diff", "collapsed_diff"] as const)(
@@ -2022,9 +2033,14 @@ describe("ThreadMessages", () => {
     });
 
     render(<ThreadMessages messages={messages} isStreaming={false} />);
-    expect(screen.getByText("result.csv")).toBeInTheDocument();
-    const ownerRow = screen.getByText("result.csv")
-      .closest<HTMLElement>("[data-thread-display-unit]")!;
+    const information = screen.getByRole("button", { name: "result.csv" });
+    const download = screen.getByRole("link", { name: "Download result.csv" });
+    expect(information).toBeVisible();
+    expect(download).toHaveAttribute("href", "/api/media/result.csv");
+    expect(download).toHaveAttribute("download", "result.csv");
+    expect(download.closest("[data-testid='activity-model-message'], [data-testid='agent-activity-content']")).toBeNull();
+    const ownerRow = information.closest<HTMLElement>("[data-thread-display-unit]")!;
+    expect(ownerRow).toContainElement(download);
     openAssistantBlockMenu(ownerRow);
     expect(screen.getByRole("button", { name: "Worked" })).toBeInTheDocument();
   });

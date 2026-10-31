@@ -1,5 +1,3 @@
-"""Helpers for keeping the bundled WebUI build in sync with source checkouts."""
-
 from __future__ import annotations
 
 import os
@@ -45,14 +43,11 @@ class WebUIBundleStatus:
 
     source_dir: Path
     dist_dir: Path
-    index_html: Path
     source_available: bool
     dist_available: bool
     stale: bool
     reason: str
     newest_source: Path | None = None
-    newest_source_mtime_ns: int | None = None
-    dist_mtime_ns: int | None = None
 
     @property
     def needs_build(self) -> bool:
@@ -116,7 +111,6 @@ def inspect_webui_bundle(
         return WebUIBundleStatus(
             source_dir=resolved_source,
             dist_dir=resolved_dist,
-            index_html=index_html,
             source_available=False,
             dist_available=index_html.is_file(),
             stale=False,
@@ -127,7 +121,6 @@ def inspect_webui_bundle(
         return WebUIBundleStatus(
             source_dir=resolved_source,
             dist_dir=resolved_dist,
-            index_html=index_html,
             source_available=True,
             dist_available=False,
             stale=True,
@@ -150,27 +143,21 @@ def inspect_webui_bundle(
         return WebUIBundleStatus(
             source_dir=resolved_source,
             dist_dir=resolved_dist,
-            index_html=index_html,
             source_available=True,
             dist_available=True,
             stale=True,
             reason="source_newer",
             newest_source=newest_source,
-            newest_source_mtime_ns=newest_source_mtime_ns,
-            dist_mtime_ns=dist_mtime_ns,
         )
 
     return WebUIBundleStatus(
         source_dir=resolved_source,
         dist_dir=resolved_dist,
-        index_html=index_html,
         source_available=True,
         dist_available=True,
         stale=False,
         reason="fresh",
         newest_source=newest_source,
-        newest_source_mtime_ns=newest_source_mtime_ns,
-        dist_mtime_ns=dist_mtime_ns,
     )
 
 
@@ -203,8 +190,10 @@ def build_webui_bundle(
     using_bun = Path(command_runner).stem.lower() == "bun"
 
     _emit(output, f"Building bundled WebUI with `{command_runner}`...")
+    # Reinstall the locked tree: Bun's incremental install can retain the old
+    # hoisting layout after a source upgrade and omit new nested major versions.
     _run_frontend_command(
-        [command_runner, "install", *(["--frozen-lockfile"] if using_bun else [])],
+        [command_runner, "install", *(["--frozen-lockfile", "--force"] if using_bun else [])],
         cwd=resolved_source,
         subprocess_run=subprocess_run,
     )

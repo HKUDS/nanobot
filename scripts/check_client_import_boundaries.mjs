@@ -1,4 +1,3 @@
-/** Check client imports without loading application or channel modules. */
 import { Glob } from "bun";
 import { readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";

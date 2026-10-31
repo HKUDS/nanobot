@@ -28,8 +28,12 @@
         "choices": {
           "mention": "Chỉ khi được nhắc",
           "open": "Mọi tin nhắn",
-          "allowlist": "Danh sách cho phép"
+          "allowlist": "Danh sách cho phép",
+          "listen": "Lắng nghe (trả lời khi được nhắc)"
         }
+      },
+      "groupPolicyOverrides": {
+        "label": "Ngoại lệ quy tắc theo phòng (JSON)"
       },
       "allowFrom": {
         "label": "Người dùng được phép"
@@ -62,6 +66,13 @@
       },
       "allowRoomMentions": {
         "label": "Nhắc cả phòng",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "replyToMessage": {
+        "label": "Trả lời trích dẫn",
         "choices": {
           "true": "Bật",
           "false": "Tắt"

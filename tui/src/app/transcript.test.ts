@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { BoxRenderable, CliRenderEvents, TextareaRenderable, TextRenderable } from "@opentui/core"
+import { BoxRenderable, CliRenderEvents, MarkdownRenderable, TextareaRenderable, TextRenderable } from "@opentui/core"
 import { MockTreeSitterClient, createTestRenderer, type TestRendererSetup } from "@opentui/core/testing"
 import { NanobotTui } from "./app"
 import { options, client, mount, waitUntil, occurrences } from "./test-support"
+import type { Transcript } from "../rendering/transcript"
 
 describe("NanobotTui transcript", () => {
   let setup: TestRendererSetup | undefined
@@ -16,9 +17,11 @@ describe("NanobotTui transcript", () => {
     createTestRenderer(rendererOptions)
   )
   test("loads earlier transcript pages in place when PageUp reaches the top", async () => {
-    setup = await createRenderer({ width: 80, height: 22, screenMode: "alternate-screen" })
+    setup = await createRenderer({ width: 100, height: 40, screenMode: "alternate-screen" })
     const original = globalThis.fetch
     const requests: string[] = []
+    const oldest = "oldest answer `ticks` __pycache__\n  ![image](image.png) <b>HTML</b>\n"
+    const recent = "recent answer \\(x_1^2\\)\n```mermaid\ngraph TD; A --> B\n```\n"
     globalThis.fetch = ((input: string | URL | Request) => {
       const url = String(input)
       requests.push(url)
@@ -27,12 +30,13 @@ describe("NanobotTui transcript", () => {
         schemaVersion: 3, projection: "events",
         events: older
           ? [
-              { event: "user_message", chat_id: "chat", starts_turn: true, text: "oldest question" },
-              { event: "stream_end", chat_id: "chat", text: "oldest answer" },
+              { event: "user_message", chat_id: "chat", starts_turn: false, text: "!cat oldest.log", turn_id: "old-shell" },
+              { event: "message", chat_id: "chat", text: oldest, render_as: "text", turn_id: "old-shell" },
             ]
           : [
-              { event: "user_message", chat_id: "chat", starts_turn: true, text: "recent question" },
-              { event: "stream_end", chat_id: "chat", text: "recent answer" },
+              { event: "user_message", chat_id: "chat", starts_turn: false, text: "!cat recent.log", turn_id: "recent-shell" },
+              { event: "message", chat_id: "chat", text: recent, render_as: "text", turn_id: "recent-shell" },
+              { event: "stream_end", chat_id: "chat", text: "Normal \\(x_1^2\\)", turn_id: "agent" },
             ],
         page: older
           ? { has_more_before: false, before_cursor: null }
@@ -55,18 +59,46 @@ describe("NanobotTui transcript", () => {
       await setup.flush()
       const frame = setup.captureCharFrame()
 
-      expect(frame.indexOf("oldest question")).toBeLessThan(frame.indexOf("recent question"))
+      expect(frame.indexOf("!cat oldest.log")).toBeLessThan(frame.indexOf("!cat recent.log"))
       expect(frame.indexOf("oldest answer")).toBeLessThan(frame.indexOf("recent answer"))
       expect((app as unknown as { historyHasMore: boolean }).historyHasMore).toBe(false)
+      const transcript = (app as unknown as { transcript: Transcript }).transcript
+      const cells = transcript.root.getChildren().flatMap((row) => row.getChildren())
+      expect(cells.filter((child) => child instanceof TextRenderable)
+        .map((child) => child.plainText)).toEqual(expect.arrayContaining([oldest, recent]))
+      expect(cells.filter((child) => child instanceof MarkdownRenderable)
+        .map((child) => child.content)).toEqual(["Normal x₁²"])
+      expect(frame).toContain("![image](image.png) <b>HTML</b>")
+      expect(frame).toContain("```mermaid")
 
       const composer = (app as unknown as { composer: TextareaRenderable }).composer
       setup.mockInput.pressArrow("up")
-      expect(composer.plainText).toBe("recent question")
+      expect(composer.plainText).toBe("!cat recent.log")
       setup.mockInput.pressArrow("up")
-      expect(composer.plainText).toBe("oldest question")
+      expect(composer.plainText).toBe("!cat oldest.log")
     } finally {
       globalThis.fetch = original
     }
+  })
+
+  test("shows literal shell output from another client without replacing a pending Markdown reply", async () => {
+    setup = await createRenderer({ width: 100, height: 26, screenMode: "alternate-screen" })
+    const app = mount(setup)
+    app.accept({ event: "goal_status", chat_id: "chat", status: "running", turn_id: "agent" })
+    app.accept({ event: "message", chat_id: "chat", text: "Normal \\(x_1^2\\)", turn_id: "agent" })
+    const output = "  __pycache__ `ticks` ![image](image.png) <b>HTML</b>\n"
+    app.accept({ event: "message", chat_id: "chat", text: output, render_as: "text", turn_id: "other-shell" })
+    await setup.flush()
+    expect(setup.captureCharFrame()).toContain("__pycache__ `ticks` ![image](image.png) <b>HTML</b>")
+    const ui = app as unknown as { activeTurn: boolean; transcript: Transcript }
+    expect(ui.activeTurn).toBe(true)
+
+    app.accept({ event: "turn_end", chat_id: "chat", turn_id: "agent" })
+    await setup.flush()
+    const cells = ui.transcript.root.getChildren().flatMap((row) => row.getChildren())
+    expect(cells.some((child) => child instanceof TextRenderable && child.plainText === output)).toBe(true)
+    expect(cells.some((child) => child instanceof MarkdownRenderable && child.content === "Normal x₁²")).toBe(true)
+    expect(ui.activeTurn).toBe(false)
   })
 
   test("replaces streamed drafts with canonical stream-end text", async () => {
@@ -223,7 +255,7 @@ describe("NanobotTui transcript", () => {
     app.accept({
       event: "message",
       chat_id: "chat",
-      text: "running shell",
+      text: "",
       kind: "tool_hint",
       tool_events: [{ phase: "start", name: "exec", arguments: { cmd: "pwd" } }],
     })

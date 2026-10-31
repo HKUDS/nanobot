@@ -1,5 +1,3 @@
-"""Stable request and error contracts shared by WebUI settings domains."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass

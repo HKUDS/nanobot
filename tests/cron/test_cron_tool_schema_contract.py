@@ -21,7 +21,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 class _SvcStub:
     """Minimal CronService stand-in; we only exercise schema/dispatch paths."""
 
-    def list_jobs(self):
+    def list_jobs(self, include_disabled=False):
         return []
 
     def get_job(self, _job_id):
@@ -53,12 +53,10 @@ def registry() -> Iterator[ToolRegistry]:
 
 class TestSchemaContract:
     def test_list_accepted_without_message(self, registry: ToolRegistry) -> None:
-        # action='list' must pass schema validation with nothing but 'action'.
         _, _, err = registry.prepare_call("cron", {"action": "list"})
         assert err is None
 
     def test_remove_accepted_without_message(self, registry: ToolRegistry) -> None:
-        # action='remove' must pass schema validation with just 'action' + 'job_id'.
         _, _, err = registry.prepare_call("cron", {"action": "remove", "job_id": "abc"})
         assert err is None
 

@@ -1,5 +1,3 @@
-"""Scoped snapshots preserve real data and never silently expand read authority."""
-
 import hashlib
 import json
 import os
@@ -40,7 +38,6 @@ def scoped_data(tmp_path):
     for path, content in files.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content.encode())
-    # Paths intentionally excluded: arbitrary project data and installed binaries.
     for path in (workspace / "src/private.py", data / "bin/cua", data / "logs/runtime.log",
                  data / "cli-apps/venvs/application/binary"):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -116,7 +113,7 @@ def test_backup_failure_keeps_incomplete_attempt_and_retries_without_false_compl
     assert len(list(job.glob(".backup-*"))) == 1
     archive = ensure_backup(job, sources, "a" * 64, mutated=False)
     assert archive.exists()
-    assert len(list(job.glob(".backup-*"))) == 1  # Do not delete previous recovery material.
+    assert len(list(job.glob(".backup-*"))) == 1
     archive.write_bytes(archive.read_bytes() + b"corruption")
     with pytest.raises(ValueError, match="missing or changed"):
         ensure_backup(job, sources, "a" * 64, mutated=True)
@@ -158,7 +155,7 @@ def test_scheduled_delivery_is_backed_up_and_changes_block_program_rollback(tmp_
     outbox.finish(message, "sent")
     with pytest.raises(ValueError, match="changed"):
         verify_backup(job, sources, "a" * 64, unchanged=True)
-    assert outbox.ready() == []  # Never replace the live store with the old backup.
+    assert outbox.ready() == []
 
 
 def test_scope_cannot_include_its_own_job(tmp_path):
@@ -184,7 +181,6 @@ async def test_scoped_backup_reopens_sqlite_history_after_runtime_drain(tmp_path
     )])
     archive = ensure_backup(job, sources, "a" * 64, mutated=False)
     restored_root = tmp_path / "restored-sessions"
-    # Reopen the real database from the scoped archive, not a JSONL stand-in.
     with ZipFile(archive) as bundle:
         manifest = json.loads(bundle.read("manifest.json"))
         for entry in manifest["entries"]:

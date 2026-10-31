@@ -1,5 +1,3 @@
-"""Session-worker completion helpers for integration tests."""
-
 import asyncio
 import faulthandler
 import time

@@ -1,7 +1,7 @@
 import { DiagramImageError } from "./svg-image";
 import type { DiagramInput } from "./types";
 
-// Pele's public TextMeasurer contract; the engine import stays in the Worker entry.
+// Pele 1.9's public TextMeasurer contract; the engine import stays in the Worker entry.
 export function canvasTextMeasurer(fonts: DiagramInput["fonts"]): {
   width(text: string, size: number, style: number): number;
 } {
@@ -13,10 +13,12 @@ export function canvasTextMeasurer(fonts: DiagramInput["fonts"]): {
   const canvas = context;
   return {
     width(text, size, style) {
-      if (!Number.isFinite(size) || size <= 0 || size > 200 || (style & ~7) !== 0) {
+      if (!Number.isFinite(size) || size <= 0 || size > 200 || (style & ~63) !== 0) {
         throw new DiagramImageError("unsupported");
       }
-      const font = `${style & 2 ? "italic " : ""}${style & 1 ? "bold " : ""}${size}px ${style & 4 ? fonts.mono : fonts.sans}`;
+      // Sub=8 and Sup=16 share Pele's smaller scale; Underline=32 has no width effect.
+      const effectiveSize = style & (8 | 16) ? size / 1.2 : size;
+      const font = `${style & 2 ? "italic " : ""}${style & 1 ? "bold " : ""}${effectiveSize}px ${style & 4 ? fonts.mono : fonts.sans}`;
       // Reset first so an invalid canvas font cannot reuse the preceding measurement.
       canvas.font = "1px serif";
       canvas.font = font;

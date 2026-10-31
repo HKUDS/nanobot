@@ -1,5 +1,3 @@
-"""Network security utilities — SSRF protection and internal URL detection."""
-
 from __future__ import annotations
 
 import asyncio
@@ -234,7 +232,7 @@ def pin_resolved_url_dns(url: str, resolved_ips: tuple[str, ...]):
         host: Any,
         port: Any,
         family: int = 0,
-        type: int = 0,  # noqa: A002
+        type: int = 0,
         proto: int = 0,
         flags: int = 0,
     ) -> list[Any]:
@@ -305,7 +303,6 @@ def validate_resolved_url(url: str) -> tuple[bool, str]:
         if _is_private(addr):
             return False, f"Redirect target is a private address: {addr}"
     except ValueError:
-        # hostname is a domain name, resolve it
         try:
             infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
         except socket.gaierror:

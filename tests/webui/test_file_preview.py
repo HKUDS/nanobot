@@ -67,7 +67,6 @@ def test_file_reference_rejects_missing_files_and_directories(tmp_path, target) 
     (b"RIFF\0\0\0\0WEBPexample", "image/webp"),
 ])
 def test_raster_preview_uses_content_signature(tmp_path: Path, data: bytes, mime: str) -> None:
-    # Extension must not determine the rendered MIME type.
     image = tmp_path / "figure.bin"
     image.write_bytes(data)
     scope = default_workspace_scope(tmp_path, restrict_to_workspace=True)

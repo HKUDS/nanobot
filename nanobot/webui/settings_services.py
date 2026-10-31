@@ -1,5 +1,3 @@
-"""Gateway-owned state for the WebUI settings surface."""
-
 from __future__ import annotations
 
 import threading

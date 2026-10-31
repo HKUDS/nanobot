@@ -1,5 +1,3 @@
-"""Consumer contracts for trusted release metadata; no package installation here."""
-
 import hashlib
 import json
 

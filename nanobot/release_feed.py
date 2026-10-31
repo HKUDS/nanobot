@@ -304,7 +304,7 @@ class ReleaseFeed:
                 raise ReleaseFeedError("Release catalogue predates the approved target")
             if target.version in catalogue.withdrawn:
                 raise ReleaseFeedError(f"Release withdrawn: {catalogue.withdrawn[target.version]}")
-            assert target.pointer is not None  # Validated by ReleaseTarget.
+            assert target.pointer is not None
             current = await self._from_pointer(target.pointer, catalogue.generation)
         if (current.artifact, current.url) != (target.artifact, target.url):
             raise ReleaseFeedError("The approved release artifact has changed")

@@ -116,6 +116,7 @@ export type InboundEvent =
       event: "message"
       chat_id: string
       text: string
+      render_as?: "text"
       kind?: "tool_hint" | "progress" | "reasoning"
       tool_events?: ToolProgressEvent[]
       turn_id?: string
@@ -229,6 +230,7 @@ export type ApiReauthenticator = (
 export interface HistoryMessage {
   role: "user" | "assistant" | "activity"
   content: string
+  renderAs?: "text"
   turnId?: string
   media?: MediaAttachment[]
   toolEvents?: ToolProgressEvent[]
@@ -279,6 +281,7 @@ export interface SessionContextSnapshot {
 }
 
 interface SessionMention {
+  id?: string
   name: string
   session_key: string
   title?: string
@@ -324,7 +327,9 @@ export type SlashCommandLifecycle =
   | "agent_turn_with_args"
 
 export interface SessionSummary {
+  key: string
   chatId: string
+  handle?: { id: string; name: string }
   title: string
   preview: string
   createdAt: string | null

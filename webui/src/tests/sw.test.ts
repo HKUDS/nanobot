@@ -11,7 +11,6 @@ const CACHE_NAME = "nanobot-static-v2";
 const ICON_CACHE_NAME = "nanobot-icons-v1";
 const ICON_CACHE_LIMIT = 128;
 
-/** Minimal Cache-compatible in-memory store with SW-style URL normalization. */
 class FakeCacheStore {
   entries = new Map<string, Response>();
 
@@ -287,7 +286,6 @@ describe("service worker", () => {
   it("removes stale cache names and prunes unreferenced static entries on activate", async () => {
     const sw = loadSw();
     await sw.fire("install");
-    // Simulate the latest loaded build: index.html references only v2 assets.
     await sw.store.put(`${ORIGIN}/`, indexHtml(["/assets/index-v2.js", "/assets/index-v2.css"]));
     await sw.store.put(`${ORIGIN}/assets/index-v2.js`, new Response("v2"));
     await sw.store.put(`${ORIGIN}/assets/index-v2.css`, new Response("v2 css"));
@@ -508,11 +506,9 @@ describe("service worker", () => {
   it("serves navigation network-first, prunes on shell refresh, and falls back when offline", async () => {
     const sw = loadSw();
     await sw.store.put(`${ORIGIN}/`, indexHtml(["/assets/index-v2.js"]));
-    // Assets from an older build, still referenced by the cached v2 shell.
     await sw.store.put(`${ORIGIN}/assets/index-v2.js`, new Response("v2"));
     await sw.store.put(`${ORIGIN}/assets/index-v1.js`, new Response("v1"));
 
-    // Offline: network rejects, cached shell is returned.
     sw.fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
     const offlineEvent = {
       request: new Request(`${ORIGIN}/`),
@@ -522,8 +518,6 @@ describe("service worker", () => {
     const offlineResponse = (await offlineEvent.respondWith.mock.calls[0][0]) as Response;
     expect(await offlineResponse.text()).toContain("assets/index-v2.js");
 
-    // Online: network response wins, refreshes the cached shell, and prunes
-    // entries the new index.html no longer references.
     const freshShell = indexHtml(["/assets/index-v3.js"]);
     sw.fetchMock.mockImplementation((input: Request | string) => {
       const url = new URL(typeof input === "string" ? input : input.url, ORIGIN);

@@ -1,5 +1,3 @@
-"""Tests for Feishu _is_bot_mentioned logic."""
-
 from types import SimpleNamespace
 
 from nanobot.channels.feishu.runtime import FeishuChannel

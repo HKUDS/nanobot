@@ -2,13 +2,11 @@
   "setup": {
     "docsLabel": "打开智能体设置指南",
     "officialLabel": "打开 WhatsApp 智能体帮助",
-    "summary": "通过 WhatsApp Agent Platform API 接入 nanobot。只有你可以与它对话，它无法访问你的其他 WhatsApp 聊天。",
     "privacyNotice": "智能体对话不采用端到端加密。消息由 nanobot 和你配置的模型服务商处理。",
     "fields": {
       "token": {
         "label": "API 令牌",
-        "placeholder": "在 WhatsApp 中打开 设置 → 智能体，创建智能体，然后从智能体聊天 → 聊天信息 → API 密钥 复制密钥。",
-        "help": "在 WhatsApp 中打开 设置 → 智能体，创建智能体，然后从智能体聊天 → 聊天信息 → API 密钥 复制密钥。"
+        "placeholder": "在 WhatsApp 中打开 设置 → 智能体，创建智能体，然后从智能体聊天 → 聊天信息 → API 密钥 复制密钥。"
       },
       "allowFrom": {
         "label": "允许的发送者",
