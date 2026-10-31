@@ -49,7 +49,7 @@ function isPrivateHostname(hostname: string): boolean {
     );
   }
 
-  return (
+  return host.includes(":") && (
     host === "::"
     || host === "::1"
     || host.startsWith("::ffff:")
