@@ -5,7 +5,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .agent.tools.context import RequestContext
+    from .agent.tools.context import (
+        RequestContext,
+        ToolInvocationContext,
+        current_tool_invocation_context,
+        tool_invocation_key,
+    )
     from .bus.runtime_events import SessionTurnPersisted
     from .nanobot import (
         STREAM_EVENT_REASONING_COMPLETED,
@@ -56,6 +61,9 @@ _LAZY_EXPORTS = {
     "RunStream": ".nanobot",
     "RunResult": ".nanobot",
     "RequestContext": ".agent.tools.context",
+    "ToolInvocationContext": ".agent.tools.context",
+    "current_tool_invocation_context": ".agent.tools.context",
+    "tool_invocation_key": ".agent.tools.context",
     "RuntimeContextBlock": ".runtime_context",
     "RuntimeContextProvider": ".runtime_context",
     "SessionInfo": ".nanobot",
@@ -93,6 +101,9 @@ __all__ = [
     "LLMUsage",
     "RunResult",
     "RequestContext",
+    "ToolInvocationContext",
+    "current_tool_invocation_context",
+    "tool_invocation_key",
     "RuntimeContextBlock",
     "RuntimeContextProvider",
     "RunStream",

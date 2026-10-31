@@ -9,7 +9,13 @@ from typing import Any, cast
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
-from nanobot.agent.tools.context import tool_log_content_allowed
+from nanobot.agent.tools.context import (
+    ToolInvocationContext,
+    current_request_session_key,
+    tool_invocation_context,
+    tool_invocation_key,
+    tool_log_content_allowed,
+)
 from nanobot.agent.tools.file_state import file_read_context
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result, with_tool_error_hint
 from nanobot.providers.base import ToolCallRequest
@@ -153,10 +159,15 @@ async def _execute_tool_call(
         return payload, event
 
     await hook.before_execute_tool(context, tool_call, tool, params)
+    invocation = ToolInvocationContext(
+        tool_call_id=tool_call.id,
+        invocation_key=tool_invocation_key(current_request_session_key(), tool_call.id),
+    )
     try:
         with (
+            tool_invocation_context(invocation),
             file_read_context(tool_call.id, read_results)
-            if tool_call.name == "read_file" else nullcontext()
+            if tool_call.name == "read_file" else nullcontext(),
         ):
             if tool is not None:
                 result = await tool.execute(**params)
