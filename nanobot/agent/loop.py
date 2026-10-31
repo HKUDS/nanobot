@@ -926,6 +926,14 @@ class AgentLoop:
         tasks.discard(task)
         if not tasks and self._active_tasks.get(key) is tasks:
             self._active_tasks.pop(key, None)
+        if task.cancelled():
+            return
+        exception = task.exception()
+        if exception is not None:
+            logger.opt(exception=exception).error(
+                "Session worker task for '{}' failed",
+                key,
+            )
 
     async def _cancel_active_tasks(self, key: str) -> int:
         journal_session = await self.sessions.state.read(key)
