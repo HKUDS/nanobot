@@ -1,5 +1,3 @@
-"""Durable session checkpoints and pending-turn recovery state."""
-
 from __future__ import annotations
 
 import asyncio
@@ -52,7 +50,12 @@ def request_origin_from_metadata(metadata: Mapping[str, Any]) -> RequestOrigin |
 
 
 class RecoveryAdmission(Protocol):
-    """Narrow AgentLoop boundary for explicit recovery validation."""
+    """Own recovery eligibility before queue injection and worker dispatch.
+
+    Messages carry their effective session key and may come from any channel.
+    Implementations must tolerate repeated admission. Admission may cancel an
+    active worker, so callers must re-read queue ownership afterwards.
+    """
 
     async def admit(self, message: InboundMessage) -> bool: ...
 
@@ -186,7 +189,6 @@ def _checkpoint_tool_call_ids(
     *,
     result_rows: bool = False,
 ) -> list[str] | None:
-    """Validate checkpoint tool rows and return their stable IDs."""
     if not isinstance(value, list):
         return None
     ids: list[str] = []
@@ -452,4 +454,6 @@ def recovery_state_from_metadata(metadata: Mapping[str, Any] | None) -> dict[str
         "authentication", "billing", "connection", "timeout", "rate_limit", "server", "unknown",
     }:
         payload["failure_error_kind"] = failure_error_kind
+    if state.get("reply_preserved") is True:
+        payload["reply_preserved"] = True
     return payload

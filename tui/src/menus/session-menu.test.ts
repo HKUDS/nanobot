@@ -6,7 +6,9 @@ import type { SessionSummary } from "../client"
 
 const sessions: SessionSummary[] = [
   {
+    key: "websocket:one",
     chatId: "one",
+    handle: { id: "handle_one", name: "luma" },
     title: "API migration",
     preview: "Move authentication to the new client",
     createdAt: "2026-08-12T10:00:00Z",
@@ -17,7 +19,9 @@ const sessions: SessionSummary[] = [
     archived: false,
   },
   {
+    key: "websocket:two",
     chatId: "two",
+    handle: { id: "handle_two", name: "bime" },
     title: "Release checklist",
     preview: "Prepare the stable release",
     createdAt: "2026-08-11T10:00:00Z",
@@ -55,7 +59,7 @@ describe("SessionMenu", () => {
     menu.open(sessions, "one", 6, "Codex")
     await setup.renderOnce()
 
-    expect(setup.captureCharFrame()).toContain("› ● API migration")
+    expect(setup.captureCharFrame()).toContain("› ● API migration  @luma")
     expect(setup.captureCharFrame()).not.toContain("Move authentication")
     expect(setup.captureCharFrame()).not.toContain("Codex")
     expect(menu.choose()?.chatId).toBe("one")
@@ -64,6 +68,13 @@ describe("SessionMenu", () => {
     await setup.renderOnce()
     expect(setup.captureCharFrame()).toContain("⚠ Release checklist")
     expect(menu.choose()?.chatId).toBe("two")
+
+    for (const query of ["luma", "@luma"]) {
+      menu.update(query, 6)
+      await setup.renderOnce()
+      expect(menu.choose()?.key).toBe("websocket:one")
+      expect(setup.captureCharFrame()).toContain("API migration  @luma")
+    }
   })
 
   test("keeps generated multi-line titles on one terminal row", () => {

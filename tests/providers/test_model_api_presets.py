@@ -1,5 +1,3 @@
-"""Preset API declarations control requests through OpenAI-compatible gateways."""
-
 import asyncio
 import json
 
@@ -76,8 +74,6 @@ async def test_model_override_keeps_request_settings_within_connection(
     before = config.model_dump()
     model = f"{target}/new-model"
     if literal_env_syntax:
-        # SDK/factory arguments are model IDs, not configuration templates.
-        # Auto routing of this literal uses the first configured connection.
         monkeypatch.setenv("NANOBOT_TEST_CALL_MODEL", "tenant_a/env-model")
         model = "${NANOBOT_TEST_CALL_MODEL}"
     if entrypoint == "sdk":
@@ -210,7 +206,6 @@ async def test_preset_overrides_isolate_requests_and_preserve_prompt_prefix(bind
             await provider._ensure_client()
         bind_transport(provider, handler)
     signature = provider_signature(config, preset=override)
-    # Editing the config cannot change a previously constructed provider.
     override.extra_body["metadata"]["local"] = "later"
     assert signature != provider_signature(config, preset=override)
     messages = [{"role": "system", "content": "stable"}, {"role": "user", "content": "hello"}]
@@ -222,7 +217,7 @@ async def test_preset_overrides_isolate_requests_and_preserve_prompt_prefix(bind
     changed_body = json.loads(by_route["preset"].content)
     assert changed_body.pop("metadata") == {"local": "yes"}
     assert base_body.pop("metadata") == {"shared": "yes"}
-    assert changed_body == base_body  # Includes system/history and serialized tool definitions.
+    assert changed_body == base_body
     assert by_route["preset"].headers.get_list("x-route") == ["preset"]
     assert all(request.headers["x-keep"] == "yes" for request in requests)
     assert by_route["preset"].url.params["route"] == "preset"

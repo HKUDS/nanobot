@@ -45,7 +45,9 @@ export function RecoveryNotice({ state, onContinue, onDismiss, onOpenSettings }:
     ? t("recovery.failedHelp", {
         defaultValue: "The saved task could not be restored safely. Review it before continuing.",
       })
-    : modelFailure?.body ?? t("recovery.review", { defaultValue: "Review the task before continuing. Tools will not be replayed automatically." });
+    : modelFailure && state.reply_preserved === true
+      ? t("recovery.replyPreserved", { defaultValue: "Reply saved. You can continue." })
+      : modelFailure?.body ?? t("recovery.review", { defaultValue: "Review the task before continuing. Tools will not be replayed automatically." });
   const run = (action: "continue" | "dismiss") => {
     setPending(action);
     setError(null);

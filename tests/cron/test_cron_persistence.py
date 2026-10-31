@@ -32,8 +32,6 @@ def _seeded_store(tmp_path: Path) -> tuple[CronService, Path]:
         schedule=CronSchedule(kind="cron", expr="0 10 * * *", tz="Asia/Kuwait"),
         message="hello",
     )
-    # add_job appended to action.jsonl; flush to jobs.json by toggling
-    # ``_running`` long enough for ``_merge_action`` to do its rewrite.
     service._running = True
     try:
         service._load_store()
@@ -71,8 +69,6 @@ def test_save_store_is_atomic(tmp_path: Path) -> None:
     cannot leave the destination truncated or invalid."""
     service, store_path = _seeded_store(tmp_path)
 
-    # Simulate an arbitrary save and confirm the result parses cleanly and
-    # no orphan ``.tmp`` is left behind.
     service._save_store()
     data = json.loads(store_path.read_text(encoding="utf-8"))
     assert len(data["jobs"]) == 1
@@ -91,8 +87,6 @@ def test_save_store_failure_does_not_corrupt_existing_file(
     service, store_path = _seeded_store(tmp_path)
     original = store_path.read_bytes()
 
-    # Inject a failure inside the temp-file write.  ``os.replace`` should
-    # never run; the destination must keep its previous content.
     real_open = open
 
     def boom(path, *args, **kwargs):  # type: ignore[no-untyped-def]
@@ -145,7 +139,6 @@ def test_action_log_survives_failed_store_save(
     assert store_path.read_bytes() == original_store
     assert action_path.read_bytes() == pending_actions
 
-    # Recover from disk, without relying on the failed gateway's dirty snapshot.
     restarted = CronService(store_path)
     restarted._running = True
     assert [(j.id, j.name) for j in restarted.list_jobs(include_disabled=True)] == expected
@@ -196,7 +189,6 @@ def test_saved_actions_can_be_replayed_if_log_cleanup_fails(
 def test_atomic_write_ignores_unsupported_directory_fsync(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """vboxsf-like filesystems can open directories but reject directory fsync."""
     store_path = tmp_path / "cron" / "jobs.json"
     dir_fd = 987654
 
@@ -236,7 +228,6 @@ def test_load_jobs_preserves_corrupt_store_and_returns_none(
     service = CronService(store_path)
     assert service._load_jobs() is None
 
-    # Original path is gone; a ``.corrupt-<ts>`` backup exists alongside it.
     assert not store_path.exists()
     backups = list(store_path.parent.glob("jobs.json.corrupt-*"))
     assert len(backups) == 1
@@ -258,10 +249,8 @@ def test_start_refuses_to_overwrite_corrupt_store(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="corrupt"):
         asyncio.run(service.start())
 
-    # Service is left in a stopped state so the operator notices.
     assert service._running is False
 
-    # And the corrupt file is still recoverable from the .corrupt-<ts> copy.
     backups = list(store_path.parent.glob("jobs.json.corrupt-*"))
     assert len(backups) == 1
 
@@ -273,15 +262,12 @@ def test_load_store_falls_back_to_in_memory_on_corruption_after_start(
     rclone-mounted Drive returns a partial read), the service must keep
     using its existing in-memory snapshot instead of dropping every job."""
     service, store_path = _seeded_store(tmp_path)
-    # Force load so ``self._store`` is populated.
     service._load_store()
     snapshot = service._store
     assert snapshot is not None and len(snapshot.jobs) == 1
 
-    # Now corrupt the file on disk.
     store_path.write_text("\x00garbage\x00", encoding="utf-8")
 
-    # Subsequent reload returns the in-memory snapshot, not None or empty.
     result = service._load_store()
     assert result is snapshot
     assert len(result.jobs) == 1

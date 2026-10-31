@@ -1,5 +1,3 @@
-"""Real shared-data leases across process and installation identities."""
-
 import json
 import os
 import subprocess
@@ -74,7 +72,7 @@ def test_shared_data_blocks_update_across_installations_until_last_writer_exits(
     with process_access(tmp_path / "first environment", [store]) as first:
         with process_access(tmp_path / "second environment", [store]):
             with data_access([store]):
-                pass  # Normal runtime sharing remains allowed.
+                pass
             crash_process(first)
             with pytest.raises(InstallationBusyError, match="data is in use"):
                 with data_access([store], updating=True):
@@ -109,7 +107,7 @@ def test_alias_and_partial_acquisition_do_not_bypass_or_leak_leases(private_home
             with data_access([available, store], updating=True):
                 pytest.fail("A symlink alias bypassed the writer lease")
         with data_access([available]):
-            pass  # Failed multi-store acquisition released its earlier leases.
+            pass
         crash_process(writer)
         with data_access([store], updating=True):
             pass
@@ -120,8 +118,6 @@ def test_job_reservation_survives_process_exit_until_same_scope_is_recovered(pri
     job_id = str(uuid4())
     with process_access(tmp_path / "update environment", [store], updating=True, job_id=job_id) as worker:
         crash_process(worker)
-    # No process holds the leases now. The durable reservation still excludes
-    # overlapping readers/writers from other installations, but not unrelated data.
     for path in (store, store / "chat.jsonl", store.parent):
         with pytest.raises(InstallationBusyError, match="reserved"):
             with data_access([path]):
@@ -153,12 +149,10 @@ def test_profile_handoff_keeps_delivery_leased_without_expanding_old_grant(priva
         with data_access(scope, job_id=job_id) as owner:
             grant = owner.grant_startup(participant, scope)
             runtime.enter_context(profile_data_access(**selectors, grant=grant))
-            # The old reservation is not enlarged to authorize initialization.
             saved = json.loads(owner.reservation_path.read_text())
             assert saved["grants"][participant]["roots"] == sorted(str(path.resolve()).casefold() for path in scope)
             assert not delivery.exists()
             owner.release_reservation()
-        # Once handoff ends, the running profile still owns the new store lease.
         with pytest.raises(InstallationBusyError, match="data is in use"):
             with data_access((delivery,), updating=True):
                 pytest.fail("A delivery store writer escaped the runtime lease")
@@ -207,8 +201,6 @@ def test_verified_handoff_admits_only_granted_scope_until_explicit_completion(pr
             with pytest.raises(InstallationBusyError, match="reserved"):
                 with data_access(runtime_scope):
                     pytest.fail("An ordinary startup entered maintenance")
-            # Only the lifecycle owner calls this after verifying the runtime;
-            # participant leases are shared, so completion does not deadlock.
             handoff.release_reservation()
             with data_access(runtime_scope):
                 pass
@@ -239,7 +231,6 @@ with data_access([sys.argv[1]], job_id=sys.argv[2]) as handoff:
         grant = DataStartupGrant(**json.loads(encoded))
         with process_access(tmp_path / "target environment", [store], grant=grant) as child:
             crash_process(coordinator)
-            # The coordinator's OS leases are gone, but the child owns its own.
             with pytest.raises(InstallationBusyError):
                 with data_access([store], updating=True, job_id=job_id):
                     pytest.fail("Repair raced an orphan startup still using data")
@@ -261,9 +252,8 @@ with data_access([sys.argv[1]], job_id=sys.argv[2]) as handoff:
                 startup.release_reservation()
             with pytest.raises(ValueError, match="Only an update job"):
                 startup.reserve()
-        # Exiting the recovered handoff still does not mean verification passed.
     with data_access([store], updating=True, job_id=job_id) as repair:
-        repair.reserve()  # New package mutation revokes all startup grants.
+        repair.reserve()
     with pytest.raises(InstallationBusyError, match="scope"):
         with data_access([store], grant=replacement):
             pytest.fail("A grant from before repair authorized a new startup")

@@ -1,5 +1,3 @@
-"""Document text extraction utilities for nanobot."""
-
 import codecs
 import mimetypes
 from collections.abc import Iterator
@@ -13,13 +11,13 @@ from loguru import logger
 from nanobot.utils.helpers import detect_image_mime
 
 _MAX_TEXT_LENGTH = 200_000
-_MAX_EXTRACT_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+_MAX_EXTRACT_FILE_SIZE = 50 * 1024 * 1024
 _MAX_OFFICE_ARCHIVE_MEMBERS = 10_000
-_MAX_OFFICE_UNCOMPRESSED_SIZE = 256 * 1024 * 1024  # 256 MB
-_MAX_OFFICE_MEMBER_SIZE = 128 * 1024 * 1024  # 128 MB
+_MAX_OFFICE_UNCOMPRESSED_SIZE = 256 * 1024 * 1024
+_MAX_OFFICE_MEMBER_SIZE = 128 * 1024 * 1024
 _MAX_DOCX_TABLE_CELLS = 100_000
 _MAX_DOCX_TABLE_DEPTH = 8
-_MAX_PDF_CONTENT_STREAM_SIZE = 32 * 1024 * 1024  # 32 MB per page
+_MAX_PDF_CONTENT_STREAM_SIZE = 32 * 1024 * 1024
 _MAX_PDF_ATTACHMENT_PAGES = 100
 
 
@@ -129,10 +127,8 @@ def extract_text(path: str | Path) -> str | None:
     elif _is_text_extension(ext):
         return _extract_text_file(path)
     elif ext in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
-        # Image files - for future OCR support
         return f"[image: {path.name}]"
     else:
-        # Unsupported extension
         return None
 
 
@@ -441,7 +437,6 @@ def _extraction_path_error(path: Path) -> str | None:
 
 
 def _extract_pdf(path: Path) -> str:
-    """Extract text from PDF using pypdf."""
     try:
         result = extract_pdf_pages(
             path,
@@ -521,7 +516,6 @@ def _parse_pdf_page_range(pages: str | None, total_pages: int) -> tuple[int, int
 
 
 def _render_document_preview(source: DocumentLineSource) -> str:
-    """Render a bounded attachment preview from the canonical line stream."""
     collector = _TextCollector(_MAX_TEXT_LENGTH)
     iterator = source.lines
     first_line = True
@@ -540,7 +534,6 @@ def _render_document_preview(source: DocumentLineSource) -> str:
 
 
 def _extract_docx(path: Path) -> str:
-    """Extract a bounded DOCX attachment preview."""
     try:
         return _render_document_preview(_open_docx_line_source(path))
     except DocxSafetyError as e:
@@ -553,7 +546,6 @@ def _extract_docx(path: Path) -> str:
 
 
 def _extract_xlsx(path: Path) -> str:
-    """Extract a bounded XLSX attachment preview."""
     try:
         return _render_document_preview(_open_xlsx_line_source(path))
     except DocumentExtractionError as e:
@@ -564,7 +556,6 @@ def _extract_xlsx(path: Path) -> str:
 
 
 def _extract_pptx(path: Path) -> str:
-    """Extract a bounded PPTX attachment preview."""
     try:
         return _render_document_preview(_open_pptx_line_source(path))
     except DocumentExtractionError as e:
@@ -599,7 +590,6 @@ def _collect_pptx_shape_text(shape: Any, out: list[str]) -> None:
 
 
 def _office_archive_error(path: Path) -> str | None:
-    """Reject oversized or encrypted OOXML containers before parsing XML."""
     try:
         with ZipFile(path) as archive:
             members = archive.infolist()
@@ -621,7 +611,6 @@ def _office_archive_error(path: Path) -> str | None:
 
 
 def _decode_bom_text(raw: bytes) -> str | None:
-    """Decode text whose byte-order mark declares a Unicode encoding."""
     if raw.startswith(codecs.BOM_UTF8):
         return raw.decode("utf-8-sig")
     # UTF-32 LE starts with the UTF-16 LE BOM, so check UTF-32 first.
@@ -633,7 +622,6 @@ def _decode_bom_text(raw: bytes) -> str | None:
 
 
 def _extract_text_file(path: Path) -> str:
-    """Extract text from a plain text file."""
     try:
         raw = path.read_bytes()
         content = _decode_bom_text(raw)
@@ -650,14 +638,12 @@ def _extract_text_file(path: Path) -> str:
 
 
 def _truncate(text: str, max_length: int) -> str:
-    """Truncate text with a suffix indicating truncation."""
     if len(text) <= max_length:
         return text
     return text[:max_length] + f"... (truncated, {len(text)} chars total)"
 
 
 def _is_text_extension(ext: str) -> bool:
-    """Check if extension is a text format."""
     return ext in {
         ".txt",
         ".md",
@@ -673,11 +659,6 @@ def _is_text_extension(ext: str) -> bool:
         ".ini",
         ".cfg",
     }
-
-
-# ---------------------------------------------------------------------------
-# High-level helper: split images from on-demand attachment references
-# ---------------------------------------------------------------------------
 
 
 def is_image_file(path: str) -> bool:
@@ -700,7 +681,6 @@ def is_image_file(path: str) -> bool:
 
 
 def _canonical_local_media_path(path: str) -> str:
-    """Return an existing local media file as an absolute path."""
     try:
         candidate = Path(path).expanduser()
         if candidate.is_file():

@@ -665,7 +665,6 @@ async def test_execute_preserves_success_text_that_starts_with_error() -> None:
     assert not is_tool_error_result(result)
 
 
-# Smallest valid 1x1 PNG, base64 without the data: prefix.
 _PNG_B64 = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8"
     "/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
@@ -698,7 +697,6 @@ async def test_execute_persists_image_block_as_artifact(tmp_path: Path) -> None:
     assert artifact["prompt"] == "a cat"
     assert artifact["provider"] == "mcp:test"
     assert Path(artifact["path"]).is_file()
-    # The base64 payload must NOT leak into the model-facing result.
     assert _PNG_B64 not in result
     assert "message tool" in payload["next_step"]
 
@@ -965,7 +963,6 @@ async def test_connect_mcp_servers_enabled_tools_empty_list_registers_none(
 async def test_connect_mcp_servers_enabled_tools_empty_list_blocks_resources_and_prompts(
     fake_mcp_runtime: dict[str, object | None],
 ) -> None:
-    """enabledTools: [] (deny-all) must also block resource and prompt registration."""
     fake_mcp_runtime["session"] = _make_fake_session_with_capabilities(
         tool_names=["demo"],
         resource_names=["secret_data"],
@@ -980,7 +977,6 @@ async def test_connect_mcp_servers_enabled_tools_empty_list_blocks_resources_and
         await stack.aclose()
 
     assert registry.tool_names == []
-    # Resources and prompts must also be blocked
     assert not any("secret_data" in name for name in registry.tool_names)
     assert not any("admin_prompt" in name for name in registry.tool_names)
 
@@ -989,7 +985,6 @@ async def test_connect_mcp_servers_enabled_tools_empty_list_blocks_resources_and
 async def test_connect_mcp_servers_enabled_tools_specific_list_blocks_resources_and_prompts(
     fake_mcp_runtime: dict[str, object | None],
 ) -> None:
-    """enabledTools with specific tool names must not leak resources or prompts."""
     fake_mcp_runtime["session"] = _make_fake_session_with_capabilities(
         tool_names=["demo", "other"],
         resource_names=["secret_data"],
@@ -1003,10 +998,8 @@ async def test_connect_mcp_servers_enabled_tools_specific_list_blocks_resources_
     for stack in stacks.values():
         await stack.aclose()
 
-    # Only the allowed tool should be registered
     assert "mcp_test_demo" in registry.tool_names
     assert "mcp_test_other" not in registry.tool_names
-    # Resources and prompts must not leak
     assert not any("secret_data" in name for name in registry.tool_names)
     assert not any("admin_prompt" in name for name in registry.tool_names)
 
@@ -1015,7 +1008,6 @@ async def test_connect_mcp_servers_enabled_tools_specific_list_blocks_resources_
 async def test_connect_mcp_servers_enabled_tools_wildcard_allows_resources_and_prompts(
     fake_mcp_runtime: dict[str, object | None],
 ) -> None:
-    """enabledTools: ['*'] should allow all tools, resources, and prompts."""
     fake_mcp_runtime["session"] = _make_fake_session_with_capabilities(
         tool_names=["demo"],
         resource_names=["public_data"],
@@ -1666,8 +1658,8 @@ async def test_connect_mcp_servers_rolls_back_completed_batch_on_cancellation(
 @pytest.mark.parametrize(
     ("tool_timeout", "expected_read"),
     [
-        (30, 300.0),  # default: match the MCP SDK's SSE read timeout
-        (600, 600.0),  # long-running tools: read must not cut the call short
+        (30, 300.0),
+        (600, 600.0),
     ],
 )
 async def test_connect_mcp_servers_streamable_http_uses_finite_timeout(
@@ -1913,11 +1905,6 @@ async def test_connect_mcp_servers_passes_stdio_cwd(
     assert captured["cwd"] == "/tmp/nanobot-mcp-test"
 
 
-# ---------------------------------------------------------------------------
-# MCPResourceWrapper tests
-# ---------------------------------------------------------------------------
-
-
 def _make_resource_def(
     name: str = "myres",
     uri: str = "file:///tmp/data.txt",
@@ -1982,11 +1969,6 @@ async def test_resource_wrapper_execute_handles_error() -> None:
     wrapper = _make_resource_wrapper(SimpleNamespace(read_resource=read_resource))
     result = await wrapper.execute()
     assert result == "(MCP resource read failed: RuntimeError)"
-
-
-# ---------------------------------------------------------------------------
-# MCPPromptWrapper tests
-# ---------------------------------------------------------------------------
 
 
 def _make_prompt_def(
@@ -2081,11 +2063,6 @@ async def test_prompt_wrapper_execute_handles_error() -> None:
     wrapper = _make_prompt_wrapper(SimpleNamespace(get_prompt=get_prompt))
     result = await wrapper.execute()
     assert result == "(MCP prompt call failed: RuntimeError)"
-
-
-# ---------------------------------------------------------------------------
-# connect_mcp_servers: resources + prompts integration
-# ---------------------------------------------------------------------------
 
 
 def _make_fake_session_with_capabilities(
@@ -2306,11 +2283,6 @@ async def test_connect_accepts_servers_without_tools_capability(
             await stack.aclose()
 
 
-# ---------------------------------------------------------------------------
-# _sanitize_name tests
-# ---------------------------------------------------------------------------
-
-
 def test_sanitize_name_replaces_spaces() -> None:
     assert _sanitize_name("PostgreSQL System Information") == "PostgreSQL_System_Information"
 
@@ -2329,11 +2301,6 @@ def test_sanitize_name_preserves_valid_characters() -> None:
 
 def test_sanitize_name_noop_for_already_clean_names() -> None:
     assert _sanitize_name("mcp_server_tool") == "mcp_server_tool"
-
-
-# ---------------------------------------------------------------------------
-# Wrapper sanitization tests
-# ---------------------------------------------------------------------------
 
 
 def test_tool_wrapper_sanitizes_name() -> None:
@@ -2362,7 +2329,6 @@ def test_prompt_wrapper_sanitizes_name() -> None:
         description="Design schema",
         arguments=None,
     )
-    # Hyphens are allowed, so this should pass through unchanged
     wrapper = MCPPromptWrapper(None, "my server", prompt_def)
     assert wrapper.name == "mcp_my_server_prompt_design-schema"
 
@@ -2374,7 +2340,6 @@ def test_tool_wrapper_preserves_original_name_for_mcp_call() -> None:
         inputSchema={"type": "object", "properties": {}},
     )
     wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), "srv", tool_def)
-    # The sanitized API-facing name differs from the original MCP name
     assert wrapper.name == "mcp_srv_My_Tool"
     assert wrapper._original_name == "My Tool"
 

@@ -3,11 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NanobotClient } from "@/lib/nanobot-client";
 import type { SidebarStatePayload } from "@/lib/types";
 
-/**
- * Minimal fake WebSocket implementing the subset NanobotClient touches.
- * Every instance is retrievable via ``FakeSocket.instances`` so tests can
- * drive open/close/message lifecycles deterministically.
- */
 class FakeSocket {
   static instances: FakeSocket[] = [];
   static readonly CONNECTING = 0;
@@ -37,8 +32,6 @@ class FakeSocket {
     this.onclose?.();
   }
 
-  /** Simulate a server-initiated drop with a specific wire-level close code
-   * (e.g. ``1009`` for Message Too Big). */
   fakeCloseWithCode(code: number) {
     this.readyState = FakeSocket.CLOSED;
     this.onclose?.({ code });
@@ -71,6 +64,45 @@ afterEach(() => {
 });
 
 describe("NanobotClient", () => {
+  it("notifies ready consumers after server ready frames, including reconnects", async () => {
+    const client = new NanobotClient({ url: "ws://test?token=fixture-token", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    const ready = vi.fn();
+    const unsubscribe = client.onReady(ready);
+    client.connect();
+    lastSocket().fakeOpen();
+    expect(ready).not.toHaveBeenCalled();
+    lastSocket().fakeMessage({ event: "ready", chat_id: "first" });
+    expect(ready).toHaveBeenCalledTimes(1);
+    expect(client.defaultChatId).toBe("first");
+    lastSocket().close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({ event: "ready", chat_id: "second" });
+    expect(ready).toHaveBeenCalledTimes(2);
+    expect(client.defaultChatId).toBe("second");
+    unsubscribe();
+    lastSocket().fakeMessage({ event: "ready", chat_id: "third" });
+    expect(client.defaultChatId).toBe("third");
+    expect(ready).toHaveBeenCalledTimes(2);
+    client.close();
+  });
+
+  it("delivers payload-free pairing changes, isolates listeners and unsubscribes", () => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    const pairing = vi.fn();
+    client.onPairingChange(() => { throw new Error("view failed"); });
+    const unsubscribe = client.onPairingChange(pairing);
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({ event: "pairing_changed" });
+    expect(pairing).toHaveBeenCalledTimes(1);
+    expect(pairing).toHaveBeenCalledWith();
+    unsubscribe();
+    lastSocket().fakeMessage({ event: "pairing_changed" });
+    expect(pairing).toHaveBeenCalledTimes(1);
+    client.close();
+  });
+
   it("emits live task notices without mounted chats, not when the chat replays", () => {
     const client = new NanobotClient({ url: "ws://test", reconnect: false,
       socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
@@ -738,6 +770,54 @@ describe("NanobotClient", () => {
     expect(
       client.reconcileCanonicalCompletion("chat-submitted", requestGeneration, []),
     ).toBe(false);
+  });
+
+  it("sends bang commands with a receipt without taking over an active run or replaying on reconnect", async () => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    socket.fakeMessage({ event: "goal_status", chat_id: "shell", status: "running", turn_id: "agent", started_at: 12_345 });
+    const run = client.getRunState("shell");
+    const pending = client.sendUserShellCommand("shell", "!pwd", { turnId: "bang" });
+    expect(JSON.parse(socket.sent.at(-1)!)).toMatchObject({ type: "message", chat_id: "shell", content: "!pwd", turn_id: "bang", webui: true, user_shell: true });
+    socket.fakeMessage({ event: "message_accepted", chat_id: "shell", turn_id: "bang", starts_turn: false, active_turn_id: "agent", started_at: 12_345 });
+    await expect(pending).resolves.toBeUndefined();
+    socket.fakeMessage({ event: "message", chat_id: "shell", turn_id: "bang", text: "Exit code: 0" });
+    expect(client.getRunState("shell")).toEqual(run);
+    socket.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    lastSocket().fakeOpen();
+    expect(lastSocket().sent.map((frame) => JSON.parse(frame)).filter((frame) => frame.type === "message")).toEqual([]);
+    client.close();
+  });
+
+  it.each(["disconnected", "write failure"])("does not queue a failed bang command for reconnect: %s", async (failure) => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    if (failure === "write failure") {
+      socket.fakeOpen();
+      vi.spyOn(socket, "send").mockImplementationOnce(() => { throw new Error("send failed"); });
+    }
+    await expect(client.sendUserShellCommand("shell", "!pwd", { turnId: "bang" })).rejects.toThrow();
+    expect(client.getRunState("shell").active).toBe(false);
+    socket.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    lastSocket().fakeOpen();
+    expect(lastSocket().sent.map((frame) => JSON.parse(frame)).filter((frame) => frame.type === "message")).toEqual([]);
+    client.close();
+  });
+
+  it("reports a gateway-rejected bang command to its receipt waiter", async () => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    const pending = client.sendUserShellCommand("shell", "!pwd", { turnId: "bang" });
+    socket.fakeMessage({ event: "error", chat_id: "shell", turn_id: "bang", detail: "workspace_scope_rejected", reason: "Workspace unavailable" });
+    await expect(pending).rejects.toThrow("Workspace unavailable");
+    client.close();
   });
 
   it("does not register injected guidance as an independently unsettled run", () => {
@@ -2346,9 +2426,7 @@ describe("NanobotClient", () => {
     expect(lastSocket().sent).toContain(
       JSON.stringify({ type: "attach", chat_id: "chat-z" }),
     );
-    // Drop the socket.
     lastSocket().close();
-    // Advance the backoff timer.
     await vi.advanceTimersByTimeAsync(20);
     const reconnected = lastSocket();
     expect(reconnected).not.toBe(FakeSocket.instances[0]);
@@ -2384,10 +2462,8 @@ describe("NanobotClient", () => {
     client.connect();
     lastSocket().fakeOpen();
     client.close();
-    // Advance past any possible backoff window to prove no reconnect was scheduled.
     await vi.advanceTimersByTimeAsync(200);
     expect(FakeSocket.instances).toHaveLength(1);
-    // "reconnecting" must never appear after an intentional close.
     expect(seen).not.toContain("reconnecting");
     expect(seen.at(-1)).toBe("closed");
   });
@@ -2442,7 +2518,6 @@ describe("NanobotClient", () => {
     client.onError((e) => errors.push(e));
     client.connect();
     lastSocket().fakeOpen();
-    // Server rejected an outbound frame as too large.
     lastSocket().fakeCloseWithCode(1009);
     expect(errors).toEqual([{ kind: "message_too_big" }]);
   });
@@ -2500,7 +2575,6 @@ describe("NanobotClient", () => {
       maxBackoffMs: 5,
       socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
     });
-    // First handler explodes; subsequent reconnect state must be untouched.
     client.onError(() => {
       throw new Error("subscriber blew up");
     });
@@ -2509,7 +2583,6 @@ describe("NanobotClient", () => {
     client.connect();
     lastSocket().fakeOpen();
     lastSocket().fakeCloseWithCode(1009);
-    // Despite the throwing handler, the client must still schedule a reconnect.
     expect(seenStatuses).toContain("reconnecting");
     await vi.advanceTimersByTimeAsync(20);
     expect(FakeSocket.instances.length).toBeGreaterThan(1);
@@ -2540,7 +2613,6 @@ describe("NanobotClient", () => {
     client.onStatus((s) => seen.push(s));
     client.connect();
     lastSocket().fakeOpen();
-    // Simulate the remote side hanging up (no client.close() call).
     lastSocket().close();
     await vi.advanceTimersByTimeAsync(50);
     expect(seen).toContain("reconnecting");

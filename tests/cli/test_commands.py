@@ -138,7 +138,6 @@ class _EmptyGatewaySessionManager:
     def state(self):
         return SimpleNamespace(
             list_sessions=AsyncMock(return_value=[]),
-            migrate_history=AsyncMock(),
             record_delivery=AsyncMock(),
             aclose=AsyncMock(),
         )
@@ -377,7 +376,6 @@ def mock_paths():
 
 
 def test_onboard_fresh_install(mock_paths):
-    """No existing config — should create from scratch."""
     config_file, workspace_dir, mock_ws = mock_paths
 
     result = runner.invoke(app, ["onboard"])
@@ -394,7 +392,6 @@ def test_onboard_fresh_install(mock_paths):
 
 
 def test_onboard_recommends_webui(mock_paths):
-    """Default onboarding should recommend the guided WebUI launcher."""
     result = runner.invoke(app, ["onboard"])
 
     assert result.exit_code == 0
@@ -402,7 +399,6 @@ def test_onboard_recommends_webui(mock_paths):
 
 
 def test_onboard_existing_config_refresh(mock_paths):
-    """Config exists, user declines overwrite — should refresh (load-merge-save)."""
     config_file, workspace_dir, _ = mock_paths
     config_file.write_text('{"existing": true}')
 
@@ -416,7 +412,6 @@ def test_onboard_existing_config_refresh(mock_paths):
 
 
 def test_onboard_existing_config_refresh_non_interactive(mock_paths):
-    """Config exists, user specifies --refresh — should refresh non-interactively (no prompt)."""
     config_file, workspace_dir, _ = mock_paths
     config_file.write_text('{"existing": true}')
 
@@ -430,7 +425,6 @@ def test_onboard_existing_config_refresh_non_interactive(mock_paths):
 
 
 def test_onboard_existing_config_overwrite(mock_paths):
-    """Config exists, user confirms overwrite — should reset to defaults."""
     config_file, workspace_dir, _ = mock_paths
     config_file.write_text('{"existing": true}')
 
@@ -443,7 +437,6 @@ def test_onboard_existing_config_overwrite(mock_paths):
 
 
 def test_onboard_existing_workspace_safe_create(mock_paths):
-    """Workspace exists — should not recreate, but still add missing templates."""
     config_file, workspace_dir, _ = mock_paths
     workspace_dir.mkdir(parents=True)
     config_file.write_text("{}")
@@ -941,7 +934,7 @@ def test_provider_login_openai_codex_uses_explicit_config_proxy(tmp_path, monkey
     proxy = "http://127.0.0.1:23458"
     config_path = tmp_path / "config.json"
     config_path.write_text(
-        json.dumps({"providers": {"openaiCodex": {"proxy": proxy}}}),
+        json.dumps({"network": {"proxy": proxy}, "providers": {"openaiCodex": {"useProxy": True}}}),
         encoding="utf-8",
     )
     active_path: dict[str, Path] = {}
@@ -1287,7 +1280,6 @@ def test_config_bare_nemotron_still_auto_routes_to_configured_ollama():
 
 
 def test_config_cloud_nemotron_is_not_hijacked_by_configured_ollama():
-    """An explicit cloud namespace takes precedence over local keywords."""
     config = Config.model_validate(
         {
             "agents": {
@@ -1659,6 +1651,33 @@ def test_agent_uses_default_config_when_no_workspace_or_config_flags(mock_agent_
     )
 
 
+@pytest.mark.parametrize("enabled", [True, False])
+def test_one_shot_agent_renders_structured_tool_hints(mock_agent_runtime, enabled):
+    config = mock_agent_runtime["config"]
+    config.channels.send_tool_hints = enabled
+    config.channels.send_progress = False
+    config.agents.defaults.tool_hint_max_length = 20
+    mock_agent_runtime["agent_loop"].channels_config = config.channels
+    events = [{
+        "phase": "start", "call_id": "search-1", "name": "web_search",
+        "arguments": {"query": "abcdefghijklmnopqrstuvwxyz"},
+    }]
+
+    async def process_direct(*_args, on_progress, **_kwargs):
+        await on_progress("", tool_hint=True, tool_events=events)
+        return OutboundMessage(channel="cli", chat_id="direct", content="Done")
+
+    mock_agent_runtime["agent_loop"].process_direct.side_effect = process_direct
+    with patch("nanobot.cli.terminal._print_cli_progress_line") as print_progress:
+        result = runner.invoke(app, ["agent", "-m", "search"])
+
+    assert result.exit_code == 0, result.output
+    if enabled:
+        assert print_progress.call_args.args[0] == 'search "abcdefghijklmnopqrs…"'
+    else:
+        print_progress.assert_not_called()
+
+
 def test_agent_uses_explicit_config_path(mock_agent_runtime, tmp_path: Path):
     config_path = tmp_path / "agent-config.json"
     config_path.write_text("{}")
@@ -1895,7 +1914,7 @@ def test_agent_workspace_override_wins_over_config_workspace(mock_agent_runtime,
     [
         ("", False),
         ("# Title\n\n## Active Tasks\n", False),
-        ("<!--\nmulti-line\ncomment\n-->\n", False),  # block comment, not tasks
+        ("<!--\nmulti-line\ncomment\n-->\n", False),
         ("<!-- single line -->\n", False),
         ("## Active Tasks\n\n- water the plants\n", True),
         ("## Active Tasks\n\n### Garden\n\n- water the plants\n", True),
@@ -2103,7 +2122,6 @@ def _patch_cli_command_runtime(
 ) -> None:
     from importlib import import_module
 
-    # Load adapter contracts before replacing runtime factories for this invocation.
     import_module("nanobot.session.webui_turns")
     import_module("nanobot.channels.validation")
     import_module("nanobot.channels.websocket.runtime")
@@ -2416,10 +2434,7 @@ def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path) 
     def fake_dev_server(**kwargs):
         seen["dev_kwargs"] = kwargs
         seen["dev_running"] = True
-        dev_server = SimpleNamespace(
-            url=kwargs["browser_url"],
-            ensure_running=lambda: None,
-        )
+        dev_server = SimpleNamespace(ensure_running=lambda: None)
         seen["dev_server"] = dev_server
         try:
             yield dev_server
@@ -2464,11 +2479,9 @@ def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path) 
     dev_kwargs = seen["dev_kwargs"]
     assert isinstance(dev_kwargs, dict)
     assert dev_kwargs["target_url"] == "http://127.0.0.1:8899"
-    browser_url = dev_kwargs["browser_url"]
-    assert isinstance(browser_url, str)
     saved = json.loads(config_file.read_text(encoding="utf-8"))
     secret = saved["channels"]["websocket"]["tokenIssueSecret"]
-    assert browser_url == f"http://127.0.0.1:5173/#/?bootstrapSecret={secret}"
+    browser_url = f"http://127.0.0.1:5173/#/?bootstrapSecret={secret}"
     assert seen["start_options"].port == 18888
     assert seen["attached_while_dev_running"] is True
     assert seen["attach_kwargs"]["poll_hook"] == seen["dev_server"].ensure_running
@@ -3814,7 +3827,6 @@ def test_gateway_custom_config_workspace_does_not_migrate_legacy_cron(
 
 
 def test_migrate_cron_store_moves_legacy_file(tmp_path: Path) -> None:
-    """Legacy global jobs.json is moved into the workspace on first run."""
     from nanobot.cli.runtime_config import _migrate_cron_store
 
     legacy_dir = tmp_path / "global" / "cron"
@@ -3835,7 +3847,6 @@ def test_migrate_cron_store_moves_legacy_file(tmp_path: Path) -> None:
 
 
 def test_migrate_cron_store_skips_when_workspace_file_exists(tmp_path: Path) -> None:
-    """Migration does not overwrite an existing workspace cron store."""
     from nanobot.cli.runtime_config import _migrate_cron_store
 
     legacy_dir = tmp_path / "global" / "cron"

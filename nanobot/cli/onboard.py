@@ -1,5 +1,3 @@
-"""Interactive onboarding questionnaire for nanobot."""
-
 import asyncio
 import json
 import types
@@ -66,10 +64,6 @@ class _QuickStartEndpointChoice(NamedTuple):
     api_base: str
 
 
-# --- Field Hints for Select Fields ---
-# Maps field names to (choices, hint_text)
-# To add a new select field with hints, add an entry:
-#   "field_name": (["choice1", "choice2", ...], "hint text for the field")
 _SELECT_FIELD_HINTS: dict[str, tuple[list[str], str]] = {
     "reasoning_effort": (
         ["low", "medium", "high"],
@@ -77,12 +71,9 @@ _SELECT_FIELD_HINTS: dict[str, tuple[list[str], str]] = {
     ),
 }
 
-# --- Key Bindings for Navigation ---
 
-_BACK_PRESSED = object()  # Sentinel value for back navigation
+_BACK_PRESSED = object()
 
-# Cache of model-preset names populated at runtime so that field handlers can
-# offer existing presets as choices (e.g. AgentDefaults.model_preset).
 _MODEL_PRESET_CACHE: set[str] = set()
 
 _QUICK_START_CUSTOM_PROVIDER_CHOICE = "Other OpenAI-compatible"
@@ -129,7 +120,6 @@ _CHANNEL_ADVANCED_CHOICE = "Edit advanced settings"
 
 
 def _get_questionary() -> Any:
-    """Return questionary or raise a clear error when wizard deps are unavailable."""
     if questionary is None:
         raise RuntimeError(
             "Interactive onboarding requires the optional 'questionary' dependency. "
@@ -141,18 +131,6 @@ def _get_questionary() -> Any:
 def _select_with_back(
     prompt: str, choices: list[str], default: str | None = None
 ) -> str | None | object:
-    """Select with Escape/Left arrow support for going back.
-
-    Args:
-        prompt: The prompt text to display.
-        choices: List of choices to select from. Must not be empty.
-        default: The default choice to pre-select. If not in choices, first item is used.
-
-    Returns:
-        _BACK_PRESSED sentinel if user pressed Escape or Left arrow
-        The selected choice string if user confirmed
-        None if user cancelled (Ctrl+C)
-    """
     from prompt_toolkit.key_binding import merge_key_bindings
     from prompt_toolkit.layout.containers import Window
     from prompt_toolkit.layout.controls import FormattedTextControl
@@ -208,8 +186,6 @@ def _select_with_back(
         logger.exception("Error in select prompt")
         return None
 
-# --- Type Introspection ---
-
 
 class FieldTypeInfo(NamedTuple):
     """Result of field type introspection."""
@@ -219,7 +195,6 @@ class FieldTypeInfo(NamedTuple):
 
 
 def _get_field_type_info(field_info: FieldInfo) -> FieldTypeInfo:
-    """Extract field type info from Pydantic field."""
     annotation = field_info.annotation
     if annotation is None:
         return FieldTypeInfo("str", None)
@@ -252,7 +227,6 @@ def _get_field_type_info(field_info: FieldInfo) -> FieldTypeInfo:
 
 
 def _get_field_display_name(field_key: str, field_info: FieldInfo | None) -> str:
-    """Get display name for a field."""
     if field_info and field_info.description:
         return field_info.description
     name = field_key
@@ -272,28 +246,20 @@ def _get_field_display_name(field_key: str, field_info: FieldInfo | None) -> str
     return name.replace("_", " ").title()
 
 
-# --- Sensitive Field Masking ---
-
 _SENSITIVE_KEYWORDS = frozenset({"api_key", "token", "secret", "password", "credentials"})
 
 
 def _is_sensitive_field(field_name: str) -> bool:
-    """Check if a field name indicates sensitive content."""
     return any(kw in field_name.lower() for kw in _SENSITIVE_KEYWORDS)
 
 
 def _mask_value(value: str) -> str:
-    """Mask a sensitive value, showing only the last 4 characters."""
     if len(value) <= 4:
         return "****"
     return "*" * (len(value) - 4) + value[-4:]
 
 
-# --- Value Formatting ---
-
-
 def _format_value(value: Any, rich: bool = True, field_name: str = "") -> str:
-    """Single recursive entry point for safe value display. Handles any depth."""
     if value is None or value == "" or value == {} or value == []:
         return "[dim]not set[/dim]" if rich else "[not set]"
     if _is_sensitive_field(field_name) and isinstance(value, str):
@@ -314,7 +280,6 @@ def _format_value(value: Any, rich: bool = True, field_name: str = "") -> str:
     if isinstance(value, list):
         return ", ".join(str(v) for v in cast(list[Any], value))
     if isinstance(value, dict):
-        # Handle dicts containing BaseModel instances
         mapping_parts: list[str] = []
         for k, v in cast(dict[Any, Any], value).items():
             formatted = _format_value(v, rich=False, field_name=str(k))
@@ -328,7 +293,6 @@ def _format_value(value: Any, rich: bool = True, field_name: str = "") -> str:
 
 
 def _format_value_for_input(value: Any, field_type: str) -> str:
-    """Format a value for use as input default."""
     if value is None or value == "":
         return ""
     if field_type == "list" and isinstance(value, list):
@@ -339,11 +303,6 @@ def _format_value_for_input(value: Any, field_type: str) -> str:
 
 
 def _validate_field_constraint(value: Any, field_info: FieldInfo | None) -> str | None:
-    """Validate a value against Pydantic Field constraints.
-
-    Returns an error message string if validation fails, None if valid.
-    Uses attribute-based detection to handle Pydantic v2 internal types.
-    """
     if field_info is None or not hasattr(field_info, "metadata"):
         return None
 
@@ -372,10 +331,6 @@ def _validate_field_constraint(value: Any, field_info: FieldInfo | None) -> str 
 
 
 def _get_constraint_hint(field_info: FieldInfo | None) -> str:
-    """Derive a human-readable constraint hint from field metadata.
-
-    Returns a string like " - 0-10" or " - >= 0" to append to field display names.
-    """
     if field_info is None or not hasattr(field_info, "metadata"):
         return ""
 
@@ -397,15 +352,11 @@ def _get_constraint_hint(field_info: FieldInfo | None) -> str:
     return ""
 
 
-# --- Rich UI Components ---
-
-
 def _show_config_panel(
     display_name: str,
     model: BaseModel,
     fields: list[tuple[str, FieldInfo]],
 ) -> None:
-    """Display current configuration as a rich table."""
     table = Table(show_header=False, box=None, padding=(0, 2))
     table.add_column("Field", style=_UI_ACCENT)
     table.add_column("Value")
@@ -420,7 +371,6 @@ def _show_config_panel(
 
 
 def _show_main_menu_header() -> None:
-    """Display the main menu header."""
     from nanobot import __logo__, __version__
 
     console.print()
@@ -443,7 +393,6 @@ def _show_main_menu_header() -> None:
 
 
 def _show_section_header(title: str, subtitle: str = "") -> None:
-    """Display a section header."""
     console.print()
     if subtitle:
         console.print(
@@ -458,11 +407,7 @@ def _show_section_header(title: str, subtitle: str = "") -> None:
         console.print(Panel("", title=f"[bold {_UI_TEXT}]{title}[/]", border_style=_UI_BORDER))
 
 
-# --- Input Handlers ---
-
-
 def _input_bool(display_name: str, current: bool | None) -> bool | None:
-    """Get boolean input via confirm dialog."""
     return _get_questionary().confirm(
         display_name,
         default=bool(current) if current is not None else False,
@@ -470,7 +415,6 @@ def _input_bool(display_name: str, current: bool | None) -> bool | None:
 
 
 def _input_back_key_bindings() -> KeyBindings:
-    """Return key bindings that make Escape behave like a local back action."""
     bindings = KeyBindings()
 
     # KeyBindings consumes this handler through decorator registration.
@@ -482,7 +426,6 @@ def _input_back_key_bindings() -> KeyBindings:
 
 
 def _ask_prompt(prompt: Any) -> Any:
-    """Ask a questionary prompt with responsive Escape handling."""
     app = getattr(prompt, "application", None)
     if app is not None:
         if hasattr(app, "ttimeoutlen"):
@@ -498,7 +441,6 @@ def _input_text(
     field_type: str,
     field_info: FieldInfo | None = None,
 ) -> Any:
-    """Get text input and parse based on field type."""
     default = _format_value_for_input(current, field_type)
 
     value = _ask_prompt(
@@ -549,7 +491,6 @@ def _input_text(
 
 
 def _input_secret(display_name: str) -> str | None | object:
-    """Get a secret value without echoing it when questionary supports password input."""
     prompt_factory = getattr(_get_questionary(), "password", None)
     if prompt_factory is None:
         prompt_factory = _get_questionary().text
@@ -565,7 +506,6 @@ def _input_with_existing(
     field_type: str,
     field_info: FieldInfo | None = None,
 ) -> Any:
-    """Handle input with 'keep existing' option for non-empty values."""
     has_existing = current is not None and current != "" and current != {} and current != []
 
     if has_existing and not isinstance(current, list):
@@ -580,11 +520,7 @@ def _input_with_existing(
     return _input_text(display_name, current, field_type, field_info=field_info)
 
 
-# --- Pydantic Model Configuration ---
-
-
 def _get_current_provider(model: BaseModel) -> str:
-    """Get the current provider setting from a model (if available)."""
     if hasattr(model, "provider"):
         return getattr(model, "provider", "auto") or "auto"
     return "auto"
@@ -593,9 +529,6 @@ def _get_current_provider(model: BaseModel) -> str:
 def _input_model_with_autocomplete(
     display_name: str, current: Any, provider: str, *, config: Config
 ) -> str | None | object:
-    """Get model input with autocomplete suggestions.
-
-    """
     default = str(current) if current else ""
 
     models = get_model_catalog(config, provider, default)
@@ -637,7 +570,6 @@ def _input_model_with_autocomplete(
 def _input_context_window_with_recommendation(
     display_name: str, current: Any, model_obj: BaseModel, *, config: Config
 ) -> int | None | object:
-    """Get context window input with option to fetch recommended value."""
     current_val = current if current else ""
 
     choices = ["Enter new value"]
@@ -658,7 +590,6 @@ def _input_context_window_with_recommendation(
         return None
 
     if choice == "[?] Get recommended value":
-        # Get the model name from the model object
         model_name = getattr(model_obj, "model", None)
         if not model_name:
             console.print("[yellow]! Please configure the model field first[/yellow]")
@@ -675,9 +606,7 @@ def _input_context_window_with_recommendation(
             return context_limit
         else:
             console.print("[yellow]! Could not fetch model info, please enter manually[/yellow]")
-            # Fall through to manual input
 
-    # Manual input
     value = _get_questionary().text(
         f"{display_name}:",
         default=str(current_val) if current_val else "",
@@ -700,7 +629,6 @@ def _handle_model_field(
     working_model: BaseModel, field_name: str, field_display: str, current_value: Any,
     *, config: Config,
 ) -> None:
-    """Handle the 'model' field with autocomplete and context-window auto-fill."""
     provider = _get_current_provider(working_model)
     new_value = _input_model_with_autocomplete(field_display, current_value, provider, config=config)
     if new_value is _BACK_PRESSED:
@@ -714,7 +642,6 @@ def _handle_context_window_field(
     working_model: BaseModel, field_name: str, field_display: str, current_value: Any,
     *, config: Config,
 ) -> None:
-    """Handle context_window_tokens with recommendation lookup."""
     new_value = _input_context_window_with_recommendation(
         field_display, current_value, working_model, config=config
     )
@@ -727,7 +654,6 @@ def _handle_context_window_field(
 def _handle_model_preset_field(
     working_model: BaseModel, field_name: str, field_display: str, current_value: Any
 ) -> None:
-    """Handle the 'model_preset' field with a list of existing presets."""
     preset_names = sorted(_MODEL_PRESET_CACHE)
     choices = [_CLEAR_CHOICE] + preset_names
     default_choice = str(current_value) if current_value else _CLEAR_CHOICE
@@ -744,7 +670,6 @@ def _set_field_from_choices(
     working_model: BaseModel, field_name: str, field_display: str,
     choices: list[str], default_choice: str
 ) -> None:
-    """Prompt to pick one of ``choices`` and set the field (no-op on back/cancel)."""
     new_value = _select_with_back(field_display, choices, default=default_choice)
     if new_value is _BACK_PRESSED:
         return
@@ -755,7 +680,6 @@ def _set_field_from_choices(
 def _handle_provider_field(
     working_model: BaseModel, field_name: str, field_display: str, current_value: Any
 ) -> None:
-    """Handle the 'provider' field with a list of registered LLM providers."""
     choices = ["auto"] + sorted(_get_provider_names().keys())
     default_choice = str(current_value) if current_value else "auto"
     _set_field_from_choices(working_model, field_name, field_display, choices, default_choice)
@@ -764,7 +688,6 @@ def _handle_provider_field(
 def _handle_fallback_models_field(
     working_model: BaseModel, field_name: str, field_display: str, current_value: Any
 ) -> None:
-    """Handle the 'fallback_models' field with preset-aware list management."""
     from nanobot.config.schema import InlineFallbackConfig
 
     items: list[Any] = (
@@ -828,7 +751,6 @@ def _handle_fallback_models_field(
 def _handle_search_provider_field(
     working_model: BaseModel, field_name: str, field_display: str, current_value: Any
 ) -> None:
-    """Handle the web-search 'provider' field with the search-engine list."""
     from nanobot.agent.tools.web import SEARCH_PROVIDER_OPTIONS
 
     choices = [opt["name"] for opt in SEARCH_PROVIDER_OPTIONS]
@@ -846,8 +768,6 @@ _FIELD_HANDLERS: dict[str, Any] = {
 
 
 def _resolve_field_handler(model: BaseModel, field_name: str) -> Any:
-    """Resolve the handler for a field. WebSearchConfig shares the bare "provider"
-    name with LLM configs but needs the search-engine picker, not the LLM list."""
     if field_name == "provider":
         from nanobot.agent.tools.web import WebSearchConfig
         if isinstance(model, WebSearchConfig):
@@ -856,7 +776,6 @@ def _resolve_field_handler(model: BaseModel, field_name: str) -> Any:
 
 
 def _is_str_or_none(annotation: Any) -> bool:
-    """Check whether a field annotation is ``str | None`` (or ``Optional[str]``)."""
     origin = get_origin(annotation)
     if origin is None:
         return False
@@ -871,11 +790,6 @@ def _configure_pydantic_model(
     skip_fields: set[str] | None = None,
     config: Config | None = None,
 ) -> _ModelT | None:
-    """Configure a Pydantic model interactively.
-
-    Returns the updated model when the user selects "Done" or navigates back.
-    Cancel actions discard the section draft.
-    """
     skip_fields = skip_fields or set()
     working_model = model.model_copy(deep=True)
 
@@ -930,7 +844,6 @@ def _configure_pydantic_model(
         ftype = _get_field_type_info(field_info)
         field_display = _get_field_display_name(field_name, field_info) + _get_constraint_hint(field_info)
 
-        # Nested Pydantic model - recurse
         if ftype.type_name == "model":
             nested = current_value
             created = nested is None
@@ -944,7 +857,6 @@ def _configure_pydantic_model(
                     setattr(working_model, field_name, None)
             continue
 
-        # Registered special-field handlers
         handler = _resolve_field_handler(working_model, field_name)
         if handler:
             if field_name in {"model", "context_window_tokens"}:
@@ -953,7 +865,6 @@ def _configure_pydantic_model(
                 handler(working_model, field_name, field_display, current_value)
             continue
 
-        # Select fields with hints (e.g. reasoning_effort)
         if field_name in _SELECT_FIELD_HINTS:
             choices_list, hint = _SELECT_FIELD_HINTS[field_name]
             select_choices = choices_list + [_CLEAR_CHOICE]
@@ -969,7 +880,6 @@ def _configure_pydantic_model(
                 setattr(working_model, field_name, new_value)
             continue
 
-        # Generic field input
         if ftype.type_name == "literal" and ftype.inner_type:
             select_choices = [str(v) for v in ftype.inner_type]
             default_choice = str(current_value) if current_value in ftype.inner_type else select_choices[0]
@@ -996,27 +906,17 @@ def _configure_pydantic_model(
 def _try_auto_fill_context_window(
     model: BaseModel, new_model_name: str, *, config: Config,
 ) -> None:
-    """Try to auto-fill context_window_tokens if it's at default value.
-
-    Note:
-        This function imports AgentDefaults from nanobot.config.schema to get
-        the default context_window_tokens value. If the schema changes, this
-        coupling needs to be updated accordingly.
-    """
-    # Check if context_window_tokens field exists
     if not hasattr(model, "context_window_tokens"):
         return
 
     current_context = getattr(model, "context_window_tokens", None)
 
-    # Check if current value is the default
-    # We only auto-fill if the user hasn't changed it from default
     from nanobot.config.schema import AgentDefaults
 
     default_context = AgentDefaults.model_fields["context_window_tokens"].default
 
     if current_context != default_context:
-        return  # User has customized it, don't override
+        return
 
     provider = _get_current_provider(model)
     context_limit = get_model_context_limit(new_model_name, provider, config=config)
@@ -1031,11 +931,7 @@ def _try_auto_fill_context_window(
         console.print("[dim]Could not auto-fill context window - provider did not return a context limit[/dim]")
 
 
-# --- Model Preset Configuration ---
-
-
 def _sync_preset_cache(config: Config) -> None:
-    """Synchronise the module-level preset name cache from config."""
     _MODEL_PRESET_CACHE.clear()
     _MODEL_PRESET_CACHE.update(config.model_presets.keys())
 
@@ -1045,7 +941,6 @@ def _validate_nonempty_name(text: str) -> bool | str:
 
 
 def _configure_model_presets(config: Config) -> None:
-    """Configure model presets (CRUD)."""
     _sync_preset_cache(config)
 
     def get_preset_choices() -> tuple[list[str], dict[str, str]]:
@@ -1109,7 +1004,6 @@ def _configure_model_presets(config: Config) -> None:
                     last_preset_name = name
                 continue
 
-            # Editing / deleting an existing preset
             preset_name = choice_to_preset.get(answer)
             if preset_name is None:
                 continue
@@ -1152,9 +1046,6 @@ def _configure_model_presets(config: Config) -> None:
             break
 
 
-# --- Provider Configuration ---
-
-
 @lru_cache(maxsize=1)
 def _get_provider_info() -> dict[str, tuple[str, bool, bool, str]]:
     """Get provider info from registry (cached)."""
@@ -1173,13 +1064,11 @@ def _get_provider_info() -> dict[str, tuple[str, bool, bool, str]]:
 
 
 def _get_provider_names() -> dict[str, str]:
-    """Get provider display names."""
     info = _get_provider_info()
     return {name: data[0] for name, data in info.items() if name}
 
 
 def _configure_provider(config: Config, provider_name: str) -> None:
-    """Configure a single LLM provider."""
     provider_config = getattr(config.providers, provider_name, None)
     if provider_config is None:
         console.print(f"[red]Unknown provider: {provider_name}[/red]")
@@ -1201,10 +1090,8 @@ def _configure_provider(config: Config, provider_name: str) -> None:
 
 
 def _configure_providers(config: Config) -> None:
-    """Configure LLM providers."""
 
     def get_provider_choices() -> list[str]:
-        """Build provider choices with config status indicators."""
         choices: list[str] = []
         for name, display in _get_provider_names().items():
             provider = getattr(config.providers, name, None)
@@ -1235,11 +1122,8 @@ def _configure_providers(config: Config) -> None:
             if answer is _BACK_PRESSED or answer is None or answer == "<- Back":
                 break
 
-            # Type guard: answer is now guaranteed to be a string
             assert isinstance(answer, str)
-            # Extract provider name from choice (remove " *" suffix if present)
             provider_name = answer.replace(" *", "")
-            # Find the actual provider key from display names
             for name, display in _get_provider_names().items():
                 if display == provider_name:
                     last_provider_key = name
@@ -1249,9 +1133,6 @@ def _configure_providers(config: Config) -> None:
         except KeyboardInterrupt:
             console.print("\n[dim]Returning to main menu...[/dim]")
             break
-
-
-# --- Channel Configuration ---
 
 
 @lru_cache(maxsize=1)
@@ -1276,25 +1157,21 @@ def _get_channel_info() -> dict[str, tuple[str, type[BaseModel]]]:
 
 
 def _get_channel_names() -> dict[str, str]:
-    """Get channel display names."""
     return {name: info[0] for name, info in _get_channel_info().items()}
 
 
 def _get_channel_config_class(channel: str) -> type[BaseModel] | None:
-    """Get channel config class."""
     entry = _get_channel_info().get(channel)
     return entry[1] if entry else None
 
 
 def _get_channel_class(channel: str) -> type[Any] | None:
-    """Get channel implementation class."""
     from nanobot.channels.registry import discover_all
 
     return discover_all().get(channel)
 
 
 def _channel_supports_login(channel_cls: type[Any] | None) -> bool:
-    """Return True when a channel overrides BaseChannel.login."""
     if channel_cls is None:
         return False
     from nanobot.channels.base import BaseChannel
@@ -1308,7 +1185,6 @@ def _run_channel_login(
     model: BaseModel,
     display_name: str,
 ) -> bool:
-    """Run a channel's interactive login and enable it only on success."""
     channel_cls = _get_channel_class(channel_name)
     if channel_cls is None:
         console.print(f"[red]Unknown channel: {channel_name}[/red]")
@@ -1342,7 +1218,6 @@ def _run_channel_login(
 
 
 def _configure_channel(config: Config, channel_name: str) -> None:
-    """Configure a single channel."""
     channel_dict = getattr(config.channels, channel_name, None)
     if channel_dict is None:
         channel_dict = {}
@@ -1380,7 +1255,6 @@ def _configure_channel(config: Config, channel_name: str) -> None:
 
 
 def _configure_channels(config: Config) -> None:
-    """Configure chat channels."""
     channel_names = list(_get_channel_names().keys())
     choices = channel_names + ["<- Back"]
 
@@ -1396,7 +1270,6 @@ def _configure_channels(config: Config) -> None:
             if answer is _BACK_PRESSED or answer is None or answer == "<- Back":
                 break
 
-            # Type guard: answer is now guaranteed to be a string
             assert isinstance(answer, str)
             last_choice = answer
             _configure_channel(config, answer)
@@ -1404,8 +1277,6 @@ def _configure_channels(config: Config) -> None:
             console.print("\n[dim]Returning to main menu...[/dim]")
             break
 
-
-# --- General Settings ---
 
 _SETTINGS_SECTIONS: dict[str, tuple[str, str, set[str] | None]] = {
     "Agent Settings": ("Agent Defaults", "Configure default model, temperature, and behavior", None),
@@ -1433,7 +1304,6 @@ _SETTINGS_SETTER: dict[str, Callable[[Config, BaseModel], None]] = {
 
 
 def _configure_general_settings(config: Config, section: str) -> None:
-    """Configure a general settings section (header + model edit + writeback)."""
     meta = _SETTINGS_SECTIONS.get(section)
     if not meta:
         return
@@ -1444,11 +1314,7 @@ def _configure_general_settings(config: Config, section: str) -> None:
         _SETTINGS_SETTER[section](config, updated)
 
 
-# --- Summary ---
-
-
 def _summarize_model(obj: BaseModel) -> list[tuple[str, str]]:
-    """Recursively summarize a Pydantic model. Returns list of (field, value) tuples."""
     items: list[tuple[str, str]] = []
     for field_name, field_info in type(obj).model_fields.items():
         value = getattr(obj, field_name, None)
@@ -1467,7 +1333,6 @@ def _summarize_model(obj: BaseModel) -> list[tuple[str, str]]:
 
 
 def _print_summary_panel(rows: list[tuple[str, str]], title: str) -> None:
-    """Build a two-column summary panel and print it."""
     if not rows:
         return
     table = Table(show_header=False, box=None, padding=(0, 2))
@@ -1479,10 +1344,8 @@ def _print_summary_panel(rows: list[tuple[str, str]], title: str) -> None:
 
 
 def _show_summary(config: Config) -> None:
-    """Display configuration summary using rich."""
     console.print()
 
-    # Providers
     provider_rows: list[tuple[str, str]] = []
     for name, display in _get_provider_names().items():
         provider = getattr(config.providers, name, None)
@@ -1494,7 +1357,6 @@ def _show_summary(config: Config) -> None:
         provider_rows.append((display, status))
     _print_summary_panel(provider_rows, "LLM Providers")
 
-    # Channels
     channel_rows: list[tuple[str, str]] = []
     for name, display in _get_channel_names().items():
         channel = getattr(config.channels, name, None)
@@ -1510,13 +1372,11 @@ def _show_summary(config: Config) -> None:
         channel_rows.append((display, status))
     _print_summary_panel(channel_rows, "Chat Channels")
 
-    # Model Presets
     preset_rows: list[tuple[str, str]] = []
     for name, preset in config.model_presets.items():
         preset_rows.append((name, f"{preset.model} - ctx {preset.context_window_tokens}"))
     _print_summary_panel(preset_rows, "Model Presets")
 
-    # Settings sections
     for title, model in [
         ("Agent Settings", config.agents.defaults),
         ("Channel Common", config.channels),
@@ -1530,15 +1390,10 @@ def _show_summary(config: Config) -> None:
 
 
 def _pause(message: str = "Press Enter to continue...") -> None:
-    """Pause for user acknowledgement before clearing the screen."""
     _get_questionary().text(message, default="").ask()
 
 
-# --- Quick Start ---
-
-
 def _set_primary_quick_start_preset(config: Config, provider_name: str, model: str) -> None:
-    """Store the primary preset used by Quick Start."""
     config.model_presets["primary"] = ModelPresetConfig(
         model=model,
         provider=provider_name,
@@ -1548,7 +1403,6 @@ def _set_primary_quick_start_preset(config: Config, provider_name: str, model: s
 
 
 def _show_quick_start_progress(active_step: int) -> None:
-    """Render a compact step tracker for Quick Start."""
     parts: list[str] = []
     for idx, label in enumerate(_QUICK_START_STEPS, 1):
         if idx < active_step:
@@ -1587,7 +1441,6 @@ def _get_quick_start_provider_info() -> dict[str, _QuickStartProviderInfo]:
 
 
 def _get_quick_start_provider_choices() -> dict[str, str]:
-    """Return Quick Start provider display choices."""
     choices: dict[str, str] = {}
     for provider_name, info in _get_quick_start_provider_info().items():
         choices.setdefault(info.display_name, provider_name)
@@ -1596,17 +1449,14 @@ def _get_quick_start_provider_choices() -> dict[str, str]:
 
 
 def _quick_start_requires_api_key(provider_name: str, info: _QuickStartProviderInfo | None) -> bool:
-    """Return whether Quick Start should ask for an API key."""
     return provider_name == "custom" or not (info and (info.is_local or info.is_oauth))
 
 
 def _quick_start_codex_proxy(config: Config) -> str | None:
-    """Resolve only the Codex proxy without validating unrelated provider secrets."""
     return config.network.resolve_proxy(config.providers.openai_codex.use_proxy)
 
 
 def _quick_start_oauth_login(config: Config, provider_name: str) -> bool:
-    """Authenticate an OAuth provider supported by Quick Start."""
     if provider_name != "openai_codex":
         console.print(f"[red]OAuth login is not supported for {provider_name}[/red]")
         return False
@@ -1653,7 +1503,6 @@ def _quick_start_oauth_login(config: Config, provider_name: str) -> bool:
 
 
 def _quick_start_oauth_is_authenticated(config: Config, provider_name: str) -> bool:
-    """Return whether Quick Start can load a usable OAuth token."""
     if provider_name != "openai_codex":
         return False
     try:
@@ -1668,7 +1517,6 @@ def _quick_start_oauth_is_authenticated(config: Config, provider_name: str) -> b
 
 
 def _quick_start_requires_base_url(provider_name: str, info: _QuickStartProviderInfo | None) -> bool:
-    """Return whether Quick Start must ask for a provider base URL."""
     if provider_name == "custom":
         return True
     if provider_name in _QUICK_START_ENDPOINT_CHOICES:
@@ -1685,7 +1533,6 @@ def _select_quick_start_api_base(
     provider_display: str,
     info: _QuickStartProviderInfo | None,
 ) -> tuple[str, bool] | None | object:
-    """Return the api_base and whether the user explicitly selected or entered it."""
     endpoint_choices = _QUICK_START_ENDPOINT_CHOICES.get(provider_name)
     if endpoint_choices:
         choices = {choice.label: choice.api_base for choice in endpoint_choices}
@@ -1722,7 +1569,6 @@ def _select_quick_start_api_base(
 
 
 def _configure_quick_start_provider(config: Config) -> bool | object:
-    """Configure the beginner path from provider credentials and model."""
     while True:
         _show_quick_start_progress(1)
 
@@ -1822,7 +1668,6 @@ def _configure_quick_start_provider(config: Config) -> bool | object:
 
 
 def _enable_quick_start_websocket_defaults(config: Config) -> bool:
-    """Enable local WebUI with the default WebSocket settings."""
     _show_quick_start_progress(2)
     console.print(
         f"[{_UI_ACCENT}]Quick Start will enable the WebSocket channel for the local WebUI.[/]"
@@ -1867,7 +1712,6 @@ def _enable_quick_start_websocket_defaults(config: Config) -> bool:
 
 
 def _show_quick_start_summary(config: Config) -> None:
-    """Show the small summary users need before returning to the menu."""
     _show_quick_start_progress(3)
     preset = config.model_presets.get("primary")
     provider_label = "AI provider"
@@ -1901,7 +1745,6 @@ def _show_quick_start_summary(config: Config) -> None:
 
 
 def _configure_quick_start(config: Config) -> bool:
-    """First-run path: provider + API key + local WebUI, with advanced settings hidden."""
     console.clear()
     _show_section_header(
         "Quick Start",
@@ -1924,16 +1767,11 @@ def _configure_quick_start(config: Config) -> bool:
     return True
 
 
-# --- Main Entry Point ---
-
-
 def _has_unsaved_changes(original: Config, current: Config) -> bool:
-    """Return True when the onboarding session has committed changes."""
     return original.model_dump(by_alias=True) != current.model_dump(by_alias=True)
 
 
 def _prompt_main_menu_exit(has_unsaved_changes: bool) -> str:
-    """Resolve how to leave the main menu."""
     if not has_unsaved_changes:
         return "discard"
 
@@ -1956,7 +1794,6 @@ def _prompt_main_menu_exit(has_unsaved_changes: bool) -> str:
 
 
 def _get_main_menu_choices(has_unsaved_changes: bool) -> list[str]:
-    """Return the top-level choices, keeping save actions hidden until needed."""
     choices = [
         _QUICK_START_MENU_CHOICE,
         "[A] Advanced Settings",
@@ -1969,7 +1806,6 @@ def _get_main_menu_choices(has_unsaved_changes: bool) -> list[str]:
 
 
 def _configure_advanced_settings(config: Config) -> None:
-    """Show lower-frequency setup options behind one advanced menu."""
     last_choice: str | None = None
     choices = [
         "[P] LLM Provider",

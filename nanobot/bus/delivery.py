@@ -1,5 +1,3 @@
-"""Delivery correlation and pre-send failure contracts, independent of transports."""
-
 from __future__ import annotations
 
 from collections.abc import Mapping

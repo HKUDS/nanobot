@@ -1,5 +1,3 @@
-"""WhatsApp management contract."""
-
 from nanobot.channels._manifest import DIRECT_GROUP_POLICIES, field
 from nanobot.channels.contracts import ChannelManagementSpec, ChannelSetupSpec
 from nanobot.channels.plugin import ChannelPlugin

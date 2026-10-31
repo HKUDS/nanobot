@@ -1,5 +1,3 @@
-"""Ordered session operations with detached reads and durable acknowledgements."""
-
 from __future__ import annotations
 
 import asyncio
@@ -14,12 +12,11 @@ from datetime import datetime
 from typing import Any, TypeVar, cast
 
 from nanobot.bus.events import InboundMessage
-from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind, HistoryReader
+from nanobot.session.display_history import HistoryFact, HistoryKind, HistoryReader
 from nanobot.session.keys import is_dream_session
 from nanobot.session.manager import (
     Session,
     SessionIdentity,
-    SessionInfo,
     SessionPolicy,
     fork_session,
 )
@@ -140,7 +137,6 @@ class SessionState:
         operation_name: str,
         barrier: bool = True,
     ) -> _T:
-        """Admit bounded work with FIFO key affinity or a global barrier."""
         self._bind_loop()
         name = operation_name
         if key is None:
@@ -617,8 +613,9 @@ class SessionState:
         updates: Mapping[str, Any],
         *,
         expected_generation: str | None = None,
+        validate_existing: Callable[[Mapping[str, Any]], None] | None = None,
     ) -> tuple[str, bool]:
-        """Open one generation and atomically attach admission metadata."""
+        """Open one generation and atomically validate and attach admission metadata."""
         values = deepcopy(dict(updates))
         if _RESERVED_KEYS.intersection(values):
             raise ValueError("turn state must be changed through turn operations")
@@ -638,6 +635,8 @@ class SessionState:
                     and session.generation != expected_generation
                 ):
                     raise SessionConflictError("session admission belongs to a replaced session")
+                if not created and validate_existing is not None:
+                    validate_existing(session.metadata)
                 session.metadata.update(values)
                 header_only = session.policy.persist and session.persisted
                 if header_only:
@@ -698,13 +697,6 @@ class SessionState:
         if baseline is not None:
             metadata = {**baseline.metadata, _CHECKPOINT_KEY: committed.metadata[_CHECKPOINT_KEY]}
             draft._baseline = replace(baseline, metadata=metadata, provider_state=committed.provider_state)  # pyright: ignore[reportPrivateUsage]
-
-    async def migrate_history(
-        self, name: str, collect: Callable[[list[SessionInfo]], list[HistoryImport]],
-    ) -> None:
-        await self._execute(
-            None, lambda: self._store.migrate_history(name, collect), operation_name="migrate_history",
-        )
 
     async def project_history(
         self, key: str, project: Callable[[HistoryReader], _T],

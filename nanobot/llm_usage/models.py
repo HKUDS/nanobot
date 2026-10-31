@@ -1,5 +1,3 @@
-"""Content-free records emitted for physical LLM provider calls."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass

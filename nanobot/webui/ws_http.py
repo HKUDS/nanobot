@@ -348,11 +348,6 @@ def _resolve_bootstrap_model_name(
     return _default_model_name_from_config(config_path) or ""
 
 
-# ---------------------------------------------------------------------------
-# GatewayHTTPHandler
-# ---------------------------------------------------------------------------
-
-
 class _HistoryProjection(Protocol):
     def __call__(self, request: WsRequest, key: str, *, history: HistoryReader) -> Response: ...
 
@@ -461,14 +456,12 @@ class GatewayHTTPHandler:
         """
         return True
 
-    # -- Token management ---------------------------------------------------
 
     def check_api_token(self, request: WsRequest) -> bool:
         if getattr(request, "_nanobot_trusted_proxy_authenticated", False):
             return True
         return self.tokens.check_api_token(request)
 
-    # -- Main dispatch ------------------------------------------------------
 
     async def dispatch(self, connection: Any, request: WsRequest) -> Any | None:
         """Route an HTTP request. Returns Response or None."""
@@ -588,24 +581,20 @@ class GatewayHTTPHandler:
     ) -> Any | None:
         if got == "/api/remote-instances" or got.startswith("/api/remote-instances/"):
             return await self._dispatch_remote_instances(connection, request, got)
-        # Token issue endpoint
         if self.config.token_issue_path:
             issue_expected = _normalize_config_path(self.config.token_issue_path)
             if got == issue_expected:
                 return self._handle_token_issue(connection, request)
 
-        # Bootstrap
         if got == "/webui/bootstrap":
             return self._handle_bootstrap(connection, request)
         if got == "/webui/terminal":
             return self._handle_bootstrap(connection, request, terminal_probe=True)
 
-        # Settings routes (delegated)
         response = await self.settings_routes.dispatch(connection, request, got)
         if response is not None:
             return response
 
-        # Recovery routes
         response = await self._dispatch_recovery_route(request, got)
         if response is not None:
             return response
@@ -613,22 +602,18 @@ class GatewayHTTPHandler:
         if got == "/api/webui/subagents/cancel":
             return await self._handle_subagent_cancel(request)
 
-        # Session routes
         response = await self._dispatch_session_routes(request, got)
         if response is not None:
             return response
 
-        # Media routes
         response = self._dispatch_media_routes(request, got)
         if response is not None:
             return response
 
-        # Automation routes
         response = await self._dispatch_automation_routes(request, got)
         if response is not None:
             return response
 
-        # Misc routes
         response = await self._dispatch_misc_routes(connection, request, got)
         if response is not None:
             return response
@@ -637,7 +622,6 @@ class GatewayHTTPHandler:
         if got.startswith("/api/"):
             return _http_error(404, "API route not found")
 
-        # Static SPA serving
         if self.static_dist_path is not None:
             response = self._serve_static(
                 got,
@@ -696,7 +680,6 @@ class GatewayHTTPHandler:
             elapsed_ms,
         )
 
-    # -- Token issue --------------------------------------------------------
 
     def _handle_token_issue(self, connection: Any, request: Any) -> Any:
         secret = self.config.token_issue_secret.strip() or self.config.token.strip()
@@ -724,7 +707,6 @@ class GatewayHTTPHandler:
             extra_headers=_NO_STORE_HEADERS,
         )
 
-    # -- Bootstrap ----------------------------------------------------------
 
     def _handle_bootstrap(
         self, connection: Any, request: Any, *, terminal_probe: bool = False,
@@ -819,14 +801,12 @@ class GatewayHTTPHandler:
         return f"{scheme}://{host}{expected_path}"
 
     def _mcp_oauth_redirect_uri(self, request: WsRequest) -> str:
-        """Derive the browser callback from the same public origin as WebSocket bootstrap."""
         from nanobot.agent.tools.mcp_oauth import MCP_OAUTH_CALLBACK_PATH
 
         public_ws_url = urlsplit(self._bootstrap_ws_url(request))
         scheme = "https" if public_ws_url.scheme == "wss" else "http"
         return urlunsplit((scheme, public_ws_url.netloc, MCP_OAUTH_CALLBACK_PATH, "", ""))
 
-    # -- Session routes -----------------------------------------------------
 
     async def _dispatch_session_routes(self, request: WsRequest, got: str) -> Response | None:
         m = re.fullmatch(r"/api/sessions/([^/]+)/webui-thread/prompts", got)
@@ -1052,6 +1032,7 @@ class GatewayHTTPHandler:
             else:
                 scope = default_scope
             row["workspace_scope"] = scope.payload()
+            row["project_locked"] = True
             handle = handles.get(key)
             if handle is not None:
                 row["handle"] = handle.public_payload()
@@ -1404,7 +1385,6 @@ class GatewayHTTPHandler:
         session_deleted = await self.session_manager.state.delete(decoded_key)
         return _http_json_response({"deleted": bool(draft_deleted or session_deleted)})
 
-    # -- Automation routes --------------------------------------------------
 
     async def _dispatch_automation_routes(
         self,
@@ -1667,7 +1647,6 @@ class GatewayHTTPHandler:
         if not ran:
             logger.warning("WebUI automation run-now task did not execute")
 
-    # -- Media routes -------------------------------------------------------
 
     def _dispatch_media_routes(self, request: WsRequest, got: str) -> Response | None:
         m = re.match(r"^/api/media/([A-Za-z0-9_-]+)/([A-Za-z0-9_-]+)$", got)
@@ -1685,7 +1664,6 @@ class GatewayHTTPHandler:
             scope_for_session=self.workspaces.existing_scope_for_session_key,
         )
 
-    # -- Misc routes --------------------------------------------------------
 
     async def _dispatch_misc_routes(
         self, connection: Any, request: WsRequest, got: str
@@ -1996,7 +1974,6 @@ class GatewayHTTPHandler:
             return _http_error(500, "failed to write sidebar state")
         return _http_json_response(state)
 
-    # -- Static file serving ------------------------------------------------
 
     def _serve_static(
         self,

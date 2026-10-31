@@ -1,5 +1,3 @@
-"""Remote setup discovers metadata, not secrets, and never invents sudo access."""
-
 import asyncio
 import getpass
 import json
@@ -46,7 +44,7 @@ def locate(monkeypatch, capsys, path, units="", properties=""):
 
 def test_default_config_found_without_reading_contents(tmp_path, monkeypatch, capsys):
     path = tmp_path / "config.json"
-    path.write_text("model-secret")  # Even invalid config content isn't read by discovery.
+    path.write_text("model-secret")
     result, calls = locate(monkeypatch, capsys, path)
     assert result["candidates"] == [{"config_path": str(path), "runtime_user": "", "service": ""}]
     assert len(calls) == 1

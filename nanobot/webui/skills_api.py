@@ -1,5 +1,3 @@
-"""Lightweight skill summaries for the WebUI."""
-
 from __future__ import annotations
 
 import json
@@ -203,7 +201,6 @@ def _nanobot_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _install_options(metadata: dict[str, Any] | None) -> list[dict[str, str]]:
-    """Return safe, copyable setup commands declared by a skill."""
     raw_install = _nanobot_metadata(metadata).get("install")
     if not isinstance(raw_install, list):
         return []

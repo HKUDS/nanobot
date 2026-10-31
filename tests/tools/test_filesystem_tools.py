@@ -1,5 +1,3 @@
-"""Tests for enhanced filesystem tools: ReadFileTool, EditFileTool, ListDirTool."""
-
 import pytest
 
 from nanobot.agent.tools.file_state import file_read_context
@@ -32,9 +30,6 @@ async def test_file_creation_preserves_provided_newlines(tmp_path, newline, oper
     assert "Error" not in result
     assert target.read_bytes() == content.encode("utf-8")
 
-# ---------------------------------------------------------------------------
-# ReadFileTool
-# ---------------------------------------------------------------------------
 
 class TestReadFileTool:
 
@@ -113,12 +108,10 @@ class TestReadFileTool:
 
     @pytest.mark.asyncio
     async def test_char_budget_trims(self, tool, tmp_path):
-        """When the selected slice exceeds _MAX_CHARS the output is trimmed."""
         f = tmp_path / "big.txt"
-        # Each line is ~110 chars, 2000 lines ≈ 220 KB > 128 KB limit
         f.write_text("\n".join("x" * 110 for _ in range(2000)), encoding="utf-8")
         result = await tool.execute(path=str(f))
-        assert len(result) <= ReadFileTool._MAX_CHARS + 500  # small margin for footer
+        assert len(result) <= ReadFileTool._MAX_CHARS + 500
         assert "Use offset=" in result
 
     @pytest.mark.asyncio
@@ -200,10 +193,6 @@ class TestReadFileTool:
         assert "Maximum is 100 MiB" in result
 
 
-# ---------------------------------------------------------------------------
-# EditFileTool
-# ---------------------------------------------------------------------------
-
 class TestEditFileTool:
 
     @pytest.fixture()
@@ -238,7 +227,6 @@ class TestEditFileTool:
         assert "Patch applied:" in result
         raw = f.read_bytes()
         assert b"LINE1" in raw
-        # CRLF line endings should be preserved throughout the file
         assert b"\r\n" in raw
 
     @pytest.mark.asyncio
@@ -284,10 +272,6 @@ class TestEditFileTool:
         assert result == "Error editing file: Unknown new_text"
 
 
-# ---------------------------------------------------------------------------
-# ListDirTool
-# ---------------------------------------------------------------------------
-
 class TestListDirTool:
 
     @pytest.fixture()
@@ -311,19 +295,16 @@ class TestListDirTool:
         result = await tool.execute(path=str(populated_dir))
         assert "README.md" in result
         assert "src" in result
-        # .git and node_modules should be ignored
         assert ".git" not in result
         assert "node_modules" not in result
 
     @pytest.mark.asyncio
     async def test_recursive(self, tool, populated_dir):
         result = await tool.execute(path=str(populated_dir), recursive=True)
-        # Normalize path separators for cross-platform compatibility
         normalized = result.replace("\\", "/")
         assert "src/main.py" in normalized
         assert "src/utils.py" in normalized
         assert "README.md" in result
-        # Ignored dirs should not appear
         assert ".git" not in result
         assert "node_modules" not in result
 
@@ -371,10 +352,6 @@ class TestListDirTool:
         result = await tool.execute()
         assert result == "Error listing directory: Unknown path"
 
-
-# ---------------------------------------------------------------------------
-# Workspace restriction + extra read/write allowed dirs
-# ---------------------------------------------------------------------------
 
 class TestWorkspaceRestriction:
 
@@ -519,7 +496,6 @@ class TestWorkspaceRestriction:
 
     @pytest.mark.asyncio
     async def test_workspace_file_still_readable_with_extra_dirs(self, tmp_path):
-        """Adding extra_allowed_dirs must not break normal workspace reads."""
         workspace = tmp_path / "ws"
         workspace.mkdir()
         ws_file = workspace / "README.md"
@@ -537,7 +513,6 @@ class TestWorkspaceRestriction:
 
     @pytest.mark.asyncio
     async def test_edit_blocked_in_extra_dir(self, tmp_path):
-        """edit_file must not be able to modify files in extra_allowed_dirs."""
         workspace = tmp_path / "ws"
         workspace.mkdir()
         skills_dir = tmp_path / "skills"

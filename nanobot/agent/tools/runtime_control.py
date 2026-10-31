@@ -1,5 +1,3 @@
-"""Explicit runtime state boundary used by :class:`MyTool`."""
-
 from __future__ import annotations
 
 import json

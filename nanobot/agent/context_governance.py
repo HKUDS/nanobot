@@ -101,7 +101,6 @@ def _request_extends_measured(
     measured: list[dict[str, Any]],
     current: list[dict[str, Any]],
 ) -> bool:
-    """Return whether measured messages are an unchanged prefix of the request."""
     return len(current) >= len(measured) and all(
         current[index] == measured[index] for index in range(len(measured))
     )
@@ -463,7 +462,6 @@ class ContextGovernor:
         *,
         tool_definitions: list[dict[str, Any]] | None,
     ) -> tuple[list[dict[str, Any]], dict[str, str]]:
-        """Make oversized, unread file results recoverable after history compaction."""
         notice = (
             "Error: read_file result was not sent because the combined request exceeds "
             "the context budget. No file was modified by this recovery. Read one file at a time "
@@ -629,7 +627,6 @@ class ContextGovernor:
         *,
         tool_definitions: list[dict[str, Any]] | None,
     ) -> list[dict[str, Any]]:
-        """Replace accepted history H with a checkpoint while preserving delta."""
         measured, _source = pressure
         compaction_id = uuid4().hex
         await state.events.emit(

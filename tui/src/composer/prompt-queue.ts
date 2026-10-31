@@ -6,7 +6,6 @@ export interface QueuedPrompt {
   options: MessageOptions
 }
 
-/** Owns prompts that should start after the active turn finishes. */
 export class PromptQueue {
   private prompts: QueuedPrompt[] = []
 

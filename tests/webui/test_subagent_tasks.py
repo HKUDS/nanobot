@@ -1,5 +1,3 @@
-"""The WebUI reads and cancels tasks through the session-owned lifecycle."""
-
 import asyncio
 import json
 from types import SimpleNamespace

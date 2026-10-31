@@ -75,7 +75,6 @@ describe("UsagePanel", () => {
         const split = bars.find((span) => span.text.includes("▆"))!
         expect(split.fg.equals(cachedColor)).toBe(true)
         expect(split.bg.equals(uncachedColor)).toBe(true)
-        // Every solid cell below the split is cached; the cell above is uncached.
         expect(bars.filter((span) => span.fg.equals(cachedColor)).length).toBe(height === 30 ? 5 : 1)
         expect(setup.captureSpans().lines.flatMap((line) => line.spans)
           .filter((span) => span.bg.equals(uncachedColor)).map((span) => span.text)).toEqual(["▆▆▆"])

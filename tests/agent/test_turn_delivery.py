@@ -36,7 +36,6 @@ async def test_internal_compaction_never_reaches_its_result_destination(channel,
     delivery.remember_session_route(metadata)
     assert "_compaction_route" not in metadata
 
-    # The same destination still receives the user's own compaction lifecycle.
     user_delivery = factory.create(msg, f"{channel}:chat")
     user_delivery.remember_session_route(metadata)
     for sink in (user_delivery.events, factory.session_events(f"{channel}:chat", metadata, generation="generation")):

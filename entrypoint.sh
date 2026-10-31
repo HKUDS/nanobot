@@ -16,7 +16,6 @@ if [ "$(id -u)" = "0" ]; then
     exit 1
 fi
 
-# Already non-root: make sure the data dir is writable before starting.
 if [ -d "$dir" ] && [ ! -w "$dir" ]; then
     owner_uid=$(stat -c %u "$dir" 2>/dev/null || stat -f %u "$dir" 2>/dev/null)
     cat >&2 <<EOF

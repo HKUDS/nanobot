@@ -1,1 +1,0 @@
-"""Native Linear Agent channel."""

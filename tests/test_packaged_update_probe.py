@@ -1,5 +1,3 @@
-"""Keep acceptance evidence honest: real target bytes and fail-closed fixtures."""
-
 import asyncio
 import csv
 import hashlib
@@ -20,8 +18,6 @@ from nanobot.release_feed import ReleaseFeed
 from scripts import verify_packaged_update as probe
 from scripts.verify_packaged_update import (
     Timings,
-    assert_canonical_preserved,
-    assert_history_preserved,
     canonical_records,
     digest,
     feed_records,
@@ -30,58 +26,33 @@ from scripts.verify_packaged_update import (
 )
 
 
-def test_historical_projection_defaults_do_not_mask_history_loss():
-    # Real retained packages omit unknown timestamps and an inactive goal from
-    # their public projection, although the latter is already in their JSONL.
-    events = [{"event": "user_message", "projection_id": "input", "text": "Keep this"},
-              {"event": "turn_end", "projection_id": "complete"}]
-    before = {"events": events, "completed_turn_ids": ["turn"]}
-    projected = [{**events[0], "created_at_ms": 0},
-                 {**events[1], "created_at_ms": 0, "goal_state": {"active": False}}]
-    after = {**before, "events": projected}
-    assert_history_preserved(before, after)
-    assert_history_preserved(after, after)
-    for change in ({"text": "Changed"}, {"projection_id": "changed"}, {"created_at_ms": 123}):
-        with pytest.raises(AssertionError):
-            assert_history_preserved(before, {**after, "events": [{**projected[0], **change}, projected[1]]})
-    with pytest.raises(AssertionError):
-        assert_history_preserved(before, {**after, "events": [projected[0], {**projected[1], "goal_state": {"active": True}}]})
-    with pytest.raises(AssertionError):
-        assert_history_preserved(before, {**after, "events": projected[:1]})
-    with pytest.raises(AssertionError):
-        assert_history_preserved(before, {**after, "completed_turn_ids": []})
-    with pytest.raises(AssertionError):
-        assert_history_preserved(after, before)
+@pytest.fixture
+def history_root(tmp_path, monkeypatch):
+    from nanobot.config.paths import get_runtime_subdir
+
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "account/.nanobot/config.json")
+    monkeypatch.setattr("nanobot.session.location.get_runtime_subdir", get_runtime_subdir)
+    return tmp_path
 
 
-def test_display_migration_allows_an_empty_owner_without_masking_context_loss(tmp_path):
-    from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind
-    from nanobot.session.manager import Session
-    from nanobot.session.sqlite_store import SqliteSessionStore
+async def test_native_history_fixture_reopens_without_mixing_model_and_display_data(history_root):
+    from nanobot.session.manager import SessionManager
+    from nanobot.webui.transcript import build_webui_thread_response
 
-    store = SqliteSessionStore(tmp_path)
-    store.initialize(tmp_path)
-    session = Session(key="websocket:canonical-only")
-    session.add_message("user", "Keep this original context")
-    store.save(session)
-    before = canonical_records(store.path)
-    store.migrate_history("acceptance-import", lambda _: [HistoryImport(
-        key="websocket:display-only", facts=[HistoryFact(HistoryKind.ANSWER, {"text": "Display only"})],
-    )])
-    after = canonical_records(store.path)
-    assert_canonical_preserved(before, after)
-    assert_canonical_preserved(after, after)
-    # The real /api/sessions read allocates the newly imported owner's handle.
-    store.update_metadata("websocket:display-only", {"session_handle": "jeno"})
-    after = canonical_records(store.path)
-    assert_canonical_preserved(before, after)
-    with pytest.raises(AssertionError):
-        assert_canonical_preserved(before, {**after, "messages": []})
-    with pytest.raises(AssertionError):
-        assert_canonical_preserved(before, {**after, "sessions": after["sessions"][1:]})
-    store.update_metadata("websocket:display-only", {"unexpected": "context"})
-    with pytest.raises(AssertionError):
-        assert_canonical_preserved(before, canonical_records(store.path))
+    probe.seed_history(history_root)
+    sessions = SessionManager(history_root / "workspace")
+    assert sessions.sessions_dir.is_relative_to(history_root / "account/.nanobot")
+    records = canonical_records(sessions.sessions_dir / "sessions.sqlite3")
+    assert len(records["sessions"]) == 3
+    for key in ("websocket:mixed-history", "websocket:canonical-only"):
+        assert sessions.read_session_file(key)["messages"] == [{"role": "user", "content": "配置和聊天不能丢失"}]
+    assert sessions.read_session_file("websocket:display-only")["messages"] == []
+    assert sessions.project_history("websocket:canonical-only", lambda history: history.all_facts()) == []
+    for key in ("websocket:mixed-history", "websocket:display-only"):
+        response = sessions.project_history(key, lambda history, key=key: build_webui_thread_response(key, history=history))
+        assert response["completed_turn_ids"] == ["fixture-" + key.split(":", 1)[1]]
+        assert {event.get("text") for event in response["events"]} >= {"配置和聊天不能丢失", "独立验收数据"}
+    assert canonical_records(sessions.sessions_dir / "sessions.sqlite3") == records
 
 
 def wheel(tmp_path, version, *, worker=b"# worker\n", fallback=b"# fallback\n"):
@@ -120,7 +91,6 @@ def test_baseline_instrumentation_does_not_modify_the_target(tmp_path):
 def test_local_feed_uses_the_real_resolver_and_exact_target_hash(tmp_path, monkeypatch, version, channel):
     from unittest.mock import AsyncMock
 
-    # The packaged lifecycle fixture is deliberately not a public signed release.
     monkeypatch.setattr(ReleaseFeed, "_authorize", AsyncMock())
     from packaging.tags import Tag
 
@@ -201,7 +171,6 @@ def test_timings_checkpoint_real_fixture_and_keep_result_schema_separate(tmp_pat
     with timings.measure("scenario_total", scenario="upgrade"):
         with timings.measure("fixture", scenario="upgrade", journey=1):
             baseline = fixture_wheel(source, tmp_path / "baseline", "0.3.5", feed=tmp_path / "feed.json")
-        # Evidence is available before the outer context exits.
         checkpoint = json.loads(output.read_text())
         assert checkpoint["clock"] == "perf_counter"
         assert checkpoint["schema_version"] == 1
@@ -242,7 +211,6 @@ def test_timings_persist_failure_and_finally_cleanup_without_exporting_secrets(t
                                    capture_output=True, timeout=0.1 if failure == "timeout" else 10)
             finally:
                 with timings.measure("cleanup", scenario="restart-failure"):
-                    # Read the failed phase from disk before cleanup completes.
                     assert json.loads(output.read_text())["timings"][0]["status"] == "failed"
                     (tmp_path / "cleaned").touch()
     assert (tmp_path / "cleaned").exists()
@@ -448,7 +416,6 @@ def test_exited_controller_cannot_leave_a_descendant_listener_running(tmp_path, 
             probe.run_parallel(args, root, args.wheel, "0.3.6", digest(args.wheel), list(probe.SCENARIOS), timings)
         _wait_for_closed_listeners((json.loads(listener.read_text()),))
     finally:
-        # A red baseline must not leak the process it deliberately exposed.
         (root / "lane-1/stop-listener").touch()
         if listener.exists():
             _wait_for_closed_listeners((json.loads(listener.read_text()),))
@@ -485,7 +452,7 @@ def test_abnormal_lane_cleanup_does_not_depend_on_the_mutable_venv(tmp_path, mon
             probe.cleanup_lane(root, ["upgrade", "worker-exit", "metadata-loss"])
     else:
         probe.cleanup_lane(root, ["upgrade", "worker-exit", "metadata-loss"])
-    assert len(calls) == 2  # Still try the second account if the first stop failed.
+    assert len(calls) == 2
     for (command, options), config in zip(calls, configs, strict=True):
         assert command == [sys.executable, "-I", "-B", "-m", "nanobot", "gateway", "stop", "--config", str(config)]
         assert options["env"]["HOME"] == str(config.parent.parent) and options["cwd"] == config.parents[2]
@@ -531,10 +498,17 @@ def test_controller_error_does_not_print_exception_values_or_commands(tmp_path):
     assert "Traceback" not in result.stderr
 
 
-def test_serial_lanes_install_dependencies_once_and_keep_recovery_chains_on_the_same_venv(tmp_path, monkeypatch):
+@pytest.mark.parametrize("version,baseline_version", [
+    ("0.3.6", None), ("0.4.0", None), ("1.0.0", None), ("0.4.0", "0.3.5"),
+])
+def test_serial_lanes_resolve_baseline_dependencies_and_keep_recovery_chains_on_the_same_venv(
+    tmp_path, monkeypatch, version, baseline_version,
+):
     package = Path(__file__).resolve().parents[1] / "nanobot"
-    target = wheel(tmp_path, "0.3.6", worker=(package / "update_worker.py").read_bytes(),
+    target = wheel(tmp_path, version, worker=(package / "update_worker.py").read_bytes(),
                    fallback=(package / "update_fallback.py").read_bytes())
+    baseline = (wheel(tmp_path, baseline_version, worker=(package / "update_worker.py").read_bytes(),
+                      fallback=(package / "update_fallback.py").read_bytes()) if baseline_version else None)
     original_hash = digest(target)
     installations, dependencies, baselines, stages = [], [], [], {}
     def execute(command, **options):
@@ -542,7 +516,7 @@ def test_serial_lanes_install_dependencies_once_and_keep_recovery_chains_on_the_
             installations.append(Path(command[-1]))
             Path(command[-1]).mkdir()
         elif "pip" in command:
-            (baselines if "--no-deps" in command else dependencies).append(command[0])
+            (baselines if "--force-reinstall" in command else dependencies).append(command)
         elif "--phase" in command:
             phase = command[command.index("--phase") + 1]
             case_root = Path(command[command.index("--output") + 1])
@@ -573,13 +547,23 @@ def test_serial_lanes_install_dependencies_once_and_keep_recovery_chains_on_the_
     for worker, scenarios in enumerate(probe.scenario_groups(list(probe.SCENARIOS), 2), 1):
         root = tmp_path / f"lane-{worker}/run"
         root.mkdir(parents=True)
-        args = Namespace(baseline_wheel=None, commit="a" * 40, dock=False)
-        results.extend(probe.run_serial(args, root, target, "0.3.6", original_hash, scenarios,
+        args = Namespace(baseline_wheel=baseline, commit="a" * 40, dock=False)
+        results.extend(probe.run_serial(args, root, target, version, original_hash, scenarios,
                                         Timings(root / "packaged-update-timings.json")))
-    assert len(installations) == len(dependencies) == 2 and len(set(installations)) == 2
+    assert len(installations) == len(set(installations)) == 2
+    assert len(dependencies) == (0 if baseline_version else 2)
     assert len(baselines) == 9 and len(stages) == 9
+    for command in baselines:
+        assert ("--no-deps" in command) == (baseline_version is None)
+        assert ("--only-binary=:all:" in command) == (baseline_version is not None)
     assert sum(1 + ("subsequent_update" in result) for result in results) == 15
     assert digest(target) == original_hash
+    upgrade = next(result for result in results if result["scenario"] == "upgrade")
+    assert upgrade["baseline_source_sha256"] == digest(baseline or target)
+    assert upgrade["target_version"] == version
+    if baseline_version:
+        assert upgrade["baseline_version"] == baseline_version
+        assert upgrade["baseline_kind"] == "instrumented historical wheel"
     for case_root, rows in stages.items():
         journeys = 1 + (case_root.name in probe.TWO_JOURNEY_SCENARIOS)
         assert [stage for stage, _ in rows] == ["prepare", "worker", "verify"] * journeys + ["cleanup"]

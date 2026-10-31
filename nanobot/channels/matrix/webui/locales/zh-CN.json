@@ -28,8 +28,12 @@
         "choices": {
           "mention": "提及回复",
           "open": "全部消息",
-          "allowlist": "白名单"
+          "allowlist": "白名单",
+          "listen": "旁听（被提及时回复）"
         }
+      },
+      "groupPolicyOverrides": {
+        "label": "按房间的规则例外（JSON）"
       },
       "allowFrom": {
         "label": "允许用户"
@@ -62,6 +66,13 @@
       },
       "allowRoomMentions": {
         "label": "房间提及",
+        "choices": {
+          "true": "开启",
+          "false": "关闭"
+        }
+      },
+      "replyToMessage": {
+        "label": "引用回复",
         "choices": {
           "true": "开启",
           "false": "关闭"

@@ -1,5 +1,3 @@
-"""CLI Apps helpers shared by the agent loop and settings surfaces."""
-
 from __future__ import annotations
 
 from pathlib import Path

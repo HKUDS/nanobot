@@ -1,5 +1,3 @@
-"""Route and publish the user-visible lifecycle of an agent turn."""
-
 from __future__ import annotations
 
 import dataclasses

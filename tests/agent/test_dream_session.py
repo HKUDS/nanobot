@@ -1,5 +1,3 @@
-"""Tests for Dream session key generation and rotation."""
-
 from datetime import datetime, timedelta
 from unittest.mock import patch
 

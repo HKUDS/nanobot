@@ -219,7 +219,6 @@ async def test_direct_transient_run_never_spills_before_cancellation(tmp_path) -
         await asyncio.Event().wait()
 
     loop.provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
-    # The session policy must suffice even without passing ephemeral=True.
     task = asyncio.create_task(loop._run_agent_loop(
         TranscriptInput(history=[], current_message="synthetic question"),
         runtime=loop.llm_runtime(), session=session,
@@ -252,7 +251,6 @@ async def test_session_worker_errors_keep_private_content_out_of_logs(
         loop.provider.chat_stream_with_retry = AsyncMock(side_effect=ValueError(secret))
     else:
         async def fail_after_discard(*args, **kwargs):
-            # The privacy snapshot must survive cache eviction during failure.
             loop.sessions.invalidate(key)
             raise ValueError(secret)
 

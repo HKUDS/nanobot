@@ -71,7 +71,6 @@ def test_trigger_store_atomic_writes_ignore_unsupported_directory_fsync(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Shared folders may allow opening directories but reject directory fsync."""
     store = LocalTriggerStore(tmp_path)
     real_open = os.open
     real_close = os.close
@@ -621,7 +620,6 @@ def test_local_trigger_from_dict_accepts_null_run_at_ms() -> None:
 
 
 def test_local_trigger_from_dict_coerces_string_last_run_at_ms() -> None:
-    """String lastRunAtMs must coerce to int like cron store ms fields."""
     trigger = LocalTrigger.from_dict(
         {
             "id": "t1",
@@ -653,7 +651,6 @@ def test_local_trigger_from_dict_coerces_string_last_run_at_ms() -> None:
 
 
 def test_local_trigger_from_dict_accepts_null_run_history() -> None:
-    """Null runHistory must load as empty, matching CronJobState.from_store_dict."""
     trigger = LocalTrigger.from_dict(
         {
             "id": "t1",

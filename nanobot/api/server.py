@@ -74,11 +74,6 @@ async def _prepare_agent(app: web.Application) -> None:
         await prepare()
 
 
-# ---------------------------------------------------------------------------
-# Response helpers
-# ---------------------------------------------------------------------------
-
-
 def _error_json(status: int, message: str, err_type: str = "invalid_request_error") -> web.Response:
     return web.json_response(
         {"error": {"message": message, "type": err_type, "code": status}},
@@ -115,7 +110,6 @@ def _chat_completion_response(
 
 
 def _response_text(value: Any) -> str:
-    """Normalize process_direct output to plain assistant text."""
     if value is None:
         return ""
     if hasattr(value, "content"):
@@ -124,31 +118,22 @@ def _response_text(value: Any) -> str:
 
 
 def _as_str(value: object) -> str:
-    """Return *value* when it is text, otherwise an empty string."""
     return value if isinstance(value, str) else ""
 
 
 def _require_json_object(value: object, field: str) -> dict[str, Any]:
-    """Validate an object-valued field from an untrusted JSON request."""
     if not isinstance(value, dict):
         raise TypeError(f"{field} must be an object")
     return cast(dict[str, Any], value)
 
 
 def _require_json_string(value: object, field: str) -> str:
-    """Validate a string-valued field from an untrusted JSON request."""
     if not isinstance(value, str):
         raise TypeError(f"{field} must be a string")
     return value
 
 
-# ---------------------------------------------------------------------------
-# SSE helpers
-# ---------------------------------------------------------------------------
-
-
 def _sse_chunk(delta: str, model: str, chunk_id: str, finish_reason: str | None = None) -> bytes:
-    """Format a single OpenAI-compatible SSE chunk."""
     payload = {
         "id": chunk_id,
         "object": "chat.completion.chunk",
@@ -167,13 +152,8 @@ def _sse_chunk(delta: str, model: str, chunk_id: str, finish_reason: str | None 
 
 _SSE_DONE = b"data: [DONE]\n\n"
 
-# ---------------------------------------------------------------------------
-# Upload helpers
-# ---------------------------------------------------------------------------
-
 
 def _parse_json_content(body: dict[str, Any]) -> tuple[str, list[str]]:
-    """Parse JSON request body. Returns (text, media_paths)."""
     messages_value = cast(object, body.get("messages"))
     if not isinstance(messages_value, list):
         raise ValueError("Only a single user message is supported")
@@ -232,7 +212,6 @@ def _parse_json_content(body: dict[str, Any]) -> tuple[str, list[str]]:
 
 
 async def _parse_multipart(request: web.Request) -> tuple[str, list[str], str | None, str | None]:
-    """Parse multipart/form-data. Returns (text, media_paths, session_id, model)."""
     media_dir = get_media_dir("api")
     reader = await request.multipart()
     text = ""
@@ -266,11 +245,6 @@ async def _parse_multipart(request: web.Request) -> tuple[str, list[str], str | 
         text = "请分析上传的文件"
 
     return text, media_paths, session_id, model
-
-
-# ---------------------------------------------------------------------------
-# Route handlers
-# ---------------------------------------------------------------------------
 
 
 async def handle_chat_completions(request: web.Request) -> web.Response | web.StreamResponse:
@@ -328,7 +302,6 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
         "API request session_key={} media={} text={} stream={}",
         session_key, len(media_paths), text[:80], stream,
     )
-    # -- streaming path --
     if stream:
         resp = web.StreamResponse()
         resp.content_type = "text/event-stream"
@@ -396,7 +369,6 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
             await resp.write(_SSE_DONE)
         return resp
 
-    # -- non-streaming path (original logic) --
     usage_capture = _UsageCaptureHook()
     try:
         async with session_lock:
@@ -453,11 +425,6 @@ async def handle_health(request: web.Request) -> web.Response:
     return web.json_response({"status": "ok"})
 
 
-# ---------------------------------------------------------------------------
-# App factory
-# ---------------------------------------------------------------------------
-
-
 def create_app(
     agent_loop: "AgentLoop",
     model_name: str = "nanobot",
@@ -474,7 +441,7 @@ def create_app(
         api_key: Optional API key for Bearer-token authentication on API routes.
         prepare_agent: Optional application-owned readiness callback run before each turn.
     """
-    app = web.Application(client_max_size=20 * 1024 * 1024)  # 20MB for base64 images
+    app = web.Application(client_max_size=20 * 1024 * 1024)
     app[_AGENT_LOOP_KEY] = agent_loop
     app[_MODEL_NAME_KEY] = model_name
     app[_REQUEST_TIMEOUT_KEY] = request_timeout

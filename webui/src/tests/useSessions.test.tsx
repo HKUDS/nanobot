@@ -257,18 +257,9 @@ describe("useSessions", () => {
     expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-a"]);
   });
 
-  it("refreshes sessions when the websocket reports a session update", async () => {
+  it("locks a draft project when a session update reports it persisted", async () => {
     vi.mocked(api.listSessions)
-      .mockResolvedValueOnce([
-      {
-        key: "websocket:chat-a",
-        channel: "websocket",
-        chatId: "chat-a",
-        createdAt: "2026-04-16T10:00:00Z",
-        updatedAt: "2026-04-16T10:00:00Z",
-        preview: "",
-      },
-      ])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         {
           key: "websocket:chat-a",
@@ -278,21 +269,26 @@ describe("useSessions", () => {
           updatedAt: "2026-04-16T10:01:00Z",
           title: "生成的小标题",
           preview: "用户第一句话",
+          projectLocked: true,
         },
       ]);
     const client = fakeClient();
+    client.newChat.mockResolvedValue("chat-a");
 
     const { result } = renderHook(() => useSessions(), {
       wrapper: wrap(client),
     });
 
-    await waitFor(() => expect(result.current.sessions[0]?.title).toBeUndefined());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => { await result.current.createChat(); });
+    expect(result.current.sessions[0].projectLocked).toBe(false);
 
     act(() => {
-      client.emitSessionUpdate("chat-a");
+      client.emitSessionUpdate("chat-a", "metadata");
     });
 
     await waitFor(() => expect(result.current.sessions[0]?.title).toBe("生成的小标题"));
+    expect(result.current.sessions[0].projectLocked).toBe(true);
     expect(api.listSessions).toHaveBeenCalledTimes(2);
   });
 

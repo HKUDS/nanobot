@@ -1,5 +1,3 @@
-"""Provider-independent generation defaults."""
-
 from dataclasses import dataclass
 
 

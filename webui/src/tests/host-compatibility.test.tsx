@@ -83,7 +83,6 @@ describe("host compatibility facts", () => {
       ]);
       const values = within(dialog).getAllByRole("definition");
       expect(values.map((value) => value.textContent)).toEqual([version, version]);
-      // Read-only facts must not inherit the settings controls' 60px row floor.
       expect(dialog.querySelector(".settings-list-row")).toBeNull();
       expect(dialog.querySelector(".break-all, .truncate")).toBeNull();
       expect(within(dialog).getByRole("status")).toHaveTextContent(i18n.t("remote.compatibility.compatibleHint"));

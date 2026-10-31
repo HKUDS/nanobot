@@ -4,7 +4,6 @@ import { ChannelQrConnectFlow } from "@/components/settings/channels/ChannelQrCo
 import { WhatsAppConnectFlowView, useWhatsAppConnectLabels } from "./WhatsAppConnectFlowView";
 
 export function WhatsAppConnectFlow({
-  token,
   idleLabel,
   connectRequestId,
   onFeaturesUpdate,
@@ -13,7 +12,6 @@ export function WhatsAppConnectFlow({
 
   return (
     <ChannelQrConnectFlow
-      token={token}
       channelName="whatsapp"
       idleLabel={idleLabel}
       connectRequestId={connectRequestId}

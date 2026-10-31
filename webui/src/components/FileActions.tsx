@@ -23,7 +23,6 @@ export function useFilePreviewLoader() {
 
 const itemClassName = `${floatingItemClassName} ${floatingItemFocusClassName} cursor-default data-[disabled]:pointer-events-none data-[disabled]:opacity-50`;
 
-/** Copy-only context menu, shared by file references and preview tabs. */
 export function FileActions({
   path, children, metadata, className,
 }: {

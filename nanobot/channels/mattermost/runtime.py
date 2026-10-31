@@ -1,5 +1,3 @@
-"""Mattermost channel implementation using WebSocket + REST API."""
-
 from __future__ import annotations
 
 import asyncio
@@ -119,7 +117,6 @@ class MattermostChannel(BaseChannel):
         self._stream_root_ids: dict[str, str] = {}
         self._thread_context_attempted: set[str] = set()
 
-    # Lifecycle ----------------------------------------------------------------
 
     async def start(self) -> None:
         if not self.config.server_url or not self.config.token:
@@ -169,7 +166,6 @@ class MattermostChannel(BaseChannel):
             await self._http_client.aclose()
             self._http_client = None
 
-    # WebSocket ----------------------------------------------------------------
 
     async def _ws_listen_loop(self) -> None:
         import websockets
@@ -205,7 +201,6 @@ class MattermostChannel(BaseChannel):
         elif event == "post_deleted":
             await self._handle_post_deleted_event(msg)
 
-    # Event: posted ------------------------------------------------------------
 
     async def _handle_posted_event(self, msg: dict[str, Any]) -> None:
         data = cast(dict[str, Any], msg.get("data", {}))
@@ -250,7 +245,7 @@ class MattermostChannel(BaseChannel):
 
         if not await self._is_allowed(sender_id, channel_id, channel_type):
             if is_dm and self.config.dm.enabled:
-                code = generate_code(self.name, str(sender_id))
+                code = generate_code(self.name, str(sender_id), on_change=self._pairing_changed)
                 await self.send(
                     OutboundMessage(
                         channel=self.name,
@@ -278,7 +273,7 @@ class MattermostChannel(BaseChannel):
         session_key = f"mattermost:{channel_id}:{thread_ts}" if thread_ts else None
 
         try:
-            await self._add_reaction(channel_id, post_id, self.config.react_emoji)
+            await self._add_reaction(post_id, self.config.react_emoji)
         except Exception:
             self.logger.debug("add reaction failed")
 
@@ -315,7 +310,6 @@ class MattermostChannel(BaseChannel):
             is_dm=is_dm,
         )
 
-    # Event: action ------------------------------------------------------------
 
     async def _handle_action_event(self, msg: dict[str, Any]) -> None:
         data = cast(dict[str, Any], msg.get("data", {}))
@@ -342,7 +336,6 @@ class MattermostChannel(BaseChannel):
             metadata={"mattermost": {"channel_type": channel_type, "is_action": True}},
         )
 
-    # Event: post_deleted ------------------------------------------------------
 
     async def _handle_post_deleted_event(self, msg: dict[str, Any]) -> None:
         data = cast(dict[str, Any], msg.get("data", {}))
@@ -364,7 +357,6 @@ class MattermostChannel(BaseChannel):
             self._stream_last_content.pop(sid, None)
             self._stream_committed.pop(sid, None)
 
-    # Permission / policy ------------------------------------------------------
 
     def is_allowed(self, sender_id: str) -> bool:
         return True
@@ -451,7 +443,6 @@ class MattermostChannel(BaseChannel):
             self.logger.warning("failed to resolve email for {}: {}", user_id, e)
             return None
 
-    # Thread context -----------------------------------------------------------
 
     async def _with_thread_context(self, text: str, *, channel_id: str, root_id: str) -> str:
         key = f"{channel_id}:{root_id}"
@@ -492,7 +483,6 @@ class MattermostChannel(BaseChannel):
             return text
         return "Mattermost thread context before this mention:\n" + "\n".join(lines) + f"\n\nCurrent message:\n{text}"
 
-    # Send ---------------------------------------------------------------------
 
     async def send(self, msg: OutboundMessage) -> None:
         if isinstance(msg.event, ContextCompactionEvent) and not (
@@ -537,7 +527,7 @@ class MattermostChannel(BaseChannel):
                     self.logger.debug("remove reaction failed")
                 if self.config.done_emoji:
                     try:
-                        await self._add_reaction(chat_id, meta["message_id"], self.config.done_emoji)
+                        await self._add_reaction(meta["message_id"], self.config.done_emoji)
                     except Exception:
                         self.logger.debug("done reaction failed")
 
@@ -545,7 +535,6 @@ class MattermostChannel(BaseChannel):
             self.logger.exception("Error sending message")
             raise
 
-    # Streaming -----------------------------------------------------------------
 
     async def send_delta(
         self,
@@ -612,7 +601,7 @@ class MattermostChannel(BaseChannel):
                         self.logger.debug("remove reaction failed")
                 if first_post_id and self.config.done_emoji:
                     try:
-                        await self._add_reaction(chat_id, first_post_id, self.config.done_emoji)
+                        await self._add_reaction(first_post_id, self.config.done_emoji)
                     except Exception:
                         self.logger.debug("done reaction failed")
 
@@ -646,7 +635,6 @@ class MattermostChannel(BaseChannel):
         self._stream_last_content.pop(stream_id, None)
         self._stream_committed.pop(stream_id, None)
 
-    # API helpers ---------------------------------------------------------------
 
     def _require_http_client(self) -> httpx.AsyncClient:
         if self._http_client is None:
@@ -721,7 +709,7 @@ class MattermostChannel(BaseChannel):
             self.logger.warning("file download failed for {}: {}", file_id, e)
             return None
 
-    async def _add_reaction(self, channel_id: str, post_id: str, emoji: str) -> None:
+    async def _add_reaction(self, post_id: str, emoji: str) -> None:
         if not self._self_id or not emoji:
             return
         await self._api_post("/api/v4/reactions", {

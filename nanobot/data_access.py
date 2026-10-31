@@ -71,7 +71,6 @@ class _Reservation:
 
 
 def _reservation(path: Path) -> _Reservation | None:
-    """Read a bounded, atomically replaced reservation; corruption never means idle."""
     if path.is_symlink():
         raise ValueError("Invalid data maintenance reservation")
     try:

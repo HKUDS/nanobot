@@ -1,5 +1,3 @@
-"""Discover channel descriptors and load their runtimes lazily."""
-
 from __future__ import annotations
 
 import pkgutil

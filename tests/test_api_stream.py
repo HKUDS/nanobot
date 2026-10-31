@@ -1,5 +1,3 @@
-"""Tests for SSE streaming support in /v1/chat/completions."""
-
 from __future__ import annotations
 
 import asyncio
@@ -28,11 +26,6 @@ API_KEY = "secret"
 AUTH_HEADERS = {"Authorization": f"Bearer {API_KEY}"}
 
 
-# ---------------------------------------------------------------------------
-# Unit tests for SSE helpers
-# ---------------------------------------------------------------------------
-
-
 def test_sse_chunk_with_delta() -> None:
     raw = _sse_chunk("hello", "test-model", "chatcmpl-abc123")
     line = raw.decode()
@@ -54,11 +47,6 @@ def test_sse_chunk_finish_reason() -> None:
 
 def test_sse_done_format() -> None:
     assert _SSE_DONE == b"data: [DONE]\n\n"
-
-
-# ---------------------------------------------------------------------------
-# Integration tests with aiohttp TestClient
-# ---------------------------------------------------------------------------
 
 
 def _make_streaming_agent(tokens: list[str]) -> MagicMock:
@@ -100,7 +88,6 @@ async def aiohttp_client():
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
 async def test_stream_true_returns_sse(aiohttp_client) -> None:
-    """stream=true should return text/event-stream with SSE chunks."""
     agent = _make_streaming_agent(["Hello", " world"])
     app = create_app(agent, model_name="test-model", api_key=API_KEY)
     client = await aiohttp_client(app)
@@ -117,14 +104,12 @@ async def test_stream_true_returns_sse(aiohttp_client) -> None:
     body = await resp.text()
     lines = [line for line in body.split("\n") if line.startswith("data: ")]
 
-    # Should have: 2 token chunks + 1 finish chunk + [DONE]
     data_lines = [line[len("data: "):] for line in lines]
     assert data_lines[-1] == "[DONE]"
 
     chunks = [json.loads(line) for line in data_lines[:-1]]
     assert chunks[0]["choices"][0]["delta"]["content"] == "Hello"
     assert chunks[1]["choices"][0]["delta"]["content"] == " world"
-    # Last chunk before [DONE] should have finish_reason=stop
     assert chunks[-1]["choices"][0]["finish_reason"] == "stop"
     assert chunks[-1]["choices"][0]["delta"] == {}
 
@@ -132,7 +117,6 @@ async def test_stream_true_returns_sse(aiohttp_client) -> None:
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
 async def test_stream_false_returns_json(aiohttp_client) -> None:
-    """stream=false should still return regular JSON response."""
     agent = MagicMock()
     agent.process_direct = AsyncMock(return_value="normal reply")
     agent.aclose = AsyncMock()
@@ -154,7 +138,6 @@ async def test_stream_false_returns_json(aiohttp_client) -> None:
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
 async def test_stream_default_is_false(aiohttp_client) -> None:
-    """Omitting stream should behave like stream=false."""
     agent = MagicMock()
     agent.process_direct = AsyncMock(return_value="default reply")
     agent.aclose = AsyncMock()
@@ -176,7 +159,6 @@ async def test_stream_default_is_false(aiohttp_client) -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stream", ["false", "true", 0, 1, [], {}])
 async def test_stream_rejects_non_boolean_values(aiohttp_client, stream) -> None:
-    """Wrong JSON types must not select a response protocol or invoke the agent."""
     agent = MagicMock()
     agent.process_direct = AsyncMock(return_value="normal reply")
     agent.aclose = AsyncMock()
@@ -199,7 +181,6 @@ async def test_stream_rejects_non_boolean_values(aiohttp_client, stream) -> None
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
 async def test_stream_null_preserves_non_streaming_compatibility(aiohttp_client) -> None:
-    """OpenAI clients may explicitly serialize the optional flag as null."""
     agent = MagicMock()
     agent.process_direct = AsyncMock(return_value="normal reply")
     agent.aclose = AsyncMock()
@@ -220,7 +201,6 @@ async def test_stream_null_preserves_non_streaming_compatibility(aiohttp_client)
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
 async def test_stream_sse_chunk_ids_are_consistent(aiohttp_client) -> None:
-    """All SSE chunks in a single stream should share the same id."""
     agent = _make_streaming_agent(["A", "B", "C"])
     app = create_app(agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)
@@ -246,7 +226,6 @@ async def test_stream_sse_chunk_ids_are_consistent(aiohttp_client) -> None:
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
 async def test_stream_segment_end_does_not_close_sse(aiohttp_client) -> None:
-    """Intermediate stream-end callbacks should not terminate the HTTP stream."""
     agent = MagicMock()
 
     async def fake_process_direct(*, on_stream=None, on_stream_end=None, **kwargs):
@@ -288,7 +267,6 @@ async def test_stream_segment_end_does_not_close_sse(aiohttp_client) -> None:
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
 async def test_stream_uses_final_response_when_no_deltas(aiohttp_client) -> None:
-    """stream=true should not return an empty stream when the agent returns content."""
     agent = MagicMock()
 
     async def fake_process_direct(*, on_stream=None, on_stream_end=None, **kwargs):
@@ -325,7 +303,6 @@ async def test_stream_uses_final_response_when_no_deltas(aiohttp_client) -> None
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
 async def test_stream_with_session_id(aiohttp_client) -> None:
-    """Streaming should respect session_id for session key routing."""
     captured_key: str = ""
 
     async def fake_process_direct(*, session_key="", on_stream=None, on_stream_end=None, **kwargs):
@@ -360,7 +337,6 @@ async def test_stream_with_session_id(aiohttp_client) -> None:
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
 async def test_streaming_backend_failure_does_not_emit_success_terminator(aiohttp_client) -> None:
-    """Backend exceptions should not surface as a normal stop+[DONE] stream."""
     agent = MagicMock()
 
     async def boom(**kwargs):

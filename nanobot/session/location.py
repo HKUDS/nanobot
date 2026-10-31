@@ -1,8 +1,5 @@
-"""Stable workspace identity and private session storage locations."""
-
 from __future__ import annotations
 
-import base64
 import errno
 import os
 import re
@@ -13,10 +10,7 @@ from pathlib import Path
 from filelock import FileLock
 
 from nanobot.config.paths import get_runtime_subdir
-from nanobot.utils.helpers import (
-    ensure_dir,
-    safe_filename,
-)
+from nanobot.utils.helpers import ensure_dir
 
 _WORKSPACE_STATE_DIR = ".nanobot"
 _WORKSPACE_ID_FILE = "workspace-id"
@@ -225,28 +219,3 @@ class SessionLocation:
             cls._replace_workspace_id(workspace, workspace_id)
 
         raise RuntimeError(f"could not allocate an isolated session namespace for {workspace}")
-
-    @staticmethod
-    def safe_key(key: str) -> str:
-        return safe_filename(key.replace(":", "_"))
-
-    @staticmethod
-    def storage_key(key: str) -> str:
-        return base64.urlsafe_b64encode(key.encode()).decode().rstrip("=")
-
-    @staticmethod
-    def decode_storage_key(stem: str) -> str | None:
-        try:
-            padding = 4 - len(stem) % 4
-            if padding != 4:
-                stem += "=" * padding
-            return base64.urlsafe_b64decode(stem).decode("utf-8")
-        except (ValueError, TypeError, AttributeError, KeyError):
-            return None
-
-    @classmethod
-    def session_key_from_path(cls, path: Path) -> str | None:
-        key = cls.decode_storage_key(path.stem)
-        if key is None or cls.storage_key(key) != path.stem:
-            return None
-        return key

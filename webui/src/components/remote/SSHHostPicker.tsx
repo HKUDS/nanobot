@@ -9,7 +9,6 @@ type SSHHostPickerProps = Pick<SSHHostPickerViewProps,
   configFile: string;
 };
 
-/** One address field for both manual entry and existing SSH aliases. */
 export function SSHHostPicker({ configFile, suggestions = true, ...props }: SSHHostPickerProps) {
   const { t } = useTranslation();
   const { client } = useClient();
@@ -47,7 +46,6 @@ export function SSHHostPicker({ configFile, suggestions = true, ...props }: SSHH
     const unsubscribe = client.onStatus((status) => {
       if (status === "open" && !started) {
         started = true;
-        // Custom paths update quietly after typing; no separate "read config" flow.
         timer = setTimeout(() => { void load(file); }, file ? 300 : 0);
       }
     });

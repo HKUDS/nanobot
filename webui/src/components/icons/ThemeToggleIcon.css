@@ -1,0 +1,45 @@
+.theme-toggle-mask {
+  mask-type: luminance;
+  forced-color-adjust: none;
+}
+
+.theme-toggle-core {
+  r: 5px;
+}
+
+.theme-toggle-cutout {
+  transform: translate(0, 0);
+}
+
+.theme-toggle-rays {
+  transform-origin: 12px 12px;
+  transform: rotate(0deg) scale(1);
+  opacity: 1;
+}
+
+.theme-toggle-icon[data-theme="light"] .theme-toggle-core {
+  r: 8px;
+}
+
+.theme-toggle-icon[data-theme="light"] .theme-toggle-cutout {
+  transform: translate(-7px, 11px);
+}
+
+.theme-toggle-icon[data-theme="light"] .theme-toggle-rays {
+  transform: rotate(-30deg) scale(0.6);
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .theme-toggle-core {
+    transition: r 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .theme-toggle-cutout {
+    transition: transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .theme-toggle-rays {
+    transition: transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 160ms ease-out;
+  }
+}

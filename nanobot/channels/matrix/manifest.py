@@ -1,9 +1,9 @@
-"""Matrix management contract."""
-
 from nanobot.channels._manifest import GROUP_POLICIES, field, one_of, required_fields
 from nanobot.channels.contracts import ChannelSetupSpec
 from nanobot.channels.matrix.validation import validate
 from nanobot.channels.plugin import ChannelPlugin
+
+MATRIX_GROUP_POLICIES = GROUP_POLICIES | {"listen"}
 
 SETUP_SPEC = ChannelSetupSpec(
     fields={
@@ -12,7 +12,8 @@ SETUP_SPEC = ChannelSetupSpec(
         "password": field("secret"),
         "accessToken": field("secret"),
         "deviceId": field(),
-        "groupPolicy": field("enum", choices=GROUP_POLICIES, default="open"),
+        "groupPolicy": field("enum", choices=MATRIX_GROUP_POLICIES, default="open"),
+        "groupPolicyOverrides": field("json", default={}),
         "allowFrom": field("list"),
         "e2eeEnabled": field("bool", default=False),
         "sasVerification": field("bool", default=False),
@@ -21,6 +22,7 @@ SETUP_SPEC = ChannelSetupSpec(
         "maxConcurrentMediaDownloads": field("int", default=2),
         "groupAllowFrom": field("list"),
         "allowRoomMentions": field("bool", default=False),
+        "replyToMessage": field("bool", default=True),
         "streaming": field("bool", default=False),
         "useProxy": field("bool", default=False),
     },

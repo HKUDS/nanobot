@@ -1,5 +1,3 @@
-"""Linked-chat titles must use the same session metadata as the sidebar."""
-
 from pathlib import Path
 from typing import Any
 

@@ -1,5 +1,3 @@
-"""Documentation stays available across installs and rebuilds."""
-
 import ctypes
 import os
 import shutil

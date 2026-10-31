@@ -1,5 +1,3 @@
-"""Background initialization of the fallback token counter."""
-
 import os
 from threading import Lock, Thread
 

@@ -1,5 +1,3 @@
-"""MyTool: runtime state inspection and configuration for the agent loop."""
-
 # Tool.execute accepts heterogeneous schemas.
 # pyright: reportIncompatibleMethodOverride=false
 
@@ -55,11 +53,8 @@ class MyTool(Tool):
         )
 
     BLOCKED = frozenset({
-        # Core infrastructure
         "bus", "provider", "runtime_resolver", "_running", "tools",
-        # Config management
         "_runtime_vars",
-        # Subsystems
         "runner", "sessions", "consolidator", "subagents",
         "dream", "auto_compact", "context", "commands",
         # Sensitive runtime state (credentials, message routing, task tracking)
@@ -76,7 +71,7 @@ class MyTool(Tool):
         "web_config",  # inspect allowed (e.g. check enable), modify blocked
         "model_presets",  # config-derived catalog; changes require config reload
         "workspace_sandbox",  # read-only view of workspace enforcement level
-        "request",  # current message routing metadata
+        "request",
     })
 
     _REQUEST_FIELDS = ("channel", "chat_id", "sender_id")
@@ -169,9 +164,6 @@ class MyTool(Tool):
         )
         logger.info("self.{} | {} | session:{}", action, detail, session)
 
-    # ------------------------------------------------------------------
-    # Path resolution
-    # ------------------------------------------------------------------
 
     def _resolve_path(
         self,
@@ -201,17 +193,12 @@ class MyTool(Tool):
             return ToolResult.error(f"Error: '{label}' cannot be empty or whitespace")
         return None
 
-    # ------------------------------------------------------------------
-    # Smart formatting
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _format_value(val: Any, key: str = "") -> str:
-        # Scalar types — repr is fine
         if isinstance(val, (str, int, float, bool, type(None))):
             r = repr(val)
             return f"{key}: {r}" if key else r
-        # Mapping — small: show content; large: show keys for dot-path navigation
         if isinstance(val, Mapping):
             value_mapping = cast(Mapping[object, object], val)
             if key == "workspace_sandbox":
@@ -226,7 +213,6 @@ class MyTool(Tool):
             preview = ", ".join(str(k) for k in ks[:15])
             suffix = ", ..." if len(ks) > 15 else ""
             return f"{key}: {{{preview}{suffix}}}" if key else f"{{{preview}{suffix}}}"
-        # List/tuple — count for large, repr for small
         if isinstance(val, (list, tuple)):
             sequence = cast(list[object] | tuple[object, ...], val)
             if len(sequence) > 20:
@@ -236,9 +222,6 @@ class MyTool(Tool):
         r = repr(val)
         return f"{key}: {r}" if key else r
 
-    # ------------------------------------------------------------------
-    # Action dispatch
-    # ------------------------------------------------------------------
 
     async def execute(
         self,
@@ -255,7 +238,6 @@ class MyTool(Tool):
             return await self._modify(key, value)
         return f"Unknown action: {action}"
 
-    # -- inspect --
 
     def _current_runtime_value(self, key: str) -> tuple[bool, Any]:
         request_ctx = current_request_context()
@@ -333,7 +315,6 @@ class MyTool(Tool):
             parts.append(self._format_value(snapshot.scratchpad, "scratchpad"))
         return "\n".join(parts)
 
-    # -- modify --
 
     async def _modify(self, key: str | None, value: Any) -> str:
         if err := self._validate_key(key):

@@ -99,7 +99,6 @@ function FilesPreview() {
     <p role="status" className="mt-4 text-xs text-muted-foreground">{opened ? t("controls.files.selected", { path: opened }) : t("controls.files.hint")}</p></>;
 }
 
-// Inline SVG fixtures stay local to the developer gallery and need no network fetch.
 const mediaImages = ["#2563eb", "#0d9488", "#9333ea", "#ea580c", "#be123c", "#4f46e5"].map((color, index) => ({
   number: index + 1,
   url: `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="960" height="640" viewBox="0 0 960 640"><rect width="960" height="640" fill="${color}"/><path d="M0 480L240 160L480 480L720 160L960 480" fill="none" stroke="white" stroke-opacity=".35" stroke-width="32"/><circle cx="480" cy="320" r="120" fill="white" fill-opacity=".2"/><text x="480" y="355" text-anchor="middle" font-family="sans-serif" font-size="100" fill="white">${index + 1}</text></svg>`)}`,

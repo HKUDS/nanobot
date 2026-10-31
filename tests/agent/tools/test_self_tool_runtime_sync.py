@@ -1,5 +1,3 @@
-"""Focused tests for MyTool runtime sync side effects."""
-
 from unittest.mock import MagicMock
 
 import pytest

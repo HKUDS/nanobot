@@ -1,7 +1,6 @@
 import { NanobotClient } from "@/lib/nanobot-client";
 import type { InboundEvent } from "@/lib/types";
 
-/** Real lifecycle and dispatch with an in-memory transport. */
 export function createStreamClient() {
   const socket = {
     readyState: 1,

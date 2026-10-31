@@ -1,5 +1,3 @@
-"""Small contract shared by channel-owned interactive connection flows."""
-
 from __future__ import annotations
 
 from collections.abc import Mapping

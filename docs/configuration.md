@@ -102,8 +102,6 @@ HTTP, HTTPS, SOCKS5, and SOCKS5H URLs are accepted; individual integrations reta
 
 </details>
 
-On upgrade, one legacy proxy address moves to `network.proxy` and previously configured features receive `useProxy: true`. The migrated configuration is written on the next normal save, including `nanobot onboard --refresh`. If the old configuration contains different proxy addresses, choose one and set `network.proxy` explicitly before upgrading; multiple per-feature addresses are no longer supported. For Discord configurations that store the entire proxy URL in an environment variable and credentials separately, combine them into one full URL environment variable and set `network.proxy` to that reference before upgrading. Credential references inside a URL remain references when saved. Back up the original configuration before saving if you may need to downgrade.
-
 ## Environment Variables for Secrets
 
 Instead of storing secrets directly in `config.json`, you can use `${VAR_NAME}` references that are resolved from environment variables at startup:
@@ -420,6 +418,8 @@ The WebUI's OpenAI web-search switch selects Responses without Chat fallback. Pr
 Providers that use the Responses API can keep reasoning context across a conversation, which helps with multi-step tasks. Supported providers can also compact long conversations automatically.
 
 nanobot preserves Responses conversation state automatically for OpenAI Responses, OpenAI Codex, Azure OpenAI, DeepSeek V4, and compatible GitHub Copilot models. Native compaction is also automatic when the provider supports it. The threshold is derived from the active model's context window and reserved output headroom; no provider configuration is required.
+
+An explicit rejection of a native compaction field or input type disables that capability for the current provider instance. Invalid threshold values and other request errors do not disable it. For OpenAI and Azure Responses requests, an unsupported compaction field permits one retry without that field; a validation error is returned for correction. Codex compaction required to fit the input budget must succeed before the conversation can continue.
 
 <details>
 <summary><b>Azure OpenAI</b></summary>
@@ -1510,7 +1510,7 @@ To configure presets in `config.json`:
 
 `supportedApis` must contain at least one of `chat_completions`, `responses`, or `anthropic_messages`. `preferredApi` must belong to that list and defaults to its first entry. Omit `api` or set it to `null` for Auto. An explicit preset declaration overrides the OpenAI connection default; for custom connections, it must stay within the connection's supported APIs.
 
-A Responses-only preset never falls back to Chat Completions. To allow Chat fallback for Responses compatibility errors, include both `responses` and `chat_completions` with `preferredApi: "responses"`. Other errors do not trigger this API fallback. Provider-hosted search uses Responses when the preset allows it.
+A Responses-only preset never falls back to Chat Completions. To allow Chat fallback for Responses compatibility errors, include both `responses` and `chat_completions` with `preferredApi: "responses"`. Fallback requires an explicit rejection of the Responses API, a Responses-specific parameter, or the `input_image` input type. Invalid parameter values, missing conversation state, authentication failures, rate limits, and server errors do not trigger this API fallback or count toward temporarily bypassing Responses. Provider-hosted search uses Responses when the preset allows it.
 
 Declare `anthropic_messages` alone in a preset. Requests use the same provider connection settings and go to `/v1/messages`; `apiBase` may include a trailing `/v1`. Automatic API fallback between Anthropic Messages and OpenAI formats is not supported; use separate [fallback presets](#model-fallbacks) when needed.
 
@@ -2119,7 +2119,7 @@ AnySearch works out of the box with no key, via its anonymous quota (lower rate 
 
 Create a key at [platform.deepseek.com](https://platform.deepseek.com). Set `tools.web.search.apiKey` directly or with a `${VAR_NAME}` reference. Missing credentials cause a configuration error, with no provider fallback.
 
-Queries are limited to 128 Unicode characters after trimming whitespace; longer queries are rejected. Pricing is ¥5 per 1,000 successful requests, with an account-wide limit of 5 QPS across API keys. See the [DeepSeek Search API documentation](https://api-docs.deepseek.com/zh-cn/guides/search/) for search syntax and billing details.
+Queries are limited to 128 Unicode characters after trimming whitespace; longer queries are rejected. See the [DeepSeek Search API documentation](https://api-docs.deepseek.com/zh-cn/guides/search/) for search syntax, pricing, and account-wide rate limits.
 
 #### `tools.web.search`
 

@@ -1,7 +1,3 @@
-# Render Blueprint — deploys nanobot's gateway + bundled WebUI as one web
-# service. Secrets are provided at deploy time as env vars (sync: false) and
-# resolved at runtime via the ${VAR} placeholders in render-config.json.
-# Nothing secret is stored in this repo.
 services:
   - type: web
     name: nanobot
@@ -31,8 +27,6 @@ services:
       # random value (e.g. `openssl rand -hex 32`) and keep it private.
       - key: NANOBOT_WEB_TOKEN
         sync: false
-      # Port Render routes public traffic to; matches channels.websocket.port
-      # in render-config.json.
       - key: PORT
         value: 8765
     # Persist sessions, memory, and the WebUI display transcripts across deploys.

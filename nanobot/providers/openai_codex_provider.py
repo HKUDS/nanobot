@@ -1,5 +1,3 @@
-"""OpenAI Codex Responses Provider."""
-
 # pyright: reportMissingTypeStubs=false, reportPrivateUsage=false
 
 from __future__ import annotations
@@ -42,6 +40,10 @@ from nanobot.providers.openai_responses import (
     ResponsesBackend,
     ResponsesWebSocketOptions,
     responses_state_matches,
+)
+from nanobot.providers.openai_responses.errors import (
+    COMPACTION_FEATURES,
+    is_unsupported_feature_error,
 )
 from nanobot.providers.openai_responses.state import (
     responses_compaction_items,
@@ -191,7 +193,6 @@ class OpenAICodexProvider(LLMProvider):
         await self._responses.aclose()
 
     def _ssl_context(self, *, verify: bool) -> ssl.SSLContext:
-        """Reuse synchronous TLS setup across requests on the shared event loop."""
         context = self._ssl_contexts.get(verify)
         if context is None:
             context = httpx.create_ssl_context(
@@ -214,7 +215,6 @@ class OpenAICodexProvider(LLMProvider):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         provider_context: ProviderCallContext | None = None,
     ) -> LLMResponse:
-        """Shared request logic for both chat() and chat_stream()."""
         model = model or self.default_model
         sanitized_messages = self._sanitize_empty_content(messages)
         sanitized_state = (
@@ -547,7 +547,6 @@ def _strip_model_prefix(model: str) -> str:
 
 
 def _build_reasoning_options(reasoning_effort: str | None) -> dict[str, str] | None:
-    """Opt in to visible summaries without changing provider-default effort."""
     if reasoning_effort and reasoning_effort.lower() == "none":
         return {"effort": "none"}
     options = {"summary": "auto"}
@@ -625,12 +624,9 @@ def _build_codex_http_error(status_code: int, headers: httpx.Headers, raw: str) 
     retry_after = LLMProvider._extract_retry_after_from_headers(headers)
     error_type, error_code = LLMProvider._extract_error_type_code(raw)
     error_param, error_message = _codex_error_details(raw)
-    compaction_unsupported = status_code in {400, 404, 422} and any(
-        marker in raw.lower()
-        for marker in ("context_management", "compact_threshold", "compaction_trigger")
-    )
+    compaction_unsupported = is_unsupported_feature_error(status_code, raw, COMPACTION_FEATURES)
     return _CodexHTTPError(
-        _friendly_error(status_code, raw), status_code=status_code,
+        _friendly_error(status_code), status_code=status_code,
         retry_after=retry_after, error_type=error_type, error_code=error_code,
         should_retry=_should_retry_status(status_code, error_type, error_code, raw),
         compaction_unsupported=compaction_unsupported,
@@ -643,8 +639,7 @@ def _prompt_cache_key(session_id: str) -> str:
     return hashlib.sha256(session_id.encode("utf-8")).hexdigest()
 
 
-def _friendly_error(status_code: int, raw: str) -> str:
-    _ = raw
+def _friendly_error(status_code: int) -> str:
     if status_code == 429:
         return "ChatGPT usage quota exceeded or rate limit triggered. Please try again later."
     return f"HTTP {status_code}: Codex API request failed"
@@ -657,7 +652,6 @@ def _diagnostic_token(value: object) -> str | None:
 
 
 def _codex_error_details(raw: str) -> tuple[str | None, str | None]:
-    """Retain parameter paths and known enum errors without upstream prompt echoes."""
     try:
         payload = json.loads(raw)
     except ValueError:
@@ -686,7 +680,6 @@ def _codex_error_details(raw: str) -> tuple[str | None, str | None]:
 
 
 def _codex_error_response(exc: Exception) -> LLMResponse:
-    """Convert Codex transport/API failures into actionable, retryable metadata."""
     if isinstance(exc, RuntimeError) and _codex_login_required(exc):
         return LLMResponse(
             content="OpenAI Codex authorization expired. Please sign in again.",
@@ -746,7 +739,6 @@ def _codex_error_response(exc: Exception) -> LLMResponse:
 
 
 def _codex_log_summary(exc_type: str, response: LLMResponse) -> str:
-    """Return a bounded diagnostic summary without request body or raw upstream payload."""
     if response.error_status_code is not None:
         parts = [f"HTTP {response.error_status_code}"]
         if response.error_type:

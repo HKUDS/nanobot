@@ -1,5 +1,3 @@
-"""Private task ownership, message receipts, cancellation, and shell lifetime."""
-
 import asyncio
 import json
 import os
@@ -300,7 +298,6 @@ async def test_owner_canonical_fallback_and_absent_context(tmp_path):
         for action in [None, "send", "cancel"]:
             assert await control(manager, stranger, task_id, action, "secret") == denied
     assert await control(manager, ctx, "missing") == denied
-    # Canonical identity, not the transport route, owns the task.
     same_owner = RequestContext("cli", "different", session_key="owner")
     assert json.loads(await control(manager, same_owner, task_id))["result"] == "private"
     fallback = RequestContext("cli", "fallback", runtime=ctx.runtime)
@@ -600,7 +597,6 @@ async def test_real_task_process_cleanup_preserves_sibling_parent_and_work_produ
         return AgentRunResult(messages=[], final_content="finished")
 
     manager.runner.run = run
-    # The parent's exec manager must not be closed by task cancellation.
     parent_exec = ExecTool(working_dir=str(tmp_path), session_manager=manager._exec_session_manager)
     try:
         with request_context(ctx):
@@ -635,7 +631,7 @@ async def test_real_task_process_cleanup_preserves_sibling_parent_and_work_produ
             assert "SURVIVED" in poll.output
         assert script.exists()
         assert await manager.cancel_by_session("owner") == 1
-        assert manager.bus.inbound_size == 1  # No cancelled sibling notice on parent stop.
+        assert manager.bus.inbound_size == 1
         parent_poll = await manager._exec_session_manager.write(
             session_id=parent_id, chars="STILL ALIVE\n", close_stdin=False, terminate=False,
             yield_time_ms=1000, max_output_chars=1000, owner_session_key="owner",
@@ -912,7 +908,6 @@ async def test_resistant_dependency_has_bounded_stop_and_no_late_result(tmp_path
         assert record.cleanup_task.done()
         assert record.exec_manager._closed
         assert is_tool_error_result(await control(manager, ctx, task_id, "send", "rejected"))
-        # Repeated cancel is bounded and must not interrupt the resistant coroutine.
         assert json.loads(await control(manager, ctx, task_id, "cancel"))["state"] == "stopping"
         assert manager.bus.inbound_size == 0
     finally:

@@ -230,7 +230,13 @@ test("wheel loading hands off to a retained 48px slot; prepend and delayed layou
   const { body, header } = await openSettledHistory(page);
   const nativeTop = await body.evaluate((node) => node.scrollTop);
   await body.hover();
+  // Lazy Markdown can change scrollTop before the queued wheel reaches the viewport.
+  const wheelDelivered = await body.evaluateHandle((node) => ({
+    done: new Promise<void>((resolve) => node.addEventListener("wheel", () => resolve(), { once: true })),
+  }));
   await page.mouse.wheel(0, -100);
+  await wheelDelivered.evaluate(({ done }) => done);
+  await wheelDelivered.dispose();
   await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBeLessThan(nativeTop);
   expect(await displacement(body)).toBe(0);
   expect(history.reads).toHaveLength(0);
@@ -283,7 +289,6 @@ test("wheel loading hands off to a retained 48px slot; prepend and delayed layou
   await expect(body.locator(".thread-history-slot")).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath("history-prepend-stable.png") });
 
-  // The reclaimed boundary scrolls as ordinary message flow, with no retained spacer.
   const beforeScroll = await body.evaluate((node) => node.scrollTop);
   const anchorBeforeScroll = await anchorTop(body, "Question 40");
   await body.hover();
@@ -299,7 +304,7 @@ test("wheel loading hands off to a retained 48px slot; prepend and delayed layou
   expect(history.reads).toHaveLength(1);
 });
 
-test("unlinked task prelude stays with the retained boundary when earlier messages load", async ({ page }) => {
+test("archived task results stay with the retained boundary when earlier messages load", async ({ page }) => {
   const history = await installHistory(page);
   await page.route("**/api/sessions/**/subagents", (route) => route.fulfill({ json: { tasks: [{
     task_id: "legacy", revision: 1, label: "Earlier check", task_description: "Check earlier work",
@@ -312,11 +317,15 @@ test("unlinked task prelude stays with the retained boundary when earlier messag
   const body = page.getByTestId("thread-message-region");
   const otherTasks = body.getByRole("region", { name: "Other tasks" });
   await expect(otherTasks).toBeAttached();
+  // Clicking an offscreen disclosure scrolls it into view and can prefetch history.
+  await positionAtTop(body);
   await otherTasks.getByRole("button", { name: /Other tasks/ }).click();
   await expect(otherTasks.getByRole("button", { name: /Earlier check Completed/ })).toBeVisible();
   await stableLayout(body);
   const originalTop = await positionAtTop(body);
   await body.hover();
+  await expect(body.locator(".thread-history-slot")).toHaveCount(0);
+  expect(history.reads).toHaveLength(0);
   await page.mouse.wheel(0, -100);
   await expect(page.locator(".thread-history-status")).toHaveAttribute("data-state", "loading");
   const held = await expectHeld(body, "Question 40");
@@ -408,6 +417,136 @@ test("touch reveals a static partial ready header, arms only on release, and ret
     history.complete();
     await page.waitForTimeout(100);
     await expect(page.locator('.thread-history-status[data-state="loading"]')).toHaveCount(0);
+  } finally { await context.close(); }
+});
+
+for (const replacement of ["before move", "before release", "before cancel"] as const) {
+  test(`history touch continues when the touched message is replaced ${replacement}`, async ({ browser, baseURL }) => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, baseURL });
+    const page = await context.newPage();
+    const history = await installHistory(page);
+    let allowRenderer = () => {};
+    let rendererRequested = () => {};
+    const rendererGate = new Promise<void>((resolve) => { allowRenderer = resolve; });
+    const requested = new Promise<void>((resolve) => { rendererRequested = resolve; });
+    await page.route("**/src/components/MarkdownTextRenderer.tsx*", async (route) => {
+      rendererRequested();
+      await rendererGate;
+      await route.continue();
+    });
+    try {
+      const { body, header } = await openSettledHistory(page);
+      await positionAtTop(body);
+      await stableLayout(body);
+      await requested;
+      const fallback = body.locator('[data-assistant-selectable="true"] > .whitespace-pre-wrap:visible').first();
+      await expect(fallback).toBeVisible();
+      await expect(fallback).toContainText("Historical answer.");
+      const target = await fallback.elementHandle();
+      const box = await target?.boundingBox();
+      if (!target || !box) throw new Error("The Markdown fallback must be visible before the touch gesture");
+      const x = box.x + Math.min(50, box.width / 2), y = box.y + Math.min(10, box.height / 2);
+      expect(await target.evaluate((node, point) => document.elementFromPoint(point.x, point.y) === node, { x, y })).toBe(true);
+      const cdp = await context.newCDPSession(page);
+      const touch = (type: "touchStart" | "touchMove" | "touchEnd" | "touchCancel", touchY = y) => cdp.send("Input.dispatchTouchEvent", {
+        type, touchPoints: type === "touchEnd" || type === "touchCancel" ? [] : [{ x, y: touchY, id: 1 }],
+      });
+      await touch("touchStart");
+      if (replacement !== "before move") {
+        await touch("touchMove", y + (replacement === "before cancel" ? 200 : 40));
+        if (replacement === "before cancel") expect(await displacement(body)).toBeGreaterThanOrEqual(56);
+        else expect(await displacement(body)).toBeGreaterThan(0);
+        expect(history.reads).toHaveLength(0);
+      }
+      allowRenderer();
+      await expect.poll(() => target.evaluate((node) => node?.isConnected)).toBe(false);
+      if (replacement === "before move") {
+        await touch("touchMove", y + 200);
+        expect(await displacement(body)).toBeGreaterThanOrEqual(56);
+        expect(history.reads).toHaveLength(0);
+      }
+      await touch(replacement === "before cancel" ? "touchCancel" : "touchEnd");
+      if (replacement !== "before move") {
+        await expect.poll(() => displacement(body)).toBe(0);
+        await expect(header).not.toBeInViewport();
+        expect(history.reads).toHaveLength(0);
+      }
+      if (replacement === "before cancel") {
+        // Cancellation must not leave a stale gesture that prevents the next pull.
+        await touch("touchStart");
+        await touch("touchMove", y + 200);
+        expect(await displacement(body)).toBeGreaterThanOrEqual(56);
+        expect(history.reads).toHaveLength(0);
+        await touch("touchEnd");
+      }
+      if (replacement !== "before release") {
+        await expect.poll(() => history.reads.length).toBe(1);
+        await expect(header).toHaveAttribute("data-state", "loading");
+        history.complete();
+      }
+      await target.dispose();
+    } finally {
+      allowRenderer();
+      await context.close();
+    }
+  });
+}
+
+test("a second finger cancels an active history pull without loading", async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, baseURL });
+  const page = await context.newPage();
+  const history = await installHistory(page);
+  try {
+    const { body, header } = await openSettledHistory(page);
+    await positionAtTop(body);
+    const cdp = await context.newCDPSession(page);
+    const dispatch = (type: "touchStart" | "touchMove" | "touchEnd", touchPoints: { id: number; x: number; y: number }[]) =>
+      cdp.send("Input.dispatchTouchEvent", { type, touchPoints });
+    await dispatch("touchStart", [{ id: 1, x: 180, y: 200 }]);
+    await dispatch("touchMove", [{ id: 1, x: 180, y: 240 }]);
+    expect(await displacement(body)).toBeGreaterThan(0);
+    await dispatch("touchStart", [{ id: 1, x: 180, y: 240 }, { id: 2, x: 220, y: 240 }]);
+    await expect.poll(() => displacement(body)).toBe(0);
+    await expect(header).not.toBeInViewport();
+    expect(history.reads).toHaveLength(0);
+    await dispatch("touchEnd", []);
+    await dispatch("touchStart", [{ id: 1, x: 180, y: 200 }]);
+    await dispatch("touchMove", [{ id: 1, x: 180, y: 400 }]);
+    expect(await displacement(body)).toBeGreaterThanOrEqual(56);
+    await dispatch("touchEnd", []);
+    await expect.poll(() => history.reads.length).toBe(1);
+    history.complete();
+  } finally { await context.close(); }
+});
+
+test("switching conversations cancels an in-progress history pull", async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, baseURL });
+  const page = await context.newPage();
+  const history = await installHistory(page);
+  try {
+    const { body } = await openSettledHistory(page);
+    await positionAtTop(body);
+    const cdp = await context.newCDPSession(page);
+    const touch = (type: "touchStart" | "touchMove" | "touchEnd", y = 200) => cdp.send("Input.dispatchTouchEvent", {
+      type, touchPoints: type === "touchEnd" ? [] : [{ id: 1, x: 180, y }],
+    });
+    await touch("touchStart");
+    await touch("touchMove", 240);
+    expect(await displacement(body)).toBeGreaterThan(0);
+    await page.getByRole("button", { name: "Switch conversation" }).click();
+    await expect(body.getByText("Question 1", { exact: true })).toBeVisible();
+    await touch("touchEnd");
+    await expect.poll(() => displacement(body)).toBe(0);
+    expect(history.reads).toHaveLength(0);
+    await page.getByRole("button", { name: "Switch conversation" }).click();
+    await expect(body.getByText("Question 40", { exact: true })).toBeVisible();
+    await positionAtTop(body);
+    await touch("touchStart");
+    await touch("touchMove", 400);
+    expect(await displacement(body)).toBeGreaterThanOrEqual(56);
+    await touch("touchEnd");
+    await expect.poll(() => history.reads.length).toBe(1);
+    history.complete();
   } finally { await context.close(); }
 });
 
@@ -813,7 +952,6 @@ test("failed Blocks animate without visible error text; pulling retries once and
   await expectCoordinates(body, "Question 40", held);
   expect(history.reads).toHaveLength(1);
 
-  // This is a fresh pull at the failed boundary, not a ready-button-only path.
   await requestOlderWithWheel(body, history, 2);
   await expect(header).toHaveAttribute("data-state", "loading");
   await page.mouse.wheel(0, -120);
@@ -987,7 +1125,6 @@ test("bounded navigation retains three pages and reclaims each completed wheel o
   const header = page.locator(".thread-history-status");
   const slot = body.locator(".thread-history-slot");
   const approachNextHead = async (text: string) => {
-    // Real scrolling stops just short of the boundary, before it can request.
     const scrollTop = await body.evaluate((node) => node.scrollTop);
     expect(scrollTop).toBeGreaterThan(120);
     await body.hover();
@@ -1005,7 +1142,6 @@ test("bounded navigation retains three pages and reclaims each completed wheel o
   await stableLayout(body);
   expect(history.reads).toHaveLength(0);
 
-  // An unloaded rail destination replaces latest with P0 (38..49).
   await jumpViaRail(page, 38);
   await expect.poll(() => history.reads.length).toBe(1);
   history.complete();
@@ -1022,7 +1158,6 @@ test("bounded navigation retains three pages and reclaims each completed wheel o
   expect((await historyGeometry(body, "Question 38")).slotBeforeKey).toBeNull();
   await expect(body.locator('[data-thread-display-unit^="u"]')).toHaveCount(24);
 
-  // Reach each prepended page head instead of loading from the old reading slot.
   const atSecondHead = await approachNextHead("Question 26");
   expect(atSecondHead.firstKey).toBe("u26");
   expect(atSecondHead.slotBeforeKey).toBeNull();
@@ -1037,7 +1172,6 @@ test("bounded navigation retains three pages and reclaims each completed wheel o
   expect((await historyGeometry(body, "Question 26")).slotBeforeKey).toBeNull();
   await expect(body.locator('[data-thread-display-unit^="u"]')).toHaveCount(36);
 
-  // Completed feedback is removed and cannot add a fourth cached page.
   await expect(header).toHaveCount(0);
   await stableLayout(body);
   await expect(page.getByText("No earlier messages", { exact: true })).toHaveCount(0);
@@ -1069,7 +1203,6 @@ test("bounded navigation retains three pages and reclaims each completed wheel o
   await expect(page.getByText("No earlier messages", { exact: true })).toHaveCount(0);
   expect(history.reads).toEqual(["?limit=24&after=38", "?limit=24&before=38", "?limit=24&before=26", "?limit=24&before=14"]);
 
-  // A real Home key reaches the next boundary and rebinds without a wheel pull.
   const atKeyboardHead = await approachNextHead("Question 2");
   expect(atKeyboardHead.firstKey).toBe("u2");
   expect(atKeyboardHead.slotBeforeKey).toBeNull();
