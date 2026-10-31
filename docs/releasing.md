@@ -38,6 +38,10 @@ Before offering public Preview, obtain approval for index ownership/protection, 
 
 Automate steps within an explicitly requested run, not the decision to build or publish. Keep builds read-only, publication permissions in a protected stage, the last accepted source/version recorded and one serialized catalogue writer. Announce Preview availability only after verifying its public feed. Any discovery hint must be dismissible; do not show an update badge for an unavailable channel or enroll users merely because they check.
 
+For the proposed stable/preview rollout and its implementation gates, see
+[Stable and preview channels](./release-channels.md). It does not enable preview
+publication or replace this stable release checklist.
+
 ## Prepare a candidate
 
 1. Choose the previous release and exact candidate commit. Use a clean worktree without local configuration, sessions, credentials or unrelated changes.
