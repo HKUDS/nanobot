@@ -177,6 +177,10 @@ export function useVoiceRecorder({
     startPendingRef.current = true;
     try {
       const stream = await mediaDevices.getUserMedia({ audio: true });
+      if (!startPendingRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       const recorder = new MediaRecorderCtor(stream, mediaRecorderOptions(MediaRecorderCtor));
       chunksRef.current = [];
       streamRef.current = stream;
