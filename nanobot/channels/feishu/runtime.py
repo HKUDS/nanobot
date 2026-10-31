@@ -1193,7 +1193,7 @@ class FeishuChannel(BaseChannel):
             else:
                 replacement = f"@{name}"
 
-            text = re.sub(pattern, replacement, text)
+            text = re.sub(pattern, lambda _: replacement, text)
 
         return text
 
