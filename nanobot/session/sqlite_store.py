@@ -485,6 +485,14 @@ class SqliteSessionStore:
                                 title=row[3], preview=row[4], path=str(self.path))
                     for row in db.execute("SELECT key, created_at, updated_at, title, preview FROM sessions ORDER BY updated_at DESC")]
 
+    def list_session_versions(self) -> dict[str, tuple[str, int]]:
+        """Read lifecycle identity and revision for every session in one snapshot."""
+        with self.transaction(write=False) as db:
+            return {
+                str(row[0]): (str(row[1]), int(row[2]))
+                for row in db.execute("SELECT key, generation, revision FROM sessions")
+            }
+
     def child_session_keys(self, parent_key: str) -> list[str]:
         """Find all persisted child kinds without decoding unrelated metadata."""
         with self.transaction(write=False) as db:
