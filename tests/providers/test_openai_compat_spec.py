@@ -929,6 +929,7 @@ def test_compatible_provider_keeps_temperature_when_reasoning_effort_is_set(
 
 
 @pytest.mark.parametrize("api_type", ["chat_completions", "responses"])
+@pytest.mark.parametrize("streaming", [False, True])
 @pytest.mark.parametrize(
     ("model", "effort", "supports_temperature"),
     [
@@ -936,14 +937,21 @@ def test_compatible_provider_keeps_temperature_when_reasoning_effort_is_set(
         ("gpt-6-sol", "high", False),
         ("gpt-6-sol", None, False),
         ("gpt-6-sol", "none", True),
+        ("gpt-6-luna", "high", False),
+        ("gpt-6-luna", None, False),
+        ("gpt-6-luna", "none", True),
     ],
 )
 @pytest.mark.asyncio
 async def test_gpt6_temperature_requires_explicit_none_effort(
-    api_type: str, model: str, effort: str | None, supports_temperature: bool,
+    api_type: str, streaming: bool, model: str, effort: str | None, supports_temperature: bool,
 ) -> None:
-    mock_chat = AsyncMock(return_value=_fake_chat_response())
-    mock_responses = AsyncMock(return_value=_fake_responses_response())
+    mock_chat = AsyncMock(return_value=_fake_chat_stream() if streaming else _fake_chat_response())
+    response = _fake_responses_response()
+    if streaming:
+        response = MagicMock()
+        response.__aiter__.side_effect = _fake_responses_stream
+    mock_responses = AsyncMock(return_value=response)
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_client:
         mock_client.return_value.chat.completions.create = mock_chat
         mock_client.return_value.responses.create = mock_responses
@@ -953,7 +961,8 @@ async def test_gpt6_temperature_requires_explicit_none_effort(
             spec=find_by_name("openai"),
             model_api=ModelAPICapabilities((api_type,), api_type),
         )
-        result = await provider.chat(
+        call = provider.chat_stream if streaming else provider.chat
+        result = await call(
             messages=[{"role": "user", "content": "hello"}],
             temperature=0.2,
             reasoning_effort=effort,
@@ -965,6 +974,11 @@ async def test_gpt6_temperature_requires_explicit_none_effort(
     request_mock.assert_awaited_once()
     other_mock.assert_not_awaited()
     request = request_mock.call_args.kwargs
+    effort_key = "reasoning" if api_type == "responses" else "reasoning_effort"
+    if effort is None:
+        assert effort_key not in request
+    else:
+        assert request[effort_key] == ({"effort": effort} if api_type == "responses" else effort)
     if supports_temperature:
         assert request["temperature"] == 0.2
     else:
