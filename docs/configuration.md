@@ -341,6 +341,7 @@ A Base URL is the service address nanobot sends model requests to. Change it onl
 | `aihubmix` | LLM (API gateway, access to all models) | [aihubmix.com](https://aihubmix.com) |
 | `siliconflow` | LLM (SiliconFlow/硅基流动) | [siliconflow.cn](https://siliconflow.cn) |
 | `novita` | LLM (Novita AI OpenAI-compatible gateway) | [novita.ai](https://novita.ai) |
+| `runcrate` | LLM (Runcrate OpenAI-compatible API, open models) | [runcrate.ai](https://www.runcrate.ai/inference/free?utm_source=nanobot&utm_medium=directory&utm_campaign=gpu_pricing) |
 | `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
 | `modelscope` | LLM (ModelScope/魔搭社区) + Image generation | [modelscope.cn](https://modelscope.cn) |
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.kimi.com](https://platform.kimi.com?aff=nanobot) |
