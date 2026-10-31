@@ -579,7 +579,7 @@ class ExecSessionManager:
                     session_id=session_id,
                     command=session.command,
                     cwd=session.cwd,
-                    elapsed_s=max(0.0, now - session.started_at),
+                    elapsed_s=max(0.0, (session.finished_at or now) - session.started_at),
                     idle_s=session.output_idle_s(now),
                     remaining_s=session.remaining_s(now),
                     returncode=session.process.returncode,
