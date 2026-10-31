@@ -3,6 +3,23 @@ import { describe, expect, test } from "bun:test"
 import { latestTurnFileEdits, mergeFileEdits } from "./diff-viewer"
 
 describe("DiffViewer projection", () => {
+  test("keeps the newest lifecycle state when restoring chronological history", () => {
+    const start = {
+      call_id: "edit-1", tool: "edit_file", path: "src/app.ts",
+      status: "editing", added: 0, deleted: 0,
+    }
+    const end = {
+      ...start, status: "done", added: 2, deleted: 1,
+      diff: { format: "unified", text: "--- a/src/app.ts\n+++ b/src/app.ts" },
+    }
+    expect(latestTurnFileEdits([
+      { role: "user", content: "edit the file" },
+      { role: "activity", content: "", fileEdits: [start] },
+      { role: "activity", content: "", fileEdits: [end] },
+      { role: "assistant", content: "done" },
+    ])).toEqual([end])
+  })
+
   test("merges lifecycle frames without losing the final unified patch", () => {
     const edits = mergeFileEdits(
       [{ call_id: "edit-1", tool: "edit_file", path: "src/app.ts", status: "editing" }],
