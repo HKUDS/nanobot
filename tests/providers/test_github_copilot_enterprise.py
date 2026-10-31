@@ -9,6 +9,14 @@ import pytest
 from nanobot.providers import github_copilot_provider as gc
 
 
+def test_storage_uses_nanobot_data_dir(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "nanobot.config.loader.get_config_path", lambda: tmp_path / "config.json"
+    )
+
+    assert gc.get_storage().get_token_path() == tmp_path / "auth" / gc.TOKEN_FILENAME
+
+
 def test_resolve_falls_back_to_default_without_env(monkeypatch):
     monkeypatch.delenv("NANOBOT_COPILOT_BASE_URL", raising=False)
     assert gc._resolve("NANOBOT_COPILOT_BASE_URL", gc.DEFAULT_COPILOT_BASE_URL) == (
