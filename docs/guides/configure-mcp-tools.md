@@ -51,6 +51,37 @@ Restart nanobot and ask a question that requires the MCP tool.
 
 </details>
 
+## Example: search a local code repository
+
+[Sem](https://github.com/Ataraxy-Labs/sem) is an optional local MCP server for finding code entities and inspecting their context. Install the Sem CLI using its upstream installation instructions (this example was checked with `sem 0.27.0`). Both the executable and the Git checkout must be accessible on the **gateway computer**, not just in your browser's filesystem.
+
+Merge this entry into your existing `tools.mcpServers` configuration, replacing both absolute paths:
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "sem": {
+        "type": "stdio",
+        "command": "/absolute/path/to/sem",
+        "args": ["mcp"],
+        "env": {
+          "SEM_REPO": "/absolute/path/to/checkout",
+          "SEM_NO_NETWORK": "1",
+          "SEM_NO_TELEMETRY": "1"
+        },
+        "enabledTools": ["sem_find", "sem_grep"],
+        "toolTimeout": 60
+      }
+    }
+  }
+}
+```
+
+Restart the gateway, then ask it to use Sem to find a function you know exists in that checkout and show its callers. For example, in a repository with a `parse_config` function, request a `sem_find` lookup with `query: "parse_config"`, `mode: "context"`, and `token_budget: 1200`. Check the returned source locations; static relationships may be incomplete. Keep the existing file tools for configuration, unsupported syntax, and missing context.
+
+The allowlist exposes only `sem_find` and `sem_grep` to the model, not Sem's validation or command-running tools. Sem may write local index/cache data. `SEM_REPO` selects a checkout; it is **not** a filesystem sandbox, and nanobot's built-in file restrictions do not isolate this external process. Use a trusted checkout and OS/container isolation when needed. Source excerpts returned by MCP enter the conversation and may reach your configured model provider despite Sem's network and telemetry settings. Remove the `sem` entry and restart the gateway to disconnect it.
+
 ## Production notes
 
 - Prefer `enabledTools` over exposing every tool by default.
