@@ -329,6 +329,7 @@ class ProvidersConfig(Base):
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)
     siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)
     edenai: ProviderConfig = Field(default_factory=ProviderConfig)
+    opper: ProviderConfig = Field(default_factory=ProviderConfig)
     novita: ProviderConfig = Field(default_factory=ProviderConfig)
     volcengine: ProviderConfig = Field(default_factory=ProviderConfig)
     volcengine_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)

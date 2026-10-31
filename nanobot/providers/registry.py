@@ -294,6 +294,20 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="edenai",
         default_api_base="https://api.edenai.run/v3",
     ),
+    # Opper: EU-hosted OpenAI-compatible gateway. Model IDs are bare pool names
+    # (e.g. "claude-sonnet-4-6"); "provider/model" (e.g. "azure/gpt-5.5") pins one
+    # upstream provider or region. Either form is sent upstream unchanged.
+    ProviderSpec(
+        name="opper",
+        keywords=("opper",),
+        env_key="OPPER_API_KEY",
+        request_apis=("chat_completions", "responses"),
+        display_name="Opper",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="opper",
+        default_api_base="https://api.opper.ai/v3/compat",
+    ),
     # OpenCode Zen: OpenAI-compatible chat-completions gateway for coding models.
     # models.dev/OpenCode use provider id "opencode" and model ids like
     # "opencode/<model>"; send the bare model upstream.
