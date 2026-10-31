@@ -1392,6 +1392,34 @@ def test_extract_attachments_saves_pdf(tmp_path, monkeypatch) -> None:
     assert "[attachment:" in items[0]["content"]
 
 
+@pytest.mark.parametrize("content_disposition", ["attachment", "inline"])
+def test_single_part_email_attachment(tmp_path, monkeypatch, content_disposition) -> None:
+    monkeypatch.setattr("nanobot.channels.email.runtime.get_media_dir", lambda _ch: tmp_path)
+    message = EmailMessage()
+    message["From"] = "alice@example.com"
+    message["To"] = "bot@example.com"
+    message["Subject"] = "Report"
+    message["Message-ID"] = "<report@example.com>"
+    message.set_content(b"%PDF-1.4 report", maintype="application", subtype="pdf")
+    message.add_header("Content-Disposition", content_disposition, filename="report.pdf")
+    assert not message.is_multipart()
+    fake = _make_fake_imap(message.as_bytes())
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+    channel = EmailChannel(_make_config(allowed_attachment_types=["application/pdf"]), MessageBus())
+
+    items, _ = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    if content_disposition == "attachment":
+        assert len(items[0]["media"]) == 1
+        saved = Path(items[0]["media"][0])
+        assert saved.read_bytes() == b"%PDF-1.4 report"
+        assert saved.name == "500_report.pdf"
+    else:
+        assert items[0]["media"] == []
+        assert list(tmp_path.iterdir()) == []
+
+
 def test_extract_attachments_disabled_by_default(monkeypatch) -> None:
     raw = _make_raw_email_with_attachment()
     fake = _make_fake_imap(raw)
