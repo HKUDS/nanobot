@@ -212,7 +212,6 @@ async def test_persist_user_message_acknowledges_durable_followup(tmp_path: Path
     try:
         identifier = await loop.sessions.state.queue_followup(message.session_key, message)
         message.metadata[PENDING_FOLLOWUP_ID_KEY] = identifier
-        # Control: unlike mid-turn injection, this draft already sees the journal.
         session = await loop.sessions.state.get(message.session_key)
         assert await loop._persist_user_message_early(message, session)
         assert PENDING_FOLLOWUPS_KEY not in session.metadata
@@ -1822,7 +1821,7 @@ async def test_request_context_uses_effective_key_for_subagent_tool(tmp_path: Pa
 @pytest.mark.asyncio
 async def test_next_turn_after_crash_closes_pending_user_turn_before_new_input(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
-    loop.provider.chat_stream_with_retry = AsyncMock(return_value=MagicMock())  # unused because _run_agent_loop is stubbed
+    loop.provider.chat_stream_with_retry = AsyncMock(return_value=MagicMock())
 
     session = loop.sessions.get_or_create("feishu:c3")
     session.add_message("user", "old question")
@@ -2039,8 +2038,6 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
     non_system = [m for m in initial_messages if m.get("role") != "system"]
     assert "question" in non_system[0]["content"]
     assert "working" in non_system[1]["content"]
-    # Persisted timestamps stay in session records, but replay content is not
-    # rewritten with volatile ``[Message Time: ...]`` prefixes.
     assert "[Message Time:" not in non_system[0]["content"]
     assert "[Message Time:" not in non_system[1]["content"]
     assert non_system[2]["role"] == "user"

@@ -1,5 +1,3 @@
-"""Local connection directory. Owns SSH tunnels, never remote gateway lifetimes."""
-
 from __future__ import annotations
 
 import asyncio

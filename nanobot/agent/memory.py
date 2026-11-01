@@ -1,5 +1,3 @@
-"""Memory storage, transcript archiving, and session checkpoint consolidation."""
-
 # Tool schemas are installed by the ``@tool_parameters`` class decorator at
 # runtime; static analyzers cannot observe that it clears ``parameters`` from
 # ``__abstractmethods__`` before these classes are instantiated.
@@ -50,10 +48,6 @@ if TYPE_CHECKING:
     from nanobot.agent.tools.registry import ToolRegistry
     from nanobot.utils.llm_runtime import LLMRuntime
 
-# ---------------------------------------------------------------------------
-# MemoryStore — pure file I/O layer
-# ---------------------------------------------------------------------------
-
 
 class MemoryStore:
     """Pure file I/O for memory files: MEMORY.md, history.jsonl, SOUL.md, USER.md."""
@@ -80,11 +74,11 @@ class MemoryStore:
         self.user_file = workspace / "USER.md"
         self._cursor_file = self.memory_dir / ".cursor"
         self._dream_cursor_file = self.memory_dir / ".dream_cursor"
-        self._corruption_logged = False  # rate-limit invalid cursor warning
-        self._malformed_entry_logged = False  # rate-limit bad history shape warning
-        self._oversize_logged = False  # rate-limit oversized-entry warning
+        self._corruption_logged = False
+        self._malformed_entry_logged = False
+        self._oversize_logged = False
         self._dream_prompt_oversize_logged = False
-        self._append_lock = threading.Lock()  # serialize cursor allocation + append
+        self._append_lock = threading.Lock()
         self._git = GitStore(workspace, tracked_files=[
             "SOUL.md", "USER.md", "memory/MEMORY.md", "memory/.dream_cursor",
         ])
@@ -94,7 +88,6 @@ class MemoryStore:
     def git(self) -> GitStore:
         return self._git
 
-    # -- generic helpers -----------------------------------------------------
 
     @staticmethod
     def read_file(path: Path) -> str:
@@ -224,7 +217,6 @@ class MemoryStore:
             suffix += 1
         return candidate
 
-    # -- MEMORY.md (long-term facts) -----------------------------------------
 
     def read_memory(self) -> str:
         return self.read_file(self.memory_file)
@@ -232,7 +224,6 @@ class MemoryStore:
     def write_memory(self, content: str) -> None:
         self.memory_file.write_text(content, encoding="utf-8")
 
-    # -- SOUL.md -------------------------------------------------------------
 
     def read_soul(self) -> str:
         return self.read_file(self.soul_file)
@@ -240,7 +231,6 @@ class MemoryStore:
     def write_soul(self, content: str) -> None:
         self.soul_file.write_text(content, encoding="utf-8")
 
-    # -- USER.md -------------------------------------------------------------
 
     def read_user(self) -> str:
         return self.read_file(self.user_file)
@@ -253,7 +243,6 @@ class MemoryStore:
         long_term = self.read_memory()
         return f"## Long-term Memory\n{long_term}" if long_term else ""
 
-    # -- history.jsonl — append-only, JSONL format ---------------------------
 
     def _normalize_history_entry(
         self,
@@ -261,7 +250,6 @@ class MemoryStore:
         *,
         max_chars: int | None = None,
     ) -> str:
-        """Return the exact bounded, model-safe text accepted by the journal."""
         limit = max_chars if max_chars is not None else _HISTORY_ENTRY_HARD_CAP
         raw = entry.rstrip()
         content = strip_think(raw)
@@ -330,7 +318,6 @@ class MemoryStore:
         return value
 
     def _iter_valid_entries(self) -> Iterator[tuple[dict[str, Any], int]]:
-        """Yield ``(entry, cursor)`` for well-formed entries; warn once on corruption."""
         poisoned: Any = None
         malformed_cursor: int | None = None
         for entry in self._read_entries():
@@ -370,7 +357,6 @@ class MemoryStore:
         return session_key is None or isinstance(session_key, str)
 
     def _read_cursor_counter(self) -> int | None:
-        """Return the persisted cursor counter when it is usable."""
         if not self._cursor_file.exists():
             return None
         with suppress(ValueError, OSError):
@@ -380,7 +366,6 @@ class MemoryStore:
         return None
 
     def _next_cursor(self) -> int:
-        """Read the current cursor counter and return the next value."""
         cursor_counter = self._read_cursor_counter()
         last = self._read_last_entry() or {}
         last_cursor = self._valid_cursor(last.get("cursor"))
@@ -431,10 +416,8 @@ class MemoryStore:
             )
         self._write_entries(kept)
 
-    # -- JSONL helpers -------------------------------------------------------
 
     def _read_entries(self) -> list[dict[str, Any]]:
-        """Read all entries from history.jsonl."""
         entries: list[dict[str, Any]] = []
         with suppress(FileNotFoundError):
             with open(self.history_file, "r", encoding="utf-8") as f:
@@ -451,7 +434,6 @@ class MemoryStore:
         return entries
 
     def _read_last_entry(self) -> dict[str, Any] | None:
-        """Read the last entry from the JSONL file efficiently."""
         try:
             with open(self.history_file, "rb") as f:
                 f.seek(0, 2)
@@ -470,13 +452,11 @@ class MemoryStore:
             return None
 
     def _write_entries(self, entries: list[dict[str, Any]]) -> None:
-        """Overwrite history.jsonl with the given entries (atomic write)."""
         atomic_write_lines(
             self.history_file,
             (json.dumps(entry, ensure_ascii=False) for entry in entries),
         )
 
-    # -- dream cursor --------------------------------------------------------
 
     def get_last_dream_cursor(self) -> int:
         if self._dream_cursor_file.exists():
@@ -620,7 +600,6 @@ class MemoryStore:
             stop_reason = "missing response metadata"
         return f"stop_reason: {stop_reason}"
 
-    # -- message formatting utility ------------------------------------------
 
     @staticmethod
     def _format_messages(messages: list[dict[str, Any]]) -> str:
@@ -686,7 +665,6 @@ class MemoryStore:
         *,
         max_chars: int | None = None,
     ) -> str:
-        """Build the same bounded checkpoint as :meth:`raw_archive` without writing it."""
         limit = max_chars if max_chars is not None else _RAW_ARCHIVE_MAX_CHARS
         checkpoint = (
             f"[RAW] {len(messages)} messages\n"
@@ -694,9 +672,6 @@ class MemoryStore:
         )
         return self._normalize_history_entry(checkpoint, max_chars=limit)
 
-    # ------------------------------------------------------------------
-    # Dream helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def dream_session_key() -> str:
@@ -721,15 +696,12 @@ class MemoryStore:
             return prefix
         return f"{prefix}\n\n{diff_body}"
 
-# ---------------------------------------------------------------------------
-# Memory ingestion and context-pressure coordination
-# ---------------------------------------------------------------------------
 
 # Raw fallbacks use a tighter cap. Completed model summaries may scale with the
 # configured generation budget, while append_history() still enforces the
 # emergency hard cap against pathological provider output.
-_RAW_ARCHIVE_MAX_CHARS = 16_000   # fallback dump (LLM failed)
-_HISTORY_ENTRY_HARD_CAP = 64_000  # emergency cap in append_history
+_RAW_ARCHIVE_MAX_CHARS = 16_000
+_HISTORY_ENTRY_HARD_CAP = 64_000
 _ARCHIVE_TOOL_RESULT = (
     "Session archival does not execute tools. Use only the supplied conversation and "
     "return the requested compact checkpoint now; do not call another tool."
@@ -765,7 +737,6 @@ class MemoryArchiver:
         max_tokens: int,
         persist: bool = True,
     ) -> str:
-        """Return a bounded raw checkpoint, optionally persisting its source."""
         raw = (
             self.store.raw_archive(messages, session_key=session_key)
             if persist
@@ -1192,7 +1163,6 @@ class Consolidator:
         )
 
     def _input_token_budget(self, runtime: LLMRuntime) -> int:
-        """Available input token budget for consolidation LLM."""
         return (
             runtime.context_window_tokens
             - runtime.generation.max_tokens

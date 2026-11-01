@@ -1,5 +1,3 @@
-"""Tests for the /skill built-in command."""
-
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -85,7 +83,6 @@ async def test_skill_command_lists_names_and_descriptions(tmp_path: Path) -> Non
     assert "Available skills (2):" in out.content
     assert "**weather** — Get current weather and forecasts" in out.content
     assert "**cron** — Schedule recurring tasks" in out.content
-    # Must NOT contain file paths
     assert ".md" not in out.content
     assert "/skills/" not in out.content
 
@@ -120,7 +117,6 @@ async def test_skill_command_fallback_description(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_skill_command_no_render_as_text(tmp_path: Path) -> None:
-    """Output is markdown; CLI should render it (not forced as plain text)."""
     loop = _make_loop(tmp_path)
     out = await cmd_skill(_ctx(loop))
     assert out.metadata.get("render_as") != "text"

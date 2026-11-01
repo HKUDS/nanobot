@@ -121,7 +121,7 @@ async def test_codex_langfuse_disabled_when_env_var_unset(monkeypatch) -> None:
 
     assert result.content == "hello"
     assert capture.calls == []
-    assert find_spec_calls == []  # short-circuited before ever checking the package
+    assert find_spec_calls == []
 
 
 @pytest.mark.parametrize(
@@ -253,7 +253,7 @@ async def test_codex_langfuse_generation_ends_on_cancellation(monkeypatch, gener
     assert len(generations) == 1
     gen = generations[0]
     assert gen.end_calls == 1
-    assert gen.update_calls == []  # no output/usage known - nothing to attach
+    assert gen.update_calls == []
 
 
 async def test_codex_langfuse_traces_each_request_during_native_compaction(monkeypatch, generations) -> None:
@@ -408,7 +408,6 @@ async def test_codex_langfuse_traces_the_actual_wire_body_not_the_prenormalized_
 
 
 async def test_codex_langfuse_records_rejected_compaction_as_error(monkeypatch, generations) -> None:
-    """A transport-successful compaction with no usable item must not trace as a success."""
     provider = OpenAICodexProvider(default_model="openai-codex/gpt-5.6-sol")
     state = build_responses_state(
         provider=provider._responses_state_provider(),
@@ -448,7 +447,7 @@ async def test_codex_langfuse_records_rejected_compaction_as_error(monkeypatch, 
         ),
     )
 
-    assert response.content == "done"  # falls back to the uncompacted request
+    assert response.content == "done"
     assert len(generations) == 2
     compaction_gen = generations[0]
     assert compaction_gen.start_kwargs["name"] == "codex_compaction"

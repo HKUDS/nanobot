@@ -531,9 +531,9 @@ describe("Settings capabilities", () => {
       return <ClientProvider client={{ requestMutation: requestMutationMock, status: "open",
         onStatus: (handler: (status: "open") => void) => { handler("open"); return () => {}; },
       } as never} token="tok">
-        <SettingsView theme="light" initialSection="voice" initialSettings={snapshot}
+        <SettingsView themePreference="light" initialSection="voice" initialSettings={snapshot}
           onSettingsChange={setSnapshot} onNativeEngineRestart={restart}
-          onToggleTheme={() => {}} onBackToChat={() => {}} onModelNameChange={() => {}} />
+          onChangeTheme={() => {}} onBackToChat={() => {}} onModelNameChange={() => {}} />
       </ClientProvider>;
     }
     render(<Parent />);

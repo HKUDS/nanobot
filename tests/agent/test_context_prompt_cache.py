@@ -1,5 +1,3 @@
-"""Tests for cache-friendly prompt construction."""
-
 from __future__ import annotations
 
 import datetime as datetime_module
@@ -35,7 +33,6 @@ def test_bootstrap_files_are_backed_by_templates() -> None:
 
 
 def test_system_prompt_stays_stable_when_clock_changes(tmp_path, monkeypatch) -> None:
-    """System prompt should not change just because wall clock minute changes."""
     monkeypatch.setattr(datetime_module, "datetime", _FakeDatetime)
 
     workspace = _make_workspace(tmp_path)
@@ -51,7 +48,6 @@ def test_system_prompt_stays_stable_when_clock_changes(tmp_path, monkeypatch) ->
 
 
 def test_selected_project_path_follows_shared_cache_prefix(tmp_path) -> None:
-    """Project paths must not invalidate the stable identity and tool contract prefix."""
     agent_home = tmp_path / "agent-home"
     project_a = tmp_path / "project-a"
     project_b = tmp_path / "project-b"
@@ -109,7 +105,6 @@ def test_provider_context_appended_after_user_content(tmp_path) -> None:
 
 
 def test_execution_rules_in_system_prompt(tmp_path) -> None:
-    """Execution rules should appear in the system prompt via the default templates."""
     from nanobot.utils.helpers import sync_workspace_templates
 
     workspace = _make_workspace(tmp_path)
@@ -122,7 +117,6 @@ def test_execution_rules_in_system_prompt(tmp_path) -> None:
 
 
 def test_execution_rules_reach_existing_workspace_soul(tmp_path) -> None:
-    """An untouched legacy SOUL is upgraded in memory without overwriting the file."""
     workspace = _make_workspace(tmp_path)
     legacy_soul = (
         pkg_files("nanobot") / "templates" / "legacy" / "SOUL.md"
@@ -142,7 +136,6 @@ def test_execution_rules_reach_existing_workspace_soul(tmp_path) -> None:
 
 @pytest.mark.parametrize("legacy_workspace", [False, True])
 def test_scheduling_contract_reaches_fresh_and_legacy_workspaces(tmp_path, legacy_workspace) -> None:
-    """Default files can be skipped and old files must not hide the current contract."""
     from nanobot.utils.helpers import sync_workspace_templates
 
     workspace = _make_workspace(tmp_path)
@@ -175,7 +168,6 @@ def test_scheduling_contract_reaches_fresh_and_legacy_workspaces(tmp_path, legac
 
 
 def test_default_soul_template_keeps_execution_policy_in_tool_contract() -> None:
-    """SOUL owns personality while the always-injected contract owns execution policy."""
     soul = (pkg_files("nanobot") / "templates" / "SOUL.md").read_text(encoding="utf-8")
     contract = (
         pkg_files("nanobot") / "templates" / "agent" / "tool_contract.md"
@@ -189,7 +181,6 @@ def test_default_soul_template_keeps_execution_policy_in_tool_contract() -> None
 
 
 def test_channel_format_hint_telegram(tmp_path) -> None:
-    """Telegram channel should get messaging-app format hint."""
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
@@ -199,7 +190,6 @@ def test_channel_format_hint_telegram(tmp_path) -> None:
 
 
 def test_channel_format_hint_whatsapp(tmp_path) -> None:
-    """WhatsApp should get plain-text format hint."""
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
@@ -209,7 +199,6 @@ def test_channel_format_hint_whatsapp(tmp_path) -> None:
 
 
 def test_channel_format_hint_absent_for_unknown(tmp_path) -> None:
-    """Unknown or None channel should not inject a format hint."""
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
@@ -221,7 +210,6 @@ def test_channel_format_hint_absent_for_unknown(tmp_path) -> None:
 
 
 def test_build_messages_passes_channel_to_system_prompt(tmp_path) -> None:
-    """build_messages should pass channel through to build_system_prompt."""
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
@@ -235,7 +223,6 @@ def test_build_messages_passes_channel_to_system_prompt(tmp_path) -> None:
 
 
 def test_memory_skill_is_lazy_loaded_from_skills_index(tmp_path) -> None:
-    """Memory search guidance should be discoverable without loading its full body."""
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
@@ -262,7 +249,6 @@ def test_fresh_workspace_omits_default_prompt_scaffolding(tmp_path) -> None:
 
 
 def test_template_memory_md_is_skipped(tmp_path) -> None:
-    """Template content is omitted while memory locations remain available."""
     workspace = _make_workspace(tmp_path)
     from nanobot.utils.helpers import sync_workspace_templates
     sync_workspace_templates(workspace, silent=True)
@@ -276,7 +262,6 @@ def test_template_memory_md_is_skipped(tmp_path) -> None:
 
 
 def test_customized_memory_md_is_injected(tmp_path, monkeypatch) -> None:
-    """A Dream-populated MEMORY.md should be injected normally."""
     workspace = _make_workspace(tmp_path)
     from nanobot.utils.helpers import sync_workspace_templates
     sync_workspace_templates(workspace, silent=True)

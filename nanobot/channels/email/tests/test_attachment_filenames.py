@@ -1,5 +1,3 @@
-"""Inbound attachment names must not cause another attachment to be overwritten."""
-
 from email.message import EmailMessage
 
 import pytest

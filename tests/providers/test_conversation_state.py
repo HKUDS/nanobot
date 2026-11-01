@@ -1,5 +1,3 @@
-"""Tests for provider-owned conversation-state lifecycle coordination."""
-
 from __future__ import annotations
 
 from unittest.mock import MagicMock

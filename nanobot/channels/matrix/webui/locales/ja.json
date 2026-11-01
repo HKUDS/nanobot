@@ -28,8 +28,12 @@
         "choices": {
           "mention": "メンションのみ",
           "open": "全メッセージ",
-          "allowlist": "許可リスト"
+          "allowlist": "許可リスト",
+          "listen": "リッスン（メンションで返信）"
         }
+      },
+      "groupPolicyOverrides": {
+        "label": "部屋ごとのルール例外（JSON）"
       },
       "allowFrom": {
         "label": "許可ユーザー"
@@ -62,6 +66,13 @@
       },
       "allowRoomMentions": {
         "label": "ルームのメンション",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "replyToMessage": {
+        "label": "引用返信",
         "choices": {
           "true": "オン",
           "false": "オフ"

@@ -7,7 +7,6 @@ from nanobot.pairing import store
 
 
 def test_all_exports_are_importable():
-    """Every name in __all__ must actually be importable from nanobot.pairing."""
     import nanobot.pairing as pkg
 
     for name in pairing_all:
@@ -23,7 +22,7 @@ def _tmp_store(tmp_path, monkeypatch):
 class TestGenerateCode:
     def test_format(self) -> None:
         code = store.generate_code("telegram", "123")
-        assert len(code) == 9  # 4 + 1 + 4
+        assert len(code) == 9
         assert code[4] == "-"
         assert code.replace("-", "").isalnum()
         assert code.replace("-", "").isupper()
@@ -244,7 +243,6 @@ class TestHandlePairingCommand:
     def test_revoke_other_channel(self) -> None:
         code = store.generate_code("discord", "456")
         store.approve_code(code)
-        # Two-arg form: first arg is channel, second is user
         reply = store.handle_pairing_command("telegram", "revoke discord 456")
         assert "Revoked" in reply
         assert store.is_approved("discord", "456") is False
@@ -294,7 +292,6 @@ class TestStoreDurability:
         path.write_text("not json{", encoding="utf-8")
         monkeypatch.setattr(store, "_store_path", lambda: path)
 
-        # Should recover gracefully and act as empty store
         assert store.list_pending() == []
         assert store.is_approved("telegram", "123") is False
 
@@ -317,7 +314,6 @@ def test_load_treats_null_approved_channel_list_as_empty(tmp_path, monkeypatch):
 
 
 def test_load_treats_null_approved_and_pending_maps_as_empty(tmp_path, monkeypatch):
-    """Top-level approved/pending null must not crash pairing load or list_pending."""
     path = tmp_path / "pairing.json"
     path.write_text(
         '{"approved": null, "pending": null}',
@@ -356,7 +352,6 @@ def test_load_treats_non_object_store_as_empty(tmp_path, monkeypatch, payload):
 
 
 def test_list_pending_skips_null_pending_entries(tmp_path, monkeypatch):
-    """Null pending entry values must be dropped instead of crashing list_pending."""
     path = tmp_path / "pairing.json"
     path.write_text(
         '{"approved": {}, "pending": {"ABCD-EFGH": null}}',
@@ -400,7 +395,6 @@ def _fail_reads_of(monkeypatch, path):
 
 
 class TestTransientReadFailure:
-    """A transient I/O failure is not corruption and must never wipe the store."""
 
     def test_generate_code_does_not_wipe_approvals(self, tmp_path, monkeypatch):
         """An unapproved DM during a read blip previously erased every approval.
@@ -432,7 +426,6 @@ class TestTransientReadFailure:
         assert store.is_approved("telegram", "123") is True
 
     def test_approve_command_reports_store_unavailable(self, tmp_path, monkeypatch):
-        """/pairing approve must fail loudly instead of claiming the code is invalid."""
         code = store.generate_code("telegram", "123")
 
         with monkeypatch.context() as m:
@@ -441,3 +434,75 @@ class TestTransientReadFailure:
 
         assert "unavailable" in reply.lower()
         assert store.approve_code(code) == ("telegram", "123")
+
+
+class TestChangeNotifications:
+    def test_changes_are_committed_and_unlocked_before_notification(self):
+        snapshots = []
+
+        def changed():
+            unlocked = store._LOCK.acquire(blocking=False)
+            if unlocked:
+                store._LOCK.release()
+                snapshots.append(store.list_pending())
+
+        code = store.generate_code("telegram", "alice", on_change=changed)
+        assert len(snapshots) == 1 and snapshots[-1][0]["code"] == code
+        assert store.generate_code("telegram", "alice", on_change=changed) == code
+        assert len(snapshots) == 1
+        store.record_delivery(code, "sending", on_change=changed)
+        assert snapshots[-1][0]["delivery_status"] == "sending"
+        store.record_delivery(code, "sending", on_change=changed)
+        assert len(snapshots) == 2
+        store.record_delivery(code, "sent", on_change=changed)
+        store.record_delivery(code, "failed", on_change=changed)
+        assert len(snapshots) == 3 and snapshots[-1][0]["delivery_status"] == "sent"
+        assert store.approve_code(code, on_change=changed) == ("telegram", "alice")
+        assert snapshots[-1] == [] and len(snapshots) == 4
+        assert store.approve_code(code, on_change=changed) is None
+        assert not store.deny_code(code, on_change=changed)
+        assert len(snapshots) == 4
+
+    def test_commands_notify_only_after_changes(self):
+        changes = []
+
+        def changed():
+            changes.append(json.loads(store._store_path().read_text()))
+
+        code = store.generate_code("telegram", "alice")
+        assert "Approved" in store.handle_pairing_command("cli", f"approve {code}", on_change=changed)
+        assert changes[-1]["approved"] == {"telegram": ["alice"]}
+        store.handle_pairing_command("cli", "list", on_change=changed)
+        store.handle_pairing_command("cli", "approve invalid", on_change=changed)
+        assert len(changes) == 1
+        store.handle_pairing_command("cli", "revoke telegram alice", on_change=changed)
+        store.handle_pairing_command("cli", "revoke telegram alice", on_change=changed)
+        code = store.generate_code("telegram", "bob")
+        store.handle_pairing_command("cli", f"deny {code}", on_change=changed)
+        code = store.generate_code("telegram", "carol")
+        store.handle_pairing_command("cli", f"approve {code}", on_change=changed)
+        store.handle_pairing_command("cli", "revoke telegram carol", on_change=changed)
+        assert len(changes) == 5 and changes[-1] == {"approved": {}, "pending": {}}
+
+    def test_failed_persistence_does_not_notify(self, monkeypatch):
+        code = store.generate_code("telegram", "alice")
+        before = store._store_path().read_bytes()
+        changes = []
+
+        def failed_write(_data):
+            raise OSError("fixture disk failure")
+
+        monkeypatch.setattr(store, "_save", failed_write)
+        with pytest.raises(OSError, match="disk failure"):
+            store.generate_code("telegram", "bob", on_change=lambda: changes.append(True))
+        store.record_delivery(code, "sent", on_change=lambda: changes.append(True))
+        assert changes == [] and store._store_path().read_bytes() == before
+
+    def test_notification_failure_does_not_report_persisted_mutation_as_failure(self):
+        def failed_notify():
+            raise RuntimeError("fixture observer failure")
+
+        code = store.generate_code("telegram", "alice", on_change=failed_notify)
+        assert store.list_pending()[0]["code"] == code
+        assert store.approve_code(code, on_change=failed_notify) == ("telegram", "alice")
+        assert store.is_approved("telegram", "alice")

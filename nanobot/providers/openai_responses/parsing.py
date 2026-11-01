@@ -1,5 +1,3 @@
-"""Parse Responses API SSE streams and SDK response objects."""
-
 from __future__ import annotations
 
 import json
@@ -60,12 +58,10 @@ class ResponsesStreamCapture:
 
 
 def _as_json_object(value: object) -> dict[str, Any] | None:
-    """Narrow untyped Responses API JSON payloads at the wire boundary."""
     return cast(dict[str, Any], value) if isinstance(value, dict) else None
 
 
 def _response_object(value: object) -> dict[str, Any] | None:
-    """Convert a Responses SDK model or JSON object to a dictionary."""
     object_value = _as_json_object(value)
     if object_value is not None:
         return object_value
@@ -81,7 +77,6 @@ def _response_object(value: object) -> dict[str, Any] | None:
 
 
 def _response_object_list(value: object) -> list[dict[str, Any]]:
-    """Normalize a Responses API array that may contain SDK model objects."""
     if not isinstance(value, list):
         return []
     return [
@@ -95,7 +90,6 @@ def _hosted_web_search_event(
     event: object,
     event_type: object,
 ) -> dict[str, Any] | None:
-    """Map the official web-search output item pair onto normal tool progress."""
     if event_type not in {"response.output_item.added", "response.output_item.done"}:
         return None
     event_object = _response_object(event) or {}
@@ -177,7 +171,6 @@ def _response_finish_reason(
     *,
     fallback_status: str | None = None,
 ) -> str:
-    """Map terminal response details without treating content filtering as truncation."""
     response_object = _response_object(response) or {}
     status = response_object.get("status")
     terminal_status = status if isinstance(status, str) else fallback_status
@@ -249,7 +242,6 @@ def _refusal_event_key(
     item_id: object,
     content_index: object,
 ) -> tuple[str | None, int | None]:
-    """Identify one streamed refusal content part across delta/done events."""
     return (
         item_id if isinstance(item_id, str) else None,
         (
@@ -264,7 +256,6 @@ def _reasoning_summary_event_key(
     item_id: object,
     summary_index: object,
 ) -> tuple[str | None, int] | None:
-    """Identify one reasoning summary part across its text deltas."""
     if not isinstance(summary_index, int) or isinstance(summary_index, bool):
         return None
     return (
@@ -274,14 +265,12 @@ def _reasoning_summary_event_key(
 
 
 def _separate_reasoning_part(content: str | None, part: str) -> str:
-    """Separate summary parts only when the provider supplied no whitespace."""
     if content and not content[-1].isspace() and not part[0].isspace():
         return "\n" + part
     return part
 
 
 def _remaining_refusal_text(streamed_text: str, refusal_text: str) -> str:
-    """Return only text not already surfaced by refusal deltas."""
     if not streamed_text:
         return refusal_text
     if refusal_text.startswith(streamed_text):
@@ -290,7 +279,6 @@ def _remaining_refusal_text(streamed_text: str, refusal_text: str) -> str:
 
 
 def _extract_refusal_text_from_output(output: object) -> tuple[bool, str]:
-    """Extract refusal content from terminal Responses output items."""
     refusal_seen = False
     parts: list[str] = []
     for item in _response_object_list(output):

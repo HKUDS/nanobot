@@ -1,5 +1,3 @@
-"""Compaction and SDK turns settle against the same persisted transcript."""
-
 import asyncio
 from datetime import datetime, timedelta
 from unittest.mock import patch
@@ -122,8 +120,6 @@ async def test_compaction_waits_for_active_sdk_turn_and_preserves_reply(
             assert provider.summary_started.is_set() is False
             assert key not in bot._loop.auto_compact._archiving
 
-            # Only the later, genuinely idle scan may summarize the fresh reply.
-            # sdk:other is idle by then too; this expectation concerns sdk:shared.
             scheduled = []
             with patch("nanobot.agent.autocompact.datetime") as clock:
                 clock.now.return_value = datetime.now() + timedelta(minutes=30)

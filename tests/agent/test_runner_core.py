@@ -1,6 +1,3 @@
-"""Tests for core AgentRunner behavior: message passing, iteration limits,
-empty-response handling, usage accumulation, and config passthrough."""
-
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
@@ -767,7 +764,6 @@ async def test_runner_replaces_empty_tool_result_with_marker():
 
 @pytest.mark.asyncio
 async def test_runner_retries_empty_final_response_with_summary_prompt():
-    """Empty responses get 2 silent retries before finalization kicks in."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
@@ -801,7 +797,6 @@ async def test_runner_retries_empty_final_response_with_summary_prompt():
     ))
 
     assert result.final_content == "final answer"
-    # 2 silent retries (iterations 0,1) + finalization on iteration 1
     assert len(calls) == 3
     assert calls[0]["tools"] is not None
     assert calls[1]["tools"] is not None
@@ -881,7 +876,6 @@ async def test_runner_does_not_auto_continue_goal_after_policy_terminal(
 
 @pytest.mark.asyncio
 async def test_runner_uses_specific_message_after_empty_finalization_retry():
-    """After silent retries + finalization all return empty, stop_reason is empty_final_response."""
     from nanobot.agent.runner import AgentRunner
     from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
@@ -959,7 +953,6 @@ async def test_empty_finalization_retry_discards_candidate_provider_state():
 
 @pytest.mark.asyncio
 async def test_runner_length_recovery_returns_all_segments():
-    """Recovered output segments are returned together instead of only the tail."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
@@ -991,7 +984,6 @@ async def test_runner_length_recovery_returns_all_segments():
 
 @pytest.mark.asyncio
 async def test_runner_length_recovery_preserves_prefix_at_max_iterations():
-    """Budget exhaustion must not replace output already produced by recovery."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
@@ -1025,7 +1017,6 @@ async def test_runner_length_recovery_preserves_prefix_at_max_iterations():
 
 @pytest.mark.asyncio
 async def test_runner_length_recovery_does_not_leak_across_tool_calls():
-    """A recovered prefix belongs only to its contiguous response chain."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
@@ -1116,7 +1107,6 @@ async def test_runner_empty_response_does_not_break_tool_chain():
 
 @pytest.mark.asyncio
 async def test_runner_accumulates_usage_and_preserves_cache_reads():
-    """Runner accumulates usage across iterations, including cache reads."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
@@ -1150,11 +1140,10 @@ async def test_runner_accumulates_usage_and_preserves_cache_reads():
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
-    # Usage should be accumulated across iterations
     assert result.usage is not None
-    assert result.usage.input_tokens == 300  # 100 + 200
-    assert result.usage.output_tokens == 30  # 10 + 20
-    assert result.usage.cache_read_tokens == 230  # 80 + 150
+    assert result.usage.input_tokens == 300
+    assert result.usage.output_tokens == 30
+    assert result.usage.cache_read_tokens == 230
     assert result.usage.context_tokens == 200
     assert result.usage.request_count == 2
     assert [
@@ -1168,7 +1157,6 @@ async def test_runner_accumulates_usage_and_preserves_cache_reads():
 
 @pytest.mark.asyncio
 async def test_runner_carries_retry_notifications_in_provider_context():
-    """The runner carries a generic scope, not an event-specific callback."""
     from nanobot.agent.runner import AgentRunner
     from nanobot.events import EventSink, RetryWaitEvent
 
@@ -1204,14 +1192,8 @@ async def test_runner_carries_retry_notifications_in_provider_context():
     retry_wait_cb.assert_awaited_once_with(event)
 
 
-# ---------------------------------------------------------------------------
-# Config passthrough tests
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_runner_passes_generation_settings_to_provider():
-    """Non-default generation settings should reach provider.chat_stream_with_retry."""
     from nanobot.agent.runner import AgentRunner
 
     captured: dict = {}

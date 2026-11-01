@@ -1,5 +1,3 @@
-"""Runtime state facts and turn-scoped publication through MessageBus."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field

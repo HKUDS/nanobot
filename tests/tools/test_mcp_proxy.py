@@ -1,5 +1,3 @@
-"""Shared MCP routing exercised through a real loopback HTTP recording proxy."""
-
 from __future__ import annotations
 
 import asyncio
@@ -49,7 +47,6 @@ class _RecordingMCPProxy:
         if request.path == "/.well-known/oauth-authorization-server":
             return web.json_response({
                 "issuer": self.origin,
-                # Browser navigation is not performed by this fixture or the gateway.
                 "authorization_endpoint": "https://8.8.8.8/authorize",
                 "token_endpoint": f"{self.origin}/token",
                 "registration_endpoint": f"{self.origin}/register",
@@ -182,7 +179,6 @@ async def test_oauth_discovery_tokens_reconnect_and_tool_calls_share_real_proxy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fixture = recording_mcp_proxy
-    # Even an ambient proxy or NO_PROXY=* cannot override an explicitly selected route.
     monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
     monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
     monkeypatch.setenv("NO_PROXY", "*")
@@ -217,13 +213,12 @@ async def test_oauth_discovery_tokens_reconnect_and_tool_calls_share_real_proxy(
         fixture.terminate_next_call = True
         assert await tool.execute() == "through-shared-proxy"
         assert registry.get("mcp_local_echo") is not tool
-        assert fixture.initialized == 3  # Browser flow, activation, terminated-session recovery.
+        assert fixture.initialized == 3
         assert fixture.rpc_methods.count("tools/call") == 3
         storage = MCPOAuthStorage("local", cfg.url)
         snapshot = await storage.get_snapshot()
         assert snapshot.tokens is not None
         assert snapshot.tokens.access_token == "local-access-token"
-        # A later runtime loads an expired saved token and must refresh over the same route.
         await storage.set_tokens(snapshot.tokens.model_copy(update={"expires_in": -1}))
         await provider.aclose()
         registry = ToolRegistry()

@@ -10,7 +10,6 @@ vi.mock("@/lib/bootstrap", async (original) => ({
   fetchBootstrap: vi.fn(async () => ({ token: "test", api_token: "test", ws_path: "/" })),
   deriveWsUrl: () => "ws://test",
 }));
-// Keep this suite focused on App's remote boundary rather than the chat implementation.
 vi.mock("@/components/thread/ThreadShell", () => ({
   ThreadShell: () => <textarea aria-label="Local draft" />,
 }));

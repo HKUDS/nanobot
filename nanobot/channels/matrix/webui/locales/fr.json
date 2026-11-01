@@ -28,8 +28,12 @@
         "choices": {
           "mention": "Mentions uniquement",
           "open": "Tous les messages",
-          "allowlist": "Liste d’autorisation"
+          "allowlist": "Liste d’autorisation",
+          "listen": "Écouter (réponse sur mention)"
         }
+      },
+      "groupPolicyOverrides": {
+        "label": "Exceptions de règles par salon (JSON)"
       },
       "allowFrom": {
         "label": "Utilisateurs autorisés"
@@ -62,6 +66,13 @@
       },
       "allowRoomMentions": {
         "label": "Mentions de salon",
+        "choices": {
+          "true": "Activé",
+          "false": "Désactivé"
+        }
+      },
+      "replyToMessage": {
+        "label": "Citer le message",
         "choices": {
           "true": "Activé",
           "false": "Désactivé"

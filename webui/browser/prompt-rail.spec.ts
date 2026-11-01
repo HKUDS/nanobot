@@ -46,7 +46,6 @@ test("complete rail scrolls independently, jumps to unloaded history and returns
   await expect.poll(() => rail.evaluate((node) => node.scrollTop)).toBeLessThan(25000);
   expect(await body.evaluate((node) => node.scrollTop)).toBe(initialBodyTop);
   expect(await rail.getByRole("button").count()).toBeLessThan(70);
-  // Keyboard navigation reaches the beginning without mounting the whole list.
   await rail.getByRole("button").first().focus();
   await page.keyboard.press("Home");
   const first = rail.getByRole("button", { name: "Jump to message: Question 0", exact: true });
@@ -72,7 +71,6 @@ test("complete rail scrolls independently, jumps to unloaded history and returns
   await expect(rail.locator('[aria-current="location"]')).toBeInViewport();
   expect(await rail.evaluate((node) => getComputedStyle(node).maskImage)).toContain("linear-gradient");
   await page.screenshot({ path: "test-results/prompt-rail-long.png" });
-  // Short lists remain centered in the same viewport-relative space.
   await page.goto("/browser/fixture.html?case=rail&short=1&workbench=1");
   const markers = page.getByTestId("prompt-rail-marker");
   await expect(markers).toHaveCount(5);
@@ -81,7 +79,6 @@ test("complete rail scrolls independently, jumps to unloaded history and returns
   const middle = await markers.nth(2).boundingBox();
   expect(Math.abs(middle!.y + middle!.height / 2 - (bounds!.y + bounds!.height / 2))).toBeLessThan(2);
   await page.screenshot({ path: "test-results/prompt-rail-short.png" });
-  // A taller composer in a shorter window must not push navigation above center.
   await page.setViewportSize({ width: 1440, height: 640 });
   await page.goto("/browser/fixture.html?case=rail&short=1&tall-composer=1&workbench=1");
   await expect(markers).toHaveCount(5);

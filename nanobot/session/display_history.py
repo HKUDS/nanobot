@@ -1,5 +1,3 @@
-"""Durable display facts, separate from provider/model messages and transports."""
-
 from __future__ import annotations
 
 import json
@@ -60,14 +58,6 @@ class HistoryFact:
 
 
 @dataclass(frozen=True)
-class HistoryImport:
-    key: str
-    facts: list[HistoryFact]
-    created_at_ms: int = 0
-    updated_at_ms: int = 0
-
-
-@dataclass(frozen=True)
 class HistoryTurn:
     ordinal: int
     record_count: int
@@ -110,9 +100,6 @@ class HistoryReader:
             (self.key, after, upper),
         ):
             yield HistoryTurn(*row)
-
-    def read_turn(self, ordinal: int) -> list[HistoryFact]:
-        return [fact for _, fact in self.read_entries(ordinal)]
 
     def read_entries(
         self, ordinal: int, *, max_records: int | None = None, max_bytes: int | None = None,

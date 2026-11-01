@@ -361,7 +361,6 @@ def login_oauth_provider(
         query,
         oauth_flows=oauth_flows,
         config_path=config_path,
-        settings_payload=settings_payload,
     )
 
 

@@ -197,6 +197,8 @@ describe("merged waiting messages", () => {
     view.unmount();
     render(<ThreadComposer {...props} />);
     expect(screen.getByRole("button", { name: "Send now" })).toBeDisabled();
+    fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
+    expect(onSend).toHaveBeenCalledTimes(1);
     await act(async () => { accept(true); });
     expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
@@ -283,8 +285,8 @@ describe("merged waiting messages", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("retains the whole message after a rejected immediate send", () => {
-    const onSend = vi.fn(() => false);
+  it("retains a rejected message until an explicit Enter retries the whole message", () => {
+    const onSend = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
     const view = render(<ThreadComposer onSend={onSend} isStreaming activeTurnId="turn-a" pendingQueueKey="chat-a" />);
     enter("1"); enter("2");
     fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
@@ -292,6 +294,12 @@ describe("merged waiting messages", () => {
     expect(screen.getByRole("group", { name: "Waiting to send" })).toHaveTextContent("1 2");
     view.rerender(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />);
     expect(onSend).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter", repeat: true });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
+    expect(onSend).toHaveBeenCalledTimes(2);
+    expect(onSend).toHaveBeenLastCalledWith("1\n2");
+    expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
   });
 
   it("does not automatically re-arm stopped content when another input is appended", () => {

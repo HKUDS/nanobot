@@ -1,5 +1,3 @@
-"""High-level programmatic interface to nanobot."""
-
 from __future__ import annotations
 
 import asyncio

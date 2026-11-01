@@ -1,5 +1,3 @@
-"""Channel-aware discovery using the same verified feed as update planning."""
-
 from __future__ import annotations
 
 from typing import Any

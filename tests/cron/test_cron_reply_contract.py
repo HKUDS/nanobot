@@ -1,5 +1,3 @@
-"""Scheduled replies and explicit sends share the normal agent delivery path."""
-
 import json
 from unittest.mock import AsyncMock, MagicMock
 
@@ -50,7 +48,6 @@ async def test_moved_cron_keeps_reply_send_and_prompt_prefix_contract(tmp_path, 
         ctx = current_request_context()
         assert ctx is not None
         trigger = ctx.metadata.get(CRON_TRIGGER_META)
-        # Serialize at the provider boundary, before the runner appends tool results.
         requests.append(json.loads(json.dumps({
             "tools": kwargs["tools"], "messages": kwargs["messages"],
             "run": trigger["run_id"] if trigger else None,
@@ -98,7 +95,6 @@ async def test_moved_cron_keeps_reply_send_and_prompt_prefix_contract(tmp_path, 
                 if message.event is None and message.content:
                     outbound.append(message)
             normal = [m for m in outbound if (m.channel, m.chat_id) == ("telegram", "new")]
-            # Normal backend replies and legacy same-chat sends each arrive once.
             assert [m.content for m in normal] == ["Drink water"]
             assert normal[0].metadata["message_thread_id"] == 42
             extra = [m for m in outbound if m not in normal]
@@ -108,8 +104,6 @@ async def test_moved_cron_keeps_reply_send_and_prompt_prefix_contract(tmp_path, 
             assert all(m.media == [str(attachment)] for m in extra)
             assert all("message_thread_id" not in m.metadata for m in extra)
 
-        # Ordinary turns, separate cron runs and tool continuations use the same
-        # system/tools prefix. Per-run instructions and runtime data stay at the end.
         def stable(row):
             return json.dumps([row["tools"], row["messages"][0]], ensure_ascii=False)
 
@@ -138,7 +132,6 @@ async def test_moved_cron_keeps_reply_send_and_prompt_prefix_contract(tmp_path, 
 @pytest.mark.parametrize("origin", ["websocket", "whatsapp"])
 @pytest.mark.parametrize("explicit_send", [False, True])
 async def test_saved_cron_separates_source_chat_from_explicit_recipient(tmp_path, origin, explicit_send):
-    """Instructions alone do not change routing; a real tool call adds its recipient."""
     workspace = tmp_path / "workspace"
     sessions = SessionManager(workspace)
     bus = MessageBus()
@@ -149,7 +142,6 @@ async def test_saved_cron_separates_source_chat_from_explicit_recipient(tmp_path
     with request_context(RequestContext(origin, chat_id, session_key=session_key)):
         created = await CronTool(cron).execute(action="add", message=instructions, every_seconds=86400)
     assert "Created job" in created
-    # The saved binding, not the recipient named in free text, survives a reload.
     cron = CronService(cron.store_path)
     job = cron.list_jobs()[0]
     assert job.payload.session_key == session_key

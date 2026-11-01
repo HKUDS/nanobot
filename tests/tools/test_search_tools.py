@@ -1,5 +1,3 @@
-"""Tests for grep search tools."""
-
 from __future__ import annotations
 
 import asyncio
@@ -667,7 +665,6 @@ async def test_grep_files_with_matches_supports_head_limit_and_offset(tmp_path: 
     # 1. Only one file path is returned (head_limit=1 after offset=1)
     # 2. The pagination info is correct
     assert "pagination: limit=1, offset=1" in result
-    # Count non-empty lines that start with src/ (file paths)
     file_lines = [line for line in result.splitlines() if line.startswith("src/")]
     assert len(file_lines) == 1
 

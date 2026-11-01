@@ -170,6 +170,37 @@ describe("Settings overview and appearance", () => {
     expect(url.href).not.toContain("private-host");
   });
 
+  it("edits browser appearance while gateway settings are pending or unavailable", async () => {
+    let rejectSettings!: (reason: Error) => void;
+    const pendingSettings = new Promise<Response>((_, reject) => { rejectSettings = reject; });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input) === "/api/settings"
+      ? pendingSettings : new Promise<Response>(() => {})));
+    renderSettingsView({ initialSection: "appearance", initialSettings: null, showSidebar: true });
+    const input = screen.getByRole("spinbutton", { name: "Custom text size" });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "22" } });
+    await waitFor(() => expect(readLocalPreferences().customReadingTextSize).toBe(22));
+    await act(async () => { rejectSettings(new Error("Gateway unavailable")); });
+    expect(screen.getByRole("spinbutton", { name: "Custom text size" })).toBe(input);
+    fireEvent.change(input, { target: { value: "24" } });
+    await waitFor(() => expect(readLocalPreferences().customReadingTextSize).toBe(24));
+    expect(screen.queryByText("Gateway unavailable")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Models" }));
+    expect(await screen.findByText("Gateway unavailable")).toBeVisible();
+  });
+
+  it("keeps an explicit native restart failure visible on Appearance", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    const restart = vi.fn().mockRejectedValue(new Error("Engine restart failed"));
+    renderSettingsView({ initialSection: "appearance", showSidebar: true,
+      initialSettings: { ...settingsPayload(), surface: "native", runtime_capabilities: { can_restart_engine: true, can_open_logs: false, can_export_diagnostics: false } },
+      onNativeEngineRestart: restart });
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+    expect(await screen.findByText("Engine restart failed")).toBeVisible();
+    expect(restart).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("spinbutton", { name: "Custom text size" })).toBeEnabled();
+  });
+
   it("saves the reading size immediately while preserving the other local preferences", async () => {
     const previous = { ...DEFAULT_LOCAL_PREFS, codeWrap: false, brandLogos: false, notificationSound: true };
     writeLocalPreferences(previous);
@@ -180,6 +211,47 @@ describe("Settings overview and appearance", () => {
 
     await waitFor(() => expect(readLocalPreferences()).toEqual({ ...previous, readingTextSize: "large" }));
     expect(screen.getByRole("radio", { name: "Large reading text" })).toBeChecked();
+  });
+
+  it("edits and remembers a custom reading size without committing an empty input", async () => {
+    writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, notificationSound: true, codeWrap: false });
+    renderSettingsView({ initialSection: "appearance", initialSettings: settingsPayload() });
+    fireEvent.focus(screen.getByRole("spinbutton", { name: "Custom text size" }));
+    const input = screen.getByRole("spinbutton", { name: "Custom text size" });
+    fireEvent.change(input, { target: { value: "" } });
+    expect(readLocalPreferences().customReadingTextSize).toBe(18);
+    fireEvent.change(input, { target: { value: "24" } });
+    await waitFor(() => expect(readLocalPreferences()).toMatchObject({
+      readingTextSize: "custom", customReadingTextSize: 24, notificationSound: true, codeWrap: false,
+    }));
+    fireEvent.click(screen.getByRole("radio", { name: "Standard reading text" }));
+    fireEvent.focus(screen.getByRole("spinbutton", { name: "Custom text size" }));
+    expect(screen.getByRole("spinbutton", { name: "Custom text size" })).toHaveValue(24);
+    const currentInput = screen.getByRole("spinbutton", { name: "Custom text size" });
+    fireEvent.change(currentInput, { target: { value: "21" } });
+    expect(readLocalPreferences().customReadingTextSize).toBe(21);
+    fireEvent.change(currentInput, { target: { value: "40" } });
+    fireEvent.blur(currentInput);
+    expect(currentInput).toHaveValue(40);
+    expect(currentInput).toHaveAttribute("aria-invalid", "true");
+    expect(readLocalPreferences().customReadingTextSize).toBe(21);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Your text remains at 21 px.");
+    fireEvent.change(currentInput, { target: { value: "22" } });
+    expect(currentInput).not.toHaveAttribute("aria-invalid", "true");
+    expect(readLocalPreferences().customReadingTextSize).toBe(22);
+  });
+
+  it.each(["", "40"])("restores the saved custom size after another tab interrupts draft %j", async (draft) => {
+    writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, readingTextSize: "custom", customReadingTextSize: 24 });
+    renderSettingsView({ initialSection: "appearance", initialSettings: settingsPayload() });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Custom text size" }), { target: { value: draft } });
+    act(() => {
+      localStorage.setItem(LOCAL_PREFS_STORAGE_KEY, JSON.stringify({ ...readLocalPreferences(), schemaVersion: 1, readingTextSize: "small" }));
+      window.dispatchEvent(new StorageEvent("storage", { key: LOCAL_PREFS_STORAGE_KEY }));
+    });
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Small reading text" })).toBeChecked());
+    fireEvent.focus(screen.getByRole("spinbutton", { name: "Custom text size" }));
+    expect(screen.getByRole("spinbutton", { name: "Custom text size" })).toHaveValue(24);
   });
 
   it("persists the file edit display local preference", async () => {

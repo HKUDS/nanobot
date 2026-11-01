@@ -115,7 +115,6 @@ def main() -> None:
                 assert request(api + "/v1/models")[0] == 401
                 print(f"PASS {label}: both default services, authenticated WebUI, API model-setup errors")
 
-                # Configure a provider without making external model requests.
                 saved["providers"]["custom"] = {
                     "apiKey": "smoke-provider-key", "apiBase": "http://127.0.0.1:9/v1",
                 }

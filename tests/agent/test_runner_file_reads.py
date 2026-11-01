@@ -1,5 +1,3 @@
-"""File-read deduplication follows the model request, including context rewrites."""
-
 import asyncio
 from copy import deepcopy
 from unittest.mock import AsyncMock, MagicMock
@@ -164,7 +162,6 @@ async def test_only_repeat_reads_scan_model_results_once_per_batch(tmp_path, ope
             assert "data.txt" in results[0]
         else:
             assert results == [contents]
-    # A later direct read has no model input proving that its contents are visible.
     assert await tools.execute("read_file", {"path": "data.txt"}) == contents
 
 

@@ -1,5 +1,3 @@
-"""Tests for shared embedded WebUI HTTP helpers."""
-
 import gzip
 import json
 

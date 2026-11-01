@@ -1,4 +1,3 @@
-"""Feishu/Lark channel implementation using lark-oapi SDK with WebSocket long connection."""
 # pyright: reportMissingModuleSource=false, reportMissingTypeStubs=false
 
 from __future__ import annotations
@@ -49,7 +48,7 @@ from nanobot.utils.helpers import safe_filename
 from nanobot.utils.logging_bridge import redirect_lib_logging
 
 if TYPE_CHECKING:
-    from lark_oapi.api.im.v1.model import (  # pyright: ignore[reportMissingTypeStubs]
+    from lark_oapi.api.im.v1.model import (
         MentionEvent,
         P2ImMessageReceiveV1,
     )
@@ -64,12 +63,10 @@ def _identity_timestamp() -> str:
 
 
 def _as_json_object(value: Any) -> dict[str, Any] | None:
-    """Narrow untyped SDK/JSON objects at the channel boundary."""
     return cast(dict[str, Any], value) if isinstance(value, dict) else None
 
 
 def _as_json_list(value: Any) -> list[Any] | None:
-    """Narrow untyped SDK/JSON arrays at the channel boundary."""
     return cast(list[Any], value) if isinstance(value, list) else None
 
 
@@ -91,9 +88,9 @@ def _load_lark_runtime() -> tuple[Any, str, str]:
     # close the same loop.
     with _LARK_RUNTIME_LOCK:
         ws_client_already_imported = "lark_oapi.ws.client" in sys.modules
-        import lark_oapi as lark  # pyright: ignore[reportMissingTypeStubs]
-        import lark_oapi.ws.client as lark_ws_client  # pyright: ignore[reportMissingTypeStubs]
-        from lark_oapi.core.const import (  # pyright: ignore[reportMissingTypeStubs]
+        import lark_oapi as lark
+        import lark_oapi.ws.client as lark_ws_client
+        from lark_oapi.core.const import (
             FEISHU_DOMAIN,
             LARK_DOMAIN,
         )
@@ -131,7 +128,7 @@ def fetch_feishu_app_identity(
 
     try:
         lark, feishu_domain, lark_domain = _load_lark_runtime()
-        from lark_oapi.api.application.v6.model.get_application_request import (  # pyright: ignore[reportMissingTypeStubs]
+        from lark_oapi.api.application.v6.model.get_application_request import (
             GetApplicationRequest,
         )
 
@@ -167,7 +164,6 @@ def fetch_feishu_app_identity(
         return {}
 
 
-# Message type display mapping
 MSG_TYPE_MAP = {
     "image": "[image]",
     "audio": "[audio]",
@@ -177,7 +173,6 @@ MSG_TYPE_MAP = {
 
 
 def _extract_share_card_content(content_json: dict[str, Any], msg_type: str) -> str:
-    """Extract text representation from share cards and interactive messages."""
     parts: list[str] = []
 
     if msg_type == "share_chat":
@@ -197,7 +192,6 @@ def _extract_share_card_content(content_json: dict[str, Any], msg_type: str) -> 
 
 
 def _extract_interactive_content(content: str | dict[str, Any]) -> list[str]:
-    """Recursively extract text and links from interactive card content."""
     parts: list[str] = []
 
     if isinstance(content, str):
@@ -232,19 +226,16 @@ def _extract_interactive_content(content: str | dict[str, Any]) -> list[str]:
         elif isinstance(title, str):
             parts.append(f"title: {title}")
 
-    # Top-level elements: flat list or nested list format
     elements = content.get("elements")
     elements_list = _as_json_list(elements)
     if elements_list is not None:
         if elements_list and isinstance(elements_list[0], list):
-            # Nested list: [[{tag:"text",text:"..."}], ...]
             for row in elements_list:
                 row_list = _as_json_list(row)
                 if row_list is not None:
                     for element in row_list:
                         parts.extend(_extract_element_content(element))
         else:
-            # Flat list: [{tag:"markdown",content:"..."}, ...]
             for element in elements_list:
                 parts.extend(_extract_element_content(element))
 
@@ -275,7 +266,6 @@ def _extract_interactive_content(content: str | dict[str, Any]) -> list[str]:
 
 
 def _extract_element_content(element: Any) -> list[str]:
-    """Extract content from a single card element."""
     parts: list[str] = []
 
     element_object = _as_json_object(element)
@@ -397,13 +387,6 @@ def _extract_element_content(element: Any) -> list[str]:
 
 
 def _extract_post_content(content_json: dict[str, Any]) -> tuple[str, list[str]]:
-    """Extract text and image keys from Feishu post (rich text) message.
-
-    Handles three payload shapes:
-    - Direct:    {"title": "...", "content": [[...]]}
-    - Localized: {"zh_cn": {"title": "...", "content": [...]}}
-    - Wrapped:   {"post": {"zh_cn": {"title": "...", "content": [...]}}}
-    """
 
     def _parse_block(block: dict[str, Any]) -> tuple[str | None, list[str]]:
         content = _as_json_list(block.get("content"))
@@ -442,19 +425,16 @@ def _extract_post_content(content_json: dict[str, Any]) -> tuple[str, list[str]]
                     images.append(key)
         return (" ".join(texts).strip() or None), images
 
-    # Unwrap optional {"post": ...} envelope
     root = content_json
     post = _as_json_object(root.get("post"))
     if post is not None:
         root = post
 
-    # Direct format
     if "content" in root:
         text, imgs = _parse_block(root)
         if text or imgs:
             return text or "", imgs
 
-    # Localized: prefer known locales, then fall back to any dict child
     for key in ("zh_cn", "en_us", "ja_jp"):
         if key in root:
             block = _as_json_object(root[key])
@@ -472,13 +452,6 @@ def _extract_post_content(content_json: dict[str, Any]) -> tuple[str, list[str]]
 
     return "", []
 
-
-# =============================================================================
-# QR scan-to-create onboarding
-#
-# Device-code flow: user scans a QR code with the Feishu/Lark mobile app and
-# the platform creates a fully configured bot application automatically.
-# =============================================================================
 
 _ONBOARD_ACCOUNTS_URLS = {
     "feishu": "https://accounts.feishu.cn",
@@ -523,7 +496,6 @@ def _post_registration(base_url: str, body: dict[str, str]) -> dict[str, Any]:
 
 
 def _init_registration(domain: str = "feishu") -> None:
-    """Verify the environment supports client_secret auth. Raises RuntimeError if not."""
     base_url = _accounts_base_url(domain)
     res = _post_registration(base_url, {"action": "init"})
     methods = _as_json_list(res.get("supported_auth_methods")) or []
@@ -535,7 +507,6 @@ def _init_registration(domain: str = "feishu") -> None:
 
 
 def _begin_registration(domain: str = "feishu") -> _RegistrationStart:
-    """Start the device-code flow. Returns device_code, qr_url, interval, expire_in."""
     base_url = _accounts_base_url(domain)
     res = _post_registration(base_url, {
         "action": "begin",
@@ -575,10 +546,6 @@ def _poll_registration(
     expire_in: int,
     domain: str = "feishu",
 ) -> dict[str, Any] | None:
-    """Poll until the user scans the QR code, or timeout/denial.
-
-    Returns dict with app_id, app_secret, domain on success, None on failure.
-    """
     deadline = time.monotonic() + expire_in
     current_domain = domain
 
@@ -602,7 +569,6 @@ def _poll_registration(
             _LOGIN_CONSOLE.print("[yellow]Authorization was cancelled or expired.[/yellow]")
             return None
 
-        # authorization_pending or unknown — keep polling
         time.sleep(interval)
 
     _LOGIN_CONSOLE.print("[yellow]Authorization timed out.[/yellow]")
@@ -895,7 +861,6 @@ def qr_register(
 
 
 def _print_qr_code(url: str) -> None:
-    """Print QR code as ASCII art if qrcode package is available, otherwise print URL."""
     try:
         import qrcode as qr_lib
 
@@ -915,7 +880,6 @@ def _qr_register_inner(
     *,
     initial_domain: str,
 ) -> dict[str, Any] | None:
-    """Run init → begin → poll. Raises on network/protocol errors."""
     _LOGIN_CONSOLE.print("[cyan]Preparing Feishu/Lark login...[/cyan]")
     _init_registration(initial_domain)
     begin = _begin_registration(initial_domain)
@@ -963,7 +927,7 @@ class FeishuChannel(BaseChannel):
     name = "feishu"
     display_name = "Feishu"
 
-    _STREAM_EDIT_INTERVAL = 0.5  # throttle between CardKit streaming updates
+    _STREAM_EDIT_INTERVAL = 0.5
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -992,16 +956,13 @@ class FeishuChannel(BaseChannel):
         self._client: Any = None
         self._ws_client: Any = None
         self._ws_runner = get_feishu_ws_runner()
-        self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
+        self._processed_message_ids: OrderedDict[str, None] = OrderedDict()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stream_bufs: dict[str, _FeishuStreamBuf] = {}
         self._bot_open_id: str | None = None
         self._background_tasks: set[asyncio.Task[Any]] = set()
-        self._reaction_ids: dict[str, str] = {}  # message_id → reaction_id
+        self._reaction_ids: dict[str, str] = {}
 
-    # ------------------------------------------------------------------
-    # QR login — writes credentials directly to config.json
-    # ------------------------------------------------------------------
 
     async def login(self, force: bool = False) -> bool:
         """Perform QR code scan-to-create login for Feishu/Lark.
@@ -1090,7 +1051,6 @@ class FeishuChannel(BaseChannel):
         self._running = True
         self._loop = asyncio.get_running_loop()
 
-        # Create Lark client for sending messages
         domain = lark_domain if self.config.domain == "lark" else feishu_domain
         self._client = (
             lark.Client.builder()
@@ -1132,7 +1092,6 @@ class FeishuChannel(BaseChannel):
         )
         event_handler = builder.build()
 
-        # Create WebSocket client for long connection
         self._ws_client = lark.ws.Client(
             self.config.app_id,
             self.config.app_secret,
@@ -1143,7 +1102,6 @@ class FeishuChannel(BaseChannel):
 
         await self._ws_runner.start_client(self.name, self._ws_client)
 
-        # Fetch bot's own open_id for accurate @mention matching
         self._bot_open_id = await asyncio.get_running_loop().run_in_executor(
             None, self._fetch_bot_open_id
         )
@@ -1155,7 +1113,6 @@ class FeishuChannel(BaseChannel):
         self.logger.info("bot started with WebSocket long connection")
         self.logger.info("No public IP required - using WebSocket to receive events")
 
-        # Keep running until stopped
         while self._running:
             await asyncio.sleep(1)
 
@@ -1172,7 +1129,6 @@ class FeishuChannel(BaseChannel):
         self.logger.info("bot stopped")
 
     def _fetch_bot_open_id(self) -> str | None:
-        """Fetch the bot's own open_id via GET /open-apis/bot/v3/info."""
         try:
             import lark_oapi as lark
 
@@ -1230,7 +1186,6 @@ class FeishuChannel(BaseChannel):
             user_id = user_id_obj.user_id
             name = mention.name or key
 
-            # Format: @姓名 (open_id, user_id: xxx)
             if open_id and user_id:
                 replacement = f"@{name} ({open_id}, user id: {user_id})"
             elif open_id:
@@ -1252,13 +1207,11 @@ class FeishuChannel(BaseChannel):
         if bot_open_id:
             return mention_open_id == bot_open_id
 
-        # Fallback heuristic when bot open_id is unavailable.
         return not getattr(mid, "user_id", None) and mention_open_id.startswith("ou_")
 
     def _strip_leading_bot_mention(
         self, text: str, mentions: list[MentionEvent] | None
     ) -> str:
-        """Remove a required leading bot mention before slash command routing."""
         if not mentions or not text:
             return text
 
@@ -1276,7 +1229,6 @@ class FeishuChannel(BaseChannel):
         return text
 
     def _is_bot_mentioned(self, message: Any) -> bool:
-        """Check if the bot is @mentioned in the message."""
         raw_content = message.content or ""
         if "@_all" in raw_content:
             return True
@@ -1287,13 +1239,11 @@ class FeishuChannel(BaseChannel):
         return False
 
     def _is_group_message_for_bot(self, message: Any) -> bool:
-        """Allow group messages when policy is open or bot is @mentioned."""
         if self.config.group_policy == "open":
             return True
         return self._is_bot_mentioned(message)
 
     def _add_reaction_sync(self, message_id: str, emoji_type: str) -> str | None:
-        """Sync helper for adding reaction (runs in thread pool)."""
         from lark_oapi.api.im.v1 import (
             CreateMessageReactionRequest,
             CreateMessageReactionRequestBody,
@@ -1327,14 +1277,6 @@ class FeishuChannel(BaseChannel):
             return None
 
     async def _add_reaction(self, message_id: str, emoji_type: str = "THUMBSUP") -> str | None:
-        """Add a reaction emoji to a message.
-
-        Returns the reaction_id on success, None on failure.
-        When called via a tracked background task, the returned reaction_id
-        is stored in ``_reaction_ids`` for later cleanup by ``send_delta``.
-
-        Common emoji types: THUMBSUP, OK, EYES, DONE, OnIt, HEART
-        """
         if not self._client:
             return None
 
@@ -1342,7 +1284,6 @@ class FeishuChannel(BaseChannel):
         return await loop.run_in_executor(None, self._add_reaction_sync, message_id, emoji_type)
 
     def _remove_reaction_sync(self, message_id: str, reaction_id: str) -> None:
-        """Sync helper for removing reaction (runs in thread pool)."""
         from lark_oapi.api.im.v1 import DeleteMessageReactionRequest
 
         try:
@@ -1364,11 +1305,6 @@ class FeishuChannel(BaseChannel):
             self.logger.debug("Error removing reaction: {}", e)
 
     async def _remove_reaction(self, message_id: str, reaction_id: str) -> None:
-        """
-        Remove a reaction emoji from a message (non-blocking).
-
-        Used to clear the "processing" indicator after bot replies.
-        """
         if not self._client or not reaction_id:
             return
 
@@ -1376,7 +1312,6 @@ class FeishuChannel(BaseChannel):
         await loop.run_in_executor(None, self._remove_reaction_sync, message_id, reaction_id)
 
     def _on_background_task_done(self, task: asyncio.Task[Any]) -> None:
-        """Callback: remove from tracking set and log unhandled exceptions."""
         self._background_tasks.discard(task)
         if task.cancelled():
             return
@@ -1386,7 +1321,6 @@ class FeishuChannel(BaseChannel):
             self.logger.warning("Background task failed: {}", exc)
 
     def _on_reaction_added(self, message_id: str, task: asyncio.Task[Any]) -> None:
-        """Callback: store reaction_id after background add-reaction completes."""
         if task.cancelled():
             return
         # Failures already logged by _on_background_task_done.
@@ -1394,7 +1328,6 @@ class FeishuChannel(BaseChannel):
             reaction_id = task.result()
             if reaction_id:
                 self._reaction_ids[message_id] = reaction_id
-        # Trim cache to prevent unbounded growth
         if len(self._reaction_ids) > 500:
             self._reaction_ids.pop(next(iter(self._reaction_ids)))
 
@@ -1404,7 +1337,6 @@ class FeishuChannel(BaseChannel):
         meta = metadata or {}
         return meta.get("message_id") or chat_id
 
-    # Regex to match markdown tables (header + separator + data rows)
     _TABLE_RE = re.compile(
         r"((?:^[ \t]*\|.+\|[ \t]*\n)(?:^[ \t]*\|[-:\s|]+\|[ \t]*\n)(?:^[ \t]*\|.+\|[ \t]*\n?)+)",
         re.MULTILINE,
@@ -1414,8 +1346,6 @@ class FeishuChannel(BaseChannel):
 
     _CODE_BLOCK_RE = re.compile(r"(```[\s\S]*?```)", re.MULTILINE)
 
-    # Markdown formatting patterns that should be stripped from plain-text
-    # surfaces like table cells and heading text.
     _MD_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
     _MD_BOLD_UNDERSCORE_RE = re.compile(r"__(.+?)__")
     _MD_ITALIC_RE = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)")
@@ -1428,12 +1358,9 @@ class FeishuChannel(BaseChannel):
         Feishu table cells do not support markdown rendering, so we remove
         the formatting markers to keep the text readable.
         """
-        # Remove bold markers
         text = cls._MD_BOLD_RE.sub(r"\1", text)
         text = cls._MD_BOLD_UNDERSCORE_RE.sub(r"\1", text)
-        # Remove italic markers
         text = cls._MD_ITALIC_RE.sub(r"\1", text)
-        # Remove strikethrough markers
         text = cls._MD_STRIKE_RE.sub(r"\1", text)
         return text
 
@@ -1463,7 +1390,6 @@ class FeishuChannel(BaseChannel):
         }
 
     def _build_card_elements(self, content: str) -> list[dict[str, Any]]:
-        """Split content into div/markdown + table elements for Feishu card."""
         protected = content
         code_blocks: list[str] = []
         for m in self._CODE_BLOCK_RE.finditer(content):
@@ -1522,7 +1448,6 @@ class FeishuChannel(BaseChannel):
         return groups or [[]]
 
     def _split_headings(self, content: str) -> list[dict[str, Any]]:
-        """Split content by headings, converting headings to div elements."""
         protected = content
         code_blocks: list[str] = []
         for m in self._CODE_BLOCK_RE.finditer(content):
@@ -1558,37 +1483,29 @@ class FeishuChannel(BaseChannel):
 
         return elements or [{"tag": "markdown", "content": content}]
 
-    # ── Smart format detection ──────────────────────────────────────────
-    # Patterns that indicate "complex" markdown needing card rendering
     _COMPLEX_MD_RE = re.compile(
-        r"```"  # fenced code block
-        r"|^\|.+\|.*\n\s*\|[-:\s|]+\|"  # markdown table (header + separator)
-        r"|^#{1,6}\s+",  # headings
+        r"```"
+        r"|^\|.+\|.*\n\s*\|[-:\s|]+\|"
+        r"|^#{1,6}\s+",
         re.MULTILINE,
     )
 
-    # Simple markdown patterns (bold, italic, strikethrough)
     _SIMPLE_MD_RE = re.compile(
-        r"\*\*.+?\*\*"  # **bold**
-        r"|__.+?__"  # __bold__
-        r"|(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)"  # *italic* (single *)
-        r"|~~.+?~~",  # ~~strikethrough~~
+        r"\*\*.+?\*\*"
+        r"|__.+?__"
+        r"|(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)"
+        r"|~~.+?~~",
         re.DOTALL,
     )
 
-    # Markdown link: [text](url)
     _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^\)]+)\)")
 
-    # Unordered list items
     _LIST_RE = re.compile(r"^[\s]*[-*+]\s+", re.MULTILINE)
 
-    # Ordered list items
     _OLIST_RE = re.compile(r"^[\s]*\d+\.\s+", re.MULTILINE)
 
-    # Max length for plain text format
     _TEXT_MAX_LEN = 200
 
-    # Max length for post (rich text) format; beyond this, use card
     _POST_MAX_LEN = 2000
 
     @classmethod
@@ -1602,11 +1519,9 @@ class FeishuChannel(BaseChannel):
         """
         stripped = content.strip()
 
-        # Complex markdown (code blocks, tables, headings) → always card
         if cls._COMPLEX_MD_RE.search(stripped):
             return "interactive"
 
-        # Long content → card (better readability with card layout)
         if len(stripped) > cls._POST_MAX_LEN:
             return "interactive"
 
@@ -1622,11 +1537,9 @@ class FeishuChannel(BaseChannel):
         if cls._MD_LINK_RE.search(stripped):
             return "post"
 
-        # Short plain text → text format
         if len(stripped) <= cls._TEXT_MAX_LEN:
             return "text"
 
-        # Medium plain text without any formatting → post format
         return "post"
 
     @classmethod
@@ -1644,7 +1557,6 @@ class FeishuChannel(BaseChannel):
             last_end = 0
 
             for m in cls._MD_LINK_RE.finditer(line):
-                # Text before this link
                 before = line[last_end : m.start()]
                 if before:
                     elements.append({"tag": "text", "text": before})
@@ -1657,12 +1569,10 @@ class FeishuChannel(BaseChannel):
                 )
                 last_end = m.end()
 
-            # Remaining text after last link
             remaining = line[last_end:]
             if remaining:
                 elements.append({"tag": "text", "text": remaining})
 
-            # Empty line → empty paragraph for spacing
             if not elements:
                 elements.append({"tag": "text", "text": ""})
 
@@ -1691,7 +1601,6 @@ class FeishuChannel(BaseChannel):
     }
 
     def _upload_image_sync(self, file_path: str) -> str | None:
-        """Upload an image to Feishu and return the image_key."""
         from lark_oapi.api.im.v1 import CreateImageRequest, CreateImageRequestBody
 
         try:
@@ -1718,7 +1627,6 @@ class FeishuChannel(BaseChannel):
             return None
 
     def _upload_file_sync(self, file_path: str) -> str | None:
-        """Upload a file to Feishu and return the file_key."""
         from lark_oapi.api.im.v1 import CreateFileRequest, CreateFileRequestBody
 
         ext = os.path.splitext(file_path)[1].lower()
@@ -1754,7 +1662,6 @@ class FeishuChannel(BaseChannel):
     def _download_image_sync(
         self, message_id: str, image_key: str
     ) -> tuple[bytes | None, str | None]:
-        """Download an image from Feishu message by message_id and image_key."""
         from lark_oapi.api.im.v1 import GetMessageResourceRequest
 
         try:
@@ -1784,7 +1691,6 @@ class FeishuChannel(BaseChannel):
     def _download_file_sync(
         self, message_id: str, file_key: str, resource_type: str = "file"
     ) -> tuple[bytes | None, str | None]:
-        """Download a file/audio/media from a Feishu message by message_id and file_key."""
         from lark_oapi.api.im.v1 import GetMessageResourceRequest
 
         # Feishu resource download API only accepts 'image' or 'file' as type.
@@ -1834,12 +1740,6 @@ class FeishuChannel(BaseChannel):
     async def _download_and_save_media(
         self, msg_type: str, content_json: dict[str, Any], message_id: str | None = None
     ) -> tuple[str | None, str]:
-        """
-        Download media from Feishu and save to local disk.
-
-        Returns:
-            (file_path, content_text) - file_path is None if download failed
-        """
         loop = asyncio.get_running_loop()
         media_dir = get_media_dir("feishu")
 
@@ -1896,10 +1796,6 @@ class FeishuChannel(BaseChannel):
     _REPLY_CONTEXT_MAX_LEN = 200
 
     def _get_message_content_sync(self, message_id: str) -> str | None:
-        """Fetch the text content of a Feishu message by ID (synchronous).
-
-        Returns a "[Reply to: ...]" context string, or None on failure.
-        """
         from lark_oapi.api.im.v1 import GetMessageRequest
 
         try:
@@ -1943,12 +1839,6 @@ class FeishuChannel(BaseChannel):
             return None
 
     def _reply_message_sync(self, parent_message_id: str, msg_type: str, content: str, *, reply_in_thread: bool = False) -> bool:
-        """Reply to an existing Feishu message using the Reply API (synchronous).
-
-        Args:
-            reply_in_thread: If True, reply as a thread/topic message
-                in the Feishu client.
-        """
         from lark_oapi.api.im.v1 import ReplyMessageRequest, ReplyMessageRequestBody
 
         try:
@@ -2060,11 +1950,9 @@ class FeishuChannel(BaseChannel):
         return last_message_id
 
     def _should_use_reply_in_thread(self, metadata: dict[str, Any]) -> bool:
-        """Return whether a group reply should create a Feishu thread/topic."""
         return metadata.get("chat_type", "group") == "group" and self.config.reply_to_message
 
     def _thread_reply_target(self, metadata: dict[str, Any]) -> str | None:
-        """Return the message_id that should receive a Reply API response."""
         if metadata.get("chat_type", "group") != "group":
             return None
         message_id = metadata.get("message_id")
@@ -2077,7 +1965,6 @@ class FeishuChannel(BaseChannel):
     def _send_message_sync(
         self, receive_id_type: str, receive_id: str, msg_type: str, content: str
     ) -> str | None:
-        """Send a single message and return the message_id on success."""
         from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
 
         try:
@@ -2124,13 +2011,6 @@ class FeishuChannel(BaseChannel):
         *,
         reply_in_thread: bool = False,
     ) -> str | None:
-        """Create a CardKit streaming card, send it to chat, return card_id.
-
-        When *reply_message_id* is provided the card is delivered via the
-        reply API. *reply_in_thread* controls whether Feishu creates a
-        thread/topic for that reply. Otherwise the plain create-message API is
-        used.
-        """
         from lark_oapi.api.cardkit.v1 import CreateCardRequest, CreateCardRequestBody
 
         card_json = {
@@ -2182,7 +2062,6 @@ class FeishuChannel(BaseChannel):
             return None
 
     def _stream_update_text_sync(self, card_id: str, content: str, sequence: int) -> bool:
-        """Stream-update the markdown element on a CardKit card (typewriter effect)."""
         from lark_oapi.api.cardkit.v1 import (
             ContentCardElementRequest,
             ContentCardElementRequestBody,
@@ -2295,7 +2174,6 @@ class FeishuChannel(BaseChannel):
         loop = asyncio.get_running_loop()
         rid_type = "chat_id" if chat_id.startswith("oc_") else "open_id"
 
-        # --- stream end: final update or fallback ---
         if stream_end and merge_next:
             if not delta:
                 return
@@ -2311,7 +2189,6 @@ class FeishuChannel(BaseChannel):
                 reaction_id = self._reaction_ids.pop(message_id, None)
                 if reaction_id:
                     await self._remove_reaction(message_id, reaction_id)
-                # Add completion emoji if configured
                 if self.config.done_emoji:
                     await self._add_reaction(message_id, self.config.done_emoji)
 
@@ -2384,7 +2261,6 @@ class FeishuChannel(BaseChannel):
                     )
             return
 
-        # --- accumulate delta ---
         buf = self._stream_bufs.get(stream_key)
         if buf is None:
             buf = _FeishuStreamBuf()
@@ -2395,8 +2271,6 @@ class FeishuChannel(BaseChannel):
 
         now = time.monotonic()
         if buf.card_id is None:
-            # Use the Reply API for existing topics, and only create new topics
-            # when reply-to-message is enabled.
             use_reply_in_thread = self._should_use_reply_in_thread(meta)
             reply_msg_id = self._thread_reply_target(meta)
             card_id = await loop.run_in_executor(
@@ -2453,9 +2327,6 @@ class FeishuChannel(BaseChannel):
             receive_id_type = "chat_id" if msg.chat_id.startswith("oc_") else "open_id"
             loop = asyncio.get_running_loop()
 
-            # Handle tool hint messages.  When a streaming card is active for
-            # this chat, inline the hint into the card instead of sending a
-            # separate message so the user experience stays cohesive.
             progress_event = msg.event if isinstance(msg.event, ProgressEvent) else None
 
             if progress_event and progress_event.tool_hint:
@@ -2472,9 +2343,6 @@ class FeishuChannel(BaseChannel):
                         metadata=msg.metadata,
                     )
                     return
-                # No active streaming card — send as a regular interactive card
-                # with the same 🔧 prefix style. Existing topics stay threaded;
-                # new topics are created only when reply-to-message is enabled.
                 card = json.dumps(
                     {"config": {"wide_screen_mode": True}, "elements": [
                         {"tag": "markdown", "content": self._format_tool_hint_delta(hint)},
@@ -2513,11 +2381,10 @@ class FeishuChannel(BaseChannel):
             has_thread_id = msg.metadata.get("thread_id")
             if self.config.reply_to_message and progress_event is None:
                 reply_message_id = _msg_id
-            # For topic group messages, always reply to keep context in thread
             elif has_thread_id:
                 reply_message_id = _msg_id
 
-            first_send = True  # tracks whether the reply has already been used
+            first_send = True
 
             def _do_send(m_type: str, content: str) -> None:
                 """Send via reply (first message) or create (subsequent).
@@ -2528,7 +2395,6 @@ class FeishuChannel(BaseChannel):
                 """
                 nonlocal first_send
                 if reply_message_id:
-                    # If we're in a topic, always use reply to stay in the topic
                     if has_thread_id:
                         ok = self._reply_message_sync(
                             reply_message_id, m_type, content,
@@ -2537,7 +2403,6 @@ class FeishuChannel(BaseChannel):
                         if ok:
                             return
                     elif first_send:
-                        # If we're not in a topic but replying to message, only first uses reply
                         first_send = False
                         ok = self._reply_message_sync(
                             reply_message_id, m_type, content,
@@ -2545,7 +2410,6 @@ class FeishuChannel(BaseChannel):
                         )
                         if ok:
                             return
-                    # Fall back to regular send if reply fails
                 message_id = self._send_message_sync(
                     receive_id_type,
                     msg.chat_id,
@@ -2593,17 +2457,14 @@ class FeishuChannel(BaseChannel):
                 fmt = "text" if msg.metadata.get(PAIRING_CODE_META_KEY) else self._detect_msg_format(msg.content)
 
                 if fmt == "text":
-                    # Short plain text – send as simple text message
                     text_body = json.dumps({"text": msg.content.strip()}, ensure_ascii=False)
                     await loop.run_in_executor(None, _do_send, "text", text_body)
 
                 elif fmt == "post":
-                    # Medium content with links – send as rich-text post
                     post_body = self._markdown_to_post(msg.content)
                     await loop.run_in_executor(None, _do_send, "post", post_body)
 
                 else:
-                    # Complex / long content – send as interactive card
                     elements = self._build_card_elements(msg.content)
                     for chunk in self._split_elements_by_table_limit(elements):
                         card = {"config": {"wide_screen_mode": True}, "elements": chunk}
@@ -2619,17 +2480,12 @@ class FeishuChannel(BaseChannel):
             raise
 
     def _on_message_sync(self, data: Any) -> None:
-        """
-        Sync handler for incoming messages (called from WebSocket thread).
-        Schedules async handling in the main event loop.
-        """
         if not self._running:
             return
         if self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(self._on_message(data), self._loop)
 
     async def _on_message(self, data: P2ImMessageReceiveV1) -> None:
-        """Handle incoming message from Feishu."""
         if not self._running:
             return
         try:
@@ -2645,7 +2501,6 @@ class FeishuChannel(BaseChannel):
 
             message_id = message.message_id
 
-            # Skip bot messages
             if sender.sender_type == "bot":
                 return
 
@@ -2672,12 +2527,10 @@ class FeishuChannel(BaseChannel):
                 self.logger.debug("skipping group message (not mentioned)")
                 return
 
-            # Deduplication check
             if message_id in self._processed_message_ids:
                 return
             self._processed_message_ids[message_id] = None
 
-            # Trim cache
             while len(self._processed_message_ids) > 1000:
                 self._processed_message_ids.popitem(last=False)
 
@@ -2695,7 +2548,6 @@ class FeishuChannel(BaseChannel):
                     )
                 return
 
-            # Add reaction (non-blocking — tracked background task)
             task = asyncio.create_task(
                 self._add_reaction(message_id, self.config.react_emoji)
             )
@@ -2703,7 +2555,6 @@ class FeishuChannel(BaseChannel):
             task.add_done_callback(self._on_background_task_done)
             task.add_done_callback(lambda t: self._on_reaction_added(message_id, t))
 
-            # Parse content
             content_parts: list[str] = []
             media_paths: list[str] = []
 
@@ -2726,7 +2577,6 @@ class FeishuChannel(BaseChannel):
                 text, image_keys = _extract_post_content(content_json)
                 if text:
                     content_parts.append(text)
-                # Download images embedded in post
                 for img_key in image_keys:
                     file_path, content_text = await self._download_and_save_media(
                         "image", {"image_key": img_key}, message_id
@@ -2757,7 +2607,6 @@ class FeishuChannel(BaseChannel):
                 "system",
                 "merge_forward",
             ):
-                # Handle share cards and interactive messages
                 text = _extract_share_card_content(content_json, msg_type)
                 if text:
                     content_parts.append(text)
@@ -2765,7 +2614,6 @@ class FeishuChannel(BaseChannel):
             else:
                 content_parts.append(MSG_TYPE_MAP.get(msg_type, f"[{msg_type}]"))
 
-            # Extract reply context (parent/root message IDs)
             parent_id = getattr(message, "parent_id", None)
             root_id = getattr(message, "root_id", None)
             thread_id = getattr(message, "thread_id", None)
@@ -2773,7 +2621,6 @@ class FeishuChannel(BaseChannel):
             root_id = root_id if isinstance(root_id, str) else None
             thread_id = thread_id if isinstance(thread_id, str) else None
 
-            # Prepend quoted message text when the user replied to another message
             if parent_id and self._client:
                 loop = asyncio.get_running_loop()
                 reply_ctx = await loop.run_in_executor(
@@ -2810,7 +2657,6 @@ class FeishuChannel(BaseChannel):
             else:
                 session_key = None
 
-            # Forward to message bus
             reply_to = chat_id if chat_type == "group" else sender_id
             await self._handle_message(
                 sender_id=sender_id,
@@ -2833,19 +2679,15 @@ class FeishuChannel(BaseChannel):
             self.logger.exception("Error processing message")
 
     def _on_reaction_created(self, data: Any) -> None:
-        """Ignore reaction events so they do not generate SDK noise."""
         pass
 
     def _on_reaction_deleted(self, data: Any) -> None:
-        """Ignore reaction deleted events so they do not generate SDK noise."""
         pass
 
     def _on_message_read(self, data: Any) -> None:
-        """Ignore read events so they do not generate SDK noise."""
         pass
 
     def _on_bot_p2p_chat_entered(self, data: Any) -> None:
-        """Ignore p2p-enter events when a user opens a bot chat."""
         self.logger.debug("Bot entered p2p chat (user opened chat window)")
         pass
 
@@ -2896,7 +2738,6 @@ class FeishuChannel(BaseChannel):
         return "\n".join(part for part in parts if part)
 
     def _format_tool_hint_delta(self, tool_hint: str) -> str:
-        """Format a tool hint string with the 🔧 prefix for each line."""
         lines = self.__class__._format_tool_hint_lines(tool_hint).split("\n")
         return "\n".join(
             f"{self.config.tool_hint_prefix} {ln}" for ln in lines if ln.strip()

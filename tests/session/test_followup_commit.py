@@ -1,5 +1,3 @@
-"""Follow-up consumption commits against the owner, not an old turn snapshot."""
-
 import sqlite3
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
@@ -35,7 +33,6 @@ def _input(text, turn_id):
 @pytest.mark.parametrize("count", [1, 2])
 @pytest.mark.parametrize("leave_unconsumed", [False, True])
 async def test_late_consumption_commits_history_and_only_its_ids(tmp_path, monkeypatch, count, leave_unconsumed):
-    monkeypatch.setattr("nanobot.webui.history.get_webui_dir", lambda: tmp_path / "webui")
     sessions = SessionManager(tmp_path / "workspace", sessions_root=tmp_path / "sessions")
     state = sessions.state
     try:
@@ -96,7 +93,6 @@ async def test_failed_followup_commit_rolls_back_history_and_ack_then_can_retry(
                           BEGIN SELECT RAISE(ABORT, 'failed follow-up commit'); END""")
         with pytest.raises(sqlite3.IntegrityError, match="failed follow-up commit"):
             await state.finish_turn(draft)
-        # Both the durable snapshot and published cache remain at the pre-commit boundary.
         for stored in (sessions.read_session_snapshot(draft.key), state.peek(draft.key)):
             assert [row["content"] for row in stored.messages] == ["initial input"]
             assert [item.content for item in pending_followups(stored)] == ["consumed input"]

@@ -14,6 +14,7 @@ interface CodeBlockProps {
   className?: string;
   chrome?: "default" | "none";
   highlight?: boolean;
+  ansi?: boolean;
   showLineNumbers?: boolean;
   wrapLongLines?: boolean;
   viewportHighlight?: boolean;
@@ -34,9 +35,11 @@ const LazyHighlightedCode = lazy(async () => {
   const [
     { default: SyntaxHighlighter },
     { ViewportCodeRows },
+    { WrappedCodeRows },
   ] = await Promise.all([
     import("react-syntax-highlighter/dist/esm/prism-async-light"),
     import("@/components/ViewportCodeRows"),
+    import("@/components/WrappedCodeRows"),
   ]);
 
   return {
@@ -83,7 +86,8 @@ const LazyHighlightedCode = lazy(async () => {
           PreTag="pre"
           showLineNumbers={showLineNumbers && !viewportHighlight}
           wrapLongLines={wrapLongLines}
-          renderer={viewportHighlight ? props => <ViewportCodeRows {...props} /> : undefined}
+          renderer={viewportHighlight ? props => <ViewportCodeRows {...props} />
+            : showLineNumbers && wrapLongLines ? props => <WrappedCodeRows {...props} /> : undefined}
         >
           {code}
         </SyntaxHighlighter>
@@ -169,6 +173,7 @@ export const CodeBlock = memo(function CodeBlock({
   className,
   chrome = "default",
   highlight = true,
+  ansi = true,
   showLineNumbers = false,
   wrapLongLines = true,
   viewportHighlight = false,
@@ -177,7 +182,7 @@ export const CodeBlock = memo(function CodeBlock({
   const rootRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
   const [highlightedSource, setHighlightedSource] = useState<string | null>(null);
-  const renderAnsi = useMemo(() => shouldRenderAnsi(language, code), [language, code]);
+  const renderAnsi = useMemo(() => ansi && shouldRenderAnsi(language, code), [ansi, language, code]);
   const plainCode = useMemo(() => renderAnsi ? stripAnsi(code) : code, [renderAnsi, code]);
   const isDark = useThemeValue() === "dark";
   const hasChrome = chrome === "default";

@@ -28,8 +28,12 @@
         "choices": {
           "mention": "提及回覆",
           "open": "全部訊息",
-          "allowlist": "允許清單"
+          "allowlist": "允許清單",
+          "listen": "旁聽（被提及時回覆）"
         }
+      },
+      "groupPolicyOverrides": {
+        "label": "按房間的規則例外（JSON）"
       },
       "allowFrom": {
         "label": "允許使用者"
@@ -62,6 +66,13 @@
       },
       "allowRoomMentions": {
         "label": "房間提及",
+        "choices": {
+          "true": "開啟",
+          "false": "關閉"
+        }
+      },
+      "replyToMessage": {
+        "label": "引用回覆",
         "choices": {
           "true": "開啟",
           "false": "關閉"

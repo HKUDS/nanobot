@@ -202,7 +202,6 @@ async def test_cross_session_input_preserves_source_in_live_events_and_history(
         assert [event.content for event in events] == [f"Review {i}" for i in range(message_count)]
         provenance = {"id": source.id, "name": source.name}
         assert all(event.provenance["session_message"]["session"] == provenance for event in events)
-        # Reconnect/reload must preserve provenance, not just live events.
         records = await loop.sessions.state.project_history(
             target_key,
             lambda history: [record_from_fact(fact, target_key) for fact in history.all_facts()],

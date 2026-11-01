@@ -25,6 +25,7 @@ import {
 } from "@/components/settings/shared/SettingsControls";
 import { TokenUsageCard } from "@/components/settings/TokenUsageCard";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
+import type { ThemePreference } from "@/hooks/useTheme";
 import type {
   LocalPreferences,
 } from "@/lib/local-preferences";
@@ -172,13 +173,13 @@ function VersionCheckRow({ currentVersion, currentCommit, onRequestUpdate, hasPe
     channelError={channelError} onChangeChannel={changeChannel} />;
 }
 
-export function AppearanceSettings({ theme, onToggleTheme, localPrefs, onChangeLocalPrefs }: {
-  theme: "light" | "dark";
-  onToggleTheme: () => void;
+export function AppearanceSettings({ themePreference, onChangeTheme, localPrefs, onChangeLocalPrefs }: {
+  themePreference: ThemePreference;
+  onChangeTheme: (value: ThemePreference) => void;
   localPrefs: LocalPreferences;
   onChangeLocalPrefs: Dispatch<SetStateAction<LocalPreferences>>;
 }) {
-  return <AppearanceSettingsView theme={theme} onToggleTheme={onToggleTheme}
+  return <AppearanceSettingsView themePreference={themePreference} onChangeTheme={onChangeTheme}
     localPrefs={localPrefs} onChangeLocalPrefs={onChangeLocalPrefs} />;
 }
 

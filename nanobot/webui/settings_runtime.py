@@ -1,5 +1,3 @@
-"""Explicit non-channel runtime configuration exposed by the settings UI."""
-
 from __future__ import annotations
 
 import ipaddress
@@ -162,7 +160,7 @@ def update_runtime_config(
                 raise WebUISettingsError("tools.ssrf_whitelist: enter valid IP addresses or CIDR ranges") from None
     for path in ("tools.exec.allow_patterns", "tools.exec.deny_patterns"):
         if path in values:
-            patterns = cast(list[str], values[path])  # Schema validation above guarantees list[str].
+            patterns = cast(list[str], values[path])
             for pattern in patterns:
                 try:
                     re.compile(pattern)

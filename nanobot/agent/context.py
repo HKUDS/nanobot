@@ -1,5 +1,3 @@
-"""Context builder for assembling agent prompts."""
-
 import base64
 import mimetypes
 import platform
@@ -139,7 +137,6 @@ class ContextBuilder:
         return "\n\n---\n\n".join(parts)
 
     def _get_identity(self, channel: str | None = None, workspace: Path | None = None) -> str:
-        """Get the core identity section."""
         root = workspace or self.workspace
         workspace_path = str(root.expanduser().resolve())
         agent_workspace_path = str(self.workspace.expanduser().resolve())
@@ -179,7 +176,6 @@ class ContextBuilder:
         return _to_blocks(left) + _to_blocks(right)
 
     def _load_bootstrap_files(self, workspace: Path | None = None) -> str:
-        """Load project instructions plus the agent's global profile files."""
         parts: list[str] = []
         project_root = workspace or self.workspace
         sources = [

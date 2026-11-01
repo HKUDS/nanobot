@@ -1,5 +1,3 @@
-"""Skills loader for agent capabilities."""
-
 import json
 import os
 import re
@@ -65,7 +63,6 @@ class SkillsLoader:
             self._snapshot.reset(token)
 
     def _skill_aliases(self) -> dict[str, str]:
-        """Return compatibility aliases owned by installed CLI Apps."""
         from nanobot.apps.cli import CliAppManager
 
         snapshot = self._snapshot.get()
@@ -319,7 +316,6 @@ class SkillsLoader:
         return bins, env
 
     def _get_missing_requirements(self, skill_meta: dict[str, Any]) -> str:
-        """Get a description of missing requirements."""
         required_bins, required_env_vars = self._requirement_lists(skill_meta)
         return ", ".join(
             [f"CLI: {command_name}" for command_name in required_bins if not self._binary_available(command_name)]
@@ -351,7 +347,6 @@ class SkillsLoader:
         return name  # Fallback to skill name
 
     def _strip_frontmatter(self, content: str) -> str:
-        """Remove YAML frontmatter from markdown content."""
         if not content.startswith("---"):
             return content
         match = _STRIP_SKILL_FRONTMATTER.match(content)
@@ -360,10 +355,6 @@ class SkillsLoader:
         return content
 
     def _parse_nanobot_metadata(self, raw: object) -> dict[str, Any]:
-        """Extract nanobot/openclaw metadata from a frontmatter field.
-
-        ``raw`` may be a dict (already parsed by yaml.safe_load) or a JSON str.
-        """
         if isinstance(raw, dict):
             data = cast(dict[str, Any], raw)
         elif isinstance(raw, str):
@@ -380,7 +371,6 @@ class SkillsLoader:
         return cast(dict[str, Any], payload) if isinstance(payload, dict) else {}
 
     def _check_requirements(self, skill_meta: dict[str, Any]) -> bool:
-        """Check if skill requirements are met (bins, env vars)."""
         required_bins, required_env_vars = self._requirement_lists(skill_meta)
         return all(self._binary_available(cmd) for cmd in required_bins) and all(
             os.environ.get(var) for var in required_env_vars
@@ -396,7 +386,6 @@ class SkillsLoader:
         return available
 
     def _get_skill_meta(self, name: str) -> dict[str, Any]:
-        """Get nanobot metadata for a skill (cached in frontmatter)."""
         raw_meta = self.get_skill_metadata(name) or {}
         return self._parse_nanobot_metadata(raw_meta.get("metadata"))
 

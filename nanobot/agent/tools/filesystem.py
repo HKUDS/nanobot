@@ -1,5 +1,3 @@
-"""File system tools: read, write, edit, list."""
-
 # pyright: reportPrivateUsage=false, reportUnusedFunction=false
 
 import difflib
@@ -188,11 +186,6 @@ class _FsTool(Tool):
         return current_tool_workspace(self._workspace).project_path
 
 
-# ---------------------------------------------------------------------------
-# read_file
-# ---------------------------------------------------------------------------
-
-
 _BLOCKED_DEVICE_PATHS = frozenset({
     "/dev/zero", "/dev/random", "/dev/urandom", "/dev/full",
     "/dev/stdin", "/dev/stdout", "/dev/stderr",
@@ -206,7 +199,6 @@ def _is_blocked_device(path: str | Path) -> bool:
     import re
     raw = str(path)
 
-    # Resolve symlinks to check the actual target
     try:
         resolved = str(Path(raw).resolve())
     except (OSError, ValueError):
@@ -219,14 +211,12 @@ def _is_blocked_device(path: str | Path) -> bool:
     if re.match(r"/proc/\d+/fd/[012]$", resolved) or re.match(r"/proc/self/fd/[012]$", resolved):
         return True
 
-    # Check if resolved path starts with /dev/ (covers symlinks to devices)
     if resolved.startswith("/dev/"):
         return True
     return False
 
 
 def _builtin_skill_read_path(path: str) -> Path | None:
-    """Map workspace-relative skills/<name>/... reads onto bundled skills."""
     from nanobot.agent.skill_metadata import BUILTIN_SKILLS_DIR
 
     requested = Path(path)
@@ -298,7 +288,6 @@ class ReadFileTool(_FsTool):
             if not path:
                 return ToolResult.error("Error reading file: Unknown path")
 
-            # Device path blacklist
             if _is_blocked_device(path):
                 return ToolResult.error(f"Error: Reading {path} is blocked (device path that could hang or produce infinite output).")
 
@@ -321,11 +310,9 @@ class ReadFileTool(_FsTool):
                     f"Maximum is {max_mib} MiB."
                 )
 
-            # PDF support
             if fp.suffix.lower() == ".pdf":
                 return self._read_pdf(fp, pages)
 
-            # Office document support
             if fp.suffix.lower() in {".docx", ".xlsx", ".pptx"}:
                 return self._read_office_doc(fp, offset, limit)
 
@@ -541,11 +528,6 @@ class ReadFileTool(_FsTool):
                 close()
 
 
-# ---------------------------------------------------------------------------
-# write_file
-# ---------------------------------------------------------------------------
-
-
 @tool_parameters(
     tool_parameters_schema(
         path=StringSchema("The file path to write to"),
@@ -586,14 +568,10 @@ class WriteFileTool(_FsTool):
             return ToolResult.error(f"Error writing file: {e}")
 
 
-# ---------------------------------------------------------------------------
-# edit_file
-# ---------------------------------------------------------------------------
-
 _QUOTE_TABLE = str.maketrans({
-    "\u2018": "'", "\u2019": "'",  # curly single → straight
-    "\u201c": '"', "\u201d": '"',  # curly double → straight
-    "'": "'", '"': '"',            # identity (kept for completeness)
+    "\u2018": "'", "\u2019": "'",
+    "\u201c": '"', "\u201d": '"',
+    "'": "'", '"': '"',
 })
 
 
@@ -631,7 +609,6 @@ def _curly_single_quotes(text: str) -> str:
 
 
 def _preserve_quote_style(old_text: str, actual_text: str, new_text: str) -> str:
-    """Preserve curly quote style when a quote-normalized fallback matched."""
     if _normalize_quotes(old_text.strip()) != _normalize_quotes(actual_text.strip()) or old_text == actual_text:
         return new_text
 
@@ -648,7 +625,6 @@ def _leading_ws(line: str) -> str:
 
 
 def _reindent_like_match(old_text: str, actual_text: str, new_text: str) -> str:
-    """Preserve the outer indentation from the actual matched block."""
     # A terminal newline does not add a logical line, even at an unterminated EOF.
     old_lines = old_text.removesuffix("\n").split("\n")
     actual_lines = actual_text.removesuffix("\n").split("\n")
@@ -794,7 +770,6 @@ def _find_quote_matches(content: str, old_text: str) -> list[_MatchSpan]:
 
 
 def _find_matches(content: str, old_text: str) -> list[_MatchSpan]:
-    """Locate all matches using progressively looser strategies."""
     for matcher in (
         lambda: _find_exact_matches(content, old_text),
         lambda: _find_trim_matches(content, old_text),
@@ -812,7 +787,6 @@ def _collapse_internal_whitespace(text: str) -> str:
 
 
 def _diagnose_near_match(old_text: str, actual_text: str) -> list[str]:
-    """Return actionable hints describing why text was close but not exact."""
     hints: list[str] = []
 
     if old_text.lower() == actual_text.lower() and old_text != actual_text:
@@ -828,7 +802,6 @@ def _diagnose_near_match(old_text: str, actual_text: str) -> list[str]:
 
 
 def _best_window(old_text: str, content: str) -> tuple[float, int, list[str], list[str]]:
-    """Find the closest line-window match and return ratio/start/snippet/hints."""
     lines = content.splitlines(keepends=True)
     old_lines = old_text.splitlines(keepends=True)
     window = max(1, len(old_lines))
@@ -881,7 +854,7 @@ class EditFileTool(_FsTool):
     """Edit a file by replacing text with fallback matching."""
     _scopes = {"core", "subagent", "memory"}
 
-    _MAX_EDIT_FILE_SIZE = 1024 * 1024 * 1024  # 1 GiB
+    _MAX_EDIT_FILE_SIZE = 1024 * 1024 * 1024
     _MARKDOWN_EXTS = frozenset({".md", ".mdx", ".markdown"})
 
     @property
@@ -942,7 +915,6 @@ class EditFileTool(_FsTool):
             if file_exists and old_text == new_text:
                 return ToolResult.error("Error: new_text must be different from old_text.")
 
-            # Create-file semantics: old_text='' + file doesn't exist → create
             if not file_exists:
                 if old_text == "":
                     fp.parent.mkdir(parents=True, exist_ok=True)
@@ -951,7 +923,6 @@ class EditFileTool(_FsTool):
                     return self._format_summary(fp, "", fp.read_bytes().decode("utf-8"), created=True)
                 return self._file_not_found_msg(path, fp)
 
-            # File size protection
             try:
                 fsize = fp.stat().st_size
             except OSError:
@@ -959,7 +930,6 @@ class EditFileTool(_FsTool):
             if fsize > self._MAX_EDIT_FILE_SIZE:
                 return ToolResult.error(f"Error: File too large to edit ({fsize / (1024**3):.1f} GiB). Maximum is 1 GiB.")
 
-            # Create-file: old_text='' but file exists and not empty → reject
             if old_text == "":
                 raw = fp.read_bytes()
                 content = raw.decode("utf-8")
@@ -1071,7 +1041,6 @@ class EditFileTool(_FsTool):
             return ToolResult.error(f"Error editing file: {e}")
 
     def _file_not_found_msg(self, path: str, fp: Path) -> str:
-        """Build an error message with 'Did you mean ...?' suggestions."""
         parent = fp.parent
         suggestions: list[str] = []
         if parent.is_dir():
@@ -1110,10 +1079,6 @@ class EditFileTool(_FsTool):
             )
         return ToolResult.error(f"Error: old_text not found in {path}. No similar text found. Verify the file content.")
 
-
-# ---------------------------------------------------------------------------
-# list_dir
-# ---------------------------------------------------------------------------
 
 @tool_parameters(
     tool_parameters_schema(

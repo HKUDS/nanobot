@@ -1,5 +1,3 @@
-"""Turn-local permission for explicit sustained-goal mutations."""
-
 from __future__ import annotations
 
 from collections.abc import Iterable

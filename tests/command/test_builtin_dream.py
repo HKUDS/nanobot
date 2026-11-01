@@ -261,7 +261,6 @@ def _build_runnable_dream(
 
 @pytest.mark.asyncio
 async def test_dream_advances_cursor_when_diff_nonempty(tmp_path) -> None:
-    """A completed run with a real file delta advances the cursor."""
     ctx, store = _build_runnable_dream(tmp_path, initialized=True, content_diff="SOUL.md: +1 -0")
     await _run_dream_command(ctx)
     assert store._last_dream_cursor == 42
@@ -269,7 +268,6 @@ async def test_dream_advances_cursor_when_diff_nonempty(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_dream_advances_cursor_on_completed_noop(tmp_path) -> None:
-    """A completed no-op has processed the batch and must not repeat it."""
     ctx, store = _build_runnable_dream(tmp_path, initialized=True, content_diff="")
     await _run_dream_command(ctx)
     assert store._last_dream_cursor == 42
@@ -278,7 +276,6 @@ async def test_dream_advances_cursor_on_completed_noop(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_dream_keeps_cursor_when_incomplete_with_diff(tmp_path) -> None:
-    """An incomplete run remains retryable even if it left a partial edit."""
     ctx, store = _build_runnable_dream(
         tmp_path,
         initialized=True,
@@ -292,7 +289,6 @@ async def test_dream_keeps_cursor_when_incomplete_with_diff(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_dream_advances_cursor_when_completed_after_tool_error(tmp_path) -> None:
-    """A handled tool failure does not invalidate a normally completed run."""
     ctx, store = _build_runnable_dream(
         tmp_path,
         initialized=True,
@@ -306,7 +302,6 @@ async def test_dream_advances_cursor_when_completed_after_tool_error(tmp_path) -
 
 @pytest.mark.asyncio
 async def test_dream_noop_batch_unlocks_following_history(tmp_path) -> None:
-    """A no-op first batch must not starve later history entries."""
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     store = MemoryStore(workspace)
@@ -354,12 +349,11 @@ async def test_dream_noop_batch_unlocks_following_history(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_dream_non_git_falls_back_to_completion_gate(tmp_path) -> None:
-    """Non-git workspaces use the same normal-completion gate."""
     ctx, store = _build_runnable_dream(
         tmp_path, initialized=False, content_diff="", stop_reason="completed",
     )
     await _run_dream_command(ctx)
-    assert store._last_dream_cursor == 42  # advanced via completion fallback
+    assert store._last_dream_cursor == 42
 
 
 @pytest.mark.asyncio

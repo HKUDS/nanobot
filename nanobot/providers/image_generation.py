@@ -1,5 +1,3 @@
-"""Image generation provider helpers."""
-
 from __future__ import annotations
 
 import asyncio
@@ -83,19 +81,16 @@ class GeneratedImageResponse:
 
 
 def _as_json_object(value: object) -> dict[str, Any] | None:
-    """Narrow an untrusted provider response value to a JSON object."""
     return cast(dict[str, Any], value) if isinstance(value, dict) else None
 
 
 def _as_json_objects(value: object) -> list[dict[str, Any]]:
-    """Return object entries from an untrusted provider response array."""
     if not isinstance(value, list):
         return []
     return [cast(dict[str, Any], item) for item in cast(list[object], value) if isinstance(item, dict)]
 
 
 def _read_image_b64(path: str | Path) -> tuple[str, str]:
-    """Return ``(mime, base64)`` for the image at ``path``."""
     p = Path(path).expanduser()
     raw = p.read_bytes()
     mime = detect_image_mime(raw)
@@ -234,10 +229,6 @@ async def _download_image_data_url(
     return f"data:{mime};base64,{encoded}"
 
 
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
-
 _IMAGE_GEN_PROVIDERS: dict[str, type[ImageGenerationProvider]] = {}
 
 
@@ -285,11 +276,6 @@ def image_gen_provider_configs(providers: ProvidersConfig | None) -> dict[str, P
         for name in image_gen_provider_names(providers)
         if (pc := getattr(providers, name, None)) is not None
     }
-
-
-# ---------------------------------------------------------------------------
-# Base class
-# ---------------------------------------------------------------------------
 
 
 class ImageGenerationProvider(ABC):
@@ -562,7 +548,6 @@ class AIHubMixImageGenerationClient(ImageGenerationProvider):
 
 
 def _http_error_detail(response: httpx.Response) -> str:
-    """Extract a readable error message from an HTTP error response."""
     try:
         data = _as_json_object(response.json())
         if data is not None:
@@ -904,7 +889,6 @@ def _gemini_flash_image_config(
 
 
 def _gemini_flash_supported_aspect_ratios(model: str) -> set[str]:
-    """Return the documented aspect ratios for a generateContent image model."""
     normalized = model.lower()
     if (
         "gemini-3.1-flash-lite-image" in normalized
@@ -1091,10 +1075,6 @@ class MiniMaxImageGenerationClient(ImageGenerationProvider):
 
 
 def _minimax_images_from_payload(payload: dict[str, Any]) -> list[str]:
-    """Extract base64 images from MiniMax API response.
-
-    MiniMax returns images in ``data.image_base64`` (list of base64 strings).
-    """
     images: list[str] = []
     data = payload.get("data")
     data_object = _as_json_object(data)
@@ -1105,10 +1085,6 @@ def _minimax_images_from_payload(payload: dict[str, Any]) -> list[str]:
             images.append(_b64_image_data_url(b64))
     return images
 
-
-# ---------------------------------------------------------------------------
-# OpenAI image generation
-# ---------------------------------------------------------------------------
 
 _OPENAI_DALLE2_SUPPORTED_SIZES = {"256x256", "512x512", "1024x1024"}
 _OPENAI_DALLE3_SUPPORTED_SIZES = {"1024x1024", "1792x1024", "1024x1792"}
@@ -1379,11 +1355,6 @@ class CustomImageGenerationClient(ImageGenerationProvider):
         return GeneratedImageResponse(images=images, content="", raw=payload)
 
 
-# ---------------------------------------------------------------------------
-# OpenAI Codex image generation
-# ---------------------------------------------------------------------------
-
-
 class CodexImageGenerationClient(ImageGenerationProvider):
     """OpenAI image generation via Codex subscription OAuth.
 
@@ -1403,7 +1374,6 @@ class CodexImageGenerationClient(ImageGenerationProvider):
         return "https://chatgpt.com/backend-api"
 
     def _codex_model(self, model: str) -> str:
-        """Strip the ``openai-codex/`` prefix if present."""
         if model.startswith(("openai-codex/", "openai_codex/")):
             return model.split("/", 1)[1]
         return model
@@ -1490,7 +1460,6 @@ def _openai_size(
     aspect_ratio: str | None,
     image_size: str | None,
 ) -> str:
-    """Resolve aspect ratio or image_size to an OpenAI Images API size string."""
     sizes, supported_sizes = _openai_size_options(model)
     explicit_size = _normalize_openai_image_size(image_size)
     if explicit_size and _openai_explicit_size_supported(
@@ -1565,10 +1534,6 @@ async def _openai_images_from_payload(
     *,
     proxy: str | None = None,
 ) -> list[str]:
-    """Extract images from OpenAI Images API response.
-
-    Handles both ``b64_json`` (preferred) and ``url`` (downloaded) formats.
-    """
     images: list[str] = []
     for item in _as_json_objects(payload.get("data")):
         b64 = item.get("b64_json")
@@ -1580,10 +1545,6 @@ async def _openai_images_from_payload(
             images.append(await _download_image_data_url(url, proxy=proxy))
     return images
 
-
-# ---------------------------------------------------------------------------
-# StepFun (阶跃星辰) image generation
-# ---------------------------------------------------------------------------
 
 _STEPFUN_ASPECT_RATIO_SIZES = {
     "1:1": "1024x1024",
@@ -1637,7 +1598,6 @@ class StepFunImageGenerationClient(ImageGenerationProvider):
             "n": 1,
         }
 
-        # Map aspect ratio / image_size to StepFun size string
         size = _stepfun_size(aspect_ratio, image_size)
         if size:
             body["size"] = size
@@ -1691,10 +1651,6 @@ def _stepfun_size(
 
 
 def _stepfun_images_from_payload(payload: dict[str, Any]) -> list[str]:
-    """Extract base64 images from StepFun API response.
-
-    StepFun returns images in ``data[].b64_json`` (base64 strings).
-    """
     images: list[str] = []
     for item in _as_json_objects(payload.get("data")):
         b64 = item.get("b64_json")
@@ -1702,10 +1658,6 @@ def _stepfun_images_from_payload(payload: dict[str, Any]) -> list[str]:
             images.append(_b64_image_data_url(b64))
     return images
 
-
-# ---------------------------------------------------------------------------
-# Zhipu (智谱) image generation
-# ---------------------------------------------------------------------------
 
 _ZHIPU_TIMEOUT_S = 300.0
 
@@ -1846,13 +1798,9 @@ async def _zhipu_images_from_payload(
     return images
 
 
-# ---------------------------------------------------------------------------
-# ModelScope (魔搭) image generation
-# ---------------------------------------------------------------------------
-
 _MODELSCOPE_TIMEOUT_S = 300.0
 _MODELSCOPE_POLL_INTERVAL_S = 5.0
-_MODELSCOPE_POLL_MAX_ATTEMPTS = 60  # 5 min at 5s intervals
+_MODELSCOPE_POLL_MAX_ATTEMPTS = 60
 _MODELSCOPE_ASPECT_RATIOS = {
     "1:1": "1328x1328",
     "16:9": "1664x928",
@@ -1866,7 +1814,6 @@ def _modelscope_size(
     aspect_ratio: str | None,
     image_size: str | None,
 ) -> str:
-    """Resolve aspect ratio / image_size to a ModelScope size string."""
     if image_size and "x" in image_size.lower():
         return image_size
     if aspect_ratio and aspect_ratio in _MODELSCOPE_ASPECT_RATIOS:
@@ -2033,10 +1980,6 @@ class ModelScopeImageGenerationClient(ImageGenerationProvider):
                     )
         return images
 
-
-# ---------------------------------------------------------------------------
-# Provider registration
-# ---------------------------------------------------------------------------
 
 register_image_gen_provider(AIHubMixImageGenerationClient)
 register_image_gen_provider(CodexImageGenerationClient)

@@ -1,5 +1,3 @@
-"""WebUI restart recovery over durable session checkpoints."""
-
 from __future__ import annotations
 
 import asyncio
@@ -74,7 +72,6 @@ class RecoveryCoordinator:
             self._active_recovery_tasks.pop(session_key, None)
 
     async def _cancel_active_recovery(self, session_key: str) -> None:
-        """Stop an explicit continuation before accepting newer user input."""
         task = self._active_recovery_tasks.get(session_key)
         if task is None or task is asyncio.current_task() or task.done():
             return
@@ -86,9 +83,6 @@ class RecoveryCoordinator:
 
     async def scan(self) -> None:
         """Recover every interrupted WebUI session once at gateway startup."""
-        from nanobot.webui.history import initialize_history
-
-        await initialize_history(self.sessions)
         for key in await self._recovery_candidates():
             metadata_payload = await self.sessions.state.read_metadata(key)
             raw_metadata = metadata_payload.get("metadata") if metadata_payload else None
@@ -118,7 +112,6 @@ class RecoveryCoordinator:
                 await self._publish(route[1], failed)
 
     async def _recovery_candidates(self) -> list[str]:
-        """Legacy display-only sessions have canonical headers after import."""
         return [item["key"] for item in await self.sessions.state.list_sessions()]
 
     @staticmethod
@@ -187,6 +180,8 @@ class RecoveryCoordinator:
                 can_continue=any(message.get("role") == "user" for message in session.messages),
             )
             waiting["failure_error_kind"] = failure_error_kind or "unknown"
+            if session.messages and session.messages[-1].get("_interrupted") is True:
+                waiting["reply_preserved"] = True
             await self.sessions.state.restore_interruption(session)
             await self._publish(route[1], waiting)
             return
@@ -419,7 +414,6 @@ class RecoveryCoordinator:
         )
 
     async def _requeue_pending_followups(self, session: Session) -> None:
-        """Return durable live-turn follow-ups to the bus after a restart."""
         for message in pending_followups(session):
             await self.bus.publish_inbound(message)
 
@@ -437,7 +431,6 @@ class RecoveryCoordinator:
         chat_id: str,
         state: Mapping[str, Any],
     ) -> None:
-        """Publish the recovery state and invalidate its sidebar projection."""
         await self.bus.publish_outbound(
             outbound_message_for_event(
                 channel="websocket",
@@ -449,6 +442,7 @@ class RecoveryCoordinator:
                     attempts=cast(int, state.get("attempts", 0)),
                     can_continue=cast(bool | None, state.get("can_continue")),
                     failure_error_kind=cast(str | None, state.get("failure_error_kind")),
+                    reply_preserved=cast(bool | None, state.get("reply_preserved")),
                 ),
             )
         )

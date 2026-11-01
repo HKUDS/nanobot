@@ -1,5 +1,3 @@
-"""Tests for subagent tool registration and wiring."""
-
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -25,7 +23,6 @@ def _runtime(provider: MagicMock, model: str = "test-model") -> LLMRuntime:
 
 @pytest.mark.asyncio
 async def test_run_inline_returns_result_without_announcement(tmp_path):
-    """Inline subagents return directly instead of injecting a follow-up."""
     from nanobot.agent.subagent import SubagentManager
     from nanobot.bus.queue import MessageBus
 
@@ -59,7 +56,6 @@ async def test_run_inline_returns_result_without_announcement(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_inline_returns_structured_error(tmp_path):
-    """Inline subagent failures remain tool errors for the parent runner."""
     from nanobot.agent.subagent import SubagentManager
     from nanobot.agent.tools.registry import is_tool_error_result
     from nanobot.bus.queue import MessageBus
@@ -92,7 +88,6 @@ async def test_run_inline_returns_structured_error(tmp_path):
 
 @pytest.mark.asyncio
 async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
-    """allowed_env_keys from ExecToolConfig must be forwarded to the subagent's ExecTool."""
     from nanobot.agent.subagent import SubagentManager
     from nanobot.agent.tools.shell import ExecToolConfig
     from nanobot.bus.queue import MessageBus
@@ -137,7 +132,6 @@ async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
 
 @pytest.mark.asyncio
 async def test_subagent_uses_configured_max_iterations(tmp_path):
-    """Subagents should honor the configured tool-iteration limit."""
     from nanobot.agent.subagent import SubagentManager
     from nanobot.bus.queue import MessageBus
 
@@ -178,7 +172,6 @@ async def test_subagent_uses_configured_max_iterations(tmp_path):
 
 @pytest.mark.asyncio
 async def test_subagent_checkpoint_updates_status_and_preserves_omitted_fields(tmp_path):
-    """Runner checkpoints update detached task snapshots without resetting omitted fields."""
     from nanobot.agent.subagent import SubagentManager
     from nanobot.bus.queue import MessageBus
 
@@ -224,7 +217,6 @@ async def test_subagent_checkpoint_updates_status_and_preserves_omitted_fields(t
 
 @pytest.mark.asyncio
 async def test_spawn_forwards_temperature_to_run_spec(tmp_path):
-    """A temperature passed to spawn() should reach the AgentRunSpec."""
     from nanobot.agent.subagent import SubagentManager
     from nanobot.bus.queue import MessageBus
 
@@ -262,7 +254,6 @@ async def test_spawn_forwards_temperature_to_run_spec(tmp_path):
 
 @pytest.mark.asyncio
 async def test_background_spawn_waits_for_concurrency_capacity(tmp_path):
-    """Background tasks should be accepted and start when capacity becomes available."""
     from nanobot.agent.subagent import SubagentManager
     from nanobot.agent.tools.subagent import SubagentTool
     from nanobot.bus.queue import MessageBus
@@ -429,7 +420,6 @@ async def test_inline_spawn_waits_for_concurrency_capacity(tmp_path):
 
 @pytest.mark.asyncio
 async def test_runner_executes_inline_spawn_batch_concurrently(tmp_path):
-    """Adjacent blocking consultations should share one concurrent tool batch."""
     from nanobot.agent.hook import AgentHook, AgentHookContext
     from nanobot.agent.subagent import SubagentManager
     from nanobot.agent.tools.context import RequestContext, request_context
@@ -539,7 +529,6 @@ async def test_cancel_by_session_cancels_inline_subagent(tmp_path):
 
 
 def test_subagent_default_max_concurrent_matches_agent_defaults(tmp_path):
-    """Direct SubagentManager construction should use the agent default concurrency limit."""
     from nanobot.agent.subagent import SubagentManager
     from nanobot.bus.queue import MessageBus
 
@@ -556,7 +545,6 @@ def test_subagent_default_max_concurrent_matches_agent_defaults(tmp_path):
 
 
 def test_subagent_default_max_iterations_matches_agent_defaults(tmp_path):
-    """Direct SubagentManager construction should use the agent default limit."""
     from nanobot.agent.subagent import SubagentManager
     from nanobot.bus.queue import MessageBus
 
@@ -572,7 +560,6 @@ def test_subagent_default_max_iterations_matches_agent_defaults(tmp_path):
 
 
 def test_agent_loop_passes_max_iterations_to_subagents(tmp_path):
-    """AgentLoop's configured limit should be shared with spawned subagents."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
 
@@ -593,7 +580,6 @@ def test_agent_loop_passes_max_iterations_to_subagents(tmp_path):
 
 @pytest.mark.asyncio
 async def test_agent_loop_syncs_updated_max_iterations_before_run(tmp_path):
-    """Runtime max_iterations changes should be reflected before tool execution."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
 
@@ -636,7 +622,6 @@ async def test_agent_loop_syncs_updated_max_iterations_before_run(tmp_path):
 
 @pytest.mark.asyncio
 async def test_drain_pending_no_block_when_no_subagents(tmp_path):
-    """_drain_pending should not block when no sub-agents are running."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
 
@@ -679,14 +664,12 @@ async def test_drain_pending_no_block_when_no_subagents(tmp_path):
     assert injection_callback is not None
     assert terminal_injection_callback is not None
 
-    # With no sub-agents and an empty queue, both paths return immediately.
     assert await asyncio.wait_for(injection_callback(), timeout=1.0) == []
     assert await asyncio.wait_for(terminal_injection_callback(), timeout=1.0) == []
 
 
 @pytest.mark.asyncio
 async def test_terminal_drain_timeout(tmp_path):
-    """The terminal drain should return empty after its shared timeout expires."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.session.manager import Session
@@ -739,7 +722,6 @@ async def test_terminal_drain_timeout(tmp_path):
 
     assert terminal_injection_callback is not None
 
-    # Patch the timeout path without leaking the queue.get() coroutine.
     async def _timeout(awaitable, timeout):
         awaitable.close()
         raise asyncio.TimeoutError
@@ -753,7 +735,6 @@ async def test_terminal_drain_timeout(tmp_path):
 
 @pytest.mark.asyncio
 async def test_terminal_drain_reuses_one_timeout_budget(tmp_path):
-    """Repeated terminal rendezvous calls share one 300-second deadline."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus

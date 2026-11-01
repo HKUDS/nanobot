@@ -1,5 +1,3 @@
-"""Tests for the Nanobot programmatic facade."""
-
 from __future__ import annotations
 
 import asyncio
@@ -555,13 +553,8 @@ def test_stream_event_constants_are_stable():
     assert len(set(STREAM_EVENT_TYPES)) == len(STREAM_EVENT_TYPES)
 
 
-# ---------------------------------------------------------------------------
-# RunResult.tools_used / messages — populated from the agent iterations
-# ---------------------------------------------------------------------------
-
 @pytest.mark.asyncio
 async def test_run_populates_tools_used_across_iterations(tmp_path):
-    """tools_used collects every tool name fired across all iterations, in order."""
     from nanobot.agent.hook import AgentHookContext
     from nanobot.bus.events import OutboundMessage
     from nanobot.providers.base import ToolCallRequest
@@ -593,7 +586,6 @@ async def test_run_populates_tools_used_across_iterations(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_populates_final_messages(tmp_path):
-    """messages reflects the agent's message list at the last iteration."""
     from nanobot.agent.hook import AgentHookContext
     from nanobot.bus.events import OutboundMessage
 
@@ -620,7 +612,6 @@ async def test_run_populates_final_messages(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_no_iterations_leaves_defaults_empty(tmp_path):
-    """If process_direct never triggers after_iteration, tools_used/messages stay []."""
     from nanobot.bus.events import OutboundMessage
 
     config_path = _write_config(tmp_path)
@@ -920,7 +911,6 @@ async def test_run_rejects_multiple_model_selectors(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_user_hooks_still_fire_alongside_capture(tmp_path):
-    """Capture hook must not displace user-provided hooks."""
     from nanobot.agent.hook import AgentHook, AgentHookContext
     from nanobot.bus.events import OutboundMessage
 
@@ -999,7 +989,6 @@ async def test_concurrent_run_hooks_are_isolated_per_call(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_restores_extra_hooks_even_on_populated_iterations(tmp_path):
-    """Previously-installed _extra_hooks must be restored regardless of capture state."""
     from nanobot.agent.hook import AgentHook, AgentHookContext
     from nanobot.bus.events import OutboundMessage
 

@@ -1,5 +1,3 @@
-"""Agent hook that observes file-editing tools and emits file-edit activity."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -62,7 +60,7 @@ class FileEditActivityHook(AgentHook):
             return
         self._trackers_by_call[self._tool_call_key(tool_call)] = trackers
         await self._emit([
-            build_file_edit_start_event(tracker, typed_params)
+            build_file_edit_start_event(tracker)
             for tracker in trackers
         ])
 

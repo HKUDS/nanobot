@@ -276,7 +276,6 @@ def test_worker_exit_and_credential_commit_are_distinct(monkeypatch, tmp_path, f
         if finish == "cancel":
             flow.cancel()
         elif finish == "expiry":
-            # Advance the shared clock used by both the flow and its save guard.
             now = time.monotonic() + 10
             monkeypatch.setattr(codex_oauth, "time", SimpleNamespace(monotonic=lambda: now))
         assert flow.has_pending_work

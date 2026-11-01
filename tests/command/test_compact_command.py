@@ -1,5 +1,3 @@
-"""Manual context compaction command behavior."""
-
 import asyncio
 import sqlite3
 import threading

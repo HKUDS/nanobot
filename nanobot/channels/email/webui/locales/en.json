@@ -157,8 +157,7 @@
       },
       "trustedAuthservIds": {
         "label": "Trusted authentication services",
-        "placeholder": "mx.google.com, comma separated",
-        "help": "Enter trusted authserv-id values.\n\nExact authserv-id values added by the receiving mail service. Required when SPF or DKIM verification is on."
+        "placeholder": "mx.google.com, comma separated"
       }
     }
   }

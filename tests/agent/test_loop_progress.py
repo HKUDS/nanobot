@@ -1,5 +1,3 @@
-"""Tests for structured tool activity emitted through AgentLoop progress events."""
-
 import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -57,7 +55,6 @@ def _attach_webui_runtime_events(loop: AgentLoop, bus: MessageBus) -> None:
 
 
 class TestToolEventProgress:
-    """AgentLoop wires tool hooks and turn delivery into progress events."""
 
     @pytest.mark.asyncio
     async def test_write_file_emits_file_edit_progress(self, tmp_path: Path) -> None:
@@ -213,7 +210,6 @@ class TestToolEventProgress:
 
     @pytest.mark.asyncio
     async def test_bus_progress_delivers_tool_activity_in_progress_events(self, tmp_path: Path) -> None:
-        """Bus-dispatched turns deliver tool activity through ProgressEvent.tool_events."""
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
@@ -237,7 +233,6 @@ class TestToolEventProgress:
         )
         await run_session(loop, msg)
 
-        # Drain all outbound messages and find the one carrying tool events.
         outbound = []
         while bus.outbound_size > 0:
             outbound.append(await bus.consume_outbound())
@@ -311,7 +306,6 @@ class TestToolEventProgress:
 
     @pytest.mark.asyncio
     async def test_goal_turn_keeps_file_edit_progress_for_webui(self, tmp_path: Path) -> None:
-        """The /goal command rewrites the prompt but must not bypass WebUI file-edit progress."""
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
@@ -396,7 +390,6 @@ class TestToolEventProgress:
         self,
         tmp_path: Path,
     ) -> None:
-        """Non-streaming channels should get one final reply, not token progress spam."""
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "openai-codex/gpt-5.5"
@@ -427,7 +420,6 @@ class TestToolEventProgress:
         self,
         tmp_path: Path,
     ) -> None:
-        """Streaming channels still receive provider deltas through stream events."""
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "openai-codex/gpt-5.5"
@@ -716,7 +708,6 @@ class TestToolEventProgress:
         self,
         tmp_path: Path,
     ) -> None:
-        """A no-tools finalization must not be dropped after empty stream retries."""
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "openai-codex/gpt-5.5"
@@ -918,7 +909,6 @@ class TestToolEventProgress:
         self,
         tmp_path: Path,
     ) -> None:
-        """Recovered streaming output should use a new stream segment."""
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "openai-codex/gpt-5.5"

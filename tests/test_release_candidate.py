@@ -1,15 +1,17 @@
-"""Candidate preparation uses real isolated Git repositories, never a live install."""
-
 import subprocess
 import tomllib
 from types import SimpleNamespace
+from zipfile import ZipFile
 
 import pytest
 
+from nanobot.releases import ReleaseArtifact, ReleaseManifest, release_filenames
+from scripts import release_candidate
 from scripts.release_candidate import (
     _candidate_identity,
     _source_payload,
     prepare_preview,
+    prepare_stable,
     preview_version,
 )
 
@@ -62,6 +64,31 @@ def test_dirty_source_is_not_accidentally_included_in_candidate(tmp_path, source
     assert not (tmp_path / "candidate/secret.txt").exists()
     assert "0.3.6.dev1" in (tmp_path / "candidate/nanobot/__init__.py").read_text()
     assert (root / "nanobot/__init__.py").read_text() == "uncommitted work"
+
+
+def test_stable_preparation_preserves_exact_source_and_ignores_local_changes(tmp_path, source):
+    root, commit = source
+    (root / "nanobot/__init__.py").write_text("uncommitted work")
+    target = tmp_path / "stable"
+    result = prepare_stable(root, target, source_commit=commit, version="0.3.5")
+    assert result == {"version": "0.3.5", "source_commit": commit, "candidate_commit": commit}
+    assert git(target, "rev-parse", "HEAD") == commit
+    assert git(target, "status", "--porcelain") == ""
+    assert _candidate_identity(target, commit) == ("0.3.5", ">=3.11", commit)
+    assert (root / "nanobot/__init__.py").read_text() == "uncommitted work"
+
+
+def test_stable_preparation_refuses_version_mismatch_and_published_identity(tmp_path, source):
+    root, commit = source
+    target = tmp_path / "stable"
+    with pytest.raises(ValueError, match="already declare"):
+        prepare_stable(root, target, source_commit=commit, version="0.4.0")
+    with pytest.raises(ValueError, match="final version"):
+        prepare_stable(root, target, source_commit=commit, version="0.4.0.dev1")
+    git(root, "tag", "v0.3.5")
+    with pytest.raises(ValueError, match="existing stable tag"):
+        prepare_stable(root, target, source_commit=commit, version="0.3.5")
+    assert not target.exists()
 
 
 def test_refuses_existing_output_and_published_stable_base(tmp_path, source):
@@ -120,8 +147,38 @@ def test_candidate_verifies_bundled_documentation_against_its_tracked_source(sou
     payload = _source_payload(root, packaged, prefix)
     assert payload[reference] == (root / "docs/README.md").read_bytes()
 
-    # Both the shipped reference and the source used to rebuild the sdist must
-    # match the reviewed documentation, not merely match each other.
     for name in (reference, "docs/README.md"):
         with pytest.raises(ValueError, match="differs from the candidate"):
             _source_payload(root, {**packaged, prefix + name: b"Unchecked instructions"}, prefix)
+
+
+def test_retained_source_survives_file_only_artifact_transport(tmp_path, source, monkeypatch):
+    root, commit = source
+    manifest = ReleaseManifest(
+        version="0.3.5", source_commit=commit, candidate_commit=commit,
+        requires_python=">=3.11",
+        artifacts=[ReleaseArtifact(filename=name, size=123, sha256="c" * 64)
+                   for name in sorted(release_filenames("0.3.5"))],
+    )
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    for artifact in manifest.artifacts:
+        (artifacts / artifact.filename).write_bytes(b"structurally verified elsewhere")
+    (artifacts / "release-manifest.json").write_text(manifest.model_dump_json(), encoding="utf-8")
+    monkeypatch.setattr(release_candidate, "verify_candidate", lambda *args, **kwargs: manifest)
+    monkeypatch.setattr(release_candidate, "write_install_guide", lambda *args, **kwargs: None)
+    retained = tmp_path / "retained"
+    release_candidate.retain_candidate(root, artifacts, retained, source_commit=commit)
+    with ZipFile(tmp_path / "handoff.zip", "w") as archive:
+        for path in retained.rglob("*"):
+            if path.is_file():
+                archive.write(path, path.relative_to(retained))
+    downloaded = tmp_path / "downloaded"
+    with ZipFile(tmp_path / "handoff.zip") as archive:
+        archive.extractall(downloaded)
+    restored = downloaded / "source.git"
+    git(restored, "fsck", "--full")
+    assert git(restored, "rev-parse", "HEAD") == commit
+    checkout = tmp_path / "checkout"
+    git(tmp_path, "clone", str(restored), str(checkout))
+    assert (checkout / "pyproject.toml").read_bytes() == (root / "pyproject.toml").read_bytes()

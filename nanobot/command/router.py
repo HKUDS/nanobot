@@ -1,5 +1,3 @@
-"""Minimal command routing table for slash commands."""
-
 from __future__ import annotations
 
 import re

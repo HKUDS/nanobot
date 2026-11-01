@@ -1,5 +1,3 @@
-"""Channel-owned address metadata retained for later session notifications."""
-
 from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any, cast

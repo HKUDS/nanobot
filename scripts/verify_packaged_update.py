@@ -3,7 +3,8 @@
 The healthy target is the exact supplied wheel, not a patched application. The
 default baseline is explicitly a version-only fixture with a local feed transport
 and bounded fault injection. It does not stand for an older published release.
-Use --baseline-wheel to exercise an actual earlier updater-enabled package too.
+Use --baseline-wheel to exercise an actual earlier updater-enabled package with
+SQLite session history, shared proxy configuration and a durable delivery outbox too.
 No public feed, user installation, model, credentials or OS service is used.
 """
 
@@ -19,7 +20,6 @@ import io
 import json
 import os
 import platform
-import re
 import secrets
 import signal
 import socket
@@ -192,7 +192,7 @@ def transport():
         for name, content in files.items():
             if name in info:
                 item = info[name]
-                item.filename = name  # Retain native executable permissions.
+                item.filename = name
                 archive.writestr(item, content)
             else:
                 archive.writestr(name, content)
@@ -253,7 +253,6 @@ def _dock_supported(root: Path) -> bool:
 
 
 def _desktop_webui(root: Path) -> None:
-    # The real managed receipt must select automatic detachment, not a test flag.
     subprocess.run([sys.executable, "-I", "-m", "nanobot", "webui", "--yes", "--no-open",
                     "--config", str(root / "account/.nanobot/config.json")], check=True, timeout=60)
 
@@ -308,49 +307,12 @@ def history(root: Path, key: str):
     return {name: response[name] for name in ("events", "completed_turn_ids")}
 
 
-def assert_history_preserved(before: dict, after: dict) -> None:
-    """Allow only known additive defaults in the older transcript projection."""
-    assert after["completed_turn_ids"] == before["completed_turn_ids"]
-    assert len(after["events"]) == len(before["events"])
-    for previous, current in zip(before["events"], after["events"], strict=True):
-        current = dict(current)
-        # SQLite represents an unknown legacy timestamp as zero. New projection
-        # also exposes the already-persisted inactive goal on a completed turn.
-        # Do not ignore these fields when the old API supplied an actual value.
-        if "created_at_ms" not in previous and current.get("created_at_ms") == 0:
-            del current["created_at_ms"]
-        if (previous["event"] == "turn_end" and "goal_state" not in previous
-                and current.get("goal_state") == {"active": False}):
-            del current["goal_state"]
-        assert current == previous, (current, previous)
-
-
 def canonical_records(path: Path, tables: tuple[str, ...] = ("sessions", "messages", "checkpoints", "pending_inputs")) -> dict:
     """Compare logical records, not SQLite's transient WAL/checkpoint layout."""
     with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db:
         assert db.execute("PRAGMA integrity_check").fetchone() == ("ok",)
         return {table: [list(row) for row in db.execute(f"SELECT * FROM {table} ORDER BY 1, 2")]
                 for table in tables}
-
-
-def assert_canonical_preserved(before: dict, after: dict) -> None:
-    """Schema v2 may add a display-only owner, never model context or lost rows."""
-    key = "websocket:display-only"
-    existing = {row[0] for row in before["sessions"]}
-    added = [row for row in after["sessions"] if row[0] == key and key not in existing]
-    for row in added:
-        # A newly imported display transcript owns an empty Session. Only its
-        # identity/timestamps and the public handle allocated by /api/sessions
-        # are new; it must not manufacture agent context or other metadata.
-        metadata = json.loads(row[3])
-        if metadata:
-            assert set(metadata) == {"session_handle"}, row
-            handle = metadata["session_handle"]
-            assert isinstance(handle, str) and re.fullmatch("[a-z]{4,16}", handle), row
-        revision = 2 if metadata else 1
-        assert row[4:7] == [None, 0, revision] and row[8:] == ["", "", None], row
-    comparable = {**after, "sessions": [row for row in after["sessions"] if row not in added]}
-    assert comparable == before, (comparable, before)
 
 
 def canonical_context(root: Path) -> dict:
@@ -400,10 +362,28 @@ def ready(root: Path, version: str):
     raise RuntimeError("The actual installed gateway did not become ready")
 
 
+def seed_history(root: Path) -> None:
+    from nanobot.session.display_history import HistoryFact, HistoryKind
+    from nanobot.session.manager import Session, SessionManager
+
+    sessions = SessionManager(root / "workspace")
+    for key in ("websocket:mixed-history", "websocket:canonical-only"):
+        sessions.save(Session(key=key, metadata={"title": "升级前的聊天"},
+                              messages=[{"role": "user", "content": "配置和聊天不能丢失"}]))
+    for chat_id in ("mixed-history", "display-only"):
+        sessions.append_history("websocket:" + chat_id, [
+            HistoryFact(HistoryKind.INPUT, {"text": "配置和聊天不能丢失"}, turn_id="fixture-" + chat_id),
+            HistoryFact(HistoryKind.ANSWER, {"text": "独立验收数据"}, turn_id="fixture-" + chat_id),
+            HistoryFact(HistoryKind.COMPLETION, turn_id="fixture-" + chat_id),
+        ])
+
+
 def seed(root: Path) -> None:
     import nanobot
+    from nanobot.bus.delivery import DeliveryRequest
+    from nanobot.bus.events import OutboundMessage
+    from nanobot.channels.outbox import DeliveryOutbox
     from nanobot.config.loader import load_config, save_config, set_config_path
-    from nanobot.config.paths import get_webui_dir
 
     assert Path(nanobot.__file__).resolve().is_relative_to(Path(sys.prefix).resolve())
     config_path = root / "account/.nanobot/config.json"
@@ -417,37 +397,19 @@ def seed(root: Path) -> None:
     config.agents.defaults.session_ttl_minutes = 0
     config.providers.custom.api_key = "fixture-not-a-secret"
     config.providers.custom.api_base = "http://127.0.0.1:1/v1"
+    config.network.proxy = "http://127.0.0.1:9"
+    config.providers.custom.use_proxy = True
     config.gateway.host, config.gateway.port = "127.0.0.1", free_port()
     config.gateway.heartbeat.enabled = False
     config.channels.websocket = {"enabled": True, "host": "127.0.0.1", "port": free_port(),
                                  "tokenIssueSecret": secrets.token_urlsafe(32), "websocketRequiresToken": True}
     save_config(config, config_path)
-    # Real historical canonical files are imported by the installed SQLite owner,
-    # not generated by a new-store round trip. Existing source bytes stay readable.
-    if importlib.util.find_spec("nanobot.session.location") is not None:
-        from nanobot.session.location import SessionLocation
-        location = SessionLocation(root / "workspace")
-    else:
-        # The retained pre-SQLite package owns the same namespace here. This is
-        # acceptance-fixture compatibility, not a fallback in the application.
-        from nanobot.session.manager import JsonlSessionStore
-        location = JsonlSessionStore(root / "workspace")
-    sessions = location.sessions_dir
-    key = "websocket:legacy-acceptance"
-    legacy = sessions / (location.storage_key(key) + ".jsonl")
-    legacy.write_text(json.dumps({"_type": "metadata", "key": key, "metadata": {"title": "升级前的聊天"},
-                                 "created_at": "2026-01-01T00:00:00", "updated_at": "2026-01-01T00:00:00"}) + "\n" +
-                      json.dumps({"role": "user", "content": "配置和聊天不能丢失"}, ensure_ascii=False) + "\n", encoding="utf-8")
-    canonical_only = sessions / (location.storage_key("websocket:canonical-only") + ".jsonl")
-    canonical_only.write_bytes(legacy.read_bytes().replace(key.encode(), b"websocket:canonical-only"))
-    webui_dir = get_webui_dir()
-    webui_dir.mkdir(parents=True, exist_ok=True)
-    for chat_id in ("legacy-acceptance", "display-only"):
-        events = [{"event": "user", "chat_id": chat_id, "text": "配置和聊天不能丢失"},
-                  {"event": "message", "chat_id": chat_id, "text": "独立验收数据"},
-                  {"event": "turn_end", "chat_id": chat_id}]
-        (webui_dir / f"websocket_{chat_id}.jsonl").write_text(
-            "".join(json.dumps(event, ensure_ascii=False) + "\n" for event in events), encoding="utf-8")
+    seed_history(root)
+    with patch("nanobot.channels.outbox.time.time", return_value=time.time() + 3600):
+        DeliveryOutbox(config_path.parent / "delivery/outbox.sqlite3").record(OutboundMessage(
+            "whatsapp", "acceptance-offline", "Retain this scheduled result",
+            delivery=DeliveryRequest("acceptance-run", "websocket:mixed-history", None),
+        ))
     if _dock_supported(root):
         _desktop_webui(root)
         _wait_dock(_dock_socket(root), present=True)
@@ -456,56 +418,36 @@ def seed(root: Path) -> None:
 
 
 def snapshot(root: Path) -> None:
-    from nanobot.config.loader import set_config_path
-    from nanobot.config.paths import get_webui_dir
+    from nanobot.config.loader import load_config, set_config_path
+    from nanobot.session.location import SessionLocation
 
     case = read(root / "case.json")
     config_path = root / "account/.nanobot/config.json"
     set_config_path(config_path)
+    config = load_config(config_path)
+    assert config.network.proxy == "http://127.0.0.1:9" and config.providers.custom.use_proxy
     delivery = config_path.parent / "delivery/outbox.sqlite3"
-    if not delivery.exists() and importlib.util.find_spec("nanobot.channels.outbox") is not None:
-        from nanobot.bus.delivery import DeliveryRequest
-        from nanobot.bus.events import OutboundMessage
-        from nanobot.channels.outbox import DeliveryOutbox
-
-        # Keep a real durable result pending through the private journey without
-        # attempting an external send. Older retained code has no outbox owner.
-        with patch("nanobot.channels.outbox.time.time", return_value=time.time() + 3600):
-            DeliveryOutbox(delivery).record(OutboundMessage(
-                "whatsapp", "acceptance-offline", "Retain this scheduled result",
-                delivery=DeliveryRequest("acceptance-run", "websocket:legacy-acceptance", None),
-            ))
-    if importlib.util.find_spec("nanobot.session.location") is not None:
-        from nanobot.session.location import SessionLocation
-        location = SessionLocation(root / "workspace")
-    else:
-        from nanobot.session.manager import JsonlSessionStore
-        location = JsonlSessionStore(root / "workspace")
-    sessions, webui_dir = location.sessions_dir, get_webui_dir()
-    key = "websocket:legacy-acceptance"
-    legacy = sessions / (location.storage_key(key) + ".jsonl")
-    canonical_only = sessions / (location.storage_key("websocket:canonical-only") + ".jsonl")
+    sessions = SessionLocation(root / "workspace").sessions_dir
+    key = "websocket:mixed-history"
     receipt = ready(root, case["baseline_version"])
     chat_id = (read(root / "before.json")["chat_id"] if (root / "before.json").exists()
                else asyncio.run(chat(root)))
     before = history(root, "websocket:" + chat_id)
-    legacy_before = history(root, key)
+    mixed_before = history(root, key)
     display_before = history(root, "websocket:display-only")
     context_before = canonical_context(root)
     assert context_before["total_messages"] == 1
-    assert "配置和聊天不能丢失" in json.dumps(legacy_before, ensure_ascii=False)
-    # Immutable files plus public logical records: SQLite/WAL checkpoint bytes
-    # may legitimately change across a clean shutdown without changing a record.
-    preserved = {str(path): digest(path) for path in (legacy, canonical_only,
-                 webui_dir / "websocket_legacy-acceptance.jsonl", webui_dir / "websocket_display-only.jsonl")}
-    preserved[str(config_path)] = digest(config_path)
-    write(root / "before.json", {"chat_id": chat_id, "history": before, "legacy": legacy_before,
+    assert "配置和聊天不能丢失" in json.dumps(mixed_before, ensure_ascii=False)
+    assert "独立验收数据" in json.dumps(mixed_before, ensure_ascii=False)
+    assert "独立验收数据" in json.dumps(display_before, ensure_ascii=False)
+    delivery_before = canonical_records(delivery, ("deliveries",))
+    assert any(row[1] == "acceptance-run" and row[5] == "pending" for row in delivery_before["deliveries"])
+    # SQLite/WAL bytes may change on shutdown; compare their logical records.
+    write(root / "before.json", {"chat_id": chat_id, "history": before, "mixed": mixed_before,
                                 "display_only": display_before, "canonical_only": context_before,
-                                "files": preserved, "run_id": receipt.run_id,
-                                "database": str(sessions / "sessions.sqlite3"),
-                                "delivery": (canonical_records(delivery, ("deliveries",)) if delivery.exists() else None),
-                                "canonical": (canonical_records(sessions / "sessions.sqlite3")
-                                              if (sessions / "sessions.sqlite3").exists() else None)})
+                                "files": {str(config_path): digest(config_path)}, "run_id": receipt.run_id,
+                                "database": str(sessions / "sessions.sqlite3"), "delivery": delivery_before,
+                                "canonical": canonical_records(sessions / "sessions.sqlite3")})
 
 
 def prepare(root: Path) -> None:
@@ -560,7 +502,7 @@ def verify(root: Path) -> dict:
     if not restored:
         assert COMMIT == case["commit"]
         assert digest(Path(case["target_wheel"])) == case["target_sha256"]
-    sqlite_expected = verify_data(root, expected)
+    verify_data(root, expected)
     if case["scenario"] in {"worker-exit", "metadata-loss"}:
         assert (directory / "fault-fired").exists()
     if case["scenario"] in {"worker-exit", "metadata-loss", "backup-failure"}:
@@ -568,19 +510,22 @@ def verify(root: Path) -> dict:
     if case["scenario"] == "restore-interruption":
         assert (directory / "restore-fault-fired").exists()
     return {**case, "phase": status.phase.value, "running_version": receipt.version,
-            "restarted": True, "config_and_legacy_bytes_preserved": True,
-            "authenticated_history_preserved": True, "sqlite_records_preserved": True if sqlite_expected else None,
-            "scheduled_delivery_preserved": True if before.get("delivery") is not None else None,
+            "history_fixture": "native-sqlite", "config_bytes_preserved": True,
+            "restarted": True, "authenticated_history_preserved": True, "sqlite_records_preserved": True,
+            "scheduled_delivery_preserved": True,
             "continued_write_and_second_start": True,
             "dock_socket": str(_dock_socket(root)) if _dock_supported(root) else None,
             "dock_restart_verified": True if _dock_supported(root) else None}
 
 
-def verify_data(root: Path, expected: str) -> bool:
+def verify_data(root: Path, expected: str) -> None:
     """Public reads and subsequent writes, shared by inline and owner-driven updates."""
-    from nanobot.config.loader import set_config_path
+    from nanobot.config.loader import load_config, set_config_path
 
-    set_config_path(root / "account/.nanobot/config.json")
+    config_path = root / "account/.nanobot/config.json"
+    set_config_path(config_path)
+    config = load_config(config_path)
+    assert config.network.proxy == "http://127.0.0.1:9" and config.providers.custom.use_proxy
     before = read(root / "before.json")
     receipt = ready(root, expected)
     assert receipt.run_id != before["run_id"], "Update did not restart the gateway"
@@ -588,36 +533,28 @@ def verify_data(root: Path, expected: str) -> bool:
         from nanobot.gateway.runtime import GatewayInstance
 
         instance = GatewayInstance.resolve(config_path=root / "account/.nanobot/config.json")
-        # A historical package without this feature cannot record desktop intent.
-        # After that first upgrade, exercise the real new launcher, then restart.
         if not instance.paths.state_path.with_suffix(".dock").exists():
             _desktop_webui(root)
         _wait_dock(_dock_socket(root), present=True)
     assert {name: digest(Path(name)) for name in before["files"]} == before["files"]
     key = "websocket:" + before["chat_id"]
-    assert_history_preserved(before["history"], history(root, key))
-    assert_history_preserved(before["legacy"], history(root, "websocket:legacy-acceptance"))
-    assert_history_preserved(before["display_only"], history(root, "websocket:display-only"))
-    assert canonical_context(root) == before["canonical_only"], (canonical_context(root), before["canonical_only"])
+    assert history(root, key) == before["history"]
+    assert history(root, "websocket:mixed-history") == before["mixed"]
+    assert history(root, "websocket:display-only") == before["display_only"]
+    assert canonical_context(root) == before["canonical_only"]
     database = Path(before["database"])
-    sqlite_expected = importlib.util.find_spec("nanobot.session.location") is not None
-    canonical = canonical_records(database) if sqlite_expected else None
-    if before["canonical"] is not None:
-        assert_canonical_preserved(before["canonical"], canonical)
+    canonical = canonical_records(database)
+    assert canonical == before["canonical"]
     delivery = root / "account/.nanobot/delivery/outbox.sqlite3"
-    if before.get("delivery") is not None:
-        assert canonical_records(delivery, ("deliveries",)) == before["delivery"]
-    if canonical is not None:
-        # Display transcripts are not canonical agent context. Check the actual
-        # imported message bodies too when the baseline predates SQLite.
-        assert not any(row[0] == "websocket:display-only" for row in canonical["messages"])
-        for session_key in ("websocket:legacy-acceptance", "websocket:canonical-only"):
-            messages = [json.loads(row[2]) for row in canonical["messages"] if row[0] == session_key]
-            assert [(message["role"], message["content"]) for message in messages] == [
-                ("user", "配置和聊天不能丢失")]
+    assert canonical_records(delivery, ("deliveries",)) == before["delivery"]
+    assert not any(row[0] == "websocket:display-only" for row in canonical["messages"])
+    for session_key in ("websocket:mixed-history", "websocket:canonical-only"):
+        messages = [json.loads(row[2]) for row in canonical["messages"] if row[0] == session_key]
+        assert [(message["role"], message["content"]) for message in messages] == [
+            ("user", "配置和聊天不能丢失")]
     asyncio.run(chat(root, before["chat_id"]))
     continued = history(root, key)
-    canonical = canonical_records(database) if sqlite_expected else None
+    canonical = canonical_records(database)
     assert len(continued["events"]) > len(before["history"]["events"])
     gateway(root, "stop")
     if _dock_supported(root):
@@ -627,15 +564,12 @@ def verify_data(root: Path, expected: str) -> bool:
     if _dock_supported(root):
         _wait_dock(_dock_socket(root), present=True)
     assert history(root, key) == continued
-    assert_history_preserved(before["legacy"], history(root, "websocket:legacy-acceptance"))
-    assert_history_preserved(before["display_only"], history(root, "websocket:display-only"))
+    assert history(root, "websocket:mixed-history") == before["mixed"]
+    assert history(root, "websocket:display-only") == before["display_only"]
     assert canonical_context(root) == before["canonical_only"]
-    if sqlite_expected:
-        assert canonical_records(database) == canonical
-    if before.get("delivery") is not None:
-        assert canonical_records(delivery, ("deliveries",)) == before["delivery"]
+    assert canonical_records(database) == canonical
+    assert canonical_records(delivery, ("deliveries",)) == before["delivery"]
     assert {name: digest(Path(name)) for name in before["files"]} == before["files"]
-    return sqlite_expected
 
 
 def isolated_environment(root: Path) -> dict[str, str]:
@@ -722,7 +656,7 @@ def run_parallel(args, root: Path, target: Path, version: str, original_hash: st
             for worker, selected in enumerate(groups, 1):
                 lane = root / f"lane-{worker}"
                 lane.mkdir(mode=0o700)
-                output = lane / "run"  # The child exclusively creates this root.
+                output = lane / "run"
                 env = isolated_environment(lane)
                 # Controller dependencies are shared read-only; do not write
                 # bytecode into their environment from either lane.
@@ -767,8 +701,6 @@ def run_parallel(args, root: Path, target: Path, version: str, original_hash: st
                     print(f"FAIL lane-{worker}: controller exited with status {status}", flush=True)
         finally:
             cleanup_failed = False
-            # Finish or terminate every owned controller before importing JSON.
-            # An ordinary failing lane does not interrupt another lane's cleanup.
             for _, selected, output, process, owner in jobs:
                 try:
                     stop_controller(process, owner)
@@ -804,24 +736,29 @@ def run_serial(args, root: Path, target: Path, version: str, original_hash: str,
 
     environment = root / "managed"
     python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    base = Version(version).release
-    baseline_version = ".".join(map(str, (*base[:-1], max(0, base[-1] - 1))))
-    if Version(baseline_version) >= Version(version):
-        raise ValueError("Select a baseline wheel for this candidate version")
     baseline_source = args.baseline_wheel.resolve(strict=True) if args.baseline_wheel else target
     if args.baseline_wheel:
         baseline_version = str(parse_wheel_filename(baseline_source.name)[1])
-        if Version(baseline_version) >= Version(version):
-            raise ValueError("Baseline must precede the target")
+    else:
+        base = list(Version(version).release)
+        for index in reversed(range(len(base))):
+            if base[index]:
+                base[index] -= 1
+                break
+        baseline_version = ".".join(map(str, base))
+    if Version(baseline_version) >= Version(version):
+        raise ValueError("Baseline must precede the target; select an earlier baseline wheel")
     results = []
     system = isolated_environment(root)
-    # Install once per lane, without inherited user pip settings; every case
-    # resets only nanobot. No mutable venv or dependency snapshot crosses lanes.
+    # Version-only fixtures share the target's dependency constraints. Real
+    # historical packages must resolve their own dependencies for every case.
+    # No mutable venv or dependency snapshot crosses lanes.
     with timings.measure("venv"):
         subprocess.run([sys.executable, "-I", "-B", "-m", "venv", str(environment)], check=True, env=system, timeout=90)
-    with timings.measure("initial_dependency_install"):
-        subprocess.run([str(python), "-I", "-m", "pip", "install", "--only-binary=:all:", str(target)],
-                       check=True, env=system, timeout=600, stdout=subprocess.DEVNULL)
+    if not args.baseline_wheel:
+        with timings.measure("initial_dependency_install"):
+            subprocess.run([str(python), "-I", "-m", "pip", "install", "--only-binary=:all:", str(target)],
+                           check=True, env=system, timeout=600, stdout=subprocess.DEVNULL)
     write(environment / "nanobot-install.json", {"schema_version": 1, "owner": "nanobot-installer",
                                                "environment": str(environment), "extras": []})
     for scenario in scenarios:
@@ -860,8 +797,10 @@ def run_serial(args, root: Path, target: Path, version: str, original_hash: str,
                         "target_unmodified": selected == target}
                 write(case_root / "case.json", case)
             with timings.measure("baseline_install", scenario=scenario, journey=1):
-                subprocess.run([str(python), "-I", "-m", "pip", "install", "--no-deps", "--force-reinstall", str(baseline)],
-                               check=True, env=env, timeout=120, stdout=subprocess.DEVNULL)
+                dependencies = ["--only-binary=:all:"] if args.baseline_wheel else ["--no-deps"]
+                subprocess.run([str(python), "-I", "-m", "pip", "install", *dependencies,
+                                "--force-reinstall", str(baseline)], check=True, env=env,
+                               timeout=600 if args.baseline_wheel else 120, stdout=subprocess.DEVNULL)
             child = [str(python), "-I", str(Path(__file__).resolve())]
             # Raw logs stay private to this local evidence root, including on success.
             with (case_root / "acceptance.log").open("w", encoding="utf-8") as log:
@@ -908,8 +847,6 @@ def run_serial(args, root: Path, target: Path, version: str, original_hash: str,
                         if config_file.exists():
                             config = read(config_file)
                             _wait_for_closed_listeners((config["gateway"]["port"], config["channels"]["websocket"]["port"]))
-                        # No journey result exists on failure; successful journeys
-                        # also retain the existing native Dock shutdown assertion.
                         if results and results[-1]["scenario"] == scenario:
                             results[-1]["gateway_process_stopped"] = True
                             dock_address = results[-1].get("dock_socket")

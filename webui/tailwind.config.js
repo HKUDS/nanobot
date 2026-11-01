@@ -79,6 +79,10 @@ export default {
         prominent: "var(--radius-prominent)",
       },
       colors: {
+        "content-link": {
+          DEFAULT: "var(--content-link)",
+          hover: "var(--content-link-hover)",
+        },
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
         card: {

@@ -2,13 +2,11 @@
   "setup": {
     "docsLabel": "開啟代理設定指南",
     "officialLabel": "開啟 WhatsApp 代理說明",
-    "summary": "透過 WhatsApp Agent Platform API 連接 nanobot。只有你可以與它對話，它無法存取你的其他 WhatsApp 聊天。",
     "privacyNotice": "代理對話不採用端對端加密。訊息由 nanobot 和你設定的模型服務供應商處理。",
     "fields": {
       "token": {
         "label": "API 權杖",
-        "placeholder": "在 WhatsApp 中開啟 設定 → 代理，建立代理，然後從代理聊天 → 聊天資訊 → API 金鑰 複製金鑰。",
-        "help": "在 WhatsApp 中開啟 設定 → 代理，建立代理，然後從代理聊天 → 聊天資訊 → API 金鑰 複製金鑰。"
+        "placeholder": "在 WhatsApp 中開啟 設定 → 代理，建立代理，然後從代理聊天 → 聊天資訊 → API 金鑰 複製金鑰。"
       },
       "allowFrom": {
         "label": "允許的寄件者",

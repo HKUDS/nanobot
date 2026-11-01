@@ -1,5 +1,3 @@
-"""Internal model calls consume active streams and stop when the stream goes idle."""
-
 import asyncio
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable

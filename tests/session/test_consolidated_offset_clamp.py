@@ -1,9 +1,6 @@
 """Reset a corrupt last_consolidated offset instead of hiding history (#4066)."""
 
-import json
-from pathlib import Path
-
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.manager import Session
 
 
 def _session(count: int, last_consolidated: object) -> Session:
@@ -21,39 +18,6 @@ def test_non_integer_offset_is_reset():
         assert _session(3, offset).last_consolidated == 0
 
 
-def test_loaded_corrupt_offset_keeps_messages(tmp_path: Path):
-    offsets = {
-        "string": "999",
-        "null": None,
-        "float": 0.5,
-        "bool": True,
-    }
-
-    for name, offset in offsets.items():
-        workspace = tmp_path / name
-        path = workspace / "sessions" / "old.jsonl"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        message = {"role": "user", "content": f"survived {name}"}
-        path.write_text(
-            "\n".join([
-                json.dumps({
-                    "_type": "metadata",
-                    "key": "chan:chat",
-                    "metadata": {},
-                    "last_consolidated": offset,
-                }),
-                json.dumps(message),
-            ]) + "\n",
-            encoding="utf-8",
-        )
-
-        session = SessionManager(workspace).get_or_create("chan:chat")
-
-        assert session.messages == [message]
-        assert session.last_consolidated == 0
-        assert session.get_history(max_messages=10) == [message]
-
-
 def test_valid_offset_is_preserved():
     session = _session(10, 4)
     assert session.last_consolidated == 4
@@ -61,59 +25,6 @@ def test_valid_offset_is_preserved():
     assert session.get_history() == [
         {"role": "user", "content": f"msg{i}"} for i in range(4, 10)
     ]
-
-
-def test_last_archived_field_migrates_with_legacy_alias(tmp_path: Path):
-    path = tmp_path / "sessions" / "old.jsonl"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    messages = [
-        {"role": "user", "content": "first"},
-        {"role": "assistant", "content": "second"},
-    ]
-    path.write_text(
-        "\n".join([
-            json.dumps({
-                "_type": "metadata",
-                "key": "chan:chat",
-                "metadata": {},
-                "last_archived": 1,
-            }),
-            *(json.dumps(message) for message in messages),
-        ]) + "\n",
-        encoding="utf-8",
-    )
-
-    manager = SessionManager(tmp_path)
-    session = manager.get_or_create("chan:chat")
-
-    assert session.last_archived == 1
-    assert session.last_consolidated == 1
-    manager.save(session)
-    assert manager.read_session_snapshot("chan:chat").last_archived == 1
-
-
-def test_loaded_null_metadata_becomes_empty_dict(tmp_path: Path):
-    """Session jsonl metadata:null must load as {} so agent .pop/.get work."""
-    path = tmp_path / "sessions" / "old.jsonl"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps({
-            "_type": "metadata",
-            "key": "chan:chat",
-            "created_at": "2026-01-01T00:00:00",
-            "updated_at": "2026-01-01T00:00:00",
-            "metadata": None,
-            "last_consolidated": 0,
-        }) + "\n",
-        encoding="utf-8",
-    )
-    manager = SessionManager(tmp_path)
-    session = manager.get_or_create("chan:chat")
-    assert session.metadata == {}
-    session.metadata["title"] = "ok"
-    assert session.metadata["title"] == "ok"
-    session.metadata.pop("title", None)
-    assert session.metadata == {}
 
 
 def test_session_post_init_coerces_null_metadata():

@@ -7,6 +7,7 @@ import type { ClipboardImageReader } from "../composer/clipboard-image"
 import { options, client, mount, waitUntil, occurrences } from "./test-support"
 import { LOCAL_COMMANDS } from "./commands"
 import type { CommandMenu } from "../menus/command-menu"
+import type { Transcript } from "../rendering/transcript"
 
 describe("NanobotTui composer", () => {
   let setup: TestRendererSetup | undefined
@@ -986,8 +987,8 @@ describe("NanobotTui composer", () => {
     expect(sent).toEqual(["start an active turn"])
   })
 
-  test("runs bang commands through the gateway without steering the agent", async () => {
-    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
+  test("runs bang commands through the gateway and copies their literal output without steering the agent", async () => {
+    setup = await createRenderer({ width: 100, height: 32, screenMode: "alternate-screen" })
     const sent: string[] = []
     const sentOptions: MessageOptions[] = []
     const app = NanobotTui.mount(
@@ -997,7 +998,9 @@ describe("NanobotTui composer", () => {
       new MockTreeSitterClient({ autoResolveTimeout: 0 }),
     )
     app.accept({ event: "attached", chat_id: "chat" })
-    const ui = app as unknown as { ready: boolean; composer: TextareaRenderable; activeTurn: boolean }
+    const ui = app as unknown as {
+      ready: boolean; composer: TextareaRenderable; activeTurn: boolean; transcript: Transcript
+    }
     await waitUntil(() => ui.ready)
 
     app.accept({ event: "goal_status", chat_id: "chat", status: "running" })
@@ -1009,9 +1012,32 @@ describe("NanobotTui composer", () => {
     expect(sentOptions).toEqual([{ userShell: true }])
     expect(ui.activeTurn).toBe(true)
 
-    app.accept({ event: "message", chat_id: "chat", text: "/tmp/project", turn_id: "turn" })
+    const output = [
+      "  __pycache__ `ticks` ``` ````",
+      "![image](image.png) <b>HTML</b>",
+      "\\(x_1^2\\)",
+      "```mermaid",
+      "graph TD; A --> B",
+      "```",
+      "",
+    ].join("\n")
+    app.accept({ event: "message", chat_id: "chat", text: output, render_as: "text", turn_id: "turn" })
     await setup.flush()
-    expect(setup.captureCharFrame()).toContain("/tmp/project")
+    const text = ui.transcript.root.getChildren().flatMap((row) => row.getChildren())
+      .find((child) => child instanceof TextRenderable && child.plainText === output)
+    expect(text).toBeInstanceOf(TextRenderable)
+    expect(setup.captureCharFrame()).toContain("![image](image.png) <b>HTML</b>")
+    expect(setup.captureCharFrame()).toContain("\\(x_1^2\\)")
+    expect(setup.captureCharFrame()).toContain("```mermaid")
     expect(ui.activeTurn).toBe(true)
+
+    let copied = ""
+    setup.renderer.copyToClipboardOSC52 = (value) => { copied = value; return true }
+    if (!(text instanceof TextRenderable)) throw new Error("missing literal shell output")
+    await setup.mockMouse.drag(text.screenX, text.screenY, text.screenX, text.screenY + text.height - 1)
+    expect(setup.renderer.getSelection()?.getSelectedText()).toBe(output)
+    setup.mockInput.pressCtrlC()
+    await waitUntil(() => copied.length > 0)
+    expect(copied).toBe(output)
   })
 })

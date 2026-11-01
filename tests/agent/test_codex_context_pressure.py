@@ -1,5 +1,3 @@
-"""Exercise request governance through the Codex transport boundary."""
-
 from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -200,12 +198,10 @@ async def test_without_pre_request_compaction_pressure_uses_local_summary(monkey
         monkeypatch.setattr(provider, "supports_pre_request_compaction", lambda _model: False)
     else:
         monkeypatch.setattr(provider, "can_resume_conversation_state", lambda *_args: False)
-        # With no replayable state, pressure must come from the actual transcript.
     state, raw, consolidate = _request_state(
         provider, repetitions=70_000 if mode == "incompatible_state" else 15_000,
     )
     if mode == "incompatible_state":
-        # Put the large content in accepted history so its replacement can fit.
         state.compaction.accepted_messages = deepcopy(raw)
         state.compaction.raw_accepted_boundary = len(raw)
     _, context = await ContextGovernor().prepare_request(

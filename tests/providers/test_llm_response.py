@@ -25,13 +25,11 @@ def _response(finish_reason: str, *, with_tool_call: bool = True) -> LLMResponse
 
 class TestShouldExecuteTools:
     def test_no_tool_calls_never_executes(self) -> None:
-        # No tool calls present -> guard must reject regardless of finish_reason.
         for reason in ("tool_calls", "stop", "length", "error", "refusal", "content_filter"):
             resp = _response(reason, with_tool_call=False)
             assert resp.should_execute_tools is False, f"rejected for finish_reason={reason!r}"
 
     def test_tool_calls_with_tool_calls_reason_executes(self) -> None:
-        # The canonical case: provider explicitly signals tool intent.
         resp = _response("tool_calls")
         assert resp.has_tool_calls is True
         assert resp.should_execute_tools is True

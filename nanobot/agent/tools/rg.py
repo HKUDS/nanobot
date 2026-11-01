@@ -1,5 +1,3 @@
-"""Installed ripgrep with native arguments and shared process controls."""
-
 # pyright: reportIncompatibleMethodOverride=false
 
 from __future__ import annotations

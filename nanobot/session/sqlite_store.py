@@ -1,5 +1,3 @@
-"""Transactional SQLite storage for private conversation state."""
-
 from __future__ import annotations
 
 import json
@@ -13,7 +11,7 @@ from pathlib import Path
 from typing import Any, TypeVar, cast
 
 from nanobot.providers.base import ProviderConversationState
-from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind, HistoryReader
+from nanobot.session.display_history import HistoryFact, HistoryKind, HistoryReader
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import (
     Session,
@@ -183,9 +181,8 @@ class SqliteSessionStore:
             if owned:
                 connection.close()
 
-    def initialize(self, workspace: Path) -> None:
-        """Upgrade the schema and import legacy sessions in one atomic transaction."""
-        workspace = workspace.expanduser().resolve(strict=False)
+    def initialize(self) -> None:
+        """Initialize or upgrade the SQLite schema."""
         # WAL is persistent and must be enabled outside a transaction.
         if self.path.is_symlink():
             raise RuntimeError("session database must not be a symlink")
@@ -211,22 +208,6 @@ class SqliteSessionStore:
             for target, migrate in enumerate(_SCHEMA_MIGRATIONS[version:], start=version + 1):
                 migrate(db)
                 db.execute(f"PRAGMA user_version = {target}")
-            marker = db.execute(
-                "SELECT value FROM storage_meta WHERE key='jsonl_import'"
-            ).fetchone()
-            if marker is None:
-                from nanobot.session.jsonl_migration import migrate_jsonl
-
-                migrate_jsonl(self, workspace)
-                db.execute("INSERT INTO storage_meta (key, value) VALUES ('jsonl_import', 'complete')")
-            elif marker[0] != "complete":
-                raise RuntimeError(
-                    f"invalid JSONL migration marker in {self.path}: {marker[0]!r}; "
-                    "restore a valid database backup or repair the marker explicitly"
-                )
-        from nanobot.session.jsonl_migration import finish_workspace_migration
-
-        finish_workspace_migration(self, workspace)
 
     def _metadata(self, db: sqlite3.Connection, key: str, raw: str) -> dict[str, Any]:
         metadata = _object(raw)
@@ -420,36 +401,6 @@ class SqliteSessionStore:
                 "updated_at": session.updated_at.isoformat(),
                 "metadata": session.metadata, "messages": session.messages}
 
-    def migrate_history(
-        self, name: str, collect: Callable[[list[SessionInfo]], list[HistoryImport]],
-    ) -> None:
-        """Commit a channel-owned legacy import and its once-only marker together."""
-        with self.transaction() as db:
-            marker = db.execute("SELECT value FROM storage_meta WHERE key=?", (name,)).fetchone()
-            if marker is not None:
-                if marker[0] != "complete":
-                    raise RuntimeError(f"invalid history import marker: {name}")
-                return
-            for item in collect(self.list_sessions()):
-                session = self.load(item.key, history=False)
-                if session is None:
-                    session = Session(key=item.key)
-                    if item.created_at_ms:
-                        session.created_at = datetime.fromtimestamp(item.created_at_ms / 1000)
-                    if item.updated_at_ms:
-                        session.updated_at = datetime.fromtimestamp(item.updated_at_ms / 1000)
-                    self.save(session)
-                revision = self.project_history(item.key, lambda reader: reader.revision)
-                if revision is not None and revision[1] >= 0:
-                    raise SessionConflictError(f"history already exists before import: {item.key}")
-                self.append_history(item.key, item.facts, expected_generation=session.generation)
-                db.execute("UPDATE history_heads SET updated_at_ms=max(updated_at_ms, ?) WHERE session_key=?",
-                           (item.updated_at_ms, item.key))
-                # Import ownership survives deletion: another namespace must not
-                # mistake this instance-wide backup for a new orphan later.
-                db.execute("INSERT INTO storage_meta (key, value) VALUES (?, 'complete')", (f"{name}:{item.key}",))
-            db.execute("INSERT INTO storage_meta (key, value) VALUES (?, 'complete')", (name,))
-
     def project_history(self, key: str, project: Callable[[HistoryReader], _T]) -> _T:
         """Project durable display facts and canonical messages from one snapshot."""
         with self.transaction(write=False) as db:
@@ -575,7 +526,6 @@ class SqliteSessionStore:
                     ORDER BY sessions.updated_at DESC
                 )
             """).fetchone()[0]
-            # The SQL projection constructs this list and its dictionary fields.
             rows = cast(list[dict[str, Any]], json.loads(encoded))
             for row in rows:
                 row["path"] = str(self.path)

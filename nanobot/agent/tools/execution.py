@@ -1,5 +1,3 @@
-"""Execute tool calls and turn their outcomes into model observations."""
-
 from __future__ import annotations
 
 import asyncio
@@ -35,7 +33,6 @@ _SSRF_BOUNDARY_NOTE = (
     "If the user explicitly trusts this private URL, ask them to whitelist "
     "the exact IP/CIDR via tools.ssrfWhitelist."
 )
-# Non-SSRF boundary markers returned to the model as recoverable tool errors.
 _WORKSPACE_VIOLATION_MARKERS: tuple[str, ...] = (
     "outside the configured workspace",
     "outside allowed directory",
@@ -225,7 +222,6 @@ def is_ssrf_violation(text: str) -> bool:
 
 
 def _is_workspace_violation(text: str) -> bool:
-    """Return whether text describes any workspace or network boundary rejection."""
     if not text:
         return False
     lowered = text.lower()

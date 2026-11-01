@@ -1,5 +1,3 @@
-"""Matrix (Element) channel — inbound sync + outbound message/media delivery."""
-
 # pyright: reportMissingTypeStubs=false
 
 import asyncio
@@ -9,6 +7,7 @@ import mimetypes
 import re
 import sys
 import time
+from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +16,7 @@ from urllib.parse import quote, unquote, urlparse
 
 from pydantic import Field
 
+from nanobot.runtime_context import RUNTIME_CONTEXT_INPUT_META, RuntimeContextBlock
 from nanobot.security.workspace_policy import is_path_within
 
 try:
@@ -63,6 +63,8 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.command.builtin import BUILTIN_COMMAND_SPECS
+from nanobot.command.router import normalize_command_text
 from nanobot.config.network import NetworkConfig
 from nanobot.config.paths import get_data_dir, get_media_dir
 from nanobot.config_base import Base
@@ -136,7 +138,6 @@ _MXC_PLACEHOLDER_SRC_RE = re.compile(
 
 
 def _filter_matrix_html_attribute(tag: str, attr: str, value: str) -> str | None:
-    """Filter attribute values to a safe Matrix-compatible subset."""
     if tag == "a" and attr == "href":
         return value if value.lower().startswith(("https://", "http://", "matrix:", "mailto:")) else None
     if tag == "img" and attr == "src":
@@ -218,8 +219,15 @@ class _SasVerificationRequest:
     device_id: str
     timestamp_ms: int
 
+
+# Listen-mode transcript bounds: hard caps on the per-room buffer of unheard
+# messages (RuntimeContextBlock content must be bounded and delimited).
+_LISTEN_BUFFER_MAX_MESSAGES = 30
+_LISTEN_BUFFER_MAX_CHARS = 6000
+_LISTEN_LINE_MAX_CHARS = 500
+
+
 def _render_markdown_html(text: str) -> str | None:
-    """Render markdown to sanitized HTML; returns None for plain text."""
     try:
         masked_text = _mask_mxc_markdown_image_sources(text)
         rendered = _mask_mxc_image_sources(cast(str, MATRIX_MARKDOWN(masked_text)))
@@ -228,7 +236,6 @@ def _render_markdown_html(text: str) -> str | None:
         return None
     if not formatted:
         return None
-    # Skip formatted_body for plain <p>text</p> to keep payload minimal.
     if formatted.startswith("<p>") and formatted.endswith("</p>"):
         inner = formatted[3:-4]
         if "<" not in inner and ">" not in inner:
@@ -285,6 +292,9 @@ def _matrix_stream_key(chat_id: str, stream_id: str | None) -> str:
     return chat_id if stream_id is None else f"{chat_id}\0{stream_id}"
 
 
+MatrixGroupPolicy = Literal["open", "mention", "allowlist", "listen"]
+
+
 class MatrixConfig(Base):
     """Matrix (Element) channel configuration."""
 
@@ -300,9 +310,13 @@ class MatrixConfig(Base):
     max_media_bytes: int = 20 * 1024 * 1024
     max_concurrent_media_downloads: int = 2
     allow_from: list[str] = Field(default_factory=list)
-    group_policy: Literal["open", "mention", "allowlist"] = "open"
+    group_policy: MatrixGroupPolicy = "open"
     group_allow_from: list[str] = Field(default_factory=list)
     allow_room_mentions: bool = False
+    reply_to_message: bool = True
+    # Per-room policy overrides keyed by room id, e.g. {"!abc:matrix.org": "mention"}.
+    # Rooms not listed fall back to `group_policy` (issue #6286).
+    group_policy_overrides: dict[str, MatrixGroupPolicy] = Field(default_factory=dict)
     streaming: bool = False
     use_proxy: bool = False
 
@@ -313,7 +327,7 @@ class MatrixChannel(BaseChannel):
     name = "matrix"
     display_name = "Matrix"
     uses_shared_proxy = True
-    _STREAM_EDIT_INTERVAL = 2 # min seconds between edit_message_text calls
+    _STREAM_EDIT_INTERVAL = 2
     monotonic_time: Callable[[], float] = staticmethod(time.monotonic)
 
     @classmethod
@@ -346,6 +360,8 @@ class MatrixChannel(BaseChannel):
         self._stream_bufs: dict[str, _StreamBuf] = {}
         self._sas_verification_requests: dict[str, _SasVerificationRequest] = {}
         self._started_at_ms: int = 0
+        self._listen_buffers: dict[str, deque[str]] = {}
+        self._listen_dropped: dict[str, int] = {}
         self._media_download_semaphore = asyncio.Semaphore(
             max(1, int(self.config.max_concurrent_media_downloads))
         )
@@ -458,7 +474,6 @@ class MatrixChannel(BaseChannel):
             await self.client.close()
 
     def _write_session_to_disk(self, resp: LoginResponse) -> None:
-        """Save login session to disk for persistence across restarts."""
         session = {
             "access_token": resp.access_token,
             "device_id": resp.device_id,
@@ -471,13 +486,11 @@ class MatrixChannel(BaseChannel):
             self.logger.warning("Failed to save session: {}", e)
 
     def _is_workspace_path_allowed(self, path: Path) -> bool:
-        """Check path is inside workspace (when restriction enabled)."""
         if not self._restrict_to_workspace or not self._workspace:
             return True
         return is_path_within(path, self._workspace)
 
     def _collect_outbound_media_candidates(self, media: list[str]) -> list[Path]:
-        """Deduplicate and resolve outbound attachment paths."""
         seen: set[str] = set()
         candidates: list[Path] = []
         for raw in media:
@@ -520,7 +533,6 @@ class MatrixChannel(BaseChannel):
 
     async def _send_room_content(self, room_id: str,
                                  content: dict[str, Any]) -> None | RoomSendResponse | RoomSendError:
-        """Send m.room.message with E2EE options."""
         if not self.client:
             return None
         kwargs: dict[str, Any] = {"room_id": room_id, "message_type": "m.room.message", "content": content}
@@ -531,7 +543,6 @@ class MatrixChannel(BaseChannel):
         return response
 
     async def _resolve_server_upload_limit_bytes(self) -> int | None:
-        """Query homeserver upload limit once per channel lifecycle."""
         if self._server_upload_limit_checked:
             return self._server_upload_limit_bytes
         self._server_upload_limit_checked = True
@@ -549,7 +560,6 @@ class MatrixChannel(BaseChannel):
         return None
 
     async def _effective_media_limit_bytes(self) -> int:
-        """min(local config, server advertised) — 0 blocks all uploads."""
         local_limit = max(int(self.config.max_media_bytes), 0)
         server_limit = await self._resolve_server_upload_limit_bytes()
         if server_limit is None:
@@ -560,7 +570,6 @@ class MatrixChannel(BaseChannel):
         self, room_id: str, path: Path, limit_bytes: int,
         relates_to: dict[str, Any] | None = None,
     ) -> str | None:
-        """Upload one local file to Matrix and send it as a media message. Returns failure marker or None."""
         if not self.client:
             return _ATTACH_UPLOAD_FAILED.format(path.name or _DEFAULT_ATTACH_NAME)
 
@@ -716,7 +725,6 @@ class MatrixChannel(BaseChannel):
                     raise RuntimeError(f"Matrix stream was not delivered: {response}")
                 buf.last_edit = now
                 if not buf.event_id:
-                    # we are editing the same message all the time, so only the first time the event id needs to be set
                     buf.event_id = cast(RoomSendResponse, response).event_id
             except Exception:
                 buf.text = previous_text
@@ -991,7 +999,6 @@ class MatrixChannel(BaseChannel):
         return is_auth or bool(getattr(response, "soft_logout", False))
 
     def _log_response_error(self, label: str, response: Any) -> None:
-        """Log Matrix response errors — auth errors at ERROR level, rest at WARNING."""
         is_fatal = self._is_fatal_auth_response(response)
         (self.logger.error if is_fatal else self.logger.warning)("{} failed: {}", label, response)
 
@@ -1058,7 +1065,6 @@ class MatrixChannel(BaseChannel):
         self._log_response_error("send", response)
 
     async def _set_typing(self, room_id: str, typing: bool) -> None:
-        """Best-effort typing indicator update."""
         if not self.client:
             return
         with suppress(Exception):
@@ -1114,7 +1120,6 @@ class MatrixChannel(BaseChannel):
         return isinstance(count, int) and count <= 2
 
     def _is_bot_mentioned(self, event: RoomMessage) -> bool:
-        """Check m.mentions payload for bot mention."""
         source = getattr(event, "source", None)
         if not isinstance(source, dict):
             return False
@@ -1142,18 +1147,74 @@ class MatrixChannel(BaseChannel):
         ts = getattr(event, "server_timestamp", None)
         return isinstance(ts, int) and ts < self._started_at_ms
 
+    def _buffer_listen_message(self, room_id: str, sender: str, content: str) -> None:
+        text = " ".join(str(content).split())[:_LISTEN_LINE_MAX_CHARS]
+        line = f"{sender}: {text}" if text else f"{sender}: [attachment]"
+        buffer = self._listen_buffers.setdefault(room_id, deque())
+        buffer.append(line)
+        total = sum(len(entry) for entry in buffer)
+        dropped = self._listen_dropped.get(room_id, 0)
+        while buffer and (
+            len(buffer) > _LISTEN_BUFFER_MAX_MESSAGES or total > _LISTEN_BUFFER_MAX_CHARS
+        ):
+            expired = buffer.popleft()
+            total -= len(expired)
+            dropped += 1
+        if dropped:
+            self._listen_dropped[room_id] = dropped
+
+    def _listen_context(self, room_id: str, content: str) -> list[RuntimeContextBlock] | None:
+        buffer = self._listen_buffers.get(room_id)
+        if not buffer:
+            return None
+        normalized = normalize_command_text(content)
+        parts = normalized.split(maxsplit=1)
+        command = next(
+            (spec for spec in BUILTIN_COMMAND_SPECS if parts and spec.command == parts[0].lower()),
+            None,
+        )
+        if command is not None and not (
+            command.lifecycle == "agent_turn"
+            or (
+                command.lifecycle == "agent_turn_with_args"
+                and normalized.lower().startswith(f"{command.command} ")
+                and bool(normalized[len(command.command):].strip())
+            )
+        ):
+            return None
+        dropped = self._listen_dropped.get(room_id, 0)
+        notice = f"[{dropped} earlier messages not shown]\n" if dropped else ""
+        return [
+            RuntimeContextBlock(
+                source="matrix_room_transcript",
+                content=(
+                    "Recent messages in this room not addressed to the bot "
+                    "(context; do not respond to these):\n" + notice + "\n".join(buffer)
+                ),
+            ),
+        ]
+
+    def _consume_listen_context(
+        self, room_id: str, content: str, context: list[RuntimeContextBlock] | None,
+    ) -> None:
+        if context or normalize_command_text(content).lower() == "/new":
+            self._listen_buffers.pop(room_id, None)
+            self._listen_dropped.pop(room_id, None)
+
+    def _effective_group_policy(self, room_id: str) -> MatrixGroupPolicy:
+        return self.config.group_policy_overrides.get(room_id, self.config.group_policy)
+
     def _should_process_message(self, room: MatrixRoom, event: RoomMessage) -> bool:
-        """Apply sender and room policy checks."""
         if not self.is_allowed(event.sender):
             return False
         if self._is_direct_room(room):
             return True
-        policy = self.config.group_policy
+        policy = self._effective_group_policy(room.room_id)
         if policy == "open":
             return True
         if policy == "allowlist":
             return room.room_id in (self.config.group_allow_from or [])
-        if policy == "mention":
+        if policy == "mention" or policy == "listen":
             return self._is_bot_mentioned(event)
         return False
 
@@ -1208,19 +1269,12 @@ class MatrixChannel(BaseChannel):
         return {"rel_type": "m.thread", "event_id": root_id,
                 "m.in_reply_to": {"event_id": reply_to}, "is_falling_back": True}
 
-    @classmethod
     def _build_outbound_relates_to(
-        cls, metadata: dict[str, Any] | None
+        self, metadata: dict[str, Any] | None
     ) -> dict[str, Any] | None:
-        """Build Matrix relation metadata for outbound messages.
-
-        Threaded turns keep the existing ``m.thread`` relation. Non-thread
-        turns attach a plain ``m.in_reply_to`` so room-level responses link
-        back to the user event that started the agent turn (issue #5274).
-        """
-        if thread := cls._build_thread_relates_to(metadata):
+        if thread := self._build_thread_relates_to(metadata):
             return thread
-        if not metadata:
+        if not self.config.reply_to_message or not metadata:
             return None
         reply_to = metadata.get("message_id") or metadata.get("event_id")
         if not isinstance(reply_to, str) or not reply_to:
@@ -1348,9 +1402,8 @@ class MatrixChannel(BaseChannel):
             return None
 
     async def _fetch_media_attachment(
-        self, room: MatrixRoom, event: MatrixMediaEvent,
+        self, event: MatrixMediaEvent,
     ) -> tuple[dict[str, Any] | None, str]:
-        """Download, decrypt if needed, and persist a Matrix attachment."""
         atype = self._event_attachment_type(event)
         mime = self._event_mime(event)
         filename = self._event_filename(event, atype)
@@ -1412,32 +1465,58 @@ class MatrixChannel(BaseChannel):
         return meta
 
     async def _on_message(self, room: MatrixRoom, event: RoomMessageText) -> None:
-        if (
-            event.sender == self.config.user_id
-            or self._is_pre_startup_event(event)
-            or not self._should_process_message(room, event)
-        ):
+        if event.sender == self.config.user_id or self._is_pre_startup_event(event):
+            return
+        listen_mode = (
+            not self._is_direct_room(room)
+            and self._effective_group_policy(room.room_id) == "listen"
+        )
+        if listen_mode and not self._is_bot_mentioned(event):
+            if self.is_allowed(event.sender):
+                self._buffer_listen_message(room.room_id, event.sender, event.body)
+            return
+        if not self._should_process_message(room, event):
             return
         await self._start_typing_keepalive(room.room_id)
         try:
+            metadata = self._base_metadata(room, event)
+            listen_context = self._listen_context(room.room_id, event.body) if listen_mode else None
+            if listen_context:
+                metadata[RUNTIME_CONTEXT_INPUT_META] = listen_context
             await self._handle_message(
                 sender_id=event.sender, chat_id=room.room_id,
-                content=event.body, metadata=self._base_metadata(room, event),
+                content=event.body, metadata=metadata,
                 session_key=self._thread_session_key(room.room_id, event),
                 is_dm=self._is_direct_room(room),
             )
+            if listen_mode:
+                self._consume_listen_context(room.room_id, event.body, listen_context)
         except Exception:
             await self._stop_typing_keepalive(room.room_id, clear_typing=True)
             raise
 
     async def _on_media_message(self, room: MatrixRoom, event: MatrixMediaEvent) -> None:
-        if (
-            event.sender == self.config.user_id
-            or self._is_pre_startup_event(event)
-            or not self._should_process_message(room, event)
-        ):
+        if event.sender == self.config.user_id or self._is_pre_startup_event(event):
             return
-        attachment, marker = await self._fetch_media_attachment(room, event)
+        listen_mode = (
+            not self._is_direct_room(room)
+            and self._effective_group_policy(room.room_id) == "listen"
+        )
+        if listen_mode and not self._is_bot_mentioned(event):
+            if self.is_allowed(event.sender):
+                media_body = getattr(event, "body", None)
+                media_note = (
+                    " ".join(media_body.split())
+                    if isinstance(media_body, str) and media_body.strip()
+                    else ""
+                )
+                self._buffer_listen_message(
+                    room.room_id, event.sender, media_note or "[attachment]"
+                )
+            return
+        if not self._should_process_message(room, event):
+            return
+        attachment, marker = await self._fetch_media_attachment(event)
         parts: list[str] = []
         if isinstance(body := getattr(event, "body", None), str) and body.strip():
             parts.append(body.strip())
@@ -1451,20 +1530,26 @@ class MatrixChannel(BaseChannel):
         elif marker:
             parts.append(marker)
 
+        content = "\n".join(parts)
         await self._start_typing_keepalive(room.room_id)
         try:
             meta = self._base_metadata(room, event)
             meta["attachments"] = []
             if attachment:
                 meta["attachments"] = [attachment]
+            listen_context = self._listen_context(room.room_id, content) if listen_mode else None
+            if listen_context:
+                meta[RUNTIME_CONTEXT_INPUT_META] = listen_context
             await self._handle_message(
                 sender_id=event.sender, chat_id=room.room_id,
-                content="\n".join(parts),
+                content=content,
                 media=[attachment["path"]] if attachment else [],
                 metadata=meta,
                 session_key=self._thread_session_key(room.room_id, event),
                 is_dm=self._is_direct_room(room),
             )
+            if listen_mode:
+                self._consume_listen_context(room.room_id, content, listen_context)
         except Exception:
             await self._stop_typing_keepalive(room.room_id, clear_typing=True)
             raise

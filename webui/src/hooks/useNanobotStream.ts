@@ -49,7 +49,6 @@ const VISIBLE_STREAM_FLUSH_INTERVAL_MS = 50;
 const EMPTY_INITIAL_MESSAGES: UIMessage[] = [];
 const EMPTY_COMPLETED_TURN_IDS: readonly string[] = [];
 
-/** Own the received transcript, accepting fetched pages and live events together. */
 /** Payload passed to ``send`` when the user attaches one or more files.
  *
  * ``media`` is handed to the wire client verbatim; ``preview`` powers the
@@ -69,6 +68,7 @@ export interface SendOptions {
   quotedContext?: string;
   workspaceScope?: WorkspaceScopePayload | null;
   sideChannel?: boolean;
+  userShell?: boolean;
   finalizeActiveTurn?: boolean;
   /** Append guidance to the running turn without detaching its active answer segment. */
   continueActiveTurn?: boolean;
@@ -152,7 +152,6 @@ export function useNanobotStream(
   isStreaming: boolean;
   /** Unix epoch seconds when the current user turn started (WebSocket ``goal_status``). */
   runStartedAt: number | null;
-  /** Transient model retry state for the active turn. */
   retryStatus: RetryStatus | null;
   /** Latest sustained goal for this ``chatId`` (``goal_state`` WS events). */
   goalState: GoalStateWsPayload | undefined;
@@ -173,8 +172,6 @@ export function useNanobotStream(
   /** Latest transport-level fault raised since the last ``dismissStreamError``.
    * ``null`` when there is nothing to show. */
   streamError: StreamError | null;
-  /** Clear the current ``streamError`` (e.g. after the user dismisses the
-   * notification or starts a fresh action). */
   dismissStreamError: () => void;
 } {
   const { client, getToken } = useClient();
@@ -209,7 +206,6 @@ export function useNanobotStream(
     setHistoryState(transcriptRef.current.paging);
   }, []);
   const [messageScope, setMessageScope] = useState({ chatId, historyKey, client });
-  /** If history ends in unfinished agent activity, keep the loading spinner alive. */
   const initialStreaming = useMemo(() => {
     if (completedTurnIds.length === 0) return hasPendingAgentActivity(initialMessages);
     const completedInitialTurns = new Set(completedTurnIds);
@@ -501,7 +497,6 @@ export function useNanobotStream(
     setGoalState(chatId ? client.getGoalState(chatId) : undefined);
     setRecoveryState(null);
     clearPendingStreamWork();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatId, client, historyKey, clearActivitySegment, clearPendingStreamWork, setMessages]);
 
   useEffect(() => {
@@ -869,6 +864,9 @@ export function useNanobotStream(
           ...(typeof ev.failure_error_kind === "string"
             ? { failure_error_kind: ev.failure_error_kind }
             : {}),
+          ...(typeof ev.reply_preserved === "boolean"
+            ? { reply_preserved: ev.reply_preserved }
+            : {}),
         };
         setRecoveryState(next);
         if (ev.reason === "model_request_failed" || ev.status === "resuming") {
@@ -1023,9 +1021,11 @@ export function useNanobotStream(
       delete clientOptions.sideChannel;
       delete clientOptions.finalizeActiveTurn;
       delete clientOptions.continueActiveTurn;
-      const delivery = wireMedia?.length
-        ? client.sendAttachments(chatId, outboundContent, wireMedia, clientOptions)
-        : undefined;
+      const delivery = options?.userShell
+        ? client.sendUserShellCommand(chatId, outboundContent, clientOptions)
+        : wireMedia?.length
+          ? client.sendAttachments(chatId, outboundContent, wireMedia, clientOptions)
+          : undefined;
       if (!delivery) client.sendMessage(chatId, outboundContent, undefined, clientOptions);
       // Every caller may keep this promise to retain its draft until accepted.
       // Also observe it here for queued/landing sends without an active composer.

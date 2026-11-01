@@ -55,10 +55,6 @@ class _FakeWindowsJob:
         pass
 
 
-# ---------------------------------------------------------------------------
-# _build_env
-# ---------------------------------------------------------------------------
-
 class TestBuildEnvUnix:
 
     def test_expected_keys(self):
@@ -124,10 +120,6 @@ class TestBuildEnvWindows:
         assert env["SYSTEMROOT"] == r"D:\Windows"
 
 
-# ---------------------------------------------------------------------------
-# argument-vector PATH
-# ---------------------------------------------------------------------------
-
 class TestArgumentVectorPath:
 
     def test_uses_parent_path_for_executable_lookup(self):
@@ -146,10 +138,6 @@ class TestArgumentVectorPath:
         assert prepared.env["PATH"] == parent_path
         assert "NANOBOT_SECRET_TOKEN" not in prepared.env
 
-
-# ---------------------------------------------------------------------------
-# _spawn
-# ---------------------------------------------------------------------------
 
 class TestSpawnUnix:
 
@@ -218,7 +206,6 @@ class TestSpawnWindows:
 
     @pytest.mark.asyncio
     async def test_single_line_uses_powershell(self):
-        """Single-line commands on Windows now route through PowerShell."""
         env = {"COMSPEC": r"C:\Windows\system32\cmd.exe", "PATH": ""}
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
@@ -239,7 +226,6 @@ class TestSpawnWindows:
 
     @pytest.mark.asyncio
     async def test_single_line_passes_cwd_and_env(self):
-        """PowerShell should receive cwd and env from the caller."""
         env = {"PATH": "/usr/bin"}
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
@@ -276,7 +262,6 @@ class TestSpawnWindows:
 
     @pytest.mark.asyncio
     async def test_explicit_cmd_shell_uses_raw_shell_string(self):
-        """Explicit shell='cmd' should preserve raw cmd.exe quoting semantics."""
         env = {"COMSPEC": r"C:\Windows\system32\cmd.exe", "PATH": ""}
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
@@ -299,7 +284,6 @@ class TestSpawnWindows:
 
     @pytest.mark.asyncio
     async def test_powershell_preserves_last_native_exit_code(self):
-        """PowerShell -Command should forward native process exit codes."""
         env = {"PATH": ""}
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
@@ -314,7 +298,6 @@ class TestSpawnWindows:
 
     @pytest.mark.asyncio
     async def test_powershell_configures_utf8_io(self):
-        """PowerShell should use UTF-8 for captured output, native input, and redirections."""
         env = {"PATH": ""}
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
@@ -333,7 +316,6 @@ class TestSpawnWindows:
 
     @pytest.mark.asyncio
     async def test_powershell_invokes_quoted_windows_executable_path(self):
-        """PowerShell needs & before quoted executable paths with arguments."""
         env = {"PATH": ""}
         command = r'"D:\Program Files\Python\python.exe" -u -c "print(1)"'
         with (
@@ -348,7 +330,6 @@ class TestSpawnWindows:
 
     @pytest.mark.asyncio
     async def test_powershell_invokes_quoted_windows_executable_without_arguments(self):
-        """A quoted executable path is still a command when it has no arguments."""
         env = {"PATH": ""}
         command = r'"D:\Program Files\Git\cmd\git.exe"'
         with (
@@ -384,15 +365,10 @@ class TestSpawnWindows:
         assert "pwsh" in args[0].lower()
 
 
-# ---------------------------------------------------------------------------
-# path_append
-# ---------------------------------------------------------------------------
-
 class TestPathAppendPlatform:
 
     @pytest.mark.asyncio
     async def test_unix_uses_env_var_in_fixed_export(self):
-        """On Unix, path_append must not be interpolated into shell source."""
         mock_proc = _CompletedProcess(b"ok")
 
         captured_cmd = None
@@ -421,7 +397,6 @@ class TestPathAppendPlatform:
 
     @pytest.mark.asyncio
     async def test_unix_path_prepend_uses_env_var_in_fixed_export(self):
-        """On Unix, path_prepend must not be interpolated into shell source."""
         mock_proc = _CompletedProcess(b"ok")
 
         captured_cmd = None
@@ -480,7 +455,6 @@ class TestPathAppendPlatform:
 
     @pytest.mark.asyncio
     async def test_windows_modifies_env(self):
-        """On Windows, path_append is appended to PATH in the env dict."""
         mock_proc = _CompletedProcess(b"ok")
 
         captured_env = {}
@@ -529,16 +503,11 @@ class TestPathAppendPlatform:
         )
 
 
-# ---------------------------------------------------------------------------
-# sandbox
-# ---------------------------------------------------------------------------
-
 class TestSandboxPlatform:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("backend", ["bwrap", "seatbelt"])
     async def test_sandbox_skipped_on_windows(self, backend):
-        """Configured Unix backends preserve the Windows native fallback."""
         mock_proc = _CompletedProcess(b"ok")
 
         with (
@@ -556,7 +525,6 @@ class TestSandboxPlatform:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("backend", ["bwrap", "seatbelt"])
     async def test_sandbox_applied_on_unix(self, backend):
-        """On Unix, sandbox wrapping should still happen normally."""
         mock_proc = _CompletedProcess(b"sandboxed")
 
         with (
@@ -575,7 +543,6 @@ class TestSandboxPlatform:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("backend", ["bwrap", "seatbelt"])
     async def test_sandbox_receives_configured_bind_roots(self, tmp_path, backend):
-        """Configured bind roots should be forwarded to the sandbox wrapper."""
         mock_proc = _CompletedProcess(b"sandboxed")
         tool_bin = tmp_path / "tool-bin"
         tool_cache = tmp_path / "tool-cache"
@@ -603,10 +570,6 @@ class TestSandboxPlatform:
         ]
 
 
-# ---------------------------------------------------------------------------
-# end-to-end (mocked subprocess, full execute path)
-# ---------------------------------------------------------------------------
-
 class TestExecuteEndToEnd:
 
     @pytest.mark.asyncio
@@ -615,7 +578,6 @@ class TestExecuteEndToEnd:
         [(None, asyncio.subprocess.DEVNULL), (1000, asyncio.subprocess.PIPE)],
     )
     async def test_windows_full_path(self, yield_time_ms, stdin):
-        """Full execute() flow on Windows: env, spawn, output formatting."""
         mock_proc = _CompletedProcess(b"hello world\r\n")
 
         with (
@@ -638,7 +600,6 @@ class TestExecuteEndToEnd:
         [(None, asyncio.subprocess.DEVNULL), (1000, asyncio.subprocess.PIPE)],
     )
     async def test_unix_full_path(self, yield_time_ms, stdin):
-        """Full execute() flow on Unix: env, spawn, output formatting."""
         mock_proc = _CompletedProcess(b"hello world\n")
 
         with (
@@ -657,7 +618,6 @@ class TestExecuteEndToEnd:
 
     @pytest.mark.asyncio
     async def test_execute_defaults_to_non_login_shell(self):
-        """The public execute path must not silently request a login shell."""
         captured_login = []
 
         async def capture_spawn(
@@ -678,46 +638,35 @@ class TestExecuteEndToEnd:
         assert captured_login == [False, True]
 
 
-# ---------------------------------------------------------------------------
-# _extract_absolute_paths - UNC path support
-# ---------------------------------------------------------------------------
-
 class TestExtractAbsolutePaths:
-    """Tests for Windows UNC path extraction in shell commands."""
 
     def test_windows_drive_path(self):
-        """Test extraction of standard Windows drive paths."""
         cmd = r"dir C:\Users\Public"
         paths = ExecTool._extract_absolute_paths(cmd)
         assert r"C:\Users\Public" in paths
 
     def test_windows_drive_path_root(self):
-        """Test extraction of Windows drive root paths."""
         cmd = r"dir C:\temp"
         paths = ExecTool._extract_absolute_paths(cmd)
         assert any("C:\\" in p for p in paths)
 
     def test_unc_path_simple(self):
-        """Test extraction of simple UNC paths."""
         cmd = r"dir \\server\share"
         paths = ExecTool._extract_absolute_paths(cmd)
         assert r"\\server\share" in paths
 
     def test_unc_path_with_subdirs(self):
-        """Test extraction of UNC paths with subdirectories."""
         cmd = r"copy \\server\share\folder\file.txt D:\backup"
         paths = ExecTool._extract_absolute_paths(cmd)
         assert r"\\server\share\folder\file.txt" in paths
         assert r"D:\backup" in paths
 
     def test_unc_path_in_quotes(self):
-        """Test extraction of UNC paths enclosed in quotes."""
         cmd = r'type "\\server\share\docs\readme.txt"'
         paths = ExecTool._extract_absolute_paths(cmd)
         assert r"\\server\share\docs\readme.txt" in paths
 
     def test_mixed_paths(self):
-        """Test extraction of mixed UNC, drive, and POSIX paths."""
         cmd = r'copy \\server\data\file.txt C:\local\temp && ls /tmp'
         paths = ExecTool._extract_absolute_paths(cmd)
         assert r"\\server\data\file.txt" in paths
@@ -725,24 +674,17 @@ class TestExtractAbsolutePaths:
         assert "/tmp" in paths
 
     def test_home_path(self):
-        """Test extraction of home directory shortcuts."""
         cmd = "cat ~/config.txt"
         paths = ExecTool._extract_absolute_paths(cmd)
         assert "~/config.txt" in paths
 
     def test_no_paths(self):
-        """Test command with no absolute paths."""
         cmd = "echo hello"
         paths = ExecTool._extract_absolute_paths(cmd)
         assert paths == []
 
 
-# ---------------------------------------------------------------------------
-# Windows multi-line command PowerShell fallback
-# ---------------------------------------------------------------------------
-
 class TestWindowsMultilineExec:
-    """Verify commands on Windows route through PowerShell (now the default)."""
 
     @pytest.mark.asyncio
     async def test_multiline_python_uses_powershell(self):
@@ -784,7 +726,6 @@ class TestWindowsMultilineExec:
 
     @pytest.mark.asyncio
     async def test_single_line_uses_powershell(self):
-        """Single-line commands also route through PowerShell now."""
         mock_proc = _CompletedProcess(b"1\n")
 
         with (
@@ -814,16 +755,10 @@ class TestWindowsMultilineExec:
         mock_spawn.assert_called_once()
 
 
-# ---------------------------------------------------------------------------
-# _resolve_shell — Windows support
-# ---------------------------------------------------------------------------
-
 class TestResolveShellWindows:
-    """shell parameter is now accepted on Windows."""
 
     @pytest.mark.asyncio
     async def test_shell_powershell_accepted(self):
-        """shell='powershell' should resolve and route through PowerShell."""
         mock_proc = _CompletedProcess(b"hello\n")
 
         with (
@@ -843,7 +778,6 @@ class TestResolveShellWindows:
 
     @pytest.mark.asyncio
     async def test_shell_cmd_accepted(self):
-        """shell='cmd' should preserve the command string for cmd.exe parsing."""
         mock_proc = _CompletedProcess(b'"a & b"\n')
 
         with (
@@ -862,7 +796,6 @@ class TestResolveShellWindows:
 
     @pytest.mark.asyncio
     async def test_shell_bash_rejected_on_windows(self):
-        """shell='bash' should still be rejected on Windows."""
         with patch("nanobot.agent.tools.shell._IS_WINDOWS", True):
             tool = ExecTool()
             result = await tool.execute(command="echo hello", shell="bash")

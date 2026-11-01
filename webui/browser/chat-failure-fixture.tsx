@@ -17,7 +17,6 @@ const messages: UIMessage[] = [{
   createdAt: 1_700_000_000_000,
 }];
 
-// Real components with controlled state. No model calls or saved user data.
 export function ChatFailureFixture({ parameters }: { parameters: URLSearchParams }) {
   useReadingTypography();
   const [visible, setVisible] = useState(true);

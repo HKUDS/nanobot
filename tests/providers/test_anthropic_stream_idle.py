@@ -1,5 +1,3 @@
-"""Anthropic streaming idle timeout should follow the full SSE stream, not text only."""
-
 from __future__ import annotations
 
 import asyncio
@@ -125,7 +123,6 @@ async def test_chat_stream_without_callback_survives_long_active_stream(monkeypa
 
 @pytest.mark.asyncio
 async def test_chat_stream_without_callback_still_enforces_idle_timeout(monkeypatch) -> None:
-    """A genuinely stalled stream must still be cut off by the idle timeout."""
     monkeypatch.setenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", "0.05")
     provider = AnthropicProvider(api_key="sk-test")
     provider._client = MagicMock()
@@ -152,7 +149,6 @@ async def test_chat_stream_without_callback_still_enforces_idle_timeout(monkeypa
 
 @pytest.mark.asyncio
 async def test_chat_stream_calls_on_content_delta_only_for_text_delta() -> None:
-    """Thinking deltas must be consumed without invoking on_content_delta."""
     provider = AnthropicProvider(api_key="sk-test")
     provider._client = MagicMock()
 

@@ -1,5 +1,3 @@
-"""Administrative SQLite repository operations."""
-
 from datetime import datetime
 
 from nanobot.providers.base import ProviderConversationState

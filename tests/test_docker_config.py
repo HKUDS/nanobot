@@ -1,5 +1,3 @@
-"""Exercise the Docker initializer that the container entrypoint invokes."""
-
 import json
 import os
 import subprocess
@@ -59,8 +57,6 @@ def test_restart_preserves_user_settings_and_credentials(tmp_path):
 
 
 def test_failed_write_does_not_leave_an_existing_config(tmp_path):
-    # A bind mount can be unwritable. Force failure at the actual atomic
-    # replacement boundary rather than only validating the input template.
     from unittest.mock import patch
 
     from nanobot.cli.docker_bootstrap import initialize_config

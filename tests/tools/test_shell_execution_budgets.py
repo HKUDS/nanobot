@@ -74,7 +74,7 @@ def _pid_running(pid: int) -> bool:
         kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
         kernel32.WaitForSingleObject.restype = wintypes.DWORD
         kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-        handle = kernel32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+        handle = kernel32.OpenProcess(0x00100000, False, pid)
         if not handle:
             error = ctypes.get_last_error()
             assert error == 87, f"OpenProcess({pid}) failed: {error}"
@@ -82,7 +82,7 @@ def _pid_running(pid: int) -> bool:
         try:
             status = kernel32.WaitForSingleObject(handle, 0)
             assert status in (0, 258), f"WaitForSingleObject({pid}) failed: {status}"
-            return status == 258  # WAIT_TIMEOUT
+            return status == 258
         finally:
             kernel32.CloseHandle(handle)
 
@@ -302,7 +302,6 @@ async def test_partial_stdout_and_stderr_bytes_refresh_idle_without_log_reads(tm
                 info, = await manager.list()
                 assert info.session_id == sid
                 assert info.returncode is None
-                # This anchor stays fixed between bytes, even if observation is delayed.
                 output_at = info.elapsed_s - info.idle_s
                 if output_at > after:
                     return output_at
@@ -349,7 +348,6 @@ async def test_idle_termination_stops_owned_tree_without_tool_activity(tmp_path)
         assert _pid_running(parent_pid)
         assert _pid_running(child_pid)
 
-        # Observe OS process exit before making another tool or manager call.
         await _pid_stopped(parent_pid)
         await _pid_stopped(child_pid, timeout=3)
         final = await session_tool.execute(session_id=sid, until_exit=True, timeout_ms=3000)
@@ -451,7 +449,6 @@ async def test_execution_stop_stops_pipe_inheriting_child_after_root_exits(
     async def spawn_with_exit_order(*args, **kwargs):
         process = await real_spawn(*args, **kwargs)
         if early_root_exit:
-            # Root exit may precede spawn return; inherited pipes must remain intact.
             async with asyncio.timeout(5):
                 while process.returncode is None:
                     await asyncio.sleep(0.005)
@@ -499,7 +496,7 @@ async def test_execution_stop_stops_pipe_inheriting_child_after_root_exits(
             assert not is_tool_error_result(final), final
             assert "Session terminated. Reason: owner_closed." in final
         assert "worker launched" in final
-        assert _exit_code(final) == 0  # Only the root exited successfully.
+        assert _exit_code(final) == 0
         assert not delayed_effect.exists()
         assert await manager.list(owner_session_key=owner.session_key) == []
     finally:

@@ -175,7 +175,6 @@ test("an enlarged diagram keeps its camera through resize and recoloring", async
   await expect(dialog).toBeVisible();
   await expect(fit).toHaveText("150%");
   await expect(dialog.locator("img")).toHaveAttribute("src", before!);
-  // Change the trusted document palette without closing the reader.
   await page.evaluate(() => document.documentElement.classList.toggle("dark"));
   await expect(dialog.locator("img")).not.toHaveAttribute("src", before!);
   await expect(fit).toHaveText("150%");
@@ -200,8 +199,10 @@ test("published Pele renders Chinese wrapping and mixed measured styles across w
     }
     for (const theme of ["light", "dark"]) {
       if (await page.evaluate(() => document.documentElement.classList.contains("dark")) !== (theme === "dark")) {
+        await expect(page.locator("html")).not.toHaveAttribute("data-theme-transition");
         const previous = await image.getAttribute("src");
         await page.getByRole("button", { name: "Toggle theme" }).click();
+        await expect.poll(() => page.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(theme === "dark");
         await expect(image).not.toHaveAttribute("src", previous!);
       }
       await image.scrollIntoViewIfNeeded();

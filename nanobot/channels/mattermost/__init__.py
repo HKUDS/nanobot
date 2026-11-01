@@ -1,1 +1,0 @@
-"""Mattermost channel package."""

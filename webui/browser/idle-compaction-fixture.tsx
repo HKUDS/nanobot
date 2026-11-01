@@ -57,8 +57,8 @@ export function IdleCompactionFixture() {
         <button onClick={() => { failNext = true; }}>Fail next save</button>
         <output aria-label="Persisted minutes">{String(snapshot.runtime_config?.[path])}</output>
       </div>
-      <SettingsView theme="light" initialSection="runtime" initialSettings={initial}
-        onSettingsChange={setSnapshot} onToggleTheme={() => {}} onBackToChat={() => {}}
+      <SettingsView themePreference="light" initialSection="runtime" initialSettings={initial}
+        onSettingsChange={setSnapshot} onChangeTheme={() => {}} onBackToChat={() => {}}
         onModelNameChange={() => {}} onRestart={() => {}} />
     </div>
   </ClientProvider>;

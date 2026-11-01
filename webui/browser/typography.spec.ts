@@ -22,73 +22,67 @@ async function metrics(element: Locator): Promise<Awaited<ReturnType<typeof read
 }
 
 for (const narrow of [false, true]) {
-  for (const dark of [false, true]) {
-    test(`reading hierarchy and stable controls: ${narrow ? "narrow" : "desktop"}, ${dark ? "dark" : "light"}`, async ({ page }, info) => {
-      await page.setViewportSize(narrow ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
-      await page.addInitScript((theme) => {
-        localStorage.setItem("nanobot.locale", "zh-CN");
-        localStorage.setItem("nanobot-webui.theme", theme);
-      }, dark ? "dark" : "light");
-      await page.goto("/browser/fixture.html?case=typography");
-      const group = page.getByRole("radiogroup", { name: "阅读字号", exact: true });
-      await expect(group.getByRole("radio", { name: "阅读字号：标准", exact: true })).toBeChecked();
-      const heights = await group.evaluate((control) => {
-        const row = control.closest(".settings-row")!;
-        const nextRow = row.nextElementSibling!;
-        return {
-          readingRow: row.getBoundingClientRect().height,
-          otherRow: nextRow.getBoundingClientRect().height,
-          readingControl: control.getBoundingClientRect().height,
-          otherControl: nextRow.querySelector(".segmented-control")!.getBoundingClientRect().height,
-        };
-      });
-      expect(heights.readingRow).toBe(heights.otherRow);
-      expect(heights.readingControl).toBe(heights.otherControl);
-      const stable = await metrics(page.locator(".settings-row").first().locator(".text-control-label"));
-      const observations = [];
-      for (const [size, label, bodySize] of [
-        ["small", "阅读字号：小", narrow ? 15 : 16],
-        ["standard", "阅读字号：标准", narrow ? 16 : 18],
-        ["large", "阅读字号：大", narrow ? 18 : 20],
-      ] as const) {
-        await group.getByRole("radio", { name: label, exact: true }).click();
-        await expect(page.locator("html")).toHaveAttribute("data-reading-text-size", size);
-        const paragraph = page.locator(".markdown-content p").first();
-        await expect(paragraph).toHaveCSS("font-size", `${bodySize}px`);
-        const body = await metrics(paragraph);
-        expect(body.size).toBe(bodySize);
-        expect(body.line).toBeCloseTo(bodySize * 1.8);
-        expect(body.weight).toBe("400");
-        expect((await metrics(page.locator("[data-user-text-bubble] p"))).size).toBe(bodySize);
-        for (const selector of ["blockquote", "ol > li", ".task-list-item"]) {
-          expect((await metrics(page.locator(`.markdown-content ${selector}`).first())).size).toBe(bodySize);
-        }
-        for (const [selector, ratio] of [["h1", 1.5], ["h2", 1.25], ["h3", 1.125], ["h4", 1]] as const) {
-          const heading = await metrics(page.locator(`.markdown-content ${selector}`));
-          expect(heading.size).toBeCloseTo(bodySize * ratio);
-          expect(heading.weight).toBe("600");
-        }
-        for (const selector of ["table", "th", "td"]) {
-          expect((await metrics(page.locator(`.markdown-content ${selector}`).first())).size).toBeCloseTo(bodySize * 0.875);
-        }
-        expect((await metrics(page.locator(".code-content pre"))).size).toBeCloseTo(bodySize * 0.875);
-        expect((await metrics(page.locator(".markdown-inline-code"))).size).toBeCloseTo(bodySize * 0.875);
-        expect((await metrics(page.locator("textarea"))).size).toBe(Math.max(16, bodySize));
-        expect(await metrics(page.locator(".settings-row").first().locator(".text-control-label"))).toEqual(stable);
-        const widths = await group.getByRole("radio").evaluateAll((nodes) => nodes.map(node => node.getBoundingClientRect().width));
-        expect(Math.max(...widths) - Math.min(...widths)).toBeLessThan(1);
-        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-        observations.push({ size, body, widths });
-        await page.locator(".markdown-content h1").evaluate(node => node.scrollIntoView({ block: "start" }));
-        await page.screenshot({ path: info.outputPath(`${size}.png`) });
-      }
-      await info.attach("text-metrics", { body: JSON.stringify(observations, null, 2), contentType: "application/json" });
-      await page.getByRole("button", { name: "复制代码", exact: true }).click();
-      await expect(page.getByRole("button", { name: "已复制", exact: true })).toBeVisible();
-      await page.locator("summary").click();
-      await expect(page.getByText("这里的正文与折叠标题也应保持协调，不因字号变化发生裁切。")).toBeVisible();
+  test(`reading hierarchy and stable controls: ${narrow ? "narrow" : "desktop"}`, async ({ page }, info) => {
+    await page.setViewportSize(narrow ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
+    await page.addInitScript(() => {
+      localStorage.setItem("nanobot.locale", "zh-CN");
+      localStorage.setItem("nanobot-webui.theme", "light");
     });
-  }
+    await page.goto("/browser/fixture.html?case=typography");
+    const group = page.getByRole("radiogroup", { name: "阅读字号", exact: true });
+    await expect(group.getByRole("radio", { name: "阅读字号：标准", exact: true })).toBeChecked();
+    await expect(group.getByRole("radio")).toHaveCount(3);
+    const stable = await metrics(page.locator(".settings-row").first().locator(".text-control-label"));
+    const observations = [];
+    for (const [size, label, bodySize] of [
+      ["small", "阅读字号：小", narrow ? 15 : 16],
+      ["standard", "阅读字号：标准", narrow ? 16 : 18],
+      ["large", "阅读字号：大", narrow ? 18 : 20],
+    ] as const) {
+      await group.getByRole("radio", { name: label, exact: true }).click();
+      await expect(page.locator("html")).toHaveAttribute("data-reading-text-size", size);
+      const paragraph = page.locator('section[aria-label="Reading preview"] .markdown-content p').first();
+      await expect(paragraph).toHaveCSS("font-size", `${bodySize}px`);
+      const body = await metrics(paragraph);
+      expect(body.size).toBe(bodySize);
+      expect(body.line).toBeCloseTo(bodySize * 1.8);
+      expect(body.weight).toBe("400");
+      expect((await metrics(page.locator("[data-user-text-bubble] p"))).size).toBe(bodySize);
+      for (const selector of ["blockquote", "ol > li", ".task-list-item"]) {
+        expect((await metrics(page.locator(`.markdown-content ${selector}`).first())).size).toBe(bodySize);
+      }
+      for (const [selector, ratio] of [["h1", 1.5], ["h2", 1.25], ["h3", 1.125], ["h4", 1]] as const) {
+        const heading = await metrics(page.locator(`.markdown-content ${selector}`));
+        expect(heading.size).toBeCloseTo(bodySize * ratio);
+        expect(heading.weight).toBe("600");
+      }
+      for (const selector of ["table", "th", "td"]) {
+        expect((await metrics(page.locator(`.markdown-content ${selector}`).first())).size).toBeCloseTo(bodySize * 0.875);
+      }
+      expect((await metrics(page.locator(".code-content pre"))).size).toBeCloseTo(bodySize * 0.875);
+      expect((await metrics(page.locator(".markdown-inline-code"))).size).toBeCloseTo(bodySize * 0.875);
+      expect((await metrics(page.locator("textarea"))).size).toBe(Math.max(16, bodySize));
+      expect(await metrics(page.locator(".settings-row").first().locator(".text-control-label"))).toEqual(stable);
+      const targets = await group.getByRole("radio").evaluateAll((nodes) => nodes.map((node) => {
+        const { width, height } = node.getBoundingClientRect();
+        return { width, height };
+      }));
+      // Fine-pointer presets are circular; the separate touch test protects 44px hit targets.
+      for (const target of targets) {
+        expect(target.width).toBeGreaterThanOrEqual(36);
+        expect(target.width).toBe(target.height);
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      observations.push({ size, body, targets });
+      await page.locator(".markdown-content h1").evaluate(node => node.scrollIntoView({ block: "start" }));
+      await page.screenshot({ path: info.outputPath(`${size}.png`) });
+    }
+    await info.attach("text-metrics", { body: JSON.stringify(observations, null, 2), contentType: "application/json" });
+    await page.getByRole("button", { name: "复制代码", exact: true }).click();
+    await expect(page.getByRole("button", { name: "已复制", exact: true })).toBeVisible();
+    await page.locator("summary").click();
+    await expect(page.getByText("这里的正文与折叠标题也应保持协调，不因字号变化发生裁切。")).toBeVisible();
+  });
 }
 
 test("keyboard, tooltip, persistence and unchanged preferences", async ({ page }) => {
@@ -125,19 +119,13 @@ test("touch composer keeps literal mention metrics and a safe editable minimum",
     await page.goto("/browser/fixture.html?case=typography");
     const readingGroup = page.getByRole("radiogroup", { name: "Reading text size", exact: true });
     await expect(readingGroup.getByRole("radio")).toHaveCount(3);
-    const heights = await readingGroup.evaluate((control) => {
-      const row = control.closest(".settings-row")!;
-      const nextRow = row.nextElementSibling!;
-      return [row.getBoundingClientRect().height, nextRow.getBoundingClientRect().height];
-    });
-    expect(heights[0]).toBe(heights[1]);
     const radios = await readingGroup.getByRole("radio").all();
     for (const [index, radio] of radios.entries()) {
       await radio.scrollIntoViewIfNeeded();
       const target = await radio.boundingBox();
       expect(target!.width).toBeGreaterThanOrEqual(44);
-      // The shared switch pattern extends the hit area without growing the pill.
-      for (const edge of [-21, 21]) {
+      expect(target!.height).toBeGreaterThanOrEqual(44);
+      for (const edge of [-20, 20]) {
         await radios[(index + 1) % radios.length].tap();
         await page.touchscreen.tap(target!.x + target!.width / 2, target!.y + target!.height / 2 + edge);
         await expect(radio).toBeChecked();

@@ -1,5 +1,3 @@
-"""Initialize a local Docker instance without replacing existing settings."""
-
 import os
 import secrets
 import sys

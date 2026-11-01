@@ -1,5 +1,3 @@
-"""Dependency-free management contract for the native Linear Agent channel."""
-
 from nanobot.channels._manifest import field, required_fields
 from nanobot.channels.contracts import ChannelManagementSpec, ChannelSetupSpec
 from nanobot.channels.linear.state import local_state_present

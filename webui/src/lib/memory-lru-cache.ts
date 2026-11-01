@@ -18,6 +18,11 @@ export class MemoryLruCache<T> {
     return entry.value;
   }
 
+  /** Read without making a background observer retain an otherwise old entry. */
+  peek(key: string): T | undefined {
+    return this.entries.get(key)?.value;
+  }
+
   set(key: string, value: T): void {
     this.delete(key);
     const bytes = this.estimate(value);

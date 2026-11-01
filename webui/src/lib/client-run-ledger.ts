@@ -81,7 +81,6 @@ export interface RunState {
 
 const COMPLETED_TURN_FENCE_MAX = 256;
 
-/** Owns transport-observed delivery and run facts for one client. */
 export class ClientRunLedger {
   private chats = new Map<string, ChatRecord>();
 

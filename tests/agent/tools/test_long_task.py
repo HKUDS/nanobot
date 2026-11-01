@@ -1,5 +1,3 @@
-"""Tests for sustained goal tools (``create_goal``, ``update_goal``)."""
-
 from __future__ import annotations
 
 import asyncio

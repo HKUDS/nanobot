@@ -1,37 +1,23 @@
 {
-  "description": "透過 Linear 原生 Agent Session 在 issue 中使用 nanobot。",
-  "requirements": "一個私有 Linear OAuth 應用程式和穩定的公網 HTTPS 回呼網址",
   "setup": {
     "docsLabel": "開啟 Linear 設定指南",
     "officialLabel": "建立 Linear OAuth 應用程式",
-    "tryIt": "在 issue 評論中 @ 應用程式或將 issue 委派給它；進入 Agent Session 後，後續對話無需重複 @。",
-    "summary": "建立私有 Linear OAuth 應用程式，儲存憑證和公網網址，再授權工作區。可透過 @ 應用程式或委派 issue 開啟會話，普通評論會被忽略。",
-    "steps": [
-      "用穩定的 HTTPS 網址公開此 nanobot 實例（可以使用隧道）。",
-      "在 Linear 建立私有 OAuth 應用程式，啟用 read、write、app:mentionable 和 app:assignable。",
-      "將應用程式 webhook 訂閱 AgentSessionEvent、PermissionChange 和 OAuthAuthorization，並填入產生的 webhook 網址。",
-      "透過 OAuth 連接工作區，然後 @ 應用程式或將 issue 委派給它。"
-    ],
     "fields": {
       "clientId": {
         "label": "OAuth Client ID",
-        "placeholder": "Linear OAuth Client ID",
-        "help": "從私有 OAuth 應用複製\n\n從 Linear 私有 OAuth 應用中複製。"
+        "placeholder": "Linear OAuth Client ID"
       },
       "clientSecret": {
         "label": "OAuth Client Secret",
-        "placeholder": "••••••",
-        "help": "只儲存在此 nanobot 實例中。"
+        "placeholder": "••••••"
       },
       "webhookSigningSecret": {
         "label": "Webhook 簽署密鑰",
-        "placeholder": "••••••",
-        "help": "驗證 Webhook 簽名\n\n在解析 webhook 內容前驗證 Linear-Signature。"
+        "placeholder": "••••••"
       },
       "publicBaseUrl": {
         "label": "公網 HTTPS 網址",
-        "placeholder": "https://nanobot.example.com",
-        "help": "填寫不含路徑的 HTTPS 地址\n\n穩定且能轉發到下方監聽埠的 HTTPS 源地址，不要包含路徑。"
+        "placeholder": "https://nanobot.example.com"
       },
       "host": {
         "label": "監聽位址",
@@ -51,12 +37,10 @@
       },
       "allowFrom": {
         "label": "允許的 Linear 使用者",
-        "placeholder": "以逗號分隔 Linear 使用者 ID",
-        "help": "選擇允許使用的使用者\n\n留空使用 nanobot 配對；填寫 * 允許已連線工作區內的所有使用者。"
+        "placeholder": "以逗號分隔 Linear 使用者 ID"
       },
       "showReasoning": {
-        "label": "顯示推理",
-        "help": "將推理釋出為思考動態\n\n把模型推理作為思考動態釋出到 Linear；關閉後會話更簡潔。"
+        "label": "顯示推理"
       }
     }
   },
@@ -73,9 +57,6 @@
     "savePublicUrl": "請先填寫公網 HTTPS 網址，再建立 Linear 應用程式。",
     "retrySave": "重試",
     "channelRunning": "Channel 正在執行",
-    "accessAll": "已授權工作區中的所有成員都可以執行此 Agent。",
-    "accessRestricted": "只有「進階」中列出的 Linear 使用者 ID 可以執行此 Agent。",
-    "accessPairing": "首次使用需配對，連接 Linear MCP 後可搜尋或修改 issue。",
     "configureTools": "設定 Linear MCP",
     "workspacesTitle": "已授權的工作區",
     "refreshWorkspaces": "重新整理工作區",
@@ -128,7 +109,6 @@
     "allow": "允許 {{name}} 使用 nanobot",
     "saveUnconfirmed": "無法確認權限已儲存，請重新整理成員清單後再試。",
     "guide": "在「成員存取」中為同事開通免配對使用。既有授權仍然有效，除非手動關閉。連接 Linear MCP 後可搜尋或修改 issue。",
-    "intro": "選擇哪些成員可以在 Linear 中使用 nanobot，無需配對碼。",
     "details": "關於成員存取權限",
     "summary": "{{allowed}} 人可用",
     "loading": "正在尋找成員…",

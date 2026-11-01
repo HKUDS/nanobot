@@ -119,12 +119,13 @@ function WorkspacePreview() {
   const { t: g } = useGalleryTranslation();
   const [scope, setScope] = useState(projectScope);
   const [mode, setMode] = useState<"ready" | "disabled">("ready");
+  const hintBoundaryRef = useRef<HTMLDivElement>(null);
   return <div className="space-y-4">
     <StatePicker label={g("previews.workspace.state")} value={mode} options={["ready", "disabled"]} onChange={setMode} />
-    <div className="flex min-w-0 flex-wrap items-center gap-1">
+    <div ref={hintBoundaryRef} className="flex min-w-0 flex-wrap items-center gap-1">
       <WorkspaceProjectPicker scope={scope} defaultScope={projectScope} controls={workspaceCatalog.controls}
         disabled={mode === "disabled"} onLoadProjects={loadExampleProjects} onChange={setScope} />
-      <WorkspaceAccessMenu scope={scope} disabled={mode === "disabled"} onChange={setScope} />
+      <WorkspaceAccessMenu scope={scope} disabled={mode === "disabled"} onChange={setScope} hintBoundaryRef={hintBoundaryRef} />
     </div>
     <p role="status" className="text-sm text-muted-foreground">{scope.project_path} · {t("thread.composer.workspace.full")}: {t(scope.access_mode === "full" ? "settings.values.on" : "settings.values.off")}</p>
   </div>;

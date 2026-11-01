@@ -1,5 +1,3 @@
-"""Gateway-owned browser authorization flows for remote MCP servers."""
-
 from __future__ import annotations
 
 import asyncio

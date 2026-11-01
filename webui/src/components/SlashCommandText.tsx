@@ -1,21 +1,24 @@
 import {
-  INLINE_TOKEN_HIGHLIGHT_COLOR,
+  INLINE_REFERENCE_HIGHLIGHT_COLOR,
   InlineTokenHighlight,
 } from "@/components/InlineTokenHighlight";
 
 interface SlashCommandTextProps {
   command: string;
+  testId?: string;
 }
 
 export function SlashCommandText({
   command,
+  testId = "message-slash-command",
 }: SlashCommandTextProps) {
   return (
     <InlineTokenHighlight
-      testId="message-slash-command"
-      color={INLINE_TOKEN_HIGHLIGHT_COLOR}
+      testId={testId}
+      className="font-normal"
+      color={INLINE_REFERENCE_HIGHLIGHT_COLOR}
     >
-      {command}
+      <span className="opacity-90">/</span>{command.slice(1)}
     </InlineTokenHighlight>
   );
 }
