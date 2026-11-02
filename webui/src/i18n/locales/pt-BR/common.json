@@ -439,6 +439,8 @@
     "closeAction": "Fechar chat temporário: {{title}}"
   },
   "sidebar": {
+    "chatsHeader": "Conversas",
+    "topicOptions": "Opções de tópicos",
     "resize": "Redimensionar a barra lateral",
     "navigation": "Navegação da barra lateral",
     "collapse": "Recolher barra lateral",
@@ -1704,16 +1706,6 @@
       "archived": "Arquivadas"
     }
   },
-  "archiveView": {
-    "topicHeader": "Conversas",
-    "topicActions": "Opções de tópicos",
-    "search": "Pesquisar tópicos arquivados",
-    "loadError": "Não foi possível carregar todos os tópicos.",
-    "empty": "Nenhum tópico arquivado.",
-    "noResults": "Nenhum tópico correspondente.",
-    "selectAll": "Selecionar tudo",
-    "cancelSelection": "Cancelar seleção"
-  },
   "archiveConfirm": {
     "title": "Arquivar este tópico?",
     "titleMany": "Arquivar {{count}} tópicos?",
@@ -2449,7 +2441,6 @@
     "addPane": "Adicionar painel",
     "paneLimit": "Máximo de {{count}} painéis",
     "deleteConversations": "Excluir todas as conversas",
-    "deleteVisibleConversations": "Excluir conversas visíveis",
     "movePane": "Mover painel {{title}}",
     "movePaneHint": "Arraste para mover. As setas também funcionam",
     "resizePaneBoundary": "Redimensionar limite do painel {{index}}",

@@ -91,7 +91,7 @@ The sidebar is the topic switcher. Each topic keeps its own history, title, work
 
 Drag topics within a sidebar group to reorder them. **Rename** edits a topic title in place; a failed save keeps the draft for retry.
 
-Use **Select** in a topic's action menu to archive or delete several topics with one confirmation. Click outside the topic rows and toolbar, or press **Esc**, to leave selection mode. Cancelling a confirmation keeps your selection. Archiving removes pins and hides topics from the default list while keeping their conversations. Open the menu in the sidebar's **Chats** section and choose **Archived** to open a separate page. There you can search archived topics, unarchive them, or select several to delete together.
+Use **Select** in a topic's action menu to archive or delete several topics with one confirmation. Click outside the topic rows and toolbar, or press **Esc**, to leave selection mode. Cancelling a confirmation keeps your selection. Archiving removes pins and hides topics from the default list while keeping their conversations. Use **Chats** → **…** → **Show archived** to find them again; selecting only archived topics offers **Unarchive**.
 
 ### Conversation groups and panes
 

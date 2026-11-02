@@ -62,12 +62,12 @@ function ChatsPreview() {
   const [active, setActive] = useState<string | null>(initialSessions[0].key);
   const [pinned, setPinned] = useState<string[]>([]);
   const [archived, setArchived] = useState<string[]>(["websocket:gallery-history"]);
-  const [mode, setMode] = useState<"ready" | "loading" | "empty">("ready");
+  const [mode, setMode] = useState<"ready" | "loading" | "empty" | "archived">("ready");
   const [renamed, setRenamed] = useState<string | null>(null);
   const toggle = (keys: string[], key: string) => keys.includes(key) ? keys.filter((value) => value !== key) : [...keys, key];
-  return <><StatePicker label={t("previews.chats.state")} value={mode} options={["ready", "loading", "empty"]} onChange={setMode} />
-    <div className="flex h-80 max-w-sm flex-col rounded-panel bg-sidebar p-2"><ChatList sessions={mode === "loading" || mode === "empty" ? [] : sessions.filter((session) => !archived.includes(session.key))}
-      activeKey={active} onSelect={setActive} pinnedKeys={pinned}
+  return <><StatePicker label={t("previews.chats.state")} value={mode} options={["ready", "loading", "empty", "archived"]} onChange={setMode} />
+    <div className="flex h-80 max-w-sm flex-col rounded-panel bg-sidebar p-2"><ChatList sessions={mode === "loading" || mode === "empty" ? [] : sessions}
+      activeKey={active} onSelect={setActive} pinnedKeys={pinned} archivedKeys={archived} showArchived={mode === "archived"}
       loading={mode === "loading"}
       onTogglePin={(key) => setPinned(toggle(pinned, key))} onToggleArchive={(key) => setArchived(toggle(archived, key))}
       onRequestDelete={(key, _label, onDecision) => {

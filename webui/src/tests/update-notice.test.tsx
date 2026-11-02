@@ -189,7 +189,7 @@ describe("Sidebar update entry", () => {
       onNewChat: noop, onSelect: noop, onRequestDelete: noop, onTogglePin: noop, onRequestRename: noop,
       onToggleArchive: noop, onToggleGroup: noop, onRequestRenameProject: noop, onNewChatInProject: noop,
       onOpenSettings: noop, onOpenApps: noop, onOpenSkills: noop, onOpenAutomations: noop, onOpenChannels: noop,
-      onOpenSearch: noop, onOpenArchive: noop, onOpenUpdates: noop,
+      onOpenSearch: noop, onToggleArchived: noop, onOpenUpdates: noop,
       availableUpdate: { version: "0.3.6", onDismiss: noop } };
     const { rerender } = render(<ClientProvider client={client} token="test"><Sidebar {...props} /></ClientProvider>);
     fireEvent.click(screen.getByRole("button", { name: "Update available v0.3.6" }));

@@ -439,6 +439,8 @@
     "closeAction": "Fermer la discussion temporaire : {{title}}"
   },
   "sidebar": {
+    "chatsHeader": "Discussions",
+    "topicOptions": "Options des sujets",
     "resize": "Redimensionner la barre latérale",
     "navigation": "Navigation de la barre latérale",
     "collapse": "Réduire la barre latérale",
@@ -1690,16 +1692,6 @@
       "archived": "Archivés"
     }
   },
-  "archiveView": {
-    "topicHeader": "Discussions",
-    "topicActions": "Options des sujets",
-    "search": "Rechercher des sujets archivés",
-    "loadError": "Impossible de charger tous les sujets.",
-    "empty": "Aucun sujet archivé.",
-    "noResults": "Aucun sujet correspondant.",
-    "selectAll": "Tout sélectionner",
-    "cancelSelection": "Annuler la sélection"
-  },
   "archiveConfirm": {
     "title": "Archiver ce sujet ?",
     "titleMany": "Archiver {{count}} sujets ?",
@@ -2435,7 +2427,6 @@
     "addPane": "Ajouter un volet",
     "paneLimit": "{{count}} volets maximum",
     "deleteConversations": "Supprimer toutes les discussions",
-    "deleteVisibleConversations": "Supprimer les discussions visibles",
     "movePane": "Déplacer le volet {{title}}",
     "movePaneHint": "Faites glisser pour déplacer. Les flèches fonctionnent aussi",
     "resizePaneBoundary": "Redimensionner la séparation {{index}}",

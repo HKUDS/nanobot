@@ -2837,148 +2837,38 @@ describe("App layout", () => {
     );
     expect(within(sidebar).getByRole("button", { name: /^Roadmap$/ })).toBeInTheDocument();
     expect(within(sidebar).queryByRole("button", { name: /^First chat$/ })).not.toBeInTheDocument();
-    act(() => statusHandlers.forEach((handler) => handler("open")));
 
+    const route = window.location.hash;
     fireEvent.pointerDown(within(sidebar).getByRole("button", { name: "Topic options" }), {
       button: 0, ctrlKey: false,
     });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Archived" }));
-    const main = screen.getByRole("main");
-    const archive = await within(main).findByRole("region", { name: "Archived" }, { timeout: 5_000 });
-    expect(within(archive).getByPlaceholderText("Search archived topics")).toBeInTheDocument();
-    expect(within(archive).getByText("First chat")).toBeVisible();
-    expect(setSidebarStateSpy).not.toHaveBeenCalled();
-
-    fireEvent.pointerDown(within(archive).getByRole("button", { name: "Topic actions for First chat" }), {
-      button: 0, ctrlKey: false,
-    });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Unarchive" }));
-    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenCalledWith(
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Show archived" }));
+    await waitFor(() =>
+      expect(within(sidebar).getByText("Archived")).toBeInTheDocument(),
+    );
+    expect(window.location.hash).toBe(route);
+    expect(within(sidebar).getByRole("button", { name: /^First chat$/ })).toBeInTheDocument();
+    expect(setSidebarStateSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         pinned_keys: initialState.pinned_keys,
-        archived_keys: [],
+        archived_keys: initialState.archived_keys,
         title_overrides: initialState.title_overrides,
-        view: expect.objectContaining({ show_archived: false }),
+        view: expect.objectContaining({ show_archived: true }),
       }),
-    ));
+    );
 
-    expect(within(sidebar).queryByRole("button", { name: "View" })).not.toBeInTheDocument();
-  }, 10_000);
-
-  it("keeps mixed pane groups intact while listing and opening archived sessions", async () => {
-    const paneKeys = ["websocket:design", "websocket:live", "websocket:testing"];
-    mockSessions = [
-      { key: paneKeys[0], channel: "websocket", chatId: "design", createdAt: null,
-        updatedAt: null, title: "Archived design", preview: "" },
-      { key: paneKeys[1], channel: "websocket", chatId: "live", createdAt: null,
-        updatedAt: null, title: "Active notes", preview: "" },
-      { key: paneKeys[2], channel: "websocket", chatId: "testing", createdAt: null,
-        updatedAt: null, title: "Archived testing", preview: "" },
-    ];
-    const saved: SidebarStatePayload = {
-      schema_version: 1, pinned_keys: [], archived_keys: [paneKeys[0], paneKeys[2]],
-      session_order: [], title_overrides: {}, project_name_overrides: {}, tags_by_key: {},
-      collapsed_groups: {},
-      workbench: { version: 1, tabs: { "tab:research": {
-        explicit: true, title: "Research group", paneKeys, layoutPaneKeys: paneKeys,
-        layout: "columns", splitRatios: [],
-      } } },
-      view: { density: "comfortable", show_archived: true, sort: "updated_desc" },
-      updated_at: null,
-    };
-    mockFetchRoutes({ "/api/webui/sidebar-state": saved });
-    window.history.replaceState(null, "", "/#/chat/websocket%3Alive");
-
-    render(<App />);
-    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    act(() => statusHandlers.forEach((handler) => handler("open")));
-    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    const group = (await within(sidebar).findByRole("button", { name: "Group: Research group" }))
-      .closest("[data-sidebar-tab-group]") as HTMLElement;
-    expect(within(group).getByRole("button", { name: "Active notes" })).toBeVisible();
-    expect(within(sidebar).queryByRole("button", { name: "Archived design" })).not.toBeInTheDocument();
-    expect(within(sidebar).queryByRole("button", { name: "Archived testing" })).not.toBeInTheDocument();
-
-    const openArchive = async () => {
-      fireEvent.pointerDown(within(sidebar).getByRole("button", { name: "Topic options" }), {
-        button: 0, ctrlKey: false,
-      });
-      fireEvent.click(await screen.findByRole("menuitem", { name: "Archived" }));
-      return within(screen.getByRole("main")).findByRole("region", { name: "Archived" }, { timeout: 5_000 });
-    };
-    let archive = await openArchive();
-    expect(within(archive).getByRole("button", { name: "Archived design" })).toBeVisible();
-    expect(within(archive).getByRole("button", { name: "Archived testing" })).toBeVisible();
-    expect(within(archive).queryByRole("button", { name: "Active notes" })).not.toBeInTheDocument();
-    const search = within(archive).getByPlaceholderText("Search archived topics");
-    fireEvent.change(search, { target: { value: "design" } });
-    expect(within(archive).getByRole("button", { name: "Archived design" })).toBeVisible();
-    expect(within(archive).queryByRole("button", { name: "Archived testing" })).not.toBeInTheDocument();
-    fireEvent.change(search, { target: { value: "" } });
-    fireEvent.click(within(archive).getByRole("button", { name: "Archived testing" }));
-    await waitFor(() => expect(window.location.hash).toBe("#/chat/websocket%3Atesting"));
-    expect(setSidebarStateSpy).not.toHaveBeenCalled();
-
-    fireEvent.click(within(sidebar).getByRole("button", { name: "Search" }));
-    const dialog = await screen.findByRole("dialog", { name: "Search" }, { timeout: 5_000 });
-    fireEvent.change(within(dialog).getByRole("textbox", { name: "Search" }), {
-      target: { value: "design" },
-    });
-    await waitFor(() => expect(within(dialog).queryByRole("button", { name: /Archived testing/ }))
-      .not.toBeInTheDocument());
-    const result = within(dialog).getByRole("button", { name: /Archived design/ });
-    expect(within(result).getByText("Archived")).toBeVisible();
-    fireEvent.click(result);
-    await waitFor(() => {
-      expect(window.location.hash).toBe("#/chat/websocket%3Adesign");
-      expect(screen.queryByRole("dialog", { name: "Search" })).not.toBeInTheDocument();
-    });
-    expect(setSidebarStateSpy).not.toHaveBeenCalled();
-
-    archive = await openArchive();
-    expect(within(archive).getByRole("button", { name: "Archived design" })).toBeVisible();
-    expect(within(archive).getByRole("button", { name: "Archived testing" })).toBeVisible();
-    fireEvent.pointerDown(within(archive).getByRole("button", { name: "Topic actions for Archived design" }), {
-      button: 0, ctrlKey: false,
-    });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Unarchive" }));
-    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenCalledWith(expect.objectContaining({
-      archived_keys: [paneKeys[2]],
-      workbench: expect.objectContaining({ tabs: expect.objectContaining({
-        "tab:research": expect.objectContaining({ paneKeys, layoutPaneKeys: paneKeys }),
-      }) }),
-    })));
-    const restoredGroup = within(sidebar).getByRole("button", { name: "Group: Research group" })
-      .closest("[data-sidebar-tab-group]") as HTMLElement;
-    expect(await within(restoredGroup).findByRole("button", { name: "Archived design" })).toBeVisible();
-    expect(within(restoredGroup).getByRole("button", { name: "Active notes" })).toBeVisible();
-    expect(within(sidebar).queryByRole("button", { name: "Archived testing" })).not.toBeInTheDocument();
-  });
-
-  it("opens an empty archive and returns to the previous chat", async () => {
-    mockSessions = [{
-      key: "websocket:active", channel: "websocket", chatId: "active",
-      createdAt: null, updatedAt: null, title: "Active topic", preview: "",
-    }];
-    window.history.replaceState(null, "", "/#/chat/websocket%3Aactive");
-    render(<App />);
-
-    const sidebar = await screen.findByRole("navigation", { name: "Sidebar navigation" });
-    await within(sidebar).findByRole("button", { name: "Active topic" });
     fireEvent.pointerDown(within(sidebar).getByRole("button", { name: "Topic options" }), {
       button: 0, ctrlKey: false,
     });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Archived" }));
-    const archive = await within(screen.getByRole("main")).findByRole(
-      "region", { name: "Archived" }, { timeout: 5_000 },
-    );
-    expect(within(archive).getByPlaceholderText("Search archived topics")).toBeVisible();
-    expect(within(archive).getByText("No archived topics.")).toBeVisible();
-    fireEvent.click(within(archive).getByRole("button", { name: "Back to chat" }));
-    await waitFor(() => expect(window.location.hash).toBe("#/chat/websocket%3Aactive"));
-    expect(within(sidebar).getByRole("button", { name: "Active topic" })).toBeVisible();
-    expect(setSidebarStateSpy).not.toHaveBeenCalled();
-  });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Hide archived" }));
+    await waitFor(() => expect(within(sidebar).queryByRole("button", { name: /^First chat$/ })).not.toBeInTheDocument());
+    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenLastCalledWith(expect.objectContaining({
+      archived_keys: initialState.archived_keys,
+      view: expect.objectContaining({ show_archived: false }),
+    })));
+    expect(window.location.hash).toBe(route);
+    expect(within(sidebar).queryByRole("button", { name: "View" })).not.toBeInTheDocument();
+  }, 10_000);
 
   it.each([false, true])("preserves sidebar metadata and panes after both reads fail with partial cache: %s", async (cached) => {
     const actual = await vi.importActual<typeof import("@/hooks/useSessions")>("@/hooks/useSessions");

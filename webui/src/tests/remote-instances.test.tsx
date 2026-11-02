@@ -49,7 +49,7 @@ function LocalShell({ collapsed = false, initialRemote = false }) {
     onRequestRename={async () => {}} onToggleArchive={noop} onToggleGroup={noop}
     onRequestRenameProject={noop} onNewChatInProject={noop} onOpenSettings={noop}
     onOpenApps={noop} onOpenSkills={noop} onOpenAutomations={noop} onOpenChannels={noop}
-    onOpenSearch={noop} onOpenArchive={noop} />
+    onOpenSearch={noop} onToggleArchived={noop} />
   <main><div hidden={connections?.managing} aria-hidden={connections?.managing || undefined}>
     {remotePage ? <RemoteConnectionsPage onBackToChat={() => setRemotePage(false)} /> : <><p>Local conversations</p><textarea aria-label="Local draft" /></>}
   </div>{connections?.managing && <RemoteConnectionsPage onBackToChat={connections.closeManagement} />}</main>
