@@ -467,21 +467,54 @@ async def test_prompt_reconnects_on_connection_closed_exception():
     assert new_session.get_prompt.call_count == 1
 
 
-async def test_tool_refresh_leaves_one_transient_retry_available():
+@pytest.mark.parametrize("fresh_annotations", [
+    mcp_types.ToolAnnotations(idempotentHint=True), None,
+    mcp_types.ToolAnnotations(readOnlyHint=False, idempotentHint=False),
+], ids=["still-idempotent", "unknown", "non-idempotent"])
+async def test_tool_refresh_rechecks_replay_contract_and_keeps_retry_budget(fresh_annotations):
     old, fresh = AsyncMock(), AsyncMock()
     old.call_tool.side_effect = ConnectionResetError("old")
-    fresh.call_tool.side_effect = [ConnectionResetError("fresh"), _make_tool_result("ok")]
-    wrapper = MCPToolWrapper(old, "srv", _make_tool_def())
-    reconnect = AsyncMock(return_value=MCPToolWrapper(fresh, "srv", _make_tool_def()))
+    effects = []
+
+    async def submit_then_lose_response(name, arguments):
+        effects.append((name, arguments))
+        if len(effects) == 1:
+            raise ConnectionResetError("fresh response lost after commit")
+        return _make_tool_result("ok")
+
+    fresh.call_tool.side_effect = submit_then_lose_response
+    definition = mcp_types.Tool(
+        name="test_tool", inputSchema={"type": "object"},
+        annotations=mcp_types.ToolAnnotations(idempotentHint=True),
+    )
+    wrapper = MCPToolWrapper(old, "srv", definition)
+    replacement = MCPToolWrapper(fresh, "srv", definition.model_copy(update={"annotations": fresh_annotations}))
+    reconnect = AsyncMock(return_value=replacement)
     wrapper.set_reconnect_handler(reconnect)
 
     with patch("nanobot.agent.tools.mcp.asyncio.sleep", new_callable=AsyncMock) as sleep:
-        assert await wrapper.execute(value="unchanged") == "ok"
+        output = await wrapper.execute(value="unchanged")
+        if fresh_annotations is not None and fresh_annotations.idempotentHint:
+            assert output == "ok"
+            assert effects == [("test_tool", {"value": "unchanged"})] * 2
+            sleep.assert_awaited_once_with(1)
+        else:
+            assert is_tool_error_result(output)
+            assert "outcome is unknown" in output
+            fresh.call_tool.assert_not_awaited()
+            assert effects == []
+            sleep.assert_not_awaited()
+            # A later authorized operation uses the new contract too: its lost
+            # response must not acquire the old wrapper's replay permission.
+            later = await wrapper.execute(value="new input")
+            assert is_tool_error_result(later)
+            assert "outcome is unknown" in later
+            assert effects == [("test_tool", {"value": "new input"})]
+            fresh.call_tool.assert_awaited_once()
+            sleep.assert_not_awaited()
 
     old.call_tool.assert_awaited_once_with("test_tool", arguments={"value": "unchanged"})
-    assert fresh.call_tool.await_count == 2
     reconnect.assert_awaited_once_with("srv", wrapper.name, wrapper)
-    sleep.assert_awaited_once_with(1)
 
 
 async def test_tool_later_refresh_does_not_reset_transient_budget():

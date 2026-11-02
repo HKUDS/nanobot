@@ -371,13 +371,18 @@ def restore_runtime_checkpoint(session: Session) -> bool:
         )
 
     overlap = 0
-    for size in range(min(len(session.messages), len(restored)), 0, -1):
-        if all(
-            _checkpoint_message_key(left) == _checkpoint_message_key(right)
-            for left, right in zip(session.messages[-size:], restored[:size])
-        ):
-            overlap = size
-            break
+    # Cumulative checkpoints contain only the delta after accepted input. The
+    # owner commits it and clears the checkpoint in one transaction, so none of
+    # it is already in history. Equal text can belong to distinct user inputs.
+    # Only legacy single-batch checkpoints may overlap a materialized tail.
+    if "preceding_messages" not in data:
+        for size in range(min(len(session.messages), len(restored)), 0, -1):
+            if all(
+                _checkpoint_message_key(left) == _checkpoint_message_key(right)
+                for left, right in zip(session.messages[-size:], restored[:size])
+            ):
+                overlap = size
+                break
     session.messages.extend(restored[overlap:])
     followup_ids = data.get("consumed_followup_ids", [])
     if isinstance(followup_ids, list) and followup_ids:

@@ -146,7 +146,8 @@ async def test_recovered_input_keeps_admission_identity_and_timestamp(tmp_path):
         await state.aclose()
 
 
-async def test_injected_inputs_keep_their_own_identity_through_runner_and_commit(tmp_path):
+@pytest.mark.parametrize("interrupt", [False, True], ids=["completed", "checkpoint-recovery"])
+async def test_injected_inputs_keep_their_own_identity_through_runner_and_commit(tmp_path, monkeypatch, interrupt):
     import asyncio
 
     provider = MagicMock(aclose=AsyncMock())
@@ -155,9 +156,24 @@ async def test_injected_inputs_keep_their_own_identity_through_runner_and_commit
     provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="completed answer"))
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path / "workspace", model="test-model")
     loop.sessions = SessionManager(tmp_path / "workspace", sessions_root=tmp_path / "sessions")
+    # Plain-text inputs are valid without extension-provided runtime context.
+    monkeypatch.setattr(loop, "_resolve_runtime_context_for_request", AsyncMock(return_value=[]))
+    checkpoint_saved = asyncio.Event()
+    checkpoint = loop._set_runtime_checkpoint
+
+    async def save_checkpoint(session, payload):
+        await checkpoint(session, payload)
+        checkpoint_saved.set()
+        if interrupt:
+            await asyncio.Event().wait()
+
+    monkeypatch.setattr(loop, "_set_runtime_checkpoint", save_checkpoint)
     try:
         draft = await loop.sessions.state.get("websocket:chat")
-        draft.add_message("user", "initial input")
+        draft.add_message(
+            "user", "intentionally identical text", **{INBOUND_META_TURN_ID: "initial-input"},
+            timestamp="2026-10-18T19:00:00",
+        )
         await loop.sessions.state.prepare_input(draft)
         queue = asyncio.Queue()
         for turn_id in ("first-input", "second-input"):
@@ -166,22 +182,46 @@ async def test_injected_inputs_keep_their_own_identity_through_runner_and_commit
             message.metadata[PENDING_FOLLOWUP_ID_KEY] = identifier
             queue.put_nowait(message)
         runtime = loop.llm_runtime()
-        result = await loop._run_agent_loop(
+        task = asyncio.create_task(loop._run_agent_loop(
             TranscriptInput(history=draft.get_history(), current_message=None),
             runtime=runtime, session=draft, pending_queue=queue,
             request_context=RequestContext(
                 channel="websocket", chat_id="chat", session_key=draft.key,
                 turn_id="active-run", runtime=runtime,
             ),
-        )
-        loop._save_turn(draft, result.messages, skip=2)
-        await loop.sessions.state.finish_turn(draft)
-        stored = await loop.sessions.state.get(draft.key)
-        injected = [row for row in stored.messages if row.get("role") == "user"][1:]
-        assert [public_history_message(row)["content"] for row in injected] == ["intentionally identical text"] * 2
-        assert [row[INBOUND_META_TURN_ID] for row in injected] == ["first-input", "second-input"]
-        assert [row["timestamp"] for row in injected] == ["2026-10-18T19:00:00"] * 2
-        assert pending_followups(stored) == []
+        ))
+        try:
+            await asyncio.wait_for(checkpoint_saved.wait(), 5)
+            if interrupt:
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+                assert len(pending_followups(await loop.sessions.state.get(draft.key))) == 2
+            else:
+                result = await task
+                loop._save_turn(draft, result.messages, skip=2)
+                await loop.sessions.state.finish_turn(draft)
+        finally:
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
         provider.chat_stream_with_retry.assert_awaited_once()
     finally:
         await loop.aclose()
+
+    reopened = SessionManager(tmp_path / "workspace", sessions_root=tmp_path / "sessions")
+    try:
+        bus = MessageBus()
+        recovery = RecoveryCoordinator(reopened, bus)
+        await recovery.scan()
+        stored = await reopened.state.get(draft.key)
+        inputs = [row for row in stored.messages if row.get("role") == "user"]
+        assert [public_history_message(row)["content"] for row in inputs] == ["intentionally identical text"] * 3
+        assert [row[INBOUND_META_TURN_ID] for row in inputs] == ["initial-input", "first-input", "second-input"]
+        assert [row["timestamp"] for row in inputs] == ["2026-10-18T19:00:00"] * 3
+        assert pending_followups(stored) == []
+        assert bus.inbound.empty()
+        await recovery.scan()
+        assert (await reopened.state.get(draft.key)).messages == stored.messages
+    finally:
+        await reopened.state.aclose()
