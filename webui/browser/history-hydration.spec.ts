@@ -319,6 +319,53 @@ test("switching away from file edits does not rebuild the outgoing diff before h
   backend.healthy();
 });
 
+test("cached conversations with a shared fork prefix reset activity disclosures on message handoff", async ({ page }) => {
+  const { backend, body } = await openFixture(page);
+  const prefix: ThreadProjectionEvent[] = [
+    input("shared-turn", "Shared question"),
+    { ...at("shared-turn", 1, "activity"), event: "message", kind: "tool_hint", text: "Shared activity detail" },
+    { ...at("shared-turn", 2, "answer"), event: "message", text: "Shared answer." },
+    { ...at("shared-turn", 3, "complete"), event: "turn_end" },
+  ];
+  const source = history([...prefix, ...closedTurn("source-turn", "Source question", "Source answer.")]);
+  const fork = history([
+    ...prefix.map((event) => ({ ...event, chat_id: B })),
+    ...closedTurn("fork-turn", "Fork question", "Fork answer.", B),
+  ], { chatId: B });
+  await backend.release(await backend.read(), source);
+  await expect(body.getByText("Source answer.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Conversation B", exact: true }).click();
+  await backend.release(await backend.read(B), fork);
+  await expect(body.getByText("Fork answer.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Conversation A", exact: true }).click();
+  await backend.read(A, null, 1);
+  await expect(body.getByText("Source answer.", { exact: true })).toBeVisible();
+  const sharedBlock = body.locator("[data-thread-display-unit]").filter({ has: page.getByText("Shared answer.", { exact: true }) });
+  await sharedBlock.hover();
+  await sharedBlock.getByRole("button", { name: "Message actions", exact: true }).click();
+  const activity = page.locator("[data-message-block-activity-action]");
+  await expect(activity).toHaveAttribute("aria-expanded", "false");
+  await activity.click();
+  await expect(sharedBlock.getByTestId("agent-activity-content")).toBeVisible();
+
+  await page.getByRole("button", { name: "Conversation B", exact: true }).click();
+  const forkRead = await backend.read(B, null, 1);
+  await expect(body.getByText("Fork answer.", { exact: true })).toBeVisible();
+  await sharedBlock.hover();
+  await sharedBlock.getByRole("button", { name: "Message actions", exact: true }).click();
+  await expect(activity).toHaveAttribute("aria-expanded", "false");
+  await page.keyboard.press("Escape");
+  await backend.release(forkRead, fork);
+
+  await page.getByRole("button", { name: "Conversation A", exact: true }).click();
+  await backend.release(await backend.read(A, null, 2), source);
+  await expect(body.getByText("Source answer.", { exact: true })).toBeVisible();
+  await sharedBlock.hover();
+  await sharedBlock.getByRole("button", { name: "Message actions", exact: true }).click();
+  await expect(activity).toHaveAttribute("aria-expanded", "false");
+  backend.healthy();
+});
+
 test("synthetic cache return retains unpainted chunks and the absent conversation's buffered wire tail", async ({ page }) => {
   const { backend, body } = await openFixture(page);
   const initial = history([input(TURN, "Cache question"), end(3, "Cache answer", "cache-wire", true)], { active: TURN });
