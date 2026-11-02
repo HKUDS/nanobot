@@ -178,7 +178,6 @@ export interface SidebarPaneGroup {
   activePaneKey: string;
   visible?: boolean;
   totalPaneCount?: number;
-  splitByWorkspace?: boolean;
   panes: Array<{
     key: string;
     chatId: string;
@@ -978,7 +977,6 @@ export const ChatList = memo(function ChatList({
                                 partiallySelected={tabPartiallySelected}
                                 hasHiddenPanes={(resolvedPaneGroup.totalPaneCount ?? resolvedPaneGroup.panes.length) > resolvedPaneGroup.panes.length}
                                 deleteCount={tabDeleteKeys.length}
-                                splitByWorkspace={Boolean(resolvedPaneGroup.splitByWorkspace)}
                                 onToggle={() => togglePaneGroup(resolvedPaneGroup.tabKey)}
                                 onToggleSelection={(shiftKey) => toggleDeleteSelection(
                                   tabDeleteKeys,
@@ -1305,7 +1303,6 @@ function WorkbenchTabHeader({
   partiallySelected,
   hasHiddenPanes,
   deleteCount,
-  splitByWorkspace,
   onToggle,
   onToggleSelection,
   onRequestRename,
@@ -1324,7 +1321,6 @@ function WorkbenchTabHeader({
   partiallySelected: boolean;
   hasHiddenPanes: boolean;
   deleteCount: number;
-  splitByWorkspace: boolean;
   onToggle: () => void;
   onToggleSelection: (shiftKey: boolean) => void;
   onRequestRename?: () => void;
@@ -1428,7 +1424,7 @@ function WorkbenchTabHeader({
               {onDissolve ? (
                 <DropdownMenuItem onSelect={onDissolve}>
                   <Ungroup className="h-4 w-4 shrink-0" />
-                  {t(splitByWorkspace ? "workbench.dissolveAllPanes" : "workbench.dissolveTab")}
+                  {t("workbench.dissolveTab")}
                 </DropdownMenuItem>
               ) : null}
               <DropdownMenuItem

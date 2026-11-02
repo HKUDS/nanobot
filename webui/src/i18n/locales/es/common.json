@@ -2423,7 +2423,6 @@
     "renameGroupDescription": "Ponle un nombre a este grupo.",
     "renameGroupPlaceholder": "Nombre del grupo",
     "dissolveTab": "Disolver grupo",
-    "dissolveAllPanes": "Disolver el grupo completo",
     "workspaceGroupMismatch": "Los temas del grupo deben usar el mismo espacio de trabajo.",
     "workspaceChangeInGroup": "Saca este tema del grupo antes de cambiar su espacio de trabajo.",
     "paneCreatedSeparately": "El grupo cambió. El nuevo tema se creó por separado.",

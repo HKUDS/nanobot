@@ -310,7 +310,6 @@ const LOCALIZED_NEW_SURFACE_KEYS = [
   "workbench.renameGroupDescription",
   "workbench.renameGroupPlaceholder",
   "workbench.dissolveTab",
-  "workbench.dissolveAllPanes",
   "workbench.workspaceGroupMismatch",
   "workbench.workspaceChangeInGroup",
   "workbench.paneCreatedSeparately",

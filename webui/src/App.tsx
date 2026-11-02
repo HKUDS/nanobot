@@ -2774,7 +2774,6 @@ function Shell({
           orderedTab: tab,
           groupPaneKeys: partition.keys,
           visiblePaneKeys,
-          splitByWorkspace,
           rowKey,
           title,
           session: visible
@@ -2873,7 +2872,6 @@ function Shell({
           : presentation.visiblePaneKeys[0] ?? presentation.groupPaneKeys[0],
         visible: orderedTab.tab.explicit || orderedTab.paneKeys.length > 1,
         totalPaneCount: orderedTab.paneKeys.length,
-        splitByWorkspace: presentation.splitByWorkspace,
         panes,
       }];
     }));

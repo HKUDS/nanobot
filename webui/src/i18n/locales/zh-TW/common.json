@@ -2422,7 +2422,6 @@
     "renameGroupDescription": "為這個群組命名。",
     "renameGroupPlaceholder": "群組名稱",
     "dissolveTab": "解散群組",
-    "dissolveAllPanes": "解散整個群組",
     "workspaceGroupMismatch": "群組內的話題需要使用同一個工作區。",
     "workspaceChangeInGroup": "變更工作區前，請先將此話題移出群組。",
     "paneCreatedSeparately": "群組已變更，已另外建立新話題。",

@@ -2422,7 +2422,6 @@
     "renameGroupDescription": "Donnez un nom à ce groupe.",
     "renameGroupPlaceholder": "Nom du groupe",
     "dissolveTab": "Dissoudre le groupe",
-    "dissolveAllPanes": "Dissoudre tout le groupe",
     "workspaceGroupMismatch": "Les sujets d’un groupe doivent utiliser le même espace de travail.",
     "workspaceChangeInGroup": "Retirez ce sujet du groupe avant de changer son espace de travail.",
     "paneCreatedSeparately": "Le groupe a changé. Le nouveau sujet a été créé séparément.",

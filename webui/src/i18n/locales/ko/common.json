@@ -2422,7 +2422,6 @@
     "renameGroupDescription": "이 그룹에 이름을 지정하세요.",
     "renameGroupPlaceholder": "그룹 이름",
     "dissolveTab": "그룹 해제",
-    "dissolveAllPanes": "전체 그룹 해제",
     "workspaceGroupMismatch": "그룹의 토픽은 같은 작업 공간을 사용해야 합니다.",
     "workspaceChangeInGroup": "작업 공간을 변경하기 전에 이 주제를 그룹에서 분리하세요.",
     "paneCreatedSeparately": "그룹이 변경되어 새 주제를 별도로 만들었습니다.",

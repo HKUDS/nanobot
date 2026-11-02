@@ -2628,7 +2628,6 @@
     "renameGroupDescription": "Give this group a name.",
     "renameGroupPlaceholder": "Group name",
     "dissolveTab": "Dissolve group",
-    "dissolveAllPanes": "Dissolve entire group",
     "workspaceGroupMismatch": "Topics in a group must use the same workspace.",
     "workspaceChangeInGroup": "Remove this topic from its group before changing its workspace.",
     "paneCreatedSeparately": "The group changed. The new topic was created separately.",

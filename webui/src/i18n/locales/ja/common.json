@@ -2422,7 +2422,6 @@
     "renameGroupDescription": "このグループに名前を付けます。",
     "renameGroupPlaceholder": "グループ名",
     "dissolveTab": "グループを解除",
-    "dissolveAllPanes": "グループ全体を解除",
     "workspaceGroupMismatch": "グループ内のトピックは同じワークスペースを使用する必要があります。",
     "workspaceChangeInGroup": "ワークスペースを変更する前に、このトピックをグループから外してください。",
     "paneCreatedSeparately": "グループが変更されたため、新しいトピックを単独で作成しました。",

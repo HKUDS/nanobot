@@ -2628,7 +2628,6 @@
     "renameGroupDescription": "为这个分组命名。",
     "renameGroupPlaceholder": "分组名称",
     "dissolveTab": "解散分组",
-    "dissolveAllPanes": "解散整个分组",
     "workspaceGroupMismatch": "组内话题需要使用同一个工作区。",
     "workspaceChangeInGroup": "更改工作区前，请先将此话题移出分组。",
     "paneCreatedSeparately": "分组已变化，新话题已单独创建。",

@@ -3052,12 +3052,18 @@ describe("App layout", () => {
     expect(within(alpha).queryByText("Beta archived")).not.toBeInTheDocument();
     fireEvent.pointerDown(within(alpha).getByRole("button", { name: "Topic actions for Shared group" }), { button: 0, ctrlKey: false });
     expect(await screen.findByRole("menuitem", { name: "Delete chats (1)" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Dissolve entire group" })).toBeInTheDocument();
-    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.getByRole("menuitem", { name: "Dissolve group" })).toBeInTheDocument();
     await waitFor(() => expect(setSidebarStateSpy).toHaveBeenCalledWith(expect.objectContaining({
       archived_keys: ["websocket:beta"],
       workbench: expect.objectContaining({ tabs: expect.objectContaining({ "tab:shared": tab }) }),
     })));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Dissolve group" }));
+    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenLastCalledWith(expect.objectContaining({
+      archived_keys: ["websocket:beta"],
+      workbench: { version: 1, tabs: {} },
+    })));
+    expect(await within(alpha).findByText("Alpha live")).toBeInTheDocument();
+    expect(await within(beta).findByText("Beta archived")).toBeInTheDocument();
   });
 
   it.each([false, true])("preserves sidebar metadata and panes after both reads fail with partial cache: %s", async (cached) => {
