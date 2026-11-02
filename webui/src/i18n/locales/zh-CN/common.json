@@ -1896,6 +1896,16 @@
       "archived": "已归档"
     }
   },
+  "archiveView": {
+    "topicHeader": "聊天",
+    "topicActions": "话题选项",
+    "search": "搜索已归档话题",
+    "loadError": "无法加载完整话题列表。",
+    "empty": "暂无已归档话题。",
+    "noResults": "没有匹配的话题。",
+    "selectAll": "全选",
+    "cancelSelection": "取消选择"
+  },
   "archiveConfirm": {
     "title": "归档此话题？",
     "titleMany": "归档 {{count}} 个话题？",
@@ -2631,6 +2641,7 @@
     "addPane": "添加窗格",
     "paneLimit": "最多 {{count}} 个窗格",
     "deleteConversations": "整组删除",
+    "deleteVisibleConversations": "删除可见聊天",
     "movePane": "移动 {{title}} 窗格",
     "movePaneHint": "拖动换位，也可以使用方向键。",
     "resizePaneBoundary": "调整窗格边界 {{index}}",

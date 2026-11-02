@@ -1690,6 +1690,16 @@
       "archived": "已封存"
     }
   },
+  "archiveView": {
+    "topicHeader": "聊天",
+    "topicActions": "話題選項",
+    "search": "搜尋已封存話題",
+    "loadError": "無法載入完整話題清單。",
+    "empty": "目前沒有已封存的話題。",
+    "noResults": "沒有符合的話題。",
+    "selectAll": "全選",
+    "cancelSelection": "取消選取"
+  },
   "archiveConfirm": {
     "title": "封存此話題？",
     "titleMany": "封存 {{count}} 個話題？",
@@ -2425,6 +2435,7 @@
     "addPane": "新增窗格",
     "paneLimit": "最多 {{count}} 個窗格",
     "deleteConversations": "整組刪除",
+    "deleteVisibleConversations": "刪除可見的聊天",
     "movePane": "移動 {{title}} 窗格",
     "movePaneHint": "拖曳換位，也可以使用方向鍵",
     "resizePaneBoundary": "調整窗格邊界 {{index}}",

@@ -12,7 +12,6 @@ import {
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import {
   Archive,
-  ArchiveRestore,
   AlertTriangle,
   ChevronDown,
   ListChecks,
@@ -177,6 +176,7 @@ export interface SidebarPaneGroup {
   title: string;
   activePaneKey: string;
   visible?: boolean;
+  totalPaneCount?: number;
   panes: Array<{
     key: string;
     chatId: string;
@@ -196,7 +196,7 @@ function droppablePaneKey(
   dataTransfer: DataTransfer,
   group: SidebarPaneGroup,
 ): string | null {
-  if (group.panes.length >= MAX_WORKBENCH_PANES
+  if ((group.totalPaneCount ?? group.panes.length) >= MAX_WORKBENCH_PANES
     || !hasDraggedSession(dataTransfer)) return null;
   const paneKey = readDraggedSession(dataTransfer);
   if (!paneKey || group.panes.some((pane) => pane.key === paneKey)) return null;
@@ -248,9 +248,7 @@ interface ChatListProps {
   onRequestRenameProject?: (projectKey: string, label: string) => void;
   onNewChatInProject?: (projectPath: string, projectName: string) => void;
   pinnedKeys?: string[];
-  archivedKeys?: string[];
   pinnedPaneKeys?: string[];
-  archivedPaneKeys?: string[];
   sessionOrder?: string[];
   titleOverrides?: Record<string, string>;
   projectNameOverrides?: Record<string, string>;
@@ -260,7 +258,7 @@ interface ChatListProps {
   recoveryChatIds?: string[];
   density?: SidebarDensity;
   sort?: SidebarSortMode;
-  showArchived?: boolean;
+  hasGlobalHeader?: boolean;
   defaultWorkspacePath?: string | null;
   actionMenuPortalContainer?: HTMLElement | null;
   loading?: boolean;
@@ -291,9 +289,7 @@ export const ChatList = memo(function ChatList({
   onRequestRenameProject,
   onNewChatInProject,
   pinnedKeys = [],
-  archivedKeys = [],
   pinnedPaneKeys = [],
-  archivedPaneKeys = [],
   sessionOrder = [],
   titleOverrides = {},
   projectNameOverrides = {},
@@ -303,7 +299,7 @@ export const ChatList = memo(function ChatList({
   recoveryChatIds = [],
   density = "comfortable",
   sort = "updated_desc",
-  showArchived = false,
+  hasGlobalHeader = false,
   defaultWorkspacePath,
   actionMenuPortalContainer,
   loading,
@@ -350,10 +346,7 @@ export const ChatList = memo(function ChatList({
   const [paneDropTarget, setPaneDropTarget] = useState<string | null>(null);
   const [deleteSelectionMode, setDeleteSelectionMode] = useState(false);
   const [deleteConfirmationPending, setDeleteConfirmationPending] = useState(false);
-  const [pendingArchive, setPendingArchive] = useState<{
-    keys: string[];
-    archive: boolean;
-  } | null>(null);
+  const [pendingArchive, setPendingArchive] = useState<string[] | null>(null);
   const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
   const [renamingTopic, setRenamingTopic] = useState<{ key: string } | null>(null);
   const renamingKey = renamingTopic?.key ?? null;
@@ -407,14 +400,24 @@ export const ChatList = memo(function ChatList({
     }
     return items;
   }, [paneGroups, sessions, t, titleOverrides]);
+  useEffect(() => {
+    if (loading) return;
+    setSelectedDeleteKeys((current) => {
+      const next = new Set(Array.from(current).filter((key) => deleteItemsByKey.has(key)));
+      return next.size === current.size ? current : next;
+    });
+    if (deleteSelectionAnchorRef.current && !deleteItemsByKey.has(deleteSelectionAnchorRef.current)) {
+      deleteSelectionAnchorRef.current = null;
+    }
+  }, [deleteItemsByKey, loading]);
   const paneGroupTargets = useMemo(() => Array.from(new Map(
     Object.values(paneGroups)
       .filter((group) => group.visible ?? group.panes.length > 1)
       .map((group) => [group.tabKey, {
         key: group.tabKey,
         title: group.title,
-        paneCount: group.panes.length,
-        atCapacity: group.panes.length >= MAX_WORKBENCH_PANES,
+        paneCount: group.totalPaneCount ?? group.panes.length,
+        atCapacity: (group.totalPaneCount ?? group.panes.length) >= MAX_WORKBENCH_PANES,
       }]),
   ).values()), [paneGroups]);
   const labels = useMemo<ChatGroupLabels>(() => ({
@@ -423,27 +426,22 @@ export const ChatList = memo(function ChatList({
     today: t("chat.groups.today"),
     yesterday: t("chat.groups.yesterday"),
     earlier: t("chat.groups.earlier"),
-    archived: t("chat.groups.archived"),
     projects: t("chat.groups.projects"),
     fallbackTitle: t("chat.newChat"),
   }), [t]);
   const groups = useMemo(
     () => groupSessions(sessions, labels, {
       pinnedKeys,
-      archivedKeys,
       titleOverrides,
       projectNameOverrides,
       sessionOrder,
-      showArchived,
       sort,
       defaultWorkspacePath,
     }),
     [
-      archivedKeys,
       labels,
       pinnedKeys,
       sessions,
-      showArchived,
       sort,
       titleOverrides,
       projectNameOverrides,
@@ -468,9 +466,7 @@ export const ChatList = memo(function ChatList({
     [limitedGroups],
   );
   const pinned = useMemo(() => new Set(pinnedKeys), [pinnedKeys]);
-  const archived = useMemo(() => new Set(archivedKeys), [archivedKeys]);
   const pinnedPanes = useMemo(() => new Set(pinnedPaneKeys), [pinnedPaneKeys]);
-  const archivedPanes = useMemo(() => new Set(archivedPaneKeys), [archivedPaneKeys]);
   const hiddenSessionCount = Math.max(0, totalSessionCount - visibleSessionCount);
   const handleActionMenuOpenChange = useCallback((id: string, open: boolean) => {
     setOpenActionMenuId((current) => {
@@ -495,7 +491,7 @@ export const ChatList = memo(function ChatList({
 
   useEffect(() => {
     setVisibleLimit(INITIAL_VISIBLE_SESSIONS);
-  }, [showArchived, sort]);
+  }, [sort]);
 
   useEffect(() => {
     if (!deleteSelectionMode) return;
@@ -693,14 +689,16 @@ export const ChatList = memo(function ChatList({
       .filter((item): item is SidebarDeleteItem => item !== undefined), onDecision);
   };
   const confirmDeleteSelection = () => {
+    const items = Array.from(selectedDeleteKeys)
+      .map((key) => deleteItemsByKey.get(key))
+      .filter((item): item is SidebarDeleteItem => item !== undefined);
+    if (items.length === 0) return;
     setDeleteConfirmationPending(true);
-    requestDeleteKeys(Array.from(selectedDeleteKeys), (confirmed) => {
+    requestDeleteItems(items, (confirmed) => {
       setDeleteConfirmationPending(false);
       if (confirmed) closeDeleteSelection();
     });
   };
-  const allSelectedArchived = selectedDeleteKeys.size > 0
-    && Array.from(selectedDeleteKeys).every((key) => archivedPanes.has(key) || archived.has(key));
   return (
     <div ref={scrollViewportRef} className="sidebar-scroll-fade sidebar-scrollbar h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain pb-2">
       <SidebarSelectionHighlight
@@ -795,7 +793,7 @@ export const ChatList = memo(function ChatList({
                 </div>
               ) : null}
               <div>
-                <div
+                {!(hasGlobalHeader && firstProjectGroupIndex === -1 && foldableChatsGroup) && <div
                   ref={(element) => {
                     const key = `group:${group.id}`;
                     if (element) layoutRowRefs.current.set(key, element);
@@ -827,7 +825,7 @@ export const ChatList = memo(function ChatList({
                   ) : (
                     <ChatsGroupHeader label={group.label} />
                   )}
-                </div>
+                </div>}
                 {projectCollapsed ? null : (
                 <div
                   data-sidebar-project-surface={group.kind === "project" ? "true" : undefined}
@@ -937,6 +935,7 @@ export const ChatList = memo(function ChatList({
                                 deleteSelectionMode={deleteSelectionMode}
                                 selected={tabSelected}
                                 partiallySelected={tabPartiallySelected}
+                                hasHiddenPanes={(resolvedPaneGroup.totalPaneCount ?? resolvedPaneGroup.panes.length) > resolvedPaneGroup.panes.length}
                                 onToggle={() => togglePaneGroup(s.key)}
                                 onToggleSelection={(shiftKey) => toggleDeleteSelection(
                                   tabDeleteKeys,
@@ -971,7 +970,6 @@ export const ChatList = memo(function ChatList({
                                   onTogglePin={onTogglePin}
                                   onToggleArchive={onToggleArchive}
                                   pinned={pinnedPanes}
-                                  archived={archivedPanes}
                                   onDetachPane={onDetachPane}
                                   moveTargets={paneGroupTargets.filter((target) => (
                                     target.key !== resolvedPaneGroup.tabKey
@@ -991,7 +989,6 @@ export const ChatList = memo(function ChatList({
                     }
 
                     const isPinned = pinned.has(s.key);
-                    const isArchived = archived.has(s.key);
                     const activityState = running.has(s.chatId)
                       ? "running"
                       : recovery.has(s.chatId)
@@ -1117,12 +1114,8 @@ export const ChatList = memo(function ChatList({
                                 {t("chat.rename")}
                               </DropdownMenuItem>
                               <DropdownMenuItem onSelect={() => onToggleArchive(s.key)}>
-                                {isArchived ? (
-                                  <ArchiveRestore className="h-4 w-4 shrink-0" />
-                                ) : (
-                                  <Archive className="h-4 w-4 shrink-0" />
-                                )}
-                                {isArchived ? t("chat.unarchive") : t("chat.archive")}
+                                <Archive className="h-4 w-4 shrink-0" />
+                                {t("chat.archive")}
                               </DropdownMenuItem>
                               {paneGroup && onCreateTab ? (
                                 <DropdownMenuItem onSelect={() => onCreateTab(s.key)}>
@@ -1203,20 +1196,15 @@ export const ChatList = memo(function ChatList({
               })}
             </span>
             {onArchiveMany ? (
-              <HoverHint content={t(allSelectedArchived ? "chat.unarchive" : "chat.archive")}>
+              <HoverHint content={t("chat.archive")}>
                 <button
                   type="button"
-                  aria-label={t(allSelectedArchived ? "chat.unarchive" : "chat.archive")}
+                  aria-label={t("chat.archive")}
                   disabled={selectedDeleteKeys.size === 0 || deleteConfirmationPending}
-                  onClick={() => setPendingArchive({
-                    keys: Array.from(selectedDeleteKeys),
-                    archive: !allSelectedArchived,
-                  })}
+                  onClick={() => setPendingArchive(Array.from(selectedDeleteKeys))}
                   className="touch-target inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-foreground transition-colors media-hover:hover:bg-sidebar-accent disabled:pointer-events-none disabled:opacity-40"
                 >
-                  {allSelectedArchived
-                    ? <ArchiveRestore className="h-4 w-4" aria-hidden />
-                    : <Archive className="h-4 w-4" aria-hidden />}
+                  <Archive className="h-4 w-4" aria-hidden />
                 </button>
               </HoverHint>
             ) : null}
@@ -1235,11 +1223,11 @@ export const ChatList = memo(function ChatList({
         ) : null}
         {pendingArchive ? (
           <ArchiveConfirm
-            count={pendingArchive.keys.length}
-            archive={pendingArchive.archive}
+            count={pendingArchive.length}
+            archive
             onCancel={() => setPendingArchive(null)}
             onConfirm={() => {
-              onArchiveMany?.(pendingArchive.keys, pendingArchive.archive);
+              onArchiveMany?.(pendingArchive, true);
               setPendingArchive(null);
               closeDeleteSelection();
             }}
@@ -1260,6 +1248,7 @@ function WorkbenchTabHeader({
   deleteSelectionMode,
   selected,
   partiallySelected,
+  hasHiddenPanes,
   onToggle,
   onToggleSelection,
   onRequestRename,
@@ -1276,6 +1265,7 @@ function WorkbenchTabHeader({
   deleteSelectionMode: boolean;
   selected: boolean;
   partiallySelected: boolean;
+  hasHiddenPanes: boolean;
   onToggle: () => void;
   onToggleSelection: (shiftKey: boolean) => void;
   onRequestRename?: () => void;
@@ -1388,7 +1378,7 @@ function WorkbenchTabHeader({
                 className="whitespace-nowrap"
               >
                 <Trash2 className="h-4 w-4 shrink-0" />
-                {t("workbench.deleteConversations")}
+                {t(hasHiddenPanes ? "workbench.deleteVisibleConversations" : "workbench.deleteConversations")}
               </DropdownMenuItem>
             </SidebarActionMenuContent>
           </DropdownMenu>
@@ -1417,7 +1407,6 @@ function ActivePaneRows({
   onTogglePin,
   onToggleArchive,
   pinned,
-  archived,
   onDetachPane,
   moveTargets,
   onAttachPane,
@@ -1445,7 +1434,6 @@ function ActivePaneRows({
   onTogglePin: (key: string) => void;
   onToggleArchive: (key: string) => void;
   pinned: ReadonlySet<string>;
-  archived: ReadonlySet<string>;
   onDetachPane?: (tabKey: string, paneKey: string) => void;
   moveTargets: PaneGroupTarget[];
   onAttachPane?: (
@@ -1483,7 +1471,6 @@ function ActivePaneRows({
         const paneActionsLabel = t("workbench.paneActions", { title: pane.title });
         const selected = selectedDeleteKeys.has(pane.key);
         const isPinned = pinned.has(pane.key);
-        const isArchived = archived.has(pane.key);
         const hasPaneMoveTarget = Boolean(onAttachPane)
           && moveTargets.some((target) => !target.atCapacity);
         const canDragSession = !deleteSelectionMode
@@ -1590,12 +1577,8 @@ function ActivePaneRows({
                     {t("chat.rename")}
                   </DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => onToggleArchive(pane.key)}>
-                    {isArchived ? (
-                      <ArchiveRestore className="h-4 w-4 shrink-0" />
-                    ) : (
-                      <Archive className="h-4 w-4 shrink-0" />
-                    )}
-                    {isArchived ? t("chat.unarchive") : t("chat.archive")}
+                    <Archive className="h-4 w-4 shrink-0" />
+                    {t("chat.archive")}
                   </DropdownMenuItem>
                   {onDetachPane ? (
                     <DropdownMenuItem onSelect={() => onDetachPane(group.tabKey, pane.key)}>

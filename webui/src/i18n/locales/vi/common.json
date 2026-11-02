@@ -1690,6 +1690,16 @@
       "archived": "Đã lưu trữ"
     }
   },
+  "archiveView": {
+    "topicHeader": "Trò chuyện",
+    "topicActions": "Tùy chọn chủ đề",
+    "search": "Tìm chủ đề đã lưu trữ",
+    "loadError": "Không thể tải đầy đủ danh sách chủ đề.",
+    "empty": "Chưa có chủ đề nào được lưu trữ.",
+    "noResults": "Không có chủ đề phù hợp.",
+    "selectAll": "Chọn tất cả",
+    "cancelSelection": "Hủy chọn"
+  },
   "archiveConfirm": {
     "title": "Lưu trữ chủ đề này?",
     "titleMany": "Lưu trữ {{count}} chủ đề?",
@@ -2425,6 +2435,7 @@
     "addPane": "Thêm khung",
     "paneLimit": "Tối đa {{count}} khung",
     "deleteConversations": "Xóa mọi trò chuyện trong nhóm",
+    "deleteVisibleConversations": "Xóa các cuộc trò chuyện đang hiển thị",
     "movePane": "Di chuyển khung {{title}}",
     "movePaneHint": "Kéo để di chuyển. Cũng có thể dùng các phím mũi tên",
     "resizePaneBoundary": "Đổi kích thước ranh giới khung {{index}}",

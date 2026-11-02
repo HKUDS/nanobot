@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionSearchDialog } from "@/components/SessionSearchDialog";
@@ -117,6 +117,30 @@ describe("SessionSearchDialog", () => {
       target: { value: "model fast" },
     });
     expect(screen.queryByText("Model chat")).not.toBeInTheDocument();
+  });
+
+  it("marks archived search matches and selects the archived session", () => {
+    const onSelect = vi.fn();
+    const onOpenChange = vi.fn();
+    render(<SessionSearchDialog open sessions={[
+      { ...session(1), title: "Planning archive" },
+      { ...session(2), title: "Planning active" },
+      session(3),
+    ]} activeKey={null} loading={false} archivedKeys={["websocket:chat-1"]}
+      onOpenChange={onOpenChange} onSelect={onSelect} />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Search" }), {
+      target: { value: "planning" },
+    });
+    const archived = screen.getByRole("button", { name: /Planning archive/ });
+    const active = screen.getByRole("button", { name: /Planning active/ });
+    expect(within(archived).getByText("Archived")).toBeVisible();
+    expect(within(active).queryByText("Archived")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Chat 3/ })).not.toBeInTheDocument();
+
+    fireEvent.click(archived);
+    expect(onSelect).toHaveBeenCalledWith("websocket:chat-1");
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
   it("finds loaded session handles with or without @ and selects the matching session without requests", () => {

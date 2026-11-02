@@ -1690,6 +1690,16 @@
       "archived": "보관됨"
     }
   },
+  "archiveView": {
+    "topicHeader": "채팅",
+    "topicActions": "주제 옵션",
+    "search": "보관된 주제 검색",
+    "loadError": "주제 목록을 모두 불러오지 못했습니다.",
+    "empty": "보관된 주제가 없습니다.",
+    "noResults": "일치하는 주제가 없습니다.",
+    "selectAll": "모두 선택",
+    "cancelSelection": "선택 취소"
+  },
   "archiveConfirm": {
     "title": "이 주제를 보관할까요?",
     "titleMany": "주제 {{count}}개를 보관할까요?",
@@ -2425,6 +2435,7 @@
     "addPane": "창 추가",
     "paneLimit": "최대 {{count}}개 창",
     "deleteConversations": "그룹 내 모든 대화 삭제",
+    "deleteVisibleConversations": "표시된 채팅 삭제",
     "movePane": "{{title}} 창 이동",
     "movePaneHint": "드래그하여 이동. 방향키로도 이동 가능",
     "resizePaneBoundary": "창 경계 {{index}} 크기 조절",

@@ -1691,6 +1691,16 @@
       "archived": "Archivados"
     }
   },
+  "archiveView": {
+    "topicHeader": "Conversaciones",
+    "topicActions": "Opciones de temas",
+    "search": "Buscar temas archivados",
+    "loadError": "No se pudieron cargar todos los temas.",
+    "empty": "No hay temas archivados.",
+    "noResults": "No hay temas que coincidan.",
+    "selectAll": "Seleccionar todo",
+    "cancelSelection": "Cancelar selección"
+  },
   "archiveConfirm": {
     "title": "¿Archivar este tema?",
     "titleMany": "¿Archivar {{count}} temas?",
@@ -2426,6 +2436,7 @@
     "addPane": "Añadir panel",
     "paneLimit": "Máximo {{count}} paneles",
     "deleteConversations": "Eliminar todos los chats",
+    "deleteVisibleConversations": "Eliminar chats visibles",
     "movePane": "Mover panel {{title}}",
     "movePaneHint": "Arrastra para mover. También puedes usar las flechas",
     "resizePaneBoundary": "Redimensionar límite de panel {{index}}",

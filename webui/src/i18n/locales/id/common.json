@@ -1690,6 +1690,16 @@
       "archived": "Diarsipkan"
     }
   },
+  "archiveView": {
+    "topicHeader": "Obrolan",
+    "topicActions": "Opsi topik",
+    "search": "Cari topik yang diarsipkan",
+    "loadError": "Tidak dapat memuat semua topik.",
+    "empty": "Belum ada topik yang diarsipkan.",
+    "noResults": "Tidak ada topik yang cocok.",
+    "selectAll": "Pilih semua",
+    "cancelSelection": "Batalkan pilihan"
+  },
   "archiveConfirm": {
     "title": "Arsipkan topik ini?",
     "titleMany": "Arsipkan {{count}} topik?",
@@ -2425,6 +2435,7 @@
     "addPane": "Tambah panel",
     "paneLimit": "Maksimal {{count}} panel",
     "deleteConversations": "Hapus semua chat",
+    "deleteVisibleConversations": "Hapus chat yang terlihat",
     "movePane": "Pindahkan panel {{title}}",
     "movePaneHint": "Seret untuk memindahkan. Tombol panah juga dapat digunakan",
     "resizePaneBoundary": "Ubah ukuran batas panel {{index}}",

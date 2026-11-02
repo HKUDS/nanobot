@@ -20,6 +20,7 @@ interface SessionSearchDialogProps {
   activeKey: string | null;
   loading: boolean;
   titleOverrides?: Record<string, string>;
+  archivedKeys?: string[];
   messageCache?: ThreadMessageCache;
   onOpenChange: (open: boolean) => void;
   onSelect: (key: string) => void;
@@ -31,6 +32,7 @@ interface SessionSearchResult {
 }
 
 const EMPTY_TITLE_OVERRIDES: Record<string, string> = {};
+const EMPTY_ARCHIVED_KEYS: string[] = [];
 const noSubscription = () => () => {};
 const noRevision = () => 0;
 
@@ -40,11 +42,13 @@ export function SessionSearchDialog({
   activeKey,
   loading,
   titleOverrides = EMPTY_TITLE_OVERRIDES,
+  archivedKeys = EMPTY_ARCHIVED_KEYS,
   messageCache,
   onOpenChange,
   onSelect,
 }: SessionSearchDialogProps) {
   const { t } = useTranslation();
+  const archived = useMemo(() => new Set(archivedKeys), [archivedKeys]);
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -253,11 +257,18 @@ export function SessionSearchDialog({
                             </span>
                           ) : null}
                         </span>
-                        {active ? (
-                          <span className="shrink-0 rounded-full bg-muted-foreground/10 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-                            {t("common.current", { defaultValue: "Current" })}
-                          </span>
-                        ) : null}
+                        <span className="flex shrink-0 items-center gap-2">
+                          {archived.has(session.key) ? (
+                            <span className="text-[11px] text-muted-foreground">
+                              {t("chat.groups.archived")}
+                            </span>
+                          ) : null}
+                          {active ? (
+                            <span className="rounded-full bg-muted-foreground/10 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                              {t("common.current", { defaultValue: "Current" })}
+                            </span>
+                          ) : null}
+                        </span>
                       </button>
                     </li>
                   );

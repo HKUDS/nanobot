@@ -146,7 +146,7 @@ const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
 const PAIRING_POLL_INTERVAL_MS = 5_000;
 const PAIRING_IDLE_POLL_INTERVAL_MS = 15_000;
 const PAIRING_DISMISS_SNOOZE_MS = 30_000;
-type ShellView = "chat" | "settings" | "apps" | "automations" | "skills" | "channels" | "remote";
+type ShellView = "chat" | "archive" | "settings" | "apps" | "automations" | "skills" | "channels" | "remote";
 type ShellRoute = {
   view: ShellView;
   activeKey: string | null;
@@ -165,6 +165,10 @@ const SettingsView = lazy(async () => {
 const SessionSearchDialog = lazy(async () => {
   const module = await import("@/components/SessionSearchDialog");
   return { default: module.SessionSearchDialog };
+});
+const ArchiveView = lazy(async () => {
+  const module = await import("@/components/ArchiveView");
+  return { default: module.ArchiveView };
 });
 const DeleteConfirm = lazy(async () => {
   const module = await import("@/components/DeleteConfirm");
@@ -208,7 +212,7 @@ function shellViewForSettingsSection(section: SettingsSectionKey): ShellView {
 }
 
 function changesSettingsSurface(current: ShellRoute, next: ShellRoute): boolean {
-  return current.view !== "chat" && current.view !== "remote" &&
+  return current.view !== "chat" && current.view !== "remote" && current.view !== "archive" &&
     (current.view !== next.view || current.settingsSection !== next.settingsSection);
 }
 
@@ -276,6 +280,9 @@ function readShellRoute(): ShellRoute {
       temporary,
       settingsSection,
     };
+  }
+  if (path === "/archive") {
+    return { view: "archive", activeKey, temporary, settingsSection: "overview" };
   }
   if (path === "/apps") {
     return { view: "apps", activeKey, temporary, settingsSection: "apps" };
@@ -2099,18 +2106,14 @@ function Shell({
   );
 
   const onToggleArchive = useCallback((key: string) => {
-    onArchiveMany([key], !sidebarState.archived_keys.includes(key));
-  }, [onArchiveMany, sidebarState.archived_keys]);
+    onArchiveMany([key], true);
+  }, [onArchiveMany]);
 
-  const onToggleArchived = useCallback(() => {
-    void updateSidebarState((current) => ({
-      ...current,
-      view: {
-        ...current.view,
-        show_archived: !current.view.show_archived,
-      },
-    }));
-  }, [updateSidebarState]);
+  const onOpenArchive = useCallback(() => {
+    setMobileSidebarOpen(false);
+    setSessionSearchOpen(false);
+    navigate({ view: "archive", activeKey, settingsSection: "overview" });
+  }, [activeKey, navigate]);
 
   const onOpenSessionSearch = useCallback(() => {
     setMobileSidebarOpen(false);
@@ -2435,7 +2438,7 @@ function Shell({
       setPendingDelete(null);
       if (deletingActive) {
         navigate({
-          view: "chat",
+          view: view === "archive" ? "archive" : "chat",
           activeKey: fallbackKey,
           settingsSection: "overview",
         }, { replace: true });
@@ -2443,7 +2446,7 @@ function Shell({
     } catch (e) {
       console.error("Failed to delete session", e);
     }
-  }, [pendingDelete, deleteChat, activeKey, activeTabState, navigate, topicSessions, filePreviewStore, draftStore]);
+  }, [pendingDelete, deleteChat, activeKey, activeTabState, navigate, topicSessions, filePreviewStore, draftStore, view]);
 
   const onRequestDeleteMany = useCallback(async (items: SidebarDeleteItem[], onDecision?: SidebarDeleteDecision) => {
     const uniqueItems = Array.from(new Map(items.map((item) => [item.key, item])).values());
@@ -2552,9 +2555,21 @@ function Shell({
     () => new Map(orderedWorkbenchTabs.map((tab) => [tab.tabKey, tab])),
     [orderedWorkbenchTabs],
   );
+  const archivedPaneKeys = useMemo(
+    () => new Set(sidebarState.archived_keys),
+    [sidebarState.archived_keys],
+  );
+  const archivedSessions = useMemo(
+    () => sessions.filter((session) => archivedPaneKeys.has(session.key)),
+    [archivedPaneKeys, sessions],
+  );
   const sidebarTabPresentations = useMemo(() => {
     const sessionsByKey = new Map(sessions.map((session) => [session.key, session]));
     return orderedWorkbenchTabs.flatMap((tab) => {
+      const visiblePaneKeys = tab.paneKeys.filter((key) => (
+        sessionsByKey.has(key) && !archivedPaneKeys.has(key)
+      ));
+      if (visiblePaneKeys.length === 0) return [];
       const anchorKey = tab.tab.paneKeys.find((key) => sessionsByKey.has(key))
         ?? tab.paneKeys[0];
       const anchor = sessionsByKey.get(anchorKey);
@@ -2564,6 +2579,7 @@ function Shell({
       const rowKey = visible ? tab.tabKey : tab.paneKeys[0];
       return [{
         orderedTab: tab,
+        visiblePaneKeys,
         rowKey,
         title,
         session: visible
@@ -2578,7 +2594,7 @@ function Shell({
           : anchor,
       }];
     });
-  }, [orderedWorkbenchTabs, sessions, titleForSession]);
+  }, [archivedPaneKeys, orderedWorkbenchTabs, sessions, titleForSession]);
   const sidebarTopicSessions = useMemo(
     () => sidebarTabPresentations.map((presentation) => presentation.session),
     [sidebarTabPresentations],
@@ -2644,7 +2660,7 @@ function Shell({
     const sessionsByKey = new Map(sessions.map((session) => [session.key, session]));
     return Object.fromEntries(sidebarTabPresentations.map((presentation) => {
       const orderedTab = presentation.orderedTab;
-      const panes = orderedTab.paneKeys
+      const panes = presentation.visiblePaneKeys
         .map((key) => sessionsByKey.get(key))
         .filter((session): session is ChatSummary => session !== undefined)
         .map((session) => ({
@@ -2656,10 +2672,11 @@ function Shell({
       return [presentation.rowKey, {
         tabKey: orderedTab.tabKey,
         title: presentation.title,
-        activePaneKey: activeKey && orderedTab.paneKeys.includes(activeKey)
+        activePaneKey: activeKey && presentation.visiblePaneKeys.includes(activeKey)
           ? activeKey
-          : orderedTab.paneKeys[0],
+          : presentation.visiblePaneKeys[0],
         visible: orderedTab.tab.explicit || orderedTab.paneKeys.length > 1,
+        totalPaneCount: orderedTab.paneKeys.length,
         panes,
       }];
     }));
@@ -2680,13 +2697,13 @@ function Shell({
   const onSelectSidebarTab = useCallback((tabKey: string) => {
     const tab = workbenchTab(workbenchState, tabKey);
     if (!tab) return;
+    const visiblePaneKeys = tab.paneKeys.filter((key) => !archivedPaneKeys.has(key));
     const rememberedPaneKey = lastActivePaneByTabRef.current.get(tabKey);
-    onSelectChat(
-      rememberedPaneKey && tab.paneKeys.includes(rememberedPaneKey)
-        ? rememberedPaneKey
-        : tab.paneKeys[0],
-    );
-  }, [onSelectChat, workbenchState]);
+    const key = rememberedPaneKey && visiblePaneKeys.includes(rememberedPaneKey)
+      ? rememberedPaneKey
+      : visiblePaneKeys[0];
+    if (key) onSelectChat(key);
+  }, [archivedPaneKeys, onSelectChat, workbenchState]);
 
   const onSelectSidebarItem = useCallback((key: string) => {
     if (
@@ -2738,6 +2755,10 @@ function Shell({
       });
       return;
     }
+    if (view === "archive") {
+      document.title = t("app.documentTitle.chat", { title: t("chat.groups.archived") });
+      return;
+    }
     if (view === "apps") {
       document.title = t("app.documentTitle.chat", {
         title: t("settings.nav.apps", { defaultValue: "Apps" }),
@@ -2773,21 +2794,16 @@ function Shell({
     () => new Set(sidebarState.pinned_keys),
     [sidebarState.pinned_keys],
   );
-  const archivedPaneKeys = useMemo(
-    () => new Set(sidebarState.archived_keys),
-    [sidebarState.archived_keys],
-  );
   const sidebarPinnedTabKeys = useMemo(() => sidebarTabPresentations
     .filter(({ orderedTab }) => orderedTab.paneKeys.some((key) => pinnedPaneKeys.has(key)))
     .map(({ rowKey }) => rowKey), [pinnedPaneKeys, sidebarTabPresentations]);
-  const sidebarArchivedTabKeys = useMemo(() => sidebarTabPresentations
-    .filter(({ orderedTab }) => orderedTab.paneKeys.every((key) => archivedPaneKeys.has(key)))
-    .map(({ rowKey }) => rowKey), [archivedPaneKeys, sidebarTabPresentations]);
-  const activeSidebarKey = activeTabKey
-    ? sidebarTabPresentations.find(({ orderedTab }) => (
-        orderedTab.tabKey === activeTabKey
-      ))?.rowKey ?? activeKey
-    : activeKey;
+  const activeSidebarKey = activeKey && archivedPaneKeys.has(activeKey)
+    ? null
+    : activeTabKey
+      ? sidebarTabPresentations.find(({ orderedTab }) => (
+          orderedTab.tabKey === activeTabKey
+        ))?.rowKey ?? activeKey
+      : activeKey;
 
   const sidebarProps = {
     sessions: sidebarStateLoading ? [] : sidebarTopicSessions,
@@ -2831,11 +2847,9 @@ function Shell({
     onSettingsIntent,
     onOpenSearch: onOpenSessionSearch,
     activeUtility: !managingConnections && (view === "apps" || view === "automations" || view === "skills" || view === "channels") ? view : null,
-    onToggleArchived,
+    onOpenArchive,
     pinnedKeys: sidebarPinnedTabKeys,
-    archivedKeys: sidebarArchivedTabKeys,
     pinnedPaneKeys: sidebarState.pinned_keys,
-    archivedPaneKeys: sidebarState.archived_keys,
     sessionOrder: sidebarState.session_order,
     titleOverrides: sidebarState.title_overrides,
     projectNameOverrides: sidebarState.project_name_overrides,
@@ -2844,8 +2858,6 @@ function Shell({
     updatedChatIds: updatedChatIdList,
     recoveryChatIds: recoveryChatIdList,
     viewState: { ...sidebarState.view, sort: automaticSidebarSort },
-    showArchived: sidebarState.view.show_archived,
-    archivedCount: sidebarArchivedTabKeys.length,
     defaultWorkspacePath: workspaces?.default_scope.project_path ?? null,
   };
   const hostSidebarFlowWidth = hostSidebarOpen ? sidebarWidth : SIDEBAR_RAIL_WIDTH;
@@ -2973,6 +2985,7 @@ function Shell({
                 activeKey={activeKey}
                 loading={loading}
                 titleOverrides={sidebarState.title_overrides}
+                archivedKeys={sidebarState.archived_keys}
                 messageCache={threadMessageCache}
                 onSelect={onSelectSearchResult}
               />
@@ -3142,7 +3155,22 @@ function Shell({
             </div>}
             {view !== "chat" && (
               <div className="absolute inset-0 flex flex-col">
-                {view === "remote" ? <LazyRemoteConnectionsPage
+                {view === "archive" ? (
+                  <Suspense fallback={<StartupShell embedded surface="apps" sidebarExpanded={hostSidebarOpen} />}>
+                    <ArchiveView
+                      sessions={archivedSessions}
+                      titleOverrides={sidebarState.title_overrides}
+                      loading={loading || sidebarStateLoading}
+                      loadError={sessionsError !== null}
+                      onRetry={() => void refresh()}
+                      onOpen={onSelectChat}
+                      onUnarchive={(keys) => onArchiveMany(keys, false)}
+                      onRequestDeleteMany={onRequestDeleteMany}
+                      onBack={onBackToChat}
+                      hostChromeInset={showHostChrome}
+                    />
+                  </Suspense>
+                ) : view === "remote" ? <LazyRemoteConnectionsPage
                   mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
                   hostChromeInset={showHostChrome}
                   onBackToChat={onBackToChat}

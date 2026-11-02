@@ -15,7 +15,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { PanelLeftClose } from "lucide-react";
+import { MoreHorizontal, PanelLeftClose } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -31,6 +31,12 @@ import {
   SidebarSelectionHighlight,
 } from "@/components/SidebarSelectionHighlight";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { HoverHint } from "@/components/ui/tooltip";
 import type {
   ChatSummary,
@@ -79,15 +85,13 @@ interface SidebarProps {
   onSettingsIntent?: () => void;
   onOpenSearch: () => void;
   activeUtility?: "apps" | "skills" | "automations" | "channels" | null;
-  onToggleArchived: () => void;
+  onOpenArchive: () => void;
   onCollapse?: () => void;
   onExpand?: () => void;
   containActionMenus?: boolean;
   collapsed?: boolean;
   pinnedKeys?: string[];
-  archivedKeys?: string[];
   pinnedPaneKeys?: string[];
-  archivedPaneKeys?: string[];
   sessionOrder?: string[];
   titleOverrides?: Record<string, string>;
   projectNameOverrides?: Record<string, string>;
@@ -96,8 +100,6 @@ interface SidebarProps {
   updatedChatIds?: string[];
   recoveryChatIds?: string[];
   viewState?: SidebarViewState;
-  showArchived?: boolean;
-  archivedCount?: number;
   defaultWorkspacePath?: string | null;
   hostChromeInset?: boolean;
 }
@@ -260,15 +262,26 @@ export function Sidebar(props: SidebarProps) {
           selectionRef={activeActionRef}
           icon={<ChannelsIcon className="h-4 w-4" />}
         />
-        {props.archivedCount ? (
-          <SidebarActionButton
-            collapsed={collapsed}
-            label={props.showArchived ? t("chat.hideArchived") : t("chat.showArchived")}
-            onClick={props.onToggleArchived}
-            icon={<ArchiveIcon className="h-4 w-4" />}
-          />
-        ) : null}
       </SidebarSelectionHighlight>
+      {!collapsed && (
+        <div data-theme-ink className="group flex min-h-8 items-center justify-between px-4 pt-1 text-[11px] font-medium leading-4 text-sidebar-muted-foreground">
+          <span>{t("archiveView.topicHeader", { defaultValue: "Chats" })}</span>
+          <DropdownMenu modal={false}>
+            <DropdownMenuTrigger
+              aria-label={t("archiveView.topicActions", { defaultValue: "Topic options" })}
+              className="sidebar-action-trigger touch-target inline-flex h-6 w-6 items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 transition-opacity media-hover:hover:text-sidebar-foreground media-hover:group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
+            >
+              <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" portalContainer={props.containActionMenus ? menuPortalContainer : undefined}>
+              <DropdownMenuItem onSelect={props.onOpenArchive}>
+                <ArchiveIcon className="h-4 w-4 shrink-0" />
+                {t("chat.groups.archived")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
       <div
         className={cn(
           "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden transition-opacity duration-200",
@@ -277,6 +290,7 @@ export function Sidebar(props: SidebarProps) {
       >
         {!collapsed && (
           <ChatList
+            hasGlobalHeader
             sessions={props.sessions}
             temporarySessions={props.temporarySessions}
             activeKey={props.activeKey}
@@ -302,9 +316,7 @@ export function Sidebar(props: SidebarProps) {
             onRequestRenameProject={props.onRequestRenameProject}
             onNewChatInProject={props.onNewChatInProject}
             pinnedKeys={props.pinnedKeys}
-            archivedKeys={props.archivedKeys}
             pinnedPaneKeys={props.pinnedPaneKeys}
-            archivedPaneKeys={props.archivedPaneKeys}
             sessionOrder={props.sessionOrder}
             titleOverrides={props.titleOverrides}
             projectNameOverrides={props.projectNameOverrides}
@@ -314,7 +326,6 @@ export function Sidebar(props: SidebarProps) {
             recoveryChatIds={props.recoveryChatIds}
             density={props.viewState?.density}
             sort={props.viewState?.sort}
-            showArchived={props.showArchived}
             defaultWorkspacePath={props.defaultWorkspacePath}
             actionMenuPortalContainer={
               props.containActionMenus ? menuPortalContainer : undefined

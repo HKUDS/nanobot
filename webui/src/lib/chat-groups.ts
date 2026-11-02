@@ -20,18 +20,15 @@ export interface ChatGroupLabels {
   today: string;
   yesterday: string;
   earlier: string;
-  archived: string;
   projects: string;
   fallbackTitle: string;
 }
 
 export interface ChatGroupingOptions {
   pinnedKeys: string[];
-  archivedKeys: string[];
   titleOverrides: Record<string, string>;
   projectNameOverrides: Record<string, string>;
   sessionOrder: string[];
-  showArchived: boolean;
   sort: SidebarSortMode;
   defaultWorkspacePath?: string | null;
 }
@@ -50,17 +47,11 @@ export function groupSessions(
   const startOfYesterday = startOfToday - 24 * 60 * 60 * 1000;
   const buckets = new Map<string, ChatSummary[]>();
   const pinned = new Set(options.pinnedKeys);
-  const archived = new Set(options.archivedKeys);
 
   const pinnedSessions: ChatSummary[] = [];
-  const archivedSessions: ChatSummary[] = [];
   const normalSessions: ChatSummary[] = [];
 
   for (const session of sessions) {
-    if (archived.has(session.key)) {
-      if (options.showArchived) archivedSessions.push(session);
-      continue;
-    }
     if (pinned.has(session.key)) {
       pinnedSessions.push(session);
       continue;
@@ -111,18 +102,6 @@ export function groupSessions(
       label: labels.pinned,
       sessions: sortSessions(
         pinnedSessions,
-        options.sort,
-        options.titleOverrides,
-        options.sessionOrder,
-      ),
-    });
-  }
-  if (archivedSessions.length) {
-    groups.push({
-      id: "archived",
-      label: labels.archived,
-      sessions: sortSessions(
-        archivedSessions,
         options.sort,
         options.titleOverrides,
         options.sessionOrder,
@@ -232,7 +211,6 @@ function groupSessionsByProject(
   labels: Pick<ChatGroupLabels, "all">,
   options: ChatGroupingOptions,
 ): SessionGroup[] {
-  const archived = new Set(options.archivedKeys);
   const conversations: ChatSummary[] = [];
   const buckets = new Map<string, {
     path?: string;
@@ -242,9 +220,6 @@ function groupSessionsByProject(
   }>();
 
   for (const session of sessions) {
-    if (archived.has(session.key) && !options.showArchived) {
-      continue;
-    }
     const scope = session.workspaceScope;
     const path = scope?.project_path || "";
     if (!path || sameWorkspacePath(path, options.defaultWorkspacePath)) {
@@ -283,7 +258,6 @@ function groupSessionsByProject(
       options.titleOverrides,
       options.sessionOrder,
       pinned,
-      archived,
     ),
   }));
 
@@ -305,7 +279,6 @@ function groupSessionsByProject(
         options.titleOverrides,
         options.sessionOrder,
         pinned,
-        archived,
       ),
     });
   }
@@ -328,15 +301,10 @@ function sortProjectSessions(
   titleOverrides: Record<string, string>,
   sessionOrder: string[],
   pinned: Set<string>,
-  archived: Set<string>,
 ): ChatSummary[] {
-  return sortSessions(sessions, sort, titleOverrides, sessionOrder).sort((a, b) => {
-    const pinOrder = Number(pinned.has(b.key)) - Number(pinned.has(a.key));
-    if (pinOrder !== 0) return pinOrder;
-    const archiveOrder = Number(archived.has(a.key)) - Number(archived.has(b.key));
-    if (archiveOrder !== 0) return archiveOrder;
-    return 0;
-  });
+  return sortSessions(sessions, sort, titleOverrides, sessionOrder).sort((a, b) => (
+    Number(pinned.has(b.key)) - Number(pinned.has(a.key))
+  ));
 }
 
 export function sortSessions(

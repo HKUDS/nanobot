@@ -1896,6 +1896,16 @@
       "archived": "Archived"
     }
   },
+  "archiveView": {
+    "topicHeader": "Chats",
+    "topicActions": "Topic options",
+    "search": "Search archived topics",
+    "loadError": "Couldn't load all topics.",
+    "empty": "No archived topics.",
+    "noResults": "No matching topics.",
+    "selectAll": "Select all",
+    "cancelSelection": "Cancel selection"
+  },
   "archiveConfirm": {
     "title": "Archive this topic?",
     "titleMany": "Archive {{count}} topics?",
@@ -2631,6 +2641,7 @@
     "addPane": "Add pane",
     "paneLimit": "Maximum {{count}} panes",
     "deleteConversations": "Delete all chats",
+    "deleteVisibleConversations": "Delete visible chats",
     "movePane": "Move {{title}} pane",
     "movePaneHint": "Drag to move, or use the arrow keys.",
     "resizePaneBoundary": "Resize pane boundary {{index}}",

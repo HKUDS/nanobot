@@ -1690,6 +1690,16 @@
       "archived": "アーカイブ済み"
     }
   },
+  "archiveView": {
+    "topicHeader": "チャット",
+    "topicActions": "トピックのオプション",
+    "search": "アーカイブ済みのトピックを検索",
+    "loadError": "すべてのトピックを読み込めませんでした。",
+    "empty": "アーカイブ済みのトピックはありません。",
+    "noResults": "一致するトピックはありません。",
+    "selectAll": "すべて選択",
+    "cancelSelection": "選択をキャンセル"
+  },
   "archiveConfirm": {
     "title": "このトピックをアーカイブしますか？",
     "titleMany": "{{count}} 件のトピックをアーカイブしますか？",
@@ -2425,6 +2435,7 @@
     "addPane": "ペインを追加",
     "paneLimit": "最大 {{count}} ペイン",
     "deleteConversations": "グループ内の全チャットを削除",
+    "deleteVisibleConversations": "表示中のチャットを削除",
     "movePane": "{{title}} ペインを移動",
     "movePaneHint": "ドラッグで移動. 矢印キーでも移動できます",
     "resizePaneBoundary": "ペイン境界 {{index}} のサイズを変更",

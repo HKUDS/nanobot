@@ -52,7 +52,7 @@ function ThemeChatFixture({ theme, toggle }: { theme: "light" | "dark"; toggle: 
         onNewChat={noop} onRequestDelete={noop} onTogglePin={noop} onRequestRename={async () => {}}
         onToggleArchive={noop} onToggleGroup={noop} onRequestRenameProject={noop} onNewChatInProject={noop}
         onOpenSettings={noop} onOpenApps={noop} onOpenSkills={noop} onOpenAutomations={noop}
-        onOpenChannels={noop} onOpenSearch={noop} onToggleArchived={noop} />
+        onOpenChannels={noop} onOpenSearch={noop} onOpenArchive={noop} />
     </aside>
     <div className="min-w-0 flex-1">
       <PaneWorkbench panes={[{ key: "theme", title: "Theme chat" }]} activePaneKey="theme" layout="columns"
