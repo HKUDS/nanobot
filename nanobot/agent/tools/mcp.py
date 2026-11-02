@@ -36,9 +36,8 @@ if TYPE_CHECKING:
     from nanobot.agent.tools.mcp_oauth import MCPOAuthHandlers
     from nanobot.config.schema import Config, MCPServerConfig
 
-# Transient connection errors that warrant a single retry.
-# These typically happen when an MCP server restarts or a network
-# connection is interrupted between calls.
+# Transient stream failures. Retrying also requires an operation safe to replay
+# or proof that the tool request has not started.
 _TRANSIENT_EXC_NAMES: frozenset[str] = frozenset((
     "ClosedResourceError",
     "BrokenResourceError",
@@ -563,15 +562,31 @@ class _MCPWrapperBase(Tool):
         request: Callable[[], Awaitable[_MCPResultT]],
         timeout: float,
         capability_kind: Literal["tool", "resource", "prompt"],
+        *,
+        replay_safe: bool,
     ) -> _MCPResultT | ToolResult:
         from mcp.shared.exceptions import McpError
 
         operation = f"{capability_kind} {'read' if capability_kind == 'resource' else 'call'}"
         refreshed_session = False
         retried = False
+        request_started = False
+
+        async def attempt() -> _MCPResultT:
+            nonlocal request_started
+            if not replay_safe and self._reconnect is not None:
+                # Repair stale sessions before submitting a non-replayable call.
+                # A failed ping proves that this attempt never called the tool;
+                # an exception from call_tool itself cannot provide that proof.
+                await self._session.send_ping()
+            request_started = True
+            return await request()
+
         while True:
+            request_started = False
             try:
-                return await asyncio.wait_for(request(), timeout=timeout)
+                # Preflight and submission share the existing per-attempt timeout.
+                return await asyncio.wait_for(attempt(), timeout=timeout)
             except asyncio.TimeoutError:
                 logger.warning(
                     "MCP {} '{}' timed out after {}s", capability_kind, self._name, timeout
@@ -584,6 +599,19 @@ class _MCPWrapperBase(Tool):
                 logger.warning("MCP {} '{}' was cancelled by server/SDK", capability_kind, self._name)
                 return ToolResult.error(f"(MCP {operation} was cancelled)")
             except Exception as exc:
+                if request_started and not replay_safe and (
+                    _is_session_terminated(exc) or isinstance(exc, httpx.TransportError)
+                ):
+                    logger.warning(
+                        "MCP tool '{}' lost its response ({}); outcome unknown, not replaying",
+                        self._name,
+                        type(exc).__name__,
+                    )
+                    return ToolResult.error(
+                        "(MCP tool call outcome is unknown after connection loss; the operation "
+                        "may have completed and was not replayed. Check its outcome before "
+                        "retrying to avoid duplicate side effects.)"
+                    )
                 if await self._refresh_session_after_termination(
                     exc, refreshed_session, capability_kind
                 ):
@@ -680,6 +708,14 @@ class MCPToolWrapper(_MCPWrapperBase):
         raw_schema = tool_def.inputSchema or {"type": "object", "properties": {}}
         self._parameters = _normalize_schema_for_openai(raw_schema)
         self._tool_timeout = tool_timeout
+        # Replay is opt-in through explicit server declarations, not inferred
+        # from names or destructiveHint=False (additive writes can duplicate).
+        # This trusts the server's contract; it is not client-side deduplication
+        # and does not change tool permissions or concurrency classification.
+        annotations = getattr(tool_def, "annotations", None)
+        self._replay_safe = annotations is not None and (
+            annotations.readOnlyHint is True or annotations.idempotentHint is True
+        )
 
     @property
     def name(self) -> str:
@@ -698,6 +734,7 @@ class MCPToolWrapper(_MCPWrapperBase):
             lambda: self._session.call_tool(self._original_name, arguments=kwargs),
             self._tool_timeout,
             "tool",
+            replay_safe=self._replay_safe,
         )
         if isinstance(result, ToolResult):
             return result
@@ -816,9 +853,10 @@ class MCPResourceWrapper(_MCPWrapperBase):
             lambda: self._session.read_resource(self._uri),
             self._resource_timeout,
             "resource",
+            replay_safe=True,
         )
         if isinstance(result, ToolResult):
-            return str(result)
+            return result
         parts: list[str] = []
         for block in result.contents:
             if isinstance(block, types.TextResourceContents):
@@ -890,9 +928,10 @@ class MCPPromptWrapper(_MCPWrapperBase):
             lambda: self._session.get_prompt(self._prompt_name, arguments=kwargs),
             self._prompt_timeout,
             "prompt",
+            replay_safe=True,
         )
         if isinstance(result, ToolResult):
-            return str(result)
+            return result
         parts: list[str] = []
         for message in result.messages:
             content = message.content
