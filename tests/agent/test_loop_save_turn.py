@@ -835,7 +835,9 @@ def test_restore_runtime_checkpoint_rehydrates_completed_and_pending_tools() -> 
     assert session.messages[0]["role"] == "assistant"
     assert session.messages[1]["tool_call_id"] == "call_done"
     assert session.messages[2]["tool_call_id"] == "call_pending"
-    assert "interrupted before this tool finished" in session.messages[2]["content"].lower()
+    assert "outcome is unknown" in session.messages[2]["content"]
+    assert "Check its effects before retrying" in session.messages[2]["content"]
+    assert session.messages[2]["_recovery_interrupted"] is True
     assert session.provider_state is None
 
 
