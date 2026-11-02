@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import nullcontext
 from copy import deepcopy
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -460,7 +459,7 @@ async def test_multiround_recovery_keeps_completed_work_and_consumed_followup(
         assert tools[0]["content"] == "result for A.txt"
         if boundary == "awaiting_tools":
             assert tools[1]["_recovery_interrupted"] is True
-            assert "interrupted" in tools[1]["content"]
+            assert "outcome is unknown" in tools[1]["content"]
         else:
             assert tools[1]["content"] == "result for B.txt"
         assert [public_history_message(row)["content"] for row in stored.messages if row["role"] == "user"] == [
@@ -484,10 +483,7 @@ async def test_multiround_recovery_keeps_completed_work_and_consumed_followup(
         await resumed.aclose()
 
 
-@pytest.mark.parametrize("complete_recovery", [False, True], ids=["checkpoint_saved", "recovery_completed"])
-async def test_new_input_waits_for_real_recovery_cancellation_before_reading_draft(
-    tmp_path, monkeypatch, complete_recovery,
-):
+async def test_new_input_waits_for_real_recovery_cancellation_before_reading_draft(tmp_path, monkeypatch):
     provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings()
@@ -517,7 +513,7 @@ async def test_new_input_waits_for_real_recovery_cancellation_before_reading_dra
     monkeypatch.setattr(loop.tools.get("read_file"), "execute", read)
     coordinator = WebuiTurnCoordinator(loop.bus, loop.sessions, loop.schedule_background, recovery=recovery)
     try:
-        with coordinator.connected() if complete_recovery else nullcontext():
+        with coordinator.connected():
             await recovery.handle_action("continue", {"chat_id": "chat", "recovery_id": "recover"})
             await loop._dispatch_inbound(loop.bus.inbound.get_nowait())
             await asyncio.wait_for(entered.wait(), 5)

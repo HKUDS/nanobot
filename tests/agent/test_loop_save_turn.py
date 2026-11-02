@@ -1974,7 +1974,7 @@ async def test_stop_preserves_runtime_checkpoint_for_next_turn(tmp_path: Path) -
             "role": "tool",
             "tool_call_id": "call_pending",
             "name": "exec",
-            "content": "Error: Task interrupted before this tool finished.",
+            "content": "Error: Task interrupted; this tool's outcome is unknown. Check its effects before retrying.",
         },
         {"role": "user", "content": "continue here"},
         {"role": "assistant", "content": "next answer"},

@@ -364,7 +364,7 @@ def restore_runtime_checkpoint(session: Session) -> bool:
                 "role": "tool",
                 "tool_call_id": tool_call_id,
                 "name": name if isinstance(name, str) and name else "tool",
-                "content": "Error: Task interrupted before this tool finished.",
+                "content": "Error: Task interrupted; this tool's outcome is unknown. Check its effects before retrying.",
                 "timestamp": datetime.now().isoformat(),
                 "_recovery_interrupted": True,
             }
