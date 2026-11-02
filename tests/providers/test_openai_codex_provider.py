@@ -40,6 +40,58 @@ def _mock_codex_token(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("input_budget", [None, 1000], ids=["optional", "required"])
+async def test_image_retry_cannot_bypass_required_compaction(
+    monkeypatch, stream, input_budget,
+) -> None:
+    _mock_codex_token(monkeypatch)
+    provider = OpenAICodexProvider(default_model="gpt-5.6-sol")
+    history = {"role": "user", "content": "earlier discussion " * 1000}
+    question = {"role": "user", "content": [
+        {"type": "text", "text": "Describe this image."},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+    ]}
+    state = build_responses_state(
+        provider=provider._responses_state_provider(), model="gpt-5.6-sol",
+        input_items=[history], output_items=[],
+    ).with_pending_messages([question])
+    submitted = []
+
+    async def request(_url, _headers, body, **_kwargs):
+        submitted.append(
+            "compaction" if body["input"][-1].get("type") == "compaction_trigger"
+            else "generation"
+        )
+        if len(submitted) == 1:
+            raise _CodexHTTPError("fixture rejection", status_code=400, error_code="unsupported_value")
+        return provider_base.LLMResponse(content="accepted without images")
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", request)
+    invoke = provider.chat_stream_with_retry if stream else provider.chat_with_retry
+    try:
+        response = await invoke(
+            [history, question], max_tokens=64,
+            provider_context=provider_base.ProviderCallContext(
+                conversation_state=state, context_window_tokens=10000,
+                compaction_input_budget=input_budget,
+            ),
+        )
+        if input_budget is not None:
+            assert submitted == ["compaction"]
+            assert response.finish_reason == "error"
+            assert response.error_status_code == 400
+            assert response.error_code == "unsupported_value"
+            assert response.preserve_provider_state_on_error is True
+            assert question["content"][1]["type"] == "image_url"
+        else:
+            assert submitted == ["generation", "generation"]
+            assert response.content == "accepted without images"
+    finally:
+        await provider.aclose()
+
+
 def test_codex_default_model_matches_curated_flagship() -> None:
     spec = find_by_name("openai_codex")
 
