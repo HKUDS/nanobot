@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ArrowRight, ChevronDown, Eye, EyeOff, ShieldCheck, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, ChevronDown, Eye, EyeOff, ShieldCheck, X } from "lucide-react";
 import { ThemeToggleIcon } from "@/components/icons/ThemeToggleIcon";
 import { Trans, useTranslation } from "react-i18next";
 import { channelUiPresentation } from "@/channel-plugins/registry";
@@ -119,6 +119,38 @@ import {
   createTemporaryChatSession,
   deriveTemporaryChatTitle,
 } from "@/lib/temporary-chat";
+
+type PaneAddFailure = "groupRemoved" | "topicMoved" | "topicGrouped" | "groupFull" | "workspaceMismatch" | "workspaceChanging" | "workspaceMissing" | "stateUnavailable" | "createFailed" | "workspaceRejected";
+
+class PaneAddError extends Error {
+  constructor(readonly reason: PaneAddFailure) {
+    super(reason);
+  }
+}
+
+function paneAddFailure(
+  current: WorkbenchState,
+  tabKey: string,
+  activeKey: string,
+  hadGroup: boolean,
+  workspacePath: string | null | undefined,
+  workspacePaths: ReadonlyMap<string, string>,
+  pendingWorkspaceScopes: ReadonlyMap<string, unknown>,
+): PaneAddFailure | null {
+  const target = workbenchTabForPane(current, activeKey);
+  if (hadGroup && !current.tabs[tabKey]) return "groupRemoved";
+  if (hadGroup && target.tabKey !== tabKey) return "topicMoved";
+  if (!hadGroup && current.tabs[target.tabKey]) return "topicGrouped";
+  if (target.tab.paneKeys.length >= MAX_WORKBENCH_PANES) return "groupFull";
+  if (!workspacePath || target.tab.paneKeys.some((key) => !workspacePaths.has(key))) {
+    const changing = target.tab.paneKeys.some((key) => (
+      !workspacePaths.has(key) && key.startsWith("websocket:") && pendingWorkspaceScopes.has(key.slice("websocket:".length))
+    ));
+    return changing ? "workspaceChanging" : "workspaceMissing";
+  }
+  if (!groupAcceptsWorkspace(target.tab.paneKeys, workspacePath, workspacePaths)) return "workspaceMismatch";
+  return null;
+}
 
 type BootState =
   | { status: "loading" }
@@ -1269,6 +1301,7 @@ function Shell({
   }, [updateSidebarState]);
   const lastActivePaneByTabRef = useRef(new Map<string, string>());
   const [creatingPane, setCreatingPane] = useState(false);
+  const [paneAddError, setPaneAddError] = useState<PaneAddFailure | null>(null);
   const topicSessions = sessions;
   const [pendingDelete, setPendingDelete] = useState<{
     items: SidebarDeleteItem[];
@@ -2292,50 +2325,51 @@ function Shell({
 
   const onAddPane = useCallback(async () => {
     const tabKey = activeTabKey;
-    if (
-      !tabKey
-      || !activeKey
-      || !activeSession
-      || creatingPane
-      || (activeTabState?.paneKeys.length ?? 0) >= MAX_WORKBENCH_PANES
-      || temporarySessionsRef.current[activeKey]
-      || !activeWorkspaceScope
-      || !groupAcceptsWorkspace(activeTabState?.paneKeys ?? [], activeWorkspaceScope.project_path, workspacePathsRef.current)
-    ) return;
+    if (!activeKey || !activeSession || creatingPane || temporarySessionsRef.current[activeKey]) return;
+    if (!tabKey || sidebarStateLoading) {
+      setPaneAddError("stateUnavailable");
+      return;
+    }
+    const scope = activeWorkspaceScope;
+    const hadGroup = Boolean(workbenchState.tabs[tabKey]);
+    const failure = paneAddFailure(workbenchStateRef.current, tabKey, activeKey, hadGroup, scope?.project_path, workspacePathsRef.current, pendingWorkspaceScopesRef.current);
+    if (failure || !scope) {
+      setPaneAddError(failure ?? "workspaceMissing");
+      return;
+    }
     setMobileSidebarOpen(false);
     setSessionSearchOpen(false);
+    setPaneAddError(null);
     setCreatingPane(true);
     try {
-      const scope = activeWorkspaceScope;
-      const chatId = await createChat(scope);
+      const chatId = await createChat(scope, undefined, (createdChatId) => {
+        let reason: PaneAddFailure | null = "stateUnavailable";
+        updateWorkbenchState((current) => {
+          reason = paneAddFailure(current, tabKey, activeKey, hadGroup, scope.project_path, workspacePathsRef.current, pendingWorkspaceScopesRef.current);
+          if (reason) return current;
+          const next = addWorkbenchPane(current, activeKey, `websocket:${createdChatId}`);
+          if (next === current) reason = "createFailed";
+          return next;
+        });
+        if (reason) throw new PaneAddError(reason);
+      });
       const paneKey = `websocket:${chatId}`;
       pendingCreatedSessionKeyRef.current = paneKey;
-      let attached = false;
-      updateWorkbenchState((current) => {
-        const target = workbenchTabForPane(current, activeKey);
-        if (target.tabKey !== tabKey
-          || target.tab.paneKeys.length >= MAX_WORKBENCH_PANES
-          || !groupAcceptsWorkspace(target.tab.paneKeys, scope.project_path, workspacePathsRef.current)) return current;
-        const next = addWorkbenchPane(current, activeKey, paneKey);
-        attached = next !== current;
-        return next;
-      });
-      if (!attached) setWorkspaceError(t("workbench.paneCreatedSeparately"));
       navigate({
         view: "chat",
         activeKey: paneKey,
         settingsSection: "overview",
       });
-      if (scope) {
-        setWorkspaceOverrides((current) => ({
-          ...current,
-          [chatId]: normalizeWorkspaceScope(scope),
-        }));
-      }
+      setWorkspaceOverrides((current) => ({
+        ...current,
+        [chatId]: normalizeWorkspaceScope(scope),
+      }));
     } catch (error) {
-      console.error("Failed to create pane", error);
-      if (error instanceof Error && error.message.startsWith("workspace_scope_rejected:")) {
-        setWorkspaceError(t("errors.workspaceScopeRejected.body"));
+      if (error instanceof PaneAddError) setPaneAddError(error.reason);
+      else {
+        console.error("Failed to create pane", error);
+        setPaneAddError(error instanceof Error && error.message.startsWith("workspace_scope_rejected:")
+          ? "workspaceRejected" : "createFailed");
       }
     } finally {
       setCreatingPane(false);
@@ -2344,13 +2378,13 @@ function Shell({
     activeKey,
     activeSession,
     activeTabKey,
-    activeTabState,
     activeWorkspaceScope,
     createChat,
     creatingPane,
     navigate,
-    t,
+    sidebarStateLoading,
     updateWorkbenchState,
+    workbenchState.tabs,
   ]);
 
   const onSelectSearchResult = useCallback(
@@ -2881,15 +2915,6 @@ function Shell({
     sidebarTabPresentations,
     titleForSession,
   ]);
-  const activePaneLimitReached = Boolean(
-    activeTabState && activeTabState.paneKeys.length >= MAX_WORKBENCH_PANES,
-  );
-  const activePaneWorkspaceMismatch = Boolean(activeTabState && !groupAcceptsWorkspace(
-    activeTabState.paneKeys,
-    activeWorkspaceScope?.project_path,
-    workspacePaths,
-  ));
-
   const onActivateWorkbenchPane = useCallback((paneKey: string) => {
     onSelectChat(paneKey);
   }, [onSelectChat]);
@@ -3218,6 +3243,18 @@ function Shell({
                 view !== "chat" && "hidden",
               )}
             >
+              {paneAddError ? (
+                <div role="alert" className="mx-4 mt-3 flex items-start gap-2 rounded-control border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12px] leading-5 text-destructive">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium">{t("workbench.paneAddError.title")}</p>
+                    <p>{t(`workbench.paneAddError.${paneAddError}`, { count: MAX_WORKBENCH_PANES })}</p>
+                  </div>
+                  <Button variant="ghost" size="icon" aria-label={t("common.dismiss")} onClick={() => setPaneAddError(null)} className="h-6 w-6 shrink-0 text-destructive hover:text-destructive">
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ) : null}
               <ThreadVisibilityContext.Provider value={localActive && !managingConnections && view === "chat"}>
                 <Suspense fallback={<StartupShell embedded surface="chat" sidebarExpanded={hostSidebarOpen} />}>
                   <PaneWorkbench
@@ -3227,10 +3264,7 @@ function Shell({
                     splitRatios={renderedWorkbenchSplitRatios}
                     chrome={paneChromeEnabled}
                     showLayoutControl={activeTabVisible}
-                    addPaneDisabled={creatingPane || activePaneLimitReached || activePaneWorkspaceMismatch}
-                    addPaneDisabledLabel={activePaneLimitReached
-                      ? t("workbench.paneLimit", { count: MAX_WORKBENCH_PANES })
-                      : activePaneWorkspaceMismatch ? t("workbench.workspaceGroupMismatch") : undefined}
+                    addPaneDisabled={creatingPane}
                     onActivatePane={onActivateWorkbenchPane}
                     onAddPane={onAddPane}
                     onLayoutChange={(layout) => {

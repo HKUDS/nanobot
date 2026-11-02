@@ -600,6 +600,12 @@ export class NanobotClient {
     });
   }
 
+  /** Stop reattaching a chat that was never published by its creator. */
+  forgetUnpublishedChat(chatId: string): void {
+    if (this.chatHandlers.has(chatId) || this.transcriptHandlers.has(chatId) || this.runs.view(chatId).active) return;
+    this.knownChats.delete(chatId);
+  }
+
   /** Ask the WebUI gateway to create a connection-owned non-persistent chat. */
   newTemporaryChat(timeoutMs: number = 5_000): Promise<string> {
     if (this.pendingNewChat) {

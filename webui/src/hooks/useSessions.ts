@@ -28,6 +28,7 @@ export function useSessions(): {
   createChat: (
     workspaceScope?: WorkspaceScopePayload | null,
     modelPreset?: string | null,
+    beforePublish?: (chatId: string) => void,
   ) => Promise<string>;
   forkChat: (sourceChatId: string, beforeUserIndex: number, title?: string) => Promise<string>;
   deleteChat: (
@@ -119,8 +120,15 @@ export function useSessions(): {
   const createChat = useCallback(async (
     workspaceScope?: WorkspaceScopePayload | null,
     modelPreset?: string | null,
+    beforePublish?: (chatId: string) => void,
   ): Promise<string> => {
     const chatId = await client.newChat(CHAT_CREATE_TIMEOUT_MS, workspaceScope);
+    try {
+      beforePublish?.(chatId);
+    } catch (error) {
+      client.forgetUnpublishedChat(chatId);
+      throw error;
+    }
     const key = `websocket:${chatId}`;
     optimisticKeysRef.current.add(key);
     // Optimistic insert; a subsequent refresh will replace it with the

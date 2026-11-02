@@ -2147,6 +2147,24 @@ describe("NanobotClient", () => {
     await expect(promise).resolves.toBe("fresh-id");
   });
 
+  it("does not reattach an unpublished chat after reconnect", async () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+    const pending = client.newChat(1_000);
+    lastSocket().fakeMessage({ event: "attached", chat_id: "unpublished" });
+    await pending;
+    client.forgetUnpublishedChat("unpublished");
+    lastSocket().close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    lastSocket().fakeOpen();
+    expect(lastSocket().sent).not.toContain(JSON.stringify({ type: "attach", chat_id: "unpublished" }));
+    client.close();
+  });
+
   it("does not mistake an existing chat's attach reply for a new chat", async () => {
     const client = new NanobotClient({
       url: "ws://test",

@@ -190,8 +190,9 @@ vi.mock("@/hooks/useSessions", async (importOriginal) => {
         loading: false,
         error: null,
         refresh: refreshSpy,
-        createChat: async (scope?: WorkspaceScopePayload | null) => {
+        createChat: async (scope?: WorkspaceScopePayload | null, _preset?: string | null, beforePublish?: (chatId: string) => void) => {
           const chatId = await createChatSpy(scope);
+          beforePublish?.(chatId);
           const now = new Date().toISOString();
           setSessions((prev: ChatSummary[]) => [
             {
@@ -3041,7 +3042,11 @@ describe("App layout", () => {
     expect(within(alpha).getByText("Alpha live")).toBeInTheDocument();
     expect(within(alpha).queryByText("Beta archived")).not.toBeInTheDocument();
     expect(within(beta).queryByText("Beta archived")).not.toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "Add pane" })).toBeDisabled();
+    fireEvent.click(await screen.findByRole("button", { name: "Add pane" }));
+    const addError = await screen.findByRole("alert");
+    expect(addError).toHaveTextContent("The new pane and one of the existing topics use different workspaces.");
+    expect(createChatSpy).not.toHaveBeenCalled();
+    fireEvent.click(within(addError).getByRole("button", { name: "Dismiss" }));
     const grid = await screen.findByTestId("pane-grid");
     expect(Array.from(grid.children).map((pane) => pane.getAttribute("aria-label")))
       .toEqual(["Alpha live", "Beta archived"]);
@@ -4397,9 +4402,15 @@ describe("App layout", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => expect(setWorkspaceScopeSpy).toHaveBeenCalledWith("draft", expect.objectContaining({ project_path: "/repo/beta" })));
-    expect(screen.getByRole("button", { name: "Add pane" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Add pane" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The workspace change hasn’t finished. Please try again or select a project again.");
+    expect(createChatSpy).not.toHaveBeenCalled();
+    fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "Dismiss" }));
     act(() => sessionUpdateHandlers.forEach((handler) => handler("draft", "metadata", scope("alpha"))));
-    expect(screen.getByRole("button", { name: "Add pane" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Add pane" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The workspace change hasn’t finished. Please try again or select a project again.");
+    expect(createChatSpy).not.toHaveBeenCalled();
+    fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "Dismiss" }));
     act(() => sessionUpdateHandlers.forEach((handler) => handler("draft", "metadata", scope("beta"), setWorkspaceScopeSpy.mock.calls.at(-1)?.[1])));
     expect(await within(screen.getByRole("region", { name: "beta" })).findByText("Draft")).toBeInTheDocument();
     requestMutationSpy.mockResolvedValue({ path: "/repo/default", name: "default" });
@@ -4409,7 +4420,10 @@ describe("App layout", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => expect(setWorkspaceScopeSpy).toHaveBeenLastCalledWith("draft", expect.objectContaining({ project_path: "/repo/default" })));
-    expect(screen.getByRole("button", { name: "Add pane" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Add pane" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The workspace change hasn’t finished. Please try again or select a project again.");
+    expect(createChatSpy).not.toHaveBeenCalled();
+    fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "Dismiss" }));
     act(() => {
       statusHandlers.forEach((handler) => handler("reconnecting"));
       statusHandlers.forEach((handler) => handler("open"));
@@ -4451,17 +4465,48 @@ describe("App layout", () => {
     expect(await screen.findByRole("button", { name: "Workspace access mode: Full Access" })).toBeEnabled();
   });
 
-  it("keeps a new pane separate if its target group changes while it is created", async () => {
+  it("reports a full group without requesting a new chat", async () => {
+    await import("@/components/thread/ThreadShell");
+    const scope = { project_path: "/repo/alpha", project_name: "alpha", access_mode: "full" as const };
+    mockSessions = ["one", "two", "three", "four"].map((chatId) => ({
+      key: `websocket:${chatId}`, channel: "websocket", chatId, createdAt: null, updatedAt: null,
+      title: chatId, preview: "", workspaceScope: scope,
+    }));
+    const paneKeys = mockSessions.map((session) => session.key);
+    mockFetchRoutes({
+      "/api/webui/sidebar-state": { workbench: { version: 1, tabs: { "tab:full": {
+        explicit: true, title: "Full group", paneKeys, layoutPaneKeys: paneKeys, layout: "columns", splitRatios: [],
+      } } } },
+      "/api/workspaces": { schema_version: 1, default_access_mode: "full", default_scope: scope, controls: { can_change_project: true } },
+    });
+    window.history.replaceState(null, "", "/#/chat/websocket%3Aone");
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    await waitFor(() => expect(screen.getByTestId("pane-grid").children).toHaveLength(4));
+    const routeBeforeAdd = window.location.hash;
+    fireEvent.click(await screen.findByRole("button", { name: "Add pane" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The group is full. It can have up to 4 panes.");
+    expect(createChatSpy).not.toHaveBeenCalled();
+    expect(window.location.hash).toBe(routeBeforeAdd);
+  });
+
+  it.each([
+    { change: "removed", locale: "zh-CN", title: "添加窗格失败", reason: "原来的分组已不存在。" },
+    { change: "grouped", locale: "en", title: "Couldn’t add pane", reason: "The topic has been added to a group." },
+    { change: "full", locale: "en", title: "Couldn’t add pane", reason: "The group is full. It can have up to 4 panes." },
+    { change: "workspace", locale: "en", title: "Couldn’t add pane", reason: "The new pane and one of the existing topics use different workspaces." },
+  ])("rejects pane creation when the group becomes $change", async ({ change, locale, title, reason }) => {
     await import("@/components/thread/ThreadShell");
     const scope = (name: string) => ({ project_path: `/repo/${name}`, project_name: name, access_mode: "full" as const });
-    mockSessions = [
-      { key: "websocket:alpha", channel: "websocket", chatId: "alpha", createdAt: null, updatedAt: null, title: "Alpha", preview: "", workspaceScope: scope("alpha") },
-      { key: "websocket:beta", channel: "websocket", chatId: "beta", createdAt: null, updatedAt: null, title: "Beta", preview: "", workspaceScope: scope("beta") },
-    ];
+    mockSessions = ["alpha", "two", "three", "four", "beta"].map((chatId) => ({
+      key: `websocket:${chatId}`, channel: "websocket", chatId, createdAt: null, updatedAt: null,
+      title: chatId, preview: "", workspaceScope: scope(chatId === "beta" ? "beta" : "alpha"),
+    }));
     const tab = { explicit: true, title: "Alpha group", paneKeys: ["websocket:alpha"], layoutPaneKeys: ["websocket:alpha"], layout: "columns" as const, splitRatios: [] };
     const saved: SidebarStatePayload = {
       schema_version: 1, pinned_keys: [], archived_keys: [], session_order: [], title_overrides: {}, project_name_overrides: {}, tags_by_key: {}, collapsed_groups: {},
-      workbench: { version: 1, tabs: { "tab:alpha": tab } },
+      workbench: { version: 1, tabs: change === "grouped" ? {} : { "tab:alpha": tab } },
       view: { density: "comfortable", show_archived: false, sort: "updated_desc" }, updated_at: null,
     };
     mockFetchRoutes({
@@ -4476,16 +4521,26 @@ describe("App layout", () => {
     act(() => statusHandlers.forEach((handler) => handler("open")));
     fireEvent.click(await screen.findByRole("button", { name: "Add pane" }));
     await waitFor(() => expect(createChatSpy).toHaveBeenCalledTimes(1));
-    const mixedKeys = ["websocket:alpha", "websocket:beta"];
+    const paneKeys = change === "full"
+      ? ["websocket:alpha", "websocket:two", "websocket:three", "websocket:four"]
+      : ["websocket:alpha", change === "grouped" ? "websocket:two" : "websocket:beta"];
+    const changedTabKey = change === "grouped" ? "tab:websocket:alpha" : "tab:alpha";
     act(() => sidebarStateUpdateHandlers.forEach((handler) => handler({
-      ...saved, workbench: { version: 1, tabs: { "tab:alpha": { ...tab, paneKeys: mixedKeys, layoutPaneKeys: mixedKeys } } },
+      ...saved, workbench: { version: 1, tabs: change === "removed" ? {} : { [changedTabKey]: { ...tab, paneKeys, layoutPaneKeys: paneKeys } } },
     })));
-    await waitFor(() => expect(screen.getByTestId("pane-grid").children).toHaveLength(2));
-    await act(async () => finishCreate("new-pane"));
-    await waitFor(() => expect(window.location.hash).toBe("#/chat/websocket%3Anew-pane"));
-    expect(screen.getByTestId("pane-grid").children).toHaveLength(1);
-    expect(await screen.findByRole("alert")).toHaveTextContent("The group changed. The new topic was created separately.");
+    if (change === "removed") await waitFor(() => expect(screen.queryByRole("button", { name: "Group: Alpha group" })).not.toBeInTheDocument());
+    else await waitFor(() => expect(screen.getByTestId("pane-grid").children).toHaveLength(paneKeys.length));
+    const routeBeforeReply = window.location.hash;
+    await act(async () => { await i18n.changeLanguage(locale); finishCreate("new-pane"); });
+    expect(window.location.hash).toBe(routeBeforeReply);
+    expect(document.querySelector('[data-chat-row="websocket:new-pane"], [data-sidebar-pane="websocket:new-pane"]')).toBeNull();
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(title);
+    expect(alert).toHaveTextContent(reason);
+    fireEvent.click(within(alert).getByRole("button", { name: locale === "zh-CN" ? "关闭" : "Dismiss" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(setSidebarStateSpy).not.toHaveBeenCalled();
+    expect(deleteChatSpy).not.toHaveBeenCalled();
   });
 
   it("keeps panes and layout scoped to the current topic tab", async () => {
