@@ -215,6 +215,33 @@ def _checkpoint_tool_call_ids(
     return ids if len(ids) == len(set(ids)) else None
 
 
+def _checkpoint_prefix_is_complete(value: object) -> bool:
+    if not isinstance(value, list):
+        return False
+    pending: set[str] = set()
+    for value_row in cast(list[object], value):
+        if not isinstance(value_row, dict):
+            return False
+        row = cast(dict[str, Any], value_row)
+        role = row.get("role")
+        if role == "tool":
+            call_id = row.get("tool_call_id")
+            if not isinstance(call_id, str) or call_id not in pending:
+                return False
+            pending.remove(call_id)
+        elif role in ("user", "assistant"):
+            if pending:
+                return False
+            if role == "assistant" and row.get("tool_calls") is not None:
+                ids = _checkpoint_tool_call_ids(row["tool_calls"])
+                if ids is None:
+                    return False
+                pending.update(ids)
+        else:
+            return False
+    return not pending
+
+
 def runtime_checkpoint_is_well_formed(checkpoint: Mapping[str, Any]) -> bool:
     """Return whether a checkpoint is safe to offer for continuation.
 
@@ -222,6 +249,8 @@ def runtime_checkpoint_is_well_formed(checkpoint: Mapping[str, Any]) -> bool:
     Continue is stricter: silently dropping a malformed tool result could make
     the model repeat an external side effect.
     """
+    if not _checkpoint_prefix_is_complete(checkpoint.get("preceding_messages", [])):
+        return False
     assistant_value = cast(object, checkpoint.get("assistant_message"))
     if not isinstance(assistant_value, dict):
         return False
@@ -294,7 +323,11 @@ def restore_runtime_checkpoint(session: Session) -> bool:
     completed = cast(list[object], completed_value) if isinstance(completed_value, list) else []
     pending = cast(list[object], pending_value) if isinstance(pending_value, list) else []
 
-    restored: list[dict[str, Any]] = []
+    preceding = data.get("preceding_messages", [])
+    restored = (
+        [dict(cast(dict[str, Any], row)) for row in cast(list[object], preceding) if isinstance(row, dict)]
+        if isinstance(preceding, list) else []
+    )
     if isinstance(assistant, dict):
         assistant_row = cast(dict[str, Any], assistant)
     else:
@@ -346,6 +379,11 @@ def restore_runtime_checkpoint(session: Session) -> bool:
             overlap = size
             break
     session.messages.extend(restored[overlap:])
+    followup_ids = data.get("consumed_followup_ids", [])
+    if isinstance(followup_ids, list) and followup_ids:
+        session.consumed_followup_ids |= {
+            value for value in cast(list[object], followup_ids) if isinstance(value, str)
+        }
 
     assistant_data = cast(dict[str, Any], assistant) if isinstance(assistant, dict) else None
     synchronized = (

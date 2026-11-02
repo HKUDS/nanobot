@@ -11,8 +11,13 @@ from nanobot.bus.events import INBOUND_META_TURN_ID, InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMResponse
 from nanobot.runtime_context import public_history_message
-from nanobot.session.manager import SessionManager
-from nanobot.session.recovery import PENDING_FOLLOWUP_ID_KEY, pending_followups
+from nanobot.session.manager import Session, SessionManager
+from nanobot.session.recovery import (
+    PENDING_FOLLOWUP_ID_KEY,
+    RUNTIME_CHECKPOINT_KEY,
+    pending_followups,
+    restore_runtime_checkpoint,
+)
 from nanobot.webui.recovery import RecoveryCoordinator
 
 
@@ -76,7 +81,8 @@ async def test_late_consumption_commits_history_and_only_its_ids(tmp_path, monke
         await reopened.state.aclose()
 
 
-async def test_failed_followup_commit_rolls_back_history_and_ack_then_can_retry(tmp_path):
+@pytest.mark.parametrize("recover_checkpoint", [False, True])
+async def test_failed_followup_commit_rolls_back_history_and_ack_then_can_retry(tmp_path, recover_checkpoint):
     sessions = SessionManager(tmp_path / "workspace", sessions_root=tmp_path / "sessions")
     state = sessions.state
     try:
@@ -84,10 +90,22 @@ async def test_failed_followup_commit_rolls_back_history_and_ack_then_can_retry(
         draft.add_message("user", "initial input")
         await state.prepare_input(draft)
         identifier = await state.queue_followup(draft.key, _input("consumed input", "follow-up"))
-        _loop(sessions)._save_turn(draft, [
+        projection = Session(key=draft.key) if recover_checkpoint else draft
+        _loop(sessions)._save_turn(projection, [
             {"role": "user", "content": "consumed input", PENDING_FOLLOWUP_ID_KEY: identifier},
             {"role": "assistant", "content": "completed answer"},
         ], skip=0)
+        if recover_checkpoint:
+            await state.checkpoint_view(draft, {
+                "phase": "final_response",
+                "preceding_messages": projection.messages[:-1],
+                "assistant_message": projection.messages[-1],
+                "completed_tool_results": [],
+                "pending_tool_calls": [],
+                "consumed_followup_ids": list(projection.consumed_followup_ids),
+            })
+            draft = await state.get(draft.key)
+            assert restore_runtime_checkpoint(draft)
         with sqlite3.connect(sessions._store.path) as db:
             db.execute("""CREATE TRIGGER reject_ack BEFORE DELETE ON pending_inputs
                           BEGIN SELECT RAISE(ABORT, 'failed follow-up commit'); END""")
@@ -96,6 +114,7 @@ async def test_failed_followup_commit_rolls_back_history_and_ack_then_can_retry(
         for stored in (sessions.read_session_snapshot(draft.key), state.peek(draft.key)):
             assert [row["content"] for row in stored.messages] == ["initial input"]
             assert [item.content for item in pending_followups(stored)] == ["consumed input"]
+            assert (RUNTIME_CHECKPOINT_KEY in stored.metadata) is recover_checkpoint
         with sqlite3.connect(sessions._store.path) as db:
             db.execute("DROP TRIGGER reject_ack")
         await state.finish_turn(draft)

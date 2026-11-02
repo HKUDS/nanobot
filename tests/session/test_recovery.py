@@ -465,7 +465,8 @@ async def test_malformed_final_response_is_not_reported_as_restored(tmp_path: Pa
 
 
 @pytest.mark.asyncio
-async def test_checkpoint_with_missing_tool_result_cannot_continue(tmp_path: Path) -> None:
+@pytest.mark.parametrize("earlier_round", [False, True])
+async def test_checkpoint_with_missing_tool_result_cannot_continue(tmp_path: Path, earlier_round: bool) -> None:
     sessions = SessionManager(tmp_path)
     session = sessions.get_or_create("websocket:chat")
     session.messages.append({"role": "user", "content": "send both"})
@@ -490,6 +491,15 @@ async def test_checkpoint_with_missing_tool_result_cannot_continue(tmp_path: Pat
         ],
         "pending_tool_calls": [],
     }
+    if earlier_round:
+        checkpoint = session.metadata[RUNTIME_CHECKPOINT_KEY]
+        session.metadata[RUNTIME_CHECKPOINT_KEY] = {
+            "phase": "final_response",
+            "assistant_message": {"role": "assistant", "content": "finished"},
+            "completed_tool_results": [],
+            "pending_tool_calls": [],
+            "preceding_messages": [checkpoint["assistant_message"], *checkpoint["completed_tool_results"]],
+        }
     _persist(sessions, session)
 
     coordinator, _, restarted = _coordinator(tmp_path)
