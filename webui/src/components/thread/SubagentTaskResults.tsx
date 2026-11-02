@@ -43,23 +43,24 @@ function groupResults(messages: UIMessage[], tasks: ObservedSubagentTask[]) {
 
 export function SubagentThreadMessages(props: ComponentProps<typeof ThreadMessages>) {
   const context = useSubagentTasks();
-  return <ResultsThreadMessages key={context?.sessionKey} {...props} tasks={context?.tasks ?? []} />;
-}
-
-function ResultsThreadMessages({ tasks, ...props }: ComponentProps<typeof ThreadMessages> & { tasks: ObservedSubagentTask[] }) {
-  const groups = useMemo(() => groupResults(props.messages, tasks), [props.messages, tasks]);
-  const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(() => new Set());
-  const expanded = (results: ObservedSubagentTask[]) => results.some(task => expandedTaskIds.has(task.task_id));
+  const sessionKey = context?.sessionKey;
+  const groups = useMemo(() => groupResults(props.messages, context?.tasks ?? []), [props.messages, context?.tasks]);
+  const [archive, setArchive] = useState(() => ({ sessionKey, expanded: new Set<string>() }));
+  // Reset only the disclosures; the outgoing transcript must not remount during handoff.
+  if (archive.sessionKey !== sessionKey) {
+    setArchive({ sessionKey, expanded: new Set<string>() });
+  }
+  const expanded = (results: ObservedSubagentTask[]) => results.some(task => archive.expanded.has(task.task_id));
   const toggle = (results: ObservedSubagentTask[]) => {
     props.onActivityToggle?.();
-    setExpandedTaskIds(current => {
-      const next = new Set(current);
-      const close = results.some(task => current.has(task.task_id));
+    setArchive(current => {
+      const next = new Set(current.expanded);
+      const close = results.some(task => current.expanded.has(task.task_id));
       for (const task of results) {
         if (close) next.delete(task.task_id);
         else next.add(task.task_id);
       }
-      return next;
+      return { sessionKey, expanded: next };
     });
   };
 

@@ -1014,6 +1014,7 @@ describe("useNanobotStream", () => {
         initialProps: { chatId: "chat-old" },
       },
     );
+    expect(result.current.messagesKey).toBe("chat-old");
 
     act(() => {
       fake.emit("chat-old", {
@@ -1024,6 +1025,7 @@ describe("useNanobotStream", () => {
     });
 
     rerender({ chatId: "chat-new" });
+    expect(result.current.messagesKey).toBe("chat-new");
 
     act(() => {
       fake.emit("chat-new", {

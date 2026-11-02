@@ -147,6 +147,8 @@ export function useNanobotStream(
   historyActiveTurnId: string | null = null,
 ): {
   messages: UIMessage[];
+  /** Conversation owning these messages, including while a selection is handing over. */
+  messagesKey: string | null;
   /** Whether ``messages`` belongs to the current ``chatId`` after a session switch. */
   messagesReady: boolean;
   isStreaming: boolean;
@@ -1073,6 +1075,7 @@ export function useNanobotStream(
 
   return {
     messages,
+    messagesKey: messageScope.historyKey ?? messageScope.chatId,
     messagesReady: messageScope.chatId === chatId && messageScope.historyKey === historyKey && messageScope.client === client,
     isStreaming,
     runStartedAt,

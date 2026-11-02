@@ -53,6 +53,8 @@ interface ThreadViewportProps {
   activeTurnId?: string | null;
   activeTurnStartedHere?: boolean;
   conversationKey?: string | null;
+  /** Override when message ownership changes after the selected conversation. */
+  messagesKey?: string | null;
   conversationReady?: boolean;
   showScrollToBottomButton?: boolean;
   cliApps?: CliAppInfo[];
@@ -264,6 +266,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   activeTurnId: liveTurnId = null,
   activeTurnStartedHere = false,
   conversationKey = null,
+  messagesKey = conversationKey,
   conversationReady = true,
   showScrollToBottomButton = true,
   cliApps = [],
@@ -1192,6 +1195,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
               <div ref={messageContentRef} className="w-full">
                 <DiagramScope identity={conversationKey}>
                 <SubagentThreadMessages
+                  key={messagesKey}
                   messages={visibleMessages}
                   topInset={PROMPT_TOP_INSET_PX}
                   beforeUnit={retainedHistorySlotKey ? { key: retainedHistorySlotKey, content: (

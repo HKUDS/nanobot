@@ -589,6 +589,7 @@ export function ThreadShell({
   }, [chatId, onTurnEnd]);
   const {
     messages,
+    messagesKey,
     messagesReady,
     isStreaming,
     runStartedAt,
@@ -1499,6 +1500,7 @@ export function ThreadShell({
           <ThreadViewport
             ref={viewportRef}
             messages={displayMessages}
+            messagesKey={messagesKey}
             navigation={promptNavigation}
             navigationFrame={navigationFrame}
             temporary={temporary}
