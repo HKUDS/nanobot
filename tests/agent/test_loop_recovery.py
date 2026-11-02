@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import nullcontext
 from copy import deepcopy
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -483,7 +484,10 @@ async def test_multiround_recovery_keeps_completed_work_and_consumed_followup(
         await resumed.aclose()
 
 
-async def test_new_input_waits_for_real_recovery_cancellation_before_reading_draft(tmp_path, monkeypatch):
+@pytest.mark.parametrize("complete_recovery", [False, True], ids=["checkpoint_saved", "recovery_completed"])
+async def test_new_input_waits_for_real_recovery_cancellation_before_reading_draft(
+    tmp_path, monkeypatch, complete_recovery,
+):
     provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings()
@@ -495,6 +499,7 @@ async def test_new_input_waits_for_real_recovery_cancellation_before_reading_dra
     loop, recovery = _recovery_loop(tmp_path, provider)
     session = await loop.sessions.state.get("websocket:chat")
     session.add_message("user", "Earlier request")
+    session.metadata["title"] = "Recovery handoff"
     session.metadata[RECOVERY_METADATA_KEY] = {
         "status": "awaiting_user", "recovery_id": "recover", "attempts": 0,
     }
@@ -510,18 +515,20 @@ async def test_new_input_waits_for_real_recovery_cancellation_before_reading_dra
             cancelled.set()
 
     monkeypatch.setattr(loop.tools.get("read_file"), "execute", read)
+    coordinator = WebuiTurnCoordinator(loop.bus, loop.sessions, loop.schedule_background, recovery=recovery)
     try:
-        await recovery.handle_action("continue", {"chat_id": "chat", "recovery_id": "recover"})
-        await loop._dispatch_inbound(loop.bus.inbound.get_nowait())
-        await asyncio.wait_for(entered.wait(), 5)
-        old_tasks = tuple(loop._active_tasks[session.key])
-        await loop._dispatch_inbound(InboundMessage(
-            channel="websocket", sender_id="user", chat_id="chat", content="Replace the old task",
-            metadata={"webui": True, "webui_turn_id": "new-input"},
-        ))
-        assert cancelled.is_set()
-        assert all(task.done() for task in old_tasks)
-        await asyncio.gather(*loop._active_tasks[session.key])
+        with coordinator.connected() if complete_recovery else nullcontext():
+            await recovery.handle_action("continue", {"chat_id": "chat", "recovery_id": "recover"})
+            await loop._dispatch_inbound(loop.bus.inbound.get_nowait())
+            await asyncio.wait_for(entered.wait(), 5)
+            old_tasks = tuple(loop._active_tasks[session.key])
+            await loop._dispatch_inbound(InboundMessage(
+                channel="websocket", sender_id="user", chat_id="chat", content="Replace the old task",
+                metadata={"webui": True, "webui_turn_id": "new-input"},
+            ))
+            assert cancelled.is_set()
+            assert all(task.done() for task in old_tasks)
+            await asyncio.gather(*loop._active_tasks[session.key])
     finally:
         await loop.aclose()
 
