@@ -566,7 +566,7 @@ class _MCPWrapperBase(Tool):
             "MCP tool '{}' {}; outcome unknown, not replaying", self._name, reason,
         )
         return ToolResult.error(
-            "(MCP tool call outcome is unknown after connection loss; the operation "
+            f"(MCP tool call outcome is unknown; {reason}. The operation "
             "may have completed and was not replayed after this failure. Check its outcome before "
             "retrying to avoid duplicate side effects.)"
         )
@@ -604,6 +604,8 @@ class _MCPWrapperBase(Tool):
                 # Preflight and submission share the existing per-attempt timeout.
                 return await asyncio.wait_for(attempt(session, replay_safe), timeout=timeout)
             except asyncio.TimeoutError:
+                if request_started and not replay_safe:
+                    return self._unknown_tool_outcome(f"timed out after {timeout}s")
                 logger.warning(
                     "MCP {} '{}' timed out after {}s", capability_kind, self._name, timeout
                 )

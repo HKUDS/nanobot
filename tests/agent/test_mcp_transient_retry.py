@@ -870,15 +870,22 @@ async def test_resource_prompt_external_cancellation_propagates_without_hooks(ki
 
 
 @pytest.mark.parametrize("cancel", [False, True], ids=["timeout", "task-cancellation"])
-async def test_non_replayable_tool_preflight_is_bounded_without_submission(cancel):
+@pytest.mark.parametrize("submitted", [False, True], ids=["preflight", "submitted"])
+async def test_non_replayable_tool_timeout_and_cancellation_do_not_repeat(cancel, submitted):
     entered = asyncio.Event()
+    effects = []
 
-    async def ping():
+    async def block(*args, **kwargs):
+        if submitted:
+            effects.append("committed before response loss")
         entered.set()
         await asyncio.Event().wait()
 
     session = AsyncMock()
-    session.send_ping.side_effect = ping
+    if submitted:
+        session.call_tool.side_effect = block
+    else:
+        session.send_ping.side_effect = block
     wrapper = MCPToolWrapper(
         session, "srv", mcp_types.Tool(name="send", inputSchema={"type": "object"}),
         tool_timeout=5 if cancel else 0.01,
@@ -896,10 +903,12 @@ async def test_non_replayable_tool_preflight_is_bounded_without_submission(cance
             result = await asyncio.wait_for(task, timeout=2)
             assert is_tool_error_result(result)
             assert "timed out after 0.01s" in result
+            assert ("outcome is unknown" in result) is submitted
     finally:
         if not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
     session.send_ping.assert_awaited_once()
-    session.call_tool.assert_not_awaited()
+    assert session.call_tool.await_count == int(submitted)
+    assert effects == (["committed before response loss"] if submitted else [])
     reconnect.assert_not_awaited()
