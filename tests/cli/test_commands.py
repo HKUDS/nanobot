@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import urlparse
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 from nanobot.agent.memory import MemoryStore
@@ -3705,11 +3706,13 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
         _fake_run_local_trigger_queue,
     )
 
-    cli_commands._run_gateway(
-        config,
-        health_server_enabled=False,
-        unconfigured_provider_error=setup_error,
-    )
+    with pytest.raises(typer.Exit) as exc_info:
+        cli_commands._run_gateway(
+            config,
+            health_server_enabled=False,
+            unconfigured_provider_error=setup_error,
+        )
+    assert exc_info.value.exit_code == 1
 
     agent = seen["agent"]
     agent_kwargs = seen["agent_from_config_kwargs"]
@@ -4021,7 +4024,7 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
 
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     assert captured["host"] == host
     assert captured["port"] == 18791
     assert f"Health endpoint: {display_url}" in result.stdout
@@ -4117,9 +4120,11 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
         assert timed_out_writer.output == b""
 
 
-def test_gateway_agent_task_owns_initial_mcp_provider_close(
+@pytest.mark.parametrize("failure_phase", ["startup", "runtime"])
+def test_gateway_failure_exits_nonzero_after_cleanup(
     monkeypatch,
     tmp_path: Path,
+    failure_phase: str,
 ) -> None:
     config_file = _write_instance_config(tmp_path)
     config = Config()
@@ -4199,7 +4204,8 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
             self.on_job = None
 
         async def start(self) -> None:
-            return None
+            if failure_phase == "startup":
+                raise _StopGatewayError("gateway startup failed")
 
         def stop(self) -> None:
             seen["cron_stopped"] = True
@@ -4218,7 +4224,7 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
             return False
 
         async def serve_forever(self) -> None:
-            raise _StopGatewayError("stop")
+            raise _StopGatewayError("gateway runtime failed")
 
     async def _fake_start_server(_handler, _host: str, _port: int):
         return _FakeServer()
@@ -4237,18 +4243,23 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
 
-    assert result.exit_code == 0
+    assert result.exit_code == 1
+    assert "Gateway crashed unexpectedly" in result.stdout
+    assert f"_StopGatewayError: gateway {failure_phase} failed" in result.stdout
     assert seen["agent_stopped"] is True
     assert seen["inflight_turns_preserved"] is True
     assert seen["agent_closed"] is True
-    assert seen["agent_task_cleaned_up"] is True
     assert seen["channels_stopped"] is True
     assert seen["cron_stopped"] is True
     mcp_provider = seen["mcp_provider"]
     assert isinstance(mcp_provider, _FakeMCPProvider)
-    assert mcp_provider.connect_task is seen["agent_task"]
-    assert mcp_provider.close_tasks[0] is mcp_provider.connect_task
-    assert len(mcp_provider.close_tasks) == 2
+    if failure_phase == "runtime":
+        assert seen["agent_task_cleaned_up"] is True
+        assert mcp_provider.connect_task is seen["agent_task"]
+        assert mcp_provider.close_tasks[0] is mcp_provider.connect_task
+        assert len(mcp_provider.close_tasks) == 2
+    else:
+        assert len(mcp_provider.close_tasks) == 1
     hooks = seen["hooks"]
     assert isinstance(hooks, list)
     assert len(hooks) == 1

@@ -1,6 +1,6 @@
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from loguru import logger
@@ -8,7 +8,11 @@ from mcp import types as mcp_types
 from mcp.shared.exceptions import McpError
 from mcp.types import ErrorData
 
+from agent.runner_helpers import make_run_spec
+from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.runner import AgentRunner
 from nanobot.agent.tools.context import RequestContext, request_context
+from nanobot.agent.tools.execution import execute_tool_calls
 from nanobot.agent.tools.mcp import (
     MCPPromptWrapper,
     MCPResourceWrapper,
@@ -16,7 +20,13 @@ from nanobot.agent.tools.mcp import (
     _is_session_terminated,
     _is_transient,
 )
-from nanobot.agent.tools.registry import is_tool_error_result
+from nanobot.agent.tools.registry import (
+    ToolRegistry,
+    is_tool_error_result,
+    with_tool_error_hint,
+)
+from nanobot.config.schema import AgentDefaults
+from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 
 class _FakeClosedResourceError(Exception):
@@ -84,8 +94,9 @@ def test_is_session_terminated_recognizes_connection_closed_mcp_error():
 def _make_tool_def(name="test_tool"):
     return SimpleNamespace(
         name=name,
-        description="A test tool",
+        description="A read-only test tool",
         inputSchema={"type": "object", "properties": {}},
+        annotations=mcp_types.ToolAnnotations(readOnlyHint=True),
     )
 
 
@@ -456,21 +467,54 @@ async def test_prompt_reconnects_on_connection_closed_exception():
     assert new_session.get_prompt.call_count == 1
 
 
-async def test_tool_refresh_leaves_one_transient_retry_available():
+@pytest.mark.parametrize("fresh_annotations", [
+    mcp_types.ToolAnnotations(idempotentHint=True), None,
+    mcp_types.ToolAnnotations(readOnlyHint=False, idempotentHint=False),
+], ids=["still-idempotent", "unknown", "non-idempotent"])
+async def test_tool_refresh_rechecks_replay_contract_and_keeps_retry_budget(fresh_annotations):
     old, fresh = AsyncMock(), AsyncMock()
     old.call_tool.side_effect = ConnectionResetError("old")
-    fresh.call_tool.side_effect = [ConnectionResetError("fresh"), _make_tool_result("ok")]
-    wrapper = MCPToolWrapper(old, "srv", _make_tool_def())
-    reconnect = AsyncMock(return_value=MCPToolWrapper(fresh, "srv", _make_tool_def()))
+    effects = []
+
+    async def submit_then_lose_response(name, arguments):
+        effects.append((name, arguments))
+        if len(effects) == 1:
+            raise ConnectionResetError("fresh response lost after commit")
+        return _make_tool_result("ok")
+
+    fresh.call_tool.side_effect = submit_then_lose_response
+    definition = mcp_types.Tool(
+        name="test_tool", inputSchema={"type": "object"},
+        annotations=mcp_types.ToolAnnotations(idempotentHint=True),
+    )
+    wrapper = MCPToolWrapper(old, "srv", definition)
+    replacement = MCPToolWrapper(fresh, "srv", definition.model_copy(update={"annotations": fresh_annotations}))
+    reconnect = AsyncMock(return_value=replacement)
     wrapper.set_reconnect_handler(reconnect)
 
     with patch("nanobot.agent.tools.mcp.asyncio.sleep", new_callable=AsyncMock) as sleep:
-        assert await wrapper.execute(value="unchanged") == "ok"
+        output = await wrapper.execute(value="unchanged")
+        if fresh_annotations is not None and fresh_annotations.idempotentHint:
+            assert output == "ok"
+            assert effects == [("test_tool", {"value": "unchanged"})] * 2
+            sleep.assert_awaited_once_with(1)
+        else:
+            assert is_tool_error_result(output)
+            assert "outcome is unknown" in output
+            fresh.call_tool.assert_not_awaited()
+            assert effects == []
+            sleep.assert_not_awaited()
+            # A later authorized operation uses the new contract too: its lost
+            # response must not acquire the old wrapper's replay permission.
+            later = await wrapper.execute(value="new input")
+            assert is_tool_error_result(later)
+            assert "outcome is unknown" in later
+            assert effects == [("test_tool", {"value": "new input"})]
+            fresh.call_tool.assert_awaited_once()
+            sleep.assert_not_awaited()
 
     old.call_tool.assert_awaited_once_with("test_tool", arguments={"value": "unchanged"})
-    assert fresh.call_tool.await_count == 2
     reconnect.assert_awaited_once_with("srv", wrapper.name, wrapper)
-    sleep.assert_awaited_once_with(1)
 
 
 async def test_tool_later_refresh_does_not_reset_transient_budget():
@@ -581,8 +625,290 @@ async def test_request_error_logs_hide_content_and_prompt_retains_error_detail(k
     finally:
         logger.remove(sink)
     assert output == expected
-    assert is_tool_error_result(output) is (kind == "tool")
+    assert is_tool_error_result(output)
     error = next(record for record in records if record["level"].name == "ERROR")
     assert "[content hidden]" in error["message"]
     assert error["exception"] is None
     assert all("private-request-content" not in record["message"] for record in records)
+
+
+class _RecordingToolHook(AgentHook):
+    def __init__(self):
+        self.errors = []
+        self.successes = []
+
+    async def on_execute_tool_error(self, context, tool_call, tool, params, error):
+        self.errors.append(error)
+
+    async def after_execute_tool(self, context, tool_call, tool, params, result):
+        self.successes.append(result)
+
+
+async def _run_mcp_call(registry, call, hook):
+    provider = MagicMock()
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content=None, tool_calls=[call]),
+        LLMResponse(content="done"),
+    ])
+    return await AgentRunner().run(make_run_spec(
+        provider, tools=registry, model="test-model", max_iterations=2,
+        initial_messages=[{"role": "user", "content": "run the MCP operation"}],
+        max_tool_result_chars=AgentDefaults().max_tool_result_chars,
+        hook=hook,
+    ))
+
+
+@pytest.mark.parametrize("annotations", [None, mcp_types.ToolAnnotations(
+    readOnlyHint=False, idempotentHint=False, destructiveHint=False,
+)], ids=["unknown", "non-idempotent-additive"])
+async def test_submitted_tool_transport_loss_is_unknown_not_replayed(annotations):
+    effects = []
+    disconnected = False
+    old, fresh = AsyncMock(), AsyncMock()
+
+    async def ping():
+        if disconnected:
+            raise _connection_closed_error()
+
+    async def submit_then_lose_response(name, arguments):
+        nonlocal disconnected
+        effects.append((name, arguments))
+        disconnected = True
+        raise McpError(ErrorData(code=-32000, message="Connection closed: private-submission"))
+
+    async def submit(name, arguments):
+        effects.append((name, arguments))
+        return _make_tool_result("created")
+
+    old.send_ping.side_effect = ping
+    old.call_tool.side_effect = submit_then_lose_response
+    fresh.call_tool.side_effect = submit
+    definition = mcp_types.Tool(name="create", inputSchema={"type": "object"}, annotations=annotations)
+    wrapper = MCPToolWrapper(old, "srv", definition)
+    replacement = MCPToolWrapper(fresh, "srv", definition)
+    reconnect = AsyncMock(return_value=replacement)
+    wrapper.set_reconnect_handler(reconnect)
+    registry = ToolRegistry()
+    registry.register(wrapper)
+    hook = _RecordingToolHook()
+    records = []
+    sink = logger.add(lambda message: records.append(message.record), level="DEBUG")
+    try:
+        with request_context(RequestContext(channel="test", chat_id="test", log_content=False)):
+            result = await _run_mcp_call(
+                registry, ToolCallRequest(id="create-1", name=wrapper.name, arguments={"title": "first"}), hook,
+            )
+    finally:
+        logger.remove(sink)
+
+    assert records and all("private-submission" not in record["message"] for record in records)
+    assert all(record["exception"] is None for record in records)
+    assert effects == [("create", {"title": "first"})]
+    assert result.tool_events[0]["status"] == "error"
+    assert result.tools_used == []
+    assert len(hook.errors) == 1 and not hook.successes
+    assert is_tool_error_result(hook.errors[0])
+    assert "outcome is unknown" in hook.errors[0]
+    assert "duplicate side effects" in hook.errors[0]
+    assert "not replayed" in hook.errors[0]
+    reconnect.assert_not_awaited()
+    fresh.call_tool.assert_not_awaited()
+
+    # A later user-authorized call can repair the connection before submitting,
+    # without replaying the first call or inheriting its outcome/retry state.
+    assert await registry.execute(wrapper.name, {"title": "second"}) == "created"
+    assert effects == [("create", {"title": "first"}), ("create", {"title": "second"})]
+    reconnect.assert_awaited_once()
+    old.call_tool.assert_awaited_once()
+    fresh.call_tool.assert_awaited_once_with("create", arguments={"title": "second"})
+
+
+async def test_explicitly_idempotent_tool_can_recover_with_the_same_arguments():
+    records = {}
+    submissions = []
+
+    async def set_record(name, arguments):
+        submissions.append((name, arguments.copy()))
+        records[arguments["id"]] = arguments["value"]
+        if len(submissions) == 1:
+            raise ConnectionResetError("response lost after commit")
+        return _make_tool_result("saved")
+
+    session = AsyncMock()
+    session.call_tool.side_effect = set_record
+    definition = mcp_types.Tool(
+        name="set_record", inputSchema={"type": "object"},
+        annotations=mcp_types.ToolAnnotations(readOnlyHint=False, idempotentHint=True),
+    )
+    wrapper = MCPToolWrapper(session, "srv", definition)
+    registry = ToolRegistry()
+    registry.register(wrapper)
+    with patch("nanobot.agent.tools.mcp.asyncio.sleep", new_callable=AsyncMock) as sleep:
+        output = await registry.execute(wrapper.name, {"id": "one", "value": "saved"})
+    assert output == "saved"
+    assert not is_tool_error_result(output)
+    assert records == {"one": "saved"}
+    assert submissions == [("set_record", {"id": "one", "value": "saved"})] * 2
+    sleep.assert_awaited_once_with(1)
+
+
+@pytest.mark.parametrize("case", [
+    "resource_timeout", "prompt_mcp_error", "resource_exhausted", "prompt_exhausted",
+    "resource_success", "prompt_success",
+])
+async def test_resource_prompt_results_keep_runtime_classification(case):
+    session = AsyncMock()
+    is_resource = case.startswith("resource")
+    if is_resource:
+        wrapper = MCPResourceWrapper(session, "srv", _make_resource_def(), resource_timeout=5)
+        request = session.read_resource
+    else:
+        wrapper = MCPPromptWrapper(session, "srv", _make_prompt_def(), prompt_timeout=5)
+        request = session.get_prompt
+    failed = not case.endswith("success")
+    if case.endswith("timeout"):
+        request.side_effect = asyncio.TimeoutError()
+        expected = "(MCP resource read timed out after 5s)"
+    elif case.endswith("mcp_error"):
+        request.side_effect = McpError(ErrorData(code=-32602, message="prompt missing"))
+        expected = "(MCP prompt call failed: prompt missing [code -32602])"
+    elif case.endswith("exhausted"):
+        request.side_effect = ConnectionResetError("lost")
+        operation = "resource read" if is_resource else "prompt call"
+        expected = f"(MCP {operation} failed after retry: ConnectionResetError)"
+    else:
+        expected = "Error: is a valid example in this document"
+        request.return_value = (
+            _make_resource_result(expected) if is_resource else _make_prompt_result(expected)
+        )
+    registry = ToolRegistry()
+    registry.register(wrapper)
+    call = ToolCallRequest(id="read-1", name=wrapper.name, arguments={})
+    with patch("nanobot.agent.tools.mcp.asyncio.sleep", new_callable=AsyncMock):
+        direct = await registry.execute(wrapper.name, {})
+        assert is_tool_error_result(direct) is failed
+        assert direct == (with_tool_error_hint(expected) if failed else expected)
+
+        hook = _RecordingToolHook()
+        outputs, events = await execute_tool_calls(
+            registry, [call], concurrent=False, external_lookup_counts={},
+            workspace_violation_counts={}, hook=hook,
+            context=AgentHookContext(iteration=0, messages=[]),
+        )
+        assert events[0]["status"] == ("error" if failed else "ok")
+        assert expected in outputs[0]
+        assert hook.errors == ([expected] if failed else [])
+        assert hook.successes == ([] if failed else [expected])
+
+        runner_hook = _RecordingToolHook()
+        result = await _run_mcp_call(registry, call, runner_hook)
+    assert result.tool_events[0]["status"] == ("error" if failed else "ok")
+    assert result.tools_used == ([] if failed else [wrapper.name])
+    assert runner_hook.errors == ([expected] if failed else [])
+    assert runner_hook.successes == ([] if failed else [expected])
+    if failed:
+        assert is_tool_error_result(runner_hook.errors[0])
+    assert expected in next(msg["content"] for msg in result.messages if msg["role"] == "tool")
+
+
+async def test_unknown_tool_without_reconnect_does_not_retry_after_side_effect():
+    effects = []
+
+    async def submit_then_disconnect(name, arguments):
+        effects.append((name, arguments))
+        raise ConnectionResetError("response lost")
+
+    session = AsyncMock()
+    session.call_tool.side_effect = submit_then_disconnect
+    wrapper = MCPToolWrapper(session, "srv", mcp_types.Tool(name="send", inputSchema={"type": "object"}))
+    registry = ToolRegistry()
+    registry.register(wrapper)
+    with patch("nanobot.agent.tools.mcp.asyncio.sleep", new_callable=AsyncMock) as sleep:
+        output = await registry.execute(wrapper.name, {"message": "hello"})
+    assert effects == [("send", {"message": "hello"})]
+    assert is_tool_error_result(output)
+    assert "outcome is unknown" in output
+    sleep.assert_not_awaited()
+
+
+@pytest.mark.parametrize("kind", ["resource", "prompt"])
+async def test_resource_prompt_external_cancellation_propagates_without_hooks(kind):
+    entered = asyncio.Event()
+
+    async def block(*args, **kwargs):
+        entered.set()
+        await asyncio.Event().wait()
+
+    session = AsyncMock()
+    if kind == "resource":
+        session.read_resource.side_effect = block
+        wrapper = MCPResourceWrapper(session, "srv", _make_resource_def())
+        request = session.read_resource
+    else:
+        session.get_prompt.side_effect = block
+        wrapper = MCPPromptWrapper(session, "srv", _make_prompt_def())
+        request = session.get_prompt
+    registry = ToolRegistry()
+    registry.register(wrapper)
+    hook = _RecordingToolHook()
+    task = asyncio.create_task(execute_tool_calls(
+        registry, [ToolCallRequest(id="read-1", name=wrapper.name, arguments={})],
+        concurrent=False, external_lookup_counts={}, workspace_violation_counts={},
+        hook=hook, context=AgentHookContext(iteration=0, messages=[]),
+    ))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    request.assert_awaited_once()
+    assert not hook.errors and not hook.successes
+
+
+@pytest.mark.parametrize("cancel", [False, True], ids=["timeout", "task-cancellation"])
+@pytest.mark.parametrize("submitted", [False, True], ids=["preflight", "submitted"])
+async def test_non_replayable_tool_timeout_and_cancellation_do_not_repeat(cancel, submitted):
+    entered = asyncio.Event()
+    effects = []
+
+    async def block(*args, **kwargs):
+        if submitted:
+            effects.append("committed before response loss")
+        entered.set()
+        await asyncio.Event().wait()
+
+    session = AsyncMock()
+    if submitted:
+        session.call_tool.side_effect = block
+    else:
+        session.send_ping.side_effect = block
+    wrapper = MCPToolWrapper(
+        session, "srv", mcp_types.Tool(name="send", inputSchema={"type": "object"}),
+        tool_timeout=5 if cancel else 0.01,
+    )
+    reconnect = AsyncMock()
+    wrapper.set_reconnect_handler(reconnect)
+    task = asyncio.create_task(wrapper.execute())
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        if cancel:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            result = await asyncio.wait_for(task, timeout=2)
+            assert is_tool_error_result(result)
+            assert "timed out after 0.01s" in result
+            assert ("outcome is unknown" in result) is submitted
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    session.send_ping.assert_awaited_once()
+    assert session.call_tool.await_count == int(submitted)
+    assert effects == (["committed before response loss"] if submitted else [])
+    reconnect.assert_not_awaited()

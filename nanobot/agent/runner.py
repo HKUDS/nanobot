@@ -222,6 +222,7 @@ class AgentRunner:
                 await self._emit_checkpoint(
                     spec,
                     checkpoint,
+                    messages,
                 )
         self._append_injected_messages(messages, injections)
         if real_injection:
@@ -549,6 +550,7 @@ class AgentRunner:
                         "completed_tool_results": [],
                         "pending_tool_calls": [tc.to_openai_tool_call() for tc in response.tool_calls],
                     },
+                    messages,
                 )
 
                 await hook.before_execute_tools(context)
@@ -609,6 +611,7 @@ class AgentRunner:
                             model_messages=checkpoint_model_messages,
                         ),
                     },
+                    messages,
                 )
                 empty_content_retries = 0
                 length_recovery_parts.clear()
@@ -832,6 +835,7 @@ class AgentRunner:
                     "pending_tool_calls": [],
                     "provider_state": conversation_state.checkpoint(messages),
                 },
+                messages,
             )
             if length_recovery_parts:
                 final_content = (
@@ -1405,10 +1409,22 @@ class AgentRunner:
         self,
         spec: AgentRunSpec,
         payload: dict[str, Any],
+        messages: list[dict[str, Any]],
     ) -> None:
         callback = spec.checkpoint_callback
         if callback is not None:
-            await callback(payload)
+            if spec.transcript_input is not None:
+                start = spec.transcript_input.message_count
+            else:
+                assert spec.initial_messages is not None
+                start = len(spec.initial_messages)
+            # Replacing the checkpoint must retain every earlier round of this
+            # run, including follow-ups consumed since the accepted input.
+            batch_size = 1 + len(payload["completed_tool_results"])
+            await callback({
+                **payload,
+                "preceding_messages": messages[start:len(messages) - batch_size],
+            })
 
     @staticmethod
     def _append_final_message(messages: list[dict[str, Any]], content: str | None) -> None:

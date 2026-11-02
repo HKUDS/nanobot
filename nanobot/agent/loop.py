@@ -1048,6 +1048,10 @@ class AgentLoop:
             if session is None or ephemeral:
                 return
             public_payload = dict(payload)
+            preceding = Session(key=session.key)
+            self._save_turn(preceding, public_payload["preceding_messages"], skip=0)
+            public_payload["preceding_messages"] = preceding.messages
+            public_payload["consumed_followup_ids"] = sorted(preceding.consumed_followup_ids)
             private_state = public_payload.pop("provider_state", None)
             public_payload.pop(self._PROVIDER_STATE_CHECKPOINT_VERSION_KEY, None)
             if "provider_state" in payload and (

@@ -718,7 +718,7 @@ async def test_execute_notes_unstorable_image_block(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_returns_timeout_message() -> None:
+async def test_execute_returns_unknown_outcome_on_submitted_timeout() -> None:
     async def call_tool(_name: str, arguments: dict) -> object:
         await asyncio.sleep(1)
         return SimpleNamespace(content=[])
@@ -727,7 +727,11 @@ async def test_execute_returns_timeout_message() -> None:
 
     result = await wrapper.execute()
 
-    assert result == "(MCP tool call timed out after 0.01s)"
+    assert result == (
+        "(MCP tool call outcome is unknown; timed out after 0.01s. The operation "
+        "may have completed and was not replayed after this failure. Check its outcome before "
+        "retrying to avoid duplicate side effects.)"
+    )
     assert is_tool_error_result(result)
 
 
