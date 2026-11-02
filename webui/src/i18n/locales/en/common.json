@@ -439,7 +439,6 @@
     "closeAction": "Close temporary chat: {{title}}"
   },
   "sidebar": {
-    "chatsHeader": "Chats",
     "topicOptions": "Topic options",
     "resize": "Resize sidebar",
     "navigation": "Sidebar navigation",
@@ -2629,10 +2628,15 @@
     "renameGroupDescription": "Give this group a name.",
     "renameGroupPlaceholder": "Group name",
     "dissolveTab": "Dissolve group",
+    "dissolveAllPanes": "Dissolve entire group",
+    "workspaceGroupMismatch": "Topics in a group must use the same workspace.",
+    "workspaceChangeInGroup": "Remove this topic from its group before changing its workspace.",
+    "paneCreatedSeparately": "The group changed. The new topic was created separately.",
     "layout": "Layout",
     "addPane": "Add pane",
     "paneLimit": "Maximum {{count}} panes",
     "deleteConversations": "Delete all chats",
+    "deleteChatsCount": "Delete chats ({{chatCount}})",
     "movePane": "Move {{title}} pane",
     "movePaneHint": "Drag to move, or use the arrow keys.",
     "resizePaneBoundary": "Resize pane boundary {{index}}",

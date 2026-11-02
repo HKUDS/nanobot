@@ -439,7 +439,6 @@
     "closeAction": "Fermer la discussion temporaire : {{title}}"
   },
   "sidebar": {
-    "chatsHeader": "Discussions",
     "topicOptions": "Options des sujets",
     "resize": "Redimensionner la barre latérale",
     "navigation": "Navigation de la barre latérale",
@@ -2423,10 +2422,15 @@
     "renameGroupDescription": "Donnez un nom à ce groupe.",
     "renameGroupPlaceholder": "Nom du groupe",
     "dissolveTab": "Dissoudre le groupe",
+    "dissolveAllPanes": "Dissoudre tout le groupe",
+    "workspaceGroupMismatch": "Les sujets d’un groupe doivent utiliser le même espace de travail.",
+    "workspaceChangeInGroup": "Retirez ce sujet du groupe avant de changer son espace de travail.",
+    "paneCreatedSeparately": "Le groupe a changé. Le nouveau sujet a été créé séparément.",
     "layout": "Disposition",
     "addPane": "Ajouter un volet",
     "paneLimit": "{{count}} volets maximum",
     "deleteConversations": "Supprimer toutes les discussions",
+    "deleteChatsCount": "Supprimer les discussions ({{chatCount}})",
     "movePane": "Déplacer le volet {{title}}",
     "movePaneHint": "Faites glisser pour déplacer. Les flèches fonctionnent aussi",
     "resizePaneBoundary": "Redimensionner la séparation {{index}}",

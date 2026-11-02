@@ -91,13 +91,13 @@ The sidebar is the topic switcher. Each topic keeps its own history, title, work
 
 Drag topics within a sidebar group to reorder them. **Rename** edits a topic title in place; a failed save keeps the draft for retry.
 
-Use **Select** in a topic's action menu to archive or delete several topics with one confirmation. Click outside the topic rows and toolbar, or press **Esc**, to leave selection mode. Cancelling a confirmation keeps your selection. Archiving removes pins and hides topics from the default list while keeping their conversations. Use **Chats** → **…** → **Show archived** to find them again; selecting only archived topics offers **Unarchive**.
+Use **Select** in a topic's action menu to archive or delete several topics with one confirmation. Click outside the topic rows and toolbar, or press **Esc**, to leave selection mode. Cancelling a confirmation keeps your selection. Archiving removes pins and hides topics while keeping their conversations. Use **Show archived** in a project's or **Topics** group's menu to find its archived topics; selecting only archived topics offers **Unarchive**.
 
 ### Conversation groups and panes
 
-Open a topic's sidebar action menu and choose **Create group** to turn it into a conversation group. Use **Add pane** in the workbench header to start another topic alongside it. A group holds up to four panes. To bring in an existing topic, drag it onto the group or use **Move to** in its action menu.
+Open a topic's sidebar action menu and choose **Create group** to turn it into a conversation group. Use **Add pane** in the workbench header to start another topic alongside it. A group holds up to four panes from the same workspace. To bring in an existing topic, drag it onto the group or use **Move to** in its action menu. To change a grouped draft to a different workspace, first move it out of a group with other workspaces. Existing cross-workspace groups remain intact and appear in their respective sidebar groups, but cannot accept new panes.
 
-**Pane layout** controls the arrangement of resizable panes. Selecting a pane directs the shared composer to that topic. Group membership and layout persist across refreshes; grouping does not merge topic histories.
+**Pane layout** controls the arrangement of resizable panes. Selecting a pane directs the shared composer to that topic. Group membership and layout persist across refreshes; grouping does not merge topic histories. When archived panes are hidden or a group spans projects, the group’s delete action affects only the chats in the current sidebar section.
 
 To use work from another topic, mention it with `@` and tell nanobot what you need. See [Composer](#composer) for how to add a topic reference.
 

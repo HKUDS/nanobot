@@ -439,7 +439,6 @@
     "closeAction": "关闭临时聊天：{{title}}"
   },
   "sidebar": {
-    "chatsHeader": "聊天",
     "topicOptions": "话题选项",
     "resize": "调整侧栏宽度",
     "navigation": "侧边栏导航",
@@ -2629,10 +2628,15 @@
     "renameGroupDescription": "为这个分组命名。",
     "renameGroupPlaceholder": "分组名称",
     "dissolveTab": "解散分组",
+    "dissolveAllPanes": "解散整个分组",
+    "workspaceGroupMismatch": "组内话题需要使用同一个工作区。",
+    "workspaceChangeInGroup": "更改工作区前，请先将此话题移出分组。",
+    "paneCreatedSeparately": "分组已变化，新话题已单独创建。",
     "layout": "布局",
     "addPane": "添加窗格",
     "paneLimit": "最多 {{count}} 个窗格",
     "deleteConversations": "整组删除",
+    "deleteChatsCount": "删除聊天（{{chatCount}}）",
     "movePane": "移动 {{title}} 窗格",
     "movePaneHint": "拖动换位，也可以使用方向键。",
     "resizePaneBoundary": "调整窗格边界 {{index}}",

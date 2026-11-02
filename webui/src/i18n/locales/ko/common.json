@@ -439,7 +439,6 @@
     "closeAction": "임시 채팅 닫기: {{title}}"
   },
   "sidebar": {
-    "chatsHeader": "채팅",
     "topicOptions": "주제 옵션",
     "resize": "사이드바 너비 조절",
     "navigation": "사이드바 탐색",
@@ -2423,10 +2422,15 @@
     "renameGroupDescription": "이 그룹에 이름을 지정하세요.",
     "renameGroupPlaceholder": "그룹 이름",
     "dissolveTab": "그룹 해제",
+    "dissolveAllPanes": "전체 그룹 해제",
+    "workspaceGroupMismatch": "그룹의 토픽은 같은 작업 공간을 사용해야 합니다.",
+    "workspaceChangeInGroup": "작업 공간을 변경하기 전에 이 주제를 그룹에서 분리하세요.",
+    "paneCreatedSeparately": "그룹이 변경되어 새 주제를 별도로 만들었습니다.",
     "layout": "레이아웃",
     "addPane": "창 추가",
     "paneLimit": "최대 {{count}}개 창",
     "deleteConversations": "그룹 내 모든 대화 삭제",
+    "deleteChatsCount": "채팅 삭제 ({{chatCount}})",
     "movePane": "{{title}} 창 이동",
     "movePaneHint": "드래그하여 이동. 방향키로도 이동 가능",
     "resizePaneBoundary": "창 경계 {{index}} 크기 조절",

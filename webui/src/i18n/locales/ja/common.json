@@ -439,7 +439,6 @@
     "closeAction": "一時チャット「{{title}}」を閉じる"
   },
   "sidebar": {
-    "chatsHeader": "チャット",
     "topicOptions": "トピックのオプション",
     "resize": "サイドバーの幅を変更",
     "navigation": "サイドバーのナビゲーション",
@@ -2423,10 +2422,15 @@
     "renameGroupDescription": "このグループに名前を付けます。",
     "renameGroupPlaceholder": "グループ名",
     "dissolveTab": "グループを解除",
+    "dissolveAllPanes": "グループ全体を解除",
+    "workspaceGroupMismatch": "グループ内のトピックは同じワークスペースを使用する必要があります。",
+    "workspaceChangeInGroup": "ワークスペースを変更する前に、このトピックをグループから外してください。",
+    "paneCreatedSeparately": "グループが変更されたため、新しいトピックを単独で作成しました。",
     "layout": "レイアウト",
     "addPane": "ペインを追加",
     "paneLimit": "最大 {{count}} ペイン",
     "deleteConversations": "グループ内の全チャットを削除",
+    "deleteChatsCount": "チャットを削除（{{chatCount}}）",
     "movePane": "{{title}} ペインを移動",
     "movePaneHint": "ドラッグで移動. 矢印キーでも移動できます",
     "resizePaneBoundary": "ペイン境界 {{index}} のサイズを変更",

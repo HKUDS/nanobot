@@ -439,7 +439,6 @@
     "closeAction": "Tutup obrolan sementara: {{title}}"
   },
   "sidebar": {
-    "chatsHeader": "Obrolan",
     "topicOptions": "Opsi topik",
     "resize": "Ubah lebar bilah samping",
     "navigation": "Navigasi bilah samping",
@@ -2423,10 +2422,15 @@
     "renameGroupDescription": "Beri nama untuk grup ini.",
     "renameGroupPlaceholder": "Nama grup",
     "dissolveTab": "Bubarkan grup",
+    "dissolveAllPanes": "Bubarkan seluruh grup",
+    "workspaceGroupMismatch": "Topik dalam grup harus menggunakan ruang kerja yang sama.",
+    "workspaceChangeInGroup": "Keluarkan topik ini dari grup sebelum mengubah ruang kerjanya.",
+    "paneCreatedSeparately": "Grup berubah. Topik baru dibuat secara terpisah.",
     "layout": "Tata letak",
     "addPane": "Tambah panel",
     "paneLimit": "Maksimal {{count}} panel",
     "deleteConversations": "Hapus semua chat",
+    "deleteChatsCount": "Hapus chat ({{chatCount}})",
     "movePane": "Pindahkan panel {{title}}",
     "movePaneHint": "Seret untuk memindahkan. Tombol panah juga dapat digunakan",
     "resizePaneBoundary": "Ubah ukuran batas panel {{index}}",

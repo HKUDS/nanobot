@@ -439,7 +439,6 @@
     "closeAction": "Cerrar chat temporal: {{title}}"
   },
   "sidebar": {
-    "chatsHeader": "Conversaciones",
     "topicOptions": "Opciones de temas",
     "resize": "Cambiar el ancho de la barra lateral",
     "navigation": "Navegación de la barra lateral",
@@ -2424,10 +2423,15 @@
     "renameGroupDescription": "Ponle un nombre a este grupo.",
     "renameGroupPlaceholder": "Nombre del grupo",
     "dissolveTab": "Disolver grupo",
+    "dissolveAllPanes": "Disolver el grupo completo",
+    "workspaceGroupMismatch": "Los temas del grupo deben usar el mismo espacio de trabajo.",
+    "workspaceChangeInGroup": "Saca este tema del grupo antes de cambiar su espacio de trabajo.",
+    "paneCreatedSeparately": "El grupo cambió. El nuevo tema se creó por separado.",
     "layout": "Diseño",
     "addPane": "Añadir panel",
     "paneLimit": "Máximo {{count}} paneles",
     "deleteConversations": "Eliminar todos los chats",
+    "deleteChatsCount": "Eliminar chats ({{chatCount}})",
     "movePane": "Mover panel {{title}}",
     "movePaneHint": "Arrastra para mover. También puedes usar las flechas",
     "resizePaneBoundary": "Redimensionar límite de panel {{index}}",

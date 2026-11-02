@@ -5722,6 +5722,24 @@ describe("ThreadShell", () => {
     expect(screen.getByRole("option", { name: /Other project/i })).toBeInTheDocument();
   });
 
+  it.each([false, true])("sends with the gateway scope for saved topics: %s", async (projectLocked) => {
+    const client = makeClient();
+    const scope = { project_path: "/srv/alpha", project_name: "alpha", access_mode: "full" as const };
+    render(wrap(client, <ThreadShell
+      session={{ ...session("project-chat"), projectLocked }}
+      title="Project chat"
+      onToggleSidebar={() => {}}
+      workspaceScope={scope}
+    />));
+    const input = await screen.findByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(client.sendMessage).toHaveBeenCalled());
+    const options = client.sendMessage.mock.calls[0][3];
+    if (projectLocked) expect(options?.workspaceScope).toBeUndefined();
+    else expect(options?.workspaceScope).toEqual(scope);
+  });
+
   it.each([true, undefined])("locks saved topics with projectLocked=%s independently of displayed history", async (projectLocked) => {
     const client = makeClient();
     const scope = { project_path: "/srv/alpha", project_name: "alpha", access_mode: "restricted" as const };

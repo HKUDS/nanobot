@@ -6,8 +6,9 @@ import type { Window as HappyWindow } from "happy-dom";
 import i18n from "@/i18n";
 import { DEFAULT_TRANSCRIPTION_SETTINGS } from "@/components/settings/capabilities/TranscriptionSettings";
 import { useSessions } from "@/hooks/useSessions";
-import type { RunState } from "@/lib/nanobot-client";
+import type { RunState, StreamError } from "@/lib/nanobot-client";
 import { activateReloadCache, clearReloadCache, writeReloadCache } from "@/lib/reload-cache";
+import { SESSION_DRAG_TYPE } from "@/lib/session-drag";
 import type {
   ChatSummary,
   ConnectionStatus,
@@ -27,6 +28,7 @@ const toggleThemeSpy = vi.fn();
 const updateUrlSpy = vi.fn();
 const attachSpy = vi.fn();
 const setSidebarStateSpy = vi.fn();
+const setWorkspaceScopeSpy = vi.fn();
 const requestMutationSpy = vi.fn();
 const discardTemporaryChatSpy = vi.fn();
 const newTemporaryChatSpy = vi.fn<() => Promise<string>>();
@@ -34,6 +36,7 @@ const sendMessageSpy = vi.fn();
 const sendSystemCommandSpy = vi.fn().mockResolvedValue(undefined);
 let mockDefaultChatId: string | null = null;
 const statusHandlers = new Set<(status: ConnectionStatus) => void>();
+const errorHandlers = new Set<(error: StreamError) => void>();
 const runStatusHandlers = new Set<(chatId: string, state: RunState) => void>();
 const runState = (startedAt: number | null): RunState => ({
   active: startedAt !== null, startedAt, latestTurnId: null, generation: 0, unsettled: false,
@@ -42,6 +45,7 @@ const sessionUpdateHandlers = new Set<(
   chatId: string,
   scope?: string,
   workspaceScope?: WorkspaceScopePayload,
+  scopeRequest?: WorkspaceScopePayload,
 ) => void>();
 const sidebarStateUpdateHandlers = new Set<(state: SidebarStatePayload) => void>();
 const pairingChangeHandlers = new Set<() => void>();
@@ -199,6 +203,7 @@ vi.mock("@/hooks/useSessions", async (importOriginal) => {
               title: "",
               preview: "",
               workspaceScope: scope ?? null,
+              projectLocked: false,
             },
             ...prev.filter((session) => session.chatId !== chatId),
           ]);
@@ -273,13 +278,17 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
       readyHandlers.add(handler);
       return () => readyHandlers.delete(handler);
     };
-    onError = () => () => {};
+    onError = (handler: (error: StreamError) => void) => {
+      errorHandlers.add(handler);
+      return () => errorHandlers.delete(handler);
+    };
     onChat = () => () => {};
     onTranscript = () => () => {};
     onSessionUpdate = (handler: (
       chatId: string,
       scope?: string,
       workspaceScope?: WorkspaceScopePayload,
+      scopeRequest?: WorkspaceScopePayload,
     ) => void) => {
       sessionUpdateHandlers.add(handler);
       return () => sessionUpdateHandlers.delete(handler);
@@ -309,6 +318,7 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
     newTemporaryChat = newTemporaryChatSpy;
     attach = attachSpy;
     setSidebarState = setSidebarStateSpy;
+    setWorkspaceScope = setWorkspaceScopeSpy;
     requestMutation = requestMutationSpy;
     discardTemporaryChat = discardTemporaryChatSpy;
     close = vi.fn();
@@ -348,6 +358,7 @@ describe("App layout", () => {
       async (state: SidebarStatePayload) => state,
     );
     requestMutationSpy.mockReset();
+    setWorkspaceScopeSpy.mockReset();
     discardTemporaryChatSpy.mockReset();
     let temporaryChatCounter = 0;
     newTemporaryChatSpy.mockImplementation(async () => (
@@ -357,6 +368,7 @@ describe("App layout", () => {
     sendSystemCommandSpy.mockReset().mockResolvedValue(undefined);
     mockDefaultChatId = null;
     statusHandlers.clear();
+    errorHandlers.clear();
     runStatusHandlers.clear();
     sessionUpdateHandlers.clear();
     sidebarStateUpdateHandlers.clear();
@@ -1108,6 +1120,7 @@ describe("App layout", () => {
   });
 
   it("keeps the context-menu project through navigation and first-message creation", async () => {
+    await import("@/components/thread/ThreadShell");
     const projectScope = {
       project_path: "/tmp/selected-project",
       project_name: "selected-project",
@@ -1140,6 +1153,10 @@ describe("App layout", () => {
     await userEvent.setup().click(await screen.findByRole("menuitem", { name: "New topic" }));
     await waitFor(() => expect(window.location.hash).toBe("#/new"));
     expect(await screen.findByRole("button", { name: "Switch directory" })).toHaveTextContent("selected-project");
+    act(() => sessionUpdateHandlers.forEach((handler) => handler("existing-chat", "metadata", {
+      ...projectScope, project_path: "/tmp/other-project", project_name: "other-project",
+    })));
+    expect(screen.getByRole("button", { name: "Switch directory" })).toHaveTextContent("selected-project");
     fireEvent.change(screen.getByLabelText("Message input"), {
       target: { value: "project topic" },
     });
@@ -2844,7 +2861,7 @@ describe("App layout", () => {
     });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Show archived" }));
     await waitFor(() =>
-      expect(within(sidebar).getByText("Archived")).toBeInTheDocument(),
+      expect(within(sidebar).getByRole("region", { name: "Topics" })).toBeInTheDocument(),
     );
     expect(window.location.hash).toBe(route);
     expect(within(sidebar).getByRole("button", { name: /^First chat$/ })).toBeInTheDocument();
@@ -2853,7 +2870,8 @@ describe("App layout", () => {
         pinned_keys: initialState.pinned_keys,
         archived_keys: initialState.archived_keys,
         title_overrides: initialState.title_overrides,
-        view: expect.objectContaining({ show_archived: true }),
+        collapsed_groups: expect.objectContaining({ "archived:workspace:chats": false }),
+        view: expect.objectContaining({ show_archived: false }),
       }),
     );
 
@@ -2864,11 +2882,183 @@ describe("App layout", () => {
     await waitFor(() => expect(within(sidebar).queryByRole("button", { name: /^First chat$/ })).not.toBeInTheDocument());
     await waitFor(() => expect(setSidebarStateSpy).toHaveBeenLastCalledWith(expect.objectContaining({
       archived_keys: initialState.archived_keys,
+      collapsed_groups: expect.objectContaining({ "archived:workspace:chats": true }),
       view: expect.objectContaining({ show_archived: false }),
     })));
     expect(window.location.hash).toBe(route);
     expect(within(sidebar).queryByRole("button", { name: "View" })).not.toBeInTheDocument();
   }, 10_000);
+
+  it("shows archived topics independently in each project and Topics across reloads", async () => {
+    const makeSession = (id: string, title: string, path?: string): ChatSummary => ({
+      key: `websocket:${id}`, channel: "websocket", chatId: id,
+      createdAt: null, updatedAt: null, title, preview: "",
+      workspaceScope: path ? { project_path: path, project_name: path.split("/").pop(), access_mode: "full" } : null,
+    });
+    mockSessions = [
+      makeSession("topics-live", "Topics live"), makeSession("topics-old", "Topics archived"),
+      makeSession("alpha-live", "Alpha live", "/repo/alpha"), makeSession("alpha-old", "Alpha archived", "/repo/alpha"),
+      makeSession("beta-live", "Beta live", "/repo/beta"), makeSession("beta-old", "Beta archived", "/repo/beta"),
+      makeSession("gamma-old", "Gamma archived", "/repo/gamma"),
+    ];
+    let saved: SidebarStatePayload = {
+      schema_version: 1, pinned_keys: [], archived_keys: ["websocket:topics-old", "websocket:alpha-old", "websocket:beta-old", "websocket:gamma-old"],
+      session_order: [], title_overrides: {}, project_name_overrides: {}, tags_by_key: {},
+      collapsed_groups: { "project:/repo/gamma": true }, workbench: { version: 1, tabs: {} },
+      view: { density: "comfortable", show_archived: false, sort: "updated_desc" }, updated_at: null,
+    };
+    mockFetchRoutes({ "/api/webui/sidebar-state": () => saved });
+    setSidebarStateSpy.mockImplementation(async (state: SidebarStatePayload) => { saved = state; return state; });
+    const first = render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    const alpha = await within(sidebar).findByRole("region", { name: "alpha" });
+    const beta = within(sidebar).getByRole("region", { name: "beta" });
+    const topics = within(sidebar).getByRole("region", { name: "Topics" });
+    const gamma = within(sidebar).getByRole("region", { name: "gamma" });
+    expect(within(alpha).queryByText("Alpha archived")).not.toBeInTheDocument();
+    expect(within(beta).queryByText("Beta archived")).not.toBeInTheDocument();
+    expect(within(topics).queryByText("Topics archived")).not.toBeInTheDocument();
+
+    fireEvent.pointerDown(within(alpha).getByRole("button", { name: "Topic actions for alpha" }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Show archived" }));
+    await within(alpha).findByText("Alpha archived");
+    expect(within(beta).queryByText("Beta archived")).not.toBeInTheDocument();
+    expect(within(topics).queryByText("Topics archived")).not.toBeInTheDocument();
+
+    fireEvent.pointerDown(within(topics).getByRole("button", { name: "Topic options" }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Show archived" }));
+    await within(topics).findByText("Topics archived");
+    expect(within(beta).queryByText("Beta archived")).not.toBeInTheDocument();
+
+    fireEvent.pointerDown(within(gamma).getByRole("button", { name: "Topic actions for gamma" }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Show archived" }));
+    await within(gamma).findByText("Gamma archived");
+    await waitFor(() => expect(saved.collapsed_groups).toMatchObject({
+      "archived:project:/repo/alpha": false,
+      "archived:project:/repo/gamma": false,
+      "archived:workspace:chats": false,
+    }));
+    expect(saved.collapsed_groups["project:/repo/gamma"]).toBeUndefined();
+
+    first.unmount();
+    render(<App />);
+    const restored = await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    expect(await within(restored).findByText("Alpha archived")).toBeInTheDocument();
+    expect(within(restored).getByText("Topics archived")).toBeInTheDocument();
+    expect(within(restored).getByText("Gamma archived")).toBeInTheDocument();
+    expect(within(restored).queryByText("Beta archived")).not.toBeInTheDocument();
+  });
+
+  it("preserves the old show-all preference while changing one project", async () => {
+    const scope = (name: string) => ({ project_path: `/repo/${name}`, project_name: name, access_mode: "full" as const });
+    mockSessions = ["alpha", "beta"].map((name) => ({
+      key: `websocket:${name}`, channel: "websocket", chatId: name, createdAt: null, updatedAt: null,
+      title: `${name} archived`, preview: "", workspaceScope: scope(name),
+    }));
+    const saved: SidebarStatePayload = {
+      schema_version: 1, pinned_keys: [], archived_keys: ["websocket:alpha", "websocket:beta"], session_order: [],
+      title_overrides: {}, project_name_overrides: {}, tags_by_key: {}, collapsed_groups: {},
+      workbench: { version: 1, tabs: {} }, view: { density: "comfortable", show_archived: true, sort: "updated_desc" }, updated_at: null,
+    };
+    mockFetchRoutes({ "/api/webui/sidebar-state": saved });
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    const alpha = await screen.findByRole("region", { name: "alpha" });
+    const beta = screen.getByRole("region", { name: "beta" });
+    expect(within(alpha).getByText("alpha archived")).toBeInTheDocument();
+    expect(within(beta).getByText("beta archived")).toBeInTheDocument();
+    fireEvent.pointerDown(within(alpha).getByRole("button", { name: "Topic actions for alpha" }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Hide archived" }));
+    await waitFor(() => expect(within(alpha).queryByText("alpha archived")).not.toBeInTheDocument());
+    expect(within(beta).getByText("beta archived")).toBeInTheDocument();
+    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenCalledWith(expect.objectContaining({
+      view: expect.objectContaining({ show_archived: true }),
+      collapsed_groups: expect.objectContaining({ "archived:project:/repo/alpha": true }),
+    })));
+  });
+
+  it("shows an archived pane only when its sidebar project shows archives", async () => {
+    const scope = { project_path: "/repo/alpha", project_name: "alpha", access_mode: "full" as const };
+    mockSessions = [
+      { key: "websocket:live", channel: "websocket", chatId: "live", createdAt: null, updatedAt: null, title: "Live pane", preview: "", workspaceScope: scope },
+      { key: "websocket:old", channel: "websocket", chatId: "old", createdAt: null, updatedAt: null, title: "Archived pane", preview: "", workspaceScope: scope },
+    ];
+    const paneKeys = ["websocket:live", "websocket:old"];
+    const saved: SidebarStatePayload = {
+      schema_version: 1, pinned_keys: [], archived_keys: ["websocket:old"], session_order: [],
+      title_overrides: {}, project_name_overrides: {}, tags_by_key: {}, collapsed_groups: {},
+      workbench: { version: 1, tabs: { "tab:mixed": {
+        explicit: true, title: "Mixed group", paneKeys, layoutPaneKeys: paneKeys, layout: "columns", splitRatios: [],
+      } } },
+      view: { density: "comfortable", show_archived: false, sort: "updated_desc" }, updated_at: null,
+    };
+    mockFetchRoutes({ "/api/webui/sidebar-state": saved });
+    window.history.replaceState(null, "", "/#/chat/websocket%3Alive");
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    const alpha = await screen.findByRole("region", { name: "alpha" });
+    expect(within(alpha).getByText("Live pane")).toBeInTheDocument();
+    expect(within(alpha).queryByText("Archived pane")).not.toBeInTheDocument();
+    fireEvent.pointerDown(within(alpha).getByRole("button", { name: "Topic actions for alpha" }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Show archived" }));
+    expect(await within(alpha).findByText("Archived pane")).toBeInTheDocument();
+    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenCalledWith(expect.objectContaining({
+      archived_keys: ["websocket:old"],
+      collapsed_groups: expect.objectContaining({ "archived:project:/repo/alpha": false }),
+      workbench: expect.objectContaining({ tabs: expect.objectContaining({
+        "tab:mixed": expect.objectContaining({ paneKeys, layoutPaneKeys: paneKeys }),
+      }) }),
+    })));
+  });
+
+  it("keeps a historical cross-workspace group intact while showing archives in their own projects", async () => {
+    await import("@/components/thread/ThreadShell");
+    const scope = (name: string) => ({ project_path: `/repo/${name}`, project_name: name, access_mode: "full" as const });
+    mockSessions = [
+      { key: "websocket:alpha", channel: "websocket", chatId: "alpha", createdAt: null, updatedAt: null, title: "Alpha live", preview: "", workspaceScope: scope("alpha") },
+      { key: "websocket:beta", channel: "websocket", chatId: "beta", createdAt: null, updatedAt: null, title: "Beta archived", preview: "", workspaceScope: scope("beta") },
+    ];
+    const paneKeys = ["websocket:alpha", "websocket:beta"];
+    const tab = { explicit: true, title: "Shared group", paneKeys, layoutPaneKeys: paneKeys, layout: "columns" as const, splitRatios: [0.5] };
+    const saved: SidebarStatePayload = {
+      schema_version: 1, pinned_keys: [], archived_keys: ["websocket:beta"], session_order: [],
+      title_overrides: {}, project_name_overrides: {}, tags_by_key: {}, collapsed_groups: {},
+      workbench: { version: 1, tabs: { "tab:shared": tab } },
+      view: { density: "comfortable", show_archived: false, sort: "updated_desc" }, updated_at: null,
+    };
+    mockFetchRoutes({ "/api/webui/sidebar-state": saved });
+    window.history.replaceState(null, "", "/#/chat/websocket%3Aalpha");
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    const alpha = await within(sidebar).findByRole("region", { name: "alpha" });
+    const beta = within(sidebar).getByRole("region", { name: "beta" });
+    expect(within(alpha).getByText("Alpha live")).toBeInTheDocument();
+    expect(within(alpha).queryByText("Beta archived")).not.toBeInTheDocument();
+    expect(within(beta).queryByText("Beta archived")).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Add pane" })).toBeDisabled();
+    const grid = await screen.findByTestId("pane-grid");
+    expect(Array.from(grid.children).map((pane) => pane.getAttribute("aria-label")))
+      .toEqual(["Alpha live", "Beta archived"]);
+
+    fireEvent.pointerDown(within(beta).getByRole("button", { name: "Topic actions for beta" }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Show archived" }));
+    expect(await within(beta).findByText("Beta archived")).toBeInTheDocument();
+    expect(within(alpha).queryByText("Beta archived")).not.toBeInTheDocument();
+    fireEvent.pointerDown(within(alpha).getByRole("button", { name: "Topic actions for Shared group" }), { button: 0, ctrlKey: false });
+    expect(await screen.findByRole("menuitem", { name: "Delete chats (1)" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Dissolve entire group" })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenCalledWith(expect.objectContaining({
+      archived_keys: ["websocket:beta"],
+      workbench: expect.objectContaining({ tabs: expect.objectContaining({ "tab:shared": tab }) }),
+    })));
+  });
 
   it.each([false, true])("preserves sidebar metadata and panes after both reads fail with partial cache: %s", async (cached) => {
     const actual = await vi.importActual<typeof import("@/hooks/useSessions")>("@/hooks/useSessions");
@@ -4048,6 +4238,250 @@ describe("App layout", () => {
       .toBeInTheDocument();
   });
 
+  it("allows moving panes only into groups with the same workspace", async () => {
+    const scope = (name: string, access_mode: "full" | "restricted" = "full") => ({
+      project_path: `/repo/${name}`, project_name: name, access_mode,
+    });
+    mockSessions = [
+      { key: "websocket:alpha-root", channel: "websocket", chatId: "alpha-root", createdAt: null, updatedAt: null, title: "Alpha root", preview: "", workspaceScope: scope("alpha") },
+      { key: "websocket:alpha-source", channel: "websocket", chatId: "alpha-source", createdAt: null, updatedAt: null, title: "Alpha source", preview: "", workspaceScope: scope("alpha") },
+      { key: "websocket:beta-root", channel: "websocket", chatId: "beta-root", createdAt: null, updatedAt: null, title: "Beta root", preview: "", workspaceScope: scope("beta") },
+      { key: "websocket:beta-source", channel: "websocket", chatId: "beta-source", createdAt: null, updatedAt: null, title: "Beta source", preview: "", workspaceScope: scope("beta", "restricted") },
+    ];
+    const tab = (name: string) => ({
+      explicit: true, title: `${name} group`, paneKeys: [`websocket:${name.toLowerCase()}-root`],
+      layoutPaneKeys: [`websocket:${name.toLowerCase()}-root`], layout: "columns", splitRatios: [],
+    });
+    mockFetchRoutes({ "/api/webui/sidebar-state": {
+      workbench: { version: 1, tabs: { "tab:alpha": tab("Alpha"), "tab:beta": tab("Beta") } },
+    } });
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    const alpha = (await within(sidebar).findByRole("button", { name: "Group: Alpha group" })).closest("[data-sidebar-tab-group]") as HTMLElement;
+    const beta = within(sidebar).getByRole("button", { name: "Group: Beta group" }).closest("[data-sidebar-tab-group]") as HTMLElement;
+    const values = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: "none", dropEffect: "none", types: [SESSION_DRAG_TYPE],
+      setData: vi.fn((type: string, value: string) => values.set(type, value)),
+      getData: vi.fn((type: string) => values.get(type) ?? ""),
+    } as unknown as DataTransfer;
+    const betaSource = within(sidebar).getByRole("button", { name: "Beta source" });
+    fireEvent.dragStart(betaSource, { dataTransfer });
+    const alphaSurface = alpha.querySelector("[data-workbench-tab-surface]")!;
+    fireEvent.dragEnter(alphaSurface, { dataTransfer });
+    fireEvent.dragOver(alphaSurface, { dataTransfer });
+    fireEvent.drop(alphaSurface, { dataTransfer });
+    expect(alpha).not.toHaveAttribute("data-pane-drop-target");
+    expect(setSidebarStateSpy).not.toHaveBeenCalled();
+    const betaSurface = beta.querySelector("[data-workbench-tab-surface]")!;
+    fireEvent.dragEnter(betaSurface, { dataTransfer });
+    fireEvent.dragOver(betaSurface, { dataTransfer });
+    expect(beta).toHaveAttribute("data-pane-drop-target", "true");
+    fireEvent.drop(betaSurface, { dataTransfer });
+    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenCalledWith(expect.objectContaining({
+      workbench: expect.objectContaining({ tabs: expect.objectContaining({
+        "tab:alpha": expect.objectContaining({ paneKeys: ["websocket:alpha-root"] }),
+        "tab:beta": expect.objectContaining({ paneKeys: ["websocket:beta-root", "websocket:beta-source"] }),
+      }) }),
+    })));
+
+    fireEvent.pointerDown(within(sidebar).getByRole("button", { name: "Topic actions for Alpha source" }), { button: 0, ctrlKey: false });
+    fireEvent.pointerMove(await screen.findByRole("menuitem", { name: "Move to" }), { pointerType: "mouse" });
+    expect(await screen.findByRole("menuitem", { name: "Alpha group 1/4" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Beta group 2/4" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Alpha group 1/4" }));
+    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenLastCalledWith(expect.objectContaining({
+      workbench: expect.objectContaining({ tabs: expect.objectContaining({
+        "tab:alpha": expect.objectContaining({ paneKeys: ["websocket:alpha-root", "websocket:alpha-source"] }),
+      }) }),
+    })));
+  });
+
+  it("prevents changing a grouped draft to another workspace while allowing permission changes", async () => {
+    await import("@/components/thread/ThreadShell");
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: false, media: query, onchange: null, addListener: vi.fn(), removeListener: vi.fn(),
+      addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    })));
+    const scope = { project_path: "/repo/alpha", project_name: "alpha", access_mode: "restricted" as const };
+    const directory = (path: string) => ({ path, parent: null, entries: [], partial: false, truncated: false, host: "test-host", platform: "Linux" });
+    const directoryUrl = (path: string) => `/api/workspaces/directories?${new URLSearchParams({ path, q: "", hidden: "0", partial: "1" })}`;
+    const paneKeys = ["websocket:draft", "websocket:other"];
+    mockSessions = [
+      { key: paneKeys[0], channel: "websocket", chatId: "draft", createdAt: null, updatedAt: null, title: "Draft", preview: "", projectLocked: false, workspaceScope: scope },
+      { key: paneKeys[1], channel: "websocket", chatId: "other", createdAt: null, updatedAt: null, title: "Other", preview: "", workspaceScope: scope },
+    ];
+    mockFetchRoutes({
+      "/api/workspaces": {
+        schema_version: 1, default_access_mode: "default", default_scope: scope,
+        controls: { can_change_project: true, can_browse_directories: true, can_resolve_project: true },
+      },
+      "/api/webui/sidebar-state": { workbench: { version: 1, tabs: { "tab:alpha": {
+        explicit: true, title: "Alpha group", paneKeys, layoutPaneKeys: paneKeys, layout: "columns", splitRatios: [],
+      } } } },
+      [directoryUrl("/repo/alpha")]: directory("/repo/alpha"),
+      [directoryUrl("/repo/alpha/")]: directory("/repo/alpha"),
+      [directoryUrl("/repo/beta")]: directory("/repo/beta"),
+      [directoryUrl("/repo/beta/")]: directory("/repo/beta"),
+    });
+    requestMutationSpy.mockResolvedValue({ path: "/repo/beta", name: "beta" });
+    window.history.replaceState(null, "", "/#/chat/websocket%3Adraft");
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(await within(sidebar).findByRole("button", { name: "Draft" }));
+    await screen.findByRole("button", { name: "Add pane" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Draft" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Switch directory" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Edit path:/ }));
+    fireEvent.change(await screen.findByRole("combobox"), { target: { value: "/repo/beta" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Remove this topic from its group before changing its workspace.");
+    expect(setWorkspaceScopeSpy).not.toHaveBeenCalled();
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Workspace access mode: Default Permission" }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Full Access" }));
+    expect(setWorkspaceScopeSpy).toHaveBeenCalledWith("draft", expect.objectContaining({ project_path: "/repo/alpha", access_mode: "full" }));
+    act(() => errorHandlers.forEach((handler) => handler({ kind: "workspace_scope_rejected", chatId: "draft" })));
+    expect(await screen.findByRole("button", { name: "Workspace access mode: Default Permission" })).toBeEnabled();
+  });
+
+  it("reconciles an interrupted workspace change before enabling grouping", async () => {
+    await import("@/components/thread/ThreadShell");
+    const scope = (name: string, access_mode: "full" | "restricted" = "restricted") => ({
+      project_path: `/repo/${name}`, project_name: name, access_mode,
+    });
+    const directory = (path: string) => ({ path, parent: null, entries: [], partial: false, truncated: false, host: "test-host", platform: "Linux" });
+    const directoryUrl = (path: string) => `/api/workspaces/directories?${new URLSearchParams({ path, q: "", hidden: "0", partial: "1" })}`;
+    mockSessions = [
+      { key: "websocket:draft", channel: "websocket", chatId: "draft", createdAt: null, updatedAt: null, title: "Draft", preview: "", projectLocked: false, workspaceScope: scope("alpha") },
+      { key: "websocket:alpha", channel: "websocket", chatId: "alpha", createdAt: null, updatedAt: null, title: "Alpha", preview: "", workspaceScope: scope("alpha") },
+      { key: "websocket:beta", channel: "websocket", chatId: "beta", createdAt: null, updatedAt: null, title: "Beta", preview: "", workspaceScope: scope("beta") },
+    ];
+    let listedSessions = [{ key: "websocket:draft", created_at: null, updated_at: null, workspace_scope: scope("beta") }];
+    let failWorkspaceRead = false;
+    mockFetchRoutes({
+      "/api/workspaces": () => {
+        if (failWorkspaceRead) throw new Error("offline");
+        return {
+          schema_version: 1, default_access_mode: "default", default_scope: scope("default"),
+          controls: { can_change_project: true, can_browse_directories: true, can_resolve_project: true },
+        };
+      },
+      "/api/sessions": () => ({ sessions: listedSessions }),
+      [directoryUrl("/repo/default")]: directory("/repo/default"),
+      [directoryUrl("/repo/default/")]: directory("/repo/default"),
+      [directoryUrl("/repo/alpha")]: directory("/repo/alpha"),
+      [directoryUrl("/repo/alpha/")]: directory("/repo/alpha"),
+      [directoryUrl("/repo/beta")]: directory("/repo/beta"),
+      [directoryUrl("/repo/beta/")]: directory("/repo/beta"),
+    });
+    requestMutationSpy.mockResolvedValue({ path: "/repo/beta", name: "beta" });
+    window.history.replaceState(null, "", "/#/chat/websocket%3Adraft");
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    fireEvent.click(await screen.findByRole("button", { name: "Switch directory" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Edit path:/ }));
+    fireEvent.change(await screen.findByRole("combobox"), { target: { value: "/repo/beta" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(setWorkspaceScopeSpy).toHaveBeenCalledWith("draft", expect.objectContaining({ project_path: "/repo/beta" })));
+    expect(screen.getByRole("button", { name: "Add pane" })).toBeDisabled();
+    act(() => sessionUpdateHandlers.forEach((handler) => handler("draft", "metadata", scope("alpha"))));
+    expect(screen.getByRole("button", { name: "Add pane" })).toBeDisabled();
+    act(() => sessionUpdateHandlers.forEach((handler) => handler("draft", "metadata", scope("beta"), setWorkspaceScopeSpy.mock.calls.at(-1)?.[1])));
+    expect(await within(screen.getByRole("region", { name: "beta" })).findByText("Draft")).toBeInTheDocument();
+    requestMutationSpy.mockResolvedValue({ path: "/repo/default", name: "default" });
+    fireEvent.click(screen.getByRole("button", { name: "Switch directory" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Edit path:/ }));
+    fireEvent.change(await screen.findByRole("combobox"), { target: { value: "/repo/default" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(setWorkspaceScopeSpy).toHaveBeenLastCalledWith("draft", expect.objectContaining({ project_path: "/repo/default" })));
+    expect(screen.getByRole("button", { name: "Add pane" })).toBeDisabled();
+    act(() => {
+      statusHandlers.forEach((handler) => handler("reconnecting"));
+      statusHandlers.forEach((handler) => handler("open"));
+      errorHandlers.forEach((handler) => handler({ kind: "workspace_scope_rejected", chatId: "draft", reason: "chat_running" }));
+    });
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    const alpha = await within(sidebar).findByRole("region", { name: "alpha" });
+    const beta = within(sidebar).getByRole("region", { name: "beta" });
+    expect(await within(beta).findByText("Draft")).toBeInTheDocument();
+    expect(within(alpha).queryByText("Draft")).not.toBeInTheDocument();
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Workspace access mode: Default Permission" }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Full Access" }));
+    expect(within(beta).getByText("Draft")).toBeInTheDocument();
+    expect(within(alpha).queryByText("Draft")).not.toBeInTheDocument();
+
+    // An unavailable stored project can make the session index return the default
+    // workspace instead. Do not treat that sidebar fallback as confirmation.
+    listedSessions = [{ key: "websocket:draft", created_at: null, updated_at: null, workspace_scope: scope("default") }];
+    failWorkspaceRead = true;
+    act(() => {
+      statusHandlers.forEach((handler) => handler("reconnecting"));
+      statusHandlers.forEach((handler) => handler("open"));
+      errorHandlers.forEach((handler) => handler({ kind: "workspace_scope_rejected", chatId: "draft", reason: "project_path" }));
+    });
+    expect((await screen.findAllByText("The gateway rejected this project or access mode. Choose an existing project or a different access mode, then try again.")).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Add pane" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Switch directory" })).toBeEnabled();
+    requestMutationSpy.mockResolvedValue({ path: "/repo/alpha", name: "alpha" });
+    fireEvent.click(screen.getByRole("button", { name: "Switch directory" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Edit path:/ }));
+    fireEvent.change(await screen.findByRole("combobox"), { target: { value: "/repo/alpha" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(setWorkspaceScopeSpy).toHaveBeenLastCalledWith("draft", expect.objectContaining({ project_path: "/repo/alpha", access_mode: "full" })));
+    act(() => sessionUpdateHandlers.forEach((handler) => handler("draft", "metadata", scope("alpha", "full"), setWorkspaceScopeSpy.mock.calls.at(-1)?.[1])));
+    expect(await within(alpha).findByText("Draft")).toBeInTheDocument();
+    expect(within(beta).queryByText("Draft")).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Workspace access mode: Full Access" })).toBeEnabled();
+  });
+
+  it("keeps a new pane separate if its target group changes while it is created", async () => {
+    await import("@/components/thread/ThreadShell");
+    const scope = (name: string) => ({ project_path: `/repo/${name}`, project_name: name, access_mode: "full" as const });
+    mockSessions = [
+      { key: "websocket:alpha", channel: "websocket", chatId: "alpha", createdAt: null, updatedAt: null, title: "Alpha", preview: "", workspaceScope: scope("alpha") },
+      { key: "websocket:beta", channel: "websocket", chatId: "beta", createdAt: null, updatedAt: null, title: "Beta", preview: "", workspaceScope: scope("beta") },
+    ];
+    const tab = { explicit: true, title: "Alpha group", paneKeys: ["websocket:alpha"], layoutPaneKeys: ["websocket:alpha"], layout: "columns" as const, splitRatios: [] };
+    const saved: SidebarStatePayload = {
+      schema_version: 1, pinned_keys: [], archived_keys: [], session_order: [], title_overrides: {}, project_name_overrides: {}, tags_by_key: {}, collapsed_groups: {},
+      workbench: { version: 1, tabs: { "tab:alpha": tab } },
+      view: { density: "comfortable", show_archived: false, sort: "updated_desc" }, updated_at: null,
+    };
+    mockFetchRoutes({
+      "/api/webui/sidebar-state": saved,
+      "/api/workspaces": { schema_version: 1, default_access_mode: "full", default_scope: scope("alpha"), controls: { can_change_project: true } },
+    });
+    let finishCreate!: (id: string) => void;
+    createChatSpy.mockReturnValueOnce(new Promise<string>((resolve) => { finishCreate = resolve; }));
+    window.history.replaceState(null, "", "/#/chat/websocket%3Aalpha");
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    fireEvent.click(await screen.findByRole("button", { name: "Add pane" }));
+    await waitFor(() => expect(createChatSpy).toHaveBeenCalledTimes(1));
+    const mixedKeys = ["websocket:alpha", "websocket:beta"];
+    act(() => sidebarStateUpdateHandlers.forEach((handler) => handler({
+      ...saved, workbench: { version: 1, tabs: { "tab:alpha": { ...tab, paneKeys: mixedKeys, layoutPaneKeys: mixedKeys } } },
+    })));
+    await waitFor(() => expect(screen.getByTestId("pane-grid").children).toHaveLength(2));
+    await act(async () => finishCreate("new-pane"));
+    await waitFor(() => expect(window.location.hash).toBe("#/chat/websocket%3Anew-pane"));
+    expect(screen.getByTestId("pane-grid").children).toHaveLength(1);
+    expect(await screen.findByRole("alert")).toHaveTextContent("The group changed. The new topic was created separately.");
+    expect(setSidebarStateSpy).not.toHaveBeenCalled();
+  });
+
   it("keeps panes and layout scoped to the current topic tab", async () => {
     vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
       matches: false,
@@ -4060,6 +4494,11 @@ describe("App layout", () => {
       dispatchEvent: vi.fn(),
     })));
     createChatSpy.mockResolvedValueOnce("chat-pane");
+    const workspaceScope = { project_path: "/tmp/workspace", project_name: "workspace", access_mode: "full" as const };
+    mockFetchRoutes({ "/api/workspaces": {
+      schema_version: 1, default_access_mode: "full", default_scope: workspaceScope,
+      controls: { can_change_project: true },
+    } });
     mockSessions = [
       {
         key: "websocket:chat-alpha",
@@ -4069,6 +4508,7 @@ describe("App layout", () => {
         updatedAt: "2026-04-16T10:00:00Z",
         title: "Alpha",
         preview: "Alpha notes",
+        workspaceScope,
       },
       {
         key: "websocket:chat-beta",
@@ -4078,6 +4518,7 @@ describe("App layout", () => {
         updatedAt: "2026-04-16T11:00:00Z",
         title: "Beta",
         preview: "Beta notes",
+        workspaceScope,
       },
     ];
     window.history.replaceState(

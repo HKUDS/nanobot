@@ -872,13 +872,14 @@ export function ThreadShell({
 
   const withWorkspaceScope = useCallback(
     (options?: SendOptions): SendOptions | undefined => {
-      if (!workspaceScope) return options;
+      // Persisted sessions already own their scope; do not overwrite it with a stale UI snapshot.
+      if (!workspaceScope || (session && session.projectLocked !== false && !temporary)) return options;
       return {
         ...(options ?? {}),
         workspaceScope,
       };
     },
-    [workspaceScope],
+    [session, temporary, workspaceScope],
   );
 
   const refreshModelSettings = useCallback(async () => {

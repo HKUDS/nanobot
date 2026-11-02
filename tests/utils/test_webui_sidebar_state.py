@@ -104,6 +104,7 @@ def test_sidebar_state_write_is_scoped_to_config_data_dir(tmp_path, monkeypatch)
             "session_order": ["websocket:b", "websocket:a"],
             "title_overrides": {"websocket:a": "Release"},
             "project_name_overrides": {"/repo": "Core"},
+            "collapsed_groups": {"archived:project:/repo": False, "archived:workspace:chats": True},
             "view": {"density": "compact", "sort": "manual"},
         }
     )
@@ -113,6 +114,7 @@ def test_sidebar_state_write_is_scoped_to_config_data_dir(tmp_path, monkeypatch)
     assert state["session_order"] == ["websocket:b", "websocket:a"]
     assert state["title_overrides"] == {"websocket:a": "Release"}
     assert state["project_name_overrides"] == {"/repo": "Core"}
+    assert state["collapsed_groups"] == {"archived:project:/repo": False, "archived:workspace:chats": True}
     assert state["view"]["density"] == "compact"
     assert state["view"]["sort"] == "manual"
     assert webui_sidebar_state_path().is_file()
