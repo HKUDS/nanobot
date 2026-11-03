@@ -101,9 +101,22 @@ def _create_schema_v3(db: sqlite3.Connection) -> None:
     )""")
 
 
+def _create_schema_v4(db: sqlite3.Connection) -> None:
+    db.execute("""CREATE TABLE session_archives_v4 (
+        key TEXT PRIMARY KEY REFERENCES sessions(key)
+            ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED,
+        archived_at TEXT NOT NULL
+    )""")
+    db.execute("""INSERT INTO session_archives_v4 (key, archived_at)
+        SELECT archives.key, archives.archived_at FROM session_archives AS archives
+        JOIN sessions ON sessions.key = archives.key""")
+    db.execute("DROP TABLE session_archives")
+    db.execute("ALTER TABLE session_archives_v4 RENAME TO session_archives")
+
+
 # Entries upgrade version N to N+1. Preserve released entries and append upgrades.
 _SCHEMA_MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
-    _create_schema_v1, _create_schema_v2, _create_schema_v3,
+    _create_schema_v1, _create_schema_v2, _create_schema_v3, _create_schema_v4,
 )
 
 
@@ -502,7 +515,15 @@ class SqliteSessionStore:
     def set_archived_keys(self, keys: list[str]) -> list[str]:
         with self.transaction() as db:
             current = set(self.archived_keys())
-            target = set(keys)
+            requested = set(keys)
+            # Existing memberships are valid by FK; only new keys need validation.
+            added = requested - current
+            if added:
+                added = {row[0] for row in db.execute(
+                    "SELECT key FROM sessions WHERE key IN (SELECT value FROM json_each(?))",
+                    (_encode(list(added)),),
+                )}
+            target = (requested & current) | added
             db.executemany("DELETE FROM session_archives WHERE key=?", ((key,) for key in current - target))
             now = datetime.now().isoformat()
             db.executemany("INSERT INTO session_archives (key, archived_at) VALUES (?, ?)", ((key, now) for key in target - current))

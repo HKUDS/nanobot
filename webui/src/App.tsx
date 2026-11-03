@@ -2072,7 +2072,11 @@ function Shell({
 
   const onArchiveMany = useCallback(
     (keys: string[], archive: boolean) => {
-      const selected = new Set(keys);
+      const persistedKeys = new Set(sessions
+        .filter((session) => session.projectLocked !== false)
+        .map((session) => session.key));
+      const selected = new Set(keys.filter((key) => persistedKeys.has(key)));
+      if (selected.size === 0) return;
       void updateSidebarState((current) => {
         const archived = new Set(current.archived_keys);
         for (const key of selected) {
@@ -2095,7 +2099,7 @@ function Shell({
         });
       }
     },
-    [activeKey, navigate, sidebarState.archived_keys, topicSessions, updateSidebarState],
+    [activeKey, navigate, sessions, sidebarState.archived_keys, topicSessions, updateSidebarState],
   );
 
   const onToggleArchive = useCallback((key: string) => {
@@ -2652,6 +2656,7 @@ function Shell({
           chatId: session.chatId,
           title: titleForSession(session),
           handle: session.handle,
+          projectLocked: session.projectLocked !== false,
         }));
       return [presentation.rowKey, {
         tabKey: orderedTab.tabKey,

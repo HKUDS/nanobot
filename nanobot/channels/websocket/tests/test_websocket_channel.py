@@ -1593,6 +1593,9 @@ async def test_webui_sidebar_state_update_broadcasts_workbench_to_other_devices(
 ) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     sessions = SessionManager(tmp_path)
+    await sessions.state.import_messages("websocket:a", [{"role": "user", "content": "saved"}])
+    await sessions.state.fork("websocket:a", "websocket:b", 0)
+    sessions.get_or_create("websocket:draft")
     channel = _ch(bus, session_manager=sessions)
     source = AsyncMock()
     source.request = SimpleNamespace(headers=Headers())
@@ -1600,7 +1603,7 @@ async def test_webui_sidebar_state_update_broadcasts_workbench_to_other_devices(
     channel._webui_connections.update({source, other_device})
     channel._register_connection_outbound(other_device)
     state = {
-        "archived_keys": ["websocket:b"],
+        "archived_keys": ["websocket:b", "websocket:draft"],
         "workbench": {
             "version": 1,
             "tabs": {

@@ -2374,11 +2374,12 @@ describe("App layout", () => {
     expect(document.body.style.pointerEvents).not.toBe("none");
   }, 15_000);
 
-  it("archives selected topics in one sidebar update and navigates outside the full selection", async () => {
+  it.each([false, true])("archives only persisted selected topics in one sidebar update (draft=%s)", async (includeDraft) => {
     mockSessions = ["a", "b", "c"].map((id) => ({
       key: `websocket:chat-${id}`, channel: "websocket", chatId: `chat-${id}`,
       createdAt: "2026-04-16T10:00:00Z", updatedAt: "2026-04-16T10:00:00Z",
-      title: `Topic ${id}`, preview: `Message ${id}`,
+      title: `Topic ${id}`, preview: "",
+      projectLocked: includeDraft && id === "a" ? false : undefined,
     }));
     mockFetchRoutes({
       "/api/webui/sidebar-state": { pinned_keys: ["websocket:chat-a", "websocket:chat-b"] },
@@ -2393,17 +2394,21 @@ describe("App layout", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
     fireEvent.click(within(sidebar).getByRole("button", { name: "Topic b" }));
     fireEvent.click(within(sidebar).getByRole("button", { name: "Archive" }));
-    const dialog = await screen.findByRole("alertdialog", { name: "Archive 2 topics?" });
+    const dialog = await screen.findByRole("alertdialog", {
+      name: includeDraft ? "Archive this topic?" : "Archive 2 topics?",
+    });
     expect(setSidebarStateSpy).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole("button", { name: "Archive" }));
 
     await waitFor(() => expect(setSidebarStateSpy).toHaveBeenCalledTimes(1));
     expect(setSidebarStateSpy).toHaveBeenCalledWith(expect.objectContaining({
-      archived_keys: ["websocket:chat-a", "websocket:chat-b"], pinned_keys: [],
+      archived_keys: includeDraft ? ["websocket:chat-b"] : ["websocket:chat-a", "websocket:chat-b"],
+      pinned_keys: includeDraft ? ["websocket:chat-a"] : [],
     }));
-    expect(window.location.hash).toBe("#/chat/websocket%3Achat-c");
+    expect(window.location.hash).toBe(includeDraft ? "#/chat/websocket%3Achat-a" : "#/chat/websocket%3Achat-c");
     expect(within(sidebar).getByRole("button", { name: "Topic c" })).toBeInTheDocument();
-    expect(within(sidebar).queryByRole("button", { name: "Topic a" })).not.toBeInTheDocument();
+    if (includeDraft) expect(within(sidebar).getByRole("button", { name: "Topic a" })).toBeInTheDocument();
+    else expect(within(sidebar).queryByRole("button", { name: "Topic a" })).not.toBeInTheDocument();
     expect(within(sidebar).queryByRole("button", { name: "Topic b" })).not.toBeInTheDocument();
     expect(deleteChatSpy).not.toHaveBeenCalled();
   });

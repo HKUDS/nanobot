@@ -433,15 +433,20 @@ def test_committed_version_tracks_history_and_session_replacement(tmp_path, monk
     assert manager.read_session_version(key) == (replacement.generation, replacement.revision)
 
 
-async def test_archive_state_survives_reopen_without_persisting_empty_chats(tmp_path):
+async def test_archive_state_survives_reopen_for_persisted_sessions_only(tmp_path):
     manager = SessionManager(tmp_path)
     state = manager.state
     try:
         await state.import_messages("websocket:active", [{"role": "user", "content": "keep history"}])
+        fork = await state.fork("websocket:active", "websocket:empty", 0)
+        assert fork is not None and fork.messages == []
+        manager.get_or_create("websocket:draft")
         original = manager.read_session_snapshot("websocket:active")
         assert await state.import_archives(["websocket:active"]) == ["websocket:active"]
-        assert await state.set_archived_keys(["websocket:active", "websocket:empty"]) == ["websocket:active", "websocket:empty"]
-        assert manager.read_session_snapshot("websocket:empty") is None
+        assert await state.set_archived_keys(["websocket:active", "websocket:empty", "websocket:draft", "websocket:missing"]) == ["websocket:active", "websocket:empty"]
+        assert manager.read_session_snapshot("websocket:draft") is None
+        assert manager.read_session_snapshot("websocket:missing") is None
+        assert manager.read_session_snapshot("websocket:empty") == fork
         assert manager.read_session_snapshot("websocket:active") == original
     finally:
         await state.aclose()
@@ -466,6 +471,8 @@ async def test_archive_batch_rolls_back_on_database_failure(tmp_path):
     state = manager.state
     try:
         await state.import_archives([])
+        for key in ("websocket:first", "websocket:fail"):
+            await state.import_messages(key, [{"role": "user", "content": "saved"}])
         with sqlite3.connect(manager._store.path) as db:
             db.execute("""CREATE TRIGGER fail_archive BEFORE INSERT ON session_archives
                           WHEN NEW.key='websocket:fail'

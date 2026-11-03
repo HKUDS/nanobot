@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 import nanobot.webui.sidebar_state as sidebar_state
-from nanobot.session.manager import SessionManager
+from nanobot.session.manager import Session, SessionManager
 from nanobot.webui.sidebar_state import (
     WebUISidebarState,
     default_webui_sidebar_state,
@@ -194,11 +194,14 @@ async def test_sidebar_archive_migration_preserves_wire_shape_and_restored_state
     path = webui_sidebar_state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({
-        "archived_keys": ["websocket:old", "websocket:empty"],
+        "archived_keys": ["websocket:old", "websocket:empty", "websocket:draft"],
         "pinned_keys": ["websocket:pinned"],
         "collapsed_groups": {"archived:workspace:chats": False},
     }), encoding="utf-8")
     manager = SessionManager(tmp_path)
+    manager.save(Session(key="websocket:old", messages=[{"role": "user", "content": "saved"}]))
+    await manager.state.fork("websocket:old", "websocket:empty", 0)
+    manager.get_or_create("websocket:draft")
     sidebar = WebUISidebarState(manager.state)
     try:
         loaded = await sidebar.read()
@@ -210,7 +213,8 @@ async def test_sidebar_archive_migration_preserves_wire_shape_and_restored_state
         saved = await sidebar.write(loaded)
         assert saved["archived_keys"] == ["websocket:empty"]
         assert await manager.state.archived_keys() == ["websocket:empty"]
-        assert manager.list_sessions() == []
+        assert {session["key"] for session in manager.list_sessions()} == {"websocket:old", "websocket:empty"}
+        assert manager.read_session_snapshot("websocket:draft") is None
     finally:
         await manager.state.aclose()
 
@@ -235,6 +239,8 @@ async def test_archive_import_failure_keeps_json_source_for_retry(tmp_path, monk
     source = json.dumps({"archived_keys": ["websocket:first", "websocket:fail"]})
     path.write_text(source, encoding="utf-8")
     manager = SessionManager(tmp_path)
+    for key in ("websocket:first", "websocket:fail"):
+        manager.save(Session(key=key))
     with sqlite3.connect(manager._store.path) as db:
         db.execute("""CREATE TRIGGER fail_archive BEFORE INSERT ON session_archives
                       WHEN NEW.key='websocket:fail'
@@ -258,6 +264,7 @@ async def test_sidebar_reads_and_preferences_do_not_wait_for_unrelated_session_w
     manager = SessionManager(tmp_path)
     sidebar = WebUISidebarState(manager.state)
     await manager.state.import_messages("websocket:busy", [{"role": "user", "content": "hello"}])
+    await manager.state.import_messages("websocket:archived", [{"role": "user", "content": "saved"}])
     saved = await sidebar.write({"archived_keys": ["websocket:archived"]})
     held, release, entered = threading.Event(), threading.Event(), threading.Event()
 
@@ -297,6 +304,7 @@ async def test_sidebar_reads_and_preferences_do_not_wait_for_unrelated_session_w
 async def test_archive_only_update_keeps_preferences_unchanged(tmp_path, monkeypatch):
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     manager = SessionManager(tmp_path)
+    manager.save(Session(key="websocket:empty"))
     sidebar = WebUISidebarState(manager.state)
     try:
         saved = await sidebar.write({"view": {"density": "compact"}, "archived_keys": []})
@@ -323,6 +331,7 @@ async def test_archive_only_update_keeps_preferences_unchanged(tmp_path, monkeyp
 async def test_sidebar_readers_overlap_without_overtaking_queued_write(tmp_path, monkeypatch):
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     manager = SessionManager(tmp_path)
+    manager.save(Session(key="websocket:new"))
     sidebar = WebUISidebarState(manager.state)
     saved = await sidebar.write({"view": {"density": "compact"}, "archived_keys": []})
     entered, release = threading.Event(), threading.Event()

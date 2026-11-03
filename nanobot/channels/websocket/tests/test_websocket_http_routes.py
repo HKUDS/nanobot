@@ -2414,6 +2414,8 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
 ) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     sm = _seed_session(tmp_path, key="websocket:sidebar")
+    await sm.state.fork("websocket:sidebar", "websocket:old", 0)
+    sm.get_or_create("websocket:draft")
     channel = _ch(bus, session_manager=sm, port=29911)
     server_task = asyncio.create_task(channel.start())
     try:
@@ -2430,7 +2432,7 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
 
         payload = {
             "pinned_keys": ["websocket:sidebar"],
-            "archived_keys": ["websocket:old"],
+            "archived_keys": ["websocket:old", "websocket:draft"],
             "session_order": ["websocket:old", "websocket:sidebar"],
             "title_overrides": {"websocket:sidebar": "Pinned work"},
             "view": {"density": "compact", "show_archived": True},
