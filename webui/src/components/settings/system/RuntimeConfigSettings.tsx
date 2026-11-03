@@ -112,7 +112,7 @@ export function useRuntimeConfigSettings(
     setErrors((prev) => ({ ...prev, [group]: "" }));
     try {
       const payload = await updateRuntimeConfigSettings(client, values);
-      if (Object.keys(values).some(path => path.startsWith("tools.cli_apps.") || path.startsWith("tools.mcp") || path === "network.proxy")) {
+      if (Object.keys(values).some(path => path.startsWith("tools.cli_apps.") || path === "network.proxy")) {
         invalidateToolsCatalog(client);
       }
       applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
