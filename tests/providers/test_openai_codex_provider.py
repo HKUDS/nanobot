@@ -1159,8 +1159,87 @@ async def test_codex_compacts_state_at_ninety_percent_before_next_request(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("outcome", ["succeeded", "failed", "cancelled"])
+async def test_codex_compaction_retries_share_one_lifecycle(monkeypatch, stream, outcome) -> None:
+    _mock_codex_token(monkeypatch)
+    provider = OpenAICodexProvider(default_model="openai-codex/gpt-5.6-sol")
+    state_provider = provider._responses_state_provider()
+    state = build_responses_state(
+        provider=state_provider, model="gpt-5.6-sol",
+        input_items=[{"type": "message", "role": "user", "content": "old"}],
+        output_items=[{"type": "reasoning", "encrypted_content": "opaque"}],
+    )
+    notices: list[ContextCompactionEvent] = []
+    attempts = 0
+    generations = 0
+    waiting = asyncio.Event()
+
+    async def observe(event) -> None:
+        if isinstance(event, ContextCompactionEvent):
+            notices.append(event)
+
+    async def fake_request(_url, _headers, body, **_kwargs):
+        nonlocal attempts, generations
+        if body["input"][-1].get("type") != "compaction_trigger":
+            generations += 1
+            return provider_base.LLMResponse(content="done")
+        attempts += 1
+        if outcome != "succeeded" or attempts <= 2:
+            raise httpx.ReadTimeout("synthetic compaction timeout")
+        return provider_base.LLMResponse(content=None, provider_state=build_responses_state(
+            provider=state_provider, model="gpt-5.6-sol", input_items=body["input"],
+            output_items=[{"type": "compaction", "encrypted_content": "compacted"}],
+        ))
+
+    async def retry_wait(*_args, **_kwargs) -> None:
+        waiting.set()
+        assert [notice.phase for notice in notices] == ["started"]
+        if outcome == "cancelled":
+            await asyncio.Future()
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
+    monkeypatch.setattr(provider, "_sleep_with_heartbeat", retry_wait)
+    context = provider_base.ProviderCallContext(
+        conversation_state=state.with_pending_messages([{"role": "user", "content": "new"}]),
+        context_window_tokens=4000, compaction_input_budget=10000, events=EventSink(observe),
+    )
+    call = provider.chat_stream_with_retry if stream else provider.chat_with_retry
+    task = asyncio.create_task(call(
+        [{"role": "user", "content": "new"}], max_tokens=5, provider_context=context,
+    ))
+    if outcome == "cancelled":
+        await asyncio.wait_for(waiting.wait(), timeout=2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    else:
+        response = await task
+        assert response.finish_reason == ("stop" if outcome == "succeeded" else "error")
+        assert attempts == (3 if outcome == "succeeded" else len(provider._CHAT_RETRY_DELAYS) + 1)
+        assert generations == (1 if outcome == "succeeded" else 0)
+        if outcome == "succeeded":
+            assert response.provider_compaction_event_id == notices[0].compaction_id
+
+    assert [notice.phase for notice in notices] == ["started", outcome]
+    assert len({notice.compaction_id for notice in notices}) == 1
+    assert all(notice.reason == "provider_native" for notice in notices)
+
+    if outcome == "succeeded":
+        first_id = notices[0].compaction_id
+        notices.clear()
+        response = await call(
+            [{"role": "user", "content": "new"}], max_tokens=5, provider_context=context,
+        )
+        assert [notice.phase for notice in notices] == ["started", "succeeded"]
+        assert notices[0].compaction_id != first_id
+        assert response.provider_compaction_event_id == notices[0].compaction_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retry", [False, True])
 async def test_codex_disables_unsupported_native_compaction_and_continues(
-    monkeypatch,
+    monkeypatch, retry,
 ) -> None:
     _mock_codex_token(monkeypatch)
     provider = OpenAICodexProvider(default_model="openai-codex/gpt-5.6-sol")
@@ -1212,7 +1291,8 @@ async def test_codex_disables_unsupported_native_compaction_and_continues(
         fake_request,
     )
 
-    response = await provider.chat(
+    call = provider.chat_with_retry if retry else provider.chat
+    response = await call(
         [{"role": "user", "content": "new"}],
         max_tokens=5,
         provider_context=provider_base.ProviderCallContext(
@@ -1235,8 +1315,9 @@ async def test_codex_disables_unsupported_native_compaction_and_continues(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("retry", [False, True])
 @pytest.mark.parametrize("cancel_during", ["compaction", "terminal", "generation"])
-async def test_codex_native_compaction_terminal_survives_cancellation(monkeypatch, cancel_during) -> None:
+async def test_codex_native_compaction_terminal_survives_cancellation(monkeypatch, cancel_during, retry) -> None:
     _mock_codex_token(monkeypatch)
     provider = OpenAICodexProvider(default_model="openai-codex/gpt-5.6-sol")
     state_provider = provider._responses_state_provider()
@@ -1270,7 +1351,8 @@ async def test_codex_native_compaction_terminal_survives_cancellation(monkeypatc
         ))
 
     monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
-    task = asyncio.create_task(provider.chat(
+    call = provider.chat_with_retry if retry else provider.chat
+    task = asyncio.create_task(call(
         [{"role": "user", "content": "new"}], max_tokens=5,
         provider_context=provider_base.ProviderCallContext(
             conversation_state=state.with_pending_messages([{"role": "user", "content": "new"}]),
