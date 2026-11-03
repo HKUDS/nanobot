@@ -36,12 +36,10 @@ export function composerUsageSnapshots(messages: UIMessage[]): ComposerUsageSnap
   });
 }
 
-export function isModelResponding(messages: UIMessage[], running: boolean): boolean {
-  if (!running) return false;
-  let latestTurnId: string | undefined;
+export function isModelResponding(messages: UIMessage[], activeTurnId: string | null): boolean {
+  if (!activeTurnId) return false;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    latestTurnId ??= messages[index].turnId;
-    if (messages[index].turnId !== latestTurnId) continue;
+    if (messages[index].turnId !== activeTurnId) continue;
     const snapshot = messages[index].modelRequest;
     if (snapshot) return !snapshot.ended && snapshot.phase === "started";
   }

@@ -259,7 +259,8 @@ class ModelRequestState:
     request_run_id: str = field(default_factory=lambda: uuid4().hex)
     request_sequence: int = 0
     request_usage: LLMUsage | None = None
-    recent_request_usages: list[LLMUsage | None] = field(default_factory=list)
+    # Reported usage per runner round; recovery requests update the same slot.
+    recent_round_usages: list[LLMUsage | None] = field(default_factory=list)
 
 
 class ContextGovernor:

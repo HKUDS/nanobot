@@ -869,7 +869,6 @@ export function projectThreadEvent(
         && event.turn_seq <= previousRequest.turnSeq)) return state;
     const modelRequest: NonNullable<UIMessage["modelRequest"]> = {
       ...previousRequest,
-      requestId: event.request_id,
       runId: event.run_id,
       sequence: event.sequence,
       turnSeq: event.turn_seq,

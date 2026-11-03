@@ -98,10 +98,10 @@ describe("webui API helpers", () => {
     vi.unstubAllGlobals();
   });
 
-  it("opts into model request snapshots when fetching a subagent thread", async () => {
+  it("fetches a subagent thread from its parent session", async () => {
     await fetchSubagentThread("tok", "websocket:chat-1", "task-1");
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/subagents/task-1/webui-thread?include_model_requests=1",
+      "/api/sessions/websocket%3Achat-1/subagents/task-1/webui-thread",
       expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
     );
   });
@@ -346,7 +346,7 @@ describe("webui API helpers", () => {
     );
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/webui-thread/trace-detail?ref=9.history-aaaaaaaaaaaaaaaaaaaa&include_model_requests=1",
+      "/api/sessions/websocket%3Achat-1/webui-thread/trace-detail?ref=9.history-aaaaaaaaaaaaaaaaaaaa",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
         credentials: "same-origin",

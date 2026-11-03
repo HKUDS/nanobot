@@ -3856,12 +3856,12 @@ it("projects active model usage without ending the turn and clears request statu
       sequence: 2, turn_seq: 2, phase: "started" });
   });
   expect(result.current.isStreaming).toBe(true);
-  expect(isModelResponding(result.current.messages, result.current.isStreaming)).toBe(true);
+  expect(isModelResponding(result.current.messages, fake.client.getRunTurnId("chat-model"))).toBe(true);
   expect(composerUsageSnapshots(result.current.messages).at(-1)?.usage?.context_tokens).toBe(105000);
   act(() => result.current.stop());
-  expect(isModelResponding(result.current.messages, result.current.isStreaming)).toBe(false);
+  expect(isModelResponding(result.current.messages, fake.client.getRunTurnId("chat-model"))).toBe(false);
   act(() => fake.emit("chat-model", { ...envelope, event: "model_request", request_id: "late", run_id: "run",
     sequence: 3, turn_seq: 3, phase: "started" }));
   expect(result.current.isStreaming).toBe(false);
-  expect(isModelResponding(result.current.messages, true)).toBe(false);
+  expect(isModelResponding(result.current.messages, envelope.turn_id)).toBe(false);
 });

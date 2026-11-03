@@ -501,7 +501,7 @@ export async function fetchWebuiThreadTraceDetail(
   ref: string,
   base: string = "",
 ): Promise<WebuiThreadTraceDetailPayload> {
-  const query = new URLSearchParams({ ref, include_model_requests: "1" });
+  const query = new URLSearchParams({ ref });
   const url = `${base}/api/sessions/${encodeURIComponent(key)}/webui-thread/trace-detail?${query}`;
   const res = await fetchWithTimeout(url, {
     headers: { Authorization: `Bearer ${token}` },
@@ -637,7 +637,7 @@ export async function fetchSubagentThread(
   token: string, sessionKey: string, taskId: string, signal?: AbortSignal,
 ): Promise<WebuiThreadPersistedPayload> {
   const payload = await request<unknown>(
-    `/api/sessions/${encodeURIComponent(sessionKey)}/subagents/${encodeURIComponent(taskId)}/webui-thread?include_model_requests=1`,
+    `/api/sessions/${encodeURIComponent(sessionKey)}/subagents/${encodeURIComponent(taskId)}/webui-thread`,
     token, { signal, cache: "no-store" }, API_READ_TIMEOUT_MS,
   );
   return parseWebuiThreadPayload(payload);

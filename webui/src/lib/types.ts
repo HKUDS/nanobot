@@ -164,7 +164,6 @@ export interface UIMessage {
   roundUsages?: RoundUsage[];
   /** Turn-owned model snapshot, independent of answer/tool streaming. */
   modelRequest?: {
-    requestId: string;
     runId: string;
     sequence: number;
     turnSeq?: number;

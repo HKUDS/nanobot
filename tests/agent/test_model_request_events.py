@@ -96,6 +96,49 @@ async def test_completed_request_usage_is_visible_while_tool_is_blocked():
 
 
 @pytest.mark.asyncio
+async def test_live_round_usage_folds_recovery_before_tool_finishes():
+    events = []
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    usages = [LLMUsage.reported(input_tokens=value, output_tokens=1) for value in (10, 20, 30)]
+
+    async def publish(event):
+        if isinstance(event, ModelRequestEvent):
+            events.append(event)
+
+    async def tool_call(*args):
+        entered.set()
+        await release.wait()
+        return "ok"
+
+    provider = MagicMock()
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content=None, tool_calls=[ToolCallRequest("bad", "", {})],
+                    finish_reason="tool_calls", usage=usages[0]),
+        LLMResponse(content=None, tool_calls=[ToolCallRequest("c", "tool", {})],
+                    finish_reason="tool_calls", usage=usages[1]),
+        LLMResponse(content="done", usage=usages[2]),
+    ])
+    run_spec = spec(provider, EventSink(publish))
+    run_spec.tools.prepare_call.return_value = (None, {}, None)
+    run_spec.tools.execute = tool_call
+    task = asyncio.create_task(AgentRunner().run(run_spec))
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        assert not task.done()
+        completed = [event for event in events if event.phase == "completed"]
+        assert completed[0].round_usages == (usages[0],)
+        assert completed[-1].round_usages == (usages[0] + usages[1],)
+        assert completed[-1].usage == usages[0] + usages[1]
+    finally:
+        release.set()
+        result = await task
+    assert events[-1].round_usages == tuple(result.round_usages)
+    assert events[-1].usage == result.usage
+    assert [usage.input_tokens for usage in result.round_usages] == [30, 30]
+
+
+@pytest.mark.asyncio
 async def test_individual_tool_finishes_before_blocked_sibling():
     emitted = []
     fast_finished = asyncio.Event()

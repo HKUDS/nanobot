@@ -450,6 +450,8 @@ class AgentRunner:
             request_messages = await self.prepare_prompt(
                 request_state.compaction.request_messages, messages,
             )
+            # Start the live slot at the same boundary as the terminal round.
+            request_state.recent_round_usages.append(None)
             response, raw_usage = await self._request_model(
                 spec,
                 request_messages,
@@ -611,6 +613,7 @@ class AgentRunner:
                 )
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=False)
+                request_state.recent_round_usages.append(None)
                 response = await self._request_finalization_retry(
                     spec,
                     messages_for_model,
@@ -896,6 +899,7 @@ class AgentRunner:
         Physical retries/fallbacks and provider-internal pre-request compaction
         remain inside the call. Post-return compaction summarization is outside.
         Only provider-returned usage is published here, never estimated zeros.
+        Callers reserve a live round slot; recovery invocations update it.
         """
         request_id = uuid4().hex
 
@@ -907,7 +911,7 @@ class AgentRunner:
                 request_id=request_id, run_id=state.request_run_id,
                 sequence=state.request_sequence, phase=phase,
                 usage=state.request_usage,
-                round_usages=tuple(usage for usage in state.recent_request_usages if usage is not None),
+                round_usages=tuple(usage for usage in state.recent_round_usages if usage is not None),
                 context_window_tokens=spec.runtime.context_window_tokens,
             ))
 
@@ -933,14 +937,11 @@ class AgentRunner:
             reported_usage = response.usage.with_timing(
                 generation_ms=response.generation_ms, ttft_ms=response.ttft_ms,
             )
-            state.request_usage = (
-                reported_usage if state.request_usage is None
-                else state.request_usage + reported_usage
+            state.request_usage = self._merge_usage(state.request_usage, reported_usage)
+            state.recent_round_usages[-1] = self._merge_usage(
+                state.recent_round_usages[-1], reported_usage,
             )
-            state.recent_request_usages.append(reported_usage)
-        else:
-            state.recent_request_usages.append(None)
-        del state.recent_request_usages[:-8]
+        del state.recent_round_usages[:-8]
         await emit("failed" if response.finish_reason == "error" else "completed")
         return response
 
@@ -1267,6 +1268,7 @@ class AgentRunner:
             if iteration > spec.max_iterations
             else self._budget_exhausted_finalization_messages(request_messages)
         )
+        request_state.recent_round_usages.append(None)
         try:
             response = await self._request_no_tools(
                 spec,

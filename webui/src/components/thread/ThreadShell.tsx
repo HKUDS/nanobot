@@ -720,6 +720,7 @@ export function ThreadShell({
   const canonicalRunTurnId = chatId && messagesReady && turnActive
     ? client.getRunTurnId(chatId)
     : null;
+  const activeRunTurnId = turnActive ? canonicalRunTurnId ?? historyActiveTurnId : null;
   const viewportTurnId = messagesReady && turnActive
     ? canonicalRunTurnId
       ?? rememberedViewportTurnId
@@ -1270,7 +1271,7 @@ export function ThreadShell({
 
   const composer = (
     <div className={composerVariant === "hero" ? "thread-composer-stack is-hero" : "thread-composer-stack"}>
-      {isModelResponding(messages, isStreaming) ? (
+      {isModelResponding(messages, activeRunTurnId) ? (
         <p role="status" className="px-3 text-xs text-muted-foreground">{t("thread.modelResponding")}</p>
       ) : null}
       {modelFallback?.chatId === chatId && !modelFallback.dismissed ? (
@@ -1313,7 +1314,7 @@ export function ThreadShell({
           disabled={!chatId}
           inputAriaLabel={composerInputAriaLabel}
           isStreaming={turnActive}
-          activeTurnId={turnActive && chatId ? client.getRunTurnId(chatId) ?? historyActiveTurnId : null}
+          activeTurnId={activeRunTurnId}
           completedTurnIds={messagesReady && !recoveryNeedsDecision
             && chatId && !client.hasUnsettledRun(chatId) ? queueCompletedTurnIds : undefined}
           placeholder={
