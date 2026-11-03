@@ -439,7 +439,6 @@
     "closeAction": "關閉臨時聊天：{{title}}"
   },
   "sidebar": {
-    "topicOptions": "話題選項",
     "resize": "調整側欄寬度",
     "navigation": "側邊欄導覽",
     "collapse": "收合側邊欄",
@@ -2422,25 +2421,10 @@
     "renameGroupDescription": "為這個群組命名。",
     "renameGroupPlaceholder": "群組名稱",
     "dissolveTab": "解散群組",
-    "workspaceChangeInGroup": "變更工作區前，請先將此話題移出群組。",
-    "paneAddError": {
-      "title": "新增窗格失敗",
-      "groupRemoved": "原本的群組已不存在。",
-      "topicMoved": "原本的話題已被移出群組。",
-      "topicGrouped": "該話題已加入群組。",
-      "groupFull": "群組已滿，每個群組最多有 {{count}} 個窗格。",
-      "workspaceMismatch": "要新增的窗格與現有話題的工作區不同。",
-      "workspaceChanging": "工作區切換尚未完成，請稍後再試或重新選擇專案。",
-      "workspaceMissing": "工作區資訊暫時無法使用，請稍後再試。",
-      "workspaceRejected": "閘道拒絕了工作區設定，請檢查專案路徑和存取模式後再試。",
-      "stateUnavailable": "暫時無法取得群組資訊，請稍後再試。",
-      "createFailed": "新增窗格時發生問題，請再試一次。"
-    },
     "layout": "佈局",
     "addPane": "新增窗格",
     "paneLimit": "最多 {{count}} 個窗格",
     "deleteConversations": "整組刪除",
-    "deleteChatsCount": "刪除聊天（{{chatCount}}）",
     "movePane": "移動 {{title}} 窗格",
     "movePaneHint": "拖曳換位，也可以使用方向鍵",
     "resizePaneBoundary": "調整窗格邊界 {{index}}",

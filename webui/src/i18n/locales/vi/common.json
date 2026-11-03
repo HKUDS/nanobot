@@ -439,7 +439,6 @@
     "closeAction": "Đóng trò chuyện tạm thời: {{title}}"
   },
   "sidebar": {
-    "topicOptions": "Tùy chọn chủ đề",
     "resize": "Điều chỉnh độ rộng thanh bên",
     "navigation": "Điều hướng thanh bên",
     "collapse": "Thu gọn thanh bên",
@@ -2422,25 +2421,10 @@
     "renameGroupDescription": "Đặt tên cho nhóm này.",
     "renameGroupPlaceholder": "Tên nhóm",
     "dissolveTab": "Giải tán nhóm",
-    "workspaceChangeInGroup": "Hãy tách chủ đề khỏi nhóm trước khi đổi workspace.",
-    "paneAddError": {
-      "title": "Không thể thêm khung",
-      "groupRemoved": "Nhóm ban đầu không còn tồn tại.",
-      "topicMoved": "Chủ đề ban đầu đã được chuyển ra khỏi nhóm.",
-      "topicGrouped": "Chủ đề đã được thêm vào một nhóm.",
-      "groupFull": "Nhóm đã đầy. Mỗi nhóm có thể có tối đa {{count}} khung.",
-      "workspaceMismatch": "Khung mới và một trong các chủ đề hiện có sử dụng workspace khác nhau.",
-      "workspaceChanging": "Việc đổi workspace chưa hoàn tất. Hãy thử lại hoặc chọn lại dự án.",
-      "workspaceMissing": "Không có thông tin workspace. Vui lòng thử lại.",
-      "workspaceRejected": "Gateway đã từ chối cài đặt workspace. Hãy kiểm tra đường dẫn dự án và chế độ truy cập, rồi thử lại.",
-      "stateUnavailable": "Chưa có thông tin về nhóm. Vui lòng thử lại.",
-      "createFailed": "Đã xảy ra lỗi khi thêm khung. Vui lòng thử lại."
-    },
     "layout": "Bố cục",
     "addPane": "Thêm khung",
     "paneLimit": "Tối đa {{count}} khung",
     "deleteConversations": "Xóa mọi trò chuyện trong nhóm",
-    "deleteChatsCount": "Xóa cuộc trò chuyện ({{chatCount}})",
     "movePane": "Di chuyển khung {{title}}",
     "movePaneHint": "Kéo để di chuyển. Cũng có thể dùng các phím mũi tên",
     "resizePaneBoundary": "Đổi kích thước ranh giới khung {{index}}",

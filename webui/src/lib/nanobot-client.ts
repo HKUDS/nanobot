@@ -84,7 +84,6 @@ type SessionUpdateHandler = (
   chatId: string,
   scope?: SessionUpdateScope,
   workspaceScope?: WorkspaceScopePayload,
-  scopeRequest?: WorkspaceScopePayload,
 ) => void;
 type SidebarStateUpdateHandler = (state: SidebarStatePayload) => void;
 type PairingChangeHandler = () => void;
@@ -252,8 +251,6 @@ export class NanobotClient {
   private lastSocketMessageSend: { chatId: string; turnId: string } | null = null;
   private goalStateByChatId = new Map<string, GoalStateWsPayload>();
   private pendingNewChat: PendingChatRequest | null = null;
-  private initialWorkspaceUpdates = new Set<string>();
-  private pendingScopeResponses = new Map<string, WorkspaceScopePayload[]>();
   private pendingTranscriptions = new Map<string, PendingRequest<string>>();
   private pendingSystemCommands = new Map<string, PendingRequest<void>>();
   private pendingWebUIRequests = new Map<string, PendingWebUIRequest>();
@@ -600,12 +597,6 @@ export class NanobotClient {
     });
   }
 
-  /** Stop reattaching a chat that was never published by its creator. */
-  forgetUnpublishedChat(chatId: string): void {
-    if (this.chatHandlers.has(chatId) || this.transcriptHandlers.has(chatId) || this.runs.view(chatId).active) return;
-    this.knownChats.delete(chatId);
-  }
-
   /** Ask the WebUI gateway to create a connection-owned non-persistent chat. */
   newTemporaryChat(timeoutMs: number = 5_000): Promise<string> {
     if (this.pendingNewChat) {
@@ -863,9 +854,6 @@ export class NanobotClient {
   setWorkspaceScope(chatId: string, workspaceScope: WorkspaceScopePayload): void {
     if (this.temporaryChatIds.has(chatId)) return;
     this.knownChats.add(chatId);
-    this.sendQueue = this.sendQueue.filter((frame) => (
-      frame.type !== "set_workspace_scope" || frame.chat_id !== chatId
-    ));
     this.queueSend({
       type: "set_workspace_scope",
       chat_id: chatId,
@@ -934,12 +922,7 @@ export class NanobotClient {
       return;
     }
 
-    const scopeControlRejected = parsed.event === "error"
-      && parsed.detail === "workspace_scope_rejected"
-      && !parsed.turn_id
-      && parsed.chat_id !== undefined
-      && this.takeScopeResponse(parsed.chat_id) !== undefined;
-    if (parsed.event === "error" && !parsed.turn_id && !scopeControlRejected) {
+    if (parsed.event === "error" && !parsed.turn_id) {
       const fallback = this.legacyRejectionTarget(parsed);
       if (fallback) {
         parsed = {
@@ -1015,7 +998,6 @@ export class NanobotClient {
     }
 
     if (parsed.event === "attached") {
-      const alreadyKnown = this.knownChats.has(parsed.chat_id);
       if (parsed.temporary === true) {
         this.temporaryChatIds.add(parsed.chat_id);
       } else {
@@ -1023,11 +1005,9 @@ export class NanobotClient {
       }
       if (
         this.pendingNewChat
-        && !alreadyKnown
         && this.pendingNewChat.temporary === (parsed.temporary === true)
       ) {
         clearTimeout(this.pendingNewChat.timer);
-        if (!this.pendingNewChat.temporary) this.initialWorkspaceUpdates.add(parsed.chat_id);
         this.pendingNewChat.resolve(parsed.chat_id);
         this.pendingNewChat = null;
       }
@@ -1058,11 +1038,7 @@ export class NanobotClient {
     }
 
     if (parsed.event === "session_updated") {
-      // New/fork replies precede subsequent scope-control replies on this socket.
-      const initial = parsed.workspace_scope && this.initialWorkspaceUpdates.delete(parsed.chat_id);
-      const scopeRequest = parsed.workspace_scope && !initial
-        ? this.takeScopeResponse(parsed.chat_id, parsed.workspace_scope) : undefined;
-      this.emitSessionUpdate(parsed.chat_id, parsed.scope, parsed.workspace_scope, scopeRequest);
+      this.emitSessionUpdate(parsed.chat_id, parsed.scope, parsed.workspace_scope);
       return;
     }
 
@@ -1078,9 +1054,14 @@ export class NanobotClient {
         chatId: parsed.chat_id,
         turnId: parsed.turn_id,
       });
+      if (this.pendingNewChat) {
+        clearTimeout(this.pendingNewChat.timer);
+        this.pendingNewChat.reject(new Error(`workspace_scope_rejected:${parsed.reason || ""}`));
+        this.pendingNewChat = null;
+      }
     }
 
-    if (parsed.event === "error" && !parsed.chat_id && !parsed.turn_id && this.pendingNewChat) {
+    if (parsed.event === "error" && this.pendingNewChat) {
       clearTimeout(this.pendingNewChat.timer);
       const detail = typeof parsed.detail === "string" ? parsed.detail : "server error";
       const reason = typeof parsed.reason === "string" && parsed.reason ? `:${parsed.reason}` : "";
@@ -1112,10 +1093,9 @@ export class NanobotClient {
     chatId: string,
     scope?: SessionUpdateScope,
     workspaceScope?: WorkspaceScopePayload,
-    scopeRequest?: WorkspaceScopePayload,
   ): void {
     for (const handler of this.sessionUpdateHandlers) {
-      handler(chatId, scope, workspaceScope, scopeRequest);
+      handler(chatId, scope, workspaceScope);
     }
   }
 
@@ -1198,8 +1178,6 @@ export class NanobotClient {
       }
     }
     this.applyRunEffects(this.runs.transition({ kind: "transport-lost" }));
-    this.pendingScopeResponses.clear();
-    this.initialWorkspaceUpdates.clear();
     this.lastSocketMessageSend = null;
     if (!willReconnect) {
       this.setStatus("closed");
@@ -1284,15 +1262,6 @@ export class NanobotClient {
     }, delay);
   }
 
-  private takeScopeResponse(chatId: string, scope?: WorkspaceScopePayload): WorkspaceScopePayload | undefined {
-    const pending = this.pendingScopeResponses.get(chatId);
-    const request = pending?.[0];
-    if (!pending || !request || (scope && request.access_mode !== scope.access_mode)) return undefined;
-    pending.shift();
-    if (!pending.length) this.pendingScopeResponses.delete(chatId);
-    return request;
-  }
-
   private queueSend(frame: Outbound): void {
     if (this.socket?.readyState === WS_OPEN) {
       this.rawSend(frame);
@@ -1332,11 +1301,6 @@ export class NanobotClient {
     try {
       this.socket.send(JSON.stringify(frame));
       this.lastSocketMessageSend = null;
-      if (frame.type === "set_workspace_scope") {
-        const pending = this.pendingScopeResponses.get(frame.chat_id) ?? [];
-        pending.push(frame.workspace_scope);
-        this.pendingScopeResponses.set(frame.chat_id, pending);
-      }
       if (frame.type === "message" && frame.turn_id) {
         const ref = { chatId: frame.chat_id, turnId: frame.turn_id };
         if (this.runs.hasPendingSend(ref)) {

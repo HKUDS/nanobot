@@ -439,7 +439,6 @@
     "closeAction": "一時チャット「{{title}}」を閉じる"
   },
   "sidebar": {
-    "topicOptions": "トピックのオプション",
     "resize": "サイドバーの幅を変更",
     "navigation": "サイドバーのナビゲーション",
     "collapse": "サイドバーを閉じる",
@@ -2422,25 +2421,10 @@
     "renameGroupDescription": "このグループに名前を付けます。",
     "renameGroupPlaceholder": "グループ名",
     "dissolveTab": "グループを解除",
-    "workspaceChangeInGroup": "ワークスペースを変更する前に、このトピックをグループから外してください。",
-    "paneAddError": {
-      "title": "ペインを追加できませんでした",
-      "groupRemoved": "元のグループは存在しません。",
-      "topicMoved": "元のトピックはグループから外されています。",
-      "topicGrouped": "トピックがグループに追加されました。",
-      "groupFull": "グループが満杯です。ペインは最大 {{count}} 個まで追加できます。",
-      "workspaceMismatch": "新しいペインと既存のトピックのワークスペースが異なります。",
-      "workspaceChanging": "ワークスペースの切り替えが完了していません。もう一度お試しいただくか、プロジェクトを選び直してください。",
-      "workspaceMissing": "ワークスペース情報を取得できません。もう一度お試しください。",
-      "workspaceRejected": "ワークスペースの設定がゲートウェイに拒否されました。プロジェクトのパスとアクセスモードを確認して、もう一度お試しください。",
-      "stateUnavailable": "グループの情報を取得できません。もう一度お試しください。",
-      "createFailed": "ペインの追加中に問題が発生しました。もう一度お試しください。"
-    },
     "layout": "レイアウト",
     "addPane": "ペインを追加",
     "paneLimit": "最大 {{count}} ペイン",
     "deleteConversations": "グループ内の全チャットを削除",
-    "deleteChatsCount": "チャットを削除（{{chatCount}}）",
     "movePane": "{{title}} ペインを移動",
     "movePaneHint": "ドラッグで移動. 矢印キーでも移動できます",
     "resizePaneBoundary": "ペイン境界 {{index}} のサイズを変更",

@@ -439,7 +439,6 @@
     "closeAction": "Fechar chat temporário: {{title}}"
   },
   "sidebar": {
-    "topicOptions": "Opções de tópicos",
     "resize": "Redimensionar a barra lateral",
     "navigation": "Navegação da barra lateral",
     "collapse": "Recolher barra lateral",
@@ -2436,25 +2435,10 @@
     "renameGroupDescription": "Dê um nome a este grupo.",
     "renameGroupPlaceholder": "Nome do grupo",
     "dissolveTab": "Desfazer grupo",
-    "workspaceChangeInGroup": "Remova este tópico do grupo antes de alterar seu espaço de trabalho.",
-    "paneAddError": {
-      "title": "Não foi possível adicionar o painel",
-      "groupRemoved": "O grupo original não existe mais.",
-      "topicMoved": "O tópico original foi removido do grupo.",
-      "topicGrouped": "O tópico foi adicionado a um grupo.",
-      "groupFull": "O grupo está cheio. Ele pode ter até {{count}} painéis.",
-      "workspaceMismatch": "O novo painel e um dos tópicos existentes usam espaços de trabalho diferentes.",
-      "workspaceChanging": "A mudança de espaço de trabalho ainda não terminou. Tente novamente ou selecione um projeto de novo.",
-      "workspaceMissing": "As informações do espaço de trabalho estão indisponíveis. Tente novamente.",
-      "workspaceRejected": "O gateway rejeitou as configurações do espaço de trabalho. Verifique o caminho do projeto e o modo de acesso e tente novamente.",
-      "stateUnavailable": "As informações de agrupamento ainda não estão disponíveis. Tente novamente.",
-      "createFailed": "Ocorreu um erro ao adicionar o painel. Tente novamente."
-    },
     "layout": "Layout",
     "addPane": "Adicionar painel",
     "paneLimit": "Máximo de {{count}} painéis",
     "deleteConversations": "Excluir todas as conversas",
-    "deleteChatsCount": "Excluir conversas ({{chatCount}})",
     "movePane": "Mover painel {{title}}",
     "movePaneHint": "Arraste para mover. As setas também funcionam",
     "resizePaneBoundary": "Redimensionar limite do painel {{index}}",

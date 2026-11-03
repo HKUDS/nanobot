@@ -1490,74 +1490,6 @@ describe("NanobotClient", () => {
     expect(client.hasUnsettledRun("chat-scope-control")).toBe(true);
   });
 
-  it("keeps a queued turn pending when a replayed workspace change is rejected", async () => {
-    const client = new NanobotClient({
-      url: "ws://test",
-      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
-    });
-    const scope = { project_path: "/missing", project_name: "missing", access_mode: "restricted" as const };
-    const errors = vi.fn();
-    client.onError(errors);
-    client.connect();
-    lastSocket().fakeOpen();
-    lastSocket().close();
-    client.setWorkspaceScope("draft", scope);
-    client.sendMessage("draft", "queued message", undefined, { turnId: "queued-turn", workspaceScope: scope });
-    client.onStatus((status) => {
-      if (status === "open") client.setWorkspaceScope("draft", scope);
-    });
-    await vi.advanceTimersByTimeAsync(1_000);
-    const socket = lastSocket();
-    socket.fakeOpen();
-    const sent = socket.sent.map((value) => JSON.parse(value) as { type: string });
-    expect(sent.filter((frame) => frame.type === "set_workspace_scope")).toHaveLength(1);
-    socket.fakeMessage({ event: "session_updated", chat_id: "draft", scope: "metadata", workspace_scope: { ...scope, access_mode: "full" } });
-    socket.fakeMessage({ event: "error", chat_id: "draft", detail: "workspace_scope_rejected", reason: "project_path" });
-    expect(client.hasUnsettledRun("draft")).toBe(true);
-    expect(errors).toHaveBeenLastCalledWith({ kind: "workspace_scope_rejected", chatId: "draft", reason: "project_path", turnId: undefined });
-    socket.fakeMessage({ event: "message_accepted", chat_id: "draft", turn_id: "queued-turn", active_turn_id: "queued-turn", starts_turn: true });
-    expect(client.hasUnsettledRun("draft")).toBe(true);
-    client.close();
-  });
-
-  it("identifies the workspace response after an older new-chat update", async () => {
-    const client = new NanobotClient({
-      url: "ws://test", reconnect: false,
-      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
-    });
-    const updates = vi.fn();
-    client.onSessionUpdate(updates);
-    client.connect();
-    const socket = lastSocket();
-    socket.fakeOpen();
-    const created = client.newChat(1_000);
-    socket.fakeMessage({ event: "attached", chat_id: "draft" });
-    await created;
-    const requested = { project_path: "~/beta", project_name: "beta", access_mode: "full" as const };
-    client.setWorkspaceScope("draft", requested);
-    socket.fakeMessage({ event: "session_updated", chat_id: "draft", scope: "metadata", workspace_scope: { project_path: "/repo/alpha", access_mode: "full" } });
-    socket.fakeMessage({ event: "session_updated", chat_id: "draft", scope: "metadata", workspace_scope: { project_path: "/home/user/beta", access_mode: "full" } });
-    expect(updates).toHaveBeenNthCalledWith(1, "draft", "metadata", expect.objectContaining({ project_path: "/repo/alpha" }), undefined);
-    expect(updates).toHaveBeenNthCalledWith(2, "draft", "metadata", expect.objectContaining({ project_path: "/home/user/beta" }), requested);
-    client.close();
-  });
-
-  it("does not reject a new chat for another chat's workspace error", async () => {
-    const client = new NanobotClient({
-      url: "ws://test", reconnect: false,
-      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
-    });
-    client.connect();
-    const socket = lastSocket();
-    socket.fakeOpen();
-    client.setWorkspaceScope("existing", { project_path: "/missing", project_name: "missing", access_mode: "restricted" });
-    const created = client.newChat(1_000);
-    socket.fakeMessage({ event: "error", chat_id: "existing", detail: "workspace_scope_rejected", reason: "project_path" });
-    socket.fakeMessage({ event: "attached", chat_id: "new-chat" });
-    await expect(created).resolves.toBe("new-chat");
-    client.close();
-  });
-
   it("sends large sidebar ordering state as a correlated WebUI request", async () => {
     const client = new NanobotClient({
       url: "ws://test",
@@ -2128,7 +2060,6 @@ describe("NanobotClient", () => {
       "chat-title",
       "metadata",
       expect.objectContaining({ project_path: "/tmp/project" }),
-      undefined,
     );
     expect(chatHandler).not.toHaveBeenCalled();
   });
@@ -2145,43 +2076,6 @@ describe("NanobotClient", () => {
     expect(lastSocket().sent).toContain(JSON.stringify({ type: "new_chat" }));
     lastSocket().fakeMessage({ event: "attached", chat_id: "fresh-id" });
     await expect(promise).resolves.toBe("fresh-id");
-  });
-
-  it("does not reattach an unpublished chat after reconnect", async () => {
-    const client = new NanobotClient({
-      url: "ws://test",
-      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
-    });
-    client.connect();
-    lastSocket().fakeOpen();
-    const pending = client.newChat(1_000);
-    lastSocket().fakeMessage({ event: "attached", chat_id: "unpublished" });
-    await pending;
-    client.forgetUnpublishedChat("unpublished");
-    lastSocket().close();
-    await vi.advanceTimersByTimeAsync(1_000);
-    lastSocket().fakeOpen();
-    expect(lastSocket().sent).not.toContain(JSON.stringify({ type: "attach", chat_id: "unpublished" }));
-    client.close();
-  });
-
-  it("does not mistake an existing chat's attach reply for a new chat", async () => {
-    const client = new NanobotClient({
-      url: "ws://test",
-      reconnect: false,
-      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
-    });
-    client.connect();
-    lastSocket().fakeOpen();
-    client.attach("existing-chat");
-    const resolved = vi.fn();
-    const pending = client.newChat(1_000).then(resolved);
-    lastSocket().fakeMessage({ event: "attached", chat_id: "existing-chat" });
-    await Promise.resolve();
-    expect(resolved).not.toHaveBeenCalled();
-    lastSocket().fakeMessage({ event: "attached", chat_id: "new-chat" });
-    await pending;
-    expect(resolved).toHaveBeenCalledWith("new-chat");
   });
 
   it("serializes workspace scope for new chats and messages", async () => {

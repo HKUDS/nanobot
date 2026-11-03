@@ -1,4 +1,5 @@
 import {
+  ArchiveIcon,
   SkillsIcon,
   AutomationsIcon,
   ChannelsIcon,
@@ -65,7 +66,6 @@ interface SidebarProps {
     paneKey: string,
     tabKey: string,
   ) => void;
-  canAttachPane?: (paneKey: string, tabKey: string) => boolean;
   onToggleGroup: (groupId: string) => void;
   onRequestRenameProject: (projectKey: string, label: string) => void;
   onNewChatInProject: (projectPath: string, projectName: string) => void;
@@ -79,14 +79,13 @@ interface SidebarProps {
   onSettingsIntent?: () => void;
   onOpenSearch: () => void;
   activeUtility?: "apps" | "skills" | "automations" | "channels" | null;
-  onToggleArchived: (groupId: string) => void;
+  onToggleArchived: () => void;
   onCollapse?: () => void;
   onExpand?: () => void;
   containActionMenus?: boolean;
   collapsed?: boolean;
   pinnedKeys?: string[];
   archivedKeys?: string[];
-  archiveAffectedKeys?: string[];
   pinnedPaneKeys?: string[];
   archivedPaneKeys?: string[];
   sessionOrder?: string[];
@@ -98,6 +97,7 @@ interface SidebarProps {
   recoveryChatIds?: string[];
   viewState?: SidebarViewState;
   showArchived?: boolean;
+  archivedCount?: number;
   defaultWorkspacePath?: string | null;
   hostChromeInset?: boolean;
 }
@@ -260,6 +260,14 @@ export function Sidebar(props: SidebarProps) {
           selectionRef={activeActionRef}
           icon={<ChannelsIcon className="h-4 w-4" />}
         />
+        {props.archivedCount ? (
+          <SidebarActionButton
+            collapsed={collapsed}
+            label={props.showArchived ? t("chat.hideArchived") : t("chat.showArchived")}
+            onClick={props.onToggleArchived}
+            icon={<ArchiveIcon className="h-4 w-4" />}
+          />
+        ) : null}
       </SidebarSelectionHighlight>
       <div
         className={cn(
@@ -283,7 +291,6 @@ export function Sidebar(props: SidebarProps) {
             onRequestRename={props.onRequestRename}
             onRequestRenameTab={props.onRequestRenameTab}
             onToggleArchive={props.onToggleArchive}
-            onToggleArchived={props.onToggleArchived}
             onArchiveMany={props.onArchiveMany}
             paneGroups={props.paneGroups}
             onSelectPane={props.onSelectPane}
@@ -291,13 +298,11 @@ export function Sidebar(props: SidebarProps) {
             onDetachPane={props.onDetachPane}
             onDissolveTab={props.onDissolveTab}
             onAttachPane={props.onAttachPane}
-            canAttachPane={props.canAttachPane}
             onToggleGroup={props.onToggleGroup}
             onRequestRenameProject={props.onRequestRenameProject}
             onNewChatInProject={props.onNewChatInProject}
             pinnedKeys={props.pinnedKeys}
             archivedKeys={props.archivedKeys}
-            archiveAffectedKeys={props.archiveAffectedKeys}
             pinnedPaneKeys={props.pinnedPaneKeys}
             archivedPaneKeys={props.archivedPaneKeys}
             sessionOrder={props.sessionOrder}

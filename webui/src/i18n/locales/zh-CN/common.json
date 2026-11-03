@@ -439,7 +439,6 @@
     "closeAction": "关闭临时聊天：{{title}}"
   },
   "sidebar": {
-    "topicOptions": "话题选项",
     "resize": "调整侧栏宽度",
     "navigation": "侧边栏导航",
     "collapse": "收起侧边栏",
@@ -2628,25 +2627,10 @@
     "renameGroupDescription": "为这个分组命名。",
     "renameGroupPlaceholder": "分组名称",
     "dissolveTab": "解散分组",
-    "workspaceChangeInGroup": "更改工作区前，请先将此话题移出分组。",
-    "paneAddError": {
-      "title": "添加窗格失败",
-      "groupRemoved": "原来的分组已不存在。",
-      "topicMoved": "该话题已移出原分组。",
-      "topicGrouped": "该话题已加入分组。",
-      "groupFull": "分组已满，每个分组最多有 {{count}} 个窗格。",
-      "workspaceMismatch": "要添加的窗格与现有话题的工作区不同。",
-      "workspaceChanging": "工作区切换尚未完成，请稍后重试或重新选择项目。",
-      "workspaceMissing": "工作区信息暂不可用，请稍后重试。",
-      "workspaceRejected": "网关拒绝了工作区设置，请检查项目路径和权限模式后重试。",
-      "stateUnavailable": "暂时无法获取分组信息，请稍后重试。",
-      "createFailed": "添加窗格时出错，请重试。"
-    },
     "layout": "布局",
     "addPane": "添加窗格",
     "paneLimit": "最多 {{count}} 个窗格",
     "deleteConversations": "整组删除",
-    "deleteChatsCount": "删除聊天（{{chatCount}}）",
     "movePane": "移动 {{title}} 窗格",
     "movePaneHint": "拖动换位，也可以使用方向键。",
     "resizePaneBoundary": "调整窗格边界 {{index}}",

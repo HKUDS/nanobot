@@ -439,7 +439,6 @@
     "closeAction": "임시 채팅 닫기: {{title}}"
   },
   "sidebar": {
-    "topicOptions": "주제 옵션",
     "resize": "사이드바 너비 조절",
     "navigation": "사이드바 탐색",
     "collapse": "사이드바 접기",
@@ -2422,25 +2421,10 @@
     "renameGroupDescription": "이 그룹에 이름을 지정하세요.",
     "renameGroupPlaceholder": "그룹 이름",
     "dissolveTab": "그룹 해제",
-    "workspaceChangeInGroup": "작업 공간을 변경하기 전에 이 주제를 그룹에서 분리하세요.",
-    "paneAddError": {
-      "title": "창을 추가하지 못했습니다",
-      "groupRemoved": "원래 그룹이 더 이상 없습니다.",
-      "topicMoved": "원래 토픽이 그룹에서 제거되었습니다.",
-      "topicGrouped": "토픽이 그룹에 추가되었습니다.",
-      "groupFull": "그룹이 가득 찼습니다. 창은 최대 {{count}}개까지 추가할 수 있습니다.",
-      "workspaceMismatch": "새 창과 기존 토픽 중 하나의 작업 공간이 서로 다릅니다.",
-      "workspaceChanging": "작업 공간 변경이 아직 완료되지 않았습니다. 다시 시도하거나 프로젝트를 다시 선택해 주세요.",
-      "workspaceMissing": "작업 공간 정보를 가져올 수 없습니다. 다시 시도해 주세요.",
-      "workspaceRejected": "게이트웨이가 작업 공간 설정을 거부했습니다. 프로젝트 경로와 접근 모드를 확인한 후 다시 시도해 주세요.",
-      "stateUnavailable": "그룹 정보를 가져올 수 없습니다. 다시 시도해 주세요.",
-      "createFailed": "창을 추가하는 중에 문제가 발생했습니다. 다시 시도해 주세요."
-    },
     "layout": "레이아웃",
     "addPane": "창 추가",
     "paneLimit": "최대 {{count}}개 창",
     "deleteConversations": "그룹 내 모든 대화 삭제",
-    "deleteChatsCount": "채팅 삭제 ({{chatCount}})",
     "movePane": "{{title}} 창 이동",
     "movePaneHint": "드래그하여 이동. 방향키로도 이동 가능",
     "resizePaneBoundary": "창 경계 {{index}} 크기 조절",

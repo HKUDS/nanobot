@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChatList } from "@/components/ChatList";
@@ -333,11 +333,11 @@ describe("ChatList", () => {
             title: "Existing group",
             activePaneKey: "websocket:group-a",
             visible: true,
-            totalPaneCount: 4,
             panes: [
               { key: "websocket:group-a", chatId: "group-a", title: "Group A" },
               { key: "websocket:group-b", chatId: "group-b", title: "Group B" },
               { key: "websocket:group-c", chatId: "group-c", title: "Group C" },
+              { key: "websocket:group-d", chatId: "group-d", title: "Group D" },
             ],
           },
           "tab:fine": {
@@ -417,8 +417,7 @@ describe("ChatList", () => {
             title: "Full group",
             activePaneKey: "websocket:full-1",
             visible: true,
-            totalPaneCount: 4,
-            panes: [1, 2, 3].map((index) => ({
+            panes: [1, 2, 3, 4].map((index) => ({
               key: `websocket:full-${index}`,
               chatId: `full-${index}`,
               title: `Full pane ${index}`,
@@ -667,33 +666,6 @@ describe("ChatList", () => {
       .toHaveAttribute("draggable", "false");
   });
 
-  it("shows the deletion count for a collapsed group with an archived pane", async () => {
-    const onRequestDeleteMany = vi.fn();
-    render(<ChatList
-      sessions={[session({ key: "tab:mixed", chatId: "mixed", title: "Mixed group" })]}
-      activeKey={null}
-      paneGroups={{ "tab:mixed": {
-        tabKey: "tab:mixed", title: "Mixed group", activePaneKey: "websocket:live",
-        visible: true, totalPaneCount: 2,
-        panes: [{ key: "websocket:live", chatId: "live", title: "Visible topic" }],
-      } }}
-      onSelect={vi.fn()}
-      onRequestDelete={vi.fn()}
-      onRequestDeleteMany={onRequestDeleteMany}
-      onTogglePin={vi.fn()}
-      onRequestRename={vi.fn()}
-      onToggleArchive={vi.fn()}
-    />);
-    fireEvent.click(screen.getByRole("button", { name: "Collapse panes in Mixed group" }));
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Topic actions for Mixed group" }), {
-      button: 0, ctrlKey: false,
-    });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete chats (1)" }));
-    await waitFor(() => expect(onRequestDeleteMany).toHaveBeenCalledWith(
-      [{ key: "websocket:live", label: "Visible topic" }], undefined,
-    ));
-  });
-
   it("collapses a multi-pane tab into one Chrome-style group header", () => {
     render(
       <ChatList
@@ -892,31 +864,6 @@ describe("ChatList", () => {
     expect(screen.queryByTestId("delete-selection-bar")).not.toBeInTheDocument();
   });
 
-  it("clears a selection hidden by an archive update", async () => {
-    const first = session({ chatId: "first", title: "First topic" });
-    const second = session({ chatId: "second", title: "Second topic" });
-    const onRequestDeleteMany = vi.fn();
-    const props = {
-      sessions: [first, second], activeKey: null, onSelect: vi.fn(), onRequestDelete: vi.fn(), onRequestDeleteMany,
-      onTogglePin: vi.fn(), onRequestRename: vi.fn(), onToggleArchive: vi.fn(), onArchiveMany: vi.fn(),
-    };
-    const { rerender } = render(<ChatList {...props} />);
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Topic actions for First topic" }), { button: 0 });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
-    expect(screen.getByText("1 selected")).toBeInTheDocument();
-    rerender(<ChatList {...props} archivedKeys={[first.key]} />);
-    expect(screen.getByText("0 selected")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Second topic" }));
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-    expect(onRequestDeleteMany).toHaveBeenCalledWith([
-      { key: second.key, label: "Second topic" },
-    ], expect.any(Function));
-    act(() => onRequestDeleteMany.mock.calls[0][1](false));
-    fireEvent.keyDown(window, { key: "Escape" });
-    expect(screen.queryByTestId("delete-selection-bar")).not.toBeInTheDocument();
-  });
-
   it("disables batch archive when all topics are deselected", async () => {
     render(<ChatList
       sessions={[session({ chatId: "first", title: "First topic" })]}
@@ -1003,38 +950,6 @@ describe("ChatList", () => {
         "true",
       );
     }
-  });
-
-  it("selects only displayed topics in a folded Shift-click range", async () => {
-    const scope = { project_path: "/workspace", project_name: "workspace", access_mode: "full" as const };
-    const live = Array.from({ length: 10 }, (_, index) => session({
-      chatId: `live-${index}`, title: `Live ${index}`, workspaceScope: scope,
-    }));
-    const archived = session({ chatId: "archived", title: "Archived topic", workspaceScope: scope });
-    const onRequestDeleteMany = vi.fn();
-    render(<ChatList
-      sessions={[...live, archived]}
-      activeKey={null}
-      defaultWorkspacePath="/workspace"
-      archivedKeys={[archived.key]}
-      collapsedGroups={{ "archived:workspace:chats": false }}
-      onSelect={vi.fn()}
-      onRequestDelete={vi.fn()}
-      onRequestDeleteMany={onRequestDeleteMany}
-      onTogglePin={vi.fn()}
-      onRequestRename={vi.fn()}
-      onToggleArchive={vi.fn()}
-    />);
-    expect(screen.queryByRole("button", { name: "Live 8" })).not.toBeInTheDocument();
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Topic actions for Live 0" }), { button: 0 });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
-    fireEvent.click(screen.getByRole("button", { name: "Archived topic" }), { shiftKey: true });
-    expect(screen.getByText("9 selected")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-    expect(onRequestDeleteMany).toHaveBeenCalledWith([
-      ...live.slice(0, 8).map((item) => ({ key: item.key, label: item.title })),
-      { key: archived.key, label: archived.title },
-    ], expect.any(Function));
   });
 
   it("includes every pane when a Shift-click range ends on a grouped tab", async () => {
@@ -1347,37 +1262,6 @@ describe("ChatList", () => {
       .toHaveAttribute("data-active-id", "websocket:inactive");
   });
 
-  it("preserves a historical group's collapsed state across project projections", async () => {
-    localStorage.setItem("nanobot-webui.collapsed-pane-groups.v1", JSON.stringify(["tab:historical"]));
-    const scope = (name: string) => ({ project_path: `/repo/${name}`, project_name: name, access_mode: "full" as const });
-    const alpha = "tab-projection:alpha";
-    const beta = "tab-projection:beta";
-    render(<ChatList
-      sessions={[
-        session({ key: alpha, chatId: "alpha-row", title: "Historical", workspaceScope: scope("alpha") }),
-        session({ key: beta, chatId: "beta-row", title: "Historical", workspaceScope: scope("beta") }),
-      ]}
-      paneGroups={{
-        [alpha]: { tabKey: "tab:historical", title: "Historical", activePaneKey: "websocket:a", visible: true,
-          panes: [{ key: "websocket:a", chatId: "a", title: "Alpha pane" }] },
-        [beta]: { tabKey: "tab:historical", title: "Historical", activePaneKey: "websocket:b", visible: true,
-          panes: [{ key: "websocket:b", chatId: "b", title: "Beta pane" }] },
-      }}
-      activeKey={null}
-      onSelect={vi.fn()}
-      onRequestDelete={vi.fn()}
-      onTogglePin={vi.fn()}
-      onRequestRename={vi.fn()}
-      onToggleArchive={vi.fn()}
-    />);
-    expect(screen.getAllByRole("button", { name: "Expand panes in Historical" })).toHaveLength(2);
-    expect(screen.queryByText("Alpha pane")).not.toBeInTheDocument();
-    await waitFor(() => expect(JSON.parse(localStorage.getItem("nanobot-webui.collapsed-pane-groups.v1")!)).toEqual(["tab:historical"]));
-    fireEvent.click(screen.getAllByRole("button", { name: "Expand panes in Historical" })[0]);
-    expect(screen.getByText("Alpha pane")).toBeInTheDocument();
-    expect(screen.getByText("Beta pane")).toBeInTheDocument();
-  });
-
   it("restores collapsed tabs from the local UI preference", () => {
     const props = {
       sessions: [session({ chatId: "root", title: "Root topic" })],
@@ -1587,27 +1471,6 @@ describe("ChatList", () => {
     expect(updated[0].firstElementChild).toHaveClass("h-2", "w-2");
   });
 
-  it("keeps Topics accessible when every topic is archived", async () => {
-    const archivedTopic = session({
-      chatId: "old", title: "Archived topic",
-      workspaceScope: { project_path: "/workspace", project_name: "workspace", access_mode: "full" },
-    });
-    const onToggleArchived = vi.fn();
-    const props = {
-      sessions: [archivedTopic], activeKey: null, defaultWorkspacePath: "/workspace",
-      archivedKeys: [archivedTopic.key], onSelect: vi.fn(), onRequestDelete: vi.fn(),
-      onTogglePin: vi.fn(), onRequestRename: vi.fn(), onToggleArchive: vi.fn(), onToggleArchived,
-    };
-    const { rerender } = render(<ChatList {...props} />);
-    const topics = screen.getByRole("region", { name: "Topics" });
-    expect(within(topics).queryByText("Archived topic")).not.toBeInTheDocument();
-    fireEvent.pointerDown(within(topics).getByRole("button", { name: "Topic options" }), { button: 0 });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Show archived" }));
-    expect(onToggleArchived).toHaveBeenCalledWith("workspace:chats");
-    rerender(<ChatList {...props} collapsedGroups={{ "archived:workspace:chats": false }} />);
-    expect(within(topics).getByText("Archived topic")).toBeInTheDocument();
-  });
-
   it("folds long default workspace chats and can show all", () => {
     const sessions = Array.from({ length: 10 }, (_, index) =>
       session({
@@ -1654,29 +1517,6 @@ describe("ChatList", () => {
 
     expect(within(chatsSection).getByText("Chat 0")).toBeInTheDocument();
     expect(within(chatsSection).getByRole("button", { name: "Show less" })).toBeInTheDocument();
-  });
-
-  it("keeps an archived item reachable when a shown group exceeds the sidebar limit", () => {
-    const workspace = { project_path: "/workspace", project_name: "workspace", access_mode: "full" as const };
-    const project = { project_path: "/repo/later", project_name: "Later project", access_mode: "full" as const };
-    const sessions = [
-      ...Array.from({ length: 170 }, (_, index) => session({
-        chatId: `active-${index}`, title: `Active ${index}`,
-        updatedAt: "2026-05-21T12:00:00Z", workspaceScope: workspace,
-      })),
-      session({ chatId: "topics-old", title: "Topics archived", updatedAt: "2026-05-20T09:00:00Z", workspaceScope: workspace }),
-      session({ chatId: "project-old", title: "Project archived", updatedAt: "2026-05-19T09:00:00Z", workspaceScope: project }),
-    ];
-    render(<ChatList
-      sessions={sessions} activeKey={null} defaultWorkspacePath="/workspace"
-      archivedKeys={["websocket:topics-old", "websocket:project-old"]}
-      collapsedGroups={{ "archived:workspace:chats": false, "archived:project:/repo/later": false }}
-      onSelect={vi.fn()} onRequestDelete={vi.fn()} onTogglePin={vi.fn()}
-      onRequestRename={vi.fn()} onToggleArchive={vi.fn()} onToggleGroup={vi.fn()}
-    />);
-    expect(within(screen.getByRole("region", { name: "Topics" })).getByText("Topics archived")).toBeInTheDocument();
-    expect(within(screen.getByRole("region", { name: "Later project" })).getByText("Project archived")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /show .* more/i })).toBeInTheDocument();
   });
 
   it("sorts Topics section among project groups by recency, not always last", () => {

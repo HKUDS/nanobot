@@ -8,7 +8,6 @@ import {
   createWorkbenchTab,
   detachWorkbenchPane,
   dissolveWorkbenchTab,
-  groupAcceptsWorkspace,
   normalizeWorkbenchState,
   orderWorkbenchTabs,
   reconcileWorkbench,
@@ -21,18 +20,6 @@ import {
 } from "@/components/workbench/workbench-model";
 
 describe("workbench model", () => {
-  it("accepts a pane only when every existing pane has the same known workspace", () => {
-    const paths = new Map([
-      ["alpha", "C:\\projects\\alpha"],
-      ["alpha-child", "C:/projects/alpha/"],
-      ["beta", "C:/projects/beta"],
-    ]);
-    expect(groupAcceptsWorkspace(["alpha", "alpha-child"], "C:/projects/alpha", paths)).toBe(true);
-    expect(groupAcceptsWorkspace(["alpha", "beta"], "C:/projects/alpha", paths)).toBe(false);
-    expect(groupAcceptsWorkspace(["alpha", "unknown"], "C:/projects/alpha", paths)).toBe(false);
-    expect(groupAcceptsWorkspace(["alpha"], undefined, paths)).toBe(false);
-  });
-
   it("derives standalone panes without persisting virtual tabs", () => {
     const match = workbenchTabForPane(EMPTY_WORKBENCH_STATE, "pane-a");
 

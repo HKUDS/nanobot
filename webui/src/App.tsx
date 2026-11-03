@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { AlertTriangle, ArrowRight, ChevronDown, Eye, EyeOff, ShieldCheck, X } from "lucide-react";
+import { ArrowRight, ChevronDown, Eye, EyeOff, ShieldCheck, X } from "lucide-react";
 import { ThemeToggleIcon } from "@/components/icons/ThemeToggleIcon";
 import { Trans, useTranslation } from "react-i18next";
 import { channelUiPresentation } from "@/channel-plugins/registry";
@@ -36,7 +36,6 @@ import {
   createWorkbenchTab,
   detachWorkbenchPane,
   dissolveWorkbenchTab,
-  groupAcceptsWorkspace,
   orderWorkbenchTabs,
   reconcileWorkbench,
   renameWorkbenchTab,
@@ -73,14 +72,7 @@ import {
   loadSavedSecret,
   saveSecret,
 } from "@/lib/bootstrap";
-import {
-  archivedSectionId,
-  displayTitle,
-  sessionGroupId,
-  showArchivedInGroup,
-  sortSessions,
-  TOPICS_GROUP_ID,
-} from "@/lib/chat-groups";
+import { displayTitle, sortSessions } from "@/lib/chat-groups";
 import { deriveTitle } from "@/lib/format";
 import { NanobotClient } from "@/lib/nanobot-client";
 import { BrowserNotifications, useBrowserNotificationLifecycle } from "@/components/BrowserNotifications";
@@ -106,7 +98,6 @@ import {
   fetchPairingRequests,
   fetchSettings,
   fetchWorkspaces,
-  listSessions,
   runPairingAction,
 } from "@/lib/api";
 import {
@@ -114,43 +105,11 @@ import {
   isNativeRuntime,
   toRuntimeSurface,
 } from "@/lib/runtime";
-import { projectNameFromPath, sameWorkspacePath, scopeWithAccessMode } from "@/lib/workspace";
+import { projectNameFromPath, scopeWithAccessMode } from "@/lib/workspace";
 import {
   createTemporaryChatSession,
   deriveTemporaryChatTitle,
 } from "@/lib/temporary-chat";
-
-type PaneAddFailure = "groupRemoved" | "topicMoved" | "topicGrouped" | "groupFull" | "workspaceMismatch" | "workspaceChanging" | "workspaceMissing" | "stateUnavailable" | "createFailed" | "workspaceRejected";
-
-class PaneAddError extends Error {
-  constructor(readonly reason: PaneAddFailure) {
-    super(reason);
-  }
-}
-
-function paneAddFailure(
-  current: WorkbenchState,
-  tabKey: string,
-  activeKey: string,
-  hadGroup: boolean,
-  workspacePath: string | null | undefined,
-  workspacePaths: ReadonlyMap<string, string>,
-  pendingWorkspaceScopes: ReadonlyMap<string, unknown>,
-): PaneAddFailure | null {
-  const target = workbenchTabForPane(current, activeKey);
-  if (hadGroup && !current.tabs[tabKey]) return "groupRemoved";
-  if (hadGroup && target.tabKey !== tabKey) return "topicMoved";
-  if (!hadGroup && current.tabs[target.tabKey]) return "topicGrouped";
-  if (target.tab.paneKeys.length >= MAX_WORKBENCH_PANES) return "groupFull";
-  if (!workspacePath || target.tab.paneKeys.some((key) => !workspacePaths.has(key))) {
-    const changing = target.tab.paneKeys.some((key) => (
-      !workspacePaths.has(key) && key.startsWith("websocket:") && pendingWorkspaceScopes.has(key.slice("websocket:".length))
-    ));
-    return changing ? "workspaceChanging" : "workspaceMissing";
-  }
-  if (!groupAcceptsWorkspace(target.tab.paneKeys, workspacePath, workspacePaths)) return "workspaceMismatch";
-  return null;
-}
 
 type BootState =
   | { status: "loading" }
@@ -1301,7 +1260,6 @@ function Shell({
   }, [updateSidebarState]);
   const lastActivePaneByTabRef = useRef(new Map<string, string>());
   const [creatingPane, setCreatingPane] = useState(false);
-  const [paneAddError, setPaneAddError] = useState<PaneAddFailure | null>(null);
   const topicSessions = sessions;
   const [pendingDelete, setPendingDelete] = useState<{
     items: SidebarDeleteItem[];
@@ -1360,16 +1318,6 @@ function Shell({
     useState<WorkspaceScopePayload | null>(null);
   const [workspaceOverrides, setWorkspaceOverrides] =
     useState<Record<string, WorkspaceScopePayload>>({});
-  const workspaceOverridesRef = useRef(workspaceOverrides);
-  workspaceOverridesRef.current = workspaceOverrides;
-  const pendingWorkspaceScopesRef = useRef(new Map<string, {
-    requested: WorkspaceScopePayload;
-    previous: WorkspaceScopePayload | undefined;
-    uncertain: boolean;
-    retryable: boolean;
-  }>());
-  const [pendingWorkspaceScopes, setPendingWorkspaceScopes] = useState<Set<string>>(() => new Set());
-  const [retryableWorkspaceScopes, setRetryableWorkspaceScopes] = useState<Set<string>>(() => new Set());
   const runningChatIdsRef = useRef<Set<string>>(new Set());
   const activeChatIdRef = useRef<string | null>(null);
   const pendingCreatedSessionKeyRef = useRef<string | null>(null);
@@ -1659,30 +1607,13 @@ function Shell({
     workspaces?.default_scope,
   ]);
   const activeChatRunning = activeChatId ? runningChatIds.has(activeChatId) : false;
-  const workspacePaths = useMemo(() => {
-    const paths = new Map<string, string>();
-    for (const session of sessions) {
-      const pending = pendingWorkspaceScopes.has(session.chatId)
-        ? pendingWorkspaceScopesRef.current.get(session.chatId) : undefined;
-      const path = pending
-        ? pending.previous?.project_path ?? session.workspaceScope?.project_path
-        : workspaceOverrides[session.chatId]?.project_path ?? session.workspaceScope?.project_path;
-      if (pending && !sameWorkspacePath(path, pending.requested.project_path)) continue;
-      if (path) paths.set(session.key, path);
-    }
-    return paths;
-  }, [pendingWorkspaceScopes, sessions, workspaceOverrides]);
-  const workspacePathsRef = useRef(workspacePaths);
-  workspacePathsRef.current = workspacePaths;
-  const workbenchStateRef = useRef(workbenchState);
-  workbenchStateRef.current = workbenchState;
 
   const refreshWorkspaces = useCallback(async () => {
     try {
       const payload = await fetchWorkspaces(getToken());
       setWorkspaces(payload);
     } catch {
-      // Keep the last confirmed catalog available for retrying a workspace change.
+      setWorkspaces(null);
     }
   }, [getToken]);
 
@@ -1702,17 +1633,6 @@ function Shell({
     setWorkspaceOverrides((current) => {
       const entries = Object.entries(current).filter(([chatId]) => knownChatIds.has(chatId));
       return entries.length === Object.keys(current).length ? current : Object.fromEntries(entries);
-    });
-    for (const chatId of pendingWorkspaceScopesRef.current.keys()) {
-      if (!knownChatIds.has(chatId)) pendingWorkspaceScopesRef.current.delete(chatId);
-    }
-    setPendingWorkspaceScopes((current) => {
-      const next = new Set(Array.from(current).filter((chatId) => knownChatIds.has(chatId)));
-      return next.size === current.size ? current : next;
-    });
-    setRetryableWorkspaceScopes((current) => {
-      const next = new Set(Array.from(current).filter((chatId) => knownChatIds.has(chatId)));
-      return next.size === current.size ? current : next;
     });
   }, [sessionsLoaded, sessions]);
 
@@ -1760,7 +1680,7 @@ function Shell({
   }, [activeKey, loading, navigate, sessions, temporarySessions]);
 
   useEffect(() => {
-    return client.onSessionUpdate((chatId, scope, workspaceScope, scopeRequest) => {
+    return client.onSessionUpdate((chatId, scope, workspaceScope) => {
       if (scope === "thread") {
         setUpdatedChatIds((current) => {
           const next = new Set(current);
@@ -1776,100 +1696,24 @@ function Shell({
       }
       if (!workspaceScope) return;
       const next = normalizeWorkspaceScope(workspaceScope);
-      const pending = pendingWorkspaceScopesRef.current.get(chatId);
-      if (pending && scopeRequest !== pending.requested) return;
-      if (pending) {
-        pendingWorkspaceScopesRef.current.delete(chatId);
-        setPendingWorkspaceScopes((current) => {
-          const updated = new Set(current);
-          updated.delete(chatId);
-          return updated;
-        });
-        setRetryableWorkspaceScopes((current) => {
-          const updated = new Set(current);
-          updated.delete(chatId);
-          return updated;
-        });
-      }
       setWorkspaceOverrides((current) => ({
         ...current,
         [chatId]: next,
       }));
-      if (activeChatIdRef.current === chatId) {
-        setDraftWorkspaceScope(next);
-        setWorkspaceError(null);
-      }
+      setDraftWorkspaceScope(next);
+      setWorkspaceError(null);
       void refreshWorkspaces();
     });
   }, [client, refreshWorkspaces]);
 
-  useEffect(() => client.onStatus((status) => {
-    if (status !== "open") return;
-    // A scope change may have been sent before a disconnect but not acknowledged.
-    for (const [chatId, pending] of pendingWorkspaceScopesRef.current) {
-      if (pending.retryable) continue;
-      pending.uncertain = true;
-      client.setWorkspaceScope(chatId, pending.requested);
-    }
-  }), [client]);
-
   useEffect(() => {
     return client.onError((error) => {
       if (error.kind !== "workspace_scope_rejected") return;
-      const pending = error.chatId ? pendingWorkspaceScopesRef.current.get(error.chatId) : undefined;
-      if (error.chatId && pending && (pending.uncertain || error.turnId)) {
-        pending.uncertain = true;
-        const chatId = error.chatId;
-        // A lost acknowledgement means rejection of the replay cannot establish
-        // whether the original request succeeded. Reconcile from persisted metadata.
-        const allowRetry = () => {
-          if (pendingWorkspaceScopesRef.current.get(chatId) !== pending) return;
-          pending.retryable = true;
-          setRetryableWorkspaceScopes((current) => new Set(current).add(chatId));
-        };
-        void listSessions(getToken()).then((rows) => {
-          if (pendingWorkspaceScopesRef.current.get(chatId) !== pending) return;
-          const scope = rows.find((row) => row.chatId === chatId)?.workspaceScope;
-          if (!scope || !sameWorkspacePath(scope.project_path, pending.previous?.project_path)) {
-            allowRetry();
-            return;
-          }
-          pendingWorkspaceScopesRef.current.delete(chatId);
-          setPendingWorkspaceScopes((current) => {
-            const updated = new Set(current);
-            updated.delete(chatId);
-            return updated;
-          });
-          setRetryableWorkspaceScopes((current) => {
-            const updated = new Set(current);
-            updated.delete(chatId);
-            return updated;
-          });
-          const confirmed = normalizeWorkspaceScope(scope);
-          setWorkspaceOverrides((current) => ({ ...current, [chatId]: confirmed }));
-          if (activeChatIdRef.current === chatId) setDraftWorkspaceScope(confirmed);
-          void refresh();
-        }).catch(allowRetry);
-      } else if (error.chatId && pending && !error.turnId) {
-        const chatId = error.chatId;
-        pendingWorkspaceScopesRef.current.delete(chatId);
-        setPendingWorkspaceScopes((current) => {
-          const updated = new Set(current);
-          updated.delete(chatId);
-          return updated;
-        });
-        setWorkspaceOverrides((current) => {
-          const updated = { ...current };
-          if (pending.previous) updated[chatId] = pending.previous;
-          else delete updated[chatId];
-          return updated;
-        });
-      }
       if (error.chatId && error.chatId !== activeChatIdRef.current) return;
       setWorkspaceError(t("errors.workspaceScopeRejected.body"));
       void refreshWorkspaces();
     });
-  }, [client, getToken, refresh, refreshWorkspaces, t]);
+  }, [client, refreshWorkspaces, t]);
 
   useEffect(() => {
     if (loading) return;
@@ -1902,46 +1746,6 @@ function Shell({
     }
   }, []);
 
-  const requestWorkspaceScope = useCallback((chatId: string, scope: WorkspaceScopePayload) => {
-    const pending = pendingWorkspaceScopesRef.current.get(chatId);
-    if (pending && !pending.retryable) return;
-    const previous = pending ? pending.previous : (
-      workspaceOverridesRef.current[chatId]
-      ?? sessions.find((session) => session.chatId === chatId)?.workspaceScope
-      ?? undefined
-    );
-    pendingWorkspaceScopesRef.current.set(chatId, {
-      requested: scope,
-      previous,
-      uncertain: pending?.uncertain ?? false,
-      retryable: false,
-    });
-    setRetryableWorkspaceScopes((current) => {
-      const updated = new Set(current);
-      updated.delete(chatId);
-      return updated;
-    });
-    if (!sameWorkspacePath(previous?.project_path, scope.project_path)) {
-      const paths = new Map(workspacePathsRef.current);
-      paths.delete(`websocket:${chatId}`);
-      workspacePathsRef.current = paths;
-    }
-    setPendingWorkspaceScopes((current) => new Set(current).add(chatId));
-    setWorkspaceOverrides((current) => ({ ...current, [chatId]: scope }));
-    client.setWorkspaceScope(chatId, scope);
-  }, [client, sessions]);
-
-  const canChangePaneWorkspace = useCallback((paneKey: string, nextPath: string) => {
-    const currentPath = workspacePathsRef.current.get(paneKey);
-    if (sameWorkspacePath(currentPath, nextPath)) return true;
-    const tab = workbenchTabForPane(workbenchStateRef.current, paneKey).tab;
-    return groupAcceptsWorkspace(
-      tab.paneKeys.filter((key) => key !== paneKey),
-      nextPath,
-      workspacePathsRef.current,
-    );
-  }, []);
-
   const applyWorkspaceScope = useCallback(
     (scope: WorkspaceScopePayload) => {
       const next = normalizeWorkspaceScope(scope);
@@ -1956,17 +1760,13 @@ function Shell({
             };
           });
         } else if (!activeChatRunning) {
-          if (activeKey && !canChangePaneWorkspace(activeKey, next.project_path)) {
-            setWorkspaceError(t("workbench.workspaceChangeInGroup"));
-            return;
-          }
-          requestWorkspaceScope(activeChatId, next);
+          client.setWorkspaceScope(activeChatId, next);
         }
         return;
       }
       setDraftWorkspaceScope(next);
     },
-    [activeChatId, activeChatRunning, activeKey, canChangePaneWorkspace, requestWorkspaceScope, t, temporaryChatActive],
+    [activeChatId, activeChatRunning, activeKey, client, temporaryChatActive],
   );
 
   const onCreateChat = useCallback(async (
@@ -2302,20 +2102,14 @@ function Shell({
     onArchiveMany([key], !sidebarState.archived_keys.includes(key));
   }, [onArchiveMany, sidebarState.archived_keys]);
 
-  const onToggleArchived = useCallback((groupId: string) => {
-    void updateSidebarState((current) => {
-      const shown = showArchivedInGroup(groupId, current.collapsed_groups, current.view.show_archived);
-      const collapsedGroups = { ...current.collapsed_groups, [archivedSectionId(groupId)]: shown };
-      if (!shown) {
-        if (groupId === TOPICS_GROUP_ID) {
-          collapsedGroups[TOPICS_GROUP_ID] = false;
-          collapsedGroups["date:all"] = false;
-        } else {
-          delete collapsedGroups[groupId];
-        }
-      }
-      return { ...current, collapsed_groups: collapsedGroups };
-    });
+  const onToggleArchived = useCallback(() => {
+    void updateSidebarState((current) => ({
+      ...current,
+      view: {
+        ...current.view,
+        show_archived: !current.view.show_archived,
+      },
+    }));
   }, [updateSidebarState]);
 
   const onOpenSessionSearch = useCallback(() => {
@@ -2325,51 +2119,38 @@ function Shell({
 
   const onAddPane = useCallback(async () => {
     const tabKey = activeTabKey;
-    if (!activeKey || !activeSession || creatingPane || temporarySessionsRef.current[activeKey]) return;
-    if (!tabKey || sidebarStateLoading) {
-      setPaneAddError("stateUnavailable");
-      return;
-    }
-    const scope = activeWorkspaceScope;
-    const hadGroup = Boolean(workbenchState.tabs[tabKey]);
-    const failure = paneAddFailure(workbenchStateRef.current, tabKey, activeKey, hadGroup, scope?.project_path, workspacePathsRef.current, pendingWorkspaceScopesRef.current);
-    if (failure || !scope) {
-      setPaneAddError(failure ?? "workspaceMissing");
-      return;
-    }
+    if (
+      !tabKey
+      || !activeKey
+      || !activeSession
+      || creatingPane
+      || (activeTabState?.paneKeys.length ?? 0) >= MAX_WORKBENCH_PANES
+      || temporarySessionsRef.current[activeKey]
+    ) return;
     setMobileSidebarOpen(false);
     setSessionSearchOpen(false);
-    setPaneAddError(null);
     setCreatingPane(true);
     try {
-      const chatId = await createChat(scope, undefined, (createdChatId) => {
-        let reason: PaneAddFailure | null = "stateUnavailable";
-        updateWorkbenchState((current) => {
-          reason = paneAddFailure(current, tabKey, activeKey, hadGroup, scope.project_path, workspacePathsRef.current, pendingWorkspaceScopesRef.current);
-          if (reason) return current;
-          const next = addWorkbenchPane(current, activeKey, `websocket:${createdChatId}`);
-          if (next === current) reason = "createFailed";
-          return next;
-        });
-        if (reason) throw new PaneAddError(reason);
-      });
+      const scope = activeWorkspaceScope;
+      const chatId = await createChat(scope);
       const paneKey = `websocket:${chatId}`;
       pendingCreatedSessionKeyRef.current = paneKey;
+      updateWorkbenchState((current) => addWorkbenchPane(current, activeKey, paneKey));
       navigate({
         view: "chat",
         activeKey: paneKey,
         settingsSection: "overview",
       });
-      setWorkspaceOverrides((current) => ({
-        ...current,
-        [chatId]: normalizeWorkspaceScope(scope),
-      }));
+      if (scope) {
+        setWorkspaceOverrides((current) => ({
+          ...current,
+          [chatId]: normalizeWorkspaceScope(scope),
+        }));
+      }
     } catch (error) {
-      if (error instanceof PaneAddError) setPaneAddError(error.reason);
-      else {
-        console.error("Failed to create pane", error);
-        setPaneAddError(error instanceof Error && error.message.startsWith("workspace_scope_rejected:")
-          ? "workspaceRejected" : "createFailed");
+      console.error("Failed to create pane", error);
+      if (error instanceof Error && error.message.startsWith("workspace_scope_rejected:")) {
+        setWorkspaceError(t("errors.workspaceScopeRejected.body"));
       }
     } finally {
       setCreatingPane(false);
@@ -2378,13 +2159,13 @@ function Shell({
     activeKey,
     activeSession,
     activeTabKey,
+    activeTabState,
     activeWorkspaceScope,
     createChat,
     creatingPane,
     navigate,
-    sidebarStateLoading,
+    t,
     updateWorkbenchState,
-    workbenchState.tabs,
   ]);
 
   const onSelectSearchResult = useCallback(
@@ -2771,59 +2552,33 @@ function Shell({
     () => new Map(orderedWorkbenchTabs.map((tab) => [tab.tabKey, tab])),
     [orderedWorkbenchTabs],
   );
-  const archivedPaneKeys = useMemo(
-    () => new Set(sidebarState.archived_keys),
-    [sidebarState.archived_keys],
-  );
-  const defaultWorkspacePath = workspaces?.default_scope.project_path ?? null;
   const sidebarTabPresentations = useMemo(() => {
     const sessionsByKey = new Map(sessions.map((session) => [session.key, session]));
     return orderedWorkbenchTabs.flatMap((tab) => {
-      const anchorKey = tab.tab.paneKeys.find((key) => sessionsByKey.has(key)) ?? tab.paneKeys[0];
+      const anchorKey = tab.tab.paneKeys.find((key) => sessionsByKey.has(key))
+        ?? tab.paneKeys[0];
       const anchor = sessionsByKey.get(anchorKey);
       if (!anchor) return [];
       const title = tab.tab.title ?? titleForSession(anchor);
       const visible = tab.tab.explicit || tab.paneKeys.length > 1;
-      const partitions = new Map<string, { anchor: ChatSummary; keys: string[] }>();
-      for (const key of tab.paneKeys) {
-        const session = sessionsByKey.get(key);
-        if (!session) continue;
-        const scope = pendingWorkspaceScopes.has(session.chatId)
-          ? pendingWorkspaceScopesRef.current.get(session.chatId)?.previous ?? session.workspaceScope
-          : workspaceOverrides[session.chatId] ?? session.workspaceScope;
-        const groupedSession = scope === session.workspaceScope ? session : { ...session, workspaceScope: scope };
-        const groupId = sessionGroupId(groupedSession, defaultWorkspacePath);
-        const partition = partitions.get(groupId) ?? { anchor: groupedSession, keys: [] };
-        partition.keys.push(key);
-        partitions.set(groupId, partition);
-      }
-      const splitByWorkspace = partitions.size > 1;
-      return Array.from(partitions, ([groupId, partition]) => {
-        const showArchived = showArchivedInGroup(groupId, sidebarState.collapsed_groups, sidebarState.view.show_archived);
-        const visiblePaneKeys = partition.keys.filter((key) => showArchived || !archivedPaneKeys.has(key));
-        const rowKey = splitByWorkspace
-          ? `tab-projection:${JSON.stringify([tab.tabKey, groupId])}`
-          : visible ? tab.tabKey : tab.paneKeys[0];
-        return {
-          orderedTab: tab,
-          groupPaneKeys: partition.keys,
-          visiblePaneKeys,
-          rowKey,
-          title,
-          session: visible
-            ? {
-                ...partition.anchor,
-                key: rowKey,
-                chatId: `workbench-tab:${rowKey}`,
-                title,
-                preview: "",
-                updatedAt: tab.updatedAt,
-              }
-            : partition.anchor,
-        };
-      });
+      const rowKey = visible ? tab.tabKey : tab.paneKeys[0];
+      return [{
+        orderedTab: tab,
+        rowKey,
+        title,
+        session: visible
+          ? {
+              ...anchor,
+              key: tab.tabKey,
+              chatId: `workbench-tab:${tab.tabKey}`,
+              title,
+              preview: "",
+              updatedAt: tab.updatedAt,
+            }
+          : anchor,
+      }];
     });
-  }, [archivedPaneKeys, defaultWorkspacePath, orderedWorkbenchTabs, pendingWorkspaceScopes, sessions, sidebarState.collapsed_groups, sidebarState.view.show_archived, titleForSession, workspaceOverrides]);
+  }, [orderedWorkbenchTabs, sessions, titleForSession]);
   const sidebarTopicSessions = useMemo(
     () => sidebarTabPresentations.map((presentation) => presentation.session),
     [sidebarTabPresentations],
@@ -2889,7 +2644,7 @@ function Shell({
     const sessionsByKey = new Map(sessions.map((session) => [session.key, session]));
     return Object.fromEntries(sidebarTabPresentations.map((presentation) => {
       const orderedTab = presentation.orderedTab;
-      const panes = presentation.visiblePaneKeys
+      const panes = orderedTab.paneKeys
         .map((key) => sessionsByKey.get(key))
         .filter((session): session is ChatSummary => session !== undefined)
         .map((session) => ({
@@ -2901,11 +2656,10 @@ function Shell({
       return [presentation.rowKey, {
         tabKey: orderedTab.tabKey,
         title: presentation.title,
-        activePaneKey: activeKey && presentation.visiblePaneKeys.includes(activeKey)
+        activePaneKey: activeKey && orderedTab.paneKeys.includes(activeKey)
           ? activeKey
-          : presentation.visiblePaneKeys[0] ?? presentation.groupPaneKeys[0],
+          : orderedTab.paneKeys[0],
         visible: orderedTab.tab.explicit || orderedTab.paneKeys.length > 1,
-        totalPaneCount: orderedTab.paneKeys.length,
         panes,
       }];
     }));
@@ -2915,20 +2669,24 @@ function Shell({
     sidebarTabPresentations,
     titleForSession,
   ]);
+  const activePaneLimitReached = Boolean(
+    activeTabState && activeTabState.paneKeys.length >= MAX_WORKBENCH_PANES,
+  );
+
   const onActivateWorkbenchPane = useCallback((paneKey: string) => {
     onSelectChat(paneKey);
   }, [onSelectChat]);
 
   const onSelectSidebarTab = useCallback((tabKey: string) => {
-    const presentation = sidebarTabPresentations.find(({ rowKey }) => rowKey === tabKey)
-      ?? sidebarTabPresentations.find(({ orderedTab }) => orderedTab.tabKey === tabKey);
-    if (!presentation) return;
+    const tab = workbenchTab(workbenchState, tabKey);
+    if (!tab) return;
     const rememberedPaneKey = lastActivePaneByTabRef.current.get(tabKey);
-    const key = rememberedPaneKey && presentation.visiblePaneKeys.includes(rememberedPaneKey)
-      ? rememberedPaneKey
-      : presentation.visiblePaneKeys[0];
-    if (key) onSelectChat(key);
-  }, [onSelectChat, sidebarTabPresentations]);
+    onSelectChat(
+      rememberedPaneKey && tab.paneKeys.includes(rememberedPaneKey)
+        ? rememberedPaneKey
+        : tab.paneKeys[0],
+    );
+  }, [onSelectChat, workbenchState]);
 
   const onSelectSidebarItem = useCallback((key: string) => {
     if (
@@ -2957,11 +2715,6 @@ function Shell({
     updateWorkbenchState((current) => dissolveWorkbenchTab(current, tabKey));
   }, [updateWorkbenchState]);
 
-  const canAttachWorkbenchPane = useCallback((paneKey: string, tabKey: string) => {
-    const target = workbenchTab(workbenchState, tabKey);
-    return Boolean(target && groupAcceptsWorkspace(target.paneKeys, workspacePaths.get(paneKey), workspacePaths));
-  }, [workbenchState, workspacePaths]);
-
   const onAttachWorkbenchPane = useCallback((
     paneKey: string,
     tabKey: string,
@@ -2972,7 +2725,6 @@ function Shell({
         !target
         || (!target.explicit && target.paneKeys.length < 2)
         || (!target.paneKeys.includes(paneKey) && target.paneKeys.length >= MAX_WORKBENCH_PANES)
-        || !groupAcceptsWorkspace(target.paneKeys, workspacePathsRef.current.get(paneKey), workspacePathsRef.current)
       ) return current;
       return attachWorkbenchPane(current, tabKey, paneKey);
     });
@@ -3021,21 +2773,21 @@ function Shell({
     () => new Set(sidebarState.pinned_keys),
     [sidebarState.pinned_keys],
   );
+  const archivedPaneKeys = useMemo(
+    () => new Set(sidebarState.archived_keys),
+    [sidebarState.archived_keys],
+  );
   const sidebarPinnedTabKeys = useMemo(() => sidebarTabPresentations
-    .filter(({ groupPaneKeys }) => groupPaneKeys.some((key) => pinnedPaneKeys.has(key)))
+    .filter(({ orderedTab }) => orderedTab.paneKeys.some((key) => pinnedPaneKeys.has(key)))
     .map(({ rowKey }) => rowKey), [pinnedPaneKeys, sidebarTabPresentations]);
   const sidebarArchivedTabKeys = useMemo(() => sidebarTabPresentations
-    .filter(({ groupPaneKeys }) => groupPaneKeys.every((key) => archivedPaneKeys.has(key)))
+    .filter(({ orderedTab }) => orderedTab.paneKeys.every((key) => archivedPaneKeys.has(key)))
     .map(({ rowKey }) => rowKey), [archivedPaneKeys, sidebarTabPresentations]);
-  const activePresentation = activeKey
-    ? sidebarTabPresentations.find(({ groupPaneKeys }) => groupPaneKeys.includes(activeKey))
-    : undefined;
-  const activeSidebarKey = activeKey && activePresentation && !activePresentation.visiblePaneKeys.includes(activeKey)
-    ? null
-    : activePresentation?.rowKey ?? activeKey;
-  const sidebarArchiveAffectedKeys = useMemo(() => sidebarTabPresentations
-    .filter(({ groupPaneKeys }) => groupPaneKeys.some((key) => archivedPaneKeys.has(key)))
-    .map(({ rowKey }) => rowKey), [archivedPaneKeys, sidebarTabPresentations]);
+  const activeSidebarKey = activeTabKey
+    ? sidebarTabPresentations.find(({ orderedTab }) => (
+        orderedTab.tabKey === activeTabKey
+      ))?.rowKey ?? activeKey
+    : activeKey;
 
   const sidebarProps = {
     sessions: sidebarStateLoading ? [] : sidebarTopicSessions,
@@ -3062,7 +2814,6 @@ function Shell({
     onDetachPane: mobileWorkbench ? undefined : onDetachWorkbenchPane,
     onDissolveTab: mobileWorkbench ? undefined : onDissolveWorkbenchTab,
     onAttachPane: mobileWorkbench ? undefined : onAttachWorkbenchPane,
-    canAttachPane: canAttachWorkbenchPane,
     onToggleGroup,
     onRequestRenameProject,
     onNewChatInProject,
@@ -3083,7 +2834,6 @@ function Shell({
     onToggleArchived,
     pinnedKeys: sidebarPinnedTabKeys,
     archivedKeys: sidebarArchivedTabKeys,
-    archiveAffectedKeys: sidebarArchiveAffectedKeys,
     pinnedPaneKeys: sidebarState.pinned_keys,
     archivedPaneKeys: sidebarState.archived_keys,
     sessionOrder: sidebarState.session_order,
@@ -3095,7 +2845,8 @@ function Shell({
     recoveryChatIds: recoveryChatIdList,
     viewState: { ...sidebarState.view, sort: automaticSidebarSort },
     showArchived: sidebarState.view.show_archived,
-    defaultWorkspacePath,
+    archivedCount: sidebarArchivedTabKeys.length,
+    defaultWorkspacePath: workspaces?.default_scope.project_path ?? null,
   };
   const hostSidebarFlowWidth = hostSidebarOpen ? sidebarWidth : SIDEBAR_RAIL_WIDTH;
 
@@ -3243,18 +2994,6 @@ function Shell({
                 view !== "chat" && "hidden",
               )}
             >
-              {paneAddError ? (
-                <div role="alert" className="mx-4 mt-3 flex items-start gap-2 rounded-control border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12px] leading-5 text-destructive">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-                  <div className="min-w-0 flex-1">
-                    <p className="font-medium">{t("workbench.paneAddError.title")}</p>
-                    <p>{t(`workbench.paneAddError.${paneAddError}`, { count: MAX_WORKBENCH_PANES })}</p>
-                  </div>
-                  <Button variant="ghost" size="icon" aria-label={t("common.dismiss")} onClick={() => setPaneAddError(null)} className="h-6 w-6 shrink-0 text-destructive hover:text-destructive">
-                    <X className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              ) : null}
               <ThreadVisibilityContext.Provider value={localActive && !managingConnections && view === "chat"}>
                 <Suspense fallback={<StartupShell embedded surface="chat" sidebarExpanded={hostSidebarOpen} />}>
                   <PaneWorkbench
@@ -3264,7 +3003,12 @@ function Shell({
                     splitRatios={renderedWorkbenchSplitRatios}
                     chrome={paneChromeEnabled}
                     showLayoutControl={activeTabVisible}
-                    addPaneDisabled={creatingPane}
+                    addPaneDisabled={creatingPane || activePaneLimitReached}
+                    addPaneDisabledLabel={activePaneLimitReached
+                      ? t("workbench.paneLimit", {
+                          count: MAX_WORKBENCH_PANES,
+                        })
+                      : undefined}
                     onActivatePane={onActivateWorkbenchPane}
                     onAddPane={onAddPane}
                     onLayoutChange={(layout) => {
@@ -3317,7 +3061,7 @@ function Shell({
                             workspaceScope={activeWorkspaceScope}
                             workspaceDefaultScope={workspaces?.default_scope ?? null}
                             workspaceControls={workspaces?.controls ?? null}
-                            workspaceScopeDisabled={activeChatRunning || Boolean(activeChatId && pendingWorkspaceScopes.has(activeChatId) && !retryableWorkspaceScopes.has(activeChatId))}
+                            workspaceScopeDisabled={activeChatRunning}
                             workspaceError={workspaceError}
                             onWorkspaceScopeChange={applyWorkspaceScope}
                             settingsSnapshot={settingsSnapshot}
@@ -3373,17 +3117,17 @@ function Shell({
                           workspaceScope={paneScope}
                           workspaceDefaultScope={workspaces?.default_scope ?? null}
                           workspaceControls={workspaces?.controls ?? null}
-                          workspaceScopeDisabled={paneRunning || (pendingWorkspaceScopes.has(paneSession.chatId) && !retryableWorkspaceScopes.has(paneSession.chatId))}
+                          workspaceScopeDisabled={paneRunning}
                           workspaceError={context.active ? workspaceError : null}
                           onWorkspaceScopeChange={(scope) => {
                             if (paneRunning) return;
                             const next = normalizeWorkspaceScope(scope);
-                            if (!canChangePaneWorkspace(paneSession.key, next.project_path)) {
-                              setWorkspaceError(t("workbench.workspaceChangeInGroup"));
-                              return;
-                            }
                             setWorkspaceError(null);
-                            requestWorkspaceScope(paneSession.chatId, next);
+                            setWorkspaceOverrides((current) => ({
+                              ...current,
+                              [paneSession.chatId]: next,
+                            }));
+                            client.setWorkspaceScope(paneSession.chatId, next);
                           }}
                           settingsSnapshot={settingsSnapshot}
                           settingsLoading={settingsLoading}

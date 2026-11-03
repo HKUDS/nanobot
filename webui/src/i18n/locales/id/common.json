@@ -439,7 +439,6 @@
     "closeAction": "Tutup obrolan sementara: {{title}}"
   },
   "sidebar": {
-    "topicOptions": "Opsi topik",
     "resize": "Ubah lebar bilah samping",
     "navigation": "Navigasi bilah samping",
     "collapse": "Ciutkan sidebar",
@@ -2422,25 +2421,10 @@
     "renameGroupDescription": "Beri nama untuk grup ini.",
     "renameGroupPlaceholder": "Nama grup",
     "dissolveTab": "Bubarkan grup",
-    "workspaceChangeInGroup": "Keluarkan topik ini dari grup sebelum mengubah ruang kerjanya.",
-    "paneAddError": {
-      "title": "Gagal menambahkan panel",
-      "groupRemoved": "Grup asal sudah tidak ada.",
-      "topicMoved": "Topik asal telah dikeluarkan dari grup.",
-      "topicGrouped": "Topik telah ditambahkan ke grup.",
-      "groupFull": "Grup sudah penuh. Maksimal {{count}} panel per grup.",
-      "workspaceMismatch": "Panel baru dan salah satu topik yang ada menggunakan ruang kerja yang berbeda.",
-      "workspaceChanging": "Perubahan ruang kerja belum selesai. Coba lagi atau pilih ulang proyek.",
-      "workspaceMissing": "Informasi ruang kerja tidak tersedia. Silakan coba lagi.",
-      "workspaceRejected": "Gateway menolak pengaturan ruang kerja. Periksa jalur proyek dan mode akses, lalu coba lagi.",
-      "stateUnavailable": "Informasi grup belum tersedia. Silakan coba lagi.",
-      "createFailed": "Terjadi masalah saat menambahkan panel. Silakan coba lagi."
-    },
     "layout": "Tata letak",
     "addPane": "Tambah panel",
     "paneLimit": "Maksimal {{count}} panel",
     "deleteConversations": "Hapus semua chat",
-    "deleteChatsCount": "Hapus chat ({{chatCount}})",
     "movePane": "Pindahkan panel {{title}}",
     "movePaneHint": "Seret untuk memindahkan. Tombol panah juga dapat digunakan",
     "resizePaneBoundary": "Ubah ukuran batas panel {{index}}",

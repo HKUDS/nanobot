@@ -38,7 +38,6 @@ function fakeClient() {
     },
     sendMessage: vi.fn(),
     newChat: vi.fn(),
-    forgetUnpublishedChat: vi.fn(),
     forkChat: vi.fn(),
     attach: vi.fn(),
     connect: vi.fn(),
@@ -409,21 +408,6 @@ describe("useSessions", () => {
     expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-new"]);
     expect(result.current.sessions[0]?.preview).toBe("First message");
     expect(result.current.sessions[0]?.title).toBe("Generated title");
-  });
-
-  it("does not publish a chat when the pane group changes during creation", async () => {
-    vi.mocked(api.listSessions).mockResolvedValue([]);
-    const client = fakeClient();
-    client.newChat.mockResolvedValue("chat-new");
-    const { result } = renderHook(() => useSessions(), { wrapper: wrap(client) });
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    const failure = new Error("group full");
-    await act(async () => {
-      await expect(result.current.createChat(null, null, () => { throw failure; })).rejects.toBe(failure);
-    });
-    expect(result.current.sessions).toEqual([]);
-    expect(client.forgetUnpublishedChat).toHaveBeenCalledWith("chat-new");
-    expect(api.deleteSession).not.toHaveBeenCalled();
   });
 
   it("stores optimistic workspace scope when creating a chat", async () => {

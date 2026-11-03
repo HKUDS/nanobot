@@ -3,7 +3,6 @@ import type {
   WorkbenchState,
   WorkbenchTabState,
 } from "@/lib/types";
-import { sameWorkspacePath } from "@/lib/workspace";
 
 export type {
   WorkbenchLayout,
@@ -12,15 +11,6 @@ export type {
 } from "@/lib/types";
 
 export const MAX_WORKBENCH_PANES = 4;
-
-export function groupAcceptsWorkspace(
-  paneKeys: readonly string[],
-  workspacePath: string | null | undefined,
-  workspacePaths: ReadonlyMap<string, string>,
-): boolean {
-  return Boolean(workspacePath)
-    && paneKeys.every((key) => sameWorkspacePath(workspacePath, workspacePaths.get(key)));
-}
 
 const WORKBENCH_LAYOUTS = [
   "columns",

@@ -439,7 +439,6 @@
     "closeAction": "Close temporary chat: {{title}}"
   },
   "sidebar": {
-    "topicOptions": "Topic options",
     "resize": "Resize sidebar",
     "navigation": "Sidebar navigation",
     "collapse": "Collapse sidebar",
@@ -2628,25 +2627,10 @@
     "renameGroupDescription": "Give this group a name.",
     "renameGroupPlaceholder": "Group name",
     "dissolveTab": "Dissolve group",
-    "workspaceChangeInGroup": "Remove this topic from its group before changing its workspace.",
-    "paneAddError": {
-      "title": "Couldn’t add pane",
-      "groupRemoved": "The original group no longer exists.",
-      "topicMoved": "The original topic has been removed from the group.",
-      "topicGrouped": "The topic has been added to a group.",
-      "groupFull": "The group is full. It can have up to {{count}} panes.",
-      "workspaceMismatch": "The new pane and one of the existing topics use different workspaces.",
-      "workspaceChanging": "The workspace change hasn’t finished. Please try again or select a project again.",
-      "workspaceMissing": "Workspace information is unavailable. Please try again.",
-      "workspaceRejected": "The gateway rejected the workspace settings. Check the project path and access mode, then try again.",
-      "stateUnavailable": "Grouping information isn’t available yet. Please try again.",
-      "createFailed": "Something went wrong while adding the pane. Please try again."
-    },
     "layout": "Layout",
     "addPane": "Add pane",
     "paneLimit": "Maximum {{count}} panes",
     "deleteConversations": "Delete all chats",
-    "deleteChatsCount": "Delete chats ({{chatCount}})",
     "movePane": "Move {{title}} pane",
     "movePaneHint": "Drag to move, or use the arrow keys.",
     "resizePaneBoundary": "Resize pane boundary {{index}}",
