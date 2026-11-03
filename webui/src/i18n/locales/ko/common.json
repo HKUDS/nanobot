@@ -1733,6 +1733,7 @@
     "error": "연결 오류"
   },
   "thread": {
+    "modelResponding": "모델 응답 중",
     "subagents": {
       "stopFailed": "이 작업을 중지할 수 없습니다.",
       "stopTask": "{{label}} 중지",

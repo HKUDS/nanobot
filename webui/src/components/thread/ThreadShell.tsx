@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { composerUsageSnapshots, isModelResponding } from "@/lib/model-request";
 
 import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailabilityContext";
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
@@ -77,18 +78,16 @@ import { providerDisplayLabel } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
-function latestComposerContextUsage(messages: UIMessage[]): ComposerContextUsage | null {
+function latestComposerContextUsage(rows: UIMessage[]): ComposerContextUsage | null {
+  const messages = composerUsageSnapshots(rows);
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (message.kind === "compaction" && message.compaction?.phase === "succeeded") {
+    if (message.compacted) {
       return null;
     }
     const contextTokens = message.usage?.context_tokens;
     if (
-      message.role !== "assistant"
-      || message.kind === "trace"
-      || message.isStreaming
-      || typeof contextTokens !== "number"
+      typeof contextTokens !== "number"
       || !Number.isFinite(contextTokens)
       || contextTokens < 0
     ) {
@@ -104,23 +103,20 @@ function latestComposerContextUsage(messages: UIMessage[]): ComposerContextUsage
   return null;
 }
 
-function recentComposerRoundUsage(messages: UIMessage[]): ComposerRoundUsage[] {
+function recentComposerRoundUsage(rows: UIMessage[]): ComposerRoundUsage[] {
+  const messages = composerUsageSnapshots(rows);
   const recent: ComposerRoundUsage[] = [];
   const seenTurns = new Set<string>();
   for (let index = messages.length - 1; index >= 0 && recent.length < 8; index -= 1) {
     const message = messages[index];
     const turnKey = message.turnId || message.id;
-    if (
-      message.role !== "assistant"
-      || message.kind === "trace"
-      || message.isStreaming
-      || seenTurns.has(turnKey)
-    ) {
+    if (seenTurns.has(turnKey)) {
       continue;
     }
 
-    seenTurns.add(turnKey);
     const rounds: RoundUsage[] = message.roundUsages ?? [];
+    if (!rounds.length) continue;
+    seenTurns.add(turnKey);
     for (let roundIndex = rounds.length - 1; roundIndex >= 0; roundIndex -= 1) {
       const round = rounds[roundIndex];
       const inputTokens = round.prompt_tokens;
@@ -701,12 +697,12 @@ export function ThreadShell({
     if (hasAppMentions) requestMentionCatalogs();
   }, [hasAppMentions, requestMentionCatalogs]);
   const composerContextUsage = useMemo(
-    () => latestComposerContextUsage(displayMessages),
-    [displayMessages],
+    () => latestComposerContextUsage(messages),
+    [messages],
   );
   const composerRoundUsage = useMemo(
-    () => recentComposerRoundUsage(displayMessages),
-    [displayMessages],
+    () => recentComposerRoundUsage(messages),
+    [messages],
   );
   const currentGoalState = messagesReady ? goalState : undefined;
   // Recovery decisions gate queued input, not the ledger-owned run state.
@@ -1274,6 +1270,9 @@ export function ThreadShell({
 
   const composer = (
     <div className={composerVariant === "hero" ? "thread-composer-stack is-hero" : "thread-composer-stack"}>
+      {isModelResponding(messages, isStreaming) ? (
+        <p role="status" className="px-3 text-xs text-muted-foreground">{t("thread.modelResponding")}</p>
+      ) : null}
       {modelFallback?.chatId === chatId && !modelFallback.dismissed ? (
         <ModelFallbackNotice
           model={modelFallback.model}

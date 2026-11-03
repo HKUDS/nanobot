@@ -10,6 +10,7 @@ from nanobot.bus.outbound_events import (
 from nanobot.events import (
     AgentEvent,
     ContextCompactionEvent,
+    ModelRequestEvent,
     RecoveryStateEvent,
     ResponseSourceEvent,
     RetryWaitEvent,
@@ -27,6 +28,7 @@ NOTIFICATION_AUDIENCES: dict[type[AgentEvent], NotificationAudience] = {
     RecoveryStateEvent: "interactive",
     RetryStatusEvent: "interactive",
     ResponseSourceEvent: "interactive",
+    ModelRequestEvent: "interactive",
 }
 
 

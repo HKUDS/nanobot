@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from contextlib import nullcontext
+from dataclasses import replace
 from functools import cache
 from typing import Any, cast
 
@@ -13,6 +14,7 @@ from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.file_state import file_read_context
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result, with_tool_error_hint
 from nanobot.providers.base import ToolCallRequest
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.runtime import (
     repeated_external_lookup_error,
     repeated_workspace_violation_error,
@@ -102,6 +104,37 @@ async def execute_tool_calls(
 
 
 async def _execute_tool_call(
+    tools: ToolRegistry,
+    tool_call: ToolCallRequest,
+    external_lookup_counts: dict[str, int],
+    workspace_violation_counts: dict[str, int],
+    hook: AgentHook,
+    context: AgentHookContext,
+    read_results: Callable[[], dict[str, str]],
+) -> tuple[Any, dict[str, str]]:
+    call_context = replace(context, tool_calls=[tool_call], tool_results=[], tool_events=[])
+    try:
+        await hook.on_tool_execution_event(call_context)
+        result, event = await _execute_tool_call_inner(
+            tools, tool_call, external_lookup_counts, workspace_violation_counts,
+            hook, context, read_results,
+        )
+    except asyncio.CancelledError:
+        cancelled = replace(call_context, tool_results=["Tool execution cancelled"], tool_events=[{
+            "name": tool_call.name, "status": "error", "detail": "cancelled",
+        }])
+        try:
+            await shield_and_drain(hook.on_tool_execution_event(cancelled))
+        except (Exception, asyncio.CancelledError):
+            pass
+        raise
+    await hook.on_tool_execution_event(replace(
+        call_context, tool_results=[result], tool_events=[event],
+    ))
+    return result, event
+
+
+async def _execute_tool_call_inner(
     tools: ToolRegistry,
     tool_call: ToolCallRequest,
     external_lookup_counts: dict[str, int],

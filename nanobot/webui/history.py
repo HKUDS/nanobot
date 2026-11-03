@@ -16,6 +16,7 @@ _EVENTS = {
     "turn_end": HistoryKind.COMPLETION,
     "fork_marker": HistoryKind.FORK_BOUNDARY,
     "context_compaction": HistoryKind.COMPACTION,
+    "model_request": HistoryKind.MODEL_REQUEST,
     "delta": HistoryKind.ANSWER_FRAGMENT,
     "reasoning_delta": HistoryKind.REASONING_FRAGMENT,
 }
@@ -30,6 +31,7 @@ _CONTENT_FIELDS = frozenset({
     "merge_next", "latency_ms", "usage", "round_usages", "context_window_tokens", "goal_state",
     "outcome", "failure_kind", "failure_error_kind", "failure_attempts", "failure_message",
     "transcript_incomplete", "stream_id", "compaction_id", "phase", "reason", "render_as",
+    "request_id", "run_id", "sequence",
 })
 
 

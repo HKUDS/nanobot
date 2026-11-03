@@ -639,6 +639,10 @@ def test_build_response_reports_fork_boundary_from_marker(history, tmp_path, mon
         {"event": "message", "chat_id": "fork", "text": "answer1"},
     ):
         history.append(key, ev)
+    history.append(key, {
+        "event": "model_request", "chat_id": "fork", "request_id": "request",
+        "run_id": "run", "sequence": 2, "phase": "completed", "round_usages": [],
+    })
     history.append(key, {"event": "fork_marker"})
     history.append(key, {"event": "user", "chat_id": "fork", "text": "new branch"})
 
@@ -649,6 +653,9 @@ def test_build_response_reports_fork_boundary_from_marker(history, tmp_path, mon
         "round1", "answer1", "new branch",
     ]
     assert out["fork_boundary_event_index"] == 2
+    modern = history.build(key, include_model_requests=True)
+    assert modern is not None
+    assert modern["fork_boundary_event_index"] == 3
 
 
 def test_thread_response_does_not_mark_completed_message_tool_tail_pending(history,
@@ -1232,3 +1239,33 @@ def test_existing_shell_output_uses_canonical_command_identity_not_bang_text(his
     assert answer.get("render_as") == ("text" if command else None)
     assert history.read(key)[1]["text"] == output
     assert messages[1]["content"] == output
+
+
+@pytest.mark.parametrize("phase", ["started", "completed", "failed", "cancelled"])
+def test_model_request_persists_through_reconnect_projection(history, tmp_path, phase):
+    from nanobot.events import ModelRequestEvent
+    from nanobot.providers.base import LLMUsage
+    from nanobot.session.manager import SessionManager
+    from nanobot.webui.outbound_wire import project_notification
+
+    key = "websocket:requests"
+    history.append(key, {"event": "user", "chat_id": "requests", "text": "hello"})
+    usage = LLMUsage.reported(input_tokens=12, output_tokens=3)
+    projection = project_notification("requests", ModelRequestEvent(
+        request_id="request", run_id="run", sequence=2, phase=phase,
+        usage=usage, round_usages=(usage,) * 10, context_window_tokens=32000,
+    ))
+    assert projection is not None
+    assert projection.persistence == "turn_activity"
+    assert projection.deliver_offline
+    record = {**projection.payload, "turn_id": "turn", "turn_seq": 2}
+    history.append(key, record)
+    reopened = SessionManager(tmp_path)
+    response = reopened.project_history(key, lambda snapshot: transcript_module.build_webui_thread_response(
+        key, history=snapshot, include_model_requests=True,
+    ))
+    assert response is not None
+    [event] = [e for e in response["events"] if e["event"] == "model_request"]
+    assert {field: event[field] for field in record} == record
+    assert len(event["round_usages"]) == 8
+    assert event["usage"] == usage.to_turn_dict()

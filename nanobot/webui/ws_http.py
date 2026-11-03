@@ -1221,7 +1221,9 @@ class GatewayHTTPHandler:
         active_turn_transcript_persistence_failed = (
             websocket_turn_transcript_persistence_failed(chat_id)
         )
+        include_model_requests = _query_first(query, "include_model_requests") == "1"
         revision_variant = {
+            "include_model_requests": include_model_requests,
             "active_turn_id": active_turn_id,
             "active_turn_started_at": active_turn_started_at,
             "active_turn_transcript_persistence_failed": (
@@ -1243,7 +1245,7 @@ class GatewayHTTPHandler:
         build_started = time.perf_counter()
         replay_stats = diagnostics.transcript if diagnostics is not None else TranscriptReplayStats()
         data = build_webui_thread_response(
-            decoded_key, history=history,
+            decoded_key, history=history, include_model_requests=include_model_requests,
             augment_user_media=lambda paths, local: self.media.augment_transcript_user_media(paths, local, session_key=decoded_key),
             augment_assistant_media=self.media.augment_transcript_media,
             augment_assistant_text=lambda text: self.media.rewrite_local_markdown_images(

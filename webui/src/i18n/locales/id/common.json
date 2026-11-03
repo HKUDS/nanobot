@@ -1733,6 +1733,7 @@
     "error": "Kesalahan koneksi"
   },
   "thread": {
+    "modelResponding": "Model sedang merespons",
     "subagents": {
       "stopFailed": "Tidak dapat menghentikan tugas ini.",
       "stopTask": "Hentikan {{label}}",

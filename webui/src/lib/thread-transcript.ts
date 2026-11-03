@@ -253,7 +253,7 @@ export class ThreadTranscript {
     const { source, members, text } = this.describe(event);
     const effects: ThreadProjectionEffects = { bodyWrites: new Set(), consumed: new Set() };
     let projection = this.projection;
-    const historical = !options.persisted && event.event !== "turn_end" && event.event !== "user_message"
+    const historical = !options.persisted && event.event !== "turn_end" && event.event !== "user_message" && event.event !== "model_request"
       && event.turn_id && event.turn_seq !== undefined
       && ((this.installed.get(event.turn_id)?.at(-1)?.[1] ?? -1) > event.turn_seq
         || this.textCoverage.some((item) => item.turn === event.turn_id && item.through > event.turn_seq!));

@@ -857,6 +857,43 @@ export function projectThreadEvent(
     turnAliases: new Map(previous.turnAliases),
   };
 
+  if (event.event === "model_request") {
+    if (!event.turn_id || state.closedTurnIds.has(event.turn_id)) return state;
+    const index = state.messages.findIndex((row) => row.turnId === event.turn_id);
+    const target = state.messages[index];
+    const previousRequest = target?.modelRequest;
+    if (previousRequest?.ended
+      || previousRequest?.retiredRunIds.includes(event.run_id)
+      || (previousRequest?.runId === event.run_id && event.sequence <= previousRequest.sequence)
+      || (previousRequest?.turnSeq !== undefined && event.turn_seq !== undefined
+        && event.turn_seq <= previousRequest.turnSeq)) return state;
+    const modelRequest: NonNullable<UIMessage["modelRequest"]> = {
+      ...previousRequest,
+      requestId: event.request_id,
+      runId: event.run_id,
+      sequence: event.sequence,
+      turnSeq: event.turn_seq,
+      phase: event.phase,
+      ...((event.phase === "completed" || event.phase === "failed")
+        && (event.usage?.request_count ?? 0) > (
+          previousRequest?.runId === event.run_id ? previousRequest.usage?.request_count ?? 0 : 0
+        ) ? { usageTurnSeq: event.turn_seq } : {}),
+      retiredRunIds: previousRequest && previousRequest.runId !== event.run_id
+        ? [...previousRequest.retiredRunIds, previousRequest.runId]
+        : previousRequest?.retiredRunIds ?? [],
+      ...(event.usage !== undefined ? { usage: event.usage } : {}),
+      ...(event.round_usages !== undefined ? { roundUsages: event.round_usages.slice(-8) } : {}),
+      ...(event.context_window_tokens !== undefined ? { contextWindowTokens: event.context_window_tokens } : {}),
+    };
+    const row: UIMessage = target ? { ...target, modelRequest } : {
+      id: projectionMessageId(event, options), role: "assistant", content: "",
+      createdAt: projectionCreatedAt(event, options), turnId: event.turn_id, modelRequest,
+    };
+    state.messages = target ? replaceMessageAt(state.messages, index, row) : [...state.messages, row];
+    options.effects?.bodyWrites.add(row.id);
+    return state;
+  }
+
   if (event.event === "user_message") {
     if (event.provenance?.session_message) {
       const messageId = event.provenance.session_message.message_id?.trim();
@@ -1002,6 +1039,7 @@ export function projectThreadEvent(
       compaction: {
         id: event.compaction_id,
         phase: event.phase,
+        turnSeq: event.turn_seq,
         reason: event.reason,
         ...(!options.persisted ? { announce: true } : {}),
       },
@@ -1088,7 +1126,15 @@ export function projectThreadEvent(
   state.suppressUntilTurnEnd = false;
   state.activitySegmentId = null;
   state.fileEditSegmentId = null;
-  state.messages = finalizeStreamedTurn(state.messages);
+  state.messages = finalizeStreamedTurn(state.messages).map((row) => (
+    row.modelRequest && (!turn.turnId || row.turnId === turn.turnId)
+      ? { ...row, modelRequest: { ...row.modelRequest, ended: true,
+          ...(event.usage !== undefined ? { usage: event.usage } : {}),
+          ...(event.round_usages !== undefined ? { roundUsages: event.round_usages.slice(-8) } : {}),
+          ...(event.context_window_tokens !== undefined ? { contextWindowTokens: event.context_window_tokens } : {}),
+        } }
+      : row
+  ));
   const latencyMs = typeof event.latency_ms === "number" && event.latency_ms >= 0
     ? Math.round(event.latency_ms)
     : undefined;

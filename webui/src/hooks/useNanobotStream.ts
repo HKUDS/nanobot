@@ -717,6 +717,11 @@ export function useNanobotStream(
         });
         return;
       }
+      if (ev.event === "model_request") {
+        flushPendingStreamEvents();
+        applyProjectionEvent(ev);
+        return;
+      }
       const sideChannelEvent = isSideChannelEvent(ev);
       if (ev.event === "context_compaction") {
         flushPendingStreamEvents();
@@ -1042,7 +1047,9 @@ export function useNanobotStream(
     flushPendingStreamEvents();
     setRetryStatus(null);
     setMessages((prev) => {
-      const settled = prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m));
+      const settled = prev.map((m) => ({ ...m, isStreaming: false,
+        ...(m.modelRequest ? { modelRequest: { ...m.modelRequest, ended: true } } : {}),
+      }));
       transcriptRef.current.projection = resetThreadProjectionCursor(transcriptRef.current.projection, settled);
       return settled;
     });

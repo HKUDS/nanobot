@@ -1733,6 +1733,7 @@
     "error": "連線錯誤"
   },
   "thread": {
+    "modelResponding": "模型處理中",
     "subagents": {
       "stopFailed": "無法停止此任務。",
       "stopTask": "停止 {{label}}",

@@ -1190,7 +1190,7 @@ async def test_runner_carries_retry_notifications_in_provider_context():
     assert "on_retry_wait" not in captured
     event = RetryWaitEvent("waiting")
     await captured["provider_context"].events.emit(event)
-    retry_wait_cb.assert_awaited_once_with(event)
+    retry_wait_cb.assert_any_await(event)
 
 
 @pytest.mark.asyncio

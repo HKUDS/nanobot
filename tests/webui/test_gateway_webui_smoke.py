@@ -645,8 +645,25 @@ main()
                 assert len(requests) == 17
             else:
                 await asyncio.wait_for(closing_request.wait(), 20)
-                await receive_until(lambda event: event.get("event") == "goal_status" and event.get("status") == "running")
+                waiting = await receive_until(lambda event: (
+                    event.get("event") == "model_request"
+                    and event.get("phase") == "started"
+                    and event.get("usage", {}).get("request_count") == 16
+                ))
+                assert waiting["usage"]["context_tokens"] == 10
+                assert len(waiting["round_usages"]) == 8
                 assert not any(event.get("event") == "turn_end" for event in events)
+                history_url = f"http://127.0.0.1:{ws_port}/api/sessions/{quote('websocket:' + chat_id, safe='')}/webui-thread"
+                headers = {"Authorization": f"Bearer {bootstrap['api_token']}"}
+                async with httpx.AsyncClient(trust_env=False) as client:
+                    modern = await client.get(history_url, params={"include_model_requests": "1"}, headers=headers)
+                    modern.raise_for_status()
+                    persisted = [event for event in modern.json()["events"] if event["event"] == "model_request"]
+                    assert persisted[-1]["request_id"] == waiting["request_id"]
+                    assert persisted[-1]["usage"] == waiting["usage"]
+                    legacy = await client.get(history_url, headers={**headers, "If-None-Match": modern.headers["etag"]})
+                    assert legacy.status_code == 200
+                    assert not any(event["event"] == "model_request" for event in legacy.json()["events"])
                 release_close.set()
                 end = await receive_until(lambda event: event.get("event") == "turn_end")
                 assert end.get("turn_id") == "goal-e2e"

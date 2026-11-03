@@ -256,6 +256,10 @@ class ModelRequestState:
     provider_compaction_applied: bool = False
     compacted_tool_results: set[str] = field(default_factory=set)
     events: EventSink = NO_EVENTS
+    request_run_id: str = field(default_factory=lambda: uuid4().hex)
+    request_sequence: int = 0
+    request_usage: LLMUsage | None = None
+    recent_request_usages: list[LLMUsage | None] = field(default_factory=list)
 
 
 class ContextGovernor:

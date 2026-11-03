@@ -6922,3 +6922,76 @@ async def test_webui_commands_keep_session_io_off_event_loop(
         assert "save" in calls or "replace_metadata" in calls
     assert all(json.loads(call.args[0])["event"] != "error" for call in conn.send.await_args_list)
     await channel._cleanup_connection(conn)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("connected", [False, True])
+async def test_model_request_delivery_persists_started_and_terminal_offline(history, connected):
+    from nanobot.events import ModelRequestEvent
+
+    bus = MagicMock()
+    channel = WebSocketChannel(
+        {"enabled": True, "allowFrom": ["*"]}, bus,
+        gateway=_basic_handler(bus, session_manager=history.sessions),
+    )
+    ws = AsyncMock()
+    if connected:
+        channel._attach(ws, "model-requests")
+    for sequence, phase in enumerate(("started", "completed"), 1):
+        await channel.send(await history.message(
+            channel="websocket", chat_id="model-requests", content="",
+            event=ModelRequestEvent("request", "run", sequence, phase),
+        ))
+    rows = history.read("websocket:model-requests")
+    assert [r["event"] for r in rows] == ["model_request", "model_request"]
+    assert [r["phase"] for r in rows] == ["started", "completed"]
+    if connected:
+        assert [r["phase"] for r in _sent_ws_payloads(ws)] == ["started", "completed"]
+
+
+@pytest.mark.asyncio
+async def test_history_model_request_opt_in_preserves_old_clients_cursors_and_etags(history):
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    key = "websocket:model-capability"
+    for number in range(3):
+        history.append(key, {"event": "user", "chat_id": "model-capability", "text": f"question {number}"})
+        history.append(key, {
+            "event": "model_request", "chat_id": "model-capability",
+            "request_id": f"request-{number}", "run_id": f"run-{number}",
+            "sequence": 2, "phase": "completed", "round_usages": [],
+        })
+        history.append(key, {"event": "message", "chat_id": "model-capability", "text": "answer"})
+        history.append(key, {"event": "turn_end", "chat_id": "model-capability"})
+    channel = _ch(MagicMock(), session_manager=history.sessions)
+    channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300
+    encoded = quote(key, safe="")
+
+    async def fetch(query, etag=None):
+        headers = [("Authorization", "Bearer tok")]
+        if etag:
+            headers.append(("If-None-Match", etag))
+        response = await channel.gateway.http._handle_webui_thread_get_async(Request(
+            f"/api/sessions/{encoded}/webui-thread?{query}", Headers(headers),
+        ), encoded)
+        return response, json.loads(response.body) if response.body else None
+
+    old_response, old = await fetch("limit=2&direction=latest")
+    modern_response, modern = await fetch(
+        "limit=2&direction=latest&include_model_requests=1", old_response.headers["ETag"],
+    )
+    assert old_response.status_code == modern_response.status_code == 200
+    assert old_response.headers["ETag"] != modern_response.headers["ETag"]
+    assert all(event["event"] != "model_request" for event in old["events"])
+    assert any(event["event"] == "model_request" for event in modern["events"])
+    assert old["events"] == [event for event in modern["events"] if event["event"] != "model_request"]
+    assert old["page"]["before_cursor"] == modern["page"]["before_cursor"]
+    cursor = quote(old["page"]["before_cursor"], safe="")
+    _, old_page = await fetch(f"limit=2&before={cursor}")
+    _, modern_page = await fetch(f"limit=2&before={cursor}&include_model_requests=1")
+    assert old_page["events"] == [event for event in modern_page["events"] if event["event"] != "model_request"]
+    assert old_page["page"]["loaded_event_count"] == len(old_page["events"])
+    assert modern_page["page"]["loaded_event_count"] == len(modern_page["events"])

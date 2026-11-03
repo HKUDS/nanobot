@@ -80,6 +80,7 @@ _TURN_DISPLAY_EVENTS: frozenset[str] = frozenset({
     "stream_end",
     "message",
     "file_edit",
+    "model_request",
     "turn_end",
 })
 MAX_SESSION_MENTIONS = 8
@@ -1496,8 +1497,19 @@ def _client_projection_event(
             projected["reason"] = reason
         return projected
 
-    if event == "turn_end":
-        projected = {"event": "turn_end", **common}
+    if event in {"turn_end", "model_request"}:
+        projected = {"event": event, **common}
+        if event == "model_request":
+            request_id, run_id = record.get("request_id"), record.get("run_id")
+            sequence, phase = record.get("sequence"), record.get("phase")
+            if (
+                not isinstance(request_id, str) or not request_id
+                or not isinstance(run_id, str) or not run_id
+                or not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 1
+                or phase not in ("started", "completed", "failed", "cancelled")
+            ):
+                return None
+            projected.update(request_id=request_id, run_id=run_id, sequence=sequence, phase=phase)
         latency_ms = record.get("latency_ms")
         if isinstance(latency_ms, int | float) and latency_ms >= 0:
             projected["latency_ms"] = int(latency_ms)
@@ -1511,8 +1523,8 @@ def _client_projection_event(
                 for item in cast(list[object], raw_round_usages)
                 if (sanitized := _sanitize_turn_usage(item)) is not None
             ]
-            if round_usages:
-                projected["round_usages"] = round_usages
+            if round_usages or event == "model_request":
+                projected["round_usages"] = round_usages[-8:] if event == "model_request" else round_usages
         context_window = record.get("context_window_tokens")
         if isinstance(context_window, int | float) and context_window >= 0:
             projected["context_window_tokens"] = int(context_window)
@@ -1591,6 +1603,7 @@ def _client_projection_page_event_count(turn: list[dict[str, Any]]) -> int:
         "message",
         "file_edit",
         "context_compaction",
+        "model_request",
         "turn_end",
     }
     return max(1, sum(record.get("event") in supported for record in turn))
@@ -1737,8 +1750,9 @@ def build_webui_thread_response(
     before: str | None = None,
     after: str | None = None,
     stats: TranscriptReplayStats | None = None,
+    include_model_requests: bool = False,
 ) -> dict[str, Any] | None:
-    """Return canonical transcript events for the WebUI projector."""
+    """Return canonical events, hiding additive request events from old clients."""
     replay_stats = stats or TranscriptReplayStats()
     lines, page = _select_transcript_page(
         history=history,
@@ -1821,6 +1835,14 @@ def build_webui_thread_response(
         augment_assistant_media=augment_assistant_media,
         augment_assistant_text=augment_assistant_text,
     )
+    if not include_model_requests:
+        # Select pages and stable identities before capability filtering, so an
+        # older client's cursors still navigate the same durable transcript.
+        if fork_boundary_event_index is not None:
+            fork_boundary_event_index = sum(
+                event["event"] != "model_request" for event in events[:fork_boundary_event_index]
+            )
+        events = [event for event in events if event["event"] != "model_request"]
     replay_stats.replay_ms += int((time.perf_counter() - replay_started) * 1000)
     payload["projection"] = "events"
     payload["events"] = events

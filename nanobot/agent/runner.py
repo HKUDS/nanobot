@@ -6,7 +6,8 @@ from collections.abc import Awaitable, Callable, Iterable
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, ParamSpec, TypeVar, cast
+from typing import Any, Literal, ParamSpec, TypeVar, cast
+from uuid import uuid4
 
 from loguru import logger
 
@@ -25,7 +26,7 @@ from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.execution import execute_tool_calls
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.events import NO_EVENTS, EventSink
+from nanobot.events import NO_EVENTS, EventSink, ModelRequestEvent
 from nanobot.llm_usage.context import (
     LLMUsageSource,
     bind_llm_usage_source,
@@ -42,6 +43,7 @@ from nanobot.providers.base import (
 from nanobot.providers.conversation_state import ProviderConversationStateController
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META, is_hidden_history_message
 from nanobot.session.summary import SessionSummaryCheckpoint
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import (
     build_assistant_message,
     estimate_message_tokens,
@@ -885,6 +887,63 @@ class AgentRunner:
             ),
         }
 
+    async def _invoke_model(
+        self, spec: AgentRunSpec, state: ModelRequestState, kwargs: dict[str, Any],
+        *, record_timing: Callable[[LLMResponse], None] | None = None,
+    ) -> LLMResponse:
+        """Observe the logical provider invocation, after request preparation.
+
+        Physical retries/fallbacks and provider-internal pre-request compaction
+        remain inside the call. Post-return compaction summarization is outside.
+        Only provider-returned usage is published here, never estimated zeros.
+        """
+        request_id = uuid4().hex
+
+        async def emit(phase: Literal["started", "completed", "failed", "cancelled"]) -> None:
+            state.request_sequence += 1
+            if not spec.events.accepts(ModelRequestEvent):
+                return
+            await spec.events.emit(ModelRequestEvent(
+                request_id=request_id, run_id=state.request_run_id,
+                sequence=state.request_sequence, phase=phase,
+                usage=state.request_usage,
+                round_usages=tuple(usage for usage in state.recent_request_usages if usage is not None),
+                context_window_tokens=spec.runtime.context_window_tokens,
+            ))
+
+        try:
+            await emit("started")
+            _raise_if_cancelling()
+            response = await spec.runtime.provider.chat_stream_with_retry(**kwargs)
+            _raise_if_cancelling()
+        except asyncio.CancelledError:
+            try:
+                await shield_and_drain(emit("cancelled"))
+            except asyncio.CancelledError:
+                pass
+            raise
+        except Exception:
+            await emit("failed")
+            raise
+        if record_timing is not None:
+            record_timing(response)
+        if response.usage is not None:
+            # Use exactly the same reported-usage/timing normalization as the
+            # terminal accounting path; missing usage remains absent live.
+            reported_usage = response.usage.with_timing(
+                generation_ms=response.generation_ms, ttft_ms=response.ttft_ms,
+            )
+            state.request_usage = (
+                reported_usage if state.request_usage is None
+                else state.request_usage + reported_usage
+            )
+            state.recent_request_usages.append(reported_usage)
+        else:
+            state.recent_request_usages.append(None)
+        del state.recent_request_usages[:-8]
+        await emit("failed" if response.finish_reason == "error" else "completed")
+        return response
+
     async def _request_model(
         self,
         spec: AgentRunSpec,
@@ -1018,7 +1077,14 @@ class AgentRunner:
                 on_tool_call_delta=_provider_tool_event,
                 on_stream_recover=_stream_recover,
             )
-        coro = spec.runtime.provider.chat_stream_with_retry(**kwargs)
+        def record_timing(response: LLMResponse) -> None:
+            _pause_generation()
+            if first_output_at is not None:
+                response.ttft_ms = max(0, round((first_output_at - request_started_at) * 1000))
+            if generation_elapsed_s > 0:
+                response.generation_ms = max(1, round(generation_elapsed_s * 1000))
+
+        coro = self._invoke_model(spec, request_state, kwargs, record_timing=record_timing)
 
         # Providers bound the wait for each stream event, including reasoning and tool deltas.
         request_started_at = time.perf_counter()
@@ -1032,10 +1098,6 @@ class AgentRunner:
         _pause_generation()
         await _close_native_reasoning()
         _end_stream_segment()
-        if first_output_at is not None:
-            response.ttft_ms = max(0, round((first_output_at - request_started_at) * 1000))
-        if generation_elapsed_s > 0:
-            response.generation_ms = max(1, round(generation_elapsed_s * 1000))
         await self.context_governor.summarize_provider_compaction(
             request_state,
             response,
@@ -1261,7 +1323,7 @@ class AgentRunner:
             transcript=transcript,
         )
         _raise_if_cancelling()
-        response = await spec.runtime.provider.chat_stream_with_retry(**kwargs)
+        response = await self._invoke_model(spec, request_state, kwargs)
         _raise_if_cancelling()
         await self.context_governor.summarize_provider_compaction(
             request_state,

@@ -8,6 +8,8 @@ type Role = "user" | "assistant" | "tool" | "system";
 type MessageKind = "message" | "trace" | "compaction";
 
 export interface UIContextCompaction extends ContextCompaction {
+  /** Lifecycle event sequence, independent of the row's display position. */
+  turnSeq?: number;
   /** Live wire transitions announce; hydrated transcript rows stay silent. */
   announce?: boolean;
 }
@@ -160,6 +162,21 @@ export interface UIMessage {
   usage?: TurnUsage;
   /** Logical model rounds in display order; runner-level recovery calls are aggregated. */
   roundUsages?: RoundUsage[];
+  /** Turn-owned model snapshot, independent of answer/tool streaming. */
+  modelRequest?: {
+    requestId: string;
+    runId: string;
+    sequence: number;
+    turnSeq?: number;
+    phase: "started" | "completed" | "failed" | "cancelled";
+    retiredRunIds: string[];
+    /** Only a completed request with actual usage advances context freshness. */
+    usageTurnSeq?: number;
+    ended?: boolean;
+    usage?: TurnUsage;
+    roundUsages?: RoundUsage[];
+    contextWindowTokens?: number;
+  };
   /** Configured context-window capacity for the model used by this turn. */
   contextWindowTokens?: number;
   /** Lightweight provenance for proactive assistant messages. */
@@ -1584,6 +1601,17 @@ export type InboundEvent =
       reauth_provider?: string;
     }
   | ({
+      event: "model_request";
+      chat_id: string;
+      request_id: string;
+      run_id: string;
+      sequence: number;
+      phase: "started" | "completed" | "failed" | "cancelled";
+      usage?: TurnUsage;
+      round_usages?: RoundUsage[];
+      context_window_tokens?: number;
+    } & InboundTurnMetadata)
+  | ({
       event: "turn_end";
       chat_id: string;
       latency_ms?: number;
@@ -1650,6 +1678,7 @@ export type InboundEvent =
     };
 
 type ThreadProjectionEventName =
+  | "model_request"
   | "user_message"
   | "message"
   | "file_edit"

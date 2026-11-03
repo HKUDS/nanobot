@@ -24,6 +24,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import SubagentTaskChanged
+from nanobot.events import ModelRequestEvent
 from nanobot.pairing.events import PairingChanged
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
@@ -153,7 +154,7 @@ class WebUIOutboundDelivery:
         recipients = self._transport.webui_recipients(ChatAudience(msg.chat_id))
         if not recipients:
             quiet_events = (
-                ProgressEvent, RetryStatusEvent, UserInputEvent, TurnEndEvent, SessionUpdatedEvent,
+                ModelRequestEvent, ProgressEvent, RetryStatusEvent, UserInputEvent, TurnEndEvent, SessionUpdatedEvent,
                 GoalStatusEvent, GoalStateSyncEvent, SubagentTaskChanged, ContextCompactionEvent,
             )
             log = logger.debug if isinstance(event, quiet_events) else logger.warning

@@ -1733,6 +1733,7 @@
     "error": "Lỗi kết nối"
   },
   "thread": {
+    "modelResponding": "Mô hình đang phản hồi",
     "subagents": {
       "stopFailed": "Không thể dừng tác vụ này.",
       "stopTask": "Dừng {{label}}",
