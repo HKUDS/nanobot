@@ -12,12 +12,15 @@ import math
 import os
 import threading
 import time
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
 from nanobot.config.paths import get_webui_dir
+from nanobot.utils.cancellation import shield_and_drain
 
 if TYPE_CHECKING:
     from nanobot.session.state import SessionState
@@ -264,8 +267,34 @@ def write_webui_sidebar_state(raw: dict[str, Any]) -> dict[str, Any]:
         return _write_webui_sidebar_state(raw)
 
 
+def write_webui_sidebar_preferences(raw: dict[str, Any]) -> dict[str, Any]:
+    """Archive-only changes must not rewrite the unchanged preference file."""
+    with _SIDEBAR_STATE_WRITE_LOCK:
+        target = normalize_webui_sidebar_state(raw)
+        current: object = None
+        try:
+            with webui_sidebar_state_path().open("rb") as source:
+                encoded = source.read(_MAX_STATE_FILE_BYTES + 1)
+            if len(encoded) <= _MAX_STATE_FILE_BYTES:
+                current = json.loads(encoded)
+        except (OSError, ValueError):
+            # Comparison is optional; the normal write still validates and
+            # reports errors, and can replace a missing or damaged file.
+            pass
+        if isinstance(current, dict) and "archived_keys" not in current:
+            previous_timestamp = cast(dict[str, Any], current).get("updated_at")
+            if previous_timestamp is None or isinstance(previous_timestamp, str):
+                target["updated_at"] = previous_timestamp
+                if target == current:
+                    return target
+        return _persist_webui_sidebar_state(target)
+
+
 def _write_webui_sidebar_state(raw: dict[str, Any]) -> dict[str, Any]:
-    state = normalize_webui_sidebar_state(raw)
+    return _persist_webui_sidebar_state(normalize_webui_sidebar_state(raw))
+
+
+def _persist_webui_sidebar_state(state: dict[str, Any]) -> dict[str, Any]:
     state["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     encoded = json.dumps(
         state,
@@ -296,31 +325,73 @@ def _write_webui_sidebar_state(raw: dict[str, Any]) -> dict[str, Any]:
     return state
 
 
-async def ensure_webui_session_archives(sessions: SessionState) -> list[str]:
-    keys = await sessions.archived_keys()
-    if keys is None:
+async def ensure_webui_archives_imported(sessions: SessionState) -> None:
+    if not await sessions.archives_imported():
         legacy = await asyncio.to_thread(read_legacy_archived_keys)
-        keys = await sessions.import_archives(legacy)
+        await sessions.import_archives(legacy)
         await asyncio.to_thread(remove_legacy_archived_keys)
-    return keys
+
+
+async def ensure_webui_session_archives(sessions: SessionState) -> list[str]:
+    await ensure_webui_archives_imported(sessions)
+    return await sessions.archived_keys()
 
 
 class WebUISidebarState:
     def __init__(self, sessions: SessionState | None) -> None:
         self._sessions = sessions
         self._lock = asyncio.Lock()
+        self._readers = 0
+        self._readers_drained = asyncio.Event()
+        self._readers_drained.set()
+
+    @asynccontextmanager
+    async def _read_snapshot(self) -> AsyncGenerator[None, None]:
+        # The FIFO admission lock lets readers overlap without overtaking a writer.
+        async with self._lock:
+            self._readers += 1
+            self._readers_drained.clear()
+        try:
+            yield
+        finally:
+            self._readers -= 1
+            if not self._readers:
+                self._readers_drained.set()
 
     async def read(self) -> dict[str, Any]:
-        async with self._lock:
-            archived = await ensure_webui_session_archives(self._sessions) if self._sessions is not None else []
-            preferences = await asyncio.to_thread(read_webui_sidebar_state)
+        async with self._read_snapshot():
+            if self._sessions is None:
+                preferences = await asyncio.to_thread(read_webui_sidebar_state)
+                return {**preferences, "archived_keys": []}
+            await ensure_webui_archives_imported(self._sessions)
+            preferences, archived = await asyncio.gather(
+                asyncio.to_thread(read_webui_sidebar_state), self._sessions.archived_keys(),
+            )
             return {**preferences, "archived_keys": archived}
 
     async def write(self, raw: dict[str, Any]) -> dict[str, Any]:
         # Keep each successful wire snapshot ordered across the two stores.
         async with self._lock:
-            archived = await ensure_webui_session_archives(self._sessions) if self._sessions is not None else []
-            preferences = await asyncio.to_thread(write_webui_sidebar_state, raw)
-            if self._sessions is not None and "archived_keys" in raw:
-                archived = await self._sessions.set_archived_keys(_clean_string_list(raw["archived_keys"]))
-            return {**preferences, "archived_keys": archived}
+            await self._readers_drained.wait()
+            return await shield_and_drain(self._write_snapshot(raw))
+
+    async def _write_snapshot(self, raw: dict[str, Any]) -> dict[str, Any]:
+        if self._sessions is None:
+            preferences = await asyncio.to_thread(write_webui_sidebar_preferences, raw)
+            return {**preferences, "archived_keys": []}
+        await ensure_webui_archives_imported(self._sessions)
+        preferences, archived = await asyncio.gather(
+            asyncio.to_thread(write_webui_sidebar_preferences, raw), self._sessions.archived_keys(),
+            return_exceptions=True,
+        )
+        # Settle both branches before releasing admission, including failed reads.
+        if isinstance(preferences, BaseException):
+            raise preferences
+        if isinstance(archived, BaseException):
+            raise archived
+        if "archived_keys" in raw:
+            target = _clean_string_list(raw["archived_keys"])
+            # Unchanged flags complete at the committed read, without a writer.
+            if set(target) != set(archived):
+                archived = await self._sessions.set_archived_keys(target)
+        return {**preferences, "archived_keys": archived}

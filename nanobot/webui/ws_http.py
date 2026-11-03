@@ -113,7 +113,7 @@ from nanobot.webui.session_list_index import (
 )
 from nanobot.webui.sidebar_state import (
     WebUISidebarState,
-    ensure_webui_session_archives,
+    ensure_webui_archives_imported,
 )
 from nanobot.webui.skills_api import (
     SkillManagementError,
@@ -1371,7 +1371,7 @@ class GatewayHTTPHandler:
                     "automations": serialize_automation_jobs(automation_jobs),
                 }
             )
-        await ensure_webui_session_archives(self.session_manager.state)
+        await ensure_webui_archives_imported(self.session_manager.state)
         if automation_jobs:
             for job in automation_jobs:
                 if isinstance(job, LocalTrigger):

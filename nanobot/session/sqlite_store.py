@@ -482,28 +482,31 @@ class SqliteSessionStore:
         return True
 
 
-    def archived_keys(self) -> list[str] | None:
-        """Return archive state, or None until the legacy import has committed."""
+    def archives_imported(self) -> bool:
         with self.transaction(write=False) as db:
-            if db.execute("SELECT 1 FROM storage_meta WHERE key='session_archives_imported'").fetchone() is None:
-                return None
-            return [row[0] for row in db.execute("SELECT key FROM session_archives ORDER BY key")]
+            return db.execute("SELECT 1 FROM storage_meta WHERE key='session_archives_imported'").fetchone() is not None
+
+    def archived_keys(self) -> list[str]:
+        with self.transaction(write=False) as db:
+            encoded = db.execute("SELECT json_group_array(key) FROM (SELECT key FROM session_archives ORDER BY key)").fetchone()[0]
+            return cast(list[str], json.loads(encoded))
 
     def import_archives(self, keys: list[str]) -> list[str]:
         with self.transaction() as db:
-            current = self.archived_keys()
-            if current is not None:
-                return current
+            if self.archives_imported():
+                return self.archived_keys()
             imported = self.set_archived_keys(keys)
             db.execute("INSERT INTO storage_meta (key, value) VALUES ('session_archives_imported', '1')")
             return imported
 
     def set_archived_keys(self, keys: list[str]) -> list[str]:
         with self.transaction() as db:
-            db.execute("DELETE FROM session_archives WHERE key NOT IN (SELECT value FROM json_each(?))", (_encode(keys),))
+            current = set(self.archived_keys())
+            target = set(keys)
+            db.executemany("DELETE FROM session_archives WHERE key=?", ((key,) for key in current - target))
             now = datetime.now().isoformat()
-            db.executemany("INSERT OR IGNORE INTO session_archives (key, archived_at) VALUES (?, ?)", ((key, now) for key in keys))
-            return [row[0] for row in db.execute("SELECT key FROM session_archives ORDER BY key")]
+            db.executemany("INSERT INTO session_archives (key, archived_at) VALUES (?, ?)", ((key, now) for key in target - current))
+            return sorted(target)
 
     def delete(self, key: str, *, preserve_archive: bool = False) -> bool:
         with self.transaction() as db:
