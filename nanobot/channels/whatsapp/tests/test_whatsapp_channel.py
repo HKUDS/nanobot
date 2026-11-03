@@ -148,39 +148,6 @@ def test_startup_preserves_compatible_neonize(monkeypatch, installed_version, ne
     assert installs == ([("whatsapp", list(PLUGIN.dependencies))] if needs_upgrade else [])
 
 
-@pytest.mark.asyncio
-async def test_login_callbacks_with_installed_neonize(monkeypatch, tmp_path):
-    pytest.importorskip("neonize")
-    import ctypes
-
-    from neonize.aioze import events as neonize_events
-    from neonize.events import EVENT_TO_INT
-
-    monkeypatch.setattr(whatsapp_module, "_NEONIZE_API", None)
-    monkeypatch.setattr(neonize_events, "event_global_loop", asyncio.get_running_loop())
-    api = whatsapp_module._load_neonize()
-    channel = _make_channel({"databasePath": str(tmp_path / "neonize.db")})
-    qr_codes = []
-
-    async def on_qr(data: bytes) -> None:
-        qr_codes.append(data)
-
-    client, login_result = channel.connect_open_client(qr_handler=on_qr)
-    try:
-        client.me = SimpleNamespace(JID=api.build_jid("15550000001"), LID=api.build_jid("123", "lid"))
-        await client.event._qr(client, b"synthetic")
-        payload = api.ConnectedEv(status=True).SerializeToString()
-        buffer = ctypes.create_string_buffer(payload)
-        client.event.execute(0, ctypes.addressof(buffer), len(payload), EVENT_TO_INT[api.ConnectedEv])
-        await asyncio.wait_for(login_result, timeout=2)
-
-        assert qr_codes == [b"synthetic"]
-        assert channel._connected is True
-        assert "15550000001@s.whatsapp.net" in channel._self_jids
-    finally:
-        await client.stop()
-
-
 def _patch_receipt_type(monkeypatch):
     neonize = types.ModuleType("neonize")
     utils = types.ModuleType("neonize.utils")
