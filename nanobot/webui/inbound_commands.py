@@ -60,7 +60,6 @@ from nanobot.webui.session_access import (
     session_mentions_runtime_context,
 )
 from nanobot.webui.session_identity import is_valid_webui_chat_id, webui_session_key
-from nanobot.webui.sidebar_state import write_webui_sidebar_state
 from nanobot.webui.temporary_chats import TemporaryChatError
 from nanobot.webui.transcription_ws import webui_transcription_event
 
@@ -405,10 +404,7 @@ class WebUICommandRouter:
                 )
                 return
             try:
-                saved_state = await asyncio.to_thread(
-                    write_webui_sidebar_state,
-                    cast(dict[str, Any], state),
-                )
+                saved_state = await self._http_router.sidebar_state.write(cast(dict[str, Any], state))
             except (OSError, ValueError):
                 await self._transport.webui_send_event(
                     connection,

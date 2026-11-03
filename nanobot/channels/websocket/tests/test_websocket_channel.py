@@ -1579,66 +1579,63 @@ async def test_webui_persists_sidebar_state_larger_than_http_request_line(
         "event": "webui_response",
         "request_id": request_id,
         "ok": True,
-        "result": saved,
+        "result": {**saved, "archived_keys": []},
     }
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("command_type", ["webui_request", "set_sidebar_state"])
 async def test_webui_sidebar_state_update_broadcasts_workbench_to_other_devices(
     bus: MagicMock,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    command_type: str,
 ) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    channel = _ch(bus)
+    sessions = SessionManager(tmp_path)
+    await sessions.state.import_messages("websocket:a", [{"role": "user", "content": "saved"}])
+    await sessions.state.fork("websocket:a", "websocket:b", 0)
+    sessions.get_or_create("websocket:draft")
+    channel = _ch(bus, session_manager=sessions)
     source = AsyncMock()
     source.request = SimpleNamespace(headers=Headers())
     other_device = AsyncMock()
     channel._webui_connections.update({source, other_device})
     channel._register_connection_outbound(other_device)
-    request_id = "sidebar-workbench-state"
-
-    await channel._dispatch_envelope(
-        source,
-        "webui-client",
-        {
-            "type": "webui_request",
-            "request_id": request_id,
-            "action": "sidebar.update",
-            "payload": {
-                "state": {
-                    "workbench": {
-                        "version": 1,
-                        "tabs": {
-                            "tab:websocket:a": {
-                                "explicit": True,
-                                "title": "Research",
-                                "paneKeys": ["websocket:a", "websocket:b"],
-                                "layoutPaneKeys": ["websocket:b", "websocket:a"],
-                                "layout": "columns",
-                                "splitRatios": [0.35],
-                            }
-                        },
-                    }
+    state = {
+        "archived_keys": ["websocket:b", "websocket:draft"],
+        "workbench": {
+            "version": 1,
+            "tabs": {
+                "tab:websocket:a": {
+                    "explicit": True,
+                    "title": "Research",
+                    "paneKeys": ["websocket:a", "websocket:b"],
+                    "layoutPaneKeys": ["websocket:b", "websocket:a"],
+                    "layout": "columns",
+                    "splitRatios": [0.35],
                 }
             },
         },
-    )
-    await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
-
-    event = json.loads(other_device.send.await_args.args[0])
-    assert event["event"] == "sidebar_state_updated"
-    assert event["state"]["workbench"]["tabs"]["tab:websocket:a"]["paneKeys"] == [
-        "websocket:a",
-        "websocket:b",
-    ]
-    assert event["state"]["workbench"]["tabs"]["tab:websocket:a"]["layoutPaneKeys"] == [
-        "websocket:b",
-        "websocket:a",
-    ]
-    assert event["state"]["workbench"]["tabs"]["tab:websocket:a"]["splitRatios"] == [
-        0.35
-    ]
+    }
+    envelope = {"type": command_type, "state": state} if command_type == "set_sidebar_state" else {
+        "type": command_type, "request_id": "sidebar-workbench-state",
+        "action": "sidebar.update", "payload": {"state": state},
+    }
+    try:
+        await channel._dispatch_envelope(source, "webui-client", envelope)
+        await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+        event = json.loads(other_device.send.await_args.args[0])
+        assert event["event"] == "sidebar_state_updated"
+        assert event["state"]["archived_keys"] == ["websocket:b"]
+        assert await sessions.state.archived_keys() == ["websocket:b"]
+        assert event["state"]["workbench"] == state["workbench"]
+        persisted = json.loads((tmp_path / "webui" / "sidebar-state.json").read_text(encoding="utf-8"))
+        assert "archived_keys" not in persisted
+        assert persisted["workbench"] == state["workbench"]
+    finally:
+        await channel.stop()
+        await sessions.state.aclose()
 
 
 @pytest.mark.asyncio

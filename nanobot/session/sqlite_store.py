@@ -94,9 +94,29 @@ def _create_schema_v2(db: sqlite3.Connection) -> None:
         db.execute(statement)
 
 
+def _create_schema_v3(db: sqlite3.Connection) -> None:
+    # Empty chats can be archived before their first persisted message.
+    db.execute("""CREATE TABLE session_archives (
+        key TEXT PRIMARY KEY, archived_at TEXT NOT NULL
+    )""")
+
+
+def _create_schema_v4(db: sqlite3.Connection) -> None:
+    db.execute("""CREATE TABLE session_archives_v4 (
+        key TEXT PRIMARY KEY REFERENCES sessions(key)
+            ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED,
+        archived_at TEXT NOT NULL
+    )""")
+    db.execute("""INSERT INTO session_archives_v4 (key, archived_at)
+        SELECT archives.key, archives.archived_at FROM session_archives AS archives
+        JOIN sessions ON sessions.key = archives.key""")
+    db.execute("DROP TABLE session_archives")
+    db.execute("ALTER TABLE session_archives_v4 RENAME TO session_archives")
+
+
 # Entries upgrade version N to N+1. Preserve released entries and append upgrades.
 _SCHEMA_MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
-    _create_schema_v1, _create_schema_v2,
+    _create_schema_v1, _create_schema_v2, _create_schema_v3, _create_schema_v4,
 )
 
 
@@ -475,9 +495,47 @@ class SqliteSessionStore:
         return True
 
 
-    def delete(self, key: str) -> bool:
+    def archives_imported(self) -> bool:
+        with self.transaction(write=False) as db:
+            return db.execute("SELECT 1 FROM storage_meta WHERE key='session_archives_imported'").fetchone() is not None
+
+    def archived_keys(self) -> list[str]:
+        with self.transaction(write=False) as db:
+            encoded = db.execute("SELECT json_group_array(key) FROM (SELECT key FROM session_archives ORDER BY key)").fetchone()[0]
+            return cast(list[str], json.loads(encoded))
+
+    def import_archives(self, keys: list[str]) -> list[str]:
         with self.transaction() as db:
-            return db.execute("DELETE FROM sessions WHERE key=?", (key,)).rowcount > 0
+            if self.archives_imported():
+                return self.archived_keys()
+            imported = self.set_archived_keys(keys)
+            db.execute("INSERT INTO storage_meta (key, value) VALUES ('session_archives_imported', '1')")
+            return imported
+
+    def set_archived_keys(self, keys: list[str]) -> list[str]:
+        with self.transaction() as db:
+            current = set(self.archived_keys())
+            requested = set(keys)
+            # Existing memberships are valid by FK; only new keys need validation.
+            added = requested - current
+            if added:
+                added = {row[0] for row in db.execute(
+                    "SELECT key FROM sessions WHERE key IN (SELECT value FROM json_each(?))",
+                    (_encode(list(added)),),
+                )}
+            target = (requested & current) | added
+            db.executemany("DELETE FROM session_archives WHERE key=?", ((key,) for key in current - target))
+            now = datetime.now().isoformat()
+            db.executemany("INSERT INTO session_archives (key, archived_at) VALUES (?, ?)", ((key, now) for key in target - current))
+            return sorted(target)
+
+    def delete(self, key: str, *, preserve_archive: bool = False) -> bool:
+        with self.transaction() as db:
+            archived = False
+            if not preserve_archive:
+                archived = db.execute("DELETE FROM session_archives WHERE key=?", (key,)).rowcount > 0
+            deleted = db.execute("DELETE FROM sessions WHERE key=?", (key,)).rowcount > 0
+            return archived or deleted
 
     def list_sessions(self) -> list[SessionInfo]:
         with self.transaction(write=False) as db:

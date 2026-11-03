@@ -112,8 +112,8 @@ from nanobot.webui.session_list_index import (
     list_webui_sessions,
 )
 from nanobot.webui.sidebar_state import (
-    read_webui_sidebar_state,
-    write_webui_sidebar_state,
+    WebUISidebarState,
+    ensure_webui_archives_imported,
 )
 from nanobot.webui.skills_api import (
     SkillManagementError,
@@ -395,6 +395,7 @@ class GatewayHTTPHandler:
     ) -> None:
         self.config = config
         self.session_manager = session_manager
+        self.sidebar_state = WebUISidebarState(session_manager.state if session_manager is not None else None)
         self.static_dist_path = static_dist_path
         self.runtime_model_name = runtime_model_name
         self.bus = bus
@@ -1370,6 +1371,7 @@ class GatewayHTTPHandler:
                     "automations": serialize_automation_jobs(automation_jobs),
                 }
             )
+        await ensure_webui_archives_imported(self.session_manager.state)
         if automation_jobs:
             for job in automation_jobs:
                 if isinstance(job, LocalTrigger):
@@ -1707,9 +1709,9 @@ class GatewayHTTPHandler:
                 return _http_error(500, "failed to save reminder preference")
             return _http_json_response({"show": show})
         if got == "/api/webui/sidebar-state":
-            return self._handle_webui_sidebar_state(request)
+            return await self._handle_webui_sidebar_state(request)
         if got == "/api/webui/sidebar-state/update":
-            return self._handle_webui_sidebar_state_update(request)
+            return await self._handle_webui_sidebar_state_update(request)
         return None
 
     def _handle_commands(self, request: WsRequest) -> Response:
@@ -1951,12 +1953,17 @@ class GatewayHTTPHandler:
             return _http_error(404, "skill not found")
         return _http_json_response(payload)
 
-    def _handle_webui_sidebar_state(self, request: WsRequest) -> Response:
+    async def _handle_webui_sidebar_state(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
-        return _http_json_response(read_webui_sidebar_state())
+        try:
+            state = await self.sidebar_state.read()
+        except (OSError, ValueError):
+            self._log.exception("failed to read webui sidebar state")
+            return _http_error(500, "failed to read sidebar state")
+        return _http_json_response(state)
 
-    def _handle_webui_sidebar_state_update(self, request: WsRequest) -> Response:
+    async def _handle_webui_sidebar_state_update(self, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         payload = _mutation_payload(request)
@@ -1966,7 +1973,7 @@ class GatewayHTTPHandler:
         if not isinstance(state_value, dict):
             return _http_error(400, "state must be an object")
         try:
-            state = write_webui_sidebar_state(cast(dict[str, Any], state_value))
+            state = await self.sidebar_state.write(cast(dict[str, Any], state_value))
         except ValueError as e:
             return _http_error(400, str(e))
         except OSError:

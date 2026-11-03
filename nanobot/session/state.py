@@ -83,6 +83,8 @@ class SessionState:
             thread_name_prefix="session-write",
         )
         self._closed = False
+        # Import completion is permanent; archive contents are never cached.
+        self._archives_imported = False
         self._close_task: asyncio.Task[None] | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -121,12 +123,14 @@ class SessionState:
         *,
         operation_name: str | None = None,
         write: bool = True,
+        barrier: bool = True,
     ) -> _T:
         async def run() -> _T:
             return await self._run_operation(operation, write=write)
 
         return await self._submit(
             key, run, operation_name=operation_name or getattr(operation, "__name__", "session operation"),
+            barrier=barrier,
         )
 
     async def _submit(
@@ -817,6 +821,34 @@ class SessionState:
             write=False,
         )
 
+    async def archives_imported(self) -> bool:
+        if not self._archives_imported and await self._execute(
+            None, self._store.archives_imported, operation_name="archives_imported",
+            write=False, barrier=False,
+        ):
+            self._archives_imported = True
+        return self._archives_imported
+
+    async def archived_keys(self) -> list[str]:
+        return await self._execute(
+            None, self._store.archived_keys, operation_name="archived_keys",
+            write=False, barrier=False,
+        )
+
+    async def import_archives(self, keys: Sequence[str]) -> list[str]:
+        values = list(keys)
+        imported = await self._execute(
+            None, lambda: self._store.import_archives(values), operation_name="import_archives",
+        )
+        self._archives_imported = True
+        return imported
+
+    async def set_archived_keys(self, keys: Sequence[str]) -> list[str]:
+        values = list(dict.fromkeys(keys))
+        return await self._execute(
+            None, lambda: self._store.set_archived_keys(values), operation_name="set_archived_keys",
+        )
+
     async def list_sessions(self) -> list[dict[str, Any]]:
         return await self._execute(
             None,
@@ -1114,7 +1146,7 @@ class SessionState:
                 for name in (*_RESERVED_KEYS, "webui_recovery", "_last_summary", "_stopped_at_iteration_limit"):
                     session.metadata.pop(name, None)
                 if session.policy.persist:
-                    self._store.delete(key)
+                    self._store.delete(key, preserve_archive=True)
                 self._commit(session)
                 return session
 

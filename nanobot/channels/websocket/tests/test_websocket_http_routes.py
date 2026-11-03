@@ -2442,6 +2442,8 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
 ) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     sm = _seed_session(tmp_path, key="websocket:sidebar")
+    await sm.state.fork("websocket:sidebar", "websocket:old", 0)
+    sm.get_or_create("websocket:draft")
     channel = _ch(bus, session_manager=sm, port=29911)
     server_task = asyncio.create_task(channel.start())
     try:
@@ -2458,7 +2460,7 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
 
         payload = {
             "pinned_keys": ["websocket:sidebar"],
-            "archived_keys": ["websocket:old"],
+            "archived_keys": ["websocket:old", "websocket:draft"],
             "session_order": ["websocket:old", "websocket:sidebar"],
             "title_overrides": {"websocket:sidebar": "Pinned work"},
             "view": {"density": "compact", "show_archived": True},
@@ -2471,15 +2473,19 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
         assert updated.status_code == 200
         body = updated.json()
         assert body["pinned_keys"] == ["websocket:sidebar"]
+        assert body["archived_keys"] == ["websocket:old"]
+        assert await sm.state.archived_keys() == ["websocket:old"]
         assert body["session_order"] == ["websocket:old", "websocket:sidebar"]
         assert body["title_overrides"] == {"websocket:sidebar": "Pinned work"}
         assert body["view"]["density"] == "compact"
 
         state_path = tmp_path / "webui" / "sidebar-state.json"
         assert state_path.is_file()
-        assert json.loads(state_path.read_text(encoding="utf-8"))["pinned_keys"] == [
-            "websocket:sidebar"
-        ]
+        persisted = json.loads(state_path.read_text(encoding="utf-8"))
+        assert persisted["pinned_keys"] == ["websocket:sidebar"]
+        assert "archived_keys" not in persisted
+        read_back = await _http_get("http://127.0.0.1:29911/api/webui/sidebar-state", headers=auth)
+        assert read_back.json()["archived_keys"] == ["websocket:old"]
     finally:
         await channel.stop()
         await server_task

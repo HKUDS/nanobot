@@ -200,3 +200,56 @@ def test_missing_sqlite_json_support_is_rejected_before_database_changes(tmp_pat
             store.initialize()
     assert _database_snapshot(store.path) == before
     assert store.path.read_bytes() == before_bytes
+
+
+def test_v4_archive_upgrade_removes_orphans_and_preserves_existing_membership(tmp_path, monkeypatch):
+    store = SqliteSessionStore(tmp_path)
+    with monkeypatch.context() as patch:
+        patch.setattr(sqlite_store, "_SCHEMA_MIGRATIONS", sqlite_store._SCHEMA_MIGRATIONS[:3])
+        store.initialize()
+        original = _session()
+        store.save(original)
+        store.save(Session(key="chat:empty-fork"))
+        with store.transaction() as db:
+            db.executemany(
+                "INSERT INTO session_archives (key, archived_at) VALUES (?, ?)",
+                [(key, "2026-11-01T12:00:00") for key in ("chat:extensions", "chat:empty-fork", "chat:draft")],
+            )
+            db.execute("INSERT INTO storage_meta (key, value) VALUES ('session_archives_imported', '1')")
+    store.initialize()
+    store.initialize()
+    assert _database_snapshot(store.path)[0] == 4
+    assert store.archived_keys() == ["chat:empty-fork", "chat:extensions"]
+    assert store.archives_imported()
+    assert store.load("chat:extensions") == original
+    with store.transaction(write=False) as db:
+        assert [row[0] for row in db.execute("SELECT archived_at FROM session_archives")] == ["2026-11-01T12:00:00"] * 2
+        assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+    with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY"):
+        with store.transaction() as db:
+            db.execute("INSERT INTO session_archives VALUES ('chat:draft', 'now')")
+    assert store.archived_keys() == ["chat:empty-fork", "chat:extensions"]
+
+
+def test_archive_reference_allows_atomic_session_replacement_but_not_orphan_commit(tmp_path):
+    store = SqliteSessionStore(tmp_path)
+    store.initialize()
+    original = _session()
+    store.save(original)
+    assert store.set_archived_keys([original.key]) == [original.key]
+    with store.transaction(write=False) as db:
+        archived_at = db.execute("SELECT archived_at FROM session_archives").fetchone()[0]
+    assert store.set_archived_keys([original.key]) == [original.key]
+    assert store.set_archived_keys([original.key, "chat:missing"]) == [original.key]
+    with store.transaction():
+        assert store.delete(original.key, preserve_archive=True)
+        store.save(Session(key=original.key))
+    assert store.archived_keys() == [original.key]
+    with store.transaction(write=False) as db:
+        assert db.execute("SELECT archived_at FROM session_archives").fetchone()[0] == archived_at
+    with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY"):
+        store.delete(original.key, preserve_archive=True)
+    assert store.load(original.key) is not None
+    assert store.archived_keys() == [original.key]
+    assert store.delete(original.key)
+    assert store.archived_keys() == []
