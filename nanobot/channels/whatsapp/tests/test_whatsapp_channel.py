@@ -114,7 +114,7 @@ def _patch_neonize_api(monkeypatch, detect_mime=None, detect_buffer=None) -> Non
 
 @pytest.mark.parametrize(
     ("installed_version", "needs_upgrade"),
-    [("0.4.3.post0", True), ("0.5.2", False)],
+    [("0.4.3.post0", True), ("0.5.2", False), ("0.10.0", False)],
 )
 def test_startup_preserves_compatible_neonize(monkeypatch, installed_version, needs_upgrade):
     from nanobot import optional_features
