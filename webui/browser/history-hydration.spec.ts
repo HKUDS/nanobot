@@ -181,7 +181,7 @@ test("idle compaction stays singular across live updates, thread refresh and col
   backend.healthy();
 });
 
-test("pre-request compaction precedes the answer in live output and history replay", async ({ page }) => {
+test("pre-request compaction stays in place through retries and precedes the answer in history", async ({ page }) => {
   const { backend, body } = await openFixture(page);
   const base = closedTurn("before-native", "Previous question", "Previous answer.");
   await backend.release(await backend.read(), history(base));
@@ -190,14 +190,33 @@ test("pre-request compaction precedes the answer in live output and history repl
   const compact: ThreadProjectionEvent = { ...at(TURN, 2, "activity"), event: "context_compaction", compaction_id: "native-before-answer", phase: "succeeded" };
   await backend.send(question);
   await backend.send({ event: "context_compaction", chat_id: A, compaction_id: "native-before-answer", phase: "started" });
+  const notice = body.locator("[data-context-compaction]");
+  await expect(notice).toHaveCount(1);
+  await notice.evaluate((element) => { element.setAttribute("data-retry-notice", "original"); });
+  for (const attempt of [1, 2]) {
+    await backend.send({ event: "retry_status", chat_id: A, state: "waiting", attempt,
+      max_attempts: 4, error_kind: "timeout", retry_after_s: 1 });
+    await expect(notice).toHaveCount(1);
+    await expect(notice).toHaveAttribute("data-context-compaction", "started");
+    await expect(notice).toHaveAttribute("data-retry-notice", "original");
+  }
   await backend.send(compact);
+  await expect(notice).toHaveCount(1);
+  await expect(notice).toHaveAttribute("data-context-compaction", "succeeded");
   await backend.send(delta(3, LIVE));
   await backend.send(end(4, LIVE, "live-wire"));
   const complete: ThreadProjectionEvent = { ...at(TURN, 5, "complete"), event: "turn_end" };
   await backend.send(complete);
   await expectBefore(body, "Context compacted", LIVE);
+  const completed = history([...base, question, compact, end(4, LIVE, "live-wire"), complete]);
   backend.refreshThread();
-  await backend.release(await backend.read(A, null, 1), history([...base, question, compact, end(4, LIVE, "live-wire"), complete]));
+  await backend.release(await backend.read(A, null, 1), completed);
+  await expect(body.locator('[data-context-compaction="succeeded"]')).toHaveCount(1);
+  await expectBefore(body, "Context compacted", LIVE);
+  await page.reload();
+  await backend.ready();
+  await backend.release(await backend.read(A, null, 2), completed);
+  await expect(body.locator("[data-context-compaction]")).toHaveCount(1);
   await expect(body.locator('[data-context-compaction="succeeded"]')).toHaveCount(1);
   await expectBefore(body, "Context compacted", LIVE);
   backend.healthy();
