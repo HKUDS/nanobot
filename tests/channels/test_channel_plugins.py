@@ -2701,7 +2701,7 @@ def test_optional_dependency_metadata_for_enable():
         "wecom": ("wecom-aibot-sdk-python>=0.1.7,<0.2.0",),
         "weixin": ("qrcode[pil]>=8.0", "pycryptodome>=3.20.0"),
         "whatsapp": (
-            "neonize>=0.4.3.post0,<0.5.0",
+            "neonize>=0.5.2,<1.0.0",
             "python-magic>=0.4.27; sys_platform != 'win32'",
             "python-magic-bin>=0.4.14; sys_platform == 'win32'",
             "segno>=1.6.1,<2.0.0",
