@@ -94,9 +94,16 @@ def _create_schema_v2(db: sqlite3.Connection) -> None:
         db.execute(statement)
 
 
+def _create_schema_v3(db: sqlite3.Connection) -> None:
+    # Empty chats can be archived before their first persisted message.
+    db.execute("""CREATE TABLE session_archives (
+        key TEXT PRIMARY KEY, archived_at TEXT NOT NULL
+    )""")
+
+
 # Entries upgrade version N to N+1. Preserve released entries and append upgrades.
 _SCHEMA_MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
-    _create_schema_v1, _create_schema_v2,
+    _create_schema_v1, _create_schema_v2, _create_schema_v3,
 )
 
 
@@ -475,9 +482,36 @@ class SqliteSessionStore:
         return True
 
 
-    def delete(self, key: str) -> bool:
+    def archived_keys(self) -> list[str] | None:
+        """Return archive state, or None until the legacy import has committed."""
+        with self.transaction(write=False) as db:
+            if db.execute("SELECT 1 FROM storage_meta WHERE key='session_archives_imported'").fetchone() is None:
+                return None
+            return [row[0] for row in db.execute("SELECT key FROM session_archives ORDER BY key")]
+
+    def import_archives(self, keys: list[str]) -> list[str]:
         with self.transaction() as db:
-            return db.execute("DELETE FROM sessions WHERE key=?", (key,)).rowcount > 0
+            current = self.archived_keys()
+            if current is not None:
+                return current
+            imported = self.set_archived_keys(keys)
+            db.execute("INSERT INTO storage_meta (key, value) VALUES ('session_archives_imported', '1')")
+            return imported
+
+    def set_archived_keys(self, keys: list[str]) -> list[str]:
+        with self.transaction() as db:
+            db.execute("DELETE FROM session_archives WHERE key NOT IN (SELECT value FROM json_each(?))", (_encode(keys),))
+            now = datetime.now().isoformat()
+            db.executemany("INSERT OR IGNORE INTO session_archives (key, archived_at) VALUES (?, ?)", ((key, now) for key in keys))
+            return [row[0] for row in db.execute("SELECT key FROM session_archives ORDER BY key")]
+
+    def delete(self, key: str, *, preserve_archive: bool = False) -> bool:
+        with self.transaction() as db:
+            archived = False
+            if not preserve_archive:
+                archived = db.execute("DELETE FROM session_archives WHERE key=?", (key,)).rowcount > 0
+            deleted = db.execute("DELETE FROM sessions WHERE key=?", (key,)).rowcount > 0
+            return archived or deleted
 
     def list_sessions(self) -> list[SessionInfo]:
         with self.transaction(write=False) as db:

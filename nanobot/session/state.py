@@ -817,6 +817,23 @@ class SessionState:
             write=False,
         )
 
+    async def archived_keys(self) -> list[str] | None:
+        return await self._execute(
+            None, self._store.archived_keys, operation_name="archived_keys", write=False,
+        )
+
+    async def import_archives(self, keys: Sequence[str]) -> list[str]:
+        values = list(keys)
+        return await self._execute(
+            None, lambda: self._store.import_archives(values), operation_name="import_archives",
+        )
+
+    async def set_archived_keys(self, keys: Sequence[str]) -> list[str]:
+        values = list(dict.fromkeys(keys))
+        return await self._execute(
+            None, lambda: self._store.set_archived_keys(values), operation_name="set_archived_keys",
+        )
+
     async def list_sessions(self) -> list[dict[str, Any]]:
         return await self._execute(
             None,
@@ -1114,7 +1131,7 @@ class SessionState:
                 for name in (*_RESERVED_KEYS, "webui_recovery", "_last_summary", "_stopped_at_iteration_limit"):
                     session.metadata.pop(name, None)
                 if session.policy.persist:
-                    self._store.delete(key)
+                    self._store.delete(key, preserve_archive=True)
                 self._commit(session)
                 return session
 

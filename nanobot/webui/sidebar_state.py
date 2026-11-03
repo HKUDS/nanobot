@@ -1,23 +1,26 @@
-"""Persisted WebUI sidebar workspace state.
+"""Compose sidebar preferences with session archive state.
 
-This state is UI-only metadata, scoped to the active nanobot instance data
-directory (the directory containing the current config.json). It deliberately
-does not modify agent sessions.
+Layout and display preferences stay in the config-scoped JSON file. Archive
+flags live in the session database; the public sidebar payload combines both.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 import os
 import threading
 import time
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
 from nanobot.config.paths import get_webui_dir
+
+if TYPE_CHECKING:
+    from nanobot.session.state import SessionState
 
 WEBUI_SIDEBAR_STATE_SCHEMA_VERSION = 1
 _MAX_STATE_FILE_BYTES = 256 * 1024
@@ -41,7 +44,6 @@ def default_webui_sidebar_state() -> dict[str, Any]:
     return {
         "schema_version": WEBUI_SIDEBAR_STATE_SCHEMA_VERSION,
         "pinned_keys": [],
-        "archived_keys": [],
         "session_order": [],
         "title_overrides": {},
         "project_name_overrides": {},
@@ -202,7 +204,6 @@ def normalize_webui_sidebar_state(raw: Any) -> dict[str, Any]:
     raw = cast(dict[str, Any], raw)
     state = default_webui_sidebar_state()
     state["pinned_keys"] = _clean_string_list(raw.get("pinned_keys"))
-    state["archived_keys"] = _clean_string_list(raw.get("archived_keys"))
     state["session_order"] = _clean_string_list(raw.get("session_order"))
     state["title_overrides"] = _clean_title_overrides(raw.get("title_overrides"))
     state["project_name_overrides"] = _clean_title_overrides(
@@ -231,6 +232,31 @@ def read_webui_sidebar_state() -> dict[str, Any]:
         logger.warning("read webui sidebar state failed {}: {}", path, e)
         return default_webui_sidebar_state()
     return normalize_webui_sidebar_state(raw)
+
+
+def read_legacy_archived_keys() -> list[str]:
+    """Do not mark the import complete when the source cannot be read."""
+    path = webui_sidebar_state_path()
+    try:
+        with path.open(encoding="utf-8") as source:
+            raw = json.load(source)
+    except FileNotFoundError:
+        return []
+    if not isinstance(raw, dict):
+        raise ValueError("sidebar state must be an object")
+    return _clean_string_list(cast(dict[str, Any], raw).get("archived_keys"))
+
+
+def remove_legacy_archived_keys() -> None:
+    with _SIDEBAR_STATE_WRITE_LOCK:
+        path = webui_sidebar_state_path()
+        try:
+            with path.open(encoding="utf-8") as source:
+                raw = json.load(source)
+        except FileNotFoundError:
+            return
+        if isinstance(raw, dict) and "archived_keys" in raw:
+            _write_webui_sidebar_state(cast(dict[str, Any], raw))
 
 
 def write_webui_sidebar_state(raw: dict[str, Any]) -> dict[str, Any]:
@@ -268,3 +294,33 @@ def _write_webui_sidebar_state(raw: dict[str, Any]) -> dict[str, Any]:
     finally:
         os.close(dir_fd)
     return state
+
+
+async def ensure_webui_session_archives(sessions: SessionState) -> list[str]:
+    keys = await sessions.archived_keys()
+    if keys is None:
+        legacy = await asyncio.to_thread(read_legacy_archived_keys)
+        keys = await sessions.import_archives(legacy)
+        await asyncio.to_thread(remove_legacy_archived_keys)
+    return keys
+
+
+class WebUISidebarState:
+    def __init__(self, sessions: SessionState | None) -> None:
+        self._sessions = sessions
+        self._lock = asyncio.Lock()
+
+    async def read(self) -> dict[str, Any]:
+        async with self._lock:
+            archived = await ensure_webui_session_archives(self._sessions) if self._sessions is not None else []
+            preferences = await asyncio.to_thread(read_webui_sidebar_state)
+            return {**preferences, "archived_keys": archived}
+
+    async def write(self, raw: dict[str, Any]) -> dict[str, Any]:
+        # Keep each successful wire snapshot ordered across the two stores.
+        async with self._lock:
+            archived = await ensure_webui_session_archives(self._sessions) if self._sessions is not None else []
+            preferences = await asyncio.to_thread(write_webui_sidebar_state, raw)
+            if self._sessions is not None and "archived_keys" in raw:
+                archived = await self._sessions.set_archived_keys(_clean_string_list(raw["archived_keys"]))
+            return {**preferences, "archived_keys": archived}
