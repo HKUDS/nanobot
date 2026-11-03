@@ -864,7 +864,7 @@ async def test_runner_does_not_auto_continue_goal_after_policy_terminal(
         model="test-model",
         max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        continuation_callback=AsyncMock(return_value="Continue working."),
+        continuation_callback=AsyncMock(return_value="Continue the goal."),
         terminal_injection_callback=terminal_injection_callback,
     ))
 
@@ -1005,6 +1005,7 @@ async def test_runner_length_recovery_preserves_prefix_at_max_iterations():
         max_iterations_message="limit reached",
     ))
 
+    assert provider.chat_stream_with_retry.await_count == 1
     assert result.stop_reason == "max_iterations"
     assert result.final_content == "partial answer\n\nlimit reached"
     assert result.pending_stream_content == "\n\nlimit reached"

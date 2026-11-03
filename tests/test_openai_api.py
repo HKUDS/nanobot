@@ -619,17 +619,20 @@ async def test_empty_response_falls_back_without_retry(aiohttp_client) -> None:
 @pytest.mark.asyncio
 async def test_process_direct_accepts_media() -> None:
     from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.turn_delivery import TurnDeliveryFactory
     from nanobot.bus.queue import MessageBus
-    from nanobot.bus.runtime_events import RuntimeEventPublisher
 
     loop = AgentLoop.__new__(AgentLoop)
     loop._session_locks = {}
     loop.bus = MessageBus()
-    loop.runtime_event_publisher = RuntimeEventPublisher(loop.bus)
+    loop.turn_delivery_factory = TurnDeliveryFactory(loop.bus)
+    loop.runtime_event_publisher = loop.turn_delivery_factory.runtime_event_publisher
 
     captured_msg = None
 
-    async def fake_process(msg, *, session_key="", on_progress=None, on_stream=None, on_stream_end=None, ephemeral=False):
+    async def fake_process(
+        msg, *, session_key="", on_progress=None, on_stream=None, on_stream_end=None, ephemeral=False, delivery=None,
+    ):
         nonlocal captured_msg
         captured_msg = msg
         return None

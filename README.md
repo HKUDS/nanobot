@@ -301,7 +301,7 @@ Use a regular topic for a bounded objective with a clear completion condition, f
 /goal Review this project's tests and list the smallest missing test case.
 ```
 
-The goal lets nanobot continue work across model turns while the gateway runs; a scheduled automation instead starts a turn at specified times. Use `/stop` to interrupt the current work, and ask nanobot to cancel the goal if you want to abandon it. Keep the gateway running for unattended work using the background or service options below.
+An active goal keeps nanobot working beyond the ordinary iteration limit until it records completion, cancellation, or a blocked state. This can use more model tokens; `/stop` interrupts the current work, while asking nanobot to cancel the goal abandons the objective. Execution errors can also stop the work. A scheduled automation instead starts work at specified times. Keep the gateway running for unattended work using the background or service options below.
 
 After a gateway restart, reopen the original topic and review saved results before explicitly continuing any interrupted work. Recovery does not blindly replay uncertain tool actions. See the [long-running agent guide](./docs/guides/long-running-ai-agent.md) for starting conditions and related automation options.
 

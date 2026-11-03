@@ -379,7 +379,7 @@ async def test_goal_continuation_precedes_terminal_wait():
     continuation_checks = 0
     terminal_waits = 0
 
-    async def continue_goal() -> str | None:
+    async def continue_goal():
         nonlocal continuation_checks
         continuation_checks += 1
         return "Continue the active goal." if continuation_checks == 1 else None
@@ -1599,7 +1599,7 @@ async def test_busy_session_burst_reaches_next_model_call_as_one_ordered_batch(
         if log_content else "[content hidden]"
     )
     assert record["message"] == (
-        f"Injected {len(followups)} follow-up message(s) after final response (snapshot 1): {preview}"
+        f"Injected {len(followups)} follow-up message(s) after final response: {preview}"
     )
     assert record["level"].name == "INFO"
     assert record["extra"]["session_key"] == "cli:c"

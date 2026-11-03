@@ -86,7 +86,7 @@ async def test_runner_recovery_diagnostics_obey_private_policy(log_content, kind
     if kind == "injection":
         spec.injection_callback = AsyncMock(side_effect=ValueError(_SECRET))
     elif kind == "continuation":
-        spec.continuation_callback = MagicMock(side_effect=ValueError(_SECRET))
+        spec.continuation_callback = AsyncMock(side_effect=ValueError(_SECRET))
     elif kind == "finalization":
         spec.max_iterations = 0
         provider.chat_stream_with_retry = AsyncMock(side_effect=ValueError(_SECRET))
@@ -101,11 +101,14 @@ async def test_runner_recovery_diagnostics_obey_private_policy(log_content, kind
         spec.hook = BrokenFinallyHook()
 
     with request_context(RequestContext(channel="websocket", chat_id="test", log_content=log_content)):
-        if kind == "finally":
+        if kind in {"finally", "continuation"}:
             with pytest.raises(ValueError, match=_SECRET):
                 await AgentRunner().run(spec)
         else:
             await AgentRunner().run(spec)
+    if kind == "continuation":
+        assert all(_SECRET not in r["message"] for r in diagnostic_records)
+        return
     errors = [r for r in diagnostic_records if r["level"].name == "ERROR"]
     assert errors
     assert all((r["exception"] is not None) is log_content for r in errors)

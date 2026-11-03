@@ -1,6 +1,6 @@
 # How to Run a Long-Running AI Agent with nanobot
 
-nanobot can keep agent work alive across turns through sustained goals, persistent sessions, scheduled automations, local triggers, and a gateway process that stays running.
+nanobot supports sustained goals, persistent sessions, scheduled automations, and local triggers for work that needs more than a single answer.
 
 ## What you will build
 
@@ -40,7 +40,7 @@ Use the same `--config` and explicit `--workspace` selectors as your instance. I
 
 - Keep the gateway running for chat apps, WebUI sessions, automations, and local triggers.
 - Use stable session keys or chat sessions for work that should preserve context.
-- Keep goals bounded and explicit about done-ness.
+- Keep goals bounded and explicit about done-ness. Active goals can exceed the ordinary iteration limit and consume more model tokens. Use `/stop` to interrupt work; stopping does not cancel the saved goal.
 - Review Automations in the WebUI before relying on a schedule.
 
 ## Security notes

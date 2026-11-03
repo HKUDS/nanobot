@@ -1,27 +1,27 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from nanobot.agent.goal_permission import goal_mutation_allowed, goal_mutation_permission
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.context import (
     RequestContext,
     current_request_context,
     request_context,
 )
-from nanobot.agent.tools.long_task import (
-    CreateGoalTool,
-    UpdateGoalTool,
-)
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.outbound_events import GoalStateSyncEvent
 from nanobot.bus.queue import MessageBus
+from nanobot.goal.assembly import install_goal
+from nanobot.goal.runtime import GoalExecutionPolicy
+from nanobot.goal.tools import CreateGoalTool, UpdateGoalTool
 from nanobot.session.goal_state import GOAL_STATE_KEY, MAX_GOAL_OBJECTIVE_CHARS
 from nanobot.session.manager import SessionManager
-from nanobot.session.turn_continuation import should_finalize_on_max_iterations
 from nanobot.session.webui_turns import WebuiTurnCoordinator
 
 
@@ -60,7 +60,15 @@ def _tools(
     return create, update, rc
 
 
+async def _bound_context(sm: SessionManager, ctx: RequestContext) -> RequestContext:
+    if ctx.session_generation is not None or ctx.session_key is None:
+        return ctx
+    session = await sm.state.get_header(ctx.session_key)
+    return replace(ctx, session_generation=session.generation)
+
+
 async def _execute(tool, ctx: RequestContext, *, allowed: bool = True, **kwargs):
+    ctx = await _bound_context(tool._sessions, ctx)
     with request_context(ctx), goal_mutation_permission(allowed):
         return await tool.execute(**kwargs)
 
@@ -70,7 +78,6 @@ async def test_create_goal_records_goal_metadata(tmp_path):
     sm = SessionManager(tmp_path)
     create, _update, ctx = _tools(sm)
     await sm.state.get("websocket:c1")
-    await sm.state.update_metadata("websocket:c1", {"_sustained_goal_continuation_rounds": 12})
 
     out = await _execute(
         create,
@@ -86,15 +93,9 @@ async def test_create_goal_records_goal_metadata(tmp_path):
     assert blob["status"] == "active"
     assert blob["objective"] == "Do the thing"
     assert blob["ui_summary"] == "thing"
-    sess = sm.get_or_create("websocket:c1")
-    assert "_sustained_goal_continuation_rounds" not in sess.metadata
-    assert "_sustained_goal_continuation_rounds" not in (
-        SessionManager(tmp_path).get_or_create("websocket:c1").metadata
-    )
-    assert not should_finalize_on_max_iterations(
-        pending_queue_available=True,
-        session_metadata=sess.metadata,
-    )
+    assert SessionManager(tmp_path).get_or_create(sess.key).metadata[GOAL_STATE_KEY] == blob
+    with GoalExecutionPolicy(sm.state).scope(sess.key, sess.generation, persistent=True) as scope:
+        assert "Do the thing" in await scope.continuation_prompt()
 
 
 @pytest.mark.asyncio
@@ -153,6 +154,7 @@ async def test_update_goal_complete_closes_active_goal(tmp_path):
     sm = SessionManager(tmp_path)
     create, update, ctx = _tools(sm)
 
+    ctx = await _bound_context(sm, ctx)
     with request_context(ctx), goal_mutation_permission(True):
         await create.execute(objective="X")
         out = await update.execute(action="complete", recap="Done.")
@@ -174,10 +176,6 @@ async def test_update_goal_replace_keeps_goal_active_with_new_objective(tmp_path
     create, update, ctx = _tools(sm)
 
     await _execute(create, ctx, objective="Old")
-    await sm.state.update_metadata(
-        "websocket:c1",
-        {"_sustained_goal_continuation_rounds": 12},
-    )
     out = await _execute(
         update,
         _request_context(),
@@ -193,14 +191,9 @@ async def test_update_goal_replace_keeps_goal_active_with_new_objective(tmp_path
     assert blob["previous_objective"] == "Old"
     assert blob["ui_summary"] == "new"
     sess = sm.get_or_create("websocket:c1")
-    assert "_sustained_goal_continuation_rounds" not in sess.metadata
-    assert "_sustained_goal_continuation_rounds" not in (
-        SessionManager(tmp_path).get_or_create("websocket:c1").metadata
-    )
-    assert not should_finalize_on_max_iterations(
-        pending_queue_available=True,
-        session_metadata=sess.metadata,
-    )
+    assert SessionManager(tmp_path).get_or_create(sess.key).metadata[GOAL_STATE_KEY] == blob
+    with GoalExecutionPolicy(sm.state).scope(sess.key, sess.generation, persistent=True) as scope:
+        assert "New" in await scope.continuation_prompt()
 
 
 @pytest.mark.asyncio
@@ -209,7 +202,6 @@ async def test_goal_state_mutations_roll_back_on_save_failure(tmp_path, monkeypa
     create, update, _context = _tools(sm)
     sess = sm.get_or_create("websocket:c1")
     sess.metadata["marker"] = {"keep": True}
-    sess.metadata["_sustained_goal_continuation_rounds"] = 12
     sm.save(sess)
     original_save = sm._store.replace_metadata
     create_context = _request_context()
@@ -221,18 +213,11 @@ async def test_goal_state_mutations_roll_back_on_save_failure(tmp_path, monkeypa
     with pytest.raises(OSError, match="disk unavailable"):
         await _execute(create, create_context, objective="Old")
 
-    assert sess.metadata == {
-        "marker": {"keep": True},
-        "_sustained_goal_continuation_rounds": 12,
-    }
+    assert sess.metadata == {"marker": {"keep": True}}
     assert GOAL_STATE_KEY not in SessionManager(tmp_path).get_or_create("websocket:c1").metadata
 
     monkeypatch.setattr(sm._store, "replace_metadata", original_save)
     assert "Goal recorded" in await _execute(create, create_context, objective="Old")
-    await sm.state.update_metadata(
-        "websocket:c1",
-        {"_sustained_goal_continuation_rounds": 12},
-    )
     sess = sm.get_or_create("websocket:c1")
     replace_context = _request_context()
 
@@ -241,10 +226,10 @@ async def test_goal_state_mutations_roll_back_on_save_failure(tmp_path, monkeypa
         await _execute(update, replace_context, action="replace", objective="New")
 
     assert sess.metadata[GOAL_STATE_KEY]["objective"] == "Old"
-    assert sess.metadata["_sustained_goal_continuation_rounds"] == 12
+    assert sess.metadata["marker"] == {"keep": True}
     persisted = SessionManager(tmp_path).get_or_create("websocket:c1").metadata
     assert persisted[GOAL_STATE_KEY]["objective"] == "Old"
-    assert persisted["_sustained_goal_continuation_rounds"] == 12
+    assert persisted["marker"] == {"keep": True}
 
     monkeypatch.setattr(sm._store, "replace_metadata", original_save)
     assert "Goal replaced" in await _execute(
@@ -254,7 +239,7 @@ async def test_goal_state_mutations_roll_back_on_save_failure(tmp_path, monkeypa
         objective="New",
     )
     sess = sm.get_or_create("websocket:c1")
-    assert "_sustained_goal_continuation_rounds" not in sess.metadata
+    assert sess.metadata["marker"] == {"keep": True}
     assert (
         SessionManager(tmp_path).get_or_create("websocket:c1").metadata[GOAL_STATE_KEY]["objective"]
         == "New"
@@ -294,7 +279,7 @@ async def test_active_goal_create_failure_preserves_permission_for_replace(tmp_p
     create, update, initial_context = _tools(sm)
     assert "Goal recorded" in await _execute(create, initial_context, objective="Old")
 
-    replacement_context = _request_context()
+    replacement_context = await _bound_context(sm, _request_context())
     with request_context(replacement_context), goal_mutation_permission(True):
         create_out = await create.execute(objective="New")
         assert goal_mutation_allowed() is True
@@ -323,7 +308,7 @@ async def test_update_goal_replace_requires_explicit_goal_permission(tmp_path):
     assert "replacing the goal is unavailable for this turn" in str(unauthorized)
     assert "/goal <task>" in str(unauthorized)
     assert sm.get_or_create("websocket:c1").metadata[GOAL_STATE_KEY]["objective"] == "Old"
-    replace_context = _request_context()
+    replace_context = await _bound_context(sm, _request_context())
 
     with request_context(replace_context), goal_mutation_permission(True):
         assert "Goal replaced" in await update.execute(action="replace", objective="New")
@@ -352,6 +337,8 @@ async def test_goal_tools_keep_request_context_per_task(tmp_path):
         metadata=_goal_metadata(),
     )
 
+    ctx_a = await _bound_context(sm, ctx_a)
+    ctx_b = await _bound_context(sm, ctx_b)
     task_a = asyncio.create_task(_execute(create, ctx_a, objective="Goal A"))
     task_b = asyncio.create_task(_execute(create, ctx_b, objective="Goal B"))
     await asyncio.gather(task_a, task_b)
@@ -390,7 +377,7 @@ async def test_registry_does_not_reuse_goal_context_after_request_scope(tmp_path
     sess = sm.get_or_create("websocket:c1")
     sess.metadata[GOAL_STATE_KEY] = {"status": "active", "objective": "Old"}
     sm.save(sess)
-    ctx = _request_context()
+    ctx = await _bound_context(sm, _request_context())
 
     with request_context(ctx), goal_mutation_permission(True):
         create_out = await registry.execute("create_goal", {"objective": "New"})
@@ -472,11 +459,12 @@ async def test_update_goal_without_active_is_noop_message(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_goal_tools_registered_in_base_registry(tmp_path):
+async def test_goal_tools_registered_by_builtin_assembly(tmp_path):
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model",
+                     builtin_assembly=install_goal)
 
     create = loop.tools.get("create_goal")
     update = loop.tools.get("update_goal")
@@ -502,3 +490,41 @@ async def test_goal_tools_registered_in_base_registry(tmp_path):
     ).lower()
     assert "authoriz" not in model_visible_contract
     assert "/goal" not in model_visible_contract
+
+
+@pytest.mark.parametrize("caller_supplied", [False, True])
+async def test_goal_assembly_preserves_builtin_plugin_precedence(tmp_path, monkeypatch, caller_supplied):
+    from nanobot.agent.tools.loader import ToolLoader
+
+    class ConflictingTool(Tool):
+        @property
+        def name(self):
+            return "create_goal"
+
+        @property
+        def description(self):
+            return "Synthetic conflicting tool"
+
+        @property
+        def parameters(self):
+            return {"type": "object", "properties": {}}
+
+        async def execute(self, **kwargs):
+            return "external"
+
+    monkeypatch.setattr(ToolLoader, "_discover_plugins", lambda _self: {"external": ConflictingTool})
+    registry = ToolRegistry()
+    supplied = ConflictingTool()
+    if caller_supplied:
+        registry.register(supplied)
+    provider = MagicMock(aclose=AsyncMock())
+    provider.get_default_model.return_value = "test-model"
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model",
+                     tool_registry=registry, builtin_assembly=install_goal)
+    try:
+        if caller_supplied:
+            assert loop.tools.get("create_goal") is supplied
+        else:
+            assert isinstance(loop.tools.get("create_goal"), CreateGoalTool)
+    finally:
+        await loop.aclose()

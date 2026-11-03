@@ -53,12 +53,16 @@ class SessionState:
         workers: int = _DEFAULT_WORKERS,
         on_delete: Callable[[str], None] | None = None,
         types: SessionTypes | None = None,
+        generation_exclusions: set[str] | None = None,
     ) -> None:
         if capacity < 1:
             raise ValueError("session operation capacity must be positive")
         if workers < 1:
             raise ValueError("session operation worker count must be positive")
         self._types = types if types is not None else SessionTypes()
+        self._generation_exclusions: set[str] = (
+            generation_exclusions if generation_exclusions is not None else set()
+        )
         self._store = store
         self._on_delete = on_delete
         self._snapshots: dict[str, Session] = {}
@@ -426,6 +430,15 @@ class SessionState:
             return self._draft(session)
         return await self._execute(key, read, write=False)
 
+    async def read_header(self, key: str) -> Session | None:
+        """Read committed identity and metadata without creating a session."""
+        def read() -> Session | None:
+            session = self._load(key, history=False)
+            if session is None:
+                return None
+            return replace(session, messages=[], provider_state=None, _baseline=None)
+        return await self._execute(key, read, write=False)
+
     async def get(self, key: str) -> Session:
         """Read an existing conversation; create missing state on the writer."""
         return await self._get(key, history=True)
@@ -661,7 +674,7 @@ class SessionState:
         await self._submit_draft(session)
 
     async def finish_turn(self, session: Session) -> None:
-        """Commit the assembled transcript and clear its recovery markers."""
+        """Commit the assembled transcript and clear its recovery checkpoint."""
         session.metadata.pop(_PENDING_KEY, None)
         session.metadata.pop(_CHECKPOINT_KEY, None)
         await self._submit_draft(session)
@@ -997,7 +1010,9 @@ class SessionState:
                 source = self._load(source_key)
                 if source is None:
                     return None
-                target = fork_session(source, target_key, before_user_index)
+                target = fork_session(
+                    source, target_key, before_user_index, exclude_metadata=frozenset(self._generation_exclusions),
+                )
                 if target is None:
                     return None
                 if title:
@@ -1144,6 +1159,8 @@ class SessionState:
                     session.policy = old.policy
                     session.metadata = deepcopy(old.metadata)
                 for name in (*_RESERVED_KEYS, "webui_recovery", "_last_summary", "_stopped_at_iteration_limit"):
+                    session.metadata.pop(name, None)
+                for name in self._generation_exclusions:
                     session.metadata.pop(name, None)
                 if session.policy.persist:
                     self._store.delete(key, preserve_archive=True)
