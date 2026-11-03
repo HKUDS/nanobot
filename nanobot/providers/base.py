@@ -1746,7 +1746,6 @@ class LLMProvider(ABC):
                     events=provider_context.events,
                     response_preset=provider_context.response_preset,
                     response_is_fallback=provider_context.response_is_fallback,
-                    compaction=provider_context.compaction,
                 )
         if stripped is None and stripped_context is None:
             return response
