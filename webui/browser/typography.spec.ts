@@ -33,6 +33,11 @@ for (const narrow of [false, true]) {
     await expect(group.getByRole("radio", { name: "阅读字号：标准", exact: true })).toBeChecked();
     await expect(group.getByRole("radio")).toHaveCount(3);
     const stable = await metrics(page.locator(".settings-row").first().locator(".text-control-label"));
+    const tables = page.getByTestId("markdown-data-table");
+    const formulaTable = tables.last();
+    await expect(tables).toHaveCount(2);
+    await expect(formulaTable.locator(".katex")).toHaveCount(7);
+    await page.evaluate(() => document.fonts.ready);
     const observations = [];
     for (const [size, label, bodySize] of [
       ["small", "阅读字号：小", narrow ? 15 : 16],
@@ -58,6 +63,26 @@ for (const narrow of [false, true]) {
       }
       for (const selector of ["table", "th", "td"]) {
         expect((await metrics(page.locator(`.markdown-content ${selector}`).first())).size).toBeCloseTo(bodySize * 0.875);
+      }
+      expect(await tables.first().evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+      await expect.poll(() => formulaTable.locator(".katex-html > .base").evaluateAll((nodes) => nodes.every((node) => {
+        const formula = node.getBoundingClientRect();
+        const cell = node.closest("th, td")!;
+        const bounds = cell.getBoundingClientRect();
+        const style = getComputedStyle(cell);
+        return formula.width > 0
+          && formula.left >= bounds.left + parseFloat(style.paddingLeft) - 1
+          && formula.right <= bounds.right - parseFloat(style.paddingRight) + 1;
+      }))).toBe(true);
+      if (narrow) {
+        expect(await formulaTable.evaluate(node => node.scrollWidth > node.clientWidth)).toBe(true);
+        await formulaTable.evaluate(node => { node.scrollLeft = node.scrollWidth; });
+        await expect.poll(() => formulaTable.evaluate((node) => {
+          const bounds = node.getBoundingClientRect();
+          const lastCell = node.querySelector("tbody td:last-child")!.getBoundingClientRect();
+          return lastCell.left >= bounds.left - 1 && lastCell.right <= bounds.right + 1;
+        })).toBe(true);
+        await formulaTable.evaluate(node => { node.scrollLeft = 0; });
       }
       expect((await metrics(page.locator(".code-content pre"))).size).toBeCloseTo(bodySize * 0.875);
       expect((await metrics(page.locator(".markdown-inline-code"))).size).toBeCloseTo(bodySize * 0.875);

@@ -740,9 +740,7 @@ describe("MarkdownTextRenderer", () => {
     expect(surface).toHaveAccessibleName("Data table");
     const table = screen.getByRole("table");
     expect(table).toHaveTextContent("nanobot");
-    expect(table).not.toHaveClass("min-w-max");
     expect(table).toHaveClass(
-      "table-fixed",
       "[&_th]:whitespace-normal",
       "[&_th]:[overflow-wrap:anywhere]",
       "[&_td]:whitespace-normal",
