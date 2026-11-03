@@ -11,7 +11,8 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.file_state import FileStateStore
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.command.builtin import cmd_new, register_builtin_commands
+from nanobot.command.application import register_builtin_commands
+from nanobot.command.builtin import cmd_new
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.config.schema import AgentDefaults, Config
 from nanobot.session.keys import UNIFIED_SESSION_KEY

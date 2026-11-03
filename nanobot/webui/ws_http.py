@@ -28,7 +28,7 @@ from websockets.http11 import Response
 
 from nanobot.agent.subagent import SubagentControlError
 from nanobot.agent.subagent_status import SubagentSessionError
-from nanobot.command.builtin import builtin_command_palette
+from nanobot.command.application import builtin_command_palette
 from nanobot.cron.binding import CronBindingError, binding_revision
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule

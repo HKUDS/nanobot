@@ -381,6 +381,8 @@ def serve(
         build_unconfigured_provider_snapshot(runtime_config, setup_error).provider
         if setup_error else None
     )
+    from nanobot.goal.assembly import install_goal
+
     try:
         agent_loop = AgentLoop.from_config(
             runtime_config, bus,
@@ -388,6 +390,7 @@ def serve(
             session_manager=session_manager,
             hook_factories=[create_file_edit_activity_hook],
             tool_registry=tools,
+            builtin_assembly=install_goal,
         )
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")

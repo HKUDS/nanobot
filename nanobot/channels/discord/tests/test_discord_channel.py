@@ -21,7 +21,7 @@ from nanobot.channels.discord.runtime import (
     DiscordChannel,
     DiscordConfig,
 )
-from nanobot.command.builtin import build_help_text
+from nanobot.command.application import build_help_text
 from nanobot.config.network import NetworkConfig
 
 

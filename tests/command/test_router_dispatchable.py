@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.command.builtin import (
+from nanobot.command.application import (
     builtin_command_starts_agent_turn,
     register_builtin_commands,
 )
@@ -141,6 +141,7 @@ class TestMidTurnCommandDispatchedDirectly:
     async def test_help_dispatched_with_session_none(
         self, router: CommandRouter, fake_loop: MagicMock, fake_msg: MagicMock,
     ) -> None:
+        fake_loop.commands = router
         ctx = CommandContext(
             msg=fake_msg, session=None,
             key="test:chat1", raw="/help", loop=fake_loop,
@@ -151,6 +152,7 @@ class TestMidTurnCommandDispatchedDirectly:
         assert result.chat_id == "chat1"
         assert result.metadata["render_as"] == "text"
         assert "/new" in result.content
+        assert "/goal <goal>" in result.content
         assert "/pairing [list|approve <code>|deny <code>|revoke <user_id>]" in result.content
 
     @pytest.mark.asyncio

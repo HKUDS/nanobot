@@ -333,12 +333,15 @@ class TestToolEventProgress:
 
         provider.chat_stream_with_retry = chat_stream_with_retry
         provider.chat_with_retry = AsyncMock()
+        from nanobot.goal.assembly import install_goal
+
         loop = AgentLoop(
             bus=bus,
             provider=provider,
             workspace=tmp_path,
             model="test-model",
             hook_factories=[create_file_edit_activity_hook],
+            builtin_assembly=install_goal,
         )
         tool = WriteFileTool(workspace=tmp_path)
         loop.tools.get_definitions = MagicMock(return_value=[

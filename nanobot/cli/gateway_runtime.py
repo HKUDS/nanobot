@@ -593,6 +593,8 @@ def _run_claimed_gateway(
         unified_session=config.agents.defaults.unified_session,
     )
 
+    from nanobot.goal.assembly import install_goal
+
     agent = AgentLoop.from_config(
         config, bus,
         provider=provider_snapshot.provider,
@@ -609,7 +611,9 @@ def _run_claimed_gateway(
         hook_factories=[create_file_edit_activity_hook],
         tool_registry=tools,
         recovery_admission=recovery,
+        builtin_assembly=install_goal,
     )
+
     def _schedule_webui_background(awaitable: Awaitable[None]) -> None:
         agent.schedule_background(cast(Coroutine[Any, Any, None], awaitable))
 
