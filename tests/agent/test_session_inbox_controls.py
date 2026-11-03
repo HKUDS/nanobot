@@ -11,7 +11,7 @@ from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.cron import CronTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.bus.runtime_events import TurnCompleted, TurnRunStatusChanged
+from nanobot.bus.runtime_events import TurnCompleted
 from nanobot.cron.service import CronService
 from nanobot.cron.session_turns import CRON_DEFER_UNTIL_IDLE_META, CRON_TRIGGER_META
 from nanobot.goal.assembly import install_goal
@@ -726,109 +726,6 @@ async def test_active_goal_keeps_origin_until_queued_independent_command_runs(lo
         assert replies == [("chat-a", "message-a")]
     finally:
         await stop_loop(loop, worker, timeout=3)
-
-
-async def test_stop_releases_live_goal_capacity_and_settles_queued_command(loop):
-    key = "websocket:capacity-goal"
-    await loop.sessions.state.get(key)
-    await loop.sessions.state.update_metadata(key, {
-        GOAL_STATE_KEY: {"status": "active", "objective": "Finish the goal"},
-    })
-    loop.max_iterations = 1
-    loop.tools.prepare_call = MagicMock(return_value=(None, {}, None))
-    loop.tools.execute = AsyncMock(return_value="ok")
-    loop.consolidator.compact_idle_session = AsyncMock()
-    gate = asyncio.Semaphore(1)
-    loop._concurrency_gate = gate
-    holder_waiting, holder_acquired, release_holder = asyncio.Event(), asyncio.Event(), asyncio.Event()
-    third_request = asyncio.Event()
-    holder = None
-    requests = []
-    completed = []
-    statuses = []
-    loop.bus.subscribe(completed.append, TurnCompleted)
-    loop.bus.subscribe(statuses.append, TurnRunStatusChanged)
-
-    async def occupy_capacity():
-        holder_waiting.set()
-        async with gate:
-            holder_acquired.set()
-            await release_holder.wait()
-
-    async def chat(**_kwargs):
-        nonlocal holder
-        requests.append(current_request_context().original_user_text)
-        if len(requests) == 1:
-            await loop.bus.publish_inbound(InboundMessage(
-                channel="websocket", sender_id="user", chat_id="capacity-goal", content="/compact",
-                metadata={"message_id": "message-b", "turn_id": "turn-b"},
-            ))
-            async with asyncio.timeout(5):
-                while loop._pending_queues[key].empty():
-                    await asyncio.sleep(0)
-        elif len(requests) == 2:
-            holder = asyncio.create_task(occupy_capacity())
-            await holder_waiting.wait()
-        elif len(requests) == 3:
-            third_request.set()
-            await asyncio.Event().wait()
-        else:
-            assert len(requests) == 4
-            await loop.sessions.state.mutate_metadata(
-                key, lambda metadata: metadata[GOAL_STATE_KEY].update(status="cancelled"),
-            )
-            return LLMResponse(content="Handled follow-up.")
-        return LLMResponse(content=None, tool_calls=[
-            ToolCallRequest(id=f"call-{len(requests)}", name="noop", arguments={}),
-        ])
-
-    loop.provider.chat_stream_with_retry = chat
-    loop.runner.run = AsyncMock(wraps=loop.runner.run)
-    worker = asyncio.create_task(loop.run())
-    try:
-        await loop.bus.publish_inbound(InboundMessage(
-            channel="websocket", sender_id="user", chat_id="capacity-goal", content="Start A",
-            metadata={"message_id": "message-a", "turn_id": "turn-a"},
-        ))
-        await asyncio.wait_for(third_request.wait(), 5)
-        assert not holder_acquired.is_set()
-        assert loop._pending_queues[key].qsize() == 1
-        loop.consolidator.compact_idle_session.assert_not_awaited()
-        loop.runner.run.assert_awaited_once()
-        assert await loop._cancel_active_tasks(key) == 1
-        await asyncio.wait_for(holder_acquired.wait(), 5)
-        assert [(event.context.metadata.get("message_id"), event.outcome) for event in completed] == [
-            ("message-a", "cancelled"), ("message-b", "completed"),
-        ]
-        assert [(event.context.metadata.get("message_id"), event.status) for event in statuses] == [
-            ("message-a", "running"), ("message-a", "idle"),
-        ]
-        current = await loop.sessions.state.read_header(key)
-        assert current.metadata[GOAL_STATE_KEY]["status"] == "active"
-        assert requests == ["Start A"] * 3
-        assert key not in loop._pending_queues
-        loop.consolidator.compact_idle_session.assert_not_awaited()
-
-        release_holder.set()
-        await holder
-        await loop.bus.publish_inbound(InboundMessage(
-            channel="websocket", sender_id="user", chat_id="capacity-goal", content="Follow-up",
-            metadata={"message_id": "message-c", "turn_id": "turn-c"},
-        ))
-        async with asyncio.timeout(5):
-            while key in loop._pending_queues or not any(
-                event.context.metadata.get("message_id") == "message-c" for event in completed
-            ):
-                await asyncio.sleep(0)
-        assert len(requests) == 4 and requests[-1] == "Follow-up"
-        assert completed[-1].outcome == "completed"
-        assert loop.runner.run.await_count == 2
-        loop.consolidator.compact_idle_session.assert_not_awaited()
-    finally:
-        release_holder.set()
-        await stop_loop(loop, worker, timeout=5)
-        if holder is not None:
-            await asyncio.gather(holder, return_exceptions=True)
 
 
 @pytest.mark.parametrize("operation", ["reset", "delete"])

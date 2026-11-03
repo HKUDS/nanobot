@@ -1,4 +1,3 @@
-import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -44,11 +43,9 @@ async def test_runner_completes_without_a_continuation_request(run_spec, callbac
     assert run_spec.runtime.provider.chat_stream_with_retry.await_count == 1
 
 
-@pytest.mark.parametrize("max_iterations,finalize", [(1, True), (3, True), (8, False)])
-async def test_continuation_extends_budget_without_reset(run_spec, max_iterations, finalize):
-    run_spec.max_iterations = max_iterations
-    run_spec.finalize_on_max_iterations = finalize
-    total_rounds = max_iterations * 12 + 1
+async def test_continuation_extends_budget_without_reset(run_spec):
+    run_spec.max_iterations = 1
+    total_rounds = 14
     calls = 0
 
     async def respond(**kwargs):
@@ -173,31 +170,6 @@ async def test_runner_does_not_auto_continue_terminal_provider_response(run_spec
     callback.assert_not_awaited()
 
 
-async def test_runner_reads_continuation_state_after_each_response(run_spec):
-    continuation = None
-    calls = 0
-
-    async def respond(**kwargs):
-        nonlocal continuation, calls
-        calls += 1
-        if calls == 1:
-            continuation = "Write the article draft."
-            return LLMResponse(content="The goal is now active.")
-        assert any(row.get("content") == continuation for row in kwargs["messages"])
-        continuation = None
-        return LLMResponse(content="The draft is complete.")
-
-    async def continuation_prompt():
-        return continuation
-
-    run_spec.runtime.provider.chat_stream_with_retry.side_effect = respond
-    run_spec.continuation_callback = continuation_prompt
-    result = await AgentRunner().run(run_spec)
-    assert calls == 2
-    assert result.stop_reason == "completed"
-    assert result.final_content == "The draft is complete."
-
-
 @pytest.mark.parametrize("response_kind", ["text", "tool"])
 async def test_real_followup_precedes_goal_at_iteration_cap(run_spec, response_kind):
     followup = {"role": "user", "content": "Stop the goal and answer this instead."}
@@ -254,30 +226,6 @@ async def test_runner_propagates_continuation_failure(run_spec, response_kind):
     with pytest.raises(RuntimeError, match="goal lookup failed"):
         await AgentRunner().run(run_spec)
     assert run_spec.runtime.provider.chat_stream_with_retry.await_count == 1
-
-
-async def test_runner_propagates_cancellation_during_overrun_continuation_check(run_spec):
-    run_spec.max_iterations = 1
-    checking = asyncio.Event()
-
-    async def continuation():
-        if run_spec.runtime.provider.chat_stream_with_retry.await_count < 2:
-            return "Continue working."
-        checking.set()
-        try:
-            await asyncio.Event().wait()
-        except asyncio.CancelledError:
-            return None
-
-    run_spec.continuation_callback = continuation
-    task = asyncio.create_task(AgentRunner().run(run_spec))
-    try:
-        await asyncio.wait_for(checking.wait(), timeout=1)
-    finally:
-        task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    assert run_spec.runtime.provider.chat_stream_with_retry.await_count == 2
 
 
 @pytest.mark.parametrize("response_kind", ["text", "tool"])

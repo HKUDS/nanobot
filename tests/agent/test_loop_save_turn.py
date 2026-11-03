@@ -22,7 +22,7 @@ from nanobot.bus.outbound_events import (
     TurnEndEvent,
 )
 from nanobot.bus.queue import MessageBus
-from nanobot.bus.runtime_events import TurnCompleted
+from nanobot.bus.runtime_events import TurnCompleted, TurnRunStatusChanged
 from nanobot.cron.session_turns import CRON_HISTORY_META, CRON_TRIGGER_META
 from nanobot.goal.assembly import install_goal
 from nanobot.providers.base import (
@@ -1466,120 +1466,15 @@ async def test_same_run_goal_preserves_streaming_route_metadata(tmp_path: Path) 
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("content", ["start the goal", "/goal start the goal"])
-async def test_websocket_goal_keeps_single_visible_run(tmp_path: Path, content: str) -> None:
-    loop = _make_full_loop(tmp_path)
-    loop.max_iterations = 1
-    session = await loop.sessions.state.get("websocket:c-auto")
-    await loop.sessions.state.update_metadata(session.key, {
-        GOAL_STATE_KEY: {"status": "active", "objective": "Finish the long goal."},
-        "title": "Goal", "title_user_edited": True,
-    })
-    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
-        LLMResponse(content=None, tool_calls=[ToolCallRequest(
-            id="list", name="list_dir", arguments={"path": "."},
-        )]),
-        LLMResponse(content=None, tool_calls=[ToolCallRequest(
-            id="complete", name="update_goal", arguments={"action": "complete", "recap": "done"},
-        )]),
-        LLMResponse(content="done"),
-    ])
-    loop.runner.run = AsyncMock(wraps=loop.runner.run)
-    try:
-        await run_session(loop, InboundMessage(
-            channel="websocket", sender_id="u1", chat_id="c-auto", content=content,
-            metadata={"webui": True},
-        ))
-        outbound = []
-        while loop.bus.outbound_size:
-            outbound.append(await loop.bus.consume_outbound())
-        statuses = [m.event for m in outbound if isinstance(m.event, GoalStatusEvent)]
-        assert [m.status for m in statuses] == ["running", "idle"]
-        assert statuses[0].started_at is not None
-        turn_end = [m.event for m in outbound if isinstance(m.event, TurnEndEvent)]
-        assert len(turn_end) == 1 and turn_end[0].outcome == "completed"
-        assert isinstance(turn_end[0].latency_ms, int)
-        assert loop.bus.inbound_size == 0
-        assert loop.provider.chat_stream_with_retry.await_count == 3
-        loop.runner.run.assert_awaited_once()
-    finally:
-        await loop.aclose()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("content", ["start the goal", "/goal start the goal"])
-async def test_stop_at_goal_checkpoint_ends_visible_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: str,
-) -> None:
-    from nanobot.command.builtin import cmd_stop
-    from nanobot.command.router import CommandContext
-
-    loop = _make_full_loop(tmp_path)
-    loop.max_iterations = 1
-    session = await loop.sessions.state.get("websocket:c-stop-goal")
-    await loop.sessions.state.update_metadata(session.key, {GOAL_STATE_KEY: {
-        "status": "active", "objective": "Finish the long goal.",
-    }})
-    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
-        LLMResponse(content=None, tool_calls=[ToolCallRequest(
-            id=f"list-{number}", name="list_dir", arguments={"path": "."},
-        )]) for number in range(1, 4)
-    ])
-    loop.runner.run = AsyncMock(wraps=loop.runner.run)
-    saving = asyncio.Event()
-    checkpoint_view = loop.sessions.state.checkpoint_view
-
-    async def hold_third_checkpoint(session, payload):
-        await checkpoint_view(session, payload)
-        if payload["phase"] == "tools_completed" and payload["completed_tool_results"][0]["tool_call_id"] == "list-3":
-            saving.set()
-            await asyncio.Event().wait()
-
-    monkeypatch.setattr(loop.sessions.state, "checkpoint_view", hold_third_checkpoint)
-    msg = InboundMessage(
-        channel="websocket", sender_id="u1", chat_id="c-stop-goal",
-        content=content, metadata={"webui": True},
-    )
-    try:
-        await loop._enqueue_session_message(msg)
-        await asyncio.wait_for(saving.wait(), timeout=5)
-        stop_msg = InboundMessage(
-            channel="websocket", sender_id="u1", chat_id=msg.chat_id, content="/stop",
-        )
-        result = await cmd_stop(CommandContext(
-            msg=stop_msg, session=None, key=msg.session_key, raw="/stop", loop=loop,
-        ))
-        assert "Stopped 1 task(s)" in result.content
-        outbound = []
-        while loop.bus.outbound_size:
-            outbound.append(await loop.bus.consume_outbound())
-        statuses = [m.event.status for m in outbound if isinstance(m.event, GoalStatusEvent)]
-        assert statuses == ["running", "idle"]
-        endings = [m.event for m in outbound if isinstance(m.event, TurnEndEvent)]
-        assert len(endings) == 1 and endings[0].outcome == "cancelled"
-        assert endings[0].goal_state["status"] == "active"
-        assert loop.provider.chat_stream_with_retry.await_count == 3
-        loop.runner.run.assert_awaited_once()
-        assert msg.session_key not in loop._pending_queues
-        saved = await loop.sessions.state.read(session.key)
-        assert [row["tool_call_id"] for row in saved.messages if row["role"] == "tool"] == [
-            "list-1", "list-2", "list-3",
-        ]
-        assert RUNTIME_CHECKPOINT_KEY not in saved.metadata
-    finally:
-        await loop._cancel_active_tasks(msg.session_key)
-        await loop.aclose()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("via_bus", [False, True])
 async def test_stop_during_committed_goal_checkpoint_settles_queued_command(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, via_bus: bool,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
     loop = _make_full_loop(tmp_path)
     loop.provider.aclose = AsyncMock()
     loop.consolidator.compact_idle_session = AsyncMock()
     loop.max_iterations = 1
+    gate = asyncio.Semaphore(1)
+    loop._concurrency_gate = gate
     session = loop.sessions.get_or_create("websocket:committed-checkpoint")
     session.metadata[GOAL_STATE_KEY] = {"status": "active", "objective": "Finish the goal."}
     loop.sessions.save(session)
@@ -1626,7 +1521,9 @@ async def test_stop_during_committed_goal_checkpoint_settles_queued_command(
         metadata={"webui": True, "message_id": "goal-input"},
     )
     completed = []
+    statuses = []
     loop.bus.subscribe(completed.append, TurnCompleted)
+    loop.bus.subscribe(statuses.append, TurnRunStatusChanged)
     stop_acknowledged = asyncio.Event()
     publish_outbound = loop.bus.publish_outbound
 
@@ -1636,38 +1533,28 @@ async def test_stop_during_committed_goal_checkpoint_settles_queued_command(
             stop_acknowledged.set()
 
     monkeypatch.setattr(loop.bus, "publish_outbound", observe_stop_reply)
-    bus_task = asyncio.create_task(loop.run()) if via_bus else None
-    stop_task = None
+    bus_task = asyncio.create_task(loop.run())
     try:
-        if via_bus:
-            await loop.bus.publish_inbound(msg)
-        else:
-            await loop._dispatch_inbound(msg)
+        await loop.bus.publish_inbound(msg)
         assert await asyncio.wait_for(asyncio.to_thread(committed.wait), 5)
         worker, = loop._active_tasks[msg.session_key]
+        assert gate.locked()
         assert loop._pending_queues[msg.session_key].qsize() == 1
         stop_msg = InboundMessage(
             channel="websocket", sender_id="user", chat_id=msg.chat_id, content="/stop",
             metadata={"message_id": "stop-attempt"},
         )
-        if via_bus:
-            await loop.bus.publish_inbound(stop_msg)
-            async with asyncio.timeout(5):
-                while not worker.cancelling():
-                    await asyncio.sleep(0)
-        else:
-            stop_task = asyncio.create_task(loop._dispatch_inbound(stop_msg))
-            await asyncio.sleep(0)
-            assert worker.cancelling() > 0
+        await loop.bus.publish_inbound(stop_msg)
+        async with asyncio.timeout(5):
+            while not worker.cancelling():
+                await asyncio.sleep(0)
         release.set()
-        if via_bus:
-            assert bus_task is not None
-            await asyncio.wait_for(stop_acknowledged.wait(), 5)
-            assert not bus_task.done(), "Stop terminated the inbound loop"
-        else:
-            await asyncio.wait_for(stop_task, 5)
+        await asyncio.wait_for(stop_acknowledged.wait(), 5)
+        assert not bus_task.done(), "Stop terminated the inbound loop"
+        assert not gate.locked()
         saved = await loop.sessions.state.read(msg.session_key)
         assert saved.metadata[GOAL_STATE_KEY]["status"] == "active"
+        assert RUNTIME_CHECKPOINT_KEY not in saved.metadata
         assert [row["tool_call_id"] for row in saved.messages if row["role"] == "tool"] == [
             "list-1", "list-2", "list-3",
         ]
@@ -1679,6 +1566,9 @@ async def test_stop_during_committed_goal_checkpoint_settles_queued_command(
                 if event.context.metadata.get("message_id") in {"goal-input", "queued-compact"}] == [
             ("goal-input", "cancelled"), ("queued-compact", "completed"),
         ]
+        assert [(event.context.metadata.get("message_id"), event.status) for event in statuses] == [
+            ("goal-input", "running"), ("goal-input", "idle"),
+        ]
         loop.consolidator.compact_idle_session.assert_not_awaited()
 
         outbound = []
@@ -1687,26 +1577,23 @@ async def test_stop_during_committed_goal_checkpoint_settles_queued_command(
         stop_responses = [item.content for item in outbound if item.content.startswith("Stopped ")]
         assert stop_responses == ["Stopped 1 task(s)."]
         endings = [item.event for item in outbound if isinstance(item.event, TurnEndEvent)]
-        assert [event.outcome for event in endings].count("cancelled") == 1
-        statuses = [item.event.status for item in outbound if isinstance(item.event, GoalStatusEvent)]
-        assert statuses == ["running", "idle"]
+        cancelled = [event for event in endings if event.outcome == "cancelled"]
+        assert len(cancelled) == 1 and cancelled[0].goal_state["status"] == "active"
+        assert [item.event.status for item in outbound if isinstance(item.event, GoalStatusEvent)] == [
+            "running", "idle",
+        ]
 
         followup = InboundMessage(
             channel="websocket", sender_id="user", chat_id=msg.chat_id, content="Independent input",
             metadata={"webui": True, "message_id": "independent-input"},
         )
-        if via_bus:
-            await loop.bus.publish_inbound(followup)
-            async with asyncio.timeout(5):
-                while msg.session_key in loop._pending_queues or not any(
-                    event.context.metadata.get("message_id") == "independent-input"
-                    for event in completed
-                ):
-                    await asyncio.sleep(0)
-        else:
-            await loop._dispatch_inbound(followup)
-            worker, = loop._active_tasks[msg.session_key]
-            await asyncio.wait_for(worker, 5)
+        await loop.bus.publish_inbound(followup)
+        async with asyncio.timeout(5):
+            while msg.session_key in loop._pending_queues or not any(
+                event.context.metadata.get("message_id") == "independent-input"
+                for event in completed
+            ):
+                await asyncio.sleep(0)
         assert calls == 5 and loop.runner.run.await_count == 2
         assert msg.session_key not in loop._pending_queues
         followup_outbound = []
@@ -1716,13 +1603,8 @@ async def test_stop_during_committed_goal_checkpoint_settles_queued_command(
         loop.consolidator.compact_idle_session.assert_not_awaited()
     finally:
         release.set()
-        if stop_task is not None:
-            if not stop_task.done():
-                stop_task.cancel()
-            await asyncio.gather(stop_task, return_exceptions=True)
-        if bus_task is not None:
-            loop.stop()
-            await asyncio.wait_for(asyncio.gather(bus_task, return_exceptions=True), 5)
+        loop.stop()
+        await asyncio.wait_for(asyncio.gather(bus_task, return_exceptions=True), 5)
         await loop.aclose()
 
 

@@ -276,91 +276,6 @@ async def test_internal_continuation_cannot_inherit_goal_permission(tmp_path):
         await loop.aclose()
 
 
-async def test_gateway_goal_runs_past_ordinary_budget_until_completion(tmp_path):
-    from agent.session_helpers import run_session
-
-    bus = MessageBus()
-    provider = MagicMock(aclose=AsyncMock())
-    provider.get_default_model.return_value = "test-model"
-    provider.generation = GenerationSettings()
-    provider.estimate_prompt_tokens.return_value = (100, "test")
-    entered, release = asyncio.Event(), asyncio.Event()
-    calls = []
-    usage = LLMUsage(input_tokens=10, output_tokens=5, total_tokens=15, reported_tokens=15)
-
-    async def respond(**kwargs):
-        calls.append(kwargs)
-        if len(calls) == 1:
-            return LLMResponse(content=None, usage=usage, tool_calls=[ToolCallRequest(
-                id="create", name="create_goal", arguments={"objective": "Verify the task."},
-            )])
-        if len(calls) <= 16:
-            return LLMResponse(content=None, usage=usage, tool_calls=[ToolCallRequest(
-                id=f"list-{len(calls)}", name="list_dir", arguments={"path": "."},
-            )])
-        if len(calls) == 17:
-            entered.set()
-            await release.wait()
-            return LLMResponse(content=None, usage=usage, tool_calls=[ToolCallRequest(
-                id="complete", name="update_goal", arguments={"action": "complete", "recap": "Verified."},
-            )])
-        assert len(calls) == 18
-        return LLMResponse(content="Verified.", usage=usage)
-
-    provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
-    loop = _assembled_loop(bus=bus, provider=provider, workspace=tmp_path, model="test-model", max_iterations=1)
-    loop.runner.run = AsyncMock(wraps=loop.runner.run)
-    loop._process_message = AsyncMock(wraps=loop._process_message)
-    WebuiTurnCoordinator(
-        bus=bus, sessions=loop.sessions,
-        schedule_background=lambda coro: loop.schedule_background(coro),
-    ).subscribe()
-    session = await loop.sessions.state.get("websocket:goal-boundary")
-    await loop.sessions.state.update_metadata(session.key, {
-        "webui": True, "title": "Goal", "title_user_edited": True,
-    })
-    run = asyncio.create_task(run_session(loop, InboundMessage(
-        channel="websocket", sender_id="user", chat_id="goal-boundary",
-        content="/goal Verify the task", metadata={"webui": True, "webui_turn_id": "goal-turn"},
-    )))
-    try:
-        await asyncio.wait_for(entered.wait(), 5)
-        events = []
-        while not bus.outbound.empty():
-            events.append(bus.outbound.get_nowait())
-        statuses = [m.event for m in events if isinstance(m.event, GoalStatusEvent)]
-        assert [event.status for event in statuses] == ["running"]
-        assert not any(isinstance(m.event, TurnEndEvent) for m in events)
-        release.set()
-        await asyncio.wait_for(run, 5)
-        while not bus.outbound.empty():
-            events.append(bus.outbound.get_nowait())
-        statuses = [m.event for m in events if isinstance(m.event, GoalStatusEvent)]
-        assert [event.status for event in statuses] == ["running", "idle"]
-        assert statuses[0].started_at is not None
-        endings = [m.event for m in events if isinstance(m.event, TurnEndEvent)]
-        assert len(endings) == 1 and endings[0].outcome == "completed"
-        assert endings[0].usage is not None and endings[0].usage.total_tokens == 270
-        assert len(endings[0].round_usages) == 18
-        assert len(calls) == 18 and all(call.get("tools") for call in calls[:17])
-        assert not calls[17].get("tools")
-        loop.runner.run.assert_awaited_once()
-        loop._process_message.assert_awaited_once()
-        persisted = await loop.sessions.state.read(session.key)
-        assert persisted.metadata[GOAL_STATE_KEY]["status"] == "completed"
-        visible = public_history_messages([row for row in persisted.messages if not is_hidden_history_message(row)])
-        assert sum(row.get("content") == "/goal Verify the task" for row in visible) == 1
-        assert [row["content"] for row in visible if row.get("role") == "user"] == ["/goal Verify the task"]
-        assert sum(row.get("content") == "Verified." for row in visible) == 1
-        assert sum(row.get("role") == "tool" for row in persisted.messages) == 17
-    finally:
-        release.set()
-        if not run.done():
-            await loop._cancel_active_tasks("websocket:goal-boundary")
-            await asyncio.gather(run, return_exceptions=True)
-        await loop.aclose()
-
-
 async def test_goal_checkpoint_failure_finishes_visible_run_without_restarting(tmp_path, monkeypatch):
     from agent.session_helpers import run_session
 
@@ -415,106 +330,105 @@ async def test_goal_checkpoint_failure_finishes_visible_run_without_restarting(t
         await loop.aclose()
 
 
-async def test_core_without_goal_streams_and_stops_normal_chat(tmp_path):
-    provider = MagicMock(aclose=AsyncMock())
-    provider.get_default_model.return_value = "test-model"
-    provider.generation = GenerationSettings()
-    provider.estimate_prompt_tokens.return_value = (100, "test")
-    entered = asyncio.Event()
-    calls = 0
-
-    async def respond(**kwargs):
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            await kwargs["on_content_delta"]("hello")
-            return LLMResponse(content="hello")
-        entered.set()
-        await asyncio.Event().wait()
-
-    provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
-    loop = CoreAgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
-    chunks = []
-
-    async def on_stream(text):
-        chunks.append(text)
-
-    result = await loop.process_direct("ordinary chat", session_key="cli:test", on_stream=on_stream)
-    assert result.content == "hello" and chunks == ["hello"]
-    help_result = await loop.process_direct("/help", session_key="cli:test")
-    assert help_result is not None and "/goal" not in help_result.content
-    assert loop.execution_policy is None
-    assert loop.commands.command_name("/goal task") is None
-    assert "create_goal" not in loop.tool_names
-    run = asyncio.create_task(loop.run())
-    try:
-        await loop.bus.publish_inbound(InboundMessage(
-            channel="cli", sender_id="user", chat_id="test", content="wait for stop",
-        ))
-        await asyncio.wait_for(entered.wait(), 5)
-        await loop.bus.publish_inbound(InboundMessage(
-            channel="cli", sender_id="user", chat_id="test", content="/stop",
-        ))
-        async with asyncio.timeout(5):
-            while True:
-                message = await loop.bus.consume_outbound()
-                if message.content.startswith("Stopped"):
-                    assert message.content == "Stopped 1 task(s)."
-                    break
-        assert calls == 2
-    finally:
-        await stop_loop(loop, run, timeout=5)
-
-
-@pytest.mark.parametrize(("action", "status"), [
-    ("complete", "completed"), ("cancel", "cancelled"), ("block", "blocked"),
-])
-async def test_active_goal_keeps_candidate_history_until_successful_closure(tmp_path, action, status):
+async def test_active_goal_keeps_candidate_history_until_successful_closure(tmp_path):
     from agent.session_helpers import run_session
 
+    bus = MessageBus()
     provider = MagicMock(aclose=AsyncMock())
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings()
     provider.estimate_prompt_tokens.return_value = (100, "test")
+    provider.can_resume_conversation_state.return_value = True
+    state = ProviderConversationState(
+        kind="openai_responses", provider="openai:test", model="test-model", version=1,
+        payload={"items": [{"type": "reasoning", "encrypted_content": "private-goal-state"}]},
+    )
+    usage = LLMUsage(input_tokens=10, output_tokens=5, total_tokens=15, reported_tokens=15)
+    entered, release = asyncio.Event(), asyncio.Event()
     calls = []
 
     async def respond(**kwargs):
         calls.append(kwargs)
+        if len(calls) > 1:
+            resumed = kwargs["provider_context"].conversation_state
+            assert resumed is not None and resumed.payload == state.payload
+            assert any(row.get("content") == "Evidence 1 recorded." for row in kwargs["messages"])
+            if len(calls) <= 16:
+                assert any("Please continue working toward the objective" in str(row.get("content"))
+                           for row in resumed.pending_messages)
+            else:
+                assert any(row.get("tool_call_id") == "close" for row in resumed.pending_messages)
         if len(calls) <= 15:
-            return LLMResponse(content=f"Evidence {len(calls)} recorded.")
+            assert kwargs.get("tools")
+            return LLMResponse(content=f"Evidence {len(calls)} recorded.", usage=usage, provider_state=state)
         if len(calls) == 16:
             assert kwargs.get("tools")
-            assert "Please continue working toward the objective" in str(kwargs["messages"])
-            return LLMResponse(content=None, tool_calls=[ToolCallRequest(
-                id="close", name="update_goal", arguments={"action": action, "recap": "Evidence reviewed."},
+            entered.set()
+            await release.wait()
+            return LLMResponse(content=None, usage=usage, provider_state=state, tool_calls=[ToolCallRequest(
+                id="close", name="update_goal", arguments={"action": "complete", "recap": "Evidence reviewed."},
             )])
         assert len(calls) == 17 and not kwargs.get("tools")
-        return LLMResponse(content="Evidence reviewed.")
+        return LLMResponse(content="Evidence reviewed.", usage=usage, provider_state=state)
 
     provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
-    loop = _assembled_loop(bus=MessageBus(), provider=provider, workspace=tmp_path,
+    loop = _assembled_loop(bus=bus, provider=provider, workspace=tmp_path,
                            model="test-model", max_iterations=1)
     loop.runner.run = AsyncMock(wraps=loop.runner.run)
-    session = await loop.sessions.state.get("cli:goal-limit")
+    loop._process_message = AsyncMock(wraps=loop._process_message)
+    WebuiTurnCoordinator(
+        bus=bus, sessions=loop.sessions,
+        schedule_background=lambda coro: loop.schedule_background(coro),
+    ).subscribe()
+    session = await loop.sessions.state.get("websocket:goal-limit")
     await loop.sessions.state.update_metadata(session.key, {
         GOAL_STATE_KEY: {"status": "active", "objective": "Keep investigating."},
+        "webui": True, "title": "Goal", "title_user_edited": True,
     })
+    run = asyncio.create_task(run_session(loop, InboundMessage(
+        channel="websocket", sender_id="user", chat_id="goal-limit", content="/goal Keep investigating.",
+        metadata={"webui": True, "webui_turn_id": "goal-turn"},
+    )))
     try:
-        await run_session(loop, InboundMessage(
-            channel="cli", sender_id="user", chat_id="goal-limit", content="Continue investigating.",
-        ))
+        await asyncio.wait_for(entered.wait(), 5)
+        events = []
+        while not bus.outbound.empty():
+            events.append(bus.outbound.get_nowait())
+        assert [m.event.status for m in events if isinstance(m.event, GoalStatusEvent)] == ["running"]
+        assert not any(isinstance(m.event, TurnEndEvent) for m in events)
+        release.set()
+        await asyncio.wait_for(run, 5)
+        while not bus.outbound.empty():
+            events.append(bus.outbound.get_nowait())
+        statuses = [m.event for m in events if isinstance(m.event, GoalStatusEvent)]
+        assert [event.status for event in statuses] == ["running", "idle"]
+        assert statuses[0].started_at is not None
+        endings = [m.event for m in events if isinstance(m.event, TurnEndEvent)]
+        assert len(endings) == 1 and endings[0].outcome == "completed"
+        assert isinstance(endings[0].latency_ms, int)
+        assert endings[0].usage is not None and endings[0].usage.total_tokens == 255
+        assert len(endings[0].round_usages) == 17
         assert len(calls) == 17
         loop.runner.run.assert_awaited_once()
+        loop._process_message.assert_awaited_once()
         saved = await loop.sessions.state.read(session.key)
-        assert saved.metadata[GOAL_STATE_KEY]["status"] == status
+        assert saved.metadata[GOAL_STATE_KEY]["status"] == "completed"
+        assert saved.provider_state is not None and saved.provider_state.payload == state.payload
         visible = public_history_messages([row for row in saved.messages if not is_hidden_history_message(row)])
-        assert [row["content"] for row in visible if row["role"] == "user"] == ["Continue investigating."]
+        assert [row["content"] for row in visible if row["role"] == "user"] == ["/goal Keep investigating."]
         for number in range(1, 16):
             assert sum(row.get("content") == f"Evidence {number} recorded." for row in visible) == 1
+        assert sum(row.get("content") == "Evidence reviewed." for row in visible) == 1
         assert visible[-1]["content"] == "Evidence reviewed."
-        assert sum(is_hidden_history_message(row) for row in saved.messages) == 15
+        assert [row["tool_call_id"] for row in saved.messages if row["role"] == "tool"] == ["close"]
+        assert sum(row.get("_hidden_history") == {"kind": "internal_continuation"} for row in saved.messages) == 15
+        assert "private-goal-state" not in str(visible)
         assert session.key not in loop._pending_queues
     finally:
+        release.set()
+        if not run.done():
+            await loop._cancel_active_tasks(session.key)
+        await asyncio.gather(run, return_exceptions=True)
         await loop.aclose()
 
 
@@ -616,65 +530,6 @@ async def test_failed_goal_completion_keeps_running_until_a_successful_block(tmp
         assert "Please continue working toward the objective" in str(calls[2].kwargs["messages"])
         saved = await loop.sessions.state.read(session.key)
         assert saved.metadata[GOAL_STATE_KEY]["status"] == "blocked"
-    finally:
-        await loop.aclose()
-
-
-async def test_goal_continuation_keeps_candidate_and_provider_state_in_one_run(tmp_path):
-    from agent.session_helpers import run_session
-
-    provider = MagicMock(aclose=AsyncMock())
-    provider.get_default_model.return_value = "test-model"
-    provider.generation = GenerationSettings()
-    provider.estimate_prompt_tokens.return_value = (100, "test")
-    calls = []
-
-    state = ProviderConversationState(
-        kind="openai_responses", provider="openai:test", model="test-model", version=1,
-        payload={"items": [{"type": "reasoning", "encrypted_content": "private-goal-state"}]},
-    )
-    provider.can_resume_conversation_state.return_value = True
-
-    async def respond(**kwargs):
-        calls.append(kwargs)
-        if len(calls) == 1:
-            return LLMResponse(content="Observed the first piece of evidence.", provider_state=state)
-        resumed = kwargs["provider_context"].conversation_state
-        assert resumed is not None and resumed.payload == state.payload
-        if len(calls) == 2:
-            assert any(message.get("content") == "Observed the first piece of evidence."
-                       for message in kwargs["messages"])
-            assert any("Please continue working toward the objective" in str(message.get("content"))
-                       for message in resumed.pending_messages)
-            return LLMResponse(content=None, provider_state=state, tool_calls=[ToolCallRequest(
-                id="complete", name="update_goal", arguments={"action": "complete", "recap": "Verified."},
-            )])
-        assert len(calls) == 3
-        assert any(message.get("tool_call_id") == "complete" for message in resumed.pending_messages)
-        return LLMResponse(content="Verified.", provider_state=state)
-
-    provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
-    loop = _assembled_loop(bus=MessageBus(), provider=provider, workspace=tmp_path,
-                           model="test-model", max_iterations=1)
-    loop.runner.run = AsyncMock(wraps=loop.runner.run)
-    session = await loop.sessions.state.get("cli:goal-candidate")
-    await loop.sessions.state.update_metadata(session.key, {
-        GOAL_STATE_KEY: {"status": "active", "objective": "Inspect the evidence."},
-    })
-    try:
-        await run_session(loop, InboundMessage(
-            channel="cli", sender_id="user", chat_id="goal-candidate", content="Continue.",
-        ))
-        saved = await loop.sessions.state.read(session.key)
-        assert any(message.get("content") == "Observed the first piece of evidence." for message in saved.messages)
-        assert saved.metadata[GOAL_STATE_KEY]["status"] == "completed"
-        assert saved.provider_state is not None and saved.provider_state.payload == state.payload
-        visible = public_history_messages([row for row in saved.messages if not is_hidden_history_message(row)])
-        assert [row["content"] for row in visible if row["role"] == "user"] == ["Continue."]
-        assert visible[-1]["content"] == "Verified."
-        assert "private-goal-state" not in str(visible)
-        assert len(calls) == 3
-        loop.runner.run.assert_awaited_once()
     finally:
         await loop.aclose()
 

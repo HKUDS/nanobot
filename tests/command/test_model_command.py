@@ -283,23 +283,14 @@ async def test_goal_command_preserves_task_and_visible_command(tmp_path, with_se
 
 
 @pytest.mark.asyncio
-async def test_goal_usage_registered_on_router(tmp_path) -> None:
-    router = CommandRouter()
-    register_builtin_commands(router)
-    loop = _make_loop(tmp_path)
-
-    out = await router.dispatch(_ctx(loop, "/goal"))
-
-    assert isinstance(out, OutboundMessage)
-    assert out.content == "Usage: /goal <long-running task description>"
-    assert out.metadata == {"render_as": "text"}
-
-
-@pytest.mark.asyncio
 async def test_goal_command_registered_on_router(tmp_path) -> None:
     router = CommandRouter()
     register_builtin_commands(router)
     loop = _make_loop(tmp_path)
+    usage = await router.dispatch(_ctx(loop, "/goal"))
+    assert isinstance(usage, OutboundMessage)
+    assert usage.content == "Usage: /goal <long-running task description>"
+    assert usage.metadata == {"render_as": "text"}
     ctx = _ctx_session(loop, "/goal ship it", args="ship it")
     ctx.session = await loop.sessions.state.get(ctx.key)
     out = await router.dispatch(ctx)
